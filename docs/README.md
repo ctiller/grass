@@ -29,6 +29,7 @@ No document may override a narrower owner by restating it differently.
 | [SPECIFICATION_LANGUAGES.md](SPECIFICATION_LANGUAGES.md) | open family of precious DSL fragments and their typed semantic junctions |
 | [GRAMMAR.md](GRAMMAR.md) | precious text/binary languages, incomplete versus invalid prefixes, parser/writer realization laws |
 | [PROCESS.md](PROCESS.md) | portable state/event/demand/view processes, networks, channels, flattening, resources, and driver boundary |
+| [PROCESS_SHARDING.md](PROCESS_SHARDING.md) | open process registries, facet certificates, scoped cancellation, SCC summaries, and rebuild cones |
 | [VERIFIED_PROGRAM.md](VERIFIED_PROGRAM.md) | the public certificate and emission gate |
 | [VERIFIED_OBJECTS.md](VERIFIED_OBJECTS.md) | stable subsystem signatures, relocatable verified objects, modular linking |
 | [OLEAN_SHARDING.md](OLEAN_SHARDING.md) | Lean module boundaries, `.olean` reuse, certificate DAGs, and rebuild cones |
@@ -56,6 +57,9 @@ No document may override a narrower owner by restating it differently.
 - [SPIKE_AUTHORING_AUDIT.md](SPIKE_AUTHORING_AUDIT.md) records the current
   adversarial cross-check findings without conflating snapshot equality with
   expansion or proof reproducibility.
+- [SPIKE_PROOF_BURDEN.md](SPIKE_PROOF_BURDEN.md) assigns every spike-shaped
+  theorem and invariant family to authored, library, generated, or authority
+  work instead of treating a short identifier as evidence of a short proof.
 - [HELLO_WORLD.md](HELLO_WORLD.md) defines the first acceptance milestone.
 - [SPIKE_1.md](SPIKE_1.md) is its annotated proof from portable specification to
   emitted Win32 PE bytes.

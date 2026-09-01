@@ -92,6 +92,15 @@ constructor(s) from which it derives. An interface or proof-sketch block names
 the residual library obligation it creates. Unknown, duplicate, or unlabeled
 blocks fail review; blanket prose covering several blocks is not a label.
 
+Concise source also owes an identifier-authority ledger. Every referenced name
+is classified as authored definition, authored proof, exact parametric library
+instance, generated structural fact, or versioned authority-model fact. A
+theorem-shaped identifier is not evidence that its proof is cheap. Before
+implementation, the ledger gives a proof sketch and coarse burden class; after
+implementation, the elaborator report gives normalized theorem identity,
+residual goals, proof-term size, imports, and rebuild cone. The current fixture
+ledger is [SPIKE_PROOF_BURDEN.md](SPIKE_PROOF_BURDEN.md).
+
 ## How authored source expands
 
 Expansion is one deterministic, inspectable pipeline. It is not permission for

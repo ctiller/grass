@@ -36,16 +36,24 @@ invalidate a consumer when `ImplementsSignature` still proves the same value.
 ## 2. Verified relocatable object
 
 ```lean
+structure GobjPayload where
+  formatVersion : GobjFormatVersion
+  scope : StableScopeId
+  sections : SerializableRelocatableSections
+  symbols : SerializableObjectSymbols
+  relocations : SerializableTypedRelocations sections symbols
+  imports : SerializableImportManifest
+  sourceMap : SerializableSourceMap
+
 structure VerifiedObject (sig : ProgramSignature) where
   privateResources : Type
   privateSpec : SpecProcess privateResources
   signature : ImplementsSignature privateSpec sig
   source : HierarchicalClosedAsmSource
-  sections : RelocatableSectionFamily
-  symbols : ObjectSymbolTable sig
-  relocations : TypedRelocationFamily sections symbols
-  machine : ObjectMachineCodeRefines privateSpec source sections
-  writerRoundTrip : parseGobj (writeGobj this) = .ok this
+  payload : GobjPayload
+  payloadSourceExact : PayloadEncodesExactSource payload source
+  payloadExports : PayloadExportsSignature payload sig
+  machine : ObjectMachineCodeRefines privateSpec source payload
 ```
 
 The existential/private specification is lawful here because an object claims
@@ -56,6 +64,11 @@ An object carries symbolic relocation targets, section alignment and
 permissions, exported/imported ABI contracts, provider demands, resource and
 obligation summaries, and a hierarchical machine certificate. Its proof does
 not mention a final image base or offsets of unrelated objects.
+
+`GobjPayload` is deliberately proof-free and first-order serializable.
+`VerifiedObject` is deliberately not serializable: it contains arbitrary Lean
+types, specifications, and kernel proof terms. The payload is useful for linking
+only through the exact equality stored by its in-kernel `VerifiedObject`.
 
 ## 3. Verified linker
 
@@ -71,6 +84,17 @@ def linkVerified
     (plan : LinkPlan root signatures)
     (objects : HArray VerifiedObject signatures) :
     Except LinkError (VerifiedProgram root)
+
+structure ResolvedGobj {sig : ProgramSignature}
+    (object : VerifiedObject sig) where
+  bytes : ByteArray
+  parsed : parseGobj bytes = .ok object.payload
+
+def linkVerifiedResolved
+    (plan : LinkPlan root signatures)
+    (objects : HArray VerifiedObject signatures)
+    (files : HArray (fun i => ResolvedGobj objects[i]) signatures) :
+    Except LinkError (VerifiedProgram root)
 ```
 
 The linker checks exact symbol resolution, signature/ABI compatibility,
@@ -79,6 +103,14 @@ encoding, import synthesis, resource/obligation composition, and entry/export
 selection. Its connection theorem proves that parsing/loading the emitted image
 produces the linked machine program assembled from those exact objects and that
 the signature composition refines `root`.
+
+`linkVerifiedResolved` is a streaming implementation of the same theorem. Each
+file is untrusted until `parseGobj` returns the payload definitionally owned by
+the corresponding imported certificate. The equality rewrites file data to the
+certified payload before symbol resolution, relocation, or output construction.
+The resulting `VerifiedProgram` and `emitProgram` are therefore still derived
+from the in-kernel objects. A digest, certificate name, or successful structural
+parse cannot supply `ResolvedGobj`.
 
 Link failure is data, not unsoundness. Duplicate exports, unresolved symbols,
 ABI mismatch, incompatible providers, overflowed relocations, permission
@@ -150,17 +182,21 @@ proof. Build reports measure actual elaboration, kernel, cache, and link work.
 
 ## 6. Serialized `.gobj`
 
-`.gobj` is an optional deterministic serialization of the relocatable object
-payload and certificate references. It obeys the corpus laws:
+`.gobj` is an optional deterministic serialization of `GobjPayload`. It contains
+no proof and no executable certificate reference. It obeys the corpus laws:
 
-- `parseGobj (writeGobj object) = .ok object`;
+- `parseGobj (writeGobj payload) = .ok payload`;
 - every successful parse satisfies the binary grammar and structural
   invariants; and
-- corrupt, stale-environment, or unknown-checker certificates are rejected.
+- a file is accepted for a certificate only through
+  `parseGobj bytes = .ok object.payload`.
 
-A standalone linker may consume `.gobj` only through a small verified checker
-whose accepted certificate theorem is connected back to Lean kernel theorems.
-The format and checker do not become a second unverified emission route.
+The initial trusted workflow imports the exact certificate `.olean`, parses the
+`.gobj`, and kernel-checks the payload equality used by `ResolvedGobj`. A truly
+standalone proof-carrying linker would require a separately specified proof
+format and verified proof checker; it is not claimed by this design. A
+standalone unverified linker may produce diagnostic bytes, but those bytes are
+not the output of `emitProgram` and carry no Grass correctness claim.
 
 ## 7. Acceptance fixtures
 

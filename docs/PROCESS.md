@@ -8,6 +8,12 @@ providers and commits by [PLATFORM_ABI.md](PLATFORM_ABI.md); refinement by
 [REFINEMENT.md](REFINEMENT.md). This layer is inspired by Elm/Redux and the pure
 part of React, not by React's runtime semantics.
 
+This document states the semantic interfaces using finite registry and plan
+parameters. A large realization must not instantiate them as one public closed
+whole-program value. Module-local open registries, facet-indexed certificates,
+scoped cancellation, SCC boundaries, and balanced process-certificate DAGs are
+normative in [PROCESS_SHARDING.md](PROCESS_SHARDING.md).
+
 ## 1. Why a process layer exists
 
 Every program has one precious root `SpecProcess`, and `VerifiedProgram` is

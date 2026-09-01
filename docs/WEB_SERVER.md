@@ -185,9 +185,11 @@ is an audit projection of the precious spec, not parallel semantic authority.
   errors, per-stream cancellation, GOAWAY drain, and cleanup.
 - [ ] Large algorithms are local typed fragment constructors first and may move
   into the verified standard library later. Every selected helper retains its
-  assembly algorithm, exact raw expansion, references, citations, and machine
-  certificate in the hierarchical closure. Macro-shaped call names are only
-  transparent adapters; an absent standard-library module is never the body.
+  assembly algorithm, references, and citations; the future elaboration report
+  must add the complete raw expansion and machine certificate to the
+  hierarchical closure. These outputs are not generated in the design corpus.
+  Macro-shaped call names are only transparent adapters; an absent
+  standard-library module is never the body.
 - [ ] A total cancellation CFG map distinguishes bounded calls, safe states,
   real observation/control-transfer blocks, request publishers, faults and
   terminal boundaries. Expanded macro

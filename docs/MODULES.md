@@ -110,6 +110,12 @@ Large instruction/API families are sharded mechanically without creating a
 closed master sum type or duplicating semantic facts. Generated reference or
 test data is versioned separately when size would burden ordinary clones/builds.
 
+The same rule applies to process roles, protocol keys, cancellation points, and
+composition witnesses. Large realizations publish module-local signatures and
+opaque facet certificates; they do not construct one whole-program process sum
+or a proof indexed by the complete plan. The normative design is
+[PROCESS_SHARDING.md](PROCESS_SHARDING.md).
+
 The baseline toolchain is Lean 4.33.1 with mathlib and other reviewed Lean
 dependencies allowed. Dependency additions enter the appropriate TCB/build
 ledger.

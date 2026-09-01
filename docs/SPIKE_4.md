@@ -9,7 +9,7 @@ bindings, and artifact bundles are generated inspection views.
 
 | Proof-economics quantity | Current evidence |
 | --- | --- |
-| Authored specification | 1 module; 98 physical / 81 nonblank lines |
+| Authored specification | 1 module; 115 physical / 96 nonblank lines |
 | Authored realization | 5 modules; 1797 physical / 1624 nonblank lines |
 | Generated expansion/certificates | not generated |
 | Clean/incremental checking | not measured |
@@ -47,13 +47,15 @@ CFG, x86, provider, and artifact witnesses is
 
 The precious surface is one root `SpecProcess`. Its DSL components state the
 HTTP/2/HPACK byte languages, protocol legality, route relation, observations,
-failures, progress, and selected resource semantics. Typed junctions capture
+listen endpoint, failures, progress, and selected resource semantics. Typed junctions capture
 them into the root. It does not name listener/connection/stream roles, Winsock,
 physical workers, polling, buffer offsets, or x86 registers.
 
 <!-- grass-block: interface id=spike4-block-01 -->
 ```lean
 def body : ByteArray := "Grass web server\n".toUTF8
+
+def endpoint : TcpEndpoint := .ipv4Loopback 8080
 
 def routes : Http2Routes :=
   .singleton { method := .GET, scheme := .http, authority := .any,
@@ -108,6 +110,7 @@ def protocolPackageFor {R} [ResourceModel R] [WebServerResources R]
 def webServerSuite {R} [ResourceModel R] [WebServerResources R]
     (resources : R) : SpecificationSuite resources :=
   (protocolPackageFor resources).suite
+    |>.atEndpoint endpoint
 
 def webServerSpec {R} [ResourceModel R] [WebServerResources R]
     (resources : R) : SpecProcess resources :=
@@ -122,10 +125,30 @@ def webServerSpec {R} [ResourceModel R] [WebServerResources R]
 
 theorem webServerSpecCorrect {R} [ResourceModel R] [WebServerResources R]
     (resources : R) : MeetsAllSpecificationTheorems (webServerSpec resources) :=
-  (protocolPackageFor resources).captureCorrect
+  (protocolPackageFor resources).captureCorrectAtEndpoint endpoint
+
+theorem clientObservableBehavior {R} [ResourceModel R] [WebServerResources R]
+    (resources : R) :
+    ∀ trace, (webServerSpec resources).Accepts trace →
+      (∀ exchange ∈ trace.completedExchanges,
+        (exchange.request.method = .GET ∧ exchange.request.path = "/".toASCII →
+          exchange.response.status = 200 ∧
+          exchange.response.body = "Grass web server\n".toUTF8) ∧
+        (exchange.request.method = .GET ∧ exchange.request.path ≠ "/".toASCII →
+          exchange.response.status = 404 ∧ exchange.response.body = #[]) ∧
+        (exchange.request.method ≠ .GET →
+          exchange.outcome = .rejectedRequestMethod)) ∧
+      trace.listenEndpoint = endpoint :=
+  (protocolPackageFor resources).clientObservableCorrect endpoint
 ```
 
-This theorem is the high-level correctness proof. It is universally quantified
+`clientObservableBehavior` restates the product promise in ground client terms:
+loopback port 8080, `GET /` yields status 200 and the exact body, and an unknown
+GET path yields status 404 with an empty body; non-GET requests are rejected by
+the declared method policy. Correctness does not depend on a
+reviewer opening the protocol package to discover the application.
+
+`webServerSpecCorrect` is the high-level correctness proof. It is universally quantified
 over accepted input bytes, fragmentation, peer settings, windows, scheduler
 choices, failures, cancellation, and response interleavings. Assembly does not
 replace it; assembly later refines it.
@@ -300,6 +323,16 @@ unclassified terminal.
 The replaceable proof lens chooses listener, connection, and stream roles. They
 make causal attribution, isolated reset, HPACK connection ordering, and
 subtree-resource theorems economical; they are not fields of the root spec.
+
+The displayed `ServerProcessKind`, registry, plan, and composition record are a
+single-file authoring presentation, not the public `.olean` boundary for a
+large server. Checked expansion splits listener/supervisor, worker family,
+connection family, stream family, writer, and HPACK facets into module-local
+open-registry fragments and opaque certificates. Each composition lemma is
+indexed by the smallest facet it consumes; scoped cancellation compares only
+calls in that shard. The root imports summaries and a balanced aggregate, never
+a closed whole-program process sum. This application of
+[PROCESS_SHARDING.md](PROCESS_SHARDING.md) is an implementation gate.
 
 <!-- grass-block: interface id=spike4-block-08 -->
 ```lean
@@ -778,14 +811,14 @@ join_workers -> close_listener -> cleanup_wsa -> ExitProcess
 ```
 
 The setup, calls, branches, register choices, atomic words, partial-send syscall
-loop, join/cleanup, and error dispatch are authored assembly. Complex parsing,
-HPACK, state-transition, scheduling, and bounded-ring operations are local typed
-fragment constructors. `Macros.lean` carries every constructor body as an
-assembly algorithm, its exact raw expansion, references, citations, and machine
-certificate. The macro-shaped names in the listing are only transparent adapters
-to those constructors; no absent standard-library implementation is the body.
-This is not an opaque compiler escape: an assembly author can replace any call
-with novel raw instructions and prove the same local entry/exit contract.
+loop, join/cleanup, and error dispatch are authored literal assembly. Complex
+parsing, HPACK, state-transition, scheduling, and bounded-ring operations are
+authored typed sequence-constructor programs in `Macros.lean`. Those terms name
+algorithms and physical state, but they are not themselves a raw x86 listing.
+Their raw expansion and machine certificates are **not generated yet**. Calling
+this layer first-class assembly is justified only if the future constructor
+expander prints the complete raw stream, proves its local contract, and permits
+replacement by literal instructions under that same contract.
 
 The constructor hierarchy includes client-preface consumption, bounded receive ring,
 frame-header parsing/dispatch, CONTINUATION assembly, full HPACK decode, request
@@ -822,6 +855,82 @@ theorem serverExpansionExact :
 The closure records exact macro definitions, static objects, imports,
 relocations, and expanded raw listing. Ghost instructions are erased only by the
 proved expansion; the layer accepted by encoding contains raw instructions.
+
+### 9.1 Representative raw expansion and literal override
+
+The following is a proof-sketch fixture for the expected expansion of
+`parseFrameHeaderBody maxFrameSize`. Symbolic layout operands are resolved by
+the selected connection layout; they are not handwritten numeric offsets. The
+eventual expansion report must contain this complete instruction sequence (or a
+reviewed changed constructor version), not merely the constructor pipeline.
+
+<!-- grass-block: proof-sketch id=spike4-parse-header-raw-expansion -->
+```lean
+def parseFrameHeaderRaw (maxFrameSize : Nat) :
+    LocalFragmentBody (Http2.X86.Contract.parseHeaderEntry maxFrameSize)
+      Http2.X86.Contract.parseHeaderExit := asm_fragment {
+    mov   ecx, dword ptr [r12 + ConnectionLayout.haveBytes]
+    cmp   ecx, 9
+    jb    .needInput
+    mov   rsi, qword ptr [r12 + ConnectionLayout.readPointer]
+    movzx eax, byte ptr [rsi]
+    shl   eax, 16
+    movzx edx, byte ptr [rsi + 1]
+    shl   edx, 8
+    or    eax, edx
+    movzx edx, byte ptr [rsi + 2]
+    or    eax, edx
+    cmp   eax, maxFrameSize
+    ja    .connectionError
+    lea   edx, [rax + 9]
+    cmp   ecx, edx
+    jb    .needInput
+    mov   dword ptr [r12 + ConnectionLayout.frameLength], eax
+    movzx edx, byte ptr [rsi + 3]
+    mov   byte ptr [r12 + ConnectionLayout.frameType], dl
+    movzx edx, byte ptr [rsi + 4]
+    mov   byte ptr [r12 + ConnectionLayout.frameFlags], dl
+    mov   edx, dword ptr [rsi + 5]
+    bswap edx
+    and   edx, 0x7fffffff
+    mov   dword ptr [r12 + ConnectionLayout.frameStream], edx
+    lea   rdx, [rsi + 9]
+    mov   qword ptr [r12 + ConnectionLayout.payloadPointer], rdx
+    jmp   .success
+.needInput:       @fragment_exit .needInput
+    jmp   parse_header_return
+.connectionError: @fragment_exit .connectionError
+    jmp   parse_header_return
+.success:         @fragment_exit .success
+    jmp   parse_header_return
+}
+
+theorem parseFrameHeaderConstructorExpansionExact (maxFrameSize : Nat) :
+    X86.expandFragment (parseFrameHeaderBody maxFrameSize) =
+      .ok (parseFrameHeaderRaw maxFrameSize).raw := by
+  exact Http2.X86.parseFrameHeader_expansion_exact maxFrameSize
+```
+
+This second fixture is the author escape hatch. It replaces the constructor
+body with a hand-tuned literal fragment; no higher process, protocol, or spec
+proof changes when the same entry/exit contract is proved.
+
+<!-- grass-block: proof-sketch id=spike4-literal-fragment-override -->
+```lean
+def serverMacrosWithRawHeader : VerifiedConstructorFamily :=
+  serverMacros.replace `parseFrameHeader (parseFrameHeaderRaw resourcePolicy.maxInboundFrameBytes)
+
+theorem rawHeaderOverridePreservesFamily :
+    ConstructorFamilyImplementsContracts serverMacrosWithRawHeader serverMacroContracts := by
+  exact ConstructorFamily.replace_typed _ _
+```
+
+The field-section decoder is the scale acceptance case. Its implementation
+report must print its entire expanded CFG and raw x86, including child fragment
+calls, private/committed HPACK state, all error exits, and the local proof
+certificate. If that report cannot be produced and reviewed without exposing a
+new semantic choice, `x86_fragment_body` is demoted to an unverified mid-level
+IR and Spike 4 fails implementation acceptance.
 
 ## 10. Assembly-to-model bindings
 
@@ -2928,6 +3037,8 @@ def resources : ServerResourceModel :=
 
 def body : ByteArray := "Grass web server\n".toUTF8
 
+def endpoint : TcpEndpoint := .ipv4Loopback 8080
+
 def routes : Http2Routes :=
   .singleton { method := .GET, scheme := .http, authority := .any,
     path := "/".toASCII, response :=
@@ -2971,6 +3082,7 @@ def protocolPackageFor {R : Type} [ResourceModel R] [WebServerResources R]
 def webServerSuite {R : Type} [ResourceModel R] [WebServerResources R]
     (resources : R) : SpecificationSuite resources :=
   (protocolPackageFor resources).suite
+    |>.atEndpoint endpoint
 
 def webServerSpec {R : Type} [ResourceModel R] [WebServerResources R]
     (resources : R) : SpecProcess resources :=
@@ -2985,7 +3097,21 @@ def webServerSpec {R : Type} [ResourceModel R] [WebServerResources R]
 
 theorem webServerSpecCorrect {R : Type} [ResourceModel R] [WebServerResources R]
     (resources : R) : MeetsAllSpecificationTheorems (webServerSpec resources) :=
-  (protocolPackageFor resources).captureCorrect
+  (protocolPackageFor resources).captureCorrectAtEndpoint endpoint
+
+theorem clientObservableBehavior {R : Type}
+    [ResourceModel R] [WebServerResources R] (resources : R) :
+    ∀ trace, (webServerSpec resources).Accepts trace →
+      (∀ exchange ∈ trace.completedExchanges,
+        (exchange.request.method = .GET ∧ exchange.request.path = "/".toASCII →
+          exchange.response.status = 200 ∧
+          exchange.response.body = "Grass web server\n".toUTF8) ∧
+        (exchange.request.method = .GET ∧ exchange.request.path ≠ "/".toASCII →
+          exchange.response.status = 404 ∧ exchange.response.body = #[]) ∧
+        (exchange.request.method ≠ .GET →
+          exchange.outcome = .rejectedRequestMethod)) ∧
+      trace.listenEndpoint = endpoint :=
+  (protocolPackageFor resources).clientObservableCorrect endpoint
 
 def spec : SpecProcess resources := webServerSpec resources
 

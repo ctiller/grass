@@ -9,8 +9,8 @@ are generated inspection views.
 
 | Proof-economics quantity | Current evidence |
 | --- | --- |
-| Authored specification | 1 module; 78 physical / 62 nonblank lines |
-| Authored realization | 5 modules; 1662 physical / 1550 nonblank lines |
+| Authored specification | 1 module; 97 physical / 77 nonblank lines |
+| Authored realization | 5 modules; 1666 physical / 1553 nonblank lines |
 | Generated expansion/certificates | not generated |
 | Clean/incremental checking | not measured |
 
@@ -43,19 +43,35 @@ namespace Grass.Spike5
 /-! A unit cube, perspective projection, rotation as a function of portable
 monotonic elapsed time, resize, and user-requested termination are semantic.
 Graphics APIs, clock APIs, refresh rate, and physical scheduling are not. -/
-def scene : InteractiveScene := Scene.spinningColoredWireCube
+def geometry : WireGeometry := WireGeometry.unitCube
+
+def vertexColors : VertexColoring geometry :=
+  VertexColoring.byVertex #[.red, .green, .blue, .yellow,
+    .cyan, .magenta, .white, .black]
+
+def angularVelocity : AngularVelocity := .radiansPerSecond (3 / 5)
+
+def scene : InteractiveScene :=
+  Scene.spinningWireGeometry geometry vertexColors angularVelocity
 
 structure CubeFrame where
   extent : Nat × Nat
   sampledAt : MonotonicInstant
   angle : Angle
   image : AbstractImage
-  depicts : RasterizesProjectedCube scene.geometry extent angle image
 
 def rotationAccuracy : ElapsedRotationAccuracy :=
   ElapsedRotationAccuracy.explicit
     (maxAngleError := .radians (1 / 1024))
     (maxSampleTimeError := .milliseconds 1)
+
+def frameProductivity : ProgressFragment :=
+  ProgressFragment.conditionalProductivity
+    (enabled := [.running, .visible, .nonzeroExtent, .noExitRequested])
+    (assumptions := [.frameOpportunitiesContinue, .schedulerFair,
+      .platformResponsive, .gpuResponsive])
+    (opportunity := .frameOpportunity)
+    (eventually := [.frameObservation, .terminalOutcome])
 
 inductive CubeInput
   | close | escapeDown | resize (width height : Nat) | irrelevant
@@ -72,7 +88,8 @@ def CubeObservation.Accepts (o : CubeObservation) : Prop :=
   FramesApproximateElapsedRotation
       scene.angularVelocity rotationAccuracy o.frames ∧
   NondecreasingFrameSampleTimes o.frames ∧
-  (∀ frame ∈ o.frames, frame.depicts) ∧
+  (∀ frame ∈ o.frames,
+    RasterizesProjectedWireScene scene frame.extent frame.angle frame.image) ∧
   ResizeAffectsProjectionOnly o.inputs o.frames ∧
   UserExitIffRequestedForConformingRuns o.inputs o.outcome ∧
   FailureNeverNormalizesToUserSuccess o.outcome
@@ -98,8 +115,10 @@ def cubeSpec {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
   SpecProcess.capture (cubeSuite resources)
     |>.acceptInput [.close, .escapeDown, .resize, .irrelevant]
     |>.withFailures .terminateWithoutFalseSuccess
-    |>.withProgress (.reactiveUntilUserExit frontiers :=
-      [.externalInput, .frameOpportunity, .frameObservation, .terminalOutcome])
+    |>.withProgress (.all #[
+      .reactiveUntilUserExit frontiers :=
+        [.externalInput, .frameOpportunity, .frameObservation, .terminalOutcome],
+      frameProductivity])
 
 theorem cubeSpecCorrect {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
     (resources : R) : MeetsAllSpecificationTheorems (cubeSpec resources) :=
@@ -271,6 +290,13 @@ and an ideal real angle. The standard library must prove that per-operation
 IEEE-754 bound refines `rotationAccuracy` over every admitted clock value before
 the representation is available to this spike.
 
+Geometry, vertex colors, and angular velocity are ground precious values, so a
+change such as “spin twice as fast” is visibly a `Spec.lean` edit. The library
+supplies scene vocabulary and rasterization relations, not this cube's product
+content. `CubeFrame` is observation data rather than a proof-carrying value;
+the acceptance relation separately demands that every observed frame depicts
+the specified geometry and vertex colors at the specified angle.
+
 No precious declaration contains a process count, channel buffer, message-loop
 convention, Vulkan result, matrix byte layout, shader language, fixed frame
 rate, exit code, or PE detail. `processPlan` chooses those facts and
@@ -283,11 +309,18 @@ and input events are filtered to the observations needed by `spec`.
 
 The `CubeObservation.Accepts` declaration above does not demand pixel identity
 across GPUs. The Vulkan realization proves
-that the shader/pipeline/rasterization model refines `RasterizesProjectedCube`;
+that the shader/pipeline/rasterization model refines
+`RasterizesProjectedWireScene` for the complete scene, including colors;
 implementation-defined precision is represented by a reviewed numeric error
 envelope, not hidden under equality. Occluded or minimized windows may present
-no frames. Frame coalescing is permitted. A close/Escape request forbids new
-submissions after the currently submitted frame is retired.
+no frames. Individual frame opportunities may be coalesced. They may not be
+discarded forever while the application is running, visible, has nonzero extent,
+has no exit request, and continuing frame opportunities, scheduler fairness,
+platform responsiveness, and GPU responsiveness all hold: under those premises
+the trace eventually contains an accepted frame or a declared terminal outcome.
+This is conditional productivity, not a fixed cadence or frame-rate promise. A
+close/Escape request forbids new submissions after the currently submitted frame
+is retired.
 
 Every finite conforming prefix is safe. The host performs finite work between
 frontiers. An infinite execution with no user exit is an intended reactive run.
@@ -622,6 +655,15 @@ instantiation, and the observation-filter simulation. Standard child, lifecycle,
 strategy, and physical-representation templates are selected, not rederived. None of this replaces the
 later local proofs for the authored x86 or SPIR-V instructions.
 
+The displayed cube registry is a compact authoring presentation, not a
+whole-engine module shape. Checked expansion emits separate opaque process
+shards for the application, window/input host, graphics coordinator, and
+generative frame family. Channel, ownership, cancellation, resource, progress,
+and provider facts are facet-indexed and composed through a balanced certificate
+DAG. Independently replacing the graphics shard with Vulkan or later lowering a
+storage shard to IOCP preserves unrelated siblings, as required by
+[PROCESS_SHARDING.md](PROCESS_SHARDING.md).
+
 The reusable driver argument relates each logical process occurrence to an
 exact CFG interval: `wndproc`/`pump_messages` implement the input child;
 `event_loop` and the minimized gate implement frame opportunities;
@@ -631,7 +673,9 @@ recording through `vkQueueSubmit2` implements submission; and
 cancellation disposition. The relation retains one namespaced choice oracle
 across Win32, Vulkan, scheduling, and GPU execution. It proves finite internal
 work to the next process frontier, response correlation, pure-render
-discardability, no post-exit submission, and exact commit filtering.
+discardability, no post-exit submission, exact commit filtering, and the
+conditional productivity theorem: repeated enabled opportunities cannot stutter
+forever when its explicit fairness and responsiveness premises hold.
 
 `processPlanRealizes` does not claim that these labels or this topology are
 semantic. It claims their projected traces satisfy `spec`; replacing the weave
@@ -3421,6 +3465,10 @@ def cubeApplication : ProcessSpec where
   Step := CubeState.Step scene
   view := some { View := DesiredCubeView, render := CubeState.render scene }
 
+theorem cubeApplicationProductive :
+    ProcessSatisfiesProgress cubeApplication frameProductivity :=
+  cube_frame_productivity
+
 theorem cubeApplicationCorrect : ProcessCorrect cubeApplication where
   Invariant := CubeState.Invariant scene
   initial := cube_initial_invariant
@@ -3431,7 +3479,7 @@ theorem cubeApplicationCorrect : ProcessCorrect cubeApplication where
   viewAccepts := cube_render_depicts_scene
   observationsAccept := cube_observations_accept
   demandsWellFormed := cube_demands_are_well_formed
-  progress := cube_reactive_progress
+  progress := cube_progress_all cube_reactive_progress cubeApplicationProductive
 
 inductive CubeProcessKind
   | application
@@ -3656,19 +3704,35 @@ def resources : GraphicsResourceModel :=
     |>.withNoUnboundedGrassOwnedGrowth
     |>.withTerminalDisposition .closeAllOwnedGraphicsObjects
 
-def scene : InteractiveScene := Scene.spinningColoredWireCube
+def geometry : WireGeometry := WireGeometry.unitCube
+
+def vertexColors : VertexColoring geometry :=
+  VertexColoring.byVertex #[.red, .green, .blue, .yellow,
+    .cyan, .magenta, .white, .black]
+
+def angularVelocity : AngularVelocity := .radiansPerSecond (3 / 5)
+
+def scene : InteractiveScene :=
+  Scene.spinningWireGeometry geometry vertexColors angularVelocity
 
 structure CubeFrame where
   extent : Nat × Nat
   sampledAt : MonotonicInstant
   angle : Angle
   image : AbstractImage
-  depicts : RasterizesProjectedCube scene.geometry extent angle image
 
 def rotationAccuracy : ElapsedRotationAccuracy :=
   ElapsedRotationAccuracy.explicit
     (maxAngleError := .radians (1 / 1024))
     (maxSampleTimeError := .milliseconds 1)
+
+def frameProductivity : ProgressFragment :=
+  ProgressFragment.conditionalProductivity
+    (enabled := [.running, .visible, .nonzeroExtent, .noExitRequested])
+    (assumptions := [.frameOpportunitiesContinue, .schedulerFair,
+      .platformResponsive, .gpuResponsive])
+    (opportunity := .frameOpportunity)
+    (eventually := [.frameObservation, .terminalOutcome])
 
 inductive CubeInput
   | close
@@ -3691,7 +3755,8 @@ def CubeObservation.Accepts (o : CubeObservation) : Prop :=
   FramesApproximateElapsedRotation
       scene.angularVelocity rotationAccuracy o.frames ∧
   NondecreasingFrameSampleTimes o.frames ∧
-  (∀ frame ∈ o.frames, frame.depicts) ∧
+  (∀ frame ∈ o.frames,
+    RasterizesProjectedWireScene scene frame.extent frame.angle frame.image) ∧
   ResizeAffectsProjectionOnly o.inputs o.frames ∧
   UserExitIffRequestedForConformingRuns o.inputs o.outcome ∧
   FailureNeverNormalizesToUserSuccess o.outcome
@@ -3713,8 +3778,10 @@ def cubeSpec {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
   SpecProcess.capture (cubeSuite resources)
     |>.acceptInput [.close, .escapeDown, .resize, .irrelevant]
     |>.withFailures .terminateWithoutFalseSuccess
-    |>.withProgress (.reactiveUntilUserExit frontiers :=
-      [.externalInput, .frameOpportunity, .frameObservation, .terminalOutcome])
+    |>.withProgress (.all #[
+      .reactiveUntilUserExit frontiers :=
+        [.externalInput, .frameOpportunity, .frameObservation, .terminalOutcome],
+      frameProductivity])
 
 theorem cubeSpecCorrect {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
     (resources : R) : MeetsAllSpecificationTheorems (cubeSpec resources) :=

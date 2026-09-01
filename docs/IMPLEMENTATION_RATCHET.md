@@ -21,6 +21,7 @@ The future executable is invoked through the pinned Lake environment:
 
 ```text
 lake env grass spike mirror     --spike <1..5> --out .grass/reports/<spike>/mirror.v1.json
+lake env grass spike authority-report --spike <1..5> --out .grass/reports/<spike>/authority.v1.json
 lake env grass spike elaborate  --spike <1..5> --out .grass/reports/<spike>/elaboration.v1.json
 lake env grass spike verify     --spike <1..5> --out .grass/reports/<spike>/verification.v1.json
 lake env grass spike artifact   --spike <1..5> --out .grass/reports/<spike>/artifact.v1.json
@@ -37,6 +38,21 @@ kernel-checked declaration and verified object remain proof authority.
 `mirror` may be implemented first by `check-spike-sources.ps1`, but the eventual
 command must emit the same classified manifest rather than merely print a pass
 line.
+
+`authority-report` implements [SPIKE_PROOF_BURDEN.md](SPIKE_PROOF_BURDEN.md).
+It lists every referenced identifier with its normalized declaration identity,
+classification, owning module, instantiated arguments, theorem type, residual
+goals, proof-term bytes when available, imports, consumed process facets, and
+rebuild cone. The command fails on any unresolved name. Pre-implementation
+burden classes are replaced by measured evidence; they are never copied into
+the report as if they were measurements.
+
+For constructor-heavy assembly, `elaborate` emits both the typed constructor
+tree and complete raw instruction hierarchy. Spike 4 additionally compares the
+frame-header expansion with `spike4-parse-header-raw-expansion`, emits the full
+HPACK field-section CFG/listing, and checks the literal replacement fixture from
+`spike4-literal-fragment-override`. A constructor name or digest without raw
+instructions fails the report.
 
 ## 2. Common report envelope
 
@@ -124,14 +140,17 @@ Acceptance requires:
 
 `ArtifactReportV1` contains verified-object identities, streamed link plan,
 section/import/export/relocation/unwind manifests, exact serialized ranges,
-writer/parser reports, loader connection, emitted digest and path, and the
-executable observation connection.
+writer/parser reports, each `.gobj` payload-to-certificate resolution equality,
+loader connection, emitted digest and path, and the executable observation
+connection.
 
 Acceptance requires the common writer law `parse (write x) = .ok x`, the
 format-specific accepted-input conformance law, exact source-to-object-to-bytes
 adjacency, valid ASLR relocations and standard permissions, and successful
-loading under the selected profile model. Running the artifact is a probe, not
-proof.
+loading under the selected profile model. The object round trip is over
+proof-free `GobjPayload`; acceptance for linking additionally proves the parsed
+payload equals the one inside the imported `VerifiedObject`. Running the
+artifact is a probe, not proof.
 
 ### 3.5 Mutation
 
@@ -245,8 +264,9 @@ Required mutations:
 
 ## 5. `.olean` locality ratchet
 
-The `locality` command implements [OLEAN_SHARDING.md](OLEAN_SHARDING.md). It
-does not generate a giant instruction program. Required scenarios are:
+The `locality` command implements [OLEAN_SHARDING.md](OLEAN_SHARDING.md) and
+[PROCESS_SHARDING.md](PROCESS_SHARDING.md). It does not generate a giant
+instruction program or one giant process graph. Required scenarios are:
 
 ```text
 cold
@@ -258,6 +278,11 @@ specification-key
 layout-only
 provider-profile
 aggregate-rebalance
+process-private-state
+process-local-invariant
+process-cancellation-point
+process-exported-channel
+process-subsystem-lowering
 ```
 
 `BuildExecutionReportV1` records the abstract dependency graph, changed inputs,
@@ -280,6 +305,10 @@ Acceptance is structural:
 - an exported-boundary edit rebuilds exactly its semantic dependent cone;
 - a layout-only edit does not reopen portable or algorithm proofs;
 - no public theorem type contains a complete descendant instruction stream;
+- no public process theorem type contains the complete realization plan or
+  private child state machine;
+- a private process or cancellation edit preserves unrelated process shard and
+  machine certificate `.olean` files;
 - no aggregate imports every leaf directly; and
 - peak memory remains bounded by configured shard/fanout plus streaming link
   buffers.

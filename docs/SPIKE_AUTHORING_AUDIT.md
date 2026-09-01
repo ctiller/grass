@@ -35,6 +35,12 @@ library is deliberately out of scope. This is not a design blocker. Their exact
 future command, schema, mutation, and first-failure contract is now fixed by
 [IMPLEMENTATION_RATCHET.md](IMPLEMENTATION_RATCHET.md).
 
+Spike-shaped theorem names and invariants are not counted as free library work.
+[SPIKE_PROOF_BURDEN.md](SPIKE_PROOF_BURDEN.md) classifies the exact visible
+families, gives their proof shapes, and makes the large HTTP/2 and graphics
+coupling proofs explicit research/economics risks until implementation reports
+their residual goals and checked proof costs.
+
 One Round 19 recommendation is rejected: stability remains precious in Spike 2
 because stable ordering was an explicit product requirement. The logical spec
 observes occurrence identities even when the selected console projection emits

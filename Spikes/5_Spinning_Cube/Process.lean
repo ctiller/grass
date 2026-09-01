@@ -135,6 +135,10 @@ def cubeApplication : ProcessSpec where
   Step := CubeState.Step scene
   view := some { View := DesiredCubeView, render := CubeState.render scene }
 
+theorem cubeApplicationProductive :
+    ProcessSatisfiesProgress cubeApplication frameProductivity :=
+  cube_frame_productivity
+
 theorem cubeApplicationCorrect : ProcessCorrect cubeApplication where
   Invariant := CubeState.Invariant scene
   initial := cube_initial_invariant
@@ -145,7 +149,7 @@ theorem cubeApplicationCorrect : ProcessCorrect cubeApplication where
   viewAccepts := cube_render_depicts_scene
   observationsAccept := cube_observations_accept
   demandsWellFormed := cube_demands_are_well_formed
-  progress := cube_reactive_progress
+  progress := cube_progress_all cube_reactive_progress cubeApplicationProductive
 
 inductive CubeProcessKind
   | application

@@ -521,6 +521,38 @@ to imitate compiler-selected storage or CFG structure.
     believable interface for those outputs, not fabricated runs. Implementation
     approval later requires the retained evidence in
     [IMPLEMENTATION_RATCHET.md](IMPLEMENTATION_RATCHET.md).
+101. `.gobj` serializes only a proof-free first-order `GobjPayload`.
+    `VerifiedObject` remains an opaque in-kernel value containing the exact
+    payload and its source/machine/signature theorems. A cached file participates
+    in verified linking only after parsing proves equality with that certificate's
+    payload. Digests and certificate names are locators, never the bridge;
+    `emitProgram` remains derived from the certified linked artifact.
+102. Interactive rendering has an explicit conditional-productivity contract.
+    While the application is running, visible, nonzero in extent, and has no exit
+    request, continued frame opportunities plus scheduler, platform, and GPU
+    responsiveness must eventually produce an accepted frame observation or a
+    declared terminal outcome. Individual opportunities may coalesce, and no
+    fixed cadence is promised; an enabled renderer may not stutter forever.
+103. Process proofs use the same separate-compilation discipline as machine
+    proofs. Large programs use module-local open registries, facet-indexed
+    opaque certificates, scoped cancellation coverage, SCC summaries, and
+    bounded-fanout aggregate DAGs. A closed whole-program process sum, global
+    blocking-call equality, or witness indexed by the complete plan is rejected
+    because it makes a local process edit a whole-program type change.
+104. Spike proof-economy accounting prices theorem-shaped identifiers. Every
+    referenced name is classified as authored, an exact parametric library
+    instance, generated structure, or versioned authority-model work; unresolved
+    names fail. Pre-implementation burden estimates are smell tests and are
+    replaced by elaborator-produced residual-goal and proof-cost reports.
+105. A typed x86 sequence-constructor language is not itself a raw instruction
+    listing. Its implementation claim requires complete inspectable expansion,
+    a theorem connecting the constructor to those instructions, and a literal
+    same-contract override. Spike 4 carries representative fixtures and makes
+    full HPACK expansion an implementation gate.
+106. Product-defining constants and observable behavior remain visible in
+    ground precious vocabulary. Spike 4 names its endpoint and client response
+    theorem; Spike 5 names geometry, colors, angular velocity, and conditional
+    productivity, and observations do not carry proofs of their own acceptance.
 
 ## Explicitly rejected shortcuts
 

@@ -23,6 +23,8 @@ def resources : ServerResourceModel :=
 
 def body : ByteArray := "Grass web server\n".toUTF8
 
+def endpoint : TcpEndpoint := .ipv4Loopback 8080
+
 def routes : Http2Routes :=
   .singleton { method := .GET, scheme := .http, authority := .any,
     path := "/".toASCII, response :=
@@ -66,6 +68,7 @@ def protocolPackageFor {R : Type} [ResourceModel R] [WebServerResources R]
 def webServerSuite {R : Type} [ResourceModel R] [WebServerResources R]
     (resources : R) : SpecificationSuite resources :=
   (protocolPackageFor resources).suite
+    |>.atEndpoint endpoint
 
 def webServerSpec {R : Type} [ResourceModel R] [WebServerResources R]
     (resources : R) : SpecProcess resources :=
@@ -80,7 +83,21 @@ def webServerSpec {R : Type} [ResourceModel R] [WebServerResources R]
 
 theorem webServerSpecCorrect {R : Type} [ResourceModel R] [WebServerResources R]
     (resources : R) : MeetsAllSpecificationTheorems (webServerSpec resources) :=
-  (protocolPackageFor resources).captureCorrect
+  (protocolPackageFor resources).captureCorrectAtEndpoint endpoint
+
+theorem clientObservableBehavior {R : Type}
+    [ResourceModel R] [WebServerResources R] (resources : R) :
+    ∀ trace, (webServerSpec resources).Accepts trace →
+      (∀ exchange ∈ trace.completedExchanges,
+        (exchange.request.method = .GET ∧ exchange.request.path = "/".toASCII →
+          exchange.response.status = 200 ∧
+          exchange.response.body = "Grass web server\n".toUTF8) ∧
+        (exchange.request.method = .GET ∧ exchange.request.path ≠ "/".toASCII →
+          exchange.response.status = 404 ∧ exchange.response.body = #[]) ∧
+        (exchange.request.method ≠ .GET →
+          exchange.outcome = .rejectedRequestMethod)) ∧
+      trace.listenEndpoint = endpoint :=
+  (protocolPackageFor resources).clientObservableCorrect endpoint
 
 def spec : SpecProcess resources := webServerSpec resources
 

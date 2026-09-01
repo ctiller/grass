@@ -11,6 +11,12 @@ to elaborate again. Grass uses Lean modules as the physical unit of proof
 reuse, verified-object summaries as the logical boundary, and a bounded-fanout
 certificate DAG as the aggregate proof.
 
+Process separate compilation is equally foundational. Open registries,
+facet-indexed certificates, scoped cancellation, SCC summaries, and their
+mutation gates are specified in
+[PROCESS_SHARDING.md](PROCESS_SHARDING.md). Machine sharding cannot compensate
+for a whole-program process theorem.
+
 This design relies on Lean's actual compilation model:
 
 - a Lean source module elaborates to `.olean` environment data which importers
@@ -77,9 +83,12 @@ its public type does not contain the source vector. The kernel checks the
 constructor application once. Downstream composition uses the exported
 certificate and cannot unfold or replace it.
 
-The `.gobj` file is a deterministic serialization of the same verified object.
-Its Lake facet records a digest and a theorem-bearing manifest. Cache hashes and
-digests locate artifacts; they are never accepted as proof of correctness.
+The `.gobj` file is a deterministic serialization of the object's proof-free
+`GobjPayload`, not of the `VerifiedObject` or its Lean proofs. Its Lake facet
+records a digest for lookup. Before linking, the parser must prove that the file
+equals the exact payload retained by the imported opaque certificate. Cache
+hashes and digests locate artifacts; they are never accepted as proof of
+correctness. [VERIFIED_OBJECTS.md](VERIFIED_OBJECTS.md) owns this bridge.
 
 ## 2. Import discipline
 
@@ -89,7 +98,7 @@ The central rule is:
 semantic/model consumer  -> imports Foo.Sig
 machine implementation    -> imports required Callee.Sig modules
 aggregate certificate     -> imports child Cert modules
-artifact linker           -> consumes child .gobj facets + aggregate certificate
+artifact linker           -> resolves child .gobj payloads against child certificates
 ```
 
 Forbidden dependency edges include:
@@ -190,10 +199,10 @@ Exactness is preserved by hierarchical existential ownership:
 ```lean
 structure VerifiedObject (summary : ShardSummary) where
   private source : RawInstructionHierarchy
-  private object : RelocatableObject
+  public payload : GobjPayload
   private sourceExact : SourceHasSummary source summary
-  private encodingExact : EncodesRelocatable source object
-  public exports : ObjectExportsSummary object summary
+  private encodingExact : PayloadEncodesExactSource payload source
+  public exports : PayloadExportsSummary payload summary
 ```
 
 The exact source is not erased; it is owned behind the checked certificate.
@@ -203,10 +212,12 @@ to that root certificate. It does not assert equality between two flattened
 million-element arrays.
 
 Review and emission still need the bytes. The build tool streams each `.gobj`
-and its compact manifest through the verified linker/writer. A small generated
-Lean module records the link tree and consumes the object certificates. No Lean
-declaration materializes the full concatenated instruction program merely to
-compute a boolean or prove `rfl`.
+through the parser and constructs `ResolvedGobj object` only after proving the
+parsed value equals `object.payload`; it then streams those resolved payloads
+through the verified linker/writer. A small generated Lean module records the
+link tree and consumes the object certificates plus these exact resolution
+equalities. No Lean declaration materializes the full concatenated instruction
+program merely to compute a boolean or prove `rfl`.
 
 ## 5. Generated metadata is sharded too
 
@@ -247,7 +258,7 @@ Grass defines Lake facets for:
 ```text
 Shard.lean:olean       kernel-checked public certificate/module data
 Shard.lean:olean.private  private implementation proof data where required
-Shard.gobj             deterministic relocatable verified object
+Shard.gobj             deterministic proof-free `GobjPayload`
 Shard.gmanifest        compact symbols/imports/relocations/citations/source map index
 Aggregate.gmanifest    child IDs, public summaries, dependency edges
 ```
@@ -257,7 +268,8 @@ The generator writes one module per bounded shard plus balanced aggregate
 modules; authors do not maintain the tree. Outputs use content-addressed cache
 keys including toolchain/profile versions, source, imported summaries, and
 generator version. A cache hit is used only after importing the kernel-checked
-certificate and validating the artifact digest named by that certificate.
+certificate, parsing the payload, and checking exact equality with the payload
+owned by that certificate; digest agreement alone is insufficient.
 
 Parallelism follows independent Lake module jobs. Linking and manifest folds
 stream child artifacts and bound in-memory fanout. The project forbids a build

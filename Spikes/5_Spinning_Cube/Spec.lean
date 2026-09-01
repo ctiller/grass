@@ -8,19 +8,35 @@ def resources : GraphicsResourceModel :=
     |>.withNoUnboundedGrassOwnedGrowth
     |>.withTerminalDisposition .closeAllOwnedGraphicsObjects
 
-def scene : InteractiveScene := Scene.spinningColoredWireCube
+def geometry : WireGeometry := WireGeometry.unitCube
+
+def vertexColors : VertexColoring geometry :=
+  VertexColoring.byVertex #[.red, .green, .blue, .yellow,
+    .cyan, .magenta, .white, .black]
+
+def angularVelocity : AngularVelocity := .radiansPerSecond (3 / 5)
+
+def scene : InteractiveScene :=
+  Scene.spinningWireGeometry geometry vertexColors angularVelocity
 
 structure CubeFrame where
   extent : Nat × Nat
   sampledAt : MonotonicInstant
   angle : Angle
   image : AbstractImage
-  depicts : RasterizesProjectedCube scene.geometry extent angle image
 
 def rotationAccuracy : ElapsedRotationAccuracy :=
   ElapsedRotationAccuracy.explicit
     (maxAngleError := .radians (1 / 1024))
     (maxSampleTimeError := .milliseconds 1)
+
+def frameProductivity : ProgressFragment :=
+  ProgressFragment.conditionalProductivity
+    (enabled := [.running, .visible, .nonzeroExtent, .noExitRequested])
+    (assumptions := [.frameOpportunitiesContinue, .schedulerFair,
+      .platformResponsive, .gpuResponsive])
+    (opportunity := .frameOpportunity)
+    (eventually := [.frameObservation, .terminalOutcome])
 
 inductive CubeInput
   | close
@@ -43,7 +59,8 @@ def CubeObservation.Accepts (o : CubeObservation) : Prop :=
   FramesApproximateElapsedRotation
       scene.angularVelocity rotationAccuracy o.frames ∧
   NondecreasingFrameSampleTimes o.frames ∧
-  (∀ frame ∈ o.frames, frame.depicts) ∧
+  (∀ frame ∈ o.frames,
+    RasterizesProjectedWireScene scene frame.extent frame.angle frame.image) ∧
   ResizeAffectsProjectionOnly o.inputs o.frames ∧
   UserExitIffRequestedForConformingRuns o.inputs o.outcome ∧
   FailureNeverNormalizesToUserSuccess o.outcome
@@ -65,8 +82,10 @@ def cubeSpec {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
   SpecProcess.capture (cubeSuite resources)
     |>.acceptInput [.close, .escapeDown, .resize, .irrelevant]
     |>.withFailures .terminateWithoutFalseSuccess
-    |>.withProgress (.reactiveUntilUserExit frontiers :=
-      [.externalInput, .frameOpportunity, .frameObservation, .terminalOutcome])
+    |>.withProgress (.all #[
+      .reactiveUntilUserExit frontiers :=
+        [.externalInput, .frameOpportunity, .frameObservation, .terminalOutcome],
+      frameProductivity])
 
 theorem cubeSpecCorrect {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
     (resources : R) : MeetsAllSpecificationTheorems (cubeSpec resources) :=

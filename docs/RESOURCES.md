@@ -80,13 +80,24 @@ storage in another. The final plan proves that all envelopes jointly cover the
 one captured semantic budget and that shared physical resources do not double
 count custody.
 
-## 5. Spike rule
+## 5. Spike and module rule
 
-Maintained spikes place semantic budgets in `Resource.lean` and selected
-physical envelopes in `Envelope.lean` or `Plan.lean`. `Spec.lean` imports only
-the former. Generated dependency reports must demonstrate that changing worker
-count, polling mode, buffer layout, or provider capacity does not re-elaborate
-the precious specification module.
+The public precious specification module defines a family parameterized by a
+semantic budget; it does not import the selected deployment profile. A separate
+`Resource.lean` or profile facet selects the budget, while `Envelope.lean` or
+`Plan.lean` selects physical resources. The application root instantiates the
+family. Thus a budget change rechecks requirements that consume that budget but
+does not re-elaborate the generic behavioral relation, and a physical-envelope
+change does not re-elaborate either.
+
+The compact pre-implementation spike files currently colocate a selected value
+and its polymorphic spec family as an authoring convenience. This is not evidence
+of `.olean` locality. Their checked expansion must split those declarations into
+the facets above without semantic invention, or the authored source must be
+physically split. Generated dependency reports demonstrate the actual boundary;
+changing worker count, polling mode, buffer layout, or provider capacity may not
+re-elaborate the precious specification module. Large programs use physical
+modules directly rather than one colocated `Spec.lean`.
 
 Spike 4 is the first acceptance fixture: its HTTP/2 limits and externally
 promised deadlines are semantic, while its four-worker Win32 polling pool,
