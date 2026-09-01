@@ -19,15 +19,18 @@ structure ContractFragment (resources : R) where
   failures : FailureProjection ports
   progress : ProgressFragment ports
   resourceUse : ResourceSemanticUse resources ports
+  processDemands : FiniteProcessDemandFamily resources ports
 
-class SpecificationLanguage (Syntax : Type) where
+class SpecificationLanguage {R : Type u} [ResourceModel R]
+    (resources : R) (Syntax : Type) where
   wellFormed : Syntax -> Prop
   denote : (term : Syntax) -> wellFormed term -> ContractFragment resources
   sourceOwner : NormativeSemanticOwner Syntax
 
-structure SomeSpecComponent (resources : R) where
+structure SomeSpecComponent {R : Type u} [ResourceModel R]
+    (resources : R) where
   Syntax : Type
-  language : SpecificationLanguage Syntax
+  language : SpecificationLanguage resources Syntax
   term : Syntax
   wellFormed : language.wellFormed term
   name : ComponentId
@@ -74,6 +77,12 @@ structure SpecificationSuite (resources : R) where
   coherent : NoContradictoryGuaranteesOrResourceSemantics components junctions
   contract : BehaviorContract resources
   contractExact : contract = ComposeFragmentDenotations components junctions
+  resourceSemantics : SelectedResourceSemantics resources
+  resourceSemanticsExact :
+    SuiteUsesSelectedResourceSemantics components resourceSemantics
+  processDemands : FiniteKeyedProcessDemandFamily resources resourceSemantics
+  processDemandsExact : processDemands =
+    ComposeProcessDemands components junctions resourceSemanticsExact
 ```
 
 This composition is precious only where it states meaning. Connecting an HTTP/2
@@ -91,9 +100,7 @@ the structure; this document uses its single capture constructor:
 
 ```lean
 def SpecProcess.capture
-    (suite : SpecificationSuite resources)
-    [CapturesResourceSemanticsFor resources suite]
-    [CapturesSuiteAsProcess suite] : SpecProcess resources
+    (suite : SpecificationSuite resources) : SpecProcess resources
 ```
 
 `VerifiedProgram spec` is indexed directly by this one root `SpecProcess` and
@@ -112,14 +119,34 @@ A DSL may also introduce an abstract process demand rather than construct a
 witness:
 
 ```lean
-structure ProcessRequirement (resources : R) where
+structure RequiredProcessContract
+    {R : Type u} [ResourceModel R] (resources : R) where
   boundary : AbstractProcessBoundary
-  acceptable : SpecProcess resources -> Prop
+  resourceView : RequiredResourceView resources
+  contract : BehaviorContract resources
+
+structure ProcessRequirement
+    {R : Type u} [ResourceModel R] (resources : R) where
+  required : RequiredProcessContract resources
+  acceptable : (witness : SpecProcess resources) ->
+    witness.boundary = required.boundary ->
+    witness.resourceSemantics.restrict required.resourceView =
+      required.resourceView -> Prop
   contractOnly : AcceptabilityDependsOnlyOnExportedSpecContract acceptable
 
+structure SelectedProcessRequirementWitness
+    (requirement : ProcessRequirement resources) where
+  witness : SpecProcess resources
+  boundaryExact : witness.boundary = requirement.required.boundary
+  resourceViewExact :
+    witness.resourceSemantics.restrict requirement.required.resourceView =
+      requirement.required.resourceView
+  acceptable : requirement.acceptable witness boundaryExact resourceViewExact
+
 def parserRequirement (format : Format alpha) : ProcessRequirement resources :=
-  { boundary := ParserProcess.boundary format
-    acceptable := fun process => ParserProcessRealizes format process
+  { required := ParserProcess.requiredContract format
+    acceptable := fun process boundaryExact resourceExact =>
+      ParserProcessRealizes format process boundaryExact resourceExact
     contractOnly := ParserProcess.realization_extensional }
 ```
 
@@ -131,6 +158,14 @@ table parser, or direct assembly. The requirement is precious; the selected
 witness and its internal topology are not. This is the specification-language
 form of demanding lower-layer typeclass capabilities without running ambient
 instance search after construction.
+
+`ContractFragment.processDemands`, `SpecificationSuite.processDemands`, and
+`SpecProcess.requirements` are the same finite keyed dependent family carried
+through composition.  Refinement selects one
+`SelectedProcessRequirementWitness` per key and records occurrence-exact
+substitution.  A requirement cannot advertise one boundary while accepting a
+witness at another boundary, and it cannot silently capture a different
+resource view.
 
 ## 3. Junction examples
 

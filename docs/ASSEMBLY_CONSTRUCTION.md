@@ -133,6 +133,65 @@ writer input. It changes the proof's ownership and invalidation boundary. A
 leaf mutation rechecks the leaf and ancestor interfaces; unchanged sibling
 certificates remain ordinary imported kernel-checked theorems.
 
+The author does not maintain a parallel symbol array, block-name dictionary,
+stack-object ledger, constructor-name table, or cancellation lookup map. The
+assembly elaborator derives those values structurally from the same typed AST
+which produces the expanded source. Block attributes such as `@placement`,
+`@invariant`, `@cancellation_point`, and safe-state classifications elaborate
+typed terms and become fields of the block node. Closure and total CFG
+classification are folds over that AST; renaming or splitting a block changes
+the source and derived manifest atomically.
+
+Generated manifests and expanded listings may be committed outside the
+author-maintained spike directory or embedded in the annotated spike document,
+but they are checked projections, never a second author-maintained source of
+truth. A custom source frontend must prove that its extracted manifest equals
+the core AST projection before it can enter hierarchical closure.
+
+### 2.1 Staged assembly checking
+
+`verify_asm` is an orchestrator over separately callable checked phases:
+
+1. `asm_elaborate` resolves typed operands, labels, constructors, layouts, ABI
+   call frames, and derived manifests;
+2. `asm_symbolic` performs deterministic instruction/CFG symbolic execution and
+   emits local verification conditions;
+3. `asm_frame` normalizes spatial ownership, provenance, loans, access
+   footprints, and framed resource assertions;
+4. `asm_arith` dispatches Presburger and bit-vector goals to kernel-checked
+   procedures such as `omega` and `bv_decide`;
+5. `asm_ghost` checks obligation, custody, cancellation, resource-flux, and
+   observation transitions; and
+6. `asm_close` composes block/fragment certificates and reports every residual
+   theorem demand.
+
+No phase performs open-ended search across another phase's domain. Each may be
+run independently and every failure identifies the instruction, CFG edge,
+logical contract, and residual proposition. Reflection can make proof terms
+compact, but its evaluation cost is measured rather than mislabeled constant.
+
+Every invocation returns an auditable report in addition to its certificate:
+
+```lean
+structure AssemblyCheckReport (source : AuthoredAsmSource) where
+  expandedSource : RawInstructionHierarchy
+  consumedContracts : FiniteContractManifest source
+  consumedCitations : InstructionAnchorManifest expandedSource
+  phaseResults : FiniteMap AssemblyCheckPhase PhaseResult
+  residualGoals : Array ResidualGoal
+  residualAllowlist : Array ResidualGoalKey
+  allowlistExact : residualGoals.map ResidualGoal.key = residualAllowlist
+  elapsedByPhase : FiniteMap AssemblyCheckPhase Duration
+  proofTermBytesByShard : FiniteMap SourceShard Nat
+```
+
+`verify_asm` succeeds only when every residual is discharged explicitly or is
+present in the reviewed source-local allowlist. A missing block invariant, an
+unhandled provider result, and an absent semantic correspondence are mutation
+fixtures which must remain as residual goals in respectively `asm_symbolic`,
+`asm_ghost`, and `asm_close`; no later phase may silently solve or reclassify
+them.
+
 ## 3. Object and aggregate layout
 
 Logical objects and physical layout remain separate:
@@ -144,12 +203,20 @@ structure FieldSpec where
   repr : ObjectRepr profile Value
 
 structure StructLayout (profile : LayoutProfile) (fields : List FieldSpec) where
+  uniqueNames : fields.Pairwise (fun left right => left.name != right.name)
   offset : (field : fields.Member) -> Nat
   size alignment : Nat
   aligned : EveryFieldAligned fields offset
   disjoint : LiveFieldByteRangesDisjoint fields offset
   contained : EveryFieldEndsAtOrBeforeSize fields offset size
   aggregateAligned : alignment ∣ size
+
+def StructLayout.lookup (layout : StructLayout profile fields)
+    (name : Name) : Option (Sigma fun field : fields.Member =>
+      field.value.name = name)
+
+theorem StructLayout.lookup_exact (layout : StructLayout profile fields) :
+  layout.lookup name = some field iff field.value.name = name
 
 def playerLayout := structLayout win64 {
   position : Vec3f
@@ -201,11 +268,21 @@ profile theorem.
 Short bursts are ordinary values:
 
 ```lean
-structure VerifiedFragment (entry exit : BlockContract) where
+structure FragmentExitFamily (entry : BlockContract) where
+  Kind : Type
+  contract : Kind -> BlockContract
+  normal : Option Kind
+  classifies : forall exit : FragmentMachineExit,
+    ExactlyOneKindClassifiesExit entry contract exit
+  complete : EveryNormalFaultCancellationInterruptionAndUnwindExitCovered
+    entry contract
+
+structure VerifiedFragment
+    (entry : BlockContract) (exits : FragmentExitFamily entry) where
   source : GhostInstructionList
   expanded : RawInstructionList
   expansionExact : ErasesExactly source expanded
-  localCorrect : HoareSequence entry expanded exit
+  localCorrect : HoareSequenceAllExits entry expanded exits
   citations : InstructionAnchorCoverage expanded
 ```
 
@@ -273,6 +350,30 @@ The binder releases storage provenance; it does not silently finalize a value
 or adopt obligations stored inside it. Every CFG edge leaving the scope proves
 the value trivially disposable, invokes an explicit verified finalizer, or
 transfers those obligations to a longer-lived owner. Jumps into a scope are
+rejected because they cannot construct its fresh provenance.
+
+The constructor is a scope eliminator, not a textual macro:
+
+```lean
+def withStack
+    (layout : StackObjectLayout alpha)
+    (body : (fresh : StackProvenance) ->
+      VerifiedFragment (entry.withStackObject fresh layout)
+        (bodyExits fresh))
+    (closes : forall fresh kind,
+      ExitEliminatesFreshStackProvenance
+        fresh ((body fresh).localCorrect.exit kind)) :
+    VerifiedFragment entry (eliminateStackScope bodyExits closes)
+```
+
+Because `fresh` is locally quantified, the result type cannot mention it.
+`closes` covers normal, fault, cancellation, interruption, explicit jump, and
+unwind exits.  Standard disposable values discharge it automatically; values
+with loans or obligations require a finalizer or an explicit transfer to an
+outer owner.  The acceptance fixtures include successful nested use and
+rejections for an escaping address, jump into scope, live borrow, missing fault
+finalization, cancellation while owned, and a dynamic allocation exceeding its
+proved bound.
 forbidden, and jumps out are checked against the same exit contract as lexical
 fallthrough.
 

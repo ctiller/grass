@@ -186,25 +186,22 @@ def SelectedResourceSemantics.lookup
 structure SpecProcess {R : Type u} [ResourceModel R]
     (resources : R) where
   suite : SpecificationSuite resources
-  resourceSemantics : SelectedResourceSemantics resources
-  suiteUsesExactly : SuiteUsesSelectedResourceSemantics suite resourceSemantics
+  resourceSemantics : SelectedResourceSemantics resources :=
+    suite.resourceSemantics
+  resourceSemanticsExact : resourceSemantics = suite.resourceSemantics
   boundary : AbstractProcessBoundary
-  State Event Command Outcome : Type
-  initial : InitialProcessRelation State Command
-  step : ProcessStepRelation State Event Command
-  terminal : ProcessTerminalRelation State Outcome
-  observations : ProcessObservationProjection State Event Outcome
-  channels : AbstractTypedChannelFamily boundary
-  custody : AbstractLinearAndSharedStateLaws State channels
-  progress : AbstractProcessProgressContract State Event
-  capturesSuite : CapturesAndHidesSuiteExactly
-    suite boundary initial step terminal observations
-  requirements : RequirementFamily resources resourceSemantics
-    (ProcessTraceContract initial step terminal observations)
+  contract : BehaviorContract resources
+  contractExact : contract = suite.contract
+  boundaryExact : boundary = ContractBoundary contract
+  requirements : FiniteKeyedProcessDemandFamily resources resourceSemantics
+  requirementsExact : requirements = suite.processDemands
 
-def SpecProcess.contract (spec : SpecProcess resources) :
-    BehaviorContract resources :=
-  ProcessTraceContract spec.initial spec.step spec.terminal spec.observations
+def SpecProcess.driverBoundary (spec : SpecProcess resources) :
+    DriverBoundary :=
+  DriverBoundary.ofContract spec.boundary spec.contract spec.requirements
+
+def SpecProcess.progress (spec : SpecProcess resources) :
+    AbstractProgressContract := spec.contract.progress
 
 structure AbstractSpecificationProcessNetwork
     {R : Type u} [ResourceModel R] (resources : R) where
@@ -217,53 +214,20 @@ structure AbstractSpecificationProcessNetwork
     Instance schema -> ProtocolInstance (protocol schema)
   composition : AbstractNetworkCompositionLaw protocol instances
 
-class CapturesResourceSemanticsFor
-    {R : Type u} [ResourceModel R] (resources : R)
-    (suite : SpecificationSuite resources) where
-  snapshot : SelectedResourceSemantics resources
-  exact : SuiteUsesSelectedResourceSemantics suite snapshot
-
-class CapturesSuiteAsProcess (suite : SpecificationSuite resources) where
-  boundary : AbstractProcessBoundary
-  State Event Command Outcome : Type
-  initial : InitialProcessRelation State Command
-  step : ProcessStepRelation State Event Command
-  terminal : ProcessTerminalRelation State Outcome
-  observations : ProcessObservationProjection State Event Outcome
-  channels : AbstractTypedChannelFamily boundary
-  custody : AbstractLinearAndSharedStateLaws State channels
-  progress : AbstractProcessProgressContract State Event
-  exact : CapturesAndHidesSuiteExactly
-    suite boundary initial step terminal observations
-
 def SpecProcess.capture
-    (suite : SpecificationSuite resources)
-    [resource : CapturesResourceSemanticsFor resources suite]
-    [process : CapturesSuiteAsProcess suite] : SpecProcess resources :=
+    (suite : SpecificationSuite resources) : SpecProcess resources :=
   { suite := suite
-    resourceSemantics := resource.snapshot
-    suiteUsesExactly := resource.exact
-    boundary := process.boundary
-    State := process.State
-    Event := process.Event
-    Command := process.Command
-    Outcome := process.Outcome
-    initial := process.initial
-    step := process.step
-    terminal := process.terminal
-    observations := process.observations
-    channels := process.channels
-    custody := process.custody
-    progress := process.progress
-    capturesSuite := process.exact
-    requirements := SpecificationSuite.requirements
-      suite resource.snapshot resource.exact process.exact }
+    resourceSemantics := suite.resourceSemantics
+    resourceSemanticsExact := rfl
+    boundary := ContractBoundary suite.contract
+    contract := suite.contract
+    contractExact := rfl
+    boundaryExact := rfl
+    requirements := suite.processDemands
+    requirementsExact := rfl }
 
 def SpecProcess.ofRelational
-    (contract : BehaviorContract resources)
-    [CapturesResourceSemanticsFor resources
-      (SpecificationSuite.singletonRelational contract)]
-    [CapturesSuiteAsProcess (SpecificationSuite.singletonRelational contract)] :
+    (contract : BehaviorContract resources) :
     SpecProcess resources :=
   SpecProcess.capture (SpecificationSuite.singletonRelational contract)
 
@@ -272,6 +236,61 @@ structure ProcessPresentation (spec : SpecProcess resources) where
   denotationExact : network.traceDenotation = spec.contract
   requirementsExact : TransportedProcessRequirements network denotationExact =
     spec.requirements
+
+structure RequirementSubstitution
+    (spec : SpecProcess resources) where
+  selected : forall key : spec.requirements.Key,
+    SelectedProcessRequirementWitness (spec.requirements.entry key)
+  occurrences : ExactRequirementOccurrenceSubstitution spec selected
+  preservesContract : SubstitutionPreservesContract spec selected occurrences
+  preservesResources :
+    SubstitutionPreservesSelectedResourceSemantics spec selected occurrences
+
+def SpecProcess.appendFragment
+    (spec : SpecProcess resources) (fragment : SomeSpecComponent resources) :
+    SpecProcess resources :=
+  SpecProcess.capture (spec.suite.append fragment)
+
+theorem SpecProcess.appendFragment_recaptures_exactly
+    (spec : SpecProcess resources) (fragment : SomeSpecComponent resources) :
+    (spec.appendFragment fragment).suite = spec.suite.append fragment := rfl
+
+def SpecProcess.withProgress
+    (spec : SpecProcess resources) (fragment : ProgressFragment) :
+    SpecProcess resources :=
+  SpecProcess.capture (spec.suite.appendProgress fragment)
+
+theorem SpecProcess.withProgress_recaptures_exactly
+    (spec : SpecProcess resources) (fragment : ProgressFragment) :
+    (spec.withProgress fragment).suite = spec.suite.appendProgress fragment := rfl
+
+def SpecProcess.withOutcomes
+    (spec : SpecProcess resources) (Outcome : Type) : SpecProcess resources :=
+  SpecProcess.capture (spec.suite.appendOutcomeLanguage Outcome)
+
+theorem SpecProcess.withOutcomes_recaptures_exactly
+    (spec : SpecProcess resources) (Outcome : Type) :
+    (spec.withOutcomes Outcome).suite =
+      spec.suite.appendOutcomeLanguage Outcome := rfl
+
+def SpecProcess.withLiveness (spec : SpecProcess resources)
+    (contract : LivenessContract) : SpecProcess resources :=
+  SpecProcess.capture (spec.suite.appendLiveness contract)
+
+def SpecProcess.withFailures (spec : SpecProcess resources)
+    (contract : FailureContract) : SpecProcess resources :=
+  SpecProcess.capture (spec.suite.appendFailures contract)
+
+def SpecProcess.acceptInput (spec : SpecProcess resources)
+    (accepted : AcceptedInputLanguage spec.contract) : SpecProcess resources :=
+  SpecProcess.capture (spec.suite.appendAcceptedInput accepted)
+
+def SpecProcess.onResourceExhaustion (spec : SpecProcess resources)
+    (outcome : AbstractOutcome spec.contract) : SpecProcess resources :=
+  SpecProcess.capture (spec.suite.appendResourceExhaustionOutcome outcome)
+
+theorem every_spec_modifier_appends_and_recaptures :
+    EveryPublicSpecModifierIsSuiteAppendThenCapture
 
 structure RelationalSpec (resources : R) where
   Input Output : Type

@@ -1,7 +1,12 @@
 import Grass.Spec.Graphics
-import Spikes.«5_Spinning_Cube».Resource
+import Grass.Spec.Resource
 
 namespace Grass.Spikes.SpinningCube
+
+def resources : GraphicsResourceModel :=
+  GraphicsResourceModel.longLivedApplication
+    |>.withNoUnboundedGrassOwnedGrowth
+    |>.withTerminalDisposition .closeAllOwnedGraphicsObjects
 
 def scene : InteractiveScene := Scene.spinningColoredWireCube
 
@@ -59,7 +64,7 @@ def cubeSpec {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
     |>.acceptInput [.close, .escapeDown, .resize]
     |>.withFailures .terminateWithoutFalseSuccess
     |>.withProgress (.reactiveUntilUserExit frontiers :=
-      [.windowInput, .frameOpportunity, .demandResult, .commit])
+      [.externalInput, .frameOpportunity, .frameObservation, .terminalOutcome])
 
 theorem cubeSpecCorrect {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
     (resources : R) : MeetsAllSpecificationTheorems (cubeSpec resources) :=

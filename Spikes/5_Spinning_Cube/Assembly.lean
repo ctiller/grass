@@ -1,6 +1,6 @@
 import Grass.Assembly.X86
 import Grass.Assembly.Spirv
-import Spikes.«5_Spinning_Cube».Plan
+import Spikes.«5_Spinning_Cube».Macros
 
 namespace Grass.Spikes.SpinningCube
 
@@ -133,6 +133,27 @@ def cubeFragment : SpirvModule plan.shaderEnv := spirv_asm {
   OpReturn
   OpFunctionEnd
 }
+
+def cubeStaticObjects : StaticObjectTable := #[
+  .utf16 `className "GrassCube\0",
+  .utf16 `title "Grass Vulkan Cube\0",
+  .ascii `grass "grass\0",
+  .ascii `mainName "main\0",
+  .ascii `vkCreateInstanceName "vkCreateInstance\0",
+  .ascii `swapchainExtName "VK_KHR_swapchain\0",
+  .cstringArray `instanceExts instanceExtensionNames,
+  .cstringArray `deviceExts deviceExtensionNames,
+  .cstringArray `instanceNames instanceFunctionNames,
+  .cstringArray `deviceNames deviceFunctionNames,
+  .uint32 `instanceSlotCount instanceFunctionNames.size,
+  .uint32 `deviceSlotCount deviceFunctionNames.size,
+  .float32 `one 1.0,
+  .uint32 `colorFormat VK_FORMAT_B8G8R8A8_UNORM,
+  .float64 `angularVelocity 0.6,
+  .float64 `tau 6.283185307179586,
+  .spirvWords `cubeVertexBytes (Spirv.writeWords cubeVertex),
+  .spirvWords `cubeFragmentBytes (Spirv.writeWords cubeFragment)
+]
 
 def cubeHost : AsmSource plan := asm_source {
 entry: @entry win64_gui_entry
@@ -295,7 +316,6 @@ select_device:
   vk_call vkEnumeratePhysicalDevices(instance,&count,0)
   test eax,eax
   jnz fail_init
-  mov byte ptr [ownership.deviceOwned],1
   test count,count
   jz fail_init
   checked_alloc count*8 -> devices
@@ -318,6 +338,14 @@ create_device:
   vk_call vkCreateDevice(physical,&deviceCI,0,&device)
   test eax,eax
   jnz fail_init
+  mov byte ptr [ownership.deviceOwned],1
+  mov rcx,[device]
+  mov rdx,[deviceNames]
+  call qword ptr [rip+__imp_vkGetDeviceProcAddr]
+  test rax,rax
+  jz provider_violation @violation_edge(.missingRequiredDeviceDestroy)
+  mov [vkDestroyDevicePtr],rax
+  mov byte ptr [ownership.deviceDestroyReady],1
   resolve_device_functions_or_fail device,deviceDispatch
   vk_call vkGetDeviceQueue(device,qfamily,0,&queue)
   jmp create_fixed
@@ -378,7 +406,6 @@ recreate: @invariant fixed_objects_owned_and_no_swapchain_work
   vk_call vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical,surface,&caps)
   test eax,eax
   jnz surface_result
-  mov byte ptr [ownership.newSwapchainOwned],1
   test caps.supportedUsageFlags,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
   jz fail_runtime
   test caps.supportedCompositeAlpha,VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
@@ -402,12 +429,23 @@ recreate: @invariant fixed_objects_owned_and_no_swapchain_work
   vk_call vkCreateSwapchainKHR(device,&swapCI,0,&newSwapchain)
   test eax,eax
   jnz surface_result
+  mov byte ptr [ownership.newSwapchainOwned],1
   destroy_old_swapchain_after_new_created
   vk_call vkGetSwapchainImagesKHR(device,swapchain,&imageCount,0)
   test eax,eax
   jnz surface_result
-  checked_alloc imageCount*(8+8) -> imagesAndViews
+  checked_alloc imageCount*8 -> images
   jz fail_runtime
+  checked_alloc imageCount*8 -> views
+  jz fail_runtime
+  checked_alloc imageCount -> imageInitialized
+  jz fail_runtime
+  mov rdi,[imageInitialized]
+  xor eax,eax
+  mov ecx,[imageCount]
+  rep stosb
+  mov dword ptr [initializedViewCount],0
+  mov dword ptr [viewIndex],0
   vk_call vkGetSwapchainImagesKHR(device,swapchain,&imageCount,images)
   test eax,eax
   jnz surface_result
@@ -606,6 +644,10 @@ acquired_layout_ready:
   jne recreate
   jmp event_loop
 
+fail_runtime_free_formats:
+  free formats
+  jmp fail_runtime
+
 surface_result:
   cmp eax,VK_ERROR_SURFACE_LOST_KHR
   je fail_surface
@@ -633,8 +675,11 @@ mov byte ptr [ownership.deviceLost],1
 jmp cleanup
 clock_violation:
   ud2 @containment_tail(.monotonicClockRegressed)
+provider_violation:
+  ud2 @containment_tail(.externalProviderContractViolation)
 
-cleanup: @invariant reverse_dependency_ledger(status=ebx)
+cleanup: @placement [status := ebx]
+         @invariant reverse_dependency_ledger
   reverse_cleanup
   add rsp,FRAME_SIZE
   pop r15

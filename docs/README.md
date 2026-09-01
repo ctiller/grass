@@ -25,10 +25,12 @@ No document may override a narrower owner by restating it differently.
 | [VISION.md](VISION.md) | large-system target, proof-economy priorities, spike interpretation |
 | [FOUNDATION.md](FOUNDATION.md) | mission, trust boundary, repository laws |
 | [SEMANTICS.md](SEMANTICS.md) | executions, nondeterminism, observations, safety, progress, liveness |
+| [RESOURCES.md](RESOURCES.md) | semantic resource budgets, physical execution envelopes, and their realization theorem |
 | [SPECIFICATION_LANGUAGES.md](SPECIFICATION_LANGUAGES.md) | open family of precious DSL fragments and their typed semantic junctions |
 | [GRAMMAR.md](GRAMMAR.md) | precious text/binary languages, incomplete versus invalid prefixes, parser/writer realization laws |
 | [PROCESS.md](PROCESS.md) | portable state/event/demand/view processes, networks, channels, flattening, resources, and driver boundary |
 | [VERIFIED_PROGRAM.md](VERIFIED_PROGRAM.md) | the public certificate and emission gate |
+| [VERIFIED_OBJECTS.md](VERIFIED_OBJECTS.md) | stable subsystem signatures, relocatable verified objects, modular linking |
 | [MEMORY_MODEL.md](MEMORY_MODEL.md) | memory, provenance, borrowing, concurrency, faults |
 | [OBLIGATIONS.md](OBLIGATIONS.md) | linear obligations, transfer, exit dispositions |
 | [REFINEMENT.md](REFINEMENT.md) | refinement proof concerns, weaving, provider realization, generated/authored machine routes |
@@ -46,6 +48,11 @@ No document may override a narrower owner by restating it differently.
 - [PROOF_FEASIBILITY.md](PROOF_FEASIBILITY.md) gives constructive proof sketches,
   automation limits, falsification fixtures, and fallbacks for mechanisms
   challenged as implausible.
+- [SPIKE_AUTHORING.md](SPIKE_AUTHORING.md) defines the two spike views, authored
+  versus generated accounting, and the mandatory cross-view review.
+- [SPIKE_AUTHORING_AUDIT.md](SPIKE_AUTHORING_AUDIT.md) records the current
+  adversarial cross-check findings without conflating snapshot equality with
+  expansion or proof reproducibility.
 - [HELLO_WORLD.md](HELLO_WORLD.md) defines the first acceptance milestone.
 - [SPIKE_1.md](SPIKE_1.md) is its annotated proof from portable specification to
   emitted Win32 PE bytes.
@@ -63,6 +70,9 @@ No document may override a narrower owner by restating it differently.
   theorems. They are design fixtures until the Grass libraries are implemented.
 - [MODULES.md](MODULES.md) proposes a dependency-safe Lean/project structure.
 - [REVIEW.md](REVIEW.md) is the adversarial review protocol and sign-off form.
+- [EXTERNAL_REVIEW_41F5C9C.md](EXTERNAL_REVIEW_41F5C9C.md) records the
+  evidence-based disposition of the external architecture review at that
+  checkpoint, including believable proof sketches for rejected remedies.
 - [DECISIONS.md](DECISIONS.md) records settled choices and rejected shortcuts.
 - [REFERENCES.md](REFERENCES.md) is the initial source and design-lineage register.
 - [GLOSSARY.md](GLOSSARY.md) fixes vocabulary used across the corpus.

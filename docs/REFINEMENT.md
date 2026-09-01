@@ -159,8 +159,12 @@ structure StagedProcessPresentation
     {R : Type u} [ResourceModel R] {resources : R}
     (spec : SpecProcess resources) where
   network : AbstractSpecificationProcessNetwork resources
-  resourceSemanticsExact : forall schema,
-    (network.protocol schema).resourceSemantics = spec.resourceSemantics
+  resourceView : network.RoleSchema -> RequiredResourceView resources
+  resourceRestrictionExact : forall schema,
+    (network.protocol schema).resourceSemantics.restrict (resourceView schema) =
+      spec.resourceSemantics.restrict (resourceView schema)
+  resourceViewsCoverRoot : ExactUnionOfRequiredResourceViews
+    resourceView spec.resourceSemantics.requiredAxes
   denotationExact : network.traceDenotation = spec.contract
   requirementsExact : TransportedProcessRequirements network denotationExact =
     spec.requirements
@@ -168,25 +172,35 @@ structure StagedProcessPresentation
 def StagedProcessPresentation.ofNetwork
     (spec : SpecProcess resources)
     (network : AbstractSpecificationProcessNetwork resources)
-    (resourceSemanticsExact : forall schema,
-      (network.protocol schema).resourceSemantics = spec.resourceSemantics)
+    (resourceView : network.RoleSchema -> RequiredResourceView resources)
+    (resourceRestrictionExact : forall schema,
+      (network.protocol schema).resourceSemantics.restrict (resourceView schema) =
+        spec.resourceSemantics.restrict (resourceView schema))
+    (resourceViewsCoverRoot : ExactUnionOfRequiredResourceViews
+      resourceView spec.resourceSemantics.requiredAxes)
     (denotationExact : network.traceDenotation = spec.contract)
     (requirementsExact :
       TransportedProcessRequirements network denotationExact = spec.requirements) :
     StagedProcessPresentation spec :=
-  { network, resourceSemanticsExact, denotationExact, requirementsExact }
+  { network, resourceView, resourceRestrictionExact, resourceViewsCoverRoot,
+    denotationExact, requirementsExact }
 
 def StagedProcessPresentation.ofProtocol
     (spec : SpecProcess resources)
     (protocol : ProtocolSpec resources)
-    (resourceSemanticsExact :
-      protocol.resourceSemantics = spec.resourceSemantics)
+    (resourceView : protocol.RoleSchema -> RequiredResourceView resources)
+    (resourceRestrictionExact : forall schema,
+      protocol.resourceSemanticsFor schema |>.restrict (resourceView schema) =
+        spec.resourceSemantics.restrict (resourceView schema))
+    (resourceViewsCoverRoot : ExactUnionOfRequiredResourceViews
+      resourceView spec.resourceSemantics.requiredAxes)
     (denotationExact : protocol.denotation = spec.contract)
     (requirementsExact :
       TransportedProtocolRequirements protocol denotationExact = spec.requirements) :
     StagedProcessPresentation spec :=
   (ProtocolSpec.elaboratesToProcessNetwork protocol).presentation
-    resourceSemanticsExact denotationExact requirementsExact
+    resourceView resourceRestrictionExact resourceViewsCoverRoot
+    denotationExact requirementsExact
 
 structure ProcessNormalization (spec : SpecProcess resources) where
   normalized : SpecProcess resources
@@ -279,8 +293,9 @@ standard constructors. The normalized `SpecProcess`, its process-shaped
 presentation, equality of the retained resource snapshot, body/denotation
 transport, requirement transport, and realization transport are actual fields.
 No constructor calls `SpecProcess.fromBody` or re-runs
-`CapturesResourceSemanticsFor`; staging remains indexed by the captured
-snapshot. `realizationTransport` returns the closed realization to the original
+construction-time resource typeclass search; staging remains indexed by the
+resource snapshot retained in the suite and root. `realizationTransport`
+returns the closed realization to the original
 precious `spec` with all three equalities. Failure to construct normalization
 leaves direct relational realization available; it never fabricates roles or
 changes the specification.
@@ -404,11 +419,16 @@ structure ImplementationBinding
 
 structure ImplementationBundle
     (source : MachineSource plan) (program : ProcessRealization spec) where
+  processRequirements : RequirementSubstitution spec :=
+    program.requirementSubstitution
   bindings : FiniteDependentMap (ProgramRequirement program)
     (ImplementationBinding source)
   scopeCoverage : ExactClaimedSourceScopeCoverage bindings
   requirementCoverage : ExactClaimedRequirementCoverage bindings
   overlap : DisjointOrExplicitlyComposedOverlaps bindings
+  substitutionCoverage :
+    EverySelectedProcessRequirementWitnessConnectedToExactBindings
+      processRequirements bindings
 
 theorem assembly_model_component
     (binding : ImplementationBinding source requirement) :
@@ -598,7 +618,12 @@ structure SourceFragmentClosure (fragment : AuthoredSourceFragment) where
   imports : FragmentImportSummary fragment expanded
   boundaries : FragmentBoundarySummary fragment expanded
   resolved : EveryReferenceResolvedLocallyOrExported fragment symbols
-  certificate : FragmentMachineCertificate expanded boundaries imports
+
+structure FragmentBehaviorCertificate
+    (closed : SourceFragmentClosure fragment) where
+  expandedIdentity : ExactExpandedFragmentIdentity closed.expanded
+  certificate : FragmentMachineCertificate
+    closed.expanded closed.boundaries closed.imports
 
 inductive SourceClosureNode
   | fragment (source : AuthoredSourceFragment)
@@ -606,11 +631,21 @@ inductive SourceClosureNode
   | shard (children : Array SourceClosureNode)
       (summary : ComposedSourceSummary children)
       (interfacesExact : ChildExportsImportsMatchExactly children summary)
-      (composition : ChildMachineCertificatesCompose children summary)
+      (syntacticComposition : ChildSourceSummariesCompose children summary)
   | component (children : Array SourceClosureNode)
       (summary : ComposedSourceSummary children)
       (interfacesExact : ChildExportsImportsMatchExactly children summary)
-      (composition : ChildMachineCertificatesCompose children summary)
+      (syntacticComposition : ChildSourceSummariesCompose children summary)
+
+inductive BehaviorCertificateNode : SourceClosureNode -> Type
+  | fragment (closed : SourceFragmentClosure source)
+      (behavior : FragmentBehaviorCertificate closed)
+  | shard (children : Array SourceClosureNode)
+      (certificates : forall index, BehaviorCertificateNode children[index])
+      (composition : ChildMachineCertificatesCompose certificates)
+  | component (children : Array SourceClosureNode)
+      (certificates : forall index, BehaviorCertificateNode children[index])
+      (composition : ChildMachineCertificatesCompose certificates)
 
 structure HierarchicalClosedAsmSource where
   root : SourceClosureNode
@@ -620,6 +655,11 @@ structure HierarchicalClosedAsmSource where
   importCoverage : RootHasNoUnresolvedInternalReference root
   rawListing : HierarchicalConcatenation root
   listingExact : RawListingObtainedByRecursiveChildConcatenation root rawListing
+
+structure HierarchicalMachineCertificate
+    (source : HierarchicalClosedAsmSource) where
+  behavior : BehaviorCertificateNode source.root
+  rootContract : ComposedMachineContract behavior
 
 structure BlockReplayEntry where
   locator : BlockCacheLocator
@@ -652,9 +692,10 @@ structure VerifiedReplayManifest where
 
 Source closure is proved at leaves and composed through exported summaries.
 Macro definitions, their transparent expansions, static data, and ordinary raw
-fragments all enter as `SourceFragmentClosure` leaves. A shard theorem consumes
-only child summaries and certificates; it does not reduce a single aggregate
-array of all instructions. `listingExact` is a tree induction using child
+fragments all enter as `SourceFragmentClosure` leaves. Syntactic closure is
+independent of behavior. A behavior shard consumes child certificates paired by
+exact expanded-leaf identity; it does not reduce a single aggregate array of
+all instructions. `listingExact` is a tree induction using child
 concatenation theorems. The final writer may stream that hierarchy into one byte
 artifact, but a leaf edit rechecks the changed fragment and its ancestor
 composition nodes rather than rerunning whole-source `decide`.

@@ -1,6 +1,4 @@
-import Spikes.«5_Spinning_Cube».Assembly
-import Spikes.«5_Spinning_Cube».Macros
-import Spikes.«5_Spinning_Cube».Staged
+import Spikes.«5_Spinning_Cube».Process
 
 namespace Grass.Spikes.SpinningCube
 
@@ -135,7 +133,6 @@ def cubeFrameObjects : Vec StackObjectSpec := #[
   .object `surfaceFormat .vkSurfaceFormatKHR,
   .object `imageCount .uint32,
   .object `requestedImageCount .uint32,
-  .object `imagesAndViews .pointer,
   .object `images .pointer,
   .object `views .pointer,
   .object `imageInitialized .pointer,
@@ -189,6 +186,8 @@ def cubeFrameObjects : Vec StackObjectSpec := #[
   .object `present .vkPresentInfoKHR,
   .object `instanceDispatch (.array instanceFunctionNames.size .pointer),
   .object `deviceDispatch (.array deviceFunctionNames.size .pointer),
+  .object `deviceDispatchCandidate (.array deviceFunctionNames.size .pointer),
+  .object `vkDestroyDevicePtr .pointer,
   .object `ownership .cubeOwnershipLedger,
   .outgoingCallArea,
   .parallelMoveSpill
@@ -209,129 +208,5 @@ def cubeFrameLayout : StackFrameLayout :=
 
 def cubeCallbackFrameLayout : StackFrameLayout :=
   StackFrameLayout.packWin64 cubeCallbackFrameObjects
-
-def cubeStaticObjects : StaticObjectTable := #[
-  .utf16 `className "GrassCube\0",
-  .utf16 `title "Grass Vulkan Cube\0",
-  .ascii `grass "grass\0",
-  .ascii `mainName "main\0",
-  .ascii `vkCreateInstanceName "vkCreateInstance\0",
-  .ascii `swapchainExtName "VK_KHR_swapchain\0",
-  .cstringArray `instanceExts instanceExtensionNames,
-  .cstringArray `deviceExts deviceExtensionNames,
-  .cstringArray `instanceNames instanceFunctionNames,
-  .cstringArray `deviceNames deviceFunctionNames,
-  .uint32 `instanceSlotCount instanceFunctionNames.size,
-  .uint32 `deviceSlotCount deviceFunctionNames.size,
-  .float32 `one 1.0,
-  .uint32 `colorFormat VK_FORMAT_B8G8R8A8_UNORM,
-  .float64 `angularVelocity 0.6,
-  .float64 `tau 6.283185307179586,
-  .spirvWords `cubeVertexBytes (Spirv.writeWords cubeVertex),
-  .spirvWords `cubeFragmentBytes (Spirv.writeWords cubeFragment)
-]
-
-def cubeSourceClosure : AsmSourceClosure plan where
-  authored := cubeHost
-  macros := cubeMacroDefinitions
-  statics := cubeStaticObjects
-  frames := #[cubeFrameLayout, cubeCallbackFrameLayout]
-  imports := win32Imports ++ vulkanImports
-
-def rawCubeHost : RawAsmSource plan := cubeSourceClosure.expand
-
-def cubeReviewedBlocks : Vec Lean.Name := #[
-  `entry, `wndproc, `wp_size, `wp_nccreate, `wp_reject_create, `wp_close,
-  `wp_destroyed, `wp_ncdestroy, `wp_default, `vk_instance, `select_device,
-  `create_device, `create_fixed, `recreate, `create_view_loop,
-  `create_pipeline, `minimized_wait, `event_loop, `pump_messages,
-  `request_exit, `messages_done, `acquired_suboptimal, `acquired,
-  `acquired_first_layout, `acquired_layout_ready,
-  `surface_result, `device_result, `clean_exit, `fail_init, `fail_runtime,
-  `fail_surface, `fail_device, `clock_violation, `cleanup
-]
-
-def cubeReviewedMacroFragments : Vec Lean.Name := #[
-  `expandArguments, `expandCall, `expandZeroInitializedStructure,
-  `expandLoad, `expandUnsignedClamp, `expandConditionalDestroy,
-  `checkedHeapAllocationBody, `checkedHeapReleaseBody,
-  `instanceDispatchResolutionBody, `deviceDispatchResolutionBody,
-  `deviceSelectionBody, `exactCStringScanBody,
-  `queuePropertyInitializationBody, `surfaceSelectionBody,
-  `extentAndCountBody,
-  `swapchainRetirementBody, `installNewSwapchainBody,
-  `reverseCleanupBody
-]
-
-def cubeReviewedStaticSymbols : Vec Lean.Name := #[
-  `className, `title, `grass, `mainName, `vkCreateInstanceName,
-  `swapchainExtName, `instanceExts, `deviceExts, `instanceNames,
-  `deviceNames, `instanceSlotCount, `deviceSlotCount, `one, `colorFormat,
-  `angularVelocity, `tau,
-  `cubeVertexBytes, `cubeFragmentBytes
-]
-
-def cubeReviewedManifest : RawSourceManifest :=
-  RawSourceManifest.fromReviewed
-    (blocks := cubeReviewedBlocks)
-    (fragmentBodies := cubeReviewedMacroFragments)
-    (statics := cubeReviewedStaticSymbols)
-    (frames := #[cubeFrameLayout, cubeCallbackFrameLayout])
-    (imports := win32Imports ++ vulkanImports)
-
-theorem cubeSourceElaboratesExactly :
-    SourceElaboratesExactlyTo cubeSourceClosure rawCubeHost := rfl
-
-theorem cubeSourceHasNoUnresolvedForms :
-    rawCubeHost.unresolvedForms = #[] := by
-  decide
-
-theorem cubeSourceManifestExact :
-    rawCubeHost.manifest = cubeReviewedManifest := by
-  decide
-
-theorem cubeSymbolResolutionExact :
-    EverySymbolicAddressResolvesExactlyOnce rawCubeHost cubeReviewedManifest := by
-  verify_symbol_resolution
-
-theorem cubeFrameLifetimesNonoverlapping :
-    PackedFrameDemandsHaveValidNonoverlappingLifetimes
-      rawCubeHost #[cubeFrameLayout, cubeCallbackFrameLayout] := by
-  verify_frame_layouts
-
-structure CubeCallbackStateConnection where
-  createParameter :
-    CreateWindowParameterIsAddressOf rawCubeHost `state
-  install :
-    WmNcCreateInstallsUserData rawCubeHost `state GWLP_USERDATA
-  recover :
-    EveryCallbackStateAccessUsesRecoveredUserData rawCubeHost `state
-  live :
-    StackObjectLiveThroughWindowNcDestroy rawCubeHost cubeFrameLayout `state
-  clear :
-    WmNcDestroyClearsUserDataBeforeFrameRelease rawCubeHost GWLP_USERDATA
-  imports :
-    ExactCallbackImports rawCubeHost #[`GetWindowLongPtrW, `SetWindowLongPtrW]
-
-theorem cubeCallbackStateConnection : CubeCallbackStateConnection := by
-  verify_callback_state_connection
-
-theorem rawHostImplementsDriver :
-    HostAssemblyImplements
-      stagedProcessRealization
-      plan rawCubeHost :=
-  hostImplementsDriver.transportSourceElaboration cubeSourceElaboratesExactly
-
-def cubeMachineBlendInput :
-    MachineBlendInput plan stagedProcessRealization :=
-  MachineBlendInput.heterogeneous
-    (host := rawCubeHost)
-    (devices := #[cubeVertex, cubeFragment])
-    (scopeSources := cube_exact_closed_scope_sources)
-    (crossIsa := cube_host_shader_edges_exact)
-
-theorem cubeMachineBlendInputComplete :
-    EveryReachableClosedScopeAppearsExactlyOnce cubeMachineBlendInput :=
-  cube_exact_closed_scope_coverage
 
 end Grass.Spikes.SpinningCube

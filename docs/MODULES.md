@@ -60,11 +60,11 @@ author modules which pressure-test the interfaces without pretending to compile:
 
 ```text
 Spikes/
-  1_Hello_World/     Resource Spec Projection Process Plan Assembly Program Artifact
-  2_Sort/            Resource Spec Projection Process Model Plan Data Constructors Assembly Bindings Program Artifact
-  3_Gzip/            Resource Spec Projection Process Model Plan Data Assembly Bindings Program Artifact
-  4_Web_Server/      Resource Spec Projection Model Process Cancellation Plan Data Macros Assembly SourceClosure Bindings Program Artifact
-  5_Spinning_Cube/   Resource Spec Projection Process Staged Model Plan Assembly SourceClosure Program Artifact
+  1_Hello_World/     Spec Program
+  2_Sort/            Spec Assembly Program
+  3_Gzip/            Spec Assembly Program
+  4_Web_Server/      Spec Process Cancellation Macros Assembly Program
+  5_Spinning_Cube/   Spec Process Macros Assembly Layout Program
 ```
 
 These are design fixtures, not an alternate library tree. When implementation
@@ -73,14 +73,14 @@ remain small clients or golden author-surface tests. Explanatory proof comments
 remain in `docs/SPIKE_n.md`; the matching `.lean` files show only the source and
 proof terms an author is expected to maintain.
 
-The displayed file split maximizes adversarial inspectability during design; it
-is not mandatory product ceremony. Public syntax may place several logical
-sections in one source file and generate closure, expansion, parser/writer, and
-artifact packaging witnesses. Conversely, large programs may shard a logical
-section. Physical module boundaries are chosen from measured elaboration,
-kernel-check, cache, and filesystem costs while the dependency tiers above stay
-intact; Grass mandates neither one module per basic block nor three files per
-program.
+The displayed files are the expected author-maintained surface and therefore
+count as ceremony. Generated closure, expansion, parser/writer, cancellation
+maps, and artifact packaging remain inspectable in the annotated documents and
+tool reports but do not receive authored files. Conversely, large programs may
+shard a genuinely independent logical or machine subsystem. Physical module
+boundaries are chosen from authored abstraction and measured build locality,
+not from the number of internal certificate-record fields. See
+[SPIKE_AUTHORING.md](SPIKE_AUTHORING.md).
 
 Lower layers must not import concrete programs. Common semantics must not import
 one ISA or platform. ISA and platform profiles may depend on common memory/event

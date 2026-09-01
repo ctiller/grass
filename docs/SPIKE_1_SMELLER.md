@@ -1006,3 +1006,280 @@ cancellation claims, nonoperational CFG cancellation mapping, or uncompiled
 dependent interfaces. The target-scale proof-economics claim remains wholly
 unmeasured. No file other than this review report was edited, and no undeveloped
 library was built.
+
+## Round 18 external review (commit `41f5c9c`)
+
+### Scope and repairs verified
+
+This round reread the governing corpus and all five spikes. Independent
+fresh-context passes covered specification/source closure and Web/Cube; the root
+pass integrated them against the total architecture and the new target of one
+million to tens of millions of instructions.
+
+No `sorry`, `admit`, `axiom`, `native_decide`, or `unsafe` declaration occurs in
+the Lean spike sources. The repository is still an interface corpus: `Grass/`
+has no library sources and there is no Lake project file, so the terms cannot be
+elaborated here and Lean cannot rescue the type inconsistencies below.
+
+Several repairs are material. Selected resources now come from one finite,
+injectively keyed construction snapshot (`docs/SEMANTICS.md:159-184`).
+`ProcessNormalization` retains resource, body, requirement, presentation, and
+realization transport evidence (`docs/REFINEMENT.md:191-208`). `ClosedBlend`
+retains its partial graph, closure, provenance, and exact origin
+(`REFINEMENT.md:246-266`). Cube's callback now installs, recovers, and clears its
+state (`Spikes/5_Spinning_Cube/Assembly.lean:188-266`;
+`SourceClosure.lean:302-317`). Web's startup split, conditional RST disposition,
+bounded provider summaries, total top-level CFG classification, captured policy,
+and GOAWAY idempotence are also real improvements.
+
+### 1. [P0] `SpecificationLanguage` is not a well-scoped Lean interface
+
+The class quantifies only `Syntax`, but `denote` returns `ContractFragment
+resources`, where `resources` is unbound
+(`docs/SPECIFICATION_LANGUAGES.md:23-26`). `SomeSpecComponent resources` then
+stores `SpecificationLanguage Syntax` without connecting the denotation to that
+selected value (`SPECIFICATION_LANGUAGES.md:28-33`).
+
+**Required closure:** index the language by the resource carrier and selected
+value, or make denotation explicitly polymorphic with the required coherence
+law. Elaborate two heterogeneous language instances and their suite together.
+
+### 2. [P0] The precious root captures the supposedly replaceable presentation
+
+The prose says internal states, ports, and decompositions remain replaceable
+(`docs/SPECIFICATION_LANGUAGES.md:99-109`). `SpecProcess` nevertheless stores
+`State`, `Event`, `Command`, `Outcome`, transition relations, channels, custody,
+and progress (`docs/SEMANTICS.md:186-203`). `capture` selects these through an
+ambient `CapturesSuiteAsProcess` instance and copies them into the precious value
+(`SEMANTICS.md:226-260`). Two lawful encodings of one suite can therefore create
+different indices for all downstream proofs. An unrelated state/channel change
+has global invalidation cost.
+
+**Required closure:** keep the suite, selected resource snapshot, exported
+contract, and abstract demands precious; move state/channel structure into a
+replaceable presentation. Alternatively prove a canonical quotient/uniqueness
+law strong enough that capture choice cannot enter downstream indices. Do not
+choose precious meaning through ambient instance search.
+
+### 3. [P0] `ProcessRequirement` is orphaned and boundary-unsound
+
+Neither `ContractFragment` nor `SpecificationSuite` carries process requirements
+(`docs/SPECIFICATION_LANGUAGES.md:14-21,70-77`), although Sort and Web construct
+parser requirements (`Spikes/2_Sort/Spec.lean:33-44`;
+`Spikes/4_Web_Server/Spec.lean:45-57`). No displayed generic refinement field
+selects a witness and proves `acceptable`, so the promised universal
+substitution (`docs/PROOF_FEASIBILITY.md:1138-1167`) has no end-to-end carrier.
+
+The structure also stores `boundary` beside an arbitrary `acceptable :
+SpecProcess resources -> Prop`, with no law that an acceptable witness has that
+boundary or a compatible resource snapshot
+(`SPECIFICATION_LANGUAGES.md:115-123`). It can advertise A and accept B.
+
+**Required closure:** add a finite keyed dependent demand family through
+fragments, suite, root, and refinement. Index witnesses by the required boundary
+and resource view, and make every spike name the selected witness,
+acceptability proof, and occurrence-exact substitution.
+
+### 4. [P0] Both staged fixtures contradict the repaired staging API
+
+`ofNetwork` and `ofProtocol` require resource-snapshot equality as well as
+denotation and requirement equality (`docs/REFINEMENT.md:168-189`); the Cube
+calls provide only the latter two (`Spikes/5_Spinning_Cube/Staged.lean:6-9,
+130-133`). `close` returns `ClosedBlend`, but both fixtures annotate its direct
+result as `ProcessRealization spec` (`Staged.lean:76-79,182-183`), discarding the
+wrapper which program closure is expressly required to retain
+(`REFINEMENT.md:288-293`).
+
+**Required closure:** pass the resource proof, retain each named `ClosedBlend`,
+and project `.realization` only at APIs which need it. Put these files in an
+elaborated fixture before revising the prose further.
+
+### 5. [P0] The fragment interfaces disagree and cannot carry the stack claims
+
+The documented `VerifiedFragment` fields are `source`, `expanded`,
+`expansionExact`, `localCorrect`, and `citations`
+(`docs/ASSEMBLY_CONSTRUCTION.md:204-210`). Web constructs that type with a field
+named `certificate` and drops citations (`Spikes/4_Web_Server/Macros.lean:15-20`).
+
+More deeply, the shown type has one ordinary Hoare exit and no effect/exit
+family. It cannot carry the claimed provenance non-escape, obligation disposal,
+cancellation/fault/interruption exits, probe/overflow behavior, restoration on
+every edge, or unwind laws (`ASSEMBLY_CONSTRUCTION.md:241-283`). No spike invokes
+`withStack`, so none of these laws is falsified by a maintained fixture.
+
+**Required closure:** define and use one interface with indexed normal and
+exceptional exits. Make `withStack` a scope eliminator whose result cannot
+mention its fresh provenance, and add positive and rejection fixtures for
+escaping borrows, jumps, finalization, cancellation, and bounded dynamic use.
+
+### 6. [P0] Web still contains semantic pseudoverbs instead of complete assembly
+
+`LocalFragmentBody` has a computed `rawExpansion`, but its bodies use whole
+algorithms such as `exactStaticOrDynamicLookup`, `transitionBy`,
+`insertAndEvictTo`, and `dischargeOrAdoptEveryStreamObligation`
+(`Spikes/4_Web_Server/Macros.lean:92-190,216-274,433-459`).
+`serverExpandedListing` is only a projection and no expanded raw instruction
+listing is checked in (`SourceClosure.lean:18-34`). The unavailable
+`x86_fragment_body` elaborator is thus asked to manufacture missing
+implementations and certificates, contrary to the promised authored,
+elaborated, and exact expanded review views
+(`docs/ASSEMBLY_CONSTRUCTION.md:62-63,120-127`).
+
+**Required closure:** make each operation a genuine finite library constructor
+with inspectable expansion and local theorem, or check in the selected raw
+expansions and manifests. Naming a projection `rawExpansion` is not evidence
+that the instructions exist.
+
+### 7. [P0] Legal fragmented Web HEADERS contradict the helper precondition
+
+`continuationBody` requires frame type `CONTINUATION`
+(`Spikes/4_Web_Server/Macros.lean:111-121`), but the host calls it from a
+`HEADERS`/not-`END_HEADERS` path (`Assembly.lean:387-403`). A legal first fragment
+must violate the helper contract or be rejected.
+
+**Required closure:** separate beginning a header block from appending a
+CONTINUATION, or parameterize and prove the permitted initial transition and
+connection-exclusive continuation state.
+
+### 8. [P0] Web dispatches payload after proving only the header exists
+
+`parseFrameHeaderBody` requires nine bytes and publishes a payload pointer
+(`Spikes/4_Web_Server/Macros.lean:34-47`). The host then dispatches, debits flow
+credit, decodes HPACK, and consumes payload with no visible complete-payload or
+`NEED_MORE` branch (`Assembly.lean:350-459`); the HPACK call checks only
+`HPACK_CONNECTION_ERROR` (`Assembly.lean:413-426`).
+
+**Required closure:** return a proof that the full declared payload is resident,
+or handle `NEED_MORE` from every consumer before any protocol, credit, or
+decoder-state mutation.
+
+### 9. [P0] Flow-blocked Web cancellation has no operational consumer
+
+`h2_cancel_expired_streams` only publishes a cause
+(`Spikes/4_Web_Server/Macros.lean:333-340`). The only visible
+`h2_observe_writer_cancellation` is in the send-suffix loop after writable
+readiness (`Assembly.lean:534-545`). A stream with no current frame or zero DATA
+credit is excluded by `h2_has_sendable_outbound` (`Macros.lean:285-301`), so it
+returns to polling without reaching the observation/RST path. This contradicts
+`blockedFlowControlRemainsCancellable`
+(`Cancellation.lean:338-342`).
+
+**Required closure:** add a scheduler-level cancellation consumer which enqueues
+RST without DATA credit when no frame is in flight. Preserve finish-current-
+frame behavior only for an already serialized prefix and map the new block to
+the cancellation summary.
+
+### 10. [P0] Cube's swapchain storage and recreation counters are incomplete
+
+The host allocates `imageCount * (8 + 8)` bytes into `imagesAndViews`, then uses
+separate `images`, `views`, and `imageInitialized` pointers
+(`Spikes/5_Spinning_Cube/Assembly.lean:409-425,522-528`). Source closure declares
+them as unrelated pointer objects, but no code partitions the allocation or
+allocates/zeros the bitmap (`SourceClosure.lean:138-141`). Also,
+`swapchainRetirementBody` destroys entries without resetting
+`initializedViewCount` or `viewIndex` (`Macros.lean:286-309`); recreation then
+uses those stale counters (`Assembly.lean:414-426`).
+
+**Required closure:** provide a typed aggregate with proved slices plus a sized,
+zeroed bitmap, or independent checked allocations. Reset both counters after
+retirement and prove all indices against the new image count.
+
+### 11. [P0] Cube publishes device ownership too early and cannot clean partial dispatch
+
+The host sets `deviceOwned := 1` after physical-device enumeration, before
+`vkCreateDevice`, with no success-site publication
+(`Spikes/5_Spinning_Cube/Assembly.lean:294-318`). Selection failure can therefore
+clean a nonexistent device. Dispatch resolution may subsequently fail after any
+missing slot (`Macros.lean:155-170`), while reverse cleanup calls
+`vkDeviceWaitIdle` and other device functions whenever that same flag is set
+(`Macros.lean:318-345`), including unresolved slots.
+
+**Required closure:** publish ownership only after successful creation, track
+dispatch completeness separately, and make partial cleanup use only established
+capabilities. Prefer validating a private table before atomic publication.
+
+### 12. [P0] Cube's claimed closed source has an unresolved branch
+
+`surfaceSelectionBody` jumps to `fail_runtime_free_formats`
+(`Spikes/5_Spinning_Cube/Macros.lean:240-257`). That label occurs nowhere else
+and is absent from `cubeReviewedBlocks` (`SourceClosure.lean:243-252`). This
+directly falsifies `rawCubeHost.unresolvedForms = #[]` and the exact
+manifest/symbol claims (`SourceClosure.lean:285-295`).
+
+**Required closure:** add the free-and-fail block or an explicitly owned typed
+external edge. Retain a negative fixture showing that deleting any target makes
+closure fail.
+
+### 13. [P0] The required million/tens-of-millions gate is unpassed
+
+The new criterion correctly requires reproducible 1M and 10M instruction
+corpora, heterogeneous boundaries, clean/incremental measurements, and a
+boundary-preserving leaf mutation (`docs/PROOF_FEASIBILITY.md:775-801`). It then
+accurately says none of those corpora or reports exists
+(`PROOF_FEASIBILITY.md:803-814`; `docs/REFINEMENT.md:727-733`). No checked-in
+`LocalityContract`, `InvalidationPlan`, or `BuildExecutionReport` value exists.
+That honesty avoids an overclaim but remains a release/fixpoint blocker.
+
+**Required closure:** check in deterministic generators, machine-readable clean
+and incremental reports, memory/proof-term measurements, and retained
+invalidation plans at both sizes. A boundary-preserving leaf edit must
+re-elaborate and kernel-check only the leaf and its ancestor path.
+
+### 14. [P1] Source closure mixes phases and is not instantiated uniformly
+
+Every governing `SourceFragmentClosure` contains a
+`FragmentMachineCertificate` (`docs/REFINEMENT.md:594-601`), although the source
+phase is said not to claim refinement (`REFINEMENT.md:429-430`). Thus changing a
+behavior theorem invalidates syntactic expansion/reference closure. No spike
+constructs `SourceFragmentClosure`, `SourceClosureNode`, or
+`HierarchicalClosedAsmSource`: Cube uses flat whole-array `decide`, Sort/Gzip use
+flat closure, and Web uses a separate custom hierarchy. This does not bank proof
+work at target scale.
+
+**Required closure:** separate syntactic expansion/reference closure from
+behavior certificates and pair them by exact expanded-leaf identity. Make all
+spikes use the same governing tree and measure source, behavior, and artifact
+invalidation separately.
+
+### 15. [P1] Assembly proof automation is not economically auditable
+
+Major theorems still end in bare `verify_asm`/`verify_asm_model` calls (Hello
+`Spikes/1_Hello_World/Assembly.lean:74-76`, Sort/Gzip Bindings, Web
+`Bindings.lean:6-22`, Cube `Assembly.lean:663-667`). Calls expose neither
+certificate inputs nor a residual-goal allowlist/report. The prose forbids
+invariant discovery and policy choice inside the tactic
+(`docs/DECISIONS.md:460-465`), but the rule is not falsifiable.
+
+**Required closure:** specify the tactic's exact input/output contract, emit a
+stable consumed-certificate/residual-goal manifest, and add fixtures where
+missing invariants, provider cases, and semantic correspondences remain open.
+Report tactic time and proof-term size per shard.
+
+### 16. [P1] Reuse and author ergonomics retain three avoidable hazards
+
+Every child presentation must equal the entire root resource snapshot
+(`docs/REFINEMENT.md:158-166`), preventing reusable components from selecting an
+exact subset without depending on unrelated axes. Use exact restriction maps
+and prove their union equals the root demand.
+
+`StructLayout` has no uniqueness invariant for `FieldSpec.name` and no proved
+name lookup (`docs/ASSEMBLY_CONSTRUCTION.md:141-153`), so stable named paths may
+be ambiguous. Require unique names and lookup exactness.
+
+Finally, spikes apply `withLiveness`, `withProgress`, and `withOutcomes` after
+suite capture (for example Sort `Spikes/2_Sort/Spec.lean:48-51`, Web
+`Spikes/4_Web_Server/Spec.lean:61-68`). Since the root contract must be derived
+from its retained suite (`docs/SPECIFICATION_LANGUAGES.md:86-103`), these
+combinators must visibly append DSL fragments and recapture with an exact
+theorem, not mutate a second semantic owner.
+
+## Round 18 fixpoint decision
+
+**No fixpoint.** Round 18 has thirteen P0 blockers and three P1 groups. The
+resource, normalization, blend, callback, and Web lifecycle changes are genuine
+monotonic improvements. The total system still has ill-scoped and inconsistent
+central interfaces, precious capture of replaceable topology, orphaned
+existential demands, non-elaborating staged fixtures, absent reviewable assembly,
+and concrete Web/Cube execution defects. The 1M/10M proof-economics test is the
+right gate, but it is explicitly unexecuted. No file other than this report was
+edited, and no undeveloped library was built.

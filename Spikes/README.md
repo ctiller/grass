@@ -1,11 +1,23 @@
 # Comment-free spike source corpus
 
-These files are the expected author-owned Lean source corresponding to the
-annotated designs in `docs/SPIKE_1.md` through `docs/SPIKE_5.md`. They are design
-fixtures, not a compiled Grass implementation: the imported `Grass.*` libraries
-do not exist yet by deliberate project scope.
+These files are the expected Lean source authored by agents for the programs in
+`docs/SPIKE_1.md` through `docs/SPIKE_5.md`. They are design fixtures, not a compiled Grass
+implementation: the imported `Grass.*` libraries do not exist yet by deliberate
+project scope.
 
-Each spike separates:
+The normative two-view and expansion rules are in
+[`docs/SPIKE_AUTHORING.md`](../docs/SPIKE_AUTHORING.md). In particular, a review
+which reads this directory without its annotated document, or the document
+without this directory, is incomplete.
+
+They are not an exploded view of every internal certificate junction. Generated
+manifests, cancellation maps, source closures, artifact bundles, and ordinary
+adapter witnesses may appear in the annotated documents or tool output for
+review, but do not get separate files here unless an author must genuinely
+maintain them. Physical file count is therefore part of the proof-economics
+review.
+
+Larger spikes may separate genuinely authored concerns such as:
 
 - `Resource.lean`: the reviewed selectable resource-model parameter;
 - `Spec.lean`: the precious portable specification function and selected instance;
@@ -20,12 +32,13 @@ Each spike separates:
   theorems when the program uses them; an older spike may still use the
   historical `Macros.lean` filename, which never implies a textual preprocessor;
 - `Assembly.lean`: the first-class authored x86-64 and, for Spike 5, SPIR-V;
-- `SourceClosure.lean`: exact constructor/static/import closure and raw expansion when
-  kept separate for a larger spike;
-- `Bindings.lean`: named model/component adjacencies;
-- `Program.lean`: `VerifiedProgram` closure and `emitProgram`; and
-- `Artifact.lean`: writer/parser, loaded-code, embedded-component, and exact-byte
-  connections.
+- `Program.lean`: platform selection, first-class assembly, novel connection
+  proofs, the standard `VerifiedProgram` closure, and emission.
+
+The list is descriptive, not a mandatory template. Hello World uses only
+`Spec.lean` and `Program.lean`. A spike that grows another file must justify a
+real authored abstraction or independent compilation boundary; “the theorem
+pipeline has another record” is not sufficient.
 
 The `.lean` files intentionally contain no explanatory comments. Their proof
 burden, rejected alternatives, and change-locality analysis live in the paired

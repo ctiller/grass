@@ -2,6 +2,11 @@
 
 Status: design artifact for review; intentionally not compilable yet.
 
+Authoring view: agents maintain exactly `Spec.lean` and `Program.lean`. The
+exact snapshot is at the end of this document. All other intermediate records
+shown below are generated expansions, library interface sketches, or proof
+sketches unless explicitly labeled authored source.
+
 Product decision: this spike is the architecture-validation artifact for the
 named `SynchronousStdoutOnly` execution profile, not Grass's production-general
 Windows console implementation. It may be shipped only with that applicability
@@ -766,20 +771,14 @@ the named frame layout so the exemplar does not normalize displacement
 arithmetic. The expanded review view still contains the exact numeric offsets:
 
 ```text
-structure HelloFrameFields where
-  shadow : Bytes 32
-  overlapped : UInt64
-  transferred : UInt32
-
-def HelloFrame : FrameLayout Win64 := FrameLayout.derive HelloFrameFields
-
-asm_source helloSource for plan {
+def helloSource :=
+withStack (transferred : UInt32 := 0)
+withCallFrame WriteFile asm_source for plan {
 
 entry:
     push r12
     push r13
     push r14
-    sub  rsp, HelloFrame.size
     mov  ecx, STD_OUTPUT_HANDLE
     call qword ptr [rip + __imp_GetStdHandle]
     test rax, rax
@@ -790,19 +789,20 @@ entry:
     lea  r13, [rip + message]
     mov  r14d, sizeof(message)            ; derived from the logical constant
 
-write_head: @invariant write_all_loop(message, handle=r12, ptr=r13, rem=r14d)
+write_head: @placement [handle := r12, cursor := r13, remaining := r14d]
+            @invariant write_all_loop(message)
     test r14d, r14d
     je   exit_success
-    mov  qword ptr [rsp + HelloFrame.overlapped], 0
-    mov  dword ptr [rsp + HelloFrame.transferred], 0
+    arg WriteFile.overlapped, 0
+    mov  transferred, 0
     mov  rcx, r12
     mov  rdx, r13
     mov  r8d, r14d
-    lea  r9, [rsp + HelloFrame.transferred]
+    lea  r9, transferred.addr
     call qword ptr [rip + __imp_WriteFile]
     test eax, eax
     jz   exit_write_failed
-    mov  eax, dword ptr [rsp + HelloFrame.transferred]
+    mov  eax, transferred
     test eax, eax
     jz   exit_no_progress
     cmp  eax, r14d
@@ -1205,3 +1205,176 @@ discovery roots, not yet sufficient instruction-level anchors.
 If a vendor source does not promise a convenient fact, the model admits the
 broader behavior or the plan names and cites a stronger precondition. A probe
 cannot silently strengthen the proof contract.
+
+
+## Exact authored source snapshot
+
+This section is the author-maintained Lean surface defined by
+[SPIKE_AUTHORING.md](SPIKE_AUTHORING.md). Earlier code blocks in this document
+are generated expansions, library interface sketches, or proof sketches unless
+they are explicitly labeled authored source. Reviewers must compare this
+snapshot with `Spikes/1_Hello_World/` exactly.
+
+### `Program.lean`
+
+```lean
+import Grass.Emit
+import Grass.Artifact.PE32Plus
+import Grass.Assembly.X86
+import Grass.Platform.Win10.X64
+import Grass.Process.Sequential
+import Spikes.«1_Hello_World».Spec
+
+namespace Grass.Spikes.HelloWorld
+
+def stdoutProtocol : AbstractSpecificationProcessNetwork resources :=
+  Console.linearStdoutProtocol resources message HelloOutcome
+
+def stdoutPresentation : ProcessPresentation spec where
+  network := stdoutProtocol
+  denotationExact := Console.linearStdoutProtocolDenotesWriteLineContract
+  requirementsExact := Console.linearStdoutProtocolRequirementsExact
+
+def processRealization : ProcessRealization spec :=
+  ProcessRealization.standard
+    (Grass.Std.Realizers.lookupExact stdoutPresentation)
+
+def policy : TargetOutcomeProjection HelloOutcome UInt32 :=
+  .successOrFailure
+    (success := HelloOutcome.success)
+    (successCode := 0)
+    (failureCode := 1)
+
+def projection : TargetProjection spec .win10X64 :=
+  TargetProjection.win10ConsoleText
+    (newline := .crlf)
+    (encoding := .utf8)
+    (outcome := policy)
+
+def plan : PlatformPlan spec.driverBoundary.requirements :=
+  PlatformPlan.win10X64SynchronousStdoutOnly projection
+
+def helloSource : MachineSource plan :=
+  withStack (transferred : UInt32 := 0)
+  withCallFrame WriteFile asm_source {
+entry:
+  push r12
+  push r13
+  push r14
+  mov ecx, STD_OUTPUT_HANDLE
+  call qword ptr [rip + __imp_GetStdHandle]
+  test rax, rax
+  jz exit_unavailable
+  cmp rax, INVALID_HANDLE_VALUE
+  je exit_unavailable
+  mov r12, rax
+  lea r13, [rip + message]
+  mov r14d, sizeof(message)
+
+write_head: @placement [handle := r12, cursor := r13, remaining := r14d]
+            @invariant write_all_loop(message)
+  test r14d, r14d
+  je exit_success
+  arg WriteFile.overlapped, 0
+  mov transferred, 0
+  mov rcx, r12
+  mov rdx, r13
+  mov r8d, r14d
+  lea r9, transferred.addr
+  call qword ptr [rip + __imp_WriteFile]
+  test eax, eax
+  jz exit_write_failed
+  mov eax, transferred
+  test eax, eax
+  jz exit_no_progress
+  cmp eax, r14d
+  ja provider_violation @violation_edge(.excessWriteCount)
+  add r13, rax
+  sub r14d, eax
+  jmp write_head
+
+exit_success: @terminal(.success)
+  xor ecx, ecx
+  jmp exit
+
+exit_unavailable: @terminal(.stdoutUnavailable)
+  mov ecx, 1
+  jmp exit
+
+exit_write_failed: @terminal(.writeFailed)
+  mov ecx, 1
+  jmp exit
+
+exit_no_progress: @terminal(.noProgress)
+  mov ecx, 1
+  jmp exit
+
+exit:
+  call qword ptr [rip + __imp_ExitProcess]
+  ud2 @containment_tail(.terminalUnexpectedReturn)
+
+provider_violation:
+  ud2 @containment_tail(.excessWriteCount)
+}
+
+theorem sourceImplementsDriver :
+    AssemblyImplements processRealization plan helloSource := by
+  verify_asm
+
+def helloVerified : VerifiedProgram spec := by
+  verify_assembly plan with helloSource
+
+def bytes : ByteArray := emitProgram helloVerified
+
+theorem emittedSound : EmittedProgramSatisfies spec bytes :=
+  helloVerified.sound
+
+def artifact : PE32Plus := helloVerified.linkedArtifact
+
+theorem writerRoundTrip : PE32Plus.parse (PE32Plus.write artifact) = .ok artifact :=
+  artifact.writerRoundTrip
+
+theorem textDecodesExactly :
+    LoadedTextDecodesTo artifact helloVerified.rawProgram :=
+  helloVerified.artifactCorrectness.loadedTextDecodes
+
+theorem emittedExactly : bytes = PE32Plus.write artifact :=
+  rfl
+
+end Grass.Spikes.HelloWorld
+```
+
+### `Spec.lean`
+
+```lean
+import Grass.Spec.Console
+import Grass.Spec.Resource
+
+namespace Grass.Spikes.HelloWorld
+
+def resources : ConsoleResourceModel :=
+  ConsoleResourceModel.singleLine
+
+def message : TextLine := "Hello, World!"
+
+inductive HelloOutcome
+  | success
+  | failure
+
+def helloContract {R : Type} [ResourceModel R] [ConsoleWriteResources R]
+    (resources : R) : BehaviorContract resources :=
+  Console.writeLineContract resources message HelloOutcome
+
+def helloSpec {R : Type} [ResourceModel R] [ConsoleWriteResources R]
+    (resources : R) : SpecProcess resources :=
+  SpecProcess.ofRelational (helloContract resources)
+    |>.withLiveness (.terminatesUnder [.environmentResponsive])
+
+theorem helloSpecCorrect {R : Type} [ResourceModel R] [ConsoleWriteResources R]
+    (resources : R) : MeetsAllSpecificationTheorems (helloSpec resources) :=
+  Console.writeLineContractCorrect resources message HelloOutcome
+
+def spec : SpecProcess resources := helloSpec resources
+
+end Grass.Spikes.HelloWorld
+```

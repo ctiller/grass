@@ -1319,6 +1319,7 @@ structure ResourceAxisRealization
     spec.resourceSemantics.lookup axis required
   metric : ResourceMetric plan
   metricAxis : metric.Axis
+  metricAxisExact : metric.axisName metricAxis = axis
   representation : AbstractResourceValueRepresentedByMetric
     abstractSemantics metric metricAxis
   initial : EveryInitialHoldingRepresentsSelectedResourceState
@@ -1333,6 +1334,10 @@ structure ResourceAxisRealizationFamily
   realizes : forall axis,
     (required : axis \u2208 spec.resourceSemantics.requiredAxes) ->
     ResourceAxisRealization spec plan axis required
+  concreteKeyInjective : Function.Injective
+    (fun key : ConcreteMetricKey plan => key.axisName)
+  requiredKeyExact : EveryRequiredAxisHasExactlyOneConcreteMetricKey
+    spec.resourceSemantics.requiredAxes realizes concreteKeyInjective
   noDummyAxes : EveryConcreteMetricAxisHasNamedAbstractOrAuditPurpose plan
   rootBound : ConcreteRootBoundFollowsFromSelectedLimits spec plan realizes
 
@@ -1346,6 +1351,7 @@ structure ProcessPlanRealizes {R : Type u} [ResourceModel R]
   simulation : ProcessNetworkSimulation spec plan
   demandMultiplicity : ConcreteOccurrencesEraseBijectivelyToAbstractBags plan spec
   childBindings : EverySpawnTransitionCarriesExactChildDemandBinding plan
+  requirementSubstitution : RequirementSubstitution spec
   demands : MeetsAllIndependentDemands plan spec
   resources : ResourceAxisRealizationFamily spec plan
 ```
@@ -1412,6 +1418,7 @@ structure ProcessRealization {R : Type u} [ResourceModel R]
   registry : ProtocolRegistry
   plan : ProcessPlan registry boundary
   correct : ProcessPlanRealizes spec plan
+  requirementSubstitution : RequirementSubstitution spec
   origin : ProcessPlanSource spec boundary
   originSound : ElaboratesTo origin registry plan correct
 ```
@@ -1423,7 +1430,42 @@ frontier closure, accumulated requirements, and elaboration into this very
 donate its provenance. Sequential and explicitly authored plans retain their
 own origins and do not pretend to have blend scopes.
 
-The sequential source consumed by the adapter has structured dynamic effects;
+The ordinary authoring interface is a typed sequential effect machine:
+
+```lean
+inductive SequentialDecision
+    (boundary : DriverBoundary) (State Terminal : Type)
+  | internal (next : State) (observations : List boundary.Observation)
+  | effect (demand : EffectDemand boundary)
+      (resume : EffectResult demand -> State)
+  | terminal (result : Terminal)
+
+structure SequentialMachine (boundary : DriverBoundary) where
+  State Request Terminal : Type
+  initial : Request -> State
+  decide : State -> SequentialDecision boundary State Terminal
+  invariant : State -> Prop
+  initialInvariant : forall request, invariant (initial request)
+  internalPreserves : EveryInternalDecisionPreserves invariant decide
+  effectResumes : EveryEffectResultPreserves invariant decide
+  progress : SequentialDecisionProgress decide
+```
+
+Custom headers, multi-pass algorithms, retry policy, and custom error handling
+normally change `State` and `decide`; they do not require an actor graph or bag
+equations. Standard typed effect operations are extensible. Adding a new effect
+protocol requires one reusable dependent result/boundary constructor, not a new
+proof for every program using it.
+
+`SequentialAdapter.elaborateMachine` translates this syntax to the more general
+relational representation below. Because a sequential decision has at most one
+newly issued effect and its continuation is indexed by that exact effect's
+result, occurrence identity, pending multiplicity, child binding, and terminal
+disposition are generated structurally. Its generic theorem transports a
+`SequentialMachineRealizes spec machine` proof to
+`DirectProgramRealizes spec (elaborateMachine machine)`.
+
+The lower-level sequential source consumed by the adapter has structured dynamic effects;
 an inventory of possible sites is not treated as the effects issued by a
 particular execution:
 
@@ -1525,6 +1567,47 @@ def ProcessRealization.standard
     (selected.realization.transport selected.exactSpec).program
     (selected.realization.transport selected.exactSpec).correct
 ```
+
+This interface has two deliberately different audiences.  The implementor of a
+new standard constructor proves the `DirectRelationalProgram` equations once.
+An application selecting that constructor does not rebuild or even name those
+equations.  Its complete process-authoring surface is one expression:
+
+```lean
+def processRealization : ProcessRealization spec :=
+  ProcessRealization.standard (Grass.Std.Realizers.lookupExact spec)
+```
+
+For a streaming filter such as gzip, the standard-library proof is itself
+assembled from typed sequential-effect combinators.  Read, write, allocation,
+and terminal combinators determine their dynamic demand occurrences, pending
+bag equations, exact child bindings, and terminal dispositions by construction.
+The constructor author supplies the filter's relational correctness, failure
+coverage, resource bound, and progress proof; it does not hand-author process
+identities, channels, escrow, or multiset arithmetic.  The selected compressor
+then separately proves that its algorithm realizes that filter relation.
+
+This is a proof-economics acceptance rule, not merely intended ergonomics:
+
+- using a registered standard sequential specification must require one
+  expression at the application process boundary;
+- a standard typed effect combinator must generate its own occurrence and
+  pending-effect bookkeeping;
+- diagnostics may expand the generated process plan, but applications do not
+  maintain it; and
+- if an ordinary sequential application must fill the fields of
+  `DirectRelationalProgram` directly, the relevant constructor or adapter is
+  incomplete.
+
+Novel sequential effect vocabularies still owe one reusable constructor proof.
+Novel program semantics still owe `DirectProgramRealizes`.  Neither fact
+justifies a second execution semantics or transfers generic adapter ceremony to
+each application.
+
+The low-level `DirectRelationalProgram` escape hatch is for genuinely
+relational sequential machines that can issue or resolve several effects in one
+transition. Ordinary serial programs use `SequentialMachine`; they do not fall
+from a one-line registry lookup directly to manual multiset proofs.
 
 This is proof-strategy inference, never platform/provider inference. The
 platform plan remains an explicit value. The short closing form performs an

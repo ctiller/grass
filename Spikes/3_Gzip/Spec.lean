@@ -1,8 +1,12 @@
 import Grass.Spec.Console
 import Grass.Spec.Grammar
-import Spikes.«3_Gzip».Resource
+import Grass.Spec.Resource
 
 namespace Grass.Spikes.Gzip
+
+def resources : StreamingResourceModel :=
+  StreamingResourceModel.console
+    |>.withResidentMemory .boundedIndependentOfInputLength
 
 inductive GzipOutcome
   | success

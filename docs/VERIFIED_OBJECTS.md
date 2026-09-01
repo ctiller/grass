@@ -1,0 +1,127 @@
+# Verified objects and modular linking
+
+`VerifiedProgram (spec : SpecProcess resources)` remains the final exact
+correctness gate. Large-system build locality is provided below that gate by
+stable exported signatures and verified relocatable objects, not by weakening
+the program index to an existential hidden specification.
+
+## 1. Stable exported signatures
+
+A subsystem exports only the facts its consumers may use:
+
+```lean
+structure ProgramSignature where
+  calls : ExportedCallableFamily
+  protocols : ExportedProcessProtocolFamily
+  observations : ExportedObservationContract
+  resources : ExportedSemanticResourceContract
+  obligations : ExportedObligationTransfer
+  providers : ProviderRequirementFamily
+  abi : ExportedAbiFamily
+
+structure ImplementsSignature
+    (spec : SpecProcess resources) (sig : ProgramSignature) : Prop where
+  behavior : ProjectedSpecContract spec = sig.observations
+  calls : SpecExportsCallables spec sig.calls sig.abi
+  protocols : SpecExportsProtocols spec sig.protocols
+  resources : SpecEntailsExportedResourceContract spec sig.resources
+  obligations : SpecTransfersExactly spec sig.obligations
+  providers : SpecRequirementsEntail spec sig.providers
+```
+
+Private process state, topology, helper contracts, layouts, registers, buffer
+sizes, and internal semantic components are absent. Changing them does not
+invalidate a consumer when `ImplementsSignature` still proves the same value.
+
+## 2. Verified relocatable object
+
+```lean
+structure VerifiedObject (sig : ProgramSignature) where
+  privateResources : Type
+  privateSpec : SpecProcess privateResources
+  signature : ImplementsSignature privateSpec sig
+  source : HierarchicalClosedAsmSource
+  sections : RelocatableSectionFamily
+  symbols : ObjectSymbolTable sig
+  relocations : TypedRelocationFamily sections symbols
+  machine : ObjectMachineCodeRefines privateSpec source sections
+  writerRoundTrip : parseGobj (writeGobj this) = .ok this
+```
+
+The existential/private specification is lawful here because an object claims
+only its exported interface. It is not lawful at the final product gate, where
+the exact precious root specification is known and retained.
+
+An object carries symbolic relocation targets, section alignment and
+permissions, exported/imported ABI contracts, provider demands, resource and
+obligation summaries, and a hierarchical machine certificate. Its proof does
+not mention a final image base or offsets of unrelated objects.
+
+## 3. Verified linker
+
+```lean
+structure LinkPlan (root : SpecProcess resources)
+    (signatures : Array ProgramSignature) where
+  composition : SignatureNetworkRefinesRoot signatures root
+  providers : CoherentProviderSelection signatures
+  layout : SectionLayoutPolicy
+  exports : RootExportSelection root signatures
+
+def linkVerified
+    (plan : LinkPlan root signatures)
+    (objects : HArray VerifiedObject signatures) :
+    Except LinkError (VerifiedProgram root)
+```
+
+The linker checks exact symbol resolution, signature/ABI compatibility,
+provider coherence, section permissions/alignment, relocation range and
+encoding, import synthesis, resource/obligation composition, and entry/export
+selection. Its connection theorem proves that parsing/loading the emitted image
+produces the linked machine program assembled from those exact objects and that
+the signature composition refines `root`.
+
+Link failure is data, not unsoundness. Duplicate exports, unresolved symbols,
+ABI mismatch, incompatible providers, overflowed relocations, permission
+conflicts, or an unclosed root contract return a precise error.
+
+## 4. Invalidation and caching
+
+Object proofs are opaque module exports and may be cached by source/theorem/
+profile hashes. A private edit rechecks its changed fragments, ancestor closure
+nodes, and object proof. Consumers need not re-elaborate when the signature hash
+and theorem environment are unchanged. Relinking necessarily revisits affected
+symbol/layout/relocation ancestors; Grass makes no false constant-time claim.
+
+Final PE/ELF bytes can change globally when layout changes, but instruction
+semantics do not. The linker re-proves the cheap layout/relocation connection
+from unchanged object certificates instead of replaying every instruction
+proof. Build reports measure actual elaboration, kernel, cache, and link work.
+
+## 5. Serialized `.gobj`
+
+`.gobj` is an optional deterministic serialization of the relocatable object
+payload and certificate references. It obeys the corpus laws:
+
+- `parseGobj (writeGobj object) = .ok object`;
+- every successful parse satisfies the binary grammar and structural
+  invariants; and
+- corrupt, stale-environment, or unknown-checker certificates are rejected.
+
+A standalone linker may consume `.gobj` only through a small verified checker
+whose accepted certificate theorem is connected back to Lean kernel theorems.
+The format and checker do not become a second unverified emission route.
+
+## 6. Acceptance fixtures
+
+The object model is retained only if fixtures demonstrate:
+
+- changing a private instruction without changing an export avoids consumer
+  elaboration and reuses sibling fragment proofs;
+- changing an ABI/resource/obligation export invalidates exactly its consumers;
+- moving an object rechecks relocation/layout connection but not machine
+  semantics;
+- a cross-object call, process channel, and SPIR-V embedding compose to one root;
+- every malformed symbol, relocation, provider, permission, and certificate
+  mutation is rejected; and
+- clean and incremental measurements at increasing object counts remain within
+  the explicit proof-economy budgets.

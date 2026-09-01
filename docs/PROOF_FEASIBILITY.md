@@ -31,7 +31,10 @@ The feasibility labels are:
 ### Claim
 
 `SequentialAdapter` does not accept an arbitrary relation and synthesize an
-actor decomposition or invariant. It accepts:
+actor decomposition or invariant. It accepts either an ordinary
+`SequentialMachine`, whose typed decisions expose zero or one exact effect
+frontier, or the following lower-level relational escape hatch for transitions
+which issue or resolve several effects together:
 
 ```lean
 structure DirectRelationalProgram (boundary : DriverBoundary) where
@@ -120,9 +123,36 @@ loop invariant, decide which arbitrary subexpression is an effect, invent a
 child protocol, prove `DirectProgramRealizes`, or infer a simulation relation
 from an arbitrary `Prop`.
 
+For `SequentialMachine`, the library also generates the declared effect sites:
+they are a structural fold over the finite typed decision syntax. Its proof is
+one induction over `SequentialDecision`. `.internal` preserves the live
+occurrence map, `.effect demand resume` allocates exactly one fresh occurrence
+whose result type fixes the continuation, and `.terminal` requires the map to
+be empty or to have the explicitly selected terminal disposition. This covers
+novel state machines, headers, pass structures, and failure policies built from
+known effects. Manual multiset equations begin only when the author selects the
+lower-level multi-effect relational escape hatch.
+
+That boundary is not the application interface.  A standard specification
+constructor packages the direct program and proof in a registry entry.  Hello,
+sort, and gzip therefore select their complete realization with
+`ProcessRealization.standard (lookupExact spec)`.  The larger structure above
+is inspected when implementing or auditing the generic constructor, not filled
+once per application.
+
+For the gzip fixture, standard byte-input, byte-output, allocation, and
+terminal combinators derive the effect sites, exact occurrences, pending
+equations, bindings, and dispositions.  The meaningful reusable proof inputs
+are exactly the streaming transducer relation, exhaustive failure behavior,
+bounded resource theorem, and conditional-progress theorem.  The compressor's
+algorithmic correctness and assembly refinement remain separate lower-layer
+proofs.  Requiring gzip application code to expose any generated process
+bookkeeping fails this section even if the theorem is provable.
+
 ### Acceptance fixture
 
-Hello, sort, and fixed-gzip must use the same closed standard-realizer registry.
+Hello, sort, and fixed-gzip must use the same closed standard-realizer registry,
+and each application fixture must select its realization with one expression.
 Adding a new result constructor to a used effect must leave one local unmatched
 case. Removing an effect site must remove its generated child. Reordering two
 independent declared sites must not require an application proof edit. A custom

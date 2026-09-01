@@ -1,8 +1,53 @@
 import Grass.Process
+import Grass.Process.Blend
+import Grass.Platform.Win10.Vulkan13
+import Grass.Std.Graphics.Cube
 import Grass.Std.Process.Graphics
 import Spikes.«5_Spinning_Cube».Spec
 
 namespace Grass.Spikes.SpinningCube
+
+def projection : TargetProjection spec .win10X64Vulkan13Spirv15 :=
+  TargetProjection.win10VulkanInteractive
+    (clock := .queryPerformanceCounter)
+    (userExitStatus := 0)
+    (failureStatus := 1)
+
+def vertexContract : ComponentContract :=
+  Graphics.vertexProjectionContract scene
+
+def fragmentContract : ComponentContract :=
+  Graphics.fragmentColorContract scene
+
+def vertexModel : ImplementationModel :=
+  Graphics.cubeVertexModel scene
+
+def fragmentModel : ImplementationModel :=
+  Graphics.cubeFragmentModel scene
+
+theorem vertexModelCorrect :
+    ImplementationRealizesContract vertexModel vertexContract :=
+  Graphics.cubeVertexModelCorrect scene
+
+theorem fragmentModelCorrect :
+    ImplementationRealizesContract fragmentModel fragmentContract :=
+  Graphics.cubeFragmentModelCorrect scene
+
+def rotationRepresentation : FloatingRotationRelation :=
+  FloatingRotationRelation.ieee754
+    (timeBase := .absoluteFromEpoch)
+    (accumulator := .binary64)
+    (shaderInput := .binary32)
+    (reduction := .towardNegativeInfinityModuloTau)
+
+theorem rotationRepresentationCorrect :
+    FloatingRotationRelation.Refines
+      rotationRepresentation rotationAccuracy scene.angularVelocity :=
+  IEEE754.absoluteEpochBinary64_binary32Input_elapsedRotation
+    rotationAccuracy scene.angularVelocity
+
+def plan : PlatformPlan spec.driverBoundary.requirements :=
+  PlatformPlan.win10X64Vulkan13Spirv15 projection
 
 inductive CubeRole
   | input
@@ -21,6 +66,21 @@ def cubeProcessPresentation : ProcessPresentation spec where
   network := cubeProtocol
   denotationExact := Graphics.interactivePresentationDenotesSceneContract
   requirementsExact := Graphics.interactivePresentationRequirementsExact
+
+def cubeProtocolResourceView : CubeRole -> RequiredResourceView resources :=
+  Graphics.interactivePresentationResourceView
+
+theorem cubeProtocolResourceRestrictionExact :
+    forall schema,
+      (cubeProtocol.protocol schema).resourceSemantics.restrict
+          (cubeProtocolResourceView schema) =
+        spec.resourceSemantics.restrict (cubeProtocolResourceView schema) :=
+  Graphics.interactivePresentationResourceRestrictionExact
+
+theorem cubeProtocolResourceViewsCoverRoot :
+    ExactUnionOfRequiredResourceViews cubeProtocolResourceView
+      spec.resourceSemantics.requiredAxes :=
+  Graphics.interactivePresentationResourceViewsCoverRoot
 
 structure DesiredCubeView where
   extent : Nat × Nat
@@ -170,6 +230,7 @@ theorem processPlanRealizes : ProcessPlanRealizes spec processPlan where
   simulation := cube_network_simulation
   demandMultiplicity := cube_occurrences_erase_exactly
   childBindings := cube_child_demand_bindings
+  requirementSubstitution := cube_process_requirement_substitution
   demands := cube_independent_safety_liveness_and_obligation_demands
   resources := cube_resource_axis_realization
 
@@ -179,5 +240,67 @@ theorem cubeResourceBound :
       CubeResourceMetric.product
       CubeResourceBudget.singleFrameInFlight :=
   processPlanRealizes.resources.rootBound
+
+def shapedSpec : StagedProcessPresentation spec :=
+  StagedProcessPresentation.ofNetwork spec cubeProtocol
+    cubeProtocolResourceView
+    cubeProtocolResourceRestrictionExact
+    cubeProtocolResourceViewsCoverRoot
+    cubeProcessPresentation.denotationExact
+    cubeProcessPresentation.requirementsExact
+
+def inputSubsystem : SubsystemRealization shapedSpec .input :=
+  SubsystemRealization.fromPlanScope
+    processPlanRealizes (CubeProcessScope.input processPlan)
+    cube_input_boundary_exact
+
+def animationSubsystem : SubsystemRealization shapedSpec .sceneAnimator :=
+  SubsystemRealization.fromPlanScope
+    processPlanRealizes (CubeProcessScope.animation processPlan)
+    cube_animation_boundary_exact
+
+def graphicsSubsystem : SubsystemRealization shapedSpec .surfacePresenter :=
+  SubsystemRealization.fromPlanScope
+    processPlanRealizes (CubeProcessScope.graphics processPlan)
+    cube_graphics_boundary_exact
+
+def terminationSubsystem : SubsystemRealization shapedSpec .termination :=
+  SubsystemRealization.fromPlanScope
+    processPlanRealizes (CubeProcessScope.termination processPlan)
+    cube_termination_boundary_exact
+
+def completeGraph : BlendedProcessGraph shapedSpec where
+  nodes
+    | .input => .realized inputSubsystem
+    | .sceneAnimator => .realized animationSubsystem
+    | .surfacePresenter => .realized graphicsSubsystem
+    | .termination => .realized terminationSubsystem
+  composition := cube_all_subsystem_boundaries_compose
+  requirements := cube_all_requirement_union
+
+def completePartial : PartialProcessRealization shapedSpec completeGraph :=
+  ProcessRealization.blend completeGraph
+
+def completeClosedBlend : ClosedBlend completePartial
+    cube_every_schema_realized_parametrically
+    cube_portable_requirements_resources_obligations_coherent :=
+  completePartial.close
+    cube_every_schema_realized_parametrically
+    cube_portable_requirements_resources_obligations_coherent
+
+def stagedProcessRealization : ProcessRealization spec :=
+  completeClosedBlend.realization
+
+theorem stagedPlanIsExact :
+    stagedProcessRealization.plan = processPlan :=
+  cube_closed_blend_elaborates_to_exact_plan
+
+theorem unresolvedDescendantRejected :
+    ¬ FrontierComplete cube_graphics_with_abstract_child :=
+  cube_abstract_child_is_reachable
+
+theorem conflictingProvidersRejected :
+    ¬ RequirementDeltasCompatible cube_vulkan_delta cube_metal_delta :=
+  cube_vulkan_metal_conflict
 
 end Grass.Spikes.SpinningCube

@@ -1,7 +1,10 @@
 import Grass.Spec.Console
-import Spikes.«1_Hello_World».Resource
+import Grass.Spec.Resource
 
 namespace Grass.Spikes.HelloWorld
+
+def resources : ConsoleResourceModel :=
+  ConsoleResourceModel.singleLine
 
 def message : TextLine := "Hello, World!"
 

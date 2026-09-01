@@ -1,23 +1,103 @@
 import Grass.Assembly.X86
-import Spikes.«4_Web_Server».Data
+import Spikes.«4_Web_Server».Process
 
 namespace Grass.Spikes.WebServer
 
-structure LocalFragmentBody (entry exit : BlockContract) where
+def routeBody : ByteArray := body
+
+def bindAddress : ByteArray :=
+  #[0x02, 0x00, 0x1f, 0x90, 0x7f, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+
+def serverSettings : Http2.Settings :=
+  { headerTableSize := resourcePolicy.hpackDecoderTableBytes
+    enablePush := false
+    maxConcurrentStreams := resourcePolicy.maxConcurrentStreamsPerConnection
+    initialWindowSize := resourcePolicy.inboundStreamWindow
+    maxFrameSize := 16384
+    maxHeaderListSize := resourcePolicy.maxHeaderListBytes }
+
+def clientPreface : ByteArray :=
+  "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".toUTF8
+
+def settingsFrame : ByteArray :=
+  Http2.Frame.write (.settings false serverSettings)
+
+def successFields : Http2.HeaderList :=
+  [(.status, "200"), (.name "content-type", "text/plain"),
+   (.name "content-length", toDecimalBytes routeBody.size)]
+
+def successHeaderBlock : ByteArray :=
+  Hpack.encodeWithoutIndexing successFields
+
+def notFoundFields : Http2.HeaderList :=
+  [(.status, "404"), (.name "content-length", "0")]
+
+def notFoundHeaderBlock : ByteArray :=
+  Hpack.encodeWithoutIndexing notFoundFields
+
+def connectionStateBytes : Nat :=
+  Http2.ConnectionLayout.bytes resourcePolicy
+
+def streamStateBytes : Nat :=
+  Http2.StreamLayout.bytes resourcePolicy
+
+def workerSlotBytes : Nat :=
+  Http2.WorkerSlotLayout.bytes resourcePolicy
+
+theorem settingsRoundTrip :
+    Http2.Frame.parse protocolProfile settingsFrame =
+      .ok (.settings false serverSettings) :=
+  Http2.Frame.parse_write protocolProfile _ serverSettings.admissible
+
+theorem successHeaderBlockDecodes :
+    Hpack.decode Hpack.emptyDecoder successHeaderBlock =
+      .ok (Hpack.emptyDecoder, successFields) :=
+  Hpack.decode_encodeWithoutIndexing _
+
+def serverStaticObjects : StaticObjectTable := static_objects {
+  rodata align 16 {
+    route_body: bytes routeBody
+    bind_address: bytes bindAddress
+    client_preface: bytes clientPreface
+    settings_frame: bytes settingsFrame
+    success_header_block: bytes successHeaderBlock
+    not_found_header_block: bytes notFoundHeaderBlock
+    hpack_huffman_decode_table: bytes Hpack.huffmanDecodeTableBytes
+    hpack_static_table: bytes Hpack.staticTableBytes
+  }
+  data align 64 {
+    shutdown: uint32 0
+    fatal: uint32 0
+    start_gate: uint32 0
+    nonblocking_one: uint32 0
+    listen_socket: uint64 0xffffffffffffffff
+    worker_handles: zero 32
+    wsa_data: zero 408
+    worker_slots: zero (executionEnvelope.workerCount * workerSlotBytes)
+    connection_states: zero (executionEnvelope.connectionCapacity * connectionStateBytes)
+    stream_states: zero (executionEnvelope.connectionCapacity *
+      resourcePolicy.maxConcurrentStreamsPerConnection * streamStateBytes)
+  }
+}
+
+structure LocalFragmentBody
+    (entry : BlockContract) (exits : FragmentExitFamily entry) where
   name : Name
   algorithm : X86.FragmentAlgorithm entry exit
   rawExpansion : RawInstructionListing
   expandsExactly : algorithm.lower = rawExpansion
   references : ExactInternalReferenceManifest rawExpansion
   citations : InstructionAndProtocolCitationManifest rawExpansion
-  machine : FragmentMachineCertificate rawExpansion entry exit references.imports
+  machine : FragmentMachineCertificate rawExpansion entry exits references.imports
 
-def LocalFragmentBody.fragment (body : LocalFragmentBody entry exit) :
-    VerifiedFragment entry exit where
+def LocalFragmentBody.fragment (body : LocalFragmentBody entry exits) :
+    VerifiedFragment entry exits where
   source := body.algorithm.authoredSource
   expanded := body.rawExpansion
   expansionExact := body.expandsExactly
-  certificate := body.machine
+  localCorrect := body.machine.localCorrect
+  citations := body.citations.instructionCoverage
 
 def consumePrefaceBody :
     LocalFragmentBody Http2.X86.Contract.consumePrefaceEntry
@@ -40,6 +120,7 @@ def parseFrameHeaderBody (maxFrameSize : Nat) :
   algorithm := requireBytes 9
     |> loadBe24 0 frameLength
     |> requireAtMost maxFrameSize connectionError
+    |> requireBytes (9 + frameLength)
     |> loadU8 3 frameType
     |> loadU8 4 frameFlags
     |> loadBe32Masked 5 0x7fffffff frameStream
@@ -71,7 +152,7 @@ def hpackHuffmanBody :
   algorithm := bitstreamLoop {
       canonicalPrefixLookup
       rejectSymbol eos compressionError
-      requireOutputBelow capturedResourcePolicy.maxHeaderListBytes
+      requireOutputBelow resourcePolicy.maxHeaderListBytes
       appendDecodedSymbol
     }
     |> requireFinalPaddingAtMost 7
@@ -86,7 +167,7 @@ def hpackStringBody :
   algorithm := decodeLength hpackIntegerBody
     |> requireInputLength
     |> chooseBy huffmanFlag (decodeWith hpackHuffmanBody) copyPlainBytes
-    |> requireDecodedTotalAtMost capturedResourcePolicy.maxHeaderListBytes
+    |> requireDecodedTotalAtMost resourcePolicy.maxHeaderListBytes
 }
 
 def hpackFieldSectionBody (tableBytes headerListBytes : Nat) :
@@ -106,6 +187,18 @@ def hpackFieldSectionBody (tableBytes headerListBytes : Nat) :
     |> requireHeaderListAtMost headerListBytes
     |> onSuccess commitPrivateWorkingAtomically
     |> onError discardPrivateWorking
+}
+
+def beginHeaderBlockBody (capacity : Nat) :
+    LocalFragmentBody (Http2.X86.Contract.beginHeaderBlockEntry capacity)
+      Http2.X86.Contract.beginHeaderBlockExit := x86_fragment_body {
+  name := `beginHeaderBlock
+  state := connection.continuationStream, connection.continuationBytes
+  algorithm := requireFrameType headers
+    |> requireNoOpenContinuation
+    |> requireNonzeroStream
+    |> checkedBeginHeaderPayloadAtMost capacity
+    |> consumeFrame
 }
 
 def continuationBody (capacity : Nat) :
@@ -162,7 +255,7 @@ def settingsBody (settings : Http2.Settings) :
     |> foldSixByteEntriesRejectInvalid
     |> requireEnablePushZero
     |> checkedInitialWindowDeltaAcrossOpenStreams
-    |> boundHeaderTable capturedResourcePolicy.hpackDecoderTableBytes
+    |> boundHeaderTable resourcePolicy.hpackDecoderTableBytes
     |> publishPeerSettings
     |> enqueueAckOnce
 }
@@ -325,7 +418,7 @@ def releaseStreamsBody :
     LocalFragmentBody Http2.X86.Contract.releaseClosedEntry
       Http2.X86.Contract.releaseClosedExit := x86_fragment_body {
   name := `releaseClosedStreams
-  algorithm := boundedSlotScan capturedResourcePolicy.maxConcurrentStreamsPerConnection {
+  algorithm := boundedSlotScan resourcePolicy.maxConcurrentStreamsPerConnection {
     releaseOnlyIf closedAndAllCustodyDischarged
   }
 }
@@ -335,7 +428,9 @@ def cancelExpiredBody (bound : Nat) :
       Http2.X86.Contract.cancelExpiredExit := x86_fragment_body {
   name := `cancelExpiredStreams
   algorithm := boundedSlotScan bound {
-    ifDeadlineExpired publishStreamCancellationCause
+    ifDeadlineExpired
+      (publishStreamCancellationCause
+        |> ifNoFrameInFlight enqueueRstWithoutDataCredit)
   }
 }
 
@@ -379,7 +474,7 @@ def pollReadableBody :
   name := `pollReadable
   imports := WSAPoll
   algorithm := buildSingleReadablePollFd
-    |> callBounded WSAPoll capturedResourcePolicy.pollQuantum
+    |> callBounded WSAPoll resourcePolicy.pollQuantum
     |> classifyReadyTimeoutError
 }
 
@@ -389,7 +484,7 @@ def pollWritableBody :
   name := `pollWritable
   imports := WSAPoll
   algorithm := buildSingleWritablePollFd
-    |> callBounded WSAPoll capturedResourcePolicy.pollQuantum
+    |> callBounded WSAPoll resourcePolicy.pollQuantum
     |> classifyReadyTimeoutError
 }
 
@@ -458,20 +553,21 @@ def writerObservationBody :
     |> otherwiseContinueCurrentFrame
 }
 
-def frameOf (body : LocalFragmentBody entry exit) : VerifiedFragment entry exit :=
+def frameOf (body : LocalFragmentBody entry exits) : VerifiedFragment entry exits :=
   body.fragment
 
 def parseFrameHeaderMacro := (frameOf (parseFrameHeaderBody 16384)).asTransparentMacro
 def consumeClientPrefaceMacro := (frameOf consumePrefaceBody).asTransparentMacro
-def decodeFieldSectionMacro := (frameOf (hpackFieldSectionBody capturedResourcePolicy.hpackDecoderTableBytes capturedResourcePolicy.maxHeaderListBytes)).asTransparentMacro
-def appendContinuationMacro := (frameOf (continuationBody capturedResourcePolicy.maxContinuationBytes)).asTransparentMacro
+def decodeFieldSectionMacro := (frameOf (hpackFieldSectionBody resourcePolicy.hpackDecoderTableBytes resourcePolicy.maxHeaderListBytes)).asTransparentMacro
+def beginHeaderBlockMacro := (frameOf (beginHeaderBlockBody resourcePolicy.maxContinuationBytes)).asTransparentMacro
+def appendContinuationMacro := (frameOf (continuationBody resourcePolicy.maxContinuationBytes)).asTransparentMacro
 def dispatchFrameMacro := (frameOf (dispatchBody protocolProfile)).asTransparentMacro
 def requireInitialSettingsMacro := (frameOf initialSettingsBody).asTransparentMacro
 def validateRequestFieldsMacro := (frameOf requestFieldsBody).asTransparentMacro
 def applySettingsMacro := (frameOf (settingsBody serverSettings)).asTransparentMacro
 def applyWindowUpdateMacro := (frameOf windowUpdateBody).asTransparentMacro
 def transitionStreamMacro := (frameOf streamTransitionBody).asTransparentMacro
-def enqueueControlMacro := (frameOf (boundedQueueBody .control capturedResourcePolicy.maxQueuedControlFramesPerConnection)).asTransparentMacro
+def enqueueControlMacro := (frameOf (boundedQueueBody .control resourcePolicy.maxQueuedControlFramesPerConnection)).asTransparentMacro
 def enqueueResponseMacro := (frameOf (staticResponseBody successHeaderBlock routeBody)).asTransparentMacro
 def enqueueNotFoundMacro := (frameOf (staticResponseBody notFoundHeaderBlock #[])).asTransparentMacro
 def enqueueErrorMacro := (frameOf scopedErrorBody).asTransparentMacro
@@ -486,10 +582,10 @@ def hasSendableOutboundMacro := (frameOf hasOutboundBody).asTransparentMacro
 def serializeSelectedFrameMacro := (frameOf serializeFrameBody).asTransparentMacro
 def commitSentPrefixMacro := (frameOf commitPrefixBody).asTransparentMacro
 def releaseClosedStreamsMacro := (frameOf releaseStreamsBody).asTransparentMacro
-def cancelExpiredStreamsMacro := (frameOf (cancelExpiredBody capturedResourcePolicy.maxConcurrentStreamsPerConnection)).asTransparentMacro
-def checkConnectionDeadlineMacro := (frameOf (connectionDeadlineBody capturedResourcePolicy.connectionIdleDeadline)).asTransparentMacro
+def cancelExpiredStreamsMacro := (frameOf (cancelExpiredBody resourcePolicy.maxConcurrentStreamsPerConnection)).asTransparentMacro
+def checkConnectionDeadlineMacro := (frameOf (connectionDeadlineBody resourcePolicy.connectionIdleDeadline)).asTransparentMacro
 def initializeConnectionMacro := (frameOf initializeConnectionBody).asTransparentMacro
-def receiveIntoRingMacro := (frameOf (receiveRingBody capturedResourcePolicy.maxReceiveBytesPerConnection)).asTransparentMacro
+def receiveIntoRingMacro := (frameOf (receiveRingBody resourcePolicy.maxReceiveBytesPerConnection)).asTransparentMacro
 def pollConnectionMacro := (frameOf pollReadableBody).asTransparentMacro
 def pollWritableMacro := (frameOf pollWritableBody).asTransparentMacro
 def validateIgnoredPriorityMacro := (frameOf ignoredPriorityBody).asTransparentMacro
@@ -509,6 +605,7 @@ def serverMacros : MacroTable platformPlan := macros {
   h2_consume_preface => consumeClientPrefaceMacro
   h2_parse_frame_header => parseFrameHeaderMacro
   hpack_decode_field_section => decodeFieldSectionMacro
+  h2_begin_header_block => beginHeaderBlockMacro
   h2_append_continuation => appendContinuationMacro
   h2_dispatch_frame => dispatchFrameMacro
   h2_require_initial_settings => requireInitialSettingsMacro
@@ -548,7 +645,7 @@ def serverMacros : MacroTable platformPlan := macros {
 
 def serverFragmentHierarchy : FragmentExpansionHierarchy platformPlan := hierarchy {
   root serverMacros
-  shard framing consumePrefaceBody parseFrameHeaderBody continuationBody dispatchBody
+  shard framing consumePrefaceBody parseFrameHeaderBody beginHeaderBlockBody continuationBody dispatchBody
   shard hpack hpackIntegerBody hpackHuffmanBody hpackStringBody hpackFieldSectionBody
   shard state initialSettingsBody requestFieldsBody settingsBody windowUpdateBody
     streamTransitionBody rstBody peerGoawayBody pingBody ignoredPriorityBody unknownPayloadBody

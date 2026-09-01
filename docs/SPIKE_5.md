@@ -2,6 +2,11 @@
 
 Status: design artifact for adversarial review; intentionally not compilable.
 
+Authoring view: agents maintain `Spec.lean`, `Process.lean`, `Layout.lean`,
+`Macros.lean`, `Assembly.lean`, and `Program.lean`. The exact snapshot is at the
+end of this document. Source closure, cross-ISA manifests, and artifact bundles
+are generated inspection views.
+
 This spike proposes the complete proof shape before its libraries exist. It is
 not permission to build the graphics framework yet. The resource-parameterized
 portable specification function is the precious semantic artifact. The selected
@@ -73,7 +78,7 @@ def cubeSpec {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
     |>.acceptInput [.close, .escapeDown, .resize]
     |>.withFailures .terminateWithoutFalseSuccess
     |>.withProgress (.reactiveUntilUserExit frontiers :=
-      [.windowInput, .frameOpportunity, .demandResult, .commit])
+      [.externalInput, .frameOpportunity, .frameObservation, .terminalOutcome])
 
 theorem cubeSpecCorrect {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
     (resources : R) : MeetsAllSpecificationTheorems (cubeSpec resources) :=
@@ -178,13 +183,22 @@ def source : MachineSource plan :=
     devices := shaders }
 
 def cubeVerified : VerifiedProgram spec := by
-  verify_assembly plan using_process stagedProcessRealization with source
-    using_machine_blend cubeMachineBlendInput cubeMachineBlendInputComplete
+  verify_assembly plan
+    using_process stagedProcessRealization
+    using_models vertexModelCorrect fragmentModelCorrect
+    with source
 
 def bytes : ByteArray := emitProgram cubeVerified
 
 end Grass.Spike5
 ```
+
+The four root progress frontiers are semantic boundary classes: accepted
+external input, an environment-provided opportunity to produce a frame, an
+observable accepted frame, and an observable terminal outcome. They do not name
+the application's command/result loop, Vulkan calls, queue submission, or an
+internal commit stage. Those belong to the replaceable process presentation and
+its driver proof.
 
 `sampledAt` names the host clock sample used to construct the frame; it is not
 an unobservable physical display time. `NondecreasingFrameSampleTimes` admits
@@ -474,6 +488,7 @@ not emittable:
 ```lean
 def shapedSpec : StagedProcessPresentation spec :=
   StagedProcessPresentation.ofNetwork spec cubeProtocol
+    cubeProtocolResourceSemanticsExact
     cubeProcessPresentation.denotationExact
     cubeProcessPresentation.requirementsExact
 
@@ -506,10 +521,15 @@ realization used below:
 def completePartial : PartialProcessRealization shapedSpec completeGraph :=
   ProcessRealization.blend completeGraph
 
-def stagedProcessRealization : ProcessRealization spec :=
+def completeClosedBlend : ClosedBlend completePartial
+    cube_every_schema_realized_parametrically
+    cube_portable_requirements_resources_obligations_coherent :=
   completePartial.close
     cube_every_schema_realized_parametrically
     cube_portable_requirements_resources_obligations_coherent
+
+def stagedProcessRealization : ProcessRealization spec :=
+  completeClosedBlend.realization
 
 theorem stagedPlanIsExact :
     stagedProcessRealization.plan = processPlan :=
@@ -1218,7 +1238,8 @@ fail_device: mov ebx,4; mov byte ptr [ownership.deviceLost],1; jmp cleanup
 clock_violation:
   ud2 @containment_tail(.monotonicClockRegressed)
 
-cleanup: @invariant reverse_dependency_ledger(status=ebx)
+cleanup: @placement [status := ebx]
+         @invariant reverse_dependency_ledger
   reverse_cleanup
   add rsp,FRAME_SIZE; pop r15; pop r14; pop r13; pop r12
   pop rdi; pop rsi; pop rbp; pop rbx
@@ -1848,3 +1869,1809 @@ enough. Spike 5's review artifact and every implementation review must print the
 fully expanded raw host listing, static data, shader words, imports,
 relocations, and artifact layout. Transparent authoring macros remain useful,
 but their displayed expansion is part of the evidence under review.
+
+
+## Exact authored source snapshot
+
+This snapshot is the exact comment-free source maintained under
+`Spikes/5_Spinning_Cube/`. Run `./check-spike-sources.ps1` to check the
+cross-view equality.
+
+### `Assembly.lean`
+
+```lean
+import Grass.Assembly.X86
+import Grass.Assembly.Spirv
+import Spikes.«5_Spinning_Cube».Macros
+
+namespace Grass.Spikes.SpinningCube
+
+def cubeVertex : SpirvModule plan.shaderEnv := spirv_asm {
+  OpCapability Shader
+  %glsl = OpExtInstImport "GLSL.std.450"
+  OpMemoryModel Logical GLSL450
+  OpEntryPoint Vertex %main "main" %vertexIndex %positionOut %colorOut
+    %push %positionsVar %indicesVar
+  OpName %main "main"
+  OpDecorate %vertexIndex BuiltIn VertexIndex
+  OpDecorate %positionOut BuiltIn Position
+  OpDecorate %colorOut Location 0
+  OpMemberDecorate %Push 0 Offset 0
+  OpMemberDecorate %Push 1 Offset 4
+  OpDecorate %Push Block
+
+  %void = OpTypeVoid
+  %fn = OpTypeFunction %void
+  %bool = OpTypeBool
+  %int = OpTypeInt 32 1
+  %uint = OpTypeInt 32 0
+  %float = OpTypeFloat 32
+  %i0=OpConstant %int 0  %i1=OpConstant %int 1
+  %i2=OpConstant %int 2  %i3=OpConstant %int 3
+  %i4=OpConstant %int 4  %i5=OpConstant %int 5
+  %i6=OpConstant %int 6  %i7=OpConstant %int 7
+  %u8=OpConstant %uint 8  %u24=OpConstant %uint 24
+  %f0=OpConstant %float 0.0  %f1=OpConstant %float 1.0
+  %fn1=OpConstant %float -1.0  %f2=OpConstant %float 2.0
+  %f3=OpConstant %float 3.0  %f025=OpConstant %float 0.25
+  %v3 = OpTypeVector %float 3
+  %v4 = OpTypeVector %float 4
+  %Push = OpTypeStruct %float %float
+  %ptrPush = OpTypePointer PushConstant %Push
+  %ptrPushF = OpTypePointer PushConstant %float
+  %ptrInI = OpTypePointer Input %int
+  %ptrOutV4 = OpTypePointer Output %v4
+  %ptrOutV3 = OpTypePointer Output %v3
+  %arrPos = OpTypeArray %v3 %u8
+  %arrIdx = OpTypeArray %int %u24
+  %ptrPrivatePos = OpTypePointer Private %arrPos
+  %ptrPrivateIdx = OpTypePointer Private %arrIdx
+  %ptrPrivateV3 = OpTypePointer Private %v3
+  %ptrPrivateI = OpTypePointer Private %int
+
+  %p0=OpConstantComposite %v3 %fn1 %fn1 %fn1
+  %p1=OpConstantComposite %v3 %f1 %fn1 %fn1
+  %p2=OpConstantComposite %v3 %f1 %f1 %fn1
+  %p3=OpConstantComposite %v3 %fn1 %f1 %fn1
+  %p4=OpConstantComposite %v3 %fn1 %fn1 %f1
+  %p5=OpConstantComposite %v3 %f1 %fn1 %f1
+  %p6=OpConstantComposite %v3 %f1 %f1 %f1
+  %p7=OpConstantComposite %v3 %fn1 %f1 %f1
+  %bias=OpConstantComposite %v3 %f025 %f025 %f025
+  %positions=OpConstantComposite %arrPos %p0 %p1 %p2 %p3 %p4 %p5 %p6 %p7
+  %indices=OpConstantComposite %arrIdx
+    %i0 %i1 %i1 %i2 %i2 %i3 %i3 %i0
+    %i4 %i5 %i5 %i6 %i6 %i7 %i7 %i4
+    %i0 %i4 %i1 %i5 %i2 %i6 %i3 %i7
+  %vertexIndex = OpVariable %ptrInI Input
+  %positionOut = OpVariable %ptrOutV4 Output
+  %colorOut = OpVariable %ptrOutV3 Output
+  %push = OpVariable %ptrPush PushConstant
+  %positionsVar = OpVariable %ptrPrivatePos Private %positions
+  %indicesVar = OpVariable %ptrPrivateIdx Private %indices
+
+  %main = OpFunction %void None %fn
+  %entry = OpLabel
+  %vi = OpLoad %int %vertexIndex
+  %ip = OpAccessChain %ptrPrivateI %indicesVar %vi
+  %ix = OpLoad %int %ip
+  %pp = OpAccessChain %ptrPrivateV3 %positionsVar %ix
+  %p = OpLoad %v3 %pp
+  %anglePtr = OpAccessChain %ptrPushF %push %i0
+  %aspectPtr = OpAccessChain %ptrPushF %push %i1
+  %angle = OpLoad %float %anglePtr
+  %aspect = OpLoad %float %aspectPtr
+  %s = OpExtInst %float %glsl Sin %angle
+  %c = OpExtInst %float %glsl Cos %angle
+  %x = OpCompositeExtract %float %p 0
+  %y = OpCompositeExtract %float %p 1
+  %z = OpCompositeExtract %float %p 2
+  %cx = OpFMul %float %c %x
+  %sz = OpFMul %float %s %z
+  %rx = OpFAdd %float %cx %sz
+  %sx = OpFMul %float %s %x
+  %cz = OpFMul %float %c %z
+  %rz0 = OpFSub %float %cz %sx
+  %rz = OpFAdd %float %rz0 %f3
+  %rxAspect = OpFDiv %float %rx %aspect
+  %clipX = OpFDiv %float %rxAspect %rz
+  %clipY = OpFDiv %float %y %rz
+  %depth0 = OpFSub %float %rz %f1
+  %depth = OpFDiv %float %depth0 %rz
+  %clip = OpCompositeConstruct %v4 %clipX %clipY %depth %f1
+  OpStore %positionOut %clip
+  %half = OpVectorTimesScalar %v3 %p %f025
+  %color = OpFAdd %v3 %half %bias
+  OpStore %colorOut %color
+  OpReturn
+  OpFunctionEnd
+}
+
+def cubeFragment : SpirvModule plan.shaderEnv := spirv_asm {
+  OpCapability Shader
+  OpMemoryModel Logical GLSL450
+  OpEntryPoint Fragment %main "main" %colorIn %colorOut
+  OpExecutionMode %main OriginUpperLeft
+  OpDecorate %colorIn Location 0
+  OpDecorate %colorOut Location 0
+  %void=OpTypeVoid
+  %fn=OpTypeFunction %void
+  %float=OpTypeFloat 32
+  %v3=OpTypeVector %float 3
+  %v4=OpTypeVector %float 4
+  %ptrInV3=OpTypePointer Input %v3
+  %ptrOutV4=OpTypePointer Output %v4
+  %f1=OpConstant %float 1.0
+  %colorIn=OpVariable %ptrInV3 Input
+  %colorOut=OpVariable %ptrOutV4 Output
+  %main=OpFunction %void None %fn
+  %entry=OpLabel
+  %rgb=OpLoad %v3 %colorIn
+  %r=OpCompositeExtract %float %rgb 0
+  %g=OpCompositeExtract %float %rgb 1
+  %b=OpCompositeExtract %float %rgb 2
+  %rgba=OpCompositeConstruct %v4 %r %g %b %f1
+  OpStore %colorOut %rgba
+  OpReturn
+  OpFunctionEnd
+}
+
+def cubeStaticObjects : StaticObjectTable := #[
+  .utf16 `className "GrassCube\0",
+  .utf16 `title "Grass Vulkan Cube\0",
+  .ascii `grass "grass\0",
+  .ascii `mainName "main\0",
+  .ascii `vkCreateInstanceName "vkCreateInstance\0",
+  .ascii `swapchainExtName "VK_KHR_swapchain\0",
+  .cstringArray `instanceExts instanceExtensionNames,
+  .cstringArray `deviceExts deviceExtensionNames,
+  .cstringArray `instanceNames instanceFunctionNames,
+  .cstringArray `deviceNames deviceFunctionNames,
+  .uint32 `instanceSlotCount instanceFunctionNames.size,
+  .uint32 `deviceSlotCount deviceFunctionNames.size,
+  .float32 `one 1.0,
+  .uint32 `colorFormat VK_FORMAT_B8G8R8A8_UNORM,
+  .float64 `angularVelocity 0.6,
+  .float64 `tau 6.283185307179586,
+  .spirvWords `cubeVertexBytes (Spirv.writeWords cubeVertex),
+  .spirvWords `cubeFragmentBytes (Spirv.writeWords cubeFragment)
+]
+
+def cubeHost : AsmSource plan := asm_source {
+entry: @entry win64_gui_entry
+  push rbx
+  push rbp
+  push rsi
+  push rdi
+  push r12
+  push r13
+  push r14
+  push r15
+  sub rsp, FRAME_SIZE
+  xor eax,eax
+  lea rdi,[rsp+locals]
+  mov ecx,LOCALS_QWORDS
+  rep stosq
+  win_call GetProcessHeap() -> rax
+  test rax,rax
+  jz fail_init
+  mov qword ptr [processHeap],rax
+  win_call GetModuleHandleW(0) -> r12
+  test r12,r12
+  jz fail_init
+  store32 wc.cbSize,SIZEOF_WNDCLASSEXW
+  store32 wc.style,CS_HREDRAW|CS_VREDRAW|CS_OWNDC
+  store64 wc.lpfnWndProc,&wndproc
+  store64 wc.hInstance,r12
+  win_call LoadCursorW(0,IDC_ARROW) -> rax
+  store64 wc.hCursor,rax
+  store64 wc.lpszClassName,&className
+  win_call RegisterClassExW(&wc) -> eax
+  test ax,ax
+  jz fail_init
+  mov byte ptr [ownership.classRegistered],1
+  win_call CreateWindowExW(0,&className,&title,WS_OVERLAPPEDWINDOW,
+      CW_USEDEFAULT,CW_USEDEFAULT,960,720,0,0,r12,&state) -> r13
+  test r13,r13
+  jz fail_init
+  mov byte ptr [state.hwndOwned],1
+  win_call ShowWindow(r13,SW_SHOW) -> _
+  win_call QueryPerformanceFrequency(&qpcFrequency) -> eax
+  test eax,eax
+  jz fail_init
+  cmp qword ptr [qpcFrequency],0
+  jle fail_init
+  win_call QueryPerformanceCounter(&qpcEpoch) -> eax
+  test eax,eax
+  jz fail_init
+  mov rax,qword ptr [qpcEpoch]
+  mov qword ptr [qpcPrevious],rax
+  jmp vk_instance
+
+wndproc: @entry win64_callback(hwnd,msg,wparam,lparam)
+  sub rsp,CALLBACK_FRAME_SIZE
+  mov qword ptr [rsp+callbackHwnd],rcx
+  mov dword ptr [rsp+callbackMessage],edx
+  mov qword ptr [rsp+callbackWparam],r8
+  mov qword ptr [rsp+callbackLparam],r9
+  cmp edx,WM_NCCREATE
+  je wp_nccreate
+  win_call GetWindowLongPtrW(rcx,GWLP_USERDATA) -> r10
+  test r10,r10
+  jz wp_default
+  mov edx,dword ptr [rsp+callbackMessage]
+  mov r8,qword ptr [rsp+callbackWparam]
+  mov r9,qword ptr [rsp+callbackLparam]
+  cmp edx,WM_CLOSE
+  je wp_close
+  cmp edx,WM_DESTROY
+  je wp_destroyed
+  cmp edx,WM_NCDESTROY
+  je wp_ncdestroy
+  cmp edx,WM_KEYDOWN
+  jne wp_size
+  cmp r8d,VK_ESCAPE
+  je wp_close
+wp_size:
+  cmp edx,WM_SIZE
+  jne wp_default
+  mov eax,r9d
+  and eax,0xffff
+  shr r9d,16
+  store32 [r10+CubeWindowState.width],eax
+  store32 [r10+CubeWindowState.height],r9d
+  mov byte ptr [r10+CubeWindowState.resize],1
+  xor eax,eax
+  add rsp,CALLBACK_FRAME_SIZE
+  ret
+wp_nccreate:
+  mov r10,qword ptr [r9+CREATESTRUCTW.lpCreateParams]
+  test r10,r10
+  jz wp_reject_create
+  mov qword ptr [rsp+callbackState],r10
+  win_call SetWindowLongPtrW(rcx,GWLP_USERDATA,r10) -> _
+  mov rcx,qword ptr [rsp+callbackHwnd]
+  win_call GetWindowLongPtrW(rcx,GWLP_USERDATA) -> rax
+  cmp rax,qword ptr [rsp+callbackState]
+  jne wp_reject_create
+  mov eax,1
+  add rsp,CALLBACK_FRAME_SIZE
+  ret
+wp_reject_create:
+  xor eax,eax
+  add rsp,CALLBACK_FRAME_SIZE
+  ret
+wp_close:
+  mov byte ptr [r10+CubeWindowState.exit],1
+  xor eax,eax
+  add rsp,CALLBACK_FRAME_SIZE
+  ret
+wp_destroyed:
+  mov byte ptr [r10+CubeWindowState.exit],1
+  mov byte ptr [r10+CubeWindowState.hwndOwned],0
+  xor eax,eax
+  add rsp,CALLBACK_FRAME_SIZE
+  ret
+wp_ncdestroy:
+  mov byte ptr [r10+CubeWindowState.hwndOwned],0
+  mov rcx,qword ptr [rsp+callbackHwnd]
+  win_call SetWindowLongPtrW(rcx,GWLP_USERDATA,0) -> _
+  xor eax,eax
+  add rsp,CALLBACK_FRAME_SIZE
+  ret
+wp_default:
+  mov rcx,qword ptr [rsp+callbackHwnd]
+  mov edx,dword ptr [rsp+callbackMessage]
+  mov r8,qword ptr [rsp+callbackWparam]
+  mov r9,qword ptr [rsp+callbackLparam]
+  win_call DefWindowProcW(rcx,rdx,r8,r9) -> rax
+  add rsp,CALLBACK_FRAME_SIZE
+  ret
+
+vk_instance:
+  init appInfo {sType=APPLICATION_INFO,pApplicationName=&title,
+      applicationVersion=1,pEngineName=&grass,engineVersion=1,
+      apiVersion=VK_API_VERSION_1_3}
+  init instanceCI {sType=INSTANCE_CREATE_INFO,pApplicationInfo=&appInfo,
+      enabledExtensionCount=2,ppEnabledExtensionNames=&instanceExts}
+  xor ecx,ecx
+  lea rdx,[vkCreateInstanceName]
+  call qword ptr [rip+__imp_vkGetInstanceProcAddr]
+  test rax,rax
+  jz fail_init
+  mov [vkCreateInstancePtr],rax
+  mov rcx,&instanceCI
+  xor edx,edx
+  lea r8,[instance]
+  call qword ptr [vkCreateInstancePtr]
+  test eax,eax
+  jnz fail_init
+  mov byte ptr [ownership.instanceOwned],1
+  resolve_instance_functions_or_fail instance, instanceDispatch
+  vk_call vkCreateWin32SurfaceKHR(instance,
+      {sType=WIN32_SURFACE_CREATE_INFO_KHR,hinstance=r12,hwnd=r13},0,&surface)
+  test eax,eax
+  jnz fail_init
+  mov byte ptr [ownership.surfaceOwned],1
+
+select_device:
+  vk_call vkEnumeratePhysicalDevices(instance,&count,0)
+  test eax,eax
+  jnz fail_init
+  test count,count
+  jz fail_init
+  checked_alloc count*8 -> devices
+  jz fail_init
+  vk_call vkEnumeratePhysicalDevices(instance,&count,devices)
+  test eax,eax
+  jnz fail_init
+  enumerate_and_select_literal_loop devices,count -> physical,qfamily
+  test physical,physical
+  jz fail_init
+
+create_device:
+  init queueCI {sType=DEVICE_QUEUE_CREATE_INFO,queueFamilyIndex=qfamily,
+      queueCount=1,pQueuePriorities=&one}
+  init features13 {sType=PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+      dynamicRendering=1,synchronization2=1}
+  init deviceCI {sType=DEVICE_CREATE_INFO,pNext=&features13,
+      queueCreateInfoCount=1,pQueueCreateInfos=&queueCI,
+      enabledExtensionCount=1,ppEnabledExtensionNames=&deviceExts}
+  vk_call vkCreateDevice(physical,&deviceCI,0,&device)
+  test eax,eax
+  jnz fail_init
+  mov byte ptr [ownership.deviceOwned],1
+  mov rcx,[device]
+  mov rdx,[deviceNames]
+  call qword ptr [rip+__imp_vkGetDeviceProcAddr]
+  test rax,rax
+  jz provider_violation @violation_edge(.missingRequiredDeviceDestroy)
+  mov [vkDestroyDevicePtr],rax
+  mov byte ptr [ownership.deviceDestroyReady],1
+  resolve_device_functions_or_fail device,deviceDispatch
+  vk_call vkGetDeviceQueue(device,qfamily,0,&queue)
+  jmp create_fixed
+
+create_fixed:
+  vk_call vkCreateCommandPool(device,
+    {sType=COMMAND_POOL_CREATE_INFO,flags=RESET_COMMAND_BUFFER_BIT,
+     queueFamilyIndex=qfamily},0,&commandPool)
+     test eax,eax
+     jnz fail_init
+  mov byte ptr [ownership.commandPoolOwned],1
+  vk_call vkAllocateCommandBuffers(device,
+    {sType=COMMAND_BUFFER_ALLOCATE_INFO,commandPool=commandPool,
+     level=PRIMARY,commandBufferCount=1},&cmd)
+     test eax,eax
+     jnz fail_init
+  vk_call vkCreateSemaphore(device,{sType=SEMAPHORE_CREATE_INFO},0,&imageAvail)
+  test eax,eax
+  jnz fail_init
+  mov byte ptr [ownership.imageAvailOwned],1
+  vk_call vkCreateSemaphore(device,{sType=SEMAPHORE_CREATE_INFO},0,&renderDone)
+  test eax,eax
+  jnz fail_init
+  mov byte ptr [ownership.renderDoneOwned],1
+  vk_call vkCreateFence(device,{sType=FENCE_CREATE_INFO,flags=SIGNALED_BIT},0,&fence)
+  test eax,eax
+  jnz fail_init
+  mov byte ptr [ownership.fenceOwned],1
+  vk_call vkCreateShaderModule(device,{sType=SHADER_MODULE_CREATE_INFO,
+    codeSize=cubeVertexBytes.size,pCode=&cubeVertexBytes},0,&vertModule)
+  test eax,eax
+  jnz fail_init
+  mov byte ptr [ownership.vertModuleOwned],1
+  vk_call vkCreateShaderModule(device,{sType=SHADER_MODULE_CREATE_INFO,
+    codeSize=cubeFragmentBytes.size,pCode=&cubeFragmentBytes},0,&fragModule)
+  test eax,eax
+  jnz fail_init
+  mov byte ptr [ownership.fragModuleOwned],1
+  vk_call vkCreatePipelineLayout(device,{sType=PIPELINE_LAYOUT_CREATE_INFO,
+    pushConstantRangeCount=1,pPushConstantRanges=&{stageFlags=VERTEX_BIT,
+    offset=0,size=8}},0,&pipelineLayout)
+    test eax,eax
+    jnz fail_init
+  mov byte ptr [ownership.pipelineLayoutOwned],1
+  jmp recreate
+
+recreate: @invariant fixed_objects_owned_and_no_swapchain_work
+  mov eax,dword ptr [state.width]
+  test eax,eax
+  jz minimized_wait
+  mov eax,dword ptr [state.height]
+  test eax,eax
+  jz minimized_wait
+  vk_call vkDeviceWaitIdle(device)
+  cmp eax,VK_SUCCESS
+  jne fail_runtime
+  destroy_swapchain_views_pipeline_if_owned
+  vk_call vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical,surface,&caps)
+  test eax,eax
+  jnz surface_result
+  test caps.supportedUsageFlags,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+  jz fail_runtime
+  test caps.supportedCompositeAlpha,VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+  jz fail_runtime
+  vk_call vkGetPhysicalDeviceSurfaceFormatsKHR(physical,surface,&fmtCount,0)
+  test eax,eax
+  jnz surface_result
+  checked_alloc fmtCount*SIZEOF_FORMAT -> formats
+  jz fail_runtime
+  vk_call vkGetPhysicalDeviceSurfaceFormatsKHR(physical,surface,&fmtCount,formats)
+  test eax,eax
+  jnz surface_result
+  select_required_format_or_fail formats,fmtCount -> surfaceFormat
+  compute_extent_and_count caps,width,height -> extent,imageCount
+  init swapCI {sType=SWAPCHAIN_CREATE_INFO_KHR,surface=surface,
+    minImageCount=imageCount,imageFormat=B8G8R8A8_UNORM,
+    imageColorSpace=SRGB_NONLINEAR_KHR,imageExtent=extent,imageArrayLayers=1,
+    imageUsage=COLOR_ATTACHMENT_BIT,imageSharingMode=EXCLUSIVE,
+    preTransform=caps.currentTransform,compositeAlpha=OPAQUE_BIT_KHR,
+    presentMode=FIFO_KHR,clipped=1,oldSwapchain=oldSwapchain}
+  vk_call vkCreateSwapchainKHR(device,&swapCI,0,&newSwapchain)
+  test eax,eax
+  jnz surface_result
+  mov byte ptr [ownership.newSwapchainOwned],1
+  destroy_old_swapchain_after_new_created
+  vk_call vkGetSwapchainImagesKHR(device,swapchain,&imageCount,0)
+  test eax,eax
+  jnz surface_result
+  checked_alloc imageCount*8 -> images
+  jz fail_runtime
+  checked_alloc imageCount*8 -> views
+  jz fail_runtime
+  checked_alloc imageCount -> imageInitialized
+  jz fail_runtime
+  mov rdi,[imageInitialized]
+  xor eax,eax
+  mov ecx,[imageCount]
+  rep stosb
+  mov dword ptr [initializedViewCount],0
+  mov dword ptr [viewIndex],0
+  vk_call vkGetSwapchainImagesKHR(device,swapchain,&imageCount,images)
+  test eax,eax
+  jnz surface_result
+create_view_loop: @measure imageCount-viewIndex
+  cmp viewIndex,imageCount
+  je create_pipeline
+  vk_call vkCreateImageView(device,{sType=IMAGE_VIEW_CREATE_INFO,
+    image=images[viewIndex],viewType=TYPE_2D,format=B8G8R8A8_UNORM,
+    components={IDENTITY,IDENTITY,IDENTITY,IDENTITY},subresourceRange=
+    {aspectMask=COLOR_BIT,baseMipLevel=0,levelCount=1,
+     baseArrayLayer=0,layerCount=1}},0,&views[viewIndex])
+  test eax,eax
+  jnz fail_runtime
+  inc dword ptr [initializedViewCount]
+  inc viewIndex
+  jmp create_view_loop
+create_pipeline:
+  init shaderStages[0] {sType=PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage=VERTEX_BIT,module=vertModule,pName=&mainName}
+  init shaderStages[1] {sType=PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage=FRAGMENT_BIT,module=fragModule,pName=&mainName}
+  init emptyVertexInput {sType=PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO}
+  init lineList {sType=PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+      topology=PRIMITIVE_TOPOLOGY_LINE_LIST,primitiveRestartEnable=0}
+  init oneDynamicViewport {sType=PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+      viewportCount=1,scissorCount=1}
+  init lineRaster {sType=PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+      depthClampEnable=0,rasterizerDiscardEnable=0,polygonMode=POLYGON_MODE_FILL,
+      cullMode=CULL_MODE_NONE,frontFace=FRONT_FACE_COUNTER_CLOCKWISE,
+      depthBiasEnable=0,lineWidth=1.0f}
+  init sample1 {sType=PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+      rasterizationSamples=SAMPLE_COUNT_1_BIT}
+  init colorAttachment {blendEnable=0,
+      colorWriteMask=R_BIT|G_BIT|B_BIT|A_BIT}
+  init opaqueBlend {sType=PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+      attachmentCount=1,pAttachments=&colorAttachment}
+  store32 dynamicStates[0],DYNAMIC_STATE_VIEWPORT
+  store32 dynamicStates[1],DYNAMIC_STATE_SCISSOR
+  init viewportScissor {sType=PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+      dynamicStateCount=2,pDynamicStates=&dynamicStates}
+  init pipelineRendering {sType=PIPELINE_RENDERING_CREATE_INFO,
+      colorAttachmentCount=1,pColorAttachmentFormats=&colorFormat}
+  init graphicsCI {sType=GRAPHICS_PIPELINE_CREATE_INFO,pNext=&pipelineRendering,
+      stageCount=2,pStages=&shaderStages,pVertexInputState=&emptyVertexInput,
+      pInputAssemblyState=&lineList,pViewportState=&oneDynamicViewport,
+      pRasterizationState=&lineRaster,pMultisampleState=&sample1,
+      pColorBlendState=&opaqueBlend,pDynamicState=&viewportScissor,
+      layout=pipelineLayout,renderPass=0,subpass=0}
+  vk_call vkCreateGraphicsPipelines(device,0,1,&graphicsCI,0,&pipeline)
+  test eax,eax
+  jnz fail_runtime
+  mov byte ptr [ownership.pipelineOwned],1
+  mov byte ptr [state.resize],0
+  jmp event_loop
+
+minimized_wait:
+  cmp byte ptr [state.exit],0
+  jne clean_exit
+  win_call WaitMessage() -> eax
+  test eax,eax
+  jz fail_runtime
+  jmp pump_messages
+
+event_loop: @frontier_or_measure(message_or_frame)
+pump_messages:
+  win_call PeekMessageW(&msg,0,0,0,PM_REMOVE) -> eax
+  test eax,eax
+  jz messages_done
+  cmp msg.message,WM_QUIT
+  je request_exit
+  win_call TranslateMessage(&msg) -> _
+  win_call DispatchMessageW(&msg) -> _
+  jmp pump_messages
+request_exit:
+  mov byte ptr [state.exit],1
+messages_done:
+  cmp byte ptr [state.exit],0
+  jne clean_exit
+  cmp byte ptr [state.resize],0
+  jne recreate
+  vk_call vkWaitForFences(device,1,&fence,1,UINT64_MAX)
+  cmp eax,VK_SUCCESS
+  jne device_result
+  vk_call vkAcquireNextImageKHR(device,swapchain,UINT64_MAX,imageAvail,0,&imageIndex)
+  cmp eax,VK_ERROR_OUT_OF_DATE_KHR
+  je recreate
+  cmp eax,VK_SUBOPTIMAL_KHR
+  je acquired_suboptimal
+  cmp eax,VK_SUCCESS
+  jne device_result
+  mov byte ptr [state.recreateAfterPresent],0
+  jmp acquired
+acquired_suboptimal:
+  mov byte ptr [state.recreateAfterPresent],1
+acquired:
+  vk_call vkResetFences(device,1,&fence)
+  cmp eax,VK_SUCCESS
+  jne device_result
+  vk_call vkResetCommandBuffer(cmd,0)
+  cmp eax,VK_SUCCESS
+  jne device_result
+  vk_call vkBeginCommandBuffer(cmd,{sType=COMMAND_BUFFER_BEGIN_INFO,
+      flags=ONE_TIME_SUBMIT_BIT})
+      cmp eax,VK_SUCCESS
+      jne device_result
+  mov ecx,dword ptr [imageIndex]
+  init barrier {sType=IMAGE_MEMORY_BARRIER_2,
+      dstStageMask=COLOR_ATTACHMENT_OUTPUT,dstAccessMask=COLOR_ATTACHMENT_WRITE,
+      newLayout=COLOR_ATTACHMENT_OPTIMAL,image=images[rcx],
+      subresourceRange={aspectMask=COLOR_BIT,baseMipLevel=0,levelCount=1,
+      baseArrayLayer=0,layerCount=1}}
+  cmp byte ptr [imageInitialized+rcx],0
+  je acquired_first_layout
+  store32 barrier.oldLayout,PRESENT_SRC_KHR
+  jmp acquired_layout_ready
+acquired_first_layout:
+  store32 barrier.oldLayout,UNDEFINED
+  mov byte ptr [imageInitialized+rcx],1
+acquired_layout_ready:
+  init dependencyInfo {sType=DEPENDENCY_INFO,imageMemoryBarrierCount=1,
+      pImageMemoryBarriers=&barrier}
+  vk_call vkCmdPipelineBarrier2(cmd,&dependencyInfo)
+  mov ecx,dword ptr [imageIndex]
+  init renderingAttachment {sType=RENDERING_ATTACHMENT_INFO,
+      imageView=views[rcx],imageLayout=COLOR_ATTACHMENT_OPTIMAL,
+      loadOp=CLEAR,storeOp=STORE,clearValue={0.02,0.02,0.04,1}}
+  init rendering {sType=RENDERING_INFO,renderArea={0,extent},layerCount=1,
+      colorAttachmentCount=1,pColorAttachments=&renderingAttachment}
+  vk_call vkCmdBeginRendering(cmd,&rendering)
+  vk_call vkCmdBindPipeline(cmd,GRAPHICS,pipeline)
+  init viewport {width=float(extent.width),height=float(extent.height),maxDepth=1}
+  init scissor {extent=extent}
+  vk_call vkCmdSetViewport(cmd,0,1,&viewport)
+  vk_call vkCmdSetScissor(cmd,0,1,&scissor)
+  win_call QueryPerformanceCounter(&qpcNow) -> eax
+  test eax,eax
+  jz fail_runtime
+  mov rax,qword ptr [qpcNow]
+  cmp rax,qword ptr [qpcPrevious]
+  jl clock_violation @violation_edge(.monotonicClockRegressed)
+  mov qword ptr [qpcPrevious],rax
+  sub rax,qword ptr [qpcEpoch]
+  jo clock_violation @violation_edge(.monotonicClockRangeExceeded)
+  cvtsi2sd xmm1,rax
+  cvtsi2sd xmm2,qword ptr [qpcFrequency]
+  divsd xmm1,xmm2
+  mulsd xmm1,qword ptr [angularVelocity]
+  movapd xmm0,xmm1
+  movapd xmm3,xmm0
+  divsd xmm3,qword ptr [tau]
+  roundsd xmm3,xmm3,1
+  mulsd xmm3,qword ptr [tau]
+  subsd xmm0,xmm3
+  cvtsd2ss xmm0,xmm0
+  cvtsi2ss xmm1,extent.width
+  cvtsi2ss xmm2,extent.height
+  divss xmm1,xmm2
+  store32 push.angle,xmm0
+  store32 push.aspect,xmm1
+  vk_call vkCmdPushConstants(cmd,pipelineLayout,VERTEX_BIT,0,8,&push)
+  vk_call vkCmdDraw(cmd,24,1,0,0)
+  vk_call vkCmdEndRendering(cmd)
+  mov ecx,dword ptr [imageIndex]
+  init barrier {sType=IMAGE_MEMORY_BARRIER_2,
+      srcStageMask=COLOR_ATTACHMENT_OUTPUT,srcAccessMask=COLOR_ATTACHMENT_WRITE,
+      oldLayout=COLOR_ATTACHMENT_OPTIMAL,newLayout=PRESENT_SRC_KHR,
+      image=images[rcx],subresourceRange={aspectMask=COLOR_BIT,baseMipLevel=0,
+      levelCount=1,baseArrayLayer=0,layerCount=1}}
+  vk_call vkCmdPipelineBarrier2(cmd,&dependencyInfo)
+  vk_call vkEndCommandBuffer(cmd)
+  cmp eax,VK_SUCCESS
+  jne device_result
+  init waitSemaphoreInfo {sType=SEMAPHORE_SUBMIT_INFO,semaphore=imageAvail,
+      stageMask=COLOR_ATTACHMENT_OUTPUT}
+  init commandBufferInfo {sType=COMMAND_BUFFER_SUBMIT_INFO,commandBuffer=cmd}
+  init signalSemaphoreInfo {sType=SEMAPHORE_SUBMIT_INFO,semaphore=renderDone,
+      stageMask=ALL_GRAPHICS}
+  init submit {sType=SUBMIT_INFO_2,waitSemaphoreInfoCount=1,
+      pWaitSemaphoreInfos=&waitSemaphoreInfo,commandBufferInfoCount=1,
+      pCommandBufferInfos=&commandBufferInfo,signalSemaphoreInfoCount=1,
+      pSignalSemaphoreInfos=&signalSemaphoreInfo}
+  vk_call vkQueueSubmit2(queue,1,&submit,fence)
+  cmp eax,VK_SUCCESS
+  jne device_result
+  init present {sType=PRESENT_INFO_KHR,waitSemaphoreCount=1,
+      pWaitSemaphores=&renderDone,swapchainCount=1,pSwapchains=&swapchain,
+      pImageIndices=&imageIndex}
+  vk_call vkQueuePresentKHR(queue,&present)
+  cmp eax,VK_ERROR_OUT_OF_DATE_KHR
+  je recreate
+  cmp eax,VK_SUBOPTIMAL_KHR
+  je recreate
+  cmp eax,VK_SUCCESS
+  jne device_result
+  cmp byte ptr [state.recreateAfterPresent],0
+  jne recreate
+  jmp event_loop
+
+fail_runtime_free_formats:
+  free formats
+  jmp fail_runtime
+
+surface_result:
+  cmp eax,VK_ERROR_SURFACE_LOST_KHR
+  je fail_surface
+  cmp eax,VK_ERROR_OUT_OF_DATE_KHR
+  je recreate
+  jmp fail_runtime
+device_result:
+  cmp eax,VK_ERROR_DEVICE_LOST
+  je fail_device
+  cmp eax,VK_ERROR_SURFACE_LOST_KHR
+  je fail_surface
+  jmp fail_runtime
+
+clean_exit: mov ebx,0
+jmp cleanup
+fail_init: mov ebx,1
+jmp cleanup
+fail_runtime: mov ebx,2
+jmp cleanup
+fail_surface: mov ebx,3
+mov byte ptr [ownership.surfaceLost],1
+jmp cleanup
+fail_device: mov ebx,4
+mov byte ptr [ownership.deviceLost],1
+jmp cleanup
+clock_violation:
+  ud2 @containment_tail(.monotonicClockRegressed)
+provider_violation:
+  ud2 @containment_tail(.externalProviderContractViolation)
+
+cleanup: @placement [status := ebx]
+         @invariant reverse_dependency_ledger
+  reverse_cleanup
+  add rsp,FRAME_SIZE
+  pop r15
+  pop r14
+  pop r13
+  pop r12
+  pop rdi
+  pop rsi
+  pop rbp
+  pop rbx
+  mov ecx,ebx
+  call qword ptr [rip+__imp_ExitProcess]
+  ud2
+}
+
+theorem vertexCorrect :
+    AssemblyRefinesImplementation
+      vertexShaderScope VertexSpirvRepresentation vertexModel cubeVertex := by
+  verify_spirv
+
+theorem fragmentCorrect :
+    AssemblyRefinesImplementation
+      fragmentShaderScope FragmentSpirvRepresentation fragmentModel cubeFragment := by
+  verify_spirv
+
+theorem hostImplementsDriver :
+    HostAssemblyImplements
+      (ProcessRealization.explicit processPlanRealizes)
+      plan cubeHost := by
+  verify_asm
+
+end Grass.Spikes.SpinningCube
+```
+
+### `Layout.lean`
+
+```lean
+import Spikes.«5_Spinning_Cube».Process
+
+namespace Grass.Spikes.SpinningCube
+
+def instanceExtensionNames : Vec CString := #[
+  "VK_KHR_surface",
+  "VK_KHR_win32_surface"
+]
+
+def deviceExtensionNames : Vec CString := #["VK_KHR_swapchain"]
+
+def instanceFunctionNames : Vec CString := #[
+  "vkDestroyInstance",
+  "vkCreateWin32SurfaceKHR",
+  "vkDestroySurfaceKHR",
+  "vkEnumeratePhysicalDevices",
+  "vkGetPhysicalDeviceProperties2",
+  "vkGetPhysicalDeviceFeatures2",
+  "vkEnumerateDeviceExtensionProperties",
+  "vkGetPhysicalDeviceQueueFamilyProperties2",
+  "vkGetPhysicalDeviceSurfaceSupportKHR",
+  "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
+  "vkGetPhysicalDeviceSurfaceFormatsKHR",
+  "vkCreateDevice"
+]
+
+def deviceFunctionNames : Vec CString := #[
+  "vkDestroyDevice",
+  "vkGetDeviceQueue",
+  "vkCreateCommandPool",
+  "vkDestroyCommandPool",
+  "vkAllocateCommandBuffers",
+  "vkCreateSemaphore",
+  "vkDestroySemaphore",
+  "vkCreateFence",
+  "vkDestroyFence",
+  "vkCreateShaderModule",
+  "vkDestroyShaderModule",
+  "vkCreatePipelineLayout",
+  "vkDestroyPipelineLayout",
+  "vkCreateSwapchainKHR",
+  "vkDestroySwapchainKHR",
+  "vkGetSwapchainImagesKHR",
+  "vkCreateImageView",
+  "vkDestroyImageView",
+  "vkCreateGraphicsPipelines",
+  "vkDestroyPipeline",
+  "vkDeviceWaitIdle",
+  "vkWaitForFences",
+  "vkAcquireNextImageKHR",
+  "vkResetFences",
+  "vkResetCommandBuffer",
+  "vkBeginCommandBuffer",
+  "vkCmdPipelineBarrier2",
+  "vkCmdBeginRendering",
+  "vkCmdBindPipeline",
+  "vkCmdSetViewport",
+  "vkCmdSetScissor",
+  "vkCmdPushConstants",
+  "vkCmdDraw",
+  "vkCmdEndRendering",
+  "vkEndCommandBuffer",
+  "vkQueueSubmit2",
+  "vkQueuePresentKHR"
+]
+
+def win32Imports : Vec ImportSymbol := #[
+  `GetModuleHandleW,
+  `LoadCursorW,
+  `RegisterClassExW,
+  `CreateWindowExW,
+  `ShowWindow,
+  `DestroyWindow,
+  `DefWindowProcW,
+  `GetWindowLongPtrW,
+  `SetWindowLongPtrW,
+  `WaitMessage,
+  `PeekMessageW,
+  `TranslateMessage,
+  `DispatchMessageW,
+  `UnregisterClassW,
+  `QueryPerformanceFrequency,
+  `QueryPerformanceCounter,
+  `GetProcessHeap,
+  `HeapAlloc,
+  `HeapFree,
+  `ExitProcess
+]
+
+def vulkanImports : Vec ImportSymbol := #[
+  `vkGetInstanceProcAddr,
+  `vkGetDeviceProcAddr
+]
+
+def cubeFrameObjects : Vec StackObjectSpec := #[
+  .object `wc .wndClassExW,
+  .object `msg .msg,
+  .object `state .cubeWindowState,
+  .object `qpcFrequency .int64,
+  .object `qpcEpoch .int64,
+  .object `qpcPrevious .int64,
+  .object `qpcNow .int64,
+  .object `processHeap .pointer,
+  .object `vkCreateInstancePtr .pointer,
+  .object `instance .vkInstance,
+  .object `surface .vkSurfaceKHR,
+  .object `physical .vkPhysicalDevice,
+  .object `qfamily .uint32,
+  .object `device .vkDevice,
+  .object `queue .vkQueue,
+  .object `commandPool .vkCommandPool,
+  .object `cmd .vkCommandBuffer,
+  .object `imageAvail .vkSemaphore,
+  .object `renderDone .vkSemaphore,
+  .object `fence .vkFence,
+  .object `vertModule .vkShaderModule,
+  .object `fragModule .vkShaderModule,
+  .object `pipelineLayout .vkPipelineLayout,
+  .object `pipeline .vkPipeline,
+  .object `swapchain .vkSwapchainKHR,
+  .object `oldSwapchain .vkSwapchainKHR,
+  .object `newSwapchain .vkSwapchainKHR,
+  .object `count .uint32,
+  .object `deviceCount .uint32,
+  .object `devices .pointer,
+  .object `extCount .uint32,
+  .object `extProps .pointer,
+  .object `queueCount .uint32,
+  .object `queueProps .pointer,
+  .object `supported .vkBool32,
+  .object `fmtCount .uint32,
+  .object `formats .pointer,
+  .object `surfaceFormat .vkSurfaceFormatKHR,
+  .object `imageCount .uint32,
+  .object `requestedImageCount .uint32,
+  .object `images .pointer,
+  .object `views .pointer,
+  .object `imageInitialized .pointer,
+  .object `initializedViewCount .uint32,
+  .object `viewIndex .uint32,
+  .object `imageIndex .uint32,
+  .object `appInfo .vkApplicationInfo,
+  .object `instanceCI .vkInstanceCreateInfo,
+  .object `properties2 .vkPhysicalDeviceProperties2,
+  .object `queueCI .vkDeviceQueueCreateInfo,
+  .object `features2 .vkPhysicalDeviceFeatures2,
+  .object `features13 .vkPhysicalDeviceVulkan13Features,
+  .object `deviceCI .vkDeviceCreateInfo,
+  .object `win32SurfaceCI .vkWin32SurfaceCreateInfoKHR,
+  .object `commandPoolCI .vkCommandPoolCreateInfo,
+  .object `commandBufferAI .vkCommandBufferAllocateInfo,
+  .object `semaphoreCI .vkSemaphoreCreateInfo,
+  .object `fenceCI .vkFenceCreateInfo,
+  .object `vertexShaderCI .vkShaderModuleCreateInfo,
+  .object `fragmentShaderCI .vkShaderModuleCreateInfo,
+  .object `pipelineLayoutCI .vkPipelineLayoutCreateInfo,
+  .object `pushConstantRange .vkPushConstantRange,
+  .object `caps .vkSurfaceCapabilitiesKHR,
+  .object `extent .vkExtent2D,
+  .object `swapCI .vkSwapchainCreateInfoKHR,
+  .object `pipelineRendering .vkPipelineRenderingCreateInfo,
+  .object `graphicsCI .vkGraphicsPipelineCreateInfo,
+  .object `imageViewCI .vkImageViewCreateInfo,
+  .object `commandBufferBI .vkCommandBufferBeginInfo,
+  .object `shaderStages (.array 2 .vkPipelineShaderStageCreateInfo),
+  .object `emptyVertexInput .vkPipelineVertexInputStateCreateInfo,
+  .object `lineList .vkPipelineInputAssemblyStateCreateInfo,
+  .object `oneDynamicViewport .vkPipelineViewportStateCreateInfo,
+  .object `lineRaster .vkPipelineRasterizationStateCreateInfo,
+  .object `sample1 .vkPipelineMultisampleStateCreateInfo,
+  .object `colorAttachment .vkPipelineColorBlendAttachmentState,
+  .object `opaqueBlend .vkPipelineColorBlendStateCreateInfo,
+  .object `dynamicStates (.array 2 .vkDynamicState),
+  .object `viewportScissor .vkPipelineDynamicStateCreateInfo,
+  .object `push .cubePushConstants,
+  .object `barrier .vkImageMemoryBarrier2,
+  .object `dependencyInfo .vkDependencyInfo,
+  .object `rendering .vkRenderingInfo,
+  .object `renderingAttachment .vkRenderingAttachmentInfo,
+  .object `viewport .vkViewport,
+  .object `scissor .vkRect2D,
+  .object `submit .vkSubmitInfo2,
+  .object `waitSemaphoreInfo .vkSemaphoreSubmitInfo,
+  .object `signalSemaphoreInfo .vkSemaphoreSubmitInfo,
+  .object `commandBufferInfo .vkCommandBufferSubmitInfo,
+  .object `present .vkPresentInfoKHR,
+  .object `instanceDispatch (.array instanceFunctionNames.size .pointer),
+  .object `deviceDispatch (.array deviceFunctionNames.size .pointer),
+  .object `deviceDispatchCandidate (.array deviceFunctionNames.size .pointer),
+  .object `vkDestroyDevicePtr .pointer,
+  .object `ownership .cubeOwnershipLedger,
+  .outgoingCallArea,
+  .parallelMoveSpill
+]
+
+def cubeCallbackFrameObjects : Vec StackObjectSpec := #[
+  .object `callbackHwnd .pointer,
+  .object `callbackMessage .uint32,
+  .object `callbackWparam .uint64,
+  .object `callbackLparam .int64,
+  .object `callbackState .pointer,
+  .outgoingCallArea,
+  .parallelMoveSpill
+]
+
+def cubeFrameLayout : StackFrameLayout :=
+  StackFrameLayout.packWin64 cubeFrameObjects
+
+def cubeCallbackFrameLayout : StackFrameLayout :=
+  StackFrameLayout.packWin64 cubeCallbackFrameObjects
+
+end Grass.Spikes.SpinningCube
+```
+
+### `Macros.lean`
+
+```lean
+import Spikes.«5_Spinning_Cube».Layout
+
+namespace Grass.Spikes.SpinningCube
+
+def win64ArgLocation : Nat → CallLocation
+  | 0 => .register .rcx
+  | 1 => .register .rdx
+  | 2 => .register .r8
+  | 3 => .register .r9
+  | n + 4 => .stack (32 + 8 * n)
+
+def expandArguments (arguments : Vec Operand) : Vec RawInstruction :=
+  ParallelMove.expand
+    (arguments.mapIdx fun index argument =>
+      (argument, win64ArgLocation index))
+
+def expandCall (target : CallTarget) (arguments : Vec Operand)
+    (result : Option Register) : Vec RawInstruction :=
+  expandArguments arguments ++
+  #[match target with
+    | .iat symbol => .callMem (.ripRelative (iatSymbol symbol))
+    | .dispatch base slot => .callMem (.baseDisplacement base slot)] ++
+  match result with
+  | none => #[]
+  | some .rax => #[]
+  | some destination => #[.mov destination .rax]
+
+def expandZeroInitializedStructure
+    (layout : ProvedStructLayout) (address : Address)
+    (fields : Vec FieldInitializer) : Vec RawInstruction :=
+  #[.xor .eax .eax,
+    .lea .rdi address,
+    .mov .ecx (.immediate (layout.size / 8)),
+    .repStosq] ++
+  fields.map fun field =>
+    .movWidth field.layout.width (address + field.layout.offset) field.value
+
+def expandLoad (destinations : Vec Register) (sources : Vec Address) :
+    Vec RawInstruction :=
+  Vec.zipWith (fun destination source => .mov destination (.memory source))
+    destinations sources
+
+def expandUnsignedClamp
+    (value low high : Operand) (destination : Address) : Vec RawInstruction := #[
+  .mov .eax value,
+  .cmp .eax low,
+  .cmovb .eax low,
+  .cmp .eax high,
+  .cmova .eax high,
+  .mov32 destination .eax
+]
+
+def expandConditionalDestroy
+    (tag : Address) (arguments : Vec Operand) (target : CallTarget) :
+    Vec RawInstruction :=
+  #[.cmp8 tag 0, .je (.relative 2)] ++
+  expandCall target arguments none ++
+  #[.mov8 tag 0]
+
+def exactCStringScanBody : TransparentAsmFragment plan := asm_fragment {
+  xor ebx,ebx
+cstr_record_head: @measure recordCount-rbx
+  cmp ebx,recordCount
+  je cstr_not_found
+  lea rsi,[records+rbx*recordStride+recordNameOffset]
+  mov rdi,needle
+  xor ecx,ecx
+cstr_char_head: @measure VK_MAX_EXTENSION_NAME_SIZE-rcx
+  cmp ecx,VK_MAX_EXTENSION_NAME_SIZE
+  je cstr_next_record
+  mov al,[rsi+rcx]
+  cmp al,[rdi+rcx]
+  jne cstr_next_record
+  test al,al
+  jz cstr_found
+  inc ecx
+  jmp cstr_char_head
+cstr_next_record:
+  inc ebx
+  jmp cstr_record_head
+cstr_not_found:
+  mov ebx,-1
+cstr_found:
+}
+
+def queuePropertyInitializationBody : TransparentAsmFragment plan := asm_fragment {
+  xor ebx,ebx
+queue_record_head: @measure queueCount-rbx
+  cmp ebx,[queueCount]
+  je queue_record_done
+  lea rdi,[queueProps+rbx*QSIZE]
+  xor eax,eax
+  mov ecx,QSIZE/8
+  rep stosq
+  mov dword ptr [queueProps+rbx*QSIZE+sType],PHYSICAL_DEVICE_QUEUE_FAMILY_PROPERTIES_2
+  inc ebx
+  jmp queue_record_head
+queue_record_done:
+}
+
+def checkedHeapAllocationBody : TransparentAsmFragment plan := asm_fragment {
+  mov rax,count
+  mov rcx,stride
+  mul rcx
+  test rdx,rdx
+  jnz allocation_failure
+  test count,count
+  jz allocation_zero_case
+  test rax,rax
+  jz allocation_failure
+  mov r8,rax
+  mov rcx,[processHeap]
+  xor edx,edx
+  call qword ptr [rip+__imp_HeapAlloc]
+  test rax,rax
+  jz allocation_failure
+  mov pointer,rax
+  mov byte ptr [tag],1
+allocation_done:
+}
+
+def checkedHeapReleaseBody : TransparentAsmFragment plan := asm_fragment {
+free_head:
+  cmp byte ptr [tag],0
+  je free_done
+  mov rcx,[processHeap]
+  xor edx,edx
+  mov r8,pointer
+  call qword ptr [rip+__imp_HeapFree]
+  test eax,eax
+  jz provider_violation @violation_edge(.ownedHeapFreeRejected)
+  mov pointer,0
+  mov byte ptr [tag],0
+free_done:
+}
+
+def instanceDispatchResolutionBody : TransparentAsmFragment plan := asm_fragment {
+resolve_i_init:
+  xor r14d,r14d
+resolve_i_head: @measure instanceSlotCount-r14
+  cmp r14d,instanceSlotCount
+  je resolve_i_seal
+  mov rcx,[instance]
+  mov rdx,[instanceNames+r14*8]
+  call qword ptr [rip+__imp_vkGetInstanceProcAddr]
+  test rax,rax
+  jz fail_init
+  mov [instanceDispatch+r14*8],rax
+  inc r14d
+  jmp resolve_i_head
+resolve_i_seal:
+  @ghost seal_read_only(instanceDispatch)
+}
+
+def deviceDispatchResolutionBody : TransparentAsmFragment plan := asm_fragment {
+resolve_d_init:
+  xor r14d,r14d
+resolve_d_head: @measure deviceSlotCount-r14
+  cmp r14d,deviceSlotCount
+  je resolve_d_seal
+  mov rcx,[device]
+  mov rdx,[deviceNames+r14*8]
+  call qword ptr [rip+__imp_vkGetDeviceProcAddr]
+  test rax,rax
+  jz fail_init
+  mov [deviceDispatchCandidate+r14*8],rax
+  inc r14d
+  jmp resolve_d_head
+resolve_d_seal:
+  lea rsi,[deviceDispatchCandidate]
+  lea rdi,[deviceDispatch]
+  mov ecx,deviceSlotCount
+  rep movsq
+  @ghost seal_read_only(deviceDispatch)
+  mov byte ptr [ownership.deviceDispatchReady],1
+}
+
+def deviceSelectionBody : TransparentAsmFragment plan := asm_fragment {
+dev_init:
+  xor r14d,r14d
+dev_head: @measure deviceCount-r14
+  cmp r14d,[deviceCount]
+  je fail_init
+  mov r15,[devices+r14*8]
+  init properties2 {sType=PHYSICAL_DEVICE_PROPERTIES_2}
+  vk_call vkGetPhysicalDeviceProperties2(r15,&properties2)
+  cmp [properties2.properties.apiVersion],VK_API_VERSION_1_3
+  jb dev_next
+  init features13 {sType=PHYSICAL_DEVICE_VULKAN_1_3_FEATURES}
+  init features2 {sType=PHYSICAL_DEVICE_FEATURES_2,pNext=&features13}
+  vk_call vkGetPhysicalDeviceFeatures2(r15,&features2)
+  cmp [features13.dynamicRendering],0
+  je dev_next
+  cmp [features13.synchronization2],0
+  je dev_next
+ext_count:
+  vk_call vkEnumerateDeviceExtensionProperties(r15,0,&extCount,0)
+  cmp eax,VK_SUCCESS
+  jne dev_next
+  checked_alloc extCount*SIZEOF_EXTENSION_PROPERTIES -> extProps
+  vk_call vkEnumerateDeviceExtensionProperties(r15,0,&extCount,extProps)
+  cmp eax,VK_INCOMPLETE
+  je ext_retry
+  cmp eax,VK_SUCCESS
+  jne dev_next_free_ext
+  exact_find_c_string extProps,extCount,&swapchainExtName -> ebx
+  js dev_next_free_ext
+  vk_call vkGetPhysicalDeviceQueueFamilyProperties2(r15,&queueCount,0)
+  checked_alloc queueCount*SIZEOF_QUEUE_PROPERTIES_2 -> queueProps
+  initialize_queue_property_records queueProps,queueCount
+  vk_call vkGetPhysicalDeviceQueueFamilyProperties2(r15,&queueCount,queueProps)
+  xor ebx,ebx
+queue_head: @measure queueCount-rbx
+  cmp ebx,[queueCount]
+  je dev_next_free_all
+  test [queueProps+rbx*QSIZE+queueFlags],VK_QUEUE_GRAPHICS_BIT
+  jz queue_next
+  vk_call vkGetPhysicalDeviceSurfaceSupportKHR(r15,ebx,[surface],&supported)
+  cmp eax,VK_SUCCESS
+  jne dev_next_free_all
+  cmp [supported],0
+  jne dev_selected
+queue_next:
+  inc ebx
+  jmp queue_head
+dev_selected:
+  mov [physical],r15
+  mov [qfamily],ebx
+  free queueProps
+  free extProps
+  free devices
+  jmp create_device
+dev_next_free_all:
+  free queueProps
+dev_next_free_ext:
+  free extProps
+dev_next:
+  inc r14d
+  jmp dev_head
+ext_retry:
+  free extProps
+  jmp ext_count
+}
+
+def surfaceSelectionBody : TransparentAsmFragment plan := asm_fragment {
+fmt_init:
+  xor ebx,ebx
+fmt_head: @measure fmtCount-rbx
+  cmp ebx,[fmtCount]
+  je fail_runtime_free_formats
+  cmp [formats+rbx*FSIZE+format],VK_FORMAT_B8G8R8A8_UNORM
+  jne fmt_next
+  cmp [formats+rbx*FSIZE+colorSpace],VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
+  je fmt_found
+fmt_next:
+  inc ebx
+  jmp fmt_head
+fmt_found:
+  mov rax,[formats+rbx*FSIZE]
+  mov [surfaceFormat],rax
+  free formats
+}
+
+def extentAndCountBody : TransparentAsmFragment plan := asm_fragment {
+  cmp [caps.currentExtent.width],UINT32_MAX
+  jne extent_fixed
+  clamp_u32 [state.width],[caps.min.width],[caps.max.width] -> [extent.width]
+  clamp_u32 [state.height],[caps.min.height],[caps.max.height] -> [extent.height]
+  jmp extent_done
+extent_fixed:
+  mov rax,[caps.currentExtent]
+  mov [extent],rax
+extent_done:
+  cmp [extent.width],0
+  je minimized_wait
+  cmp [extent.height],0
+  je minimized_wait
+  mov eax,[caps.minImageCount]
+  cmp eax,UINT32_MAX
+  je fail_runtime
+  inc eax
+  mov ecx,[caps.maxImageCount]
+  test ecx,ecx
+  jz count_done
+  cmp eax,ecx
+  cmova eax,ecx
+count_done:
+  mov [requestedImageCount],eax
+}
+
+def swapchainRetirementBody : TransparentAsmFragment plan := asm_fragment {
+destroy_old_init:
+  mov ecx,[initializedViewCount]
+destroy_old_head: @measure ecx
+  test ecx,ecx
+  jz destroy_old_pipeline
+  dec ecx
+  vk_call vkDestroyImageView(device,views[rcx],0)
+  mov qword ptr [views+rcx*8],0
+  jmp destroy_old_head
+destroy_old_pipeline:
+  cmp byte ptr [ownership.pipelineOwned],0
+  je destroy_old_swap
+  vk_call vkDestroyPipeline(device,pipeline,0)
+  mov byte ptr [ownership.pipelineOwned],0
+destroy_old_swap:
+  cmp byte ptr [ownership.swapchainOwned],0
+  je destroy_old_arrays
+  vk_call vkDestroySwapchainKHR(device,swapchain,0)
+  mov byte ptr [ownership.swapchainOwned],0
+destroy_old_arrays:
+  mov dword ptr [initializedViewCount],0
+  mov dword ptr [viewIndex],0
+  free imageInitialized
+  free views
+  free images
+}
+
+def installNewSwapchainBody : TransparentAsmFragment plan := asm_fragment {
+  mov rax,[newSwapchain]
+  mov [swapchain],rax
+  mov byte ptr [ownership.newSwapchainOwned],0
+  mov byte ptr [ownership.swapchainOwned],1
+}
+
+def reverseCleanupBody : TransparentAsmFragment plan := asm_fragment {
+cleanup_device_wait:
+  cmp byte ptr [ownership.deviceDispatchReady],0
+  je cleanup_views
+  cmp byte ptr [ownership.deviceLost],0
+  jne cleanup_views
+  vk_call vkDeviceWaitIdle(device)
+cleanup_views:
+  mov ecx,[initializedViewCount]
+cleanup_view_head: @measure ecx
+  test ecx,ecx
+  jz cleanup_pipeline
+  dec ecx
+  vk_call vkDestroyImageView(device,views[rcx],0)
+  jmp cleanup_view_head
+cleanup_pipeline:
+  destroy_if_owned ownership.pipelineOwned,vkDestroyPipeline,device,pipeline
+  destroy_if_owned ownership.swapchainOwned,vkDestroySwapchainKHR,device,swapchain
+  destroy_if_owned ownership.pipelineLayoutOwned,vkDestroyPipelineLayout,device,pipelineLayout
+  destroy_if_owned ownership.fragModuleOwned,vkDestroyShaderModule,device,fragModule
+  destroy_if_owned ownership.vertModuleOwned,vkDestroyShaderModule,device,vertModule
+  destroy_if_owned ownership.fenceOwned,vkDestroyFence,device,fence
+  destroy_if_owned ownership.renderDoneOwned,vkDestroySemaphore,device,renderDone
+  destroy_if_owned ownership.imageAvailOwned,vkDestroySemaphore,device,imageAvail
+  destroy_if_owned ownership.commandPoolOwned,vkDestroyCommandPool,device,commandPool
+  cmp byte ptr [ownership.deviceOwned],0
+  je cleanup_surface
+  cmp byte ptr [ownership.deviceDestroyReady],0
+  je provider_violation @violation_edge(.ownedDeviceWithoutDestroyCapability)
+  mov rcx,[device]
+  xor edx,edx
+  call qword ptr [vkDestroyDevicePtr]
+  mov byte ptr [ownership.deviceOwned],0
+cleanup_surface:
+  destroy_if_owned ownership.surfaceOwned,vkDestroySurfaceKHR,instance,surface
+  destroy_if_owned ownership.instanceOwned,vkDestroyInstance,instance
+  free imageInitialized
+  free views
+  free images
+  free queueProps
+  free extProps
+  free devices
+  cmp byte ptr [state.hwndOwned],0
+  je cleanup_class
+  win_call DestroyWindow(r13)
+cleanup_class:
+  cmp byte ptr [ownership.classRegistered],0
+  je cleanup_return
+  win_call UnregisterClassW(&className,r12)
+cleanup_return:
+}
+
+def cubeMacroDefinitions : AsmMacroRegistry plan := #[
+  .functional `win_call expandCall,
+  .functional `vk_call expandCall,
+  .functional `init expandZeroInitializedStructure,
+  .literal `checked_alloc checkedHeapAllocationBody,
+  .literal `free checkedHeapReleaseBody,
+  .literal `resolve_instance_functions_or_fail instanceDispatchResolutionBody,
+  .literal `resolve_device_functions_or_fail deviceDispatchResolutionBody,
+  .literal `enumerate_and_select_literal_loop deviceSelectionBody,
+  .literal `select_required_format_or_fail surfaceSelectionBody,
+  .literal `compute_extent_and_count extentAndCountBody,
+  .literal `destroy_swapchain_views_pipeline_if_owned swapchainRetirementBody,
+  .literal `destroy_old_swapchain_after_new_created installNewSwapchainBody,
+  .literal `reverse_cleanup reverseCleanupBody,
+  .singleInstruction `store32 .mov32,
+  .singleInstruction `store64 .mov64,
+  .functional `load expandLoad,
+  .functional `clamp_u32 expandUnsignedClamp,
+  .literal `exact_find_c_string exactCStringScanBody,
+  .literal `initialize_queue_property_records queuePropertyInitializationBody,
+  .functional `destroy_if_owned expandConditionalDestroy
+]
+
+end Grass.Spikes.SpinningCube
+```
+
+### `Process.lean`
+
+```lean
+import Grass.Process
+import Grass.Process.Blend
+import Grass.Platform.Win10.Vulkan13
+import Grass.Std.Graphics.Cube
+import Grass.Std.Process.Graphics
+import Spikes.«5_Spinning_Cube».Spec
+
+namespace Grass.Spikes.SpinningCube
+
+def projection : TargetProjection spec .win10X64Vulkan13Spirv15 :=
+  TargetProjection.win10VulkanInteractive
+    (clock := .queryPerformanceCounter)
+    (userExitStatus := 0)
+    (failureStatus := 1)
+
+def vertexContract : ComponentContract :=
+  Graphics.vertexProjectionContract scene
+
+def fragmentContract : ComponentContract :=
+  Graphics.fragmentColorContract scene
+
+def vertexModel : ImplementationModel :=
+  Graphics.cubeVertexModel scene
+
+def fragmentModel : ImplementationModel :=
+  Graphics.cubeFragmentModel scene
+
+theorem vertexModelCorrect :
+    ImplementationRealizesContract vertexModel vertexContract :=
+  Graphics.cubeVertexModelCorrect scene
+
+theorem fragmentModelCorrect :
+    ImplementationRealizesContract fragmentModel fragmentContract :=
+  Graphics.cubeFragmentModelCorrect scene
+
+def rotationRepresentation : FloatingRotationRelation :=
+  FloatingRotationRelation.ieee754
+    (timeBase := .absoluteFromEpoch)
+    (accumulator := .binary64)
+    (shaderInput := .binary32)
+    (reduction := .towardNegativeInfinityModuloTau)
+
+theorem rotationRepresentationCorrect :
+    FloatingRotationRelation.Refines
+      rotationRepresentation rotationAccuracy scene.angularVelocity :=
+  IEEE754.absoluteEpochBinary64_binary32Input_elapsedRotation
+    rotationAccuracy scene.angularVelocity
+
+def plan : PlatformPlan spec.driverBoundary.requirements :=
+  PlatformPlan.win10X64Vulkan13Spirv15 projection
+
+inductive CubeRole
+  | input
+  | sceneAnimator
+  | surfacePresenter
+  | termination
+
+def cubeProtocol : AbstractSpecificationProcessNetwork resources :=
+  Graphics.interactivePresentationProtocol
+    (roles := CubeRole)
+    (resources := resources)
+    (scene := scene)
+    (accepts := CubeObservation.Accepts)
+
+def cubeProcessPresentation : ProcessPresentation spec where
+  network := cubeProtocol
+  denotationExact := Graphics.interactivePresentationDenotesSceneContract
+  requirementsExact := Graphics.interactivePresentationRequirementsExact
+
+def cubeProtocolResourceView : CubeRole -> RequiredResourceView resources :=
+  Graphics.interactivePresentationResourceView
+
+theorem cubeProtocolResourceRestrictionExact :
+    forall schema,
+      (cubeProtocol.protocol schema).resourceSemantics.restrict
+          (cubeProtocolResourceView schema) =
+        spec.resourceSemantics.restrict (cubeProtocolResourceView schema) :=
+  Graphics.interactivePresentationResourceRestrictionExact
+
+theorem cubeProtocolResourceViewsCoverRoot :
+    ExactUnionOfRequiredResourceViews cubeProtocolResourceView
+      spec.resourceSemantics.requiredAxes :=
+  Graphics.interactivePresentationResourceViewsCoverRoot
+
+structure DesiredCubeView where
+  extent : Nat × Nat
+  sampledAt : MonotonicInstant
+  angle : Angle
+
+inductive FrameOpportunity
+  | available (now : MonotonicInstant)
+
+inductive CubePhase
+  | running
+  | stopping (outcome : CubeOutcome)
+  | finished (outcome : CubeOutcome)
+
+structure PendingCubeDemand where
+  view : DesiredCubeView
+
+structure CubeState where
+  phase : CubePhase
+  extent : Nat × Nat
+  lastOpportunity : Option MonotonicInstant
+  nextAngle : Angle
+  pending : Multiset PendingCubeDemand
+
+inductive FrameCommitResult (view : DesiredCubeView)
+  | committed (frame : CubeFrame)
+      (matches : FrameMatchesDesired scene view frame)
+  | coalesced
+  | failed (outcome : CubeOutcome) (notSuccess : outcome ≠ .userExit)
+
+inductive FinishResult (outcome : CubeOutcome)
+  | stopped
+
+inductive CubeDemand
+  | commitFrame (view : DesiredCubeView)
+  | finish (outcome : CubeOutcome)
+
+def CubeResult : CubeDemand → Type
+  | .commitFrame view => FrameCommitResult view
+  | .finish outcome => FinishResult outcome
+
+def cubeApplication : ProcessSpec where
+  Request := Unit
+  State := CubeState
+  TerminalResult := CubeOutcome
+  ExternalEvent := CubeInput ⊕ FrameOpportunity
+  Demand := CubeDemand
+  Result := CubeResult
+  Observation := CubeObservation
+  Initial := CubeState.InitialWithDemands scene
+  Terminal := CubeState.Terminal
+  Step := CubeState.Step scene
+  view := some { View := DesiredCubeView, render := CubeState.render scene }
+
+theorem cubeApplicationCorrect : ProcessCorrect cubeApplication where
+  Invariant := CubeState.Invariant scene
+  initial := cube_initial_invariant
+  initialDemands := cube_initial_demands_are_well_formed
+  preserved := cube_step_preserves
+  terminal := cube_terminal_accepts
+  terminalNoStep := cube_terminal_has_no_step
+  viewAccepts := cube_render_depicts_scene
+  observationsAccept := cube_observations_accept
+  demandsWellFormed := cube_demands_are_well_formed
+  progress := cube_reactive_progress
+
+inductive CubeProcessKind
+  | application
+  | windowInput
+  | frameOpportunity
+  | graphics
+  | terminal
+  | acquire (frame : DemandId)
+  | submission (frame : DemandId)
+  | presentation (frame : DemandId)
+  | apiCall (call : CubeProviderCall)
+
+inductive CubeSharedRegion
+  | selectedProfile
+
+inductive CubeProtocolKey
+  | application
+  | windowInput
+  | frameOpportunity
+  | graphics
+  | terminal
+  | acquire
+  | submission
+  | presentation
+  | api (call : CubeProviderCall)
+
+def cubeProtocols : ProtocolRegistry where
+  Key := CubeProtocolKey
+  protocol
+    | .application => cubeApplication
+    | .windowInput => win32WindowInputProtocol
+    | .frameOpportunity => monotonicFrameOpportunityProtocol
+    | .graphics => vulkanGraphicsProtocol
+    | .terminal => win32TerminalProtocol
+    | .acquire => vulkanAcquireProtocol
+    | .submission => vulkanSubmissionProtocol
+    | .presentation => vulkanPresentationProtocol
+    | .api call => CubeProviderCall.protocol call
+
+def processPlan : ProcessPlan cubeProtocols spec.driverBoundary where
+  ProcessKind := CubeProcessKind
+  SharedRegion := CubeSharedRegion
+  SharedState := CubeSharedState
+  protocolKey
+    | .application => .application
+    | .windowInput => .windowInput
+    | .frameOpportunity => .frameOpportunity
+    | .graphics => .graphics
+    | .terminal => .terminal
+    | .acquire _ => .acquire
+    | .submission _ => .submission
+    | .presentation _ => .presentation
+    | .apiCall call => .api call
+  root := .application
+  rootBoundary := cube_root_exposes_boundary
+  maySpawn := cubeMaySpawn
+  sharedAccess := cubeSharedAccess
+  population := cubePopulation
+  ChannelKind := CubeChannelKind
+  endpoints := CubeChannelEndpoints
+  channel := CubeChannelContracts
+  boundaryProjection := CubeBoundaryProjection
+  spawn := CubeSpawnAuthority
+  cancellation := CubeCancellationLaw
+  supervision := CubeSupervisionLaw
+
+theorem processPlanRealizes : ProcessPlanRealizes spec processPlan where
+  processProofs := by
+    intro kind
+    cases kind with
+    | application => exact cubeApplicationCorrect
+    | windowInput => exact Std.Win32.windowInput_correct
+    | frameOpportunity => exact Std.Process.monotonicFrameOpportunity_correct
+    | graphics => exact Std.Vulkan.graphicsCoordinator_correct
+    | terminal => exact Std.Win32.terminal_correct
+    | acquire _ => exact Std.Vulkan.acquire_correct
+    | submission _ => exact Std.Vulkan.submission_correct
+    | presentation _ => exact Std.Vulkan.presentation_correct
+    | apiCall call => exact CubeProviderCall.correct call
+  composition := cube_channels_ownership_and_progress_compose
+  adequate := cube_network_adequate
+  simulation := cube_network_simulation
+  demandMultiplicity := cube_occurrences_erase_exactly
+  childBindings := cube_child_demand_bindings
+  requirementSubstitution := cube_process_requirement_substitution
+  demands := cube_independent_safety_liveness_and_obligation_demands
+  resources := cube_resource_axis_realization
+
+theorem cubeResourceBound :
+    EveryExecutionUsesAtMost
+      ProcessScope.root
+      CubeResourceMetric.product
+      CubeResourceBudget.singleFrameInFlight :=
+  processPlanRealizes.resources.rootBound
+
+def shapedSpec : StagedProcessPresentation spec :=
+  StagedProcessPresentation.ofNetwork spec cubeProtocol
+    cubeProtocolResourceView
+    cubeProtocolResourceRestrictionExact
+    cubeProtocolResourceViewsCoverRoot
+    cubeProcessPresentation.denotationExact
+    cubeProcessPresentation.requirementsExact
+
+def inputSubsystem : SubsystemRealization shapedSpec .input :=
+  SubsystemRealization.fromPlanScope
+    processPlanRealizes (CubeProcessScope.input processPlan)
+    cube_input_boundary_exact
+
+def animationSubsystem : SubsystemRealization shapedSpec .sceneAnimator :=
+  SubsystemRealization.fromPlanScope
+    processPlanRealizes (CubeProcessScope.animation processPlan)
+    cube_animation_boundary_exact
+
+def graphicsSubsystem : SubsystemRealization shapedSpec .surfacePresenter :=
+  SubsystemRealization.fromPlanScope
+    processPlanRealizes (CubeProcessScope.graphics processPlan)
+    cube_graphics_boundary_exact
+
+def terminationSubsystem : SubsystemRealization shapedSpec .termination :=
+  SubsystemRealization.fromPlanScope
+    processPlanRealizes (CubeProcessScope.termination processPlan)
+    cube_termination_boundary_exact
+
+def completeGraph : BlendedProcessGraph shapedSpec where
+  nodes
+    | .input => .realized inputSubsystem
+    | .sceneAnimator => .realized animationSubsystem
+    | .surfacePresenter => .realized graphicsSubsystem
+    | .termination => .realized terminationSubsystem
+  composition := cube_all_subsystem_boundaries_compose
+  requirements := cube_all_requirement_union
+
+def completePartial : PartialProcessRealization shapedSpec completeGraph :=
+  ProcessRealization.blend completeGraph
+
+def completeClosedBlend : ClosedBlend completePartial
+    cube_every_schema_realized_parametrically
+    cube_portable_requirements_resources_obligations_coherent :=
+  completePartial.close
+    cube_every_schema_realized_parametrically
+    cube_portable_requirements_resources_obligations_coherent
+
+def stagedProcessRealization : ProcessRealization spec :=
+  completeClosedBlend.realization
+
+theorem stagedPlanIsExact :
+    stagedProcessRealization.plan = processPlan :=
+  cube_closed_blend_elaborates_to_exact_plan
+
+theorem unresolvedDescendantRejected :
+    ¬ FrontierComplete cube_graphics_with_abstract_child :=
+  cube_abstract_child_is_reachable
+
+theorem conflictingProvidersRejected :
+    ¬ RequirementDeltasCompatible cube_vulkan_delta cube_metal_delta :=
+  cube_vulkan_metal_conflict
+
+end Grass.Spikes.SpinningCube
+```
+
+### `Program.lean`
+
+```lean
+import Grass.Emit
+import Grass.Artifact.PE32Plus
+import Spikes.«5_Spinning_Cube».Assembly
+import Spikes.«5_Spinning_Cube».Layout
+import Spikes.«5_Spinning_Cube».Process
+
+namespace Grass.Spikes.SpinningCube
+
+def shaders : ShaderSet plan :=
+  { vertex := cubeVertex
+    fragment := cubeFragment }
+
+def source : MachineSource plan :=
+  { host := cubeHost
+    devices := shaders }
+
+def cubeVerified : VerifiedProgram spec := by
+  verify_assembly plan
+    using_process stagedProcessRealization
+    using_models vertexModelCorrect fragmentModelCorrect
+    with source
+
+def bytes : ByteArray := emitProgram cubeVerified
+
+theorem emittedSound : EmittedProgramSatisfies spec bytes :=
+  cubeVerified.sound
+
+def vertexWords : Vec UInt32 := Spirv.writeWords cubeVertex
+
+def fragmentWords : Vec UInt32 := Spirv.writeWords cubeFragment
+
+theorem vertexRoundTrip :
+    Spirv.parseWords vertexWords = .ok cubeVertex :=
+  Spirv.writeWords_parse cubeVertex
+
+theorem fragmentRoundTrip :
+    Spirv.parseWords fragmentWords = .ok cubeFragment :=
+  Spirv.writeWords_parse cubeFragment
+
+def artifact : PE32Plus := cubeVerified.linkedArtifact
+
+theorem writerRoundTrip : PE32Plus.parse (PE32Plus.write artifact) = .ok artifact :=
+  artifact.writerRoundTrip
+
+theorem hostTextDecodesExactly :
+    LoadedHostTextDecodesTo artifact cubeVerified.rawProgram.host :=
+  cubeVerified.artifactCorrectness.loadedHostTextDecodes
+
+theorem embeddedVertexExactly :
+    EmbeddedWordsAt artifact cubeVerified.layout.vertexRva vertexWords :=
+  cubeVerified.artifactCorrectness.embeddedVertex
+
+theorem embeddedFragmentExactly :
+    EmbeddedWordsAt artifact cubeVerified.layout.fragmentRva fragmentWords :=
+  cubeVerified.artifactCorrectness.embeddedFragment
+
+theorem emittedExactly : bytes = PE32Plus.write artifact :=
+  rfl
+
+end Grass.Spikes.SpinningCube
+```
+
+### `Spec.lean`
+
+```lean
+import Grass.Spec.Graphics
+import Grass.Spec.Resource
+
+namespace Grass.Spikes.SpinningCube
+
+def resources : GraphicsResourceModel :=
+  GraphicsResourceModel.longLivedApplication
+    |>.withNoUnboundedGrassOwnedGrowth
+    |>.withTerminalDisposition .closeAllOwnedGraphicsObjects
+
+def scene : InteractiveScene := Scene.spinningColoredWireCube
+
+structure CubeFrame where
+  extent : Nat × Nat
+  sampledAt : MonotonicInstant
+  angle : Angle
+  image : AbstractImage
+  depicts : RasterizesProjectedCube scene.geometry extent angle image
+
+def rotationAccuracy : ElapsedRotationAccuracy :=
+  Graphics.defaultInteractiveRotationAccuracy
+
+inductive CubeInput
+  | close
+  | escapeDown
+  | resize (width height : Nat)
+  | irrelevant
+
+inductive CubeOutcome
+  | userExit
+  | initializationFailure
+  | graphicsFailure
+  | surfaceLost
+
+structure CubeObservation where
+  inputs : Stream CubeInput
+  frames : Stream CubeFrame
+  outcome : Option CubeOutcome
+
+def CubeObservation.Accepts (o : CubeObservation) : Prop :=
+  FramesApproximateElapsedRotation
+      scene.angularVelocity rotationAccuracy o.frames ∧
+  NondecreasingFrameSampleTimes o.frames ∧
+  (∀ frame ∈ o.frames, frame.depicts) ∧
+  ResizeAffectsProjectionOnly o.inputs o.frames ∧
+  UserExitIffRequestedForConformingRuns o.inputs o.outcome ∧
+  FailureNeverNormalizesToUserSuccess o.outcome
+
+def sceneFragment : SceneSpec :=
+  Graphics.sceneSpec scene
+
+def cubeTraceFragment {R : Type} [ResourceModel R]
+    (resources : R) : TraceSpec resources :=
+  Graphics.interactiveTraceSpec CubeInput CubeObservation CubeObservation.Accepts
+
+def cubeSuite {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
+    (resources : R) : SpecificationSuite resources :=
+  Graphics.interactiveSceneSuite
+    resources sceneFragment (cubeTraceFragment resources) rotationAccuracy
+
+def cubeSpec {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
+    (resources : R) : SpecProcess resources :=
+  SpecProcess.capture (cubeSuite resources)
+    |>.acceptInput [.close, .escapeDown, .resize]
+    |>.withFailures .terminateWithoutFalseSuccess
+    |>.withProgress (.reactiveUntilUserExit frontiers :=
+      [.externalInput, .frameOpportunity, .frameObservation, .terminalOutcome])
+
+theorem cubeSpecCorrect {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
+    (resources : R) : MeetsAllSpecificationTheorems (cubeSpec resources) :=
+  Graphics.interactiveSceneSuiteCaptureCorrect
+    resources scene CubeObservation.Accepts rotationAccuracy
+
+def spec : SpecProcess resources := cubeSpec resources
+
+end Grass.Spikes.SpinningCube
+```

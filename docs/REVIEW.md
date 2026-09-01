@@ -1,5 +1,9 @@
 # Adversarial review protocol
 
+Every spike review must apply the cross-view audit in
+[SPIKE_AUTHORING.md](SPIKE_AUTHORING.md). Reviewing only the annotated document
+or only the comment-free authored directory is incomplete.
+
 Reviewers should attempt to break the design, not confirm its intent. Approval
 means the interfaces can be implemented without silently choosing a foundational
 semantic policy.

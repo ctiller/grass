@@ -76,8 +76,10 @@ entry: @entrypoint @unwind(server_entry_unwind)
     test eax, eax
     jz   startup_failure_socket
 
-create_workers: @invariant created_prefix(r13,worker_handles,worker_slots) @measure 4-r13
-    cmp  r13d, 4
+create_workers: @placement [created := r13]
+                @invariant created_prefix(worker_handles, worker_slots)
+                @measure executionEnvelope.workerCount-r13
+    cmp  r13d, executionEnvelope.workerCount
     je   resume_workers
     mov  rax, r13
     imul rax, rax, WORKER_SLOT_BYTES
@@ -98,7 +100,8 @@ create_workers: @invariant created_prefix(r13,worker_handles,worker_slots) @meas
 
 resume_workers:
     xor  r14d, r14d
-resume_loop: @invariant resumed_prefix(r14,created=r13) @measure r13-r14
+resume_loop: @placement [resumed := r14, created := r13]
+             @invariant resumed_prefix @measure created-resumed
     cmp  r14d, r13d
     je   publish_ready
     lea  rdx, [rip+worker_handles]
@@ -125,7 +128,9 @@ startup_partial_workers:
     mov  eax, 1
     xchg dword ptr [rip+shutdown], eax
     xor  r14d, r14d
-resume_failure_workers: @invariant failure_resumed_prefix(r14,created=r13) @measure r13-r14
+resume_failure_workers: @placement [resumed := r14, created := r13]
+                        @invariant failure_resumed_prefix
+                        @measure created-resumed
     cmp  r14d, r13d
     je   join_workers
     lea  rdx, [rip+worker_handles]
@@ -136,7 +141,8 @@ resume_failure_workers: @invariant failure_resumed_prefix(r14,created=r13) @meas
     inc  r14d
     jmp  resume_failure_workers
 
-join_workers: @invariant joined_suffix(r13,worker_handles) @measure r13
+join_workers: @placement [remainingWorkers := r13]
+              @invariant joined_suffix(worker_handles) @measure remainingWorkers
     test r13d, r13d
     jz   unregister_handler
     dec  r13d
@@ -224,7 +230,8 @@ worker_gate: @reactive_frontier initialization_gate
     call qword ptr [rip+__imp_Sleep]
     jmp  worker_gate
 
-accept_wait: @reactive_frontier poll_listener @invariant owns_worker_slot(rbx)
+accept_wait: @placement [workerSlot := rbx]
+             @reactive_frontier poll_listener @invariant owns_worker_slot
     mov  eax, dword ptr [rip+shutdown] @atomic(.acquire)
     test eax, eax
     jnz  worker_return
@@ -397,7 +404,7 @@ frame_headers:
 
 begin_continuation:
     mov  rcx, rbx
-    call h2_append_continuation
+    call h2_begin_header_block
     test eax, eax
     jnz  connection_protocol_error
     jmp  frame_parse_loop

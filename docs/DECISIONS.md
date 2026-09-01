@@ -463,6 +463,43 @@ to imitate compiler-selected storage or CFG structure.
     compose typed CFG contracts, and invoke checked decision procedures. It may
     not silently discover or choose invariants, algorithmic correspondences,
     failure policies, representations, or omitted provider cases.
+93. Resource parameters are stratified into a precious-family
+    `SemanticBudget` and a non-precious `ExecutionEnvelope`. The former contains
+    only capacities, deadlines, backpressure, exhaustion, and bounds which
+    affect admitted or observed product behavior. The latter contains workers,
+    scheduling, handles/descriptors, concrete buffers/arenas, polling/completion
+    policy, and platform reserve. `RealizesSemanticBudget` proves representation,
+    capacity, backpressure, deadline, exhaustion, and lifecycle compatibility;
+    changing an envelope does not change the root `SpecProcess`.
+94. Large-system build locality uses `VerifiedObject ProgramSignature` and a
+    verified modular linker beneath the final gate. A signature exposes only
+    callable/process/observation/resource/obligation/provider/ABI contracts and
+    may existentially hide a subsystem's private `SpecProcess`. The linker proves
+    signature composition against the one exact root and returns
+    `VerifiedProgram root`; the final program is not weakened to an existential
+    signature index. Symbolic relocations isolate machine proofs from final
+    layout, and hierarchical object certificates permit measured incremental
+    reuse without promising constant-time relinking.
+95. Assembly/source manifests and total CFG attribute maps are structurally
+    derived from the same typed assembly AST; authors do not maintain parallel
+    symbol, label, stack-object, constructor, or cancellation dictionaries.
+    Generated manifests/listings may be committed outside the authored spike
+    directory or embedded in its annotated document as checked review
+    projections. Standard Program/Artifact closing records are likewise
+    derivable bundles, while novel connection lemmas remain explicit.
+96. `verify_asm` orchestrates separately callable checked elaboration, symbolic
+    execution, spatial framing, arithmetic/bit-vector, ghost/resource, and
+    closure phases. No phase performs open-ended cross-domain search; diagnostics
+    name the exact instruction/edge and residual proposition. Reflection may
+    compact proof terms but does not make evaluation constant-time.
+97. Spike documents and spike source directories are distinct review views.
+    `docs/SPIKE_N.md` contains authored code plus labeled generated expansion,
+    proof sketches, and explanation. `Spikes/N_Name/` contains only what agents
+    are expected to author and maintain. Every file there counts as ceremony;
+    generated manifests, ordinary bindings, adapter witnesses, and artifact
+    wrappers remain inspectable but do not receive authored files. Reviewers
+    must cross-check both views mechanically and report author cost separately
+    from generated/kernel cost.
 
 ## Explicitly rejected shortcuts
 

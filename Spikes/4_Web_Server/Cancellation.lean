@@ -43,7 +43,7 @@ def receiveReadinessCall :
     CancellationSummary Std.Process.Network.pollReadable :=
   CancellationSummary.uncancellableCall
     Std.Win32.Winsock.pollReadableCorrect
-    (.providerReturnsWithin capturedResourcePolicy.pollQuantum)
+    (.providerReturnsWithin resourcePolicy.pollQuantum)
 
 def receiveReadinessObservation :
     CancellationSummary Http2.afterReadablePollPoint :=
@@ -76,7 +76,7 @@ def sendReadinessCall :
     CancellationSummary Std.Process.Network.pollWritable :=
   CancellationSummary.uncancellableCall
     Std.Win32.Winsock.pollWritableCorrect
-    (.providerReturnsWithin capturedResourcePolicy.pollQuantum)
+    (.providerReturnsWithin resourcePolicy.pollQuantum)
 
 def sendReadinessObservation :
     CancellationSummary Http2.afterWritablePollPoint :=
@@ -215,7 +215,7 @@ def workerAcceptCancellation :
         (CancellationSummary.seq
           (CancellationSummary.uncancellableCall
             Std.Win32.Winsock.pollAcceptCorrect
-            (.providerReturnsWithin capturedResourcePolicy.pollQuantum))
+            (.providerReturnsWithin resourcePolicy.pollQuantum))
           (CancellationSummary.uncancellableCall
             Std.Win32.Winsock.nonblockingAcceptCorrect
             (.providerBounded Std.Win32.Winsock.nonblockingAcceptBound))))
@@ -238,7 +238,7 @@ def rootServiceCancellation :
       rootShutdownCancelPoint
       (CancellationSummary.uncancellableCall
         Std.Win32.Sleep.correct
-        (.providerReturnsWithin capturedResourcePolicy.pollQuantum)))
+        (.providerReturnsWithin resourcePolicy.pollQuantum)))
     FixedPool.rootServiceIterationProgress
     FixedPool.everyRootIterationCrossesShutdownPoint
 
@@ -338,8 +338,10 @@ theorem writableSurvivingConnectionEventuallyResetsAddressedStream
 theorem blockedFlowControlRemainsCancellable
     (stream : Http2StreamId) :
     AtFlowCreditWait stream ⟹
-      CancellationCanConsumeAt flowCreditWaitCancellation stream :=
-  flowCreditWaitCancellation.safeAt _
+      EventuallyExactDisposition
+        (.enqueueRstWithoutDataCredit stream .cancel)
+        (.preserveSiblingStreamsByControlQueue stream) :=
+  schedulerCancellationConsumer.enqueueRstForFlowBlocked stream
 
 theorem partialSendCancellationPreservesCommittedPrefix
     (frame : Http2.SerializedFrame) (committed : Fin (frame.bytes.size + 1)) :
@@ -460,14 +462,14 @@ theorem streamMemoryBound (connection : ConnectionId) (stream : Http2StreamId) :
 
 theorem connectionStreamBound (id : ConnectionId) :
     EveryReachableStateSatisfies
-      (ActiveStreams id ≤ capturedResourcePolicy.maxConcurrentStreamsPerConnection) :=
+      (ActiveStreams id ≤ resourcePolicy.maxConcurrentStreamsPerConnection) :=
   serverProcessPlanRealizes.resources.capacityBound
 
 theorem serverSocketBound :
     EveryExecutionUsesAtMost
       ProcessScope.root
       ServerResourceMetric.socketDescriptors
-      capturedResourcePolicy.maxSocketDescriptors :=
+      resourcePolicy.maxSocketDescriptors :=
   serverProcessPlanRealizes.resources.rootBound
 
 theorem serverHandleBound :
@@ -488,13 +490,13 @@ theorem serverRootResidentMemoryBound :
     EveryExecutionUsesAtMost
       ProcessScope.root
       ServerResourceMetric.grassOwnedResidentBytes
-      (ServerResourceBudget.residentBytes capturedResourcePolicy) :=
+      (ServerResourceBudget.residentBytes resourcePolicy) :=
   serverProcessPlanRealizes.resources.rootBound
 
 theorem serverRootResourceEquation :
     ExactRootResourceEquation
       serverProcessPlan serverResourceAxisRealization
-      (ServerResourceBudget.allAxes capturedResourcePolicy) :=
+      (ServerResourceBudget.allAxes resourcePolicy) :=
   serverProcessPlanRealizes.resources.rootEquation
 
 end Grass.Spikes.WebServer

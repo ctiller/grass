@@ -1,4 +1,4 @@
-import Spikes.«5_Spinning_Cube».Plan
+import Spikes.«5_Spinning_Cube».Layout
 
 namespace Grass.Spikes.SpinningCube
 
@@ -163,11 +163,16 @@ resolve_d_head: @measure deviceSlotCount-r14
   call qword ptr [rip+__imp_vkGetDeviceProcAddr]
   test rax,rax
   jz fail_init
-  mov [deviceDispatch+r14*8],rax
+  mov [deviceDispatchCandidate+r14*8],rax
   inc r14d
   jmp resolve_d_head
 resolve_d_seal:
+  lea rsi,[deviceDispatchCandidate]
+  lea rdi,[deviceDispatch]
+  mov ecx,deviceSlotCount
+  rep movsq
   @ghost seal_read_only(deviceDispatch)
+  mov byte ptr [ownership.deviceDispatchReady],1
 }
 
 def deviceSelectionBody : TransparentAsmFragment plan := asm_fragment {
@@ -304,8 +309,11 @@ destroy_old_swap:
   vk_call vkDestroySwapchainKHR(device,swapchain,0)
   mov byte ptr [ownership.swapchainOwned],0
 destroy_old_arrays:
+  mov dword ptr [initializedViewCount],0
+  mov dword ptr [viewIndex],0
   free imageInitialized
-  free imagesAndViews
+  free views
+  free images
 }
 
 def installNewSwapchainBody : TransparentAsmFragment plan := asm_fragment {
@@ -317,7 +325,7 @@ def installNewSwapchainBody : TransparentAsmFragment plan := asm_fragment {
 
 def reverseCleanupBody : TransparentAsmFragment plan := asm_fragment {
 cleanup_device_wait:
-  cmp byte ptr [ownership.deviceOwned],0
+  cmp byte ptr [ownership.deviceDispatchReady],0
   je cleanup_views
   cmp byte ptr [ownership.deviceLost],0
   jne cleanup_views
@@ -340,11 +348,20 @@ cleanup_pipeline:
   destroy_if_owned ownership.renderDoneOwned,vkDestroySemaphore,device,renderDone
   destroy_if_owned ownership.imageAvailOwned,vkDestroySemaphore,device,imageAvail
   destroy_if_owned ownership.commandPoolOwned,vkDestroyCommandPool,device,commandPool
-  destroy_if_owned ownership.deviceOwned,vkDestroyDevice,device
+  cmp byte ptr [ownership.deviceOwned],0
+  je cleanup_surface
+  cmp byte ptr [ownership.deviceDestroyReady],0
+  je provider_violation @violation_edge(.ownedDeviceWithoutDestroyCapability)
+  mov rcx,[device]
+  xor edx,edx
+  call qword ptr [vkDestroyDevicePtr]
+  mov byte ptr [ownership.deviceOwned],0
+cleanup_surface:
   destroy_if_owned ownership.surfaceOwned,vkDestroySurfaceKHR,instance,surface
   destroy_if_owned ownership.instanceOwned,vkDestroyInstance,instance
   free imageInitialized
-  free imagesAndViews
+  free views
+  free images
   free queueProps
   free extProps
   free devices

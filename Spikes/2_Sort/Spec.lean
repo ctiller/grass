@@ -1,8 +1,13 @@
 import Grass.Spec.Console
 import Grass.Spec.Grammar
-import Spikes.«2_Sort».Resource
+import Grass.Spec.Resource
 
 namespace Grass.Spikes.Sort
+
+def resources : ConsoleBufferResourceModel :=
+  ConsoleBufferResourceModel.untilMemoryExhaustion
+    (onExhaustion := .terminateWithNoOutput)
+    (capacity := .noArtificialLimit)
 
 def format : ByteLineFormat := .lfDelimited (.normalizeFinal true)
 

@@ -30,4 +30,6 @@ Start review at [docs/README.md](docs/README.md).
 Constructive feasibility arguments for the disputed proof machinery are in
 [docs/PROOF_FEASIBILITY.md](docs/PROOF_FEASIBILITY.md).
 The comment-free expected Lean source for all five design spikes is in
-[Spikes/README.md](Spikes/README.md).
+[Spikes/README.md](Spikes/README.md). The contract relating those authored files
+to the annotated spike documents and generated expansions is
+[docs/SPIKE_AUTHORING.md](docs/SPIKE_AUTHORING.md).

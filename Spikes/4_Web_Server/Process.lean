@@ -1,10 +1,77 @@
 import Grass.Process
+import Grass.Platform.Win10.X64
+import Grass.Std.Http2.Model
 import Grass.Std.Http2.Process
+import Grass.Std.Hpack.Model
 import Grass.Std.Process.Network
 import Grass.Std.Process.Supervision
-import Spikes.«4_Web_Server».Model
+import Spikes.«4_Web_Server».Spec
 
 namespace Grass.Spikes.WebServer
+
+def executionEnvelope : Win32ServerExecutionEnvelope where
+  workerCount := 4
+  connectionCapacity := 4
+  streamCapacityPerConnection := 128
+  hpackDecoderStorageBytes := 4096
+  maxQueuedControlFramesPerConnection := 32
+  maxQueuedDataBytesPerConnection := 65535
+  maxReceiveBytesPerConnection := 32768
+  maxTransmitBytesPerConnection := 65535
+  maxSocketDescriptors := 5
+  maxThreadHandles := 4
+  pollQuantum := .milliseconds 10
+  storage := .fixedAfterReady
+
+def resourcePolicy : MemoryServerResourcePolicy :=
+  executionEnvelope.materialize capturedSemanticBudget
+
+theorem executionEnvelopeRealizesSemanticBudget :
+    RealizesSemanticBudget executionEnvelope capturedSemanticBudget := by
+  simpa [capturedSemanticBudgetExact] using
+    Win32ServerExecutionEnvelope.materialize_sound executionEnvelope semanticBudget
+
+def projection : TargetProjection spec .win10X64 :=
+  TargetProjection.win10Http2PriorKnowledge
+    (endpoint := .ipv4Loopback 8080)
+    (gracefulShutdownStatus := 0)
+    (startupFailureStatus := 1)
+
+def protocolProfile : Http2.Profile where
+  transport := .cleartextPriorKnowledge
+  maxFrameSize := capturedSemanticBudget.maxInboundFrameBytes
+  serverPush := false
+  priorityMode := .ignoreDeprecated
+  extensionMode := .ignoreUnknown
+  hpackDynamicTableBytes := capturedSemanticBudget.hpackDecoderTableBytes
+  maxHeaderListBytes := capturedSemanticBudget.maxHeaderListBytes
+
+def connectionModel : Http2.ConnectionModel :=
+  Http2.ConnectionModel.server protocolProfile behaviorPolicy routes
+
+def frameParserRealizes : ParserRealizes frameFormat
+    (Http2.Frame.parseResult protocolProfile) :=
+  Http2.Frame.parserRealizesFormat protocolProfile
+
+def hpackParserRealizes : ParserRealizes hpackFieldSectionFormat
+    (Hpack.FieldSection.parseResult protocolProfile) :=
+  Hpack.FieldSection.parserRealizesFormat protocolProfile
+
+theorem frameWriterRoundTrip (frame : Http2.Frame)
+    (admissible : frame.Admissible protocolProfile) :
+    Http2.Frame.parse protocolProfile (Http2.Frame.write frame) = .ok frame :=
+  Http2.Frame.parse_write protocolProfile frame admissible
+
+theorem frameParserConforms (input : ByteArray) :
+    Http2.Frame.parse protocolProfile input = .error ∨
+    ∃ frame suffix,
+      Http2.Frame.parsePrefix protocolProfile input = .ok (frame, suffix) ∧
+      frame.Admissible protocolProfile ∧
+      input = Http2.Frame.write frame ++ suffix :=
+  Http2.Frame.parse_conforms protocolProfile input
+
+def platformPlan : PlatformPlan spec.driverBoundary.requirements :=
+  PlatformPlan.win10X64Http2FixedPool projection
 
 inductive ServerRoleSchema
   | listener
@@ -140,7 +207,7 @@ def ServerApiProtocol.process : ServerApiProtocol → ProcessSpec
 inductive ServerProtocolKey
   | root
   | listener
-  | worker (slot : Fin 4)
+  | worker (slot : Fin executionEnvelope.workerCount)
   | connection
   | stream
   | hpackDecoder
@@ -166,7 +233,7 @@ def serverProtocols : ProtocolRegistry where
 inductive ServerProcessKind
   | root
   | listener
-  | worker (slot : Fin 4)
+  | worker (slot : Fin executionEnvelope.workerCount)
   | connection (id : ConnectionId)
   | stream (connection : ConnectionId) (id : Http2StreamId)
   | hpackDecoder (connection : ConnectionId)
@@ -243,7 +310,7 @@ structure ServerCompositionWitness where
   socketGeneration : SocketIdentityAndGenerationInvariant serverProcessPlan
   listenerAuthority : ExactlyOneListenerAuthority serverProcessPlan
   admissionPermits : ActiveConnectionsCorrespondToPermits
-    serverProcessPlan capturedResourcePolicy.maxActiveConnections
+    serverProcessPlan resourcePolicy.maxActiveConnections
   workerSlots : DisjointWorkerSlotOwnership serverProcessPlan
   receiveCancelRace : EveryReceiveLoanHasOneRaceWinner serverProcessPlan
   sendCancelRace : EverySendSuffixHasOneRaceWinner serverProcessPlan

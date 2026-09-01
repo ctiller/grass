@@ -1,8 +1,26 @@
 import Grass.Spec.Http2
 import Grass.Spec.Grammar
-import Spikes.«4_Web_Server».Resource
+import Grass.Spec.Resource
 
 namespace Grass.Spikes.WebServer
+
+def semanticBudget : Http2ServerSemanticBudget where
+  maxActiveConnections := 4
+  maxConcurrentStreamsPerConnection := 128
+  maxHeaderListBytes := 16384
+  hpackDecoderTableBytes := 4096
+  hpackEncoderTableBytes := 0
+  maxInboundFrameBytes := 16384
+  maxContinuationBytes := 16384
+  inboundConnectionWindow := 65535
+  inboundStreamWindow := 65535
+  outboundConnectionWindowCeiling := 2147483647
+  outboundStreamWindowCeiling := 2147483647
+  streamProgressDeadline := .seconds 5
+  connectionIdleDeadline := .seconds 30
+
+def resources : ServerResourceModel :=
+  ServerResourceModel.http2 semanticBudget
 
 def body : ByteArray := "Grass web server\n".toUTF8
 
@@ -77,10 +95,10 @@ def spec : SpecProcess resources := webServerSpec resources
 
 def behaviorPolicy : Http2ServerBehaviorPolicy := behaviorPolicyFor resources
 
-def capturedResourcePolicy : MemoryServerResourcePolicy :=
-  MemoryServerResourcePolicy.fromCapturedSemantics spec.resourceSemantics
+def capturedSemanticBudget : Http2ServerSemanticBudget :=
+  Http2ServerSemanticBudget.fromCapturedSemantics spec.resourceSemantics
 
-theorem capturedResourcePolicyExact : capturedResourcePolicy = resourcePolicy :=
+theorem capturedSemanticBudgetExact : capturedSemanticBudget = semanticBudget :=
   SpecProcess.capturedResourceConstructionExact spec
 
 end Grass.Spikes.WebServer
