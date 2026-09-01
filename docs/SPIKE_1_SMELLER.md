@@ -1572,3 +1572,220 @@ authored type errors, absent expansion/proof/artifact reproduction, generated
 semantics which would require invention, excessive hand-maintained plumbing, or
 the new Web and Cube product defects. The review change is confined to this
 report; unrelated concurrent working-tree changes are excluded from its commit.
+
+## Round 20 design-fixpoint review (commit `2664d46`)
+
+### Scope and result
+
+This round first applied the pre-implementation rule in
+`SPIKE_AUTHORING.md`. Missing Grass libraries, generated listings, kernel proof
+terms, PE files, mutation runs, fuzz results, and scale timings are implementation
+acceptance gates. They are not design blockers where the corpus says **not
+generated** or **not measured** and supplies a credible interface and proof
+route. Both the authored directories and all five annotated documents were read.
+
+`./check-spike-sources.ps1` passes all five spikes at the reviewed commit. All
+fenced blocks are classified and uniquely identified, every exact authored
+snapshot matches its directory, no banned proof escape or source comment occurs
+in authored Lean, and the accounting tables match the current physical/nonblank
+line counts.
+
+Several Round 19 executable defects are closed: Sort uses only its four actual
+outcomes; Web's fragment exit binder is scoped, SETTINGS ACK has one owner, and
+DATA/HEADERS normalization precedes the consumers which need it; Cube writes the
+exact image-count field and accepts irrelevant input. Static objects,
+constructors, layouts, join contracts, parser selection, model selection, and
+cross-ISA connections are now explicit typed source inputs. Routine artifact
+wrappers and most registry/cancellation plumbing have left the authored closing
+modules. The remaining failures are considerably narrower than Round 19.
+
+### Design blockers
+
+#### 1. [P0] The HTTP/2 constraint family has the wrong single origin
+
+`HTTP2_CONSTRAINTS.md:49-61` says every one of its 81 `h2.*` keys is emitted by
+the HTTP/2 specification DSL and requires `entries.keys =
+spec.accumulatedRequirements.keys`. That cannot be the authority relation for
+the displayed family. `h2.provider.winsock_total`, `h2.memory.stack_abi`,
+`h2.x86.fragment_exact`, and the PE/load/unwind keys are introduced by platform
+projection, selected provider/ABI/ISA, machine source, or artifact construction;
+they are deliberately not precious HTTP/2 semantics. Their propositions also
+cannot be statement-equal to an HTTP/2 suite demand. This collapses the project's
+central two-way flow: spec demands travel downward, while memory, ISA, provider,
+obligation, and serialization layers introduce demands upward.
+
+The umbrella at `HTTP2_CONSTRAINTS.md:180-228` consequently proves closure only
+by assuming a false origin equation. Replace it with a staged dependent ledger.
+Each entry needs an exact tagged origin (captured spec occurrence, universal
+`VerifiedProgram` law, projection/provider occurrence, source/ISA obligation,
+or artifact/loader obligation), and each lowering step needs an exact
+old-keys-preserved/new-keys-introduced theorem. `CompleteHttp2ConstraintSet`
+then quantifies the final union while `RestrictOrigin .spec` is exactly the
+captured suite. This is also the right gRPC seam: extending the precious suite
+adds gRPC semantic keys while the selected projection may independently retain
+or replace WinSock/x86/PE keys.
+
+#### 2. [P0] The 81-row HTTP/2 review projection has no theorem that it is the expected base family
+
+Even after origin stratification, `originExact` only says “the map contains
+whatever keys the current suite happens to contain.” A deficient HTTP/2 DSL
+which forgot half of RFC 9113 could satisfy it. The hand-maintained table is
+strong and covers the important grammar, HPACK, state, flow, partial-I/O,
+concurrency, cancellation, resource, memory, provider, CFG, and artifact seams,
+but there is no separately reviewable theorem that the selected HTTP/2 profile
+generates exactly the applicable semantic key family, nor an extraction schema
+which makes the 81 rows a faithful rendering of that theorem.
+
+Add a finite, profile-indexed `Http2BaseDemand` family and a theorem of the form
+`capturedHttp2Keys spec = applicableBaseDemands profile policy routes budget`.
+Its coverage proof should be organized by RFC frame/setting/error/message-state
+case, with selected exclusions (no push, GET-only, cleartext prior knowledge)
+explicit. The rendered inventory must identify each row's constructor in that
+family and the command/schema which will eventually render it. Broad rows such
+as request-field validity and exhaustive error scope may remain factored
+theorems, but their finite case-coverage lemmas must be named. Without this
+second theorem the corpus has a useful checklist, not yet a complete
+spec-derived constraint family suitable for extending to gRPC.
+
+The inventory has already earned its keep by exposing semantic counterexamples
+which that exact family must correct: the selected non-CONNECT GET profile makes
+`:scheme` optional; `settingsBody` rejects the legal client value
+`SETTINGS_ENABLE_PUSH = 1`; the incoming frame-size row uses a peer limit rather
+than the receiver's advertised limit; deprecated HEADERS priority is not simply
+ignored because self-dependency is rejected; and no named constraint relates a
+received `content-length` to total DATA content. These are false/incomplete
+HTTP/2 demands, not implementation evidence merely waiting to be generated.
+
+#### 3. [P0] Canonical sequential uniqueness is stated over every machine
+
+`PROCESS.md:1510-1519` gives `StandardSequentialDerivation.unique` the shape
+`∀ other, other = SequentialSyntax.elaborate spec.suite`. Unless `other` is an
+unstated singleton subtype, this asserts that every `SequentialMachine` is the
+same machine and is not a believable theorem. Uniqueness is needed only among
+successful canonical derivations of the exact suite. Define an explicit
+`IsCanonicalSequentialDerivation spec machine` predicate (including syntax
+origin and the exact direct-program witness), and quantify `other` together with
+that evidence. The elaborator must retain the returned derivation identity in
+the final certificate.
+
+With that correction, the application connections are good. Hello, Sort, and
+Gzip visibly request the canonical route; Sort supplies its parser occurrence
+witness, Sort/Gzip supply their algorithm models, and each exact source is the
+term passed to `verify_assembly`. Ambiguous suites fail rather than invoke
+ambient search. The cube likewise closes over the exact
+`stagedProcessRealization`; `hostImplementsDriver` is indexed by it,
+`vertexCorrect` and `fragmentCorrect` are explicitly consumed, and
+`sourceConnectionsCorrect` ties those exact modules and entry points to the
+heterogeneous source.
+
+#### 4. [P0] Hello and Gzip terminal annotations do not inhabit their outcome types
+
+Hello's precious outcome type is only `.success | .failure`, but
+`Program.lean:70-78` uses `.stdoutUnavailable`, `.writeFailed`, and
+`.noProgress` as `@terminal` values. Gzip similarly defines only success,
+allocation, input, and output failure, while `Assembly.lean:707-722` uses six
+finer physical causes as terminal values. Sort now demonstrates the intended
+shape: use the precious failure constructor at `@terminal` and retain the
+physical cause under `@audit`. Apply that pattern to Hello and Gzip and correct
+the stale seven-outcome Gzip interface sketch in `SPIKE_3.md:217-242`.
+
+#### 5. [P1] Model selection is not yet tied to exact Sort/Gzip machine scopes
+
+The outer closings select `stableSortModelCorrect` and `fixed32KModelCorrect`,
+but Sort's exact source does not author the parser/algorithm scope and record
+representation named by its own annotated proof, while Gzip's
+`@implements fixed32KContract` annotation does not expose a typed source scope
+and representation junction. Whole-source inspection must not discover these
+novel boundaries. Author the scope, entries/exits, and representation relation;
+then allow the standard constructor to derive coverage and compose the banked
+model theorem. This is essential to the promised local, model-first proof split.
+
+#### 6. [P1] Several annotated proof sketches still contradict the repaired author boundary
+
+The exact snapshots are right, but the earlier review narrative is not yet one
+coherent expansion:
+
+- `SPIKE_4.md:757-825` refers to nonexistent `Data.lean`, says `Macros.lean`
+  already carries exact raw expansions/citations/certificates, and manually
+  passes an undefined `serverImports` into source closure. Imports are supposed
+  to be derived from the typed source, and raw output is explicitly not
+  generated.
+- `SPIKE_4.md:620-627` shows an older `serverProcessPlanRealizes` which omits the
+  authored cancellation-policy connection present in
+  `Cancellation.lean:99-106`.
+- `SPIKE_5.md:879-903` calls a shortened, comment-bearing interface sketch “the
+  whole authored machine source,” although the actual exact source is correctly
+  captured later and includes explicit statics, constructors, and layouts.
+
+These are inexpensive documentation repairs, but design fixpoint requires a
+reader to get the same authored/derived boundary from every section. Generated
+proof sketches should consume `serverSource` and derive imports/closure; they
+must say their raw listing and certificate are future results, not fields already
+present in `Macros.lean`.
+
+### Implementation acceptance gates, not current design blockers
+
+- All HTTP/2 implementation witnesses marked **missing** or **disconnected**
+  remain real gates: especially HPACK table-update placement, exhaustive
+  error-code/scope coverage, extension stuttering, DATA-padding credit,
+  HEADERS normalization, memory/race/ABI coverage, total WinSock result domains,
+  typed-CFG edge coverage, and exact fragment/source/artifact identity.
+- The raw x86/SPIR-V listings, source/import/relocation manifests, residual-goal
+  reports, PE bytes, parser/writer/load evidence, citation ledger, probes,
+  fuzzers, mutation failures, and 1M/10M build measurements must be generated and
+  checked once the supporting library exists.
+- The concise `verify_assembly` forms are acceptable only as checked certificate
+  consumers which display the staged constraint ledger and every residual goal.
+  `ServerCompositionWitness` may remain a convenient authored bundle of novel
+  weave lemmas, but it cannot be a parallel completeness checklist; exact field
+  coverage must be generated from the ledger above.
+
+### Disputable precious-spec choices
+
+Most remaining semantic criticism is now criticism of an actual product
+contract rather than hidden realization policy:
+
+- Sort intentionally observes ordinal-tagged occurrences and requires stable
+  order before byte erasure. That is stronger than this console projection can
+  distinguish, but it is an explicit requested property, not a proof-economy
+  leak.
+- Gzip chooses exactly one member, a bounded-memory streaming realization, and
+  permits the already-constructed valid prefix on failure. Review should decide
+  whether the failure prefix and one-member rule are the desired product
+  semantics; neither is forced by x86.
+- Web chooses cleartext prior-knowledge HTTP/2 on loopback, GET-only routes,
+  discarded request bodies, no push/trailers, fixed semantic bounds, and named
+  deadline behavior. Those are appropriately visible precious/profile choices
+  and are the right points to challenge before deriving a gRPC suite.
+- Cube's observation predicate constrains every emitted frame but does not
+  visibly require any frame to be emitted. The prose permits zero frames while
+  occluded/minimized and says frame opportunities *may* issue a commit, while
+  `reactiveBetweenFrontiers` can plausibly be satisfied by endlessly reaching
+  opportunities and coalescing. If a visible, nonzero, responsive window must
+  actually animate, add a conditional productivity theorem (eventual frame or
+  declared failure under repeated opportunities and settling GPU calls), with
+  an explicit bound only if the product demands one. Otherwise the no-render
+  implementation is a surprising but precious-spec-permitted behavior.
+
+### Proof-economics result
+
+Current exact authored counts are: Hello 30/21 specification and 97/81
+realization lines; Sort 73/57 and 582/542; Gzip 50/40 and 752/702; Web 104/86
+and 1,822/1,645; Cube 78/62 and 1,638/1,526. The small spikes now have two or
+three files and one-line standard process ceremony. The larger spikes spend
+their extra surface on selected algorithms, assembly, explicit process/weave
+invariants, cancellation, and heterogeneous connections. That is a defensible
+pressure-test shape. Generated size and checking cost remain honestly unknown.
+
+## Round 20 fixpoint decision
+
+**Very close, but not yet at design fixpoint.** Most Round 19 concrete semantic
+and authoring defects are closed. Constraint origin must be stratified, the
+HTTP/2 base family and its currently false cases need an exact completeness
+theorem, canonical sequential uniqueness must quantify only valid derivations,
+Hello/Gzip terminal values must type against their specs, and the selected
+Sort/Gzip models need exact machine scopes. The annotated Web/Cube
+contradictions are small cleanup. After those repairs, the remaining objections
+are implementation ratchets or decisions about the precious
+Sort/Gzip/Web/Cube contracts—the point at which adversarial review is finally
+attacking what the programs promise, not inventing missing proof architecture.
