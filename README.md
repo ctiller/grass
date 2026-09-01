@@ -33,3 +33,9 @@ The comment-free expected Lean source for all five design spikes is in
 [Spikes/README.md](Spikes/README.md). The contract relating those authored files
 to the annotated spike documents and generated expansions is
 [docs/SPIKE_AUTHORING.md](docs/SPIKE_AUTHORING.md).
+
+Cross-provider implementation agents coordinate through the orphan-branch
+protocol in [docs/AGENT_BUS.md](docs/AGENT_BUS.md). Product changes follow
+[docs/AGENT_REVIEW.md](docs/AGENT_REVIEW.md): an author nominates a distinct
+reviewer, and that reviewer—not the author—reviews and cleanly merges a selected
+snapshot of the named product branch.

@@ -553,6 +553,25 @@ to imitate compiler-selected storage or CFG structure.
     ground precious vocabulary. Spike 4 names its endpoint and client response
     theorem; Spike 5 names geometry, colors, angular velocity, and conditional
     productivity, and observations do not carry proofs of their own acceptance.
+107. Cross-provider implementation coordination uses the orphan
+    `refs/heads/agent-bus` branch. Each registered agent exclusively appends to
+    segmented `<agent>/<six-digit-segment>.jsonl` logs with 1,000 events per
+    segment. Events are immutable and causal; current scope, plan, progress,
+    issue, dependency, handoff, and review state is derived by replay rather
+    than stored in shared mutable files.
+108. Every product change reaching `main` has at least one author agent and one
+    distinct eligible reviewer agent. An author nominates the reviewer for a
+    named product branch, which may continue advancing during review. The
+    reviewer takes the nomination and either requests changes, declines, or
+    personally merges a reviewed snapshot cleanly into current `main`. The
+    receipt records the snapshot actually incorporated. There is no separate
+    approval token returned to the author, and authors do not merge their own
+    changes. Force pushes are forbidden on all protocol branches.
+109. Every agent-bus identity has one immutable primary role: `implementor`,
+    `reviewer`, `coordinator`, or `observer`. Product authoring and review/merge
+    authority are deliberately separated between implementor and reviewer
+    identities. Changing workload requires a new agent name rather than a role
+    mutation, so dedicated review remains visible and mechanically checkable.
 
 ## Explicitly rejected shortcuts
 

@@ -34,6 +34,8 @@ No document may override a narrower owner by restating it differently.
 | [VERIFIED_OBJECTS.md](VERIFIED_OBJECTS.md) | stable subsystem signatures, relocatable verified objects, modular linking |
 | [OLEAN_SHARDING.md](OLEAN_SHARDING.md) | Lean module boundaries, `.olean` reuse, certificate DAGs, and rebuild cones |
 | [IMPLEMENTATION_RATCHET.md](IMPLEMENTATION_RATCHET.md) | future spike commands, evidence schemas, mutations, and implementation sign-off |
+| [AGENT_BUS.md](AGENT_BUS.md) | orphan-branch, segmented JSONL coordination protocol for implementation agents |
+| [AGENT_REVIEW.md](AGENT_REVIEW.md) | mandatory distinct-author/reviewer nomination, review, and reviewer-owned merge protocol |
 | [MEMORY_MODEL.md](MEMORY_MODEL.md) | memory, provenance, borrowing, concurrency, faults |
 | [OBLIGATIONS.md](OBLIGATIONS.md) | linear obligations, transfer, exit dispositions |
 | [REFINEMENT.md](REFINEMENT.md) | refinement proof concerns, weaving, provider realization, generated/authored machine routes |
