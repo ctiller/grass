@@ -558,4 +558,58 @@ internal_fault:
 
 }
 
+def lineParserScope : SourceScope sortSource :=
+  SourceScope.region sortSource
+    (entry := `count_loop)
+    (exitFrontier := #[(`descriptor_scan_done, `sort_pass)])
+    (containmentExits := #[`internal_fault])
+
+def lineParserRepresentation : RepresentationPlan lineParserScope :=
+  Format.byteLineDescriptorRepresentation
+    (format := lineStreamFormat)
+    (sourceBytes := .registerRange r13 r14)
+    (descriptorBase := .register rdi)
+    (descriptorCount := .register rbp)
+    (descriptorLayout := LineDesc)
+    (offsetField := LineDesc.offset)
+    (lengthField := LineDesc.length)
+
+def sortAlgorithmScope : SourceScope sortSource :=
+  SourceScope.region sortSource
+    (entry := `sort_pass)
+    (exitFrontier := #[(`sort_complete, `sort_done)])
+    (containmentExits := #[])
+
+def lineDescRepresentation : RepresentationPlan sortAlgorithmScope :=
+  StableSort.lineDescriptorArrayRepresentation
+    (format := format)
+    (order := order)
+    (sourceBytes := .registerRange r13 r14)
+    (activeDescriptors := .register rdi)
+    (scratchDescriptors := .register rsi)
+    (descriptorCount := .register rbp)
+    (descriptorLayout := LineDesc)
+    (offsetField := LineDesc.offset)
+    (lengthField := LineDesc.length)
+    (resultBase := .frameField SortFrame.finalDescriptors)
+
+theorem sortSourceRefinesModel :
+    AssemblyRefinesImplementation
+      sortAlgorithmScope lineDescRepresentation stableSortModel := by
+  verify_asm_scope
+
+def sortAlgorithmRequirement : ProgramRequirement spec :=
+  Console.stableLineSortRequirement spec
+
+theorem stableSortContractConnects :
+    ComponentContractRefinesRequirement
+      stableSortContract sortAlgorithmRequirement :=
+  Console.stableLineSortComponentConnects spec
+
+def sortImplementationBinding :
+    ImplementationBinding sortSource sortAlgorithmRequirement :=
+  ImplementationBinding.mkChecked
+    sortAlgorithmScope lineDescRepresentation
+    stableSortModelCorrect sortSourceRefinesModel stableSortContractConnects
+
 end Grass.Spikes.Sort

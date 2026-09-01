@@ -995,12 +995,13 @@ The architectural target is zero sibling re-elaboration and zero sibling kernel
 checks for a boundary-preserving leaf change; path-to-root composition and
 artifact work are measured separately.
 
-`Spikes/5_Spinning_Cube/Staged.lean` is presently a design-level inventory of
-the intended cube and engine-blend terms. Its undeclared witness names are not a
-positive fixture and supply no closure evidence. This acceptance item remains
-open until those terms elaborate against the actual definitions, the positive
-values construct an indexed `ClosedBlend`, the machine blend is indexed by its
-retained origin, and each negative mutation fails at the intended boundary.
+`Spikes/5_Spinning_Cube/Process.lean` is the exact authored design fixture for
+the cube blend. It selects scoped subsystem realizations, constructs an indexed
+`ClosedBlend`, retains the exact resulting process plan, and includes negative
+abstract-descendant and provider-conflict statements. These are believable
+pre-implementation theorem applications, not execution evidence. Implementation
+acceptance still requires their elaboration plus the named rejecting mutations
+under [IMPLEMENTATION_RATCHET.md](IMPLEMENTATION_RATCHET.md).
 
 ### Status and fallback
 

@@ -19,9 +19,25 @@ def sourceConnections : HeterogeneousSourceConnections plan source :=
         (installAt := .wmNcCreate)
         (clearAt := .wmNcDestroy)
     shader `vertexShader =>
-      Spirv.module cubeVertex (entry := `main)
+      Spirv.module cubeVertex
+        (entry := `main)
+        (staticRange := `cubeVertexBytes)
+        (createCall := `vkCreateShaderModule)
+        (codeSize := `cubeVertexBytes.size)
+        (codePointer := `cubeVertexBytes.address)
+        (returnedHandle := `vertModule)
+        (pipelineStage := (`shaderStages, 0, VERTEX_BIT))
+        (entryName := `mainName)
     shader `fragmentShader =>
-      Spirv.module cubeFragment (entry := `main)
+      Spirv.module cubeFragment
+        (entry := `main)
+        (staticRange := `cubeFragmentBytes)
+        (createCall := `vkCreateShaderModule)
+        (codeSize := `cubeFragmentBytes.size)
+        (codePointer := `cubeFragmentBytes.address)
+        (returnedHandle := `fragModule)
+        (pipelineStage := (`shaderStages, 1, FRAGMENT_BIT))
+        (entryName := `mainName)
     pushConstant `rotation => rotationRepresentation
   }
 

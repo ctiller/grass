@@ -10,15 +10,20 @@ are generated inspection views.
 | Proof-economics quantity | Current evidence |
 | --- | --- |
 | Authored specification | 1 module; 78 physical / 62 nonblank lines |
-| Authored realization | 5 modules; 1638 physical / 1526 nonblank lines |
+| Authored realization | 5 modules; 1662 physical / 1550 nonblank lines |
 | Generated expansion/certificates | not generated |
 | Clean/incremental checking | not measured |
 
+Future generation, proof, artifact, mutation, and locality evidence follows the
+shared [implementation ratchet](IMPLEMENTATION_RATCHET.md), including the
+Spike 5 first-failure fixtures; none is claimed as present here.
+
 The five realization modules currently separate process proofs, ABI/layout
 selection, host constructors, host plus shader assembly, and the closing form.
-The authoring audit disputes the generated content in `Layout.lean` and the
-invalidation locality of the combined assembly module; this table records the
-present cost rather than endorsing it.
+The displayed layout and cross-ISA selections are application construction
+inputs; generated offsets, manifests, source closure, and object aggregation do
+not receive authored modules. Physical sharding follows the `.olean` design and
+may split the combined assembly module when measurement warrants it.
 
 This spike proposes the complete proof shape before its libraries exist. It is
 not permission to build the graphics framework yet. The resource-parameterized
@@ -197,6 +202,40 @@ def shaders : ShaderSet plan :=
 def source : MachineSource plan :=
   { host := cubeHost
     devices := shaders }
+
+def sourceConnections : HeterogeneousSourceConnections plan source :=
+  machine_connections {
+    callback `wndproc =>
+      Win32.windowStatePointer
+        (installAt := .wmNcCreate)
+        (clearAt := .wmNcDestroy)
+    shader `vertexShader =>
+      Spirv.module cubeVertex
+        (entry := `main)
+        (staticRange := `cubeVertexBytes)
+        (createCall := `vkCreateShaderModule)
+        (codeSize := `cubeVertexBytes.size)
+        (codePointer := `cubeVertexBytes.address)
+        (returnedHandle := `vertModule)
+        (pipelineStage := (`shaderStages, 0, VERTEX_BIT))
+        (entryName := `mainName)
+    shader `fragmentShader =>
+      Spirv.module cubeFragment
+        (entry := `main)
+        (staticRange := `cubeFragmentBytes)
+        (createCall := `vkCreateShaderModule)
+        (codeSize := `cubeFragmentBytes.size)
+        (codePointer := `cubeFragmentBytes.address)
+        (returnedHandle := `fragModule)
+        (pipelineStage := (`shaderStages, 1, FRAGMENT_BIT))
+        (entryName := `mainName)
+    pushConstant `rotation => rotationRepresentation
+  }
+
+theorem sourceConnectionsCorrect :
+    HeterogeneousSourceConnections.Valid sourceConnections := by
+  verify_machine_connections
+    using_rotation rotationRepresentationCorrect
 
 def cubeVerified : VerifiedProgram spec := by
   verify_assembly plan
@@ -512,7 +551,9 @@ not emittable:
 ```lean
 def shapedSpec : StagedProcessPresentation spec :=
   StagedProcessPresentation.ofNetwork spec cubeProtocol
-    cubeProtocolResourceSemanticsExact
+    cubeProtocolResourceView
+    cubeProtocolResourceRestrictionExact
+    cubeProtocolResourceViewsCoverRoot
     cubeProcessPresentation.denotationExact
     cubeProcessPresentation.requirementsExact
 
@@ -1348,14 +1389,18 @@ follows (`count`, `stride`, pointer, and tag are macro parameters):
 
 <!-- grass-block: proof-sketch id=spike5-block-17 -->
 ```text
+mov pointer,0; mov byte ptr [tag],0
 mov rax,count; mov rcx,stride; mul rcx
-test rdx,rdx; jnz allocation_failure
-test count,count; jz allocation_zero_case
-test rax,rax; jz allocation_failure
+test rdx,rdx; jnz allocation_failed
+test count,count; jz allocation_failed
+test rax,rax; jz allocation_failed
 mov r8,rax; mov rcx,[processHeap]; xor edx,edx
 call qword ptr [rip+__imp_HeapAlloc]
-test rax,rax; jz allocation_failure
+test rax,rax; jz allocation_failed
 mov pointer,rax; mov byte ptr [tag],1
+mov eax,1; jmp allocation_done
+allocation_failed: xor eax,eax
+allocation_done: test eax,eax
 ; @ghost fresh_allocation(pointer, count*stride)
 
 free_head: cmp byte ptr [tag],0; je free_done
@@ -1366,7 +1411,9 @@ mov pointer,0; mov byte ptr [tag],0
 free_done:
 ```
 
-The derived imports therefore include `GetProcessHeap`, `HeapAlloc`, and
+The allocation fragment owns both local continuations and returns success in
+the flags tested by the following authored branch. It cannot jump to an ambient
+label. The derived imports therefore include `GetProcessHeap`, `HeapAlloc`, and
 `HeapFree`.
 
 ### 7.2 Dispatch-table expansion
@@ -2068,7 +2115,7 @@ def cubeHost : AsmSource plan :=
   asm_source
     (statics := cubeStaticObjects)
     (constructors := cubeMacroDefinitions)
-    (layouts := #[cubeHostFrameLayout, cubeCallbackFrameLayout]) {
+    (layouts := #[cubeFrameLayout, cubeCallbackFrameLayout]) {
 entry: @entry win64_gui_entry
   push rbx
   push rbp
@@ -2875,9 +2922,10 @@ def expandUnsignedClamp
 def expandConditionalDestroy
     (tag : Address) (arguments : Vec Operand) (target : CallTarget) :
     Vec RawInstruction :=
-  #[.cmp8 tag 0, .je (.relative 2)] ++
-  expandCall target arguments none ++
-  #[.mov8 tag 0]
+  RawInstructionBuilder.withFreshLabel `destroy_done fun done =>
+    #[.cmp8 tag 0, .je (.label done)] ++
+    expandCall target arguments none ++
+    #[.mov8 tag 0, .label done]
 
 def exactCStringScanBody : TransparentAsmFragment plan := asm_fragment {
   xor ebx,ebx
@@ -2921,24 +2969,31 @@ queue_record_done:
 }
 
 def checkedHeapAllocationBody : TransparentAsmFragment plan := asm_fragment {
+  mov pointer,0
+  mov byte ptr [tag],0
   mov rax,count
   mov rcx,stride
   mul rcx
   test rdx,rdx
-  jnz allocation_failure
+  jnz allocation_failed
   test count,count
-  jz allocation_zero_case
+  jz allocation_failed
   test rax,rax
-  jz allocation_failure
+  jz allocation_failed
   mov r8,rax
   mov rcx,[processHeap]
   xor edx,edx
   call qword ptr [rip+__imp_HeapAlloc]
   test rax,rax
-  jz allocation_failure
+  jz allocation_failed
   mov pointer,rax
   mov byte ptr [tag],1
+  mov eax,1
+  jmp allocation_done
+allocation_failed:
+  xor eax,eax
 allocation_done:
+  test eax,eax
 }
 
 def checkedHeapReleaseBody : TransparentAsmFragment plan := asm_fragment {
@@ -3547,9 +3602,25 @@ def sourceConnections : HeterogeneousSourceConnections plan source :=
         (installAt := .wmNcCreate)
         (clearAt := .wmNcDestroy)
     shader `vertexShader =>
-      Spirv.module cubeVertex (entry := `main)
+      Spirv.module cubeVertex
+        (entry := `main)
+        (staticRange := `cubeVertexBytes)
+        (createCall := `vkCreateShaderModule)
+        (codeSize := `cubeVertexBytes.size)
+        (codePointer := `cubeVertexBytes.address)
+        (returnedHandle := `vertModule)
+        (pipelineStage := (`shaderStages, 0, VERTEX_BIT))
+        (entryName := `mainName)
     shader `fragmentShader =>
-      Spirv.module cubeFragment (entry := `main)
+      Spirv.module cubeFragment
+        (entry := `main)
+        (staticRange := `cubeFragmentBytes)
+        (createCall := `vkCreateShaderModule)
+        (codeSize := `cubeFragmentBytes.size)
+        (codePointer := `cubeFragmentBytes.address)
+        (returnedHandle := `fragModule)
+        (pipelineStage := (`shaderStages, 1, FRAGMENT_BIT))
+        (entryName := `mainName)
     pushConstant `rotation => rotationRepresentation
   }
 

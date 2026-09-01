@@ -10,9 +10,13 @@ files.
 | Proof-economics quantity | Current evidence |
 | --- | --- |
 | Authored specification | 1 module; 73 physical / 57 nonblank lines |
-| Authored realization | 2 modules; 582 physical / 542 nonblank lines |
+| Authored realization | 2 modules; 637 physical / 589 nonblank lines |
 | Generated expansion/certificates | not generated |
 | Clean/incremental checking | not measured |
+
+Future generation, proof, artifact, mutation, and locality evidence follows the
+shared [implementation ratchet](IMPLEMENTATION_RATCHET.md), including the
+Spike 2 first-failure fixtures; none is claimed as present here.
 
 `Spec.lean` owns the precious contract, `Assembly.lean` owns the selected model,
 layout, constructors, data, and literal CFG, and `Program.lean` owns only the
@@ -165,7 +169,7 @@ def sortVerified : VerifiedProgram spec := by
   verify_assembly plan
     deriving_standard_process_from spec
     using_requirement parserWitness
-    using_model stableSortModelCorrect
+    using_component sortImplementationBinding
     with sortSource
 
 def bytes : ByteArray := emitProgram sortVerified
@@ -547,38 +551,51 @@ The exact proof boundary is not merely the top-level console relation:
 <!-- grass-block: interface id=spike2-block-12 -->
 ```lean
 def stableSortModel : ImplementationModel :=
-  StableSort.bottomUpModel format order
+  StableSort.bottomUpMergeModel format order
 
-theorem stableSortModel_correct :
-  ImplementationRealizesContract stableSortModel
-    (StableSortContract format order)
+theorem stableSortModelCorrect :
+    ImplementationRealizesContract stableSortModel stableSortContract :=
+  StableSort.bottomUpMergeCorrect format order
 
-theorem sortSource_refines_model :
-  AssemblyRefinesImplementation
-    sortAlgorithmScope lineDescRepresentation stableSortModel
+def sortAlgorithmScope : SourceScope sortSource :=
+  SourceScope.region sortSource
+    (entry := `sort_pass)
+    (exitFrontier := #[(`sort_complete, `sort_done)])
+    (containmentExits := #[])
 
-theorem stableSort_contract_connects :
-  ComponentContractRefinesRequirement
-    (StableSortContract format order) sortRequirement
+theorem sortSourceRefinesModel :
+    AssemblyRefinesImplementation
+      sortAlgorithmScope lineDescRepresentation stableSortModel := by
+  verify_asm_scope
+
+theorem stableSortContractConnects :
+    ComponentContractRefinesRequirement
+      stableSortContract sortAlgorithmRequirement :=
+  Console.stableLineSortComponentConnects spec
 ```
 
-`stableSortModel_correct` owns stable permutation/order mathematics once.
+`stableSortModelCorrect` owns stable permutation/order mathematics once.
 The assembly theorem owns descriptor representation and literal merge control
 inside `sortAlgorithmScope`. Parsing, I/O fragmentation, allocation failure,
 terminal policy, and progress remain separate program/driver requirements and
-are composed through `stableSort_contract_connects`; the pure model does not
+are composed through `stableSortContractConnects`; the pure model does not
 pretend to prove them. A SIMD or radix implementation may refine the same
 extensional model or supply a new proved model without reopening provider,
 process, or PE proofs.
 
-The expected source marks the sort region with its selected model contract;
-`verify_assembly` derives and reports the corresponding
-`ImplementationBinding` from the exact source scope, descriptor representation,
-banked model certificate, assembly-to-model theorem, and component-to-program
-theorem. A merge-body edit first invalidates
+The author selects `sort_pass` and the single edge from `sort_complete` to
+`sort_done`; the scope elaborator derives every enclosed occurrence and rejects
+any other escape. `lineDescRepresentation` explicitly names the input byte
+range, active and scratch descriptor bases, count, layout fields, and final
+result slot. The analogous parser values select `count_loop` through the
+descriptor-scan frontier. Thus neither the verifier nor `inlineParserWitness`
+discovers a semantic region or a physical relation from the whole source.
+
+`ImplementationBinding.mkChecked` merely packages the exact source scope,
+descriptor representation, banked model certificate, assembly-to-model theorem,
+and component-to-program theorem. A merge-body edit first invalidates
 `sortSourceRefinesModel`; a model-contract edit first invalidates
-`stableSortContractConnects` and its consumers. The fixture records and checks
-those first-invalidated boundaries in `sortBindingMutationExpectations`.
+`stableSortContractConnects` and its consumers.
 
 ## 6. The authored Win32 x64 CFG
 
@@ -1990,6 +2007,60 @@ internal_fault:
 
 }
 
+def lineParserScope : SourceScope sortSource :=
+  SourceScope.region sortSource
+    (entry := `count_loop)
+    (exitFrontier := #[(`descriptor_scan_done, `sort_pass)])
+    (containmentExits := #[`internal_fault])
+
+def lineParserRepresentation : RepresentationPlan lineParserScope :=
+  Format.byteLineDescriptorRepresentation
+    (format := lineStreamFormat)
+    (sourceBytes := .registerRange r13 r14)
+    (descriptorBase := .register rdi)
+    (descriptorCount := .register rbp)
+    (descriptorLayout := LineDesc)
+    (offsetField := LineDesc.offset)
+    (lengthField := LineDesc.length)
+
+def sortAlgorithmScope : SourceScope sortSource :=
+  SourceScope.region sortSource
+    (entry := `sort_pass)
+    (exitFrontier := #[(`sort_complete, `sort_done)])
+    (containmentExits := #[])
+
+def lineDescRepresentation : RepresentationPlan sortAlgorithmScope :=
+  StableSort.lineDescriptorArrayRepresentation
+    (format := format)
+    (order := order)
+    (sourceBytes := .registerRange r13 r14)
+    (activeDescriptors := .register rdi)
+    (scratchDescriptors := .register rsi)
+    (descriptorCount := .register rbp)
+    (descriptorLayout := LineDesc)
+    (offsetField := LineDesc.offset)
+    (lengthField := LineDesc.length)
+    (resultBase := .frameField SortFrame.finalDescriptors)
+
+theorem sortSourceRefinesModel :
+    AssemblyRefinesImplementation
+      sortAlgorithmScope lineDescRepresentation stableSortModel := by
+  verify_asm_scope
+
+def sortAlgorithmRequirement : ProgramRequirement spec :=
+  Console.stableLineSortRequirement spec
+
+theorem stableSortContractConnects :
+    ComponentContractRefinesRequirement
+      stableSortContract sortAlgorithmRequirement :=
+  Console.stableLineSortComponentConnects spec
+
+def sortImplementationBinding :
+    ImplementationBinding sortSource sortAlgorithmRequirement :=
+  ImplementationBinding.mkChecked
+    sortAlgorithmScope lineDescRepresentation
+    stableSortModelCorrect sortSourceRefinesModel stableSortContractConnects
+
 end Grass.Spikes.Sort
 ```
 
@@ -2006,13 +2077,14 @@ def parserWitness :
     SelectedProcessRequirementWitness (lineParserRequirement resources) :=
   Format.inlineParserWitness
     (format := lineStreamFormat)
-    (source := sortSource)
+    (scope := lineParserScope)
+    (representation := lineParserRepresentation)
 
 def sortVerified : VerifiedProgram spec := by
   verify_assembly plan
     deriving_standard_process_from spec
     using_requirement parserWitness
-    using_model stableSortModelCorrect
+    using_component sortImplementationBinding
     with sortSource
 
 def bytes : ByteArray := emitProgram sortVerified

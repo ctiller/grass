@@ -508,6 +508,19 @@ to imitate compiler-selected storage or CFG structure.
     shard DAG, simulates large compact graphs, and calibrates representative real
     builds. Grass does not manufacture a million-instruction Lean term as a
     proxy for repository scale. See [OLEAN_SHARDING.md](OLEAN_SHARDING.md).
+99. A banked implementation-model proof attaches only through an authored exact
+    source scope and physical representation. The author selects entry and exit
+    frontier, containment treatment, and any imported component calls; the
+    elaborator derives occurrence coverage and rejects all other escapes. Common
+    representation constructors may remove algebraic boilerplate but must expose
+    every physical base, length, layout field, and result location. Whole-source
+    `using_model` inference is rejected.
+100. All design spikes share one future implementation ratchet: classified
+    mirror, source closure, verification, artifact, first-failure mutation, and
+    `.olean` locality reports with versioned schemas. Design approval requires a
+    believable interface for those outputs, not fabricated runs. Implementation
+    approval later requires the retained evidence in
+    [IMPLEMENTATION_RATCHET.md](IMPLEMENTATION_RATCHET.md).
 
 ## Explicitly rejected shortcuts
 

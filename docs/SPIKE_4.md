@@ -14,11 +14,15 @@ bindings, and artifact bundles are generated inspection views.
 | Generated expansion/certificates | not generated |
 | Clean/incremental checking | not measured |
 
+Future generation, proof, artifact, mutation, and locality evidence follows the
+shared [implementation ratchet](IMPLEMENTATION_RATCHET.md), including the
+Spike 4 first-failure fixtures; none is claimed as present here.
+
 The five realization modules separate the process model, optional cancellation
 policy, typed fragment constructors, literal host CFG, and final closing form.
-The current authoring audit disputes how much process/cancellation/constructor
-plumbing genuinely belongs in those modules; this count is evidence, not an
-approval.
+Application-specific process topology, cancellation choices, and fragment
+algorithms remain authored; mechanically derived CFG maps, source closure,
+requirement projections, and artifact wrappers do not receive files.
 
 This spike pressure-tests whether Grass can make a large global event loop
 locally provable without hiding either protocol behavior or hand-authored
@@ -796,21 +800,23 @@ library implementations and may later move without changing their contracts.
 
 <!-- grass-block: proof-sketch id=spike4-block-19 -->
 ```lean
-def serverSourceClosure : ClosedAsmSource platformPlan :=
-  ClosedAsmSource.closeWithFragmentHierarchy
-    serverSource serverMacros serverFragmentHierarchy
-    serverStaticObjects serverImports
+def serverSourceClosure : HierarchicalClosedAsmSource :=
+  HierarchicalClosedAsmSource.ofAuthored
+    (source := serverSource)
+    (constructors := serverMacros)
+    (statics := serverStaticObjects)
+    (layouts := #[ServerEntryFrame, WorkerFrame])
+    (joinContracts := serverJoinContracts)
 
 theorem serverSourceClosureComplete : SourceClosureComplete serverSourceClosure := by
   validate_source_closure
 
-def serverExpandedSource : RawAsmSource platformPlan :=
-  serverSourceClosure.expand
+def serverExpandedSource : RawInstructionHierarchy :=
+  serverSourceClosure.rawListing
 
 theorem serverExpansionExact :
     SourceElaboratesExactlyTo serverSourceClosure serverExpandedSource := by
-  exact ClosedAsmSource.hierarchicalExpansionExact
-    serverSourceClosure serverFragmentExpansionExact
+  exact serverSourceClosure.listingExact
 ```
 
 The closure records exact macro definitions, static objects, imports,
@@ -840,43 +846,17 @@ theorem sourceRespectsFixedStorage :
     AssemblyNeverAllocatesAfterReady serverExpandedSource resourcePolicy := by
   verify_asm_resource_calls
 
-def serverCancellationBlockMap :
-    CancellationCfgMap serverExpandedSource serverCancellation :=
-  cancellation_cfg_total {
-    service_loop => observe FixedPool.CancelPoint.rootShutdownObservation
-    worker_gate => observe FixedPool.CancelPoint.workerGateObservation
-    accept_wait => observe FixedPool.CancelPoint.acceptLoopObservation
-    preface_loop => observe Http2.CancelPoint.prefaceObservation
-    connection_schedule => observe Http2.CancelPoint.schedulerObservation
-    receive_frames => uncancellable Http2.Segment.boundedReceive
-    receive_result_observation => observe Http2.CancelPoint.receiveResultObservation
-    frame_parse_loop => safeState Http2.SafePoint.frameBoundary
-    decode_fields => expands hpackDecoderCancellation
-    send_selected_frame => uncancellable Http2.Segment.selectDebitSerialize
-    send_suffix_loop => uncancellable Http2.Segment.boundedWritablePoll
-    send_readiness_observation => observe Http2.CancelPoint.writerReadinessObservation
-    send_positive => uncancellable Http2.Segment.commitSentPrefix
-    connection_draining => safeState Http2.SafePoint.drainBoundary
-    connection_close => uncancellable Http2.Segment.closeAndReleaseConnection
-    connection_closed_boundary => observe Http2.CancelPoint.connectionClosedObservation
-    console_handler => requestPublisher FixedPool.CancellationSource.consoleControl
-    worker_return => terminal FixedPool.Terminal.workerDischarged
-    finish_status => terminalChoice
-      FixedPool.Terminal.normalDischarged
-      FixedPool.Terminal.failedAdoption
-    fatal_exit => terminal FixedPool.Terminal.failedAdoption
-    edges => classifyEveryExpandedEdgeByInstructionSemantics
-  }
-
-theorem serverCfgCancellationRefines :
-    CancellationCfgRefines
-      serverExpandedSource serverCancellationBlockMap serverCancellation := by
-  verify_cancellation_cfg
+def serverCfgCancellation :
+    CancellationCfgCertificate serverExpandedSource serverCancellation :=
+  CancellationCfgCertificate.elaborate
+    (source := serverExpandedSource)
+    (policy := serverCancellationPolicy)
+    (summary := serverCancellation)
+    (joins := serverJoinContracts)
 
 theorem everyExpandedBlockAndEdgeIsClassified :
-    TotalCancellationCfgClassification
-      serverExpandedSource serverCancellationBlockMap :=
-  serverCfgCancellationRefines.total
+    TotalCancellationCfgClassification serverExpandedSource :=
+  serverCfgCancellation.total
 ```
 
 Straight-line instruction verification should symbolically execute and close
@@ -887,11 +867,14 @@ locally, and every jump/call proves its target entry contract. Novel assembly is
 therefore possible without forcing the author to restate the global server
 proof.
 
-The comment-free fixture lists every expanded label, including setup, callback,
-success/failure unwind, cleanup, no-return and all frame/error blocks; every
-expanded edge is classified by its exact instruction semantics. A `safeState`
-only establishes custody/invariant shape. An `observe` block additionally loads
-or consumes the pending request and branches to its continuation/disposition.
+This is generated inspection output, not an application-maintained second map.
+The policy's named atomic regions, bounded calls, and cancellation points resolve
+to unique source occurrences. Structural instruction semantics classify every
+remaining block and edge; elaboration rejects a missing or duplicate occurrence,
+an uncovered blocking call, a continuing loop with no selected observation, or
+an exit whose disposition is absent. A safe state only establishes
+custody/invariant shape. An observation additionally loads or consumes the
+pending request and branches to its continuation/disposition.
 Callback arrival may latch a request but cannot jump to a safe state or pretend
 an interior instruction observed it. Fault edges retain their separately typed
 failed disposition, and the totality theorem rejects every reachable unmapped

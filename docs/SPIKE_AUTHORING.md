@@ -224,6 +224,11 @@ reproduction, mutations, and the structural/graph/measured locality ratchet in
 [OLEAN_SHARDING.md](OLEAN_SHARDING.md) are blocking gates for implementation
 acceptance, not for this document-only fixpoint.
 
+The shared versioned commands, report schemas, spike-specific mutations, and
+first-failing-phase expectations are normative in
+[IMPLEMENTATION_RATCHET.md](IMPLEMENTATION_RATCHET.md). Individual spike
+documents may add domain fixtures but must not duplicate or weaken that route.
+
 ## Proof-economics accounting
 
 Reviews report at least four separate quantities:

@@ -401,6 +401,41 @@ contract directly. Reusable algorithms instead bank their mathematical proof at
 an explicit model boundary:
 
 ```lean
+structure SourceScopeBoundary (source : MachineSource plan) where
+  entry : SourceLabel source
+  exitFrontier : FiniteSet (SourceEdge source)
+  containmentExits : FiniteSet (SourceLabel source)
+
+def SourceScope.region
+    (source : MachineSource plan)
+    (entry : SourceLabel source)
+    (exitFrontier : FiniteSet (SourceEdge source))
+    (containmentExits : FiniteSet (SourceLabel source)) :
+    SourceScope source
+
+def SourceScope.closedCallable
+    (source : MachineSource plan)
+    (entry returnSite : SourceLabel source)
+    (localCalls : LocalCallClosureSelection source entry)
+    (containmentExits : FiniteSet (SourceLabel source)) :
+    SourceScope source
+
+def SourceScope.callableRegion
+    (source : MachineSource plan)
+    (entry returnSite : SourceLabel source)
+    (localCalls : LocalCallClosureSelection source entry)
+    (importedCalls : FiniteMap (LocalCallOccurrence source) ComponentCallContract)
+    (containmentExits : FiniteSet (SourceLabel source)) :
+    SourceScope source
+
+structure RepresentationPlan {source : MachineSource plan}
+    (scope : SourceScope source) where
+  logicalState : Type
+  entryRelation : logicalState -> MachineState -> Prop
+  exitRelation : logicalState -> MachineState -> Prop
+  footprint : ScopeFootprint scope
+  calls : EveryIncludedCallPreservesRepresentation scope entryRelation exitRelation
+
 structure ImplementationCertificate
     (implementation : ImplementationModel)
     (contract : ComponentContract) where
@@ -434,6 +469,33 @@ theorem assembly_model_component
     (binding : ImplementationBinding source requirement) :
     AssemblyImplementsRequirement binding.sourceScope requirement
 ```
+
+`SourceScope.region` computes the unique maximal region reachable from `entry`
+without crossing the selected frontier; it rejects missing labels, a frontier
+edge not reached from the entry, an unlisted escaping edge, an internal return,
+or a reachable containment exit not selected by the author.
+`SourceScope.closedCallable` performs the analogous computation over structural
+`call_local` edges and rejects an indirect or external call hidden inside the
+claimed model scope. `SourceScope.callableRegion` permits deliberately excluded
+local callees only when every excluded call occurrence is assigned an imported
+component contract; the assembly-to-model theorem must prove the call's entry,
+result, fault, footprint, and obligation correspondence. This supports a codec
+which imports an abstract output sink without absorbing its Win32 `WriteFile`
+implementation into the codec theorem. The author chooses the semantic
+entry/frontier and whether
+a containment path belongs to the component; the elaborator enumerates blocks
+and occurrences. Neither is permitted to discover an algorithm boundary.
+
+A representation constructor may package a common relation such as typed line
+descriptors or the standard zlib arena, but its application must expose every
+physical base, length, layout field, alternation rule, and result location used
+by the adjacency theorem. Its theorem establishes the displayed
+`entryRelation`, `exitRelation`, footprint, and local-call preservation; a name
+such as `using_model` cannot synthesize those choices from the whole source.
+`ImplementationBinding.mkChecked` is only record construction after all five
+indexed arguments are present. Deleting a frontier, swapping a layout field, or
+changing a requirement key must fail at that argument rather than later in
+whole-program verification.
 
 Stable sorting, CRC, LZ77, Huffman, bit writing, parsers, and other data
 transformations prove `ImplementationRealizesContract` once. Assembly proves its

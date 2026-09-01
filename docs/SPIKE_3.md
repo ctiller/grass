@@ -10,9 +10,13 @@ review projections rather than additional authored modules.
 | Proof-economics quantity | Current evidence |
 | --- | --- |
 | Authored specification | 1 module; 61 physical / 50 nonblank lines |
-| Authored realization | 2 modules; 752 physical / 702 nonblank lines |
+| Authored realization | 2 modules; 796 physical / 740 nonblank lines |
 | Generated expansion/certificates | not generated |
 | Clean/incremental checking | not measured |
+
+Future generation, proof, artifact, mutation, and locality evidence follows the
+shared [implementation ratchet](IMPLEMENTATION_RATCHET.md), including the
+Spike 3 first-failure fixtures; none is claimed as present here.
 
 `Spec.lean` owns the precious contract, `Assembly.lean` owns the selected codec
 plan, data/layout, and literal CFG, and `Program.lean` owns only the verified
@@ -120,7 +124,7 @@ def platformPlan : PlatformPlan spec.driverBoundary.requirements :=
 def gzipVerified : VerifiedProgram spec := by
   verify_assembly platformPlan
     deriving_standard_process_from spec
-    using_model fixed32KModelCorrect
+    using_component gzipImplementationBinding
     with gzipSource
 
 def bytes : ByteArray := emitProgram gzipVerified
@@ -186,33 +190,53 @@ The reusable algorithm adjacency is explicit:
 ```lean
 def fixed32KModel : ImplementationModel := Std.Zlib.Fixed32K.model codecPlan
 
-theorem fixed32KModel_correct :
-  ImplementationRealizesContract fixed32KModel
-    (Deflate.Fixed32KContract codecPlan)
+theorem fixed32KModelCorrect :
+    ImplementationRealizesContract fixed32KModel fixed32KContract :=
+  Std.Zlib.Fixed32K.correct codecPlan
 
-theorem gzipSource_refines_model :
-  AssemblyRefinesImplementation
-    codecAlgorithmScope fixed32KRepresentation fixed32KModel
+def codecAlgorithmScope : SourceScope gzipSource :=
+  SourceScope.callableRegion gzipSource
+    (entry := `process_block)
+    (returnSite := `process_block_return)
+    (localCalls := .transitiveExcept #[`flush_output])
+    (importedCalls := #[
+      (`flush_output, Std.Zlib.Fixed32K.outputSinkContract codecPlan)
+    ])
+    (containmentExits := #[])
 
-theorem fixed32K_contract_connects :
-  ComponentContractRefinesRequirement
-    (Deflate.Fixed32KContract codecPlan) gzipCodecRequirement
+theorem gzipSourceRefinesModel :
+    AssemblyRefinesImplementation
+      codecAlgorithmScope fixed32KRepresentation fixed32KModel := by
+  verify_asm_scope
+
+theorem fixed32KContractConnects :
+    ComponentContractRefinesRequirement
+      fixed32KContract gzipCodecRequirement :=
+  Console.streamingGzipComponentConnects spec
 ```
 
 The model theorem owns CRC, LZ77, fixed-Huffman, bitstream, round-trip, and
 construction-prefix mathematics once. The assembly theorem owns the exact codec
 arena/layout representation and loops inside `codecAlgorithmScope`. Partial I/O,
 application failure/progress, and terminal behavior remain separate requirements
-composed through `fixed32K_contract_connects`; the codec model does not claim the
+composed through `fixed32KContractConnects`; the codec model does not claim the
 whole console application. The exact authored instructions simulate the selected
 component.
 
-The `@implements fixed32KContract using fixed32KModelCorrect` annotation causes
-the elaborator to derive a reported
-`gzipImplementationBinding : ImplementationBinding gzipExpandedSource
-gzipCodecRequirement`. Its fields name the codec source scope, physical state
-representation, banked `fixed32KModelCorrect` certificate,
-`gzipSourceRefinesModel`, and `fixed32KContractConnects`. Whole-driver
+The author selects the callable rooted at `process_block`, its return site, and
+the transitive local-call closure except `flush_output`. That one excluded call
+is explicitly imported as the codec's abstract output-sink contract. Its Win32
+partial-write realization remains in the driver scope, so the reusable codec
+proof neither hides `WriteFile` nor claims to prove it. The scope elaborator
+rejects an unlisted escape, call, return, or containment edge.
+`fixed32KRepresentation` explicitly maps the selected arena base and every
+input, dictionary, output, and bit-writer field used by the model; it does not
+infer a zlib state from register names.
+
+`gzipImplementationBinding : ImplementationBinding gzipSource
+gzipCodecRequirement` packages that scope, physical state representation,
+banked `fixed32KModelCorrect` certificate, `gzipSourceRefinesModel`, and
+`fixed32KContractConnects`. Whole-driver
 verification consumes that value; it does not repeat codec mathematics. The
 generated binding-mutation fixture requires a codec-body or arena
 edit to stop at assembly refinement and a model-contract edit to stop at the
@@ -2123,6 +2147,50 @@ dictionary_violation_terminal:
     ud2 @containment_tail(.internalCodecInvariant)
 }
 
+def codecAlgorithmScope : SourceScope gzipSource :=
+  SourceScope.callableRegion gzipSource
+    (entry := `process_block)
+    (returnSite := `process_block_return)
+    (localCalls := .transitiveExcept #[`flush_output])
+    (importedCalls := #[
+      (`flush_output, Std.Zlib.Fixed32K.outputSinkContract codecPlan)
+    ])
+    (containmentExits := #[])
+
+def fixed32KRepresentation : RepresentationPlan codecAlgorithmScope :=
+  Std.Zlib.Fixed32K.arenaRepresentation
+    (plan := codecPlan)
+    (arenaBase := .register r12)
+    (arenaLayout := GzipArena)
+    (input := GzipArena.input)
+    (inputLength := GzipArena.inputLength)
+    (position := GzipArena.position)
+    (head := GzipArena.head)
+    (previous := GzipArena.prev)
+    (output := GzipArena.output)
+    (outputLength := GzipArena.outputLength)
+    (bitAccumulator := GzipArena.bitAccumulator)
+    (bitCount := GzipArena.bitCount)
+
+theorem gzipSourceRefinesModel :
+    AssemblyRefinesImplementation
+      codecAlgorithmScope fixed32KRepresentation fixed32KModel := by
+  verify_asm_scope
+
+def gzipCodecRequirement : ProgramRequirement spec :=
+  Console.streamingGzipCodecRequirement spec
+
+theorem fixed32KContractConnects :
+    ComponentContractRefinesRequirement
+      fixed32KContract gzipCodecRequirement :=
+  Console.streamingGzipComponentConnects spec
+
+def gzipImplementationBinding :
+    ImplementationBinding gzipSource gzipCodecRequirement :=
+  ImplementationBinding.mkChecked
+    codecAlgorithmScope fixed32KRepresentation
+    fixed32KModelCorrect gzipSourceRefinesModel fixed32KContractConnects
+
 end Grass.Spikes.Gzip
 ```
 
@@ -2138,7 +2206,7 @@ namespace Grass.Spikes.Gzip
 def gzipVerified : VerifiedProgram spec := by
   verify_assembly platformPlan
     deriving_standard_process_from spec
-    using_model fixed32KModelCorrect
+    using_component gzipImplementationBinding
     with gzipSource
 
 def bytes : ByteArray := emitProgram gzipVerified

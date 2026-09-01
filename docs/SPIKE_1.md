@@ -14,6 +14,10 @@ sketches unless explicitly labeled authored source.
 | Generated expansion/certificates | not generated |
 | Clean/incremental checking | not measured |
 
+Future generation, proof, artifact, mutation, and locality evidence follows the
+shared [implementation ratchet](IMPLEMENTATION_RATCHET.md), including the
+Spike 1 first-failure fixtures; none is claimed as present here.
+
 `Spec.lean` owns the precious contract; `Program.lean` owns the selected Win32
 projection, literal assembly, verified closing command, and emission request.
 

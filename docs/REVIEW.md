@@ -296,7 +296,8 @@ For a pre-implementation spike review, sign-off distinguishes `design approve`
 from `implementation approve`. The former applies the design-fixpoint rules in
 [SPIKE_AUTHORING.md](SPIKE_AUTHORING.md) and must not demand that the prohibited
 library already exist. The latter requires real generated evidence, mutation
-runs, artifact bytes, kernel checks, and scale measurements. A reviewer may
+runs, artifact bytes, kernel checks, and scale measurements under
+[IMPLEMENTATION_RATCHET.md](IMPLEMENTATION_RATCHET.md). A reviewer may
 reject a missing or unbelievable proof sketch at design time; it may not call
 honestly unavailable execution evidence a design defect while the library is
 explicitly out of scope.

@@ -159,7 +159,7 @@ def cubeHost : AsmSource plan :=
   asm_source
     (statics := cubeStaticObjects)
     (constructors := cubeMacroDefinitions)
-    (layouts := #[cubeHostFrameLayout, cubeCallbackFrameLayout]) {
+    (layouts := #[cubeFrameLayout, cubeCallbackFrameLayout]) {
 entry: @entry win64_gui_entry
   push rbx
   push rbp

@@ -53,9 +53,10 @@ def expandUnsignedClamp
 def expandConditionalDestroy
     (tag : Address) (arguments : Vec Operand) (target : CallTarget) :
     Vec RawInstruction :=
-  #[.cmp8 tag 0, .je (.relative 2)] ++
-  expandCall target arguments none ++
-  #[.mov8 tag 0]
+  RawInstructionBuilder.withFreshLabel `destroy_done fun done =>
+    #[.cmp8 tag 0, .je (.label done)] ++
+    expandCall target arguments none ++
+    #[.mov8 tag 0, .label done]
 
 def exactCStringScanBody : TransparentAsmFragment plan := asm_fragment {
   xor ebx,ebx
@@ -99,24 +100,31 @@ queue_record_done:
 }
 
 def checkedHeapAllocationBody : TransparentAsmFragment plan := asm_fragment {
+  mov pointer,0
+  mov byte ptr [tag],0
   mov rax,count
   mov rcx,stride
   mul rcx
   test rdx,rdx
-  jnz allocation_failure
+  jnz allocation_failed
   test count,count
-  jz allocation_zero_case
+  jz allocation_failed
   test rax,rax
-  jz allocation_failure
+  jz allocation_failed
   mov r8,rax
   mov rcx,[processHeap]
   xor edx,edx
   call qword ptr [rip+__imp_HeapAlloc]
   test rax,rax
-  jz allocation_failure
+  jz allocation_failed
   mov pointer,rax
   mov byte ptr [tag],1
+  mov eax,1
+  jmp allocation_done
+allocation_failed:
+  xor eax,eax
 allocation_done:
+  test eax,eax
 }
 
 def checkedHeapReleaseBody : TransparentAsmFragment plan := asm_fragment {

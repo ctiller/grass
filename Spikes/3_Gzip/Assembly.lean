@@ -735,4 +735,48 @@ dictionary_violation_terminal:
     ud2 @containment_tail(.internalCodecInvariant)
 }
 
+def codecAlgorithmScope : SourceScope gzipSource :=
+  SourceScope.callableRegion gzipSource
+    (entry := `process_block)
+    (returnSite := `process_block_return)
+    (localCalls := .transitiveExcept #[`flush_output])
+    (importedCalls := #[
+      (`flush_output, Std.Zlib.Fixed32K.outputSinkContract codecPlan)
+    ])
+    (containmentExits := #[])
+
+def fixed32KRepresentation : RepresentationPlan codecAlgorithmScope :=
+  Std.Zlib.Fixed32K.arenaRepresentation
+    (plan := codecPlan)
+    (arenaBase := .register r12)
+    (arenaLayout := GzipArena)
+    (input := GzipArena.input)
+    (inputLength := GzipArena.inputLength)
+    (position := GzipArena.position)
+    (head := GzipArena.head)
+    (previous := GzipArena.prev)
+    (output := GzipArena.output)
+    (outputLength := GzipArena.outputLength)
+    (bitAccumulator := GzipArena.bitAccumulator)
+    (bitCount := GzipArena.bitCount)
+
+theorem gzipSourceRefinesModel :
+    AssemblyRefinesImplementation
+      codecAlgorithmScope fixed32KRepresentation fixed32KModel := by
+  verify_asm_scope
+
+def gzipCodecRequirement : ProgramRequirement spec :=
+  Console.streamingGzipCodecRequirement spec
+
+theorem fixed32KContractConnects :
+    ComponentContractRefinesRequirement
+      fixed32KContract gzipCodecRequirement :=
+  Console.streamingGzipComponentConnects spec
+
+def gzipImplementationBinding :
+    ImplementationBinding gzipSource gzipCodecRequirement :=
+  ImplementationBinding.mkChecked
+    codecAlgorithmScope fixed32KRepresentation
+    fixed32KModelCorrect gzipSourceRefinesModel fixed32KContractConnects
+
 end Grass.Spikes.Gzip
