@@ -572,6 +572,26 @@ to imitate compiler-selected storage or CFG structure.
     authority are deliberately separated between implementor and reviewer
     identities. Changing workload requires a new agent name rather than a role
     mutation, so dedicated review remains visible and mechanically checkable.
+110. Reviewer silence, quota exhaustion, or provider loss never transfers
+    authority implicitly. An author or bootstrap-authorized coordinator may emit
+    `review.reassigned`, preserving the request and its open findings and
+    requiring a different reviewer to accept. Only that reviewer may clear or
+    explicitly supersede inherited findings. A published merge
+    authorization remains an immutable candidate-specific verdict and can only
+    win or lose its pinned product compare-and-swap. If a reviewer disappears
+    after winning but before its receipt, a bootstrap-authorized coordinator may
+    reconcile only the already-demonstrable product-history fact.
+111. Product merge review is two-phase. `review.merge_authorized` pins the bus
+    state, previous `main`, reviewed commit, exact conflict-free merge commit,
+    passed checks, and reviewer before a non-force push. `review.merged` is the
+    post-push audit receipt, not retroactive authority. Main always receives a
+    reviewer-trailed merge commit, even where Git could fast-forward.
+112. Agent-bus V1 has complete bounded schemas in `AGENT_BUS_SCHEMA.md`, a
+    65,536-byte event-line limit, causal same-agent offline references, explicit
+    work reassignment, deterministic scope-race defaults, validation CI, and
+    malformed-log quarantine limited to unrelated diagnostic publication. The helper audits product history but,
+    in the cooperative shared-credential model, does not claim it can prevent a
+    direct push performed outside itself.
 
 ## Explicitly rejected shortcuts
 
