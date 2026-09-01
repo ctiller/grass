@@ -83,20 +83,37 @@ mandate for one 44-field elaboration telescope. The implementation groups it
 behind stratified exported certificates:
 
 `requirementClosure` is not a handwritten theorem checklist. Each specification
-DSL contributes keyed demands while the suite is captured; a total dependent
-translation derives the implementation-facing proposition at every key:
+DSL contributes portable keyed demands while the suite is captured. Projection,
+provider, machine, and artifact stages then derive disjoint obligation families
+with total origin maps. Target-specific facts are never inserted into the
+precious `SpecProcess.requirements`:
 
 ```lean
-structure ImplementationConstraintIndex (spec : SpecProcess resources) where
-  entries : (key : spec.accumulatedRequirements.Key) ->
-    ImplementationConstraint spec.accumulatedRequirements[key]
-  originExact : entries.keys = spec.accumulatedRequirements.keys
+structure StagedObligationFamily
+    (spec : SpecProcess resources)
+    (projection : TargetProjection spec profile)
+    (plan : PlatformPlan spec.driverBoundary.requirements)
+    (source : MachineSource plan)
+    (artifact : Artifact plan) where
+  portable : DemandFamily := spec.requirements
+  projected : DerivedDemandFamily portable
+  provider : DerivedDemandFamily projected
+  machine : DerivedDemandFamily provider
+  artifact : DerivedDemandFamily machine
+  origins : EveryDerivedDemandHasOnePriorStageOrigin
+  disjoint : PairwiseDisjointKeys portable projected provider machine artifact
+
+structure ImplementationConstraintIndex
+    (staged : StagedObligationFamily spec projection plan source artifact) where
+  entries : (key : staged.disjointUnion.Key) ->
+    ImplementationConstraint staged.disjointUnion[key]
+  originExact : EveryEntryHasItsStagedOrigin staged entries
   dependenciesExact : ConstraintDependencies entries =
-    spec.accumulatedRequirements.dependencyEdges
+    staged.disjointUnion.dependencyEdges
 
 structure AllRequirementsDischarged
-    (spec : SpecProcess resources)
-    (index : ImplementationConstraintIndex spec)
+    (staged : StagedObligationFamily spec projection plan source artifact)
+    (index : ImplementationConstraintIndex staged)
     (program : GhostProgram spec.driverBoundary realization) where
   witness : (key : index.entries.Key) ->
     index.entries[key].Witness program
@@ -105,9 +122,12 @@ structure AllRequirementsDischarged
 ```
 
 An HTTP/2 or future gRPC constraint inventory is a review rendering of this
-dependent map. Adding a grammar, behavior, resource, cancellation, or provider
-demand to the precious suite changes its key family and makes the old closing
-term ill-typed; a prose checklist cannot independently strengthen or weaken it.
+dependent staged map. Adding a grammar, behavior, resource, or cancellation
+demand to the precious suite changes the portable family. Selecting a provider,
+ISA, ABI, or artifact form changes only its later family. Either change makes
+the first stale closing term ill-typed; a prose checklist cannot independently
+strengthen or weaken it. Requirement closure is the meta-theorem over the union
+and is never one of the demands it closes.
 
 ```lean
 structure PortableProgramCertificate {R : Type u} [ResourceModel R]

@@ -704,22 +704,22 @@ route_io_error:
     je   write_count_violation @violation_edge(.excessWriteCount)
     jmp  dictionary_violation_terminal @violation_edge(.internalCodecInvariant)
 
-stdin_unavailable:      @terminal(.stdinUnavailable)
+stdin_unavailable:      @terminal(.inputFailure) @audit(.stdinUnavailable)
     mov  ecx, 1
     jmp  exit
-stdout_unavailable:     @terminal(.stdoutUnavailable)
+stdout_unavailable:     @terminal(.outputFailure) @audit(.stdoutUnavailable)
     mov  ecx, 1
     jmp  exit
-resource_exhausted_no_root: @terminal(.resourceExhausted)
+resource_exhausted_no_root: @terminal(.allocationFailure) @audit(.resourceExhausted)
     mov  ecx, 1
     jmp  exit
-read_failed:            @terminal(.readFailed)
+read_failed:            @terminal(.inputFailure) @audit(.readFailed)
     mov  ecx, 1
     jmp  exit
-write_failed:           @terminal(.writeFailed)
+write_failed:           @terminal(.outputFailure) @audit(.writeFailed)
     mov  ecx, 1
     jmp  exit
-no_progress:            @terminal(.noProgress)
+no_progress:            @terminal(.outputFailure) @audit(.noProgress)
     mov  ecx, 1
     jmp  exit
 exit_success:           @terminal(.success)

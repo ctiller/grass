@@ -9,8 +9,8 @@ bindings, and artifact bundles are generated inspection views.
 
 | Proof-economics quantity | Current evidence |
 | --- | --- |
-| Authored specification | 1 module; 104 physical / 86 nonblank lines |
-| Authored realization | 5 modules; 1822 physical / 1645 nonblank lines |
+| Authored specification | 1 module; 98 physical / 81 nonblank lines |
+| Authored realization | 5 modules; 1797 physical / 1624 nonblank lines |
 | Generated expansion/certificates | not generated |
 | Clean/incremental checking | not measured |
 
@@ -91,24 +91,19 @@ literal-only decoder would not realize the claimed HTTP/2 input behavior.
 
 <!-- grass-block: interface id=spike4-block-02 -->
 ```lean
-def frameFormat : Format Http2.Frame := Http2.frameFormat
+def protocolProfileFor {R} [ResourceModel R] [WebServerResources R]
+    (resources : R) : Http2.ServerProfile R :=
+  Http2.ServerProfile.rfc9113CleartextPriorKnowledge
+    (budget := Http2ServerSemanticBudget.fromResources resources)
+    (behavior := behaviorPolicyFor resources)
 
-def hpackFieldSectionFormat : Format Http2.HeaderList :=
-  Hpack.fieldSectionFormat
-
-def frameParserRequirement {R} [ResourceModel R]
-    (resources : R) : ProcessRequirement resources :=
-  Format.parserRequirement frameFormat
-
-def hpackParserRequirement {R} [ResourceModel R]
-    (resources : R) : ProcessRequirement resources :=
-  Format.parserRequirement hpackFieldSectionFormat
+def protocolPackageFor {R} [ResourceModel R] [WebServerResources R]
+    (resources : R) : Http2.Server.Package R :=
+  Http2.Server.package resources (protocolProfileFor resources) routes
 
 def webServerSuite {R} [ResourceModel R] [WebServerResources R]
     (resources : R) : SpecificationSuite resources :=
-  Http2.memoryServerSuite
-    resources routes (behaviorPolicyFor resources)
-    (frameParserRequirement resources) (hpackParserRequirement resources)
+  (protocolPackageFor resources).suite
 
 def webServerSpec {R} [ResourceModel R] [WebServerResources R]
     (resources : R) : SpecProcess resources :=
@@ -123,9 +118,7 @@ def webServerSpec {R} [ResourceModel R] [WebServerResources R]
 
 theorem webServerSpecCorrect {R} [ResourceModel R] [WebServerResources R]
     (resources : R) : MeetsAllSpecificationTheorems (webServerSpec resources) :=
-  Http2.memoryServerSuiteCaptureCorrect
-    resources routes (behaviorPolicyFor resources)
-    (frameParserRequirement resources) (hpackParserRequirement resources)
+  (protocolPackageFor resources).captureCorrect
 ```
 
 This theorem is the high-level correctness proof. It is universally quantified
@@ -222,17 +215,13 @@ still withhold credit; neither is server-owned memory exhaustion.
 
 <!-- grass-block: interface id=spike4-block-04 -->
 ```lean
-def protocolProfile : Http2.Profile where
-  transport := .cleartextPriorKnowledge
-  maxFrameSize := capturedSemanticBudget.maxInboundFrameBytes
-  serverPush := false
-  priorityMode := .ignoreDeprecated
-  extensionMode := .ignoreUnknown
-  hpackDynamicTableBytes := capturedSemanticBudget.hpackDecoderTableBytes
-  maxHeaderListBytes := capturedSemanticBudget.maxHeaderListBytes
+def protocolPackage : Http2.Server.Package resources :=
+  protocolPackageFor resources
+
+def protocolProfile : Http2.Profile := protocolPackage.machineProfile
 
 def connectionModel : Http2.ConnectionModel :=
-  Http2.ConnectionModel.server protocolProfile behaviorPolicy routes
+  protocolPackage.connectionModel
 ```
 
 The model contains the client preface, SETTINGS synchronization, every base
@@ -246,13 +235,8 @@ The framing proof surface is deliberately stronger than round-trip testing:
 
 <!-- grass-block: interface id=spike4-block-05 -->
 ```lean
-def frameParserRealizes : ParserRealizes frameFormat
-    (Http2.Frame.parseResult protocolProfile) :=
-  Http2.Frame.parserRealizesFormat protocolProfile
-
-def hpackParserRealizes : ParserRealizes hpackFieldSectionFormat
-    (Hpack.FieldSection.parseResult protocolProfile) :=
-  Hpack.FieldSection.parserRealizesFormat protocolProfile
+protocolPackage.frameParserWitness
+protocolPackage.hpackParserWitness
 ```
 
 These discharge the two existential process requirements after the chosen
@@ -262,16 +246,9 @@ success cases below.
 
 <!-- grass-block: interface id=spike4-block-06 -->
 ```lean
-theorem frameWriterRoundTrip (frame : Http2.Frame)
-    (admissible : frame.Admissible protocolProfile) :
-    Http2.Frame.parse protocolProfile (Http2.Frame.write frame) = .ok frame
-
-theorem frameParserConforms (input : ByteArray) :
-    Http2.Frame.parse protocolProfile input = .error ∨
-    ∃ frame suffix,
-      Http2.Frame.parsePrefix protocolProfile input = .ok (frame, suffix) ∧
-      frame.Admissible protocolProfile ∧
-      input = Http2.Frame.write frame ++ suffix
+protocolPackage.frameWriterRoundTrip
+protocolPackage.frameParserConforms
+protocolPackage.errorMatrixExact
 ```
 
 The second theorem prevents a parser from accepting an unrelated object or
@@ -1920,6 +1897,7 @@ end Grass.Spikes.WebServer
 <!-- grass-block: authored file=Macros.lean -->
 ```lean
 import Grass.Assembly.X86
+import Grass.Std.Protocol.Http2.X86
 import Spikes.«4_Web_Server».Process
 
 namespace Grass.Spikes.WebServer
@@ -1935,7 +1913,7 @@ def serverSettings : Http2.Settings :=
     enablePush := false
     maxConcurrentStreams := resourcePolicy.maxConcurrentStreamsPerConnection
     initialWindowSize := resourcePolicy.inboundStreamWindow
-    maxFrameSize := 16384
+    maxFrameSize := resourcePolicy.maxInboundFrameBytes
     maxHeaderListSize := resourcePolicy.maxHeaderListBytes }
 
 def clientPreface : ByteArray :=
@@ -2122,7 +2100,6 @@ def normalizeHeadersPayloadBody :
     }
     |> ifFlag priority {
       requirePayloadLengthAtLeast 5
-      requirePriorityDependencyNotCurrentStream
       removePriorityPrefix
     }
     |> publishExactHeaderBlockSlice
@@ -2185,9 +2162,11 @@ def requestFieldsBody :
     |> rejectConnectionSpecificFields
     |> requirePseudoHeadersBeforeRegular
     |> requireExactlyOne method
+    |> requireExactlyOne scheme
     |> requireExactlyOne path
-    |> allowOptional scheme authority
+    |> allowOptional authority
     |> requireMethod get
+    |> parseAndRetainOptionalContentLength
     |> exactStaticRouteMatch routes
 }
 
@@ -2196,8 +2175,8 @@ def settingsBody (settings : Http2.Settings) :
       Http2.X86.Contract.settingsExit := x86_fragment_body {
   name := `applySettings
   algorithm := validateAckAndLength
-    |> foldSixByteEntriesRejectInvalid
-    |> requireEnablePushZero
+    |> foldSixByteEntriesRejectInvalidForReceiver .server
+    |> acceptClientEnablePushZeroOrOne
     |> checkedInitialWindowDeltaAcrossOpenStreams
     |> boundHeaderTable resourcePolicy.hpackDecoderTableBytes
     |> publishPeerSettings
@@ -2222,6 +2201,8 @@ def streamTransitionBody :
   algorithm := validatePeerStreamParityAndMonotonicity
     |> lookupOrClaimBoundedIncarnation
     |> transitionBy frameType frameFlags streamState
+    |> accountDataContentOctets
+    |> onRemoteEnd requireDeclaredContentLengthExact
     |> classifyErrorScope
 }
 
@@ -2498,7 +2479,8 @@ def writerObservationBody :
 
 def serverMacros : MacroTable platformPlan := macros {
   h2_consume_preface => consumePrefaceBody
-  h2_parse_frame_header => parseFrameHeaderBody 16384
+  h2_parse_frame_header =>
+    parseFrameHeaderBody resourcePolicy.maxInboundFrameBytes
   hpack_decode_field_section =>
     hpackFieldSectionBody
       resourcePolicy.hpackDecoderTableBytes
@@ -2558,9 +2540,7 @@ end Grass.Spikes.WebServer
 ```lean
 import Grass.Process
 import Grass.Platform.Win10.X64
-import Grass.Std.Http2.Model
-import Grass.Std.Http2.Process
-import Grass.Std.Hpack.Model
+import Grass.Std.Protocol.Http2
 import Grass.Std.Process.Network
 import Grass.Std.Process.Supervision
 import Spikes.«4_Web_Server».Spec
@@ -2595,38 +2575,10 @@ def projection : TargetProjection spec .win10X64 :=
     (gracefulShutdownStatus := 0)
     (startupFailureStatus := 1)
 
-def protocolProfile : Http2.Profile where
-  transport := .cleartextPriorKnowledge
-  maxFrameSize := capturedSemanticBudget.maxInboundFrameBytes
-  serverPush := false
-  priorityMode := .ignoreDeprecated
-  extensionMode := .ignoreUnknown
-  hpackDynamicTableBytes := capturedSemanticBudget.hpackDecoderTableBytes
-  maxHeaderListBytes := capturedSemanticBudget.maxHeaderListBytes
+def protocolProfile : Http2.Profile := protocolPackage.machineProfile
 
 def connectionModel : Http2.ConnectionModel :=
-  Http2.ConnectionModel.server protocolProfile behaviorPolicy routes
-
-def frameParserRealizes : ParserRealizes frameFormat
-    (Http2.Frame.parseResult protocolProfile) :=
-  Http2.Frame.parserRealizesFormat protocolProfile
-
-def hpackParserRealizes : ParserRealizes hpackFieldSectionFormat
-    (Hpack.FieldSection.parseResult protocolProfile) :=
-  Hpack.FieldSection.parserRealizesFormat protocolProfile
-
-theorem frameWriterRoundTrip (frame : Http2.Frame)
-    (admissible : frame.Admissible protocolProfile) :
-    Http2.Frame.parse protocolProfile (Http2.Frame.write frame) = .ok frame :=
-  Http2.Frame.parse_write protocolProfile frame admissible
-
-theorem frameParserConforms (input : ByteArray) :
-    Http2.Frame.parse protocolProfile input = .error ∨
-    ∃ frame suffix,
-      Http2.Frame.parsePrefix protocolProfile input = .ok (frame, suffix) ∧
-      frame.Admissible protocolProfile ∧
-      input = Http2.Frame.write frame ++ suffix :=
-  Http2.Frame.parse_conforms protocolProfile input
+  protocolPackage.connectionModel
 
 def platformPlan : PlatformPlan spec.driverBoundary.requirements :=
   PlatformPlan.win10X64Http2FixedPool projection
@@ -2968,8 +2920,7 @@ end Grass.Spikes.WebServer
 
 <!-- grass-block: authored file=Spec.lean -->
 ```lean
-import Grass.Spec.Http2
-import Grass.Spec.Grammar
+import Grass.Std.Protocol.Http2
 import Grass.Spec.Resource
 
 namespace Grass.Spikes.WebServer
@@ -3024,25 +2975,19 @@ def behaviorPolicyFor {R : Type} [ResourceModel R] [WebServerResources R]
     hpackEncoder := .anyConformingEncoding
     huffman := .acceptValidRejectInvalid
 
-def frameFormat : Format Http2.Frame :=
-  Http2.frameFormat
+def protocolProfileFor {R : Type} [ResourceModel R] [WebServerResources R]
+    (resources : R) : Http2.ServerProfile R :=
+  Http2.ServerProfile.rfc9113CleartextPriorKnowledge
+    (budget := Http2ServerSemanticBudget.fromResources resources)
+    (behavior := behaviorPolicyFor resources)
 
-def hpackFieldSectionFormat : Format Http2.HeaderList :=
-  Hpack.fieldSectionFormat
-
-def frameParserRequirement {R : Type} [ResourceModel R]
-    (resources : R) : ProcessRequirement resources :=
-  Format.parserRequirement frameFormat
-
-def hpackParserRequirement {R : Type} [ResourceModel R]
-    (resources : R) : ProcessRequirement resources :=
-  Format.parserRequirement hpackFieldSectionFormat
+def protocolPackageFor {R : Type} [ResourceModel R] [WebServerResources R]
+    (resources : R) : Http2.Server.Package R :=
+  Http2.Server.package resources (protocolProfileFor resources) routes
 
 def webServerSuite {R : Type} [ResourceModel R] [WebServerResources R]
     (resources : R) : SpecificationSuite resources :=
-  Http2.memoryServerSuite
-    resources routes (behaviorPolicyFor resources)
-    (frameParserRequirement resources) (hpackParserRequirement resources)
+  (protocolPackageFor resources).suite
 
 def webServerSpec {R : Type} [ResourceModel R] [WebServerResources R]
     (resources : R) : SpecProcess resources :=
@@ -3057,13 +3002,14 @@ def webServerSpec {R : Type} [ResourceModel R] [WebServerResources R]
 
 theorem webServerSpecCorrect {R : Type} [ResourceModel R] [WebServerResources R]
     (resources : R) : MeetsAllSpecificationTheorems (webServerSpec resources) :=
-  Http2.memoryServerSuiteCaptureCorrect
-    resources routes (behaviorPolicyFor resources)
-    (frameParserRequirement resources) (hpackParserRequirement resources)
+  (protocolPackageFor resources).captureCorrect
 
 def spec : SpecProcess resources := webServerSpec resources
 
-def behaviorPolicy : Http2ServerBehaviorPolicy := behaviorPolicyFor resources
+def protocolPackage : Http2.Server.Package resources :=
+  protocolPackageFor resources
+
+def behaviorPolicy : Http2ServerBehaviorPolicy := protocolPackage.profile.behavior
 
 def capturedSemanticBudget : Http2ServerSemanticBudget :=
   Http2ServerSemanticBudget.fromCapturedSemantics spec.resourceSemantics

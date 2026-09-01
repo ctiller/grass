@@ -1,4 +1,5 @@
 import Grass.Assembly.X86
+import Grass.Std.Protocol.Http2.X86
 import Spikes.«4_Web_Server».Process
 
 namespace Grass.Spikes.WebServer
@@ -14,7 +15,7 @@ def serverSettings : Http2.Settings :=
     enablePush := false
     maxConcurrentStreams := resourcePolicy.maxConcurrentStreamsPerConnection
     initialWindowSize := resourcePolicy.inboundStreamWindow
-    maxFrameSize := 16384
+    maxFrameSize := resourcePolicy.maxInboundFrameBytes
     maxHeaderListSize := resourcePolicy.maxHeaderListBytes }
 
 def clientPreface : ByteArray :=
@@ -201,7 +202,6 @@ def normalizeHeadersPayloadBody :
     }
     |> ifFlag priority {
       requirePayloadLengthAtLeast 5
-      requirePriorityDependencyNotCurrentStream
       removePriorityPrefix
     }
     |> publishExactHeaderBlockSlice
@@ -264,9 +264,11 @@ def requestFieldsBody :
     |> rejectConnectionSpecificFields
     |> requirePseudoHeadersBeforeRegular
     |> requireExactlyOne method
+    |> requireExactlyOne scheme
     |> requireExactlyOne path
-    |> allowOptional scheme authority
+    |> allowOptional authority
     |> requireMethod get
+    |> parseAndRetainOptionalContentLength
     |> exactStaticRouteMatch routes
 }
 
@@ -275,8 +277,8 @@ def settingsBody (settings : Http2.Settings) :
       Http2.X86.Contract.settingsExit := x86_fragment_body {
   name := `applySettings
   algorithm := validateAckAndLength
-    |> foldSixByteEntriesRejectInvalid
-    |> requireEnablePushZero
+    |> foldSixByteEntriesRejectInvalidForReceiver .server
+    |> acceptClientEnablePushZeroOrOne
     |> checkedInitialWindowDeltaAcrossOpenStreams
     |> boundHeaderTable resourcePolicy.hpackDecoderTableBytes
     |> publishPeerSettings
@@ -301,6 +303,8 @@ def streamTransitionBody :
   algorithm := validatePeerStreamParityAndMonotonicity
     |> lookupOrClaimBoundedIncarnation
     |> transitionBy frameType frameFlags streamState
+    |> accountDataContentOctets
+    |> onRemoteEnd requireDeclaredContentLengthExact
     |> classifyErrorScope
 }
 
@@ -577,7 +581,8 @@ def writerObservationBody :
 
 def serverMacros : MacroTable platformPlan := macros {
   h2_consume_preface => consumePrefaceBody
-  h2_parse_frame_header => parseFrameHeaderBody 16384
+  h2_parse_frame_header =>
+    parseFrameHeaderBody resourcePolicy.maxInboundFrameBytes
   hpack_decode_field_section =>
     hpackFieldSectionBody
       resourcePolicy.hpackDecoderTableBytes

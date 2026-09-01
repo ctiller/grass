@@ -1,5 +1,4 @@
-import Grass.Spec.Http2
-import Grass.Spec.Grammar
+import Grass.Std.Protocol.Http2
 import Grass.Spec.Resource
 
 namespace Grass.Spikes.WebServer
@@ -54,25 +53,19 @@ def behaviorPolicyFor {R : Type} [ResourceModel R] [WebServerResources R]
     hpackEncoder := .anyConformingEncoding
     huffman := .acceptValidRejectInvalid
 
-def frameFormat : Format Http2.Frame :=
-  Http2.frameFormat
+def protocolProfileFor {R : Type} [ResourceModel R] [WebServerResources R]
+    (resources : R) : Http2.ServerProfile R :=
+  Http2.ServerProfile.rfc9113CleartextPriorKnowledge
+    (budget := Http2ServerSemanticBudget.fromResources resources)
+    (behavior := behaviorPolicyFor resources)
 
-def hpackFieldSectionFormat : Format Http2.HeaderList :=
-  Hpack.fieldSectionFormat
-
-def frameParserRequirement {R : Type} [ResourceModel R]
-    (resources : R) : ProcessRequirement resources :=
-  Format.parserRequirement frameFormat
-
-def hpackParserRequirement {R : Type} [ResourceModel R]
-    (resources : R) : ProcessRequirement resources :=
-  Format.parserRequirement hpackFieldSectionFormat
+def protocolPackageFor {R : Type} [ResourceModel R] [WebServerResources R]
+    (resources : R) : Http2.Server.Package R :=
+  Http2.Server.package resources (protocolProfileFor resources) routes
 
 def webServerSuite {R : Type} [ResourceModel R] [WebServerResources R]
     (resources : R) : SpecificationSuite resources :=
-  Http2.memoryServerSuite
-    resources routes (behaviorPolicyFor resources)
-    (frameParserRequirement resources) (hpackParserRequirement resources)
+  (protocolPackageFor resources).suite
 
 def webServerSpec {R : Type} [ResourceModel R] [WebServerResources R]
     (resources : R) : SpecProcess resources :=
@@ -87,13 +80,14 @@ def webServerSpec {R : Type} [ResourceModel R] [WebServerResources R]
 
 theorem webServerSpecCorrect {R : Type} [ResourceModel R] [WebServerResources R]
     (resources : R) : MeetsAllSpecificationTheorems (webServerSpec resources) :=
-  Http2.memoryServerSuiteCaptureCorrect
-    resources routes (behaviorPolicyFor resources)
-    (frameParserRequirement resources) (hpackParserRequirement resources)
+  (protocolPackageFor resources).captureCorrect
 
 def spec : SpecProcess resources := webServerSpec resources
 
-def behaviorPolicy : Http2ServerBehaviorPolicy := behaviorPolicyFor resources
+def protocolPackage : Http2.Server.Package resources :=
+  protocolPackageFor resources
+
+def behaviorPolicy : Http2ServerBehaviorPolicy := protocolPackage.profile.behavior
 
 def capturedSemanticBudget : Http2ServerSemanticBudget :=
   Http2ServerSemanticBudget.fromCapturedSemantics spec.resourceSemantics

@@ -9,8 +9,8 @@ sketches unless explicitly labeled authored source.
 
 | Proof-economics quantity | Current evidence |
 | --- | --- |
-| Authored specification | 1 module; 30 physical / 21 nonblank lines |
-| Authored realization | 1 module; 97 physical / 81 nonblank lines |
+| Authored specification | 1 module; 36 physical / 26 nonblank lines |
+| Authored realization | 1 module; 99 physical / 82 nonblank lines |
 | Generated expansion/certificates | not generated |
 | Clean/incremental checking | not measured |
 
@@ -92,6 +92,12 @@ inductive HelloOutcome
   | success
   | failure
 
+def outcomePolicy : ConsoleWriteOutcomePolicy HelloOutcome where
+  success := .success
+  stdoutUnavailable := .failure
+  writeFailed := .failure
+  noProgress := .failure
+
 /-!
 The portable specification is parameterized by `resources`. Numeric terminal
 status and text representation belong to the separately proved target
@@ -118,7 +124,7 @@ def resources : ConsoleResourceModel :=
 
 def helloContract {R : Type} [ResourceModel R] [ConsoleWriteResources R]
     (resources : R) : BehaviorContract resources :=
-  Console.writeLineContract resources message HelloOutcome
+  Console.writeLineContract resources message outcomePolicy
 
 def helloSpec {R : Type} [ResourceModel R] [ConsoleWriteResources R]
     (resources : R) : SpecProcess resources :=
@@ -127,7 +133,7 @@ def helloSpec {R : Type} [ResourceModel R] [ConsoleWriteResources R]
 
 theorem helloSpecCorrect {R : Type} [ResourceModel R] [ConsoleWriteResources R]
     (resources : R) : MeetsAllSpecificationTheorems (helloSpec resources) :=
-  Console.writeLineContractCorrect resources message HelloOutcome
+  Console.writeLineContractCorrect resources message outcomePolicy
 
 def spec : SpecProcess resources := helloSpec resources
 
@@ -798,7 +804,7 @@ split basic blocks automatically;
 The registers and instructions remain literal choices; routine ABI storage uses
 the named frame layout. This pre-implementation rendering still contains
 symbolic layout terms such as `transferred.addr`,
-`arg WriteFile.overlapped`, and `sizeof(message)`; it is therefore not the
+`arg WriteFile.overlapped`, and `sizeof(payload)`; it is therefore not the
 required final raw expansion. The generated review view must replace them with
 exact numeric operands and include static bytes, symbols, imports, relocations,
 encodings, and a source map.
@@ -820,11 +826,11 @@ entry:
     cmp  rax, INVALID_HANDLE_VALUE
     je   exit_unavailable
     mov  r12, rax                         ; borrowed stdout handle
-    lea  r13, [rip + message]
-    mov  r14d, sizeof(message)            ; derived from the logical constant
+    lea  r13, [rip + payload]
+    mov  r14d, sizeof(payload)            ; derived by the selected projection
 
 write_head: @placement [handle := r12, cursor := r13, remaining := r14d]
-            @invariant write_all_loop(message)
+            @invariant write_all_loop(payload)
     test r14d, r14d
     je   exit_success
     arg WriteFile.overlapped, 0
@@ -848,13 +854,13 @@ write_head: @placement [handle := r12, cursor := r13, remaining := r14d]
 exit_success: @terminal(.success)
     xor  ecx, ecx
     jmp  exit
-exit_unavailable: @terminal(.stdoutUnavailable)
+exit_unavailable: @terminal(.failure) @audit(.stdoutUnavailable)
     mov  ecx, 1
     jmp  exit
-exit_write_failed: @terminal(.writeFailed)
+exit_write_failed: @terminal(.failure) @audit(.writeFailed)
     mov  ecx, 1
     jmp  exit
-exit_no_progress: @terminal(.noProgress)
+exit_no_progress: @terminal(.failure) @audit(.noProgress)
     mov  ecx, 1
     jmp  exit
 exit:
@@ -1277,8 +1283,10 @@ def projection : TargetProjection spec .win10X64 :=
 def plan : PlatformPlan spec.driverBoundary.requirements :=
   PlatformPlan.win10X64SynchronousStdoutOnly projection
 
+def payload : ByteArray := projection.encodeLine message
+
 def helloStatics : StaticObjectTable := static_objects {
-  rodata align 1 { message: bytes message }
+  rodata align 1 { payload: bytes payload }
 }
 
 def helloSource : MachineSource plan :=
@@ -1295,11 +1303,11 @@ entry:
   cmp rax, INVALID_HANDLE_VALUE
   je exit_unavailable
   mov r12, rax
-  lea r13, [rip + message]
-  mov r14d, sizeof(message)
+  lea r13, [rip + payload]
+  mov r14d, sizeof(payload)
 
 write_head: @placement [handle := r12, cursor := r13, remaining := r14d]
-            @invariant write_all_loop(message)
+            @invariant write_all_loop(payload)
   test r14d, r14d
   je exit_success
   arg WriteFile.overlapped, 0
@@ -1324,15 +1332,15 @@ exit_success: @terminal(.success)
   xor ecx, ecx
   jmp exit
 
-exit_unavailable: @terminal(.stdoutUnavailable)
+exit_unavailable: @terminal(.failure) @audit(.stdoutUnavailable)
   mov ecx, 1
   jmp exit
 
-exit_write_failed: @terminal(.writeFailed)
+exit_write_failed: @terminal(.failure) @audit(.writeFailed)
   mov ecx, 1
   jmp exit
 
-exit_no_progress: @terminal(.noProgress)
+exit_no_progress: @terminal(.failure) @audit(.noProgress)
   mov ecx, 1
   jmp exit
 
@@ -1372,9 +1380,15 @@ inductive HelloOutcome
   | success
   | failure
 
+def outcomePolicy : ConsoleWriteOutcomePolicy HelloOutcome where
+  success := .success
+  stdoutUnavailable := .failure
+  writeFailed := .failure
+  noProgress := .failure
+
 def helloContract {R : Type} [ResourceModel R] [ConsoleWriteResources R]
     (resources : R) : BehaviorContract resources :=
-  Console.writeLineContract resources message HelloOutcome
+  Console.writeLineContract resources message outcomePolicy
 
 def helloSpec {R : Type} [ResourceModel R] [ConsoleWriteResources R]
     (resources : R) : SpecProcess resources :=
@@ -1383,7 +1397,7 @@ def helloSpec {R : Type} [ResourceModel R] [ConsoleWriteResources R]
 
 theorem helloSpecCorrect {R : Type} [ResourceModel R] [ConsoleWriteResources R]
     (resources : R) : MeetsAllSpecificationTheorems (helloSpec resources) :=
-  Console.writeLineContractCorrect resources message HelloOutcome
+  Console.writeLineContractCorrect resources message outcomePolicy
 
 def spec : SpecProcess resources := helloSpec resources
 

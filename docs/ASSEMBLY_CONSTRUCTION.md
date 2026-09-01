@@ -218,6 +218,78 @@ fixtures which must remain as residual goals in respectively `asm_symbolic`,
 `asm_ghost`, and `asm_close`; no later phase may silently solve or reclassify
 them.
 
+## 2.2 Complete constructor interfaces
+
+The concise spike constructors are governed library interfaces, not tactic
+vocabulary. A structured fragment body has a total lowering and retains every
+exit and physical effect:
+
+```lean
+structure ClosedVerifiedFragmentBody
+    (plan : PlatformPlan requirements)
+    (entry : BlockContract)
+    (exits : FragmentExitFamily entry) where
+  algorithm : StructuredAsm entry exits
+  raw : RawInstructionHierarchy
+  lowerExact : StructuredAsm.lower algorithm = .ok raw
+  sourceMap : TotalSourceMap algorithm raw
+  exitCoverage : EveryNormalFaultCancelInterruptUnwindExitMapped algorithm exits
+  effects : FragmentEffectSummary raw
+  effectsExact : effects = RawInstructionHierarchy.deriveEffects raw
+  localCorrect : HoareSequenceAllExits entry raw exits
+  referencesClosed : EveryReferenceResolvedInPlan raw plan
+  citationsComplete : InstructionAnchorCoverage raw
+```
+
+Lowering may return a typed construction error before this value exists; it has
+no partial success. `effects` includes registers, flags, stack delta, memory,
+faults, resources, obligations, cancellation, and calls. A splice consumes this
+dependent summary and fails if live caller state is not framed. The application
+author selects novel algorithms and contracts; the library derives routine
+effect enumeration and source maps.
+
+CFG join selection is total over structural discovery:
+
+```lean
+structure JoinContractSelection (source : AuthoredAsmSource) where
+  discovered : FiniteMap BlockId JoinKind := source.discoverJoins
+  selected : (id : discovered.Key) -> BlockContract
+  keyExact : selected.keys = discovered.keys
+  predecessorCoverage : forall id, EveryPredecessorProves source id (selected id)
+  backEdges : forall id, discovered[id].isCyclic ->
+    HasInvariantAndMeasureOrFrontier source id (selected id)
+```
+
+Straight-line single-predecessor entries may derive their contract from the
+predecessor exit. Every shared target and cycle appears in `discovered` and must
+be selected exactly once. Deleting an entry, redirecting an edge, or adding a
+back edge changes the key family and makes the old selection ill-typed.
+
+Cross-ISA connections are typed occurrence chains, never whole-source guesses:
+
+```lean
+structure CrossIsaArtifactConnection
+    (producer : DeviceSourceShard)
+    (consumer : HostSourceShard) where
+  serializedWords : ExactSerializedRange producer
+  staticOccurrence : UniqueStaticRangeOccurrence consumer serializedWords
+  createCall : UniqueProviderCallOccurrence consumer `createShaderModule
+  codeArgumentsExact : CallConsumesRange createCall staticOccurrence
+  returnedHandle : CorrelatedResultOccurrence createCall
+  pipelineUse : UniquePipelineStageOccurrence consumer returnedHandle
+  entryPoint : ExactEntryPointString producer pipelineUse
+  providerConsumes : ProviderContractConnects producer consumer
+
+structure HeterogeneousSourceConnections (source : MachineSource plan) where
+  connections : FiniteMap ConnectionKey (CrossIsaArtifactConnection ...)
+  demandedExact : connections.keys = source.discoverCrossIsaDemands.keys
+  occurrenceCoverage : EveryDemandedOccurrenceConnectedExactlyOnce source connections
+```
+
+Mechanical scanning discovers demanded occurrences and checks uniqueness. It
+does not decide which shader, callback, handle, push constant, or entry point an
+application intended.
+
 ## 3. Object and aggregate layout
 
 Logical objects and physical layout remain separate:

@@ -20,8 +20,10 @@ def projection : TargetProjection spec .win10X64 :=
 def plan : PlatformPlan spec.driverBoundary.requirements :=
   PlatformPlan.win10X64SynchronousStdoutOnly projection
 
+def payload : ByteArray := projection.encodeLine message
+
 def helloStatics : StaticObjectTable := static_objects {
-  rodata align 1 { message: bytes message }
+  rodata align 1 { payload: bytes payload }
 }
 
 def helloSource : MachineSource plan :=
@@ -38,11 +40,11 @@ entry:
   cmp rax, INVALID_HANDLE_VALUE
   je exit_unavailable
   mov r12, rax
-  lea r13, [rip + message]
-  mov r14d, sizeof(message)
+  lea r13, [rip + payload]
+  mov r14d, sizeof(payload)
 
 write_head: @placement [handle := r12, cursor := r13, remaining := r14d]
-            @invariant write_all_loop(message)
+            @invariant write_all_loop(payload)
   test r14d, r14d
   je exit_success
   arg WriteFile.overlapped, 0
@@ -67,15 +69,15 @@ exit_success: @terminal(.success)
   xor ecx, ecx
   jmp exit
 
-exit_unavailable: @terminal(.stdoutUnavailable)
+exit_unavailable: @terminal(.failure) @audit(.stdoutUnavailable)
   mov ecx, 1
   jmp exit
 
-exit_write_failed: @terminal(.writeFailed)
+exit_write_failed: @terminal(.failure) @audit(.writeFailed)
   mov ecx, 1
   jmp exit
 
-exit_no_progress: @terminal(.noProgress)
+exit_no_progress: @terminal(.failure) @audit(.noProgress)
   mov ecx, 1
   jmp exit
 

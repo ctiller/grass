@@ -12,9 +12,15 @@ inductive HelloOutcome
   | success
   | failure
 
+def outcomePolicy : ConsoleWriteOutcomePolicy HelloOutcome where
+  success := .success
+  stdoutUnavailable := .failure
+  writeFailed := .failure
+  noProgress := .failure
+
 def helloContract {R : Type} [ResourceModel R] [ConsoleWriteResources R]
     (resources : R) : BehaviorContract resources :=
-  Console.writeLineContract resources message HelloOutcome
+  Console.writeLineContract resources message outcomePolicy
 
 def helloSpec {R : Type} [ResourceModel R] [ConsoleWriteResources R]
     (resources : R) : SpecProcess resources :=
@@ -23,7 +29,7 @@ def helloSpec {R : Type} [ResourceModel R] [ConsoleWriteResources R]
 
 theorem helloSpecCorrect {R : Type} [ResourceModel R] [ConsoleWriteResources R]
     (resources : R) : MeetsAllSpecificationTheorems (helloSpec resources) :=
-  Console.writeLineContractCorrect resources message HelloOutcome
+  Console.writeLineContractCorrect resources message outcomePolicy
 
 def spec : SpecProcess resources := helloSpec resources
 

@@ -84,7 +84,56 @@ Link failure is data, not unsoundness. Duplicate exports, unresolved symbols,
 ABI mismatch, incompatible providers, overflowed relocations, permission
 conflicts, or an unclosed root contract return a precise error.
 
-## 4. Invalidation and caching
+## 4. Canonical source DAG and stable local proof identity
+
+Large sources are canonical DAGs of shards, not one dependent vector copied
+into every theorem type:
+
+```lean
+structure SourceShard where
+  scopeId : StableScopeId
+  publicSummary : MachineBoundarySummary
+  imports : FiniteMap StableScopeId MachineBoundarySummary
+  body : AuthoredAsmSource
+  localIdentity : HashOfCanonicalSource body imports
+
+structure SourceDag where
+  shards : FiniteMap StableScopeId SourceShard
+  edges : FiniteDependencyDag shards
+  roots : FiniteSet StableScopeId
+  importsExact : EveryImportMatchesOneExport shards edges
+
+structure VerifiedShard (shard : SourceShard) where
+  local : ShardSourceRefinesSummary shard.body shard.publicSummary
+  dependencies : EveryLocalProofUsesOnly shard.imports
+  sourceClosure : ExactLocalSymbolsReferencesAndExpansion shard
+```
+
+`StableScopeId` is a reviewed nominal identity. The cache key additionally uses
+the canonical body and imported-summary hashes; it is not a proof. A local
+certificate is indexed by the exact shard and small imported summaries, never
+the entire program. The aggregate theorem folds `VerifiedShard` values over the
+DAG and proves that recursive concatenation/linking is the exact root machine
+source. Its root hash supports lookup and reproduction but cannot replace the
+folded theorem.
+
+Consequences:
+
+- a body-only edit rechecks that shard and ancestors whose imported summary or
+  layout actually changes;
+- an implementation edit preserving an exported summary permits sibling and
+  consumer proof reuse;
+- an interface edit invalidates direct consumers and their affected ancestors;
+- adding/removing an edge changes the finite dependency proof; and
+- no local theorem elaborates or compares a tens-of-millions-instruction term.
+
+Implementation acceptance measures clean work, one-instruction body edits,
+interface edits, cache hits, proof bytes, and peak memory at one million and ten
+million instructions. The design target is work proportional to the changed
+shard plus affected ancestor/interface closure, with logarithmic or bounded
+index lookup; no fixed numeric timing is claimed before measurement.
+
+## 5. Invalidation and caching
 
 Object proofs are opaque module exports and may be cached by source/theorem/
 profile hashes. A private edit rechecks its changed fragments, ancestor closure
@@ -97,7 +146,7 @@ semantics do not. The linker re-proves the cheap layout/relocation connection
 from unchanged object certificates instead of replaying every instruction
 proof. Build reports measure actual elaboration, kernel, cache, and link work.
 
-## 5. Serialized `.gobj`
+## 6. Serialized `.gobj`
 
 `.gobj` is an optional deterministic serialization of the relocatable object
 payload and certificate references. It obeys the corpus laws:
@@ -111,7 +160,7 @@ A standalone linker may consume `.gobj` only through a small verified checker
 whose accepted certificate theorem is connected back to Lean kernel theorems.
 The format and checker do not become a second unverified emission route.
 
-## 6. Acceptance fixtures
+## 7. Acceptance fixtures
 
 The object model is retained only if fixtures demonstrate:
 

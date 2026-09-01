@@ -1,8 +1,6 @@
 import Grass.Process
 import Grass.Platform.Win10.X64
-import Grass.Std.Http2.Model
-import Grass.Std.Http2.Process
-import Grass.Std.Hpack.Model
+import Grass.Std.Protocol.Http2
 import Grass.Std.Process.Network
 import Grass.Std.Process.Supervision
 import Spikes.«4_Web_Server».Spec
@@ -37,38 +35,10 @@ def projection : TargetProjection spec .win10X64 :=
     (gracefulShutdownStatus := 0)
     (startupFailureStatus := 1)
 
-def protocolProfile : Http2.Profile where
-  transport := .cleartextPriorKnowledge
-  maxFrameSize := capturedSemanticBudget.maxInboundFrameBytes
-  serverPush := false
-  priorityMode := .ignoreDeprecated
-  extensionMode := .ignoreUnknown
-  hpackDynamicTableBytes := capturedSemanticBudget.hpackDecoderTableBytes
-  maxHeaderListBytes := capturedSemanticBudget.maxHeaderListBytes
+def protocolProfile : Http2.Profile := protocolPackage.machineProfile
 
 def connectionModel : Http2.ConnectionModel :=
-  Http2.ConnectionModel.server protocolProfile behaviorPolicy routes
-
-def frameParserRealizes : ParserRealizes frameFormat
-    (Http2.Frame.parseResult protocolProfile) :=
-  Http2.Frame.parserRealizesFormat protocolProfile
-
-def hpackParserRealizes : ParserRealizes hpackFieldSectionFormat
-    (Hpack.FieldSection.parseResult protocolProfile) :=
-  Hpack.FieldSection.parserRealizesFormat protocolProfile
-
-theorem frameWriterRoundTrip (frame : Http2.Frame)
-    (admissible : frame.Admissible protocolProfile) :
-    Http2.Frame.parse protocolProfile (Http2.Frame.write frame) = .ok frame :=
-  Http2.Frame.parse_write protocolProfile frame admissible
-
-theorem frameParserConforms (input : ByteArray) :
-    Http2.Frame.parse protocolProfile input = .error ∨
-    ∃ frame suffix,
-      Http2.Frame.parsePrefix protocolProfile input = .ok (frame, suffix) ∧
-      frame.Admissible protocolProfile ∧
-      input = Http2.Frame.write frame ++ suffix :=
-  Http2.Frame.parse_conforms protocolProfile input
+  protocolPackage.connectionModel
 
 def platformPlan : PlatformPlan spec.driverBoundary.requirements :=
   PlatformPlan.win10X64Http2FixedPool projection

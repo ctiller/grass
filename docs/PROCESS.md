@@ -1511,7 +1511,9 @@ structure StandardSequentialDerivation (spec : SpecProcess resources) where
   machine : SequentialMachine spec.driverBoundary
   realizes : SequentialMachineRealizes spec machine
   syntaxOrigin : machine = SequentialSyntax.elaborate spec.suite
-  unique : ∀ other, other = SequentialSyntax.elaborate spec.suite
+  unique : ∀ other : SequentialMachine spec.driverBoundary,
+    SequentialSyntax.ValidDerivation spec.suite other ->
+    other = SequentialSyntax.elaborate spec.suite
 
 def SequentialAdapter.deriveStandard
     (spec : SpecProcess resources) :
@@ -1921,6 +1923,62 @@ their transfer/cancellation/disposition laws.
 Callbacks and system messages enter only as typed events. Reentrancy is an
 explicit interleaving theorem, never an implicit assumption that `update` cannot
 be interrupted.
+
+### Total cancellation and scoped-realization interfaces
+
+Cancellation policy is indexed by the exact process graph and source occurrence
+map. Names alone are insufficient:
+
+```lean
+structure CancellationPolicy
+    (network : ProcessNetwork root)
+    (source : MachineSource plan) where
+  points : (id : network.cancellationDemand.Key) -> CancellationPointPolicy id
+  sourceOccurrence : (id : points.Key) -> UniqueSourceOccurrence source id
+  atomicRegions : FiniteMap AtomicRegionId BoundedAtomicRegion
+  blockingCalls : (call : source.discoverPotentiallyBlockingCalls.Key) ->
+    BlockingCallCancellationDisposition call points atomicRegions
+  pointsExact : points.keys = network.cancellationDemand.keys
+  callsExact : blockingCalls.keys = source.discoverPotentiallyBlockingCalls.keys
+  routesTotal : EveryCancelFaultInterruptRouteClassified network source points
+  progress : EveryRequestedCancellationReachesDispositionUnderDeclaredPremises
+```
+
+A call may be uncancellable only inside a named bounded atomic region. A
+finish-current-frame policy states the exact completion premise and its
+timeout/teardown alternative. Adding `Sleep`, a provider wait, a new retry loop,
+or a cancellation point changes a discovered key family and rejects the old
+policy. The elaborator checks occurrence identity; it never matches unscoped
+strings.
+
+Staged subsystem refinement receives a canonical scoped projection, not the
+whole plan plus an advisory scope:
+
+```lean
+structure ScopedProcessPlan (whole : ProcessPlan root) (scope : ScopeId) where
+  graph : whole.graph.induced scope
+  imports : BoundaryImports whole scope
+  exports : BoundaryExports whole scope
+  demands : ScopedDemandFamily whole scope
+  projectionExact : graph = whole.graph.induced scope
+
+structure SubsystemRealization (scoped : ScopedProcessPlan whole scope) where
+  implementation : ProcessImplementation scoped
+  refines : implementation.Refines scoped
+  boundaryExact : implementation.summary = scoped.exports.summary
+  cacheInputsExact : CacheInputs implementation =
+    {scoped.graph, scoped.imports.summaries, scoped.demands}
+
+theorem SubsystemRealization.siblingInsensitive
+    (edit : WholePlanEditOutside whole scope) :
+    ScopedProcessPlan.project (edit.apply whole) scope =
+      ScopedProcessPlan.project whole scope
+```
+
+This theorem is structural: an outside-scope edit leaves the induced nodes,
+edges, imported summaries, and demand keys definitionally equal. An edit to a
+shared boundary changes an imported summary and correctly invalidates the
+subsystem.
 
 ### Derived global-loop invariant
 

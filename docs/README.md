@@ -40,6 +40,7 @@ No document may override a narrower owner by restating it differently.
 | [ARTIFACTS.md](ARTIFACTS.md) | parsers, writers, PE/COFF, relocation, connection theorems |
 | [VALIDATION.md](VALIDATION.md) | citations, probes, fuzzers, TCB ledgers, CI gates |
 | [STDLIB.md](STDLIB.md) | fundamental data structures and reusable proof laws |
+| [PROTOCOL_STDLIB.md](PROTOCOL_STDLIB.md) | candidate protocol-package shape, staged obligations, and HTTP/2/gRPC composition |
 
 ## Review and delivery
 
@@ -66,6 +67,9 @@ No document may override a narrower owner by restating it differently.
 - [HTTP2_CONSTRAINTS.md](HTTP2_CONSTRAINTS.md) is the mechanically keyed audit
   projection from the precious HTTP/2 spec to implementation witnesses and the
   extension seam for a later gRPC suite.
+- [PROTOCOL_STDLIB.md](PROTOCOL_STDLIB.md) proposes the reusable package imported
+  by protocol spikes so applications select profiles rather than hand-plumbing
+  grammars, parsers, error matrices, and process demands.
 - [CUBE.md](CUBE.md) and [SPIKE_5.md](SPIKE_5.md) define and fully lower the
   Win32/Vulkan/SPIR-V spinning-cube composition milestone.
 - [../Spikes/README.md](../Spikes/README.md) indexes the matching comment-free

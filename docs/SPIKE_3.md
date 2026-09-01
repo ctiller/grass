@@ -9,7 +9,7 @@ review projections rather than additional authored modules.
 
 | Proof-economics quantity | Current evidence |
 | --- | --- |
-| Authored specification | 1 module; 50 physical / 40 nonblank lines |
+| Authored specification | 1 module; 61 physical / 50 nonblank lines |
 | Authored realization | 2 modules; 752 physical / 702 nonblank lines |
 | Generated expansion/certificates | not generated |
 | Clean/incremental checking | not measured |
@@ -51,6 +51,15 @@ Infinite input is productive rather than terminating. Safety is unconditional.
 inductive GzipOutcome
   | success | allocationFailure | inputFailure | outputFailure
 
+def outcomePolicy : StreamingFilterOutcomePolicy GzipOutcome where
+  success := .success
+  allocationFailure := .allocationFailure
+  stdinUnavailable := .inputFailure
+  readFailed := .inputFailure
+  stdoutUnavailable := .outputFailure
+  writeFailed := .outputFailure
+  noProgress := .outputFailure
+
 def resources : StreamingResourceModel :=
   StreamingResourceModel.console
     |>.withResidentMemory .boundedIndependentOfInputLength
@@ -63,6 +72,7 @@ def gzipSuite {R : Type} [ResourceModel R] [StreamingFilterResources R]
   Console.streamingGzipSuite
     (resources := resources)
     (members := .one) (outputFormat := gzipMemberFormat)
+    (outcomes := outcomePolicy)
     (failureOutput := .constructionPrefix)
 
 def gzipSpec {R : Type} [ResourceModel R] [StreamingFilterResources R]
@@ -76,14 +86,14 @@ def gzipSpec {R : Type} [ResourceModel R] [StreamingFilterResources R]
 theorem gzipSpecCorrect {R : Type} [ResourceModel R] [StreamingFilterResources R]
     (resources : R) : MeetsAllSpecificationTheorems (gzipSpec resources) :=
   Console.streamingGzipSuiteCaptureCorrect
-    resources GzipOutcome gzipMemberFormat
+    resources outcomePolicy gzipMemberFormat
 
 theorem successfulTraceIffOneMemberRoundTrip
     {R : Type} [ResourceModel R] [StreamingFilterResources R]
     (resources : R) (input output : ByteArray) :
     SuccessfulConsoleTrace (gzipSpec resources) input output ↔
       Gzip.IsExactlyOneMember output ∧ Gzip.inflate output = .ok input :=
-  Console.streamingGzipContract_success_iff resources GzipOutcome
+  Console.streamingGzipContract_success_iff resources GzipOutcome outcomePolicy
 
 def spec : SpecProcess resources := gzipSpec resources
 
@@ -1082,22 +1092,22 @@ route_io_error:
     je   write_count_violation @violation_edge(.excessWriteCount)
     jmp  dictionary_violation_terminal @violation_edge(.internalCodecInvariant)
 
-stdin_unavailable:      @terminal(.stdinUnavailable)
+stdin_unavailable:      @terminal(.inputFailure) @audit(.stdinUnavailable)
     mov  ecx, 1
     jmp  exit
-stdout_unavailable:     @terminal(.stdoutUnavailable)
+stdout_unavailable:     @terminal(.outputFailure) @audit(.stdoutUnavailable)
     mov  ecx, 1
     jmp  exit
-resource_exhausted_no_root: @terminal(.resourceExhausted)
+resource_exhausted_no_root: @terminal(.allocationFailure) @audit(.resourceExhausted)
     mov  ecx, 1
     jmp  exit
-read_failed:            @terminal(.readFailed)
+read_failed:            @terminal(.inputFailure) @audit(.readFailed)
     mov  ecx, 1
     jmp  exit
-write_failed:           @terminal(.writeFailed)
+write_failed:           @terminal(.outputFailure) @audit(.writeFailed)
     mov  ecx, 1
     jmp  exit
-no_progress:            @terminal(.noProgress)
+no_progress:            @terminal(.outputFailure) @audit(.noProgress)
     mov  ecx, 1
     jmp  exit
 exit_success:           @terminal(.success)
@@ -2082,22 +2092,22 @@ route_io_error:
     je   write_count_violation @violation_edge(.excessWriteCount)
     jmp  dictionary_violation_terminal @violation_edge(.internalCodecInvariant)
 
-stdin_unavailable:      @terminal(.stdinUnavailable)
+stdin_unavailable:      @terminal(.inputFailure) @audit(.stdinUnavailable)
     mov  ecx, 1
     jmp  exit
-stdout_unavailable:     @terminal(.stdoutUnavailable)
+stdout_unavailable:     @terminal(.outputFailure) @audit(.stdoutUnavailable)
     mov  ecx, 1
     jmp  exit
-resource_exhausted_no_root: @terminal(.resourceExhausted)
+resource_exhausted_no_root: @terminal(.allocationFailure) @audit(.resourceExhausted)
     mov  ecx, 1
     jmp  exit
-read_failed:            @terminal(.readFailed)
+read_failed:            @terminal(.inputFailure) @audit(.readFailed)
     mov  ecx, 1
     jmp  exit
-write_failed:           @terminal(.writeFailed)
+write_failed:           @terminal(.outputFailure) @audit(.writeFailed)
     mov  ecx, 1
     jmp  exit
-no_progress:            @terminal(.noProgress)
+no_progress:            @terminal(.outputFailure) @audit(.noProgress)
     mov  ecx, 1
     jmp  exit
 exit_success:           @terminal(.success)
@@ -2156,6 +2166,15 @@ inductive GzipOutcome
   | inputFailure
   | outputFailure
 
+def outcomePolicy : StreamingFilterOutcomePolicy GzipOutcome where
+  success := .success
+  allocationFailure := .allocationFailure
+  stdinUnavailable := .inputFailure
+  readFailed := .inputFailure
+  stdoutUnavailable := .outputFailure
+  writeFailed := .outputFailure
+  noProgress := .outputFailure
+
 def gzipMemberFormat : Format Gzip.Member :=
   Gzip.memberFormat
 
@@ -2165,6 +2184,7 @@ def gzipSuite {R : Type} [ResourceModel R] [StreamingFilterResources R]
     (resources := resources)
     (members := .one)
     (outputFormat := gzipMemberFormat)
+    (outcomes := outcomePolicy)
     (failureOutput := .constructionPrefix)
 
 def gzipSpec {R : Type} [ResourceModel R] [StreamingFilterResources R]
@@ -2178,7 +2198,7 @@ def gzipSpec {R : Type} [ResourceModel R] [StreamingFilterResources R]
 theorem gzipSpecCorrect {R : Type} [ResourceModel R] [StreamingFilterResources R]
     (resources : R) : MeetsAllSpecificationTheorems (gzipSpec resources) :=
   Console.streamingGzipSuiteCaptureCorrect
-    resources GzipOutcome gzipMemberFormat
+    resources outcomePolicy gzipMemberFormat
 
 theorem successfulTraceIffOneMemberRoundTrip
     {R : Type} [ResourceModel R] [StreamingFilterResources R]
@@ -2186,6 +2206,7 @@ theorem successfulTraceIffOneMemberRoundTrip
     SuccessfulConsoleTrace (gzipSpec resources) input output ↔
       Gzip.IsExactlyOneMember output ∧ Gzip.inflate output = .ok input :=
   Console.streamingGzipContract_success_iff resources GzipOutcome
+    outcomePolicy
 
 def spec : SpecProcess resources := gzipSpec resources
 

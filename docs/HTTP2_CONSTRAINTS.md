@@ -29,8 +29,11 @@ is divided as follows:
 - [SPIKE_4.md](SPIKE_4.md) and [WEB_SERVER.md](WEB_SERVER.md) own the current
   fixture and acceptance claims.
 
-Every key below is a stable `RequirementKey` emitted by the HTTP/2 specification
-DSL. It is mechanically indexable as text and as a Lean name. Status means:
+Every key below is a stable key from the staged obligation family derived from
+the selected HTTP/2 package. Portable keys are emitted by the specification;
+projection, provider, machine, and artifact keys are derived later and retain a
+total origin path to the earlier stage. They are mechanically indexable as text
+and as Lean names. Status means:
 
 - **present**: the current fixture contains a proposition and a connected named
   witness route into `serverVerified`;
@@ -46,22 +49,33 @@ well-formedness, invariant, ownership, obligation, and resource ledgers.
 
 ## 2. Constraint-origin law
 
-The inventory is valid only if it is extracted from the precious specification:
+The inventory is valid only if it is extracted from the selected protocol
+package and its staged lowering. It may not make target choices precious:
 
 ```lean
-structure Http2ConstraintIndex (spec : SpecProcess R) where
-  entries : FiniteMap RequirementKey ImplementationConstraint
-  originExact : entries.keys = spec.accumulatedRequirements.keys
-  statementExact : ∀ key ∈ entries.keys,
-    entries[key].demand = spec.accumulatedRequirements[key]
+structure Http2ConstraintIndex
+    (package : Http2.Server.Package R)
+    (obligations : StagedProtocolObligations package) where
+  portable : DemandAuditProjection obligations.portable
+  projection : DemandAuditProjection obligations.projection
+  provider : DemandAuditProjection obligations.provider
+  machine : DemandAuditProjection obligations.machine
+  artifact : DemandAuditProjection obligations.artifact
+  entries := portable ++ projection ++ provider ++ machine ++ artifact
+  keysExact : entries.keys = obligations.disjointUnion.keys
+  statementsExact : ∀ key ∈ entries.keys,
+    entries[key].demand = obligations.disjointUnion[key]
   dependenciesExact : DependencyEdges entries =
-    spec.accumulatedRequirements.dependencyEdges
-  noDuplicateAuthority : EveryEntryIsAuditProjectionOfCapturedDemand entries spec
+    obligations.disjointUnion.dependencyEdges
+  originExact : EveryNonPortableEntryHasOnePriorStageOrigin entries obligations
+  noDuplicateAuthority : EveryEntryIsAuditProjectionOfStagedDemand entries obligations
 ```
 
 Adding gRPC refines or extends the captured suite and regenerates this index.
 Reviewers may add a missing row here only by first adding or identifying its
-source demand. A row cannot strengthen the program by itself.
+source or derived demand at its proper stage. A row cannot strengthen the
+program by itself. Requirement closure is a meta-theorem over the resulting
+union and is deliberately not an indexed row.
 
 ## 3. Connection start and frame grammar
 
@@ -71,13 +85,13 @@ source demand. A row cannot strengthen the program by itself.
 | `h2.grammar.preface.server_settings_first` | RFC 9113 §3.4 | `∀ run, first(ServerFrame run) = SETTINGS(false, localSettings)` | process/model | Startup ordering and writer-queue theorem; named initial SETTINGS construction is **disconnected** | Schedule response work before readiness; reject any earlier PING/HEADERS | Requires startup silence and serialized writer | gRPC adds settings but not ordering |
 | `h2.grammar.preface.peer_settings_first` | RFC 9113 §3.4 | `∀ c, firstFrameAfterMagic c` is non-ACK SETTINGS or connection `PROTOCOL_ERROR` | grammar/model | Parser-to-connection transition; `requireInitialSettingsBody` is **disconnected** | First frame of every other type; ACK first; partial SETTINGS | Composes preface parser with connection state | unchanged |
 | `h2.grammar.frame.header` | RFC 9113 §4.1 | `parseₚ(writeHeader h ++ s)=ok(h,s)` and accepted header is exactly 9 bytes, 24-bit length, type, flags, reserved bit ignored, 31-bit stream id | grammar | Exact writer/parser and normalization witness; generic `frameWriterRoundTrip` is **disconnected** from x86 | Every header split, reserved-bit set, length extrema, truncated header | Feeds all payload grammars | unchanged |
-| `h2.grammar.frame.size` | RFC 9113 §4.2 | `∀ h, h.length > peerMaxFrame → FRAME_SIZE_ERROR(connection)`; receive capability includes 16384+9 | grammar/model/resource | Bound proof linked to captured budget and negotiated setting; **disconnected** | 16383/16384/16385 and 2²⁴−1; type-specific undersize | Header parse + SETTINGS state + buffer capacity | gRPC message limits are additional, not a replacement |
+| `h2.grammar.frame.size` | RFC 9113 §4.2 | `∀ h, h.length > localAdvertisedMaxFrame → FRAME_SIZE_ERROR(connection)`; receive capability includes 16384+9 | grammar/model/resource | Bound proof linked to the receiver's captured local advertised limit; the selected constructor now uses `resourcePolicy.maxInboundFrameBytes`, but its proof is **disconnected** | 16383/16384/16385 and 2²⁴−1; mutate local and peer settings independently | Header parse + local SETTINGS state + buffer capacity | gRPC message limits are additional, not a replacement |
 | `h2.grammar.frame.unknown` | RFC 9113 §§4.1, 5.5 | Unknown type payload is consumed exactly, unused flags ignored, and protocol state/observations unchanged except input progress | grammar/model | Stuttering refinement and exact payload custody; named body is **disconnected** | Unknown type with every flag and stream id; payload split | Header parse + input conservation | extension frames can later refine the stutter |
 | `h2.grammar.data.normalized` | RFC 9113 §6.1 | Accepted DATA normalizes to `(stream,endStream,data,paddingBytes)`; PADDED requires length≥1+pad and padding≤remaining | grammar | `normalizeDataPayloadBody` is selected before stream transition, but its raw expansion and erase-padding theorem are **disconnected** | Pad length 0, exact remainder, remainder+1, empty padded frame | Frame header; stream legality; flow debit counts full payload | gRPC DATA bytes feed message deframer after normalization |
-| `h2.grammar.headers.normalized` | RFC 9113 §6.2 | Accepted HEADERS normalizes to `(stream,endStream,endHeaders,fieldFragment,padding,priority?)`; PADDED and PRIORITY fields are removed before HPACK, with exact consumed length | grammar | `normalizeHeadersPayloadBody` is selected on the common direct/fragmented path, but its raw expansion and normalization proof are **disconnected** | All four flag combinations; too-short priority; self-dependency; invalid padding | Header parse → continuation → HPACK | gRPC metadata is decoded field list after this seam |
+| `h2.grammar.headers.normalized` | RFC 9113 §6.2 | Accepted HEADERS normalizes to `(stream,endStream,endHeaders,fieldFragment,padding,priority?)`; PADDED and deprecated PRIORITY fields are removed before HPACK, with exact consumed length | grammar | `normalizeHeadersPayloadBody` is selected on the common direct/fragmented path and ignores the priority value after syntactic extraction; raw expansion and normalization proof are **disconnected** | All four flag combinations; too-short priority; self-dependency retained but ignored; invalid padding | Header parse → continuation → HPACK | gRPC metadata is decoded field list after this seam |
 | `h2.grammar.priority.deprecated_safe` | RFC 9113 §§5.3, 6.3 | Syntactically valid PRIORITY information may be ignored; malformed length/stream rules still produce prescribed errors; scheduling observations do not depend on priority | grammar/model | Normalization plus noninterference theorem; current ignore body is **disconnected** | PRIORITY length≠5, stream 0, dependency cycles, exclusive bit | Frame grammar + scheduler noninterference | unchanged |
 | `h2.grammar.rst_stream` | RFC 9113 §6.4 | Exactly 4 payload bytes and nonzero stream; parse/write exact error code | grammar | Parser/writer and stream transition witness; **disconnected** | Length 3/5, stream 0, closed/idle targets | Stream state and scoped errors | maps to gRPC cancellation status later |
-| `h2.grammar.settings` | RFC 9113 §6.5 | ACK iff empty; non-ACK length multiple of 6; unknown ids ignored; each known value validated; writer round trip | grammar/model | Full entry parser plus atomic application witness; round trip is **disconnected** | ACK payload, remainder 1–5, invalid ENABLE_PUSH/window/frame size | Preface, flow rebase, HPACK table bound | gRPC may demand larger windows, still same theorem |
+| `h2.grammar.settings` | RFC 9113 §6.5 | ACK iff empty; non-ACK length multiple of 6; unknown ids ignored; each known value validated by sender/receiver direction; a server accepts client ENABLE_PUSH 0 or 1 but emits only 0 if present; writer round trip | grammar/model | The selected settings body now uses a server-receiver validation profile; atomic application and round-trip proofs are **disconnected** | ACK payload, remainder 1–5, client ENABLE_PUSH 0/1/2, server emission 0/1, invalid window/frame size | Preface, flow rebase, HPACK table bound | gRPC may demand larger windows, still same theorem |
 | `h2.grammar.ping` | RFC 9113 §6.7 | Connection-scoped length 8; non-ACK causes one ACK with identical opaque bytes | grammar/model | Exact payload preservation and enqueue theorem; **disconnected** | Stream≠0, length 7/9, ACK loop | Control capacity + writer order | unchanged |
 | `h2.grammar.goaway` | RFC 9113 §6.8 | Connection-scoped length≥8; reserved bit masked; debug suffix preserved or intentionally unobserved by spec | grammar/model | Parser/writer and monotone last-stream theorem; **disconnected** | Stream≠0, short payload, increasing/decreasing repeated last id | Drain/cancellation/error constraints | gRPC maps unprocessed streams to retry semantics |
 | `h2.grammar.window_update` | RFC 9113 §6.9 | Exactly 4 bytes; 31-bit increment nonzero; scope determined by stream id | grammar/model | Parser plus checked-credit update; **disconnected** | Increment 0, reserved bit set, overflow, wrong length | Both flow-control ledgers | unchanged |
@@ -95,6 +109,7 @@ source demand. A row cannot strengthen the program by itself.
 | `h2.model.stream.concurrency` | RFC 9113 §5.1.2 | Active peer streams≤effective MAX_CONCURRENT_STREAMS; refusal does not mutate unrelated streams | model/resource | Permit correspondence and REFUSED_STREAM behavior; **disconnected** | Open N, N+1; setting reduction below active count | Resource admission + stream transition | bounds concurrent RPCs |
 | `h2.model.request.fields` | RFC 9113 §§8.1–8.3 | Accepted request has ordered pseudo-fields, exactly required pseudo-fields, valid lowercase names/values, no connection-specific fields, and selected method/profile | model | Header-list validator refinement; **disconnected** | Duplicate/order/missing pseudo-fields, uppercase, forbidden connection field | HPACK output + route relation | gRPC adds `:method POST`, `content-type`, `te`, path rules |
 | `h2.model.request.body` | RFC 9113 §8.1; selected discard policy | Every DATA byte belongs to the addressed request in order; discard returns flow credit and produces no route-body observation | process/model | Stream byte-channel conservation and discard theorem; **disconnected** | DATA before headers, after END_STREAM, interleaved streams | Stream transition + flow control | replaced/refined by gRPC message deframing |
+| `h2.model.request.content_length` | RFC 9113 §8.1.1 | If a request carries `content-length = n`, the sum of DATA content octets is exactly `n` at END_STREAM; mismatch is stream `PROTOCOL_ERROR`; absent content length imposes no equality | model/process | Request-field validation now retains the optional declared length and stream transition accounts DATA content before checking END_STREAM; the joint theorem is **disconnected** | Missing, duplicate, nondecimal, overflow, exact/short/long body, padded DATA, empty END_STREAM | Request fields + normalized DATA + stream lifecycle | gRPC message framing composes only after HTTP message validity |
 | `h2.model.response.exact` | RFC 9113 §8; precious routes | GET `/` emits status 200, selected fields and exact body; unmatched route emits 404/empty; lengths are derived | model | Route theorem and frame-sequence refinement; **disconnected** | Body-length mutation, route mismatch, reordered bytes | HPACK encoder + writer ordering | gRPC replaces route response with RPC status/messages |
 | `h2.model.output.stream_order` | RFC 9113 §§5,8 | Per stream, response HEADERS precede DATA, DATA order equals logical body order, END_STREAM occurs exactly once | process/model | Writer serialization and causal attribution theorem; **disconnected** | Scheduler reorders same-stream frames or duplicates END_STREAM | Selection + queues + observations | preserves gRPC message order and trailers |
 | `h2.model.multiplex_noninterference` | RFC 9113 §§2,5 | A transition for stream `s` preserves all `t≠s` state except declared connection-global HPACK/flow/error effects | process/model | Framed noninterference theorem; **disconnected** | Reset/stall one stream while sibling progresses | Typed channel custody + global effects | RPC isolation theorem composes here |
@@ -172,8 +187,6 @@ source demand. A row cannot strengthen the program by itself.
 | `h2.artifact.pe_roundtrip` | PE/COFF specification owner; `VERIFIED_PROGRAM.md` | `parse(write image)=ok image` and parser returns error or specification-conforming image | artifact | Generic writer/parser theorem instantiated to exact linked image; **present** as design route in `Program.lean` | Mutate every directory/section/relocation/import bound | Linker + serialization | unchanged |
 | `h2.artifact.loaded_text_exact` | `VERIFIED_PROGRAM.md` | Every admissible ASLR load decodes executable bytes to exactly the verified raw program with resolved imports | artifact | Relocation/load/decode theorem; **present** as design route, implementation pending | Relocate bases, corrupt relocation/IAT/text byte | Source coverage + ISA decoder + loader | gRPC adds code/data but same theorem |
 | `h2.artifact.permissions_unwind` | PE/Win64 ABI owners | Every admitted load has NX data, RX non-writable text, valid unwind metadata and stack behavior for all callable/fault paths | artifact/provider | Section and unwind coverage theorem; **missing** in HTTP/2 inventory | Flip section flags; omit unwind range; fault each prologue point | Stack ABI + artifact layout | unchanged |
-| `h2.artifact.requirement_closure` | `VERIFIED_PROGRAM.md` | `VerifiedProgram.requirementClosure` discharges exactly every captured key using witnesses over the same raw program, provider environment and artifact | artifact/all | Exact key-origin/coverage theorem below; currently **missing** | Add one spec demand without witness; reuse witness for different artifact | All constraints | gRPC extension is accepted only when new keys close |
-
 ## 9. Umbrella certificate and refinement theorem
 
 The umbrella object is indexed by the captured spec and contains implementations
@@ -181,13 +194,12 @@ of its demands, not a separately authored list of HTTP/2 facts:
 
 ```lean
 structure CompleteHttp2ConstraintSet
-    (spec : SpecProcess R)
-    (index : Http2ConstraintIndex spec)
+    (package : Http2.Server.Package R)
+    (obligations : StagedProtocolObligations package)
+    (index : Http2ConstraintIndex package obligations)
     (implementation : Http2Implementation) where
-  witness : (key : RequirementKey) ->
-    key ∈ spec.accumulatedRequirements.keys ->
-    ImplementationWitness implementation
-      spec.accumulatedRequirements[key]
+  witness : (key : obligations.disjointUnion.Key) ->
+    ImplementationWitness implementation obligations.disjointUnion[key]
   phaseOwnerExact : ∀ key member,
     witness key member |>.phase = index.entries[key].phase
   dependencyClosure : ∀ key member,
@@ -196,7 +208,7 @@ structure CompleteHttp2ConstraintSet
   sourceIdentity : AllMachineWitnessesReferTo implementation.rawProgram
   providerIdentity : AllProviderWitnessesReferTo implementation.providerEnv
   artifactIdentity : AllArtifactWitnessesReferTo implementation.artifact
-  noExtraAssumptions : WitnessPremisesEqualCapturedPremises spec witness
+  noExtraAssumptions : WitnessPremisesEqualStagedPremises obligations witness
 ```
 
 The desired library theorem is a fold over the captured requirement dependency
@@ -208,14 +220,15 @@ machine program.
 
 ```lean
 theorem CompleteHttp2ConstraintSet.implies_refinement
-    (complete : CompleteHttp2ConstraintSet spec index implementation) :
+    (complete : CompleteHttp2ConstraintSet
+      package obligations index implementation) :
     (∀ load ∈ implementation.artifact.admissibleLoads,
       LoadedRuns load ⊆ implementation.machineRuns) ∧
-    (implementation.machineRuns refinesₒ spec.denotation) ∧
+    (implementation.machineRuns refinesₒ package.specProcess.denotation) ∧
     EveryLoadedRunSafeProgressingAndObligationCorrect
-      implementation.artifact spec := by
-  exact RequirementDependencyGraph.fold
-    spec.accumulatedRequirements
+      implementation.artifact package.specProcess := by
+  exact StagedRequirementDependencyGraph.fold
+    obligations.disjointUnion
     complete.witness
     complete.dependencyClosure
     complete.sourceIdentity
@@ -224,8 +237,9 @@ theorem CompleteHttp2ConstraintSet.implies_refinement
     complete.noExtraAssumptions
 ```
 
-`VerifiedProgram.requirementClosure` consumes this result and separately checks
-that `index.originExact` covers the current spec. A manually assembled record
+`VerifiedProgram` consumes this result and checks the disjoint-union coverage,
+each stage origin, and `package.captureExact`. Closure is the meta-theorem being
+constructed, not a member of the family it closes. A manually assembled record
 whose keys merely resemble this document is rejected.
 
 ## 10. gRPC extension seam
@@ -255,7 +269,7 @@ The extension theorem shape is:
 ```lean
 theorem grpc_extends_http2
     (grpc : CompleteGrpcConstraintSet grpcSpec grpcImpl) :
-    RestrictRequirements grpcSpec `h2 = baseHttp2Spec.accumulatedRequirements ∧
+    RestrictRequirements grpcSpec `h2 = baseHttp2Spec.requirements ∧
     ProjectGrpcObservations grpcImpl refinesₒ baseHttp2Spec.denotation
 ```
 

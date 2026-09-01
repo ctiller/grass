@@ -14,6 +14,15 @@ inductive GzipOutcome
   | inputFailure
   | outputFailure
 
+def outcomePolicy : StreamingFilterOutcomePolicy GzipOutcome where
+  success := .success
+  allocationFailure := .allocationFailure
+  stdinUnavailable := .inputFailure
+  readFailed := .inputFailure
+  stdoutUnavailable := .outputFailure
+  writeFailed := .outputFailure
+  noProgress := .outputFailure
+
 def gzipMemberFormat : Format Gzip.Member :=
   Gzip.memberFormat
 
@@ -23,6 +32,7 @@ def gzipSuite {R : Type} [ResourceModel R] [StreamingFilterResources R]
     (resources := resources)
     (members := .one)
     (outputFormat := gzipMemberFormat)
+    (outcomes := outcomePolicy)
     (failureOutput := .constructionPrefix)
 
 def gzipSpec {R : Type} [ResourceModel R] [StreamingFilterResources R]
@@ -36,7 +46,7 @@ def gzipSpec {R : Type} [ResourceModel R] [StreamingFilterResources R]
 theorem gzipSpecCorrect {R : Type} [ResourceModel R] [StreamingFilterResources R]
     (resources : R) : MeetsAllSpecificationTheorems (gzipSpec resources) :=
   Console.streamingGzipSuiteCaptureCorrect
-    resources GzipOutcome gzipMemberFormat
+    resources outcomePolicy gzipMemberFormat
 
 theorem successfulTraceIffOneMemberRoundTrip
     {R : Type} [ResourceModel R] [StreamingFilterResources R]
@@ -44,6 +54,7 @@ theorem successfulTraceIffOneMemberRoundTrip
     SuccessfulConsoleTrace (gzipSpec resources) input output ↔
       Gzip.IsExactlyOneMember output ∧ Gzip.inflate output = .ok input :=
   Console.streamingGzipContract_success_iff resources GzipOutcome
+    outcomePolicy
 
 def spec : SpecProcess resources := gzipSpec resources
 

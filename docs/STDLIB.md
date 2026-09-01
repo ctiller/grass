@@ -389,3 +389,13 @@ extensional pass replacement. These constructs build process proof graphs; the
 architecture entirely before CFG lowering. Libraries must not require a parser,
 compiler, or codec to execute as actors merely because it was proved through a
 process graph.
+
+### Protocol packages
+
+`Std.Protocol` packages versioned wire grammars, logical role/state machines,
+typed error matrices, partial-byte channels, resource and cancellation demands,
+citations, model proofs, and implementation substitution points. Applications
+select one profile and supply application behavior; they do not reconstruct
+parser requirements or protocol laws declaration by declaration. The candidate
+interface and HTTP/2/gRPC composition shape are specified in
+[PROTOCOL_STDLIB.md](PROTOCOL_STDLIB.md).
