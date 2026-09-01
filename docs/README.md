@@ -76,6 +76,9 @@ No document may override a narrower owner by restating it differently.
 - [EXTERNAL_REVIEW_41F5C9C.md](EXTERNAL_REVIEW_41F5C9C.md) records the
   evidence-based disposition of the external architecture review at that
   checkpoint, including believable proof sketches for rejected remedies.
+- [EXTERNAL_REVIEW_23E252B.md](EXTERNAL_REVIEW_23E252B.md) accepts the next
+  review's four headline tensions and separates the actionable diagnosis from
+  the selected repairs.
 - [DECISIONS.md](DECISIONS.md) records settled choices and rejected shortcuts.
 - [REFERENCES.md](REFERENCES.md) is the initial source and design-lineage register.
 - [GLOSSARY.md](GLOSSARY.md) fixes vocabulary used across the corpus.
