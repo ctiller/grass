@@ -11,6 +11,7 @@ def parserWitness :
 
 def sortVerified : VerifiedProgram spec := by
   verify_assembly plan
+    deriving_standard_process_from spec
     using_requirement parserWitness
     using_model stableSortModelCorrect
     with sortSource

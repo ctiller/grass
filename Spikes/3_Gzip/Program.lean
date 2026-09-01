@@ -5,6 +5,8 @@ namespace Grass.Spikes.Gzip
 
 def gzipVerified : VerifiedProgram spec := by
   verify_assembly platformPlan
+    deriving_standard_process_from spec
+    using_model fixed32KModelCorrect
     with gzipSource
 
 def bytes : ByteArray := emitProgram gzipVerified

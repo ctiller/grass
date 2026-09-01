@@ -1504,6 +1504,33 @@ one-root network with identity-correlated API children and proves the complete
 `ProcessPlanRealizes`; that graph and proof are generated, inspectable, and not
 application-maintained.
 
+Small spikes may request this route with one explicit closing clause:
+
+```lean
+structure StandardSequentialDerivation (spec : SpecProcess resources) where
+  machine : SequentialMachine spec.driverBoundary
+  realizes : SequentialMachineRealizes spec machine
+  syntaxOrigin : machine = SequentialSyntax.elaborate spec.suite
+  unique : ∀ other, other = SequentialSyntax.elaborate spec.suite
+
+def SequentialAdapter.deriveStandard
+    (spec : SpecProcess resources) :
+    Except NonCanonicalSequentialSuite (StandardSequentialDerivation spec)
+
+def verified : VerifiedProgram spec := by
+  verify_assembly plan
+    deriving_standard_process_from spec
+    with source
+```
+
+This is not ambient typeclass search. It is a total inspection of the exact
+captured suite and succeeds only when the suite's DSL junctions select one
+canonical sequential machine with a uniqueness theorem. Ambiguous concurrency,
+scheduling, subprocess partition, or failure routing returns
+`NonCanonicalSequentialSuite`; the author must then supply an explicit process
+presentation. The generated `ProcessRealization.standard` retains
+`syntaxOrigin`, so the final certificate cannot silently use a different graph.
+
 The adapter does not discover boundaries, invariants, or correctness for an
 arbitrary Lean relation. Its input is the structured effect/control vocabulary
 of `DirectRelationalProgram` plus an already proved `DirectProgramRealizes`

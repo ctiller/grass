@@ -88,7 +88,9 @@ provider_violation:
 }
 
 def helloVerified : VerifiedProgram spec := by
-  verify_assembly plan with helloSource
+  verify_assembly plan
+    deriving_standard_process_from spec
+    with helloSource
 
 def bytes : ByteArray := emitProgram helloVerified
 

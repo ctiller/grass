@@ -10,7 +10,7 @@ sketches unless explicitly labeled authored source.
 | Proof-economics quantity | Current evidence |
 | --- | --- |
 | Authored specification | 1 module; 30 physical / 21 nonblank lines |
-| Authored realization | 1 module; 95 physical / 79 nonblank lines |
+| Authored realization | 1 module; 97 physical / 81 nonblank lines |
 | Generated expansion/certificates | not generated |
 | Clean/incremental checking | not measured |
 
@@ -226,7 +226,9 @@ Generated code uses `verify_program plan with source` against the same internall
 elaborated platform contract.
 -/
 def helloVerified : VerifiedProgram spec := by
-  verify_assembly plan with helloSource
+  verify_assembly plan
+    deriving_standard_process_from spec
+    with helloSource
 
 /-!
 Internally the result contains dependent adjacency certificates: the selected
@@ -1343,7 +1345,9 @@ provider_violation:
 }
 
 def helloVerified : VerifiedProgram spec := by
-  verify_assembly plan with helloSource
+  verify_assembly plan
+    deriving_standard_process_from spec
+    with helloSource
 
 def bytes : ByteArray := emitProgram helloVerified
 

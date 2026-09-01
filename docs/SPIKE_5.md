@@ -10,7 +10,7 @@ are generated inspection views.
 | Proof-economics quantity | Current evidence |
 | --- | --- |
 | Authored specification | 1 module; 78 physical / 62 nonblank lines |
-| Authored realization | 5 modules; 1637 physical / 1525 nonblank lines |
+| Authored realization | 5 modules; 1638 physical / 1526 nonblank lines |
 | Generated expansion/certificates | not generated |
 | Clean/incremental checking | not measured |
 
@@ -202,6 +202,8 @@ def cubeVerified : VerifiedProgram spec := by
   verify_assembly plan
     using_process stagedProcessRealization
     using_models vertexModelCorrect fragmentModelCorrect
+    using_machine_proofs hostImplementsDriver vertexCorrect fragmentCorrect
+    using_connections sourceConnectionsCorrect
     with source
 
 def bytes : ByteArray := emitProgram cubeVerified
@@ -2618,7 +2620,7 @@ theorem fragmentCorrect :
 
 theorem hostImplementsDriver :
     HostAssemblyImplements
-      (ProcessRealization.explicit processPlanRealizes)
+      stagedProcessRealization
       plan cubeHost := by
   verify_asm
 
@@ -3560,6 +3562,7 @@ def cubeVerified : VerifiedProgram spec := by
   verify_assembly plan
     using_process stagedProcessRealization
     using_models vertexModelCorrect fragmentModelCorrect
+    using_machine_proofs hostImplementsDriver vertexCorrect fragmentCorrect
     using_connections sourceConnectionsCorrect
     with source
 

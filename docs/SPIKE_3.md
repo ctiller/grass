@@ -10,7 +10,7 @@ review projections rather than additional authored modules.
 | Proof-economics quantity | Current evidence |
 | --- | --- |
 | Authored specification | 1 module; 50 physical / 40 nonblank lines |
-| Authored realization | 2 modules; 750 physical / 700 nonblank lines |
+| Authored realization | 2 modules; 752 physical / 702 nonblank lines |
 | Generated expansion/certificates | not generated |
 | Clean/incremental checking | not measured |
 
@@ -109,6 +109,8 @@ def platformPlan : PlatformPlan spec.driverBoundary.requirements :=
 
 def gzipVerified : VerifiedProgram spec := by
   verify_assembly platformPlan
+    deriving_standard_process_from spec
+    using_model fixed32KModelCorrect
     with gzipSource
 
 def bytes : ByteArray := emitProgram gzipVerified
@@ -2125,6 +2127,8 @@ namespace Grass.Spikes.Gzip
 
 def gzipVerified : VerifiedProgram spec := by
   verify_assembly platformPlan
+    deriving_standard_process_from spec
+    using_model fixed32KModelCorrect
     with gzipSource
 
 def bytes : ByteArray := emitProgram gzipVerified

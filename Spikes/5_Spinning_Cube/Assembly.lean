@@ -711,7 +711,7 @@ theorem fragmentCorrect :
 
 theorem hostImplementsDriver :
     HostAssemblyImplements
-      (ProcessRealization.explicit processPlanRealizes)
+      stagedProcessRealization
       plan cubeHost := by
   verify_asm
 

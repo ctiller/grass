@@ -10,7 +10,7 @@ files.
 | Proof-economics quantity | Current evidence |
 | --- | --- |
 | Authored specification | 1 module; 73 physical / 57 nonblank lines |
-| Authored realization | 2 modules; 581 physical / 541 nonblank lines |
+| Authored realization | 2 modules; 582 physical / 542 nonblank lines |
 | Generated expansion/certificates | not generated |
 | Clean/incremental checking | not measured |
 
@@ -163,6 +163,8 @@ application-maintained pipeline values.
 -/
 def sortVerified : VerifiedProgram spec := by
   verify_assembly plan
+    deriving_standard_process_from spec
+    using_requirement parserWitness
     using_model stableSortModelCorrect
     with sortSource
 
@@ -2008,6 +2010,7 @@ def parserWitness :
 
 def sortVerified : VerifiedProgram spec := by
   verify_assembly plan
+    deriving_standard_process_from spec
     using_requirement parserWitness
     using_model stableSortModelCorrect
     with sortSource
