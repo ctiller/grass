@@ -1283,3 +1283,292 @@ existential demands, non-elaborating staged fixtures, absent reviewable assembly
 and concrete Web/Cube execution defects. The 1M/10M proof-economics test is the
 right gate, but it is explicitly unexecuted. No file other than this report was
 edited, and no undeveloped library was built.
+
+## Round 19 external authoring review (commit `88a65ec`)
+
+### Scope and mechanical result
+
+This round applied `docs/SPIKE_AUTHORING.md` as a mandatory contract and read
+both views of every spike: every `.lean` file under `Spikes/N_Name/` and every
+corresponding `docs/SPIKE_N.md`. Two independent fresh-context reviews covered
+Spikes 1–3 and Web; the root review cross-checked Cube, the governing interfaces,
+and the total-system result. `./check-spike-sources.ps1` passed all five spikes
+at the reviewed commit.
+
+That pass establishes exactly one fact: the normalized files equal the final
+source snapshots. It does not classify document blocks, elaborate Lean, expand
+constructors, extract processes/CFGs, generate manifests, check proofs, link an
+artifact, or reproduce bytes. `docs/SPIKE_AUTHORING_AUDIT.md` correctly warns of
+this distinction, but its broad findings miss several exact type and product
+defects and understate the authored ceremony.
+
+### Round 18 repairs rechecked
+
+The central resource and specification repairs are directionally sound.
+`SpecificationLanguage` is now resource-indexed
+(`docs/SPECIFICATION_LANGUAGES.md:24-35`); `SpecProcess` retains only the suite,
+resource snapshot, exported contract, boundary, and requirements, with process
+topology moved to `ProcessPresentation` (`docs/SEMANTICS.md:186-238`). Process
+requirements now flow through the suite and retain boundary/resource-indexed
+witnesses and exact substitution (`SPECIFICATION_LANGUAGES.md:73-85,122-168`;
+`SEMANTICS.md:240-247`). Cube supplies resource restrictions, retains its
+`ClosedBlend`, and projects its realization explicitly
+(`Spikes/5_Spinning_Cube/Process.lean:244-296`). Source closure now separates
+syntactic closure from behavior certificates (`docs/REFINEMENT.md:614-662`),
+layout names are unique (`docs/ASSEMBLY_CONSTRUCTION.md:199-219`), and Hello uses
+`withStack`.
+
+Web's distinct initial-HEADERS and CONTINUATION operations, complete-payload
+residence check, and no-frame-in-flight cancellation/RST path materially close
+three Round 18 execution findings (`Spikes/4_Web_Server/Macros.lean:114-128,
+192-214,426-435`; `Assembly.lean:394-420`). Cube now separates its allocations,
+resets recreation counters, publishes device/swapchain ownership after success,
+guards partial dispatch cleanup, and supplies the formerly missing failure label
+(`Spikes/5_Spinning_Cube/Assembly.lean:338-349,429-463,647-649`;
+`Macros.lean:291-376`). These are genuine monotonic improvements.
+
+### 1. [P0] All 120 document code blocks violate the mandatory classification law
+
+The five documents contain respectively 22, 22, 14, 29, and 33 fenced blocks,
+and zero `<!-- grass-block: ... -->` classification lines. Even the exact source
+snapshots beginning at `docs/SPIKE_1.md:1210`, `SPIKE_2.md:1378`,
+`SPIKE_3.md:1340`, `SPIKE_4.md:1029`, and `SPIKE_5.md:1874` are unlabeled.
+Consequently there is no machine-readable `AnnotatedSpikeManifest`, no unique
+generated/interface/proof-sketch identity, no `derives` relation, and no
+enforceable generated/authored disjointness.
+
+The checker deliberately searches only the last snapshot heading and a
+heading-plus-fence regex (`check-spike-sources.ps1:26-49`). It never parses a
+block classification or validates the earlier annotated view. The audit calls
+classification incomplete; the stronger result is zero compliance.
+
+**Required closure:** label every block individually, reject unknown/duplicate
+IDs, derive both manifests, and make CI prove all eight cross-view laws
+separately. Keep normalized snapshot equality as one small check, not the name
+of the whole cross-view audit.
+
+### 2. [P0] Two exact authored interfaces cannot elaborate
+
+Sort defines `SortOutcome` with only `success`, `allocationFailure`,
+`inputFailure`, and `outputFailure` (`Spikes/2_Sort/Spec.lean:16-20`). Its
+`failureExit` accepts a `SortOutcome` (`Assembly.lean:190-194`) but is invoked
+with `.stdinUnavailable`, `.readFailed`, `.resourceExhausted`,
+`.stdoutUnavailable`, `.writeFailed`, and `.noProgress`
+(`Assembly.lean:538-549`). None is a constructor of that type. The exact mirror
+repeats the contradiction (`docs/SPIKE_2.md:1572,1921-1931`).
+
+Web's `LocalFragmentBody` parameter is named `exits`, but the `algorithm` field
+uses unbound `exit` (`Spikes/4_Web_Server/Macros.lean:84-92`). This is the central
+type through which every claimed Web constructor body passes. The audit says it
+is malformed but does not identify the exact scoping failure.
+
+**Required closure:** correct both types and elaborate the exact authored
+snapshots. A mirror can perfectly preserve invalid source.
+
+### 3. [P0] No spike has reproducible expansion, proof, or artifact evidence
+
+None of the five documents supplies an executable clean-output command and
+environment identity which generates the complete raw instruction/shader
+stream, process/CFG view, source/import/relocation manifest, residual-goal and
+consumed-authority report, artifact layout, and final bytes. None reports a
+digest paired with an exact retrieval command. None literally records all
+unavailable phases as `not generated` and `not measured`, as the authoring
+contract requires.
+
+Specific counterexamples make the gap falsifiable:
+
+- Hello's supposed expanded review still contains `withStack`,
+  `withCallFrame`, named objects, `sizeof`, and symbolic imports
+  (`docs/SPIKE_1.md:766-832`).
+- Sort's handwritten compare expansion differs in instruction order from the
+  authored constructor, and `bufferAppend` still contains `$(flushOutput)`
+  (`docs/SPIKE_2.md:990-1021,1037-1072`).
+- Gzip merely names future closure/expanded values
+  (`docs/SPIKE_3.md:1140-1148`).
+- Web stores a `rawExpansion` field but supplies only semantic pseudoverbs; no
+  raw listing is printed (`Spikes/4_Web_Server/Macros.lean:84-100,173-190,
+  274-283,528-535`). Its document's proposed closure references an unavailable
+  `serverImports` and has no command or environment (`docs/SPIKE_4.md:776-792`).
+- Cube says a future review printer renders `rawCubeHost`, while explicitly
+  admitting that the elaborator, verifier, and printer do not exist
+  (`docs/SPIKE_5.md:1576-1583`).
+
+**Required closure:** either check in deterministic generated outputs outside
+the authored directories or provide exact commands that reproduce them from a
+clean output directory. Until then, say `not generated`/`not measured`; prose
+and handwritten pseudo-expansions are not generated evidence.
+
+### 4. [P0] Concise Web construction still asks generation to invent semantics
+
+The authored Web assembly labels mostly state generic measures/frontiers or no
+entry/exit contract (`Spikes/4_Web_Server/Assembly.lean:280,305,357,420,522,611`).
+The document's alleged generated cancellation map assigns exact safe-state,
+observation, expansion, and uncancellable meanings
+(`docs/SPIKE_4.md:820-846`). Those custody and cancellation choices are not
+structural projections of the annotations; an elaborator would have to invent
+them. Similarly, pseudoverbs such as `transitionBy`,
+`exactStaticOrDynamicLookup`, and
+`dischargeOrAdoptEveryStreamObligation` hide entire algorithms and invariants
+behind absent library implementations.
+
+**Required closure:** author each novel block contract and cancellation choice,
+or name an existing checked parameterized constructor whose theorem and raw
+expansion are reproducible. Generated maps may collect facts already present;
+they may not create the facts which make the program correct.
+
+### 5. [P0] Sort/Gzip closure inputs and Sort's existential parser witness are disconnected
+
+Sort defines `sortStaticObjects` and `sortConstructorClosure` but passes neither
+to `sortSource` (`Spikes/2_Sort/Assembly.lean:34-41,196-203`). Gzip likewise
+defines `gzipStaticObjects` without passing it to `gzipSource`
+(`Spikes/3_Gzip/Assembly.lean:58-65,145`). Both sources reference the resulting
+symbols. Either an ambient registry discovers source and policy—which violates
+the closed expansion boundary—or the source is incomplete.
+
+Sort also inserts a precious `lineParserRequirement`
+(`Spikes/2_Sort/Spec.lean:38-49,61`) but contains no selected requirement witness
+or occurrence-exact substitution. The standard realization lookup at
+`Assembly.lean:18-19` is not visibly connected to the inline parser. Thus the
+repaired central requirement interface has no application-level closure fixture.
+
+**Required closure:** pass every constructor/static input explicitly into the
+one source value and show the exact generated closure. Select the parser witness,
+prove acceptability, and connect its occurrences to the inline implementation.
+
+### 6. [P0] Web acknowledges non-ACK SETTINGS twice
+
+`applySettings` ends with `enqueueAckOnce`
+(`Spikes/4_Web_Server/Macros.lean:250-261`). The host then calls
+`h2_apply_settings`, tests the incoming ACK flag, and explicitly enqueues
+`CONTROL_SETTINGS_ACK` again for a non-ACK frame
+(`Assembly.lean:468-480`). This violates the advertised apply-before-one-ACK
+policy and changes observable output bytes.
+
+**Required closure:** give ACK ownership to exactly one layer and prove the
+other layer cannot enqueue it. Add a trace fixture for one non-ACK SETTINGS
+frame which observes exactly one ACK.
+
+### 7. [P0] Web's single-frame padded/prioritized HEADERS path lacks payload normalization
+
+Header parsing publishes the raw payload pointer
+(`Spikes/4_Web_Server/Macros.lean:114-128`). `dispatchBody` says it validates
+length/flags but does not remove padding or the PRIORITY dependency bytes
+(`Macros.lean:216-225`). For `END_HEADERS`, the host jumps directly from stream
+transition to HPACK decode (`Assembly.lean:394-403,420-426`). Only the fragmented
+path visibly calls a header-block constructor capable of normalizing payload
+(`Macros.lean:192-202`).
+
+**Required closure:** author the normalization operation at the direct path or
+show its exact checked constructor expansion and contract. Test all PADDED,
+PRIORITY, and combined boundary cases before HPACK mutation.
+
+### 8. [P0] Cube's literal extent macro does not produce the value its call site consumes
+
+The host spells `compute_extent_and_count ... -> extent,imageCount`, then uses
+`imageCount` as the requested swapchain minimum
+(`Spikes/5_Spinning_Cube/Assembly.lean:422-429`). The registered constructor is a
+`.literal` fragment (`Macros.lean:378-390`), and its body writes
+`requestedImageCount`, not `imageCount` (`Macros.lean:264-289`). Both names are
+distinct layout objects (`Layout.lean:134-135`). The invented macro semantics
+therefore cannot honestly be literal substitution, and the requested count used
+by `vkCreateSwapchainKHR` is stale or uninitialized.
+
+**Required closure:** make the constructor explicitly parameterized with typed
+inputs/outputs and prove its exact substitution, or make the call and body use
+the same destination. The generated raw view must expose the resulting load and
+store operands.
+
+### 9. [P1] Cube's precious input language still contradicts its stated stutter behavior
+
+`CubeInput` includes `.irrelevant`, observations quantify the complete input
+stream, and the document says irrelevant input stutters
+(`Spikes/5_Spinning_Cube/Spec.lean:23-47`; `docs/SPIKE_5.md:244`). Yet `cubeSpec`
+passes only close, Escape, and resize to `acceptInput`
+(`Spec.lean:61-67`). If `acceptInput` is the accepted language, the ordinary
+irrelevant-message behavior is excluded; if it is only a meaningful-input
+filter, its name and governing semantics are misleading.
+
+**Required closure:** include `.irrelevant` with an explicit stutter law, or
+define and use a separately named filtering projection before the precious
+input stream.
+
+### 10. [P1] The audit's “plausible” file counts conceal substantial authored plumbing
+
+Physical file count alone is not proof economy. Web makes an author maintain 70
+top-level declarations in `Cancellation.lean`, 105 in `Macros.lean`, and 42 in
+`Process.lean`. Derivable ceremony includes its composition record copying
+(`Process.lean:307-382`), cancellation export/resource wrappers
+(`Cancellation.lean:253-306,440-500`), macro aliases/table/hierarchy
+(`Macros.lean:559-677`), and artifact projections (`Program.lean:14-40`). Cube's
+import manifests (`Layout.lean:67-94`), macro registry (`Macros.lean:378-399`),
+staged reconstruction from an already complete plan (`Process.lean:244-296`),
+and artifact projections (`Program.lean:23-58`) have the same problem.
+
+Smaller spikes also retain standard lookup/presentation, duplicate source
+proofs, artifact projections, and unused records. Examples include Hello
+`Program.lean:10-20,100-122`; Sort `Assembly.lean:18-19,196-201` and
+`Program.lean:12-27`; Gzip `Assembly.lean:18-36,67-80` and
+`Program.lean:11-26`. Gzip's fixed DEFLATE tables (`Assembly.lean:41-56`) should
+be a named standard-library fragment unless they are intentionally tunable.
+
+**Required closure:** generate routine registries, summaries, adapters,
+projections, and artifact witnesses from the actual typed source. Require the
+missing one-sentence justification for every retained module and declaration
+family, not merely a plausible directory count.
+
+### 11. [P1] Sort still makes unobservable stability precious
+
+The precious Sort contract retains stable occurrence ordering
+(`Spikes/2_Sort/Spec.lean:29-33,63-70`). Equal-valued records emit identical
+bytes, so their hidden occurrence order has no consumer in this console byte
+contract. This forces a particular algorithmic property and proof invalidation
+without constraining shipped behavior.
+
+**Required closure:** specify sorted permutation of normalized byte lines.
+Retain stability as an optional model theorem or introduce an interface where
+record identity is actually observable.
+
+### 12. [P0] No executable invalidation or target-scale evidence exists
+
+The documents contain prose mutation lists and invalidation tables, but no
+typed-source, expansion, or checking command can perform those mutations. They
+therefore cannot identify the first failing phase or prove that stale downstream
+evidence is rejected. The mandatory 1M/10M corpora, clean/incremental reports,
+proof-term sizes, and retained locality plans remain absent. This is correctly
+described elsewhere as unmeasured, but it remains a fixpoint and target-release
+blocker.
+
+**Required closure:** provide executable spec, assembly, placement, and platform
+mutations from a clean generated-output directory. Record phase-first failure,
+the exact invalidation cone, generated bytes/nodes/goals/proof sizes, and clean
+and incremental costs at both mandatory scales.
+
+### Four-part proof-economics accounting
+
+The following counts are for exact commit `88a65ec`. “Realization” includes all
+authored `.lean` files other than `Spec.lean`, so these are ceremony-inclusive
+costs, not an endorsement that every line belongs there.
+
+| Spike | Authored specification | Authored realization/assembly | Generated evidence | Build/check cost |
+|---|---:|---:|---|---|
+| Hello | 30 physical / 21 nonblank lines; 1 module; 7 declarations | 124 / 100; 1 module; 15 declarations | **not generated** | **not measured** |
+| Sort | 73 / 57; 1 module; 14 declarations | 591 / 546; 2 modules; 25 declarations | **not generated** | **not measured** |
+| Gzip | 50 / 40; 1 module; 8 declarations | 812 / 749; 2 modules; 36 declarations | **not generated** | **not measured** |
+| Web | 104 / 86; 1 module; 16 declarations | 2,253 / 2,009; 5 modules; 231 declarations | **not generated** | **not measured** |
+| Cube | 76 / 60; 1 module; 14 declarations | 1,693 / 1,570; 5 modules; 98 declarations | **not generated** | **not measured** |
+
+The source-mirror script took only fractions of a second in warm local runs,
+but that is text comparison and is not an elaboration, kernel, generation, or
+artifact cost. It is intentionally excluded from the build column. No banned
+proof escape was found in the authored Lean sources.
+
+## Round 19 fixpoint decision
+
+**No fixpoint.** Round 19 finds nine P0 semantic/authoring blockers, three P1
+semantic/economic defects, and the independently blocking unexecuted scale gate.
+The source consolidation and several Round 18 repairs are substantial monotonic
+improvements. They do not overcome zero block-classification compliance, exact
+authored type errors, absent expansion/proof/artifact reproduction, generated
+semantics which would require invention, excessive hand-maintained plumbing, or
+the new Web and Cube product defects. The review change is confined to this
+report; unrelated concurrent working-tree changes are excluded from its commit.
