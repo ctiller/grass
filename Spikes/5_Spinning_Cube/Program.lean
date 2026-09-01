@@ -17,6 +17,7 @@ def cubeVerified : VerifiedProgram spec := by
     using_machine_blend cubeMachineBlendInput cubeMachineBlendInputComplete
     and_source_identity cubeSourceElaboratesExactly
     and_host_refinement rawHostImplementsDriver
+    and_callback_lifetime cubeCallbackStateConnection
 
 def bytes : ByteArray := emitProgram cubeVerified
 

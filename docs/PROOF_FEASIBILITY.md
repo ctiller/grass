@@ -26,7 +26,7 @@ The feasibility labels are:
 - **conditional commitment**: Grass retains the interface only if the stated
   fixture succeeds within the proof/build budget.
 
-## 2. Canonical sequential realization
+## 2. Standard sequential presentation
 
 ### Claim
 
@@ -53,7 +53,7 @@ structure DirectRelationalProgram (boundary : DriverBoundary) where
   terminalDisposition : EveryTerminalStateClassifiesEveryPendingOccurrence
 
 structure DirectProgramRealizes {R : Type u} [ResourceModel R]
-    {resources : R} (spec : Specification resources)
+    {resources : R} (spec : SpecProcess resources)
     (program : DirectRelationalProgram spec.driverBoundary) where
   invariant : program.State -> Prop
   initial : DirectInitialSimulation spec program invariant
@@ -63,8 +63,9 @@ structure DirectProgramRealizes {R : Type u} [ResourceModel R]
   progress : DirectProgressRefinement spec program
 ```
 
-and produces one canonical process realization. The input already contains the
-program decomposition and correctness proof.
+and produces one conventional, replaceable process presentation. The input
+already contains the program decomposition and correctness proof; neither the
+adapter's topology nor its chosen child placement becomes precious.
 
 ### Construction
 
@@ -761,6 +762,16 @@ includes a separate-compilation case, and
 [Compositional CompCert](https://www.cs.princeton.edu/~appel/papers/compcomp.pdf)
 uses module-local structured simulations.
 
+Source closure follows the same hierarchy. Each authored raw fragment, static
+data fragment, and transparent macro definition/instance has a local
+`SourceFragmentClosure` proving exact expansion, references, imports,
+boundaries, and machine behavior. Shard and component nodes consume only child
+summaries plus exact export/import matching; the root proves coverage and no
+unresolved reference by tree induction. Recursive child concatenation produces
+the exact writer listing. A whole-expansion boolean proof may be a debugging
+check for a small fixture, but it is neither the target-scale closure theorem
+nor a substitute for missing fragment bodies.
+
 ### Acceptance fixture
 
 Mutation tests must demonstrate required sibling reuse and exact invalidation
@@ -783,11 +794,24 @@ certificate action. Full source hashing and full artifact regeneration are
 allowed but reported as separate byte counts. A boundary change is judged
 against its declared semantic dependent cone rather than this leaf bound.
 
+Source-closure mutations replace one macro body, remove one static symbol,
+change one child export, and alter one fragment instruction. The first affected
+leaf or interface-composition certificate must fail. Unchanged sibling fragment
+certificates remain imported; no test may close a source containing a named but
+unimplemented macro, setup path, callback, cleanup path, or data object.
+
 ### Status and fallback
 
 Kernel-checked module reuse is a **standard construction**. Fine-grained
 hierarchical build economics are a **conditional commitment**. The fallback is
 coarser ordinary Lean modules and more rechecking, never trusting hashes.
+
+**Current evidence status: not measured and therefore not passed.** The design
+spikes contain neither the reproducible 1M/10M+ corpora nor retained execution
+reports. They establish interfaces and mutation expectations only. Grass must
+not describe target-scale locality, memory use, or build speed as achieved until
+the generated corpora, machine-readable plans/reports, clean runs, incremental
+runs, and boundary-preserving mutations have been checked in and reproduced.
 
 ## 12. Orthogonal staged subsystem refinement
 
@@ -895,11 +919,13 @@ set while each realized schema certificate quantifies over every dynamic
 instance and recursively proves every reachable internal frontier realized.
 Each abstract schema makes `EverySchemaRealizedParametrically` uninhabited.
 Portable closure composes resource ledgers and obligations and yields an
-ordinary `ProcessRealization spec` retaining the exact graph origin and demand
-union. It does not select a platform or claim machine artifacts.
+indexed `ClosedBlend` whose `realization.origin` is the `.blended` constructor
+carrying the exact graph, local certificates, recursive closure evidence, and
+demand union. It does not select a platform or claim machine artifacts.
 
 After one target projection and coherent platform plan discharge that demand
-union, machine blending uses the retained closed scopes. Each scope contributes
+union, machine blending is indexed by that same `ClosedBlend` and uses its
+retained closed scopes. Each scope contributes
 its exact heterogeneous source certificate; the coverage theorem proves every
 reachable scope occurs exactly once, and global coherence checks provider
 versions/features, ABI, ISA, shared resources and cross-ISA edges. The final
@@ -938,12 +964,12 @@ The architectural target is zero sibling re-elaboration and zero sibling kernel
 checks for a boundary-preserving leaf change; path-to-root composition and
 artifact work are measured separately.
 
-The design-level positive and negative values are present in
-`Spikes/5_Spinning_Cube/Staged.lean`: the cube exercises staged closure into its
-actual process plan, while `EngineBlendFixture` exercises independent Vulkan,
-IOCP, and simulation schemas. They are interface-pressure fixtures, not evidence
-that the future library theorem has compiled; implementation status remains the
-fallback below.
+`Spikes/5_Spinning_Cube/Staged.lean` is presently a design-level inventory of
+the intended cube and engine-blend terms. Its undeclared witness names are not a
+positive fixture and supply no closure evidence. This acceptance item remains
+open until those terms elaborate against the actual definitions, the positive
+values construct an indexed `ClosedBlend`, the machine blend is indexed by its
+retained origin, and each negative mutation fails at the intended boundary.
 
 ### Status and fallback
 
@@ -1101,7 +1127,76 @@ environment-pending result, but it may not promise cancellation termination. A
 realization with no safe forced primitive must escalate to a larger owned scope
 or declare the demanded termination property unrealizable on that platform.
 
-## 14. What remains genuinely unproved
+## 14. Composable DSL capture into one root SpecProcess
+
+### Claim
+
+A finite suite of well-formed specification-language fragments connected by
+typed, total semantic junctions can be captured into one root `SpecProcess`.
+Every external trace of the root is exactly a trace of the composed fragments
+after hiding internal ports, and conversely every productive composed trace has
+a root trace. An abstract `ProcessRequirement` remains universally quantified
+until refinement supplies a satisfying witness.
+
+### Construction and proof sketch
+
+Each fragment denotes a small labeled transition system over typed ports. Form
+their dependent product state and tagged disjoint union of enabled fragment
+steps. A junction step consumes one output occurrence and creates the matching
+input occurrence under its `JunctionRelation`; affine occurrence identity makes
+the transfer unique. Internal ports and component states are existentially
+hidden in the root state. Public input/output ports become root events,
+commands, outcomes, and observations.
+
+Finite-prefix soundness is induction over root steps. Constructor inversion
+selects a component or junction transition; its local denotation theorem and
+junction preservation theorem extend the composed trace. Custody and resource
+facts frame untouched components. Completeness is induction over a productive
+composed schedule after quotienting adjacent independent internal steps by the
+diamond theorem. Each selected transition constructs the corresponding root
+step. Internal finite stuttering is bounded by component ranks; an infinite run
+uses the existing frontier/productivity coinduction and cannot vanish entirely
+under hiding.
+
+A process requirement is interpreted as a universally quantified boundary
+relation in this proof. None of its private state is added to precious syntax.
+When refinement supplies `witness : SpecProcess` and
+`acceptable witness`, relational substitution replaces the abstract boundary;
+parametricity plus the acceptability theorem preserves the root trace contract.
+Substitution composes and is insensitive to whether the witness is a primitive
+process, a captured subgraph, a sequentially adapted function, or assembly.
+
+Associativity follows from dependent-product reassociation, occurrence-tag
+renaming, and relational composition associativity. Hiding fusion proves the
+fractal law: capturing sub-suites and then the parent is trace-equivalent to one
+capture, with identical public observations and requirements. Conflicting
+guarantees, unmatched ports, uncovered cases, nullable internal cycles, and
+resource-semantic disagreement make suite construction fail before capture.
+
+### Automation boundary and fixtures
+
+Libraries generate product-state plumbing, occurrence renaming, standard
+framing, and the associativity/hiding transports. Authors provide novel DSL
+denotations, nonstandard junction relations, ambiguity decisions, and any
+progress fact not inherited from components. Fixtures cover relation + grammar,
+grammar + protocol, trace + temporal, and resource fragments; two parser
+witnesses with different process topologies; reassociated and nested capture;
+and staged substitution of one abstract process demand. Mutations reject an
+unconnected port, duplicated occurrence, missing invalid-input case,
+contradictory failure outcome, hidden infinite silent cycle, witness selected by
+ambient instance search, or a process whose contract is only similar rather
+than accepted by the exact requirement.
+
+### Status and fallback
+
+This construction must be prototyped before the DSL family is treated as stable.
+If fully generic dependent ports make elaboration or proof terms impractical,
+the fallback is a small closed set of junction shapes—sequence, tagged choice,
+product, feedback with guarded progress, and hiding—while retaining the same
+one-root theorem. The fallback may narrow extensibility but may not introduce
+parallel correctness towers or put an execution topology in the root spec.
+
+## 15. What remains genuinely unproved
 
 The corpus still owes implementation evidence for all of the following:
 

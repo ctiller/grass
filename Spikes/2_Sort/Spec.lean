@@ -1,4 +1,5 @@
 import Grass.Spec.Console
+import Grass.Spec.Grammar
 import Spikes.«2_Sort».Resource
 
 namespace Grass.Spikes.Sort
@@ -26,24 +27,33 @@ def stableSorted (input output : Vec Occurrence) : Prop :=
   ∀ i j, i < j -> input[i].value = input[j].value ->
     (output.findIdx? input[i]).get! < (output.findIdx? input[j]).get!
 
-def sortContract {R : Type} [ResourceModel R] [BufferedSortResources R]
-    (resources : R) : BehaviorContract resources :=
-  Console.stableLineSortContract
+def lineStreamFormat : Format (Vec ByteArray) :=
+  Console.byteLineStreamFormat format
+
+def lineParserRequirement {R : Type} [ResourceModel R]
+    (resources : R) : ProcessRequirement resources :=
+  Format.parserRequirement lineStreamFormat
+
+def sortSuite {R : Type} [ResourceModel R] [BufferedSortResources R]
+    (resources : R) : SpecificationSuite resources :=
+  Console.stableLineSortSuite
     (resources := resources)
     (format := format)
     (order := order)
     (outcomes := SortOutcome)
+    (parser := lineParserRequirement resources)
 
 def sortSpec {R : Type} [ResourceModel R] [BufferedSortResources R]
-    (resources : R) : Specification resources :=
-  Specification.ofRelational (sortContract resources)
+    (resources : R) : SpecProcess resources :=
+  SpecProcess.capture (sortSuite resources)
     |>.onResourceExhaustion .allocationFailure
     |>.withLiveness
         (.terminatesUnder [.stdinEventuallyEOF, .environmentResponsive])
 
 theorem sortSpecCorrect {R : Type} [ResourceModel R] [BufferedSortResources R]
     (resources : R) : MeetsAllSpecificationTheorems (sortSpec resources) :=
-  Console.stableLineSortContractCorrect resources format order SortOutcome
+  Console.stableLineSortSuiteCaptureCorrect resources format order SortOutcome
+    (lineParserRequirement resources)
 
 theorem successfulTraceIffStableSorted
     {R : Type} [ResourceModel R] [BufferedSortResources R]
@@ -53,6 +63,6 @@ theorem successfulTraceIffStableSorted
   Console.stableLineSortContract_success_iff
     resources format order SortOutcome
 
-def spec : Specification resources := sortSpec resources
+def spec : SpecProcess resources := sortSpec resources
 
 end Grass.Spikes.Sort

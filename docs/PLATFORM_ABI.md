@@ -99,7 +99,7 @@ structure ConcreteResponsiveStrategy (plan : PlatformPlan) where
   resultComplete : ConcreteFrontierComplete plan strategy
   responsive : ConcreteResponsive plan strategy
 
-structure ResponsivenessBridge (spec : Specification) (plan : PlatformPlan) where
+structure ResponsivenessBridge (spec : SpecProcess) (plan : PlatformPlan) where
   concreteInhabited : Nonempty (ConcreteResponsiveStrategy plan)
   project : ConcreteResponsiveStrategy plan -> AbstractEnvironmentStrategy spec
   realizes : ∀ s, StrategyRefines plan spec s.strategy (project s)

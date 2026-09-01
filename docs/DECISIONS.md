@@ -306,14 +306,16 @@ to imitate compiler-selected storage or CFG structure.
     pages, interrupt work, GPU objects, or other axes. The specification depends
     on that resource value, while the selected platform later proves it realizes
     the exact value and laws used upstream.
-73. A precious specification body may be relational or process-shaped. A spec
-    process is an abstract protocol role with typed channels, linear/shared
-    logical state, and causal laws; its external trace contract is a derived
-    denotation of that same source. It contains no OS threads, physical worker
-    count, scheduler, polling/completion mechanism, concrete buffer/handle,
-    layout, or ISA identity. Spec processes are distinct from the replaceable
-    `ProcessRealization`: serialized, reactor, worker-pool, callback, and device
-    topologies may all refine the same abstract process specification.
+73. The precious root `SpecProcess` captures one composable suite of semantic DSL
+    fragments into its one transition/observation contract, not an execution
+    topology. `VerifiedProgram` is indexed by that exact root process.
+    Relational, stream, trace, grammar, protocol, temporal, resource, and domain
+    forms are authoring fronts which elaborate through explicit typed junctions.
+    A replaceable `ProcessPresentation` may
+    then provide abstract protocol roles, typed channels, linear/shared logical
+    state, and causal laws together with an exact-denotation theorem. Serialized,
+    reactor, worker-pool, callback, and device presentations may all serve the
+    same specification; changing among them cannot change the precious value.
 74. Refinement acts apply locally and fractally, not as whole-program phase
     barriers. A typed refinement lens may replace one role/subgraph while
     preserving its observation causality, channel, custody, obligation,
@@ -337,19 +339,20 @@ to imitate compiler-selected storage or CFG structure.
     not when the boundary itself changes.
 76. The resource value is explicit at precious specification construction and
     becomes an implicit dependent index downstream. Thus an author writes
-    `def spec : Specification resources := ...` and later
+    `def spec : SpecProcess resources := ...` and later
     `VerifiedProgram spec`, not a second ambient resource selection. Resource
     typeclasses expose bounded construction operations and laws; the resulting
     exact semantic dictionary is captured in `spec`, never reselected
     downstream, and no resource class chooses a platform provider.
-77. Relational, stream, trace/reactive, and protocol syntax are first-class
-    authoring front ends to one specification denotation, not independent
-    semantic towers. Sort and gzip use relational/stream-shaped meaning without
-    invented pipeline actors; interactive and multiplexed systems may use
-    product-significant processes or sessions. Every front end feeds the same
+77. Relational, stream, trace/reactive, grammar, protocol, temporal, resource,
+    and domain syntax are first-class authoring fronts captured into one root
+    `SpecProcess`, not independent semantic towers. Sort and gzip use
+    relational/stream/grammar-shaped meaning without invented pipeline actors;
+    interactive and multiplexed systems may demand abstract session contracts
+    without freezing a decomposition. Every front end feeds the same
     refinement and exact-artifact theorem.
 78. Resource capability typeclasses are construction-time builders. A
-    `Specification` snapshots the exact finite, uniquely keyed semantic
+    root `SpecProcess` snapshots the exact finite, uniquely keyed semantic
     dictionary used to construct it; all downstream proofs project from that
     value. Competing lawful instances over the same carrier cannot lend limits,
     deadlines, exhaustion, or lifecycle facts to the selected `spec`.
@@ -396,6 +399,70 @@ to imitate compiler-selected storage or CFG structure.
     independent termination proof, and flattening preserves the summary. Thus
     `uncancellable |> cancelpoint |> uncancellable` has a derived policy, while
     a forever-blocking segment cannot falsely acquire eventual cancellation.
+85. Text and binary languages are precious through a typed `Format` denotation,
+    not through a parser algorithm or process graph. A format distinguishes
+    complete derivation, repairable incomplete prefix, and irrecoverably invalid
+    prefix; states semantic values and explicit ambiguity/disambiguation; and
+    supports binary lengths, bits, refinements, and productive recursion.
+    Parsers and writers are replaceable realizations with soundness,
+    completeness, exact residual-input, and round-trip laws. Stateful protocol
+    legality remains a separate precious transition relation connected to the
+    decoded values.
+86. Specification authoring is an open family of typed DSLs sharing
+    `ContractFragment` and `SpecJunction`. The authored fragment values and
+    meaning-bearing junctions are precious; their composed denotation is the
+    single contract consumed by `VerifiedProgram`. Execution assignment to
+    processes, callbacks, buffers, APIs, CFGs, or instructions is a replaceable
+    presentation/realization. New DSLs must provide total denotation,
+    composition laws, conflict diagnostics, adversarial fixtures, and a direct
+    Lean proof escape hatch without creating another correctness tower.
+87. A DSL may introduce a precious existential `ProcessRequirement`, such as “a
+    process realizing this parser format.” The enclosing root `SpecProcess`
+    proves behavior parametrically using only that exported contract. Refinement
+    supplies a witness—one process, a captured subgraph, generated code, or raw
+    assembly—and proves it acceptable. Ambient instance selection after spec
+    construction and dependence on the witness's private topology are forbidden.
+88. Lean is a Turing-complete assembly construction language, while the kernel-
+    checked result remains exact first-class assembly. Typed object/stack layouts
+    compute named offsets and prove alignment, disjointness, representation,
+    ABI, and unwind laws. Transparent generators may emit short verified
+    instruction fragments for prologues, calls, spills, field access, and other
+    routine work. Literal instructions and numeric offsets remain legal with
+    local proofs. Logical block invariants use a separate physical `Placement`
+    unless register identity is intentionally part of the contract; annotation
+    predicates elaborate as Lean terms, never untyped strings.
+89. Grass's maintained spikes use concise typed construction syntax because
+    they are permanent copy sources. Named layout paths replace hand-computed
+    object, frame, ABI-home, and bitfield displacements; transparent ABI and
+    instruction-burst constructors replace bookkeeping where they preserve an
+    obvious expanded view. Raw offsets and entirely literal assembly remain
+    first-class escape hatches and receive dedicated fixtures, but are not the
+    ordinary exemplar spelling. Lean functions are the semantic macro system;
+    assembly quotation and splicing are its readable surface, with authored,
+    elaborated, and exact expanded views available to review.
+90. A reusable assembly constructor exports a strong parametric theorem about
+    the entire family of instruction sequences it generates, not merely an
+    expansion equation. Its checked summary may include Hoare behavior, access
+    and fault footprints, stack delta, preservation, obligations, resources,
+    cancellation, unwind metadata, and citation coverage. Call sites instantiate
+    and compose that theorem instead of re-deriving instruction proofs, while
+    emission and review retain exact expansion. Hierarchical constructor
+    certificates are therefore part of Grass's proof-size and incremental-build
+    strategy; literal one-off assembly remains equally legal.
+91. `withStack` is the concise typed surface for lexical addressable objects in
+    assembly. It binds typed stack objects whose field projections elaborate to
+    memory operands and whose proofs track layout, provenance, permission,
+    initialization, loans, and non-escape. The binder supplies lifetime demands
+    to an inspectable enclosing frame plan; it does not necessarily emit dynamic
+    `rsp` adjustment. Nonoverlapping lifetimes may share physical storage, while
+    pinned layouts, disabled reuse, explicit overlays, and entirely literal
+    frames remain available to first-class assembly authors.
+92. A one-line assembly tactic is acceptable only as a kernel-checked
+    certificate consumer and deterministic dispatcher with a documented
+    residual-goal boundary. It may instantiate fragment-family theorems,
+    compose typed CFG contracts, and invoke checked decision procedures. It may
+    not silently discover or choose invariants, algorithmic correspondences,
+    failure policies, representations, or omitted provider cases.
 
 ## Explicitly rejected shortcuts
 

@@ -7,6 +7,8 @@ structure PhysicalLineDesc where
   offset : UInt64
   length : UInt64
 
+def LineDesc : StructLayout Win64 := StructLayout.derive PhysicalLineDesc
+
 structure SortFrameLayout where
   shadow : Bytes 32
   arg5 : UInt64
@@ -36,13 +38,14 @@ structure SortFrameLayout where
 
 def SortFrame : FrameLayout Win64 := FrameLayout.derive SortFrameLayout
 
-def compareRecordsMacro : TransparentAsmMacro plan := asm_macro compare_records(left, right) {
-    mov  rax, qword ptr [left+0]
+def compareRecords (left right : AddressOperand) :
+    VerifiedFragment (CompareEntry left right) CompareExit := asm_fragment {
+    mov  rax, qword ptr [left + LineDesc.offset]
     add  rax, r13
-    mov  r10, qword ptr [left+8]
-    mov  rcx, qword ptr [right+0]
+    mov  r10, qword ptr [left + LineDesc.length]
+    mov  rcx, qword ptr [right + LineDesc.offset]
     add  rcx, r13
-    mov  r11, qword ptr [right+8]
+    mov  r11, qword ptr [right + LineDesc.length]
     xor  r9d, r9d
 .compare_loop:
     cmp  r9, r10
@@ -69,7 +72,8 @@ def compareRecordsMacro : TransparentAsmMacro plan := asm_macro compare_records(
 .done:
 }
 
-def flushOutputMacro : TransparentAsmMacro plan := asm_macro flush_output() {
+def flushOutput :
+    VerifiedFragment FlushOutputEntry FlushOutputExit := asm_fragment {
     lea  rax, [rip + output_buffer]
     mov  qword ptr [rsp+SortFrame.flushPtr], rax
     mov  rax, qword ptr [rsp+SortFrame.outUsed]
@@ -108,7 +112,8 @@ def flushOutputMacro : TransparentAsmMacro plan := asm_macro flush_output() {
 .flush_done:
 }
 
-def bufferAppendMacro : TransparentAsmMacro plan := asm_macro buffer_append(pointer, length) {
+def bufferAppend (pointer length : MachineOperand) :
+    VerifiedFragment (BufferAppendEntry pointer length) BufferAppendExit := asm_fragment {
     mov  qword ptr [rsp+SortFrame.savedRsi], rsi
     mov  qword ptr [rsp+SortFrame.savedRdi], rdi
     mov  qword ptr [rsp+SortFrame.appendPtr], pointer
@@ -118,7 +123,7 @@ def bufferAppendMacro : TransparentAsmMacro plan := asm_macro buffer_append(poin
     je   .append_complete
     cmp  qword ptr [rsp+SortFrame.outUsed], 65536
     jb   .append_have_room
-    flush_output -> eax
+    $(flushOutput)
     test eax, eax
     jnz  .append_restore
     jmp  .append_head
@@ -145,12 +150,17 @@ def bufferAppendMacro : TransparentAsmMacro plan := asm_macro buffer_append(poin
     mov  rdi, qword ptr [rsp+SortFrame.savedRdi]
 }
 
-def failureExitMacro : TransparentAsmMacro plan := asm_macro failure_exit(outcome) {
+def failureExit (outcome : SortOutcome) :
+    VerifiedFragment (FailureExitEntry outcome) NoReturn := asm_fragment {
     mov  ecx, policy.status outcome
     jmp  exit
 }
 
-def sortMacroRegistry : TransparentMacroRegistry plan :=
-  #[compareRecordsMacro, flushOutputMacro, bufferAppendMacro, failureExitMacro]
+def sortConstructorClosure : FragmentConstructorClosure plan := constructors {
+  compareRecords
+  flushOutput
+  bufferAppend
+  failureExit
+}
 
 end Grass.Spikes.Sort

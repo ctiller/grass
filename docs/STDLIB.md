@@ -227,6 +227,39 @@ when its provider contract names the interrupt operation, race outcomes,
 returned custody, and late-result handling; it is never inferred from an
 ordinary blocking call.
 
+### Grammar and parser combinators
+
+The standard library mirrors the constructors in [GRAMMAR.md](GRAMMAR.md) and
+derives `ParserRealizes`/`WriterRealizes` compositionally for byte, bit, text,
+sequence, choice, repetition, dependent length, refinement, isomorphism, and
+productive recursion formats. These combinators are implementations of one
+precious `Format` denotation, not the denotation itself. Generated tables carry
+checked certificates; scalar, SIMD, hand-assembly, and process-pipelined parsers
+remain interchangeable realizations.
+
+### Layout and assembly-construction combinators
+
+The standard library provides target-profiled struct, array, union, bitfield,
+stack-frame, call-frame, save/restore, spill/reload, and typed field-access
+constructors described in [ASSEMBLY_CONSTRUCTION.md](ASSEMBLY_CONSTRUCTION.md).
+They compute concrete offsets and transparent raw instruction bursts while
+returning reusable local correctness, ABI, unwind, provenance, and expansion
+theorems. They are conveniences over first-class literal assembly, not a
+mandatory compiler IR.
+
+Each reusable constructor proves the strongest stable theorem for its whole
+parameterized expansion family. Call sites instantiate and compose that theorem
+rather than replaying its instruction proof. The library publishes hierarchical
+access, fault, clobber, obligation, resource, cancellation, metadata, citation,
+and exact-expansion summaries so a caller pays only for the dimensions it uses
+without allowing an omitted effect to disappear.
+
+`withStack` binds one or more typed lexical stack objects directly around an
+assembly quotation. Field projections are typed memory operands; the enclosing
+frame planner derives placement, lifetime-compatible slot reuse, prologue size,
+and unwind information. Initialization is explicit, pointer escape and live
+loans are rejected at scope exit, and pinned/literal layouts remain available.
+
 ### Algebraic values
 
 `Unit`, booleans, integers/bit-vectors, products, sums, `Option`, `Result`,

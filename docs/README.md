@@ -25,11 +25,14 @@ No document may override a narrower owner by restating it differently.
 | [VISION.md](VISION.md) | large-system target, proof-economy priorities, spike interpretation |
 | [FOUNDATION.md](FOUNDATION.md) | mission, trust boundary, repository laws |
 | [SEMANTICS.md](SEMANTICS.md) | executions, nondeterminism, observations, safety, progress, liveness |
+| [SPECIFICATION_LANGUAGES.md](SPECIFICATION_LANGUAGES.md) | open family of precious DSL fragments and their typed semantic junctions |
+| [GRAMMAR.md](GRAMMAR.md) | precious text/binary languages, incomplete versus invalid prefixes, parser/writer realization laws |
 | [PROCESS.md](PROCESS.md) | portable state/event/demand/view processes, networks, channels, flattening, resources, and driver boundary |
 | [VERIFIED_PROGRAM.md](VERIFIED_PROGRAM.md) | the public certificate and emission gate |
 | [MEMORY_MODEL.md](MEMORY_MODEL.md) | memory, provenance, borrowing, concurrency, faults |
 | [OBLIGATIONS.md](OBLIGATIONS.md) | linear obligations, transfer, exit dispositions |
 | [REFINEMENT.md](REFINEMENT.md) | refinement proof concerns, weaving, provider realization, generated/authored machine routes |
+| [ASSEMBLY_CONSTRUCTION.md](ASSEMBLY_CONSTRUCTION.md) | typed layouts, physical placement, verified generated instruction fragments, literal escape |
 | [INSTRUCTIONS.md](INSTRUCTIONS.md) | extensible operations, ghost erasure, raw instructions, ISA profiles |
 | [PLATFORM_ABI.md](PLATFORM_ABI.md) | platform plans, APIs, ABIs, Win32 x64 baseline |
 | [ARTIFACTS.md](ARTIFACTS.md) | parsers, writers, PE/COFF, relocation, connection theorems |

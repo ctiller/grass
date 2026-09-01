@@ -3,8 +3,10 @@ import Spikes.«5_Spinning_Cube».Process
 
 namespace Grass.Spikes.SpinningCube
 
-def shapedSpec : ProcessShapedSpecification spec :=
-  ProcessShapedSpecification.ofProcesses spec (cubeProtocol resources) rfl
+def shapedSpec : StagedProcessPresentation spec :=
+  StagedProcessPresentation.ofNetwork spec cubeProtocol
+    cubeProcessPresentation.denotationExact
+    cubeProcessPresentation.requirementsExact
 
 def inputSubsystem : SubsystemRealization shapedSpec .input :=
   SubsystemRealization.fromPlanScope
@@ -122,11 +124,13 @@ def protocol : ProtocolSpec resources :=
     (roles := RoleSchema)
     (instances := RoleSchema.Instance)
 
-def spec : Specification resources :=
-  Specification.fromProtocolSpec protocol
+def spec : SpecProcess resources :=
+  SpecProcess.fromProtocolSpec protocol
 
-def shaped : ProcessShapedSpecification spec :=
-  ProcessShapedSpecification.ofProtocolSpec spec protocol rfl
+def shaped : StagedProcessPresentation spec :=
+  StagedProcessPresentation.ofProtocol spec protocol
+    EngineProtocol.denotationExact
+    EngineProtocol.requirementsExact
 
 def vulkanGraphics : SubsystemRealization shaped .graphics :=
   Vulkan.refineGraphicsProtocol shaped

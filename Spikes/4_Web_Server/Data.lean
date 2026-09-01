@@ -11,12 +11,12 @@ def bindAddress : ByteArray :=
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
 
 def serverSettings : Http2.Settings :=
-  { headerTableSize := resourcePolicy.hpackDecoderTableBytes
+  { headerTableSize := capturedResourcePolicy.hpackDecoderTableBytes
     enablePush := false
-    maxConcurrentStreams := resourcePolicy.maxConcurrentStreamsPerConnection
-    initialWindowSize := resourcePolicy.inboundStreamWindow
+    maxConcurrentStreams := capturedResourcePolicy.maxConcurrentStreamsPerConnection
+    initialWindowSize := capturedResourcePolicy.inboundStreamWindow
     maxFrameSize := 16384
-    maxHeaderListSize := resourcePolicy.maxHeaderListBytes }
+    maxHeaderListSize := capturedResourcePolicy.maxHeaderListBytes }
 
 def clientPreface : ByteArray :=
   "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".toUTF8
@@ -38,13 +38,18 @@ def notFoundHeaderBlock : ByteArray :=
   Hpack.encodeWithoutIndexing notFoundFields
 
 def connectionStateBytes : Nat :=
-  Http2.ConnectionLayout.bytes resourcePolicy
+  Http2.ConnectionLayout.bytes capturedResourcePolicy
+
+theorem connectionLayoutCarriesGoawayPublicationState :
+    Http2.ConnectionLayout.HasField
+      capturedResourcePolicy .goawayPublished (Atomic UInt32) :=
+  Http2.ConnectionLayout.hasGoawayPublished capturedResourcePolicy
 
 def streamStateBytes : Nat :=
-  Http2.StreamLayout.bytes resourcePolicy
+  Http2.StreamLayout.bytes capturedResourcePolicy
 
 def workerSlotBytes : Nat :=
-  Http2.WorkerSlotLayout.bytes resourcePolicy
+  Http2.WorkerSlotLayout.bytes capturedResourcePolicy
 
 theorem settingsRoundTrip :
     Http2.Frame.parse protocolProfile settingsFrame =
@@ -77,7 +82,7 @@ def serverStaticObjects : StaticObjectTable := static_objects {
     wsa_data: zero 408
     worker_slots: zero (4 * workerSlotBytes)
     connection_states: zero (4 * connectionStateBytes)
-    stream_states: zero (4 * resourcePolicy.maxConcurrentStreamsPerConnection * streamStateBytes)
+    stream_states: zero (4 * capturedResourcePolicy.maxConcurrentStreamsPerConnection * streamStateBytes)
   }
 }
 

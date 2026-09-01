@@ -18,6 +18,69 @@ structure GzipMachineState where
   generation : UInt16
   phase : GzipPhase
 
+structure GzipFrameFields where
+  shadow : Bytes 32
+  overlapped : UInt64
+  transferred : UInt32
+  locals : Bytes 28
+
+def GzipFrame : FrameLayout Win64 := FrameLayout.derive GzipFrameFields
+
+structure GzipArenaFields where
+  heap : UInt64
+  stdin : UInt64
+  stdout : UInt64
+  inputLength : UInt32
+  position : UInt32
+  outputLength : UInt32
+  bitCount : UInt32
+  bitAccumulator : UInt64
+  crc : UInt32
+  totalInput : UInt32
+  root : UInt64
+  input : UInt64
+  head : UInt64
+  prev : UInt64
+  output : UInt64
+  ioRequest : UInt32
+  ioCount : UInt32
+  reserved : Bytes 152
+  inputBytes : Bytes 32768
+  headEntries : Bytes 131072
+  prevEntries : Bytes 65536
+  outputBytes : Bytes 65536
+
+def GzipArena : StructLayout Win64 := StructLayout.derive GzipArenaFields
+
+structure GzipHeaderFields where
+  magic : UInt16
+  compressionMethod : UInt8
+  flags : UInt8
+  modificationTime : UInt32
+  extraFlags : UInt8
+  operatingSystem : UInt8
+
+def GzipHeader : PackedStructLayout :=
+  PackedStructLayout.derive GzipHeaderFields
+
+def ProcessBlockFrame :=
+  Win64.callFrameAfterSaves #[rbx, rbp, rsi, rdi, r13, r14, r15]
+
+def EmitReferenceFrame := Win64.callFrameAfterSaves #[rbx, rsi, rdi]
+
+def EmitFixedSymbolFrame := Win64.callFrameAfterSaves #[]
+
+def EmitBitsFrame := Win64.callFrameAfterSaves #[rbx]
+
+def EmitRawByteFrame := Win64.callFrameAfterSaves #[rbx]
+
+structure FlushFrameFields where
+  shadow : Bytes 32
+  overlapped : UInt64
+  transferred : UInt32
+
+def FlushFrame : FrameLayout Win64 := FrameLayout.derive FlushFrameFields
+
 def gzipSource : AsmSource platformPlan := asm_source using codecPlan {
 
 entry:
@@ -29,7 +92,7 @@ entry:
     push r13
     push r14
     push r15
-    sub  rsp, 72
+    sub  rsp, GzipFrame.size
     mov  ecx, STD_INPUT_HANDLE
     call qword ptr [rip + __imp_GetStdHandle]
     test rax, rax
@@ -50,72 +113,72 @@ entry:
     mov  rbx, rax
     mov  rcx, rbx
     xor  edx, edx
-    mov  r8d, 295168
+    mov  r8d, GzipArena.size
     call qword ptr [rip + __imp_HeapAlloc]
     test rax, rax
     jz   resource_exhausted_no_root
     mov  r12, rax
-    mov  [r12+0], rbx
-    mov  [r12+8], r13
-    mov  [r12+16], r14
-    mov  [r12+56], r12
-    lea  rax, [r12+256]
-    mov  [r12+64], rax
-    lea  rax, [r12+33024]
-    mov  [r12+72], rax
-    lea  rax, [r12+164096]
-    mov  [r12+80], rax
-    lea  rax, [r12+229632]
-    mov  [r12+88], rax
-    mov  dword ptr [r12+24], 0
-    mov  dword ptr [r12+28], 0
-    mov  dword ptr [r12+32], 10
-    mov  dword ptr [r12+36], 0
-    mov  qword ptr [r12+40], 0
-    mov  dword ptr [r12+48], 0xffffffff
-    mov  dword ptr [r12+52], 0
-    mov  rdi, [r12+88]
+    mov  [r12 + GzipArena.heap], rbx
+    mov  [r12 + GzipArena.stdin], r13
+    mov  [r12 + GzipArena.stdout], r14
+    mov  [r12 + GzipArena.root], r12
+    lea  rax, [r12 + GzipArena.inputBytes]
+    mov  [r12 + GzipArena.input], rax
+    lea  rax, [r12 + GzipArena.headEntries]
+    mov  [r12 + GzipArena.head], rax
+    lea  rax, [r12 + GzipArena.prevEntries]
+    mov  [r12 + GzipArena.prev], rax
+    lea  rax, [r12 + GzipArena.outputBytes]
+    mov  [r12 + GzipArena.output], rax
+    mov  dword ptr [r12 + GzipArena.inputLength], 0
+    mov  dword ptr [r12 + GzipArena.position], 0
+    mov  dword ptr [r12 + GzipArena.outputLength], 10
+    mov  dword ptr [r12 + GzipArena.bitCount], 0
+    mov  qword ptr [r12 + GzipArena.bitAccumulator], 0
+    mov  dword ptr [r12 + GzipArena.crc], 0xffffffff
+    mov  dword ptr [r12 + GzipArena.totalInput], 0
+    mov  rdi, [r12 + GzipArena.output]
     mov  rax, 0x0000000000088b1f
-    mov  [rdi], rax
-    mov  word ptr [rdi+8], 0xff00
+    mov  [rdi + GzipHeader.magic], rax
+    mov  word ptr [rdi + GzipHeader.extraFlags], 0xff00
     jmp  read_head
 
 read_head: @invariant collecting_block(state, capacity=32768)
            @frontier_or_measure(read_or_remaining_spare)
-    mov  eax, [r12+24]
+    mov  eax, [r12 + GzipArena.inputLength]
     cmp  eax, 32768
     je   process_nonfinal_block
     mov  ecx, 32768
     sub  ecx, eax
-    mov  [r12+96], ecx
-    mov  rcx, [r12+8]
-    mov  rdx, [r12+64]
+    mov  [r12 + GzipArena.ioRequest], ecx
+    mov  rcx, [r12 + GzipArena.stdin]
+    mov  rdx, [r12 + GzipArena.input]
     add  rdx, rax
-    mov  r8d, [r12+96]
-    lea  r9, [rsp+40]
-    mov  dword ptr [rsp+40], 0
-    mov  qword ptr [rsp+32], 0
+    mov  r8d, [r12 + GzipArena.ioRequest]
+    lea  r9, [rsp + GzipFrame.transferred]
+    mov  dword ptr [rsp + GzipFrame.transferred], 0
+    mov  qword ptr [rsp + GzipFrame.overlapped], 0
     call qword ptr [rip + __imp_ReadFile]
     test eax, eax
     jz   read_failed
-    mov  eax, [rsp+40]
-    cmp  eax, [r12+96]
+    mov  eax, [rsp + GzipFrame.transferred]
+    cmp  eax, [r12 + GzipArena.ioRequest]
     ja   read_count_violation @violation_edge(.excessReadCount)
     test eax, eax
     jz   input_eof
-    mov  [r12+100], eax
-    mov  esi, [r12+24]
-    add  [r12+24], eax
-    add  [r12+52], eax
-    mov  edi, [r12+100]
-    mov  rbx, [r12+64]
+    mov  [r12 + GzipArena.ioCount], eax
+    mov  esi, [r12 + GzipArena.inputLength]
+    add  [r12 + GzipArena.inputLength], eax
+    add  [r12 + GzipArena.totalInput], eax
+    mov  edi, [r12 + GzipArena.ioCount]
+    mov  rbx, [r12 + GzipArena.input]
     add  rbx, rsi
 crc_byte_head: @invariant crc32_prefix(transferred-edi)
                @measure edi
     test edi, edi
     jz   read_head
     movzx edx, byte ptr [rbx]
-    mov  eax, [r12+48]
+    mov  eax, [r12 + GzipArena.crc]
     xor  al, dl
     mov  ecx, 8
 crc_bit_head: @measure ecx
@@ -127,7 +190,7 @@ crc_bit_head: @measure ecx
     xor  eax, edx
     dec  ecx
     jnz  crc_bit_head
-    mov  [r12+48], eax
+    mov  [r12 + GzipArena.crc], eax
     inc  rbx
     dec  edi
     jmp  crc_byte_head
@@ -137,7 +200,7 @@ process_nonfinal_block:
     call_local process_block
     test eax, eax
     jnz  route_io_error
-    mov  dword ptr [r12+24], 0
+    mov  dword ptr [r12 + GzipArena.inputLength], 0
     jmp  read_head
 
 input_eof:
@@ -148,7 +211,7 @@ input_eof:
     call_local align_writer
     test eax, eax
     jnz  route_io_error
-    mov  eax, [r12+48]
+    mov  eax, [r12 + GzipArena.crc]
     not  eax
     mov  ebx, eax
     mov  esi, 4
@@ -160,7 +223,7 @@ trailer_crc_head: @measure esi
     shr  ebx, 8
     dec  esi
     jnz  trailer_crc_head
-    mov  ebx, [r12+52]
+    mov  ebx, [r12 + GzipArena.totalInput]
     mov  esi, 4
 trailer_size_head: @measure esi
     movzx eax, bl
@@ -184,14 +247,14 @@ process_block: @contract fixed_block_refines_input
     push r13
     push r14
     push r15
-    sub  rsp, 48
+    sub  rsp, ProcessBlockFrame.size
     mov  ebp, ecx
-    mov  rdi, [r12+72]
+    mov  rdi, [r12 + GzipArena.head]
     mov  ecx, 65536
     mov  ax, 0xffff
     cld
     rep  stosw
-    mov  dword ptr [r12+28], 0
+    mov  dword ptr [r12 + GzipArena.position], 0
     mov  eax, ebp
     or   eax, 2
     mov  ecx, 3
@@ -200,14 +263,14 @@ process_block: @contract fixed_block_refines_input
     jnz  process_block_return
 token_head: @invariant token_prefix_expands_to_input_prefix(position)
             @measure inputLen-position
-    mov  esi, [r12+28]
-    cmp  esi, [r12+24]
+    mov  esi, [r12 + GzipArena.position]
+    cmp  esi, [r12 + GzipArena.inputLength]
     jae  token_eob
-    mov  eax, [r12+24]
+    mov  eax, [r12 + GzipArena.inputLength]
     sub  eax, esi
     cmp  eax, 3
     jb   token_literal
-    mov  rdi, [r12+64]
+    mov  rdi, [r12 + GzipArena.input]
     add  rdi, rsi
     movzx eax, byte ptr [rdi]
     imul eax, eax, 251
@@ -217,9 +280,9 @@ token_head: @invariant token_prefix_expands_to_input_prefix(position)
     movzx edx, byte ptr [rdi+2]
     add  eax, edx
     and  eax, 0xffff
-    mov  rbx, [r12+72]
+    mov  rbx, [r12 + GzipArena.head]
     movzx r13d, word ptr [rbx+rax*2]
-    mov  rdx, [r12+80]
+    mov  rdx, [r12 + GzipArena.prev]
     mov  word ptr [rdx+rsi*2], r13w
     mov  word ptr [rbx+rax*2], si
     mov  r14d, 2
@@ -237,14 +300,14 @@ candidate_head: @invariant candidates_strictly_precede_position
     sub  eax, r13d
     cmp  eax, 32768
     ja   candidate_next
-    mov  ebp, [r12+24]
+    mov  ebp, [r12 + GzipArena.inputLength]
     sub  ebp, esi
     cmp  ebp, 258
     jbe  compare_setup
     mov  ebp, 258
 compare_setup:
     xor  ecx, ecx
-    mov  rdi, [r12+64]
+    mov  rdi, [r12 + GzipArena.input]
 compare_head: @measure ebp-ecx
     cmp  ecx, ebp
     jae  compare_done
@@ -266,7 +329,7 @@ compare_done:
     cmp  ecx, ebp
     je   candidate_done
 candidate_next:
-    mov  rdx, [r12+80]
+    mov  rdx, [r12 + GzipArena.prev]
     movzx r13d, word ptr [rdx+r13*2]
     dec  ebx
     jmp  candidate_head
@@ -285,11 +348,11 @@ insert_consumed_head: @invariant inserted_range(oldPosition,esi)
                       @measure ebx-esi
     cmp  esi, ebx
     jae  reference_advance
-    mov  eax, [r12+24]
+    mov  eax, [r12 + GzipArena.inputLength]
     sub  eax, esi
     cmp  eax, 3
     jb   insert_consumed_skip
-    mov  rdi, [r12+64]
+    mov  rdi, [r12 + GzipArena.input]
     add  rdi, rsi
     movzx eax, byte ptr [rdi]
     imul eax, eax, 251
@@ -299,32 +362,32 @@ insert_consumed_head: @invariant inserted_range(oldPosition,esi)
     movzx edx, byte ptr [rdi+2]
     add  eax, edx
     and  eax, 0xffff
-    mov  rdi, [r12+72]
+    mov  rdi, [r12 + GzipArena.head]
     movzx ecx, word ptr [rdi+rax*2]
-    mov  rdx, [r12+80]
+    mov  rdx, [r12 + GzipArena.prev]
     mov  word ptr [rdx+rsi*2], cx
     mov  word ptr [rdi+rax*2], si
 insert_consumed_skip:
     inc  esi
     jmp  insert_consumed_head
 reference_advance:
-    mov  [r12+28], ebx
+    mov  [r12 + GzipArena.position], ebx
     jmp  token_head
 token_literal_after_insert:
 token_literal:
-    mov  rdi, [r12+64]
+    mov  rdi, [r12 + GzipArena.input]
     movzx ecx, byte ptr [rdi+rsi]
     call_local emit_fixed_symbol
     test eax, eax
     jnz  process_block_return
     inc  esi
-    mov  [r12+28], esi
+    mov  [r12 + GzipArena.position], esi
     jmp  token_head
 token_eob:
     mov  ecx, 256
     call_local emit_fixed_symbol
 process_block_return:
-    add  rsp, 48
+    add  rsp, ProcessBlockFrame.size
     pop  r15
     pop  r14
     pop  r13
@@ -342,7 +405,7 @@ emit_reference:
     push rbx
     push rsi
     push rdi
-    sub  rsp, 32
+    sub  rsp, EmitReferenceFrame.size
     mov  ebx, ecx
     mov  esi, edx
     xor  edi, edi
@@ -411,7 +474,7 @@ distance_code_found:
 reference_ok:
     xor  eax, eax
 reference_return:
-    add  rsp, 32
+    add  rsp, EmitReferenceFrame.size
     pop  rdi
     pop  rsi
     pop  rbx
@@ -423,7 +486,7 @@ reference_impossible:
 
 
 emit_fixed_symbol:
-    sub  rsp, 40
+    sub  rsp, EmitFixedSymbolFrame.size
     cmp  ecx, 143
     ja   fixed_144
     lea  eax, [rcx+0x30]
@@ -451,11 +514,11 @@ fixed_reverse:
     call_local reverse_low_bits
     mov  ecx, r10d
     call_local emit_bits
-    add  rsp, 40
+    add  rsp, EmitFixedSymbolFrame.size
     ret
 fixed_symbol_impossible:
     mov  eax, 4
-    add  rsp, 40
+    add  rsp, EmitFixedSymbolFrame.size
     ret
 
 
@@ -478,15 +541,15 @@ reverse_done:
 
 emit_bits:
     push rbx
-    sub  rsp, 32
+    sub  rsp, EmitBitsFrame.size
     mov  r10d, ecx
     mov  edx, 1
     mov  ecx, r10d
     shl  edx, cl
     dec  edx
     and  eax, edx
-    mov  edx, [r12+36]
-    mov  r8, [r12+40]
+    mov  edx, [r12 + GzipArena.bitCount]
+    mov  r8, [r12 + GzipArena.bitAccumulator]
     mov  r9, rax
     mov  cl, dl
     shl  r9, cl
@@ -496,36 +559,36 @@ emit_full_byte_head: @invariant bitAccRep(bitAcc,bitCount)
                      @measure edx
     cmp  edx, 8
     jb   emit_bits_store
-    cmp  dword ptr [r12+32], 65536
+    cmp  dword ptr [r12 + GzipArena.outputLength], GzipArena.outputBytes.size
     jne  emit_bits_space
-    mov  [r12+40], r8
-    mov  [r12+36], edx
+    mov  [r12 + GzipArena.bitAccumulator], r8
+    mov  [r12 + GzipArena.bitCount], edx
     call_local flush_output
     test eax, eax
     jnz  emit_bits_return
-    mov  r8, [r12+40]
-    mov  edx, [r12+36]
+    mov  r8, [r12 + GzipArena.bitAccumulator]
+    mov  edx, [r12 + GzipArena.bitCount]
 emit_bits_space:
-    mov  rbx, [r12+88]
-    mov  ecx, [r12+32]
+    mov  rbx, [r12 + GzipArena.output]
+    mov  ecx, [r12 + GzipArena.outputLength]
     mov  byte ptr [rbx+rcx], r8b
     inc  ecx
-    mov  [r12+32], ecx
+    mov  [r12 + GzipArena.outputLength], ecx
     shr  r8, 8
     sub  edx, 8
     jmp  emit_full_byte_head
 emit_bits_store:
-    mov  [r12+40], r8
-    mov  [r12+36], edx
+    mov  [r12 + GzipArena.bitAccumulator], r8
+    mov  [r12 + GzipArena.bitCount], edx
     xor  eax, eax
 emit_bits_return:
-    add  rsp, 32
+    add  rsp, EmitBitsFrame.size
     pop  rbx
     ret
 
 
 align_writer:
-    mov  ecx, [r12+36]
+    mov  ecx, [r12 + GzipArena.bitCount]
     test ecx, ecx
     jz   align_done
     mov  edx, 8
@@ -540,24 +603,24 @@ align_done:
 
 emit_raw_byte:
     push rbx
-    sub  rsp, 32
+    sub  rsp, EmitRawByteFrame.size
     mov  ebx, eax
-    cmp  dword ptr [r12+36], 0
+    cmp  dword ptr [r12 + GzipArena.bitCount], 0
     jne  raw_byte_impossible
-    cmp  dword ptr [r12+32], 65536
+    cmp  dword ptr [r12 + GzipArena.outputLength], GzipArena.outputBytes.size
     jne  raw_byte_space
     call_local flush_output
     test eax, eax
     jnz  raw_byte_return
 raw_byte_space:
-    mov  rdx, [r12+88]
-    mov  ecx, [r12+32]
+    mov  rdx, [r12 + GzipArena.output]
+    mov  ecx, [r12 + GzipArena.outputLength]
     mov  byte ptr [rdx+rcx], bl
     inc  ecx
-    mov  [r12+32], ecx
+    mov  [r12 + GzipArena.outputLength], ecx
     xor  eax, eax
 raw_byte_return:
-    add  rsp, 32
+    add  rsp, EmitRawByteFrame.size
     pop  rbx
     ret
 raw_byte_impossible:
@@ -569,35 +632,35 @@ flush_output:
     push rbx
     push rsi
     push rdi
-    sub  rsp, 48
+    sub  rsp, FlushFrame.size
     xor  ebx, ebx
 flush_head: @invariant SliceConsumerInvariant(output,consumed,outLen)
             @frontier_or_measure(write_or_remaining)
-    mov  esi, [r12+32]
+    mov  esi, [r12 + GzipArena.outputLength]
     cmp  ebx, esi
     jae  flush_done
     mov  edi, esi
     sub  edi, ebx
-    mov  [r12+96], edi
-    mov  rcx, [r12+16]
-    mov  rdx, [r12+88]
+    mov  [r12 + GzipArena.ioRequest], edi
+    mov  rcx, [r12 + GzipArena.stdout]
+    mov  rdx, [r12 + GzipArena.output]
     add  rdx, rbx
-    mov  r8d, [r12+96]
-    lea  r9, [rsp+40]
-    mov  dword ptr [rsp+40], 0
-    mov  qword ptr [rsp+32], 0
+    mov  r8d, [r12 + GzipArena.ioRequest]
+    lea  r9, [rsp + FlushFrame.transferred]
+    mov  dword ptr [rsp + FlushFrame.transferred], 0
+    mov  qword ptr [rsp + FlushFrame.overlapped], 0
     call qword ptr [rip + __imp_WriteFile]
     test eax, eax
     jz   flush_failed
-    mov  eax, [rsp+40]
-    cmp  eax, [r12+96]
+    mov  eax, [rsp + FlushFrame.transferred]
+    cmp  eax, [r12 + GzipArena.ioRequest]
     ja   flush_violation
     test eax, eax
     jz   flush_no_progress
     add  ebx, eax
     jmp  flush_head
 flush_done:
-    mov  dword ptr [r12+32], 0
+    mov  dword ptr [r12 + GzipArena.outputLength], 0
     xor  eax, eax
     jmp  flush_return
 flush_failed:
@@ -609,7 +672,7 @@ flush_no_progress:
 flush_violation:
     mov  eax, 3
 flush_return:
-    add  rsp, 48
+    add  rsp, FlushFrame.size
     pop  rdi
     pop  rsi
     pop  rbx

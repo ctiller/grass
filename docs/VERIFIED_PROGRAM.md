@@ -4,11 +4,15 @@ This document owns the certificate accepted by `emitProgram`. Exact Lean fields
 may evolve, but no implementation may merge independent demands in a way that
 makes a weaker theorem appear to discharge a stronger one.
 
+There is exactly one precious semantic index: the root `SpecProcess`. Other
+specification DSLs and semantic subprocesses have already been composed and
+captured into that value; implementation process graphs merely realize it.
+
 ## 1. Conceptual interface
 
 ```lean
 structure VerifiedProgram {R : Type u} [ResourceModel R]
-    {resources : R} (spec : Specification resources) where
+    {resources : R} (spec : SpecProcess resources) where
   process               : ProcessRealization spec
   portableCorrectness   : ProcessModelSatisfiesSpecification
                              process.model spec
@@ -80,7 +84,7 @@ behind stratified exported certificates:
 
 ```lean
 structure PortableProgramCertificate {R : Type u} [ResourceModel R]
-    {resources : R} (spec : Specification resources) where
+    {resources : R} (spec : SpecProcess resources) where
   model : PortableProcessModel spec.driverBoundary
   correctness : ModelSatisfiesSpecification model spec
   boundary : ProcessBoundary
@@ -88,7 +92,7 @@ structure PortableProgramCertificate {R : Type u} [ResourceModel R]
   demands : DemandCertificateFamily spec.requirements model
 
 structure ProjectedDriverCertificate {R : Type u} [ResourceModel R]
-    {resources : R} {spec : Specification resources}
+    {resources : R} {spec : SpecProcess resources}
     (portable : PortableProgramCertificate spec)
     (projection : TargetProjection spec profile) where
   plan : PlatformPlan projection portable.boundary.requirements
@@ -100,7 +104,7 @@ structure ProjectedDriverCertificate {R : Type u} [ResourceModel R]
   projectionCorrect : ProjectionAndDriverRefine portable projection driverSummary
 
 structure MachineCertificate {R : Type u} [ResourceModel R]
-    {resources : R} {spec : Specification resources}
+    {resources : R} {spec : SpecProcess resources}
     (driver : ProjectedDriverCertificate portable projection) where
   blend : MachineBlend driver
   source : MachineSource driver.plan
@@ -113,7 +117,7 @@ structure MachineCertificate {R : Type u} [ResourceModel R]
   sourceAndMachineCorrect : SourceRefinesDriverExactly source summary driver
 
 structure ArtifactCertificate {R : Type u} [ResourceModel R]
-    {resources : R} {spec : Specification resources}
+    {resources : R} {spec : SpecProcess resources}
     (machine : MachineCertificate driver) where
   raw : RawProgram driver.plan
   linked : Artifact driver.plan
@@ -121,7 +125,7 @@ structure ArtifactCertificate {R : Type u} [ResourceModel R]
   writerParserLoader : ArtifactDemandCertificateFamily linked machine.summary
 
 structure VerifiedProgram {R : Type u} [ResourceModel R]
-    {resources : R} (spec : Specification resources) where
+    {resources : R} (spec : SpecProcess resources) where
   portable : PortableProgramCertificate spec
   projection : TargetProjection spec profile
   driver : ProjectedDriverCertificate portable projection

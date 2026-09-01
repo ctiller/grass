@@ -9,19 +9,19 @@ inductive HelloOutcome
   | success
   | failure
 
-def stdoutProtocol {R : Type} [ResourceModel R] [ConsoleWriteResources R]
-    (resources : R) : AbstractSpecificationProcessNetwork resources :=
-  Console.linearStdoutProtocol resources message HelloOutcome
+def helloContract {R : Type} [ResourceModel R] [ConsoleWriteResources R]
+    (resources : R) : BehaviorContract resources :=
+  Console.writeLineContract resources message HelloOutcome
 
 def helloSpec {R : Type} [ResourceModel R] [ConsoleWriteResources R]
-    (resources : R) : Specification resources :=
-  Specification.ofProcesses (stdoutProtocol resources)
+    (resources : R) : SpecProcess resources :=
+  SpecProcess.ofRelational (helloContract resources)
     |>.withLiveness (.terminatesUnder [.environmentResponsive])
 
 theorem helloSpecCorrect {R : Type} [ResourceModel R] [ConsoleWriteResources R]
     (resources : R) : MeetsAllSpecificationTheorems (helloSpec resources) :=
-  Console.linearStdoutProtocolCorrect resources message HelloOutcome
+  Console.writeLineContractCorrect resources message HelloOutcome
 
-def spec : Specification resources := helloSpec resources
+def spec : SpecProcess resources := helloSpec resources
 
 end Grass.Spikes.HelloWorld

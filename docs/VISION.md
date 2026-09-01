@@ -89,13 +89,22 @@ protocol/resource/obligation/progress boundary and frames the rest of the graph.
 Provider and platform requirements accumulate explicitly and are checked for
 global coherence before verified emission.
 
-The precious specification may use that lens directly through abstract spec
-processes. A web server can name connection sessions, a route authority, typed
-request/response channels, and linear per-session custody without naming a
-thread pool, IOCP, `epoll`, or concrete buffer. This is not the replaceable
-process model: it is a process-shaped statement of meaning whose denotation is
-the external trace contract. A fixed worker plan, proactor, coroutine loop, or
-serialized executor can each prove refinement to it.
+The precious root `SpecProcess` does not store that lens. It captures a composition of
+domain-appropriate specification-language fragments, their meaning-bearing
+junctions, the one derived external behavior contract, and selected resource
+semantics. `VerifiedProgram` is indexed by that exact root. A replaceable process
+presentation can name connection sessions, typed request/response channels, and
+linear per-session custody, then prove that its trace denotation is exactly that
+contract. A fixed worker plan, proactor, coroutine loop, serialized executor, or
+different abstract role decomposition can each supply such a presentation and
+refinement without changing the precious value.
+
+There is no mandated universal specification syntax. Relations, grammars,
+protocols, reactive traces, temporal demands, resource policies, scenes,
+schemas, and future domain languages share a typed `ContractFragment` interface.
+Their junctions state semantic flow—such as bytes decoding to frames which drive
+a protocol and route relation—not execution assignment. Every composed suite
+still produces the single contract consumed by `VerifiedProgram`.
 
 Grass distinguishes semantic blast radius from elaboration blast radius. The
 process realization is a replaceable witness exported through a small

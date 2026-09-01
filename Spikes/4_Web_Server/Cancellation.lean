@@ -3,11 +3,22 @@ import Spikes.«4_Web_Server».Process
 
 namespace Grass.Spikes.WebServer
 
+def hpackSliceStateProtocol :
+    CommittedWorkingStateProtocol (Hpack.DecoderState protocolProfile) where
+  beginWorking := Hpack.beginSlice
+  mutateWorking := Hpack.decodeBoundedSlice
+  commit := Hpack.commitCompletedSlice
+  abandon := Hpack.returnLastCommitted
+  workingPrivate := Hpack.workingSlicePrivate
+  commitExact := Hpack.commitCompletedSliceExact
+  abandonExact := Hpack.returnLastCommittedExact
+
 def hpackSliceSummary :
     CancellationSummary (Hpack.decodeSliceProcess protocolProfile) :=
-  CancellationSummary.uncancellable
+  CancellationSummary.uncancellableWorkingSlice
     (Hpack.decodeSliceCorrect protocolProfile)
     (.stepsAtMost Hpack.decodeSliceStepBound)
+    hpackSliceStateProtocol
 
 def hpackBetweenSlices :
     CancellationSummary (Hpack.betweenSlicesProcess protocolProfile) :=
@@ -28,30 +39,57 @@ def hpackDecoderCancellation : CancellationSummary hpackDecoderProcess :=
     (Hpack.decoderDecomposesIntoSlices protocolProfile)
     hpackLoopSummary
 
-def receiveReadinessCancellation :
+def receiveReadinessCall :
     CancellationSummary Std.Process.Network.pollReadable :=
-  CancellationSummary.interruptibleCall
-    Std.Win32.Winsock.pollReadableInterruption
+  CancellationSummary.uncancellableCall
+    Std.Win32.Winsock.pollReadableCorrect
+    (.providerReturnsWithin capturedResourcePolicy.pollQuantum)
 
-def receiveCallCancellation :
+def receiveReadinessObservation :
+    CancellationSummary Http2.afterReadablePollPoint :=
+  CancellationSummary.cancelPoint
+    Http2.afterReadablePollSafe
+    Http2.pendingConnectionCancellationCustody
+    Http2.observeCancellationAfterReadablePoll
+
+def receiveCall :
     CancellationSummary Std.Process.Network.receive :=
-  CancellationSummary.interruptibleCall
-    Std.Win32.Winsock.receiveInterruption
+  CancellationSummary.uncancellableCall
+    Std.Win32.Winsock.nonblockingReceiveCorrect
+    (.providerBounded Std.Win32.Winsock.nonblockingReceiveBound)
+
+def receiveResultObservation :
+    CancellationSummary Http2.afterReceiveResultPoint :=
+  CancellationSummary.cancelPoint
+    Http2.afterReceiveResultSafe
+    Http2.pendingConnectionCancellationCustody
+    Http2.observeCancellationAfterReceiveResult
 
 def receiveCancellation :
-    CancellationSummary Http2.receiveByteSegment :=
+  CancellationSummary Http2.receiveByteSegment :=
   CancellationSummary.transport Http2.receiveByteSegmentDecomposition
-    (CancellationSummary.seq receiveReadinessCancellation receiveCallCancellation)
+    (CancellationSummary.seq receiveReadinessCall
+      (CancellationSummary.seq receiveReadinessObservation
+        (CancellationSummary.seq receiveCall receiveResultObservation)))
 
-def sendReadinessCancellation :
+def sendReadinessCall :
     CancellationSummary Std.Process.Network.pollWritable :=
-  CancellationSummary.interruptibleCall
-    Std.Win32.Winsock.pollWritableInterruption
+  CancellationSummary.uncancellableCall
+    Std.Win32.Winsock.pollWritableCorrect
+    (.providerReturnsWithin capturedResourcePolicy.pollQuantum)
 
-def sendCallCancellation :
+def sendReadinessObservation :
+    CancellationSummary Http2.afterWritablePollPoint :=
+  CancellationSummary.cancelPoint
+    Http2.afterWritablePollSafe
+    Http2.pendingWriterCancellationCustody
+    Http2.observeCancellationAfterWritablePoll
+
+def sendCall :
     CancellationSummary Std.Process.Network.send :=
-  CancellationSummary.interruptibleCall
-    Std.Win32.Winsock.sendInterruption
+  CancellationSummary.uncancellableCall
+    Std.Win32.Winsock.nonblockingSendCorrect
+    (.providerBounded Std.Win32.Winsock.nonblockingSendBound)
 
 def commitSentPrefixSummary :
     CancellationSummary Http2.commitSentPrefixProcess :=
@@ -59,20 +97,27 @@ def commitSentPrefixSummary :
     Http2.commitSentPrefixCorrect
     (.stepsAtMost Http2.commitSentPrefixStepBound)
 
-def suffixCustodyCancelPoint :
-    CancellationSummary Http2.unsentSuffixCustodyPoint :=
+def completedFrameCancelPoint :
+    CancellationSummary Http2.completedFrameCustodyPoint :=
   CancellationSummary.cancelPoint
-    Http2.unsentSuffixCustodySafe
+    Http2.completedFrameCustodySafe
     Http2.pendingWriterCancellationCustody
-    Http2.cancelRoutesExactUnsentSuffixByCause
+    Http2.cancelAtFrameBoundaryByCause
+
+def partialSendIterationCancellation :
+    CancellationSummary Http2.partialSendIterationProcess :=
+  CancellationSummary.seq sendReadinessCall
+    (CancellationSummary.seq sendReadinessObservation
+      (CancellationSummary.seq sendCall commitSentPrefixSummary))
 
 def partialSendCancellation :
     CancellationSummary Http2.partialSendSegment :=
   CancellationSummary.transport Http2.partialSendSegmentDecomposition
-    (CancellationSummary.seq sendReadinessCancellation
-      (CancellationSummary.seq sendCallCancellation
-        (CancellationSummary.seq commitSentPrefixSummary
-          suffixCustodyCancelPoint)))
+    (CancellationSummary.seq
+      (CancellationSummary.loop partialSendIterationCancellation
+        Http2.remainingSuffixDecreasesOrProviderFrontier
+        Http2.everyContinuingPartialSendIterationReachesReadinessObservation)
+      completedFrameCancelPoint)
 
 def flowCreditWaitCancellation :
     CancellationSummary Http2.flowCreditWaitProcess :=
@@ -162,7 +207,18 @@ def workerAcceptCancellation :
     CancellationSummary (FixedPool.workerProcess processPolicy) :=
   CancellationSummary.loop
     (CancellationSummary.choice
-      (CancellationSummary.interruptibleCall Std.Win32.Winsock.acceptInterruption)
+      (CancellationSummary.seq
+        (CancellationSummary.cancelPoint
+          FixedPool.acceptLoopObservationSafe
+          FixedPool.pendingWorkerCancellationCustody
+          FixedPool.observeCancellationBeforeAcceptPoll)
+        (CancellationSummary.seq
+          (CancellationSummary.uncancellableCall
+            Std.Win32.Winsock.pollAcceptCorrect
+            (.providerReturnsWithin capturedResourcePolicy.pollQuantum))
+          (CancellationSummary.uncancellableCall
+            Std.Win32.Winsock.nonblockingAcceptCorrect
+            (.providerBounded Std.Win32.Winsock.nonblockingAcceptBound))))
       connectionCancellation
       FixedPool.acceptOrConnectionBranchJoin)
     FixedPool.workerIterationProgress
@@ -179,8 +235,10 @@ def rootServiceCancellation :
     CancellationSummary (FixedPool.serverRootProcess processPolicy) :=
   CancellationSummary.loop
     (CancellationSummary.seq
-      (CancellationSummary.interruptibleCall Std.Win32.Sleep.interruption)
-      rootShutdownCancelPoint)
+      rootShutdownCancelPoint
+      (CancellationSummary.uncancellableCall
+        Std.Win32.Sleep.correct
+        (.providerReturnsWithin capturedResourcePolicy.pollQuantum)))
     FixedPool.rootServiceIterationProgress
     FixedPool.everyRootIterationCrossesShutdownPoint
 
@@ -249,21 +307,33 @@ def serverTerminationFacet :
 
 theorem cancellationSequenceRegroupingIsIrrelevant :
     CancellationSummary.seq
-      receiveReadinessCancellation
-      (CancellationSummary.seq receiveCallCancellation hpackSliceSummary) =
+      receiveReadinessCall
+      (CancellationSummary.seq receiveReadinessObservation receiveCall) =
     CancellationSummary.transportProcessAssoc
       (CancellationSummary.seq
-        (CancellationSummary.seq receiveReadinessCancellation receiveCallCancellation)
-        hpackSliceSummary) :=
+        (CancellationSummary.seq receiveReadinessCall receiveReadinessObservation)
+        receiveCall) :=
   CancellationSummary.seq_assoc _ _ _
 
 theorem streamResetCancelsOnlyAddressedIncarnation
     (connection : ConnectionId) (stream : Http2StreamId) :
     CancellationRequestAt serverCancellation (.stream connection stream) .deadline
       ⟹ EventuallyExactDisposition
-        (.rstStream stream .cancel)
-        (.preserveSiblingStreams connection stream) :=
+        (.finishCurrentFrameThenRst stream .cancel ∨
+          .connectionTeardownWithExactSuffixDisposition connection stream)
+        (.preserveSiblingsUntilConnectionTeardown connection stream) :=
   streamCancellation.addressedDisposition connection stream
+
+theorem writableSurvivingConnectionEventuallyResetsAddressedStream
+    (connection : ConnectionId) (stream : Http2StreamId)
+    (writable : EventuallyWritableForCurrentFrame connection)
+    (survives : ConnectionSurvivesUntilFrameBoundary connection)
+    (fair : WriterScheduledFairly connection) :
+    CancellationRequestAt serverCancellation (.stream connection stream) .deadline
+      ⟹ EventuallyExactDisposition
+        (.finishCurrentFrameThenRst stream .cancel)
+        (.preserveSiblingStreams connection stream) :=
+  streamCancellation.rstAfterFinish writable survives fair
 
 theorem blockedFlowControlRemainsCancellable
     (stream : Http2StreamId) :
@@ -279,13 +349,19 @@ theorem partialSendCancellationPreservesCommittedPrefix
         (remainingSuffix := frame.bytes.drop committed)
         (streamCancel := .finishFrameThenReset)
         (connectionCancel := .finishFrameOrCloseConnection) :=
-  partialSendCancellation.dispositionAtSuffixPoint frame committed
+  partialSendCancellation.dispositionAtFrameBoundaryOrTeardown frame committed
 
 theorem hpackCancellationPreservesLastCommittedState
-    (state : Hpack.DecoderState protocolProfile) :
-    CancellationDuringDecode state ⟹
-      EventuallyCancelsWithExactState hpackDecoderCancellation state :=
-  hpackDecoderCancellation.delayAndDisposition state
+    (committed working : Hpack.DecoderState protocolProfile)
+    (started : Hpack.WorkingSliceStartedFrom committed working)
+    (mutation : Hpack.WorkingMutationOf committed working) :
+    CancellationDuringDecode committed working ⟹
+      Eventually
+        (CancellationReturnsExactly committed ∨
+          ∃ successor,
+            Hpack.SliceFinishesToCommittedSuccessor committed working successor ∧
+            CancellationReturnsExactly successor) :=
+  hpackDecoderCancellation.delayAndDisposition committed working started mutation
 
 theorem streamCancellationDoesNotCancelHpackDecoder
     (connection : ConnectionId) (stream : Http2StreamId) :
@@ -298,6 +374,22 @@ theorem gracefulConnectionCancellationPublishesPrefix
     CancellationRequestAt serverCancellation (.connection connection) .shutdown
       ⟹ EventuallyGoawayDrainOrFailedClose connection :=
   connectionCancellation.supervisedDisposition connection
+
+theorem goawayDrainProgressOrExactEscalation
+    (connection : ConnectionId) :
+    GoawayPublished connection ⟹
+      (DrainPremises connection → EventuallyDrainedAndClosed connection) ∧
+      (DrainDeadlineExceeded connection →
+        EventuallyExactTeardownWithSuffixDisposition connection) :=
+  connectionCancellation.drainProgressOrEscalation connection
+
+theorem repeatedShutdownObservationDoesNotConsumeControlCapacity
+    (connection : ConnectionId) :
+    GoawayPublished connection →
+      ReobserveShutdown connection →
+      ControlQueueSlotsAfter connection = ControlQueueSlotsBefore connection ∧
+      FrozenLastStreamIdAfter connection = FrozenLastStreamIdBefore connection :=
+  Http2.beginGracefulShutdownIdempotent
 
 theorem normalAndFailedTerminalsAreExhaustive :
     EveryCancellationTerminal serverCancellation
@@ -336,7 +428,7 @@ theorem serverProcessPlanRealizes :
     ProcessPlanRealizes spec serverProcessPlan := by
   exact FixedPool.weaveCorrect
     serverComposition serverTerminationFacet
-    memoryServerCorrect connectionCorrect streamCorrect
+    memoryServerCorrect connectionCorrect streamCorrect frameParserCorrect
     hpackDecoderCorrect connectionWriterCorrect
     Std.Process.Network.allCorrect Std.Process.Clock.allCorrect
     Std.Process.Supervision.allCorrect Std.Process.Resource.closeHandleCorrect
@@ -368,14 +460,14 @@ theorem streamMemoryBound (connection : ConnectionId) (stream : Http2StreamId) :
 
 theorem connectionStreamBound (id : ConnectionId) :
     EveryReachableStateSatisfies
-      (ActiveStreams id ≤ resourcePolicy.maxConcurrentStreamsPerConnection) :=
+      (ActiveStreams id ≤ capturedResourcePolicy.maxConcurrentStreamsPerConnection) :=
   serverProcessPlanRealizes.resources.capacityBound
 
 theorem serverSocketBound :
     EveryExecutionUsesAtMost
       ProcessScope.root
       ServerResourceMetric.socketDescriptors
-      resourcePolicy.maxSocketDescriptors :=
+      capturedResourcePolicy.maxSocketDescriptors :=
   serverProcessPlanRealizes.resources.rootBound
 
 theorem serverHandleBound :
@@ -384,5 +476,25 @@ theorem serverHandleBound :
       ServerResourceMetric.windowsHandles
       (ServerResourceBudget.handles processPolicy) :=
   serverProcessPlanRealizes.resources.rootBound
+
+def serverResourceAxisRealization : ResourceAxisRealizationFamily spec :=
+  ResourceAxisRealizationFamily.fromCapturedSemantics spec.resourceSemantics
+
+theorem serverResourceAxisKeysInjective :
+    Function.Injective serverResourceAxisRealization.concreteKey :=
+  serverResourceAxisRealization.keyInjective
+
+theorem serverRootResidentMemoryBound :
+    EveryExecutionUsesAtMost
+      ProcessScope.root
+      ServerResourceMetric.grassOwnedResidentBytes
+      (ServerResourceBudget.residentBytes capturedResourcePolicy) :=
+  serverProcessPlanRealizes.resources.rootBound
+
+theorem serverRootResourceEquation :
+    ExactRootResourceEquation
+      serverProcessPlan serverResourceAxisRealization
+      (ServerResourceBudget.allAxes capturedResourcePolicy) :=
+  serverProcessPlanRealizes.resources.rootEquation
 
 end Grass.Spikes.WebServer

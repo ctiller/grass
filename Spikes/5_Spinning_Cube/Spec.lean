@@ -41,23 +41,21 @@ def CubeObservation.Accepts (o : CubeObservation) : Prop :=
   UserExitIffRequestedForConformingRuns o.inputs o.outcome ∧
   FailureNeverNormalizesToUserSuccess o.outcome
 
-inductive CubeRole
-  | input
-  | sceneAnimator
-  | surfacePresenter
-  | termination
+def sceneFragment : SceneSpec :=
+  Graphics.sceneSpec scene
 
-def cubeProtocol {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
-    (resources : R) : AbstractSpecificationProcessNetwork resources :=
-  Graphics.interactivePresentationProtocol
-    (roles := CubeRole)
-    (resources := resources)
-    (scene := scene)
-    (accepts := CubeObservation.Accepts)
+def cubeTraceFragment {R : Type} [ResourceModel R]
+    (resources : R) : TraceSpec resources :=
+  Graphics.interactiveTraceSpec CubeInput CubeObservation CubeObservation.Accepts
+
+def cubeSuite {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
+    (resources : R) : SpecificationSuite resources :=
+  Graphics.interactiveSceneSuite
+    resources sceneFragment (cubeTraceFragment resources) rotationAccuracy
 
 def cubeSpec {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
-    (resources : R) : Specification resources :=
-  Specification.ofProcesses (cubeProtocol resources)
+    (resources : R) : SpecProcess resources :=
+  SpecProcess.capture (cubeSuite resources)
     |>.acceptInput [.close, .escapeDown, .resize]
     |>.withFailures .terminateWithoutFalseSuccess
     |>.withProgress (.reactiveUntilUserExit frontiers :=
@@ -65,9 +63,9 @@ def cubeSpec {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
 
 theorem cubeSpecCorrect {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
     (resources : R) : MeetsAllSpecificationTheorems (cubeSpec resources) :=
-  Graphics.interactivePresentationProtocolCorrect
+  Graphics.interactiveSceneSuiteCaptureCorrect
     resources scene CubeObservation.Accepts rotationAccuracy
 
-def spec : Specification resources := cubeSpec resources
+def spec : SpecProcess resources := cubeSpec resources
 
 end Grass.Spikes.SpinningCube

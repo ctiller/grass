@@ -1,4 +1,4 @@
-import Spikes.«2_Sort».Macros
+import Spikes.«2_Sort».Constructors
 
 namespace Grass.Spikes.Sort
 
@@ -171,10 +171,10 @@ descriptor_scan: @invariant represents_scanned_prefix(r8,r9,r10)
     mov  rax, r10
     shl  rax, 4
     lea  rdx, [rdi+rax]
-    mov  qword ptr [rdx+0], r9
+    mov  qword ptr [rdx + LineDesc.offset], r9
     mov  rcx, r8
     sub  rcx, r9
-    mov  qword ptr [rdx+8], rcx
+    mov  qword ptr [rdx + LineDesc.length], rcx
     add  r10, 1
     add  r8, 1
     mov  r9, r8
@@ -188,10 +188,10 @@ descriptor_suffix:
     mov  rax, r10
     shl  rax, 4
     lea  rdx, [rdi+rax]
-    mov  qword ptr [rdx+0], r9
+    mov  qword ptr [rdx + LineDesc.offset], r9
     mov  rcx, r14
     sub  rcx, r9
-    mov  qword ptr [rdx+8], rcx
+    mov  qword ptr [rdx + LineDesc.length], rcx
     add  r10, 1
 descriptor_scan_done:
     cmp  r10, rbp
@@ -236,7 +236,7 @@ merge_choose: @invariant stable_merge_cursors(i,j,k)
     mov  rax, rcx
     shl  rax, 4
     lea  r8, [rdi+rax]
-    compare_records rdx, r8 -> eax
+    $(compareRecords rdx r8)
     cmp  eax, 0
     jle  merge_take_left
 merge_take_right:
@@ -252,10 +252,10 @@ merge_copy:
     mov  rax, qword ptr [rsp+SortFrame.k]
     shl  rax, 4
     lea  r8, [rsi+rax]
-    mov  rcx, qword ptr [rdx+0]
-    mov  qword ptr [r8+0], rcx
-    mov  rcx, qword ptr [rdx+8]
-    mov  qword ptr [r8+8], rcx
+    mov  rcx, qword ptr [rdx + LineDesc.offset]
+    mov  qword ptr [r8 + LineDesc.offset], rcx
+    mov  rcx, qword ptr [rdx + LineDesc.length]
+    mov  qword ptr [r8 + LineDesc.length], rcx
     add  qword ptr [rsp+SortFrame.k], 1
     jmp  merge_choose
 merge_drain_left:
@@ -306,17 +306,17 @@ emit_head: @invariant sorted_occurrence_consumer(finalDescriptors)
     jae  emit_final_flush
     shl  rax, 4
     add  rax, qword ptr [rsp+SortFrame.finalDescriptors]
-    mov  rdx, qword ptr [rax+0]
+    mov  rdx, qword ptr [rax + LineDesc.offset]
     add  rdx, r13
-    mov  r8, qword ptr [rax+8]
-    buffer_append rdx, r8 -> eax
+    mov  r8, qword ptr [rax + LineDesc.length]
+    $(bufferAppend rdx r8)
     cmp  eax, 1
     je   write_failed
     cmp  eax, 2
     je   no_progress
     lea  rdx, [rip + lf_byte]
     mov  r8d, 1
-    buffer_append rdx, r8 -> eax
+    $(bufferAppend rdx r8)
     cmp  eax, 1
     je   write_failed
     cmp  eax, 2
@@ -325,7 +325,7 @@ emit_head: @invariant sorted_occurrence_consumer(finalDescriptors)
     jmp  emit_head
 
 emit_final_flush:
-    flush_output -> eax
+    $(flushOutput)
     cmp  eax, 1
     je   write_failed
     cmp  eax, 2
@@ -333,17 +333,17 @@ emit_final_flush:
     jmp  exit_success
 
 stdin_unavailable:   @terminal(.stdinUnavailable)
-    failure_exit $policy
+    $(failureExit .stdinUnavailable)
 read_failed:         @terminal(.readFailed)
-    failure_exit $policy
+    $(failureExit .readFailed)
 resource_exhausted:  @terminal(.resourceExhausted)
-    failure_exit $policy
+    $(failureExit .resourceExhausted)
 stdout_unavailable:  @terminal(.stdoutUnavailable)
-    failure_exit $policy
+    $(failureExit .stdoutUnavailable)
 write_failed:        @terminal(.writeFailed)
-    failure_exit $policy
+    $(failureExit .writeFailed)
 no_progress:         @terminal(.noProgress)
-    failure_exit $policy
+    $(failureExit .noProgress)
 exit_success:       @terminal(.success)
     xor ecx, ecx
 exit:

@@ -6,15 +6,23 @@ namespace Grass.Spikes.WebServer
 
 def protocolProfile : Http2.Profile where
   transport := .cleartextPriorKnowledge
-  maxFrameSize := resourcePolicy.maxInboundFrameBytes
+  maxFrameSize := capturedResourcePolicy.maxInboundFrameBytes
   serverPush := false
   priorityMode := .ignoreDeprecated
   extensionMode := .ignoreUnknown
-  hpackDynamicTableBytes := resourcePolicy.hpackDecoderTableBytes
-  maxHeaderListBytes := resourcePolicy.maxHeaderListBytes
+  hpackDynamicTableBytes := capturedResourcePolicy.hpackDecoderTableBytes
+  maxHeaderListBytes := capturedResourcePolicy.maxHeaderListBytes
 
 def connectionModel : Http2.ConnectionModel :=
   Http2.ConnectionModel.server protocolProfile behaviorPolicy routes
+
+def frameParserRealizes : ParserRealizes frameFormat
+    (Http2.Frame.parseResult protocolProfile) :=
+  Http2.Frame.parserRealizesFormat protocolProfile
+
+def hpackParserRealizes : ParserRealizes hpackFieldSectionFormat
+    (Hpack.FieldSection.parseResult protocolProfile) :=
+  Hpack.FieldSection.parserRealizesFormat protocolProfile
 
 theorem frameWriterRoundTrip (frame : Http2.Frame)
     (admissible : frame.Admissible protocolProfile) :
@@ -43,8 +51,8 @@ theorem hpackDecoderConforms (state : Hpack.DecoderState protocolProfile)
     ∃ next fields,
       Hpack.decode state block = .ok (next, fields) ∧
       Hpack.Rfc7541Transition state block next fields ∧
-      next.dynamicTable.bytes ≤ resourcePolicy.hpackDecoderTableBytes ∧
-      fields.byteSize ≤ resourcePolicy.maxHeaderListBytes :=
+      next.dynamicTable.bytes ≤ capturedResourcePolicy.hpackDecoderTableBytes ∧
+      fields.byteSize ≤ capturedResourcePolicy.maxHeaderListBytes :=
   Hpack.decode_conforms state block
 
 theorem huffmanDecoderExact (encoded : ByteArray) :

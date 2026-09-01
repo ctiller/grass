@@ -36,7 +36,8 @@ the concise acceptance checklist.
 
 ## Process model acceptance
 
-- [ ] The precious `Specification` contains only the gzip byte relation,
+- [ ] The precious root `SpecProcess` contains only the captured gzip language,
+  byte relation,
   outcomes, bounded-memory demand, and conditional progress. It names no block
   size, compressor stage, API order, allocator, or operating system.
 - [ ] The unique standard serial gzip relation is selected from the

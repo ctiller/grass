@@ -33,7 +33,8 @@ point facts.
 The ordinary emission path is:
 
 ```text
-Specification
+domain specification DSLs + semantic junctions
+  -> one precious root SpecProcess
   -> ProcessPlan with ProcessPlanRealizes
   -> verified process driver
   -> ghost-bearing verified program
@@ -105,12 +106,11 @@ challenge trust; they never establish a theorem.
     block invalidates only certificates that semantically depend on that change.
     Generated identities do not force orthogonal re-proving, and the build
     explains the invalidation cone.
-15. No weave leakage: only the resource-parameterized specification function is
-    precious program meaning. It may be written with abstract spec processes,
-    roles, typed channels, and linear/shared logical state. A selected resource
-    value, process realization protocol, population/state partition/channel
-    weave, and their proofs remain reviewed replaceable inputs. Physical
-    topology must never leak into a spec process.
+15. No weave leakage: only the resource-parameterized root `SpecProcess` and the
+    DSL components/junctions it captures are precious program meaning. It may
+    demand semantic child-process contracts, but no selected role decomposition,
+    process population, state partition, channel weave, scheduler, or physical
+    topology. Presentations and realizations remain reviewed replaceable inputs.
 16. No untyped process transfer: every process channel has exact Hoare-style
     send/receive contracts for state, occurrence identities, ownership, and
     obligations. The send postcondition and receive precondition meet at a

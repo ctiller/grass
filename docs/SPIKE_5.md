@@ -56,18 +56,20 @@ def resources : GraphicsResourceModel :=
     |>.withNoUnboundedGrassOwnedGrowth
     |>.withTerminalDisposition .closeAllOwnedGraphicsObjects
 
-inductive CubeRole
-  | input | sceneAnimator | surfacePresenter | termination
+def sceneFragment : SceneSpec := Graphics.sceneSpec scene
 
-def cubeProtocol {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
-    (resources : R) : AbstractSpecificationProcessNetwork resources :=
-  Graphics.interactivePresentationProtocol
-    (roles := CubeRole) (resources := resources)
-    (scene := scene) (accepts := CubeObservation.Accepts)
+def cubeTraceFragment {R : Type} [ResourceModel R]
+    (resources : R) : TraceSpec resources :=
+  Graphics.interactiveTraceSpec CubeInput CubeObservation CubeObservation.Accepts
+
+def cubeSuite {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
+    (resources : R) : SpecificationSuite resources :=
+  Graphics.interactiveSceneSuite
+    resources sceneFragment (cubeTraceFragment resources) rotationAccuracy
 
 def cubeSpec {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
-    (resources : R) : Specification resources :=
-  Specification.ofProcesses (cubeProtocol resources)
+    (resources : R) : SpecProcess resources :=
+  SpecProcess.capture (cubeSuite resources)
     |>.acceptInput [.close, .escapeDown, .resize]
     |>.withFailures .terminateWithoutFalseSuccess
     |>.withProgress (.reactiveUntilUserExit frontiers :=
@@ -75,10 +77,23 @@ def cubeSpec {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
 
 theorem cubeSpecCorrect {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
     (resources : R) : MeetsAllSpecificationTheorems (cubeSpec resources) :=
-  Graphics.interactivePresentationProtocolCorrect
+  Graphics.interactiveSceneSuiteCaptureCorrect
     resources scene CubeObservation.Accepts rotationAccuracy
 
-def spec : Specification resources := cubeSpec resources
+def spec : SpecProcess resources := cubeSpec resources
+
+inductive CubeRole
+  | input | sceneAnimator | surfacePresenter | termination
+
+def cubeProtocol : AbstractSpecificationProcessNetwork resources :=
+  Graphics.interactivePresentationProtocol
+    (roles := CubeRole) (resources := resources)
+    (scene := scene) (accepts := CubeObservation.Accepts)
+
+def cubeProcessPresentation : ProcessPresentation spec where
+  network := cubeProtocol
+  denotationExact := Graphics.interactivePresentationDenotesSceneContract
+  requirementsExact := Graphics.interactivePresentationRequirementsExact
 
 structure DesiredCubeView where
   extent : Nat × Nat
@@ -457,8 +472,10 @@ input, animation, and termination schemas and is therefore proof-bearing but
 not emittable:
 
 ```lean
-def shapedSpec : ProcessShapedSpecification spec :=
-  ProcessShapedSpecification.ofProcesses spec (cubeProtocol resources) rfl
+def shapedSpec : StagedProcessPresentation spec :=
+  StagedProcessPresentation.ofNetwork spec cubeProtocol
+    cubeProcessPresentation.denotationExact
+    cubeProcessPresentation.requirementsExact
 
 def graphicsOnlyGraph : BlendedProcessGraph shapedSpec where
   nodes
@@ -850,10 +867,11 @@ entry: @entry win64_gui_entry
   win_call LoadCursorW(0,IDC_ARROW) -> rax; store64 wc.hCursor,rax
   store64 wc.lpszClassName,&className
   win_call RegisterClassExW(&wc) -> eax; test ax,ax; jz fail_init
-  mov registered,1
+  mov byte ptr [ownership.classRegistered],1
   win_call CreateWindowExW(0,&className,&title,WS_OVERLAPPEDWINDOW,
       CW_USEDEFAULT,CW_USEDEFAULT,960,720,0,0,r12,&state) -> r13
   test r13,r13; jz fail_init
+  mov byte ptr [state.hwndOwned],1
   win_call ShowWindow(r13,SW_SHOW) -> _
   win_call QueryPerformanceFrequency(&qpcFrequency) -> eax
   test eax,eax; jz fail_init
@@ -864,26 +882,53 @@ entry: @entry win64_gui_entry
   jmp vk_instance
 
 wndproc: @entry win64_callback(hwnd,msg,wparam,lparam)
-  sub rsp,40
+  sub rsp,CALLBACK_FRAME_SIZE
+  mov [rsp+callbackHwnd],rcx; mov [rsp+callbackMessage],edx
+  mov [rsp+callbackWparam],r8; mov [rsp+callbackLparam],r9
+  cmp edx,WM_NCCREATE; je wp_nccreate
+  win_call GetWindowLongPtrW(rcx,GWLP_USERDATA) -> r10
+  test r10,r10; jz wp_default
+  mov edx,[rsp+callbackMessage]; mov r8,[rsp+callbackWparam]
+  mov r9,[rsp+callbackLparam]
   cmp edx,WM_CLOSE; je wp_close
   cmp edx,WM_DESTROY; je wp_destroyed
+  cmp edx,WM_NCDESTROY; je wp_ncdestroy
   cmp edx,WM_KEYDOWN; jne wp_size
   cmp r8d,VK_ESCAPE; je wp_close
 wp_size:
   cmp edx,WM_SIZE; jne wp_default
   mov eax,r9d; and eax,0xffff; shr r9d,16
-  store32 [state.width],eax; store32 [state.height],r9d
-  mov byte ptr [state.resize],1; xor eax,eax; add rsp,40; ret
+  store32 [r10+CubeWindowState.width],eax
+  store32 [r10+CubeWindowState.height],r9d
+  mov byte ptr [r10+CubeWindowState.resize],1
+  xor eax,eax; add rsp,CALLBACK_FRAME_SIZE; ret
+wp_nccreate:
+  mov r10,[r9+CREATESTRUCTW.lpCreateParams]; test r10,r10; jz wp_reject_create
+  mov [rsp+callbackState],r10
+  win_call SetWindowLongPtrW(rcx,GWLP_USERDATA,r10) -> _
+  mov rcx,[rsp+callbackHwnd]
+  win_call GetWindowLongPtrW(rcx,GWLP_USERDATA) -> rax
+  cmp rax,[rsp+callbackState]; jne wp_reject_create
+  mov eax,1; add rsp,CALLBACK_FRAME_SIZE; ret
+wp_reject_create:
+  xor eax,eax; add rsp,CALLBACK_FRAME_SIZE; ret
 wp_close:
-  mov byte ptr [state.exit],1
-  xor eax,eax; add rsp,40; ret
+  mov byte ptr [r10+CubeWindowState.exit],1
+  xor eax,eax; add rsp,CALLBACK_FRAME_SIZE; ret
 wp_destroyed:
-  mov byte ptr [state.exit],1
-  mov byte ptr [state.hwndOwned],0
-  xor eax,eax; add rsp,40; ret
+  mov byte ptr [r10+CubeWindowState.exit],1
+  mov byte ptr [r10+CubeWindowState.hwndOwned],0
+  xor eax,eax; add rsp,CALLBACK_FRAME_SIZE; ret
+wp_ncdestroy:
+  mov byte ptr [r10+CubeWindowState.hwndOwned],0
+  mov rcx,[rsp+callbackHwnd]
+  win_call SetWindowLongPtrW(rcx,GWLP_USERDATA,0) -> _
+  xor eax,eax; add rsp,CALLBACK_FRAME_SIZE; ret
 wp_default:
+  mov rcx,[rsp+callbackHwnd]; mov edx,[rsp+callbackMessage]
+  mov r8,[rsp+callbackWparam]; mov r9,[rsp+callbackLparam]
   win_call DefWindowProcW(rcx,rdx,r8,r9) -> rax
-  add rsp,40; ret
+  add rsp,CALLBACK_FRAME_SIZE; ret
 
 vk_instance:
   ; VkApplicationInfo{apiVersion=VK_API_VERSION_1_3}; exact two extension names
@@ -898,10 +943,12 @@ vk_instance:
   mov rcx,&instanceCI; xor edx,edx; lea r8,[instance]
   call qword ptr [vkCreateInstancePtr]
   test eax,eax; jnz fail_init
+  mov byte ptr [ownership.instanceOwned],1
   resolve_instance_functions_or_fail instance, instanceDispatch
   vk_call vkCreateWin32SurfaceKHR(instance,
       {sType=WIN32_SURFACE_CREATE_INFO_KHR,hinstance=r12,hwnd=r13},0,&surface)
   test eax,eax; jnz fail_init
+  mov byte ptr [ownership.surfaceOwned],1
 
 select_device:
   vk_call vkEnumeratePhysicalDevices(instance,&count,0); test eax,eax; jnz fail_init
@@ -923,8 +970,9 @@ create_device:
       dynamicRendering=1,synchronization2=1}
   init deviceCI {sType=DEVICE_CREATE_INFO,pNext=&features13,
       queueCreateInfoCount=1,pQueueCreateInfos=&queueCI,
-      enabledExtensionCount=1,ppEnabledExtensionNames=&swapchainExt}
+      enabledExtensionCount=1,ppEnabledExtensionNames=&deviceExts}
   vk_call vkCreateDevice(physical,&deviceCI,0,&device); test eax,eax; jnz fail_init
+  mov byte ptr [ownership.deviceOwned],1
   resolve_device_functions_or_fail device,deviceDispatch
   vk_call vkGetDeviceQueue(device,qfamily,0,&queue)
   jmp create_fixed
@@ -933,30 +981,37 @@ create_fixed:
   vk_call vkCreateCommandPool(device,
     {sType=COMMAND_POOL_CREATE_INFO,flags=RESET_COMMAND_BUFFER_BIT,
      queueFamilyIndex=qfamily},0,&commandPool); test eax,eax; jnz fail_init
+  mov byte ptr [ownership.commandPoolOwned],1
   vk_call vkAllocateCommandBuffers(device,
     {sType=COMMAND_BUFFER_ALLOCATE_INFO,commandPool=commandPool,
      level=PRIMARY,commandBufferCount=1},&cmd); test eax,eax; jnz fail_init
   vk_call vkCreateSemaphore(device,{sType=SEMAPHORE_CREATE_INFO},0,&imageAvail)
   test eax,eax; jnz fail_init
+  mov byte ptr [ownership.imageAvailOwned],1
   vk_call vkCreateSemaphore(device,{sType=SEMAPHORE_CREATE_INFO},0,&renderDone)
   test eax,eax; jnz fail_init
+  mov byte ptr [ownership.renderDoneOwned],1
   vk_call vkCreateFence(device,{sType=FENCE_CREATE_INFO,flags=SIGNALED_BIT},0,&fence)
   test eax,eax; jnz fail_init
+  mov byte ptr [ownership.fenceOwned],1
   ; exact embedded shader ranges are supplied directly
   vk_call vkCreateShaderModule(device,{sType=SHADER_MODULE_CREATE_INFO,
     codeSize=cubeVertexBytes.size,pCode=&cubeVertexBytes},0,&vertModule)
   test eax,eax; jnz fail_init
+  mov byte ptr [ownership.vertModuleOwned],1
   vk_call vkCreateShaderModule(device,{sType=SHADER_MODULE_CREATE_INFO,
     codeSize=cubeFragmentBytes.size,pCode=&cubeFragmentBytes},0,&fragModule)
   test eax,eax; jnz fail_init
+  mov byte ptr [ownership.fragModuleOwned],1
   vk_call vkCreatePipelineLayout(device,{sType=PIPELINE_LAYOUT_CREATE_INFO,
     pushConstantRangeCount=1,pPushConstantRanges=&{stageFlags=VERTEX_BIT,
     offset=0,size=8}},0,&pipelineLayout); test eax,eax; jnz fail_init
+  mov byte ptr [ownership.pipelineLayoutOwned],1
   jmp recreate
 
 recreate: @invariant fixed_objects_owned_and_no_swapchain_work
-  load width,height; test width,width; jz minimized_wait
-  test height,height; jz minimized_wait
+  mov eax,dword ptr [state.width]; test eax,eax; jz minimized_wait
+  mov eax,dword ptr [state.height]; test eax,eax; jz minimized_wait
   vk_call vkDeviceWaitIdle(device); cmp eax,VK_SUCCESS; jne fail_runtime
   destroy_swapchain_views_pipeline_if_owned
   vk_call vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical,surface,&caps)
@@ -1001,8 +1056,31 @@ create_pipeline:
   ; two stages main; no vertex input; line list; no culling; lineWidth=1;
   ; one viewport/scissor; no MSAA;
   ; no depth; one opaque color attachment; dynamic viewport/scissor/rendering.
+  init shaderStages[0] {sType=PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage=VERTEX_BIT,module=vertModule,pName=&mainName}
+  init shaderStages[1] {sType=PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage=FRAGMENT_BIT,module=fragModule,pName=&mainName}
+  init emptyVertexInput {sType=PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO}
+  init lineList {sType=PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+      topology=PRIMITIVE_TOPOLOGY_LINE_LIST,primitiveRestartEnable=0}
+  init oneDynamicViewport {sType=PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+      viewportCount=1,scissorCount=1}
+  init lineRaster {sType=PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+      depthClampEnable=0,rasterizerDiscardEnable=0,polygonMode=POLYGON_MODE_FILL,
+      cullMode=CULL_MODE_NONE,frontFace=FRONT_FACE_COUNTER_CLOCKWISE,
+      depthBiasEnable=0,lineWidth=1.0f}
+  init sample1 {sType=PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+      rasterizationSamples=SAMPLE_COUNT_1_BIT}
+  init colorAttachment {blendEnable=0,
+      colorWriteMask=R_BIT|G_BIT|B_BIT|A_BIT}
+  init opaqueBlend {sType=PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+      attachmentCount=1,pAttachments=&colorAttachment}
+  store32 dynamicStates[0],DYNAMIC_STATE_VIEWPORT
+  store32 dynamicStates[1],DYNAMIC_STATE_SCISSOR
+  init viewportScissor {sType=PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+      dynamicStateCount=2,pDynamicStates=&dynamicStates}
   init pipelineRendering {sType=PIPELINE_RENDERING_CREATE_INFO,
-      colorAttachmentCount=1,pColorAttachmentFormats=&B8G8R8A8_UNORM}
+      colorAttachmentCount=1,pColorAttachmentFormats=&colorFormat}
   init graphicsCI {sType=GRAPHICS_PIPELINE_CREATE_INFO,pNext=&pipelineRendering,
       stageCount=2,pStages=&shaderStages,pVertexInputState=&emptyVertexInput,
       pInputAssemblyState=&lineList,pViewportState=&oneDynamicViewport,
@@ -1045,16 +1123,32 @@ acquired:
   vk_call vkResetCommandBuffer(cmd,0); cmp eax,VK_SUCCESS; jne device_result
   vk_call vkBeginCommandBuffer(cmd,{sType=COMMAND_BUFFER_BEGIN_INFO,
       flags=ONE_TIME_SUBMIT_BIT}); cmp eax,VK_SUCCESS; jne device_result
-  vk_call vkCmdPipelineBarrier2(cmd,&barrier selectedOldLayout->ColorAttachmentOptimal
-      for images[imageIndex],srcStage=NONE,srcAccess=NONE,
-      dstStage=COLOR_ATTACHMENT_OUTPUT,dstAccess=COLOR_ATTACHMENT_WRITE)
-  vk_call vkCmdBeginRendering(cmd,{sType=RENDERING_INFO,renderArea={0,extent},
-      layerCount=1,colorAttachmentCount=1,pColorAttachments=&{imageView=
-      views[imageIndex],imageLayout=COLOR_ATTACHMENT_OPTIMAL,
-      loadOp=CLEAR,storeOp=STORE,clearValue={0.02,0.02,0.04,1}}})
+  mov ecx,[imageIndex]
+  init barrier {sType=IMAGE_MEMORY_BARRIER_2,
+      dstStageMask=COLOR_ATTACHMENT_OUTPUT,dstAccessMask=COLOR_ATTACHMENT_WRITE,
+      newLayout=COLOR_ATTACHMENT_OPTIMAL,image=images[rcx],
+      subresourceRange={aspectMask=COLOR_BIT,baseMipLevel=0,levelCount=1,
+      baseArrayLayer=0,layerCount=1}}
+  cmp byte ptr [imageInitialized+rcx],0; je acquired_first_layout
+  store32 barrier.oldLayout,PRESENT_SRC_KHR; jmp acquired_layout_ready
+acquired_first_layout:
+  store32 barrier.oldLayout,UNDEFINED; mov byte ptr [imageInitialized+rcx],1
+acquired_layout_ready:
+  init dependencyInfo {sType=DEPENDENCY_INFO,imageMemoryBarrierCount=1,
+      pImageMemoryBarriers=&barrier}
+  vk_call vkCmdPipelineBarrier2(cmd,&dependencyInfo)
+  mov ecx,[imageIndex]
+  init renderingAttachment {sType=RENDERING_ATTACHMENT_INFO,
+      imageView=views[rcx],imageLayout=COLOR_ATTACHMENT_OPTIMAL,
+      loadOp=CLEAR,storeOp=STORE,clearValue={0.02,0.02,0.04,1}}
+  init rendering {sType=RENDERING_INFO,renderArea={0,extent},layerCount=1,
+      colorAttachmentCount=1,pColorAttachments=&renderingAttachment}
+  vk_call vkCmdBeginRendering(cmd,&rendering)
   vk_call vkCmdBindPipeline(cmd,GRAPHICS,pipeline)
-  vk_call vkCmdSetViewport(cmd,0,1,&{0,0,float(extent.width),float(extent.height),0,1})
-  vk_call vkCmdSetScissor(cmd,0,1,&{0,0,extent})
+  init viewport {width=float(extent.width),height=float(extent.height),maxDepth=1}
+  init scissor {extent=extent}
+  vk_call vkCmdSetViewport(cmd,0,1,&viewport)
+  vk_call vkCmdSetScissor(cmd,0,1,&scissor)
   win_call QueryPerformanceCounter(&qpcNow) -> eax
   test eax,eax; jz fail_runtime
   mov rax,qword ptr [qpcNow]
@@ -1079,16 +1173,23 @@ acquired:
   vk_call vkCmdPushConstants(cmd,pipelineLayout,VERTEX_BIT,0,8,&push)
   vk_call vkCmdDraw(cmd,24,1,0,0)
   vk_call vkCmdEndRendering(cmd)
-  vk_call vkCmdPipelineBarrier2(cmd,&barrier ColorAttachmentOptimal->PresentSrcKHR
-      for images[imageIndex],srcStage=COLOR_ATTACHMENT_OUTPUT,
-      srcAccess=COLOR_ATTACHMENT_WRITE,dstStage=NONE,dstAccess=NONE)
+  mov ecx,[imageIndex]
+  init barrier {sType=IMAGE_MEMORY_BARRIER_2,
+      srcStageMask=COLOR_ATTACHMENT_OUTPUT,srcAccessMask=COLOR_ATTACHMENT_WRITE,
+      oldLayout=COLOR_ATTACHMENT_OPTIMAL,newLayout=PRESENT_SRC_KHR,
+      image=images[rcx],subresourceRange={aspectMask=COLOR_BIT,baseMipLevel=0,
+      levelCount=1,baseArrayLayer=0,layerCount=1}}
+  vk_call vkCmdPipelineBarrier2(cmd,&dependencyInfo)
   vk_call vkEndCommandBuffer(cmd); cmp eax,VK_SUCCESS; jne device_result
+  init waitSemaphoreInfo {sType=SEMAPHORE_SUBMIT_INFO,semaphore=imageAvail,
+      stageMask=COLOR_ATTACHMENT_OUTPUT}
+  init commandBufferInfo {sType=COMMAND_BUFFER_SUBMIT_INFO,commandBuffer=cmd}
+  init signalSemaphoreInfo {sType=SEMAPHORE_SUBMIT_INFO,semaphore=renderDone,
+      stageMask=ALL_GRAPHICS}
   init submit {sType=SUBMIT_INFO_2,waitSemaphoreInfoCount=1,
-      pWaitSemaphoreInfos=&{sType=SEMAPHORE_SUBMIT_INFO,semaphore=imageAvail,
-      stageMask=COLOR_ATTACHMENT_OUTPUT},commandBufferInfoCount=1,
-      pCommandBufferInfos=&{sType=COMMAND_BUFFER_SUBMIT_INFO,commandBuffer=cmd},
-      signalSemaphoreInfoCount=1,pSignalSemaphoreInfos=&{sType=
-      SEMAPHORE_SUBMIT_INFO,semaphore=renderDone,stageMask=ALL_GRAPHICS}}
+      pWaitSemaphoreInfos=&waitSemaphoreInfo,commandBufferInfoCount=1,
+      pCommandBufferInfos=&commandBufferInfo,signalSemaphoreInfoCount=1,
+      pSignalSemaphoreInfos=&signalSemaphoreInfo}
   vk_call vkQueueSubmit2(queue,1,&submit,fence); cmp eax,VK_SUCCESS; jne device_result
   init present {sType=PRESENT_INFO_KHR,waitSemaphoreCount=1,
       pWaitSemaphores=&renderDone,swapchainCount=1,pSwapchains=&swapchain,
@@ -1112,31 +1213,16 @@ device_result:
 clean_exit: mov ebx,0; jmp cleanup
 fail_init: mov ebx,1; jmp cleanup
 fail_runtime: mov ebx,2; jmp cleanup
-fail_surface: mov ebx,3; mark_surface_lost; jmp cleanup
-fail_device: mov ebx,4; mark_device_lost; jmp cleanup
+fail_surface: mov ebx,3; mov byte ptr [ownership.surfaceLost],1; jmp cleanup
+fail_device: mov ebx,4; mov byte ptr [ownership.deviceLost],1; jmp cleanup
 clock_violation:
   ud2 @containment_tail(.monotonicClockRegressed)
 
 cleanup: @invariant reverse_dependency_ledger(status=ebx)
-  if device_owned and not device_lost: vkDeviceWaitIdle(device)
-  for each owned imageView in reverse: vkDestroyImageView(device,view,0)
-  if pipeline_owned: vkDestroyPipeline(device,pipeline,0)
-  if swapchain_owned: vkDestroySwapchainKHR(device,swapchain,0)
-  if pipelineLayout_owned: vkDestroyPipelineLayout(device,pipelineLayout,0)
-  if fragModule_owned: vkDestroyShaderModule(device,fragModule,0)
-  if vertModule_owned: vkDestroyShaderModule(device,vertModule,0)
-  if fence_owned: vkDestroyFence(device,fence,0)
-  if renderDone_owned: vkDestroySemaphore(device,renderDone,0)
-  if imageAvail_owned: vkDestroySemaphore(device,imageAvail,0)
-  if commandPool_owned: vkDestroyCommandPool(device,commandPool,0)
-  if device_owned: vkDestroyDevice(device,0)
-  if surface_owned: vkDestroySurfaceKHR(instance,surface,0)
-  if instance_owned: vkDestroyInstance(instance,0)
-  if hwnd_owned: win_call DestroyWindow(hwnd)
-  if class_registered: win_call UnregisterClassW(&className,hInstance)
+  reverse_cleanup
   add rsp,FRAME_SIZE; pop r15; pop r14; pop r13; pop r12
   pop rdi; pop rsi; pop rbp; pop rbx
-  exit_with ebx
+  mov ecx,ebx; call qword ptr [rip+__imp_ExitProcess]; ud2
 }
 ```
 
@@ -1436,16 +1522,27 @@ instantiation into one line-auditable raw listing. A contract alone cannot
 satisfy this section. No C, GLSL, windowing helper, Vulkan helper, allocator
 runtime, or hidden exception path exists in the artifact.
 
-The comment-free spike expresses that requirement as one imported closure in
-`SourceClosure.lean`. `cubeSourceClosure` contains the authored syntax, exact
-macro registry, all static objects, the two serialized shader arrays, and the
-complete import set. Its expansion is `rawCubeHost`;
+The comment-free spike expresses that requirement through `Macros.lean` and
+`SourceClosure.lean`. `Macros.lean` contains the transparent instruction
+functions and literal expected fragments for calls, structure initialization,
+allocation, dispatch resolution, enumeration and device selection, format and
+extent selection, swapchain retirement, and reverse cleanup; the corpus does
+not refer to absent `AsmMacro.*` bodies for these operations.
+`cubeSourceClosure` contains the authored syntax, that exact local macro
+registry, all static objects, both stack-frame layouts, the two serialized
+shader arrays, and the complete import set. Its expansion is `rawCubeHost`;
 `cubeSourceElaboratesExactly`, `cubeSourceHasNoUnresolvedForms`, and
 `cubeSourceManifestExact` connect the two renderings. `Program.lean` puts
 `rawCubeHost`, not an independently copied annotated listing, into
 `VerifiedProgram` and passes the expansion identity to `verify_assembly`.
 `rawHostImplementsDriver` transports the block-local host proof across that
 exact elaboration relation and is also an explicit constructor input.
+`cubeCallbackStateConnection` proves that the `lpParam` passed to
+`CreateWindowExW` is installed under `GWLP_USERDATA` during `WM_NCCREATE`, every
+later state access uses the recovered pointer, the entry-frame object remains
+live through `WM_NCDESTROY`, and the slot is cleared before the entry frame can
+be released. This covers synchronous creation callbacks as well as later
+dispatch; no callback-relative symbolic `state` offset is accepted.
 `cubeMachineBlendInput` then assigns `rawCubeHost`, `cubeVertex`, and
 `cubeFragment` to the exact closed scopes retained by
 `stagedProcessRealization`; `cubeMachineBlendInputComplete` proves that every
@@ -1457,6 +1554,14 @@ Changing a macro body, expansion input, static byte, import, or authored token
 therefore changes machine-source identity and invalidates the first adjacent
 certificate. The review printer renders `rawCubeHost` in full.
 
+This remains an expected-source design fixture, not build evidence: the future
+`Grass.*` modules, elaborator, verifier, and printer do not yet exist, so the
+displayed theorem terms have not run and no generated byte-level listing is
+claimed. What is reviewable now is the complete local body/manifest shape and
+every intended adjacency. Implementation acceptance additionally requires the
+printer's fully instantiated raw listing to be checked against this manifest;
+until then the spike is defensible design input, not a verified executable.
+
 ### 7.6 Static data, dispatch names, and imports
 
 The authored static objects are: UTF-16 `className = "GrassCube\0"` and
@@ -1465,6 +1570,21 @@ The authored static objects are: UTF-16 `className = "GrassCube\0"` and
 `angularVelocity = 0.6` radians/second, and `tau = 6.283185307179586` as
 binary64 values; the two shader-word arrays; and the
 complete function-name arrays below. There is no generated geometry blob.
+`vkCreateInstanceName`, `swapchainExtName`, `mainName`, and the addressable
+`colorFormat` enum word are separate named static objects. The mutable
+`vkCreateInstancePtr` is instead an entry-frame pointer and never appears in
+read-only data.
+
+`cubeFrameLayout` packs the window state, clock fields, all handles and counts,
+allocation pointers, dispatch tables, ownership ledger, every Vulkan create or
+submit structure, both shader-stage records, pipeline fixed-function records,
+barriers, dynamic-rendering records, and outgoing-call/spill storage.
+`cubeCallbackFrameLayout` separately packs the four saved callback arguments,
+recovered state pointer, outgoing-call area, and move spill. The reviewed
+manifest names both layouts, every static symbol, every authored block, and
+every literal expansion fragment. `cubeSymbolResolutionExact` and
+`cubeFrameLifetimesNonoverlapping` are required before the no-unresolved-form
+claim can be used.
 
 ```text
 instanceNames = [
@@ -1493,7 +1613,8 @@ deviceNames = [
 
 The exact derived PE imports are `GetModuleHandleW`, `LoadCursorW`,
 `RegisterClassExW`, `CreateWindowExW`, `ShowWindow`, `DestroyWindow`,
-`DefWindowProcW`, `WaitMessage`, `PeekMessageW`, `TranslateMessage`,
+`DefWindowProcW`, `GetWindowLongPtrW`, `SetWindowLongPtrW`, `WaitMessage`,
+`PeekMessageW`, `TranslateMessage`,
 `DispatchMessageW`, `UnregisterClassW`, `QueryPerformanceFrequency`,
 `QueryPerformanceCounter`, `GetProcessHeap`, `HeapAlloc`,
 `HeapFree`, and `ExitProcess`, plus `vkGetInstanceProcAddr` and
@@ -1643,6 +1764,15 @@ postcommit phase, forces acquire/present recreation and device/surface loss, and
 checks the process-to-CFG interval map covers every reachable API call and
 callback. These tests challenge the model; they do not replace the universal
 driver and machine proofs.
+
+Source-closure mutations delete or rename each reviewed static symbol and frame
+object in turn, remove each `shaderStages` field initialization, exchange the
+vertex and fragment module handles, remove either user-data import, dispatch
+`WM_SIZE` synchronously from `CreateWindowExW`, clear `GWLP_USERDATA` early, and
+move entry-frame release before `WM_NCDESTROY`. The first adjacent symbol,
+layout, pipeline, callback-lifetime, or host-refinement certificate must fail.
+The raw-manifest test also deletes each local macro fragment body while retaining
+its registry name; a name without reviewed instructions must not elaborate.
 
 ## 10. Proof economy and SDLC invalidation
 

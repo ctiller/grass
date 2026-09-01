@@ -75,9 +75,10 @@ implemented Grass library.
 - [ ] Bounded control and DATA queues define scheduler capacity. The fair
   connection writer preserves frame atomicity and per-stream byte order while
   allowing progress by unrelated streams.
-- [ ] A stuck stream can be cancelled/reset without terminating healthy sibling
-  streams. Connection failure, HPACK failure, or exhausted connection lifetime
-  still cancels all descendants.
+- [ ] A stuck stream finishes the current frame and resets without disturbing
+  siblings when the connection remains writable and scheduled. Otherwise the
+  bounded result is exact connection teardown with suffix disposition; HPACK or
+  connection failure still cancels all descendants.
 
 ## Resource and ownership proof
 
@@ -85,15 +86,26 @@ implemented Grass library.
   connection, frame and continuation bytes, decoded header-list bytes, HPACK
   dynamic table, receive/transmit storage, control-frame slots, DATA queue
   bytes, sockets, thread handles, and deadlines.
+- [ ] Generic behavior derives HPACK/header/window/admission limits from the
+  passed resource value. Concrete layouts/macros/bounds use the retained
+  `spec.resourceSemantics`; an equality ties that capture to the selected
+  construction, and no global policy is consulted by the generic family.
 - [ ] Startup owns all fixed storage before publishing `.ready`. Any pre-ready
   startup/worker creation failure serves and emits no HTTP bytes, discharges
   acquired resources, and exits nonzero.
+- [ ] Partial worker creation resumes the suspended created prefix only through
+  a failure gate, then joins/closes it without publishing readiness. Fixtures
+  cover every creation index and every `ResumeThread` failure index; the latter
+  uses its declared failed-adoption/no-return boundary rather than hanging.
 - [ ] After `.ready`, no allocation API is imported or invoked. Admission and
   flow-control credits make exhaustion a refused/deferred protocol action, not
   an allocation failure.
 - [ ] Per-stream, per-connection, and whole-server bounds include descendants,
   queues, HPACK state, byte-channel storage, escrow, stack/layout charges,
   sockets, and Windows handles. Bounds are stated on independent resource axes.
+- [ ] The fixture exports a whole-server resident-byte bound and one exact root
+  resource equation over the mandatory concrete-axis family, whose selected
+  axis keys are injective.
 - [ ] Immutable route bytes have one owner and disjoint shared read loans. Each
   mutable connection/stream slot has one generation-indexed owner. Numeric
   socket or stream-id reuse cannot alias an old cancellation action.
@@ -125,32 +137,38 @@ implemented Grass library.
 - [ ] `ProcessCorrect` has no cancellation field. Plain serial/leaf processes
   receive only the weakest uncancellable summary and incur no new proof burden.
 - [ ] The server's stronger `CancellationSummary` is calculated from bounded
-  uncancellable segments, explicit cancellation points, interruptible provider
-  calls, and sequence/choice/loop/parallel/supervisor combinators.
+  uncancellable segments and calls, explicit observation points, and
+  sequence/choice/loop/parallel/supervisor combinators.
 - [ ] A summary exports a `ProcessTerminationContract` only after its progress
   and disposition premises suffice. The root summary does so and converts via
   `toSupervisedTerminationFacet` using an explicit supervisor-compatibility
   proof; a plain or forever-blocking uncancellable summary exports `none`.
 - [ ] Every continuing HPACK decode loop crosses a point between bounded slices.
-  No cancellation is legal during Huffman/table mutation; the last committed
-  decoder state and pending request occurrence remain exact.
+  The proof names distinct committed and private working decoder states. No
+  cancellation is legal during mutation; cancellation returns the old committed
+  state or a separately proved committed successor after finishing the slice.
 - [ ] Per-stream cancellation never addresses the connection HPACK decoder. An
   already accepted field block advances shared decoder state in connection
   order even if its decoded fields are later discarded for a reset stream.
-- [ ] `WSAPoll`, `accept`, `recv`, and `send` use provider interruption/race
-  summaries. A forever-blocking masked provider call cannot be promoted to a
-  bounded cancellation guarantee.
+- [ ] This nonblocking Win32 plan has no provider interrupt operation.
+  `WSAPoll`, `Sleep`, `accept`, `recv`, and `send` are bounded uncancellable
+  calls followed by displayed cancellation-observation blocks. A
+  forever-blocking masked provider call cannot be promoted to a bounded claim.
 - [ ] A positive partial send enters a bounded uncancellable prefix-commit
   segment. Cancellation becomes legal only after committed bytes and exact
   suffix custody are restored. Stream cancellation finishes that frame before
   RST_STREAM; only connection close may dispose a mid-frame suffix.
 - [ ] A stream blocked on either flow-control window has an immediate stream
-  cancellation point; its RST_STREAM disposition returns only unselected
-  resources and leaves sibling streams unchanged.
+  cancellation observation point. Its result is frame-finish-then-RST under
+  writability/survival/fairness, or exact connection teardown otherwise.
 - [ ] Connection cancellation publishes GOAWAY with the exact admitted prefix,
   drains/resets children, settles writer/HPACK custody, and closes only at the
   connection safe boundary. Root shutdown composes root service policy with the
   worker family and does not count connection policy twice.
+- [ ] `goawayPublished` makes shutdown idempotent: one successful publication
+  consumes one control slot and freezes the prefix; repeated observations
+  consume no slot, and queue failure takes exact teardown. Drain either makes
+  progress under named premises or reaches its deadline/escalation frontier.
 - [ ] Normal and failed terminal boundaries have distinct exhaustive custody,
   resource, observation, and obligation dispositions. A supervisor cannot
   invent a forced safe point while a worker owns a live socket or child state.
@@ -163,11 +181,14 @@ implemented Grass library.
   accept/preface loop, partial receive channel, frame dispatch, HPACK/CONTINUATION
   path, flow-credit debits, fair output selection, partial-send suffix, scoped
   errors, per-stream cancellation, GOAWAY drain, and cleanup.
-- [ ] Large algorithms may be transparent verified standard-library macros.
-  Each macro has a raw-instruction expansion theorem; the closed source records
-  the exact macro table, static objects, imports, and expanded listing.
-- [ ] A cancellation CFG map identifies interruptible calls, bounded masked
-  regions, cancellation points, and terminal boundaries. Expanded macro
+- [ ] Large algorithms are local typed fragment constructors first and may move
+  into the verified standard library later. Every selected helper retains its
+  assembly algorithm, exact raw expansion, references, citations, and machine
+  certificate in the hierarchical closure. Macro-shaped call names are only
+  transparent adapters; an absent standard-library module is never the body.
+- [ ] A total cancellation CFG map distinguishes bounded calls, safe states,
+  real observation/control-transfer blocks, request publishers, faults and
+  terminal boundaries. Expanded macro
   interiors map to the same summary; callbacks and faults cannot counterfeit a
   safe point.
 - [ ] An author may replace any macro with arbitrary custom assembly and prove
@@ -189,7 +210,8 @@ implemented Grass library.
   one stuck stream among progressing siblings, shutdown at every setup/service
   point, callback at every instruction boundary, peer close, poll/recv/send
   failure, worker starvation, and infinite service.
-- [ ] Positive fixtures prove addressed RST_STREAM, GOAWAY/drain, cancellation
+- [ ] Positive fixtures prove conditional addressed RST_STREAM or exact
+  teardown, idempotent GOAWAY/drain, cancellation
   while flow blocked, interrupted readiness, HPACK slice cancellation, exact
   partial-send suffix custody, and normal/failed terminal settlement.
 - [ ] Negative fixtures reject cancellation mid-HPACK mutation, after `send`

@@ -20,10 +20,11 @@ RFC 9113 and RFC 7541 as registered in [REFERENCES.md](REFERENCES.md).
 
 ## 1. Precious surface
 
-The precious surface says what clients may observe. It names abstract listener,
-connection, and stream processes because those roles explain multiplexed
-behavior and causal ordering. It does not name Winsock, four physical workers,
-polling, buffer offsets, or x86 registers.
+The precious surface is one root `SpecProcess`. Its DSL components state the
+HTTP/2/HPACK byte languages, protocol legality, route relation, observations,
+failures, progress, and selected resource semantics. Typed junctions capture
+them into the root. It does not name listener/connection/stream roles, Winsock,
+physical workers, polling, buffer offsets, or x86 registers.
 
 ```lean
 def body : ByteArray := "Grass web server\n".toUTF8
@@ -33,77 +34,62 @@ def routes : Http2Routes :=
     path := "/".toASCII, response :=
       { status := 200, fields := [("content-type", "text/plain")], body } }
 
-def behaviorPolicy : Http2ServerBehaviorPolicy where
-  transport := .cleartextPriorKnowledge
-  acceptedVersion := .http2
-  serverPush := false
-  priority := .ignoreDeprecatedSignals
-  unknownRoute := .responseStatus 404
-  malformed := .rfc9113ScopedError
-  unsupportedExtensionFrame := .ignore
-  requestMethods := {.GET}
-  requestBodies := .discardWithinFlowControl
-  responseTrailers := false
-  peerSettings := .applyAfterValidationThenAcknowledge
-  ping := .acknowledgeOpaquePayload
-  goaway := .gracefulPrefix
-  connectionWindowUpdates := .rfc9113
-  streamWindowUpdates := .rfc9113
-  hpack :=
-    { decoder := .rfc7541
-      encoder := .literalWithoutIndexing
-      dynamicTableBytes := resourcePolicy.hpackDecoderTableBytes
-      huffman := .acceptValidRejectInvalid }
+def behaviorPolicyFor {R} [ResourceModel R] [WebServerResources R]
+    (resources : R) : Http2ServerBehaviorPolicy :=
+  Http2ServerBehaviorPolicy.fromCapturedResources resources where
+    transport := .cleartextPriorKnowledge
+    acceptedVersion := .http2
+    serverPush := false
+    priority := .ignoreDeprecatedSignals
+    unknownRoute := .responseStatus 404
+    malformed := .rfc9113ScopedError
+    unsupportedExtensionFrame := .ignore
+    requestMethods := {.GET}
+    requestBodies := .discardWithinFlowControl
+    responseTrailers := false
+    peerSettings := .applyAfterValidationThenAcknowledge
+    ping := .acknowledgeOpaquePayload
+    goaway := .gracefulPrefix
+    connectionWindowUpdates := .rfc9113
+    streamWindowUpdates := .rfc9113
+    hpackDecoderTableBytes := WebServerResources.hpackDecoderTableBytes resources
+    maxHeaderListBytes := WebServerResources.maxHeaderListBytes resources
+    initialConnectionWindow := WebServerResources.inboundConnectionWindow resources
+    initialStreamWindow := WebServerResources.inboundStreamWindow resources
+    hpackEncoder := .anyConformingEncoding
+    huffman := .acceptValidRejectInvalid
 ```
 
 There is deliberately no `message_value` or `message_length`: route bytes and
-all lengths are derived from the values. The encoder choice is behaviorally
-irrelevant after decoding, but it is retained in the profile so exact emitted
-responses are reviewable. The decoder is the full bounded RFC 7541 decoder; a
+all lengths are derived from the values. The outgoing HPACK representation is
+not precious: peers observe the decoded fields, while exact emitted bytes remain
+reviewable through the source/artifact chain. The realization later selects
+literal-without-indexing. The decoder is the full bounded RFC 7541 decoder; a
 literal-only decoder would not realize the claimed HTTP/2 input behavior.
 
 ```lean
-inductive ServerRoleSchema
-  | listener
-  | connection
-  | stream
+def frameFormat : Format Http2.Frame := Http2.frameFormat
 
-def ServerRoleSchema.Instance : ServerRoleSchema -> Type
-  | .listener => Unit
-  | .connection => ConnectionId
-  | .stream => ConnectionId × Http2StreamId
+def hpackFieldSectionFormat : Format Http2.HeaderList :=
+  Hpack.fieldSectionFormat
 
-def connectionSession {R} [ResourceModel R] [WebServerResources R]
-    (resources : R) (id : ConnectionId) : SpecProcess resources :=
-  Http2.abstractConnectionSession resources routes behaviorPolicy id
+def frameParserRequirement {R} [ResourceModel R]
+    (resources : R) : ProcessRequirement resources :=
+  Format.parserRequirement frameFormat
 
-def streamSession {R} [ResourceModel R] [WebServerResources R]
-    (resources : R) (connection : ConnectionId) (stream : Http2StreamId) :
-    SpecProcess resources :=
-  Http2.abstractRequestStream resources routes behaviorPolicy connection stream
+def hpackParserRequirement {R} [ResourceModel R]
+    (resources : R) : ProcessRequirement resources :=
+  Format.parserRequirement hpackFieldSectionFormat
 
-def abstractServer {R} [ResourceModel R] [WebServerResources R]
-    (resources : R) : AbstractSpecificationProcessNetwork resources :=
-  Http2.abstractMemoryServer
-    (roleSchema := ServerRoleSchema)
-    (instances := ServerRoleSchema.Instance)
-    (routes := routes)
-    (connection := connectionSession resources)
-    (stream := streamSession resources)
-    (admission := WebServerResources.connectionCapacity resources)
-    (custody := .linearPerConnectionAndStream)
-```
+def webServerSuite {R} [ResourceModel R] [WebServerResources R]
+    (resources : R) : SpecificationSuite resources :=
+  Http2.memoryServerSuite
+    resources routes (behaviorPolicyFor resources)
+    (frameParserRequirement resources) (hpackParserRequirement resources)
 
-The stream identity is part of the protocol, not a physical scheduling choice.
-The process graph allows the specification proof to say that stream 3 can be
-reset while stream 5 completes and that connection-ordered HPACK transitions
-caused both field sections. A relational denotation is derived from these
-process semantics; there is not a second precious trace model to synchronize.
-
-```lean
 def webServerSpec {R} [ResourceModel R] [WebServerResources R]
-    (resources : R) : Specification resources :=
-  Specification.ofProcesses (abstractServer resources)
+    (resources : R) : SpecProcess resources :=
+  SpecProcess.capture (webServerSuite resources)
     |>.withProgress
       { service := .reactive
         acceptedConnection := .settlesUnder
@@ -114,13 +100,21 @@ def webServerSpec {R} [ResourceModel R] [WebServerResources R]
 
 theorem webServerSpecCorrect {R} [ResourceModel R] [WebServerResources R]
     (resources : R) : MeetsAllSpecificationTheorems (webServerSpec resources) :=
-  Http2.abstractMemoryServerCorrect resources routes behaviorPolicy
+  Http2.memoryServerSuiteCaptureCorrect
+    resources routes (behaviorPolicyFor resources)
+    (frameParserRequirement resources) (hpackParserRequirement resources)
 ```
 
 This theorem is the high-level correctness proof. It is universally quantified
 over accepted input bytes, fragmentation, peer settings, windows, scheduler
 choices, failures, cancellation, and response interleavings. Assembly does not
 replace it; assembly later refines it.
+
+The suite uses a frame/HPACK grammar DSL, HTTP/2 protocol DSL, route relation,
+and temporal/resource fragments. Its grammar-to-protocol and
+protocol-to-route/observation junctions are precious. It may demand “a process
+which realizes this parser format” parametrically; the selected parser witness
+and its decomposition are supplied later.
 
 ## 2. Resource parameter
 
@@ -147,6 +141,7 @@ def resourcePolicy : MemoryServerResourcePolicy where
   maxTransmitBytesPerConnection := 65535
   maxSocketDescriptors := 5
   maxThreadHandles := 4
+  pollQuantum := .milliseconds 10
   streamProgressDeadline := .seconds 5
   connectionIdleDeadline := .seconds 30
   storage := .fixedAfterReady
@@ -154,7 +149,15 @@ def resourcePolicy : MemoryServerResourcePolicy where
 def resources : ServerResourceModel :=
   ServerResourceModel.http2 resourcePolicy
 
-def spec : Specification resources := webServerSpec resources
+def spec : SpecProcess resources := webServerSpec resources
+
+def behaviorPolicy : Http2ServerBehaviorPolicy := behaviorPolicyFor resources
+
+def capturedResourcePolicy : MemoryServerResourcePolicy :=
+  MemoryServerResourcePolicy.fromCapturedSemantics spec.resourceSemantics
+
+theorem capturedResourcePolicyExact : capturedResourcePolicy = resourcePolicy :=
+  SpecProcess.capturedResourceConstructionExact spec
 ```
 
 Memory, active streams, receive bytes, transmit bytes, control-frame slots,
@@ -166,6 +169,12 @@ tokens travel through process channels and make backpressure constructive.
 Fixed-after-ready means startup constructs every worker, connection, stream,
 HPACK, frame, and queue slot before publishing readiness. Startup allocation or
 worker creation failure emits no HTTP bytes and exits nonzero after cleanup.
+The partial-creation edge never reaches `publish_ready`: it sets shutdown,
+resumes the suspended created prefix through `resume_failure_workers`, joins and
+closes that prefix, unregisters the console handler, closes the listener, ends
+Winsock, and exits nonzero. A `ResumeThread` failure before readiness takes the
+declared failed-adoption/no-return boundary rather than waiting on a suspended
+thread. Fixtures quantify every creation and resume index.
 After readiness the import table has no allocation function, so an allocation
 failure transition is unreachable. Admission can still be refused and peers can
 still withhold credit; neither is server-owned memory exhaustion.
@@ -175,12 +184,12 @@ still withhold credit; neither is server-owned memory exhaustion.
 ```lean
 def protocolProfile : Http2.Profile where
   transport := .cleartextPriorKnowledge
-  maxFrameSize := resourcePolicy.maxInboundFrameBytes
+  maxFrameSize := capturedResourcePolicy.maxInboundFrameBytes
   serverPush := false
   priorityMode := .ignoreDeprecated
   extensionMode := .ignoreUnknown
-  hpackDynamicTableBytes := resourcePolicy.hpackDecoderTableBytes
-  maxHeaderListBytes := resourcePolicy.maxHeaderListBytes
+  hpackDynamicTableBytes := capturedResourcePolicy.hpackDecoderTableBytes
+  maxHeaderListBytes := capturedResourcePolicy.maxHeaderListBytes
 
 def connectionModel : Http2.ConnectionModel :=
   Http2.ConnectionModel.server protocolProfile behaviorPolicy routes
@@ -194,6 +203,21 @@ validated but cannot affect selection. PUSH_PROMISE is rejected because the
 server advertised `SETTINGS_ENABLE_PUSH = 0` and is not a client.
 
 The framing proof surface is deliberately stronger than round-trip testing:
+
+```lean
+def frameParserRealizes : ParserRealizes frameFormat
+    (Http2.Frame.parseResult protocolProfile) :=
+  Http2.Frame.parserRealizesFormat protocolProfile
+
+def hpackParserRealizes : ParserRealizes hpackFieldSectionFormat
+    (Hpack.FieldSection.parseResult protocolProfile) :=
+  Hpack.FieldSection.parserRealizesFormat protocolProfile
+```
+
+These discharge the two existential process requirements after the chosen
+parser processes are wrapped around the implementations. They prove complete
+success, exact `needMore`, and exact invalid-prefix classification, not only the
+success cases below.
 
 ```lean
 theorem frameWriterRoundTrip (frame : Http2.Frame)
@@ -222,8 +246,8 @@ theorem hpackDecoderConforms (state : Hpack.DecoderState protocolProfile)
     ∃ next fields,
       Hpack.decode state block = .ok (next, fields) ∧
       Hpack.Rfc7541Transition state block next fields ∧
-      next.dynamicTable.bytes ≤ resourcePolicy.hpackDecoderTableBytes ∧
-      fields.byteSize ≤ resourcePolicy.maxHeaderListBytes
+      next.dynamicTable.bytes ≤ capturedResourcePolicy.hpackDecoderTableBytes ∧
+      fields.byteSize ≤ capturedResourcePolicy.maxHeaderListBytes
 ```
 
 `Rfc7541Transition` covers indexed fields, the three literal forms, dynamic
@@ -238,6 +262,32 @@ may then move to stream children. This is why “one decoder per stream” is
 rejected even though it would simplify parallel execution.
 
 ## 4. Process realization
+
+The replaceable proof lens chooses listener, connection, and stream roles. They
+make causal attribution, isolated reset, HPACK connection ordering, and
+subtree-resource theorems economical; they are not fields of the root spec.
+
+```lean
+inductive ServerRoleSchema
+  | listener
+  | connection
+  | stream
+
+def abstractServer : AbstractSpecificationProcessNetwork resources :=
+  Http2.abstractMemoryServer
+    (roleSchema := ServerRoleSchema)
+    (routes := routes)
+    (admission := WebServerResources.connectionCapacity resources)
+    (custody := .linearPerConnectionAndStream)
+
+def serverProcessPresentation : ProcessPresentation spec where
+  network := abstractServer
+  denotationExact := Http2.abstractMemoryServerDenotesContract
+  requirementsExact := Http2.abstractMemoryServerRequirementsExact
+```
+
+Another presentation may use a single serialized session process or a different
+abstract decomposition if it proves the same two exact equations.
 
 The chosen realization is a four-worker fixed pool. Each worker owns at most one
 connection at a time; each connection hosts up to 128 logical stream processes,
@@ -313,9 +363,10 @@ The summary is built from the same structure as the realization:
 ```lean
 def hpackSliceSummary :
     CancellationSummary (Hpack.decodeSliceProcess protocolProfile) :=
-  CancellationSummary.uncancellable
+  CancellationSummary.uncancellableWorkingSlice
     (Hpack.decodeSliceCorrect protocolProfile)
     (.stepsAtMost Hpack.decodeSliceStepBound)
+    hpackSliceStateProtocol
 
 def hpackBetweenSlices :
     CancellationSummary (Hpack.betweenSlicesProcess protocolProfile) :=
@@ -340,38 +391,42 @@ committed decoder state is exact. The loop theorem supplies bounded delay from
 the slice step bound; a monolithic decoder with an unbounded masked loop would
 fail this construction.
 
-Win32 readiness and socket calls use reusable interruptible summaries:
+The selected Win32 plan has no provider cancellation operation. Its
+nonblocking calls and bounded `WSAPoll`/`Sleep` calls are uncancellable segments
+followed by real cancellation-observation blocks:
 
 ```lean
 def receiveCancellation : CancellationSummary Http2.receiveByteSegment :=
   CancellationSummary.transport Http2.receiveByteSegmentDecomposition
-    (CancellationSummary.seq
-      (CancellationSummary.interruptibleCall
-        Std.Win32.Winsock.pollReadableInterruption)
-      (CancellationSummary.interruptibleCall
-        Std.Win32.Winsock.receiveInterruption))
+    (CancellationSummary.seq receiveReadinessCall
+      (CancellationSummary.seq receiveReadinessObservation
+        (CancellationSummary.seq receiveCall receiveResultObservation)))
 
 def partialSendCancellation : CancellationSummary Http2.partialSendSegment :=
   CancellationSummary.transport Http2.partialSendSegmentDecomposition
-    (CancellationSummary.seq sendReadinessCancellation
-      (CancellationSummary.seq sendCallCancellation
-        (CancellationSummary.seq commitSentPrefixSummary
-          suffixCustodyCancelPoint)))
+    (CancellationSummary.seq
+      (CancellationSummary.loop partialSendIterationCancellation
+        Http2.remainingSuffixDecreasesOrProviderFrontier
+        Http2.everyContinuingPartialSendIterationReachesReadinessObservation)
+      completedFrameCancelPoint)
 ```
 
 `WSAPoll`, `recv`, and `send` quantify over completion, readiness timeout,
-`WSAEWOULDBLOCK`, failure, peer close, and cancellation races. After a positive
+`WSAEWOULDBLOCK`, failure, and peer close. Cancellation is not attributed to
+those APIs: the callback only publishes a request, and the subsequent displayed
+observation block consumes or defers it. After a positive
 `send(k)`, the prefix-commit segment is briefly uncancellable: it transfers
 exactly the first `k` bytes to committed history and restores ownership of the
-exact suffix. Only then is the suffix-custody cancellation point enabled. This
-prevents both duplicate bytes and disappearing bytes.
+exact suffix. The writer then either continues its bounded partial-send loop or
+reaches the completed-frame observation point. This prevents both duplicate
+bytes and disappearing bytes.
 
-That point does not permit a stream reset to discard the middle of a frame. A
-stream-scoped request is retained while the exact suffix finishes, then emits
-RST_STREAM at the next frame boundary. A connection-scoped request may instead
-close the connection and dispose the exact suffix under the failed/draining
-connection contract. If no byte was committed, the whole unselected frame can
-be returned without a wire effect.
+No observation permits a stream reset to discard the middle of a frame. A
+stream-scoped request is retained while the exact suffix finishes and can emit
+RST_STREAM at the next frame boundary under writability, fairness and
+connection-survival premises. If those premises fail, timeout/escalation closes
+the connection with exact suffix disposition. If no byte was committed, the
+whole unselected frame can be returned without a wire effect.
 
 Flow-control wait is itself a cancellation point. No CPU work or socket call is
 needed to reset a stream whose connection or stream window is zero. Cancelling
@@ -412,8 +467,10 @@ def rootServiceCancellation :
     CancellationSummary (FixedPool.serverRootProcess processPolicy) :=
   CancellationSummary.loop
     (CancellationSummary.seq
-      (CancellationSummary.interruptibleCall Std.Win32.Sleep.interruption)
-      rootShutdownCancelPoint)
+      rootShutdownCancelPoint
+      (CancellationSummary.uncancellableCall
+        Std.Win32.Sleep.correct
+        (.providerReturnsWithin capturedResourcePolicy.pollQuantum)))
     FixedPool.rootServiceIterationProgress
     FixedPool.everyRootIterationCrossesShutdownPoint
 
@@ -444,10 +501,12 @@ def serverTerminationFacet :
 ```
 
 Choice retains only guarantees valid for its reachable branches. Each fair
-continuing loop crosses a point or an interruptible provider frontier. Parallel
+continuing loop crosses a real observation point or finishes a bounded provider
+call and reaches one. Parallel
 composition addresses cancellation to exact live incarnations and waits for
 the required child dispositions. The connection supervisor turns stream
-deadline cancellation into RST_STREAM without disturbing siblings; connection
+deadline cancellation into frame-finish-then-RST when its named premises hold,
+or exact connection teardown when they do not; connection
 cancellation freezes the accepted stream prefix, emits GOAWAY, drains or resets
 children, settles the writer suffix and HPACK state, and only then closes the
 socket. The server supervisor stops admission, cancels/drains connections,
@@ -461,8 +520,9 @@ enough delay/progress and exact disposition facts. The separately named
 compatibility proof shows that its causes, deadlines, escalation, and terminal
 dispositions match the fixed-pool supervisor. `toSupervisedTerminationFacet` is
 the bridge from the calculated summary to the opt-in promise consumed by the
-plan; cooperative callers use the distinct cooperative bridge. Nothing adds a
-field to `ProcessCorrect`.
+plan; its `CancellationBackedContract` retains the summary and exactness witness
+inside the facet rather than discarding them. Cooperative callers use the
+distinct cooperative bridge. Nothing adds a field to `ProcessCorrect`.
 
 The calculation is structural rather than a new monolithic server proof:
 
@@ -470,7 +530,7 @@ The calculation is structural rather than a new monolithic server proof:
 |---|---|---|
 | uncancellable | ordinary correctness plus finite bound or named environment pending | request stays affine; no interior safe point |
 | cancel point | typed state/custody and exact cancel disposition | consumes one pending request or continues unchanged |
-| interruptible call | provider request/result/cancel race theorem | result or cancellation owns every loan exactly once |
+| bounded uncancellable call | provider return bound and ordinary result custody | pending cancellation remains affine until the next observation |
 | sequence | compatible boundary masks/custody | delay adds; safe-point sets compose |
 | choice | exhaustive branch classifier | only guarantees common to every reachable branch |
 | loop | per-iteration progress plus point/frontier coverage | finite delay or named environment pending on every fair cycle |
@@ -479,8 +539,8 @@ The calculation is structural rather than a new monolithic server proof:
 
 The proof is induction over this expression. Each constructor preserves the
 unique pending occurrence and terminal resource/obligation partition. Delay is
-finite arithmetic for bounded masked segments, inherited provider pending for
-interruptible calls, maximum/join for parallel children, and the supplied cycle
+finite arithmetic for bounded masked segments and provider calls, maximum/join
+for parallel children, and the supplied cycle
 argument for loops. A missing branch, an unbounded masked cycle, or a terminal
 path without disposition makes `exportedContract = none`; automation must report
 that failed premise rather than synthesize a promise.
@@ -540,12 +600,29 @@ policy error path instead of allocating.
 
 Each stream has an absolute progress deadline tied to `(connection generation,
 stream id)`. Expiry races with the exact next stream transition and has one
-winner. It enqueues RST_STREAM and returns stream-local capacity without closing
-healthy siblings. Connection-idle expiry and connection-scope faults cancel all
-descendants. Shutdown stops admission, sends GOAWAY with the last processed
-client stream id, drains or cancels the admitted prefix, closes each socket once,
-joins workers, unregisters/ends Winsock state, and exits zero unless cleanup
-failed.
+winner. If no frame is partially committed, it enqueues RST_STREAM and returns
+stream-local capacity without closing healthy siblings. With a partial frame,
+the unconditional result is instead
+`finishCurrentFrameThenRst ∨ connectionTeardownWithExactSuffixDisposition`.
+The RST branch requires named writable-peer, writer-fairness, and
+connection-survival premises; a peer which never accepts the suffix can force
+the exact teardown branch. Connection-idle expiry and connection-scope faults
+cancel all descendants.
+
+`beginGracefulShutdown` carries an explicit `goawayPublished` state. Its first
+successful call consumes one control slot and freezes the last-stream prefix;
+later calls return `alreadyPublished`, consume no capacity and preserve that
+prefix. The caller checks the queue-failure result and takes exact connection
+teardown. Under drain premises the connection closes after settling children;
+deadline expiry takes the separately proved suffix/obligation escalation.
+Shutdown then joins workers, unregisters the handler, ends Winsock, and exits
+zero unless cleanup failed.
+
+HPACK cancellation quantifies distinct `committed` and private `working` states.
+A request arriving during a bounded slice either returns exactly `committed`, or
+the slice finishes through its atomic commit relation and returns a separately
+named committed successor. No theorem treats an arbitrary mid-table mutation as
+a committed decoder state.
 
 ## 6. Concrete resource theorems
 
@@ -564,7 +641,7 @@ theorem connectionMemoryBound (id) :
 
 theorem connectionStreamBound (id) :
     EveryReachableStateSatisfies
-      (ActiveStreams id ≤ resourcePolicy.maxConcurrentStreamsPerConnection)
+      (ActiveStreams id ≤ capturedResourcePolicy.maxConcurrentStreamsPerConnection)
 
 theorem serverSocketBound :
     EveryExecutionUsesAtMost ProcessScope.root
@@ -574,6 +651,15 @@ theorem serverHandleBound :
     EveryExecutionUsesAtMost ProcessScope.root
       ServerResourceMetric.windowsHandles
       (ServerResourceBudget.handles processPolicy)
+
+theorem serverRootResidentMemoryBound :
+    EveryExecutionUsesAtMost ProcessScope.root
+      ServerResourceMetric.grassOwnedResidentBytes
+      (ServerResourceBudget.residentBytes capturedResourcePolicy)
+
+theorem serverRootResourceEquation :
+    ExactRootResourceEquation serverProcessPlan serverResourceAxisRealization
+      (ServerResourceBudget.allAxes capturedResourcePolicy)
 ```
 
 These are gross subgraph bounds, including descendants and boundary escrow;
@@ -636,6 +722,7 @@ Its visible labels include:
 
 ```text
 entry -> create_workers -> resume_workers -> publish_ready -> service_loop
+startup_partial_workers -> resume_failure_workers -> join_workers
 worker_entry -> worker_gate -> accept_wait -> preface_loop
 connection_schedule -> receive_frames -> frame_parse_loop
 frame_headers/continuation/data/settings/ping/goaway/rst/window/priority/unknown
@@ -647,22 +734,30 @@ join_workers -> close_listener -> cleanup_wsa -> ExitProcess
 
 The setup, calls, branches, register choices, atomic words, partial-send syscall
 loop, join/cleanup, and error dispatch are authored assembly. Complex parsing,
-HPACK, state-transition, scheduling, and bounded-ring operations are transparent
-verified macros. `Macros.lean` names each local contract and exact expansion.
-This is not an opaque compiler escape: an assembly author can replace any macro
-call with novel raw instructions and prove the same local entry/exit contract.
+HPACK, state-transition, scheduling, and bounded-ring operations are local typed
+fragment constructors. `Macros.lean` carries every constructor body as an
+assembly algorithm, its exact raw expansion, references, citations, and machine
+certificate. The macro-shaped names in the listing are only transparent adapters
+to those constructors; no absent standard-library implementation is the body.
+This is not an opaque compiler escape: an assembly author can replace any call
+with novel raw instructions and prove the same local entry/exit contract.
 
-The macro table includes client-preface consumption, bounded receive ring,
+The constructor hierarchy includes client-preface consumption, bounded receive ring,
 frame-header parsing/dispatch, CONTINUATION assembly, full HPACK decode, request
 field validation, SETTINGS/WINDOW_UPDATE/RST/GOAWAY/PING transitions, stream
 state, connection/stream credit debit, bounded control/response enqueue, fair
 selection, frame serialization, partial-prefix commit, deadline cancellation,
-and state release. A missing algorithm cannot be replaced by an unexplained
-Hoare assertion.
+and state release. HPACK is further split into integer, string, Huffman, and
+field-section constructors with committed/working state explicit. A missing
+algorithm cannot be replaced by an unexplained Hoare assertion or a reference
+to a future `Grass.Std` module. These local bodies are the proposed standard
+library implementations and may later move without changing their contracts.
 
 ```lean
 def serverSourceClosure : ClosedAsmSource platformPlan :=
-  ClosedAsmSource.close serverSource serverMacros serverStaticObjects serverImports
+  ClosedAsmSource.closeWithFragmentHierarchy
+    serverSource serverMacros serverFragmentHierarchy
+    serverStaticObjects serverImports
 
 theorem serverSourceClosureComplete : SourceClosureComplete serverSourceClosure := by
   validate_source_closure
@@ -672,7 +767,8 @@ def serverExpandedSource : RawAsmSource platformPlan :=
 
 theorem serverExpansionExact :
     SourceElaboratesExactlyTo serverSourceClosure serverExpandedSource := by
-  exact ClosedAsmSource.expansionExact serverSourceClosure
+  exact ClosedAsmSource.hierarchicalExpansionExact
+    serverSourceClosure serverFragmentExpansionExact
 ```
 
 The closure records exact macro definitions, static objects, imports,
@@ -698,35 +794,46 @@ theorem sourcePreservesFlowCredit :
   exact sourceImplementsHttp2Model.preserve flowCreditsConserved
 
 theorem sourceRespectsFixedStorage :
-    AssemblyNeverAllocatesAfterReady serverExpandedSource resourcePolicy := by
+    AssemblyNeverAllocatesAfterReady serverExpandedSource capturedResourcePolicy := by
   verify_asm_resource_calls
 
 def serverCancellationBlockMap :
     CancellationCfgMap serverExpandedSource serverCancellation :=
-  cancellation_cfg_map {
-    worker_gate => interruptible Std.Win32.Sleep.initializationGate
-    accept_wait => interruptible Std.Win32.Winsock.pollAndAccept
-    preface_loop => cancelpoint Http2.SafePoint.prefaceBoundary
-    connection_schedule => cancelpoint Http2.SafePoint.schedulerBoundary
-    receive_frames => interruptible Std.Win32.Winsock.pollAndReceive
-    frame_parse_loop => cancelpoint Http2.SafePoint.frameBoundary
+  cancellation_cfg_total {
+    service_loop => observe FixedPool.CancelPoint.rootShutdownObservation
+    worker_gate => observe FixedPool.CancelPoint.workerGateObservation
+    accept_wait => observe FixedPool.CancelPoint.acceptLoopObservation
+    preface_loop => observe Http2.CancelPoint.prefaceObservation
+    connection_schedule => observe Http2.CancelPoint.schedulerObservation
+    receive_frames => uncancellable Http2.Segment.boundedReceive
+    receive_result_observation => observe Http2.CancelPoint.receiveResultObservation
+    frame_parse_loop => safeState Http2.SafePoint.frameBoundary
     decode_fields => expands hpackDecoderCancellation
     send_selected_frame => uncancellable Http2.Segment.selectDebitSerialize
-    send_suffix_loop => expands partialSendCancellation
-    connection_draining => cancelpoint Http2.SafePoint.drainBoundary
+    send_suffix_loop => uncancellable Http2.Segment.boundedWritablePoll
+    send_readiness_observation => observe Http2.CancelPoint.writerReadinessObservation
+    send_positive => uncancellable Http2.Segment.commitSentPrefix
+    connection_draining => safeState Http2.SafePoint.drainBoundary
     connection_close => uncancellable Http2.Segment.closeAndReleaseConnection
-    connection_closed_boundary => cancelpoint Http2.SafePoint.connectionCustodyClosed
+    connection_closed_boundary => observe Http2.CancelPoint.connectionClosedObservation
+    console_handler => requestPublisher FixedPool.CancellationSource.consoleControl
     worker_return => terminal FixedPool.Terminal.workerDischarged
     finish_status => terminalChoice
       FixedPool.Terminal.normalDischarged
       FixedPool.Terminal.failedAdoption
     fatal_exit => terminal FixedPool.Terminal.failedAdoption
+    edges => classifyEveryExpandedEdgeByInstructionSemantics
   }
 
 theorem serverCfgCancellationRefines :
     CancellationCfgRefines
       serverExpandedSource serverCancellationBlockMap serverCancellation := by
   verify_cancellation_cfg
+
+theorem everyExpandedBlockAndEdgeIsClassified :
+    TotalCancellationCfgClassification
+      serverExpandedSource serverCancellationBlockMap :=
+  serverCfgCancellationRefines.total
 ```
 
 Straight-line instruction verification should symbolically execute and close
@@ -737,15 +844,19 @@ locally, and every jump/call proves its target entry contract. Novel assembly is
 therefore possible without forcing the author to restate the global server
 proof.
 
-The map is checked after transparent macro expansion. Every mapped safe point
-is a typed CFG block entry whose registers, stack, memory loans, capacity,
-pending cancellation occurrence, and obligations satisfy either the exact
-continuation contract or a terminal disposition. Callback arrival may latch a
-request but cannot jump to that block or pretend an interior instruction is
-safe. Fault edges retain their separately typed failed disposition.
+The comment-free fixture lists every expanded label, including setup, callback,
+success/failure unwind, cleanup, no-return and all frame/error blocks; every
+expanded edge is classified by its exact instruction semantics. A `safeState`
+only establishes custody/invariant shape. An `observe` block additionally loads
+or consumes the pending request and branches to its continuation/disposition.
+Callback arrival may latch a request but cannot jump to a safe state or pretend
+an interior instruction observed it. Fault edges retain their separately typed
+failed disposition, and the totality theorem rejects every reachable unmapped
+block.
 
-Positive fixtures include cancellation at a zero-window wait, an interrupted
-readiness call, per-stream RST_STREAM with sibling preservation, GOAWAY/drain,
+Positive fixtures include cancellation at a zero-window wait, a bounded
+readiness return followed by actual observation, conditional per-stream
+RST_STREAM or exact teardown, GOAWAY/drain,
 HPACK cancellation between slices, partial-send cancellation after exact prefix
 commit, and normal/failed terminal settlement. Negative fixtures require proofs
 of impossibility:
@@ -828,7 +939,7 @@ of these exact bytes executes the verified raw program and refines the spec.
 | receive window exhausted | FLOW_CONTROL_ERROR | stream or connection | no uncredited DATA admitted |
 | send windows zero | retain queued DATA and wait | stream/connection backpressure | control/sibling progress allowed |
 | control queue policy exceeded | bounded overload error | connection | no allocation attempt |
-| per-stream deadline | race once, RST_STREAM, reclaim slot | stream | siblings continue |
+| per-stream deadline | finish current frame then RST, or exact connection teardown | stream/connection | siblings continue only on RST branch |
 | peer RST_STREAM | discard/return stream-local queued custody | stream | exact reset observation |
 | peer GOAWAY | stop affected new work, drain prefix | connection | prefix semantics |
 | peer orderly close or recv/send failure | reclaim all connection descendants | connection | explicit connection outcome |

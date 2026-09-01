@@ -76,22 +76,31 @@ def resources : ConsoleBufferResourceModel :=
     (onExhaustion := .terminateWithNoOutput)
     (capacity := .noArtificialLimit)
 
-def sortContract {R : Type} [ResourceModel R] [BufferedSortResources R]
-    (resources : R) : BehaviorContract resources :=
-  Console.stableLineSortContract
+def lineStreamFormat : Format (Vec ByteArray) :=
+  Console.byteLineStreamFormat format
+
+def lineParserRequirement {R : Type} [ResourceModel R]
+    (resources : R) : ProcessRequirement resources :=
+  Format.parserRequirement lineStreamFormat
+
+def sortSuite {R : Type} [ResourceModel R] [BufferedSortResources R]
+    (resources : R) : SpecificationSuite resources :=
+  Console.stableLineSortSuite
     (resources := resources)
     (format := format) (order := order) (outcomes := SortOutcome)
+    (parser := lineParserRequirement resources)
 
 def sortSpec {R : Type} [ResourceModel R] [BufferedSortResources R]
-    (resources : R) : Specification resources :=
-  Specification.ofRelational (sortContract resources)
+    (resources : R) : SpecProcess resources :=
+  SpecProcess.capture (sortSuite resources)
     |>.onResourceExhaustion .allocationFailure
     |>.withLiveness
         (.terminatesUnder [.stdinEventuallyEOF, .environmentResponsive])
 
 theorem sortSpecCorrect {R : Type} [ResourceModel R] [BufferedSortResources R]
     (resources : R) : MeetsAllSpecificationTheorems (sortSpec resources) :=
-  Console.stableLineSortContractCorrect resources format order SortOutcome
+  Console.stableLineSortSuiteCaptureCorrect resources format order SortOutcome
+    (lineParserRequirement resources)
 
 theorem successfulTraceIffStableSorted
     {R : Type} [ResourceModel R] [BufferedSortResources R]
@@ -101,7 +110,7 @@ theorem successfulTraceIffStableSorted
   Console.stableLineSortContract_success_iff
     resources format order SortOutcome
 
-def spec : Specification resources := sortSpec resources
+def spec : SpecProcess resources := sortSpec resources
 
 def policy : TargetOutcomeProjection SortOutcome UInt32 :=
   .successOrFailure
@@ -348,13 +357,13 @@ structure PhysicalLineDesc where
   offset : UInt64
   length : UInt64
 
-def LineDescLayout : StructLayout where
+def LineDesc : StructLayout where
   fields := [(`offset, .u64), (`length, .u64)]
   alignment := 8
 
-theorem lineDesc_size : LineDescLayout.size = 16 := by decide
+theorem lineDesc_size : LineDesc.size = 16 := by decide
 theorem lineDesc_addr (base index : UInt64) :
-  elementAddress LineDescLayout base index = base + (index <<< 4) := by
+  elementAddress LineDesc base index = base + (index <<< 4) := by
   bv_decide
 
 structure SortStorage where
@@ -489,7 +498,7 @@ in-place implementation may replace the entire sub-CFG by proving the same
 `StableSortContract`; it need not resemble mergesort.
 
 Descriptor construction and the merge copy contain no manual occurrence
-annotations. `LineDescLayout` plus the scan/merge invariants identifies each
+annotations. `LineDesc` plus the scan/merge invariants identifies each
 whole initialized element, and the verifier transports its ordinal occurrence
 through the literal scalar loads/stores. Replacing those two loads/stores by one
 proved 128-bit move changes the local instruction proof but not the logical
@@ -543,15 +552,16 @@ those first-invalidated boundaries in `sortBindingMutationExpectations`.
 
 This is the complete intended machine source. It is one authored `asm_source`;
 generated `ImplementsBlock` and `SubCFG.plug` values are diagnostics. The
-local macros used below are transparent raw-instruction templates, not semantic
-helpers: their complete expansions follow the main CFG.
+local reusable forms used below are typed Lean fragment constructors, not a
+textual preprocessor and not semantic shortcuts: their complete expansions
+follow the main CFG.
 
 The comment-free fixture separates this one closed value into `Data.lean`,
-`Macros.lean`, and `Assembly.lean`. `Bindings.lean` combines the exact macro
-registry, static-object table, import table, and authored source as
+`Constructors.lean`, and `Assembly.lean`. `Bindings.lean` combines the exact
+constructor closure, static-object table, import table, and authored source as
 `sortSourceClosure`, derives `sortExpandedSource`, and proves
 `sortExpansionExact : SourceElaboratesExactlyTo sortSourceClosure
-sortExpandedSource`. `sortSourceClosureComplete` rejects unresolved macro,
+sortExpandedSource`. `sortSourceClosureComplete` rejects unresolved constructor,
 symbol, import, and helper references; `sortExpandedListingExact` ties the
 review listing to the generated raw instruction value. Only that expanded
 source reaches verification and emission.
@@ -595,7 +605,7 @@ def SortFrame : FrameLayout Win64 := frame_layout {
 It proves field non-overlap, stack ownership, the 216-byte extent, call-site
 alignment after eight pushes, and the unwind description. The assembly source
 uses operands such as `[rsp+SortFrame.stdout]`; lowering produces literal
-`[rsp+56]`. The table, representative derived comments, and fully lowered macro
+`[rsp+56]`. The table, representative derived comments, and fully lowered constructor
 expansions keep the exact instructions reviewable. An author may instead write
 `[rsp+56]` as a literal override, in which case the verifier checks that address
 directly without pretending it follows the named layout. Adding or reordering a field
@@ -776,10 +786,10 @@ descriptor_scan: @invariant represents_scanned_prefix(r8,r9,r10)
     mov  rax, r10
     shl  rax, 4
     lea  rdx, [rdi+rax]
-    mov  qword ptr [rdx+0], r9
+    mov  qword ptr [rdx + LineDesc.offset], r9
     mov  rcx, r8
     sub  rcx, r9
-    mov  qword ptr [rdx+8], rcx
+    mov  qword ptr [rdx + LineDesc.length], rcx
     add  r10, 1
     add  r8, 1
     mov  r9, r8
@@ -793,10 +803,10 @@ descriptor_suffix:
     mov  rax, r10
     shl  rax, 4
     lea  rdx, [rdi+rax]
-    mov  qword ptr [rdx+0], r9
+    mov  qword ptr [rdx + LineDesc.offset], r9
     mov  rcx, r14
     sub  rcx, r9
-    mov  qword ptr [rdx+8], rcx
+    mov  qword ptr [rdx + LineDesc.length], rcx
     add  r10, 1
 descriptor_scan_done:
     cmp  r10, rbp
@@ -841,7 +851,7 @@ merge_choose: @invariant stable_merge_cursors(i,j,k)
     mov  rax, rcx
     shl  rax, 4
     lea  r8, [rdi+rax]                    ; right descriptor
-    compare_records rdx, r8 -> eax
+    $(compareRecords rdx r8)
     cmp  eax, 0
     jle  merge_take_left                  ; equality is the stable choice
 merge_take_right:
@@ -857,10 +867,10 @@ merge_copy:
     mov  rax, qword ptr [rsp+SortFrame.k]
     shl  rax, 4
     lea  r8, [rsi+rax]
-    mov  rcx, qword ptr [rdx+0]
-    mov  qword ptr [r8+0], rcx
-    mov  rcx, qword ptr [rdx+8]
-    mov  qword ptr [r8+8], rcx
+    mov  rcx, qword ptr [rdx + LineDesc.offset]
+    mov  qword ptr [r8 + LineDesc.offset], rcx
+    mov  rcx, qword ptr [rdx + LineDesc.length]
+    mov  qword ptr [r8 + LineDesc.length], rcx
     add  qword ptr [rsp+SortFrame.k], 1
     jmp  merge_choose
 merge_drain_left:
@@ -911,17 +921,17 @@ emit_head: @invariant sorted_occurrence_consumer(finalDescriptors)
     jae  emit_final_flush
     shl  rax, 4
     add  rax, qword ptr [rsp+SortFrame.finalDescriptors] ; derived +168
-    mov  rdx, qword ptr [rax+0]
+    mov  rdx, qword ptr [rax + LineDesc.offset]
     add  rdx, r13
-    mov  r8, qword ptr [rax+8]
-    buffer_append rdx, r8 -> eax
+    mov  r8, qword ptr [rax + LineDesc.length]
+    $(bufferAppend rdx r8)
     cmp  eax, 1
     je   write_failed
     cmp  eax, 2
     je   no_progress
     lea  rdx, [rip + lf_byte]
     mov  r8d, 1
-    buffer_append rdx, r8 -> eax
+    $(bufferAppend rdx r8)
     cmp  eax, 1
     je   write_failed
     cmp  eax, 2
@@ -930,7 +940,7 @@ emit_head: @invariant sorted_occurrence_consumer(finalDescriptors)
     jmp  emit_head
 
 emit_final_flush:
-    flush_output -> eax
+    $(flushOutput)
     cmp  eax, 1
     je   write_failed
     cmp  eax, 2
@@ -938,17 +948,17 @@ emit_final_flush:
     jmp  exit_success
 
 stdin_unavailable:   @terminal(.stdinUnavailable)
-    failure_exit $policy
+    $(failureExit .stdinUnavailable)
 read_failed:         @terminal(.readFailed)
-    failure_exit $policy
+    $(failureExit .readFailed)
 resource_exhausted:  @terminal(.resourceExhausted)
-    failure_exit $policy
+    $(failureExit .resourceExhausted)
 stdout_unavailable:  @terminal(.stdoutUnavailable)
-    failure_exit $policy
+    $(failureExit .stdoutUnavailable)
 write_failed:        @terminal(.writeFailed)
-    failure_exit $policy
+    $(failureExit .writeFailed)
 no_progress:         @terminal(.noProgress)
-    failure_exit $policy
+    $(failureExit .noProgress)
 exit_success:       @terminal(.success)
     xor ecx, ecx
 exit:
@@ -970,7 +980,8 @@ output_buffer: resb 65536
 }
 ```
 
-The hygienic `compare_records` invocation expands at its use site to:
+The hygienic `$(compareRecords rdx r8)` constructor application expands at its
+use site to:
 
 ```text
 mov  rax, qword ptr [rdx+0]
@@ -1005,7 +1016,7 @@ xor  r9d, r9d
 It performs no call and changes only volatile registers. Bounds for both byte
 loads come from the two physical descriptors and `RepresentsLines`.
 
-`buffer_append pointer, length -> eax` stages an arbitrary-size slice in the
+`$(bufferAppend pointer length)` stages an arbitrary-size slice in the
 64 KiB static object. A record longer than the buffer crosses the flush backedge
 as many times as necessary; there is no line-size cap. The following is the
 exact derived expansion after named frame operands have become literal offsets:
@@ -1026,7 +1037,7 @@ mov  qword ptr [rsp+152], length          ; appendRemaining
     je   .append_complete
     cmp  qword ptr [rsp+176], 65536       ; outUsed
     jb   .append_have_room
-    flush_output -> eax                   ; expands to the block shown below
+    $(flushOutput)                         ; expands to the block shown below
     test eax, eax
     jnz  .append_restore                  ; 1 = failure, 2 = no progress
     jmp  .append_head
@@ -1053,9 +1064,9 @@ mov  qword ptr [rsp+152], length          ; appendRemaining
     mov  rdi, qword ptr [rsp+192]
 ```
 
-`flush_output -> eax` is not one `WriteFile`: it is the complete partial-write
+`$(flushOutput)` is not one `WriteFile`: it is the complete partial-write
 loop below. It is inlined hygienically at each invocation, including the one
-inside `buffer_append` and the final flush before success.
+inside `bufferAppend` and the final flush before success.
 
 ```text
 lea  rax, [rip + output_buffer]
@@ -1096,30 +1107,36 @@ mov  qword ptr [rsp+208], rax             ; flushRemaining
 .flush_done:
 ```
 
-Macro expansion occurs before CFG verification and erasure; the expanded
+Fragment expansion occurs before CFG verification and erasure; the expanded
 instructions, hygienic labels, violation edge, encodings, and proof obligations
-are inspectable. An author may inline or replace any macro. No scan, compare,
+are inspectable. An author may inline or replace any constructor. No scan, compare,
 merge, allocation, API, output, or terminal helper body is omitted.
 
-The macro headers declare these effects explicitly. `compare_records` clobbers
+The constructor result types declare these effects explicitly. `compareRecords` clobbers
 `rax, rcx, rdx, r8, r9, r10, r11` and flags, has one internal backedge, and
-touches only its two represented read slices. `buffer_append` clobbers the
+touches only its two represented read slices. `bufferAppend` clobbers the
 Win64 volatile set, flags, and temporary `rsi/rdi` values which it saves and
 restores; it requires the exact source slice readable and the destination spare
 range writable; it owns frame fields `appendPtr`, `appendRemaining`, `savedRsi`,
-`savedRdi`, and the fields delegated to `flush_output`; it has the append and
-full-buffer backedges and may take every flush exit. `flush_output` clobbers the
+`savedRdi`, and the fields delegated to `flushOutput`; it has the append and
+full-buffer backedges and may take every flush exit. `flushOutput` clobbers the
 Win64 volatile set and flags, owns `arg5`, `ioCount`, `ioRequest`, `flushPtr`,
 and `flushRemaining`, has the displayed partial-write backedge, and may pend,
 fail, report no progress, or enter the narrow excess-count violation edge. Both
-macros have zero additional stack footprint beyond `SortFrame`; neither changes
+constructors have zero additional stack footprint beyond `SortFrame`; neither changes
 `rsp`; both preserve all nonvolatile registers at their public exits. Hygiene
 alone proves none of this—the expanded CFG is checked against the declarations.
 
-`failure_exit $policy` is a proved transparent assembly macro expanding to
+Each declaration is universally quantified over its legal operands and frame
+placement. Its theorem is checked once for the generated sequence family; an
+application such as `$(compareRecords rdx r8)` contributes only operand typing,
+entry-contract matching, and exit-contract composition. The closed source still
+retains the exact expansion used for CFG discovery and encoding.
+
+`$(failureExit outcome)` is a proved fragment constructor expanding to
 `mov ecx, policy.status(outcome); jmp exit` for the incoming terminal tag. Its
 raw instructions and encoding remain inspectable, and an author may inline or
-replace them. The macro removes repeated status bookkeeping without inferring
+replace it. The constructor removes repeated status bookkeeping without inferring
 which semantic outcome occurred.
 
 The generated graph retains call pending, narrow violation-envelope, ordinary

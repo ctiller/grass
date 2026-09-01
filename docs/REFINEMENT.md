@@ -83,7 +83,7 @@ relational program, reactive application, process graph, or another Lean model:
 
 ```lean
 structure PortableSpecCertificate {R : Type u} [ResourceModel R]
-    {resources : R} (spec : Specification resources) where
+    {resources : R} (spec : SpecProcess resources) where
   Model : Type
   model : Model
   satisfies : ModelSatisfiesSpecification model spec
@@ -112,8 +112,8 @@ proofs. It includes sequencing, parallel composition, linking, shared-state
 composition, adapters, and proofs of noninteraction between independently
 running components.
 
-When the precious body is process-shaped, Act 2 proves that a selected
-`ProcessRealization` refines the abstract spec-process network. It need not have
+When a process presentation has been proved exact for the precious contract,
+Act 2 proves that a selected `ProcessRealization` refines that abstract network. It need not have
 the same number of processes or channels: one abstract connection session may
 be serialized, multiplexed through a reactor, or distributed across workers as
 long as the refinement preserves its denotation, causal ordering, linear state,
@@ -150,45 +150,65 @@ required. Independent local refinements commute when their boundaries,
 requirements, and shared-resource effects are disjoint or explicitly proved
 compatible.
 
-The author-facing staged form is indexed by an actual process-shaped
-specification, never by fictional projections from every `Specification`:
+The author-facing staged form is indexed by an exact, replaceable process
+presentation of the precious specification. No role projection is fabricated
+from an arbitrary behavior contract:
 
 ```lean
-structure ProcessShapedSpecification
+structure StagedProcessPresentation
     {R : Type u} [ResourceModel R] {resources : R}
-    (spec : Specification resources) where
+    (spec : SpecProcess resources) where
   network : AbstractSpecificationProcessNetwork resources
-  bodyEq : spec.body = .processes network
-
-def ProcessShapedSpecification.ofProcesses
-    (spec : Specification resources)
-    (network : AbstractSpecificationProcessNetwork resources)
-    (bodyEq : spec.body = .processes network) :
-    ProcessShapedSpecification spec :=
-  { network, bodyEq }
-
-def ProcessShapedSpecification.ofProtocolSpec
-    (spec : Specification resources)
-    (protocol : ProtocolSpec resources)
-    (exact : spec = Specification.fromProtocolSpec protocol) :
-    ProcessShapedSpecification spec :=
-  (ProtocolSpec.elaboratesToProcessNetwork protocol).shape.transport exact
-
-structure ProcessNormalization (spec : Specification resources) where
-  network : AbstractSpecificationProcessNetwork resources
-  denotationExact : network.traceDenotation = spec.body.denotation
-  requirementsExact : TransportedRequirements network denotationExact =
+  resourceSemanticsExact : forall schema,
+    (network.protocol schema).resourceSemantics = spec.resourceSemantics
+  denotationExact : network.traceDenotation = spec.contract
+  requirementsExact : TransportedProcessRequirements network denotationExact =
     spec.requirements
-  realizationTransport : ProcessRealization
-    (Specification.fromBody (.processes network)) -> ProcessRealization spec
+
+def StagedProcessPresentation.ofNetwork
+    (spec : SpecProcess resources)
+    (network : AbstractSpecificationProcessNetwork resources)
+    (resourceSemanticsExact : forall schema,
+      (network.protocol schema).resourceSemantics = spec.resourceSemantics)
+    (denotationExact : network.traceDenotation = spec.contract)
+    (requirementsExact :
+      TransportedProcessRequirements network denotationExact = spec.requirements) :
+    StagedProcessPresentation spec :=
+  { network, resourceSemanticsExact, denotationExact, requirementsExact }
+
+def StagedProcessPresentation.ofProtocol
+    (spec : SpecProcess resources)
+    (protocol : ProtocolSpec resources)
+    (resourceSemanticsExact :
+      protocol.resourceSemantics = spec.resourceSemantics)
+    (denotationExact : protocol.denotation = spec.contract)
+    (requirementsExact :
+      TransportedProtocolRequirements protocol denotationExact = spec.requirements) :
+    StagedProcessPresentation spec :=
+  (ProtocolSpec.elaboratesToProcessNetwork protocol).presentation
+    resourceSemanticsExact denotationExact requirementsExact
+
+structure ProcessNormalization (spec : SpecProcess resources) where
+  normalized : SpecProcess resources
+  resourceSemanticsExact :
+    normalized.resourceSemantics = spec.resourceSemantics
+  bodyExact : normalized.contract = spec.contract
+  requirementsExact : TransportRequirementsAcrossBodyEquality
+    normalized.requirements bodyExact = spec.requirements
+  processShape : StagedProcessPresentation normalized
+  realizationTransport : ProcessRealization normalized -> ProcessRealization spec
+  realizationTransportExact : forall realization,
+    RealizationTransportPreservesBodyRequirementsAndResourceSnapshot
+      realization (realizationTransport realization)
+      bodyExact requirementsExact resourceSemanticsExact
 
 def ProcessNormalization.shape
     (normalization : ProcessNormalization spec) :
-    ProcessShapedSpecification normalization.processSpecification :=
+    StagedProcessPresentation normalization.normalized :=
   normalization.processShape
 
 structure SubsystemRealization
-    (shaped : ProcessShapedSpecification spec)
+    (shaped : StagedProcessPresentation spec)
     (schema : shaped.network.RoleSchema) where
   implementation : PortableClosedSubgraph
     (shaped.network.protocol schema).boundary
@@ -202,19 +222,19 @@ structure SubsystemRealization
     FrontierRealized frontier
   requirements : RequirementDelta
 
-inductive BlendedNode (shaped : ProcessShapedSpecification spec)
+inductive BlendedNode (shaped : StagedProcessPresentation spec)
     (schema : shaped.network.RoleSchema)
   | abstract
   | realized (certificate : SubsystemRealization shaped schema)
 
-structure BlendedProcessGraph (shaped : ProcessShapedSpecification spec) where
+structure BlendedProcessGraph (shaped : StagedProcessPresentation spec) where
   nodes : forall schema : shaped.network.RoleSchema,
     BlendedNode shaped schema
   composition : MixedNodesComposeAtExactAbstractBoundaries nodes
   requirements : ExactUnionOfRealizedRequirementDeltas nodes
 
 structure PartialProcessRealization
-    (shaped : ProcessShapedSpecification spec)
+    (shaped : StagedProcessPresentation spec)
     (graph : BlendedProcessGraph shaped) where
   origin : ExactBlendedGraphOrigin shaped graph
   localRefinements : EveryRealizedNodeHasItsExactCertificate graph
@@ -223,12 +243,27 @@ def ProcessRealization.blend
     (graph : BlendedProcessGraph shaped) :
     PartialProcessRealization shaped graph
 
+structure ClosedBlend
+    (partial : PartialProcessRealization shaped graph)
+    (complete : EverySchemaRealizedParametrically graph)
+    (coherent : AccumulatedPortableRequirementsResourcesAndObligationsCoherent
+      partial) where
+  realization : ProcessRealization spec
+  provenance : ClosedBlendProvenance spec realization.boundary
+    realization.registry realization.plan realization.correct
+  exactSource : ProvenanceNamesExactPartialGraphAndCertificates
+    provenance partial
+  exactClosure : ProvenanceNamesExactClosureEvidence
+    provenance complete coherent
+  originExact : realization.origin = .blended
+    realization.registry realization.plan realization.correct provenance
+
 def PartialProcessRealization.close
     (partial : PartialProcessRealization shaped graph)
     (complete : EverySchemaRealizedParametrically graph)
     (coherent : AccumulatedPortableRequirementsResourcesAndObligationsCoherent
       partial) :
-    ProcessRealization spec
+    ClosedBlend partial complete coherent
 ```
 
 `RoleSchema` is finite static syntax; its `Instance` family may be infinite.
@@ -237,18 +272,25 @@ Thus one connection-session schema has a proof polymorphic in
 internally frontier-closed, so an abstract descendant cannot hide beneath an
 outer `.realized` tag.
 
-A relational or stream specification has no role projections and cannot be
-passed directly to `blend`. It first needs an explicit `ProcessNormalization`
-whose denotation and requirements are exact. The sequential adapter is one
-standard constructor of that witness. Staging then indexes the normalized
-process-shaped specification, and `realizationTransport` returns the closed
-realization to the original precious `spec`. Failure to construct normalization
-leaves direct relational realization available; it never fabricates roles.
+No specification has intrinsic role projections. Before `blend`, the author or
+library supplies an explicit `ProcessNormalization` whose denotation and
+requirements are exact. A protocol presentation and the sequential adapter are
+standard constructors. The normalized `SpecProcess`, its process-shaped
+presentation, equality of the retained resource snapshot, body/denotation
+transport, requirement transport, and realization transport are actual fields.
+No constructor calls `SpecProcess.fromBody` or re-runs
+`CapturesResourceSemanticsFor`; staging remains indexed by the captured
+snapshot. `realizationTransport` returns the closed realization to the original
+precious `spec` with all three equalities. Failure to construct normalization
+leaves direct relational realization available; it never fabricates roles or
+changes the specification.
 
 An abstract node is proof-visible but not executable. A runnable prototype uses
 a proved mock/interpreter `SubsystemRealization`; unresolved abstraction is not
-silently trusted. `VerifiedProgram` accepts only the exact value produced by
-`close`, never a partial blend or closure evidence belonging to another graph.
+silently trusted. `VerifiedProgram` accepts `closed.realization` only together
+with its indexed `ClosedBlend`; it never accepts a partial blend or closure
+evidence belonging to another graph. The realization's `.blended` origin
+retains that same dependent provenance after ordinary process APIs hide staging.
 
 This Act-2 blend is portable. It may introduce a Vulkan, IOCP, or other provider
 requirement and prove refinement to that provider's abstract API model, but it
@@ -259,20 +301,26 @@ supports a second, machine-indexed blend:
 ```lean
 structure MachineSubsystemRealization
     (driver : ProjectedDriverCertificate portable projection)
-    (scope : ClosedBlendScope driver.plan.processOrigin) where
+    (scope : ClosedProcessOriginScope driver.plan.processOrigin) where
   source : HeterogeneousMachineSource driver.plan scope
   local : SourceRefinesExactClosedScope source scope
   boundary : MachineSourceExportsExactDriverBoundary source scope
   crossIsa : EveryCrossIsaEdgeConnected source driver.plan scope
 
-structure MachineBlend (driver : ProjectedDriverCertificate portable projection) where
-  nodes : forall scope : driver.plan.processOrigin.closedScopes,
-    MachineSubsystemRealization driver scope
+structure MachineBlend
+    (driver : ProjectedDriverCertificate portable projection) where
+  origin : ProcessPlanSource spec driver.plan.boundary
+  originExact : origin = driver.plan.processOrigin
+  nodes : forall scope : ClosedProcessOriginScope origin,
+    MachineSubsystemRealization driver (originExact ▸ scope)
   coverage : EveryReachableClosedScopeAppearsExactlyOnce nodes
   coherent : MachineSourcesAbiIsaAndProviderCoherent driver nodes
 ```
 
-`MachineCertificate` consumes this exact `MachineBlend`; it cannot reconstruct
+`MachineCertificate` consumes this exact `MachineBlend`, whose dependent
+`origin` is the exact `ProcessPlanSource` value retained by the platform plan.
+For a `.blended` origin that value contains the exact graph and closure
+certificates; it cannot be reconstructed from a lookalike plan or replaced by
 an extensionally similar source. This is where one team may finish the Vulkan
 x86/SPIR-V source proof before another finishes the IOCP x86 source proof,
 without losing either artifact connection at the final gate.
@@ -543,6 +591,36 @@ structure BlockCacheLocator where
   consumedBoundary : CanonicalBoundaryFacet
   environment : SemanticEnvironmentRoot
 
+structure SourceFragmentClosure (fragment : AuthoredSourceFragment) where
+  expanded : RawInstructionFragment
+  expansionExact : FragmentExpansionExactly fragment expanded
+  symbols : FragmentSymbolSummary fragment expanded
+  imports : FragmentImportSummary fragment expanded
+  boundaries : FragmentBoundarySummary fragment expanded
+  resolved : EveryReferenceResolvedLocallyOrExported fragment symbols
+  certificate : FragmentMachineCertificate expanded boundaries imports
+
+inductive SourceClosureNode
+  | fragment (source : AuthoredSourceFragment)
+      (closed : SourceFragmentClosure source)
+  | shard (children : Array SourceClosureNode)
+      (summary : ComposedSourceSummary children)
+      (interfacesExact : ChildExportsImportsMatchExactly children summary)
+      (composition : ChildMachineCertificatesCompose children summary)
+  | component (children : Array SourceClosureNode)
+      (summary : ComposedSourceSummary children)
+      (interfacesExact : ChildExportsImportsMatchExactly children summary)
+      (composition : ChildMachineCertificatesCompose children summary)
+
+structure HierarchicalClosedAsmSource where
+  root : SourceClosureNode
+  sourceCoverage : EveryAuthoredFragmentAppearsExactlyOnce root
+  macroCoverage : EveryMacroDefinitionAndExpansionIsAClosedFragment root
+  staticCoverage : EveryStaticObjectAndSymbolIsOwnedByOneFragment root
+  importCoverage : RootHasNoUnresolvedInternalReference root
+  rawListing : HierarchicalConcatenation root
+  listingExact : RawListingObtainedByRecursiveChildConcatenation root rawListing
+
 structure BlockReplayEntry where
   locator : BlockCacheLocator
   module : ImportedKernelCheckedLeanModule
@@ -566,10 +644,20 @@ inductive ReplayNode
       (root : MerkleRoot (children.map ReplayNode.root, certificate.typeHash))
 
 structure VerifiedReplayManifest where
+  source : HierarchicalClosedAsmSource
   root : ReplayNode
-  complete : EverySelectedBlockAppearsExactlyOnceInHierarchy root
-  cleanRebuild : ReconstructsIdenticalRootAndCertificatesFromSources root
+  complete : EverySelectedBlockAppearsExactlyOnceInHierarchy source root
+  cleanRebuild : ReconstructsIdenticalRootAndCertificatesFromSources source root
 ```
+
+Source closure is proved at leaves and composed through exported summaries.
+Macro definitions, their transparent expansions, static data, and ordinary raw
+fragments all enter as `SourceFragmentClosure` leaves. A shard theorem consumes
+only child summaries and certificates; it does not reduce a single aggregate
+array of all instructions. `listingExact` is a tree induction using child
+concatenation theorems. The final writer may stream that hierarchy into one byte
+artifact, but a leaf edit rechecks the changed fragment and its ancestor
+composition nodes rather than rerunning whole-source `decide`.
 
 `IdentityFacets` keeps separate canonical hashes for adopted/authored source,
 semantic boundary interfaces, raw machine code, and serialized artifact bytes.
@@ -635,6 +723,14 @@ compose those modules; it does not intercept sub-declaration elaboration,
 deserialize unchecked proof objects, or modify the kernel. If measured Lean
 module/import overhead makes a proposed shard size uneconomic, the policy must
 coarsen the shard rather than assume a custom kernel frontend.
+
+The 1M/10M+ corpus and locality reports are future acceptance evidence, not
+facts established by the current five design spikes. Until reproducible source
+generators, retained `LocalityContract`, `InvalidationPlan`, and
+`BuildExecutionReport` artifacts, and clean/incremental measurements exist in
+the repository, the hierarchical scheme is a proposed architecture with an
+unpassed scale gate. No document or certificate may infer target-scale proof
+economics from the small fixtures or from asymptotic prose alone.
 
 The pipeline is complete only with a composed connection chain from the original
 specification to the final loaded artifact. Pairwise theorems that are never

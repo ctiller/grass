@@ -657,3 +657,352 @@ dependent interfaces do not preserve the selected capability semantics or
 connect staged values to the final machine/artifact gate. Section 12 is not yet
 a constructive proof sketch for its advertised theorem family. No file other
 than this review report was edited, and no undeveloped library was built.
+
+# Total-system adversarial review — round 17
+
+Commit reviewed: `420233e`.
+
+This round reread the current governing interfaces and all five spike source
+trees. Three fresh-context reviews independently attacked HTTP/2 cancellation,
+resource/staged interfaces, and whole-spike shippability; this section is the
+integrated review, including conflicts which become visible only across those
+axes. The review did not treat a theorem-shaped identifier as evidence: the
+`Grass.*` library is absent by stated scope (`Spikes/README.md:3-6`), so the
+spikes can pressure-test an interface but cannot claim compiled proof closure or
+hide a required instruction body in that future library.
+
+The trust-source lint is clean: no spike proof contains `sorry`, `admit`,
+`axiom`, unsafe proof promotion, or `native_decide`. Kernel `decide` remains
+permitted. That does not cure false statements, missing source, or an
+uncheckable dependency boundary.
+
+## Round 16 closure audit
+
+| Round 16 finding | Round 17 status |
+|---|---|
+| 1. Resource value did not pin its capability dictionary | **Still open.** A snapshot was added, but its selected axes are not tied to the captured dictionary; finding 8. |
+| 2. Staged graph did not type against `Specification` | **Partially repaired.** Staging now requires a process-shaped witness, but `ProcessNormalization.shape` projects nonexistent fields and normalization reopens resource capture; finding 9. |
+| 3. `close` did not consume its partial realization | **Locally repaired, globally open.** `close` now consumes `partial`, but returns a `ProcessRealization` whose origin cannot retain that graph; finding 10. |
+| 4. Top-level closure was not recursive | **Stated, not demonstrated.** `internalFrontiersClosed` and schema-parametric closure are the right interface direction; the fixture premises are undeclared and uncompiled; finding 10. |
+| 5. Machine artifacts were introduced early and then lost | **Architecturally improved, not connected.** Portable and machine blends are separated, but the closed portable graph provenance is erased before machine scope selection; finding 10. |
+| 6. Cube source closure used `native_decide` | **Trust issue closed.** It now uses kernel `decide`; the asserted closure is nevertheless false for displayed symbols and uneconomical at target scale; findings 3 and 11. |
+| 7. Precious resource policy had no concrete junction | **Partially repaired.** `ResourceAxisRealizationFamily` is mandatory, but axis identity remains underspecified and several spike root bounds are not exposed; finding 15. |
+| 8. Section 12 omitted constructive infinite behavior | **Substantially repaired in prose.** It now names initialization, a total constructor classifier, silent rank, productive extension, divergence reflection, frontier preservation, and fairness projection (`PROOF_FEASIBILITY.md:811-907`). Required executable mutations remain absent; findings 10-11. |
+| 9. No staged fixture existed | **File added, evidence absent.** `Staged.lean` is useful proposed caller syntax, but its single-use cube/engine witnesses are undeclared; finding 10. |
+| 10. Precious specs overauthored topology | **Materially improved.** Sort and gzip are relational, and the remaining web/cube roles correspond to independently observable custody, ordering, or cancellation. Sort still makes an erased stability property precious; finding 16. |
+
+## Findings
+
+### 1. [P0] The corpus still does not contain the full assembly required to build Web or Cube
+
+The corpus explicitly says its imported `Grass.*` libraries do not exist
+(`Spikes/README.md:3-6`). Nevertheless, every Web macro is only a reference to an
+absent library value (`Spikes/4_Web_Server/Macros.lean:6-121`). Those references
+hide the frame parser, HPACK decoder, stream state machine, queues, flow-control
+accounting, bounded ring, deadline logic, and writer selection invoked by
+`Spikes/4_Web_Server/Assembly.lean:229-567`. Cube likewise registers absent
+`AsmMacro.*` implementations (`Spikes/5_Spinning_Cube/SourceClosure.lean:145-162`)
+for device enumeration, selection, allocation, swapchain retirement and reverse
+cleanup. `serverSourceClosure.expand` and `cubeSourceClosure.expand` name future
+computations; no raw expanded listing is present to review.
+
+This is not merely missing proof infrastructure. It violates the spike rule
+that the complete assembly to build the program is present and prevents review
+of whether the invented standard-library semantics are implementable at a sane
+proof cost.
+
+**Failure fixture:** remove the future library import and attempt to enumerate
+the raw instruction, data, frame, import and relocation manifests. Web loses
+most of its program and Cube cannot expand its policy-bearing pseudo-operations.
+
+**Required closure:** check in the actual transparent macro implementations and
+reproducible expanded raw manifests/listings, or inline them. The source-closure
+proof must consume those exact reviewed values. A semantic macro contract may
+hide routine proof ceremony from an application author; it may not hide the
+only implementation body from the corpus being reviewed.
+
+### 2. [P0] Cube's Win64 callback cannot address the state it mutates
+
+`state` is a packed object in the entry routine's stack frame
+(`Spikes/5_Spinning_Cube/SourceClosure.lean:94-124`, especially line 97). Its
+address is passed only as `CreateWindowExW`'s creation parameter
+(`Spikes/5_Spinning_Cube/Assembly.lean:170-171`). `wndproc` neither handles
+`WM_NCCREATE`, recovers `CREATESTRUCT.lpCreateParams`, stores `GWLP_USERDATA`,
+nor otherwise obtains that pointer. It nevertheless accesses `state.width`,
+`state.height`, `state.resize`, `state.exit`, and `state.hwndOwned` from a
+distinct callback stack (`Assembly.lean:187-221`). An entry-frame symbolic
+offset cannot denote the corresponding object relative to the callback's
+`rsp`.
+
+**Failure fixture:** deliver `WM_SIZE` synchronously during `CreateWindowExW`, as
+Win32 permits. The callback writes through no recovered state pointer; the
+entry's state remains unchanged or unrelated callback-stack memory is damaged.
+
+**Required closure:** on `WM_NCCREATE`, recover the passed pointer and store it
+with `SetWindowLongPtrW`; recover it with `GetWindowLongPtrW` on later messages,
+adding exact imports, provider protocols and lifetime proof. Alternatively use a
+declared static singleton and narrow the product to one window. Prove callback
+access remains valid until callback unregistration/window destruction.
+
+### 3. [P0] The displayed Cube source cannot satisfy its own source-closure and frame claims
+
+The host references `vkCreateInstanceName` and `vkCreateInstancePtr`
+(`Spikes/5_Spinning_Cube/Assembly.lean:232-240`), but the static table declares
+neither; the instance function-name table starts with `vkDestroyInstance`
+(`SourceClosure.lean:13-26`). Device creation passes `&swapchainExt`
+(`Assembly.lean:264-272`), while the declared pointer array is `deviceExts`
+(`SourceClosure.lean:134-135`). These are direct unresolved-symbol
+counterexamples to `cubeSourceHasNoUnresolvedForms` (`SourceClosure.lean:176-178`).
+
+The frame also declares none of `emptyVertexInput`, `lineList`,
+`oneDynamicViewport`, `lineRaster`, `sample1`, `colorAttachment`, `opaqueBlend`,
+`dynamicStates`, or `viewportScissor`, although all are passed to graphics
+pipeline creation (`Assembly.lean:371-380`) and the design says they are
+materialized host-frame structures (`SPIKE_5.md:1503-1534`). The two
+`shaderStages` records are allocated in the frame but never visibly populated
+after module creation (`Assembly.lean:299-312`).
+
+**Required closure:** declare every static symbol and every authored or
+macro-demanded frame object; initialize every nonzero Vulkan structure and both
+stage records; pack their dependent frame demands; and prove all symbolic
+addresses resolve exactly once with nonoverlapping lifetimes. Add mutations for
+each missing name/object before reinstating the empty-unresolved-form theorem.
+
+### 4. [P0] A pre-ready worker-creation failure publishes `.ready`
+
+On `CreateThread` failure the source sets failure status and `shutdown`, then
+jumps to `resume_workers` (`Spikes/4_Web_Server/Assembly.lean:64-82,108-112`).
+After resuming the successfully created prefix, `resume_loop` unconditionally
+branches to `publish_ready`, stores `start_gate = 1`, and only then enters the
+shutdown service/join path (`Assembly.lean:84-105`). This contradicts the stated
+requirement that pre-ready worker failure never publishes readiness and
+discharges acquired resources before a nonzero exit
+(`docs/WEB_SERVER.md:88-90`).
+
+**Required closure:** split successful startup from failure unwinding. Resume a
+created suspended prefix only through a failure gate which cannot publish
+readiness or serve; join/close that prefix, unregister the console handler,
+close the listener, end Winsock and exit nonzero. Add a failure fixture for each
+creation index and for `ResumeThread` failure.
+
+### 5. [P0] The unconditional eventual-RST theorem is false under the accepted frame rule
+
+`streamResetCancelsOnlyAddressedIncarnation` concludes an eventual exact
+`RST_STREAM` from only a cancellation request
+(`Spikes/4_Web_Server/Cancellation.lean:260-266`). The accepted policy requires a
+stream cancellation to finish an already partially emitted frame before that
+reset; only connection teardown may dispose the suffix
+(`docs/WEB_SERVER.md:143-149`; `Cancellation.lean:274-282`). If a peer stops
+accepting bytes after a positive partial send, the suffix cannot finish. A
+connection timeout/failure may lawfully close it, in which case no RST is put on
+the wire.
+
+**Required closure:** state the real result:
+`finishCurrentFrameThenRst ∨ connectionTeardownWithExactSuffixDisposition`.
+Derive the first branch only under named fairness, writable-peer and
+connection-survival premises. Keep the connection-timeout escalation theorem
+separate.
+
+### 6. [P0] Spike 4 assigns interruption semantics to provider calls its machine never interrupts
+
+The cancellation construction uses `interruptibleCall` for poll, receive, send,
+accept and `Sleep` (`Spikes/4_Web_Server/Cancellation.lean:31-54,161-185`). The
+selected program instead uses nonblocking sockets, bounded `WSAPoll`, ordinary
+bounded `Sleep`, and a console callback which merely stores `shutdown`
+(`Assembly.lean:100-106,164-168,183-226`). It imports no cancel operation. The
+standard-library rule requires an interruptible foreign call to name the
+provider interrupt, result/cancel race, returned custody and late-result handling
+(`docs/STDLIB.md:218-228`). No such machine action exists here.
+
+**Required closure:** model these selected calls as bounded uncancellable calls
+followed by an actual cancellation observation point. Reserve
+`interruptibleCall` for an IOCP/event/CancelIoEx-style realization whose exact
+provider cancellation protocol is in the platform plan and source.
+
+### 7. [P0] The cancellation CFG map is neither operational nor total
+
+The map calls `preface_loop`, `frame_parse_loop` and `connection_draining`
+cancellation points (`Spikes/4_Web_Server/Bindings.lean:24-48`). At
+`frame_parse_loop` the machine immediately parses/dispatches, and
+`connection_draining` is only an unconditional jump
+(`Assembly.lean:310-345,557-558`). Neither observes a pending request, consumes
+its affine authority, or transfers control to a disposition. A custody-safe
+state is not by itself a cooperative cancellation point.
+
+The purported whole-server map also omits material blocks and loops including
+`create_workers`, `resume_loop`, `service_loop`, `join_workers`,
+`console_handler`, accepted-connection setup/failure and `send_positive`
+(`Assembly.lean:64-168,219-238,514-522`). In particular the root cancellation
+summary is claimed by the final server facet while its actual service loop is
+not mapped.
+
+**Required closure:** distinguish safe-state predicates from machine
+cancellation-observation/control-transfer edges. Require total post-expansion
+basic-block and edge classification, with explicit setup, callback, fault,
+cleanup and no-return cases. Add actual request polls/branches at every mapped
+logical cancel point and reject every unmapped reachable block.
+
+### 8. [P0] The selected resource snapshot still permits unrelated axis semantics
+
+`SelectedResourceSemantics` stores `requiredAxes` and its `axes` function
+separately from `capabilities`; `fromConstruction` mentions only
+`capabilities` (`docs/SEMANTICS.md:159-165`). No displayed equality says the
+selected axis operations, limits, exhaustion or lifecycle values are the entries
+of that captured dictionary. A constructor can therefore snapshot one
+capability dictionary while supplying different axis semantics.
+
+**Required closure:** use one finite dependent capability map. Derive
+`requiredAxes` from its keys and every selected axis by proof-indexed lookup.
+Make construction provenance a property of that entire map, not a neighboring
+field.
+
+### 9. [P0] `ProcessNormalization` is ill-typed and can recapture resource semantics
+
+The displayed structure has only `network`, `denotationExact`,
+`requirementsExact`, and `realizationTransport`
+(`docs/REFINEMENT.md:177-183`). Its `.shape` definition projects nonexistent
+`normalization.processSpecification` and `normalization.processShape`
+(`REFINEMENT.md:185-188`). Moreover, the source type of `realizationTransport`
+reconstructs `Specification.fromBody`, which invokes a fresh ambient
+`CapturesResourceSemanticsFor` instead of being indexed by the original
+`spec.resourceSemantics`.
+
+**Required closure:** store an explicit normalized specification, equality of
+its resource snapshot to the original snapshot, body/denotation and requirement
+transport, and the process-shaped witness as actual fields. Construct the
+normalized value using the retained snapshot directly; do not rerun instance
+search.
+
+### 10. [P0] Portable staged closure erases its provenance, and the proposed fixture supplies names rather than evidence
+
+`PartialProcessRealization.close` now consumes the exact partial value, but
+returns a plain `ProcessRealization spec` (`docs/REFINEMENT.md:226-231`). Its
+`ProcessPlanSource` has only `sequential` and `explicit` origins
+(`docs/PROCESS.md:1351-1369`), so it cannot retain the exact blended graph as
+`PROOF_FEASIBILITY.md:892-907` claims or dependently determine the later machine
+closed scopes.
+
+The new staged file does not falsify this interface. Its cube- and engine-specific
+boundary, completeness, coherence, resource, progress, commutation and rejection
+witnesses are undeclared single-use identifiers throughout
+`Spikes/5_Spinning_Cube/Staged.lean:9-101,131-188`. The feasibility document
+admits that the future theorem has not compiled (`PROOF_FEASIBILITY.md:941-946`).
+
+**Required closure:** introduce a dependent `ClosedBlend` or a blend constructor
+in `ProcessPlanSource` retaining the exact graph, local certificates and closure
+proof. Index platform closed scopes and `MachineBlend` by that value. Then make
+the staged fixture elaborate against actual definitions, including the required
+negative mutations; a list of desired theorem names is not closure evidence.
+
+### 11. [P0] The mandatory million-to-tens-of-millions proof-economics gate has no evidence
+
+The acceptance rule requires one-million and ten-million-plus instruction
+fixtures, at least one thousand boundary shapes, heterogeneous instruction and
+process/resource structure, plus clean and incremental work counts
+(`docs/PROOF_FEASIBILITY.md:755-784`; `docs/REFINEMENT.md:603-637`). No such
+fixture, manifest, execution report or measurement exists in the corpus. The
+current small design spikes cannot falsify flat normalization, global manifest
+reconstruction, import explosion, or whole-source kernel reduction.
+
+Cube already exposes the likely failure mode: whole-expansion `decide` proofs
+for unresolved forms and manifest equality
+(`Spikes/5_Spinning_Cube/SourceClosure.lean:176-182`) ask the kernel to traverse
+the aggregate source. That is not a demonstrated hierarchical closure path for
+tens of millions of instructions.
+
+**Required closure:** add reproducible generated 1M and 10M+ corpora, retained
+machine-readable `LocalityContract`, `InvalidationPlan` and
+`BuildExecutionReport` artifacts, and boundary-preserving mutations with actual
+elaboration/kernel/cache counts. Source closure must aggregate proved per-macro
+and per-shard manifests hierarchically; it must not normalize a monolithic
+listing for every leaf edit.
+
+### 12. [P1] `exportedContract` adds ceremony but the facet bridges discard its exactness witness
+
+`toCooperativeTerminationFacet` derives `exactSummary` and never uses it before
+returning `.cooperative contract`; the supervised bridge likewise returns the
+bare contract (`docs/PROCESS.md:1153-1171`). The `TerminationFacet` constructors
+accept `ProcessTerminationContract` directly (`PROCESS.md:1087-1097`). Thus the
+summary-export equality is neither needed to prevent manufacturing liveness—the
+contract already contains `reachesSafePoint`—nor retained to connect the facet
+to `pendingCustody`, the exact affine request occurrence, or incarnation.
+
+**Required closure:** choose one source of truth. Either make the facet carry
+`ContractExactlySummarizesCancellation summary ...` and use it in cancellation
+transitions, or remove `exportedContract` and construct the self-contained
+termination contract directly. Do not make authors prove and consumers store an
+exactness bridge which vanishes at the only conversion point.
+
+### 13. [P1] The HPACK cancellation theorem does not distinguish committed and working decoder states
+
+`hpackCancellationPreservesLastCommittedState` takes one `DecoderState state`,
+assumes `CancellationDuringDecode state`, and promises cancellation with that
+same state (`Spikes/4_Web_Server/Cancellation.lean:284-288`). The requirement
+distinguishes the last committed decoder state from mutable in-slice working
+state (`docs/WEB_SERVER.md:134-139`). The theorem as written either blesses a
+mid-mutation value or hides the essential rollback/commit relation inside an
+opaque predicate.
+
+**Required closure:** quantify `committed` and `working`, relate slice start and
+mutation to them, and prove cancellation returns exactly `committed` or finishes
+the slice and returns a separately named committed successor.
+
+### 14. [P1] Shutdown repeatedly enqueues GOAWAY without a visible idempotence or failure law
+
+Every visit to `connection_schedule` with global shutdown set invokes
+`h2_enqueue_goaway`; `connection_shutdown` invokes it again, and neither call
+checks a result (`Spikes/4_Web_Server/Assembly.lean:265-272,553-558`). The control
+queue is bounded to 32 entries (`Resource.lean:17`). The macro alias
+`beginGracefulShutdown` (`Macros.lean:114-115`) does not expose at the call site
+that repeated use consumes no slot, preserves the frozen last-stream prefix, or
+cannot fail.
+
+**Required closure:** carry an explicit `goawayPublished` state and take one
+enqueue transition, or expose a proved idempotent result which the caller checks.
+Prove the drain loop makes progress or reaches its close/escalation frontier.
+
+### 15. [P1] Resource parametrization and concrete-axis identity remain incomplete
+
+The generic `webServerSpec resources` uses global `behaviorPolicy`, which in turn
+hardcodes the selected global `resourcePolicy` for HPACK limits
+(`Spikes/4_Web_Server/Spec.lean:13-33,45-67`). Instantiating the generic function
+with a resource model having a different table limit does not change that
+behavior. This defeats the advertised reusable resource-parameterized spec
+family even though the currently selected instance happens to agree.
+
+At the realization junction, `ResourceAxisRealization` takes an abstract axis
+but chooses an unrelated `metricAxis : metric.Axis`; no displayed key equality
+connects them (`docs/PROCESS.md:1288-1309`). Web exports per-stream/per-connection
+resident bounds and root socket/handle bounds, but no whole-server resident-byte
+bound; Hello, Sort and Gzip expose no concise concrete root-resource theorem.
+
+**Required closure:** derive every observable policy limit from the passed and
+captured resource semantics. Index the concrete axis by required-axis membership
+and an exact injective key mapping. Export one root resource equation/bound per
+spike from that mandatory family, with scoped projections where useful.
+
+### 16. [P1] Sort makes erased occurrence stability a precious product demand
+
+The observable success theorem is over input and output `ByteArray`, but
+`stableSorted` demands preservation of hidden occurrence ordinals
+(`Spikes/2_Sort/Spec.lean:16-27,48-54`). Equal line values serialize identically;
+swapping two equal occurrences cannot change the output bytes. The document
+itself notes that encoding erases ordinals (`docs/SPIKE_2.md:185-199`). Requiring
+stability therefore constrains the algorithm/model proof without constraining
+this program's correctness.
+
+**Required closure:** make the precious CLI contract a sorted permutation of
+normalized byte lines. Retain stable occurrence identity only as an optional
+component theorem or for a future interface which exposes record identity.
+
+## Round 17 fixpoint decision
+
+**No fixpoint.** Round 17 has eleven P0 blockers and five P1 semantic/economic
+defects. The process/resource/staged prose improved materially, Section 12 now
+states the right finite/infinite obligations, and Sort/Gzip use the correct
+model-correctness then assembly-refinement boundary. Those gains do not overcome
+missing buildable assembly, false Cube closure, an invalid callback, false HTTP
+cancellation claims, nonoperational CFG cancellation mapping, or uncompiled
+dependent interfaces. The target-scale proof-economics claim remains wholly
+unmeasured. No file other than this review report was edited, and no undeveloped
+library was built.

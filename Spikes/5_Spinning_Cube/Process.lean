@@ -4,6 +4,24 @@ import Spikes.«5_Spinning_Cube».Spec
 
 namespace Grass.Spikes.SpinningCube
 
+inductive CubeRole
+  | input
+  | sceneAnimator
+  | surfacePresenter
+  | termination
+
+def cubeProtocol : AbstractSpecificationProcessNetwork resources :=
+  Graphics.interactivePresentationProtocol
+    (roles := CubeRole)
+    (resources := resources)
+    (scene := scene)
+    (accepts := CubeObservation.Accepts)
+
+def cubeProcessPresentation : ProcessPresentation spec where
+  network := cubeProtocol
+  denotationExact := Graphics.interactivePresentationDenotesSceneContract
+  requirementsExact := Graphics.interactivePresentationRequirementsExact
+
 structure DesiredCubeView where
   extent : Nat × Nat
   sampledAt : MonotonicInstant

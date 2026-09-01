@@ -10,6 +10,8 @@ Grass/
     Logical/     pure Vec/ByteArray, lists, maps, iterators and algebraic laws
     Owned/       OwnedVec, physical slices, allocation and cleanup realizations
   Semantics/     execution, traces, observations, oracle, progress
+  Specification/ common contract fragments, typed junctions, suite composition
+  Grammar/       typed text/binary formats, derivations, streaming parser and writer laws
   Process/
     Protocol/    nominal registries, demands/results, optional view facets
     Network/     populations, lifecycle, Hoare channels, escrow, supervision
@@ -24,6 +26,7 @@ Grass/
   Effect/        abstract law-bearing monads and requirements
   Weave/         composition and noninteraction
   CFG/           block contracts, edges, loops, calls, stack shapes
+  Construct/     layouts, placement, verified instruction-fragment generators
   Op/            existential ghost/raw operation interfaces and erasure
   ISA/
     X86/         common, Intel, AMD, encoding, decoding, validation metadata
@@ -32,7 +35,7 @@ Grass/
   Platform/
     Win32/
   Artifact/
-    Binary/      byte readers/writers and general parser laws
+    Binary/      concrete readers/writers realizing Grammar formats
     COFF/
     PE/
   Verify/        VerifiedProgram and composed connection theorems
@@ -58,7 +61,7 @@ author modules which pressure-test the interfaces without pretending to compile:
 ```text
 Spikes/
   1_Hello_World/     Resource Spec Projection Process Plan Assembly Program Artifact
-  2_Sort/            Resource Spec Projection Process Model Plan Data Macros Assembly Bindings Program Artifact
+  2_Sort/            Resource Spec Projection Process Model Plan Data Constructors Assembly Bindings Program Artifact
   3_Gzip/            Resource Spec Projection Process Model Plan Data Assembly Bindings Program Artifact
   4_Web_Server/      Resource Spec Projection Model Process Cancellation Plan Data Macros Assembly SourceClosure Bindings Program Artifact
   5_Spinning_Cube/   Resource Spec Projection Process Staged Model Plan Assembly SourceClosure Program Artifact

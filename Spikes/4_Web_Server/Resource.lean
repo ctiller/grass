@@ -20,6 +20,7 @@ def resourcePolicy : MemoryServerResourcePolicy where
   maxTransmitBytesPerConnection := 65535
   maxSocketDescriptors := 5
   maxThreadHandles := 4
+  pollQuantum := .milliseconds 10
   streamProgressDeadline := .seconds 5
   connectionIdleDeadline := .seconds 30
   storage := .fixedAfterReady

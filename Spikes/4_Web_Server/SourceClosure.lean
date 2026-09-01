@@ -3,10 +3,17 @@ import Spikes.«4_Web_Server».Assembly
 namespace Grass.Spikes.WebServer
 
 def serverSourceClosure : ClosedAsmSource platformPlan :=
-  ClosedAsmSource.close serverSource serverMacros serverStaticObjects serverImports
+  ClosedAsmSource.closeWithFragmentHierarchy
+    serverSource serverMacros serverFragmentHierarchy
+    serverStaticObjects serverImports
 
 theorem serverSourceClosureComplete : SourceClosureComplete serverSourceClosure := by
-  validate_source_closure
+  validate_hierarchical_source_closure
+
+theorem serverSourceClosureOwnsEveryHelperBody :
+    EverySelectedOperationHasExactlyOneLocalConstructorBody
+      serverMacros serverFragmentHierarchy :=
+  serverFragmentHierarchyComplete
 
 def serverExpandedSource : RawAsmSource platformPlan :=
   serverSourceClosure.expand
@@ -19,7 +26,8 @@ theorem serverExpandedListingExact :
 
 theorem serverExpansionExact :
     SourceElaboratesExactlyTo serverSourceClosure serverExpandedSource := by
-  exact ClosedAsmSource.expansionExact serverSourceClosure
+  exact ClosedAsmSource.hierarchicalExpansionExact
+    serverSourceClosure serverFragmentExpansionExact
 
 theorem serverExpansionHasNoGhostInstructions :
     EveryInstructionIsRaw serverExpandedSource :=

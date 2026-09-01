@@ -16,9 +16,11 @@ Each spike separates:
 - `Model.lean`: a reusable algorithm model when the spike needs one;
 - `Plan.lean`: the coherent platform/provider selection;
 - `Data.lean`: exact static objects and derived imports when the program has them;
-- `Macros.lean`: transparent authored macro definitions when the program uses them;
+- `Constructors.lean`: typed Lean fragment constructors and their family
+  theorems when the program uses them; an older spike may still use the
+  historical `Macros.lean` filename, which never implies a textual preprocessor;
 - `Assembly.lean`: the first-class authored x86-64 and, for Spike 5, SPIR-V;
-- `SourceClosure.lean`: exact macro/static/import closure and raw expansion when
+- `SourceClosure.lean`: exact constructor/static/import closure and raw expansion when
   kept separate for a larger spike;
 - `Bindings.lean`: named model/component adjacencies;
 - `Program.lean`: `VerifiedProgram` closure and `emitProgram`; and

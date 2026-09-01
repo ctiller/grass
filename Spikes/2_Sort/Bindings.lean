@@ -3,7 +3,7 @@ import Spikes.«2_Sort».Assembly
 namespace Grass.Spikes.Sort
 
 def sortSourceClosure : ClosedAsmSource plan :=
-  ClosedAsmSource.close sortSource sortMacroRegistry sortStaticObjects sortImports
+  ClosedAsmSource.close sortSource sortConstructorClosure sortStaticObjects sortImports
 
 theorem sortSourceClosureComplete : SourceClosureComplete sortSourceClosure := by
   validate_source_closure

@@ -156,24 +156,55 @@ class WebServerResources (R : Type u) [ResourceModel R]
   responseDeadline : R -> Duration
   fixedAfterReady : R -> Prop
 
+structure ConstructionCapturedCapabilityMap
+    {R : Type u} [ResourceModel R] (resources : R) where
+  Key : Type
+  finite : Fintype Key
+  axis : Key -> ResourceAxisName
+  axisInjective : Function.Injective axis
+  entry : forall key : Key, SelectedAxisSemantics resources (axis key)
+  construction : ExactSnapshotOfEntireCapabilityMap resources axis entry
+
 structure SelectedResourceSemantics
     {R : Type u} [ResourceModel R] (resources : R) where
-  requiredAxes : FiniteKeySet ResourceAxisName
-  axes : forall axis, axis \u2208 requiredAxes -> SelectedAxisSemantics resources axis
-  capabilities : FiniteCapabilityDictionary resources
-  keysUnique : capabilities.KeysUnique
-  fromConstruction : ExactSnapshotOfConstructionCapabilities capabilities
+  capabilities : ConstructionCapturedCapabilityMap resources
+
+def SelectedResourceSemantics.requiredAxes
+    (selected : SelectedResourceSemantics resources) :
+    FiniteKeySet ResourceAxisName :=
+  FiniteKeySet.range selected.capabilities.axis
+
+def SelectedResourceSemantics.lookup
+    (selected : SelectedResourceSemantics resources)
+    (axis : ResourceAxisName)
+    (required : axis \u2208 selected.requiredAxes) :
+    SelectedAxisSemantics resources axis :=
+  selected.capabilities.entry
+    (selected.capabilities.keyOfMembership axis required)
+    |>.transport (selected.capabilities.axisOfKeyOfMembership axis required)
 
 structure SpecProcess {R : Type u} [ResourceModel R]
     (resources : R) where
+  suite : SpecificationSuite resources
+  resourceSemantics : SelectedResourceSemantics resources
+  suiteUsesExactly : SuiteUsesSelectedResourceSemantics suite resourceSemantics
   boundary : AbstractProcessBoundary
   State Event Command Outcome : Type
   initial : InitialProcessRelation State Command
   step : ProcessStepRelation State Event Command
   terminal : ProcessTerminalRelation State Outcome
+  observations : ProcessObservationProjection State Event Outcome
   channels : AbstractTypedChannelFamily boundary
   custody : AbstractLinearAndSharedStateLaws State channels
   progress : AbstractProcessProgressContract State Event
+  capturesSuite : CapturesAndHidesSuiteExactly
+    suite boundary initial step terminal observations
+  requirements : RequirementFamily resources resourceSemantics
+    (ProcessTraceContract initial step terminal observations)
+
+def SpecProcess.contract (spec : SpecProcess resources) :
+    BehaviorContract resources :=
+  ProcessTraceContract spec.initial spec.step spec.terminal spec.observations
 
 structure AbstractSpecificationProcessNetwork
     {R : Type u} [ResourceModel R] (resources : R) where
@@ -186,47 +217,61 @@ structure AbstractSpecificationProcessNetwork
     Instance schema -> ProtocolInstance (protocol schema)
   composition : AbstractNetworkCompositionLaw protocol instances
 
-inductive SpecificationBody {R : Type u} [ResourceModel R] (resources : R)
-  | relational (contract : BehaviorContract resources)
-  | processes (protocol : AbstractSpecificationProcessNetwork resources)
-
-def SpecificationBody.denotation :
-    SpecificationBody resources -> BehaviorContract resources
-  | .relational contract => contract
-  | .processes protocol => protocol.traceDenotation
-
-structure Specification {R : Type u} [ResourceModel R] (resources : R) where
-  resourceSemantics : SelectedResourceSemantics resources
-  body : SpecificationBody resources
-  bodyUsesExactly : BodyUsesSelectedResourceSemantics body resourceSemantics
-  requirements : RequirementFamily
-    resources resourceSemantics body.denotation
-
 class CapturesResourceSemanticsFor
-    {R : Type u} [ResourceModel R] (resources : R) (body : SpecificationBody resources) where
+    {R : Type u} [ResourceModel R] (resources : R)
+    (suite : SpecificationSuite resources) where
   snapshot : SelectedResourceSemantics resources
-  exact : BodyUsesSelectedResourceSemantics body snapshot
+  exact : SuiteUsesSelectedResourceSemantics suite snapshot
 
-def Specification.fromBody
-    (body : SpecificationBody resources)
-    [captured : CapturesResourceSemanticsFor resources body] :
-    Specification resources :=
-  { resourceSemantics := captured.snapshot
-    body
-    bodyUsesExactly := captured.exact
-    requirements := RequirementFamily.ofBody body captured.snapshot }
+class CapturesSuiteAsProcess (suite : SpecificationSuite resources) where
+  boundary : AbstractProcessBoundary
+  State Event Command Outcome : Type
+  initial : InitialProcessRelation State Command
+  step : ProcessStepRelation State Event Command
+  terminal : ProcessTerminalRelation State Outcome
+  observations : ProcessObservationProjection State Event Outcome
+  channels : AbstractTypedChannelFamily boundary
+  custody : AbstractLinearAndSharedStateLaws State channels
+  progress : AbstractProcessProgressContract State Event
+  exact : CapturesAndHidesSuiteExactly
+    suite boundary initial step terminal observations
 
-def Specification.ofRelational
+def SpecProcess.capture
+    (suite : SpecificationSuite resources)
+    [resource : CapturesResourceSemanticsFor resources suite]
+    [process : CapturesSuiteAsProcess suite] : SpecProcess resources :=
+  { suite := suite
+    resourceSemantics := resource.snapshot
+    suiteUsesExactly := resource.exact
+    boundary := process.boundary
+    State := process.State
+    Event := process.Event
+    Command := process.Command
+    Outcome := process.Outcome
+    initial := process.initial
+    step := process.step
+    terminal := process.terminal
+    observations := process.observations
+    channels := process.channels
+    custody := process.custody
+    progress := process.progress
+    capturesSuite := process.exact
+    requirements := SpecificationSuite.requirements
+      suite resource.snapshot resource.exact process.exact }
+
+def SpecProcess.ofRelational
     (contract : BehaviorContract resources)
-    [CapturesResourceSemanticsFor resources (.relational contract)] :
-    Specification resources :=
-  Specification.fromBody (.relational contract)
+    [CapturesResourceSemanticsFor resources
+      (SpecificationSuite.singletonRelational contract)]
+    [CapturesSuiteAsProcess (SpecificationSuite.singletonRelational contract)] :
+    SpecProcess resources :=
+  SpecProcess.capture (SpecificationSuite.singletonRelational contract)
 
-def Specification.ofProcesses
-    (network : AbstractSpecificationProcessNetwork resources)
-    [CapturesResourceSemanticsFor resources (.processes network)] :
-    Specification resources :=
-  Specification.fromBody (.processes network)
+structure ProcessPresentation (spec : SpecProcess resources) where
+  network : AbstractSpecificationProcessNetwork resources
+  denotationExact : network.traceDenotation = spec.contract
+  requirementsExact : TransportedProcessRequirements network denotationExact =
+    spec.requirements
 
 structure RelationalSpec (resources : R) where
   Input Output : Type
@@ -252,10 +297,10 @@ structure ProtocolSpec (resources : R) where
   protocol : forall schema, SessionProtocol resources (SessionId schema)
   composition : ProtocolCompositionLaws protocol
 
-def Specification.fromRelationalSpec : RelationalSpec resources -> Specification resources
-def Specification.fromStreamSpec : StreamSpec resources -> Specification resources
-def Specification.fromTraceSpec : TraceSpec resources -> Specification resources
-def Specification.fromProtocolSpec : ProtocolSpec resources -> Specification resources
+def SpecProcess.fromRelationalSpec : RelationalSpec resources -> SpecProcess resources
+def SpecProcess.fromStreamSpec : StreamSpec resources -> SpecProcess resources
+def SpecProcess.fromTraceSpec : TraceSpec resources -> SpecProcess resources
+def SpecProcess.fromProtocolSpec : ProtocolSpec resources -> SpecProcess resources
 
 theorem natural_frontends_denote_one_contract :
   EveryNaturalSpecificationFrontendDenotesBehaviorContract
@@ -263,14 +308,22 @@ theorem natural_frontends_denote_one_contract :
 structure TargetProjection
     {R : Type u} [ResourceModel R]
     {resources : R}
-    (spec : Specification resources)
+    (spec : SpecProcess resources)
     (profile : PlatformProfile) where
-  project : AbstractObservation spec.behavior -> PlatformObservation profile
-  outcome : AbstractOutcome spec.behavior -> PlatformOutcome profile
+  project : AbstractObservation spec.contract -> PlatformObservation profile
+  outcome : AbstractOutcome spec.contract -> PlatformOutcome profile
   capabilities : CapabilityProjection resources spec profile
   faithful : ProjectionPreservesConfiguredClaims
     resources spec project outcome capabilities
 ```
+
+There is one captured resource-semantics value. Axis keys are derived from the
+dependent map's finite key type, and selected semantics are obtained only by
+proof-indexed lookup into that same map. Limits, combination, ordering,
+exhaustion, and lifecycle are fields of the returned
+`SelectedAxisSemantics`; none can be supplied by a neighboring dictionary.
+`construction` attests the complete dependent map—key-to-axis association and
+entry—not merely its payload array.
 
 1. The **resource model** is an explicit selectable value whose typeclasses name
    only the quantitative and lifecycle capabilities a specification needs over
@@ -278,7 +331,7 @@ structure TargetProjection
    descriptors, threads, GPU objects, pending work, and obligations. It is
    independent of any one application. There is no closed universal axis list or
    god record. These typeclasses are construction-time dictionary builders.
-   `Specification.resourceSemantics` snapshots their exact, finite, uniquely
+   `SpecProcess.resourceSemantics` snapshots their exact, finite, uniquely
    keyed semantic data; every downstream theorem projects from that snapshot
    and is forbidden to rerun instance search.
 2. The **specification family** accepts that model as a parameter and may use
@@ -309,23 +362,28 @@ snapshots differ. Since all later certificates are indexed by the selected
 from a third ambient instance. Typeclass proof irrelevance is used only for laws
 about the captured operations, never to identify competing semantic operations.
 
-`SpecificationBody.processes` is specification language, not a selected process
-realization. It may name abstract logical roles, typed channels, linear custody,
-shared logical state, and causal ordering because those are useful ways to state
-the program. It may not name OS threads, worker implementation counts, polling
-or completion mechanisms, concrete queues/buffers/handles, layouts, registers,
-or schedulers. Its trace contract is the denotation of the same authored body,
-not a second precious specification maintained beside it.
+The one root `SpecProcess` stores the precious suite of DSL components and
+semantic junctions, its captured transition/observation semantics, selected
+resource-semantics snapshot, and theorem demands. `VerifiedProgram` is indexed
+by that exact process. A `ProcessPresentation` is a
+replaceable proof lens over that value. It may name abstract logical roles,
+typed channels, linear custody, shared logical state, and causal ordering, but
+its `denotationExact` theorem must recover the already selected contract. It is
+not stored inside the specification and changing its topology cannot change the
+precious value. OS threads, worker counts, polling/completion mechanisms,
+concrete queues/buffers/handles, layouts, registers, and schedulers remain still
+lower realization choices.
 
 `RelationalSpec`, `StreamSpec`, `TraceSpec`, and `ProtocolSpec` are natural
 authoring front ends, not four competing semantic foundations. Batch algorithms
 normally use a relation; codecs use a causal stream relation; interactive
 applications use a transition trace; multiplexed services use session
-protocols. Their constructors elaborate to the same `SpecificationBody`
+protocols. Their constructors elaborate to the same `BehaviorContract`
 denotation and the same observation, resource, failure, progress, refinement,
 and artifact theory. An author therefore need not invent process roles for a
-sort, while a web server can state product-significant streams and flow-control
-custody without freezing a worker topology. A convenient modality must not
+sort. A web server can then choose a product-significant stream presentation to
+prove attribution, flow control, and isolated cancellation without freezing
+that presentation into its precious contract. A convenient modality must not
 introduce a second end-to-end correctness theorem.
 
 Resource typeclasses are bounded customization surfaces with laws, not ambient
@@ -463,7 +521,7 @@ Responsiveness is packaged with strategy adequacy:
 
 ```lean
 structure ResponsiveStrategyWitness {R : Type u} [ResourceModel R]
-    {resources : R} (spec : Specification resources) where
+    {resources : R} (spec : SpecProcess resources) where
   strategy : AbstractEnvironmentStrategy spec
   adequate : StrategyAdequate strategy
   scheduleComplete : SchedulingComplete spec strategy

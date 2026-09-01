@@ -166,11 +166,12 @@ entry: @entry win64_gui_entry
   win_call RegisterClassExW(&wc) -> eax
   test ax,ax
   jz fail_init
-  mov registered,1
+  mov byte ptr [ownership.classRegistered],1
   win_call CreateWindowExW(0,&className,&title,WS_OVERLAPPEDWINDOW,
       CW_USEDEFAULT,CW_USEDEFAULT,960,720,0,0,r12,&state) -> r13
   test r13,r13
   jz fail_init
+  mov byte ptr [state.hwndOwned],1
   win_call ShowWindow(r13,SW_SHOW) -> _
   win_call QueryPerformanceFrequency(&qpcFrequency) -> eax
   test eax,eax
@@ -185,11 +186,25 @@ entry: @entry win64_gui_entry
   jmp vk_instance
 
 wndproc: @entry win64_callback(hwnd,msg,wparam,lparam)
-  sub rsp,40
+  sub rsp,CALLBACK_FRAME_SIZE
+  mov qword ptr [rsp+callbackHwnd],rcx
+  mov dword ptr [rsp+callbackMessage],edx
+  mov qword ptr [rsp+callbackWparam],r8
+  mov qword ptr [rsp+callbackLparam],r9
+  cmp edx,WM_NCCREATE
+  je wp_nccreate
+  win_call GetWindowLongPtrW(rcx,GWLP_USERDATA) -> r10
+  test r10,r10
+  jz wp_default
+  mov edx,dword ptr [rsp+callbackMessage]
+  mov r8,qword ptr [rsp+callbackWparam]
+  mov r9,qword ptr [rsp+callbackLparam]
   cmp edx,WM_CLOSE
   je wp_close
   cmp edx,WM_DESTROY
   je wp_destroyed
+  cmp edx,WM_NCDESTROY
+  je wp_ncdestroy
   cmp edx,WM_KEYDOWN
   jne wp_size
   cmp r8d,VK_ESCAPE
@@ -200,26 +215,54 @@ wp_size:
   mov eax,r9d
   and eax,0xffff
   shr r9d,16
-  store32 [state.width],eax
-  store32 [state.height],r9d
-  mov byte ptr [state.resize],1
+  store32 [r10+CubeWindowState.width],eax
+  store32 [r10+CubeWindowState.height],r9d
+  mov byte ptr [r10+CubeWindowState.resize],1
   xor eax,eax
-  add rsp,40
+  add rsp,CALLBACK_FRAME_SIZE
+  ret
+wp_nccreate:
+  mov r10,qword ptr [r9+CREATESTRUCTW.lpCreateParams]
+  test r10,r10
+  jz wp_reject_create
+  mov qword ptr [rsp+callbackState],r10
+  win_call SetWindowLongPtrW(rcx,GWLP_USERDATA,r10) -> _
+  mov rcx,qword ptr [rsp+callbackHwnd]
+  win_call GetWindowLongPtrW(rcx,GWLP_USERDATA) -> rax
+  cmp rax,qword ptr [rsp+callbackState]
+  jne wp_reject_create
+  mov eax,1
+  add rsp,CALLBACK_FRAME_SIZE
+  ret
+wp_reject_create:
+  xor eax,eax
+  add rsp,CALLBACK_FRAME_SIZE
   ret
 wp_close:
-  mov byte ptr [state.exit],1
+  mov byte ptr [r10+CubeWindowState.exit],1
   xor eax,eax
-  add rsp,40
+  add rsp,CALLBACK_FRAME_SIZE
   ret
 wp_destroyed:
-  mov byte ptr [state.exit],1
-  mov byte ptr [state.hwndOwned],0
+  mov byte ptr [r10+CubeWindowState.exit],1
+  mov byte ptr [r10+CubeWindowState.hwndOwned],0
   xor eax,eax
-  add rsp,40
+  add rsp,CALLBACK_FRAME_SIZE
+  ret
+wp_ncdestroy:
+  mov byte ptr [r10+CubeWindowState.hwndOwned],0
+  mov rcx,qword ptr [rsp+callbackHwnd]
+  win_call SetWindowLongPtrW(rcx,GWLP_USERDATA,0) -> _
+  xor eax,eax
+  add rsp,CALLBACK_FRAME_SIZE
   ret
 wp_default:
+  mov rcx,qword ptr [rsp+callbackHwnd]
+  mov edx,dword ptr [rsp+callbackMessage]
+  mov r8,qword ptr [rsp+callbackWparam]
+  mov r9,qword ptr [rsp+callbackLparam]
   win_call DefWindowProcW(rcx,rdx,r8,r9) -> rax
-  add rsp,40
+  add rsp,CALLBACK_FRAME_SIZE
   ret
 
 vk_instance:
@@ -240,16 +283,19 @@ vk_instance:
   call qword ptr [vkCreateInstancePtr]
   test eax,eax
   jnz fail_init
+  mov byte ptr [ownership.instanceOwned],1
   resolve_instance_functions_or_fail instance, instanceDispatch
   vk_call vkCreateWin32SurfaceKHR(instance,
       {sType=WIN32_SURFACE_CREATE_INFO_KHR,hinstance=r12,hwnd=r13},0,&surface)
   test eax,eax
   jnz fail_init
+  mov byte ptr [ownership.surfaceOwned],1
 
 select_device:
   vk_call vkEnumeratePhysicalDevices(instance,&count,0)
   test eax,eax
   jnz fail_init
+  mov byte ptr [ownership.deviceOwned],1
   test count,count
   jz fail_init
   checked_alloc count*8 -> devices
@@ -268,7 +314,7 @@ create_device:
       dynamicRendering=1,synchronization2=1}
   init deviceCI {sType=DEVICE_CREATE_INFO,pNext=&features13,
       queueCreateInfoCount=1,pQueueCreateInfos=&queueCI,
-      enabledExtensionCount=1,ppEnabledExtensionNames=&swapchainExt}
+      enabledExtensionCount=1,ppEnabledExtensionNames=&deviceExts}
   vk_call vkCreateDevice(physical,&deviceCI,0,&device)
   test eax,eax
   jnz fail_init
@@ -282,6 +328,7 @@ create_fixed:
      queueFamilyIndex=qfamily},0,&commandPool)
      test eax,eax
      jnz fail_init
+  mov byte ptr [ownership.commandPoolOwned],1
   vk_call vkAllocateCommandBuffers(device,
     {sType=COMMAND_BUFFER_ALLOCATE_INFO,commandPool=commandPool,
      level=PRIMARY,commandBufferCount=1},&cmd)
@@ -290,32 +337,39 @@ create_fixed:
   vk_call vkCreateSemaphore(device,{sType=SEMAPHORE_CREATE_INFO},0,&imageAvail)
   test eax,eax
   jnz fail_init
+  mov byte ptr [ownership.imageAvailOwned],1
   vk_call vkCreateSemaphore(device,{sType=SEMAPHORE_CREATE_INFO},0,&renderDone)
   test eax,eax
   jnz fail_init
+  mov byte ptr [ownership.renderDoneOwned],1
   vk_call vkCreateFence(device,{sType=FENCE_CREATE_INFO,flags=SIGNALED_BIT},0,&fence)
   test eax,eax
   jnz fail_init
+  mov byte ptr [ownership.fenceOwned],1
   vk_call vkCreateShaderModule(device,{sType=SHADER_MODULE_CREATE_INFO,
     codeSize=cubeVertexBytes.size,pCode=&cubeVertexBytes},0,&vertModule)
   test eax,eax
   jnz fail_init
+  mov byte ptr [ownership.vertModuleOwned],1
   vk_call vkCreateShaderModule(device,{sType=SHADER_MODULE_CREATE_INFO,
     codeSize=cubeFragmentBytes.size,pCode=&cubeFragmentBytes},0,&fragModule)
   test eax,eax
   jnz fail_init
+  mov byte ptr [ownership.fragModuleOwned],1
   vk_call vkCreatePipelineLayout(device,{sType=PIPELINE_LAYOUT_CREATE_INFO,
     pushConstantRangeCount=1,pPushConstantRanges=&{stageFlags=VERTEX_BIT,
     offset=0,size=8}},0,&pipelineLayout)
     test eax,eax
     jnz fail_init
+  mov byte ptr [ownership.pipelineLayoutOwned],1
   jmp recreate
 
 recreate: @invariant fixed_objects_owned_and_no_swapchain_work
-  load width,height
-  test width,width
+  mov eax,dword ptr [state.width]
+  test eax,eax
   jz minimized_wait
-  test height,height
+  mov eax,dword ptr [state.height]
+  test eax,eax
   jz minimized_wait
   vk_call vkDeviceWaitIdle(device)
   cmp eax,VK_SUCCESS
@@ -324,6 +378,7 @@ recreate: @invariant fixed_objects_owned_and_no_swapchain_work
   vk_call vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical,surface,&caps)
   test eax,eax
   jnz surface_result
+  mov byte ptr [ownership.newSwapchainOwned],1
   test caps.supportedUsageFlags,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
   jz fail_runtime
   test caps.supportedCompositeAlpha,VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
@@ -366,11 +421,35 @@ create_view_loop: @measure imageCount-viewIndex
      baseArrayLayer=0,layerCount=1}},0,&views[viewIndex])
   test eax,eax
   jnz fail_runtime
+  inc dword ptr [initializedViewCount]
   inc viewIndex
   jmp create_view_loop
 create_pipeline:
+  init shaderStages[0] {sType=PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage=VERTEX_BIT,module=vertModule,pName=&mainName}
+  init shaderStages[1] {sType=PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage=FRAGMENT_BIT,module=fragModule,pName=&mainName}
+  init emptyVertexInput {sType=PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO}
+  init lineList {sType=PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+      topology=PRIMITIVE_TOPOLOGY_LINE_LIST,primitiveRestartEnable=0}
+  init oneDynamicViewport {sType=PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+      viewportCount=1,scissorCount=1}
+  init lineRaster {sType=PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+      depthClampEnable=0,rasterizerDiscardEnable=0,polygonMode=POLYGON_MODE_FILL,
+      cullMode=CULL_MODE_NONE,frontFace=FRONT_FACE_COUNTER_CLOCKWISE,
+      depthBiasEnable=0,lineWidth=1.0f}
+  init sample1 {sType=PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+      rasterizationSamples=SAMPLE_COUNT_1_BIT}
+  init colorAttachment {blendEnable=0,
+      colorWriteMask=R_BIT|G_BIT|B_BIT|A_BIT}
+  init opaqueBlend {sType=PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+      attachmentCount=1,pAttachments=&colorAttachment}
+  store32 dynamicStates[0],DYNAMIC_STATE_VIEWPORT
+  store32 dynamicStates[1],DYNAMIC_STATE_SCISSOR
+  init viewportScissor {sType=PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+      dynamicStateCount=2,pDynamicStates=&dynamicStates}
   init pipelineRendering {sType=PIPELINE_RENDERING_CREATE_INFO,
-      colorAttachmentCount=1,pColorAttachmentFormats=&B8G8R8A8_UNORM}
+      colorAttachmentCount=1,pColorAttachmentFormats=&colorFormat}
   init graphicsCI {sType=GRAPHICS_PIPELINE_CREATE_INFO,pNext=&pipelineRendering,
       stageCount=2,pStages=&shaderStages,pVertexInputState=&emptyVertexInput,
       pInputAssemblyState=&lineList,pViewportState=&oneDynamicViewport,
@@ -380,6 +459,7 @@ create_pipeline:
   vk_call vkCreateGraphicsPipelines(device,0,1,&graphicsCI,0,&pipeline)
   test eax,eax
   jnz fail_runtime
+  mov byte ptr [ownership.pipelineOwned],1
   mov byte ptr [state.resize],0
   jmp event_loop
 
@@ -433,16 +513,35 @@ acquired:
       flags=ONE_TIME_SUBMIT_BIT})
       cmp eax,VK_SUCCESS
       jne device_result
-  vk_call vkCmdPipelineBarrier2(cmd,&barrier selectedOldLayout->ColorAttachmentOptimal
-      for images[imageIndex],srcStage=NONE,srcAccess=NONE,
-      dstStage=COLOR_ATTACHMENT_OUTPUT,dstAccess=COLOR_ATTACHMENT_WRITE)
-  vk_call vkCmdBeginRendering(cmd,{sType=RENDERING_INFO,renderArea={0,extent},
-      layerCount=1,colorAttachmentCount=1,pColorAttachments=&{imageView=
-      views[imageIndex],imageLayout=COLOR_ATTACHMENT_OPTIMAL,
-      loadOp=CLEAR,storeOp=STORE,clearValue={0.02,0.02,0.04,1}}})
+  mov ecx,dword ptr [imageIndex]
+  init barrier {sType=IMAGE_MEMORY_BARRIER_2,
+      dstStageMask=COLOR_ATTACHMENT_OUTPUT,dstAccessMask=COLOR_ATTACHMENT_WRITE,
+      newLayout=COLOR_ATTACHMENT_OPTIMAL,image=images[rcx],
+      subresourceRange={aspectMask=COLOR_BIT,baseMipLevel=0,levelCount=1,
+      baseArrayLayer=0,layerCount=1}}
+  cmp byte ptr [imageInitialized+rcx],0
+  je acquired_first_layout
+  store32 barrier.oldLayout,PRESENT_SRC_KHR
+  jmp acquired_layout_ready
+acquired_first_layout:
+  store32 barrier.oldLayout,UNDEFINED
+  mov byte ptr [imageInitialized+rcx],1
+acquired_layout_ready:
+  init dependencyInfo {sType=DEPENDENCY_INFO,imageMemoryBarrierCount=1,
+      pImageMemoryBarriers=&barrier}
+  vk_call vkCmdPipelineBarrier2(cmd,&dependencyInfo)
+  mov ecx,dword ptr [imageIndex]
+  init renderingAttachment {sType=RENDERING_ATTACHMENT_INFO,
+      imageView=views[rcx],imageLayout=COLOR_ATTACHMENT_OPTIMAL,
+      loadOp=CLEAR,storeOp=STORE,clearValue={0.02,0.02,0.04,1}}
+  init rendering {sType=RENDERING_INFO,renderArea={0,extent},layerCount=1,
+      colorAttachmentCount=1,pColorAttachments=&renderingAttachment}
+  vk_call vkCmdBeginRendering(cmd,&rendering)
   vk_call vkCmdBindPipeline(cmd,GRAPHICS,pipeline)
-  vk_call vkCmdSetViewport(cmd,0,1,&{0,0,float(extent.width),float(extent.height),0,1})
-  vk_call vkCmdSetScissor(cmd,0,1,&{0,0,extent})
+  init viewport {width=float(extent.width),height=float(extent.height),maxDepth=1}
+  init scissor {extent=extent}
+  vk_call vkCmdSetViewport(cmd,0,1,&viewport)
+  vk_call vkCmdSetScissor(cmd,0,1,&scissor)
   win_call QueryPerformanceCounter(&qpcNow) -> eax
   test eax,eax
   jz fail_runtime
@@ -471,18 +570,25 @@ acquired:
   vk_call vkCmdPushConstants(cmd,pipelineLayout,VERTEX_BIT,0,8,&push)
   vk_call vkCmdDraw(cmd,24,1,0,0)
   vk_call vkCmdEndRendering(cmd)
-  vk_call vkCmdPipelineBarrier2(cmd,&barrier ColorAttachmentOptimal->PresentSrcKHR
-      for images[imageIndex],srcStage=COLOR_ATTACHMENT_OUTPUT,
-      srcAccess=COLOR_ATTACHMENT_WRITE,dstStage=NONE,dstAccess=NONE)
+  mov ecx,dword ptr [imageIndex]
+  init barrier {sType=IMAGE_MEMORY_BARRIER_2,
+      srcStageMask=COLOR_ATTACHMENT_OUTPUT,srcAccessMask=COLOR_ATTACHMENT_WRITE,
+      oldLayout=COLOR_ATTACHMENT_OPTIMAL,newLayout=PRESENT_SRC_KHR,
+      image=images[rcx],subresourceRange={aspectMask=COLOR_BIT,baseMipLevel=0,
+      levelCount=1,baseArrayLayer=0,layerCount=1}}
+  vk_call vkCmdPipelineBarrier2(cmd,&dependencyInfo)
   vk_call vkEndCommandBuffer(cmd)
   cmp eax,VK_SUCCESS
   jne device_result
+  init waitSemaphoreInfo {sType=SEMAPHORE_SUBMIT_INFO,semaphore=imageAvail,
+      stageMask=COLOR_ATTACHMENT_OUTPUT}
+  init commandBufferInfo {sType=COMMAND_BUFFER_SUBMIT_INFO,commandBuffer=cmd}
+  init signalSemaphoreInfo {sType=SEMAPHORE_SUBMIT_INFO,semaphore=renderDone,
+      stageMask=ALL_GRAPHICS}
   init submit {sType=SUBMIT_INFO_2,waitSemaphoreInfoCount=1,
-      pWaitSemaphoreInfos=&{sType=SEMAPHORE_SUBMIT_INFO,semaphore=imageAvail,
-      stageMask=COLOR_ATTACHMENT_OUTPUT},commandBufferInfoCount=1,
-      pCommandBufferInfos=&{sType=COMMAND_BUFFER_SUBMIT_INFO,commandBuffer=cmd},
-      signalSemaphoreInfoCount=1,pSignalSemaphoreInfos=&{sType=
-      SEMAPHORE_SUBMIT_INFO,semaphore=renderDone,stageMask=ALL_GRAPHICS}}
+      pWaitSemaphoreInfos=&waitSemaphoreInfo,commandBufferInfoCount=1,
+      pCommandBufferInfos=&commandBufferInfo,signalSemaphoreInfoCount=1,
+      pSignalSemaphoreInfos=&signalSemaphoreInfo}
   vk_call vkQueueSubmit2(queue,1,&submit,fence)
   cmp eax,VK_SUCCESS
   jne device_result
@@ -520,31 +626,16 @@ jmp cleanup
 fail_runtime: mov ebx,2
 jmp cleanup
 fail_surface: mov ebx,3
-mark_surface_lost
+mov byte ptr [ownership.surfaceLost],1
 jmp cleanup
 fail_device: mov ebx,4
-mark_device_lost
+mov byte ptr [ownership.deviceLost],1
 jmp cleanup
 clock_violation:
   ud2 @containment_tail(.monotonicClockRegressed)
 
 cleanup: @invariant reverse_dependency_ledger(status=ebx)
-  if device_owned and not device_lost: vkDeviceWaitIdle(device)
-  for each owned imageView in reverse: vkDestroyImageView(device,view,0)
-  if pipeline_owned: vkDestroyPipeline(device,pipeline,0)
-  if swapchain_owned: vkDestroySwapchainKHR(device,swapchain,0)
-  if pipelineLayout_owned: vkDestroyPipelineLayout(device,pipelineLayout,0)
-  if fragModule_owned: vkDestroyShaderModule(device,fragModule,0)
-  if vertModule_owned: vkDestroyShaderModule(device,vertModule,0)
-  if fence_owned: vkDestroyFence(device,fence,0)
-  if renderDone_owned: vkDestroySemaphore(device,renderDone,0)
-  if imageAvail_owned: vkDestroySemaphore(device,imageAvail,0)
-  if commandPool_owned: vkDestroyCommandPool(device,commandPool,0)
-  if device_owned: vkDestroyDevice(device,0)
-  if surface_owned: vkDestroySurfaceKHR(instance,surface,0)
-  if instance_owned: vkDestroyInstance(instance,0)
-  if hwnd_owned: win_call DestroyWindow(hwnd)
-  if class_registered: win_call UnregisterClassW(&className,hInstance)
+  reverse_cleanup
   add rsp,FRAME_SIZE
   pop r15
   pop r14
@@ -554,7 +645,9 @@ cleanup: @invariant reverse_dependency_ledger(status=ebx)
   pop rsi
   pop rbp
   pop rbx
-  exit_with ebx
+  mov ecx,ebx
+  call qword ptr [rip+__imp_ExitProcess]
+  ud2
 }
 
 theorem vertexCorrect :

@@ -100,20 +100,20 @@ def message : TextLine := "Hello, World!"
 def resources : ConsoleResourceModel :=
   ConsoleResourceModel.singleLine
 
-def stdoutProtocol {R : Type} [ResourceModel R] [ConsoleWriteResources R]
-    (resources : R) : AbstractSpecificationProcessNetwork resources :=
-  Console.linearStdoutProtocol resources message HelloOutcome
+def helloContract {R : Type} [ResourceModel R] [ConsoleWriteResources R]
+    (resources : R) : BehaviorContract resources :=
+  Console.writeLineContract resources message HelloOutcome
 
 def helloSpec {R : Type} [ResourceModel R] [ConsoleWriteResources R]
-    (resources : R) : Specification resources :=
-  Specification.ofProcesses (stdoutProtocol resources)
+    (resources : R) : SpecProcess resources :=
+  SpecProcess.ofRelational (helloContract resources)
     |>.withLiveness (.terminatesUnder [.environmentResponsive])
 
 theorem helloSpecCorrect {R : Type} [ResourceModel R] [ConsoleWriteResources R]
     (resources : R) : MeetsAllSpecificationTheorems (helloSpec resources) :=
-  Console.linearStdoutProtocolCorrect resources message HelloOutcome
+  Console.writeLineContractCorrect resources message HelloOutcome
 
-def spec : Specification resources := helloSpec resources
+def spec : SpecProcess resources := helloSpec resources
 
 def policy : TargetOutcomeProjection HelloOutcome UInt32 :=
   .successOrFailure
@@ -699,6 +699,13 @@ every state satisfying the entry contract. Straight-line code should normally
 need no intermediate assertions; loops need an invariant plus a measure or
 frontier law; genuinely novel code may expose additional local lemmas.
 
+The tactic is a checked certificate consumer and deterministic goal dispatcher,
+not an invariant-discovery oracle. Its report identifies which fragment-family
+theorems were instantiated, which CFG contracts were composed, and every
+residual goal. It cannot invent a loop invariant, algorithmic correspondence,
+failure policy, memory representation, or missing provider case and then hide
+that choice behind success.
+
 Low-level contracts are extensional specifications. If two assembly CFGs both
 prove equivalence to the same deterministic contract, their equivalence follows
 by composition. For relational or nondeterministic contracts, the library
@@ -712,7 +719,7 @@ separate fuzzing/experimentation route and cannot be used to construct
 
 Assembly may also appear earlier in authored code behind an explicit nominal ISA
 capability. Doing so narrows the program's implementation requirements but need
-not contaminate its functional specification: a portable `Specification` can be
+not contaminate its functional specification: a portable root `SpecProcess` can be
 refined by an intentionally x86-specific program. Weaving rejects incompatible
 ISA/provider demands rather than silently choosing one.
 
@@ -754,16 +761,25 @@ terminal contract.
 The following is the single authored `asm_source`, not a rendering assembled from
 separate block-proof definitions. Labels split basic blocks automatically;
 `@invariant`, `@measure`, and `@terminal` are proof-bearing source annotations.
-Instruction and offset choices remain literal source:
+The registers and instructions remain literal choices; routine ABI storage uses
+the named frame layout so the exemplar does not normalize displacement
+arithmetic. The expanded review view still contains the exact numeric offsets:
 
 ```text
+structure HelloFrameFields where
+  shadow : Bytes 32
+  overlapped : UInt64
+  transferred : UInt32
+
+def HelloFrame : FrameLayout Win64 := FrameLayout.derive HelloFrameFields
+
 asm_source helloSource for plan {
 
 entry:
     push r12
     push r13
     push r14
-    sub  rsp, 48
+    sub  rsp, HelloFrame.size
     mov  ecx, STD_OUTPUT_HANDLE
     call qword ptr [rip + __imp_GetStdHandle]
     test rax, rax
@@ -777,16 +793,16 @@ entry:
 write_head: @invariant write_all_loop(message, handle=r12, ptr=r13, rem=r14d)
     test r14d, r14d
     je   exit_success
-    mov  qword ptr [rsp+32], 0
-    mov  dword ptr [rsp+40], 0
+    mov  qword ptr [rsp + HelloFrame.overlapped], 0
+    mov  dword ptr [rsp + HelloFrame.transferred], 0
     mov  rcx, r12
     mov  rdx, r13
     mov  r8d, r14d
-    lea  r9, [rsp+40]
+    lea  r9, [rsp + HelloFrame.transferred]
     call qword ptr [rip + __imp_WriteFile]
     test eax, eax
     jz   exit_write_failed
-    mov  eax, dword ptr [rsp+40]
+    mov  eax, dword ptr [rsp + HelloFrame.transferred]
     test eax, eax
     jz   exit_no_progress
     cmp  eax, r14d

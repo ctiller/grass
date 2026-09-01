@@ -190,6 +190,33 @@ mailboxes, distributed-delivery guarantees, garbage collection, or “let it
 crash” as proof principles. The exact adopted and rejected semantics are stated
 in [PROCESS.md](PROCESS.md).
 
+### Assembly construction precedents
+
+- NASM, *The NASM Preprocessor*:
+  https://www.nasm.us/doc/nasm05.html
+- NASM, *Standard Macros*, including `STRUC`, `ISTRUC`, `ALIGN`, and `ALIGNB`:
+  https://www.nasm.us/doc/nasm06.html
+- Microsoft MASM, `STRUCT`:
+  https://learn.microsoft.com/en-us/cpp/assembler/masm/struct-masm
+- Microsoft MASM, `RECORD`:
+  https://learn.microsoft.com/en-us/cpp/assembler/masm/record-masm
+- Microsoft MASM, `LOCAL`:
+  https://learn.microsoft.com/en-us/cpp/assembler/masm/local-masm
+- Microsoft MASM, `PROC`, including x64 `FRAME` and unwind emission:
+  https://learn.microsoft.com/en-us/cpp/assembler/masm/proc
+- GNU Binutils, *Using as*, `.macro`:
+  https://sourceware.org/binutils/docs/as/Macro.html
+- GNU Binutils, *Using as*, CFI directives:
+  https://sourceware.org/binutils/docs/as/CFI-directives.html
+
+Grass mines these for author-visible affordances: typed macro parameters,
+finite repetition and alternatives, hygienic local labels, named layouts and
+bitfields, local storage, expansion listings, and keeping procedure/unwind
+descriptions synchronized. They are design precedents, not semantic authority
+for Grass instructions. Review must compare both the authored and expanded
+forms, verify that no helper hides effects or exits, and confirm that all target
+instructions and ABI metadata retain their own vendor anchors.
+
 ## Internal predecessor material
 
 These documents are design lineage, not external semantic authority. Citations

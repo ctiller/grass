@@ -1,4 +1,5 @@
 import Grass.Spec.Console
+import Grass.Spec.Grammar
 import Spikes.«3_Gzip».Resource
 
 namespace Grass.Spikes.Gzip
@@ -9,16 +10,20 @@ inductive GzipOutcome
   | inputFailure
   | outputFailure
 
-def gzipContract {R : Type} [ResourceModel R] [StreamingFilterResources R]
-    (resources : R) : BehaviorContract resources :=
-  Console.streamingGzipContract
+def gzipMemberFormat : Format Gzip.Member :=
+  Gzip.memberFormat
+
+def gzipSuite {R : Type} [ResourceModel R] [StreamingFilterResources R]
+    (resources : R) : SpecificationSuite resources :=
+  Console.streamingGzipSuite
     (resources := resources)
     (members := .one)
+    (outputFormat := gzipMemberFormat)
     (failureOutput := .constructionPrefix)
 
 def gzipSpec {R : Type} [ResourceModel R] [StreamingFilterResources R]
-    (resources : R) : Specification resources :=
-  Specification.ofRelational (gzipContract resources)
+    (resources : R) : SpecProcess resources :=
+  SpecProcess.capture (gzipSuite resources)
     |>.withOutcomes GzipOutcome
     |>.withProgress
         (.reactiveBetweenFrontiers
@@ -26,7 +31,8 @@ def gzipSpec {R : Type} [ResourceModel R] [StreamingFilterResources R]
 
 theorem gzipSpecCorrect {R : Type} [ResourceModel R] [StreamingFilterResources R]
     (resources : R) : MeetsAllSpecificationTheorems (gzipSpec resources) :=
-  Console.streamingGzipContractCorrect resources GzipOutcome
+  Console.streamingGzipSuiteCaptureCorrect
+    resources GzipOutcome gzipMemberFormat
 
 theorem successfulTraceIffOneMemberRoundTrip
     {R : Type} [ResourceModel R] [StreamingFilterResources R]
@@ -35,6 +41,6 @@ theorem successfulTraceIffOneMemberRoundTrip
       Gzip.IsExactlyOneMember output ∧ Gzip.inflate output = .ok input :=
   Console.streamingGzipContract_success_iff resources GzipOutcome
 
-def spec : Specification resources := gzipSpec resources
+def spec : SpecProcess resources := gzipSpec resources
 
 end Grass.Spikes.Gzip

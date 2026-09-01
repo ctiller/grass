@@ -3,6 +3,21 @@ import Spikes.«4_Web_Server».Macros
 
 namespace Grass.Spikes.WebServer
 
+structure ServerEntryFrameFields where
+  shadow : Bytes 32
+  callArg5 : UInt64
+  callArg6 : UInt64
+  locals : Bytes 8
+
+def ServerEntryFrame : FrameLayout Win64 :=
+  FrameLayout.derive ServerEntryFrameFields
+
+structure WorkerFrameFields where
+  shadow : Bytes 32
+  locals : Bytes 24
+
+def WorkerFrame : FrameLayout Win64 := FrameLayout.derive WorkerFrameFields
+
 def serverSource : AsmSource platformPlan := asm_source {
 
 entry: @entrypoint @unwind(server_entry_unwind)
@@ -14,7 +29,7 @@ entry: @entrypoint @unwind(server_entry_unwind)
     push r13
     push r14
     push r15
-    sub  rsp, 56
+    sub  rsp, ServerEntryFrame.size
     xor  ebp, ebp
     xor  r13d, r13d
     mov  qword ptr [rip+listen_socket], INVALID_SOCKET
@@ -30,8 +45,8 @@ entry: @entrypoint @unwind(server_entry_unwind)
     mov  edx, SOCK_STREAM
     mov  r8d, IPPROTO_TCP
     xor  r9d, r9d
-    mov  qword ptr [rsp+32], 0
-    mov  dword ptr [rsp+40], 0
+    mov  qword ptr [rsp + ServerEntryFrame.callArg5], 0
+    mov  dword ptr [rsp + ServerEntryFrame.callArg6], 0
     call qword ptr [rip+__imp_WSASocketW]
     cmp  rax, INVALID_SOCKET
     je   startup_failure_wsa
@@ -71,8 +86,8 @@ create_workers: @invariant created_prefix(r13,worker_handles,worker_slots) @meas
     xor  ecx, ecx
     xor  edx, edx
     lea  r8, [rip+worker_entry]
-    mov  dword ptr [rsp+32], CREATE_SUSPENDED
-    mov  qword ptr [rsp+40], 0
+    mov  dword ptr [rsp + ServerEntryFrame.callArg5], CREATE_SUSPENDED
+    mov  qword ptr [rsp + ServerEntryFrame.callArg6], 0
     call qword ptr [rip+__imp_CreateThread]
     test rax, rax
     jz   startup_partial_workers
@@ -109,11 +124,21 @@ startup_partial_workers:
     mov  ebp, 1
     mov  eax, 1
     xchg dword ptr [rip+shutdown], eax
-    jmp  resume_workers
+    xor  r14d, r14d
+resume_failure_workers: @invariant failure_resumed_prefix(r14,created=r13) @measure r13-r14
+    cmp  r14d, r13d
+    je   join_workers
+    lea  rdx, [rip+worker_handles]
+    mov  rcx, qword ptr [rdx+r14*8]
+    call qword ptr [rip+__imp_ResumeThread]
+    cmp  eax, -1
+    je   fatal_exit
+    inc  r14d
+    jmp  resume_failure_workers
 
 join_workers: @invariant joined_suffix(r13,worker_handles) @measure r13
     test r13d, r13d
-    jz   close_listener
+    jz   unregister_handler
     dec  r13d
     lea  rdx, [rip+worker_handles]
     mov  rcx, qword ptr [rdx+r13*8]
@@ -128,6 +153,14 @@ join_workers: @invariant joined_suffix(r13,worker_handles) @measure r13
     jnz  join_workers
     mov  ebp, 1
     jmp  join_workers
+
+unregister_handler:
+    lea  rcx, [rip+console_handler]
+    xor  edx, edx
+    call qword ptr [rip+__imp_SetConsoleCtrlHandler]
+    test eax, eax
+    jnz  close_listener
+    mov  ebp, 1
 
 close_listener:
     mov  rcx, r12
@@ -176,7 +209,7 @@ worker_entry: @thread_entry @unwind(worker_entry_unwind)
     push r13
     push r14
     push r15
-    sub  rsp, 56
+    sub  rsp, WorkerFrame.size
     mov  rbx, rcx
     mov  rsi, INVALID_SOCKET
 
@@ -269,6 +302,8 @@ connection_schedule: @reactive_frontier socket_readiness_or_deadline
     mov  rcx, rbx
     mov  edx, NO_ERROR
     call h2_enqueue_goaway
+    cmp  eax, GOAWAY_QUEUE_FAILURE
+    je   connection_goaway_failure
 connection_deadlines:
     call qword ptr [rip+__imp_GetTickCount64]
     mov  rdx, rax
@@ -306,6 +341,11 @@ receive_frames:
     je   connection_peer_close
     cmp  eax, IO_FAILED
     je   connection_io_error
+
+receive_result_observation: @cancellation_observation connection_receive_result
+    mov  eax, dword ptr [rip+shutdown] @atomic(.acquire)
+    test eax, eax
+    jnz  connection_shutdown
 
 frame_parse_loop: @measure buffered_complete_frames_or_need_input
     mov  rcx, rbx
@@ -498,6 +538,11 @@ send_suffix_loop: @frontier_or_measure(socket_writable_or_tx_length-tx_committed
     jnz  connection_io_error
     test eax, POLL_WRITABLE
     jz   connection_schedule
+send_readiness_observation: @cancellation_observation writer_readiness_result
+    mov  rcx, rbx
+    call h2_observe_writer_cancellation
+    cmp  eax, WRITER_CANCEL_CONNECTION_CLOSE
+    je   connection_goaway_failure
     mov  rcx, rsi
     lea  rdx, [rbx+TX_BUFFER]
     add  rdx, qword ptr [rbx+TX_COMMITTED]
@@ -554,8 +599,15 @@ connection_shutdown:
     mov  rcx, rbx
     mov  edx, NO_ERROR
     call h2_enqueue_goaway
+    cmp  eax, GOAWAY_QUEUE_FAILURE
+    je   connection_goaway_failure
 connection_draining: @frontier_or_measure(control_queue_or_drain_deadline)
     jmp  connection_schedule
+
+connection_goaway_failure:
+    mov  rcx, rbx
+    call h2_mark_exact_teardown_suffix_disposition
+    jmp  connection_close
 
 connection_peer_close:
 connection_io_error:

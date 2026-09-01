@@ -3,12 +3,19 @@ import Spikes.«1_Hello_World».Plan
 
 namespace Grass.Spikes.HelloWorld
 
+structure HelloFrameFields where
+  shadow : Bytes 32
+  overlapped : UInt64
+  transferred : UInt32
+
+def HelloFrame : FrameLayout Win64 := FrameLayout.derive HelloFrameFields
+
 def helloSource : MachineSource plan := asm_source {
 entry:
   push r12
   push r13
   push r14
-  sub rsp, 48
+  sub rsp, HelloFrame.size
   mov ecx, STD_OUTPUT_HANDLE
   call qword ptr [rip + __imp_GetStdHandle]
   test rax, rax
@@ -22,16 +29,16 @@ entry:
 write_head: @invariant write_all_loop(message, handle=r12, ptr=r13, rem=r14d)
   test r14d, r14d
   je exit_success
-  mov qword ptr [rsp+32], 0
-  mov dword ptr [rsp+40], 0
+  mov qword ptr [rsp + HelloFrame.overlapped], 0
+  mov dword ptr [rsp + HelloFrame.transferred], 0
   mov rcx, r12
   mov rdx, r13
   mov r8d, r14d
-  lea r9, [rsp+40]
+  lea r9, [rsp + HelloFrame.transferred]
   call qword ptr [rip + __imp_WriteFile]
   test eax, eax
   jz exit_write_failed
-  mov eax, dword ptr [rsp+40]
+  mov eax, dword ptr [rsp + HelloFrame.transferred]
   test eax, eax
   jz exit_no_progress
   cmp eax, r14d

@@ -1,4 +1,5 @@
 import Grass.Spec.Http2
+import Grass.Spec.Grammar
 import Spikes.«4_Web_Server».Resource
 
 namespace Grass.Spikes.WebServer
@@ -10,61 +11,54 @@ def routes : Http2Routes :=
     path := "/".toASCII, response :=
       { status := 200, fields := [("content-type", "text/plain")], body } }
 
-def behaviorPolicy : Http2ServerBehaviorPolicy where
-  transport := .cleartextPriorKnowledge
-  acceptedVersion := .http2
-  serverPush := false
-  priority := .ignoreDeprecatedSignals
-  unknownRoute := .responseStatus 404
-  malformed := .rfc9113ScopedError
-  unsupportedExtensionFrame := .ignore
-  requestMethods := {.GET}
-  requestBodies := .discardWithinFlowControl
-  responseTrailers := false
-  peerSettings := .applyAfterValidationThenAcknowledge
-  ping := .acknowledgeOpaquePayload
-  goaway := .gracefulPrefix
-  connectionWindowUpdates := .rfc9113
-  streamWindowUpdates := .rfc9113
-  hpack :=
-    { decoder := .rfc7541
-      encoder := .literalWithoutIndexing
-      dynamicTableBytes := resourcePolicy.hpackDecoderTableBytes
-      huffman := .acceptValidRejectInvalid }
+def behaviorPolicyFor {R : Type} [ResourceModel R] [WebServerResources R]
+    (resources : R) : Http2ServerBehaviorPolicy :=
+  Http2ServerBehaviorPolicy.fromCapturedResources resources where
+    transport := .cleartextPriorKnowledge
+    acceptedVersion := .http2
+    serverPush := false
+    priority := .ignoreDeprecatedSignals
+    unknownRoute := .responseStatus 404
+    malformed := .rfc9113ScopedError
+    unsupportedExtensionFrame := .ignore
+    requestMethods := {.GET}
+    requestBodies := .discardWithinFlowControl
+    responseTrailers := false
+    peerSettings := .applyAfterValidationThenAcknowledge
+    ping := .acknowledgeOpaquePayload
+    goaway := .gracefulPrefix
+    connectionWindowUpdates := .rfc9113
+    streamWindowUpdates := .rfc9113
+    hpackDecoderTableBytes := WebServerResources.hpackDecoderTableBytes resources
+    maxHeaderListBytes := WebServerResources.maxHeaderListBytes resources
+    initialConnectionWindow := WebServerResources.inboundConnectionWindow resources
+    initialStreamWindow := WebServerResources.inboundStreamWindow resources
+    hpackEncoder := .anyConformingEncoding
+    huffman := .acceptValidRejectInvalid
 
-inductive ServerRoleSchema
-  | listener
-  | connection
-  | stream
+def frameFormat : Format Http2.Frame :=
+  Http2.frameFormat
 
-def ServerRoleSchema.Instance : ServerRoleSchema -> Type
-  | .listener => Unit
-  | .connection => ConnectionId
-  | .stream => ConnectionId × Http2StreamId
+def hpackFieldSectionFormat : Format Http2.HeaderList :=
+  Hpack.fieldSectionFormat
 
-def connectionSession {R : Type} [ResourceModel R] [WebServerResources R]
-    (resources : R) (id : ConnectionId) : SpecProcess resources :=
-  Http2.abstractConnectionSession resources routes behaviorPolicy id
+def frameParserRequirement {R : Type} [ResourceModel R]
+    (resources : R) : ProcessRequirement resources :=
+  Format.parserRequirement frameFormat
 
-def streamSession {R : Type} [ResourceModel R] [WebServerResources R]
-    (resources : R) (connection : ConnectionId) (stream : Http2StreamId) :
-    SpecProcess resources :=
-  Http2.abstractRequestStream resources routes behaviorPolicy connection stream
+def hpackParserRequirement {R : Type} [ResourceModel R]
+    (resources : R) : ProcessRequirement resources :=
+  Format.parserRequirement hpackFieldSectionFormat
 
-def abstractServer {R : Type} [ResourceModel R] [WebServerResources R]
-    (resources : R) : AbstractSpecificationProcessNetwork resources :=
-  Http2.abstractMemoryServer
-    (roleSchema := ServerRoleSchema)
-    (instances := ServerRoleSchema.Instance)
-    (routes := routes)
-    (connection := connectionSession resources)
-    (stream := streamSession resources)
-    (admission := WebServerResources.connectionCapacity resources)
-    (custody := .linearPerConnectionAndStream)
+def webServerSuite {R : Type} [ResourceModel R] [WebServerResources R]
+    (resources : R) : SpecificationSuite resources :=
+  Http2.memoryServerSuite
+    resources routes (behaviorPolicyFor resources)
+    (frameParserRequirement resources) (hpackParserRequirement resources)
 
 def webServerSpec {R : Type} [ResourceModel R] [WebServerResources R]
-    (resources : R) : Specification resources :=
-  Specification.ofProcesses (abstractServer resources)
+    (resources : R) : SpecProcess resources :=
+  SpecProcess.capture (webServerSuite resources)
     |>.withProgress
       { service := .reactive
         acceptedConnection := .settlesUnder
@@ -75,8 +69,18 @@ def webServerSpec {R : Type} [ResourceModel R] [WebServerResources R]
 
 theorem webServerSpecCorrect {R : Type} [ResourceModel R] [WebServerResources R]
     (resources : R) : MeetsAllSpecificationTheorems (webServerSpec resources) :=
-  Http2.abstractMemoryServerCorrect resources routes behaviorPolicy
+  Http2.memoryServerSuiteCaptureCorrect
+    resources routes (behaviorPolicyFor resources)
+    (frameParserRequirement resources) (hpackParserRequirement resources)
 
-def spec : Specification resources := webServerSpec resources
+def spec : SpecProcess resources := webServerSpec resources
+
+def behaviorPolicy : Http2ServerBehaviorPolicy := behaviorPolicyFor resources
+
+def capturedResourcePolicy : MemoryServerResourcePolicy :=
+  MemoryServerResourcePolicy.fromCapturedSemantics spec.resourceSemantics
+
+theorem capturedResourcePolicyExact : capturedResourcePolicy = resourcePolicy :=
+  SpecProcess.capturedResourceConstructionExact spec
 
 end Grass.Spikes.WebServer

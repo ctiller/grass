@@ -10,14 +10,20 @@ part of React, not by React's runtime semantics.
 
 ## 1. Why a process layer exists
 
-A portable specification may itself be written with abstract specification
-processes: logical roles, typed channels, linear custody, shared logical state,
-and causal ordering. Those declarations are precious specification syntax and
-denote the demanded external trace. A replaceable process realization supplies
-the chosen state partition, population, weave, and driver which refine that
-abstract protocol. The specification must not contain a Win32 message pump, OS
-worker topology, console loop, Vulkan scheduler, concrete queue, or callback
-mechanism.
+Every program has one precious root `SpecProcess`, and `VerifiedProgram` is
+indexed by it. Domain DSLs may construct semantic child processes or demand an
+existential process satisfying a contract; semantic composition captures and
+hides them into that root. Their public contracts and meaning-bearing junctions
+are precious. A particular lexer/parser, listener/connection/stream,
+graphics/storage, or other decomposition is not.
+
+A replaceable `ProcessPresentation` supplies logical roles, typed channels,
+linear custody, shared logical state, causal attribution, and a theorem that its
+network denotes the root exactly. A lower process realization supplies the
+chosen physical state partition, population, weave, and driver. Neither layer
+may enter the root merely because it is convenient for a proof. The root must
+not contain a Win32 message pump, OS worker topology, console loop, Vulkan
+scheduler, concrete queue, or callback mechanism.
 
 The reusable driver theorem is proved once:
 
@@ -397,12 +403,13 @@ endpoint protocols, spawn/population laws, shared-state interference, and
 process-network assertions without a self-referential structure declaration.
 The completed `ProcessPlan` below adds the channel edges.
 
-The precious specification may require process roles or population/state facts
-only when they are semantically observable—for example, independent cancellation
-of requests or isolation of two tenants. Exact worker count, pipeline shape,
-which helper owns a buffer, sequential versus parallel execution, batching, and
-event routing normally belong to `ProcessPlan`. Another plan may realize the
-same precious spec with a different topology and state partition.
+The precious root may require independently cancellable requests or tenant
+isolation as behavior, and may demand child processes satisfying named
+contracts. It does not require that a realization represent those guarantees
+with particular roles or populations. Worker count, pipeline shape, helper
+ownership, sequential versus parallel execution, batching, and event routing
+belong to `ProcessPresentation`/`ProcessPlan`. Another plan may realize the same
+root with a different topology and state partition.
 
 `population` describes static, bounded, or generative instances and their stable
 identities. It can say “one root and one child call at a time,” “four supervised
@@ -1084,17 +1091,6 @@ inductive TerminationDemand (p : ProcessSpec)
   | supervised (policy : SupervisorPolicy)
   | versioned (versions : VersionFamily)
 
-inductive TerminationFacet (correct : ProcessCorrect p) : TerminationDemand p -> Type
-  | ordinary : TerminalTransitionsHaveExactDisposition correct ->
-      TerminationFacet correct .ordinary
-  | cooperative (contract : ProcessTerminationContract p) :
-      TerminationFacet correct (.cooperative contract.Cause contract.premises)
-  | supervised (contract : ProcessTerminationContract p)
-      (policy : SupervisorPolicy) :
-      SupervisorConsumesTerminationContract policy contract ->
-      TerminationFacet correct (.supervised policy)
-  | versioned (handoff : VersionHandoff p versions) :
-      TerminationFacet correct (.versioned versions)
 ```
 
 This supports theorems of the form “this process may terminate only at these
@@ -1142,6 +1138,26 @@ structure CancellationSummary (p : ProcessSpec) where
     ContractExactlySummarizesCancellation
       contract SafePoint pendingCustody delay disposition
 
+structure CancellationBackedContract (p : ProcessSpec) where
+  summary : CancellationSummary p
+  contract : ProcessTerminationContract p
+  exact : ContractExactlySummarizesCancellation
+    contract summary.SafePoint summary.pendingCustody
+      summary.delay summary.disposition
+
+inductive TerminationFacet (correct : ProcessCorrect p) : TerminationDemand p -> Type
+  | ordinary : TerminalTransitionsHaveExactDisposition correct ->
+      TerminationFacet correct .ordinary
+  | cooperative (backed : CancellationBackedContract p) :
+      TerminationFacet correct
+        (.cooperative backed.contract.Cause backed.contract.premises)
+  | supervised (backed : CancellationBackedContract p)
+      (policy : SupervisorPolicy) :
+      SupervisorConsumesTerminationContract policy backed.contract ->
+      TerminationFacet correct (.supervised policy)
+  | versioned (handoff : VersionHandoff p versions) :
+      TerminationFacet correct (.versioned versions)
+
 def CancellationSummary.seq
     (left : CancellationSummary p) (right : CancellationSummary q) :
     CancellationSummary (p |> q) :=
@@ -1157,7 +1173,7 @@ def CancellationSummary.toCooperativeTerminationFacet
     TerminationFacet correct (.cooperative contract.Cause contract.premises) :=
   by
     have exactSummary := summary.exportedContractExact contract exports
-    exact .cooperative contract
+    exact .cooperative { summary, contract, exact := exactSummary }
 
 def CancellationSummary.toSupervisedTerminationFacet
     (summary : CancellationSummary p) (correct : ProcessCorrect p)
@@ -1168,7 +1184,10 @@ def CancellationSummary.toSupervisedTerminationFacet
       SupervisorConsumesTerminationContract policy contract) :
     TerminationFacet correct (.supervised policy) := by
   rcases exports with ⟨contract, exactContract⟩
-  exact .supervised contract policy (compatible contract exactContract)
+  exact .supervised
+    { summary, contract,
+      exact := summary.exportedContractExact contract exactContract }
+    policy (compatible contract exactContract)
 ```
 
 The constructor for an ordinary serial function supplies the weakest summary:
@@ -1177,6 +1196,11 @@ fault according to its ordinary process contract; its `exportedContract` is
 `none`. This creates no additional proof field for its author. Standard
 combinators calculate stronger summaries and export `some contract` only when
 their composed progress and disposition premises are sufficient.
+The cooperative and supervised facet constructors retain the complete
+`CancellationBackedContract`, including the exact summary witness. Runtime and
+proof-level cancellation transitions consume that retained summary to identify
+the affine request occurrence, safe state, delay premise and disposition; the
+bridge cannot discard it after manufacturing a liveness contract.
 In particular,
 
 ```text
@@ -1265,7 +1289,7 @@ theorem ProcessRun.observationCausality
   ProcessRun.concatSegments_has_unique_origin run
 
 structure ProcessNetworkAdequate {R : Type u} [ResourceModel R]
-    {resources : R} (spec : Specification resources)
+    {resources : R} (spec : SpecProcess resources)
     (plan : ProcessPlan registry boundary) where
   initial : ∀ input, AdmissibleInput spec input ->
     Nonempty (ExactInitialNetworkAndRootRun plan input)
@@ -1276,7 +1300,7 @@ structure ProcessNetworkAdequate {R : Type u} [ResourceModel R]
   networkProgress : MaximalNetworkExecutionsMeetProgressOrFrontier spec plan
 
 structure ProcessNetworkSimulation {R : Type u} [ResourceModel R]
-    {resources : R} (spec : Specification resources)
+    {resources : R} (spec : SpecProcess resources)
     (plan : ProcessPlan registry boundary) where
   coupledExecutions : CoupledExecutionRelation plan spec
   preservesAndReflectsChoices : EnvironmentAndOccurrenceChoicesCoupled
@@ -1287,10 +1311,12 @@ structure ProcessNetworkSimulation {R : Type u} [ResourceModel R]
 
 structure ResourceAxisRealization
     {R : Type u} [ResourceModel R] {resources : R}
-    (spec : Specification resources)
+    (spec : SpecProcess resources)
     (plan : ProcessPlan registry boundary)
-    (axis : ResourceAxisName) where
-  abstractSemantics : SelectedResourceAxisSemantics spec axis
+    (axis : ResourceAxisName)
+    (required : axis \u2208 spec.resourceSemantics.requiredAxes) where
+  abstractSemantics : SelectedAxisSemantics resources axis :=
+    spec.resourceSemantics.lookup axis required
   metric : ResourceMetric plan
   metricAxis : metric.Axis
   representation : AbstractResourceValueRepresentedByMetric
@@ -1302,16 +1328,16 @@ structure ResourceAxisRealization
 
 structure ResourceAxisRealizationFamily
     {R : Type u} [ResourceModel R] {resources : R}
-    (spec : Specification resources)
+    (spec : SpecProcess resources)
     (plan : ProcessPlan registry boundary) where
   realizes : forall axis,
-    axis \u2208 spec.resourceSemantics.requiredAxes ->
-    ResourceAxisRealization spec plan axis
+    (required : axis \u2208 spec.resourceSemantics.requiredAxes) ->
+    ResourceAxisRealization spec plan axis required
   noDummyAxes : EveryConcreteMetricAxisHasNamedAbstractOrAuditPurpose plan
   rootBound : ConcreteRootBoundFollowsFromSelectedLimits spec plan realizes
 
 structure ProcessPlanRealizes {R : Type u} [ResourceModel R]
-    {resources : R} (spec : Specification resources)
+    {resources : R} (spec : SpecProcess resources)
     (plan : ProcessPlan registry boundary) where
   processProofs : ∀ kind,
     ProcessCorrect (registry.protocol (plan.protocolKey kind))
@@ -1343,13 +1369,29 @@ not smuggled into `Invariant`; those remain independent lower-layer demands.
 ### One algebra, two plan-authoring modes
 
 The process network is Grass's universal internal semantic form, but an explicit
-network is not mandatory application ceremony. Both authoring modes elaborate
+network is not mandatory application ceremony. Every authoring source elaborates
 to the same `ProcessRealization` and expose the same stable `DriverBoundary` to
 platform and assembly proofs:
 
 ```lean
+structure ClosedBlendProvenance {R : Type u} [ResourceModel R]
+    {resources : R} (spec : SpecProcess resources)
+    (boundary : DriverBoundary)
+    (registry : ProtocolRegistry)
+    (plan : ProcessPlan registry boundary)
+    (correct : ProcessPlanRealizes spec plan) where
+  Presentation : Type
+  Graph : Presentation -> Type
+  shaped : Presentation
+  graph : Graph shaped
+  localCertificates : ExactLocalCertificatesForGraph shaped graph
+  portableClosure : EveryReachableAbstractFrontierClosed shaped graph
+  requirementUnion : ExactRequirementResourceAndObligationUnion shaped graph
+  elaboratesExact : ExactClosedBlendElaboration
+    shaped graph registry plan correct
+
 inductive ProcessPlanSource {R : Type u} [ResourceModel R]
-    {resources : R} (spec : Specification resources)
+    {resources : R} (spec : SpecProcess resources)
     (boundary : DriverBoundary)
   | sequential
       (program : DirectRelationalProgram boundary)
@@ -1358,9 +1400,14 @@ inductive ProcessPlanSource {R : Type u} [ResourceModel R]
       (registry : ProtocolRegistry)
       (plan : ProcessPlan registry boundary)
       (correct : ProcessPlanRealizes spec plan)
+  | blended
+      (registry : ProtocolRegistry)
+      (plan : ProcessPlan registry boundary)
+      (correct : ProcessPlanRealizes spec plan)
+      (provenance : ClosedBlendProvenance spec boundary registry plan correct)
 
 structure ProcessRealization {R : Type u} [ResourceModel R]
-    {resources : R} (spec : Specification resources) where
+    {resources : R} (spec : SpecProcess resources) where
   boundary : DriverBoundary
   registry : ProtocolRegistry
   plan : ProcessPlan registry boundary
@@ -1368,6 +1415,13 @@ structure ProcessRealization {R : Type u} [ResourceModel R]
   origin : ProcessPlanSource spec boundary
   originSound : ElaboratesTo origin registry plan correct
 ```
+
+The `.blended` case is the only origin produced by staged portable closure. It
+retains the exact dependent presentation, graph, local certificates, recursive
+frontier closure, accumulated requirements, and elaboration into this very
+`registry`, `plan`, and `correct` value. An extensionally similar graph cannot
+donate its provenance. Sequential and explicitly authored plans retain their
+own origins and do not pretend to have blend scopes.
 
 The sequential source consumed by the adapter has structured dynamic effects;
 an inventory of possible sites is not treated as the effects issued by a
@@ -1438,7 +1492,7 @@ realizer:
 
 ```lean
 structure StandardSequentialRealization {R : Type u} [ResourceModel R]
-    {resources : R} (spec : Specification resources) where
+    {resources : R} (spec : SpecProcess resources) where
   program : DirectRelationalProgram spec.driverBoundary
   correct : DirectProgramRealizes spec program
 
@@ -1447,7 +1501,7 @@ structure StandardRealizerEntry where
   model : ResourceModel R
   resources : R
   key : StandardRealizerKey
-  spec : @Specification R model resources
+  spec : @SpecProcess R model resources
   realization : @StandardSequentialRealization R model resources spec
 
 structure StandardRealizerRegistry where
@@ -1458,7 +1512,7 @@ structure StandardRealizerRegistry where
 
 structure ExactStandardRealizerLookup {R : Type u} [ResourceModel R]
     (registry : StandardRealizerRegistry) {resources : R}
-    (spec : Specification resources) where
+    (spec : SpecProcess resources) where
   entry : StandardRealizerEntry
   member : entry ∈ registry.entries
   exactSpec : DefinitionalOrCanonicalSpecEquality entry.spec spec
@@ -1722,7 +1776,7 @@ A driver realizes a process using selected providers:
 
 ```lean
 structure ProcessDriver {R : Type u} [ResourceModel R]
-    {resources : R} (spec : Specification resources)
+    {resources : R} (spec : SpecProcess resources)
     (processes : ProcessPlan registry boundary)
     (realizes : ProcessPlanRealizes spec processes)
     (platform : PlatformPlan boundary.requirements)

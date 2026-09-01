@@ -65,6 +65,10 @@ the concise acceptance checklist.
 - Close/Escape records an exit request but does not destroy the `HWND` from the
   callback. Cleanup first retires device work and destroys the Vulkan surface,
   then destroys the dependent window and unregisters its class.
+- The entry-frame application state is passed as `lpParam`, installed as
+  `GWLP_USERDATA` during `WM_NCCREATE`, recovered for every later callback
+  access, and cleared during `WM_NCDESTROY`. The frame remains live until
+  `DestroyWindow` has returned and callback access has ended.
 - Acquire, submit, and present transfer image and synchronization obligations
   explicitly. No image is rendered before acquisition, reused before its fence,
   destroyed while in flight, or presented outside the required layout.

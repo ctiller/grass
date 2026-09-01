@@ -1,7 +1,9 @@
 # Glossary
 
-**Specification** — A Lean program or relation describing accepted observations
-and functional behavior, independently of one target realization.
+**SpecProcess** — The one precious root semantic process indexing
+`VerifiedProgram`. It captures composed specification DSLs and semantic child
+processes behind one public transition/observation boundary, independently of
+one target realization.
 
 **Behavior contract** — The portable part of a resource-parameterized specification which
 names domain values, admitted inputs, observations, outcomes, safety, progress,
@@ -11,7 +13,7 @@ and functional relations without choosing a target representation.
 quantitative and lifecycle semantics over an extensible resource algebra,
 including but not limited to memory. A specification depends on this model.
 
-**Specification family** — The precious program definition parameterized by a
+**Specification family** — The precious root-process definition parameterized by a
 resource model. Different selected models instantiate the same program for
 different deployment envelopes without reversing the dependency into
 `ResourceContract behavior`.
@@ -21,9 +23,10 @@ limit, exhaustion, lifecycle, and named capability operations used while
 constructing one specification value. Downstream certificates recover it from
 the exact `spec`; they do not repeat typeclass selection.
 
-**Natural specification front end** — Relational, stream, trace/reactive, or
-protocol syntax suited to a problem domain and elaborating to the one common
-behavior-contract denotation. These are authoring modalities, not separate
+**Natural specification front end** — Relational, stream, trace/reactive,
+grammar, protocol, temporal, resource, or domain syntax suited to a problem and
+captured into the one common root-process behavior contract. These are
+authoring modalities, not separate
 refinement foundations.
 
 **Target projection** — A reviewed mapping from an instantiated specification's
@@ -54,17 +57,17 @@ weave, provider, ABI, platform, or ISA.
 **Process protocol** — A portable logical state/event/demand/result relation
 for one process role. API and library operations are child process protocols.
 
-**Spec process** — A process protocol authored inside a precious specification
-body to state abstract roles, typed communication, linear/shared logical state,
-and causality. It contains no physical topology or provider identity, and its
-external trace contract is a derived denotation of the same source.
+**Semantic child process** — A process contract constructed or existentially
+demanded by a specification DSL and captured behind the precious root
+`SpecProcess`. Its contract may be precious; its selected witness and private
+decomposition are not.
 
 **Process realization** — A reviewed replaceable model/plan/driver which proves
-refinement to a relational or process-shaped specification. Its population,
+refinement to the root `SpecProcess`. Its population,
 state partition, channels, scheduling, and execution strategy are not precious.
 
-**Partial process realization** — A graph indexed by an exact process-shaped
-specification in which some finite role schemas have portable subsystem
+**Partial process realization** — A graph indexed by an exact staged process
+presentation of the root in which some finite role schemas have subsystem
 certificates and others remain abstract. It carries proofs and accumulated
 requirements but is not executable or emittable.
 
@@ -116,11 +119,34 @@ live process invariant, population, shared-access and channel laws, outstanding
 children, obligations, observations, progress state, and physical
 representation.
 
+**Specification suite** — The precious finite composition of domain-specific
+DSL components and typed semantic junctions. It is captured into the single
+root `SpecProcess` consumed by `VerifiedProgram` without specifying execution
+weaving.
+
+**Contract fragment** — The common denotational interface exported by a
+specification DSL: typed ports, assumptions, guarantees, observations, failures,
+progress, and selected-resource use.
+
+**Spec junction** — A precious typed relation connecting ports of two contract
+fragments and proving coverage and preservation. It describes semantic flow,
+not assignment to processes, APIs, buffers, or instructions.
+
 **Obligation** — A linear ghost resource whose current holder must perform or
 lawfully transfer a future action.
 
 **Ghost operation/state** — Proof-relevant structure used before emission and
 erased before raw instructions are serialized.
+
+**Fragment constructor** — A typed Lean function that generates an exact finite
+instruction fragment and exports a parametric theorem for the entire generated
+family. Assembly quotation and splicing are its source surface; it is not a
+textual substitution phase.
+
+**`withStack` binder** — A lexical assembly construction form that introduces
+typed addressable stack objects and contributes their layout/lifetime demands
+to an inspectable frame plan. It tracks initialization, provenance, loans, and
+non-escape without implying hidden initialization or finalization.
 
 **RawProgram** — A program containing only concrete target operations and
 layout/link information. It is executable and fuzzable but unverified by itself.

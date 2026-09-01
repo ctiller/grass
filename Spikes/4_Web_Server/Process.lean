@@ -6,8 +6,41 @@ import Spikes.«4_Web_Server».Model
 
 namespace Grass.Spikes.WebServer
 
+inductive ServerRoleSchema
+  | listener
+  | connection
+  | stream
+
+def ServerRoleSchema.Instance : ServerRoleSchema -> Type
+  | .listener => Unit
+  | .connection => ConnectionId
+  | .stream => ConnectionId × Http2StreamId
+
+def connectionSession (id : ConnectionId) : SpecProcess resources :=
+  Http2.abstractConnectionSession resources routes behaviorPolicy id
+
+def streamSession (connection : ConnectionId) (stream : Http2StreamId) :
+    SpecProcess resources :=
+  Http2.abstractRequestStream resources routes behaviorPolicy connection stream
+
+def abstractServer : AbstractSpecificationProcessNetwork resources :=
+  Http2.abstractMemoryServer
+    (roleSchema := ServerRoleSchema)
+    (instances := ServerRoleSchema.Instance)
+    (routes := routes)
+    (connection := connectionSession)
+    (stream := streamSession)
+    (admission := WebServerResources.connectionCapacity resources)
+    (custody := .linearPerConnectionAndStream)
+
+def serverProcessPresentation : ProcessPresentation spec where
+  network := abstractServer
+  denotationExact := Http2.abstractMemoryServerDenotesContract
+  requirementsExact := Http2.abstractMemoryServerRequirementsExact
+
 def processPolicy : MemoryServerProcessPolicy :=
   MemoryServerProcessPolicy.ofSpecification spec
+    |>.withHpackEncoder .literalWithoutIndexing
 
 inductive ServerCommand
   | beginListening (endpoint : Endpoint)
@@ -52,6 +85,9 @@ def connectionProcess : ProcessSpec :=
 
 def streamProcess : ProcessSpec :=
   Grass.Std.Http2.streamProcess routes processPolicy.stream
+
+def frameParserProcess : ProcessSpec :=
+  SequentialAdapter.parserProcess frameParserRealizes
 
 def hpackDecoderProcess : ProcessSpec :=
   Grass.Std.Hpack.decoderProcess protocolProfile
@@ -109,6 +145,7 @@ inductive ServerProtocolKey
   | stream
   | hpackDecoder
   | connectionWriter
+  | frameParser
   | api (protocol : ServerApiProtocol)
   | terminal
 
@@ -122,6 +159,7 @@ def serverProtocols : ProtocolRegistry where
     | .stream => streamProcess
     | .hpackDecoder => hpackDecoderProcess
     | .connectionWriter => connectionWriterProcess
+    | .frameParser => frameParserProcess
     | .api protocol => protocol.process
     | .terminal => Std.Process.Terminal.finish processPolicy.terminalPolicy
 
@@ -133,6 +171,7 @@ inductive ServerProcessKind
   | stream (connection : ConnectionId) (id : Http2StreamId)
   | hpackDecoder (connection : ConnectionId)
   | connectionWriter (connection : ConnectionId)
+  | frameParser (connection : ConnectionId) (demand : DemandId)
   | apiCall (id : DemandId) (protocol : ServerApiProtocol)
   | terminal
 
@@ -155,6 +194,7 @@ def serverProcessPlan : ProcessPlan serverProtocols spec.driverBoundary where
     | .stream _ _ => .stream
     | .hpackDecoder _ => .hpackDecoder
     | .connectionWriter _ => .connectionWriter
+    | .frameParser _ _ => .frameParser
     | .apiCall _ protocol => .api protocol
     | .terminal => .terminal
   root := .root
@@ -188,6 +228,9 @@ def connectionCorrect : ProcessCorrect connectionProcess :=
 def streamCorrect : ProcessCorrect streamProcess :=
   Grass.Std.Http2.streamCorrect routes processPolicy.stream
 
+def frameParserCorrect : ProcessCorrect frameParserProcess :=
+  SequentialAdapter.parserProcessCorrect frameParserRealizes
+
 def hpackDecoderCorrect : ProcessCorrect hpackDecoderProcess :=
   Grass.Std.Hpack.decoderProcessCorrect protocolProfile
 
@@ -200,7 +243,7 @@ structure ServerCompositionWitness where
   socketGeneration : SocketIdentityAndGenerationInvariant serverProcessPlan
   listenerAuthority : ExactlyOneListenerAuthority serverProcessPlan
   admissionPermits : ActiveConnectionsCorrespondToPermits
-    serverProcessPlan resourcePolicy.maxActiveConnections
+    serverProcessPlan capturedResourcePolicy.maxActiveConnections
   workerSlots : DisjointWorkerSlotOwnership serverProcessPlan
   receiveCancelRace : EveryReceiveLoanHasOneRaceWinner serverProcessPlan
   sendCancelRace : EverySendSuffixHasOneRaceWinner serverProcessPlan
