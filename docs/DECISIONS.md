@@ -500,6 +500,14 @@ to imitate compiler-selected storage or CFG structure.
     wrappers remain inspectable but do not receive authored files. Reviewers
     must cross-check both views mechanically and report author cost separately
     from generated/kernel cost.
+98. Lean modules are the physical unit of proof invalidation. Each bounded
+    machine shard has a stable signature module, a private exact implementation,
+    an opaque checked certificate, and a serialized verified-object facet.
+    Callers depend on imported signatures; bounded-fanout aggregate modules
+    depend on certificates. Scale acceptance proves edit locality over this
+    shard DAG, simulates large compact graphs, and calibrates representative real
+    builds. Grass does not manufacture a million-instruction Lean term as a
+    proxy for repository scale. See [OLEAN_SHARDING.md](OLEAN_SHARDING.md).
 
 ## Explicitly rejected shortcuts
 

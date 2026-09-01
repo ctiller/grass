@@ -750,13 +750,19 @@ Source discovery may read and hash the complete tree even when proof replay is
 local, and its byte count is reported separately. Grass does not mandate one
 Lean module per basic block. The shard
 policy is selected from measured elaboration/import/kernel-check tradeoffs and
-is itself recorded in the manifest. Scale fixtures publish selected-block,
+is itself recorded in the manifest. Scale validation publishes selected-block,
 source-byte-scan, equality-construction, shard-import, elaboration, kernel-check,
 diagnostic, composition-node, aggregation, artifact-scan, and artifact-write
-counts for the mandatory 1M- and 10M+-instruction fixtures. A flat
+counts for structural locality proofs, large compact dependency-graph
+simulations, and calibrated representative builds. A flat
 whole-program proof-certificate reconstruction on a leaf edit fails the locality
 gate; a full source hash scan or final artifact write does not, but must not be
 misreported as local proof work.
+
+The physical module, certificate, and Lake-facet design is normative in
+[OLEAN_SHARDING.md](OLEAN_SHARDING.md). Grass does not materialize an arbitrary
+million-instruction Lean value merely to establish that dependency cones are
+local.
 
 Each shard is an ordinary generated Lean module imported and kernel-checked by
 the ordinary Lean environment. The build layer may content-address, reuse, and
@@ -765,11 +771,11 @@ deserialize unchecked proof objects, or modify the kernel. If measured Lean
 module/import overhead makes a proposed shard size uneconomic, the policy must
 coarsen the shard rather than assume a custom kernel frontend.
 
-The 1M/10M+ corpus and locality reports are future acceptance evidence, not
-facts established by the current five design spikes. Until reproducible source
-generators, retained `LocalityContract`, `InvalidationPlan`, and
-`BuildExecutionReport` artifacts, and clean/incremental measurements exist in
-the repository, the hierarchical scheme is a proposed architecture with an
+The locality reports are future acceptance evidence, not facts established by
+the current five design spikes. Until retained `LocalityContract`,
+`InvalidationPlan`, and `BuildExecutionReport` artifacts, structural locality
+proofs, compact graph simulations, and calibrated clean/incremental builds exist
+in the repository, the hierarchical scheme is a proposed architecture with an
 unpassed scale gate. No document or certificate may infer target-scale proof
 economics from the small fixtures or from asymptotic prose alone.
 

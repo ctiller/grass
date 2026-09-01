@@ -86,8 +86,10 @@ DEFLATE kernel is a serial component with a local model/Hoare certificate. A
 generic opaque adapter theorem is applied at a subsystem boundary; its proof is
 not textually regenerated once per instruction. Whether even this compact
 application checks economically at target scale is an empirical gate, so Grass
-retains the million/tens-of-millions fixture instead of asserting unmeasured
-kernel costs in either direction.
+retains measured locality gates instead of asserting unmeasured kernel costs in
+either direction. Those gates are specified in
+[OLEAN_SHARDING.md](OLEAN_SHARDING.md) and do not require a synthetic
+million-instruction program.
 
 The follow-up review correctly challenged the eleven-file gzip directory. The
 project intent is that `Spikes/` shows what agents actually author, so placing
@@ -219,5 +221,7 @@ The review is correct that prose and comment-free design fixtures are not an
 implemented library.  Before implementation claims are made, Grass still needs
 elaborated interface fixtures, executable rejection mutations, an optimized
 kernel refinement, measured tactic reports, and hierarchical scale fixtures.
-Those are acceptance gates.  This document does not convert them into claims of
+The scale fixture here means the structural, compact-graph, and calibrated-build
+ratchet in [OLEAN_SHARDING.md](OLEAN_SHARDING.md), not a giant synthetic source.
+Those are acceptance gates. This document does not convert them into claims of
 completion.

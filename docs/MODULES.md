@@ -80,7 +80,9 @@ tool reports but do not receive authored files. Conversely, large programs may
 shard a genuinely independent logical or machine subsystem. Physical module
 boundaries are chosen from authored abstraction and measured build locality,
 not from the number of internal certificate-record fields. See
-[SPIKE_AUTHORING.md](SPIKE_AUTHORING.md).
+[SPIKE_AUTHORING.md](SPIKE_AUTHORING.md). The required public/private module
+split, opaque certificate boundary, Lake facets, aggregate DAG, and rebuild-cone
+ratchet are specified in [OLEAN_SHARDING.md](OLEAN_SHARDING.md).
 
 Lower layers must not import concrete programs. Common semantics must not import
 one ISA or platform. ISA and platform profiles may depend on common memory/event

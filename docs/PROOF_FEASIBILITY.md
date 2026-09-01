@@ -812,17 +812,17 @@ scanned, file count, equality-construction work, module imports, elaboration
 work, kernel-check work, composition visits, serialization work, and wall time
 are measured separately at several shard sizes before choosing defaults.
 
-The scale fixture has two mandatory sizes: at least 1,000,000 and at least
-10,000,000 source instructions, with at least 1,000 distinct block-boundary
-shapes and every instruction family selected by the fixture profiles. It also
-contains one composed long-running process/resource system; repeating one
-identical certified block does not satisfy the gate. For a leaf edit preserving
-its exported boundary, the report must show zero sibling certificate
-elaborations and kernel checks, at most the changed leaf shard plus the nodes on
-its hierarchical composition path recomputed, and no unrelated spec/provider
-certificate action. Full source hashing and full artifact regeneration are
-allowed but reported as separate byte counts. A boundary change is judged
-against its declared semantic dependent cone rather than this leaf bound.
+Scale validation follows [OLEAN_SHARDING.md](OLEAN_SHARDING.md): prove edit
+locality over the abstract shard DAG, exercise large compact graphs without
+inventing instruction bodies, and run calibrated representative builds only as
+far as needed to expose real elaboration, import, kernel, encoding, and linking
+cost curves. For a leaf edit preserving its exported boundary, the report must
+show zero sibling certificate elaborations and kernel checks, at most the
+changed leaf shard plus the nodes on its hierarchical composition path
+recomputed, and no unrelated spec/provider certificate action. Full source
+hashing and full artifact regeneration are allowed but reported as separate byte
+counts. A boundary change is judged against its declared semantic dependent
+cone rather than this leaf bound.
 
 Source-closure mutations replace one macro body, remove one static symbol,
 change one child export, and alter one fragment instruction. The first affected
@@ -837,11 +837,12 @@ hierarchical build economics are a **conditional commitment**. The fallback is
 coarser ordinary Lean modules and more rechecking, never trusting hashes.
 
 **Current evidence status: not measured and therefore not passed.** The design
-spikes contain neither the reproducible 1M/10M+ corpora nor retained execution
+spikes contain neither the structural locality proofs nor retained execution
 reports. They establish interfaces and mutation expectations only. Grass must
 not describe target-scale locality, memory use, or build speed as achieved until
-the generated corpora, machine-readable plans/reports, clean runs, incremental
-runs, and boundary-preserving mutations have been checked in and reproduced.
+the compact-graph simulations, machine-readable plans/reports, calibrated clean
+and incremental runs, and boundary-preserving mutations have been checked in
+and reproduced.
 
 ## 12. Orthogonal staged subsystem refinement
 

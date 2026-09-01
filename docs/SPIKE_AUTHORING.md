@@ -205,7 +205,7 @@ and enforces every phase independently.
 
 The present corpus is explicitly forbidden from building the supporting
 library. Its design fixpoint therefore does not require fabricated generator
-output, proof terms, timings, executable mutations, or million-line runs. It
+output, proof terms, timings, executable mutations, or synthetic scale runs. It
 does require:
 
 - exact classified authored source;
@@ -220,8 +220,9 @@ A handwritten listing may be a proof sketch but cannot be called generated or
 exact evidence. Design approval means the demanded libraries can be built
 without choosing another foundational interface; it does not mean the program
 has compiled or the artifact exists. Actual expansion, kernel replay, artifact
-reproduction, mutations, and the 1M/10M scale runs are blocking gates for
-implementation acceptance, not for this document-only fixpoint.
+reproduction, mutations, and the structural/graph/measured locality ratchet in
+[OLEAN_SHARDING.md](OLEAN_SHARDING.md) are blocking gates for implementation
+acceptance, not for this document-only fixpoint.
 
 ## Proof-economics accounting
 

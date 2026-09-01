@@ -143,10 +143,13 @@ at least one concurrent reclamation discipline. Those mechanisms need not be
 artificially inserted into terminating Hello, sort, or gzip.
 
 The current single large `asm_source` terms are also insufficient evidence for
-10M-line locality. Their intended typed object/shard boundaries must appear in
-the authored example, and implementation acceptance must show that editing one
-HPACK, worker, host, or shader shard rechecks that shard and ancestor interfaces
-without reopening unrelated siblings.
+repository-scale locality. Their intended typed object/shard boundaries must
+appear in the authored example, and implementation acceptance must show that
+editing one HPACK, worker, host, or shader shard rechecks that shard and its
+bounded aggregate path without reopening unrelated siblings. The ratchet is the
+structural, compact-graph, and calibrated-build design in
+[OLEAN_SHARDING.md](OLEAN_SHARDING.md); no synthetic 10M-instruction source is
+required.
 
 Dynamic shader permutations are a valuable later pressure test, not part of the
 one-pipeline cube behavior. The actionable finding is that the present
@@ -156,7 +159,7 @@ replaceable, not that this spike must silently become a render-graph system.
 ## Evidence boundary
 
 Generated expansion, exact effect reports, rejected mutations, proof sizes,
-incremental builds, IOCP substitution, and million/tens-of-millions scale runs
-remain implementation acceptance gates. The design corpus must state their
+incremental builds, IOCP substitution, and the `.olean` sharding locality
+ratchet remain implementation acceptance gates. The design corpus must state their
 interfaces and falsification tests now, but must continue to label their results
 `not generated` or `not measured` until they run.

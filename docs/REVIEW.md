@@ -287,7 +287,8 @@ or equivalent—and a local extensional-equivalence proof route. A scalar
 reference implementation is not evidence that optimized assembly is
 economical. Conversely, estimated speedups and invented module counts are not
 evidence: record instruction mix, proof/elaboration work, cache reuse, generated
-files, kernel checks, and runtime probes on the stated scale fixtures.
+files, kernel checks, and runtime probes under the structural, graph-simulation,
+and calibrated-build ratchet in [OLEAN_SHARDING.md](OLEAN_SHARDING.md).
 
 ## 5. Sign-off
 

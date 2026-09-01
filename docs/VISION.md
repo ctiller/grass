@@ -392,17 +392,15 @@ milestones must demonstrate:
 - adversarial model validation against cited CPUs, APIs, loaders, devices, and
   external libraries.
 
-The scale claim is tested at two mandatory sizes: at least 1,000,000 and at
-least 10,000,000 source instructions. Each fixture has at least 1,000 distinct
-block-boundary shapes, covers every instruction family selected by its declared
-profiles, and includes a composed long-running process/resource system; copying
-one certified block millions of times is insufficient. For a one-leaf edit
-which preserves its exported boundary, zero sibling certificates may be
-re-elaborated or kernel-rechecked, only the changed shard and its hierarchical
-composition path may be recomputed, and unrelated specification/provider
-certificates must be untouched. Full source hashing and final artifact emission
-may remain linear in bytes and are reported separately. Interface changes are
-measured against their explicit semantic dependent cones.
+The scale claim is tested by the structural, graph-simulation, and calibrated
+real-build ratchet in [OLEAN_SHARDING.md](OLEAN_SHARDING.md), not by manufacturing
+an arbitrary number of instructions. For a one-leaf edit which preserves its
+exported boundary, zero sibling certificates may be re-elaborated or
+kernel-rechecked, only the changed shard and its hierarchical composition path
+may be recomputed, and unrelated specification/provider certificates must be
+untouched. Full source hashing and final artifact emission may remain linear in
+bytes and are reported separately. Interface changes are measured against their
+explicit semantic dependent cones.
 
 They must also demonstrate that these mechanisms coexist in one nontrivial
 system. Passing each feature in isolation is insufficient if their composition

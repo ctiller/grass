@@ -31,6 +31,7 @@ No document may override a narrower owner by restating it differently.
 | [PROCESS.md](PROCESS.md) | portable state/event/demand/view processes, networks, channels, flattening, resources, and driver boundary |
 | [VERIFIED_PROGRAM.md](VERIFIED_PROGRAM.md) | the public certificate and emission gate |
 | [VERIFIED_OBJECTS.md](VERIFIED_OBJECTS.md) | stable subsystem signatures, relocatable verified objects, modular linking |
+| [OLEAN_SHARDING.md](OLEAN_SHARDING.md) | Lean module boundaries, `.olean` reuse, certificate DAGs, and rebuild cones |
 | [MEMORY_MODEL.md](MEMORY_MODEL.md) | memory, provenance, borrowing, concurrency, faults |
 | [OBLIGATIONS.md](OBLIGATIONS.md) | linear obligations, transfer, exit dispositions |
 | [REFINEMENT.md](REFINEMENT.md) | refinement proof concerns, weaving, provider realization, generated/authored machine routes |
@@ -76,6 +77,9 @@ No document may override a narrower owner by restating it differently.
   expected Lean source files, including final PE emission and connection
   theorems. They are design fixtures until the Grass libraries are implemented.
 - [MODULES.md](MODULES.md) proposes a dependency-safe Lean/project structure.
+- [OLEAN_SHARDING.md](OLEAN_SHARDING.md) specifies how bounded source shards,
+  public signatures, opaque certificates, Lake facets, and aggregate `.olean`
+  modules localize proof and build invalidation.
 - [REVIEW.md](REVIEW.md) is the adversarial review protocol and sign-off form.
 - [EXTERNAL_REVIEW_41F5C9C.md](EXTERNAL_REVIEW_41F5C9C.md) records the
   evidence-based disposition of the external architecture review at that

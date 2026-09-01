@@ -128,10 +128,12 @@ Consequences:
 - no local theorem elaborates or compares a tens-of-millions-instruction term.
 
 Implementation acceptance measures clean work, one-instruction body edits,
-interface edits, cache hits, proof bytes, and peak memory at one million and ten
-million instructions. The design target is work proportional to the changed
-shard plus affected ancestor/interface closure, with logarithmic or bounded
-index lookup; no fixed numeric timing is claimed before measurement.
+interface edits, cache hits, proof bytes, and peak memory using the structural,
+graph-simulation, and calibrated-real-build ratchet in
+[OLEAN_SHARDING.md](OLEAN_SHARDING.md). The design target is work proportional
+to the changed shard plus affected ancestor/interface closure, with logarithmic
+or bounded index lookup; no fixed numeric timing or giant instruction corpus is
+claimed before measurement.
 
 ## 5. Invalidation and caching
 
