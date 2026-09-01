@@ -1,0 +1,24 @@
+# Lean build products
+.lake/
+*.olean
+*.ilean
+
+# Agent-local worktrees and state
+.claude/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Editor and operating-system files
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Native helper build products
+target/

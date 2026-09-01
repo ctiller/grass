@@ -1,0 +1,37 @@
+name: Corpus bug
+description: Report an inconsistency, broken link, stale source fixture, or validation failure.
+title: "bug: "
+labels: [bug]
+body:
+  - type: textarea
+    id: revision
+    attributes:
+      label: Revision
+      description: Commit hash or branch where the problem occurs.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is inconsistent or failing, and where?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Give the shortest command or reading path that demonstrates the problem.
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: checkboxes
+    id: disclosure
+    attributes:
+      label: Disclosure check
+      options:
+        - label: This report contains no confidential vulnerability or personal information.
+          required: true

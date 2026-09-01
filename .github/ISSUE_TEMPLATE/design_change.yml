@@ -1,0 +1,51 @@
+name: Design change
+description: Propose a correction or extension to the Grass specification corpus.
+title: "design: "
+labels: [design]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start with `docs/README.md` and identify the normative owner of the rule you want to change.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is wrong, missing, over-specified, or economically impractical?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: State the smallest change and which documents or spike sources it affects.
+    validations:
+      required: true
+  - type: textarea
+    id: proof
+    attributes:
+      label: Proof and authoring impact
+      description: Describe residual proof goals, assembly freedom, automation boundaries, and expected authored ceremony.
+    validations:
+      required: true
+  - type: textarea
+    id: blast_radius
+    attributes:
+      label: Change blast radius
+      description: Which specifications, shards, implementations, or cached certificates should be invalidated?
+    validations:
+      required: true
+  - type: textarea
+    id: authority
+    attributes:
+      label: External authority
+      description: Link primary vendor, standards-body, or research sources when behavior is defined externally.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I checked the normative owner and related decisions for conflicts.
+          required: true
+        - label: I have not included confidential vulnerability or personal information.
+          required: true

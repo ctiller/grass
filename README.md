@@ -3,6 +3,11 @@
 Grass is a high-level, extensible assembler for building programs whose emitted
 machine code is proved safe and equivalent to a Lean specification.
 
+> **Project status:** pre-implementation specification and spike corpus. Grass
+> does not yet provide a buildable assembler, verified executable, or supported
+> release. The Lean files under `Spikes/` are reviewed authoring fixtures whose
+> imported `Grass.*` libraries are deliberately not built yet.
+
 Its target is large, long-lived systems—games, databases, operating systems,
 compilers, graphics and storage engines—not merely small verified examples. The
 spikes pressure-test one compositional architecture intended to scale across
@@ -40,3 +45,30 @@ protocol in [docs/AGENT_BUS.md](docs/AGENT_BUS.md), with exact event types in
 [docs/AGENT_REVIEW.md](docs/AGENT_REVIEW.md): an author nominates a distinct
 reviewer, and that reviewer—not the author—reviews and cleanly merges a selected
 snapshot of the named product branch.
+
+## Repository validation
+
+The current executable check verifies that annotated spike documents and their
+comment-free authored Lean views remain exact:
+
+```powershell
+pwsh ./check-spike-sources.ps1
+pwsh ./check-doc-links.ps1
+```
+
+These are corpus consistency checks, not compilation or proof checking. The
+conditions for beginning implementation are tracked in
+[docs/IMPLEMENTATION_RATCHET.md](docs/IMPLEMENTATION_RATCHET.md).
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change. Suspected
+vulnerabilities or sensitive disclosures must follow
+[SECURITY.md](SECURITY.md), not a public issue or agent-bus event.
+
+## License
+
+No open-source license has been selected yet. Until a `LICENSE` file is added,
+default copyright restrictions apply: the source is visible to recipients but
+must not be represented or redistributed as open source. License selection is a
+required step before public launch.
