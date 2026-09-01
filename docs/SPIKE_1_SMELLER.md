@@ -1829,7 +1829,7 @@ missing. No banned proof escape was found in the authored spike sources.
 | Cube extent writes the wrong destination | **Closed.** The typed constructor writes the `imageCount` consumed by swapchain creation. |
 | Cube omits irrelevant-input stuttering | **Closed.** `.irrelevant` is now accepted explicitly. |
 | Excess authored plumbing | **Materially improved, not closed.** Standard projections and large Web cancellation wrappers disappeared, but undefined high-powered constructors now hide some of the same work (finding 6). |
-| Sort makes unobservable stability precious | **Still disputed.** The document calls it a product requirement, but the byte-stream consumer cannot observe duplicate occurrence identity (finding 11). |
+| Sort makes unobservable stability precious | **Still disputed.** The document calls it a product requirement, but the byte-stream consumer cannot observe duplicate occurrence identity (finding 12). |
 | Missing executable scale evidence | **Reclassified by the revised contract.** Runs are an implementation gate, not a document-only gate. The missing future command/schema/mutation/acceptance ratchets and missing shard interface remain design blockers (findings 10--11). |
 
 ### Ranked Round 20 findings
@@ -2167,6 +2167,26 @@ update one authority while silently leaving the parser unchanged.
 **Required closure:** derive the inbound parser bound from the directionally
 correct captured local receive policy. A mutation of that policy must invalidate
 the parser constructor application at the first typed boundary.
+
+#### 15. [P1] Cube's fixed rotation-error promise has no valid clock domain
+
+The precious observation fixes a maximum angular error of 1/1024 radian and
+one-millisecond timing tolerance (`Spikes/5_Spinning_Cube/Spec.lean:20-23`). The
+selected implementation uses binary64 absolute-epoch arithmetic
+(`Process.lean:36-47`), while the assembly accepts every non-regressing signed-64
+tick delta that survives subtraction before division, multiplication, modulo,
+and binary32 conversion (`Assembly.lean:590-606`). Neither the spec, target
+projection, nor rotation representation bounds uptime, tick magnitude, or
+frequency. For sufficiently large admitted epochs/deltas, binary64 range
+reduction cannot sustain a uniform 1/1024-radian error. The document itself says
+the IEEE theorem must cover every admitted clock value
+(`docs/SPIKE_5.md:219-231`).
+
+**Required closure:** put the exact QPC frequency and elapsed-range validity
+domain in the selected target profile and prove it implies the promised error,
+with range exhaustion routed to a named failure/containment edge; or use an
+incremental/range-stable reduction with a uniform proof. Add boundary fixtures at
+the largest accepted tick delta and frequency.
 
 ### Round 20 proof-economics decision
 
