@@ -164,6 +164,10 @@ The branch and nomination together provide intended behavior, normative demands,
 affected interfaces and trust boundaries, expected invalidation cone, checks,
 known limitations, and an adversarial starting point. The reviewer may demand
 missing information and inspect any relevant surrounding material.
+`review_scope` should include known generated manifests, lockfiles, and source
+maps that the change can legitimately update; otherwise their appearance in the
+candidate correctly requires a replacement nomination rather than an implicit
+scope expansion.
 
 ## 5. Required review work
 
@@ -275,12 +279,29 @@ Later commits stay outside `main` and require a later merge under an active
 nomination. The helper and receipt make this boundary visible.
 
 `prepare-merge` uses the merge engine and exact version pinned in immutable
-`BUS.json`, with fixed helper-owned options and repository attributes from
-`previous_main`. It requires one merge base, refuses conflicts, submodule
+`BUS.json` or the currently selected `merge_engine.activated` epoch, with fixed
+helper-owned options and repository attributes from `previous_main`. It requires
+one merge base, refuses conflicts, submodule
 ambiguity, unsupported filters, and platform-dependent path collisions, and
 constructs the commit itself. The acceptance corpus covers renames, modes,
 attributes, symlinks, submodules, and conflicting edits. Reviewers never edit a
 prepared candidate tree.
+
+Candidate commit identity is deterministic. The helper emits exactly two parents
+in the stated order; fixed author and committer
+`Grass Agent Bus <agent-bus@invalid>`; timestamp one second after the greater
+parent committer timestamp in UTC (overflow is rejected); no optional encoding,
+signature, or mergetag headers; canonical Git header order and LF bytes; and
+exact UTF-8 message:
+
+```text
+agent-bus candidate
+
+Agent-Bus-Reviewer: <reviewer>
+```
+
+For identical epoch, parents, and reviewer, Windows and Linux must produce the
+same tree and commit object ID.
 
 A mechanical, conflict-free merge commit is integration metadata and does not
 make the reviewer a product author. Always creating it gives product history an
@@ -325,8 +346,9 @@ and exclude that reviewer; every finding has an explicit terminal disposition;
 no unresolved issue explicitly blocks its nomination chain; current `main`
 equals `previous_main`; the candidate has exactly the required two parents,
 reviewer trailer, and conflict-free tree; all required check results are present;
-every changed path is within `review_scope`; and structural bus validation
-passes. It outputs the exact candidate object ID to push.
+authorization `reviewed_scope` exactly equals nomination `review_scope`; every
+changed path is within that scope; and structural bus validation passes. It
+outputs the exact candidate object ID to push.
 
 The authorization consumes the bus state named by its `observed` field. Events
 published later do not retroactively change that verdict. This makes the

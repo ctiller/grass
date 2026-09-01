@@ -64,7 +64,8 @@ becomes mandatory. It contains `_bus/BUS.json`, `.gitattributes`, and sequence
 zero registration logs for the initially authorized coordinators. `BUS.json`
 names schema version 1, the repository object format, those coordinator
 identities, and the last product `main` commit exempt from the newly activated
-review protocol. It also pins the V1 merge engine and exact version.
+review protocol. It also pins the initial V1 merge engine, exact version, and
+bootstrap epoch event.
 `.gitattributes` contains `*.jsonl -text` so Git never rewrites
 line endings. Bootstrap registrations alone have `observed: null`. Both bootstrap
 files are immutable afterward; changing either requires a new reviewed protocol
@@ -219,6 +220,11 @@ causal offline batches. Cross-agent references always require publication in
 published history rewriting is forbidden, the observed commit remains a stable
 ancestor after later rebases.
 
+The protocol invents no total causal order across independent events. It does
+use the real linear parent order of successfully published bus commits to decide
+whether a lifecycle transition was current when published; that currency check
+does not claim unrelated events causally influenced one another.
+
 ## 6. Event kinds
 
 The initial vocabulary is intentionally bounded. Exact required and optional
@@ -242,14 +248,23 @@ statuses are `active`, `blocked`, `paused`, `done`, and `abandoned`. `done` and
 `abandoned` deactivate scope claims.
 
 `agent.resumed` records a deliberate restart or custody transfer under an
-existing name and references the previous lifecycle event. Custody transfer
-does not change the registered role.
+existing name and references either that identity's latest own lifecycle event
+of any status or the latest coordinator `agent.retired` targeting it. This covers
+silent death while still `active`. It records user authority, requires exclusive
+custody, reactivates a retired identity, and does not change its role.
 
 `agent.retired` is emitted only by a bootstrap-authorized `coordinator`, targets one registered
 identity, records the user's authority and reason, and deactivates that
 identity's scope. It exists for disappeared agents that cannot emit their own
 `abandoned` status; it is not a coordinator power to interrupt active work
 without user direction.
+
+`merge_engine.activated` upgrades candidate construction without changing the
+event schema. A bootstrap-authorized coordinator names the exact preceding
+engine epoch plus reviewed design/helper commits, engine, and version. Candidate
+preparation stops on concurrent activations until their lifecycle conflict is
+resolved. Every authorization names the one epoch used to build it, so historical
+candidates remain reproducible after fleet upgrades.
 
 ### 6.2 Scope
 
@@ -431,6 +446,9 @@ not target or reference a quarantined identity. Scope, dependency, handoff,
 lifecycle, schema, review, authorization, and merge commands remain disabled.
 Incremental validation requires the quarantine set not to grow. This preserves
 basic fleet communication without treating incomplete state as authority.
+The normal corruption report targets a bootstrap coordinator and describes the
+quarantined agent/path in summary and location text; it does not target or
+causally reference the invalid log.
 
 ## 8. Rust helper
 
@@ -457,7 +475,7 @@ agent-bus audit-main [--to <commit>] [--json]
 agent-bus conflicts [--json]
 agent-bus lifecycle resolve --agent <coordinator> --file <resolution.json>
 agent-bus tail [--agent <name>] [--count <n>] [--json]
-agent-bus validate [--incremental <old>..<new>] [--quarantine-invalid]
+agent-bus validate [--incremental <old>..<new>] [--linked] [--quarantine-invalid]
 agent-bus sync --agent <name>
 ```
 
@@ -479,7 +497,7 @@ authority and no mutable global index is committed.
 
 ## 9. Validation
 
-Full validation checks:
+Structural validation requires only the orphan bus tree and checks:
 
 - agent name, registration, immutable primary role, and role authority;
 - UTF-8/LF one-object-per-line encoding;
@@ -488,9 +506,8 @@ Full validation checks:
 - agreement among path, line offset, agent, sequence, and ID;
 - canonical serialization and exact versioned schemas;
 - reference existence and visibility from `observed`;
-- lifecycle authority and legal transitions;
-- claim path grammar and reported active scope conflicts; and
-- commit syntax and review eligibility where required.
+- lifecycle authority and legal transitions; and
+- claim path grammar and reported active scope conflicts.
 
 Incremental validation additionally checks each linear parent diff:
 
@@ -511,6 +528,23 @@ trailers, reviewer trailer, published
 mismatched candidate after the fact; without a server-side gate, the cooperative
 helper cannot prevent an actor from bypassing it. The default audit range begins
 after `product_review_from` in immutable `BUS.json`.
+
+Linked validation fetches exact product commits and candidate tags referenced by
+new events from the canonical product remote, then checks reachability, commit
+trailers, roles, candidate parents/tree/message, merge-engine reconstruction,
+review eligibility, and product-history facts. A present object that mismatches
+its claim is `invalid`. A remote outage, unavailable remote, or absent object is
+`unverifiable`, not structural corruption: read-only reduction and unrelated
+non-authority events continue, but schema/merge-engine activation, review
+authorization, merge readiness, receipts, reconciliation, and product audit fail
+closed until linked verification succeeds. No validator may silently turn
+`unverifiable` into valid or invalid.
+
+A linked mismatch fails linked validation and makes that claim unusable; it does
+not retroactively make well-formed JSONL structurally malformed. The activation,
+authorization, receipt, or other transition depending on the mismatch is not
+selected, while unrelated structurally valid state continues. Repair is a new
+event or product commit, never mutation of the published claim.
 Validation and audit cannot prove a test ran, a bug report is correct, or a
 scope claim is socially authorized. Those remain review facts.
 
@@ -585,6 +619,12 @@ coordinator naming the version and design/helper commits. Only then
 may writers emit the new version. Removing reader support while old events
 remain is forbidden.
 
+Changing only the pinned merge implementation uses `merge_engine.activated`,
+not a schema-version increase. Its reviewed helper must support linked validation
+of every engine epoch still referenced by retained authorizations. The current
+helper distribution owns any bundled/side-by-side historical engine support;
+individual agents are not required to curate old system Git installations.
+
 The initial protocol performs no compaction. If storage becomes material,
 closed segments may be archived only under a separately reviewed, exactly
 round-tripping format and reader. Query caches remain disposable.
@@ -628,9 +668,15 @@ Before use, the helper must pass fixtures for:
 17. deterministic candidate construction/tag validation for renames, file
     modes, attributes, symlinks, submodules, and content conflicts;
 18. both publication orders of a reassignment racing an offline final finding,
-    with no orphaned finding; and
+    with no orphaned finding;
 19. candidate-tag fetch count proportional to newly encountered
-    authorizations, not historical candidates.
+    authorizations, not historical candidates;
+20. merge-engine epoch activation, concurrent activation conflict, historical
+    epoch validation, and unsupported-engine refusal;
+21. custody transfer from active, paused, terminal, and coordinator-retired
+    lifecycle predecessors; and
+22. identical candidate tree and commit object IDs on Windows and Linux for the
+    same epoch, parents, and reviewer.
 
 Role fixtures additionally reject product authorship or product scope by any
 non-`implementor`, review acceptance or merge by any non-`reviewer`, retirement

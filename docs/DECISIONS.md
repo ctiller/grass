@@ -589,9 +589,20 @@ to imitate compiler-selected storage or CFG structure.
 112. Agent-bus V1 has complete bounded schemas in `AGENT_BUS_SCHEMA.md`, a
     65,536-byte event-line limit, causal same-agent offline references, explicit
     work reassignment, deterministic scope-race defaults, validation CI, and
-    malformed-log quarantine limited to unrelated diagnostic publication. The helper audits product history but,
-    in the cooperative shared-credential model, does not claim it can prevent a
-    direct push performed outside itself.
+    malformed-log quarantine limited to unrelated diagnostic publication. The
+    helper audits product history but, in the cooperative shared-credential
+    model, does not claim it can prevent a direct push performed outside itself.
+113. Bus-tree structural validity and product-object linked verification are
+    distinct. Missing/unreachable remote objects make linked claims
+    `unverifiable`, not malformed; authority-bearing operations still fail
+    closed until fetch and verification succeed. Present mismatches are invalid.
+114. Merge determinism is pinned by an explicit engine epoch. Reviewed
+    `merge_engine.activated` events upgrade the fleet without rewriting bootstrap
+    or historical authorizations. Each candidate names its epoch and uses fully
+    deterministic commit metadata, with cross-platform object-ID fixtures.
+115. `agent.resumed` may transfer exclusive custody from the identity's latest
+    own lifecycle event of any status or a coordinator retirement targeting it,
+    so silent death while `active` does not strand the identity or its role.
 
 ## Explicitly rejected shortcuts
 

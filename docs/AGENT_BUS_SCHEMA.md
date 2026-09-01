@@ -55,7 +55,7 @@ sequence. `observed` is `null` only for the bootstrap coordinator's first
 The immutable bootstrap file has canonical compact JSON plus LF:
 
 ```json
-{"v":1,"object_format":"sha1","coordinators":["coordinator"],"product_review_from":"abc1230000000000000000000000000000000000","merge_engine":"git-ort","merge_engine_version":"2.51.0"}
+{"v":1,"object_format":"sha1","coordinators":["coordinator"],"product_review_from":"abc1230000000000000000000000000000000000","merge_engine":"git-ort","merge_engine_version":"2.51.0","merge_engine_epoch":"coordinator:0"}
 ```
 
 Bootstrap fields use the fixed order displayed above.
@@ -66,7 +66,9 @@ product `main` and is the last bootstrap-exempt product commit. `merge_engine`
 is `git-ort` in V1 and `merge_engine_version` is the exact semantic version
 validated by the helper at bootstrap. The example version is illustrative; the
 implemented helper publishes its reviewed supported version before bootstrap,
-fixes all merge options, and refuses to run on a different version. The root
+fixes all merge options, and refuses to run on a different version.
+`merge_engine_epoch` names one bootstrap coordinator registration in the same
+root commit and identifies the initial engine epoch. The root
 `.gitattributes` is exactly `*.jsonl -text` plus LF. Every named coordinator has
 its sequence-zero registration in the same orphan root commit, and no other
 agent log occurs there.
@@ -96,6 +98,10 @@ CheckResult = { command : Text, result : passed, evidence? : Text }
 Finding IDs are unique within one `review.changes_requested`. A finding's global
 identity is `(changes_event, finding_id)`. `superseded` requires a nonempty
 rationale and never means the finding was fixed.
+
+`CheckResult` occurs only inside merge authorization, so `passed` is its sole
+result. Failed runs are recorded in `progress.reported` and normally produce
+`review.changes_requested`; they cannot appear as authorization evidence.
 
 ## 4. Bootstrap and lifecycle events
 
@@ -135,12 +141,14 @@ Product fields are permitted only for an implementor.
 ### `agent.resumed`
 
 ```text
-data = { previous_lifecycle : EventId, reason : Text }
+data = { previous_lifecycle : EventId, reason : Text, user_authority : Text }
 refs = [previous_lifecycle]
 ```
 
-The referenced event belongs to the same identity and is its latest terminal or
-paused lifecycle event. Role remains unchanged.
+The referenced event is either the same identity's latest own lifecycle event of
+any status or the latest `agent.retired` targeting it. User-directed exclusive
+custody is required. The event reactivates the identity and role remains
+unchanged.
 
 ### `agent.retired`
 
@@ -160,8 +168,29 @@ refs = []
 ```
 
 Only a bootstrap-authorized coordinator emits it. `version` is greater than all
-previously activated versions and both commits must be reachable from product
-`main` when checked locally.
+previously activated versions. Linked validation requires both commits reachable
+from product `main`; unavailable objects make the event `unverifiable`, while
+present nonmatching/unreachable objects make it invalid.
+
+### `merge_engine.activated`
+
+```text
+data = {
+  previous_epoch : EventId,
+  merge_engine : git-ort,
+  merge_engine_version : Short,
+  design_commit : ObjectId,
+  helper_commit : ObjectId
+}
+refs = [previous_epoch]
+```
+
+Only a bootstrap-authorized coordinator emits it. `previous_epoch` is the
+currently selected bootstrap registration or prior engine activation. Linked
+validation requires the design/helper commits on product `main` and the helper
+to support that exact engine/version. Concurrent activations from one predecessor
+form a lifecycle conflict; no candidate may use either until a coordinator
+selects one.
 
 ## 5. Scope, plan, and progress
 
@@ -503,6 +532,7 @@ data = {
   previous_main : ObjectId,
   reviewed_commit : ObjectId,
   candidate : ObjectId,
+  merge_engine_epoch : EventId,
   checks : List<CheckResult>,
   finding_dispositions : List<FindingDisposition>,
   evidence : StringSet<EventId>,
@@ -510,7 +540,7 @@ data = {
   limitations : List<Text>,
   summary : Text
 }
-refs = unique ([nomination] + every finding_dispositions.changes_event + evidence)
+refs = unique ([nomination, merge_engine_epoch] + every finding_dispositions.changes_event + evidence)
 ```
 
 Only the accepting reviewer emits it. The candidate is a prepared merge commit
@@ -524,10 +554,21 @@ a changed path falls outside `reviewed_scope`, a required check is absent, or
 any finding lacks a terminal `cleared` or `superseded` disposition. Every check
 result is `passed`.
 
+`reviewed_scope` equals the active nomination's `review_scope` exactly; an
+authorization cannot widen, narrow, or otherwise rewrite the author's review
+request. Changed paths remain a subset of that unchanged scope.
+
+`merge_engine_epoch` is the selected engine epoch visible in the authorization's
+`observed` state and is the exact implementation used to prepare/reconstruct the
+candidate.
+
 Before this event is published, the exact candidate is available at immutable
-lightweight tag `refs/tags/agent-candidate/<reviewer>/<candidate>`. Full bus
-validation checks parents, tree, message, merge-engine reconstruction, and tag;
-absence or mismatch is invalid.
+lightweight tag `refs/tags/agent-candidate/<reviewer>/<candidate>`. Structural
+validation checks the event shape and lifecycle. Linked validation fetches the
+exact tag and product objects and checks parents, tree, message, merge-engine
+reconstruction, and tag. A fetched mismatch is invalid; an unavailable remote
+or object is `unverifiable` and blocks authorization/merge without making the
+bus malformed.
 
 ### `review.merged`
 
@@ -604,6 +645,8 @@ The event cannot select a transition outside that exact conflict set.
   accept/decline/withdraw; review decline/withdraw/reassign from one nomination;
   and clear/supersede for one finding. Acknowledgements and independently pinned
   merge authorizations are not exclusive transitions.
+- Concurrent `merge_engine.activated` events naming one `previous_epoch` form a
+  lifecycle conflict whose root is that epoch.
 - `review.changes_requested` has the stronger current-nomination publication
   precondition above. It never becomes an orphaned concurrent successor of a
   published reassignment.
@@ -621,6 +664,10 @@ The event cannot select a transition outside that exact conflict set.
 - Event authority is derived from registration role, bootstrap coordinator list,
   opening event, current reassignment chain, and causal references. Timestamp
   never grants, expires, or orders authority.
+- Structural validity and linked status are separate. `unverifiable` linked
+  claims remain pending and block dependent authority; linked-invalid claims are
+  unusable and excluded from lifecycle selection without corrupting unrelated
+  structurally valid logs.
 
 ## 11. Generated artifacts
 
