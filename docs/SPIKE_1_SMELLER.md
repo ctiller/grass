@@ -1789,3 +1789,401 @@ contradictions are small cleanup. After those repairs, the remaining objections
 are implementation ratchets or decisions about the precious
 Sort/Gzip/Web/Cube contracts—the point at which adversarial review is finally
 attacking what the programs promise, not inventing missing proof architecture.
+
+## Round 20 external total-system review (commit `23e252b`)
+
+Verdict: **not at design fixpoint**.
+
+This round applies the revised design-fixpoint rule in
+`docs/SPIKE_AUTHORING.md`: the unavailable Grass implementation is not a reason
+to demand generated artifacts, timings, executable mutations, or 1M/10M runs
+now. It is, however, a reason to insist on a complete and believable interface,
+an economical proof decomposition, and an explicit future implementation
+ratchet. The target is not a collection of thousand-line examples. The design
+must remain credible for millions to tens of millions of assembly instructions.
+
+Two independent axis passes reread Spikes 1--3 and the HTTP/2 spike, and a third
+fresh-context pass reviewed Cube and scale locality. The root review then
+rechecked their claims against the shared semantics, closing interfaces, and the
+total-system dependency story. No axis report is accepted as the whole-system
+judgment.
+
+At the exact reviewed commit, `./check-spike-sources.ps1` passes. It proves block
+classification, identifier uniqueness, and normalized equality of the authored
+snapshots. It does not elaborate the proposed interfaces, expand constructors,
+check proofs, or reproduce an artifact. The 81-row HTTP/2 table has 81 unique
+keys, but classifies only 2 witnesses as present, 69 as disconnected, and 10 as
+missing. No banned proof escape was found in the authored spike sources.
+
+### Round 19 closure audit
+
+| Round 19 finding | Round 20 status |
+| --- | --- |
+| Fence classification and duplicate IDs | **Closed.** Every fence is classified and IDs are unique. |
+| No real expansion evidence | **Truthfully deferred, not closed for implementation.** This is permitted at design fixpoint only where the lowering interface and future ratchet are complete; findings 6 and 11 show they are not. |
+| Proof sketches are not checked proofs | **Truthfully deferred, not closed for implementation.** The documents now distinguish the categories, but several sketches do not type against their own governing interfaces. |
+| No artifact reproduction | **Truthfully deferred, not closed for implementation.** No artifact claim is made. |
+| Sort parser witness is implicit | **Partially repaired.** A named closing input exists, but its parser scope and representation are still discovered from the whole source (finding 4). |
+| Web emits two SETTINGS acknowledgements | **Closed.** `settingsBody` no longer enqueues; the host owns the single non-ACK enqueue. |
+| HEADERS skips PADDED/PRIORITY normalization | **Closed structurally.** Both direct and fragmented paths select one normalizer, but the selected normalizer imposes a wrong protocol rule (finding 2). |
+| Cube extent writes the wrong destination | **Closed.** The typed constructor writes the `imageCount` consumed by swapchain creation. |
+| Cube omits irrelevant-input stuttering | **Closed.** `.irrelevant` is now accepted explicitly. |
+| Excess authored plumbing | **Materially improved, not closed.** Standard projections and large Web cancellation wrappers disappeared, but undefined high-powered constructors now hide some of the same work (finding 6). |
+| Sort makes unobservable stability precious | **Still disputed.** The document calls it a product requirement, but the byte-stream consumer cannot observe duplicate occurrence identity (finding 11). |
+| Missing executable scale evidence | **Reclassified by the revised contract.** Runs are an implementation gate, not a document-only gate. The missing future command/schema/mutation/acceptance ratchets and missing shard interface remain design blockers (findings 10--11). |
+
+### Ranked Round 20 findings
+
+#### 1. [P0] The 81-key HTTP/2 index has no well-typed source of authority
+
+`Http2ConstraintIndex` claims exact equality with
+`spec.accumulatedRequirements` (`docs/HTTP2_CONSTRAINTS.md:49-59`), and the
+generic closing architecture repeats that projection
+(`docs/VERIFIED_PROGRAM.md:85-105,121-129`). `SpecProcess` actually exposes
+`requirements : FiniteKeyedProcessDemandFamily`; no definition or projection
+named `SpecProcess.accumulatedRequirements` exists
+(`docs/SEMANTICS.md:186-197`). The two proposed index types also disagree:
+HTTP2_CONSTRAINTS uses a finite map, whereas VERIFIED_PROGRAM uses a dependent
+function and then asks that function for `.keys`.
+
+The authority claim is also at the wrong phase. The table includes portable
+HTTP semantics alongside WinSock provider totality, Win64 stack ABI, x86 source
+coverage, PE properties, and the self-referential
+`h2.artifact.requirement_closure` (`docs/HTTP2_CONSTRAINTS.md:162-175`). Those
+cannot all be demands emitted by the portable `Http2.memoryServerSuite` without
+making target and implementation choices precious. Requirement closure cannot
+soundly be one of the requirements whose closure it establishes.
+
+**Required closure:** define one actual finite dependent demand family on
+`SpecProcess.requirements`. Give projection, provider, machine, and artifact
+stages distinct derived obligation families with total origin maps back to the
+earlier stage. Make closure a meta-theorem over the union, not a member of that
+union. Generate the review inventory from those typed values. Adding, deleting,
+or moving one demand must make the first wrong phase ill-typed.
+
+#### 2. [P0] Several indexed HTTP/2 demands are already false or incomplete
+
+The new inventory is useful because it makes concrete falsification possible.
+It currently exposes at least these product defects:
+
+- the source allows `:scheme` to be optional for the selected non-CONNECT GET
+  profile (`Spikes/4_Web_Server/Macros.lean:259-270`), while the stated
+  `h2.model.request.fields` row requires the mandatory request pseudo-fields;
+- no row connects a received `content-length` value to the total DATA content,
+  despite claiming exhaustive request-message validity;
+- `settingsBody` rejects peer `SETTINGS_ENABLE_PUSH = 1`
+  (`Macros.lean:273-283`), although that is a legal client setting; the server's
+  no-push policy constrains what the server sends, not the client's willingness
+  to receive push;
+- `h2.grammar.frame.size` tests incoming frames against `peerMaxFrame`
+  (`docs/HTTP2_CONSTRAINTS.md:74`), but the receive limit is the maximum the
+  receiver itself advertised; and
+- the HEADERS normalizer rejects a self-dependency
+  (`Macros.lean:190-208`) even though the selected RFC 9113 profile deprecates
+  the old priority tree and says it ignores deprecated priority signals. The
+  shared failure edge then collapses every envelope failure to connection
+  `PROTOCOL_ERROR` rather than preserving the frame-specific code and scope.
+
+These are not merely disconnected proofs. They are wrong or missing semantics
+in the program proposed for shipment.
+
+**Required closure:** correct the precious/profile demands first, then derive an
+exhaustive state/frame/error matrix and make each selected normalizer return a
+typed error carrying exact code and scope. Add the missing content-length law,
+mandatory `:scheme` rule, directionally named local/peer settings, and settings
+value legality before attempting source refinement.
+
+#### 3. [P0] Hello and Gzip use terminal values outside their precious outcome types
+
+Hello defines only `.success | .failure`, yet its source marks terminals
+`.stdoutUnavailable`, `.writeFailed`, and `.noProgress`
+(`Spikes/1_Hello_World/Spec.lean:11-13`;
+`Program.lean:66-79`). Gzip defines only success, allocation, input, and output
+failure, yet its source marks six finer values as terminals
+(`Spikes/3_Gzip/Spec.lean:11-15`;
+`Assembly.lean:707-725`). Sort now shows the intended economical shape: a
+portable terminal plus a separate detailed audit tag
+(`Spikes/2_Sort/Assembly.lean:537-548`).
+
+The annotated Gzip interface also displays a different seven-constructor
+`GzipOutcome` from the exact authored specification (`docs/SPIKE_3.md:217-242`).
+This is a source/spec contradiction, not a matter for Lean automation to infer.
+
+**Required closure:** use only precious outcome constructors in `@terminal` and
+put provider diagnostics in `@audit`, exactly as Sort does. Supply a value-level
+outcome policy to each generic suite; passing only the outcome type cannot tell
+a believable library which inhabitant denotes success or each failure class.
+
+#### 4. [P0] Sort and Gzip still cannot express the requested model-first proof split
+
+The requested economic layering is correct: prove data manipulation against a
+Lean model once, then prove the selected assembly region refines that model.
+The exact sources do not expose enough information to construct that proof.
+
+Sort's `parserWitness` passes the entire `sortSource` to
+`Format.inlineParserWitness` (`Spikes/2_Sort/Program.lean:6-10`), but the source
+does not select a parser sub-CFG or representation. Its descriptor scan has only
+placement/invariant annotations (`Assembly.lean:361-404`). The document's sort
+proof requires `sortAlgorithmScope` and `lineDescRepresentation`
+(`docs/SPIKE_2.md:543-569`), neither of which is authored. Gzip labels
+`process_block` as implementing `fixed32KContract using fixed32KModelCorrect`
+(`Spikes/3_Gzip/Assembly.lean:258`); it does not author the model scope,
+representation, or the assembly-to-model junction described in
+`docs/SPIKE_3.md:173-207`.
+
+Whole-source elaboration would have to discover program boundaries and the
+novel representation relation. That loses both proof banking and change
+locality.
+
+**Required closure:** author typed parser/algorithm scopes, entries/exits, and
+representation values in the source. The standard constructor may then prove
+scope coverage and compose assembly-to-model with the already banked
+model-to-contract theorem. It must never rediscover the algorithm or reprove its
+correctness over assembly instructions.
+
+#### 5. [P0] Hello's static bytes bypass the selected text projection
+
+The precious message is a logical `TextLine`; the selected projection chooses
+UTF-8 plus CRLF (`Spikes/1_Hello_World/Program.lean:8-18`). Nevertheless the
+static table says `message: bytes message` and the source sizes that object
+(`Program.lean:23-25,40-43`). No explicit encoding/newline projection connects
+the logical value to those bytes. The document simultaneously says `TextLine`
+has no target encoding/newline and that the projection produces the 15 output
+bytes (`docs/SPIKE_1.md:49-67`).
+
+**Required closure:** make the static payload a named projection result, for
+example `projection.encodeLine message`, and prove its exact length/content.
+The source pointer and count must name that byte object. Do not hide target text
+encoding in a coercion named `bytes`.
+
+#### 6. [P0] New high-powered library names conceal the semantics the spikes must test
+
+The repair replaces much handwritten ceremony with concise applications, which
+is directionally right. But several foundational constructors exist only at
+their call sites:
+
+- `X86.ClosedVerifiedFragmentBody`, `JoinContractSelection`,
+  `cfg_join_contracts`, and `CancellationPolicy` occur only in Spike 4;
+- `SubsystemRealization.fromIndependentPlanScope` occurs only in Cube; and
+- `HeterogeneousSourceConnections`, `machine_connections`, and its verifier have
+  no governing interface/laws outside Cube.
+
+See `Spikes/4_Web_Server/Macros.lean:83-86`,
+`Assembly.lean:21-50`, `Cancellation.lean:6-97`,
+`Spikes/5_Spinning_Cube/Process.lean:223-245`, and
+`Program.lean:15-31`. These names cover exactly the hard questions: what syntax
+lowers to complete raw assembly, how exits and faults are retained, how join and
+cancel points bind to CFG occurrences, how a scope is independent, and how host
+bytes connect to shader creation and use.
+
+This also means the spikes do not yet contain believable complete assembly-to-
+build semantics. A prose algorithm inside `x86_fragment_body` is not full
+assembly unless a total lowering and inspectable expansion contract is shown.
+
+**Required closure:** add total, typed interfaces and laws for each constructor,
+including inputs, generated outputs, uniqueness/coverage, failure behavior,
+source maps, and local proof obligations. Application-specific selections stay
+authored; routine enumeration and checking may be generated. Demonstrate with
+one positive and one mutation proof sketch per interface.
+
+#### 7. [P0] Web join and cancellation selections are not total
+
+The HTTP/2 table says `serverJoinContracts` selects every nontrivial join/loop
+(`docs/HTTP2_CONSTRAINTS.md:169`). Its 21 entries omit visibly shared or looping
+points including `service_loop`, `resume_failure_workers`,
+`connection_deadlines`, `send_selected_frame`, `connection_shutdown`, and the
+shared `fatal_exit` (`Spikes/4_Web_Server/Assembly.lean:140-171,312-349,559-642`).
+Without a governing derivation rule, inline invariant prose does not establish
+the advertised total selection.
+
+The concise cancellation policy is a major economy improvement, but it omits
+the bounded `Sleep` calls in root/worker loops and gives
+`finishCurrentFrameThenRst` no authored timeout/teardown alternative
+(`Spikes/4_Web_Server/Cancellation.lean:22-69`; `Assembly.lean:147-153,251-287`).
+Bare cancel-point names are not connected to concrete CFG occurrences. The
+elaborator would have to invent the missing bound and escalation policy.
+
+**Required closure:** define mechanical join discovery and prove the authored
+selection equals it, or include every discovered join explicitly. Bind each
+cancellation point to a unique source occurrence/range and require total
+coverage of every potentially blocking provider call. Author the exact
+finish/RST-or-teardown premises rather than synthesizing policy from names.
+
+#### 8. [P0] Cube's exact authored source is neither name-resolved nor control-total
+
+The exact source passes `cubeHostFrameLayout` to `asm_source`
+(`Spikes/5_Spinning_Cube/Assembly.lean:158-163`), but `Layout.lean` defines only
+`cubeFrameLayout` (`Layout.lean:177-181`). The exact snapshot repeats the
+contradiction while the prose itself names `cubeFrameLayout`
+(`docs/SPIKE_5.md:1619,2065-2069,2808-2812`). A design fixture that claims the
+complete source cannot contain an unresolved layout identifier.
+
+Two literal constructors also fail their own claimed semantics:
+
+- `destroy_if_owned` emits `je (.relative 2)` in front of `expandCall`
+  (`Spikes/5_Spinning_Cube/Macros.lean:53-58`). `expandCall` contains a variable
+  number of argument moves plus the call (`Macros.lean:17-26`), so a fixed
+  displacement cannot in general skip the call. The zero-ownership path can
+  branch into the expansion it is supposed to avoid.
+- `checkedHeapAllocationBody` branches to `allocation_failure` and
+  `allocation_zero_case` without declaring or receiving either continuation
+  (`Macros.lean:101-120`). It is registered as a literal constructor and is used
+  both with and without a following local failure check
+  (`Macros.lean:196-210,380-400`; `Assembly.lean:325-326,420-445`). Failure,
+  zero-count behavior, flags, and control transfer are therefore hidden.
+
+These are source-completeness failures, not unavailable-build evidence.
+
+**Required closure:** use the defined host layout or define the intended one.
+Make cleanup expansion target a hygienic structural end label. Give allocation
+typed count/stride/output/tag and failure/zero continuations with specified
+flags/results. Add name-resolution, zero-ownership, overflow, zero-count, null,
+and success fixtures with exact first-failing-edge expectations.
+
+#### 9. [P0] Cube's independent scopes and cross-ISA junction remain assertions
+
+Each subsystem constructor receives the entire `processPlan` before a selected
+scope (`Spikes/5_Spinning_Cube/Process.lean:223-245`). With no displayed type or
+laws for `fromIndependentPlanScope`, nothing proves that a sibling-only edit
+leaves the subsystem certificate's type/cache key unchanged. The interface
+example in `docs/SPIKE_5.md:509-532` is stale: it uses an older
+`StagedProcessPresentation.ofNetwork` call and values absent from the exact
+authored source.
+
+`sourceConnections` names a callback, two shader modules, and a push constant
+(`Spikes/5_Spinning_Cube/Program.lean:15-31`), but not the embedded word ranges,
+shader-create `pCode`/`codeSize`, returned module handles, pipeline-stage module
+fields, or entry-point strings required by its own
+`CrossIsaArtifactConnection` (`docs/SPIKE_5.md:1700-1751`). An undefined
+`verify_machine_connections` cannot be permitted to discover these
+application-specific adjacencies from a whole program.
+
+**Required closure:** make a canonical scoped-plan projection the subsystem
+input and prove an explicit sibling-insensitivity theorem. Make cross-ISA
+connections a typed chain from device source to serialized words, exact static
+range, creation call, returned handle, pipeline use, entry point, and provider
+consumption. Mechanical source scanning may prove coverage; it may not choose
+which occurrences correspond.
+
+#### 10. [P0] The dependency shape is not credible at million-instruction scale
+
+`VERIFIED_PROGRAM.md` promises affected-shard checking
+(`docs/VERIFIED_PROGRAM.md:165-170,196-220`), but the authored closing values are
+monolithic: one `AsmSource`, one `MachineSource`, and whole-source-indexed
+connection/final certificates. In Cube, any host instruction changes `cubeHost`,
+then `source`, then the type of `HeterogeneousSourceConnections plan source`,
+and finally `cubeVerified` (`Spikes/5_Spinning_Cube/Assembly.lean:158-162`;
+`Program.lean:11-38`). The claimed local certificates have no displayed stable
+shard identity, dependency manifest, or replay interface that would prevent
+whole-source elaboration/equality work.
+
+At tens of millions of instructions, merely saying that implementations “may
+package” the fields into stratified certificates is insufficient. A linear
+whole-source dependent term and global source-identity equality would make an
+unrelated one-instruction edit invalidate or at least re-elaborate an enormous
+cone.
+
+**Required closure:** make the source a canonical component DAG with stable
+scope IDs, extensional boundary summaries, explicit dependency edges, and a
+Merkle-like aggregate identity used only for cache lookup—not as proof. Local
+certificates must be indexed by the exact shard plus small imported summaries;
+the aggregate proof must compose them without embedding the full program in
+every local type. State asymptotic work and storage targets. The future 1M/10M
+ratchet must measure clean work, one-instruction edit work, interface edit work,
+proof-term size, cache hits, and peak memory.
+
+#### 11. [P0] None of the five spikes supplies the required implementation ratchet
+
+The revised contract requires every unavailable phase to name its future
+command, output schema, mutation fixture, and acceptance criterion
+(`docs/SPIKE_AUTHORING.md:205-224`). The spikes honestly say “not generated” and
+“not measured,” and several name useful mutation ideas. They do not provide a
+complete reproducible command/schema/acceptance contract for typed expansion,
+manifest/source closure, proof/residual report, artifact reproduction, and
+clean/incremental scale checks. Naming `LocalityContract`,
+`BuildExecutionReport`, or an informal mutation list is not a future command.
+
+Some proof sketches are already stale: Web's source-closure sketch consumes
+removed or undefined `serverFragmentHierarchy`, `serverFragmentExpansionExact`,
+and `serverImports` (`docs/SPIKE_4.md:799-837`). Such a sketch cannot serve as
+the schema for later acceptance.
+
+**Required closure:** add one versioned CLI contract per phase (or one command
+with explicit subcommands), canonical output paths and schemas, named positive
+and negative fixtures, first-failing-phase expectations, and numeric/structural
+acceptance criteria. This is a design deliverable; running it remains an
+implementation gate.
+
+#### 12. [P1] Sort stability remains non-observable in the selected product
+
+The spec assigns private ordinals to equal byte records and requires their order
+to survive (`Spikes/2_Sort/Spec.lean:22-33,63-70`). The shipped interface emits
+only byte lines. Two equal lines have no consumer-visible identity, so an output
+cannot reveal which equal occurrence came first. If
+`StableFormattedOccurrenceOutput` existentially reattaches identities, the
+stability clause is vacuous; if it observes descriptor identity, the spec has
+leaked an implementation detail.
+
+Calling the milestone `InMemoryStableSort` does not by itself make an
+unobservable theorem precious. It adds algorithm/proof invalidation without
+constraining the shipped trace.
+
+**Required closure:** either specify sorted permutation of normalized byte lines
+and keep stability as a reusable model theorem, or expose a record identity in a
+real product interface where stability is observable.
+
+#### 13. [P1] Exact audit data and governing documents are stale
+
+The four-part accounting tables are close but not exact at the reviewed commit.
+Recounting committed authored sources gives:
+
+| Spike | Authored specification | Authored realization |
+| --- | ---: | ---: |
+| Hello | 30 physical / 21 nonblank; 1 module; 7 declarations | 97 / 81; 1 module; 7 declarations |
+| Sort | 73 / 57; 1 module; 14 declarations | 582 / 542; 2 modules; 20 declarations |
+| Gzip | 50 / 40; 1 module; 8 declarations | 752 / 702; 2 modules; 23 declarations |
+| Web | 104 / 86; 1 module; 16 declarations | 1,822 / 1,645; 5 modules; 114 declarations |
+| Cube | 78 / 62; 1 module; 14 declarations | 1,638 / 1,526; 5 modules; 87 declarations |
+
+The Hello, Sort, Gzip, and Cube document tables are low by one or two lines.
+`docs/SPIKE_AUTHORING_AUDIT.md` also retains supposedly current spike-specific
+blockers that its own repair-status section says are closed—for example the old
+malformed Web fragment interface and Cube source-connection omissions. A review
+document that contradicts itself is unsafe authority.
+
+**Required closure:** generate counts and repair status from the same classified
+manifest used by the mirror checker. Move historical findings to explicitly
+versioned history or mark each row closed/open with commit evidence. Extend the
+checker to validate accounting and referenced symbol existence without pretending
+that this substitutes for elaboration.
+
+#### 14. [P1] Captured policy still has duplicate literals
+
+The Web macro registry calls `parseFrameHeaderBody 16384` directly while the
+selected settings and resource profile separately own frame-size policy
+(`Spikes/4_Web_Server/Macros.lean:12-18,578-584`). A policy change can therefore
+update one authority while silently leaving the parser unchanged.
+
+**Required closure:** derive the inbound parser bound from the directionally
+correct captured local receive policy. A mutation of that policy must invalidate
+the parser constructor application at the first typed boundary.
+
+### Round 20 proof-economics decision
+
+Round 20 shows substantial monotonic improvement: the authored/source views are
+mechanically classified and equal; the accounting categories are honest; Sort's
+failure mapping, Web's single SETTINGS ACK, DATA/HEADERS normalization, concise
+cancellation policy, Cube extent output, irrelevant-input behavior, explicit
+source inputs, and initial cross-ISA naming are all better.
+
+The corpus nevertheless remains before design fixpoint. The new HTTP/2 index is
+not sourced by the actual specification type and contains incorrect protocol
+demands. Hello/Gzip do not inhabit their own outcome types. The model-first
+Sort/Gzip proof boundary is still undisclosed. Several invented library
+constructors hide the very semantics and application-specific choices the
+spikes exist to validate. Cube's scope and cross-ISA connections do not prove
+locality, and the total dependency shape does not yet support the intended
+million-to-tens-of-millions instruction scale. Finally, the mandatory future
+ratchets are absent. These are specification and architecture blockers; actual
+generation and scale measurements remain correctly deferred to implementation
+acceptance.
