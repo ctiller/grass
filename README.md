@@ -68,7 +68,6 @@ vulnerabilities or sensitive disclosures must follow
 
 ## License
 
-No open-source license has been selected yet. Until a `LICENSE` file is added,
-default copyright restrictions apply: the source is visible to recipients but
-must not be represented or redistributed as open source. License selection is a
-required step before public launch.
+Grass is licensed under the [Apache License, Version 2.0](LICENSE). Files
+authored for Grass on this development system are copyright Craig Tiller; see
+[NOTICE](NOTICE).

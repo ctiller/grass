@@ -57,3 +57,10 @@ review. Follow [SECURITY.md](SECURITY.md) instead.
 
 All project participation is governed by
 [the code of conduct](CODE_OF_CONDUCT.md).
+
+## Contribution licensing
+
+Unless explicitly marked otherwise, a contribution intentionally submitted for
+inclusion in Grass is provided under the
+[Apache License, Version 2.0](LICENSE), as described by section 5 of that
+license. Do not submit material that you do not have the right to contribute.
