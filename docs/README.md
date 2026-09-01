@@ -54,9 +54,6 @@ No document may override a narrower owner by restating it differently.
   challenged as implausible.
 - [SPIKE_AUTHORING.md](SPIKE_AUTHORING.md) defines the two spike views, authored
   versus generated accounting, and the mandatory cross-view review.
-- [SPIKE_AUTHORING_AUDIT.md](SPIKE_AUTHORING_AUDIT.md) records the current
-  adversarial cross-check findings without conflating snapshot equality with
-  expansion or proof reproducibility.
 - [SPIKE_PROOF_BURDEN.md](SPIKE_PROOF_BURDEN.md) assigns every spike-shaped
   theorem and invariant family to authored, library, generated, or authority
   work instead of treating a short identifier as evidence of a short proof.
@@ -89,12 +86,6 @@ No document may override a narrower owner by restating it differently.
   command, report, mutation, and first-failure contract without claiming that
   the deliberately deferred library or outputs exist.
 - [REVIEW.md](REVIEW.md) is the adversarial review protocol and sign-off form.
-- [EXTERNAL_REVIEW_41F5C9C.md](EXTERNAL_REVIEW_41F5C9C.md) records the
-  evidence-based disposition of the external architecture review at that
-  checkpoint, including believable proof sketches for rejected remedies.
-- [EXTERNAL_REVIEW_23E252B.md](EXTERNAL_REVIEW_23E252B.md) accepts the next
-  review's four headline tensions and separates the actionable diagnosis from
-  the selected repairs.
 - [DECISIONS.md](DECISIONS.md) records settled choices and rejected shortcuts.
 - [REFERENCES.md](REFERENCES.md) is the initial source and design-lineage register.
 - [GLOSSARY.md](GLOSSARY.md) fixes vocabulary used across the corpus.
