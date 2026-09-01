@@ -2,7 +2,9 @@
 
 This checklist owns the acceptance surface for Spike 4. The detailed proposed
 proof is [SPIKE_4.md](SPIKE_4.md). The spike is a design fixture, not an
-implemented Grass library.
+implemented Grass library. The keyed, implementation-facing trace of every
+captured demand is [HTTP2_CONSTRAINTS.md](HTTP2_CONSTRAINTS.md); that inventory
+is an audit projection of the precious spec, not parallel semantic authority.
 
 ## Portable behavior and protocol profile
 

@@ -148,6 +148,32 @@ but they are checked projections, never a second author-maintained source of
 truth. A custom source frontend must prove that its extracted manifest equals
 the core AST projection before it can enter hierarchical closure.
 
+Every nonlocal input to source elaboration is a dependent field of the authored
+source term, never an ambient namespace scan or global registry lookup:
+
+```lean
+structure AuthoredSourceInputs (plan : PlatformPlan requirements) where
+  statics : StaticObjectTable
+  constructors : FragmentConstructorClosure plan
+  layouts : LayoutSelection plan
+  requirementWitnesses : RequirementSubstitution plan.spec
+
+def source : AsmSource plan :=
+  asm_source
+    (statics := selectedStatics)
+    (constructors := selectedConstructors)
+    (layouts := selectedLayouts)
+    (requirements := selectedRequirementWitnesses) {
+      -- literal instructions and typed constructor applications
+    }
+```
+
+The syntax may omit an empty or uniquely derivable field, but elaboration prints
+the inferred term and proves uniqueness. Referencing a symbol, constructor,
+layout path, or required child process not reachable from these dependent inputs
+is a source-closure error. Thus edits to static data, constructors, layouts, and
+selected child processes change source identity at the first adjacent boundary.
+
 ### 2.1 Staged assembly checking
 
 `verify_asm` is an orchestrator over separately callable checked phases:

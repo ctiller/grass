@@ -201,6 +201,28 @@ certificate, or artifact reproducibility. The script accepts `-Spike N` for a
 focused check. Once implementation begins, CI also runs clean-output generation
 and enforces every phase independently.
 
+### Pre-implementation design fixpoint
+
+The present corpus is explicitly forbidden from building the supporting
+library. Its design fixpoint therefore does not require fabricated generator
+output, proof terms, timings, executable mutations, or million-line runs. It
+does require:
+
+- exact classified authored source;
+- a total interface and believable proof sketch for every unavailable phase;
+- no hidden invariant discovery, policy choice, semantic correspondence, or
+  source input in a purportedly derived step;
+- every unavailable result recorded as `not generated` or `not measured`; and
+- an explicit implementation ratchet naming the future command, output schema,
+  mutation fixture, and acceptance criterion.
+
+A handwritten listing may be a proof sketch but cannot be called generated or
+exact evidence. Design approval means the demanded libraries can be built
+without choosing another foundational interface; it does not mean the program
+has compiled or the artifact exists. Actual expansion, kernel replay, artifact
+reproduction, mutations, and the 1M/10M scale runs are blocking gates for
+implementation acceptance, not for this document-only fixpoint.
+
 ## Proof-economics accounting
 
 Reviews report at least four separate quantities:

@@ -22,31 +22,81 @@ $failed = $false
 foreach ($pair in $pairs) {
     $documentPath = Join-Path $PSScriptRoot "docs/SPIKE_$($pair.Number).md"
     $sourceDirectory = Join-Path $PSScriptRoot "Spikes/$($pair.Directory)"
-    $document = Get-Content -LiteralPath $documentPath -Raw -Encoding utf8
-    $heading = '## Exact authored source snapshot'
-    $headingIndex = $document.LastIndexOf($heading, [StringComparison]::Ordinal)
-
-    if ($headingIndex -lt 0) {
-        Write-Host "SPIKE_$($pair.Number): no exact authored source snapshot" -ForegroundColor Red
-        $failed = $true
-        continue
-    }
-
-    $snapshot = $document.Substring($headingIndex)
-    $pattern = '(?ms)^### `(?<name>[^`]+\.lean)`\r?\n\r?\n```lean\r?\n(?<source>.*?)\r?\n```'
+    $document = ConvertTo-NormalizedSource (
+        Get-Content -LiteralPath $documentPath -Raw -Encoding utf8)
+    $lines = $document -split "`n"
     $documentSources = [System.Collections.Generic.Dictionary[string,string]]::new(
         [StringComparer]::Ordinal)
+    $identities = [System.Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::Ordinal)
+    $blockCount = 0
 
-    foreach ($match in [regex]::Matches($snapshot, $pattern)) {
-        $name = $match.Groups['name'].Value.Replace('\', '/')
-        if ($documentSources.ContainsKey($name)) {
-            Write-Host "SPIKE_$($pair.Number): duplicate snapshot path $name" -ForegroundColor Red
-            $failed = $true
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        if ($lines[$index] -notmatch '^```') {
             continue
         }
-        $documentSources.Add(
-            $name,
-            (ConvertTo-NormalizedSource $match.Groups['source'].Value))
+
+        $blockCount++
+        if ($index -eq 0 -or
+            $lines[$index - 1] -notmatch '^<!-- grass-block: (?<body>.+) -->$') {
+            Write-Host "SPIKE_$($pair.Number): block $blockCount has no immediate classification" -ForegroundColor Red
+            $failed = $true
+            $classification = $null
+        } else {
+            $classification = $Matches['body']
+        }
+
+        $closing = $index + 1
+        while ($closing -lt $lines.Count -and $lines[$closing] -notmatch '^```$') {
+            $closing++
+        }
+        if ($closing -ge $lines.Count) {
+            Write-Host "SPIKE_$($pair.Number): block $blockCount is unterminated" -ForegroundColor Red
+            $failed = $true
+            break
+        }
+
+        $content = if ($closing -eq $index + 1) {
+            ''
+        } else {
+            [string]::Join("`n", $lines[($index + 1)..($closing - 1)])
+        }
+
+        if ($null -ne $classification) {
+            $identity = $null
+            if ($classification -match '^authored file=(?<path>[^ ]+)$') {
+                $path = $Matches['path'].Replace('\', '/')
+                $identity = "authored:$path"
+                if ($lines[$index] -ne '```lean') {
+                    Write-Host "SPIKE_$($pair.Number): authored $path is not a Lean block" -ForegroundColor Red
+                    $failed = $true
+                }
+                if ($documentSources.ContainsKey($path)) {
+                    Write-Host "SPIKE_$($pair.Number): duplicate authored path $path" -ForegroundColor Red
+                    $failed = $true
+                } else {
+                    $documentSources.Add($path, (ConvertTo-NormalizedSource $content))
+                }
+            } elseif ($classification -match '^generated id=(?<id>[^ ]+) derives=(?<derives>.+)$') {
+                $identity = "generated:$($Matches['id'])"
+                if ([string]::IsNullOrWhiteSpace($Matches['derives'])) {
+                    Write-Host "SPIKE_$($pair.Number): generated block lacks derives authority" -ForegroundColor Red
+                    $failed = $true
+                }
+            } elseif ($classification -match '^(?<kind>interface|proof-sketch) id=(?<id>[^ ]+)$') {
+                $identity = "$($Matches['kind']):$($Matches['id'])"
+            } else {
+                Write-Host "SPIKE_$($pair.Number): invalid classification '$classification'" -ForegroundColor Red
+                $failed = $true
+            }
+
+            if ($null -ne $identity -and -not $identities.Add($identity)) {
+                Write-Host "SPIKE_$($pair.Number): duplicate block identity $identity" -ForegroundColor Red
+                $failed = $true
+            }
+        }
+
+        $index = $closing
     }
 
     $directoryFiles = @(Get-ChildItem -LiteralPath $sourceDirectory -Filter '*.lean' -Recurse |
@@ -72,7 +122,7 @@ foreach ($pair in $pairs) {
         $actual = ConvertTo-NormalizedSource (
             Get-Content -LiteralPath $file.FullName -Raw -Encoding utf8)
         if ($actual -cne $documentSources[$relativePath]) {
-            Write-Host "SPIKE_$($pair.Number): $relativePath differs from its document snapshot" -ForegroundColor Red
+            Write-Host "SPIKE_$($pair.Number): $relativePath differs from its authored block" -ForegroundColor Red
             $failed = $true
         }
     }
@@ -82,4 +132,4 @@ if ($failed) {
     exit 1
 }
 
-Write-Host 'All selected spike authored source snapshots match their directories under the documented normalization.'
+Write-Host 'All selected spike blocks are classified, uniquely identified, and exact authored sources match their directories.'

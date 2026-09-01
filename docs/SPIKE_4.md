@@ -7,6 +7,19 @@ Authoring view: agents maintain `Spec.lean`, `Process.lean`,
 exact snapshot is at the end of this document. Source closure, CFG maps,
 bindings, and artifact bundles are generated inspection views.
 
+| Proof-economics quantity | Current evidence |
+| --- | --- |
+| Authored specification | 1 module; 104 physical / 86 nonblank lines |
+| Authored realization | 5 modules; 1822 physical / 1645 nonblank lines |
+| Generated expansion/certificates | not generated |
+| Clean/incremental checking | not measured |
+
+The five realization modules separate the process model, optional cancellation
+policy, typed fragment constructors, literal host CFG, and final closing form.
+The current authoring audit disputes how much process/cancellation/constructor
+plumbing genuinely belongs in those modules; this count is evidence, not an
+approval.
+
 This spike pressure-tests whether Grass can make a large global event loop
 locally provable without hiding either protocol behavior or hand-authored
 assembly. It reaches a complete cleartext HTTP/2 prior-knowledge server,
@@ -22,6 +35,9 @@ Internet deployment profile.
 
 The acceptance owner is [WEB_SERVER.md](WEB_SERVER.md). Protocol authority is
 RFC 9113 and RFC 7541 as registered in [REFERENCES.md](REFERENCES.md).
+The complete keyed trace from captured demand through grammar, process, model,
+CFG, x86, provider, and artifact witnesses is
+[HTTP2_CONSTRAINTS.md](HTTP2_CONSTRAINTS.md).
 
 ## 1. Precious surface
 
@@ -31,6 +47,7 @@ failures, progress, and selected resource semantics. Typed junctions capture
 them into the root. It does not name listener/connection/stream roles, Winsock,
 physical workers, polling, buffer offsets, or x86 registers.
 
+<!-- grass-block: interface id=spike4-block-01 -->
 ```lean
 def body : ByteArray := "Grass web server\n".toUTF8
 
@@ -72,6 +89,7 @@ reviewable through the source/artifact chain. The realization later selects
 literal-without-indexing. The decoder is the full bounded RFC 7541 decoder; a
 literal-only decoder would not realize the claimed HTTP/2 input behavior.
 
+<!-- grass-block: interface id=spike4-block-02 -->
 ```lean
 def frameFormat : Format Http2.Frame := Http2.frameFormat
 
@@ -128,6 +146,7 @@ admission, header limits, and deadlines affect behavior. A separate Win32
 execution envelope selects workers, OS objects, buffers, scheduling, and fixed
 storage and proves it realizes that budget.
 
+<!-- grass-block: interface id=spike4-block-03 -->
 ```lean
 def semanticBudget : Http2ServerSemanticBudget where
   maxActiveConnections := 4
@@ -201,6 +220,7 @@ still withhold credit; neither is server-owned memory exhaustion.
 
 ## 3. Wire and compression model
 
+<!-- grass-block: interface id=spike4-block-04 -->
 ```lean
 def protocolProfile : Http2.Profile where
   transport := .cleartextPriorKnowledge
@@ -224,6 +244,7 @@ server advertised `SETTINGS_ENABLE_PUSH = 0` and is not a client.
 
 The framing proof surface is deliberately stronger than round-trip testing:
 
+<!-- grass-block: interface id=spike4-block-05 -->
 ```lean
 def frameParserRealizes : ParserRealizes frameFormat
     (Http2.Frame.parseResult protocolProfile) :=
@@ -239,6 +260,7 @@ parser processes are wrapped around the implementations. They prove complete
 success, exact `needMore`, and exact invalid-prefix classification, not only the
 success cases below.
 
+<!-- grass-block: interface id=spike4-block-06 -->
 ```lean
 theorem frameWriterRoundTrip (frame : Http2.Frame)
     (admissible : frame.Admissible protocolProfile) :
@@ -259,6 +281,7 @@ TCP receive boundaries do not enter the HTTP model.
 HPACK separately proves integer and plain-string writer round trips and a
 decoder conformance theorem:
 
+<!-- grass-block: interface id=spike4-block-07 -->
 ```lean
 theorem hpackDecoderConforms (state : Hpack.DecoderState protocolProfile)
     (block : ByteArray) :
@@ -283,10 +306,21 @@ rejected even though it would simplify parallel execution.
 
 ## 4. Process realization
 
+The authored cancellation surface is the single `cancellation_policy` term in
+the exact source snapshot. It names atomic regions, bounded calls, safe points,
+address routing, dispositions, and supervisor shutdown order. The detailed
+`seq` / `choice` / `loop` / `parallel` / `supervisor` summaries shown in this
+section are proof sketches for the library-generated elaboration; an
+application author does not maintain that tree or its exported-contract
+projections. `verify_cancellation_policy` must print the tree and fail at the
+first missing bound, unsafe custody edge, unreachable cancellation point, or
+unclassified terminal.
+
 The replaceable proof lens chooses listener, connection, and stream roles. They
 make causal attribution, isolated reset, HPACK connection ordering, and
 subtree-resource theorems economical; they are not fields of the root spec.
 
+<!-- grass-block: interface id=spike4-block-08 -->
 ```lean
 inductive ServerRoleSchema
   | listener
@@ -331,6 +365,7 @@ process. Hoare channel contracts carry:
 
 The principal composition witness is intentionally decomposed:
 
+<!-- grass-block: interface id=spike4-block-09 -->
 ```lean
 structure ServerCompositionWitness where
   startupSilence : BeforeReadyNoProtocolBytesAreEmitted serverProcessPlan
@@ -380,6 +415,7 @@ server promises stream reset, graceful connection drain, and bounded shutdown.
 
 The summary is built from the same structure as the realization:
 
+<!-- grass-block: interface id=spike4-block-10 -->
 ```lean
 def hpackSliceSummary :
     CancellationSummary (Hpack.decodeSliceProcess protocolProfile) :=
@@ -415,6 +451,7 @@ The selected Win32 plan has no provider cancellation operation. Its
 nonblocking calls and bounded `WSAPoll`/`Sleep` calls are uncancellable segments
 followed by real cancellation-observation blocks:
 
+<!-- grass-block: interface id=spike4-block-11 -->
 ```lean
 def receiveCancellation : CancellationSummary Http2.receiveByteSegment :=
   CancellationSummary.transport Http2.receiveByteSegmentDecomposition
@@ -454,6 +491,7 @@ there returns only unselected DATA capacity; credit already debited for a
 selected frame remains associated with that frame until send or connection
 close.
 
+<!-- grass-block: interface id=spike4-block-12 -->
 ```lean
 def streamCancellation : CancellationSummary streamProcess :=
   CancellationSummary.transport Http2.streamProcessDecomposition
@@ -568,6 +606,7 @@ that failed premise rather than synthesize a promise.
 The algebra is associative at sequence boundaries, so refactoring or flattening
 does not change the cancellation claim:
 
+<!-- grass-block: interface id=spike4-block-13 -->
 ```lean
 theorem cancellationSequenceRegroupingIsIrrelevant :
     CancellationSummary.seq a (CancellationSummary.seq b c) =
@@ -576,6 +615,7 @@ theorem cancellationSequenceRegroupingIsIrrelevant :
   CancellationSummary.seq_assoc _ _ _
 ```
 
+<!-- grass-block: interface id=spike4-block-14 -->
 ```lean
 theorem serverProcessPlanRealizes :
     ProcessPlanRealizes spec serverProcessPlan := by
@@ -646,6 +686,7 @@ a committed decoder state.
 
 ## 6. Concrete resource theorems
 
+<!-- grass-block: proof-sketch id=spike4-block-15 -->
 ```lean
 theorem streamMemoryBound (connection) (stream) :
     EveryExecutionUsesAtMost
@@ -689,6 +730,7 @@ changing the server behavior model.
 
 ## 7. Win10 x64 projection and provider plan
 
+<!-- grass-block: interface id=spike4-block-16 -->
 ```lean
 def projection : TargetProjection spec .win10X64 :=
   TargetProjection.win10Http2PriorKnowledge
@@ -722,6 +764,7 @@ states, and `4 × 128` stream slots.
 
 The import table is limited to:
 
+<!-- grass-block: proof-sketch id=spike4-block-17 -->
 ```text
 KERNEL32: CreateThread ResumeThread WaitForSingleObject CloseHandle Sleep
           SetConsoleCtrlHandler GetTickCount64 ExitProcess
@@ -740,6 +783,7 @@ The complete comment-free author fixture is
 [`Spikes/4_Web_Server/Assembly.lean`](../Spikes/4_Web_Server/Assembly.lean).
 Its visible labels include:
 
+<!-- grass-block: proof-sketch id=spike4-block-18 -->
 ```text
 entry -> create_workers -> resume_workers -> publish_ready -> service_loop
 startup_partial_workers -> resume_failure_workers -> join_workers
@@ -773,6 +817,7 @@ algorithm cannot be replaced by an unexplained Hoare assertion or a reference
 to a future `Grass.Std` module. These local bodies are the proposed standard
 library implementations and may later move without changing their contracts.
 
+<!-- grass-block: proof-sketch id=spike4-block-19 -->
 ```lean
 def serverSourceClosure : ClosedAsmSource platformPlan :=
   ClosedAsmSource.closeWithFragmentHierarchy
@@ -797,6 +842,7 @@ proved expansion; the layer accepted by encoding contains raw instructions.
 
 ## 10. Assembly-to-model bindings
 
+<!-- grass-block: proof-sketch id=spike4-block-20 -->
 ```lean
 theorem sourceImplementsDriver :
     AssemblyImplements
@@ -881,6 +927,7 @@ HPACK cancellation between slices, partial-send cancellation after exact prefix
 commit, and normal/failed terminal settlement. Negative fixtures require proofs
 of impossibility:
 
+<!-- grass-block: proof-sketch id=spike4-block-21 -->
 ```lean
 theorem noCancellationInsideHpackMutation :
     ¬ CancellationSafePoint hpackDecoderCancellation
@@ -907,6 +954,7 @@ cancelpoint, supervisor, or richer proof.
 
 ## 11. Verified program and exact PE bytes
 
+<!-- grass-block: proof-sketch id=spike4-block-22 -->
 ```lean
 def serverVerified : VerifiedProgram spec := by
   verify_assembly platformPlan
@@ -971,6 +1019,37 @@ external protocol obligation that the spec requires to remain observable.
 
 ## 13. Change locality
 
+The following regression obligations are proof sketches for generated model and
+CFG fixtures. They are not application-authored wrapper theorems, but the
+constraint registry must instantiate them against the exact selected source.
+
+<!-- grass-block: proof-sketch id=http2-settings-and-headers-regressions -->
+```lean
+theorem oneNonAckSettingsProducesExactlyOneAck
+    (entries : Vec Http2.Setting)
+    (valid : Http2.ValidSettingsEntries protocolProfile entries) :
+    ExactOutboundControlTrace
+      (runFrame serverModel (Http2.settingsFrame false entries))
+      [Http2.settingsAckFrame] := by
+  check_http2_trace
+
+theorem headersPayloadNormalizationBeforeHpack
+    (block padding : ByteArray)
+    (priority : Option Http2.PriorityFields)
+    (valid : Http2.ValidHeadersPayload block padding priority) :
+    HpackInputOf
+      (runFrame serverModel
+        (Http2.headersFrame block padding priority true)) = block := by
+  check_http2_trace
+
+theorem invalidHeadersEnvelopeNeverMutatesHpack
+    (frame : Http2.Frame)
+    (invalid : Http2.InvalidPaddingOrPriorityEnvelope frame) :
+    HpackStateAfter (runFrame serverModel frame) = HpackStateBefore ∧
+    TerminatesWithConnectionProtocolError (runFrame serverModel frame) := by
+  check_http2_trace
+```
+
 | Change | Precious proof | Local/model proof | Assembly/artifact |
 |---|---|---|---|
 | response body bytes | route theorem recomputes | response lengths/HPACK block | rodata and affected encoding |
@@ -1010,6 +1089,7 @@ calling it O(1) by assertion.
 
 The expected author-owned modules are:
 
+<!-- grass-block: interface id=spike4-block-23 -->
 ```text
 Spikes/4_Web_Server/
   Spec.lean
@@ -1028,14 +1108,13 @@ the eventual libraries should let an author maintain.
 
 ## Exact authored source snapshot
 
-This section is the author-maintained Lean surface defined by
-[SPIKE_AUTHORING.md](SPIKE_AUTHORING.md). Earlier code blocks in this document
-are generated expansions, library interface sketches, or proof sketches unless
-they are explicitly labeled authored source. Reviewers must compare this
-snapshot with `Spikes/4_Web_Server/` exactly.
+This snapshot is the exact comment-free source maintained under
+`Spikes/4_Web_Server/`. Run `./check-spike-sources.ps1 -Spike 4` to check the
+normalized cross-view equality and block classifications.
 
 ### `Assembly.lean`
 
+<!-- grass-block: authored file=Assembly.lean -->
 ```lean
 import Grass.Assembly.X86
 import Spikes.«4_Web_Server».Macros
@@ -1057,7 +1136,36 @@ structure WorkerFrameFields where
 
 def WorkerFrame : FrameLayout Win64 := FrameLayout.derive WorkerFrameFields
 
-def serverSource : AsmSource platformPlan := asm_source {
+def serverJoinContracts : JoinContractSelection platformPlan := cfg_join_contracts {
+  entry => FixedPool.X86.serverEntry processPolicy executionEnvelope
+  create_workers => FixedPool.X86.workerCreationLoop processPolicy
+  resume_loop => FixedPool.X86.workerResumeLoop processPolicy
+  join_workers => FixedPool.X86.workerJoinLoop processPolicy
+  console_handler => FixedPool.X86.shutdownCallback processPolicy
+  worker_entry => FixedPool.X86.workerEntry processPolicy
+  worker_gate => FixedPool.X86.initializationGate processPolicy
+  accept_wait => FixedPool.X86.acceptFrontier processPolicy
+  preface_loop => Http2.X86.prefaceLoop processPolicy.connection
+  connection_schedule => Http2.X86.connectionScheduler processPolicy.connection
+  receive_result_observation => Http2.X86.receiveCancellationPoint processPolicy.connection
+  frame_parse_loop => Http2.X86.frameParseLoop processPolicy.connection
+  decode_fields => Http2.X86.normalizedFieldBlock processPolicy.connection
+  send_suffix_loop => Http2.X86.partialSendLoop processPolicy.connection
+  send_readiness_observation => Http2.X86.writerCancellationPoint processPolicy.connection
+  enqueue_stream_error => Http2.X86.streamErrorJoin processPolicy.connection
+  enqueue_connection_error => Http2.X86.connectionErrorJoin processPolicy.connection
+  connection_draining => Http2.X86.goawayDrainLoop processPolicy.connection
+  connection_close => Http2.X86.connectionTeardown processPolicy.connection
+  connection_closed_boundary => Http2.X86.connectionCustodyDischarged processPolicy.connection
+  worker_return => FixedPool.X86.workerLoansReturned processPolicy
+}
+
+def serverSource : AsmSource platformPlan :=
+  asm_source
+    (statics := serverStaticObjects)
+    (constructors := serverMacros)
+    (layouts := #[ServerEntryFrame, WorkerFrame])
+    (joinContracts := serverJoinContracts) {
 
 entry: @entrypoint @unwind(server_entry_unwind)
     push rbx
@@ -1432,6 +1540,10 @@ frame_parse_loop: @measure buffered_complete_frames_or_need_input
 
 frame_headers:
     mov  rcx, rbx
+    call h2_normalize_headers_payload
+    test eax, eax
+    jnz  connection_protocol_error
+    mov  rcx, rbx
     call h2_transition_stream
     cmp  eax, TRANSITION_STREAM_ERROR
     je   stream_protocol_error
@@ -1486,6 +1598,10 @@ enqueue_not_found:
     jmp  frame_parse_loop
 
 frame_data:
+    mov  rcx, rbx
+    call h2_normalize_data_payload
+    test eax, eax
+    jnz  connection_protocol_error
     mov  rcx, rbx
     call h2_transition_stream
     cmp  eax, TRANSITION_STREAM_ERROR
@@ -1687,513 +1803,121 @@ end Grass.Spikes.WebServer
 
 ### `Cancellation.lean`
 
+<!-- grass-block: authored file=Cancellation.lean -->
 ```lean
 import Grass.Process.Cancellation
 import Spikes.«4_Web_Server».Process
 
 namespace Grass.Spikes.WebServer
 
-def hpackSliceStateProtocol :
-    CommittedWorkingStateProtocol (Hpack.DecoderState protocolProfile) where
-  beginWorking := Hpack.beginSlice
-  mutateWorking := Hpack.decodeBoundedSlice
-  commit := Hpack.commitCompletedSlice
-  abandon := Hpack.returnLastCommitted
-  workingPrivate := Hpack.workingSlicePrivate
-  commitExact := Hpack.commitCompletedSliceExact
-  abandonExact := Hpack.returnLastCommittedExact
+def serverCancellationPolicy :
+    CancellationPolicy memoryServerProcess := cancellation_policy {
+  atomic hpackSlice {
+    process := Hpack.decodeSliceProcess protocolProfile
+    bound := Hpack.decodeSliceStepBound
+    commit := Hpack.commitCompletedSlice
+    abandon := Hpack.returnLastCommitted
+    privateWorkingState := Hpack.workingSlicePrivate
+  }
 
-def hpackSliceSummary :
-    CancellationSummary (Hpack.decodeSliceProcess protocolProfile) :=
-  CancellationSummary.uncancellableWorkingSlice
-    (Hpack.decodeSliceCorrect protocolProfile)
-    (.stepsAtMost Hpack.decodeSliceStepBound)
-    hpackSliceStateProtocol
+  atomic sentPrefixCommit {
+    process := Http2.commitSentPrefixProcess
+    bound := Http2.commitSentPrefixStepBound
+    prohibitCancellationBefore := Http2.ControlPoint.sentPrefixCommitted
+  }
 
-def hpackBetweenSlices :
-    CancellationSummary (Hpack.betweenSlicesProcess protocolProfile) :=
-  CancellationSummary.cancelPoint
-    Hpack.betweenSlicesSafe
-    Hpack.pendingCancellationCustody
-    Hpack.cancelPreservesCommittedDecoderState
+  boundedCall pollAccept {
+    process := Std.Process.Network.pollAccept
+    frontier := resourcePolicy.pollQuantum
+  }
 
-def hpackLoopSummary :
-    CancellationSummary (Hpack.decodeLoopProcess protocolProfile) :=
-  CancellationSummary.loop
-    (CancellationSummary.seq hpackSliceSummary hpackBetweenSlices)
-    Hpack.everyContinuingIterationConsumesInput
-    Hpack.everyContinuingIterationCrossesCancelPoint
+  boundedCall accept {
+    process := Std.Process.Network.accept
+    frontier := Std.Win32.Winsock.nonblockingAcceptBound
+  }
 
-def hpackDecoderCancellation : CancellationSummary hpackDecoderProcess :=
-  CancellationSummary.transport
-    (Hpack.decoderDecomposesIntoSlices protocolProfile)
-    hpackLoopSummary
+  boundedCall pollReadable {
+    process := Std.Process.Network.pollReadable
+    frontier := resourcePolicy.pollQuantum
+  }
 
-def receiveReadinessCall :
-    CancellationSummary Std.Process.Network.pollReadable :=
-  CancellationSummary.uncancellableCall
-    Std.Win32.Winsock.pollReadableCorrect
-    (.providerReturnsWithin resourcePolicy.pollQuantum)
+  boundedCall receive {
+    process := Std.Process.Network.receive
+    frontier := Std.Win32.Winsock.nonblockingReceiveBound
+  }
 
-def receiveReadinessObservation :
-    CancellationSummary Http2.afterReadablePollPoint :=
-  CancellationSummary.cancelPoint
-    Http2.afterReadablePollSafe
-    Http2.pendingConnectionCancellationCustody
-    Http2.observeCancellationAfterReadablePoll
+  boundedCall pollWritable {
+    process := Std.Process.Network.pollWritable
+    frontier := resourcePolicy.pollQuantum
+  }
 
-def receiveCall :
-    CancellationSummary Std.Process.Network.receive :=
-  CancellationSummary.uncancellableCall
-    Std.Win32.Winsock.nonblockingReceiveCorrect
-    (.providerBounded Std.Win32.Winsock.nonblockingReceiveBound)
+  boundedCall send {
+    process := Std.Process.Network.send
+    frontier := Std.Win32.Winsock.nonblockingSendBound
+  }
 
-def receiveResultObservation :
-    CancellationSummary Http2.afterReceiveResultPoint :=
-  CancellationSummary.cancelPoint
-    Http2.afterReceiveResultSafe
-    Http2.pendingConnectionCancellationCustody
-    Http2.observeCancellationAfterReceiveResult
+  cancelPoint beforeAcceptPoll
+  cancelPoint afterReadablePoll
+  cancelPoint afterReceiveResult
+  cancelPoint afterWritablePoll
+  cancelPoint flowCreditWait
+  cancelPoint completedFrame
+  cancelPoint betweenHpackSlices
+  cancelPoint goawayDrain
+  cancelPoint rootShutdown
 
-def receiveCancellation :
-  CancellationSummary Http2.receiveByteSegment :=
-  CancellationSummary.transport Http2.receiveByteSegmentDecomposition
-    (CancellationSummary.seq receiveReadinessCall
-      (CancellationSummary.seq receiveReadinessObservation
-        (CancellationSummary.seq receiveCall receiveResultObservation)))
+  route (.stream connection stream) .deadline => {
+    at flowCreditWait =>
+      enqueueRstWithoutDataCredit stream .cancel
+    duringFrame =>
+      finishCurrentFrameThenRst stream .cancel
+    preserveSiblingStreams connection stream
+    neverAddress (.hpackDecoder connection)
+  }
 
-def sendReadinessCall :
-    CancellationSummary Std.Process.Network.pollWritable :=
-  CancellationSummary.uncancellableCall
-    Std.Win32.Winsock.pollWritableCorrect
-    (.providerReturnsWithin resourcePolicy.pollQuantum)
+  route (.connection connection) .shutdown => {
+    stopNewStreams connection
+    publishGoawayOnce connection
+    freezeLastAdmittedStream connection
+    drainUntil resourcePolicy.connectionDrainDeadline
+    otherwise closeWithExactSuffixDisposition connection
+  }
 
-def sendReadinessObservation :
-    CancellationSummary Http2.afterWritablePollPoint :=
-  CancellationSummary.cancelPoint
-    Http2.afterWritablePollSafe
-    Http2.pendingWriterCancellationCustody
-    Http2.observeCancellationAfterWritablePoll
+  route .server .shutdown => {
+    stopAdmission
+    cancelWorkersAtSafePoints
+    preserveEveryLiveSocketUntilOwnedClose
+    adoptOnlyDeclaredFailureObligations
+  }
 
-def sendCall :
-    CancellationSummary Std.Process.Network.send :=
-  CancellationSummary.uncancellableCall
-    Std.Win32.Winsock.nonblockingSendCorrect
-    (.providerBounded Std.Win32.Winsock.nonblockingSendBound)
+  requireEveryContinuingLoopCrossesCancelPoint
+  requireEveryAtomicRegionTerminatesWithinItsBound
+  requireTerminalDispositions [.normalDischarged, .failedWithDeclaredAdoption]
+}
 
-def commitSentPrefixSummary :
-    CancellationSummary Http2.commitSentPrefixProcess :=
-  CancellationSummary.uncancellable
-    Http2.commitSentPrefixCorrect
-    (.stepsAtMost Http2.commitSentPrefixStepBound)
+def serverCancellation : CancellationSummary memoryServerProcess := by
+  elaborate_cancellation_policy serverCancellationPolicy
 
-def completedFrameCancelPoint :
-    CancellationSummary Http2.completedFrameCustodyPoint :=
-  CancellationSummary.cancelPoint
-    Http2.completedFrameCustodySafe
-    Http2.pendingWriterCancellationCustody
-    Http2.cancelAtFrameBoundaryByCause
-
-def partialSendIterationCancellation :
-    CancellationSummary Http2.partialSendIterationProcess :=
-  CancellationSummary.seq sendReadinessCall
-    (CancellationSummary.seq sendReadinessObservation
-      (CancellationSummary.seq sendCall commitSentPrefixSummary))
-
-def partialSendCancellation :
-    CancellationSummary Http2.partialSendSegment :=
-  CancellationSummary.transport Http2.partialSendSegmentDecomposition
-    (CancellationSummary.seq
-      (CancellationSummary.loop partialSendIterationCancellation
-        Http2.remainingSuffixDecreasesOrProviderFrontier
-        Http2.everyContinuingPartialSendIterationReachesReadinessObservation)
-      completedFrameCancelPoint)
-
-def flowCreditWaitCancellation :
-    CancellationSummary Http2.flowCreditWaitProcess :=
-  CancellationSummary.cancelPoint
-    Http2.flowCreditWaitSafe
-    Http2.pendingStreamCancellationCustody
-    Http2.cancelReturnsUnselectedDataCredit
-
-def streamTransitionSummary :
-    CancellationSummary Http2.streamTransitionProcess :=
-  CancellationSummary.uncancellable
-    Http2.streamTransitionCorrect
-    (.stepsAtMost Http2.streamTransitionStepBound)
-
-def streamIterationCancellation :
-    CancellationSummary Http2.streamIterationProcess :=
-  CancellationSummary.choice
-    (CancellationSummary.seq streamTransitionSummary flowCreditWaitCancellation)
-    partialSendCancellation
-    Http2.streamIterationBranchJoin
-
-def streamCancellation : CancellationSummary streamProcess :=
-  CancellationSummary.transport Http2.streamProcessDecomposition
-    (CancellationSummary.loop streamIterationCancellation
-      Http2.streamIterationProgress
-      Http2.everyContinuingStreamIterationCrossesCancelPoint)
-
-def connectionParseSummary :
-    CancellationSummary Http2.connectionParseProcess :=
-  CancellationSummary.uncancellable
-    Http2.connectionParseCorrect
-    (.stepsAtMost Http2.connectionParseStepBound)
-
-def goawayDrainCancelPoint :
-    CancellationSummary Http2.goawayDrainPoint :=
-  CancellationSummary.cancelPoint
-    Http2.goawayDrainSafe
-    Http2.pendingConnectionCancellationCustody
-    Http2.cancelPublishesGoawayAndFreezesAdmittedPrefix
-
-def connectionIterationCancellation :
-    CancellationSummary Http2.connectionIterationProcess :=
-  CancellationSummary.choice
-    (CancellationSummary.seq receiveCancellation connectionParseSummary)
-    (CancellationSummary.choice partialSendCancellation
-      (CancellationSummary.seq flowCreditWaitCancellation goawayDrainCancelPoint)
-      Http2.writerOrDrainBranchJoin)
-    Http2.receiveOrWriteBranchJoin
-
-def connectionLoopCancellation : CancellationSummary connectionProcess :=
-  CancellationSummary.transport Http2.connectionProcessDecomposition
-    (CancellationSummary.loop connectionIterationCancellation
-      Http2.connectionIterationProgress
-      Http2.everyContinuingConnectionIterationCrossesCancelPoint)
-
-def writerIterationCancellation :
-    CancellationSummary Http2.writerIterationProcess :=
-  CancellationSummary.choice
-    partialSendCancellation
-    flowCreditWaitCancellation
-    Http2.writerBranchJoin
-
-def connectionWriterCancellation :
-    CancellationSummary connectionWriterProcess :=
-  CancellationSummary.transport Http2.connectionWriterProcessDecomposition
-    (CancellationSummary.loop writerIterationCancellation
-      Http2.writerIterationProgress
-      Http2.everyContinuingWriterIterationCrossesCancelPoint)
-
-def connectionChildrenCancellation :
-    CancellationSummary (Http2.connectionChildrenProcess processPolicy.connection) :=
-  CancellationSummary.parallel
-    hpackDecoderCancellation
-    connectionWriterCancellation
-    streamCancellation
-    Http2.connectionChildAddressedCancellation
-    Http2.connectionChildJoinDisposition
-
-def connectionCancellation : CancellationSummary connectionProcess :=
-  CancellationSummary.supervisor
-    connectionLoopCancellation
-    connectionChildrenCancellation
-    Http2.goawayDrainSupervisorPolicy
-    Http2.noForcedStopOutsideConnectionSafePoint
-
-def workerAcceptCancellation :
-    CancellationSummary (FixedPool.workerProcess processPolicy) :=
-  CancellationSummary.loop
-    (CancellationSummary.choice
-      (CancellationSummary.seq
-        (CancellationSummary.cancelPoint
-          FixedPool.acceptLoopObservationSafe
-          FixedPool.pendingWorkerCancellationCustody
-          FixedPool.observeCancellationBeforeAcceptPoll)
-        (CancellationSummary.seq
-          (CancellationSummary.uncancellableCall
-            Std.Win32.Winsock.pollAcceptCorrect
-            (.providerReturnsWithin resourcePolicy.pollQuantum))
-          (CancellationSummary.uncancellableCall
-            Std.Win32.Winsock.nonblockingAcceptCorrect
-            (.providerBounded Std.Win32.Winsock.nonblockingAcceptBound))))
-      connectionCancellation
-      FixedPool.acceptOrConnectionBranchJoin)
-    FixedPool.workerIterationProgress
-    FixedPool.everyContinuingWorkerIterationCrossesCancelPoint
-
-def rootShutdownCancelPoint :
-    CancellationSummary (FixedPool.rootShutdownPoint processPolicy) :=
-  CancellationSummary.cancelPoint
-    FixedPool.rootShutdownSafe
-    FixedPool.pendingShutdownCustody
-    FixedPool.shutdownStopsAdmission
-
-def rootServiceCancellation :
-    CancellationSummary (FixedPool.serverRootProcess processPolicy) :=
-  CancellationSummary.loop
-    (CancellationSummary.seq
-      rootShutdownCancelPoint
-      (CancellationSummary.uncancellableCall
-        Std.Win32.Sleep.correct
-        (.providerReturnsWithin resourcePolicy.pollQuantum)))
-    FixedPool.rootServiceIterationProgress
-    FixedPool.everyRootIterationCrossesShutdownPoint
-
-def serverCancellation : CancellationSummary memoryServerProcess :=
-  CancellationSummary.transport FixedPool.memoryServerProcessDecomposition
-    (CancellationSummary.supervisor
-      rootServiceCancellation
-      (CancellationSummary.parallelFamily workerAcceptCancellation)
-      FixedPool.serverShutdownPolicy
-      FixedPool.noForcedWorkerStopWithLiveCustody)
-
-theorem streamCancellationExports :
-    ∃ contract, streamCancellation.exportedContract = some contract :=
-  CancellationSummary.loop_exports
-    Http2.everyContinuingStreamIterationCrossesCancelPoint
-
-theorem hpackDecoderCancellationExports :
-    ∃ contract, hpackDecoderCancellation.exportedContract = some contract :=
-  CancellationSummary.loop_exports
-    Hpack.everyContinuingIterationCrossesCancelPoint
-
-theorem connectionWriterCancellationExports :
-    ∃ contract, connectionWriterCancellation.exportedContract = some contract :=
-  CancellationSummary.loop_exports
-    Http2.everyContinuingWriterIterationCrossesCancelPoint
-
-theorem connectionCancellationExports :
-    ∃ contract, connectionCancellation.exportedContract = some contract :=
-  CancellationSummary.supervisor_exports
-    (CancellationSummary.loop_exports
-      Http2.everyContinuingConnectionIterationCrossesCancelPoint)
-    (CancellationSummary.parallel_exports
-      hpackDecoderCancellationExports connectionWriterCancellationExports
-      streamCancellationExports)
-    Http2.goawayDrainSupervisorPolicy
-
-theorem workerAcceptCancellationExports :
-    ∃ contract, workerAcceptCancellation.exportedContract = some contract :=
-  CancellationSummary.loop_exports
-    FixedPool.everyContinuingWorkerIterationCrossesCancelPoint
-
-theorem rootServiceCancellationExports :
-    ∃ contract, rootServiceCancellation.exportedContract = some contract :=
-  CancellationSummary.loop_exports
-    FixedPool.everyRootIterationCrossesShutdownPoint
-
-theorem serverCancellationExports :
-    ∃ contract, serverCancellation.exportedContract = some contract :=
-  CancellationSummary.supervisor_exports
-    rootServiceCancellationExports
-    (CancellationSummary.parallelFamily_exports workerAcceptCancellationExports)
-    FixedPool.serverShutdownPolicy
-
-theorem serverExportedContractCompatibleWithSupervisor :
-    ExportedContractCompatibleWithSupervisor
-      serverCancellation FixedPool.supervisorPolicy :=
-  FixedPool.serverExportedContractCompatible
-    serverCancellationExports
-
-def serverTerminationFacet :
-    TerminationFacet memoryServerCorrect
-      (.supervised FixedPool.supervisorPolicy) :=
-  CancellationSummary.toSupervisedTerminationFacet
-    serverCancellation memoryServerCorrect FixedPool.supervisorPolicy
-    serverCancellationExports serverExportedContractCompatibleWithSupervisor
-
-theorem cancellationSequenceRegroupingIsIrrelevant :
-    CancellationSummary.seq
-      receiveReadinessCall
-      (CancellationSummary.seq receiveReadinessObservation receiveCall) =
-    CancellationSummary.transportProcessAssoc
-      (CancellationSummary.seq
-        (CancellationSummary.seq receiveReadinessCall receiveReadinessObservation)
-        receiveCall) :=
-  CancellationSummary.seq_assoc _ _ _
-
-theorem streamResetCancelsOnlyAddressedIncarnation
-    (connection : ConnectionId) (stream : Http2StreamId) :
-    CancellationRequestAt serverCancellation (.stream connection stream) .deadline
-      ⟹ EventuallyExactDisposition
-        (.finishCurrentFrameThenRst stream .cancel ∨
-          .connectionTeardownWithExactSuffixDisposition connection stream)
-        (.preserveSiblingsUntilConnectionTeardown connection stream) :=
-  streamCancellation.addressedDisposition connection stream
-
-theorem writableSurvivingConnectionEventuallyResetsAddressedStream
-    (connection : ConnectionId) (stream : Http2StreamId)
-    (writable : EventuallyWritableForCurrentFrame connection)
-    (survives : ConnectionSurvivesUntilFrameBoundary connection)
-    (fair : WriterScheduledFairly connection) :
-    CancellationRequestAt serverCancellation (.stream connection stream) .deadline
-      ⟹ EventuallyExactDisposition
-        (.finishCurrentFrameThenRst stream .cancel)
-        (.preserveSiblingStreams connection stream) :=
-  streamCancellation.rstAfterFinish writable survives fair
-
-theorem blockedFlowControlRemainsCancellable
-    (stream : Http2StreamId) :
-    AtFlowCreditWait stream ⟹
-      EventuallyExactDisposition
-        (.enqueueRstWithoutDataCredit stream .cancel)
-        (.preserveSiblingStreamsByControlQueue stream) :=
-  schedulerCancellationConsumer.enqueueRstForFlowBlocked stream
-
-theorem partialSendCancellationPreservesCommittedPrefix
-    (frame : Http2.SerializedFrame) (committed : Fin (frame.bytes.size + 1)) :
-    CancelAfterSendResult frame committed ⟹
-      ExactPartialFrameCancellationDisposition
-        (committedPrefix := frame.bytes.take committed)
-        (remainingSuffix := frame.bytes.drop committed)
-        (streamCancel := .finishFrameThenReset)
-        (connectionCancel := .finishFrameOrCloseConnection) :=
-  partialSendCancellation.dispositionAtFrameBoundaryOrTeardown frame committed
-
-theorem hpackCancellationPreservesLastCommittedState
-    (committed working : Hpack.DecoderState protocolProfile)
-    (started : Hpack.WorkingSliceStartedFrom committed working)
-    (mutation : Hpack.WorkingMutationOf committed working) :
-    CancellationDuringDecode committed working ⟹
-      Eventually
-        (CancellationReturnsExactly committed ∨
-          ∃ successor,
-            Hpack.SliceFinishesToCommittedSuccessor committed working successor ∧
-            CancellationReturnsExactly successor) :=
-  hpackDecoderCancellation.delayAndDisposition committed working started mutation
-
-theorem streamCancellationDoesNotCancelHpackDecoder
-    (connection : ConnectionId) (stream : Http2StreamId) :
-    ¬ CancellationAddresses
-      (.stream connection stream) (.hpackDecoder connection) :=
-  Http2.streamCancellationDoesNotAddressConnectionDecoder connection stream
-
-theorem gracefulConnectionCancellationPublishesPrefix
-    (connection : ConnectionId) :
-    CancellationRequestAt serverCancellation (.connection connection) .shutdown
-      ⟹ EventuallyGoawayDrainOrFailedClose connection :=
-  connectionCancellation.supervisedDisposition connection
-
-theorem goawayDrainProgressOrExactEscalation
-    (connection : ConnectionId) :
-    GoawayPublished connection ⟹
-      (DrainPremises connection → EventuallyDrainedAndClosed connection) ∧
-      (DrainDeadlineExceeded connection →
-        EventuallyExactTeardownWithSuffixDisposition connection) :=
-  connectionCancellation.drainProgressOrEscalation connection
-
-theorem repeatedShutdownObservationDoesNotConsumeControlCapacity
-    (connection : ConnectionId) :
-    GoawayPublished connection →
-      ReobserveShutdown connection →
-      ControlQueueSlotsAfter connection = ControlQueueSlotsBefore connection ∧
-      FrozenLastStreamIdAfter connection = FrozenLastStreamIdBefore connection :=
-  Http2.beginGracefulShutdownIdempotent
-
-theorem normalAndFailedTerminalsAreExhaustive :
-    EveryCancellationTerminal serverCancellation
-      (.normalDischarged ∨ .failedWithDeclaredAdoption) :=
-  serverCancellation.terminalBoundaryComplete
-
-theorem noCancellationInsideHpackMutation :
-    ¬ CancellationSafePoint hpackDecoderCancellation
-      Hpack.ControlPoint.midDynamicTableMutation :=
-  hpackDecoderCancellation.notSafeInsideSlice
-
-theorem noCancellationBeforeSentPrefixCommit :
-    ¬ CancellationSafePoint partialSendCancellation
-      Http2.ControlPoint.sendReturnedBeforePrefixCommit :=
-  partialSendCancellation.notSafeBeforeCustodyRestored
-
-theorem noForcedWorkerStopWithLiveSocket :
-    ¬ PermittedForcedCancellation serverCancellation
-      FixedPool.ControlPoint.workerOwnsLiveSocket :=
-  serverCancellation.noForcedStop
-
-theorem uncancellableInfiniteCallCannotClaimBoundedCancellation
-    (call : ProcessSpec) (correct : ProcessCorrect call)
-    (forever : MayBlockForeverWithoutEnvironmentFrontier call) :
-    (CancellationSummary.uncancellable correct .environmentPending).exportedContract =
-      none :=
-  CancellationSummary.uncancellable_exports_none correct forever
-
-theorem plainSerialLeafNeedsNoRichCancellationFacet
-    (function : RegisteredSerialFunction) :
-    CancellationSummary function.process =
-      CancellationSummary.weakestUncancellable function.correct :=
-  rfl
+theorem serverCancellationCorrect :
+    CancellationPolicyRealizes
+      serverCancellationPolicy serverCancellation := by
+  verify_cancellation_policy
 
 theorem serverProcessPlanRealizes :
     ProcessPlanRealizes spec serverProcessPlan := by
-  exact FixedPool.weaveCorrect
-    serverComposition serverTerminationFacet
-    memoryServerCorrect connectionCorrect streamCorrect frameParserCorrect
-    hpackDecoderCorrect connectionWriterCorrect
-    Std.Process.Network.allCorrect Std.Process.Clock.allCorrect
-    Std.Process.Supervision.allCorrect Std.Process.Resource.closeHandleCorrect
-    Std.Process.System.shutdownSignalCorrect
-    Std.Process.Terminal.finishCorrect
-
-def connectionScope (id : ConnectionId) : ProcessScope serverProcessPlan :=
-  ProcessScope.descendantsOf (.connection id)
-
-theorem connectionMemoryBound (id : ConnectionId) :
-    EveryExecutionUsesAtMost
-      (connectionScope id)
-      ServerResourceMetric.grassOwnedResidentBytes
-      (Http2.connectionBytes processPolicy) :=
-  serverProcessPlanRealizes.resources.subgraphBound
-    (ServerBoundaryFlux.connection id)
-
-def streamScope (connection : ConnectionId) (stream : Http2StreamId) :
-    ProcessScope serverProcessPlan :=
-  ProcessScope.descendantsOf (.stream connection stream)
-
-theorem streamMemoryBound (connection : ConnectionId) (stream : Http2StreamId) :
-    EveryExecutionUsesAtMost
-      (streamScope connection stream)
-      ServerResourceMetric.grassOwnedResidentBytes
-      (Http2.streamBytes processPolicy) :=
-  serverProcessPlanRealizes.resources.subgraphBound
-    (ServerBoundaryFlux.stream connection stream)
-
-theorem connectionStreamBound (id : ConnectionId) :
-    EveryReachableStateSatisfies
-      (ActiveStreams id ≤ resourcePolicy.maxConcurrentStreamsPerConnection) :=
-  serverProcessPlanRealizes.resources.capacityBound
-
-theorem serverSocketBound :
-    EveryExecutionUsesAtMost
-      ProcessScope.root
-      ServerResourceMetric.socketDescriptors
-      resourcePolicy.maxSocketDescriptors :=
-  serverProcessPlanRealizes.resources.rootBound
-
-theorem serverHandleBound :
-    EveryExecutionUsesAtMost
-      ProcessScope.root
-      ServerResourceMetric.windowsHandles
-      (ServerResourceBudget.handles processPolicy) :=
-  serverProcessPlanRealizes.resources.rootBound
-
-def serverResourceAxisRealization : ResourceAxisRealizationFamily spec :=
-  ResourceAxisRealizationFamily.fromCapturedSemantics spec.resourceSemantics
-
-theorem serverResourceAxisKeysInjective :
-    Function.Injective serverResourceAxisRealization.concreteKey :=
-  serverResourceAxisRealization.keyInjective
-
-theorem serverRootResidentMemoryBound :
-    EveryExecutionUsesAtMost
-      ProcessScope.root
-      ServerResourceMetric.grassOwnedResidentBytes
-      (ServerResourceBudget.residentBytes resourcePolicy) :=
-  serverProcessPlanRealizes.resources.rootBound
-
-theorem serverRootResourceEquation :
-    ExactRootResourceEquation
-      serverProcessPlan serverResourceAxisRealization
-      (ServerResourceBudget.allAxes resourcePolicy) :=
-  serverProcessPlanRealizes.resources.rootEquation
+  verify_process_plan
+    using serverComposition
+    using_processes
+      memoryServerCorrect connectionCorrect streamCorrect frameParserCorrect
+      hpackDecoderCorrect connectionWriterCorrect
+    using_cancellation serverCancellationCorrect
 
 end Grass.Spikes.WebServer
 ```
 
 ### `Macros.lean`
 
+<!-- grass-block: authored file=Macros.lean -->
 ```lean
 import Grass.Assembly.X86
 import Spikes.«4_Web_Server».Process
@@ -2278,23 +2002,9 @@ def serverStaticObjects : StaticObjectTable := static_objects {
   }
 }
 
-structure LocalFragmentBody
-    (entry : BlockContract) (exits : FragmentExitFamily entry) where
-  name : Name
-  algorithm : X86.FragmentAlgorithm entry exit
-  rawExpansion : RawInstructionListing
-  expandsExactly : algorithm.lower = rawExpansion
-  references : ExactInternalReferenceManifest rawExpansion
-  citations : InstructionAndProtocolCitationManifest rawExpansion
-  machine : FragmentMachineCertificate rawExpansion entry exits references.imports
-
-def LocalFragmentBody.fragment (body : LocalFragmentBody entry exits) :
-    VerifiedFragment entry exits where
-  source := body.algorithm.authoredSource
-  expanded := body.rawExpansion
-  expansionExact := body.expandsExactly
-  localCorrect := body.machine.localCorrect
-  citations := body.citations.instructionCoverage
+abbrev LocalFragmentBody
+    (entry : BlockContract) (exits : FragmentExitFamily entry) :=
+  X86.ClosedVerifiedFragmentBody entry exits
 
 def consumePrefaceBody :
     LocalFragmentBody Http2.X86.Contract.consumePrefaceEntry
@@ -2398,6 +2108,43 @@ def beginHeaderBlockBody (capacity : Nat) :
     |> consumeFrame
 }
 
+def normalizeHeadersPayloadBody :
+    LocalFragmentBody Http2.X86.Contract.normalizeHeadersPayloadEntry
+      Http2.X86.Contract.normalizeHeadersPayloadExit := x86_fragment_body {
+  name := `normalizeHeadersPayload
+  state := connection.currentPayload, connection.currentPayloadLength
+  algorithm := requireFrameType headers
+    |> ifFlag padded {
+      requirePayloadLengthAtLeast 1
+      readPadLength
+      requirePaddingFitsPayload
+      removePadLengthAndTrailingPadding
+    }
+    |> ifFlag priority {
+      requirePayloadLengthAtLeast 5
+      requirePriorityDependencyNotCurrentStream
+      removePriorityPrefix
+    }
+    |> publishExactHeaderBlockSlice
+}
+
+def normalizeDataPayloadBody :
+    LocalFragmentBody Http2.X86.Contract.normalizeDataPayloadEntry
+      Http2.X86.Contract.normalizeDataPayloadExit := x86_fragment_body {
+  name := `normalizeDataPayload
+  state := connection.currentPayload, connection.currentPayloadLength,
+    connection.currentFlowControlledLength
+  algorithm := requireFrameType data
+    |> snapshotFullPayloadLengthForFlowCredit
+    |> ifFlag padded {
+      requirePayloadLengthAtLeast 1
+      readPadLength
+      requirePaddingFitsPayload
+      removePadLengthAndTrailingPadding
+    }
+    |> publishExactDataSlice
+}
+
 def continuationBody (capacity : Nat) :
     LocalFragmentBody (Http2.X86.Contract.continuationEntry capacity)
       Http2.X86.Contract.continuationExit := x86_fragment_body {
@@ -2454,7 +2201,6 @@ def settingsBody (settings : Http2.Settings) :
     |> checkedInitialWindowDeltaAcrossOpenStreams
     |> boundHeaderTable resourcePolicy.hpackDecoderTableBytes
     |> publishPeerSettings
-    |> enqueueAckOnce
 }
 
 def windowUpdateBody :
@@ -2750,134 +2496,65 @@ def writerObservationBody :
     |> otherwiseContinueCurrentFrame
 }
 
-def frameOf (body : LocalFragmentBody entry exits) : VerifiedFragment entry exits :=
-  body.fragment
-
-def parseFrameHeaderMacro := (frameOf (parseFrameHeaderBody 16384)).asTransparentMacro
-def consumeClientPrefaceMacro := (frameOf consumePrefaceBody).asTransparentMacro
-def decodeFieldSectionMacro := (frameOf (hpackFieldSectionBody resourcePolicy.hpackDecoderTableBytes resourcePolicy.maxHeaderListBytes)).asTransparentMacro
-def beginHeaderBlockMacro := (frameOf (beginHeaderBlockBody resourcePolicy.maxContinuationBytes)).asTransparentMacro
-def appendContinuationMacro := (frameOf (continuationBody resourcePolicy.maxContinuationBytes)).asTransparentMacro
-def dispatchFrameMacro := (frameOf (dispatchBody protocolProfile)).asTransparentMacro
-def requireInitialSettingsMacro := (frameOf initialSettingsBody).asTransparentMacro
-def validateRequestFieldsMacro := (frameOf requestFieldsBody).asTransparentMacro
-def applySettingsMacro := (frameOf (settingsBody serverSettings)).asTransparentMacro
-def applyWindowUpdateMacro := (frameOf windowUpdateBody).asTransparentMacro
-def transitionStreamMacro := (frameOf streamTransitionBody).asTransparentMacro
-def enqueueControlMacro := (frameOf (boundedQueueBody .control resourcePolicy.maxQueuedControlFramesPerConnection)).asTransparentMacro
-def enqueueResponseMacro := (frameOf (staticResponseBody successHeaderBlock routeBody)).asTransparentMacro
-def enqueueNotFoundMacro := (frameOf (staticResponseBody notFoundHeaderBlock #[])).asTransparentMacro
-def enqueueErrorMacro := (frameOf scopedErrorBody).asTransparentMacro
-def debitInboundCreditMacro := (frameOf inboundCreditBody).asTransparentMacro
-def releaseInboundDataMacro := (frameOf releaseInboundBody).asTransparentMacro
-def debitOutboundCreditMacro := (frameOf outboundCreditBody).asTransparentMacro
-def applyRstStreamMacro := (frameOf rstBody).asTransparentMacro
-def applyGoawayMacro := (frameOf peerGoawayBody).asTransparentMacro
-def acknowledgePingMacro := (frameOf pingBody).asTransparentMacro
-def selectOutboundMacro := (frameOf outboundSelectionBody).asTransparentMacro
-def hasSendableOutboundMacro := (frameOf hasOutboundBody).asTransparentMacro
-def serializeSelectedFrameMacro := (frameOf serializeFrameBody).asTransparentMacro
-def commitSentPrefixMacro := (frameOf commitPrefixBody).asTransparentMacro
-def releaseClosedStreamsMacro := (frameOf releaseStreamsBody).asTransparentMacro
-def cancelExpiredStreamsMacro := (frameOf (cancelExpiredBody resourcePolicy.maxConcurrentStreamsPerConnection)).asTransparentMacro
-def checkConnectionDeadlineMacro := (frameOf (connectionDeadlineBody resourcePolicy.connectionIdleDeadline)).asTransparentMacro
-def initializeConnectionMacro := (frameOf initializeConnectionBody).asTransparentMacro
-def receiveIntoRingMacro := (frameOf (receiveRingBody resourcePolicy.maxReceiveBytesPerConnection)).asTransparentMacro
-def pollConnectionMacro := (frameOf pollReadableBody).asTransparentMacro
-def pollWritableMacro := (frameOf pollWritableBody).asTransparentMacro
-def validateIgnoredPriorityMacro := (frameOf ignoredPriorityBody).asTransparentMacro
-def consumeUnknownPayloadMacro := (frameOf unknownPayloadBody).asTransparentMacro
-def enqueueGoawayMacro := (frameOf localGoawayBody).asTransparentMacro
-def shouldCloseDrainedMacro := (frameOf drainedBody).asTransparentMacro
-def releaseConnectionMacro := (frameOf releaseConnectionBody).asTransparentMacro
-def markTeardownSuffixDispositionMacro := (frameOf teardownSuffixBody).asTransparentMacro
-def observeWriterCancellationMacro := (frameOf writerObservationBody).asTransparentMacro
-
-theorem enqueueGoawayMacroIdempotent :
-    RepeatedSuccessConsumesNoAdditionalControlSlot
-      enqueueGoawayMacro Http2.ConnectionField.goawayPublished :=
-  localGoawayBody.machine.goawayPublicationIdempotent
-
 def serverMacros : MacroTable platformPlan := macros {
-  h2_consume_preface => consumeClientPrefaceMacro
-  h2_parse_frame_header => parseFrameHeaderMacro
-  hpack_decode_field_section => decodeFieldSectionMacro
-  h2_begin_header_block => beginHeaderBlockMacro
-  h2_append_continuation => appendContinuationMacro
-  h2_dispatch_frame => dispatchFrameMacro
-  h2_require_initial_settings => requireInitialSettingsMacro
-  h2_validate_request_fields => validateRequestFieldsMacro
-  h2_apply_settings => applySettingsMacro
-  h2_apply_window_update => applyWindowUpdateMacro
-  h2_transition_stream => transitionStreamMacro
-  h2_enqueue_control => enqueueControlMacro
-  h2_enqueue_response => enqueueResponseMacro
-  h2_enqueue_not_found => enqueueNotFoundMacro
-  h2_enqueue_error => enqueueErrorMacro
-  h2_debit_inbound_credit => debitInboundCreditMacro
-  h2_release_inbound_data => releaseInboundDataMacro
-  h2_debit_outbound_credit => debitOutboundCreditMacro
-  h2_apply_rst_stream => applyRstStreamMacro
-  h2_apply_goaway => applyGoawayMacro
-  h2_ack_ping => acknowledgePingMacro
-  h2_select_outbound => selectOutboundMacro
-  h2_has_sendable_outbound => hasSendableOutboundMacro
-  h2_serialize_selected_frame => serializeSelectedFrameMacro
-  h2_commit_sent_prefix => commitSentPrefixMacro
-  h2_release_closed_streams => releaseClosedStreamsMacro
-  h2_cancel_expired_streams => cancelExpiredStreamsMacro
-  h2_check_connection_deadline => checkConnectionDeadlineMacro
-  h2_initialize_connection_state => initializeConnectionMacro
-  receive_into_ring => receiveIntoRingMacro
-  connection_poll => pollConnectionMacro
-  poll_connection_writable => pollWritableMacro
-  h2_validate_ignored_priority => validateIgnoredPriorityMacro
-  h2_consume_unknown_payload => consumeUnknownPayloadMacro
-  h2_enqueue_goaway => enqueueGoawayMacro
-  h2_should_close_drained => shouldCloseDrainedMacro
-  h2_release_connection_state => releaseConnectionMacro
-  h2_mark_exact_teardown_suffix_disposition => markTeardownSuffixDispositionMacro
-  h2_observe_writer_cancellation => observeWriterCancellationMacro
+  h2_consume_preface => consumePrefaceBody
+  h2_parse_frame_header => parseFrameHeaderBody 16384
+  hpack_decode_field_section =>
+    hpackFieldSectionBody
+      resourcePolicy.hpackDecoderTableBytes
+      resourcePolicy.maxHeaderListBytes
+  h2_normalize_headers_payload => normalizeHeadersPayloadBody
+  h2_normalize_data_payload => normalizeDataPayloadBody
+  h2_begin_header_block =>
+    beginHeaderBlockBody resourcePolicy.maxContinuationBytes
+  h2_append_continuation =>
+    continuationBody resourcePolicy.maxContinuationBytes
+  h2_dispatch_frame => dispatchBody protocolProfile
+  h2_require_initial_settings => initialSettingsBody
+  h2_validate_request_fields => requestFieldsBody
+  h2_apply_settings => settingsBody serverSettings
+  h2_apply_window_update => windowUpdateBody
+  h2_transition_stream => streamTransitionBody
+  h2_enqueue_control =>
+    boundedQueueBody .control resourcePolicy.maxQueuedControlFramesPerConnection
+  h2_enqueue_response => staticResponseBody successHeaderBlock routeBody
+  h2_enqueue_not_found => staticResponseBody notFoundHeaderBlock #[]
+  h2_enqueue_error => scopedErrorBody
+  h2_debit_inbound_credit => inboundCreditBody
+  h2_release_inbound_data => releaseInboundBody
+  h2_debit_outbound_credit => outboundCreditBody
+  h2_apply_rst_stream => rstBody
+  h2_apply_goaway => peerGoawayBody
+  h2_ack_ping => pingBody
+  h2_select_outbound => outboundSelectionBody
+  h2_has_sendable_outbound => hasOutboundBody
+  h2_serialize_selected_frame => serializeFrameBody
+  h2_commit_sent_prefix => commitPrefixBody
+  h2_release_closed_streams => releaseStreamsBody
+  h2_cancel_expired_streams =>
+    cancelExpiredBody resourcePolicy.maxConcurrentStreamsPerConnection
+  h2_check_connection_deadline =>
+    connectionDeadlineBody resourcePolicy.connectionIdleDeadline
+  h2_initialize_connection_state => initializeConnectionBody
+  receive_into_ring =>
+    receiveRingBody resourcePolicy.maxReceiveBytesPerConnection
+  connection_poll => pollReadableBody
+  poll_connection_writable => pollWritableBody
+  h2_validate_ignored_priority => ignoredPriorityBody
+  h2_consume_unknown_payload => unknownPayloadBody
+  h2_enqueue_goaway => localGoawayBody
+  h2_should_close_drained => drainedBody
+  h2_release_connection_state => releaseConnectionBody
+  h2_mark_exact_teardown_suffix_disposition => teardownSuffixBody
+  h2_observe_writer_cancellation => writerObservationBody
 }
-
-def serverFragmentHierarchy : FragmentExpansionHierarchy platformPlan := hierarchy {
-  root serverMacros
-  shard framing consumePrefaceBody parseFrameHeaderBody beginHeaderBlockBody continuationBody dispatchBody
-  shard hpack hpackIntegerBody hpackHuffmanBody hpackStringBody hpackFieldSectionBody
-  shard state initialSettingsBody requestFieldsBody settingsBody windowUpdateBody
-    streamTransitionBody rstBody peerGoawayBody pingBody ignoredPriorityBody unknownPayloadBody
-  shard queues boundedQueueBody staticResponseBody scopedErrorBody
-    inboundCreditBody releaseInboundBody outboundCreditBody
-    outboundSelectionBody hasOutboundBody serializeFrameBody commitPrefixBody
-  shard lifecycle initializeConnectionBody receiveRingBody pollReadableBody pollWritableBody
-    releaseStreamsBody cancelExpiredBody connectionDeadlineBody localGoawayBody drainedBody
-    releaseConnectionBody teardownSuffixBody writerObservationBody
-}
-
-theorem serverFragmentHierarchyComplete :
-    EverySelectedOperationHasExactlyOneLocalConstructorBody
-      serverMacros serverFragmentHierarchy := by
-  validate_fragment_hierarchy
-
-theorem serverFragmentExpansionExact :
-    HierarchicalExpansionExactlyEqualsFlatMacroExpansion
-      serverFragmentHierarchy serverMacros :=
-  FragmentExpansionHierarchy.flatten_exact serverFragmentHierarchy
-
-theorem serverMacrosTransparent :
-    EveryMacroExpandsToExactRawInstructions serverMacros :=
-  serverFragmentExpansionExact.everyMacroExact
-
-theorem serverMacrosCancellationTransparent :
-    EveryMacroExpansionPreservesCancellationMasksSafePointsAndCustody
-      serverMacros :=
-  serverFragmentHierarchy.cancellationTransparent
 
 end Grass.Spikes.WebServer
 ```
 
 ### `Process.lean`
 
+<!-- grass-block: authored file=Process.lean -->
 ```lean
 import Grass.Process
 import Grass.Platform.Win10.X64
@@ -3267,9 +2944,9 @@ end Grass.Spikes.WebServer
 
 ### `Program.lean`
 
+<!-- grass-block: authored file=Program.lean -->
 ```lean
 import Grass.Emit
-import Grass.Artifact.PE32Plus
 import Spikes.«4_Web_Server».Assembly
 import Spikes.«4_Web_Server».Cancellation
 
@@ -3277,43 +2954,19 @@ namespace Grass.Spikes.WebServer
 
 def serverVerified : VerifiedProgram spec := by
   verify_assembly platformPlan
+    deriving_constraints_from spec
     using explicit_process serverProcessPlanRealizes
     using_cancellation serverCancellation
     with serverSource
 
 def bytes : ByteArray := emitProgram serverVerified
 
-theorem emittedSound : EmittedProgramSatisfies spec bytes :=
-  serverVerified.sound
-
-def artifact : PE32Plus := serverVerified.linkedArtifact
-
-theorem writerRoundTrip : PE32Plus.parse (PE32Plus.write artifact) = .ok artifact :=
-  artifact.writerRoundTrip
-
-theorem parserConforms (input : ByteArray) :
-    PE32Plus.parse input = .error ∨
-    ∃ image, PE32Plus.parse input = .ok image ∧
-      PE32Plus.ConformsToSpecification input image :=
-  PE32Plus.parserConforms input
-
-theorem textDecodesExactly :
-    LoadedTextDecodesTo artifact serverVerified.rawProgram :=
-  serverVerified.artifactCorrectness.loadedTextDecodes
-
-theorem emittedExactly : bytes = PE32Plus.write artifact :=
-  rfl
-
-theorem admissibleLoadsRefineHttp2 :
-    ∀ load ∈ PE32Plus.admissibleLoads bytes,
-      LoadedExecutionRefines load spec :=
-  serverVerified.artifactCorrectness.everyAdmissibleLoad
-
 end Grass.Spikes.WebServer
 ```
 
 ### `Spec.lean`
 
+<!-- grass-block: authored file=Spec.lean -->
 ```lean
 import Grass.Spec.Http2
 import Grass.Spec.Grammar

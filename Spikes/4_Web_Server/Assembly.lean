@@ -18,7 +18,36 @@ structure WorkerFrameFields where
 
 def WorkerFrame : FrameLayout Win64 := FrameLayout.derive WorkerFrameFields
 
-def serverSource : AsmSource platformPlan := asm_source {
+def serverJoinContracts : JoinContractSelection platformPlan := cfg_join_contracts {
+  entry => FixedPool.X86.serverEntry processPolicy executionEnvelope
+  create_workers => FixedPool.X86.workerCreationLoop processPolicy
+  resume_loop => FixedPool.X86.workerResumeLoop processPolicy
+  join_workers => FixedPool.X86.workerJoinLoop processPolicy
+  console_handler => FixedPool.X86.shutdownCallback processPolicy
+  worker_entry => FixedPool.X86.workerEntry processPolicy
+  worker_gate => FixedPool.X86.initializationGate processPolicy
+  accept_wait => FixedPool.X86.acceptFrontier processPolicy
+  preface_loop => Http2.X86.prefaceLoop processPolicy.connection
+  connection_schedule => Http2.X86.connectionScheduler processPolicy.connection
+  receive_result_observation => Http2.X86.receiveCancellationPoint processPolicy.connection
+  frame_parse_loop => Http2.X86.frameParseLoop processPolicy.connection
+  decode_fields => Http2.X86.normalizedFieldBlock processPolicy.connection
+  send_suffix_loop => Http2.X86.partialSendLoop processPolicy.connection
+  send_readiness_observation => Http2.X86.writerCancellationPoint processPolicy.connection
+  enqueue_stream_error => Http2.X86.streamErrorJoin processPolicy.connection
+  enqueue_connection_error => Http2.X86.connectionErrorJoin processPolicy.connection
+  connection_draining => Http2.X86.goawayDrainLoop processPolicy.connection
+  connection_close => Http2.X86.connectionTeardown processPolicy.connection
+  connection_closed_boundary => Http2.X86.connectionCustodyDischarged processPolicy.connection
+  worker_return => FixedPool.X86.workerLoansReturned processPolicy
+}
+
+def serverSource : AsmSource platformPlan :=
+  asm_source
+    (statics := serverStaticObjects)
+    (constructors := serverMacros)
+    (layouts := #[ServerEntryFrame, WorkerFrame])
+    (joinContracts := serverJoinContracts) {
 
 entry: @entrypoint @unwind(server_entry_unwind)
     push rbx
@@ -393,6 +422,10 @@ frame_parse_loop: @measure buffered_complete_frames_or_need_input
 
 frame_headers:
     mov  rcx, rbx
+    call h2_normalize_headers_payload
+    test eax, eax
+    jnz  connection_protocol_error
+    mov  rcx, rbx
     call h2_transition_stream
     cmp  eax, TRANSITION_STREAM_ERROR
     je   stream_protocol_error
@@ -447,6 +480,10 @@ enqueue_not_found:
     jmp  frame_parse_loop
 
 frame_data:
+    mov  rcx, rbx
+    call h2_normalize_data_payload
+    test eax, eax
+    jnz  connection_protocol_error
     mov  rcx, rbx
     call h2_transition_stream
     cmp  eax, TRANSITION_STREAM_ERROR

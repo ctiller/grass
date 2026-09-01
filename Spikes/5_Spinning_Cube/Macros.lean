@@ -261,11 +261,13 @@ fmt_found:
   free formats
 }
 
-def extentAndCountBody : TransparentAsmFragment plan := asm_fragment {
+def expandExtentAndCount
+    (caps width height extent imageCount : AddressOperand) :
+    TransparentAsmFragment plan := asm_fragment {
   cmp [caps.currentExtent.width],UINT32_MAX
   jne extent_fixed
-  clamp_u32 [state.width],[caps.min.width],[caps.max.width] -> [extent.width]
-  clamp_u32 [state.height],[caps.min.height],[caps.max.height] -> [extent.height]
+  clamp_u32 width,[caps.min.width],[caps.max.width] -> [extent.width]
+  clamp_u32 height,[caps.min.height],[caps.max.height] -> [extent.height]
   jmp extent_done
 extent_fixed:
   mov rax,[caps.currentExtent]
@@ -285,7 +287,7 @@ extent_done:
   cmp eax,ecx
   cmova eax,ecx
 count_done:
-  mov [requestedImageCount],eax
+  mov [imageCount],eax
 }
 
 def swapchainRetirementBody : TransparentAsmFragment plan := asm_fragment {
@@ -385,7 +387,7 @@ def cubeMacroDefinitions : AsmMacroRegistry plan := #[
   .literal `resolve_device_functions_or_fail deviceDispatchResolutionBody,
   .literal `enumerate_and_select_literal_loop deviceSelectionBody,
   .literal `select_required_format_or_fail surfaceSelectionBody,
-  .literal `compute_extent_and_count extentAndCountBody,
+  .functional `compute_extent_and_count expandExtentAndCount,
   .literal `destroy_swapchain_views_pipeline_if_owned swapchainRetirementBody,
   .literal `destroy_old_swapchain_after_new_created installNewSwapchainBody,
   .literal `reverse_cleanup reverseCleanupBody,

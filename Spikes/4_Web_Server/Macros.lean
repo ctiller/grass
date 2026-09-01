@@ -81,23 +81,9 @@ def serverStaticObjects : StaticObjectTable := static_objects {
   }
 }
 
-structure LocalFragmentBody
-    (entry : BlockContract) (exits : FragmentExitFamily entry) where
-  name : Name
-  algorithm : X86.FragmentAlgorithm entry exit
-  rawExpansion : RawInstructionListing
-  expandsExactly : algorithm.lower = rawExpansion
-  references : ExactInternalReferenceManifest rawExpansion
-  citations : InstructionAndProtocolCitationManifest rawExpansion
-  machine : FragmentMachineCertificate rawExpansion entry exits references.imports
-
-def LocalFragmentBody.fragment (body : LocalFragmentBody entry exits) :
-    VerifiedFragment entry exits where
-  source := body.algorithm.authoredSource
-  expanded := body.rawExpansion
-  expansionExact := body.expandsExactly
-  localCorrect := body.machine.localCorrect
-  citations := body.citations.instructionCoverage
+abbrev LocalFragmentBody
+    (entry : BlockContract) (exits : FragmentExitFamily entry) :=
+  X86.ClosedVerifiedFragmentBody entry exits
 
 def consumePrefaceBody :
     LocalFragmentBody Http2.X86.Contract.consumePrefaceEntry
@@ -201,6 +187,43 @@ def beginHeaderBlockBody (capacity : Nat) :
     |> consumeFrame
 }
 
+def normalizeHeadersPayloadBody :
+    LocalFragmentBody Http2.X86.Contract.normalizeHeadersPayloadEntry
+      Http2.X86.Contract.normalizeHeadersPayloadExit := x86_fragment_body {
+  name := `normalizeHeadersPayload
+  state := connection.currentPayload, connection.currentPayloadLength
+  algorithm := requireFrameType headers
+    |> ifFlag padded {
+      requirePayloadLengthAtLeast 1
+      readPadLength
+      requirePaddingFitsPayload
+      removePadLengthAndTrailingPadding
+    }
+    |> ifFlag priority {
+      requirePayloadLengthAtLeast 5
+      requirePriorityDependencyNotCurrentStream
+      removePriorityPrefix
+    }
+    |> publishExactHeaderBlockSlice
+}
+
+def normalizeDataPayloadBody :
+    LocalFragmentBody Http2.X86.Contract.normalizeDataPayloadEntry
+      Http2.X86.Contract.normalizeDataPayloadExit := x86_fragment_body {
+  name := `normalizeDataPayload
+  state := connection.currentPayload, connection.currentPayloadLength,
+    connection.currentFlowControlledLength
+  algorithm := requireFrameType data
+    |> snapshotFullPayloadLengthForFlowCredit
+    |> ifFlag padded {
+      requirePayloadLengthAtLeast 1
+      readPadLength
+      requirePaddingFitsPayload
+      removePadLengthAndTrailingPadding
+    }
+    |> publishExactDataSlice
+}
+
 def continuationBody (capacity : Nat) :
     LocalFragmentBody (Http2.X86.Contract.continuationEntry capacity)
       Http2.X86.Contract.continuationExit := x86_fragment_body {
@@ -257,7 +280,6 @@ def settingsBody (settings : Http2.Settings) :
     |> checkedInitialWindowDeltaAcrossOpenStreams
     |> boundHeaderTable resourcePolicy.hpackDecoderTableBytes
     |> publishPeerSettings
-    |> enqueueAckOnce
 }
 
 def windowUpdateBody :
@@ -553,127 +575,57 @@ def writerObservationBody :
     |> otherwiseContinueCurrentFrame
 }
 
-def frameOf (body : LocalFragmentBody entry exits) : VerifiedFragment entry exits :=
-  body.fragment
-
-def parseFrameHeaderMacro := (frameOf (parseFrameHeaderBody 16384)).asTransparentMacro
-def consumeClientPrefaceMacro := (frameOf consumePrefaceBody).asTransparentMacro
-def decodeFieldSectionMacro := (frameOf (hpackFieldSectionBody resourcePolicy.hpackDecoderTableBytes resourcePolicy.maxHeaderListBytes)).asTransparentMacro
-def beginHeaderBlockMacro := (frameOf (beginHeaderBlockBody resourcePolicy.maxContinuationBytes)).asTransparentMacro
-def appendContinuationMacro := (frameOf (continuationBody resourcePolicy.maxContinuationBytes)).asTransparentMacro
-def dispatchFrameMacro := (frameOf (dispatchBody protocolProfile)).asTransparentMacro
-def requireInitialSettingsMacro := (frameOf initialSettingsBody).asTransparentMacro
-def validateRequestFieldsMacro := (frameOf requestFieldsBody).asTransparentMacro
-def applySettingsMacro := (frameOf (settingsBody serverSettings)).asTransparentMacro
-def applyWindowUpdateMacro := (frameOf windowUpdateBody).asTransparentMacro
-def transitionStreamMacro := (frameOf streamTransitionBody).asTransparentMacro
-def enqueueControlMacro := (frameOf (boundedQueueBody .control resourcePolicy.maxQueuedControlFramesPerConnection)).asTransparentMacro
-def enqueueResponseMacro := (frameOf (staticResponseBody successHeaderBlock routeBody)).asTransparentMacro
-def enqueueNotFoundMacro := (frameOf (staticResponseBody notFoundHeaderBlock #[])).asTransparentMacro
-def enqueueErrorMacro := (frameOf scopedErrorBody).asTransparentMacro
-def debitInboundCreditMacro := (frameOf inboundCreditBody).asTransparentMacro
-def releaseInboundDataMacro := (frameOf releaseInboundBody).asTransparentMacro
-def debitOutboundCreditMacro := (frameOf outboundCreditBody).asTransparentMacro
-def applyRstStreamMacro := (frameOf rstBody).asTransparentMacro
-def applyGoawayMacro := (frameOf peerGoawayBody).asTransparentMacro
-def acknowledgePingMacro := (frameOf pingBody).asTransparentMacro
-def selectOutboundMacro := (frameOf outboundSelectionBody).asTransparentMacro
-def hasSendableOutboundMacro := (frameOf hasOutboundBody).asTransparentMacro
-def serializeSelectedFrameMacro := (frameOf serializeFrameBody).asTransparentMacro
-def commitSentPrefixMacro := (frameOf commitPrefixBody).asTransparentMacro
-def releaseClosedStreamsMacro := (frameOf releaseStreamsBody).asTransparentMacro
-def cancelExpiredStreamsMacro := (frameOf (cancelExpiredBody resourcePolicy.maxConcurrentStreamsPerConnection)).asTransparentMacro
-def checkConnectionDeadlineMacro := (frameOf (connectionDeadlineBody resourcePolicy.connectionIdleDeadline)).asTransparentMacro
-def initializeConnectionMacro := (frameOf initializeConnectionBody).asTransparentMacro
-def receiveIntoRingMacro := (frameOf (receiveRingBody resourcePolicy.maxReceiveBytesPerConnection)).asTransparentMacro
-def pollConnectionMacro := (frameOf pollReadableBody).asTransparentMacro
-def pollWritableMacro := (frameOf pollWritableBody).asTransparentMacro
-def validateIgnoredPriorityMacro := (frameOf ignoredPriorityBody).asTransparentMacro
-def consumeUnknownPayloadMacro := (frameOf unknownPayloadBody).asTransparentMacro
-def enqueueGoawayMacro := (frameOf localGoawayBody).asTransparentMacro
-def shouldCloseDrainedMacro := (frameOf drainedBody).asTransparentMacro
-def releaseConnectionMacro := (frameOf releaseConnectionBody).asTransparentMacro
-def markTeardownSuffixDispositionMacro := (frameOf teardownSuffixBody).asTransparentMacro
-def observeWriterCancellationMacro := (frameOf writerObservationBody).asTransparentMacro
-
-theorem enqueueGoawayMacroIdempotent :
-    RepeatedSuccessConsumesNoAdditionalControlSlot
-      enqueueGoawayMacro Http2.ConnectionField.goawayPublished :=
-  localGoawayBody.machine.goawayPublicationIdempotent
-
 def serverMacros : MacroTable platformPlan := macros {
-  h2_consume_preface => consumeClientPrefaceMacro
-  h2_parse_frame_header => parseFrameHeaderMacro
-  hpack_decode_field_section => decodeFieldSectionMacro
-  h2_begin_header_block => beginHeaderBlockMacro
-  h2_append_continuation => appendContinuationMacro
-  h2_dispatch_frame => dispatchFrameMacro
-  h2_require_initial_settings => requireInitialSettingsMacro
-  h2_validate_request_fields => validateRequestFieldsMacro
-  h2_apply_settings => applySettingsMacro
-  h2_apply_window_update => applyWindowUpdateMacro
-  h2_transition_stream => transitionStreamMacro
-  h2_enqueue_control => enqueueControlMacro
-  h2_enqueue_response => enqueueResponseMacro
-  h2_enqueue_not_found => enqueueNotFoundMacro
-  h2_enqueue_error => enqueueErrorMacro
-  h2_debit_inbound_credit => debitInboundCreditMacro
-  h2_release_inbound_data => releaseInboundDataMacro
-  h2_debit_outbound_credit => debitOutboundCreditMacro
-  h2_apply_rst_stream => applyRstStreamMacro
-  h2_apply_goaway => applyGoawayMacro
-  h2_ack_ping => acknowledgePingMacro
-  h2_select_outbound => selectOutboundMacro
-  h2_has_sendable_outbound => hasSendableOutboundMacro
-  h2_serialize_selected_frame => serializeSelectedFrameMacro
-  h2_commit_sent_prefix => commitSentPrefixMacro
-  h2_release_closed_streams => releaseClosedStreamsMacro
-  h2_cancel_expired_streams => cancelExpiredStreamsMacro
-  h2_check_connection_deadline => checkConnectionDeadlineMacro
-  h2_initialize_connection_state => initializeConnectionMacro
-  receive_into_ring => receiveIntoRingMacro
-  connection_poll => pollConnectionMacro
-  poll_connection_writable => pollWritableMacro
-  h2_validate_ignored_priority => validateIgnoredPriorityMacro
-  h2_consume_unknown_payload => consumeUnknownPayloadMacro
-  h2_enqueue_goaway => enqueueGoawayMacro
-  h2_should_close_drained => shouldCloseDrainedMacro
-  h2_release_connection_state => releaseConnectionMacro
-  h2_mark_exact_teardown_suffix_disposition => markTeardownSuffixDispositionMacro
-  h2_observe_writer_cancellation => observeWriterCancellationMacro
+  h2_consume_preface => consumePrefaceBody
+  h2_parse_frame_header => parseFrameHeaderBody 16384
+  hpack_decode_field_section =>
+    hpackFieldSectionBody
+      resourcePolicy.hpackDecoderTableBytes
+      resourcePolicy.maxHeaderListBytes
+  h2_normalize_headers_payload => normalizeHeadersPayloadBody
+  h2_normalize_data_payload => normalizeDataPayloadBody
+  h2_begin_header_block =>
+    beginHeaderBlockBody resourcePolicy.maxContinuationBytes
+  h2_append_continuation =>
+    continuationBody resourcePolicy.maxContinuationBytes
+  h2_dispatch_frame => dispatchBody protocolProfile
+  h2_require_initial_settings => initialSettingsBody
+  h2_validate_request_fields => requestFieldsBody
+  h2_apply_settings => settingsBody serverSettings
+  h2_apply_window_update => windowUpdateBody
+  h2_transition_stream => streamTransitionBody
+  h2_enqueue_control =>
+    boundedQueueBody .control resourcePolicy.maxQueuedControlFramesPerConnection
+  h2_enqueue_response => staticResponseBody successHeaderBlock routeBody
+  h2_enqueue_not_found => staticResponseBody notFoundHeaderBlock #[]
+  h2_enqueue_error => scopedErrorBody
+  h2_debit_inbound_credit => inboundCreditBody
+  h2_release_inbound_data => releaseInboundBody
+  h2_debit_outbound_credit => outboundCreditBody
+  h2_apply_rst_stream => rstBody
+  h2_apply_goaway => peerGoawayBody
+  h2_ack_ping => pingBody
+  h2_select_outbound => outboundSelectionBody
+  h2_has_sendable_outbound => hasOutboundBody
+  h2_serialize_selected_frame => serializeFrameBody
+  h2_commit_sent_prefix => commitPrefixBody
+  h2_release_closed_streams => releaseStreamsBody
+  h2_cancel_expired_streams =>
+    cancelExpiredBody resourcePolicy.maxConcurrentStreamsPerConnection
+  h2_check_connection_deadline =>
+    connectionDeadlineBody resourcePolicy.connectionIdleDeadline
+  h2_initialize_connection_state => initializeConnectionBody
+  receive_into_ring =>
+    receiveRingBody resourcePolicy.maxReceiveBytesPerConnection
+  connection_poll => pollReadableBody
+  poll_connection_writable => pollWritableBody
+  h2_validate_ignored_priority => ignoredPriorityBody
+  h2_consume_unknown_payload => unknownPayloadBody
+  h2_enqueue_goaway => localGoawayBody
+  h2_should_close_drained => drainedBody
+  h2_release_connection_state => releaseConnectionBody
+  h2_mark_exact_teardown_suffix_disposition => teardownSuffixBody
+  h2_observe_writer_cancellation => writerObservationBody
 }
-
-def serverFragmentHierarchy : FragmentExpansionHierarchy platformPlan := hierarchy {
-  root serverMacros
-  shard framing consumePrefaceBody parseFrameHeaderBody beginHeaderBlockBody continuationBody dispatchBody
-  shard hpack hpackIntegerBody hpackHuffmanBody hpackStringBody hpackFieldSectionBody
-  shard state initialSettingsBody requestFieldsBody settingsBody windowUpdateBody
-    streamTransitionBody rstBody peerGoawayBody pingBody ignoredPriorityBody unknownPayloadBody
-  shard queues boundedQueueBody staticResponseBody scopedErrorBody
-    inboundCreditBody releaseInboundBody outboundCreditBody
-    outboundSelectionBody hasOutboundBody serializeFrameBody commitPrefixBody
-  shard lifecycle initializeConnectionBody receiveRingBody pollReadableBody pollWritableBody
-    releaseStreamsBody cancelExpiredBody connectionDeadlineBody localGoawayBody drainedBody
-    releaseConnectionBody teardownSuffixBody writerObservationBody
-}
-
-theorem serverFragmentHierarchyComplete :
-    EverySelectedOperationHasExactlyOneLocalConstructorBody
-      serverMacros serverFragmentHierarchy := by
-  validate_fragment_hierarchy
-
-theorem serverFragmentExpansionExact :
-    HierarchicalExpansionExactlyEqualsFlatMacroExpansion
-      serverFragmentHierarchy serverMacros :=
-  FragmentExpansionHierarchy.flatten_exact serverFragmentHierarchy
-
-theorem serverMacrosTransparent :
-    EveryMacroExpandsToExactRawInstructions serverMacros :=
-  serverFragmentExpansionExact.everyMacroExact
-
-theorem serverMacrosCancellationTransparent :
-    EveryMacroExpansionPreservesCancellationMasksSafePointsAndCustody
-      serverMacros :=
-  serverFragmentHierarchy.cancellationTransparent
 
 end Grass.Spikes.WebServer

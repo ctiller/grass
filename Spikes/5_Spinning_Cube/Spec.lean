@@ -18,7 +18,9 @@ structure CubeFrame where
   depicts : RasterizesProjectedCube scene.geometry extent angle image
 
 def rotationAccuracy : ElapsedRotationAccuracy :=
-  Graphics.defaultInteractiveRotationAccuracy
+  ElapsedRotationAccuracy.explicit
+    (maxAngleError := .radians (1 / 1024))
+    (maxSampleTimeError := .milliseconds 1)
 
 inductive CubeInput
   | close
@@ -61,7 +63,7 @@ def cubeSuite {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
 def cubeSpec {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
     (resources : R) : SpecProcess resources :=
   SpecProcess.capture (cubeSuite resources)
-    |>.acceptInput [.close, .escapeDown, .resize]
+    |>.acceptInput [.close, .escapeDown, .resize, .irrelevant]
     |>.withFailures .terminateWithoutFalseSuccess
     |>.withProgress (.reactiveUntilUserExit frontiers :=
       [.externalInput, .frameOpportunity, .frameObservation, .terminalOutcome])

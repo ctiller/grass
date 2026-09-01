@@ -7,6 +7,19 @@ Authoring view: agents maintain `Spec.lean`, `Process.lean`, `Layout.lean`,
 end of this document. Source closure, cross-ISA manifests, and artifact bundles
 are generated inspection views.
 
+| Proof-economics quantity | Current evidence |
+| --- | --- |
+| Authored specification | 1 module; 78 physical / 62 nonblank lines |
+| Authored realization | 5 modules; 1637 physical / 1525 nonblank lines |
+| Generated expansion/certificates | not generated |
+| Clean/incremental checking | not measured |
+
+The five realization modules currently separate process proofs, ABI/layout
+selection, host constructors, host plus shader assembly, and the closing form.
+The authoring audit disputes the generated content in `Layout.lean` and the
+invalidation locality of the combined assembly module; this table records the
+present cost rather than endorsing it.
+
 This spike proposes the complete proof shape before its libraries exist. It is
 not permission to build the graphics framework yet. The resource-parameterized
 portable specification function is the precious semantic artifact. The selected
@@ -18,6 +31,7 @@ layouts, import tables, shader words, and PE bytes are derived.
 
 ## 1. The application proof we want to read
 
+<!-- grass-block: proof-sketch id=spike5-block-01 -->
 ```lean
 namespace Grass.Spike5
 
@@ -34,7 +48,9 @@ structure CubeFrame where
   depicts : RasterizesProjectedCube scene.geometry extent angle image
 
 def rotationAccuracy : ElapsedRotationAccuracy :=
-  Graphics.defaultInteractiveRotationAccuracy
+  ElapsedRotationAccuracy.explicit
+    (maxAngleError := .radians (1 / 1024))
+    (maxSampleTimeError := .milliseconds 1)
 
 inductive CubeInput
   | close | escapeDown | resize (width height : Nat) | irrelevant
@@ -75,7 +91,7 @@ def cubeSuite {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
 def cubeSpec {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
     (resources : R) : SpecProcess resources :=
   SpecProcess.capture (cubeSuite resources)
-    |>.acceptInput [.close, .escapeDown, .resize]
+    |>.acceptInput [.close, .escapeDown, .resize, .irrelevant]
     |>.withFailures .terminateWithoutFalseSuccess
     |>.withProgress (.reactiveUntilUserExit frontiers :=
       [.externalInput, .frameOpportunity, .frameObservation, .terminalOutcome])
@@ -258,6 +274,7 @@ The portable proof model's `CubeState.Step` relation has only these application 
 
 The application proof is consequently the small reusable package we want:
 
+<!-- grass-block: interface id=spike5-block-02 -->
 ```lean
 theorem cubeApplicationCorrect : ProcessCorrect cubeApplication := by
   constructor
@@ -294,6 +311,7 @@ registry theorem rejects missing or extra call identities. Every constructor
 carries the standard dependent result protocol, citation, and correctness
 witness; it is not an open "external call succeeds" escape hatch.
 
+<!-- grass-block: proof-sketch id=spike5-block-03 -->
 ```lean
 inductive CubeProcessKind
   | application
@@ -385,6 +403,7 @@ The graphics coordinator reconciles `DesiredCubeView` into the selected
 Vulkan resource graph. Each frame demand expands into identity-correlated
 children with these terminal projections:
 
+<!-- grass-block: interface id=spike5-block-04 -->
 ```lean
 Acquire(frame, generation)
   : acquired(image, imageLoan) | recreate | cancelled | deviceLost | surfaceLost
@@ -433,6 +452,7 @@ demand occurrence resides in stable `Escrow` after send. Its affine resolve
 token permits at most one receive or cited cancellation/device-loss disposition;
 an unrestricted pending execution may retain it forever.
 
+<!-- grass-block: interface id=spike5-block-05 -->
 ```text
 windowInput      -> application : ordered CubeInput; resize coalescible
 frameOpportunity -> application : coalescible FrameOpportunity
@@ -452,6 +472,7 @@ observes another process's local state by reading a shared Lean record.
 
 ### 3.3 The realization theorem
 
+<!-- grass-block: proof-sketch id=spike5-block-06 -->
 ```lean
 theorem cubeWin32VulkanDriverCorrect :
     ProcessPlanRealizes spec cubeWin32VulkanProcessPlan := by
@@ -485,6 +506,7 @@ inside their subsystem certificate. The graphics-only value retains abstract
 input, animation, and termination schemas and is therefore proof-bearing but
 not emittable:
 
+<!-- grass-block: interface id=spike5-block-07 -->
 ```lean
 def shapedSpec : StagedProcessPresentation spec :=
   StagedProcessPresentation.ofNetwork spec cubeProtocol
@@ -517,6 +539,7 @@ certificates; closure consumes that same indexed partial value, proves every
 schema and every reachable descendant frontier closed, and returns the process
 realization used below:
 
+<!-- grass-block: interface id=spike5-block-08 -->
 ```lean
 def completePartial : PartialProcessRealization shapedSpec completeGraph :=
   ProcessRealization.blend completeGraph
@@ -536,19 +559,13 @@ theorem stagedPlanIsExact :
   cube_closed_blend_elaborates_to_exact_plan
 ```
 
-The comment-free `Staged.lean` fixture additionally rejects an abstract nested
-child, Vulkan/Metal provider conflict, changed occurrence multiplicity,
-increased resource flux, and new silent divergence. These are negative theorem
-fixtures rather than intentionally ill-typed source files.
-
-The same file includes an independent `EngineBlendFixture` with finite graphics,
-storage, and simulation schemas and arbitrary runtime session identities. It
-constructs Vulkan-only and IOCP-only partials, proves both non-emittable, applies
-the disjoint refinements in both orders, and closes only after a simulation
-realization is supplied. It also rejects a Vulkan/Metal requirement conflict and
-an IOCP realization with a reachable abstract file-provider descendant. This
-fixture tests the general staged API without adding disk I/O to the cube's
-precious product behavior.
+The staged-process library must separately carry negative fixtures rejecting an
+abstract nested child, Vulkan/Metal provider conflict, changed occurrence
+multiplicity, increased resource flux, and new silent divergence. Those are
+library validation fixtures, not authored cube files. A general graphics /
+storage / simulation commutation fixture likewise belongs with the blend
+library: it pressure-tests staged lowering without adding disk I/O to this
+cube's precious behavior or charging the application author another module.
 
 The root is the only application-specific local process proof. The composition
 witness is plan-specific: it owns swapchain generations, acquired-image loans,
@@ -581,6 +598,7 @@ requires this theorem again but does not edit the precious application.
 
 The plan fixes these nominal identities together:
 
+<!-- grass-block: interface id=spike5-block-09 -->
 ```text
 host ISA          common-x86-64 + Microsoft x64 ABI
 host platform     Windows 10 Win32 desktop
@@ -609,6 +627,7 @@ derived from the literal operations below.
 
 The ledger contains nominal, non-forgeable resources:
 
+<!-- grass-block: interface id=spike5-block-10 -->
 ```lean
 WindowClass -> HWND -> VkSurfaceKHR
 VkInstance -> VkSurfaceKHR
@@ -632,6 +651,7 @@ storage, but cannot adopt live Vulkan work or a live surface.
 
 One frame is in flight. The loop transition is:
 
+<!-- grass-block: interface id=spike5-block-11 -->
 ```text
 FenceSignaled
   --vkWaitForFences--> FenceSignaled
@@ -658,6 +678,7 @@ externally lost object.
 
 The portable graphics mathematics is banked before either shader is authored:
 
+<!-- grass-block: interface id=spike5-block-12 -->
 ```lean
 def vertexContract : ComponentContract :=
   Graphics.vertexProjectionContract scene
@@ -711,6 +732,7 @@ and exports a position-derived color. There is no vertex buffer, index buffer,
 depth buffer, or descriptor set. The product is explicitly a wireframe cube;
 the proof must not pass off depth-incorrect filled triangles as a solid cube.
 
+<!-- grass-block: interface id=spike5-block-13 -->
 ```spirv
 def cubeVertex : SpirvModule plan.shaderEnv := spirv_asm {
   OpCapability Shader
@@ -817,6 +839,7 @@ def cubeVertex : SpirvModule plan.shaderEnv := spirv_asm {
 
 The fragment shader has no hidden text/source representation:
 
+<!-- grass-block: interface id=spike5-block-14 -->
 ```spirv
 def cubeFragment : SpirvModule plan.shaderEnv := spirv_asm {
   OpCapability Shader
@@ -871,6 +894,7 @@ call. They do not choose functions, insert branches, construct structures, or
 discharge obligations. Every structure named below is a standard proved layout;
 each brace lists every nonzero field and zero-initialization covers all others.
 
+<!-- grass-block: interface id=spike5-block-15 -->
 ```text
 def cubeHost : AsmSource plan := asm_source {
 entry: @entry win64_gui_entry
@@ -1060,7 +1084,9 @@ recreate: @invariant fixed_objects_owned_and_no_swapchain_work
   destroy_old_swapchain_after_new_created
   vk_call vkGetSwapchainImagesKHR(device,swapchain,&imageCount,0)
   test eax,eax; jnz surface_result
-  checked_alloc imageCount*(8+8) -> imagesAndViews; jz fail_runtime
+  checked_alloc imageCount*8 -> images; jz fail_runtime
+  checked_alloc imageCount*8 -> views; jz fail_runtime
+  checked_alloc imageCount -> imageInitialized; jz fail_runtime
   vk_call vkGetSwapchainImagesKHR(device,swapchain,&imageCount,images)
   test eax,eax; jnz surface_result
 create_view_loop: @measure imageCount-viewIndex
@@ -1265,6 +1291,7 @@ separately cached block certificate.
 The macros are finite syntax transformers, not proof-producing or
 provider-selecting operations. Their complete expansion function is:
 
+<!-- grass-block: proof-sketch id=spike5-block-16 -->
 ```lean
 def win64ArgLocation : Nat -> CallLocation
   | 0 => .register .rcx
@@ -1317,6 +1344,7 @@ no hidden control choice, provider choice, or obligation discharge.
 The entry calls `GetProcessHeap`. Allocation and release expand exactly as
 follows (`count`, `stride`, pointer, and tag are macro parameters):
 
+<!-- grass-block: proof-sketch id=spike5-block-17 -->
 ```text
 mov rax,count; mov rcx,stride; mul rcx
 test rdx,rdx; jnz allocation_failure
@@ -1344,6 +1372,7 @@ The derived imports therefore include `GetProcessHeap`, `HeapAlloc`, and
 The following literal loops replace both resolver abbreviations. The static
 name arrays contain exactly the slots used in section 7.
 
+<!-- grass-block: proof-sketch id=spike5-block-18 -->
 ```text
 resolve_i_init: xor r14d,r14d
 resolve_i_head: @measure instanceSlotCount-r14
@@ -1371,6 +1400,7 @@ Every count/fill pair follows this literal scheme: query count, checked-allocate
 free and restart at the count query. Other non-success returns take the printed
 failure edge. Device selection expands to:
 
+<!-- grass-block: proof-sketch id=spike5-block-19 -->
 ```text
 dev_init: xor r14d,r14d
 dev_head: @measure deviceCount-r14
@@ -1435,6 +1465,7 @@ ecx,size/8; rep stosq`. No callback or hidden iterator is involved.
 
 ### 7.4 Format, extent, image state, and recreation expansion
 
+<!-- grass-block: proof-sketch id=spike5-block-20 -->
 ```text
 fmt_init: xor ebx,ebx
 fmt_head: @measure fmtCount-rbx
@@ -1456,13 +1487,14 @@ extent_done:
   mov eax,[caps.minImageCount]; cmp eax,UINT32_MAX; je fail_runtime
   inc eax; mov ecx,[caps.maxImageCount]; test ecx,ecx; jz count_done
   cmp eax,ecx; cmova eax,ecx
-count_done: mov [requestedImageCount],eax
+count_done: mov [imageCount],eax
 ```
 
 Each swapchain generation owns `images`, `views`, and one byte of layout state
 per image. Every byte starts zero. The first use chooses `UNDEFINED`; later uses
 choose `PRESENT_SRC_KHR`:
 
+<!-- grass-block: proof-sketch id=spike5-block-21 -->
 ```text
 mov ecx,[imageIndex]
 cmp byte ptr [imageInitialized+rcx],0; je layout_undefined
@@ -1476,6 +1508,7 @@ mov [barrier.newLayout],VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
 
 Old generation destruction, after `vkDeviceWaitIdle`, is literal:
 
+<!-- grass-block: proof-sketch id=spike5-block-22 -->
 ```text
 destroy_old_init: mov ecx,[initializedViewCount]
 destroy_old_head: @measure ecx
@@ -1488,7 +1521,7 @@ destroy_old_pipeline:
 destroy_old_swap:
   cmp swapchainOwned,0; je destroy_old_arrays
   vk_call vkDestroySwapchainKHR(device,swapchain,0); mov swapchainOwned,0
-destroy_old_arrays: free imageInitialized; free imagesAndViews
+destroy_old_arrays: free imageInitialized; free views; free images
 ```
 
 ### 7.5 Reverse cleanup expansion
@@ -1496,6 +1529,7 @@ destroy_old_arrays: free imageInitialized; free imagesAndViews
 Device loss skips the idle wait but does not silently adopt resources. The
 selected Vulkan failure profile must authorize each destroy call after loss.
 
+<!-- grass-block: proof-sketch id=spike5-block-23 -->
 ```text
 cleanup:
   cmp deviceOwned,0; je cleanup_views
@@ -1528,7 +1562,7 @@ cleanup_surface: cmp surfaceOwned,0; je cleanup_instance
   vk_call vkDestroySurfaceKHR(instance,surface,0)
 cleanup_instance: cmp instanceOwned,0; je cleanup_heap
   vk_call vkDestroyInstance(instance,0)
-cleanup_heap: free imageInitialized; free imagesAndViews
+cleanup_heap: free imageInitialized; free views; free images
   free queueProps; free extProps; free devices
   cmp hwndOwned,0; je cleanup_class; win_call DestroyWindow(hwnd)
 cleanup_class: cmp classRegistered,0; je cleanup_return
@@ -1543,37 +1577,23 @@ instantiation into one line-auditable raw listing. A contract alone cannot
 satisfy this section. No C, GLSL, windowing helper, Vulkan helper, allocator
 runtime, or hidden exception path exists in the artifact.
 
-The comment-free spike expresses that requirement through `Macros.lean` and
-`SourceClosure.lean`. `Macros.lean` contains the transparent instruction
-functions and literal expected fragments for calls, structure initialization,
-allocation, dispatch resolution, enumeration and device selection, format and
-extent selection, swapchain retirement, and reverse cleanup; the corpus does
-not refer to absent `AsmMacro.*` bodies for these operations.
-`cubeSourceClosure` contains the authored syntax, that exact local macro
-registry, all static objects, both stack-frame layouts, the two serialized
-shader arrays, and the complete import set. Its expansion is `rawCubeHost`;
-`cubeSourceElaboratesExactly`, `cubeSourceHasNoUnresolvedForms`, and
-`cubeSourceManifestExact` connect the two renderings. `Program.lean` puts
-`rawCubeHost`, not an independently copied annotated listing, into
-`VerifiedProgram` and passes the expansion identity to `verify_assembly`.
-`rawHostImplementsDriver` transports the block-local host proof across that
-exact elaboration relation and is also an explicit constructor input.
-`cubeCallbackStateConnection` proves that the `lpParam` passed to
-`CreateWindowExW` is installed under `GWLP_USERDATA` during `WM_NCCREATE`, every
-later state access uses the recovered pointer, the entry-frame object remains
-live through `WM_NCDESTROY`, and the slot is cleared before the entry frame can
-be released. This covers synchronous creation callbacks as well as later
-dispatch; no callback-relative symbolic `state` offset is accepted.
-`cubeMachineBlendInput` then assigns `rawCubeHost`, `cubeVertex`, and
-`cubeFragment` to the exact closed scopes retained by
-`stagedProcessRealization`; `cubeMachineBlendInputComplete` proves that every
-reachable scope appears exactly once and the cross-ISA host/shader edges are
-the ones certified in the artifact connection. The final machine tier consumes
-this value, so the portable Vulkan refinement cannot be closed using shader A
-and emitted later using an unconnected shader B.
-Changing a macro body, expansion input, static byte, import, or authored token
-therefore changes machine-source identity and invalidates the first adjacent
-certificate. The review printer renders `rawCubeHost` in full.
+The current comment-free spike expresses the authored source through
+`Layout.lean`, `Macros.lean`, and `Assembly.lean`. `Layout.lean` selects concrete
+ABI layouts and dispatch names; `Macros.lean` contains transparent host
+constructors; `Assembly.lean` owns static objects, both SPIR-V modules, and the
+literal host source. `Program.lean` composes the host and shaders as `source`
+and passes that term to `verify_assembly`.
+
+This is not yet enough to claim source closure. The final closing form must take
+the selected layout, macro registry, static-object table, rotation
+representation theorem, callback-state theorem, and cross-ISA host/shader
+connection as explicit dependent inputs or derive them uniquely from `source`.
+It must produce one canonical raw host listing and a manifest containing exact
+shader words, imports, relocations, symbols, layouts, and source maps. The
+present corpus has **not generated** that listing or manifest, and their check
+cost is **not measured**. Ambient namespace discovery is forbidden. Changing
+any connected input must change machine-source identity and invalidate the first
+adjacent certificate.
 
 This remains an expected-source design fixture, not build evidence: the future
 `Grass.*` modules, elaborator, verifier, and printer do not yet exist, so the
@@ -1607,6 +1627,7 @@ every literal expansion fragment. `cubeSymbolResolutionExact` and
 `cubeFrameLifetimesNonoverlapping` are required before the no-unresolved-form
 claim can be used.
 
+<!-- grass-block: interface id=spike5-block-24 -->
 ```text
 instanceNames = [
  vkDestroyInstance, vkCreateWin32SurfaceKHR, vkDestroySurfaceKHR,
@@ -1645,6 +1666,7 @@ set, the IAT, and reachable call sites.
 The pipeline component names in `graphicsCI` expand to these complete nonzero
 fields; all structures are first zeroed by the displayed `init` expansion:
 
+<!-- grass-block: interface id=spike5-block-25 -->
 ```text
 shaderStages[0] {sType=PIPELINE_SHADER_STAGE_CREATE_INFO,
   stage=VERTEX_BIT,module=vertModule,pName=&mainName}
@@ -1680,6 +1702,7 @@ whose lifetime could end before the call.
 The shader modules are serialized independently, then embedded as aligned,
 read-only PE data:
 
+<!-- grass-block: proof-sketch id=spike5-block-26 -->
 ```lean
 def vertexWords : Vec UInt32 := Spirv.writeWords cubeVertex
 def fragmentWords : Vec UInt32 := Spirv.writeWords cubeFragment
@@ -1734,6 +1757,7 @@ entries. ASLR remains enabled, every host/shader address is abstract until
 layout, final permissions are standard, and shader `pCode` alignment and
 `codeSize mod 4 = 0` are proved.
 
+<!-- grass-block: proof-sketch id=spike5-block-27 -->
 ```lean
 theorem artifact_connection :
   CrossIsaArtifactConnection cubeVerified.linkedArtifact
@@ -1874,11 +1898,12 @@ but their displayed expansion is part of the evidence under review.
 ## Exact authored source snapshot
 
 This snapshot is the exact comment-free source maintained under
-`Spikes/5_Spinning_Cube/`. Run `./check-spike-sources.ps1` to check the
-cross-view equality.
+`Spikes/5_Spinning_Cube/`. Run `./check-spike-sources.ps1 -Spike 5` to check the
+normalized cross-view equality and block classifications.
 
 ### `Assembly.lean`
 
+<!-- grass-block: authored file=Assembly.lean -->
 ```lean
 import Grass.Assembly.X86
 import Grass.Assembly.Spirv
@@ -2037,7 +2062,11 @@ def cubeStaticObjects : StaticObjectTable := #[
   .spirvWords `cubeFragmentBytes (Spirv.writeWords cubeFragment)
 ]
 
-def cubeHost : AsmSource plan := asm_source {
+def cubeHost : AsmSource plan :=
+  asm_source
+    (statics := cubeStaticObjects)
+    (constructors := cubeMacroDefinitions)
+    (layouts := #[cubeHostFrameLayout, cubeCallbackFrameLayout]) {
 entry: @entry win64_gui_entry
   push rbx
   push rbp
@@ -2598,6 +2627,7 @@ end Grass.Spikes.SpinningCube
 
 ### `Layout.lean`
 
+<!-- grass-block: authored file=Layout.lean -->
 ```lean
 import Spikes.«5_Spinning_Cube».Process
 
@@ -2665,34 +2695,6 @@ def deviceFunctionNames : Vec CString := #[
   "vkQueuePresentKHR"
 ]
 
-def win32Imports : Vec ImportSymbol := #[
-  `GetModuleHandleW,
-  `LoadCursorW,
-  `RegisterClassExW,
-  `CreateWindowExW,
-  `ShowWindow,
-  `DestroyWindow,
-  `DefWindowProcW,
-  `GetWindowLongPtrW,
-  `SetWindowLongPtrW,
-  `WaitMessage,
-  `PeekMessageW,
-  `TranslateMessage,
-  `DispatchMessageW,
-  `UnregisterClassW,
-  `QueryPerformanceFrequency,
-  `QueryPerformanceCounter,
-  `GetProcessHeap,
-  `HeapAlloc,
-  `HeapFree,
-  `ExitProcess
-]
-
-def vulkanImports : Vec ImportSymbol := #[
-  `vkGetInstanceProcAddr,
-  `vkGetDeviceProcAddr
-]
-
 def cubeFrameObjects : Vec StackObjectSpec := #[
   .object `wc .wndClassExW,
   .object `msg .msg,
@@ -2733,7 +2735,6 @@ def cubeFrameObjects : Vec StackObjectSpec := #[
   .object `formats .pointer,
   .object `surfaceFormat .vkSurfaceFormatKHR,
   .object `imageCount .uint32,
-  .object `requestedImageCount .uint32,
   .object `images .pointer,
   .object `views .pointer,
   .object `imageInitialized .pointer,
@@ -2815,6 +2816,7 @@ end Grass.Spikes.SpinningCube
 
 ### `Macros.lean`
 
+<!-- grass-block: authored file=Macros.lean -->
 ```lean
 import Spikes.«5_Spinning_Cube».Layout
 
@@ -3079,11 +3081,13 @@ fmt_found:
   free formats
 }
 
-def extentAndCountBody : TransparentAsmFragment plan := asm_fragment {
+def expandExtentAndCount
+    (caps width height extent imageCount : AddressOperand) :
+    TransparentAsmFragment plan := asm_fragment {
   cmp [caps.currentExtent.width],UINT32_MAX
   jne extent_fixed
-  clamp_u32 [state.width],[caps.min.width],[caps.max.width] -> [extent.width]
-  clamp_u32 [state.height],[caps.min.height],[caps.max.height] -> [extent.height]
+  clamp_u32 width,[caps.min.width],[caps.max.width] -> [extent.width]
+  clamp_u32 height,[caps.min.height],[caps.max.height] -> [extent.height]
   jmp extent_done
 extent_fixed:
   mov rax,[caps.currentExtent]
@@ -3103,7 +3107,7 @@ extent_done:
   cmp eax,ecx
   cmova eax,ecx
 count_done:
-  mov [requestedImageCount],eax
+  mov [imageCount],eax
 }
 
 def swapchainRetirementBody : TransparentAsmFragment plan := asm_fragment {
@@ -3203,7 +3207,7 @@ def cubeMacroDefinitions : AsmMacroRegistry plan := #[
   .literal `resolve_device_functions_or_fail deviceDispatchResolutionBody,
   .literal `enumerate_and_select_literal_loop deviceSelectionBody,
   .literal `select_required_format_or_fail surfaceSelectionBody,
-  .literal `compute_extent_and_count extentAndCountBody,
+  .functional `compute_extent_and_count expandExtentAndCount,
   .literal `destroy_swapchain_views_pipeline_if_owned swapchainRetirementBody,
   .literal `destroy_old_swapchain_after_new_created installNewSwapchainBody,
   .literal `reverse_cleanup reverseCleanupBody,
@@ -3221,6 +3225,7 @@ end Grass.Spikes.SpinningCube
 
 ### `Process.lean`
 
+<!-- grass-block: authored file=Process.lean -->
 ```lean
 import Grass.Process
 import Grass.Process.Blend
@@ -3436,35 +3441,6 @@ def processPlan : ProcessPlan cubeProtocols spec.driverBoundary where
   cancellation := CubeCancellationLaw
   supervision := CubeSupervisionLaw
 
-theorem processPlanRealizes : ProcessPlanRealizes spec processPlan where
-  processProofs := by
-    intro kind
-    cases kind with
-    | application => exact cubeApplicationCorrect
-    | windowInput => exact Std.Win32.windowInput_correct
-    | frameOpportunity => exact Std.Process.monotonicFrameOpportunity_correct
-    | graphics => exact Std.Vulkan.graphicsCoordinator_correct
-    | terminal => exact Std.Win32.terminal_correct
-    | acquire _ => exact Std.Vulkan.acquire_correct
-    | submission _ => exact Std.Vulkan.submission_correct
-    | presentation _ => exact Std.Vulkan.presentation_correct
-    | apiCall call => exact CubeProviderCall.correct call
-  composition := cube_channels_ownership_and_progress_compose
-  adequate := cube_network_adequate
-  simulation := cube_network_simulation
-  demandMultiplicity := cube_occurrences_erase_exactly
-  childBindings := cube_child_demand_bindings
-  requirementSubstitution := cube_process_requirement_substitution
-  demands := cube_independent_safety_liveness_and_obligation_demands
-  resources := cube_resource_axis_realization
-
-theorem cubeResourceBound :
-    EveryExecutionUsesAtMost
-      ProcessScope.root
-      CubeResourceMetric.product
-      CubeResourceBudget.singleFrameInFlight :=
-  processPlanRealizes.resources.rootBound
-
 def shapedSpec : StagedProcessPresentation spec :=
   StagedProcessPresentation.ofNetwork spec cubeProtocol
     cubeProtocolResourceView
@@ -3474,23 +3450,27 @@ def shapedSpec : StagedProcessPresentation spec :=
     cubeProcessPresentation.requirementsExact
 
 def inputSubsystem : SubsystemRealization shapedSpec .input :=
-  SubsystemRealization.fromPlanScope
-    processPlanRealizes (CubeProcessScope.input processPlan)
+  SubsystemRealization.fromIndependentPlanScope
+    processPlan (CubeProcessScope.input processPlan)
+    cube_input_scope_correct
     cube_input_boundary_exact
 
 def animationSubsystem : SubsystemRealization shapedSpec .sceneAnimator :=
-  SubsystemRealization.fromPlanScope
-    processPlanRealizes (CubeProcessScope.animation processPlan)
+  SubsystemRealization.fromIndependentPlanScope
+    processPlan (CubeProcessScope.animation processPlan)
+    cube_animation_scope_correct
     cube_animation_boundary_exact
 
 def graphicsSubsystem : SubsystemRealization shapedSpec .surfacePresenter :=
-  SubsystemRealization.fromPlanScope
-    processPlanRealizes (CubeProcessScope.graphics processPlan)
+  SubsystemRealization.fromIndependentPlanScope
+    processPlan (CubeProcessScope.graphics processPlan)
+    cube_graphics_scope_correct
     cube_graphics_boundary_exact
 
 def terminationSubsystem : SubsystemRealization shapedSpec .termination :=
-  SubsystemRealization.fromPlanScope
-    processPlanRealizes (CubeProcessScope.termination processPlan)
+  SubsystemRealization.fromIndependentPlanScope
+    processPlan (CubeProcessScope.termination processPlan)
+    cube_termination_scope_correct
     cube_termination_boundary_exact
 
 def completeGraph : BlendedProcessGraph shapedSpec where
@@ -3519,6 +3499,16 @@ theorem stagedPlanIsExact :
     stagedProcessRealization.plan = processPlan :=
   cube_closed_blend_elaborates_to_exact_plan
 
+theorem processPlanRealizes : ProcessPlanRealizes spec processPlan :=
+  stagedProcessRealization.transportPlan stagedPlanIsExact
+
+theorem cubeResourceBound :
+    EveryExecutionUsesAtMost
+      ProcessScope.root
+      CubeResourceMetric.product
+      CubeResourceBudget.singleFrameInFlight :=
+  processPlanRealizes.resources.rootBound
+
 theorem unresolvedDescendantRejected :
     ¬ FrontierComplete cube_graphics_with_abstract_child :=
   cube_abstract_child_is_reachable
@@ -3532,11 +3522,10 @@ end Grass.Spikes.SpinningCube
 
 ### `Program.lean`
 
+<!-- grass-block: authored file=Program.lean -->
 ```lean
 import Grass.Emit
-import Grass.Artifact.PE32Plus
 import Spikes.«5_Spinning_Cube».Assembly
-import Spikes.«5_Spinning_Cube».Layout
 import Spikes.«5_Spinning_Cube».Process
 
 namespace Grass.Spikes.SpinningCube
@@ -3549,54 +3538,39 @@ def source : MachineSource plan :=
   { host := cubeHost
     devices := shaders }
 
+def sourceConnections : HeterogeneousSourceConnections plan source :=
+  machine_connections {
+    callback `wndproc =>
+      Win32.windowStatePointer
+        (installAt := .wmNcCreate)
+        (clearAt := .wmNcDestroy)
+    shader `vertexShader =>
+      Spirv.module cubeVertex (entry := `main)
+    shader `fragmentShader =>
+      Spirv.module cubeFragment (entry := `main)
+    pushConstant `rotation => rotationRepresentation
+  }
+
+theorem sourceConnectionsCorrect :
+    HeterogeneousSourceConnections.Valid sourceConnections := by
+  verify_machine_connections
+    using_rotation rotationRepresentationCorrect
+
 def cubeVerified : VerifiedProgram spec := by
   verify_assembly plan
     using_process stagedProcessRealization
     using_models vertexModelCorrect fragmentModelCorrect
+    using_connections sourceConnectionsCorrect
     with source
 
 def bytes : ByteArray := emitProgram cubeVerified
-
-theorem emittedSound : EmittedProgramSatisfies spec bytes :=
-  cubeVerified.sound
-
-def vertexWords : Vec UInt32 := Spirv.writeWords cubeVertex
-
-def fragmentWords : Vec UInt32 := Spirv.writeWords cubeFragment
-
-theorem vertexRoundTrip :
-    Spirv.parseWords vertexWords = .ok cubeVertex :=
-  Spirv.writeWords_parse cubeVertex
-
-theorem fragmentRoundTrip :
-    Spirv.parseWords fragmentWords = .ok cubeFragment :=
-  Spirv.writeWords_parse cubeFragment
-
-def artifact : PE32Plus := cubeVerified.linkedArtifact
-
-theorem writerRoundTrip : PE32Plus.parse (PE32Plus.write artifact) = .ok artifact :=
-  artifact.writerRoundTrip
-
-theorem hostTextDecodesExactly :
-    LoadedHostTextDecodesTo artifact cubeVerified.rawProgram.host :=
-  cubeVerified.artifactCorrectness.loadedHostTextDecodes
-
-theorem embeddedVertexExactly :
-    EmbeddedWordsAt artifact cubeVerified.layout.vertexRva vertexWords :=
-  cubeVerified.artifactCorrectness.embeddedVertex
-
-theorem embeddedFragmentExactly :
-    EmbeddedWordsAt artifact cubeVerified.layout.fragmentRva fragmentWords :=
-  cubeVerified.artifactCorrectness.embeddedFragment
-
-theorem emittedExactly : bytes = PE32Plus.write artifact :=
-  rfl
 
 end Grass.Spikes.SpinningCube
 ```
 
 ### `Spec.lean`
 
+<!-- grass-block: authored file=Spec.lean -->
 ```lean
 import Grass.Spec.Graphics
 import Grass.Spec.Resource
@@ -3618,7 +3592,9 @@ structure CubeFrame where
   depicts : RasterizesProjectedCube scene.geometry extent angle image
 
 def rotationAccuracy : ElapsedRotationAccuracy :=
-  Graphics.defaultInteractiveRotationAccuracy
+  ElapsedRotationAccuracy.explicit
+    (maxAngleError := .radians (1 / 1024))
+    (maxSampleTimeError := .milliseconds 1)
 
 inductive CubeInput
   | close
@@ -3661,7 +3637,7 @@ def cubeSuite {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
 def cubeSpec {R : Type} [ResourceModel R] [InteractiveGraphicsResources R]
     (resources : R) : SpecProcess resources :=
   SpecProcess.capture (cubeSuite resources)
-    |>.acceptInput [.close, .escapeDown, .resize]
+    |>.acceptInput [.close, .escapeDown, .resize, .irrelevant]
     |>.withFailures .terminateWithoutFalseSuccess
     |>.withProgress (.reactiveUntilUserExit frontiers :=
       [.externalInput, .frameOpportunity, .frameObservation, .terminalOutcome])

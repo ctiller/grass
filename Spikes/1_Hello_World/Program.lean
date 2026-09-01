@@ -1,23 +1,9 @@
 import Grass.Emit
-import Grass.Artifact.PE32Plus
 import Grass.Assembly.X86
 import Grass.Platform.Win10.X64
-import Grass.Process.Sequential
 import Spikes.«1_Hello_World».Spec
 
 namespace Grass.Spikes.HelloWorld
-
-def stdoutProtocol : AbstractSpecificationProcessNetwork resources :=
-  Console.linearStdoutProtocol resources message HelloOutcome
-
-def stdoutPresentation : ProcessPresentation spec where
-  network := stdoutProtocol
-  denotationExact := Console.linearStdoutProtocolDenotesWriteLineContract
-  requirementsExact := Console.linearStdoutProtocolRequirementsExact
-
-def processRealization : ProcessRealization spec :=
-  ProcessRealization.standard
-    (Grass.Std.Realizers.lookupExact stdoutPresentation)
 
 def policy : TargetOutcomeProjection HelloOutcome UInt32 :=
   .successOrFailure
@@ -34,9 +20,13 @@ def projection : TargetProjection spec .win10X64 :=
 def plan : PlatformPlan spec.driverBoundary.requirements :=
   PlatformPlan.win10X64SynchronousStdoutOnly projection
 
+def helloStatics : StaticObjectTable := static_objects {
+  rodata align 1 { message: bytes message }
+}
+
 def helloSource : MachineSource plan :=
   withStack (transferred : UInt32 := 0)
-  withCallFrame WriteFile asm_source {
+  withCallFrame WriteFile asm_source (statics := helloStatics) {
 entry:
   push r12
   push r13
@@ -97,28 +87,9 @@ provider_violation:
   ud2 @containment_tail(.excessWriteCount)
 }
 
-theorem sourceImplementsDriver :
-    AssemblyImplements processRealization plan helloSource := by
-  verify_asm
-
 def helloVerified : VerifiedProgram spec := by
   verify_assembly plan with helloSource
 
 def bytes : ByteArray := emitProgram helloVerified
-
-theorem emittedSound : EmittedProgramSatisfies spec bytes :=
-  helloVerified.sound
-
-def artifact : PE32Plus := helloVerified.linkedArtifact
-
-theorem writerRoundTrip : PE32Plus.parse (PE32Plus.write artifact) = .ok artifact :=
-  artifact.writerRoundTrip
-
-theorem textDecodesExactly :
-    LoadedTextDecodesTo artifact helloVerified.rawProgram :=
-  helloVerified.artifactCorrectness.loadedTextDecodes
-
-theorem emittedExactly : bytes = PE32Plus.write artifact :=
-  rfl
 
 end Grass.Spikes.HelloWorld

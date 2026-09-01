@@ -7,6 +7,16 @@ exact snapshot is at the end of this document. All other intermediate records
 shown below are generated expansions, library interface sketches, or proof
 sketches unless explicitly labeled authored source.
 
+| Proof-economics quantity | Current evidence |
+| --- | --- |
+| Authored specification | 1 module; 30 physical / 21 nonblank lines |
+| Authored realization | 1 module; 95 physical / 79 nonblank lines |
+| Generated expansion/certificates | not generated |
+| Clean/incremental checking | not measured |
+
+`Spec.lean` owns the precious contract; `Program.lean` owns the selected Win32
+projection, literal assembly, verified closing command, and emission request.
+
 Product decision: this spike is the architecture-validation artifact for the
 named `SynchronousStdoutOnly` execution profile, not Grass's production-general
 Windows console implementation. It may be shipped only with that applicability
@@ -49,6 +59,7 @@ API baseline. The artifact is an ASLR-enabled PE32+ image.
 
 ## 1. The proof we want to read
 
+<!-- grass-block: proof-sketch id=spike1-block-01 -->
 ```lean
 namespace Grass.Spike1
 
@@ -247,6 +258,7 @@ elaborate them transiently rather than store public pipeline datatypes.
 
 The selected functional observation is:
 
+<!-- grass-block: interface id=spike1-block-02 -->
 ```lean
 inductive ProviderWriteCause
   | unavailable
@@ -288,6 +300,7 @@ effect; a future text-console abstraction would require its own encoding law.
 The optional high-level-program route uses the portable failure and an ordinary
 `Except` result:
 
+<!-- grass-block: interface id=spike1-block-03 -->
 ```lean
 class Console (key : ConsoleKey) where
   writeAll : (bytes : ByteArray) -> Program (Except WriteFailure Unit)
@@ -332,6 +345,7 @@ must reach exit or the next frontier in finite internal time.
 The nominal provider `Win32.Console.Synchronous.v1` first exposes logical Win32
 effects in Act 3:
 
+<!-- grass-block: proof-sketch id=spike1-block-04 -->
 ```lean
 GetStdHandleRequest(STD_OUTPUT_HANDLE)
 
@@ -350,6 +364,7 @@ This request names Win32 behavior and its dependent result, but it is not yet an
 ABI call and does not pretend that a pure array is a pointer. Act 4 realizes it
 as a physical boundary:
 
+<!-- grass-block: proof-sketch id=spike1-block-05 -->
 ```lean
 WriteFileCall where
   handle     : BorrowedHandle .synchronous
@@ -380,6 +395,7 @@ realizer come only from the cited API law. Successful zero means `noProgress`.
 
 The provider library's pure scheduling/refinement algorithm is:
 
+<!-- grass-block: proof-sketch id=spike1-block-06 -->
 ```lean
 def win32WriteAll (requested : ByteArray) :
     Win32 (Except WriteFailure Unit) := do
@@ -412,6 +428,7 @@ def win32WriteAll (requested : ByteArray) :
 
 The provider library proves these separately named facts:
 
+<!-- grass-block: proof-sketch id=spike1-block-07 -->
 ```lean
 theorem loop_partition ... : committed' ++ remaining' = requested
 theorem loop_output_prefix ... : observed.IsPrefixOf requested
@@ -467,6 +484,7 @@ this program has none.
 The apparent write loop directly realizes the relational console program.
 `write_head` is typed by the specialization:
 
+<!-- grass-block: proof-sketch id=spike1-block-08 -->
 ```lean
 Console.WriteStdoutInvariant message policy helloVerified.driver
 ```
@@ -525,6 +543,7 @@ The generated full control/event graph is derived from `helloSource`; it is not
 a maintained second source. Source labels are shown directly, while call
 frontiers and continuations receive generated scoped names:
 
+<!-- grass-block: proof-sketch id=spike1-block-09 -->
 ```text
 entry
   GetStdHandle -> pending | environmentViolation | entry.afterGetStdHandle
@@ -569,6 +588,7 @@ to `helloSource`.
 
 A basic block is the primary local proof unit:
 
+<!-- grass-block: proof-sketch id=spike1-block-10 -->
 ```lean
 TypedBlock profile (entry : StateContract) (exits : ExitContracts)
 ```
@@ -587,6 +607,7 @@ The application selects registers and identifies the consumed slice inline; a
 CFG library combinator owns the routine partition and bounds facts. The source
 header in section 5 elaborates to this inspectable generated contract:
 
+<!-- grass-block: proof-sketch id=spike1-block-11 -->
 ```lean
 WriteAllLoopInvariant
     (object := ``message)
@@ -608,6 +629,7 @@ required. A custom ranking or protocol remains an explicit goal.
 
 The cached block theorem is generalized before storage:
 
+<!-- grass-block: proof-sketch id=spike1-block-12 -->
 ```lean
 writeAllBlock_correct
   (bytes : ByteArray) (object : StaticObject bytes)
@@ -636,6 +658,7 @@ different frontier contract. It does not
 extend the local invariant with contradictory ownership: lending the unique
 `bytesWritten` slot changes the phase-indexed frame authority.
 
+<!-- grass-block: proof-sketch id=spike1-block-13 -->
 ```lean
 structure PendingWriteInvariant where
   data           : SliceConsumerState ``message r13 r14d
@@ -654,6 +677,7 @@ same loan identities.
 
 The same generic rule instantiates a reachable `ExitProcess` pending frontier:
 
+<!-- grass-block: proof-sketch id=spike1-block-14 -->
 ```lean
 structure PendingExitInvariant where
   control        : ControlAuthority environment exitCallId
@@ -733,6 +757,7 @@ blocks; its elaborator resolves labels and mechanically assembles certificates
 indexed only by their own code and boundary contracts. The following is the
 inspectable expansion, not a hand-written `SubCFG.plug` list:
 
+<!-- grass-block: proof-sketch id=spike1-block-15 -->
 ```lean
 entryImpl     : ImplementsBlock commonX86Win64 entryContract entryExits entryBody
 writeHeadImpl : ImplementsBlock commonX86Win64 writeHeadContract writeHeadExits writeHeadBody
@@ -763,13 +788,20 @@ different claims—not redundant copies—and disagreement produces a local goal
 A bare-metal provider gives the same tagged outcome a different physical
 terminal contract.
 
-The following is the single authored `asm_source`, not a rendering assembled from
-separate block-proof definitions. Labels split basic blocks automatically;
+The following is a generated explanatory rendering of the single authored
+`helloSource`; the exact authored text is in the source snapshot. It is not a
+second source and must eventually be printed from the elaborated term. Labels
+split basic blocks automatically;
 `@invariant`, `@measure`, and `@terminal` are proof-bearing source annotations.
 The registers and instructions remain literal choices; routine ABI storage uses
-the named frame layout so the exemplar does not normalize displacement
-arithmetic. The expanded review view still contains the exact numeric offsets:
+the named frame layout. This pre-implementation rendering still contains
+symbolic layout terms such as `transferred.addr`,
+`arg WriteFile.overlapped`, and `sizeof(message)`; it is therefore not the
+required final raw expansion. The generated review view must replace them with
+exact numeric operands and include static bytes, symbols, imports, relocations,
+encodings, and a source map.
 
+<!-- grass-block: proof-sketch id=hello-source-rendering -->
 ```text
 def helloSource :=
 withStack (transferred : UInt32 := 0)
@@ -877,6 +909,7 @@ memory events, faults, encoding/decoding, Intel and AMD anchors, and probes.
 
 The important erasure direction is:
 
+<!-- grass-block: proof-sketch id=spike1-block-17 -->
 ```lean
 theorem hello_erasure :
   ErasurePreservesSemantics
@@ -918,6 +951,7 @@ The unwind description is generated from the proved prologue, not typed as PE
 bytes by the assembly author. Its **prologue-effect review form (execution
 order, not serialized `UNWIND_CODE` order)** contains:
 
+<!-- grass-block: proof-sketch id=spike1-block-18 -->
 ```text
 UWOP_PUSH_NONVOL r12
 UWOP_PUSH_NONVOL r13
@@ -933,6 +967,7 @@ the prologue forces derived metadata to change without duplicating literals.
 
 Serialization and connection remain distinct:
 
+<!-- grass-block: proof-sketch id=spike1-block-19 -->
 ```lean
 theorem pe_write_parse :
   PE.parse (PE.write helloVerified.linkedArtifact) =
@@ -1064,6 +1099,7 @@ expansion and in diagnostics:
 
 For Spike 1 the result specializes to:
 
+<!-- grass-block: interface id=spike1-block-20 -->
 ```lean
 theorem spike1_emitted_sound
     (context : AdmissibleExecutionContext helloVerified.realization)
@@ -1209,35 +1245,20 @@ cannot silently strengthen the proof contract.
 
 ## Exact authored source snapshot
 
-This section is the author-maintained Lean surface defined by
-[SPIKE_AUTHORING.md](SPIKE_AUTHORING.md). Earlier code blocks in this document
-are generated expansions, library interface sketches, or proof sketches unless
-they are explicitly labeled authored source. Reviewers must compare this
-snapshot with `Spikes/1_Hello_World/` exactly.
+This snapshot is the exact comment-free source maintained under
+`Spikes/1_Hello_World/`. Run `./check-spike-sources.ps1 -Spike 1` to check the
+normalized cross-view equality and block classifications.
 
 ### `Program.lean`
 
+<!-- grass-block: authored file=Program.lean -->
 ```lean
 import Grass.Emit
-import Grass.Artifact.PE32Plus
 import Grass.Assembly.X86
 import Grass.Platform.Win10.X64
-import Grass.Process.Sequential
 import Spikes.«1_Hello_World».Spec
 
 namespace Grass.Spikes.HelloWorld
-
-def stdoutProtocol : AbstractSpecificationProcessNetwork resources :=
-  Console.linearStdoutProtocol resources message HelloOutcome
-
-def stdoutPresentation : ProcessPresentation spec where
-  network := stdoutProtocol
-  denotationExact := Console.linearStdoutProtocolDenotesWriteLineContract
-  requirementsExact := Console.linearStdoutProtocolRequirementsExact
-
-def processRealization : ProcessRealization spec :=
-  ProcessRealization.standard
-    (Grass.Std.Realizers.lookupExact stdoutPresentation)
 
 def policy : TargetOutcomeProjection HelloOutcome UInt32 :=
   .successOrFailure
@@ -1254,9 +1275,13 @@ def projection : TargetProjection spec .win10X64 :=
 def plan : PlatformPlan spec.driverBoundary.requirements :=
   PlatformPlan.win10X64SynchronousStdoutOnly projection
 
+def helloStatics : StaticObjectTable := static_objects {
+  rodata align 1 { message: bytes message }
+}
+
 def helloSource : MachineSource plan :=
   withStack (transferred : UInt32 := 0)
-  withCallFrame WriteFile asm_source {
+  withCallFrame WriteFile asm_source (statics := helloStatics) {
 entry:
   push r12
   push r13
@@ -1317,35 +1342,17 @@ provider_violation:
   ud2 @containment_tail(.excessWriteCount)
 }
 
-theorem sourceImplementsDriver :
-    AssemblyImplements processRealization plan helloSource := by
-  verify_asm
-
 def helloVerified : VerifiedProgram spec := by
   verify_assembly plan with helloSource
 
 def bytes : ByteArray := emitProgram helloVerified
-
-theorem emittedSound : EmittedProgramSatisfies spec bytes :=
-  helloVerified.sound
-
-def artifact : PE32Plus := helloVerified.linkedArtifact
-
-theorem writerRoundTrip : PE32Plus.parse (PE32Plus.write artifact) = .ok artifact :=
-  artifact.writerRoundTrip
-
-theorem textDecodesExactly :
-    LoadedTextDecodesTo artifact helloVerified.rawProgram :=
-  helloVerified.artifactCorrectness.loadedTextDecodes
-
-theorem emittedExactly : bytes = PE32Plus.write artifact :=
-  rfl
 
 end Grass.Spikes.HelloWorld
 ```
 
 ### `Spec.lean`
 
+<!-- grass-block: authored file=Spec.lean -->
 ```lean
 import Grass.Spec.Console
 import Grass.Spec.Resource

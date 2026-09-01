@@ -1,6 +1,5 @@
 import Grass.Assembly.X86
 import Grass.Platform.Win10.X64
-import Grass.Process.Sequential
 import Grass.Std.Sort.Stable
 import Spikes.«2_Sort».Spec
 
@@ -14,9 +13,6 @@ def policy : TargetOutcomeProjection SortOutcome UInt32 :=
 
 def projection : TargetProjection spec .win10X64 :=
   TargetProjection.win10ByteStreams policy
-
-def processRealization : ProcessRealization spec :=
-  ProcessRealization.standard (Grass.Std.Realizers.lookupExact spec)
 
 def stableSortContract : ComponentContract :=
   StableSort.contract format order
@@ -200,7 +196,10 @@ def sortConstructorClosure : FragmentConstructorClosure plan := constructors {
   failureExit
 }
 
-def sortSource : AsmSource plan := asm_source {
+def sortSource : AsmSource plan :=
+  asm_source
+    (statics := sortStaticObjects)
+    (constructors := sortConstructorClosure) {
 
 entry:
     push rbx
@@ -535,18 +534,18 @@ emit_final_flush:
     je   no_progress
     jmp  exit_success
 
-stdin_unavailable:   @terminal(.stdinUnavailable)
-    $(failureExit .stdinUnavailable)
-read_failed:         @terminal(.readFailed)
-    $(failureExit .readFailed)
-resource_exhausted:  @terminal(.resourceExhausted)
-    $(failureExit .resourceExhausted)
-stdout_unavailable:  @terminal(.stdoutUnavailable)
-    $(failureExit .stdoutUnavailable)
-write_failed:        @terminal(.writeFailed)
-    $(failureExit .writeFailed)
-no_progress:         @terminal(.noProgress)
-    $(failureExit .noProgress)
+stdin_unavailable:   @terminal(.inputFailure) @audit(.stdinUnavailable)
+    $(failureExit .inputFailure)
+read_failed:         @terminal(.inputFailure) @audit(.readFailed)
+    $(failureExit .inputFailure)
+resource_exhausted:  @terminal(.allocationFailure) @audit(.resourceExhausted)
+    $(failureExit .allocationFailure)
+stdout_unavailable:  @terminal(.outputFailure) @audit(.stdoutUnavailable)
+    $(failureExit .outputFailure)
+write_failed:        @terminal(.outputFailure) @audit(.writeFailed)
+    $(failureExit .outputFailure)
+no_progress:         @terminal(.outputFailure) @audit(.noProgress)
+    $(failureExit .outputFailure)
 exit_success:       @terminal(.success)
     xor ecx, ecx
 exit:

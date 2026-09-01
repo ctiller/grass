@@ -4,6 +4,44 @@ Status: blocking findings open. This audit applies the contract in
 [SPIKE_AUTHORING.md](SPIKE_AUTHORING.md) to the current five-spike corpus. Three
 independent agents reviewed Spikes 1–3, the HTTP/2 server, and the spinning cube.
 
+## Post-audit repair status
+
+The following findings are now closed in the working corpus:
+
+- every fenced spike block has an immediate machine-readable classification and
+  unique identity; the checker validates the entire document rather than only
+  its terminal snapshot;
+- all authored blocks match the recursively discovered `.lean` files exactly;
+- standard artifact, writer/parser, decode/load, and soundness projections were
+  removed from all five authored closing modules;
+- unused standard process lookups and gzip records were removed; the fixed
+  DEFLATE tables now come from one named `Std.Zlib.Fixed32K` static fragment;
+- sort's physical failure paths now use its actual four portable outcomes while
+  retaining detailed failure causes in the audit trace, and its parser witness,
+  statics, and constructor family are explicit closing inputs;
+- Web's fragment exit family is well scoped, SETTINGS acknowledgement has one
+  owner, and both direct and fragmented HEADERS pass through explicit PADDED /
+  PRIORITY normalization before HPACK;
+- the cube extent constructor has typed arguments and writes the exact
+  `imageCount` consumed by swapchain creation, and irrelevant inputs are
+  explicitly accepted as stuttering events; and
+- stale prose describing authored `Staged.lean` and `SourceClosure.lean` modules
+  was removed.
+
+The central blocking finding remains: raw expansion, certificate reports,
+artifact outputs, mutation runs, and build/scale measurements are still **not
+generated** or **not measured** because the supporting library is deliberately
+out of scope. Several Web/Cube application-specific contracts and the exact
+cross-ISA closing junction also remain under author-surface repair.
+
+One Round 19 recommendation is rejected: stability remains precious in Spike 2
+because stable ordering was an explicit product requirement. The logical spec
+observes occurrence identities even when the selected console projection emits
+equal byte strings. The proof factors as stable permutation over ordinal-tagged
+occurrences followed by erasure of ordinals during byte serialization; a future
+byte-only client may compose the projection theorem and reuse the stronger
+implementation, but cannot retroactively weaken this spike's demanded theorem.
+
 ## What passes
 
 `./check-spike-sources.ps1` passes for all five spikes. Under the documented
@@ -18,11 +56,11 @@ a reasonable file count does not make every declaration reasonable author work.
 
 ## Corpus-wide blockers
 
-1. Existing spike documents do not yet classify every fenced block with the
-   machine-readable authored/generated/interface/proof-sketch metadata required
-   by the authoring contract. Introductory blanket prose is insufficient.
-2. The current checker intentionally proves only normalized snapshot equality.
-   It does not reproduce constructor expansion, process/CFG extraction, source
+1. Block classification and authored-source equality now pass mechanically.
+   This does not make an interface or proof-sketch block generated evidence.
+2. The current checker proves classification, identity uniqueness, and
+   normalized authored-source equality. It does not reproduce constructor
+   expansion, process/CFG extraction, source
    closure, proof reports, artifact layout, or bytes.
 3. Generated expansion size, certificate/proof-term size, and clean and
    incremental check costs are not available because the libraries do not yet

@@ -7,6 +7,17 @@ Authoring view: agents maintain exactly `Spec.lean`, `Assembly.lean`, and
 closure, component binding, and artifact records shown below are generated
 review projections rather than additional authored modules.
 
+| Proof-economics quantity | Current evidence |
+| --- | --- |
+| Authored specification | 1 module; 50 physical / 40 nonblank lines |
+| Authored realization | 2 modules; 750 physical / 700 nonblank lines |
+| Generated expansion/certificates | not generated |
+| Clean/incremental checking | not measured |
+
+`Spec.lean` owns the precious contract, `Assembly.lean` owns the selected codec
+plan, data/layout, and literal CFG, and `Program.lean` owns only the verified
+closing command and emission request.
+
 This document proposes the complete proof shape before its supporting Lean
 libraries exist. Normative force remains with the owning documents linked from
 [README.md](README.md). The resource-parameterized root `SpecProcess`, including
@@ -23,6 +34,7 @@ body is correct; it never replaces the body.
 
 ## 1. Application surface
 
+<!-- grass-block: interface id=spike3-block-01 -->
 ```lean
 namespace Grass.Spike3
 
@@ -111,6 +123,7 @@ implementation without making this source a semantic oracle.
 
 ### 1.1 Synthesized sequential process realization
 
+<!-- grass-block: interface id=spike3-block-02 -->
 ```lean
 def gzipProcessRealization : ProcessRealization spec :=
   ProcessRealization.standard (Grass.Std.Realizers.lookupExact spec)
@@ -157,6 +170,7 @@ proof graph. A genuinely parallel codec can instead retain the explicit plan.
 
 The reusable algorithm adjacency is explicit:
 
+<!-- grass-block: interface id=spike3-block-03 -->
 ```lean
 def fixed32KModel : ImplementationModel := Std.Zlib.Fixed32K.model codecPlan
 
@@ -200,6 +214,7 @@ assembly realizing the resulting universal process plan.
 
 ## 2. Portable observations and nondeterminism
 
+<!-- grass-block: interface id=spike3-block-04 -->
 ```lean
 inductive GzipOutcome
   | success
@@ -248,6 +263,7 @@ while retaining a fixed live heap footprint.
 The spike demands these standard-library interfaces rather than defining a
 spike-private codec:
 
+<!-- grass-block: interface id=spike3-block-05 -->
 ```lean
 namespace Grass.Std.Zlib
 
@@ -291,6 +307,7 @@ definitions rather than growing two codec stacks.
 
 The selected construction uses a narrower reusable theorem:
 
+<!-- grass-block: interface id=spike3-block-06 -->
 ```lean
 def Fixed32K.write (input : ByteArray) : ByteArray
 
@@ -317,6 +334,7 @@ product gates, not kernel propositions masquerading as semantic correctness.
 
 One 295,168-byte process-heap allocation is divided by a proved layout:
 
+<!-- grass-block: interface id=spike3-block-07 -->
 ```lean
 structure GzipMachineState where
   heap       : UInt64 -- 0
@@ -373,6 +391,7 @@ to reach the minimal containment tail.
 
 The executable emits one deterministic header:
 
+<!-- grass-block: proof-sketch id=spike3-block-08 -->
 ```text
 1f 8b 08 00  00 00 00 00  00 ff
 ID1 ID2 CM FLG   MTIME      XFL OS(unknown)
@@ -412,6 +431,7 @@ nonvolatile registers; `eax = 0` means success, `eax = 1` write failure, `eax =
 2` zero progress, and `eax = 3` excess-count provider violation. Every helper
 body is present.
 
+<!-- grass-block: proof-sketch id=spike3-block-09 -->
 ```text
 def GzipFrame := stackLayout win64 {
   shadow : Bytes 32
@@ -1116,6 +1136,7 @@ These are the complete non-code codec tables. The PE writer serializes each
 typed array exactly as shown and proves its parser round trip; it does not rely
 on assembler-private data.
 
+<!-- grass-block: proof-sketch id=spike3-block-10 -->
 ```lean
 def lengthBase : Vec UInt16 29 :=
   #[3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,
@@ -1192,6 +1213,12 @@ for every instruction, the library boundary has failed.
 
 ## 9. Erasure and exact Win64 PE
 
+The following are demanded generated theorems, not current generated evidence.
+The raw numeric instruction/static/import/relocation manifest is **not
+generated** and checking cost is **not measured**. Until the generator exists,
+these statements are proof sketches and cannot substantiate exact emission.
+
+<!-- grass-block: proof-sketch id=gzip-erasure-and-artifact-laws -->
 ```lean
 theorem gzip_erasure :
   ErasurePreservesSemantics
@@ -1339,18 +1366,16 @@ requires a feature-specific realization plus its own citations and probes.
 
 ## Exact authored source snapshot
 
-This section is the author-maintained Lean surface defined by
-[SPIKE_AUTHORING.md](SPIKE_AUTHORING.md). Earlier code blocks in this document
-are generated expansions, library interface sketches, or proof sketches unless
-they are explicitly labeled authored source. Reviewers must compare this
-snapshot with `Spikes/3_Gzip/` exactly.
+This snapshot is the exact comment-free source maintained under
+`Spikes/3_Gzip/`. Run `./check-spike-sources.ps1 -Spike 3` to check the
+normalized cross-view equality and block classifications.
 
 ### `Assembly.lean`
 
+<!-- grass-block: authored file=Assembly.lean -->
 ```lean
 import Grass.Assembly.X86
 import Grass.Platform.Win10.X64
-import Grass.Process.Sequential
 import Grass.Std.Zlib.Fixed32K
 import Spikes.«3_Gzip».Spec
 
@@ -1365,9 +1390,6 @@ def policy : TargetOutcomeProjection GzipOutcome UInt32 :=
 def projection : TargetProjection spec .win10X64 :=
   TargetProjection.win10ByteStreams policy
 
-def processRealization : ProcessRealization spec :=
-  ProcessRealization.standard (Grass.Std.Realizers.lookupExact spec)
-
 def codecPlan : GzipImplementationPlan :=
   .fixed32KHashChain (maxProbes := 64)
 
@@ -1381,53 +1403,8 @@ theorem fixed32KModelCorrect :
     ImplementationRealizesContract fixed32KModel fixed32KContract :=
   Std.Zlib.Fixed32K.correct codecPlan
 
-theorem fixed32KRoundTrip (input : ByteArray) :
-    Std.Zlib.inflate (Std.Zlib.Fixed32K.write codecPlan input) = .ok input :=
-  Std.Zlib.Fixed32K.roundTrip codecPlan input
-
 def platformPlan : PlatformPlan spec.driverBoundary.requirements :=
   PlatformPlan.win10X64StreamingIO projection
-
-def lengthBase : Vec UInt16 29 :=
-  #[3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43,
-    51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258]
-
-def lengthExtra : Vec UInt8 29 :=
-  #[0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3,
-    4, 4, 4, 4, 5, 5, 5, 5, 0]
-
-def distanceBase : Vec UInt16 30 :=
-  #[1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257,
-    385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385,
-    24577]
-
-def distanceExtra : Vec UInt8 30 :=
-  #[0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8,
-    9, 9, 10, 10, 11, 11, 12, 12, 13, 13]
-
-def gzipStaticObjects : StaticObjectTable := static_objects {
-  rodata align 2 {
-    lengthBase: uint16s lengthBase
-    lengthExtra: uint8s lengthExtra
-    distanceBase: uint16s distanceBase
-    distanceExtra: uint8s distanceExtra
-  }
-}
-
-structure GzipMachineState where
-  input : OwnedBuffer
-  window : OwnedBuffer
-  head : OwnedBuffer
-  prev : OwnedBuffer
-  tokens : OwnedBuffer
-  output : OwnedBuffer
-  crc : UInt32
-  inputSize : UInt32
-  bitAccumulator : UInt64
-  bitCount : UInt8
-  blockLength : UInt32
-  generation : UInt16
-  phase : GzipPhase
 
 structure GzipFrameFields where
   shadow : Bytes 32
@@ -1492,7 +1469,10 @@ structure FlushFrameFields where
 
 def FlushFrame : FrameLayout Win64 := FrameLayout.derive FlushFrameFields
 
-def gzipSource : AsmSource platformPlan := asm_source using codecPlan {
+def gzipSource : AsmSource platformPlan :=
+  asm_source
+    (model := codecPlan)
+    (statics := Std.Zlib.Fixed32K.staticObjects codecPlan) {
 
 entry:
     push rbx
@@ -2136,9 +2116,9 @@ end Grass.Spikes.Gzip
 
 ### `Program.lean`
 
+<!-- grass-block: authored file=Program.lean -->
 ```lean
 import Grass.Emit
-import Grass.Artifact.PE32Plus
 import Spikes.«3_Gzip».Assembly
 
 namespace Grass.Spikes.Gzip
@@ -2149,26 +2129,12 @@ def gzipVerified : VerifiedProgram spec := by
 
 def bytes : ByteArray := emitProgram gzipVerified
 
-theorem emittedSound : EmittedProgramSatisfies spec bytes :=
-  gzipVerified.sound
-
-def artifact : PE32Plus := gzipVerified.linkedArtifact
-
-theorem writerRoundTrip : PE32Plus.parse (PE32Plus.write artifact) = .ok artifact :=
-  artifact.writerRoundTrip
-
-theorem textDecodesExactly :
-    LoadedTextDecodesTo artifact gzipVerified.rawProgram :=
-  gzipVerified.artifactCorrectness.loadedTextDecodes
-
-theorem emittedExactly : bytes = PE32Plus.write artifact :=
-  rfl
-
 end Grass.Spikes.Gzip
 ```
 
 ### `Spec.lean`
 
+<!-- grass-block: authored file=Spec.lean -->
 ```lean
 import Grass.Spec.Console
 import Grass.Spec.Grammar

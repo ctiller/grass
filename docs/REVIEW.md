@@ -21,6 +21,10 @@ semantic policy.
    [ARTIFACTS.md](ARTIFACTS.md) and [VERIFIED_PROGRAM.md](VERIFIED_PROGRAM.md).
 6. Challenge every external assertion using [VALIDATION.md](VALIDATION.md).
 7. Walk the Hello World acceptance chain end to end.
+8. For HTTP/2 or a protocol layered over it, regenerate and audit
+   [HTTP2_CONSTRAINTS.md](HTTP2_CONSTRAINTS.md): every captured requirement key
+   must have one connected witness over the same provider, raw program, and
+   artifact, and the inventory must introduce no independent semantic demand.
 
 ## 2. Mandatory attack questions
 
@@ -286,6 +290,15 @@ evidence: record instruction mix, proof/elaboration work, cache reuse, generated
 files, kernel checks, and runtime probes on the stated scale fixtures.
 
 ## 5. Sign-off
+
+For a pre-implementation spike review, sign-off distinguishes `design approve`
+from `implementation approve`. The former applies the design-fixpoint rules in
+[SPIKE_AUTHORING.md](SPIKE_AUTHORING.md) and must not demand that the prohibited
+library already exist. The latter requires real generated evidence, mutation
+runs, artifact bytes, kernel checks, and scale measurements. A reviewer may
+reject a missing or unbelievable proof sketch at design time; it may not call
+honestly unavailable execution evidence a design defect while the library is
+explicitly out of scope.
 
 ```text
 Reviewer:

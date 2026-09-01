@@ -63,6 +63,9 @@ No document may override a narrower owner by restating it differently.
   bounded-memory streaming gzip milestone.
 - [WEB_SERVER.md](WEB_SERVER.md) and [SPIKE_4.md](SPIKE_4.md) define and fully
   lower the cancellable multiplexed in-memory cleartext HTTP/2 server milestone.
+- [HTTP2_CONSTRAINTS.md](HTTP2_CONSTRAINTS.md) is the mechanically keyed audit
+  projection from the precious HTTP/2 spec to implementation witnesses and the
+  extension seam for a later gRPC suite.
 - [CUBE.md](CUBE.md) and [SPIKE_5.md](SPIKE_5.md) define and fully lower the
   Win32/Vulkan/SPIR-V spinning-cube composition milestone.
 - [../Spikes/README.md](../Spikes/README.md) indexes the matching comment-free

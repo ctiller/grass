@@ -64,34 +64,6 @@ def deviceFunctionNames : Vec CString := #[
   "vkQueuePresentKHR"
 ]
 
-def win32Imports : Vec ImportSymbol := #[
-  `GetModuleHandleW,
-  `LoadCursorW,
-  `RegisterClassExW,
-  `CreateWindowExW,
-  `ShowWindow,
-  `DestroyWindow,
-  `DefWindowProcW,
-  `GetWindowLongPtrW,
-  `SetWindowLongPtrW,
-  `WaitMessage,
-  `PeekMessageW,
-  `TranslateMessage,
-  `DispatchMessageW,
-  `UnregisterClassW,
-  `QueryPerformanceFrequency,
-  `QueryPerformanceCounter,
-  `GetProcessHeap,
-  `HeapAlloc,
-  `HeapFree,
-  `ExitProcess
-]
-
-def vulkanImports : Vec ImportSymbol := #[
-  `vkGetInstanceProcAddr,
-  `vkGetDeviceProcAddr
-]
-
 def cubeFrameObjects : Vec StackObjectSpec := #[
   .object `wc .wndClassExW,
   .object `msg .msg,
@@ -132,7 +104,6 @@ def cubeFrameObjects : Vec StackObjectSpec := #[
   .object `formats .pointer,
   .object `surfaceFormat .vkSurfaceFormatKHR,
   .object `imageCount .uint32,
-  .object `requestedImageCount .uint32,
   .object `images .pointer,
   .object `views .pointer,
   .object `imageInitialized .pointer,

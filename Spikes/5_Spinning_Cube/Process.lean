@@ -212,35 +212,6 @@ def processPlan : ProcessPlan cubeProtocols spec.driverBoundary where
   cancellation := CubeCancellationLaw
   supervision := CubeSupervisionLaw
 
-theorem processPlanRealizes : ProcessPlanRealizes spec processPlan where
-  processProofs := by
-    intro kind
-    cases kind with
-    | application => exact cubeApplicationCorrect
-    | windowInput => exact Std.Win32.windowInput_correct
-    | frameOpportunity => exact Std.Process.monotonicFrameOpportunity_correct
-    | graphics => exact Std.Vulkan.graphicsCoordinator_correct
-    | terminal => exact Std.Win32.terminal_correct
-    | acquire _ => exact Std.Vulkan.acquire_correct
-    | submission _ => exact Std.Vulkan.submission_correct
-    | presentation _ => exact Std.Vulkan.presentation_correct
-    | apiCall call => exact CubeProviderCall.correct call
-  composition := cube_channels_ownership_and_progress_compose
-  adequate := cube_network_adequate
-  simulation := cube_network_simulation
-  demandMultiplicity := cube_occurrences_erase_exactly
-  childBindings := cube_child_demand_bindings
-  requirementSubstitution := cube_process_requirement_substitution
-  demands := cube_independent_safety_liveness_and_obligation_demands
-  resources := cube_resource_axis_realization
-
-theorem cubeResourceBound :
-    EveryExecutionUsesAtMost
-      ProcessScope.root
-      CubeResourceMetric.product
-      CubeResourceBudget.singleFrameInFlight :=
-  processPlanRealizes.resources.rootBound
-
 def shapedSpec : StagedProcessPresentation spec :=
   StagedProcessPresentation.ofNetwork spec cubeProtocol
     cubeProtocolResourceView
@@ -250,23 +221,27 @@ def shapedSpec : StagedProcessPresentation spec :=
     cubeProcessPresentation.requirementsExact
 
 def inputSubsystem : SubsystemRealization shapedSpec .input :=
-  SubsystemRealization.fromPlanScope
-    processPlanRealizes (CubeProcessScope.input processPlan)
+  SubsystemRealization.fromIndependentPlanScope
+    processPlan (CubeProcessScope.input processPlan)
+    cube_input_scope_correct
     cube_input_boundary_exact
 
 def animationSubsystem : SubsystemRealization shapedSpec .sceneAnimator :=
-  SubsystemRealization.fromPlanScope
-    processPlanRealizes (CubeProcessScope.animation processPlan)
+  SubsystemRealization.fromIndependentPlanScope
+    processPlan (CubeProcessScope.animation processPlan)
+    cube_animation_scope_correct
     cube_animation_boundary_exact
 
 def graphicsSubsystem : SubsystemRealization shapedSpec .surfacePresenter :=
-  SubsystemRealization.fromPlanScope
-    processPlanRealizes (CubeProcessScope.graphics processPlan)
+  SubsystemRealization.fromIndependentPlanScope
+    processPlan (CubeProcessScope.graphics processPlan)
+    cube_graphics_scope_correct
     cube_graphics_boundary_exact
 
 def terminationSubsystem : SubsystemRealization shapedSpec .termination :=
-  SubsystemRealization.fromPlanScope
-    processPlanRealizes (CubeProcessScope.termination processPlan)
+  SubsystemRealization.fromIndependentPlanScope
+    processPlan (CubeProcessScope.termination processPlan)
+    cube_termination_scope_correct
     cube_termination_boundary_exact
 
 def completeGraph : BlendedProcessGraph shapedSpec where
@@ -294,6 +269,16 @@ def stagedProcessRealization : ProcessRealization spec :=
 theorem stagedPlanIsExact :
     stagedProcessRealization.plan = processPlan :=
   cube_closed_blend_elaborates_to_exact_plan
+
+theorem processPlanRealizes : ProcessPlanRealizes spec processPlan :=
+  stagedProcessRealization.transportPlan stagedPlanIsExact
+
+theorem cubeResourceBound :
+    EveryExecutionUsesAtMost
+      ProcessScope.root
+      CubeResourceMetric.product
+      CubeResourceBudget.singleFrameInFlight :=
+  processPlanRealizes.resources.rootBound
 
 theorem unresolvedDescendantRejected :
     ¬ FrontierComplete cube_graphics_with_abstract_child :=

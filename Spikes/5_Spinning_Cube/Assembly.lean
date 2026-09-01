@@ -155,7 +155,11 @@ def cubeStaticObjects : StaticObjectTable := #[
   .spirvWords `cubeFragmentBytes (Spirv.writeWords cubeFragment)
 ]
 
-def cubeHost : AsmSource plan := asm_source {
+def cubeHost : AsmSource plan :=
+  asm_source
+    (statics := cubeStaticObjects)
+    (constructors := cubeMacroDefinitions)
+    (layouts := #[cubeHostFrameLayout, cubeCallbackFrameLayout]) {
 entry: @entry win64_gui_entry
   push rbx
   push rbp

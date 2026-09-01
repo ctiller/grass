@@ -1,6 +1,5 @@
 import Grass.Assembly.X86
 import Grass.Platform.Win10.X64
-import Grass.Process.Sequential
 import Grass.Std.Zlib.Fixed32K
 import Spikes.«3_Gzip».Spec
 
@@ -15,9 +14,6 @@ def policy : TargetOutcomeProjection GzipOutcome UInt32 :=
 def projection : TargetProjection spec .win10X64 :=
   TargetProjection.win10ByteStreams policy
 
-def processRealization : ProcessRealization spec :=
-  ProcessRealization.standard (Grass.Std.Realizers.lookupExact spec)
-
 def codecPlan : GzipImplementationPlan :=
   .fixed32KHashChain (maxProbes := 64)
 
@@ -31,53 +27,8 @@ theorem fixed32KModelCorrect :
     ImplementationRealizesContract fixed32KModel fixed32KContract :=
   Std.Zlib.Fixed32K.correct codecPlan
 
-theorem fixed32KRoundTrip (input : ByteArray) :
-    Std.Zlib.inflate (Std.Zlib.Fixed32K.write codecPlan input) = .ok input :=
-  Std.Zlib.Fixed32K.roundTrip codecPlan input
-
 def platformPlan : PlatformPlan spec.driverBoundary.requirements :=
   PlatformPlan.win10X64StreamingIO projection
-
-def lengthBase : Vec UInt16 29 :=
-  #[3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43,
-    51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258]
-
-def lengthExtra : Vec UInt8 29 :=
-  #[0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3,
-    4, 4, 4, 4, 5, 5, 5, 5, 0]
-
-def distanceBase : Vec UInt16 30 :=
-  #[1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257,
-    385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385,
-    24577]
-
-def distanceExtra : Vec UInt8 30 :=
-  #[0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8,
-    9, 9, 10, 10, 11, 11, 12, 12, 13, 13]
-
-def gzipStaticObjects : StaticObjectTable := static_objects {
-  rodata align 2 {
-    lengthBase: uint16s lengthBase
-    lengthExtra: uint8s lengthExtra
-    distanceBase: uint16s distanceBase
-    distanceExtra: uint8s distanceExtra
-  }
-}
-
-structure GzipMachineState where
-  input : OwnedBuffer
-  window : OwnedBuffer
-  head : OwnedBuffer
-  prev : OwnedBuffer
-  tokens : OwnedBuffer
-  output : OwnedBuffer
-  crc : UInt32
-  inputSize : UInt32
-  bitAccumulator : UInt64
-  bitCount : UInt8
-  blockLength : UInt32
-  generation : UInt16
-  phase : GzipPhase
 
 structure GzipFrameFields where
   shadow : Bytes 32
@@ -142,7 +93,10 @@ structure FlushFrameFields where
 
 def FlushFrame : FrameLayout Win64 := FrameLayout.derive FlushFrameFields
 
-def gzipSource : AsmSource platformPlan := asm_source using codecPlan {
+def gzipSource : AsmSource platformPlan :=
+  asm_source
+    (model := codecPlan)
+    (statics := Std.Zlib.Fixed32K.staticObjects codecPlan) {
 
 entry:
     push rbx

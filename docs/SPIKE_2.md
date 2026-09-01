@@ -7,6 +7,17 @@ Authoring view: agents maintain exactly `Spec.lean`, `Assembly.lean`, and
 names such as `Bindings.lean` denote generated review projections, not authored
 files.
 
+| Proof-economics quantity | Current evidence |
+| --- | --- |
+| Authored specification | 1 module; 73 physical / 57 nonblank lines |
+| Authored realization | 2 modules; 581 physical / 541 nonblank lines |
+| Generated expansion/certificates | not generated |
+| Clean/incremental checking | not measured |
+
+`Spec.lean` owns the precious contract, `Assembly.lean` owns the selected model,
+layout, constructors, data, and literal CFG, and `Program.lean` owns only the
+verified closing command and emission request.
+
 This spike asks what a proof of a small `sort` replacement should look like
 before its supporting libraries exist. Normative force remains with the owning
 documents listed in [README.md](README.md). The portable specification is the
@@ -27,6 +38,7 @@ feature parity with locale-aware or external-storage `sort` implementations.
 
 ## 1. The proof we want to read
 
+<!-- grass-block: proof-sketch id=spike2-block-01 -->
 ```lean
 namespace Grass.Spike2
 
@@ -174,6 +186,7 @@ platform plan, and `sortSource` may be deleted and rebuilt against it.
 
 The abstract parser is total over every finite byte input:
 
+<!-- grass-block: interface id=spike2-block-02 -->
 ```lean
 def ByteLineFormat.decode : ByteArray -> Vec Occurrence
 def ByteLineFormat.encode : Vec Occurrence -> ByteArray
@@ -185,6 +198,7 @@ theorem decode_ordinals (input) :
 
 For this format:
 
+<!-- grass-block: interface id=spike2-block-03 -->
 ```text
 []           -> []
 "a"          -> ["a"]
@@ -212,9 +226,15 @@ that swapping equal serialized strings produces the same stdout bytes.
 
 The portable outcome relation is:
 
+<!-- grass-block: interface id=spike2-block-04 -->
 ```lean
 inductive SortOutcome
   | success
+  | allocationFailure
+  | inputFailure
+  | outputFailure
+
+inductive SortFailureCause
   | stdinUnavailable
   | readFailed
   | resourceExhausted
@@ -225,23 +245,23 @@ inductive SortOutcome
 structure SortObservation (input : ByteArray) where
   stdout : ByteArray
   outcome : SortOutcome
+  failureCause : Option SortFailureCause
   status : UInt32
 
 def SortObservation.Accepts (input : ByteArray)
     (o : SortObservation input) : Prop :=
   o.status = policy.status o.outcome ∧
-  match o.outcome with
-  | .success =>
-      ∃ sorted,
-        StableSorted order (format.decode input) sorted ∧
-        o.stdout = format.encode sorted
-  | .stdinUnavailable | .readFailed | .resourceExhausted =>
-      o.stdout = #[]
-  | .stdoutUnavailable =>
-      o.stdout = #[]
-  | .writeFailed | .noProgress =>
-      o.stdout.IsPrefixOf
-        (format.encode (stableSort order (format.decode input)))
+  (match o.outcome with
+   | .success =>
+       ∃ sorted,
+         StableSorted order (format.decode input) sorted ∧
+         o.stdout = format.encode sorted
+   | .allocationFailure | .inputFailure =>
+       o.stdout = #[]
+   | .outputFailure =>
+       o.stdout.IsPrefixOf
+         (format.encode (stableSort order (format.decode input)))) ∧
+  AuditCauseMatchesOutcome o.failureCause o.outcome
 ```
 
 The success clause uses an existential stable-sorted occurrence sequence rather
@@ -261,6 +281,7 @@ The specification deliberately does not prescribe a pipeline. The application
 author does not maintain a second input/allocation/sort/output actor graph.
 Instead the canonical adapter elaborates the relational program:
 
+<!-- grass-block: interface id=spike2-block-05 -->
 ```lean
 def sortProcessRealization : ProcessRealization spec :=
   ProcessRealization.standard (Grass.Std.Realizers.lookupExact spec)
@@ -298,6 +319,7 @@ The logical process plan proves the allocation/output barrier without mentioning
 handles or addresses. The lower process driver refines its five logical phases
 to this phase-indexed machine capability:
 
+<!-- grass-block: interface id=spike2-block-06 -->
 ```lean
 inductive SortPhase
   | collecting
@@ -355,6 +377,7 @@ zero-byte output while bytes remain each have explicit rejection/failure paths.
 
 The implementation uses three process-heap ownership roots:
 
+<!-- grass-block: interface id=spike2-block-07 -->
 ```lean
 structure PhysicalLineDesc where
   offset : UInt64
@@ -397,6 +420,7 @@ source ordinal remains a proof identity derived from the unique record start.
 `HeapReAlloc` may replace the byte buffer without invalidating a slice. Its
 dependent result is:
 
+<!-- grass-block: interface id=spike2-block-08 -->
 ```lean
 inductive ReallocResult (old : OwnedVec Byte processHeap)
   | success (new : OwnedVec Byte processHeap)
@@ -433,6 +457,7 @@ external obligations are not silently adopted.
 
 Output adds one non-heap root:
 
+<!-- grass-block: interface id=spike2-block-09 -->
 ```lean
 def outputBuffer : StaticObject (Array Byte 65536) :=
   static_bss_object (name := `output_buffer) (alignment := 64)
@@ -461,6 +486,7 @@ requires both all sorted records consumed and an empty buffer.
 
 The low-level contract is extensional over descriptor identities:
 
+<!-- grass-block: interface id=spike2-block-10 -->
 ```lean
 structure StableSortContract where
   entry : OwnsInitializedVec PhysicalLineDesc lines
@@ -479,6 +505,7 @@ small and its allocation is complete before sorting. The reusable merge theorem
 owns cursor bounds, permutation, initialization transfer, and run concatenation.
 The assembly author owns the actual compare loop and the tie rule:
 
+<!-- grass-block: interface id=spike2-block-11 -->
 ```text
 compare(left.value, right.value)
   less    -> take left
@@ -515,6 +542,7 @@ or PE loading.
 
 The exact proof boundary is not merely the top-level console relation:
 
+<!-- grass-block: interface id=spike2-block-12 -->
 ```lean
 def stableSortModel : ImplementationModel :=
   StableSort.bottomUpModel format order
@@ -571,6 +599,7 @@ source reaches verification and emission.
 The author declares the frame by name rather than maintaining displacement
 arithmetic by hand:
 
+<!-- grass-block: proof-sketch id=spike2-block-13 -->
 ```lean
 def SortFrame : FrameLayout Win64 := frame_layout {
   shadow          : bytes 32
@@ -618,6 +647,7 @@ The output buffer is a distinct 65,536-byte, 64-byte-aligned writable static
 object. It is not an allocator result and introduces no allocation-failure path.
 Its PE mapping creates writable static provenance for exactly that object.
 
+<!-- grass-block: proof-sketch id=spike2-block-14 -->
 ```text
 def sortSource : AsmSource plan := asm_source {
 
@@ -954,18 +984,18 @@ emit_final_flush:
     je   no_progress
     jmp  exit_success
 
-stdin_unavailable:   @terminal(.stdinUnavailable)
-    $(failureExit .stdinUnavailable)
-read_failed:         @terminal(.readFailed)
-    $(failureExit .readFailed)
-resource_exhausted:  @terminal(.resourceExhausted)
-    $(failureExit .resourceExhausted)
-stdout_unavailable:  @terminal(.stdoutUnavailable)
-    $(failureExit .stdoutUnavailable)
-write_failed:        @terminal(.writeFailed)
-    $(failureExit .writeFailed)
-no_progress:         @terminal(.noProgress)
-    $(failureExit .noProgress)
+stdin_unavailable:   @terminal(.inputFailure) @audit(.stdinUnavailable)
+    $(failureExit .inputFailure)
+read_failed:         @terminal(.inputFailure) @audit(.readFailed)
+    $(failureExit .inputFailure)
+resource_exhausted:  @terminal(.allocationFailure) @audit(.resourceExhausted)
+    $(failureExit .allocationFailure)
+stdout_unavailable:  @terminal(.outputFailure) @audit(.stdoutUnavailable)
+    $(failureExit .outputFailure)
+write_failed:        @terminal(.outputFailure) @audit(.writeFailed)
+    $(failureExit .outputFailure)
+no_progress:         @terminal(.outputFailure) @audit(.noProgress)
+    $(failureExit .outputFailure)
 exit_success:       @terminal(.success)
     xor ecx, ecx
 exit:
@@ -987,9 +1017,14 @@ output_buffer: resb 65536
 }
 ```
 
-The hygienic `$(compareRecords rdx r8)` constructor application expands at its
-use site to:
+The following is a historical handwritten proof sketch, not the exact expansion
+of the current authored `compareRecords`. The current source performs address
+formation in a different instruction order and uses `add` rather than the shown
+`lea` sequence. It remains only to expose the demanded shape until one
+canonical generated raw manifest replaces it; it must not be cited as expansion
+evidence.
 
+<!-- grass-block: proof-sketch id=sort-compare-expansion-obsolete -->
 ```text
 mov  rax, qword ptr [rdx+0]
 mov  r10, qword ptr [rdx+8]
@@ -1025,8 +1060,11 @@ loads come from the two physical descriptors and `RepresentsLines`.
 
 `$(bufferAppend pointer length)` stages an arbitrary-size slice in the
 64 KiB static object. A record longer than the buffer crosses the flush backedge
-as many times as necessary; there is no line-size cap. The following is the
-exact derived expansion after named frame operands have become literal offsets:
+as many times as necessary; there is no line-size cap. The following is likewise
+a non-authoritative proof sketch. It still contains `$(flushOutput)` and
+uninstantiated local labels, so it is neither fully expanded nor hygienically
+instantiated. The final generator must print every instance with numeric
+operands and unique labels.
 
 For a conforming provider that completes each request in full, a successful run
 with `n` output bytes performs exactly `ceil(n / 65536)` `WriteFile` calls (zero
@@ -1034,6 +1072,7 @@ when `n = 0`), independent of record count. Permitted partial writes add only th
 calls necessary to drain those same buffer slices; they never restore the old
 two-calls-per-record behavior.
 
+<!-- grass-block: proof-sketch id=sort-buffer-append-expansion-obsolete -->
 ```text
 mov  qword ptr [rsp+184], rsi             ; savedRsi
 mov  qword ptr [rsp+192], rdi             ; savedRdi
@@ -1075,6 +1114,7 @@ mov  qword ptr [rsp+152], length          ; appendRemaining
 loop below. It is inlined hygienically at each invocation, including the one
 inside `bufferAppend` and the final flush before success.
 
+<!-- grass-block: proof-sketch id=sort-flush-expansion-obsolete -->
 ```text
 lea  rax, [rip + output_buffer]
 mov  qword ptr [rsp+200], rax             ; flushPtr
@@ -1114,7 +1154,8 @@ mov  qword ptr [rsp+208], rax             ; flushRemaining
 .flush_done:
 ```
 
-Fragment expansion occurs before CFG verification and erasure; the expanded
+Fragment expansion is required to occur before CFG verification and erasure;
+it has not yet been generated for this design corpus. When implemented, the expanded
 instructions, hygienic labels, violation edge, encodings, and proof obligations
 are inspectable. An author may inline or replace any constructor. No scan, compare,
 merge, allocation, API, output, or terminal helper body is omitted.
@@ -1232,6 +1273,7 @@ obligations. Erasure retains exactly the authored x86 instructions, static LF
 byte, writable zero-fill output object, selected calls, symbols, and relocations.
 Its owned theorem is:
 
+<!-- grass-block: proof-sketch id=spike2-block-18 -->
 ```lean
 theorem sort_erasure :
   ErasurePreservesSemantics
@@ -1261,6 +1303,7 @@ read-only mapping of that object fails artifact verification.
 Writer/reader, parser-correctness, semantic decode, loader, and exact-byte
 connection laws use only canonical certificate projections:
 
+<!-- grass-block: proof-sketch id=spike2-block-19 -->
 ```lean
 theorem emission_exact :
   emitProgram sortVerified = PE.write sortVerified.linkedArtifact
@@ -1377,18 +1420,16 @@ must be listed in the source register with their theorem owners.
 
 ## Exact authored source snapshot
 
-This section is the author-maintained Lean surface defined by
-[SPIKE_AUTHORING.md](SPIKE_AUTHORING.md). Earlier code blocks in this document
-are generated expansions, library interface sketches, or proof sketches unless
-they are explicitly labeled authored source. Reviewers must compare this
-snapshot with `Spikes/2_Sort/` exactly.
+This snapshot is the exact comment-free source maintained under
+`Spikes/2_Sort/`. Run `./check-spike-sources.ps1 -Spike 2` to check the
+normalized cross-view equality and block classifications.
 
 ### `Assembly.lean`
 
+<!-- grass-block: authored file=Assembly.lean -->
 ```lean
 import Grass.Assembly.X86
 import Grass.Platform.Win10.X64
-import Grass.Process.Sequential
 import Grass.Std.Sort.Stable
 import Spikes.«2_Sort».Spec
 
@@ -1402,9 +1443,6 @@ def policy : TargetOutcomeProjection SortOutcome UInt32 :=
 
 def projection : TargetProjection spec .win10X64 :=
   TargetProjection.win10ByteStreams policy
-
-def processRealization : ProcessRealization spec :=
-  ProcessRealization.standard (Grass.Std.Realizers.lookupExact spec)
 
 def stableSortContract : ComponentContract :=
   StableSort.contract format order
@@ -1588,7 +1626,10 @@ def sortConstructorClosure : FragmentConstructorClosure plan := constructors {
   failureExit
 }
 
-def sortSource : AsmSource plan := asm_source {
+def sortSource : AsmSource plan :=
+  asm_source
+    (statics := sortStaticObjects)
+    (constructors := sortConstructorClosure) {
 
 entry:
     push rbx
@@ -1923,18 +1964,18 @@ emit_final_flush:
     je   no_progress
     jmp  exit_success
 
-stdin_unavailable:   @terminal(.stdinUnavailable)
-    $(failureExit .stdinUnavailable)
-read_failed:         @terminal(.readFailed)
-    $(failureExit .readFailed)
-resource_exhausted:  @terminal(.resourceExhausted)
-    $(failureExit .resourceExhausted)
-stdout_unavailable:  @terminal(.stdoutUnavailable)
-    $(failureExit .stdoutUnavailable)
-write_failed:        @terminal(.writeFailed)
-    $(failureExit .writeFailed)
-no_progress:         @terminal(.noProgress)
-    $(failureExit .noProgress)
+stdin_unavailable:   @terminal(.inputFailure) @audit(.stdinUnavailable)
+    $(failureExit .inputFailure)
+read_failed:         @terminal(.inputFailure) @audit(.readFailed)
+    $(failureExit .inputFailure)
+resource_exhausted:  @terminal(.allocationFailure) @audit(.resourceExhausted)
+    $(failureExit .allocationFailure)
+stdout_unavailable:  @terminal(.outputFailure) @audit(.stdoutUnavailable)
+    $(failureExit .outputFailure)
+write_failed:        @terminal(.outputFailure) @audit(.writeFailed)
+    $(failureExit .outputFailure)
+no_progress:         @terminal(.outputFailure) @audit(.noProgress)
+    $(failureExit .outputFailure)
 exit_success:       @terminal(.success)
     xor ecx, ecx
 exit:
@@ -1952,40 +1993,33 @@ end Grass.Spikes.Sort
 
 ### `Program.lean`
 
+<!-- grass-block: authored file=Program.lean -->
 ```lean
 import Grass.Emit
-import Grass.Artifact.PE32Plus
 import Spikes.«2_Sort».Assembly
 
 namespace Grass.Spikes.Sort
 
+def parserWitness :
+    SelectedProcessRequirementWitness (lineParserRequirement resources) :=
+  Format.inlineParserWitness
+    (format := lineStreamFormat)
+    (source := sortSource)
+
 def sortVerified : VerifiedProgram spec := by
   verify_assembly plan
+    using_requirement parserWitness
     using_model stableSortModelCorrect
     with sortSource
 
 def bytes : ByteArray := emitProgram sortVerified
-
-theorem emittedSound : EmittedProgramSatisfies spec bytes :=
-  sortVerified.sound
-
-def artifact : PE32Plus := sortVerified.linkedArtifact
-
-theorem writerRoundTrip : PE32Plus.parse (PE32Plus.write artifact) = .ok artifact :=
-  artifact.writerRoundTrip
-
-theorem textDecodesExactly :
-    LoadedTextDecodesTo artifact sortVerified.rawProgram :=
-  sortVerified.artifactCorrectness.loadedTextDecodes
-
-theorem emittedExactly : bytes = PE32Plus.write artifact :=
-  rfl
 
 end Grass.Spikes.Sort
 ```
 
 ### `Spec.lean`
 
+<!-- grass-block: authored file=Spec.lean -->
 ```lean
 import Grass.Spec.Console
 import Grass.Spec.Grammar

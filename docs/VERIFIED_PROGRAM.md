@@ -82,6 +82,33 @@ The listing above is the **audit inventory of independent demands**, not a
 mandate for one 44-field elaboration telescope. The implementation groups it
 behind stratified exported certificates:
 
+`requirementClosure` is not a handwritten theorem checklist. Each specification
+DSL contributes keyed demands while the suite is captured; a total dependent
+translation derives the implementation-facing proposition at every key:
+
+```lean
+structure ImplementationConstraintIndex (spec : SpecProcess resources) where
+  entries : (key : spec.accumulatedRequirements.Key) ->
+    ImplementationConstraint spec.accumulatedRequirements[key]
+  originExact : entries.keys = spec.accumulatedRequirements.keys
+  dependenciesExact : ConstraintDependencies entries =
+    spec.accumulatedRequirements.dependencyEdges
+
+structure AllRequirementsDischarged
+    (spec : SpecProcess resources)
+    (index : ImplementationConstraintIndex spec)
+    (program : GhostProgram spec.driverBoundary realization) where
+  witness : (key : index.entries.Key) ->
+    index.entries[key].Witness program
+  coverage : EveryCapturedOccurrenceUsesExactlyOneWitness spec index witness
+  dependencyOrder : EveryWitnessConsumesOnlyClosedDependencies index witness
+```
+
+An HTTP/2 or future gRPC constraint inventory is a review rendering of this
+dependent map. Adding a grammar, behavior, resource, cancellation, or provider
+demand to the precious suite changes its key family and makes the old closing
+term ill-typed; a prose checklist cannot independently strengthen or weaken it.
+
 ```lean
 structure PortableProgramCertificate {R : Type u} [ResourceModel R]
     {resources : R} (spec : SpecProcess resources) where
