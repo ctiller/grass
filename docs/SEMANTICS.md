@@ -25,6 +25,13 @@ admitted finite terminal execution or infinite execution. Infinite executions
 have a profile-defined limit condition whose finite restrictions agree with the
 monotonic graph and whose complete graph satisfies global consistency.
 
+A `ProcessPlan` induces a logical interleaving semantics over live process
+instances, Hoare-channel sends/receives, child lifecycle transitions, and
+commits. Driver refinement relates each physical step or finite internal stutter
+segment to one logical process transition. Process decomposition never selects
+one favorable schedule or result; unrestricted execution retains every allowed
+interleaving and child response.
+
 The executable interpreter consumes a `ChoiceOracle` and fuel. It must prove
 that every produced prefix is admitted and remains extendable; local choices
 that lead to no coherent complete execution are not permitted runner prefixes.
@@ -74,6 +81,29 @@ to conforming executions and only a matched safe prefix ending immediately
 before the first contract violation. It must not project or normalize the
 post-violation suffix as if it satisfied the specification.
 
+Violations are result-indexed, not one unconstrained escape constructor. Broad
+classes include value-domain, output-memory, ABI/control, and arbitrary external
+misbehavior. A profile may provide
+`ViolationReturnEnvelope occurrence preWorld postWorld callId loanIds r class`
+for a
+narrow class. The envelope states exactly which boundary facts survived—for
+example, ordinary ABI return, completed in-bounds output-slot write, returned
+loans, and intact residual frame while one numeric range predicate failed. It
+does not restore functional conformance or the full assurance theorem.
+
+The envelope is an affine token produced by the exact violating boundary-step
+witness. It carries the first-violation proof, consumes the pending invariant for
+that call occurrence and those loan identities exactly once, and cannot be
+reused at another equal request/result. Classification is exclusive: a value-only
+class proves that memory effects, ABI/control return, and loan return all
+conformed; a compound violation cannot masquerade as `.excessWriteCount`.
+
+Verified post-violation containment is a separate local theorem that consumes
+such an envelope. An arbitrary memory, ABI, or control violation has no envelope
+and supports only the maximal pre-violation safe prefix. Thus a trap tail can be
+proved for a narrow returned-value violation without pretending that arbitrary
+external corruption is safe or recoverable.
+
 ## 3. Observations
 
 The complete audit trace may include:
@@ -96,6 +126,271 @@ obligation demands; those are independent `VerifiedProgram` fields.
 For an input routine or imported call, equivalence quantifies over every result
 allowed by its profile, including short operations, interruptions, failure
 codes, and dependent output memory.
+
+### Tripartite specification
+
+Grass gives three independently reviewable owners to the product boundary:
+
+```lean
+class ResourceModel (R : Type u) where
+  algebra : ResourceAlgebra R
+
+class HasResourceAxis (R : Type u) [ResourceModel R] (axis : ResourceAxisName) where
+  Value : Type
+  combine : Value -> Value -> Value
+  le : Value -> Value -> Prop
+  laws : OrderedPartialCommutativeResourceLaws combine le
+
+class HasResourceLimit (R : Type u) [ResourceModel R]
+    (axis : ResourceAxisName) extends HasResourceAxis R axis where
+  limit : R -> Value
+  exhaustion : R -> ResourceExhaustionPolicy axis
+  lifecycle : R -> ResourceLifecyclePolicy axis
+
+class WebServerResources (R : Type u) [ResourceModel R]
+    extends HasResourceLimit R .residentBytes,
+            HasResourceLimit R .connections,
+            HasResourceLimit R .sockets,
+            HasResourceLimit R .requestWork where
+  requestDeadline : R -> Duration
+  responseDeadline : R -> Duration
+  fixedAfterReady : R -> Prop
+
+structure SelectedResourceSemantics
+    {R : Type u} [ResourceModel R] (resources : R) where
+  requiredAxes : FiniteKeySet ResourceAxisName
+  axes : forall axis, axis \u2208 requiredAxes -> SelectedAxisSemantics resources axis
+  capabilities : FiniteCapabilityDictionary resources
+  keysUnique : capabilities.KeysUnique
+  fromConstruction : ExactSnapshotOfConstructionCapabilities capabilities
+
+structure SpecProcess {R : Type u} [ResourceModel R]
+    (resources : R) where
+  boundary : AbstractProcessBoundary
+  State Event Command Outcome : Type
+  initial : InitialProcessRelation State Command
+  step : ProcessStepRelation State Event Command
+  terminal : ProcessTerminalRelation State Outcome
+  channels : AbstractTypedChannelFamily boundary
+  custody : AbstractLinearAndSharedStateLaws State channels
+  progress : AbstractProcessProgressContract State Event
+
+structure AbstractSpecificationProcessNetwork
+    {R : Type u} [ResourceModel R] (resources : R) where
+  RoleSchema : Type
+  finiteSchemas : Fintype RoleSchema
+  Instance : RoleSchema -> Type
+  protocol : forall schema,
+    SpecProcess resources
+  instances : forall schema,
+    Instance schema -> ProtocolInstance (protocol schema)
+  composition : AbstractNetworkCompositionLaw protocol instances
+
+inductive SpecificationBody {R : Type u} [ResourceModel R] (resources : R)
+  | relational (contract : BehaviorContract resources)
+  | processes (protocol : AbstractSpecificationProcessNetwork resources)
+
+def SpecificationBody.denotation :
+    SpecificationBody resources -> BehaviorContract resources
+  | .relational contract => contract
+  | .processes protocol => protocol.traceDenotation
+
+structure Specification {R : Type u} [ResourceModel R] (resources : R) where
+  resourceSemantics : SelectedResourceSemantics resources
+  body : SpecificationBody resources
+  bodyUsesExactly : BodyUsesSelectedResourceSemantics body resourceSemantics
+  requirements : RequirementFamily
+    resources resourceSemantics body.denotation
+
+class CapturesResourceSemanticsFor
+    {R : Type u} [ResourceModel R] (resources : R) (body : SpecificationBody resources) where
+  snapshot : SelectedResourceSemantics resources
+  exact : BodyUsesSelectedResourceSemantics body snapshot
+
+def Specification.fromBody
+    (body : SpecificationBody resources)
+    [captured : CapturesResourceSemanticsFor resources body] :
+    Specification resources :=
+  { resourceSemantics := captured.snapshot
+    body
+    bodyUsesExactly := captured.exact
+    requirements := RequirementFamily.ofBody body captured.snapshot }
+
+def Specification.ofRelational
+    (contract : BehaviorContract resources)
+    [CapturesResourceSemanticsFor resources (.relational contract)] :
+    Specification resources :=
+  Specification.fromBody (.relational contract)
+
+def Specification.ofProcesses
+    (network : AbstractSpecificationProcessNetwork resources)
+    [CapturesResourceSemanticsFor resources (.processes network)] :
+    Specification resources :=
+  Specification.fromBody (.processes network)
+
+structure RelationalSpec (resources : R) where
+  Input Output : Type
+  admits : Input -> Prop
+  relates : Input -> Output -> Prop
+  failure : RelationalFailureContract Input Output
+
+structure StreamSpec (resources : R) where
+  InputChunk OutputChunk : Type
+  relation : Stream InputChunk -> Stream OutputChunk -> Prop
+  causal : CausalStreamRelation relation
+  rechunking : OptionalRechunkingLaw relation
+
+structure TraceSpec (resources : R) where
+  State InputEvent OutputEvent : Type
+  initial : State -> Prop
+  step : State -> InputEvent -> State -> List OutputEvent -> Prop
+  progress : TraceProgressContract step
+
+structure ProtocolSpec (resources : R) where
+  SessionSchema : Type
+  SessionId : SessionSchema -> Type
+  protocol : forall schema, SessionProtocol resources (SessionId schema)
+  composition : ProtocolCompositionLaws protocol
+
+def Specification.fromRelationalSpec : RelationalSpec resources -> Specification resources
+def Specification.fromStreamSpec : StreamSpec resources -> Specification resources
+def Specification.fromTraceSpec : TraceSpec resources -> Specification resources
+def Specification.fromProtocolSpec : ProtocolSpec resources -> Specification resources
+
+theorem natural_frontends_denote_one_contract :
+  EveryNaturalSpecificationFrontendDenotesBehaviorContract
+
+structure TargetProjection
+    {R : Type u} [ResourceModel R]
+    {resources : R}
+    (spec : Specification resources)
+    (profile : PlatformProfile) where
+  project : AbstractObservation spec.behavior -> PlatformObservation profile
+  outcome : AbstractOutcome spec.behavior -> PlatformOutcome profile
+  capabilities : CapabilityProjection resources spec profile
+  faithful : ProjectionPreservesConfiguredClaims
+    resources spec project outcome capabilities
+```
+
+1. The **resource model** is an explicit selectable value whose typeclasses name
+   only the quantitative and lifecycle capabilities a specification needs over
+   extensible axes such as resident bytes, allocation capacity, handles, file
+   descriptors, threads, GPU objects, pending work, and obligations. It is
+   independent of any one application. There is no closed universal axis list or
+   god record. These typeclasses are construction-time dictionary builders.
+   `Specification.resourceSemantics` snapshots their exact, finite, uniquely
+   keyed semantic data; every downstream theorem projects from that snapshot
+   and is forbidden to rerun instance search.
+2. The **specification family** accepts that model as a parameter and may use
+   either a direct portable relation or an abstract process protocol to name
+   domain values, admitted inputs, observations, outcomes, safety, progress,
+   and functional relations under those resource semantics. Defining
+   `webServerSpec {R} [WebServerResources R] (resources : R)` once permits separate
+   microcontroller, workstation, and data-center instantiations.
+3. The **target projection** maps abstract observations, outcomes, capabilities,
+   and provider boundaries to one coherent platform/API/ISA profile. It may map
+   a logical text line to CRLF, an abstract success/failure to target exit
+   statuses, or an abstract clock to a cited platform provider. Its `faithful`
+   theorem prevents it from weakening or inventing product behavior.
+
+The precious portable program meaning is the specification **function**, not
+one selected resource value. A resource model is a reviewed build parameter:
+it is theorem-relevant and must be discharged, but replacing it instantiates the
+same program definition. Because the specification depends on the resource
+model, exhaustion, admission, backpressure, and lifecycle observations are
+stated rather than retrofitted by an external contract. A target
+projection is another reviewed selection unless the product explicitly promises
+a named target representation.
+
+Two lawful capability dictionaries over the same carrier and equal resource
+value may construct two different specification values, because their exact
+snapshots differ. Since all later certificates are indexed by the selected
+`spec`, they cannot borrow capacity, deadline, exhaustion, or lifecycle facts
+from a third ambient instance. Typeclass proof irrelevance is used only for laws
+about the captured operations, never to identify competing semantic operations.
+
+`SpecificationBody.processes` is specification language, not a selected process
+realization. It may name abstract logical roles, typed channels, linear custody,
+shared logical state, and causal ordering because those are useful ways to state
+the program. It may not name OS threads, worker implementation counts, polling
+or completion mechanisms, concrete queues/buffers/handles, layouts, registers,
+or schedulers. Its trace contract is the denotation of the same authored body,
+not a second precious specification maintained beside it.
+
+`RelationalSpec`, `StreamSpec`, `TraceSpec`, and `ProtocolSpec` are natural
+authoring front ends, not four competing semantic foundations. Batch algorithms
+normally use a relation; codecs use a causal stream relation; interactive
+applications use a transition trace; multiplexed services use session
+protocols. Their constructors elaborate to the same `SpecificationBody`
+denotation and the same observation, resource, failure, progress, refinement,
+and artifact theory. An author therefore need not invent process roles for a
+sort, while a web server can state product-significant streams and flow-control
+custody without freezing a worker topology. A convenient modality must not
+introduce a second end-to-end correctness theorem.
+
+Resource typeclasses are bounded customization surfaces with laws, not ambient
+provider selection. The resource value is passed explicitly; the instance only
+states what its type means and which theorems it supports. A sort asks for
+allocation/buffering capabilities, a Unix service may add file descriptors, a
+kernel may add pages and interrupt work, and a graphics application may add host
+bytes, device bytes, handles, and in-flight submissions. Spec-specific classes
+may extend the common axes without changing unrelated specifications.
+
+This is a semantic split, not a rule about filenames: small programs may
+colocate the layers, while corpus fixtures use `Spec.lean`, `Resource.lean`, and
+`Projection.lean` so ownership and invalidation are visible.
+
+Each layer has a separately bankable proof. Ideally a portable model proves the
+specification family for every resource model satisfying explicit premises;
+otherwise it proves named supported instances. Resource certificates establish
+those premises without target facts. A target plan
+proves projection faithfulness and provider adequacy. Assembly proves
+refinement to the projected model. The final artifact theorem composes all
+three; none is permitted to stand in for another.
+
+### Independent theorem demands and invalidation facets
+
+Functional observation is one demand, not the container for every guarantee.
+Specifications carry a finite keyed family of independently stated theorem
+demands:
+
+```lean
+inductive RequirementKind
+  | functional | safety | memory | concurrency | progress | termination
+  | resource | obligation | diagnostic | applicability | artifact
+  | extension (owner : Name) (kind : Name)
+
+structure TheoremDemand where
+  key : RequirementKey
+  kind : RequirementKind
+  statement : SpecificationContext -> Prop
+  dependencies : Finset SemanticFacet
+
+structure RequirementFamily where
+  demands : FiniteMap RequirementKey TheoremDemand
+  unique : demands.Keys.Nodup
+```
+
+`VerifiedProgram` discharges every key separately and records the semantic
+facets actually consumed by its proof. Composition may derive a new demand from
+several old ones, but it cannot conflate them into one opaque “program correct”
+field. This is the basis for surgical invalidation and for diagnostics which
+name the unmet guarantee.
+
+Grass deliberately does not freeze all future requirements into four permanent
+functional/resource/time/diagnostic buckets. Memory provenance, race freedom,
+ABI applicability, liveness, obligation custody, and exact-artifact connection
+have different composition and trust laws; placing them in a broad tuple does
+not isolate their dependencies. `RequirementKind.extension` permits new
+independent axes while stable keys and dependency facets retain locality.
+
+Product policy belongs in the precious family when it changes admitted external
+behavior. A four-connection admission limit, silence on allocation failure,
+deadline, exact newline bytes, or required fixed-after-ready storage is not
+“platform leakage” merely because an implementation must work harder to honor
+it. Conversely, worker count, `WSAPoll`, IOCP, buffer layout, provider error
+codes, and register choices remain realization or audit facts unless the product
+explicitly observes them.
 
 ## 4. Safety over prefixes
 
@@ -151,6 +446,86 @@ Safety must not depend on them. If an environment never answers a permitted
 blocking request, a program may remain at that frontier without violating local
 progress; it cannot claim conditional termination unless its assumption requires
 that response.
+
+`AbstractEnvironmentStrategy spec` is a coherent branching strategy: it
+constrains choices but denotes the complete set of abstract histories compatible
+with those choices, not one favorable run. `EnvironmentResponsive spec σ` has
+one fixed meaning in specification vocabulary. For every finite history
+reachable under `σ`, every nonterminal frontier settles with an allowed response
+on every maximal continuation compatible with `σ`, and every terminal-status
+frontier eventually produces its declared terminal observation. It grants no
+particular success result, value, schedule, or stronger functional behavior.
+A platform provider may state more concrete sufficient assumptions only by
+proving they imply this fixed predicate; it cannot redefine or strengthen the
+author's liveness premise.
+
+Responsiveness is packaged with strategy adequacy:
+
+```lean
+structure ResponsiveStrategyWitness {R : Type u} [ResourceModel R]
+    {resources : R} (spec : Specification resources) where
+  strategy : AbstractEnvironmentStrategy spec
+  adequate : StrategyAdequate strategy
+  scheduleComplete : SchedulingComplete spec strategy
+  resultComplete : FrontierComplete spec strategy
+  responsive : EnvironmentResponsive spec strategy
+```
+
+`StrategyAdequate` proves that the compatible-history set is prefix closed, the
+root/empty history is compatible, every
+reachable nonterminal history has a nonempty compatible continuation set, and
+maximal compatible executions exist. A strategy with no histories or an empty
+continuation tree is therefore not a witness, even when universal response
+clauses would otherwise be vacuous.
+
+`SchedulingComplete spec σ` states the exact timing/scheduling dimensions named
+by the liveness premise and requires every base schedule satisfying those
+constraints to have a represented compatible history. A strategy cannot select
+one favorable fair schedule and discard the other fair schedules. Schedules
+which violate the named premise remain in unrestricted safety semantics but are
+not liveness-compatible.
+
+`FrontierComplete spec σ` separately handles value nondeterminism: at every
+frontier reachable under a strategy-compatible schedule, every
+response value allowed by that frontier's law appears in the strategy tree with
+its dependent post-state. A responsive strategy may constrain only the named
+timing/scheduling dimensions used by its premise; it cannot prove termination
+by pruning success, failure, partial-result, cancellation, or other difficult
+value branches. It is prefix closed. Concrete/abstract strategy refinement
+preserves and reflects this response completeness as well as histories and
+maximality.
+
+The unrestricted execution/profile adequacy theorem—not a responsive strategy—
+proves that every API contract which permits indefinite pending has an actual
+infinite pending execution. This separation is essential: a strategy satisfying
+`EnvironmentResponsive` may rule out perpetual waiting by assumption, whereas
+the universal safety model must retain that behavior. Requiring the same
+responsive strategy both to include an infinite pending maximal branch and to
+settle every maximal branch would make the witness contradictory.
+
+Conditional liveness also carries `Nonempty (ResponsiveStrategyWitness spec)`:
+an explicit adequate coherent branching strategy witnessing that the predicate can hold
+universally across all reachable frontier kinds and compatible maximal
+continuations. This is distinct from per-request response adequacy, which need
+not assemble its individually allowed replies into one strategy, and
+from unconditional safe-pending behavior. Provider diagnostics expose the
+concrete assumptions, an inhabitant of one joint concrete provider/scheduler
+strategy, an explicit projection to its abstract branching strategy, a
+refinement coupling their complete generated-history sets, choices,
+events/frontiers/eventual-settlement facts, and responsiveness of that exact
+projection. A function that can return an unrelated abstract strategy—or
+a separately inhabited abstract strategy alone—is not enough.
+
+Strategy refinement preserves and reflects the root, continuation totality,
+maximality, scheduling completeness, and concrete-to-abstract history coverage. In particular, every
+concrete compatible maximal execution projects to an abstract compatible
+maximal execution, and every reachable concrete prefix has the coupled abstract
+prefix; empty-to-empty inclusion is insufficient.
+
+Conditional termination is universal: for every conforming execution compatible
+with a strategy satisfying `EnvironmentResponsive`, the implementation
+terminates as specified. Existence of one terminating compatible history never
+discharges the demand.
 
 ## 6. Refinement
 

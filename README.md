@@ -3,6 +3,11 @@
 Grass is a high-level, extensible assembler for building programs whose emitted
 machine code is proved safe and equivalent to a Lean specification.
 
+Its target is large, long-lived systems—games, databases, operating systems,
+compilers, graphics and storage engines—not merely small verified examples. The
+spikes pressure-test one compositional architecture intended to scale across
+those systems. See [docs/VISION.md](docs/VISION.md).
+
 The public goal is deliberately simple:
 
 ```lean
@@ -22,4 +27,7 @@ Grass is a clean-slate successor to experiments in `gasm` and `wsc`. Their code
 and ideas are spare parts, not compatibility constraints.
 
 Start review at [docs/README.md](docs/README.md).
-
+Constructive feasibility arguments for the disputed proof machinery are in
+[docs/PROOF_FEASIBILITY.md](docs/PROOF_FEASIBILITY.md).
+The comment-free expected Lean source for all five design spikes is in
+[Spikes/README.md](Spikes/README.md).

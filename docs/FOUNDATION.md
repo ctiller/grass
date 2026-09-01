@@ -2,9 +2,15 @@
 
 ## 1. Mission
 
+The scale and proof-economy priorities of this mission are fixed by
+[VISION.md](VISION.md). Grass targets large, long-lived systems such as games,
+databases, operating systems, compilers, and graphics/storage engines. Small
+programs test ceremony and the end-to-end chain; they do not justify a second
+semantic architecture which would weaken composition at system scale.
+
 Grass constructs executable programs by refining a high-level Lean
-specification into a typed control-flow graph and finally raw target
-instructions. It must prove that every permitted execution of the emitted
+specification through a reviewed replaceable process plan and typed control-flow
+graph into raw target instructions. It must prove that every permitted execution of the emitted
 artifact:
 
 - refines the passed specification under its declared observation projection;
@@ -28,6 +34,8 @@ The ordinary emission path is:
 
 ```text
 Specification
+  -> ProcessPlan with ProcessPlanRealizes
+  -> verified process driver
   -> ghost-bearing verified program
   -> proved ghost erasure
   -> RawProgram
@@ -93,6 +101,57 @@ challenge trust; they never establish a theorem.
     multi-gigabyte generated states require a reviewed exception.
 13. No private topology: published corpus and validation data contain no personal
     account paths, hostnames, device serials, or irrelevant workstation layout.
+14. Proof locality: a change to a specification field, platform plan, or basic
+    block invalidates only certificates that semantically depend on that change.
+    Generated identities do not force orthogonal re-proving, and the build
+    explains the invalidation cone.
+15. No weave leakage: only the resource-parameterized specification function is
+    precious program meaning. It may be written with abstract spec processes,
+    roles, typed channels, and linear/shared logical state. A selected resource
+    value, process realization protocol, population/state partition/channel
+    weave, and their proofs remain reviewed replaceable inputs. Physical
+    topology must never leak into a spec process.
+16. No untyped process transfer: every process channel has exact Hoare-style
+    send/receive contracts for state, occurrence identities, ownership, and
+    obligations. The send postcondition and receive precondition meet at a
+    stable in-flight escrow assertion. Every occurrence has at most one receive
+    or disposition; unrestricted pending may retain it forever, while eventual
+    resolution needs named progress assumptions. Physical communication must
+    refine those laws.
+17. One scalable algebra: serial authoring may synthesize a degenerate process
+    realization, but it may not introduce an alternate semantics or theorem
+    route. Explicit concurrent plans, flattened subsystems, and synthesized
+    serial plans share one execution, safety, liveness, and obligation model.
+18. No schedule leakage: portable process-model transitions request abstract demands;
+    occurrence identity, command DAGs, batching, routing, worker assignment, and
+    cancellation mechanism remain replaceable realization facts unless the
+    product explicitly observes them.
+19. Byte flow before framing: partial reads and writes refine one asynchronous
+    ordered-byte protocol. No parser, codec, or application may assume provider
+    call boundaries are message boundaries, and an egress retry may address only
+    the uniquely retained suffix.
+20. Quantitative compositionality: process and subgraph certificates expose
+    resource theorems. Affine transfers are not double-counted, shared storage is
+    charged according to an explicit metric law, dynamic population is bounded,
+    and finite channel capacity is enforced by transferable credit and a real
+    backpressure frontier.
+21. No unused authored source: source elaboration, ghost erasure, raw instruction
+    encoding, artifact representation, writing, loading, and decoding form one
+    exact dependent identity chain. Extensional contract equivalence cannot
+    replace an assembly author's selected instructions with another program.
+22. No live-set freshness: process generations, channel epochs, child/message
+    occurrences, and replacements are fresh over a monotone execution history;
+    stale completions never regain authority after numeric reuse.
+23. No unbanked standard algorithm proof: when a reusable implementation model
+    is selected, exact authored/generated source proves refinement to that model
+    before its once-proved specification theorem is composed. Direct extensional
+    proofs remain a deliberate first-class alternative, not an accidental default.
+24. No assembly-only product proof: the portable model or process composition
+    proves the demanded product specification independently of platform and ISA;
+    authored assembly then proves refinement to that already-verified boundary.
+    Moving operational definitions out of a precious `Spec` module is encouraged
+    when it improves minimality, but it must not erase the platform-independent
+    satisfaction theorem or force each realization to re-prove product logic.
 
 ## 5. Change policy
 
@@ -101,6 +160,12 @@ care because Lean cannot prove that they express the intended real-world claim.
 Implementations beneath them are replaceable. When a requirement changes, the
 preferred workflow is a branch, deletion of obsolete machinery, and a clean
 rebuild against the reviewed interface. Git preserves old implementations.
+
+A clean rebuild checks reproducibility after obsolete machinery is deleted; it
+is not the expected incremental invalidation cone. During ordinary development,
+the mandatory invalidation plan and build-execution report must show local
+semantic invalidation and distinguish semantic status from elaboration, kernel
+checking, generation, linking, and serialization work.
 
 Proof-to-assembly ratios are design smells, not machine gates. Straight-line
 code should normally need little local proof because libraries own reusable

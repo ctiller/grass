@@ -3,6 +3,35 @@
 **Specification** — A Lean program or relation describing accepted observations
 and functional behavior, independently of one target realization.
 
+**Behavior contract** — The portable part of a resource-parameterized specification which
+names domain values, admitted inputs, observations, outcomes, safety, progress,
+and functional relations without choosing a target representation.
+
+**Resource model** — An application-independent selectable parameter stating
+quantitative and lifecycle semantics over an extensible resource algebra,
+including but not limited to memory. A specification depends on this model.
+
+**Specification family** — The precious program definition parameterized by a
+resource model. Different selected models instantiate the same program for
+different deployment envelopes without reversing the dependency into
+`ResourceContract behavior`.
+
+**Selected resource semantics** — The finite, uniquely keyed snapshot of axis,
+limit, exhaustion, lifecycle, and named capability operations used while
+constructing one specification value. Downstream certificates recover it from
+the exact `spec`; they do not repeat typeclass selection.
+
+**Natural specification front end** — Relational, stream, trace/reactive, or
+protocol syntax suited to a problem domain and elaborating to the one common
+behavior-contract denotation. These are authoring modalities, not separate
+refinement foundations.
+
+**Target projection** — A reviewed mapping from an instantiated specification's
+abstract observations, outcomes, capabilities, and demands to one coherent
+platform/API/ISA profile, together with a theorem that the mapping preserves the
+product claims. It is replaceable unless target representation is itself
+part of the precious specification function.
+
 **Modeled execution** — The disjoint union of a conforming execution and an
 environment-violation execution. Runners may expose either.
 
@@ -21,6 +50,71 @@ projection; mandatory safety and ABI demands are never filtered away.
 
 **Requirement** — A separate theorem demand imposed downward by a specification,
 weave, provider, ABI, platform, or ISA.
+
+**Process protocol** — A portable logical state/event/demand/result relation
+for one process role. API and library operations are child process protocols.
+
+**Spec process** — A process protocol authored inside a precious specification
+body to state abstract roles, typed communication, linear/shared logical state,
+and causality. It contains no physical topology or provider identity, and its
+external trace contract is a derived denotation of the same source.
+
+**Process realization** — A reviewed replaceable model/plan/driver which proves
+refinement to a relational or process-shaped specification. Its population,
+state partition, channels, scheduling, and execution strategy are not precious.
+
+**Partial process realization** — A graph indexed by an exact process-shaped
+specification in which some finite role schemas have portable subsystem
+certificates and others remain abstract. It carries proofs and accumulated
+requirements but is not executable or emittable.
+
+**Portable blend** — Repeated local process refinement which preserves exact
+abstract boundaries and accumulates provider/resource/obligation requirements
+without claiming a target ISA or artifact.
+
+**Machine blend** — The post-projection family assigning exact heterogeneous
+machine sources and cross-ISA connections to every closed portable scope. The
+machine certificate consumes this same value and proves complete coverage.
+
+**Process plan** — A reviewed replaceable realization choice describing process
+instances/population, local and shared logical state, channels, routing,
+supervision, and composition. It proves refinement to the precious
+specification; it is not itself precious unless a detail is observably demanded.
+
+**Hoare channel** — A process channel whose send and receive transitions carry
+exact pre/post contracts for process state, message occurrence identity,
+ownership, obligations, and framed nonparticipants. Send deposits them in a
+stable in-flight escrow assertion which is the receive precondition; escrow owns
+one affine resolve token for the exact historically fresh occurrence, so it can be received or disposed at
+most once. Unrestricted pending may retain it forever.
+
+**Flattening** — Hiding a proved process network behind one process protocol
+whose private state is the logical network and whose steps are exact network
+transitions. The result may be registered as one node for fractal composition.
+
+**Serialization of a process plan** — A proved relational single-threaded
+executor preserving and reflecting the plan's complete execution behavior.
+Unlike semantic flattening, physical serialization requires branch completeness,
+commutation/linearizability, observation, obligation, and progress proofs.
+
+**Byte flow** — An ordered asynchronous byte protocol in which partial reads
+produce chunks and partial writes commit prefixes without treating provider call
+boundaries as application framing. Functional rechunking erases timing/capacity/
+cancellation cuts; full asynchronous relations preserve and map those cuts.
+
+**Resource metric** — An axis-indexed valuation of owned network resource state.
+Reachable-state invariants and explicit scope-flux/composition witnesses derive
+bounds for bytes, descriptors/handles, threads, GPU objects, work, or products.
+
+**Process independence** — A proof that two enabled network transitions have
+disjoint or commuting local/shared state, channel escrow, obligations, provider
+effects, and boundary observations. Independence yields a diamond and permits
+an adjacent syscall-trace swap.
+
+**Process loop invariant** — The derived global-loop relation combining every
+live process invariant, population, shared-access and channel laws, outstanding
+children, obligations, observations, progress state, and physical
+representation.
 
 **Obligation** — A linear ghost resource whose current holder must perform or
 lawfully transfer a future action.
@@ -46,6 +140,13 @@ authority. A count may be derived; identities are authoritative.
 **Frontier** — A law-bearing protocol state that performs a specification-level
 interaction or transfers agency to a named environment/context. A label, no-op,
 or immediately returning synthetic yield is not a frontier by itself.
+
+**Cancellation summary** — Optional compositional metadata describing a
+process's safe cancellation points, custody of an affine pending request,
+progress/delay premises, and exact terminal disposition. Ordinary serial
+functions need no richer cancellation proof; explicit combinators derive
+stronger summaries under sequencing, choice, loops, parallel composition, and
+supervision.
 
 **Connection theorem** — A proof that two adjacent representations describe the
 same permitted behavior, especially that emitted bytes decode/load to the raw

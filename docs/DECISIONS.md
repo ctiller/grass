@@ -3,6 +3,13 @@
 This file records decisions already accepted for the initial implementation.
 Normative owners take precedence if wording is later incorporated there.
 
+Spike-driven revision, 2026-09-01: the six refinement acts are ordered proof
+concerns, not a mandatory sequential storage pipeline. Generated lowering and
+first-class authored assembly are equal routes from a realized platform
+contract. Basic-block entry/exit contracts are the reusable local proof
+boundary. This preserves the proof ordering without forcing authored assembly
+to imitate compiler-selected storage or CFG structure.
+
 1. `emitProgram : VerifiedProgram spec -> ByteArray` is the verified gate.
 2. Functional refinement and platform/ISA safety are separate certificate fields.
 3. Normative execution semantics is relational; an oracle-driven runner selects
@@ -54,9 +61,11 @@ Normative owners take precedence if wording is later incorporated there.
     allocation identity and proves `Represents` rather than sharing extensional
     equality with the logical value.
 27. Every verified artifact proves non-vacuous loadability for all admissible
-    bases/import environments; those domains have independent inhabitants and
-    every loader result is a valid initial state. Every profile proves nonempty
-    execution and response-or-pending domains.
+    execution-context/base/import triples. The context, base, and import domains
+    each have a separately named independent inhabitant; tuple inhabitation may
+    not define one domain in terms of another. Every loader result is a valid
+    initial state for the exact context. Every profile proves nonempty execution
+    and response-or-pending domains.
 28. Environment-contract violations receive assurance only through the maximal
     matched safe prefix before the first violation; no post-violation functional
     or cleanup claim is made.
@@ -72,6 +81,321 @@ Normative owners take precedence if wording is later incorporated there.
 32. Standard-library dependencies are stratified as `Core -> Std.Logical ->
     Semantics/Memory/Obligation -> Std.Owned`; lower ownership models never
     import their physical container specializations.
+33. Conditional `environmentResponsive` has a fixed specification-level meaning.
+    Each selected provider plan supplies an inhabited coherent concrete
+    provider/scheduler strategy, projects its abstract branching strategy, and
+    proves a refinement coupling their complete compatible-history sets;
+    separately inhabited assumptions or an uncoupled function are insufficient.
+34. Abstract terminal-status providers prove preservation, reflection,
+    distinguishability on the demanded subset, and terminal/resource fidelity.
+35. Runtime containment after an environment-contract violation is an explicit
+    assembly implementation policy. It is not required for the conforming
+    theorem and may be omitted by an optimized implementation.
+36. Standard total outcome/status policy builders and CFG slice-consumer
+    invariants own routine proof ceremony while leaving policy distinctions,
+    registers, loop measures, and arbitrary custom assembly author-controlled.
+37. Responsiveness is universal over every maximal continuation compatible with
+    a coherent branching strategy. Concrete/abstract strategy refinement couples
+    complete generated-history sets; one favorable history is insufficient.
+38. Post-environment-violation containment requires a result-indexed typed return
+    envelope proving exactly the surviving ABI, memory, loan, and frame facts.
+    Arbitrary memory/control/ABI violations have no typed continuation.
+39. Terminal reflection is program-relative: it ranges only over events
+    independently reachable from the specification's demanded terminal requests,
+    not every status supported by a reusable provider.
+40. Spike programs separate a functional architecture milestone from broader
+    product profiles. Spike 2 is explicitly an in-memory, bytewise, LF-normalizing
+    stable sort for a declared I/O provider; external spilling, locale collation,
+    stderr diagnostics, and adaptive overlapped Win32 I/O are product extensions,
+    not facts hidden to shorten a proof. Each extension should preserve the
+    minimal portable core when its semantics permit that reuse.
+41. Physical struct layout is a reviewed construction choice. Standard layout
+    machinery derives offsets, sizes, bounds, and representation lemmas, but it
+    neither hides memory-footprint choices nor generates an assembly author's
+    loads, stores, and indexing strategy.
+42. End-to-end spike documents flow completely through their machine-language
+    artifacts and exact emission. Contracts remain essential proof boundaries,
+    but cannot replace undisplayed assembly helper bodies; a proved macro is
+    acceptable only when its transparent expansion is present and auditable.
+43. Infinite-pending existence belongs to the unrestricted execution/profile
+    adequacy theorem used by universal safety. Adequacy of a strategy assumed
+    responsive requires a nonempty rooted total strategy tree and maximal
+    executions, but does not require that tree to retain a perpetually pending
+    branch that would contradict universal settlement.
+44. Portable programs use a small process-machine abstraction: pure logical
+    state transitions consume typed external/correlated-response events and
+    produce occurrence-free abstract demand multisets, finite logical observation
+    segments, and an optional pure desired-view facet. Observation history is
+    not duplicated in process state. Demand identities, routing, order, batching,
+    and scheduling belong to the replaceable realization.
+    Only verified driver commit transitions affect platform resources or append
+    physical observations. This is React-shaped proof economy, not a model of
+    React runtime semantics.
+45. The primary portable model is a process topology and logical state ownership
+    graph during realization: process kinds/instances, local state, explicitly
+    shared regions, spawn/cancel/supervision relations, and typed event channels.
+    Only the resource-parameterized portable specification function is precious
+    program identity; it may contain abstract spec-process protocols. Selected
+    resource models, realization protocols, their proofs, and the exact
+    `ProcessPlan` weave are reviewed
+    replaceable construction inputs which prove those contracts. External or
+    independently pending API/library computations are child process protocols;
+    frontier-free serial functions remain local Hoare calls. Callbacks, monadic
+    sequencing, and parallel weaving are compositions or realizations of this
+    one model.
+46. Process channels carry Hoare-style send/receive contracts over sender,
+    receiver, shared logical state, message occurrence identity, ownership, and
+    obligations. Send places the exact occurrence and transfers in stable
+    in-flight escrow with one affine resolve token. Receive or disposition may
+    consume it at most once; unrestricted pending may retain it forever, and
+    eventual resolution requires named progress assumptions. They are the high-level peer of typed CFG edges; platform queues,
+    callbacks, API completions, synchronization, and direct control flow must
+    refine their exact pre/post transfers.
+47. `ProcessSpec` emits occurrence-free abstract demand sets, not command DAGs.
+    Fresh identities, dependency order, batching, routing, supervision, and
+    cancellation mechanism belong to the replaceable process realization.
+48. Grass has one process algebra, not separate sequential and concurrent
+    semantics. Sequential relational programs are normalized by a proved
+    `SequentialAdapter`; explicit plans use the same `ProcessRealization` and
+    driver theorems. The adapter plan is generated, inspectable scaffolding and
+    is absent from the small-program author surface.
+49. A proved process network can be flattened behind one process protocol and
+    registered fractally as a child of another network. Flattening the canonical
+    sequential adapter round-trips up to complete execution bisimulation.
+    Physically serializing a genuinely concurrent plan additionally requires a
+    `SerializablePlan` scheduler/commutation/progress proof.
+50. Independence and syscall-trace commutation are proved before flattening.
+    Disjoint process/channel/obligation footprints and commuting provider/
+    observation effects yield a diamond; physical traces which linearize the
+    same process partial order are strongly equivalent.
+51. Partial I/O is modeled through asynchronous ordered byte-flow protocols.
+    Positive reads produce nonempty chunks; positive writes commit exact prefixes
+    and retain the unique suffix. Rechunking is irrelevant only under the named
+    completed functional projection and for `ChunkExtensional` consumers;
+    capacity, timing, resource, partial-prefix, and cancellation cuts use a
+    stronger mapped relation. EOF, pending/readiness, failure, cancellation, and
+    close remain distinct. Blocking and asynchronous APIs refine this same model.
+52. Process plans support compositional quantitative theorem extraction. Resource
+    metrics account for local state, shared regions, dynamic descendants, channel
+    escrow, obligations, and physical layout. Capacity credit is affine channel
+    state, so proved finite memory bounds force backpressure instead of assuming
+    it. Metrics are not memory-specific: file descriptors, handles, sockets,
+    threads, GPU resources, pending work, obligations, and products of axes use
+    explicit sum, maximum, shared-once, or transfer composition laws.
+53. A standard specification constructor may expose one uniquely selected
+    `StandardSequentialRealization` through exact lookup in a named closed
+    registry, allowing `verify_assembly plan with source` without
+    application-maintained relational scaffolding. This is recorded
+    proof-strategy inference normalized into the universal process algebra;
+    provider selection remains explicit, absence or ambiguity is rejected, open
+    typeclass priority is prohibited, and novel relational programs retain an
+    explicit `using` form.
+54. `VerifiedProgram` retains exact source elaboration, exact ghost erasure, and
+    exact raw-instruction encoding witnesses before artifact representation.
+    First-class authored assembly is an identity claim in addition to a
+    behavioral refinement claim.
+55. Serialization bisimulation is justified only by an execution-complete
+    relational serial scheduler in both directions, including every result,
+    lifecycle, maximal execution, observation, and obligation behavior.
+    Conditional fairness is separate; overlapping operations require explicit
+    linearizability. A deterministic scheduler normally proves refinement only.
+56. Process-run semantics owns a linear outstanding abstract-demand bag.
+    Realization-private occurrences erase bijectively to its live multiplicity;
+    results and interruptions consume exactly one item and terminal states
+    classify every remainder. Internal child occurrences are parent-local and
+    only selected root occurrences project to the driver boundary.
+57. Nominal identity freshness ranges over a monotone execution-prefix history,
+    not the current live set. Resolve tokens are owned escrow assertions.
+    Ordinary success/failure/termination and close are explicit lifecycle
+    transitions distinct from death.
+58. Resource bounds are reachable-state invariants over an owned resource
+    algebra. Scope extraction includes lineage and temporal boundary flux;
+    composition requires explicit disjointness, overlap attribution, phase
+    exclusion, and cross-edge equations. Channel credit charges positive slots,
+    payload and physical records and transfers retained payload cost to receivers.
+59. Certificate lookup uses a Merkle locator over normalized theorem type,
+    transitive semantic facets, profile, verifier/generator, toolchain/kernel
+    options, and axiom-audit policy. Applicability is then kernel-checked against
+    actual canonical content, theorem types and imported declaration identities;
+    hashes are no logical evidence. Manifests compose hierarchically from measured
+    shards; leaf work is proportional to Merkle depth and impact cone.
+60. Reusable algorithm correctness is banked at an explicit Lean implementation
+    model boundary, with a separate exact assembly/representation refinement.
+    Custom assembly may refine that model, another proved model, or deliberately
+    pay for a direct extensional proof.
+61. Grass optimizes its theorem architecture for large, long-lived systems:
+    games, databases, operating systems, compilers, graphics and storage engines.
+    Bounded generated/internal ceremony for trivial programs is acceptable when
+    it preserves one scalable composition law; author-facing routine ceremony
+    remains a proof-economy defect to remove transparently. Spikes are pressure
+    tests with declared product scope, not the project's objective function.
+62. A terminating serial function with a local Hoare/footprint/obligation/
+    resource contract may be called directly inside a process transition and
+    realized by an ordinary ABI call. It does not become a child process merely
+    because it is a call. External entropy, pending, independent cancellation,
+    custodian transfer, or observable interleaving crosses a process frontier.
+    A suitably serialized frontier-free process graph may export the same kind
+    of callable contract.
+63. Specification guarantees are a finite keyed family of independent theorem
+    demands with explicit semantic dependency facets. Grass rejects a fixed
+    four-bucket correctness tuple: functional, memory, concurrency, liveness,
+    resource, obligation, applicability, diagnostic, and artifact demands have
+    different composition laws, and future axes must be extensible without a
+    semantic fork.
+64. Cube rotation is a function of portable monotonic elapsed time and a
+    specified angular velocity, not frame count. The Win32 realization samples
+    `QueryPerformanceCounter` through the selected clock provider; refresh rate,
+    coalescing, and GPU latency may change which frames appear but not angular
+    velocity.
+65. A disputed library mechanism requires a constructive proof sketch naming
+    caller premises, induction/simulation cases, automation boundary,
+    falsification fixture, and fallback. `PROOF_FEASIBILITY.md` owns these
+    arguments. Neither “standard” nor “proof fantasy” is a sufficient verdict.
+66. A certified assembly macro is a separately checked sub-CFG whose theorem is
+    indexed by its exact transparent expansion. Parent modules may retain the
+    invocation plus expansion identity and consume the contract; audit tooling
+    must make the expanded raw listing available, but need not textually inline
+    it into every parent Lean module. A bare call or instruction sequence is
+    never silently rewritten.
+67. Performance numbers, throughput ratios, GPU utilization, build-memory
+    projections, and invalidation latencies require reproducible measurements on
+    identified artifacts and hardware. Uncited estimates neither justify an
+    architecture change nor excuse a poor implementation. The first five spikes
+    establish proof shape; optimized scalar/SIMD, IOCP, multi-frame, and dynamic
+    codec realizations are required later scale milestones and refine the same
+    specifications where their behavior matches.
+68. A policy is precious exactly when changing it changes admitted product
+    behavior or a demanded guarantee. Exact output bytes, silence on resource
+    exhaustion, connection admission bounds, deadlines, and fixed-after-ready
+    storage may therefore be precious. OS worker count, polling/completion
+    mechanism, buffer layout, and provider diagnostic codes remain replaceable
+    unless separately observed.
+69. Product correctness is proved at the portable specification/model level and
+    reused by concrete realizations. Assembly proves an adjacent refinement to
+    that already-proved model, and exact emission connects the resulting source
+    to loaded bytes. Grass rejects a “zero proof at specification level” rule:
+    operational state may move out of the precious `Spec` module, but eliminating
+    the platform-independent satisfaction theorem would duplicate product
+    reasoning across implementations and make local optimization globally
+    invalidating. Direct assembly-to-specification proofs remain an explicit
+    first-class escape hatch for novel implementations, not the default shape.
+70. The configured program boundary is tripartite with a directed dependency: a
+    reviewed selectable resource model is a parameter to the precious portable
+    specification function, and a faithful target projection consumes the
+    resulting instance. Grass rejects the inverse `ResourceContract behavior`
+    shape. Microcontroller and data-center models instantiate the same program
+    definition; exhaustion, admission, backpressure, and lifecycle behavior are
+    explicit in each instance. Resource theorem keys and invalidation facets
+    remain independent. The reviewed replaceable projection
+    maps abstract observations, outcomes, capabilities, and provider demands to
+    one coherent platform/API/ISA profile; it must prove preservation and may
+    not weaken product policy. It becomes precious only where the product
+    explicitly promises the target representation itself.
+71. The process lens is the canonical causal and compositional proof model, but
+    its private operational state belongs to a replaceable Act 1 model/process
+    module rather than the precious specification function. It exports a small
+    portable satisfaction/boundary theorem connecting every observation to its
+    generating transition. Serial functions and basic blocks refine individual
+    steps through local Hoare/CFG contracts. Concurrent weave invariants are
+    independent frameable families; an aggregate closing record is a thin
+    facade, not one monolithic induction reopened by unrelated changes.
+72. Resource models are explicit values with stratified, law-bearing typeclass
+    capabilities, not one closed universal record and not ambient provider
+    selection. Each specification quantifies over only the axes and bounded
+    customizations it needs; domain-specific classes may add file descriptors,
+    pages, interrupt work, GPU objects, or other axes. The specification depends
+    on that resource value, while the selected platform later proves it realizes
+    the exact value and laws used upstream.
+73. A precious specification body may be relational or process-shaped. A spec
+    process is an abstract protocol role with typed channels, linear/shared
+    logical state, and causal laws; its external trace contract is a derived
+    denotation of that same source. It contains no OS threads, physical worker
+    count, scheduler, polling/completion mechanism, concrete buffer/handle,
+    layout, or ISA identity. Spec processes are distinct from the replaceable
+    `ProcessRealization`: serialized, reactor, worker-pool, callback, and device
+    topologies may all refine the same abstract process specification.
+74. Refinement acts apply locally and fractally, not as whole-program phase
+    barriers. A typed refinement lens may replace one role/subgraph while
+    preserving its observation causality, channel, custody, obligation,
+    resource-flux, and progress boundary and framing all nonselected processes.
+    It may introduce a finite requirement delta. Subsystems may therefore sit at
+    different abstraction depths—such as Vulkan graphics beside abstract disk
+    I/O—until later local proofs lower them. `VerifiedProgram` closure requires
+    all frontiers discharged and one coherent accumulated provider environment.
+75. `ProcessRealization.blend` composes independently refined and still-abstract
+    spec-process roles at exact exported boundaries. A subsystem certificate
+    seals its portable implementation while exporting
+    refinement, requirement delta, observation causality, custody, resource, and
+    progress facts. Mixed graphs support parallel proof construction but are not
+    emittable. Execution requires a proved realization, including for mocks;
+    `VerifiedProgram` accepts only a complete coherent portable blend followed
+    by an exact post-projection machine blend covering every closed scope.
+    Machine artifacts never appear before the platform/ABI/ISA environment
+    exists and cannot disappear before the final machine certificate.
+    Cross-subsystem
+    reuse is mandatory when a changed implementation preserves its boundary,
+    not when the boundary itself changes.
+76. The resource value is explicit at precious specification construction and
+    becomes an implicit dependent index downstream. Thus an author writes
+    `def spec : Specification resources := ...` and later
+    `VerifiedProgram spec`, not a second ambient resource selection. Resource
+    typeclasses expose bounded construction operations and laws; the resulting
+    exact semantic dictionary is captured in `spec`, never reselected
+    downstream, and no resource class chooses a platform provider.
+77. Relational, stream, trace/reactive, and protocol syntax are first-class
+    authoring front ends to one specification denotation, not independent
+    semantic towers. Sort and gzip use relational/stream-shaped meaning without
+    invented pipeline actors; interactive and multiplexed systems may use
+    product-significant processes or sessions. Every front end feeds the same
+    refinement and exact-artifact theorem.
+78. Resource capability typeclasses are construction-time builders. A
+    `Specification` snapshots the exact finite, uniquely keyed semantic
+    dictionary used to construct it; all downstream proofs project from that
+    value. Competing lawful instances over the same carrier cannot lend limits,
+    deadlines, exhaustion, or lifecycle facts to the selected `spec`.
+79. Local well-founded ranks do not replace infinite reactive semantics. They
+    rule out unbounded internal stuttering between visible steps; productive
+    coinduction, divergence reflection, explicit environment frontiers, and a
+    concrete-to-abstract fairness projection establish maximal infinite
+    behavior. An inductive OS-settlement premise alone would silently assume the
+    liveness fact being proved.
+80. The multi-file spike corpus is an audit fixture, not a mandatory per-program
+    authoring ceremony. Public closing syntax may co-locate resource selection,
+    projection, plan, assembly, and emission and generate closure/artifact
+    certificates. Physical modules are selected by measured elaboration and
+    caching boundaries; neither one file per basic block nor a fixed three-file
+    layout is normative.
+81. Optimized assembly is a required acceptance axis. Scalar reference models
+    remain useful, but SIMD, carryless-polynomial, atomic, and other tuned
+    kernels must be able to prove local extensional step equivalence using
+    kernel-checked reflection such as `bv_decide` or separately checked proof
+    certificates. An optimization does not need to adopt a compiler-like DSL;
+    literal instructions and transparent parameterized macros remain peers.
+82. Long-running spikes must prove resource recycling and steady-state bounds,
+    not rely on process-exit adoption. Rings, generational pools, arenas, and
+    ordinary alloc/free chains are library candidates rather than a closed
+    allocator trinity. Each selected realization proves its own infinite-trace
+    conservation and terminal disposition against the resource axes demanded by
+    its specification.
+83. Grass mines Erlang/OTP for typed signal order, selective receive,
+    correlated calls, monitors, links, supervision strategies, restart
+    intensity, postponed events, timeout races, and explicit version handoff;
+    it does not adopt BEAM execution semantics. Ordinary terminal safety stays
+    in the base process proof; cancellation, bounded shutdown, restart, and
+    upgrade promises attach opt-in typed termination facets naming safe points,
+    causes, custody disposition, cooperative progress premises, and escalation.
+    “Let it crash,” unbounded
+    mailboxes, scheduler reductions, and arbitrary forced thread death never
+    discharge safety, resources, or obligations.
+84. Cancellation policies form an optional compositional algebra. An ordinary
+    serial function is an uncancellable segment with no extra author field;
+    cancellation points and interruptible calls are explicit combinators.
+    Sequencing conserves a pending affine cancellation occurrence and computes
+    safe points, delay premises, and terminal custody. Branches weaken to common
+    guarantees, loops require a point on every fair continuing cycle or an
+    independent termination proof, and flattening preserves the summary. Thus
+    `uncancellable |> cancelpoint |> uncancellable` has a derived policy, while
+    a forever-blocking segment cannot falsely acquire eventual cancellation.
 
 ## Explicitly rejected shortcuts
 
@@ -86,3 +410,9 @@ Normative owners take precedence if wording is later incorporated there.
 - accepting undecodable indirect control flow as safe;
 - relying on emulator/fuzzer agreement as proof;
 - silently considering obligations discharged on process failure.
+- restricting process graphs to physically concurrent code and allowing serial
+  subsystems to end on a separate semantics. This would duplicate boundary,
+  failure, liveness, obligation, and resource theories and make later parallel
+  composition a rewrite. Serial CFG proofs remain local Hoare proofs, while a
+  generated/cached adapter and proved serialization remove author and runtime
+  ceremony without creating a semantic fork.

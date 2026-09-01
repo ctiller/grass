@@ -189,10 +189,43 @@ Theorems are factored into logical sequence laws, generic representation laws,
 and allocator/profile realization laws. User code should not re-prove physical
 buffer invariants for routine vector use.
 
+The ownership proof layer supplies checked `grass_frame` and `grass_loan`
+automation for routine disjoint framing, loan split/join, unchanged-buffer
+transport, and exact loan reconstruction at calls. Diagnostics show the tokens
+consumed and returned. Ambiguous aliasing, unusual transfer, or a changed
+resource remains an explicit goal; automation may not invent separation.
+
+Whole-element transfers between disjoint `OwnedVec`/`StructLayout` regions
+derive occurrence, permutation, and initialization transport from the proved
+physical copy. The theorem is instruction-shape independent: scalar, vector,
+and macro-expanded copies instantiate the same footprint relation. Overlap,
+partial representation writes, or unusual aliasing remains author-supplied.
+
+`OwnedVec` interior access has two explicit shapes. A `PinLoan` makes live
+machine pointers legal and disables reallocation until returned. An `OffsetRef`
+retains a stable logical position without physical read authority; successful
+reallocation returns a `RebaseMap` which converts valid offsets to fresh-buffer
+pointers and transports their initialized occurrence facts. Neither route lets
+an old raw pointer survive a generative buffer change.
+
 ## 6. Standard-library shape
 
 The planned library is layered and demand-driven. Pure shapes live in
 `Std.Logical`; resource-bearing realizations live in `Std.Owned`:
+
+### Process and cancellation combinators
+
+Routine serial functions lower as uncancellable process segments without a new
+author proof. Reusable `cancelPoint`, `interruptibleCall`,
+`withCancellationMask`, `sequence`, `choice`, `loop`, `parallel`, and supervisor
+combinators calculate `CancellationSummary` values and export opt-in
+`TerminationFacet` instances when their premises are met. The library proves
+sequencing associativity, affine pending-request conservation, branch
+weakening, loop safe-point coverage, flattening preservation, and standard
+deadline/escalation laws once. An interruptible foreign call is available only
+when its provider contract names the interrupt operation, race outcomes,
+returned custody, and late-result handling; it is never inferred from an
+ordinary blocking call.
 
 ### Algebraic values
 
@@ -204,6 +237,11 @@ bounded indices, and explicit error types.
 Persistent `List`, contiguous `Vec`, borrowed `Slice`, `NonEmpty`, `ByteArray`,
 and encoding-indexed `String`/text views. Text encoding is explicit at binary and
 API boundaries.
+
+UTF-8 conversion of a literal used as a logical constant reduces during kernel
+elaboration to the canonical `Vec Byte`, so consumers reason directly about its
+bytes and derive its length. Runtime or nonliteral conversion uses the ordinary
+law-bearing encoding API and does not borrow this definitional shortcut.
 
 ### Associative and ordered structures
 
@@ -223,3 +261,98 @@ memory and obligation models rather than inventing library-local ownership.
 
 Only structures demanded by a milestone are implemented, but their common
 interfaces and proof package are reviewed before consumers proliferate.
+
+### Physical struct layouts
+
+`StructLayout` describes an ordered physical field sequence, field widths,
+alignment, padding policy, and total size. A reviewed layout declaration derives
+named field offsets, `sizeof`/alignment theorems, checked array-size arithmetic,
+and indexed-address lemmas. It does not choose a program's fields or synthesize
+its loads and stores. `OwnedVec` may use a `StructLayout` representation theorem
+to connect physical elements to logical values while preserving distinct
+allocation and occurrence identities.
+
+For C-ABI records, a transparent `init layout { field := value, ... }` assembly
+form may zero the complete object representation and then store the named
+nonzero fields. Its expansion is a literal `rep stos*`/store CFG with declared
+clobbers; layout proofs establish offsets, padding, initialization, and
+non-overlap. The author still chooses every semantic field and may replace the
+expansion with hand-tuned literal stores. The form cannot hide allocation,
+control flow, API calls, ownership transfer, or an omitted required field.
+
+Layout writers and readers obey the corpus serialization laws: writing a
+represented value then reading at the same layout returns it exactly, and every
+successful read denotes a value allowed by the layout specification. Padding is
+never silently treated as initialized semantic data.
+
+### Effect-policy builders
+
+Reusable total policy values remove boundary boilerplate without inventing
+catch-all behavior. `CliWritePolicy.distinctStatuses` covers success,
+unavailable, failed-after-prefix, and zero-progress outcomes with author-chosen
+statuses. `CliWritePolicy.successOrFailure` deliberately collapses those failure
+classes when the specification does not observe the distinction. Both builders
+are total over the closed standard effect outcome; extending that outcome forces
+the builder and every boundary using it to be reviewed.
+
+Named convenience specifications may pair a standard policy with a standard
+liveness intent, for example `CliSpec.writeStdoutResponsive`. Their names expose
+the choice and their definitions transparently expand to the ordinary effect,
+policy, and liveness fields. Grass does not silently add outcome or liveness
+policy merely because an effect was mentioned; applications may use the named
+builder or spell bespoke policy as this spike does.
+
+Failure policy can remain binary, map abstract failure classes to structured
+application errors/status values, or demand selected provider diagnostics. The
+complete audit trace always retains modeled provider causes. Observing
+`GetLastError`, `errno`, an HRESULT, or another provider detail is itself an
+explicit demand/API operation with all returned values and assembly paths; it is
+never conjured by a status macro. Thus production diagnostics are author-
+controlled without forcing Hello's minimal public specification to preserve a
+platform taxonomy.
+
+Machine-state templates such as `SliceConsumerInvariant` live in the CFG proof
+library rather than `Std.Logical`: the pure library owns ordered-sequence and
+slice laws, while the CFG layer connects those laws to selected registers,
+pointers, provenance, and loans.
+
+### Process composition and flattening
+
+`Std.Process` owns reusable protocol registries, sequential adapters, Hoare
+channel patterns, bounded pipelines, worker pools, ring buffers, supervision,
+strategy combinators, graph flattening, serial schedulers, and independence/
+commutation theorems. Canonical physical representation packages include fixed
+worker pools, bounded rings, poll sets, and handle tables; each connects exact
+logical occurrences/escrows to physical records and obligations.
+
+`Std.Process.ByteFlow` owns asynchronous ingress and egress protocols. Positive
+partial reads produce nonempty ordered chunks; parsers consume their
+concatenation independent of chunk boundaries. Positive partial writes commit
+exact prefixes and retain the unique unwritten suffix. EOF, pending/readiness,
+failure, cancellation, and close are distinct lifecycle events. Its standard
+proofs provide completed functional rechunk projection for `ChunkExtensional`
+consumers, mapped-cut/capacity relations for asynchronous behavior, prefix
+conservation, bounded backpressure, exact terminal disposition, and adapters for blocking calls,
+overlapped completion, readiness polling, files, pipes, consoles, and sockets.
+Framing and decoding belong above this byte channel rather than inside a
+platform provider.
+
+`Std.Process.Resource` owns compositional metrics, capacity-credit channels,
+subgraph theorem extraction, and sum/maximum/transfer rules. It derives bounds
+for a process together with all of its dynamic descendants, counts shared
+regions once, and connects logical holdings to exact physical layout overhead.
+Bounded pipeline, worker-pool, parser, codec, and server combinators carry these
+certificates, so changing a channel capacity or population bound recomputes the
+whole-graph peak instead of reopening every transition proof.
+Metrics are generic and product-composable: standard axes cover bytes, Unix file
+descriptors, Windows handles, sockets, threads, GPU resources, pending work, and
+obligations, with separate provider representation theorems and per-axis
+composition laws.
+
+Parser/compiler combinators cover token streams, bounded lookahead,
+lexer-parser fusion, structured error/recovery propagation, pass pipelines, and
+extensional pass replacement. These constructs build process proof graphs; the
+`flatten_correct` and `SerializablePlan` theorems can erase the runtime process
+architecture entirely before CFG lowering. Libraries must not require a parser,
+compiler, or codec to execute as actors merely because it was proved through a
+process graph.

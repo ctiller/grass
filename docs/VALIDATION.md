@@ -109,3 +109,19 @@ Published-corpus lint rejects user-profile absolute paths, account names,
 hostnames, device serials, credentials, and private workstation topology.
 Validation environments use anonymized stable profile IDs and include only
 hardware attributes technically required to interpret results.
+
+CI also validates the mandatory `InvalidationPlan` and `BuildExecutionReport` owned by
+[REFINEMENT.md](REFINEMENT.md). Each change-matrix row in Spike 1 and later
+milestones has a fixture that mutates only the named reviewed input and asserts
+the expected semantic statuses, action sets, and required-reuse subjects.
+Unexplained invalidation, re-execution of an unrelated local proof, a missing
+causal dependency, or a false reuse is rejection. Reports are retained as small
+build artifacts; they may not require a monolithic proof-state snapshot.
+Each reviewed module's `LocalityContract` is checked against those reports;
+changing a leaf block while touching a forbidden unrelated consumer is a CI
+failure even if the full rebuild eventually succeeds.
+Periodic clean uncached and differential reconstructions verify the incremental
+engine's reuse claims and cache-key sufficiency.
+
+Published-corpus lint also rejects audience/workstation idioms used as evidence,
+including “worked on my machine,” in addition to literal private topology.

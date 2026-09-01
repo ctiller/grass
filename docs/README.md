@@ -22,12 +22,14 @@ No document may override a narrower owner by restating it differently.
 
 | Document | Owns |
 |---|---|
+| [VISION.md](VISION.md) | large-system target, proof-economy priorities, spike interpretation |
 | [FOUNDATION.md](FOUNDATION.md) | mission, trust boundary, repository laws |
 | [SEMANTICS.md](SEMANTICS.md) | executions, nondeterminism, observations, safety, progress, liveness |
+| [PROCESS.md](PROCESS.md) | portable state/event/demand/view processes, networks, channels, flattening, resources, and driver boundary |
 | [VERIFIED_PROGRAM.md](VERIFIED_PROGRAM.md) | the public certificate and emission gate |
 | [MEMORY_MODEL.md](MEMORY_MODEL.md) | memory, provenance, borrowing, concurrency, faults |
 | [OBLIGATIONS.md](OBLIGATIONS.md) | linear obligations, transfer, exit dispositions |
-| [REFINEMENT.md](REFINEMENT.md) | the six refinement acts, weaving, provider realization, CFG lowering |
+| [REFINEMENT.md](REFINEMENT.md) | refinement proof concerns, weaving, provider realization, generated/authored machine routes |
 | [INSTRUCTIONS.md](INSTRUCTIONS.md) | extensible operations, ghost erasure, raw instructions, ISA profiles |
 | [PLATFORM_ABI.md](PLATFORM_ABI.md) | platform plans, APIs, ABIs, Win32 x64 baseline |
 | [ARTIFACTS.md](ARTIFACTS.md) | parsers, writers, PE/COFF, relocation, connection theorems |
@@ -36,7 +38,26 @@ No document may override a narrower owner by restating it differently.
 
 ## Review and delivery
 
-- [HELLO_WORLD.md](HELLO_WORLD.md) defines the first acceptance artifact.
+- [VISION.md](VISION.md) explains the large-system objective and the tradeoffs
+  against which spike proof economy is judged.
+- [PROOF_FEASIBILITY.md](PROOF_FEASIBILITY.md) gives constructive proof sketches,
+  automation limits, falsification fixtures, and fallbacks for mechanisms
+  challenged as implausible.
+- [HELLO_WORLD.md](HELLO_WORLD.md) defines the first acceptance milestone.
+- [SPIKE_1.md](SPIKE_1.md) is its annotated proof from portable specification to
+  emitted Win32 PE bytes.
+- [SORT.md](SORT.md) defines the second acceptance milestone.
+- [SPIKE_2.md](SPIKE_2.md) is the annotated proof proposal for an in-memory stable,
+  allocation-aware stdin byte-line sort.
+- [GZIP.md](GZIP.md) and [SPIKE_3.md](SPIKE_3.md) define and fully lower the
+  bounded-memory streaming gzip milestone.
+- [WEB_SERVER.md](WEB_SERVER.md) and [SPIKE_4.md](SPIKE_4.md) define and fully
+  lower the cancellable multiplexed in-memory cleartext HTTP/2 server milestone.
+- [CUBE.md](CUBE.md) and [SPIKE_5.md](SPIKE_5.md) define and fully lower the
+  Win32/Vulkan/SPIR-V spinning-cube composition milestone.
+- [../Spikes/README.md](../Spikes/README.md) indexes the matching comment-free
+  expected Lean source files, including final PE emission and connection
+  theorems. They are design fixtures until the Grass libraries are implemented.
 - [MODULES.md](MODULES.md) proposes a dependency-safe Lean/project structure.
 - [REVIEW.md](REVIEW.md) is the adversarial review protocol and sign-off form.
 - [DECISIONS.md](DECISIONS.md) records settled choices and rejected shortcuts.

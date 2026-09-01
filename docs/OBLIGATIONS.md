@@ -14,6 +14,13 @@ Examples include unlock-after-lock, restore-interrupt-state, release allocation,
 finish/abort transaction, join/detach thread, restore ABI state, complete partial
 I/O, and return borrowed authority.
 
+At process level, Hoare channel sends and child-process lifecycle transitions
+are obligation-transfer boundaries. A send postcondition names which obligations
+remain with the sender, move with the exact message occurrence, or are created
+for supervision/cancellation. Receive consumes that occurrence and reconstructs
+the receiver's exact ledger. Driver lowering proves the physical
+queue/callback/API path implements the same transfer.
+
 ## 2. Ledger law
 
 Every semantic transition states how it transforms the ledger. It may preserve,

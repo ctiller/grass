@@ -11,6 +11,12 @@ operations, and external calls declare memory events through one sealed access
 interface. Raw mutation of memory bytes, initialization, permissions,
 provenance, or race state outside that interface is prohibited.
 
+Process-local and shared state in a `ProcessPlan` is logical ownership, not
+physical provenance. A driver realization proves how that state graph maps to
+allocations, regions, loans, atomics, synchronization, and race freedom. A Hoare
+channel transfer moves logical ownership only when its lowering transfers the
+corresponding physical authority and obligations exactly once.
+
 An access declares at least:
 
 - address expression and byte range;
@@ -108,6 +114,30 @@ Moving a typed object within one arena may preserve provenance. Moving across
 arenas requires a deep copy, a modeled ownership transfer, or another explicit
 proof. Untyped attachment is unsafe until arena identity and lifetime are proved.
 
+### 5.1 Reallocation, pinning, and interior references
+
+A raw interior machine pointer carries the current generative `bufferId`; it
+cannot survive reallocation. Basic reallocation consumes exclusive allocation
+authority and requires every live raw-pointer/slice loan into the old buffer to
+be returned. This makes accidental use-after-move unspellable.
+
+Algorithms which need stable logical positions retain an `OffsetRef` indexed by
+stable container identity, element shape, and checked offset—not a readable
+machine pointer. Successful reallocation returns a fresh buffer identity plus a
+`RebaseMap oldBuffer newBuffer` proving which initialized offsets and logical
+occurrences were preserved. Applying that map creates a pointer into the new
+buffer with new provenance. It never revives an old pointer, and one-past/end or
+invalidated offsets remain non-dereferenceable.
+
+Alternatively, a `PinLoan bufferId` permits interior machine pointers and
+prevents reallocating or moving that buffer until every pin is returned. An
+allocator with stable-address growth may provide a stronger cited profile and a
+corresponding preservation theorem. Typed vectors expose checked cursor/rebase
+combinators; untyped code supplies the same bounds, shape, loan-return, and
+occurrence-preservation proof explicitly. The assembly author chooses pinning,
+offset rebasing, or a different data structure—the verifier does not silently
+rewrite pointers.
+
 ## 6. Calls, stacks, and CFG boundaries
 
 Every block entry contract names required registers, stack depth/shape, memory
@@ -116,6 +146,29 @@ that its outgoing state satisfies the target contract. Stack-frame provenance is
 created by the call/entry protocol and destroyed only after all frame loans and
 obligations are resolved. Tail calls and nonlocal exits require dedicated
 theorems; they are not ordinary returns.
+
+An ABI/API call profile supplies a reusable call-framing theorem. From the
+proved call-site arguments and frame geometry it lends the exact buffer/slot
+authorities to the environment, retains only disjoint residual frame authority,
+constructs the pending frontier state and completion obligation, and consumes
+the same loan identities to reconstruct local authority on a conforming return.
+Terminal calls instead apply their result-indexed disposition at the terminal
+transition. Assembly authors see call preconditions and dependent return/pending
+postconditions; they do not manually restate this standard internal bookkeeping.
+Nonstandard transfer or obligation policy remains an explicit local proof.
+
+A profile may also reconstruct only a typed residual state on a narrowly
+classified nonconforming return through `ViolationReturnEnvelope`. This requires
+proof that the ABI return occurred, every memory effect used by the tail stayed
+within lent authority, and the same loan identities were returned. It is not the
+conforming postcondition and cannot be synthesized for an arbitrary memory,
+control, or ABI violation. Without the envelope, local authority ends at the
+maximal safe prefix before the violating event.
+
+The envelope is affine and indexed by the exact call occurrence, pre/post worlds,
+call ID, loan IDs, and boundary-step witness. Constructing it consumes that
+occurrence's pending invariant once; equal request and result values at another
+call cannot reconstruct or return these resources.
 
 ## 7. Concurrent executions
 
