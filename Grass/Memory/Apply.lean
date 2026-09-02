@@ -41,12 +41,24 @@ namespace Grass.Memory
 open Grass.Std.Logical
 
 /--
-Why this access is refused by memory's own rules, or `none`.
+Why the state refuses one access, or `none` if it authorizes it.
 
-Every reason an `AllocationRecord` can refuse an access, in one place and one
-order, so the recorded class names the first thing that was wrong.
-`docs/MEMORY_MODEL.md` §1 requires the check to happen before anything commits;
-`applyAccess` calls this first and commits only on `none`.
+Checked before anything commits, so a denial leaves the state exactly as it was
+(`docs/MEMORY_MODEL.md` §1). The order is deliberate: liveness before space before
+bounds before permission before initialization, so the recorded class names the
+first thing that was wrong rather than an incidental consequence.
+
+Alignment is deliberately absent. `AccessDescriptor.WellFormedIn.aligned` already
+checks it and `step` requires well-formedness before any access is attempted, so a
+misaligned access is *rejected at the declaration*, never denied at the state. An
+alignment branch here would be unreachable, and an unreachable branch that looks
+like a check is worse than no branch: it suggests the transition tests something
+it does not. `AuditViolationClass.misaligned` remains for a profile whose own
+alignment rule is stricter than the declared demand.
+
+Authority beyond what an allocation record means is not here: loans, frames,
+pins, and lock tokens are `Grass/Op/Step.lean`'s `AuthorityProvider` and need a
+policy. This is memory's own rules, which is why it lives in the memory layer.
 -/
 def denialOf (state : MemoryState) (d : AccessDescriptor) : Option AuditViolationClass :=
   match state.allocations.lookup d.provenance.root with

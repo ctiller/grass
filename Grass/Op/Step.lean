@@ -1,3 +1,4 @@
+import Grass.Memory.Apply
 import Grass.Memory.State
 import Grass.Op.Facets
 
@@ -173,10 +174,7 @@ def Oracle.ofMemory
   answer state d :=
     { observed :=
         if d.intent.reads then
-          some ((List.range d.range.size).map fun i =>
-            match state.memory.byteAt? d.provenance.root (d.range.start + i) with
-            | some byte => byte
-            | Option.none => indeterminate state d i)
+          some (observedBytes state.memory d (indeterminate state d))
         else Option.none
       written :=
         if d.intent.writes then some ((writeData state d).take d.range.size)
@@ -188,7 +186,7 @@ def Oracle.ofMemory
       observedFits := by
         intro bytes hb
         split at hb
-        · cases hb; simp
+        · cases hb; simp [observedBytes]
         · exact absurd hb (by simp)
       writtenFits := by
         intro bytes hb
@@ -324,35 +322,6 @@ instance (policy : StepPolicy) (d : AccessDescriptor) : Decidable (policy.Admits
 
 end StepPolicy
 
-/--
-Why the state refuses one access, or `none` if it authorizes it.
-
-Checked before anything commits, so a denial leaves the state exactly as it was
-(`docs/MEMORY_MODEL.md` §1). The order is deliberate: liveness before space before
-bounds before permission before initialization, so the recorded class names the
-first thing that was wrong rather than an incidental consequence.
-
-Alignment is deliberately absent. `AccessDescriptor.WellFormedIn.aligned` already
-checks it and `step` requires well-formedness before any access is attempted, so a
-misaligned access is *rejected at the declaration*, never denied at the state. An
-alignment branch here would be unreachable, and an unreachable branch that looks
-like a check is worse than no branch: it suggests the transition tests something
-it does not. `AuditViolationClass.misaligned` remains for a profile whose own
-alignment rule is stricter than the declared demand.
--/
-def denialOf (state : MemoryState) (d : AccessDescriptor) : Option AuditViolationClass :=
-  match state.allocations.lookup d.provenance.root with
-  | Option.none => some .deadProvenance
-  | some record =>
-      if record.live ≠ true then some .deadProvenance
-      else if record.epoch ≠ d.provenance.epoch then some .deadProvenance
-      else if record.space ≠ d.provenance.space then some .wrongAddressSpace
-      else if ¬ record.extent.Contains d.range then some .outOfBounds
-      else if ¬ record.permission.Permits d.intent then some .permissionDenied
-      else if d.initialization = .allBytesInitialized ∧
-              ¬ state.RangeInitialized d.provenance.root d.range then
-        some .uninitializedRead
-      else Option.none
 
 /-- The violation record for a denied access. -/
 def violationOf (d : AccessDescriptor) (class_ : AuditViolationClass) : AuditViolation :=
