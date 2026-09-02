@@ -64,11 +64,22 @@ through a multi-step instruction is exactly the kind of thing a permissive
 default would get wrong in the safe-looking direction.
 -/
 inductive FaultVisibility where
-  /-- Steps that completed before the failure remain visible. This is the default
-  *behavior* of most hardware, though not a default *value* here. -/
+  /-- Steps that completed before the failure remain visible, **and so does the
+  faulting step's own committed prefix**: a store that faults partway has written
+  the bytes it wrote. `faultingEffectVisible` is where the second half is
+  answered, and saying only the first half here is what let the transition commit
+  a `transactional` sequence's faulting prefix for as long as it did. This is the
+  default *behavior* of most hardware, though not a default *value* here. -/
   | priorEffectsVisible
-  /-- No step is visible unless all are. Requires a target theorem, named by
-  `justification`, per `docs/INSTRUCTIONS.md` §4. -/
+  /-- No step is visible unless all are, the faulting step's own prefix included;
+  `faultingEffectVisible` is the second half and `visibleEffects?` the first.
+
+  `justification` names the target theorem `docs/INSTRUCTIONS.md` §4 requires. **It
+  is a name and nothing checks it.** `RequiresJustification` and
+  `SubstepSequence.ClaimsAtomicity` exist so a §10 profile package can enumerate
+  outstanding claims, and no registry holds justification names, so a sequence
+  gets all-or-nothing fault semantics by declaring a string. Recorded as owed in
+  `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 rather than implied to be enforced. -/
   | transactional (justification : Name)
   /-- A visibility rule owned by one profile. This module cannot answer questions
   about it, and `visibleEffects?` says so rather than guessing. -/

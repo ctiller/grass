@@ -63,10 +63,30 @@ inductive StepRejection where
   The rule belongs to a profile, and guessing which effects survive would be
   worse than refusing. -/
   | visibilityRuleUnknown
-  /-- The machine reported a fault at a substep the operation does not have.
-  Refused rather than ignored: treating an out-of-range index as "no fault"
-  would turn a reported fault into a completed operation. -/
-  | faultPointOutOfRange
+  /-- The machine reported a fault class the faulting substep does not declare.
+
+  `Substep.faults` is what an access or a compute step says it may raise, and
+  `MemoryProfile.Admits` already requires an access's `admittedFaults` to be
+  recognized by the vocabulary. Nothing consulted either, so a `FaultPlan` could
+  name a class no registry admitted and the transition would record it — into
+  `RaisedFault` and into a `ValidMemoryEvent`'s status, since
+  `MemoryEvent.WellFormed` constrains counts and lengths but not fault identity.
+  That is `AuthorityProvider.violationClass`'s hole in a second place, and
+  `Grass/Memory/Profile.lean` claims every registry here is consulted. Review
+  found it. -/
+  | faultClassNotDeclared (fault : FaultClassId)
+  /-- The machine reported a fault at a substep whose access carries an obligation
+  ledger effect, and the corpus does not say what becomes of that effect.
+
+  `docs/OBLIGATIONS.md` §1 makes cancellation and fault behaviour part of an
+  obligation's form and §2 requires a transition to *state* how it transforms the
+  ledger. The generic relation applied the whole effect on the faulting path, so a
+  `reserve` that faulted having written zero bytes still created its release duty
+  and a `release` that faulted having written nothing still discharged one — the
+  second is a leak. Refusing is `docs/FOUNDATION.md` law 8's answer to a rule
+  nobody wrote: the profile owes a fault rule before such an operation can fault.
+  See `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.3. -/
+  | faultWithUndeclaredLedgerEffect
 deriving DecidableEq, Repr
 
 /-- What one step produced. -/
@@ -617,8 +637,10 @@ inductive FaultPlan (sequence : SubstepSequence) where
   /-- Every substep completed. -/
   | none
   /-- The substep at `index` did not complete, raising `fault` after committing
-  `committed` bytes. -/
-  | before (index : Fin sequence.substeps.length) (fault : FaultClassId) (committed : Nat)
+  `readCommitted` and `writeCommitted` bytes. Separate counts, because a faulting
+  read-modify-write can have observed its operand and stored nothing. -/
+  | before (index : Fin sequence.substeps.length) (fault : FaultClassId)
+      (readCommitted writeCommitted : Nat)
 
 /--
 The state a running step produces.
@@ -633,7 +655,7 @@ def runStep (policy : StepPolicy) (state : MachineState) (sequence : SubstepSequ
     (context : ContextId) (contextKind : ContextKind) (cause : EventCause) :
     FaultPlan sequence → MachineState
   | .none => runAccesses policy state sequence.accesses contextKind cause
-  | .before index fault committed =>
+  | .before index fault reads writes =>
       match sequence.visibleEffects? index.val with
       | Option.none => state
       | some survivors =>
@@ -672,7 +694,7 @@ def runStep (policy : StepPolicy) (state : MachineState) (sequence : SubstepSequ
                 -- prefix, which is the reverse of what `transactional` declares.
                 if sequence.faultingEffectVisible then
                   performAccess policy faulted d
-                    (.faulted fault ((policy.oracle.answer faulted d).truncate committed))
+                    (.faulted fault ((policy.oracle.answer faulted d).truncate reads writes))
                     contextKind cause
                 else faulted
             | _ => faulted
@@ -711,12 +733,18 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
         else
           match faultAt sequence with
           | .none => .ran (runStep policy state sequence context contextKind cause .none)
-          | .before index fault committed =>
-              match sequence.visibleEffects? index.val with
-              | Option.none => .rejected .visibilityRuleUnknown
-              | some _ =>
-                  .ran (runStep policy state sequence context contextKind cause
-                    (.before index fault committed))
+          | .before index fault reads writes =>
+              if ! decide (fault ∈ sequence.substeps[index].faults) then
+                .rejected (.faultClassNotDeclared fault)
+              else if ! (sequence.substeps[index].descriptor?.elim true
+                  (fun d => d.ledgerEffect.isEmpty)) then
+                .rejected .faultWithUndeclaredLedgerEffect
+              else
+                match sequence.visibleEffects? index.val with
+                | Option.none => .rejected .visibilityRuleUnknown
+                | some _ =>
+                    .ran (runStep policy state sequence context contextKind cause
+                      (.before index fault reads writes))
 
 /-! ## The transition invariants
 
@@ -825,11 +853,11 @@ complete, so nothing licenses what follows it.
 theorem runStep_stops_at_refusal (policy : StepPolicy) (state : MachineState)
     (sequence : SubstepSequence) (context : ContextId) (contextKind : ContextKind)
     (cause : EventCause) (index : Fin sequence.substeps.length) (fault : FaultClassId)
-    (committed : Nat) (survivors : List AccessDescriptor)
+    (reads writes : Nat) (survivors : List AccessDescriptor)
     (hvisible : sequence.visibleEffects? index.val = some survivors)
     (hrefused : (runAccesses policy state survivors contextKind cause).violations.recordCount
       ≠ state.violations.recordCount) :
-    runStep policy state sequence context contextKind cause (.before index fault committed) =
+    runStep policy state sequence context contextKind cause (.before index fault reads writes) =
       runAccesses policy state survivors contextKind cause := by
   show (match sequence.visibleEffects? index.val with
     | Option.none => state
@@ -846,7 +874,7 @@ theorem runStep_stops_at_refusal (policy : StepPolicy) (state : MachineState)
           | some (.access d) =>
               if sequence.faultingEffectVisible then
                 performAccess policy faulted d
-                  (.faulted fault ((policy.oracle.answer faulted d).truncate committed))
+                  (.faulted fault ((policy.oracle.answer faulted d).truncate reads writes))
                   contextKind cause
               else faulted
           | _ => faulted) = _
@@ -859,15 +887,15 @@ was never reached. The complement of `runStep_records_the_fault`'s `hreached`. -
 theorem runStep_records_no_fault_after_refusal (policy : StepPolicy) (state : MachineState)
     (sequence : SubstepSequence) (context : ContextId) (contextKind : ContextKind)
     (cause : EventCause) (index : Fin sequence.substeps.length) (fault : FaultClassId)
-    (committed : Nat) (survivors : List AccessDescriptor)
+    (reads writes : Nat) (survivors : List AccessDescriptor)
     (hvisible : sequence.visibleEffects? index.val = some survivors)
     (hrefused : (runAccesses policy state survivors contextKind cause).violations.recordCount
       ≠ state.violations.recordCount) :
     (runStep policy state sequence context contextKind cause
-      (.before index fault committed)).faults =
+      (.before index fault reads writes)).faults =
       (runAccesses policy state survivors contextKind cause).faults := by
   rw [runStep_stops_at_refusal policy state sequence context contextKind cause index fault
-    committed survivors hvisible hrefused]
+    reads writes survivors hvisible hrefused]
 
 /--
 The refusal path `refusalOf` does not gather.
@@ -1120,12 +1148,12 @@ that a fault is invented for a substep that never ran.
 theorem runStep_records_the_fault (policy : StepPolicy) (state : MachineState)
     (sequence : SubstepSequence) (context : ContextId) (contextKind : ContextKind)
     (cause : EventCause) (index : Fin sequence.substeps.length) (fault : FaultClassId)
-    (committed : Nat) (survivors : List AccessDescriptor)
+    (reads writes : Nat) (survivors : List AccessDescriptor)
     (hvisible : sequence.visibleEffects? index.val = some survivors)
     (hreached : (runAccesses policy state survivors contextKind cause).violations.recordCount =
       state.violations.recordCount) :
     ∃ record ∈ (runStep policy state sequence context contextKind cause
-      (.before index fault committed)).faults, record.fault = fault := by
+      (.before index fault reads writes)).faults, record.fault = fault := by
   show ∃ record ∈ (match sequence.visibleEffects? index.val with
     | Option.none => state
     | some survivors =>
@@ -1141,7 +1169,7 @@ theorem runStep_records_the_fault (policy : StepPolicy) (state : MachineState)
           | some (.access d) =>
               if sequence.faultingEffectVisible then
                 performAccess policy faulted d
-                  (.faulted fault ((policy.oracle.answer faulted d).truncate committed))
+                  (.faulted fault ((policy.oracle.answer faulted d).truncate reads writes))
                   contextKind cause
               else faulted
           | _ => faulted).faults, record.fault = fault

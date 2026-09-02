@@ -939,7 +939,7 @@ not have noticed a write that recorded no event.
 theorem denial_stops_the_operation_on_the_fault_path :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.deniedThenStore) thread₀
         .thread ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 8
+          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 8 8
           else .none)).state? = some s →
       s.events = [] ∧ s.violations.recordCount = 1 ∧
       s.memory.byteAt? bufferAlloc 8 = some 0x00 := by
@@ -953,12 +953,108 @@ here would be inventing a fault for a substep that did not run. -/
 theorem a_denial_before_the_fault_records_no_fault :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.deniedThenStore) thread₀
         .thread ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 8
+          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 8 8
           else .none)).state? = some s →
       s.faults = [] := by
   intro s hs
   cases hs
   decide
+
+/-! ## What a fault plan may claim
+
+Three things the transition took on trust from its caller and now checks. Each was
+found by local adversarial review, and each is the shape law 8 targets: an
+unchecked input is not rejected, it is modelled. -/
+
+/-- A fault class no substep declares is refused, not recorded.
+
+`Substep.faults` has always said what a step may raise and `MemoryProfile.Admits`
+has always required an access's `admittedFaults` to be recognized. Nothing
+consulted either, so a `FaultPlan` could name a class no registry admitted and the
+transition recorded it -- into `RaisedFault`, and into a `ValidMemoryEvent`'s
+status, since `MemoryEvent.WellFormed` constrains counts and lengths but not fault
+identity. -/
+theorem an_undeclared_fault_class_is_refused :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
+      ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 0 < seq.substeps.length then
+          .before ⟨0, h⟩ ⟨⟨"fake.neverDeclaredFault"⟩⟩ 3 3
+        else .none) =
+      .rejected (.faultClassNotDeclared ⟨⟨"fake.neverDeclaredFault"⟩⟩) := rfl
+
+/-- The declared class on the same substep still runs, so the check discriminates
+rather than refusing every fault. -/
+theorem a_declared_fault_class_still_runs :
+    ∃ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
+      ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3 3
+        else .none)).state? = some s := ⟨_, rfl⟩
+
+/-- A fault on a substep carrying an obligation ledger effect is refused, because
+nothing says what becomes of the effect. Before this, a `reserve` that faulted
+having written zero bytes still created its release duty, and a `release` that
+faulted having written nothing still discharged one -- the second is a leak. -/
+theorem a_fault_on_a_ledger_bearing_substep_is_refused :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.reserve) thread₀ .thread
+      ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 0
+        else .none) =
+      .rejected .faultWithUndeclaredLedgerEffect := rfl
+
+/-! ## A completed access reports that it completed
+
+The completeness test demanded that reads *and* writes both cover the range,
+unconditionally on intent. A write-only access has `readCount = 0` by
+`Committed.observedAbsent`, so every ordinary load and store recorded
+`partialCommit` -- whose docstring says "stopped early without faulting" -- and
+`AccessStatus.IsComplete` was false for every access this model can perform except
+a full-width read-modify-write. -/
+
+theorem a_completed_load_reports_completed :
+    ∀ s, (stepAlpha state₀ .load).state? = some s →
+      s.events.map (·.event.status) = [AccessStatus.completed] := by
+  intro s hs
+  cases hs
+  decide
+
+theorem a_completed_store_reports_completed :
+    ∀ s, (stepAlpha state₀ .store).state? = some s →
+      s.events.map (·.event.status) = [AccessStatus.completed] := by
+  intro s hs
+  cases hs
+  decide
+
+/-- A genuinely partial access still reports `partialCommit`, so the fix did not
+make the status say "completed" unconditionally. -/
+theorem a_faulted_store_still_reports_its_prefix :
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
+        ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3 3
+          else .none)).state? = some s →
+      s.events.map (·.event.status) = [AccessStatus.faulted .pageFault 3] := by
+  intro s hs
+  cases hs
+  decide
+
+/-! ## A faulting read-modify-write can keep its read without its write
+
+`Committed` counts reads and writes separately, and `Grass/Memory/Event.lean`
+motivates that with an `xadd` which observed eight bytes and then faulted before
+storing. The transition truncated both lists by one shared count, so that outcome
+was the one thing the fault path could not express: a faulting RMW always reported
+`readCommitted = writeCommitted`. `faulted_rmw_keeps_its_read` never checked the
+write, so it passed while demonstrating the opposite of its own section header. -/
+
+theorem faulted_rmw_keeps_its_read_without_its_write :
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.atomicAdd) thread₀ .thread
+        ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 8 0
+          else .none)).state? = some s →
+      ∃ e, s.events = [e] ∧ e.event.readCommitted = 8 ∧ e.event.writeCommitted = 0 ∧
+        s.memory.byteAt? bufferAlloc 0 = some 0x00 := by
+  intro s hs
+  cases hs
+  exact ⟨_, rfl, by decide, by decide, by decide⟩
 
 /-! ## A transactional sequence exposes nothing when it faults
 
@@ -976,7 +1072,7 @@ the zeros the allocation started with, rather than the `0xAB` a store writes. -/
 theorem transactional_exposes_nothing :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.atomicSplitStore) thread₀
         .thread ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 4
+          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 4 4
           else .none)).state? = some s →
       s.memory.byteAt? bufferAlloc 0 = some 0x00 ∧
       s.memory.byteAt? bufferAlloc 4 = some 0x00 ∧
@@ -990,7 +1086,7 @@ committed effects, not about whether the machine faulted. -/
 theorem transactional_still_records_its_fault :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.atomicSplitStore) thread₀
         .thread ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 4
+          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 4 4
           else .none)).state? = some s →
       s.faults.map RaisedFault.fault = [FaultClassId.pageFault] := by
   intro s hs
@@ -1084,7 +1180,7 @@ value. Reads and writes now count separately. -/
 theorem faulted_rmw_keeps_its_read :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.atomicAdd) thread₀ .thread
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 8
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 8 8
           else .none)).state? = some s →
       ∃ e, s.events = [e] ∧ e.event.kind = .readModifyWrite ∧
         e.event.readCommitted = 8 ∧ e.event.valueRead.isSome := by
@@ -1097,7 +1193,7 @@ count is the committed prefix, not the width the access named. -/
 theorem partially_faulted_rmw_records_its_prefix :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.atomicAdd) thread₀ .thread
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3 3
           else .none)).state? = some s →
       ∃ e, s.events = [e] ∧ e.event.readCommitted = 3 ∧ e.event.writeCommitted = 3 := by
   intro s hs
@@ -1152,7 +1248,7 @@ theorem divide_fault_preserves_the_read :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) thread₀ .thread
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
           if h : 1 < seq.substeps.length then
-            .before ⟨1, h⟩ divideError 0
+            .before ⟨1, h⟩ divideError 0 0
           else .none)).state? = some s →
       s.events.length = 1 ∧ s.violations.IsEmpty := by
   intro s hs
@@ -1171,7 +1267,7 @@ range.
 theorem divide_fault_at_zero_commits_no_bytes :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) thread₀ .thread
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 0
           else .none)).state? = some s →
       ∃ e, s.events = [e] ∧ e.event.readCommitted = 0 ∧ e.event.writeCommitted = 0 := by
   intro s hs
@@ -1183,7 +1279,7 @@ theorem divide_fault_at_zero_commits_no_bytes :
 theorem faulted_store_commits_its_declared_prefix :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3 3
           else .none)).state? = some s →
       ∃ e, s.events = [e] ∧ e.event.writeCommitted = 3 ∧ e.event.status = .faulted .pageFault 3 := by
   intro s hs
@@ -1204,7 +1300,7 @@ theorem divide_fault_is_recoverable :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) thread₀ .thread
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
           if h : 1 < seq.substeps.length then
-            .before ⟨1, h⟩ divideError 0
+            .before ⟨1, h⟩ divideError 0 0
           else .none)).state? = some s →
       s.faults = [{ fault := divideError, context := thread₀, cause := ⟨⟨"alpha"⟩⟩
                     substep := 1 }] := by
@@ -1225,7 +1321,7 @@ on which kind of substep failed. -/
 theorem access_fault_is_recorded :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3 3
           else .none)).state? = some s →
       s.faults.length = 1 ∧ s.events.length = 1 := by
   intro s hs
@@ -1238,7 +1334,7 @@ survive would be the permissive fallback law 8 forbids. -/
 theorem profile_visibility_rule_is_refused :
     (Grass.Op.step policy state₀ (SomeOperation.of Alpha.splitStore) thread₀ .thread
       ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-        if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 0
+        if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 0 0
         else .none)).rejection? = some .visibilityRuleUnknown := by decide
 
 end Grass.Tests.FakeIsa

@@ -375,10 +375,22 @@ def inert (hr : d.intent.reads = false) (hw : d.intent.writes = false) :
     observedFits := fun _ h => absurd h (by simp)
     writtenFits := fun _ h => absurd h (by simp) }
 
-/-- Truncate a committed outcome to a prefix, for a faulting access. -/
-def truncate {d : AccessDescriptor} (c : Committed d) (count : Nat) : Committed d :=
-  { observed := c.observed.map (·.take count)
-    written := c.written.map (·.take count)
+/--
+Truncate a committed outcome to a prefix, for a faulting access.
+
+**Reads and writes truncate separately**, which is the whole reason `Committed`
+counts them separately. This module's own docstrings motivate the two-count design
+with an `xadd` that observed eight bytes and then faulted before storing any — and
+until review checked, the transition truncated both lists by one shared count, so
+that outcome was the one thing the fault path could not express. A faulting
+read-modify-write always reported `readCommitted = writeCommitted`, and the
+fixture asserting the read survived never checked the write, so it passed while
+demonstrating the opposite of the property its section claimed.
+-/
+def truncate {d : AccessDescriptor} (c : Committed d) (reads writes : Nat) :
+    Committed d :=
+  { observed := c.observed.map (·.take reads)
+    written := c.written.map (·.take writes)
     observedPresent := fun h => by simpa using c.observedPresent h
     observedAbsent := fun h => by simp [c.observedAbsent h]
     writtenPresent := fun h => by simpa using c.writtenPresent h
@@ -417,11 +429,25 @@ namespace AccessOutcome
 
 variable {d : AccessDescriptor}
 
-/-- The architectural status this outcome reports. -/
+/--
+The architectural status this outcome reports.
+
+The completeness test is **intent-relative**, and has to be. It once demanded
+`readCount = size ∧ writeCount = size` unconditionally, so a write-only access —
+whose `readCount` is `0` because `Committed.observedAbsent` requires it — could
+never report `.completed`. Every ordinary load and store recorded
+`.partialCommit`, whose own docstring says "stopped early without faulting", and
+`AccessStatus.IsComplete` was false for every access this model can perform except
+a full-width read-modify-write. Review found it by asking what a completed load
+reports. `Tests/Op/FakeIsa.lean`'s `a_completed_load_reports_completed` is the
+regression.
+-/
 def status : AccessOutcome d → AccessStatus
-  | .completed c => if c.readCount = d.range.size ∧ c.writeCount = d.range.size then
-      .completed
-    else .partialCommit (max c.readCount c.writeCount)
+  | .completed c =>
+      if (!d.intent.reads || c.readCount == d.range.size) &&
+         (!d.intent.writes || c.writeCount == d.range.size) then
+        .completed
+      else .partialCommit (max c.readCount c.writeCount)
   | .faulted fault c => .faulted fault (max c.readCount c.writeCount)
   | .denied _ => .partialCommit 0
 

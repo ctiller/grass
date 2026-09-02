@@ -652,6 +652,19 @@ one outright defect that had already merged — see §3.11's denial row.
   theorem is derivable rather than false. Until it exists, a consumer following the
   prose to `runAccesses_frames_untouched` over the survivors would have an unsound
   framing argument, which is how review found it.
+- **`FaultVisibility.transactional`'s `justification` names nothing.**
+  `RequiresJustification` and `SubstepSequence.ClaimsAtomicity` exist so a §10
+  package can enumerate outstanding claims, and nothing under `Grass/` consults
+  either; no registry holds justification names. A sequence gets all-or-nothing
+  fault semantics by declaring a string. `FaultVisibility.profileSpecific`'s name
+  is likewise unchecked.
+- **`Restartability` is declared and never read.** A profile can require the facet
+  and a descriptor carries a value, but nothing in the transition consults it, so
+  [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.4's retry rules have no mechanism here.
+- **`FaultPlan`'s commit counts are unbounded.** `Committed.truncate` clamps by
+  `List.take`, so an over-large count cannot over-claim bytes and soundness holds.
+  It is accepted silently rather than refused, which is the behaviour
+  `StepRejection`'s other constructors exist to avoid.
 - **`AgreesOn` does not carry the refusal decision.** It compares cells, which is
   bytes and initialization. `denialOf` also reads `extent`, `epoch`, `space`,
   `permission` and `live`, so two states can agree and refuse differently — review
@@ -685,11 +698,47 @@ which is the reverse of what it declares.
 fault is still recorded: nothing being visible is a claim about committed effects,
 not about whether the machine faulted.
 
+A fourth adversarial round, aimed at the fault model because both live defects
+so far were there, found four more and the same shape twice again — a property
+enforced for the substeps before a failure with the failing one exempt, or an
+input the transition took on trust.
+
+- **The reported fault class was checked against nothing.** `FaultPlan` carried a
+  `FaultClassId` that no registry saw: not `Substep.faults`, not
+  `AccessDescriptor.admittedFaults`, not `AdmittedVocabulary.faultClasses`. An
+  undeclared class was recorded into `RaisedFault` and into a `ValidMemoryEvent`'s
+  status, since `MemoryEvent.WellFormed` constrains counts and lengths but not
+  fault identity. This is `AuthorityProvider.violationClass`'s hole in a second
+  place, in a module claiming every registry is consulted.
+  `StepRejection.faultClassNotDeclared` closes it.
+- **Every completed load and store reported `partialCommit`.**
+  `AccessOutcome.status` demanded reads *and* writes both cover the range,
+  unconditionally on intent, and a write-only access has `readCount = 0` by
+  construction. So `AccessStatus.completed` was reachable only for a full-width
+  read-modify-write, and `IsComplete` — the predicate written to answer "did the
+  whole access take effect" — was false for every load and store. The test is
+  intent-relative now.
+- **A faulting read-modify-write could not keep its read without its write.**
+  `Committed` counts reads and writes separately and this document's own module
+  motivates that with an `xadd` that observed its operand and faulted before
+  storing. The transition truncated both lists by one shared count, so that
+  outcome was the one thing the fault path could not express, and the fixture
+  asserting the read survived never checked the write. `FaultPlan.before` carries
+  both counts now.
+- **A faulted access applied its obligation ledger effect in full**, at any commit
+  count including zero: a `reserve` that faulted having written nothing created its
+  duty, and a `release` that faulted having written nothing discharged one. The
+  second is a leak. The asymmetry review named is the sharp part: the alias check
+  treats a zero-byte faulted access as having touched nothing, while the ledger
+  treated the same access as fully performed, and both cannot be right. See §4.3.
+
 ### 4.3 A semantic decision this milestone made and does not own
 
-Fixing the denial defect forced a question the corpus does not answer: **when a
-denial stops an operation before the substep the machine reported a fault at, is
-that fault recorded?**
+Two questions, both forced by fixing defects and neither answerable from the
+corpus.
+
+**First: when a denial stops an operation before the substep the machine reported
+a fault at, is that fault recorded?**
 
 M2 answers *no*, on the reasoning that a denied substep did not complete, the
 model has declined to follow the execution past it, and attaching a fact about
@@ -699,11 +748,22 @@ diagnostic rather than an effect, keeping it commits nothing, and `FaultPlan` is
 documented as a fact the stepper is *given* rather than one it predicts, so
 discarding it is the model overruling its own input.
 
-This plan is tier four and cannot settle it. The behaviour is implemented and
-tested, the property in §3.11 is stated to match, and the decision is provisional
-until [MEMORY_MODEL.md](MEMORY_MODEL.md) §1 or [DECISIONS.md](DECISIONS.md) rules.
-Raised with the design owner rather than left in a code comment, which is where it
-sat when review found it.
+**Second: what becomes of an obligation ledger effect when the access carrying it
+faults?** [OBLIGATIONS.md](OBLIGATIONS.md) §1 makes cancellation and fault
+behaviour part of an obligation's form and §2 requires a transition to state how
+it transforms the ledger; neither says what a partial or zero-byte faulted access
+does. The conservative answer differs by delta kind, which is why it cannot be
+guessed: applying a `create` is conservative, because a spurious duty causes a
+verification failure rather than an unsound accept, while applying a `discharge`
+is a leak. M2 refuses instead — `StepRejection.faultWithUndeclaredLedgerEffect` —
+because refusing is law 8's answer to a rule nobody wrote. That is strict: it
+rejects operations a ruling might well admit.
+
+This plan is tier four and cannot settle either. Both behaviours are implemented
+and tested, §3.11 is stated to match, and both are provisional until
+[MEMORY_MODEL.md](MEMORY_MODEL.md) §1, [OBLIGATIONS.md](OBLIGATIONS.md), or
+[DECISIONS.md](DECISIONS.md) rules. Raised with the design owner rather than left
+in code comments, which is where the first one sat when review found it.
 
 Exit criteria: the M1 reference instruction set steps end to end over a
 hand-built `MemState`; the framing lemma set is sufficient to discharge a

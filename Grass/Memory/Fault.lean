@@ -76,7 +76,13 @@ def committedBytes : AccessStatus → Nat → Nat
   | .partialCommit committed, _ => committed
   | .faulted _ committed, _ => committed
 
-/-- `status.IsComplete` holds when the whole access took effect. -/
+/-- `status.IsComplete` holds when the whole access took effect.
+
+Nothing in `Grass/` consumes this yet; M8's consistency model is its intended
+reader. Worth knowing that it was false for every load and store this model could
+perform until `AccessOutcome.status`'s completeness test was made intent-relative,
+which review found by asking what a completed load reports — a predicate with no
+consumer is a predicate nothing was checking. -/
 def IsComplete : AccessStatus → Prop
   | .completed => True
   | _ => False
@@ -132,6 +138,14 @@ Whether an operation may be restarted after an interruption or fault.
 instructions to declare the state handlers observe them from and the rules for
 retry. `Grass.Op.FacetName.restartability` is how a profile demands it and
 `Grass.Op.OperationFacets.Closes` is the check, so this has no default.
+
+**Declared and not enforced.** `StepPolicy.requiredFacets` can demand the facet
+exist, and `AccessDescriptor.restartability` carries a value, but nothing in the
+transition reads either, so `docs/MEMORY_MODEL.md` §7.4's retry rules have no
+mechanism behind them here. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records it.
+Note also that this field *does* default, to `.notRestartable`, which is the
+conservative direction but is the defaulting discipline `FaultVisibility`
+deliberately refuses.
 -/
 inductive Restartability where
   /-- The operation may be re-executed from its start with the same effect. -/
