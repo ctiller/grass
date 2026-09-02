@@ -1,57 +1,87 @@
-/-!
-# Escrow: the prefix laws an in-flight message obeys
+import Grass.Process.Cancellation.Identity
+import Grass.Process.Network.Death
 
-`docs/PROCESS.md` §3 puts the whole weight of channel soundness on one object:
+/-!
+# Escrow: what one channel is holding, and what it may do with it
+
+`docs/PROCESS.md` §3 puts the weight of channel soundness on one object:
 
 > Their central object is an **escrow assertion**: after send commits, the
 > channel—not either endpoint—owns the exact occurrence and every resource,
 > capability, provenance fact, and obligation transferred with it until receive
 > or an explicitly modeled cancellation/disposition transition consumes it.
 
-and then states the laws it obeys:
+and states the laws it obeys:
 
-> Conservation and at-most-one resolution are unconditional prefix laws; an
-> unrestricted infinite-pending execution may retain live escrow forever. …
+> Conservation and at-most-one resolution are unconditional prefix laws …
 > Requesting cancellation does not reclaim escrow; acknowledged cancellation,
 > timeout, endpoint/channel death, drop, reroute, and coalescing are exhaustive
 > competing resolution transitions. Coalescing consumes every source token and
 > creates one fresh occurrence.
 
-Those are `docs/PROCESS_IMPLEMENTATION_PLAN.md` §4's second exit criterion, and
-this module is them. It is deliberately *below* the channel contract: no
-assertions, no worlds, no Hoare triples, no plan. An escrow ledger is a list of
-occurrences that were created and a partial map saying how each one ended, and
-everything here is a fact about that pair.
+## What this module is, and what it is not
 
-## Why `resolution` is a function
+It is the **ledger-level half** of `docs/PROCESS_IMPLEMENTATION_PLAN.md` §4's
+second exit criterion. That criterion asks for conservation, at-most-one
+resolution, *and stability under unrelated steps*, over the *full transition
+family*. Stability is `Grass/Process/Network/Assertion.lean`'s frame rule
+applied to an escrow assertion, and the quantification over the family needs
+`Transition.lean`. Neither is here. An earlier revision of this note claimed the
+module was the criterion; it is the part of it that can be stated about a ledger
+with no transitions in sight.
 
-At-most-one resolution is not stated as a side condition. `resolution` is a
-partial function from occurrences, so an occurrence has at most one ending by
-construction, and `atMostOneResolution` below is a projection rather than an
-assumption. `docs/PROCESS.md` §3 calls the affine resolve token "an owned
-assertion inside `Escrow`, not a field whose Lean value is assumed
-noncopyable" — a Lean record field is copyable, so affinity has to be a shape
-the type cannot violate rather than a promise a field makes.
+Three further claims that revision made and this one does not:
 
-## Why requesting cancellation is a separate field
+* **At-most-one *recorded ending*, not the affine resolve token.** `resolution`
+  is a function, so an occurrence has at most one recorded ending by
+  construction. §3's `ResolveToken` is stronger: it is consumed exactly once by
+  exactly one transition. Two transitions could each consume the same source and
+  record the same ending here, consistently. That half needs the transition
+  family; this module delivers the recording half only.
+* **"Coalescing consumes every source token" is not stated here.** A ledger has
+  no notion of a transition, so it cannot say "every source of *this* coalesce".
+  What it does say is that a coalesced occurrence names a real, strictly later
+  carrier, which is what stops the constructor being a disguised drop.
+* **`accounting` is a counting identity, not §3's prefix conservation.** It says
+  the occurrences ever escrowed are exactly those settled plus those in flight.
+  The prefix half — that this holds monotonically along an execution — is
+  `settled_monotone` and `created_monotone` over `LedgerExtends`, and those are
+  what §3's "unconditional prefix laws" names.
 
-`cancelRequested` is tracked and is deliberately unrelated to `resolution`,
-because §3 is explicit that "requesting cancellation does not reclaim escrow".
-A design that resolved escrow on the request would lose the payload of a message
-whose cancellation is later refused or lost a race, which is
-`docs/FOUNDATION.md` law 5. `Grass/Process/Network/Instance.lean` makes the same
-choice on the other side: a process with an outstanding cancellation is still
-running.
+## Why `rank` exists
+
+`coalesceCarrierLater` requires a coalesce to name a carrier of *strictly
+greater* rank. Irreflexivity alone is not enough: with only "the carrier is
+escrowed and is not this occurrence", two occurrences may coalesce into each
+other, a chain may close into a cycle, and every field still discharges while
+both payloads land nowhere. A ledger like that satisfies `accounting` and
+reports itself in order.
+
+`rank` is the occurrence's position in the monotone allocation history — §3's
+`usedNominals` ordering — and `rankOrdersCreated` ties it to `created`, so there
+is one order and not two. `CoalescesTo.no_cycle` then holds for cycles of every
+length, by `Nat.lt_irrefl` on the transitive closure.
+
+## Why `rerouted` carries no local carrier
+
+A reroute moves an occurrence to a *different* session, and this ledger is one
+channel's. An earlier revision made `rerouted` carry a replacement and subjected
+it to the same "carrier is escrowed here" law as `coalesced`, which is
+unsatisfiable for any genuine reroute: the carrier is by construction not in
+this ledger. So `rerouted` records only the destination, and the obligation that
+the payload reappears there is `ReroutedElsewhere` — stated here, dischargeable
+only by `Plan.lean`, which holds every channel's ledger at once. That is a real
+cross-ledger obligation, recorded rather than hidden inside a law this module
+cannot check.
 
 ## Prefix laws, not step laws
 
-`Extends` is what "unconditional prefix law" means here. It says one ledger is a
-later point of the same execution: occurrences are only appended, and a
-resolution once written is never rewritten or erased. `noLoss` and
-`resolvedStaysResolved` are then theorems about it, and they hold with no
-responsiveness assumption at all — which is the point, since §3 warns that
-"an unrestricted infinite-pending execution may retain live escrow forever".
-Eventual delivery is a separate, named assumption and is not in this file.
+`LedgerExtends` says one ledger is a later point of the same execution:
+occurrences are only appended, a resolution once written is permanent, and a
+cancellation request once made does not evaporate. The laws over it hold with no
+responsiveness assumption at all, which is the point — §3 warns that "an
+unrestricted infinite-pending execution may retain live escrow forever", and
+they hold anyway.
 -/
 
 namespace Grass.Process
@@ -61,65 +91,79 @@ universe u
 /--
 How an escrowed occurrence stopped being in flight.
 
-`docs/PROCESS.md` §3 lists these as "exhaustive competing resolution
-transitions", with receive as the ordinary one. Closed, because the enumeration
-being exhaustive is what makes `resolution` a total account of an occurrence's
-ending rather than a place to put the cases someone thought of.
+`docs/PROCESS.md` §3 names these as "exhaustive competing resolution
+transitions", with receive as the ordinary one. `channelClosed` is here because
+§3 says separately that "ordinary close is distinct from endpoint death" and
+`NetworkTransition` carries `channelClose` beside `channelDeath`; without it an
+occurrence in flight at an ordinary close has no ending, and would either strand
+live forever or have to be misrecorded as a death.
 
-`rerouted` and `coalesced` carry a replacement because the occurrence does not
-survive them. §3 says coalescing "consumes every source token and creates one
-fresh occurrence"; the same follows for reroute from nominal freshness, since an
-occurrence's identity is indexed by its session and a rerouted message is on a
-different one. Carrying the replacement is what stops either transition from
-being a disguised drop.
+The payload rule is `Grass/Process/Network/Instance.lean`'s: a constructor
+carries a payload exactly when nothing else determines it. A cancellation
+acknowledgement happens at a declared point, and an endpoint death has a reason;
+neither is recoverable from the ledger otherwise.
 -/
 inductive ChannelResolution (Occurrence : Type u) (Session : Type u)
   /-- The receiver consumed it. The ordinary ending. -/
   | received
-  /-- A cancellation was *acknowledged*. Requesting one does not appear here. -/
-  | cancelAcknowledged
+  /-- A cancellation was *acknowledged*, at this point. Requesting one does not
+  appear here. -/
+  | cancelAcknowledged (reason : CancelReason)
   /-- It timed out. -/
   | timedOut
-  /-- The sending incarnation died. -/
-  | senderDied
-  /-- The receiving incarnation died. -/
-  | receiverDied
+  /-- The session was closed in the ordinary way, which is not a death. -/
+  | channelClosed
+  /-- The sending incarnation died, for this reason. -/
+  | senderDied (reason : ProcessDeathReason)
+  /-- The receiving incarnation died, for this reason. -/
+  | receiverDied (reason : ProcessDeathReason)
   /-- The session itself died. -/
   | channelDied
   /-- An explicitly modeled disposition dropped it. -/
   | dropped
-  /-- It moved to another session, as a fresh occurrence there. -/
-  | rerouted (destination : Session) (replacement : Occurrence)
-  /-- It merged into one fresh occurrence, along with its fellow sources. -/
-  | coalesced (replacement : Occurrence)
+  /-- It moved to this other session, where it is re-created as a fresh
+  occurrence this ledger does not hold. -/
+  | rerouted (destination : Session)
+  /-- It merged into this occurrence of the same session, along with its fellow
+  sources. -/
+  | coalesced (carrier : Occurrence)
 
 namespace ChannelResolution
 
 variable {Occurrence Session : Type u}
 
-/-- The occurrence that carries this one's payload onward, if any. -/
-def replacement : ChannelResolution Occurrence Session → Option Occurrence
-  | .rerouted _ replacement => some replacement
-  | .coalesced replacement => some replacement
+/-- The occurrence *in this ledger* that carries this one's payload onward. -/
+def carrier : ChannelResolution Occurrence Session → Option Occurrence
+  | .coalesced carrier => some carrier
+  | _ => none
+
+/-- The other session this occurrence's payload moved to, if any. -/
+def destination : ChannelResolution Occurrence Session → Option Session
+  | .rerouted destination => some destination
   | _ => none
 
 /--
-A resolution that ends the payload's life rather than passing it on.
+An ending that consumes the payload here rather than passing it on.
 
-Named so that a reader can see which endings are terminal for the escrowed
-state, and so a conservation argument can distinguish them from the two that
-are not.
+`coalesced` passes it to another occurrence of this session; `rerouted` passes
+it to another session. Everything else ends it.
 -/
 def IsTerminal (resolution : ChannelResolution Occurrence Session) : Prop :=
-  resolution.replacement = none
+  resolution.carrier = none ∧ resolution.destination = none
 
 theorem received_isTerminal :
-    (ChannelResolution.received : ChannelResolution Occurrence Session).IsTerminal := rfl
+    (ChannelResolution.received : ChannelResolution Occurrence Session).IsTerminal :=
+  ⟨rfl, rfl⟩
 
-theorem coalesced_not_terminal (replacement : Occurrence) :
-    ¬ (ChannelResolution.coalesced (Session := Session) replacement).IsTerminal := by
-  intro terminal
-  exact absurd terminal (by simp [IsTerminal, ChannelResolution.replacement])
+theorem coalesced_not_terminal (carrier : Occurrence) :
+    ¬ (ChannelResolution.coalesced (Session := Session) carrier).IsTerminal := by
+  rintro ⟨noCarrier, _⟩
+  exact absurd noCarrier (by simp [ChannelResolution.carrier])
+
+theorem rerouted_not_terminal (destination : Session) :
+    ¬ (ChannelResolution.rerouted (Occurrence := Occurrence) destination).IsTerminal := by
+  rintro ⟨_, noDestination⟩
+  exact absurd noDestination (by simp [ChannelResolution.destination])
 
 end ChannelResolution
 
@@ -128,29 +172,51 @@ The escrow held by one channel, at one point of an execution.
 
 `created` is every occurrence this channel has ever escrowed, oldest first, and
 `resolution` says how each one ended — `none` meaning it is still in flight.
+
+`docs/PROCESS.md` §3 spells the plan-level object `ChannelEscrowLedger topology
+Message`; that will be the per-edge family of these, and `Plan.lean` names it.
 -/
 structure EscrowLedger (Occurrence : Type u) (Session : Type u) where
   /-- Every occurrence ever escrowed here, oldest first. -/
   created : List Occurrence
-  /-- No occurrence is escrowed twice; a repeat would be a fabricated identity. -/
-  createdDistinct : created.Nodup
+  /-- Each occurrence's position in the monotone allocation history. -/
+  rank : Occurrence → Nat
+  /--
+  And `rank` agrees with `created`'s order, so there is one order and not two.
+
+  Strict, so it also gives duplicate-freedom: an occurrence escrowed twice would
+  be a fabricated identity, and here it would need a rank strictly below itself.
+  -/
+  rankOrdersCreated : (created.map rank).Pairwise (· < ·)
   /-- How each occurrence ended, or `none` while it is in flight. -/
   resolution : Occurrence → Option (ChannelResolution Occurrence Session)
   /-- Nothing is resolved that was never escrowed. -/
   noFabrication : ∀ occurrence, (resolution occurrence).isSome = true →
     occurrence ∈ created
+  /--
+  **A coalesce names a real carrier, strictly later than its source.**
+
+  The law that makes `coalesced` an onward transfer rather than a drop. See the
+  module note: irreflexivity alone admits cycles, in which every payload is
+  "passed on" and none lands.
+  -/
+  coalesceCarrierLater : ∀ occurrence carrier,
+    resolution occurrence = some (.coalesced carrier) →
+    carrier ∈ created ∧ rank occurrence < rank carrier
   /-- A cancellation has been requested for these. Says nothing about escrow. -/
   cancelRequested : Occurrence → Bool
   /--
-  A replacement is itself an escrowed occurrence, and a different one.
+  An acknowledgement acknowledges something.
 
-  Without this, `coalesced` and `rerouted` could name an occurrence that never
-  existed, or name themselves, and the payload would be lost while the ledger
-  claimed it had been passed on.
+  `docs/PROCESS.md` §3 calls a cancellation request an affine occurrence, so an
+  acknowledgement of a request that was never made is a fabricated ending. Note
+  what this does *not* say: it constrains the acknowledgement, not the escrow,
+  so a requested-but-unacknowledged cancellation still leaves the payload in
+  flight.
   -/
-  replacementEscrowed : ∀ occurrence carrier,
-    (resolution occurrence).bind ChannelResolution.replacement = some carrier →
-    carrier ∈ created ∧ carrier ≠ occurrence
+  acknowledgedWasRequested : ∀ occurrence reason,
+    resolution occurrence = some (.cancelAcknowledged reason) →
+    cancelRequested occurrence = true
 
 namespace EscrowLedger
 
@@ -172,14 +238,13 @@ def settled : List Occurrence :=
   ledger.created.filter ledger.Resolved
 
 /--
-**At most one resolution.**
+**At most one recorded ending.**
 
-`docs/PROCESS.md` §3's affinity law, and a projection rather than an assumption:
-`resolution` is a function, so an occurrence cannot end twice. Stated because
-the property is what the design buys, and a reader should not have to
-reconstruct that a function is single-valued to see that the law holds.
+A projection, not an assumption: `resolution` is a function. See the module note
+for what this is *not* — it is the recording half of §3's affine resolve token,
+and the once-consumption half needs the transition family.
 -/
-theorem atMostOneResolution {occurrence : Occurrence}
+theorem atMostOneRecordedEnding {occurrence : Occurrence}
     {first second : ChannelResolution Occurrence Session}
     (isFirst : ledger.resolution occurrence = some first)
     (isSecond : ledger.resolution occurrence = some second) : first = second := by
@@ -200,6 +265,47 @@ theorem outstanding_xor_settled (occurrence : Occurrence)
     exact absurd inFlight (by simp)
 
 end EscrowLedger
+
+/-! ## Coalescing cannot go in circles -/
+
+/-- One occurrence's payload reaches another by one or more coalesces. -/
+inductive CoalescesTo {Occurrence Session : Type u}
+    (ledger : EscrowLedger Occurrence Session) : Occurrence → Occurrence → Prop
+  /-- One coalesce. -/
+  | step {source carrier : Occurrence}
+      (merged : ledger.resolution source = some (.coalesced carrier)) :
+      CoalescesTo ledger source carrier
+  /-- And onward. -/
+  | trans {source middle target : Occurrence}
+      (first : CoalescesTo ledger source middle)
+      (rest : CoalescesTo ledger middle target) :
+      CoalescesTo ledger source target
+
+namespace CoalescesTo
+
+variable {Occurrence Session : Type u} {ledger : EscrowLedger Occurrence Session}
+
+/-- Rank strictly increases along every coalesce path. -/
+theorem rank_increases {source target : Occurrence}
+    (reaches : CoalescesTo ledger source target) :
+    ledger.rank source < ledger.rank target := by
+  induction reaches with
+  | step merged => exact (ledger.coalesceCarrierLater _ _ merged).2
+  | trans _ _ firstRank restRank => exact Nat.lt_trans firstRank restRank
+
+/--
+**No coalesce cycle, of any length.**
+
+The law an irreflexivity condition could not give. Without it two occurrences
+may merge into each other, or a chain may close, and every field of the ledger
+still discharges while both payloads land nowhere — a ledger that reports itself
+in order and has lost everything in the cycle.
+-/
+theorem no_cycle {occurrence : Occurrence}
+    (loops : CoalescesTo ledger occurrence occurrence) : False :=
+  Nat.lt_irrefl _ loops.rank_increases
+
+end CoalescesTo
 
 /-- Every element of a list is in exactly one of the two complementary filters. -/
 private theorem length_filter_add_filter_not {α : Type u} (predicate : α → Bool) :
@@ -225,17 +331,18 @@ namespace EscrowLedger
 variable {Occurrence Session : Type u} (ledger : EscrowLedger Occurrence Session)
 
 /--
-**Conservation.**
+**Accounting.**
 
-Every escrowed occurrence is accounted for: it is either still in flight or it
-has ended, and the two counts add to the number ever created. Nothing leaks and
-nothing is invented.
+Every escrowed occurrence is either still in flight or has ended, and the two
+counts add to the number ever created.
 
-`docs/PROCESS.md` §3 calls this an unconditional prefix law, and it is
-unconditional here in the strongest sense — it is a fact about the ledger's
-shape, with no hypothesis about scheduling, responsiveness, or progress.
+A counting identity about *one* ledger, and this docstring is careful not to
+claim more: it uses `created` and `resolution` and none of the other fields, so
+"nothing is invented" is `noFabrication`'s and not this theorem's, and what is
+counted is identities rather than the resources §3 says travel with them.
+§3's *prefix* conservation is `settled_monotone` and `created_monotone` below.
 -/
-theorem conservation :
+theorem accounting :
     ledger.settled.length + ledger.outstanding.length = ledger.created.length :=
   length_filter_add_filter_not ledger.Resolved ledger.created
 
@@ -258,27 +365,46 @@ theorem outstanding_escrowed {occurrence : Occurrence}
 /--
 **Requesting cancellation does not reclaim escrow.**
 
-Nothing in this structure relates `cancelRequested` to `resolution`, and that is
-the content: an occurrence may have a cancellation requested and still be in
-flight. `docs/PROCESS.md` §3 requires exactly this, because a request that
-reclaimed the escrow would lose the payload of a message whose cancellation
-later loses its race with delivery.
+`docs/PROCESS.md` §3 requires this, because a request that reclaimed the escrow
+would lose the payload of a message whose cancellation later loses its race with
+delivery.
 
-Stated as a theorem over the ledger rather than left implicit, so that a future
-field tying the two together would break this file.
+This theorem is the projection `Outstanding` already carries, and it is honest
+to say so: it would still prove if a field tying `cancelRequested` to
+`resolution` were added — it would merely become vacuous. What actually enforces
+the independence is `Tests/Process/EscrowFixtures.lean`, which builds a ledger
+with a cancellation requested against an outstanding occurrence and stops
+elaborating the moment such a field exists. An earlier revision of this
+docstring claimed the theorem itself was the guard; it is not.
 -/
 theorem cancel_request_leaves_escrow (occurrence : Occurrence)
-    (inFlight : ledger.Outstanding occurrence) (_requested : ledger.cancelRequested occurrence = true) :
+    (inFlight : ledger.Outstanding occurrence)
+    (_requested : ledger.cancelRequested occurrence = true) :
     ledger.resolution occurrence = none :=
   inFlight.2
+
+/--
+The cross-ledger obligation a reroute creates.
+
+`rerouted destination` says the payload left this channel; it does not and
+cannot say it arrived. This predicate names what a plan holding every channel's
+ledger must prove: for each rerouted occurrence, the destination session escrows
+something carrying it.
+
+Stated here so the obligation is written down at the point it is created rather
+than remembered at the point it could be discharged.
+-/
+def ReroutedElsewhere (landsAt : Session → Occurrence → Prop) : Prop :=
+  ∀ occurrence destination,
+    ledger.resolution occurrence = some (.rerouted destination) →
+    ∃ arrival, landsAt destination arrival
 
 end EscrowLedger
 
 /--
 One ledger is a later point of the same execution than another.
 
-The prefix relation the laws in `docs/PROCESS.md` §3 are stated over: escrowed
-occurrences are only appended, and a resolution once written is permanent.
+The prefix relation `docs/PROCESS.md` §3's unconditional laws are stated over.
 -/
 structure LedgerExtends {Occurrence Session : Type u}
     (earlier later : EscrowLedger Occurrence Session) where
@@ -288,6 +414,17 @@ structure LedgerExtends {Occurrence Session : Type u}
   resolutionPermanent : ∀ occurrence resolution,
     earlier.resolution occurrence = some resolution →
     later.resolution occurrence = some resolution
+  /--
+  A cancellation request, once made, does not evaporate.
+
+  Without this an outstanding request disappears with no acknowledgement, no
+  timeout and no record, which is `docs/FOUNDATION.md` law 7 — §3 calls the
+  request an affine occurrence, and an affine thing that vanishes was not
+  affine.
+  -/
+  cancelRequestMonotone : ∀ occurrence,
+    earlier.cancelRequested occurrence = true →
+    later.cancelRequested occurrence = true
 
 namespace LedgerExtends
 
@@ -312,11 +449,6 @@ theorem resolvedStaysResolved (extension : LedgerExtends earlier later)
 An occurrence in flight at any point of an execution is, at every later point,
 either still in flight or ended by one of the named resolutions. It cannot
 simply be absent.
-
-This is the `docs/FOUNDATION.md` law 5 statement for escrow, and the reason
-`Extends` carries `resolutionPermanent` rather than merely `createdPrefix`:
-without permanence a ledger could erase a resolution and reopen a settled
-occurrence, and without the prefix an occurrence could vanish from `created`.
 -/
 theorem noLoss (extension : LedgerExtends earlier later) {occurrence : Occurrence}
     (inFlight : earlier.Outstanding occurrence) :
@@ -326,10 +458,31 @@ theorem noLoss (extension : LedgerExtends earlier later) {occurrence : Occurrenc
   | none => exact Or.inl ⟨escrowed, ending⟩
   | some _ => exact Or.inr (by simp [EscrowLedger.Resolved, ending])
 
+/-- **The prefix half of conservation: what was settled stays settled.** -/
+theorem settled_monotone (extension : LedgerExtends earlier later)
+    {occurrence : Occurrence} (wasSettled : occurrence ∈ earlier.settled) :
+    occurrence ∈ later.settled := by
+  have escrowed := (List.mem_filter.mp wasSettled).1
+  have resolved := (List.mem_filter.mp wasSettled).2
+  refine List.mem_filter.mpr ⟨extension.created_preserved escrowed, ?_⟩
+  cases ending : earlier.resolution occurrence with
+  | none =>
+    rw [EscrowLedger.Resolved, ending] at resolved
+    exact absurd resolved (by simp)
+  | some _ =>
+    rw [EscrowLedger.Resolved, extension.resolvedStaysResolved ending]
+    rfl
+
+/-- And what was escrowed stays escrowed, so neither count can shrink. -/
+theorem created_monotone (extension : LedgerExtends earlier later) :
+    earlier.created.length ≤ later.created.length :=
+  extension.createdPrefix.length_le
+
 /-- Extension is reflexive: a ledger is a later point of itself. -/
 theorem refl (ledger : EscrowLedger Occurrence Session) : LedgerExtends ledger ledger where
   createdPrefix := List.prefix_refl _
   resolutionPermanent := fun _ _ ended => ended
+  cancelRequestMonotone := fun _ requested => requested
 
 /-- And transitive, so the laws hold across a whole execution, not one step. -/
 theorem trans {middle : EscrowLedger Occurrence Session}
@@ -339,6 +492,9 @@ theorem trans {middle : EscrowLedger Occurrence Session}
   resolutionPermanent := fun occurrence resolution ended =>
     second.resolutionPermanent occurrence resolution
       (first.resolutionPermanent occurrence resolution ended)
+  cancelRequestMonotone := fun occurrence requested =>
+    second.cancelRequestMonotone occurrence
+      (first.cancelRequestMonotone occurrence requested)
 
 end LedgerExtends
 
