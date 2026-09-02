@@ -33,7 +33,10 @@ impl BusCtx {
         let repo_root = gitrepo::repo_root(&start)?;
         let remotes = gitrepo::run_ok(&repo_root, &["remote"])?;
         let has_origin = remotes.lines().any(|l| l.trim() == "origin");
-        Ok(BusCtx { repo_root, has_origin })
+        Ok(BusCtx {
+            repo_root,
+            has_origin,
+        })
     }
 
     pub fn worktrees_root(&self) -> AbResult<PathBuf> {
@@ -66,7 +69,14 @@ impl BusCtx {
         // failure (no network, auth, bad remote URL, ...) should be a hard
         // error; a missing ref specifically must not block every other bus
         // command from working purely off local state.
-        let out = gitrepo::run(&self.repo_root, &["fetch", "origin", "refs/heads/agent-bus:refs/remotes/origin/agent-bus"])?;
+        let out = gitrepo::run(
+            &self.repo_root,
+            &[
+                "fetch",
+                "origin",
+                "refs/heads/agent-bus:refs/remotes/origin/agent-bus",
+            ],
+        )?;
         if !out.success && !out.stderr.contains("couldn't find remote ref") {
             return Err(crate::error::AbError::Git(format!(
                 "git fetch origin refs/heads/agent-bus failed: {}",
@@ -79,13 +89,12 @@ impl BusCtx {
             (None, Some(r)) => {
                 gitrepo::run_ok(&self.repo_root, &["update-ref", BUS_BRANCH, &r])?;
             }
-            (Some(l), Some(r)) if l != r => {
-                if gitrepo::is_ancestor(&self.repo_root, &l, &r)? {
-                    gitrepo::run_ok(&self.repo_root, &["update-ref", BUS_BRANCH, &r])?;
-                }
-                // else: local has unpublished commits ahead; leave as-is, the
-                // per-agent worktree rebase handles reconciliation on push.
+            (Some(l), Some(r)) if l != r && gitrepo::is_ancestor(&self.repo_root, &l, &r)? => {
+                gitrepo::run_ok(&self.repo_root, &["update-ref", BUS_BRANCH, &r])?;
             }
+            // Local has unpublished commits ahead (or `l == r`, or one side
+            // is missing entirely); leave as-is, the per-agent worktree
+            // rebase handles reconciliation on push.
             _ => {}
         }
         Ok(())
@@ -168,7 +177,10 @@ impl BusCtx {
                 return gitrepo::rev_parse(&self.repo_root, BUS_BRANCH);
             }
             if attempts >= 10 {
-                return Err(invalid(format!("push to {BUS_BRANCH} failed after {attempts} attempts: {}", push.stderr)));
+                return Err(invalid(format!(
+                    "push to {BUS_BRANCH} failed after {attempts} attempts: {}",
+                    push.stderr
+                )));
             }
             self.fetch_remote()?;
         }
@@ -180,7 +192,10 @@ impl BusCtx {
             return Ok(());
         }
         let local = gitrepo::rev_parse(&self.repo_root, BUS_BRANCH)?;
-        gitrepo::run_ok(&self.repo_root, &["push", "origin", &format!("{local}:{BUS_BRANCH}")])?;
+        gitrepo::run_ok(
+            &self.repo_root,
+            &["push", "origin", &format!("{local}:{BUS_BRANCH}")],
+        )?;
         Ok(())
     }
 }
@@ -199,7 +214,12 @@ impl BusCtx {
 /// two events genuinely retain the *same* `observed` even though one ends up
 /// published causally after the other, which is exactly the input the
 /// concurrent-vs-causally-later distinction in section 10 is built to handle.
-pub fn publish_event(ctx: &BusCtx, agent: &Agent, data: EventData, extra_refs: Vec<crate::scalars::EventId>) -> AbResult<Envelope> {
+pub fn publish_event(
+    ctx: &BusCtx,
+    agent: &Agent,
+    data: EventData,
+    extra_refs: Vec<crate::scalars::EventId>,
+) -> AbResult<Envelope> {
     let _lock = ctx.lock()?;
     ctx.fetch_remote()?;
     let wt = ctx.ensure_worktree(agent)?;
@@ -230,7 +250,10 @@ pub fn publish_event(ctx: &BusCtx, agent: &Agent, data: EventData, extra_refs: V
             return Ok(env);
         }
         if attempts >= 10 {
-            return Err(invalid(format!("push to {BUS_BRANCH} failed after {attempts} attempts: {}", push.stderr)));
+            return Err(invalid(format!(
+                "push to {BUS_BRANCH} failed after {attempts} attempts: {}",
+                push.stderr
+            )));
         }
         ctx.fetch_remote()?;
         let new_target = gitrepo::rev_parse(&ctx.repo_root, BUS_BRANCH)?;
@@ -254,7 +277,11 @@ pub fn bootstrap_init(
         return Err(invalid("agent-bus branch already exists"));
     }
     let object_format = gitrepo::object_format(&ctx.repo_root)?;
-    let bus_json = BusJson::new(object_format, coordinators.to_vec(), product_review_from.clone())?;
+    let bus_json = BusJson::new(
+        object_format,
+        coordinators.to_vec(),
+        product_review_from.clone(),
+    )?;
 
     let staging = ctx.worktrees_root()?.join("_bootstrap");
     if staging.exists() {
@@ -270,7 +297,10 @@ pub fn bootstrap_init(
     gitrepo::run_ok(&staging, &["init", "--quiet"])?;
 
     std::fs::create_dir_all(staging.join("_bus")).ok();
-    storage::atomic_write(&staging.join("_bus/BUS.json"), &bus_json.to_canonical_bytes())?;
+    storage::atomic_write(
+        &staging.join("_bus/BUS.json"),
+        &bus_json.to_canonical_bytes(),
+    )?;
     storage::atomic_write(
         &staging.join(".gitattributes"),
         crate::bootstrap::GITATTRIBUTES_CONTENTS.as_bytes(),
@@ -301,15 +331,16 @@ pub fn bootstrap_init(
     }
 
     gitrepo::add_all(&staging)?;
-    gitrepo::run_ok(
-        &staging,
-        &["commit", "-m", "agent-bus: bootstrap root"],
-    )?;
+    gitrepo::run_ok(&staging, &["commit", "-m", "agent-bus: bootstrap root"])?;
     let root_commit = gitrepo::rev_parse(&staging, "HEAD")?;
     gitrepo::run_ok(&staging, &["branch", "-f", BUS_BRANCH_SHORT, &root_commit])?;
     gitrepo::run_ok(
         &ctx.repo_root,
-        &["fetch", staging.to_string_lossy().as_ref(), &format!("{BUS_BRANCH}:{BUS_BRANCH}")],
+        &[
+            "fetch",
+            staging.to_string_lossy().as_ref(),
+            &format!("{BUS_BRANCH}:{BUS_BRANCH}"),
+        ],
     )?;
     std::fs::remove_dir_all(&staging).ok();
     Ok(())
@@ -348,8 +379,17 @@ mod tests {
     // ---------------------------------------------------------------
 
     fn run_setup_git(dir: &Path, args: &[&str]) -> String {
-        let out = Command::new("git").arg("-C").arg(dir).args(args).output().expect("failed to run git");
-        assert!(out.status.success(), "git {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .expect("failed to run git");
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 
@@ -378,7 +418,10 @@ mod tests {
     /// Bootstrap a fresh `agent-bus` branch (real git, no mock) with the
     /// given coordinators already registered.
     fn bootstrap(dir: &Path, agents: &[&str]) -> BusCtx {
-        let ctx = BusCtx { repo_root: dir.to_path_buf(), has_origin: false };
+        let ctx = BusCtx {
+            repo_root: dir.to_path_buf(),
+            has_origin: false,
+        };
         let agents: Vec<Agent> = agents.iter().map(|a| agent(a)).collect();
         bootstrap_init(&ctx, &agents, &some_object_id()).unwrap();
         ctx
@@ -409,16 +452,22 @@ mod tests {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
-                .map_err(|e| crate::error::AbError::Git(format!("failed to run git {args:?}: {e}")))?;
+                .map_err(|e| {
+                    crate::error::AbError::Git(format!("failed to run git {args:?}: {e}"))
+                })?;
             child
                 .stdin
                 .as_mut()
                 .unwrap()
                 .write_all(input.as_bytes())
-                .map_err(|e| crate::error::AbError::Git(format!("failed to write stdin to git {args:?}: {e}")))?;
-            let out = child
-                .wait_with_output()
-                .map_err(|e| crate::error::AbError::Git(format!("failed to wait on git {args:?}: {e}")))?;
+                .map_err(|e| {
+                    crate::error::AbError::Git(format!(
+                        "failed to write stdin to git {args:?}: {e}"
+                    ))
+                })?;
+            let out = child.wait_with_output().map_err(|e| {
+                crate::error::AbError::Git(format!("failed to wait on git {args:?}: {e}"))
+            })?;
             Ok(GitOutput {
                 success: out.status.success(),
                 stdout: String::from_utf8_lossy(&out.stdout).trim_end().to_string(),
@@ -430,7 +479,9 @@ mod tests {
                 .arg(dir)
                 .args(args)
                 .output()
-                .map_err(|e| crate::error::AbError::Git(format!("failed to run git {args:?}: {e}")))?;
+                .map_err(|e| {
+                    crate::error::AbError::Git(format!("failed to run git {args:?}: {e}"))
+                })?;
             Ok(GitOutput {
                 success: out.status.success(),
                 stdout: String::from_utf8_lossy(&out.stdout).trim_end().to_string(),
@@ -443,7 +494,7 @@ mod tests {
     /// real `git` subprocess, so a `MockGit` built with a few specific
     /// overrides otherwise behaves exactly like no mock were installed.
     fn passthrough(m: MockGit) -> MockGit {
-        m.on_with(|_, _, _| true, |dir, args, stdin| real_git_output(dir, args, stdin))
+        m.on_with(|_, _, _| true, real_git_output)
     }
 
     /// Simulates another agent's unrelated, concurrent publish landing on
@@ -453,7 +504,16 @@ mod tests {
     /// `receive.denyCurrentBranch`). Returns the new tip.
     fn inject_commit(repo_root: &Path, file_rel_path: &str, contents: &str) -> String {
         let tmp = tempfile::tempdir().unwrap();
-        run_setup_git(repo_root, &["worktree", "add", "--detach", &tmp.path().to_string_lossy(), BUS_BRANCH]);
+        run_setup_git(
+            repo_root,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                &tmp.path().to_string_lossy(),
+                BUS_BRANCH,
+            ],
+        );
         let file_path = tmp.path().join(file_rel_path);
         if let Some(parent) = file_path.parent() {
             std::fs::create_dir_all(parent).unwrap();
@@ -463,7 +523,15 @@ mod tests {
         run_setup_git(tmp.path(), &["commit", "-m", "agent-bus: concurrent write"]);
         let sha = run_setup_git(tmp.path(), &["rev-parse", "HEAD"]);
         run_setup_git(repo_root, &["update-ref", BUS_BRANCH, &sha]);
-        run_setup_git(repo_root, &["worktree", "remove", "--force", &tmp.path().to_string_lossy()]);
+        run_setup_git(
+            repo_root,
+            &[
+                "worktree",
+                "remove",
+                "--force",
+                &tmp.path().to_string_lossy(),
+            ],
+        );
         sha
     }
 
@@ -476,7 +544,16 @@ mod tests {
     fn inject_agent_registered(repo_root: &Path, name: &str) -> String {
         let tip = gitrepo::rev_parse(repo_root, BUS_BRANCH).unwrap();
         let tmp = tempfile::tempdir().unwrap();
-        run_setup_git(repo_root, &["worktree", "add", "--detach", &tmp.path().to_string_lossy(), BUS_BRANCH]);
+        run_setup_git(
+            repo_root,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                &tmp.path().to_string_lossy(),
+                BUS_BRANCH,
+            ],
+        );
         let new_agent = agent(name);
         let data = EventData::AgentRegistered(crate::events::AgentRegistered {
             display_name: crate::scalars::Short::parse(name.to_string()).unwrap(),
@@ -491,10 +568,25 @@ mod tests {
         let env = Envelope::new(&new_agent, 0, observed, &data, []);
         storage::append_event(tmp.path(), &env).unwrap();
         run_setup_git(tmp.path(), &["add", "-A"]);
-        run_setup_git(tmp.path(), &["commit", "-m", &format!("agent-bus: {name} agent.registered")]);
+        run_setup_git(
+            tmp.path(),
+            &[
+                "commit",
+                "-m",
+                &format!("agent-bus: {name} agent.registered"),
+            ],
+        );
         let sha = run_setup_git(tmp.path(), &["rev-parse", "HEAD"]);
         run_setup_git(repo_root, &["update-ref", BUS_BRANCH, &sha]);
-        run_setup_git(repo_root, &["worktree", "remove", "--force", &tmp.path().to_string_lossy()]);
+        run_setup_git(
+            repo_root,
+            &[
+                "worktree",
+                "remove",
+                "--force",
+                &tmp.path().to_string_lossy(),
+            ],
+        );
         sha
     }
 
@@ -503,13 +595,33 @@ mod tests {
     /// rebase conflict against a local commit that edits the same path.
     fn inject_delete_commit(repo_root: &Path, file_rel_path: &str) -> String {
         let tmp = tempfile::tempdir().unwrap();
-        run_setup_git(repo_root, &["worktree", "add", "--detach", &tmp.path().to_string_lossy(), BUS_BRANCH]);
+        run_setup_git(
+            repo_root,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                &tmp.path().to_string_lossy(),
+                BUS_BRANCH,
+            ],
+        );
         std::fs::remove_file(tmp.path().join(file_rel_path)).unwrap();
         run_setup_git(tmp.path(), &["add", "-A"]);
-        run_setup_git(tmp.path(), &["commit", "-m", "agent-bus: concurrent delete"]);
+        run_setup_git(
+            tmp.path(),
+            &["commit", "-m", "agent-bus: concurrent delete"],
+        );
         let sha = run_setup_git(tmp.path(), &["rev-parse", "HEAD"]);
         run_setup_git(repo_root, &["update-ref", BUS_BRANCH, &sha]);
-        run_setup_git(repo_root, &["worktree", "remove", "--force", &tmp.path().to_string_lossy()]);
+        run_setup_git(
+            repo_root,
+            &[
+                "worktree",
+                "remove",
+                "--force",
+                &tmp.path().to_string_lossy(),
+            ],
+        );
         sha
     }
 
@@ -524,7 +636,15 @@ mod tests {
         assert!(!ctx.has_origin);
         assert!(ctx.repo_root.exists());
 
-        run_setup_git(repo.path(), &["remote", "add", "origin", "https://example.invalid/repo.git"]);
+        run_setup_git(
+            repo.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://example.invalid/repo.git",
+            ],
+        );
         let ctx2 = BusCtx::discover(Some(&path_str)).unwrap();
         assert!(ctx2.has_origin);
     }
@@ -534,11 +654,20 @@ mod tests {
     #[test]
     fn worktrees_root_and_worktree_path_are_under_git_dir() {
         let repo = init_repo();
-        let ctx = BusCtx { repo_root: repo.path().to_path_buf(), has_origin: false };
-        assert_eq!(ctx.worktrees_root().unwrap(), repo.path().join(".git").join("agent-bus-worktrees"));
+        let ctx = BusCtx {
+            repo_root: repo.path().to_path_buf(),
+            has_origin: false,
+        };
+        assert_eq!(
+            ctx.worktrees_root().unwrap(),
+            repo.path().join(".git").join("agent-bus-worktrees")
+        );
         assert_eq!(
             ctx.worktree_path(&agent("alice")).unwrap(),
-            repo.path().join(".git").join("agent-bus-worktrees").join("alice")
+            repo.path()
+                .join(".git")
+                .join("agent-bus-worktrees")
+                .join("alice")
         );
     }
 
@@ -547,7 +676,10 @@ mod tests {
     #[test]
     fn bus_ref_exists_toggles_after_bootstrap() {
         let repo = init_repo();
-        let ctx = BusCtx { repo_root: repo.path().to_path_buf(), has_origin: false };
+        let ctx = BusCtx {
+            repo_root: repo.path().to_path_buf(),
+            has_origin: false,
+        };
         assert!(!ctx.bus_ref_exists().unwrap());
         bootstrap_init(&ctx, &[agent("alice")], &some_object_id()).unwrap();
         assert!(ctx.bus_ref_exists().unwrap());
@@ -558,7 +690,10 @@ mod tests {
     #[test]
     fn bus_json_errors_before_bootstrap_and_reads_after() {
         let repo = init_repo();
-        let ctx = BusCtx { repo_root: repo.path().to_path_buf(), has_origin: false };
+        let ctx = BusCtx {
+            repo_root: repo.path().to_path_buf(),
+            has_origin: false,
+        };
         let err = ctx.bus_json().unwrap_err();
         assert!(err.to_string().contains("not found"), "{err}");
 
@@ -575,12 +710,21 @@ mod tests {
         let origin_tip = gitrepo::rev_parse(&origin_ctx.repo_root, BUS_BRANCH).unwrap();
 
         let repo = init_repo();
-        run_setup_git(repo.path(), &["remote", "add", "origin", &origin.path().to_string_lossy()]);
-        let ctx = BusCtx { repo_root: repo.path().to_path_buf(), has_origin: true };
+        run_setup_git(
+            repo.path(),
+            &["remote", "add", "origin", &origin.path().to_string_lossy()],
+        );
+        let ctx = BusCtx {
+            repo_root: repo.path().to_path_buf(),
+            has_origin: true,
+        };
         assert!(!ctx.bus_ref_exists().unwrap());
 
         ctx.fetch_remote().unwrap();
-        assert_eq!(gitrepo::rev_parse(&ctx.repo_root, BUS_BRANCH).unwrap(), origin_tip);
+        assert_eq!(
+            gitrepo::rev_parse(&ctx.repo_root, BUS_BRANCH).unwrap(),
+            origin_tip
+        );
     }
 
     #[test]
@@ -590,12 +734,24 @@ mod tests {
         let origin_tip = gitrepo::rev_parse(&origin_ctx.repo_root, BUS_BRANCH).unwrap();
 
         let repo = init_repo();
-        run_setup_git(repo.path(), &["remote", "add", "origin", &origin.path().to_string_lossy()]);
-        run_setup_git(repo.path(), &["fetch", "origin", &format!("{BUS_BRANCH}:{BUS_BRANCH}")]);
-        let ctx = BusCtx { repo_root: repo.path().to_path_buf(), has_origin: true };
+        run_setup_git(
+            repo.path(),
+            &["remote", "add", "origin", &origin.path().to_string_lossy()],
+        );
+        run_setup_git(
+            repo.path(),
+            &["fetch", "origin", &format!("{BUS_BRANCH}:{BUS_BRANCH}")],
+        );
+        let ctx = BusCtx {
+            repo_root: repo.path().to_path_buf(),
+            has_origin: true,
+        };
 
         ctx.fetch_remote().unwrap();
-        assert_eq!(gitrepo::rev_parse(&ctx.repo_root, BUS_BRANCH).unwrap(), origin_tip);
+        assert_eq!(
+            gitrepo::rev_parse(&ctx.repo_root, BUS_BRANCH).unwrap(),
+            origin_tip
+        );
     }
 
     #[test]
@@ -605,17 +761,38 @@ mod tests {
         let root_tip = gitrepo::rev_parse(&origin_ctx.repo_root, BUS_BRANCH).unwrap();
 
         let repo = init_repo();
-        run_setup_git(repo.path(), &["remote", "add", "origin", &origin.path().to_string_lossy()]);
-        run_setup_git(repo.path(), &["fetch", "origin", &format!("{BUS_BRANCH}:{BUS_BRANCH}")]);
-        let ctx = BusCtx { repo_root: repo.path().to_path_buf(), has_origin: true };
-        assert_eq!(gitrepo::rev_parse(&ctx.repo_root, BUS_BRANCH).unwrap(), root_tip);
+        run_setup_git(
+            repo.path(),
+            &["remote", "add", "origin", &origin.path().to_string_lossy()],
+        );
+        run_setup_git(
+            repo.path(),
+            &["fetch", "origin", &format!("{BUS_BRANCH}:{BUS_BRANCH}")],
+        );
+        let ctx = BusCtx {
+            repo_root: repo.path().to_path_buf(),
+            has_origin: true,
+        };
+        assert_eq!(
+            gitrepo::rev_parse(&ctx.repo_root, BUS_BRANCH).unwrap(),
+            root_tip
+        );
 
-        publish_event(&origin_ctx, &agent("carol"), status_event("origin moved on"), vec![]).unwrap();
+        publish_event(
+            &origin_ctx,
+            &agent("carol"),
+            status_event("origin moved on"),
+            vec![],
+        )
+        .unwrap();
         let advanced_tip = gitrepo::rev_parse(&origin_ctx.repo_root, BUS_BRANCH).unwrap();
         assert_ne!(advanced_tip, root_tip);
 
         ctx.fetch_remote().unwrap();
-        assert_eq!(gitrepo::rev_parse(&ctx.repo_root, BUS_BRANCH).unwrap(), advanced_tip);
+        assert_eq!(
+            gitrepo::rev_parse(&ctx.repo_root, BUS_BRANCH).unwrap(),
+            advanced_tip
+        );
     }
 
     #[test]
@@ -624,9 +801,18 @@ mod tests {
         bootstrap(origin.path(), &["carol"]);
 
         let repo = init_repo();
-        run_setup_git(repo.path(), &["remote", "add", "origin", &origin.path().to_string_lossy()]);
-        run_setup_git(repo.path(), &["fetch", "origin", &format!("{BUS_BRANCH}:{BUS_BRANCH}")]);
-        let ctx = BusCtx { repo_root: repo.path().to_path_buf(), has_origin: true };
+        run_setup_git(
+            repo.path(),
+            &["remote", "add", "origin", &origin.path().to_string_lossy()],
+        );
+        run_setup_git(
+            repo.path(),
+            &["fetch", "origin", &format!("{BUS_BRANCH}:{BUS_BRANCH}")],
+        );
+        let ctx = BusCtx {
+            repo_root: repo.path().to_path_buf(),
+            has_origin: true,
+        };
         let origin_tip = gitrepo::rev_parse(&ctx.repo_root, BUS_BRANCH).unwrap();
 
         // Local advances independently of origin (never pushed there).
@@ -662,8 +848,14 @@ mod tests {
     fn push_remote_publishes_local_bus_branch_to_origin() {
         let origin = bare_repo();
         let repo = init_repo();
-        run_setup_git(repo.path(), &["remote", "add", "origin", &origin.path().to_string_lossy()]);
-        let ctx = BusCtx { repo_root: repo.path().to_path_buf(), has_origin: true };
+        run_setup_git(
+            repo.path(),
+            &["remote", "add", "origin", &origin.path().to_string_lossy()],
+        );
+        let ctx = BusCtx {
+            repo_root: repo.path().to_path_buf(),
+            has_origin: true,
+        };
         bootstrap_init(&ctx, &[agent("alice")], &some_object_id()).unwrap();
 
         ctx.push_remote().unwrap();
@@ -740,8 +932,14 @@ mod tests {
         let local_head = gitrepo::rev_parse(&wt, "HEAD").unwrap();
 
         let result = ctx.sync(&alice).unwrap();
-        assert_eq!(result, local_head, "the local commit should publish as-is (fast-forward rebase is a no-op)");
-        assert_eq!(gitrepo::rev_parse(&ctx.repo_root, BUS_BRANCH).unwrap(), local_head);
+        assert_eq!(
+            result, local_head,
+            "the local commit should publish as-is (fast-forward rebase is a no-op)"
+        );
+        assert_eq!(
+            gitrepo::rev_parse(&ctx.repo_root, BUS_BRANCH).unwrap(),
+            local_head
+        );
     }
 
     #[test]
@@ -753,7 +951,11 @@ mod tests {
         std::fs::write(wt.join("not-alice.txt"), "stray\n").unwrap();
 
         let err = ctx.sync(&alice).unwrap_err();
-        assert!(err.to_string().contains("changes outside its own directory"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("changes outside its own directory"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -789,7 +991,9 @@ mod tests {
                 if n == 0 {
                     // Another agent's unrelated publish lands first.
                     inject_agent_registered(&repo_root, "bob");
-                    Ok(GitOutput::err("! [rejected] HEAD -> refs/heads/agent-bus (fetch first)"))
+                    Ok(GitOutput::err(
+                        "! [rejected] HEAD -> refs/heads/agent-bus (fetch first)",
+                    ))
                 } else {
                     real_git_output(dir, args, stdin)
                 }
@@ -819,7 +1023,9 @@ mod tests {
                 // ...racing a concurrent commit that deletes that same file:
                 // a real, unresolvable modify/delete conflict.
                 inject_delete_commit(&repo_root, "alice/000000.jsonl");
-                Ok(GitOutput::err("! [rejected] HEAD -> refs/heads/agent-bus (fetch first)"))
+                Ok(GitOutput::err(
+                    "! [rejected] HEAD -> refs/heads/agent-bus (fetch first)",
+                ))
             },
         );
         let _guard = passthrough(mock).install();
@@ -845,7 +1051,10 @@ mod tests {
         let _guard = passthrough(mock).install();
 
         let err = ctx.sync(&alice).unwrap_err();
-        assert!(err.to_string().contains("failed after 10 attempts"), "{err}");
+        assert!(
+            err.to_string().contains("failed after 10 attempts"),
+            "{err}"
+        );
     }
 
     // ---------------------------------------------------------- publish_event
@@ -884,7 +1093,9 @@ mod tests {
                 calls.set(n + 1);
                 if n == 0 {
                     inject_agent_registered(&repo_root, "bob");
-                    Ok(GitOutput::err("! [rejected] HEAD -> refs/heads/agent-bus (fetch first)"))
+                    Ok(GitOutput::err(
+                        "! [rejected] HEAD -> refs/heads/agent-bus (fetch first)",
+                    ))
                 } else {
                     real_git_output(dir, args, stdin)
                 }
@@ -896,7 +1107,10 @@ mod tests {
         assert_eq!(env.seq, 1);
         let state = ctx.load_state().unwrap();
         assert!(state.agents.contains_key(&alice));
-        assert!(state.agents.contains_key(&agent("bob")), "the concurrent registration must also survive the rebase");
+        assert!(
+            state.agents.contains_key(&agent("bob")),
+            "the concurrent registration must also survive the rebase"
+        );
     }
 
     #[test]
@@ -913,7 +1127,9 @@ mod tests {
                 // racing a concurrent delete of that exact file guarantees a
                 // real, unresolvable modify/delete conflict on retry.
                 inject_delete_commit(&repo_root, "alice/000000.jsonl");
-                Ok(GitOutput::err("! [rejected] HEAD -> refs/heads/agent-bus (fetch first)"))
+                Ok(GitOutput::err(
+                    "! [rejected] HEAD -> refs/heads/agent-bus (fetch first)",
+                ))
             },
         );
         let _guard = passthrough(mock).install();
@@ -927,7 +1143,10 @@ mod tests {
         // not stuck mid-conflict.
         let wt = ctx.worktree_path(&alice).unwrap();
         let status = gitrepo::status_porcelain(&wt).unwrap();
-        assert!(status.trim().is_empty(), "worktree left dirty after abort: {status}");
+        assert!(
+            status.trim().is_empty(),
+            "worktree left dirty after abort: {status}"
+        );
     }
 
     #[test]
@@ -942,7 +1161,10 @@ mod tests {
         let _guard = passthrough(mock).install();
 
         let err = publish_event(&ctx, &alice, status_event("never lands"), vec![]).unwrap_err();
-        assert!(err.to_string().contains("failed after 10 attempts"), "{err}");
+        assert!(
+            err.to_string().contains("failed after 10 attempts"),
+            "{err}"
+        );
     }
 
     // ------------------------------------------------------- bootstrap_init
@@ -958,7 +1180,10 @@ mod tests {
     #[test]
     fn bootstrap_init_cleans_up_a_stale_staging_directory_from_a_prior_attempt() {
         let repo = init_repo();
-        let ctx = BusCtx { repo_root: repo.path().to_path_buf(), has_origin: false };
+        let ctx = BusCtx {
+            repo_root: repo.path().to_path_buf(),
+            has_origin: false,
+        };
         // Simulate a previous bootstrap-init that got interrupted before its
         // own end-of-function `remove_dir_all(&staging)` cleanup ran.
         let staging = ctx.worktrees_root().unwrap().join("_bootstrap");
@@ -972,7 +1197,10 @@ mod tests {
     #[test]
     fn bootstrap_init_errors_when_worktrees_root_is_blocked_by_a_file() {
         let repo = init_repo();
-        let ctx = BusCtx { repo_root: repo.path().to_path_buf(), has_origin: false };
+        let ctx = BusCtx {
+            repo_root: repo.path().to_path_buf(),
+            has_origin: false,
+        };
         // Occupy the directory bootstrap-init needs to create the staging
         // checkout under, with a plain file instead of a directory.
         std::fs::write(ctx.worktrees_root().unwrap(), b"not a directory").unwrap();

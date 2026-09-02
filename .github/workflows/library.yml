@@ -1,0 +1,54 @@
+name: Library build
+
+# The corpus workflow checks documents. This one checks the Lean library, which
+# until now had no mechanical gate at all: `lake build` was never run in CI, so a
+# declaration using `sorry` could reach main unnoticed.
+#
+# Two things make a green run mean something. `warningAsError = true` in
+# lakefile.toml turns Lean's `declaration uses 'sorry'` warning into a build
+# failure. The axiom audit then enforces docs/FOUNDATION.md section 3: only the
+# reviewed logical-foundation constants are permitted, and `sorryAx` or any
+# dependency-declared axiom fails the gate.
+#
+# A third check is about prose. Four adversarial review rounds each found a
+# docstring asserting a property the code did not have, including one naming a
+# theorem that did not exist. Tools/DocstringAudit.py requires a strong claim in
+# a definition or module comment to name the type or theorem enforcing it.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: |
+          curl -sSfL https://github.com/leanprover/elan/releases/download/v4.2.3/elan-x86_64-unknown-linux-gnu.tar.gz \
+            | tar xz
+          ./elan-init -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Report toolchain
+        run: |
+          lean --version
+          lake --version
+
+      - name: Build the library
+        run: lake build
+
+      - name: Audit axioms
+        run: lake env lean Tools/AxiomAudit.lean
+
+      - name: Audit docstring claims
+        run: python3 Tools/DocstringAudit.py

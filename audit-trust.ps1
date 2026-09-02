@@ -48,9 +48,8 @@ foreach ($root in $TestSourceRoot) {
     if (-not (Test-Path -LiteralPath $root -PathType Container)) {
         throw "Configured test source root '$root' does not exist."
     }
-    $resolvedRoot = (Resolve-Path -LiteralPath $root).Path
     foreach ($file in Get-ChildItem -LiteralPath $root -Filter '*.lean' -File -Recurse) {
-        $relative = [System.IO.Path]::GetRelativePath($resolvedRoot, $file.FullName)
+        $relative = [System.IO.Path]::GetRelativePath((Get-Location).Path, $file.FullName)
         $withoutExtension = $relative.Substring(0, $relative.Length - '.lean'.Length)
         $moduleNames += $withoutExtension.Replace([System.IO.Path]::DirectorySeparatorChar, '.')
     }
@@ -99,7 +98,7 @@ try {
     }
 
     $negativeProbe = @(
-        "import Foundation",
+        "import Tests.Foundation",
         "open Grass",
         "@[irreducible] def HiddenVerifiedProgram : Type 1 := VerifiedProgram Grass.Tests.Foundation.spec",
         "axiom hiddenVerifiedProgram : HiddenVerifiedProgram",
