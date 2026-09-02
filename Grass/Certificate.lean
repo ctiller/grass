@@ -38,11 +38,14 @@ def HasInput (behavior : ProgramBehavior spec)
     (input : spec.Input) (execution : behavior.system.ExecutionPrefix) : Prop :=
   behavior.inputOf execution.initialState = input
 
-/-- Every admitted input has at least one coherent, extendable execution prefix. -/
+/-- Every admitted input has an initial execution, and every permitted finite
+frontier has either a finite-terminal or infinite continuation. -/
 structure Adequate (behavior : ProgramBehavior spec) : Prop where
   execution : forall input, spec.admits input ->
     Nonempty { run : behavior.system.ExecutionPrefix //
       behavior.HasInput input run }
+  completion : forall run : behavior.system.ExecutionPrefix,
+    Nonempty (behavior.system.Completion run.state run.graph)
 
 end ProgramBehavior
 
@@ -157,7 +160,6 @@ def mapPrefix (refinement : BehaviorRefinement concrete abstract)
   graph := refinement.mapGraph execution.graph
   events := execution.events
   runs := refinement.mapRuns execution.runs
-  completion := refinement.mapCompletion execution.completion
 
 /-- Transport the concrete side of a refinement along exact behavior equality. -/
 def castConcrete {replacement : ProgramBehavior spec}

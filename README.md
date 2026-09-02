@@ -20,9 +20,12 @@ emitProgram : VerifiedProgram spec → ByteArray
 ```
 
 `emitProgram v` produces an executable artifact for `v`'s selected platform.
-The `VerifiedProgram` certificate establishes functional refinement, memory and
-concurrency safety, progress, ABI correctness, obligation handling, and the
-connection between the program that was proved and the bytes that were emitted.
+The current minimal `VerifiedProgram` certificate composes exact adjacent
+behavior refinements, terminal-trace acceptance, execution progress, selected
+demand certificates, and the connection between the modeled loaded artifact
+and the bytes that were emitted. Concrete memory, concurrency, ABI, and other
+domain guarantees become part of that result only when a domain layer exposes
+them as explicit demands and supplies their certificates.
 
 The first end-to-end target is a Win32 x64 PE32+ Hello World using
 `GetStdHandle`, `WriteFile`, and `ExitProcess`, with ASLR, derived imports,
@@ -59,10 +62,11 @@ pwsh ./audit-trust.ps1
 
 The trust script generates a temporary audit import over every library and test
 module. Its Lean command unfolds even irreducible result aliases to discover
-every concrete `VerifiedProgram` producer, then checks each exact fully
-qualified producer and the configured public theorem roots for rejected
-transitive axioms. The build's warning-as-error setting independently rejects
-admission mechanisms in declarations outside those named closures.
+concrete `VerifiedProgram` producers and audits every declaration originating
+in those project modules, including declarations outside the `Grass` namespace.
+It then checks the configured public theorem roots as an additional explicit
+manifest. The build's warning-as-error setting independently rejects admission
+mechanisms.
 
 The corpus checks verify that annotated spike documents and their comment-free
 authored Lean views remain exact:
