@@ -433,9 +433,9 @@ law 3 forbids an executed example standing in for a proof.
 `Network/Structural.lean` (the canonical network, `coord1:4`), and
 `Network/Delivery.lean` (the total cross-vocabulary classifier that `g-design:4`
 made a condition of per-vocabulary fault classes), and `Network/Child.lean` (the
-binding that authorizes a spawn and routes every child outcome). Not started:
-assertions, channels, the plan, the transition family, mailbox profiles, and the
-commit law.
+binding that authorizes a spawn and routes every child outcome), and
+`Network/Mailbox.lean` (ordering profiles and selective receive). Not started:
+assertions, channels, the plan, the transition family, and the commit law.
 
 `Child.lean` was taken before `Assertion.lean` deliberately. The assertion
 language is standing risk 1 — the one most likely to eat this milestone if it
