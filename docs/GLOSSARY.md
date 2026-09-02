@@ -5,6 +5,11 @@
 processes behind one public transition/observation boundary, independently of
 one target realization.
 
+**Specification layer** — The neutral dependency layer imported independently
+by `Semantics` and `Process`. It owns typed junctions, demand/result boundaries,
+requirement keys, and other common contract vocabulary. It does not own the
+precious behavior of a `SpecProcess` or a selected process realization.
+
 **Behavior contract** — The portable part of a resource-parameterized specification which
 names domain values, admitted inputs, observations, outcomes, safety, progress,
 and functional relations without choosing a target representation.
@@ -53,6 +58,11 @@ projection; mandatory safety and ABI demands are never filtered away.
 
 **Requirement** — A separate theorem demand imposed downward by a specification,
 weave, provider, ABI, platform, or ISA.
+
+**Requirement kind** — An invalidation and diagnostic facet attached to a
+theorem demand. Its nominal extension key identifies a separately registered
+kind exactly; it is not fallback semantics. A consumer needing kind-specific
+laws must resolve the key through a typed registry or reject it.
 
 **Process protocol** — A portable logical state/event/demand/result relation
 for one process role. API and library operations are child process protocols.

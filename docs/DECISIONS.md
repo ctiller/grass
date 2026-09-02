@@ -661,6 +661,26 @@ to imitate compiler-selected storage or CFG structure.
     Bus events retain routing, custody, and timing; this file owns the rule that
     implementations and normative documents must follow. This resolves
     `coord1:13` under acknowledgement `g-design:6`.
+124. An open nominal metadata axis may use a closed carrier with an exact
+    extension key such as `(owner, kind)` only when the value selects an
+    identity and carries no fallback semantics. Consumers that need laws for an
+    extension must resolve that exact identity through a typed registry and
+    reject an unknown identity. They may not interpret `extension` as `other`,
+    approximate it with default behavior, or use it to hide an unclassified
+    event. This permits `RequirementKind.extension` as an invalidation and
+    diagnostic facet; it does not weaken decision 121, because process faults,
+    interruptions, and environment violations advance semantic state and remain
+    typed per `ProcessVocabulary`. This resolves the classification part of
+    `coord1:16`, raised by comparison of `c-process:8` with `g-foundation:4`,
+    under acknowledgement `g-design:13`.
+125. `Specification` names the neutral dependency layer below both `Semantics`
+    and `Process`; it owns typed junctions, demand/result boundaries, and
+    requirement keys, not precious behavior. The semantic root remains named
+    `SpecProcess` and belongs to `Semantics`. Its defining source/module should
+    therefore use the specific `SpecProcess` name rather than a generic
+    `Semantics.Specification` name that suggests a second owner for the neutral
+    layer. This resolves the terminology part of `coord1:16` under
+    acknowledgement `g-design:13`.
 
 ## Explicitly rejected shortcuts
 
