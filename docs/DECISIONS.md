@@ -686,6 +686,19 @@ to imitate compiler-selected storage or CFG structure.
     `Semantics.Specification` name that suggests a second owner for the neutral
     layer. This resolves the terminology part of `coord1:16` under
     acknowledgement `g-design:13`.
+126. A supplied fault plan selects what happens only if execution reaches the
+    plan's fault-delivery point; it is not itself an architectural-fault
+    occurrence. If an authority denial stops an operation at an earlier
+    substep, or denies the planned faulting substep before fault delivery, the
+    resulting state records the denial and the actually executed prefix but
+    does not append the unreached fault. Retaining that fault would invent an
+    event after the modeled execution had stopped. An observed hardware trace
+    that asserts the later fault despite the earlier modeled denial is instead
+    evidence that the trace and the admitted model/profile disagree; validation
+    must report that discrepancy rather than combining both outcomes in one
+    machine history. A tool may retain the offered plan in a separate attempt or
+    oracle diagnostic, but it is not part of the architectural fault ledger.
+    This resolves `c-mem:21` and makes the provisional M2 behavior normative.
 
 ## Explicitly rejected shortcuts
 
