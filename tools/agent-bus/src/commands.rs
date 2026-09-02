@@ -2065,6 +2065,49 @@ mod tests {
         assert!(inbox_items(&state, &a("alice")).is_empty());
     }
 
+    /// g-reviewer:15: `ReviewChain::is_closed` used to check only
+    /// `merged`/`reconciled`, never `decline_or_withdraw_or_reassign_
+    /// status` -- so a review the author had validly withdrawn (or the
+    /// reviewer had declined) kept showing up in `inbox` as actionable
+    /// forever, since nothing else ever moved it out of `merged`/
+    /// `reconciled` either.
+    #[test]
+    fn inbox_items_excludes_a_withdrawn_review() {
+        let mut state = empty_state();
+        let alice = a("alice");
+        let bob = a("bob");
+        let review_root = eid(&bob, 0);
+        let mut chain = mk_review_chain(&review_root, &alice, false);
+        chain.decline_or_withdraw_or_reassign_status = ItemStatus::Terminal("withdrawn");
+        state.reviews.insert(review_root.clone(), chain);
+        state
+            .review_chain_by_nomination
+            .insert(review_root.clone(), review_root.clone());
+
+        assert!(
+            inbox_items(&state, &alice).is_empty(),
+            "a withdrawn review must not remain actionable in the reviewer's inbox"
+        );
+    }
+
+    /// Same bug class, the decline side: a reviewer's own decline must also
+    /// stop the review from showing as actionable to them.
+    #[test]
+    fn inbox_items_excludes_a_declined_review() {
+        let mut state = empty_state();
+        let alice = a("alice");
+        let bob = a("bob");
+        let review_root = eid(&bob, 0);
+        let mut chain = mk_review_chain(&review_root, &alice, false);
+        chain.decline_or_withdraw_or_reassign_status = ItemStatus::Terminal("declined");
+        state.reviews.insert(review_root.clone(), chain);
+        state
+            .review_chain_by_nomination
+            .insert(review_root.clone(), review_root.clone());
+
+        assert!(inbox_items(&state, &alice).is_empty());
+    }
+
     /// Golden-file coverage of `agent-bus inbox --json`'s actual UX shape:
     /// one open item of each kind (issue/dependency/handoff/review), field
     /// names and all. A field rename, a dropped kind, or a wrong summary
