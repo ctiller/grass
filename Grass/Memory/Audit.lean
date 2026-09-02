@@ -80,6 +80,29 @@ def misaligned : AuditViolationClass := ⟨⟨"misaligned"⟩⟩
 /-- An access was attempted without the authority its loan state requires. -/
 def authorityUnavailable : AuditViolationClass := ⟨⟨"authorityUnavailable"⟩⟩
 
+/-- An access declared a ledger effect its protocol does not authorize against
+the obligations actually outstanding: consuming a duty that is not live,
+producing an identity that already is, or splitting into obligations governed by
+a different protocol. -/
+def obligationNotAuthorized : AuditViolationClass := ⟨⟨"obligationNotAuthorized"⟩⟩
+
+/-- An access to storage in an address space other than the one its provenance
+names. `docs/MEMORY_MODEL.md` §7.5 makes this a distinct failure from a bounds
+error: the spaces are not interchangeable, so reporting it as `outOfBounds` would
+lose which rule was broken. -/
+def wrongAddressSpace : AuditViolationClass := ⟨⟨"wrongAddressSpace"⟩⟩
+
+/--
+The classes the generic transition relation can emit.
+
+A profile must declare all of these, which is what makes
+`AdmittedVocabulary.auditViolationClasses` a consulted registry rather than a
+field nothing reads. `StepPolicy` carries the proof.
+-/
+def emittedByTransition : List AuditViolationClass :=
+  [outOfBounds, deadProvenance, permissionDenied, uninitializedRead, misaligned,
+   authorityUnavailable, obligationNotAuthorized, wrongAddressSpace]
+
 end AuditViolationClass
 
 /--

@@ -195,6 +195,67 @@ theorem preservesIdentity_discharge_of_ne {discharged id : ObligationId}
     (h : id ≠ discharged) : (LedgerDelta.discharge discharged).PreservesIdentity id :=
   ⟨by simp [h], by simp, by simp [reowns]⟩
 
+/--
+`Applicable live effect` holds when `effect` can lawfully act on a ledger whose
+live identities are `live`, and whose protocols are given by `protocolOf`.
+
+`LedgerDelta.WellFormed` checks *shape*: that a split goes somewhere and a join
+comes from somewhere. That is not enough, and an earlier transition relation
+proved it: with shape alone, `join [ghost₁, ghost₂] into` erased two identities
+that were never live and installed a duty from nothing, `split ghost [a, b]`
+installed two, and `discharge ghost` silently no-opped. All three are what
+`docs/OBLIGATIONS.md` §2 names — "Dropping, duplicating, or fabricating
+obligations is forbidden" — and `docs/FOUNDATION.md` law 7 states as no obligation
+disappearance.
+
+The protocol conditions are §2's other half: the ledger changes "only through the
+owning protocol theorem", so a split may not produce duties governed by a
+different protocol than the one it divides, and a join may not merge duties from
+several.
+-/
+def Applicable (live : List ObligationId)
+    (protocolOf : ObligationId → Option ObligationProtocolId) : LedgerDelta → Prop
+  | .create o => o.id ∉ live
+  | .discharge id => id ∈ live
+  | .split source into =>
+      source ∈ live ∧
+      (∀ o ∈ into, o.id ∉ live ∨ o.id = source) ∧
+      (∀ o ∈ into, protocolOf source = some o.protocol)
+  | .join sources into =>
+      (∀ id ∈ sources, id ∈ live) ∧
+      (into.id ∉ live ∨ into.id ∈ sources) ∧
+      (∀ id ∈ sources, protocolOf id = some into.protocol)
+  | .transfer id _ => id ∈ live
+
+instance (live : List ObligationId)
+    (protocolOf : ObligationId → Option ObligationProtocolId) :
+    (delta : LedgerDelta) → Decidable (Applicable live protocolOf delta)
+  | .create _ => inferInstanceAs (Decidable (_ ∉ _))
+  | .discharge _ => inferInstanceAs (Decidable (_ ∈ _))
+  | .split _ _ => inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+  | .join _ _ => inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+  | .transfer _ _ => inferInstanceAs (Decidable (_ ∈ _))
+
+/-- A discharge of an identity that is not live is not applicable. This is the
+silent drop the transition used to perform. -/
+theorem not_applicable_discharge_of_not_live {live : List ObligationId}
+    {protocolOf : ObligationId → Option ObligationProtocolId} {id : ObligationId}
+    (h : id ∉ live) : ¬ Applicable live protocolOf (.discharge id) := h
+
+/-- A join whose sources were never live is not applicable. This is the
+fabrication. -/
+theorem not_applicable_join_of_dead_source {live : List ObligationId}
+    {protocolOf : ObligationId → Option ObligationProtocolId}
+    {sources : List ObligationId} {into : Obligation} {id : ObligationId}
+    (hmem : id ∈ sources) (h : id ∉ live) :
+    ¬ Applicable live protocolOf (.join sources into) := fun ha => h (ha.1 id hmem)
+
+/-- A create of an identity that is already live is not applicable. This is the
+duplication that silently overwrote a live duty. -/
+theorem not_applicable_create_of_live {live : List ObligationId}
+    {protocolOf : ObligationId → Option ObligationProtocolId} {o : Obligation}
+    (h : o.id ∈ live) : ¬ Applicable live protocolOf (.create o) := fun ha => ha h
+
 end LedgerDelta
 
 /--

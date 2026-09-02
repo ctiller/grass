@@ -60,6 +60,16 @@ private def obligations₀ : FreshSupply ObligationTag := .initial
 /-- The obligation an allocation creates. -/
 def releaseObligationId : ObligationId := obligations₀.fresh.1
 
+/-- An obligation identity that is never live. -/
+def ghostObligationId : ObligationId := obligations₀.fresh.2.fresh.1
+
+/-- A second identity that is never live. -/
+def ghostObligationId₂ : ObligationId := obligations₀.fresh.2.fresh.2.fresh.1
+
+/-- An identity a fabricating delta would install. -/
+def fabricatedObligationId : ObligationId :=
+  obligations₀.fresh.2.fresh.2.fresh.2.fresh.1
+
 /-- Provenance of the buffer. -/
 def bufferProv : Provenance :=
   { space := .cpuVirtual, root := bufferAlloc, epoch := epoch₀, source := .virtualAlloc
@@ -121,7 +131,20 @@ inductive Alpha where
   | staleEpoch
   /-- A store split across two substeps under a profile-owned visibility rule. -/
   | splitStore
+  /-- Discharges an obligation that was never live. -/
+  | dischargeGhost
+  /-- Joins two obligations that were never live into a new one. -/
+  | joinGhosts
+  /-- Splits a ghost obligation into two live-looking ones. -/
+  | splitGhost
+  /-- Two substeps, the first of which the state denies. -/
+  | deniedThenStore
 deriving DecidableEq, Repr
+
+/-- The duty a fabricating delta would conjure. -/
+def fabricatedObligation : Obligation :=
+  { id := fabricatedObligationId, kind := .releaseAllocation
+    protocol := ⟨⟨"fake.buffer"⟩⟩, owner := thread₀ }
 
 /-- The release obligation `reserve` creates. -/
 def releaseObligation : Obligation :=
@@ -190,6 +213,29 @@ instance : HasOperationFacets Alpha where
             false true))
           faults := some [], restartability := some .notRestartable
           ordering := some .plain }
+    | .dischargeGhost =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true [.discharge ghostObligationId]))
+          faults := some [], restartability := some .notRestartable
+          ordering := some .plain }
+    | .joinGhosts =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true [.join [ghostObligationId, ghostObligationId₂] fabricatedObligation]))
+          faults := some [], restartability := some .notRestartable
+          ordering := some .plain }
+    | .splitGhost =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true [.split ghostObligationId [fabricatedObligation]]))
+          faults := some [], restartability := some .notRestartable
+          ordering := some .plain }
+    | .deniedThenStore =>
+        { memoryEffects := some
+            { substeps :=
+                [ .access (acc staleProv ⟨0, 8⟩ 0x1000 .write .readWrite false true)
+                  , .access (acc bufferProv ⟨8, 8⟩ 0x1008 .write .readWrite false true) ]
+              onFault := .priorEffectsVisible }
+          faults := some [], restartability := some .notRestartable
+          ordering := some .plain }
     | .splitStore =>
         { memoryEffects := some
             { substeps :=
@@ -231,8 +277,7 @@ def vocabulary : AdmittedVocabulary :=
     faultClasses := ⟨[.pageFault, .deviceFault, ⟨⟨"divideError"⟩⟩]⟩
     allocationSources := ⟨[.virtualAlloc, .mappedFile, .imageMapping]⟩
     provenanceStepKinds := ⟨[]⟩
-    auditViolationClasses :=
-      ⟨[.outOfBounds, .deadProvenance, .permissionDenied, .uninitializedRead, .misaligned]⟩
+    auditViolationClasses := ⟨AuditViolationClass.emittedByTransition⟩
     obligationKinds := ⟨[.releaseAllocation]⟩ }
 
 /-- A profile whose §10 package is explicitly unproved. It is a checklist of
@@ -252,6 +297,7 @@ def profile : MemoryProfile :=
 /-- Every operation must declare its memory effects and its faults. -/
 def policy : StepPolicy :=
   { profile := profile, requiredFacets := [.memoryEffects, .faults]
+    violationClassesDeclared := by decide
     vocabularyWellFormed := by decide }
 
 /-- A vocabulary that declares one address-space identity twice, with different
@@ -362,6 +408,80 @@ premise of admission, not a theorem with no consumer. -/
 theorem badLedger_is_rejected :
     (stepAlpha state₀ .badLedger).rejection? = some .accessNotAdmitted := by decide
 
+/-! ## Obligations cannot be fabricated, dropped, or duplicated
+
+`docs/OBLIGATIONS.md` §2 forbids all three, and `docs/FOUNDATION.md` law 7 states
+the same rule as no obligation disappearance. Each of these was *performed* by an
+earlier version of this transition: `LedgerDelta.WellFormed` checked only shape,
+so a delta consuming an identity that was never live passed admission and the fold
+applied it. -/
+
+/-- Discharging a duty that is not live is refused. The earlier fold silently
+no-opped, leaving no violation and no record. -/
+theorem discharging_a_ghost_is_denied :
+    ∀ s, (stepAlpha state₀ .dischargeGhost).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- Joining duties that were never live is refused. The earlier fold erased two
+nothings and installed a duty from nowhere. -/
+theorem joining_ghosts_is_denied :
+    ∀ s, (stepAlpha state₀ .joinGhosts).state? = some s →
+      s.obligations.lookup fabricatedObligationId = Option.none ∧
+        s.violations.recordCount = 1 := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- Splitting a duty that was never live is refused. -/
+theorem splitting_a_ghost_is_denied :
+    ∀ s, (stepAlpha state₀ .splitGhost).state? = some s →
+      s.obligations.lookup fabricatedObligationId = Option.none ∧
+        s.violations.recordCount = 1 := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- Creating a duty whose identity is already live is refused, so a second
+`create` cannot silently overwrite the first. -/
+theorem creating_a_live_identity_is_denied :
+    ∀ s, (stepAlpha state₀ .reserve).state? = some s →
+      ∀ t, (stepAlpha s .reserve).state? = some t →
+        t.violations.recordCount = 1 := by
+  intro s hs t ht
+  cases hs; cases ht
+  decide
+
+/-! ## A denied access stops the operation
+
+An earlier `runAccesses` folded over every access unconditionally, so an operation
+whose first substep was denied still committed its second. That is a
+continue-after-denial policy no operation declared. -/
+
+theorem denial_stops_the_operation :
+    ∀ s, (stepAlpha state₀ .deniedThenStore).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-! ## A reported fault is never discarded
+
+An out-of-range fault index used to mean "no fault at all": `visibleEffects?` took
+the whole list, the substep lookup missed, and every access committed to
+completion while `step` returned `.ran`. A fault turning into a success is the
+law-8 failure running in the most dangerous direction. -/
+
+theorem out_of_range_fault_is_refused :
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) .thread ⟨⟨"alpha"⟩⟩
+      (some ⟨99, .pageFault, 0⟩)).rejection? = some .faultPointOutOfRange := by decide
+
+theorem out_of_range_fault_on_compound_is_refused :
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) .thread ⟨⟨"alpha"⟩⟩
+      (some ⟨99, .pageFault, 0⟩)).rejection? = some .faultPointOutOfRange := by decide
+
 /-! ## 7: alias conflicts across distinct allocations -/
 
 /--
@@ -467,14 +587,22 @@ theorem divide_fault_preserves_the_read :
   cases hs
   exact ⟨by decide, by decide⟩
 
-/-- Faulting at the *first* substep commits nothing. -/
-theorem divide_fault_at_zero_commits_nothing :
+/--
+Faulting at the *first* substep commits no bytes.
+
+The event is still recorded — a faulted access is an event, and pretending
+otherwise would lose it from the trace — but it committed nothing. An earlier
+version of this theorem said "commits nothing" in its docstring and checked only
+`events.length = 1`, which is compatible with an event that committed the whole
+range.
+-/
+theorem divide_fault_at_zero_commits_no_bytes :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) .thread
         ⟨⟨"alpha"⟩⟩ (some ⟨0, .pageFault, 0⟩)).state? = some s →
-      s.events.length = 1 := by
+      ∃ e, s.events = [e] ∧ e.readCommitted = 0 ∧ e.writeCommitted = 0 := by
   intro s hs
   cases hs
-  decide
+  exact ⟨_, rfl, by decide, by decide⟩
 
 /-- A faulting access commits the prefix it declares, and the event records it.
 `docs/MEMORY_MODEL.md` §1 forbids assuming a faulted access did nothing. -/

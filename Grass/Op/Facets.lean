@@ -61,6 +61,14 @@ def faults : FacetName := ⟨⟨"faults"⟩⟩
 /-- The atomicity and ordering an operation requests. -/
 def ordering : FacetName := ⟨⟨"ordering"⟩⟩
 
+/-- Whether an operation may be restarted after an interruption.
+
+`docs/MEMORY_MODEL.md` §7.4 requires restartable or partially executed
+instructions to declare their retry discipline. The `OperationFacets` field
+existed before this name did, so a profile could not require it — the facet was
+declarable and undemandable. -/
+def restartability : FacetName := ⟨⟨"restartability"⟩⟩
+
 end FacetName
 
 /--
@@ -87,7 +95,8 @@ namespace OperationFacets
 def supplied (facets : OperationFacets) : List FacetName :=
   (if facets.memoryEffects.isSome then [FacetName.memoryEffects] else []) ++
   (if facets.faults.isSome then [FacetName.faults] else []) ++
-  (if facets.ordering.isSome then [FacetName.ordering] else [])
+  (if facets.ordering.isSome then [FacetName.ordering] else []) ++
+  (if facets.restartability.isSome then [FacetName.restartability] else [])
 
 /--
 `facets.Closes required` holds when every required facet is supplied.
