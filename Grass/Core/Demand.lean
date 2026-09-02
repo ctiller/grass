@@ -1,0 +1,77 @@
+import Grass.Core.Identifiers
+
+/-!
+# Independently keyed theorem demands
+
+The family is deliberately open in both keys and kinds.  Finiteness is exposed
+as an explicit, duplicate-free enumeration so diagnostics and future build
+manifests need not recover it from an implementation-specific map.
+-/
+
+namespace Grass
+
+universe u
+
+/-- Stable invalidation facets for the foundation-owned requirement kinds. -/
+inductive RequirementKind where
+  | functional
+  | safety
+  | memory
+  | concurrency
+  | progress
+  | termination
+  | resource
+  | obligation
+  | diagnostic
+  | applicability
+  | artifact
+  | extension (owner kind : StableId)
+deriving Repr, DecidableEq
+
+/-- A finite family of propositions which must be certified independently. -/
+structure DemandFamily where
+  Key : Type u
+  keys : List Key
+  complete : forall key, key ∈ keys
+  unique : keys.Nodup
+  identity : Key -> RequirementKey
+  identityInjective : Function.Injective identity
+  kind : Key -> RequirementKind
+  statement : Key -> Prop
+
+/-- Evidence for every member of one exact demand family. -/
+structure DemandCertificateFamily (demands : DemandFamily.{u}) : Prop where
+  discharge : forall key, demands.statement key
+
+/-- Stable identities exported by one exact finite family. -/
+def DemandFamily.identities (demands : DemandFamily) : List RequirementKey :=
+  demands.keys.map demands.identity
+
+/-- Auditable origin of a later-stage demand. -/
+inductive RequirementOrigin (priorKeys : List RequirementKey) where
+  | prior (key : RequirementKey) (present : key ∈ priorKeys)
+  | external (authority : StableId)
+
+/-- A later-stage family fresh from every cumulative prior stable key. -/
+structure DerivedDemandFamily (priorKeys : List RequirementKey) where
+  demands : DemandFamily.{u}
+  origin : demands.Key -> RequirementOrigin priorKeys
+  fresh : forall derived, demands.identity derived ∉ priorKeys
+
+/-- Cumulative stable keys passed to the next certificate tier. -/
+def DerivedDemandFamily.allKeys {priorKeys : List RequirementKey}
+    (stage : DerivedDemandFamily priorKeys) : List RequirementKey :=
+  priorKeys ++ stage.demands.identities
+
+namespace DemandCertificateFamily
+
+variable {demands : DemandFamily}
+
+/-- Project the certificate for a single stable key. -/
+theorem get (certificates : DemandCertificateFamily demands)
+    (key : demands.Key) : demands.statement key :=
+  certificates.discharge key
+
+end DemandCertificateFamily
+
+end Grass
