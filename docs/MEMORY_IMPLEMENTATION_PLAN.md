@@ -232,6 +232,50 @@ changes every one of those name types.
 Unblocks: ISA instruction authoring, `Std.Owned` type design, and the
 `Semantics` statement of `SpecProcess`.
 
+### 3.7 Freeze status: not yet
+
+The M1 vocabulary is **not** frozen, and two rounds of adversarial review are the
+reason. Recording why, because the freeze is the step this plan exists to get
+right on the first try.
+
+Round one found three type-level defects — an identity type colliding with Lean's
+`Id` monad, a `BitVec 64` address falsified by Spike 5's own
+`OpMemoryModel Logical GLSL450`, and an alignment predicate that accepted
+everything at its default value. Round two, run with fresh context, found that
+the sealed descriptor did not seal:
+
+- a descriptor carried its own `AddressSpace`, so it could choose a
+  representation that made its own alignment and range checks vacuous;
+- nothing related `requiredPermission` to `intent`, so a store could declare it
+  needed only read-only permission, and `Permission.Permits` was dead code;
+- `alignment` and `requiresInitialized` had permissive defaults;
+- a `div [mem]` could not be expressed at all, because its `#DE` is raised by a
+  step that performs no access and a list of accesses had no index to name it;
+- the audit violation ledger could be erased in one line, and the axiom audit had
+  already stopped covering six modules.
+
+All of those are closed, with negative fixtures for the ones that were
+constructible. The lesson worth carrying is narrower than "review works": in
+every case the docstring already asserted the property. Prose describing a
+mechanism is not the mechanism, and the reviews found the gap by executing rather
+than reading.
+
+Known gaps that remain open, and must be closed or accepted before the freeze:
+
+- **`Address.symbolic` is an atom, not an expression.** §1 asks for an "address
+  expression". A SPIR-V `OpAccessChain` derives a pointer from a base and a
+  runtime index, and a bare `Uid` records none of that — nothing relates a
+  symbolic address to its provenance. This is enough for Spike 5 to *name* a
+  pointer and not enough to *derive* one.
+- **`AccessDescriptor` carries no values.** `lock cmpxchg16b` cannot declare its
+  compare and swap operands, and nothing relates a descriptor to the events it
+  licenses. `MemoryEvent` has the value fields; the descriptor does not.
+- **`WellFormedIn` is not decidable**, unlike every other predicate in the layer,
+  because the `Type 1` universe bump from `ObligationPayload` propagates through
+  the descriptor. An ISA author cannot check a declaration by computation.
+- **`ObligationPayload` is write-only.** A protocol can store evidence and has no
+  supported route to retrieve it.
+
 ## 4. M2 — Executable single-thread memory semantics
 
 Goal: straight-line assembly verification actually discharges. This is the gate
