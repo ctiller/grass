@@ -1957,20 +1957,43 @@ is never a second type arity, and the spelling `ProcessNetwork` is not a type at
 all. The logical world a plan steps through is `LogicalProcessNetwork plan`,
 which is a different thing and keeps its name.
 
+There is exactly one core `CancellationPolicy`, and it is indexed by a scoped
+cancellation-point family rather than by a plan:
+
 ```lean
-structure CancellationPolicy
-    (plan : ProcessPlan registry boundary)
-    (source : MachineSource plan) where
-  points : (id : plan.cancellationDemand.Key) -> CancellationPointPolicy id
-  sourceOccurrence : (id : points.Key) -> UniqueSourceOccurrence source id
-  atomicRegions : FiniteMap AtomicRegionId BoundedAtomicRegion
-  blockingCalls : (call : source.discoverPotentiallyBlockingCalls.Key) ->
-    BlockingCallCancellationDisposition call points atomicRegions
-  pointsExact : points.keys = plan.cancellationDemand.keys
-  callsExact : blockingCalls.keys = source.discoverPotentiallyBlockingCalls.keys
-  routesTotal : EveryCancelFaultInterruptRouteClassified plan source points
+structure ProcessScopeSummary where
+  scope : ScopeId
+  publicCancellationPoints : List CancellationPointId
+  blockingCalls : List BlockingCallId
+  pointsDistinct : publicCancellationPoints.Nodup
+  callsDistinct : blockingCalls.Nodup
+
+structure CancellationPolicy where
+  points : List CancellationPointId
+  pointPolicy : CancellationPointId -> CancellationPointPolicy
+  atomicRegions : List BoundedAtomicRegion
+  blockingCalls : List BlockingCallId
+  callDisposition : BlockingCallId -> BlockingCallDisposition
+
+structure ScopedCancellationCertificate (summary : ProcessScopeSummary) where
+  policy : CancellationPolicy
+  exact : policy.Covers summary
+  regionsDeclared : policy.RegionsDeclared
+  pointsDeclared : policy.PointsDeclared
+  routesTotal : EveryCancelFaultInterruptRouteClassified summary policy
   progress : EveryRequestedCancellationReachesDispositionUnderDeclaredPremises
 ```
+
+`Covers` is list equality against *that scope's* points and calls, and the field
+is `blockingCalls` on both sides. This is the whole scalability claim: an added
+`Sleep` changes one scope's discovered-call list and rejects that scope's
+certificate, instead of changing a global key set that every certificate in the
+program compares against.
+
+Whole-plan cancellation is the hierarchical composition of scoped certificates,
+not a separate whole-plan type. Spike syntax may infer the root scope from a
+named process, but that is typed elaborator sugar which constructs a
+`ProcessScopeSummary`; it is not a second Lean arity for this structure.
 
 A call may be uncancellable only inside a named bounded atomic region. A
 finish-current-frame policy states the exact completion premise and its
