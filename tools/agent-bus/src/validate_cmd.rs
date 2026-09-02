@@ -614,7 +614,7 @@ mod tests {
         let ctx = bootstrap(&path, &["coord1"]);
         let alice = register(&ctx, "alice", Role::Implementor);
         let _bob = register(&ctx, "bob", Role::Reviewer);
-        let alice_wt = ctx.worktree_path(&alice);
+        let alice_wt = ctx.worktree_path(&alice).unwrap();
         corrupt_alice_log(&ctx, &alice_wt);
 
         // The full structural walk must now fail...

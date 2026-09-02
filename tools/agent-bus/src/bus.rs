@@ -533,9 +533,13 @@ mod tests {
 
     #[test]
     fn worktrees_root_and_worktree_path_are_under_git_dir() {
-        let ctx = BusCtx { repo_root: PathBuf::from("/repo"), has_origin: false };
-        assert_eq!(ctx.worktrees_root(), PathBuf::from("/repo/.git/agent-bus-worktrees"));
-        assert_eq!(ctx.worktree_path(&agent("alice")), PathBuf::from("/repo/.git/agent-bus-worktrees/alice"));
+        let repo = init_repo();
+        let ctx = BusCtx { repo_root: repo.path().to_path_buf(), has_origin: false };
+        assert_eq!(ctx.worktrees_root().unwrap(), repo.path().join(".git").join("agent-bus-worktrees"));
+        assert_eq!(
+            ctx.worktree_path(&agent("alice")).unwrap(),
+            repo.path().join(".git").join("agent-bus-worktrees").join("alice")
+        );
     }
 
     // ------------------------------------------------------- bus_ref_exists
@@ -921,7 +925,7 @@ mod tests {
 
         // rebase --abort must have actually run: the worktree is left clean,
         // not stuck mid-conflict.
-        let wt = ctx.worktree_path(&alice);
+        let wt = ctx.worktree_path(&alice).unwrap();
         let status = gitrepo::status_porcelain(&wt).unwrap();
         assert!(status.trim().is_empty(), "worktree left dirty after abort: {status}");
     }
@@ -957,7 +961,7 @@ mod tests {
         let ctx = BusCtx { repo_root: repo.path().to_path_buf(), has_origin: false };
         // Simulate a previous bootstrap-init that got interrupted before its
         // own end-of-function `remove_dir_all(&staging)` cleanup ran.
-        let staging = ctx.worktrees_root().join("_bootstrap");
+        let staging = ctx.worktrees_root().unwrap().join("_bootstrap");
         std::fs::create_dir_all(&staging).unwrap();
         std::fs::write(staging.join("leftover.txt"), b"stale").unwrap();
 
@@ -971,7 +975,7 @@ mod tests {
         let ctx = BusCtx { repo_root: repo.path().to_path_buf(), has_origin: false };
         // Occupy the directory bootstrap-init needs to create the staging
         // checkout under, with a plain file instead of a directory.
-        std::fs::write(ctx.worktrees_root(), b"not a directory").unwrap();
+        std::fs::write(ctx.worktrees_root().unwrap(), b"not a directory").unwrap();
 
         match bootstrap_init(&ctx, &[agent("alice")], &some_object_id()) {
             Err(crate::error::AbError::Io { .. }) => {}
