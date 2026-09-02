@@ -453,13 +453,22 @@ over that carrier. There is no second topology-level escrow carrier and no
 self-referential structure.
 
 ```lean
+inductive ProcessLifecycle (p : ProcessSpec)
+  | running
+  | terminated (result : p.TerminalResult)
+  | cancelled (reason : CancelReason)
+  | interrupted (reason : p.InterruptReason)
+  | faulted (fault : p.LogicalFault)
+  | violated (violation : p.EnvironmentViolation)
+  | died (reason : ProcessDeathReason)
+
 structure ProcessInstance (topology : ProcessTopology registry boundary) where
   kind : topology.ProcessKind
   ref : ProcessRef topology kind
   parent : Option (Sigma fun parentKind => ProcessRef topology parentKind)
   request : (registry.protocol (topology.protocolKey kind)).Request
   local : (registry.protocol (topology.protocolKey kind)).State
-  lifecycle : ProcessLifecycle
+  lifecycle : ProcessLifecycle (registry.protocol (topology.protocolKey kind))
 
 structure LogicalProcessNetworkCore
     (topology : ProcessTopology registry boundary)
@@ -562,6 +571,17 @@ useful proposition-indexed families without improving the verified gate.
 The definitions above make each occurrence nominally indexed by the exact
 channel edge, sender and receiver incarnations, session epoch, message, and
 pre-send world.
+
+`ProcessLifecycle` is indexed by the instance protocol because an ending must
+remain recoverable from network state without replaying the parent transition.
+The terminal tag stores the exact `TerminalResult`; the other ending tags store
+their exact cancellation, interruption, fault, violation, or death reason. A
+well-formed network separately proves that `.terminated result` satisfies the
+protocol's `Terminal request local result` relation and that every ending tag is
+the exact payload committed by its lifecycle transition. Carrying the payload
+does not duplicate an independent fact: the transition owns one value and
+records that same value in the child event, parent projection when applicable,
+and resulting instance state through equality proofs.
 
 `usedNominals` contains every process generation, channel epoch, child demand,
 message occurrence, and coalesced replacement ever allocated in the execution
@@ -1050,8 +1070,15 @@ does not prove acknowledgement or recover its resources.
 `ChildLifecycleEvent` family. Success/failure/ordinary termination consumes live
 lifecycle authority, establishes the exact terminal state and parent event,
 transfers or disposes every resource and obligation, and only then enables join
-or restart. `processTermination` performs the corresponding operation for a
-non-child/root instance; ordinary close is distinct from endpoint death.
+or restart. The event's exact terminal result, cancellation reason, interruption
+reason, fault, or violation is stored in the resulting protocol-indexed
+`ProcessLifecycle`; a death disposition supplies its exact `ProcessDeathReason`.
+Joins, supervisors, and audits therefore do not reconstruct an ending from a
+possibly nondeterministic terminal relation or search another process's history.
+`processTermination` performs the corresponding operation for a non-child/root
+instance; ordinary close is distinct from endpoint death. This storage is
+transition-generated and imposes no additional payload bookkeeping on an
+ordinary protocol author.
 
 A `WriteFile` process can remain pending, commit a partial effect, return a
 dependent count, fail, be cancelled/interrupted, violate its environment
