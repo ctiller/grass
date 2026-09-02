@@ -25,10 +25,10 @@ warningAsError = true
 name = "Grass"
 globs = ["Grass.+"]
 
-# The fixture corpus. docs/MODULES.md places it at the repository root, and
-# docs/FOUNDATION.md law 3 is why its entries are theorems rather than `#eval`s:
-# an executed example is not a universal proof. It is a default target so that a
-# green build means the fixtures still hold.
+# Fixtures live outside the library and are built by the default target, so a
+# vocabulary change that breaks the Spike 1 reference cases fails the build
+# rather than being noticed later. See docs/MEMORY_IMPLEMENTATION_PLAN.md
+# section 3.2.
 [[lean_lib]]
 name = "Tests"
 globs = ["Tests.+"]
