@@ -153,10 +153,51 @@ Two registries whose scopes do not overlap.
 The disjointness `docs/PROCESS_SHARDING.md` §2 requires of `merge`. It is stated
 over scopes rather than over keys because scopes are the reviewed nominal
 identities; two fragments may perfectly well use the same local key type.
+
+**Non-containment, not inequality.** An earlier revision required only that the
+two scopes differ, which let `["Grass"]` merge with `["Grass", "Platform"]` — two
+fragments owning overlapping namespaces, with the aggregate claiming they did
+not. `Grass/Specification/Scope.lean` says exactly this where it declares
+`Contains`: "two fragments may share an ancestor scope and still own disjoint
+namespaces, while two fragments where one contains the other do not." The
+registry was using the relation that module's own docstring rules out.
+
+Both directions, because containment is not symmetric and either nesting is an
+overlap. Equality is covered too, since `ScopeId.contains_self` makes a scope
+contain itself.
 -/
 def ScopesDisjoint (left right : ProtocolRegistry.{u, w, v}) : Prop :=
   ∀ (leftKey : left.Key) (rightKey : right.Key),
-    left.scope leftKey ≠ right.scope rightKey
+    ¬ (left.scope leftKey).Contains (right.scope rightKey) ∧
+      ¬ (right.scope rightKey).Contains (left.scope leftKey)
+
+/--
+Disjoint scopes are in particular distinct.
+
+The property the old, too-weak definition asserted, now derived — so any
+consumer that only needed inequality keeps working, and a reader can see that
+nothing was lost by strengthening.
+-/
+theorem ScopesDisjoint.scopes_ne {left right : ProtocolRegistry.{u, w, v}}
+    (disjoint : ScopesDisjoint left right)
+    (leftKey : left.Key) (rightKey : right.Key) :
+    left.scope leftKey ≠ right.scope rightKey := by
+  intro same
+  exact (disjoint leftKey rightKey).1 (same ▸ ScopeId.contains_self _)
+
+/--
+**A fragment scoped at an ancestor of another's cannot merge with it.**
+
+The defect stated as the property the fix buys. `g-foundation:44` found it: with
+inequality alone, a fragment owning `["Grass"]` and one owning
+`["Grass", "Platform"]` merged, and the merge's namespace-uniqueness claim was
+false.
+-/
+theorem ScopesDisjoint.not_nested {left right : ProtocolRegistry.{u, w, v}}
+    (disjoint : ScopesDisjoint left right)
+    (leftKey : left.Key) (rightKey : right.Key)
+    (nested : (left.scope leftKey).Contains (right.scope rightKey)) : False :=
+  (disjoint leftKey rightKey).1 nested
 
 /--
 Merge two registries with disjoint scopes.

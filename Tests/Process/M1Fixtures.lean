@@ -374,8 +374,51 @@ registered. Only the private types move; the countdownVocabulary is shared. -/
 theorem scopes_disjoint :
     ProtocolRegistry.ScopesDisjoint baseRegistry observerRegistry := by
   intro _ _
-  show baseScope ≠ observerScope
-  decide
+  have forward : ¬ (baseScope.path.isPrefixOf observerScope.path = true) := by decide
+  have backward : ¬ (observerScope.path.isPrefixOf baseScope.path = true) := by decide
+  exact ⟨forward, backward⟩
+
+/--
+**A parent scope and a child scope cannot merge.**
+
+`g-foundation:44`: an earlier `ScopesDisjoint` required only that the two scopes
+differ, so a fragment owning `["Grass"]` and one owning `["Grass", "Platform"]`
+merged while their namespaces overlapped. `Grass/Specification/Scope.lean` says
+where it declares `Contains` that this is exactly the case containment exists to
+exclude, and the registry was using the other relation.
+
+Stated as an impossibility rather than as a passing merge, because what the fix
+buys is a rejection.
+-/
+@[reducible] def parentScope : ScopeId := ⟨["Tests", "Process", "Nested"]⟩
+
+@[reducible] def childScope : ScopeId := ⟨["Tests", "Process", "Nested", "Inner"]⟩
+
+@[reducible] def parentRegistry : ProtocolRegistry.{0, 1, 0} :=
+  (⟨parentScope, Unit, fun _ => countdownLifted⟩ :
+    RegistryFragment.{0, 1, 0}).toRegistry
+
+@[reducible] def childRegistry : ProtocolRegistry.{0, 1, 0} :=
+  (⟨childScope, Unit, fun _ => observer⟩ :
+    RegistryFragment.{0, 1, 0}).toRegistry
+
+theorem nested_scopes_are_not_disjoint :
+    ¬ ProtocolRegistry.ScopesDisjoint parentRegistry childRegistry := by
+  intro disjoint
+  have nested : parentScope.Contains childScope :=
+    (by decide : parentScope.path.isPrefixOf childScope.path = true)
+  exact disjoint.not_nested () () nested
+
+/-- Nor the other way round, since containment is not symmetric. -/
+theorem nested_scopes_are_not_disjoint_reversed :
+    ¬ ProtocolRegistry.ScopesDisjoint childRegistry parentRegistry := by
+  intro disjoint
+  have nested : parentScope.Contains childScope :=
+    (by decide : parentScope.path.isPrefixOf childScope.path = true)
+  exact (disjoint () ()).2 nested
+
+/-- And the two scopes *are* distinct, so inequality alone would have admitted them. -/
+theorem nested_scopes_differ : parentScope ≠ childScope := by decide
 
 /-- The extension. -/
 @[reducible] def extendedRegistry : ProtocolRegistry.{0, 1, 0} :=
