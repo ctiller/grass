@@ -1184,13 +1184,19 @@ fn apply_finding_disposition(
         )));
     }
     let fkey = (changes_event.clone(), finding_id.as_str().to_string());
-    let finding = chain
-        .findings
-        .get(&fkey)
-        .ok_or_else(|| invalid(format!("{}: unknown finding {}", env.id, finding_id)))?;
-    if finding.disposition != FindingDisposition::Open {
-        return Err(invalid(format!("{}: finding is already disposed", env.id)));
+    if !chain.findings.contains_key(&fkey) {
+        return Err(invalid(format!("{}: unknown finding {}", env.id, finding_id)));
     }
+    // No pre-guard on the finding's current disposition here: that would
+    // duplicate (and, worse, preempt) what `record_exclusive` below already
+    // does correctly for every other exclusive-transition kind — a
+    // causally-later duplicate disposition is rejected as "already
+    // observed" by `record_exclusive` itself (it can see the prior
+    // transition's commit index), while a *genuinely concurrent* second
+    // disposition must reduce to `Exclusivity::Concurrent`, not a hard
+    // error. A blanket "already disposed" check here would hard-reject the
+    // concurrent case too, since by the time it replays the first racer's
+    // effect has already flipped the finding out of `Open`.
     let idx = observed_index(state, env)?;
     let outcome = record_exclusive(state, finding_key(changes_event, finding_id), &env.id, commit_idx, idx)?;
     let root = state.review_chain_by_nomination.get(nomination).unwrap().clone();
@@ -1198,10 +1204,28 @@ fn apply_finding_disposition(
     // default) rather than either racer's disposition — no explicit revert
     // needed, and `authorize`'s "no open finding" check already blocks
     // authorization while it remains unresolved.
-    if let Exclusivity::Apply = outcome {
-        apply_finding_disposition_effect(state, &root, &fkey, &env.id, data);
+    match outcome {
+        Exclusivity::Apply => apply_finding_disposition_effect(state, &root, &fkey, &env.id, data),
+        // The *first* racer's submission is always `Exclusivity::Apply`
+        // (nothing else contests a fresh key yet) and eagerly sets the
+        // finding's disposition before a second, genuinely concurrent racer
+        // is even evaluated. Once that second racer arrives and this call
+        // returns `Concurrent`, the first racer's eager effect must be
+        // reverted back to `Open` here -- matching `reset_issue_to_conflict`/
+        // `reset_dependency_to_conflict`'s role for the other exclusive-
+        // transition kinds -- otherwise the finding would incorrectly keep
+        // showing whichever racer happened to be walked first as settled.
+        Exclusivity::Concurrent => reset_finding_to_open(state, &root, &fkey),
     }
     Ok(())
+}
+
+fn reset_finding_to_open(state: &mut BusState, root: &EventId, fkey: &(EventId, String)) {
+    if let Some(chain) = state.reviews.get_mut(root) {
+        if let Some(f) = chain.findings.get_mut(fkey) {
+            f.disposition = FindingDisposition::Open;
+        }
+    }
 }
 
 fn apply_finding_disposition_effect(
@@ -4253,7 +4277,9 @@ mod tests {
         assert!(err.to_string().contains("only the accepting reviewer may dispose of findings"), "{err}");
     }
 
-    /// A finding that's already disposed cannot be disposed again.
+    /// A causally-later duplicate disposition of the same finding (the same
+    /// reviewer, sequentially, having already observed their own first
+    /// disposition) is rejected by `record_exclusive` itself.
     #[test]
     fn finding_disposition_rejects_a_second_disposition() {
         let alice = a("alice");
@@ -4280,35 +4306,27 @@ mod tests {
         b.push(&rev1, &cleared, []);
         b.push(&rev1, &cleared, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("finding is already disposed"), "{err}");
+        assert!(err.to_string().contains("already causally observed a disposition"), "{err}");
     }
 
-    /// FINDING (see this session's coverage report for the full writeup):
-    /// unlike `issue.*`/`dependency.*`/`handoff.*`/review-closing, a finding
-    /// disposition's own "already disposed" guard
-    /// (`if finding.disposition != Open { return Err(...) }`, right above
-    /// this function's `record_exclusive` call) runs unconditionally BEFORE
-    /// `record_exclusive`, using already-mutated state rather than a causal
-    /// check. Because the very first submission against a fresh
-    /// `finding_key` is *always* `Exclusivity::Apply` (an empty transitions
-    /// list short-circuits straight to it), that first submission eagerly
-    /// sets `disposition` before a second, genuinely-concurrent (non-
-    /// observing) submission is ever evaluated -- so the second one is
-    /// rejected by the guard above, and `record_exclusive`'s own
-    /// `Concurrent` branch (the one the doc comment on this function
-    /// describes, "the finding simply stays Open... no explicit revert
-    /// needed") is consequently never reached through any real published
-    /// sequence. This is a real behavioral difference from the other four
-    /// exclusive-transition kinds, each of which lacks an equivalent
-    /// pre-`record_exclusive` "already terminal" guard and instead reverts
-    /// the first transition's eager effect via a dedicated `reset_*_to_
-    /// conflict` function when `Concurrent` fires. Verified empirically:
-    /// two non-observing `review.findings_cleared`/`review.findings_
-    /// superseded` events on the same finding actually replay as "finding is
-    /// already disposed" (a hard rejection of the second), not a
-    /// `LifecycleConflict`-style outcome.
+    /// Two genuinely concurrent (neither observing the other) dispositions
+    /// of the same finding must reduce to `Exclusivity::Concurrent` and
+    /// leave the finding `Open` -- matching every other exclusive-transition
+    /// kind (issue/dependency resolve-reject-reassign, handoff disposition,
+    /// review decline/withdraw/reassign), and matching this function's own
+    /// doc comment. This was NOT always true: `apply_finding_disposition`
+    /// used to have a blanket `if finding.disposition != Open { return
+    /// Err(...) }` guard *before* `record_exclusive`, which (since the first
+    /// racer's submission is unconditionally `Exclusivity::Apply` against a
+    /// fresh key) hard-rejected the second, genuinely-concurrent racer
+    /// instead of letting `record_exclusive` classify it correctly -- found
+    /// during this session's coverage push and fixed by removing that
+    /// pre-guard; `record_exclusive` alone already handles both the
+    /// causally-later-duplicate case (see the sibling test above) and this
+    /// concurrent case correctly, exactly as it does for the other four
+    /// kinds.
     #[test]
-    fn finding_disposition_concurrent_race_is_actually_a_hard_rejection_not_a_conflict() {
+    fn finding_disposition_concurrent_race_reduces_to_open_not_a_hard_rejection() {
         let alice = a("alice");
         let bob = a("bob");
         let rev1 = a("rev1");
@@ -4340,10 +4358,75 @@ mod tests {
         // Neither observes the other: genuinely concurrent by construction.
         b.push_observing(&rev1, &race_tip, &cleared, []);
         b.push_observing(&rev1, &race_tip, &superseded, []);
-        let err = b.replay().err().unwrap();
-        assert!(
-            err.to_string().contains("finding is already disposed"),
-            "expected the second, non-observing disposition to be hard-rejected, got: {err}"
+        let state = b.state().expect("two genuinely concurrent dispositions must not hard-fail replay");
+        let chain = state.review_chain(&nom_id).unwrap();
+        let fkey = (changes_id.clone(), "f1".to_string());
+        assert_eq!(
+            chain.findings.get(&fkey).unwrap().disposition,
+            FindingDisposition::Open,
+            "neither racer's disposition may win; the finding must stay Open until lifecycle.conflict_resolved"
+        );
+        let tracker = state.exclusive.get(&finding_key(&changes_id, &Short::parse("f1".into()).unwrap())).unwrap();
+        assert_eq!(tracker.transitions.len(), 2, "both racers must be recorded");
+        assert!(tracker.resolved.is_none());
+    }
+
+    /// End to end: a real two-way finding-disposition race, resolved by a
+    /// coordinator's `lifecycle.conflict_resolved` picking one racer -- the
+    /// winner's effect must actually apply (not stay reverted to `Open`).
+    #[test]
+    fn finding_disposition_conflict_resolved_applies_the_selected_winner() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let rev1 = a("rev1");
+        let coord = a("coord1");
+        let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone(), coord.clone()]);
+        b.register(&rev1, Role::Reviewer);
+        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        b.push(&rev1, &review_accept(&nom_id), []);
+        let changes = EventData::ReviewChangesRequested(ReviewChangesRequested {
+            nomination: nom_id.clone(),
+            reviewed_commit: oid(1),
+            findings: vec![finding("f1")],
+            evidence: StringSet::default(),
+        });
+        let changes_id = b.push(&rev1, &changes, []);
+        let race_tip = b.tip_oid();
+        let cleared = EventData::ReviewFindingsCleared(ReviewFindingsCleared {
+            nomination: nom_id.clone(),
+            changes_event: changes_id.clone(),
+            finding_id: Short::parse("f1".into()).unwrap(),
+            resolved_commit: oid(2),
+            summary: Text::parse("s".into()).unwrap(),
+        });
+        let superseded = EventData::ReviewFindingsSuperseded(ReviewFindingsSuperseded {
+            nomination: nom_id.clone(),
+            changes_event: changes_id.clone(),
+            finding_id: Short::parse("f1".into()).unwrap(),
+            rationale: Text::parse("moot".into()).unwrap(),
+        });
+        let cleared_id = b.push_observing(&rev1, &race_tip, &cleared, []);
+        let superseded_id = b.push_observing(&rev1, &race_tip, &superseded, []);
+
+        let resolved = EventData::LifecycleConflictResolved(LifecycleConflictResolved {
+            root: changes_id.clone(),
+            competing: StringSet::from_sorted_unique(vec![cleared_id, superseded_id.clone()]).unwrap(),
+            selected: superseded_id.clone(),
+            reason: Text::parse("clearing was premature".into()).unwrap(),
+            user_authority: Text::parse("user".into()).unwrap(),
+        });
+        b.push(&coord, &resolved, []);
+        let state = b.state().expect("conflict resolution must replay");
+        let chain = state.review_chain(&nom_id).unwrap();
+        let fkey = (changes_id.clone(), "f1".to_string());
+        assert_eq!(
+            chain.findings.get(&fkey).unwrap().disposition,
+            FindingDisposition::Superseded { by_event: superseded_id.clone(), rationale: Text::parse("moot".into()).unwrap() },
+            "the selected racer's effect must apply once resolved"
+        );
+        assert_eq!(
+            state.exclusive.get(&finding_key(&changes_id, &Short::parse("f1".into()).unwrap())).unwrap().resolved,
+            Some(superseded_id)
         );
     }
 
@@ -5022,17 +5105,15 @@ mod tests {
     /// A root naming two distinct still-open findings under the same
     /// `changes_event` is ambiguous and must be rejected.
     ///
-    /// A *real* two-transition `finding_key` tracker cannot currently be
-    /// produced by any published sequence of events (see the NOTE above
-    /// `finding_disposition_concurrent_race_is_actually_a_hard_rejection_
-    /// not_a_conflict`): `apply_finding_disposition`'s own "already
-    /// disposed" guard rejects a second, non-observing disposition before
-    /// `record_exclusive` ever runs. This test drives `apply_conflict_
-    /// resolved` (the private function itself, not through the public event
-    /// pipeline) against a hand-built `BusState` whose `exclusive` map holds
-    /// exactly the two open finding trackers a real race *would* have left
-    /// behind, so the ambiguous-root disambiguation logic itself is still
-    /// verified against the code as written.
+    /// This drives `apply_conflict_resolved` (the private function itself,
+    /// not through the public event pipeline) against a hand-built
+    /// `BusState` whose `exclusive` map holds two independent open finding
+    /// trackers under the same `changes_event` -- exactly what two separate
+    /// concurrent-disposition races (see
+    /// `finding_disposition_concurrent_race_reduces_to_open_not_a_hard_
+    /// rejection` for how one such race actually replays end to end) would
+    /// leave behind, isolating the ambiguous-root disambiguation logic on
+    /// its own.
     #[test]
     fn conflict_resolved_rejects_an_ambiguous_finding_root() {
         let alice = a("alice");
