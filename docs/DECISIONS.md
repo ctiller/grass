@@ -819,8 +819,11 @@ to imitate compiler-selected storage or CFG structure.
     `Grass.Assembly.*`, `Grass.Platform.*`, `Grass.Std.*`, and `Grass.Emit`.
     Facades re-export logical/signature modules only and never implementation,
     certificate, or aggregate bodies; their measured dependency cones are the
-    deliberate public-re-export exception to the no-umbrella rule. This resolves
-    the three-way spike/foundation/module mismatch raised by `c-spike`.
+    deliberate public-re-export exception to the no-umbrella rule.
+    `Grass.Process` is specifically a bounded authoring facade, not an aggregate
+    of every `Grass/Process/**` module. This resolves the three-way
+    spike/foundation/module mismatch raised by `c-spike` while retaining the
+    process layer's no-import-all invariant.
 
 ## Explicitly rejected shortcuts
 

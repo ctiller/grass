@@ -150,7 +150,9 @@ surface. It never imports an `Impl`, `Cert`, whole-program aggregate, or concret
 program. This is the deliberate public-re-export exception anticipated by
 `OLEAN_SHARDING.md`, not permission for a leaf to use `import all`. Facade
 dependency cones are measured, and an implementation-only edit must not rewrite
-one.
+one. In particular, `Grass.Process` is a bounded authoring facade, not the Lake
+root and not an aggregate of every module below `Grass/Process/`; adding the
+file does not reverse the existing no-import-all decision.
 
 The same rule applies to process roles, protocol keys, cancellation points, and
 composition witnesses. Large realizations publish module-local signatures and
