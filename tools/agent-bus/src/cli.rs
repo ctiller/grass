@@ -332,6 +332,13 @@ pub struct InboxArgs {
     pub agent: String,
     #[arg(long)]
     pub json: bool,
+    /// Block until an actionable item appears (fetching from origin, when
+    /// configured, on each poll) instead of returning a one-shot snapshot.
+    #[arg(long)]
+    pub wait: bool,
+    /// Seconds to wait before giving up; only meaningful with --wait.
+    #[arg(long)]
+    pub timeout: Option<u64>,
 }
 
 #[derive(Subcommand)]

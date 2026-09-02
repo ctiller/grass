@@ -662,10 +662,22 @@ fn agent_summary(a: &crate::state::AgentState) -> Value {
     })
 }
 
+const DEFAULT_INBOX_WAIT_TIMEOUT_SECS: u64 = 300;
+const INBOX_WAIT_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// c-agent:2: lets an agent block on its own inbox instead of a calling
+/// session having to reschedule its own wakeups purely to re-run `inbox` on
+/// a timer.
 pub fn inbox(ctx: &BusCtx, args: &crate::cli::InboxArgs) -> AbResult<()> {
     let agent = Agent::parse(args.agent.clone())?;
-    let state = ctx.load_state()?;
-    let items = inbox_items(&state, &agent);
+    let items = if args.wait {
+        let timeout =
+            std::time::Duration::from_secs(args.timeout.unwrap_or(DEFAULT_INBOX_WAIT_TIMEOUT_SECS));
+        wait_for_inbox_items(ctx, &agent, timeout, INBOX_WAIT_POLL_INTERVAL)?
+    } else {
+        let state = ctx.load_state()?;
+        inbox_items(&state, &agent)
+    };
     if args.json {
         println!("{}", serde_json::to_string_pretty(&items)?);
     } else {
@@ -677,6 +689,35 @@ pub fn inbox(ctx: &BusCtx, args: &crate::cli::InboxArgs) -> AbResult<()> {
         }
     }
     Ok(())
+}
+
+/// Blocks, polling `fetch_remote` (a no-op without `origin` configured) plus
+/// a fresh `load_state` every `poll_interval`, until `agent`'s inbox is
+/// non-empty or `timeout` elapses. Fetching on every poll is what makes this
+/// useful across processes/machines sharing the same repo through `origin`,
+/// not just same-clone same-process changes.
+fn wait_for_inbox_items(
+    ctx: &BusCtx,
+    agent: &Agent,
+    timeout: std::time::Duration,
+    poll_interval: std::time::Duration,
+) -> AbResult<Vec<Value>> {
+    let start = std::time::Instant::now();
+    loop {
+        ctx.fetch_remote()?;
+        let state = ctx.load_state()?;
+        let items = inbox_items(&state, agent);
+        if !items.is_empty() {
+            return Ok(items);
+        }
+        if start.elapsed() >= timeout {
+            return Err(invalid(format!(
+                "timed out after {}s waiting for an actionable item in {agent}'s inbox",
+                timeout.as_secs()
+            )));
+        }
+        std::thread::sleep(poll_interval);
+    }
 }
 
 /// Not yet terminally resolved — includes `LifecycleConflict` items, which
@@ -2385,6 +2426,8 @@ mod tests {
         let args = crate::cli::InboxArgs {
             agent: "BAD".to_string(),
             json: false,
+            wait: false,
+            timeout: None,
         };
         assert!(inbox(&ctx, &args).is_err());
     }
@@ -2395,6 +2438,8 @@ mod tests {
         let args = crate::cli::InboxArgs {
             agent: "alice".to_string(),
             json: false,
+            wait: false,
+            timeout: None,
         };
         assert!(inbox(&ctx, &args).is_err());
     }
@@ -2748,6 +2793,8 @@ mod tests {
             &crate::cli::InboxArgs {
                 agent: "coord1".to_string(),
                 json: false,
+                wait: false,
+                timeout: None,
             },
         )
         .unwrap();
@@ -2756,6 +2803,8 @@ mod tests {
             &crate::cli::InboxArgs {
                 agent: "alice".to_string(),
                 json: true,
+                wait: false,
+                timeout: None,
             },
         )
         .unwrap();
@@ -2830,5 +2879,103 @@ mod tests {
                 file: lifecycle_path,
             },
         );
+    }
+
+    // -------------------------------------------------- inbox --wait (c-agent:2)
+
+    #[test]
+    fn inbox_wait_times_out_when_nothing_ever_appears() {
+        let dir = init_real_repo();
+        let ctx = BusCtx {
+            repo_root: dir.path().to_path_buf(),
+            has_origin: false,
+        };
+        let coord1 = a("coord1");
+        bus::bootstrap_init(&ctx, std::slice::from_ref(&coord1), &oid(1)).unwrap();
+
+        let err = wait_for_inbox_items(
+            &ctx,
+            &coord1,
+            std::time::Duration::from_millis(60),
+            std::time::Duration::from_millis(10),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("timed out"), "{err}");
+    }
+
+    #[test]
+    fn inbox_wait_returns_immediately_if_already_actionable() {
+        let dir = init_real_repo();
+        let ctx = BusCtx {
+            repo_root: dir.path().to_path_buf(),
+            has_origin: false,
+        };
+        let coord1 = a("coord1");
+        bus::bootstrap_init(&ctx, std::slice::from_ref(&coord1), &oid(1)).unwrap();
+        register(&ctx, &{
+            let mut a = base_register_args();
+            a.agent = "alice".to_string();
+            a.display_name = "Alice".to_string();
+            a
+        })
+        .unwrap();
+
+        let (_t, issue_path) = temp_json(
+            r#"{"issue_kind":"bug","severity":"normal","summary":"s","locations":[],"reproduction":[],"blocks":[],"evidence":[]}"#,
+        );
+        issue_open(&ctx, "alice", "coord1", &issue_path).unwrap();
+
+        let items = wait_for_inbox_items(
+            &ctx,
+            &coord1,
+            std::time::Duration::from_millis(1),
+            std::time::Duration::from_millis(1),
+        )
+        .expect("an already-actionable inbox must not wait at all, let alone time out");
+        assert_eq!(items.len(), 1);
+    }
+
+    /// Proves the loop actually re-polls live state rather than only ever
+    /// checking once: nothing is actionable when the wait starts, and a
+    /// concurrent publisher makes something actionable partway through.
+    #[test]
+    fn inbox_wait_picks_up_an_item_published_while_waiting() {
+        let dir = init_real_repo();
+        let ctx = BusCtx {
+            repo_root: dir.path().to_path_buf(),
+            has_origin: false,
+        };
+        let coord1 = a("coord1");
+        bus::bootstrap_init(&ctx, std::slice::from_ref(&coord1), &oid(1)).unwrap();
+        register(&ctx, &{
+            let mut a = base_register_args();
+            a.agent = "alice".to_string();
+            a.display_name = "Alice".to_string();
+            a
+        })
+        .unwrap();
+
+        let repo_root = dir.path().to_path_buf();
+        let publisher = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let ctx = BusCtx {
+                repo_root,
+                has_origin: false,
+            };
+            let (_t, issue_path) = temp_json(
+                r#"{"issue_kind":"bug","severity":"normal","summary":"s","locations":[],"reproduction":[],"blocks":[],"evidence":[]}"#,
+            );
+            issue_open(&ctx, "alice", "coord1", &issue_path).unwrap();
+        });
+
+        let items = wait_for_inbox_items(
+            &ctx,
+            &coord1,
+            std::time::Duration::from_secs(5),
+            std::time::Duration::from_millis(20),
+        )
+        .expect("must pick up the concurrently published item before the 5s timeout");
+        assert_eq!(items.len(), 1);
+        publisher.join().unwrap();
     }
 }
