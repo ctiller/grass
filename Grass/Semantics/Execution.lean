@@ -19,8 +19,13 @@ structure RelationalSystem (Event : Type u) where
   Initial : State -> Graph -> Prop
   Step : Graph -> State -> Choice -> Event -> State -> Graph -> Prop
   Terminal : State -> Graph -> Prop
+  /-- Global limit condition for an infinite suffix, parameterized by the exact
+  finite event trace which reached its frontier. The suffix graph begins at the
+  cumulative frontier graph, so the condition can relate the complete finite
+  history to every finite restriction of the infinite execution. -/
   InfiniteConsistent :
-    (Nat -> State) -> (Nat -> Graph) -> (Nat -> Choice) -> (Nat -> Event) -> Prop
+    List Event -> (Nat -> State) -> (Nat -> Graph) -> (Nat -> Choice) ->
+      (Nat -> Event) -> Prop
   Extends : Graph -> Graph -> Prop
   extendsRefl : forall graph, Extends graph graph
   extendsTrans : forall {a b c}, Extends a b -> Extends b c -> Extends a c
@@ -38,9 +43,10 @@ inductive Steps {Event : Type u} (system : RelationalSystem Event) : system.Stat
       (transition : system.Step currentGraph current choice event next nextGraph) :
       Steps system state graph (events ++ [event]) next nextGraph
 
-/-- An infinite coherent continuation from one exact frontier. -/
+/-- An infinite coherent continuation from one exact frontier whose global
+consistency condition retains the event trace already taken to that frontier. -/
 structure InfiniteContinuation {Event : Type u} (system : RelationalSystem Event)
-    (state : system.State) (graph : system.Graph) where
+    (state : system.State) (graph : system.Graph) (priorEvents : List Event) where
   stateAt : Nat -> system.State
   graphAt : Nat -> system.Graph
   choiceAt : Nat -> system.Choice
@@ -49,17 +55,18 @@ structure InfiniteContinuation {Event : Type u} (system : RelationalSystem Event
   graphZero : graphAt 0 = graph
   step : forall index, system.Step (graphAt index) (stateAt index)
     (choiceAt index) (eventAt index) (stateAt (index + 1)) (graphAt (index + 1))
-  consistent : system.InfiniteConsistent stateAt graphAt choiceAt eventAt
+  consistent : system.InfiniteConsistent priorEvents stateAt graphAt choiceAt eventAt
 
-/-- A genuine finite-terminal or infinite continuation from a frontier. -/
+/-- A genuine finite-terminal or trace-aware infinite continuation from a
+frontier. -/
 inductive Completion {Event : Type u} (system : RelationalSystem Event)
-    (state : system.State) (graph : system.Graph) : Type u where
+    (state : system.State) (graph : system.Graph) (priorEvents : List Event) : Type u where
   | finite {events finalState finalGraph}
       (steps : system.Steps state graph events finalState finalGraph)
       (terminal : system.Terminal finalState finalGraph) :
-      Completion system state graph
-  | infinite (execution : InfiniteContinuation system state graph) :
-      Completion system state graph
+      Completion system state graph priorEvents
+  | infinite (execution : InfiniteContinuation system state graph priorEvents) :
+      Completion system state graph priorEvents
 
 /--
 A finite execution proof retaining one monotonically extended graph.

@@ -38,7 +38,7 @@ def system : RelationalSystem spec.AuditEvent where
   Initial := fun _ graph => graph = 0
   Step := fun _ _ _ _ _ _ => False
   Terminal := fun _ _ => True
-  InfiniteConsistent := fun _ _ _ _ => True
+  InfiniteConsistent := fun _ _ _ _ _ => True
   Extends := Nat.le
   extendsRefl := Nat.le_refl
   extendsTrans := Nat.le_trans
@@ -134,8 +134,51 @@ example : Nonempty { execution :
   verified.execution_nonempty true trivial
 
 example : Nonempty ((artifactFormat.loadedBehavior ByteArray.empty).system.Completion
-    (initialExecution true).state (initialExecution true).graph) :=
+    (initialExecution true).state (initialExecution true).graph
+      (initialExecution true).events) :=
   verified.execution_completes (initialExecution true)
+
+namespace InfinitePrefixFixture
+
+/-- A nontrivial fixture whose infinite limit condition inspects both the event
+already taken and the first event of its suffix. -/
+def system : RelationalSystem Bool where
+  State := Unit
+  Choice := Unit
+  Graph := Unit
+  Initial := fun _ _ => True
+  Step := fun _ _ _ _ _ _ => True
+  Terminal := fun _ _ => False
+  InfiniteConsistent := fun priorEvents _ _ _ eventAt =>
+    priorEvents = [true] ∧ eventAt 0 = false
+  Extends := fun _ _ => True
+  extendsRefl := fun _ => trivial
+  extendsTrans := fun _ _ => trivial
+  stepExtends := fun _ => trivial
+
+def samplePrefix : system.ExecutionPrefix :=
+  RelationalSystem.ExecutionPrefix.step
+    (RelationalSystem.ExecutionPrefix.initial (system := system)
+      (state := ()) (graph := ()) trivial)
+    (choice := ()) (event := true) (nextState := ()) (nextGraph := ()) trivial
+
+def continuation : system.InfiniteContinuation samplePrefix.state samplePrefix.graph
+    samplePrefix.events where
+  stateAt := fun _ => ()
+  graphAt := fun _ => ()
+  choiceAt := fun _ => ()
+  eventAt := fun _ => false
+  stateZero := rfl
+  graphZero := rfl
+  step := fun _ => trivial
+  consistent := ⟨rfl, rfl⟩
+
+def completion : system.Completion samplePrefix.state samplePrefix.graph samplePrefix.events :=
+  .infinite continuation
+
+example : samplePrefix.events = [true] := rfl
+
+end InfinitePrefixFixture
 
 example : artifactFormat.Parses (emitProgram verified) () :=
   emitProgram_parses verified

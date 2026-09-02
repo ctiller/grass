@@ -76,7 +76,8 @@ theorem execution_completes (verified : VerifiedProgram spec)
     (execution : (verified.artifact.format.loadedBehavior
       (emitProgram verified)).system.ExecutionPrefix) :
     Nonempty ((verified.artifact.format.loadedBehavior
-      (emitProgram verified)).system.Completion execution.state execution.graph) := by
+      (emitProgram verified)).system.Completion execution.state execution.graph
+        execution.events) := by
   exact (ProgramBehavior.Adequate.cast verified.loadedBehavior_exact
     verified.artifact.adequate).completion execution
 
