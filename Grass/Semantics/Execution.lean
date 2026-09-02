@@ -1,9 +1,10 @@
 /-!
 # Relational execution prefixes
 
-The relation, rather than an interpreter, is authoritative.  Each step consumes
-the graph witness produced by its predecessor and must extend it, preventing a
-prefix from assembling unrelated per-step consistency witnesses.
+The relation, rather than an interpreter, is authoritative.
+`RelationalSystem.Steps` consumes each predecessor graph, while
+`RelationalSystem.stepExtends` requires every transition to extend it; together
+they prevent a prefix from assembling unrelated per-step graph witnesses.
 -/
 
 namespace Grass
