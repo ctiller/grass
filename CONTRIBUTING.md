@@ -39,7 +39,11 @@ pwsh ./check-doc-links.ps1
 ```
 
 The Lake commands compile the Lean libraries, and the trust command audits
-project declarations and named public roots for rejected transitive axioms.
+project declarations and named public roots for rejected transitive axioms, then
+rejects unverified `implemented_by` and `extern` replacements in the verified
+runtime dependency closure. Participating module cohorts and persisted non-meta
+compiler dependency modules keep scoped `csimp` substitutions covered after
+their attribute state expires.
 The last two commands classify spike code, compare authored blocks with their
 files under `Spikes/`, and check relative documentation targets. None of these
 commands is an end-to-end proof of the eventual assembler or executable.
