@@ -662,10 +662,22 @@ fn agent_summary(a: &crate::state::AgentState) -> Value {
     })
 }
 
+const DEFAULT_INBOX_WAIT_TIMEOUT_SECS: u64 = 300;
+const INBOX_WAIT_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// c-agent:2: lets an agent block on its own inbox instead of a calling
+/// session having to reschedule its own wakeups purely to re-run `inbox` on
+/// a timer.
 pub fn inbox(ctx: &BusCtx, args: &crate::cli::InboxArgs) -> AbResult<()> {
     let agent = Agent::parse(args.agent.clone())?;
-    let state = ctx.load_state()?;
-    let items = inbox_items(&state, &agent);
+    let items = if args.wait {
+        let timeout =
+            std::time::Duration::from_secs(args.timeout.unwrap_or(DEFAULT_INBOX_WAIT_TIMEOUT_SECS));
+        wait_for_inbox_items(ctx, &agent, timeout, INBOX_WAIT_POLL_INTERVAL)?
+    } else {
+        let state = ctx.load_state()?;
+        inbox_items(&state, &agent)
+    };
     if args.json {
         println!("{}", serde_json::to_string_pretty(&items)?);
     } else {
@@ -677,6 +689,57 @@ pub fn inbox(ctx: &BusCtx, args: &crate::cli::InboxArgs) -> AbResult<()> {
         }
     }
     Ok(())
+}
+
+/// Blocks, polling `fetch_remote` (a no-op without `origin` configured) plus
+/// a fresh `load_state` every `poll_interval`, until either the computed
+/// inbox snapshot changes from what it was when this call started, or the
+/// bus branch itself advances at all -- or `timeout` elapses. Fetching on
+/// every poll is what makes this useful across processes/machines sharing
+/// the same repo through `origin`, not just same-clone same-process
+/// changes.
+///
+/// g-reviewer:26: an earlier version returned as soon as the inbox was
+/// *non-empty*, so an agent with an already-pending review (the motivating
+/// case: waiting for the reviewer's response) got that stale item back
+/// immediately instead of actually waiting. Diffing against a snapshot
+/// taken at call start fixes the common case, but `inbox_items`'s rendered
+/// entry for a review chain (id + summary only) does not itself change
+/// when e.g. `review.changes_requested`/`review.findings_cleared` lands on
+/// an already-listed nomination -- so the bus-tip check is also needed to
+/// catch real activity the rendered snapshot doesn't reflect. For an
+/// immediate, unwaited snapshot of the current state, call `inbox` without
+/// `--wait`.
+fn wait_for_inbox_items(
+    ctx: &BusCtx,
+    agent: &Agent,
+    timeout: std::time::Duration,
+    poll_interval: std::time::Duration,
+) -> AbResult<Vec<Value>> {
+    let start = std::time::Instant::now();
+    ctx.fetch_remote()?;
+    let baseline_tip = current_bus_tip(ctx)?;
+    let baseline_items = inbox_items(&ctx.load_state()?, agent);
+    loop {
+        ctx.fetch_remote()?;
+        let tip = current_bus_tip(ctx)?;
+        let state = ctx.load_state()?;
+        let items = inbox_items(&state, agent);
+        if tip != baseline_tip || items != baseline_items {
+            return Ok(items);
+        }
+        if start.elapsed() >= timeout {
+            return Err(invalid(format!(
+                "timed out after {}s waiting for a change in {agent}'s inbox",
+                timeout.as_secs()
+            )));
+        }
+        std::thread::sleep(poll_interval);
+    }
+}
+
+fn current_bus_tip(ctx: &BusCtx) -> AbResult<Option<String>> {
+    crate::gitrepo::rev_parse_opt(&ctx.repo_root, crate::bus::BUS_BRANCH)
 }
 
 /// Not yet terminally resolved — includes `LifecycleConflict` items, which
@@ -2385,6 +2448,8 @@ mod tests {
         let args = crate::cli::InboxArgs {
             agent: "BAD".to_string(),
             json: false,
+            wait: false,
+            timeout: None,
         };
         assert!(inbox(&ctx, &args).is_err());
     }
@@ -2395,6 +2460,8 @@ mod tests {
         let args = crate::cli::InboxArgs {
             agent: "alice".to_string(),
             json: false,
+            wait: false,
+            timeout: None,
         };
         assert!(inbox(&ctx, &args).is_err());
     }
@@ -2748,6 +2815,8 @@ mod tests {
             &crate::cli::InboxArgs {
                 agent: "coord1".to_string(),
                 json: false,
+                wait: false,
+                timeout: None,
             },
         )
         .unwrap();
@@ -2756,6 +2825,8 @@ mod tests {
             &crate::cli::InboxArgs {
                 agent: "alice".to_string(),
                 json: true,
+                wait: false,
+                timeout: None,
             },
         )
         .unwrap();
@@ -2830,5 +2901,193 @@ mod tests {
                 file: lifecycle_path,
             },
         );
+    }
+
+    // -------------------------------------------------- inbox --wait (c-agent:2)
+
+    #[test]
+    fn inbox_wait_times_out_when_nothing_ever_appears() {
+        let dir = init_real_repo();
+        let ctx = BusCtx {
+            repo_root: dir.path().to_path_buf(),
+            has_origin: false,
+        };
+        let coord1 = a("coord1");
+        bus::bootstrap_init(&ctx, std::slice::from_ref(&coord1), &oid(1)).unwrap();
+
+        let err = wait_for_inbox_items(
+            &ctx,
+            &coord1,
+            std::time::Duration::from_millis(60),
+            std::time::Duration::from_millis(10),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("timed out"), "{err}");
+    }
+
+    /// g-reviewer:26: the motivating case is waiting for a *response* to a
+    /// review already sitting in the inbox -- so a call that starts with
+    /// that review already listed must NOT return it back immediately; it
+    /// must actually wait for something to change.
+    #[test]
+    fn inbox_wait_does_not_return_immediately_for_an_already_pending_review() {
+        let dir = init_real_repo();
+        let ctx = BusCtx {
+            repo_root: dir.path().to_path_buf(),
+            has_origin: false,
+        };
+        let coord1 = a("coord1");
+        bus::bootstrap_init(&ctx, std::slice::from_ref(&coord1), &oid(1)).unwrap();
+        register(&ctx, &{
+            let mut a = base_register_args();
+            a.agent = "alice".to_string();
+            a.display_name = "Alice".to_string();
+            a
+        })
+        .unwrap();
+        register(&ctx, &{
+            let mut a = base_register_args();
+            a.agent = "bob".to_string();
+            a.display_name = "Bob".to_string();
+            a.role = "reviewer".to_string();
+            a
+        })
+        .unwrap();
+        let (_t, nom_path) = temp_json(
+            r#"{"authors":["alice"],"product_branch":"refs/heads/agent/alice/x","reviewer":"bob","required_checks":[],"review_scope":[],"summary":"s","target_branch":"refs/heads/main","evidence":[]}"#,
+        );
+        crate::review_cmds::nominate(&ctx, "alice", &nom_path).unwrap();
+
+        let err = wait_for_inbox_items(
+            &ctx,
+            &a("bob"),
+            std::time::Duration::from_millis(50),
+            std::time::Duration::from_millis(10),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("timed out"),
+            "an already-pending review must not be handed back immediately: {err}"
+        );
+    }
+
+    /// The other half of g-reviewer:26: once real activity *does* land on
+    /// that already-listed review (a `review.changes_requested`), the wait
+    /// must wake for it -- even though `inbox_items`' rendered entry for
+    /// this nomination (just its id and summary) is byte-identical before
+    /// and after, since only the bus tip -- not the rendered snapshot --
+    /// changes here.
+    #[test]
+    fn inbox_wait_wakes_on_bus_activity_even_when_rendered_items_are_unchanged() {
+        let dir = init_real_repo();
+        let ctx = BusCtx {
+            repo_root: dir.path().to_path_buf(),
+            has_origin: false,
+        };
+        let coord1 = a("coord1");
+        bus::bootstrap_init(&ctx, std::slice::from_ref(&coord1), &oid(1)).unwrap();
+        register(&ctx, &{
+            let mut a = base_register_args();
+            a.agent = "alice".to_string();
+            a.display_name = "Alice".to_string();
+            a
+        })
+        .unwrap();
+        register(&ctx, &{
+            let mut a = base_register_args();
+            a.agent = "bob".to_string();
+            a.display_name = "Bob".to_string();
+            a.role = "reviewer".to_string();
+            a
+        })
+        .unwrap();
+        let (_t, nom_path) = temp_json(
+            r#"{"authors":["alice"],"product_branch":"refs/heads/agent/alice/x","reviewer":"bob","required_checks":[],"review_scope":[],"summary":"s","target_branch":"refs/heads/main","evidence":[]}"#,
+        );
+        crate::review_cmds::nominate(&ctx, "alice", &nom_path).unwrap();
+        let nomination = EventId::new(&a("alice"), 1);
+        crate::review_cmds::take(&ctx, "bob", nomination.as_str(), "").unwrap();
+
+        let before = inbox_items(&ctx.load_state().unwrap(), &a("bob"));
+        assert_eq!(before.len(), 1, "the nomination must already be listed");
+
+        let bob = a("bob");
+        let repo_root = dir.path().to_path_buf();
+        let publisher = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let ctx = BusCtx {
+                repo_root,
+                has_origin: false,
+            };
+            let (_t, changes_path) = temp_json(&format!(
+                r#"{{"nomination":"{nomination}","reviewed_commit":"{}","findings":[{{"id":"f1","priority":"normal","locations":[],"rationale":"needs work","closure_conditions":"fix it"}}],"evidence":[]}}"#,
+                hash(1)
+            ));
+            crate::review_cmds::changes(&ctx, "bob", &changes_path).unwrap();
+        });
+
+        let after = wait_for_inbox_items(
+            &ctx,
+            &bob,
+            std::time::Duration::from_secs(30),
+            std::time::Duration::from_millis(50),
+        )
+        .expect("must wake once review.changes_requested lands, well before the 30s timeout");
+        publisher.join().unwrap();
+
+        assert_eq!(
+            before, after,
+            "inbox_items' rendering for this nomination is unchanged by design (id+summary only) -- \
+             the wake must come from the bus tip advancing, not from a rendered diff"
+        );
+    }
+
+    /// Proves the loop actually re-polls live state rather than only ever
+    /// checking once: nothing is actionable when the wait starts, and a
+    /// concurrent publisher makes something actionable partway through.
+    #[test]
+    fn inbox_wait_picks_up_an_item_published_while_waiting() {
+        let dir = init_real_repo();
+        let ctx = BusCtx {
+            repo_root: dir.path().to_path_buf(),
+            has_origin: false,
+        };
+        let coord1 = a("coord1");
+        bus::bootstrap_init(&ctx, std::slice::from_ref(&coord1), &oid(1)).unwrap();
+        register(&ctx, &{
+            let mut a = base_register_args();
+            a.agent = "alice".to_string();
+            a.display_name = "Alice".to_string();
+            a
+        })
+        .unwrap();
+
+        let repo_root = dir.path().to_path_buf();
+        let publisher = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let ctx = BusCtx {
+                repo_root,
+                has_origin: false,
+            };
+            let (_t, issue_path) = temp_json(
+                r#"{"issue_kind":"bug","severity":"normal","summary":"s","locations":[],"reproduction":[],"blocks":[],"evidence":[]}"#,
+            );
+            issue_open(&ctx, "alice", "coord1", &issue_path).unwrap();
+        });
+
+        // A generous timeout: this test's point is proving the loop re-polls
+        // live state (the publisher only starts after a 100ms head start),
+        // not pinning down how fast that happens -- under a heavily loaded
+        // machine, real git subprocess calls in each poll can take far
+        // longer than the low-contention case.
+        let items = wait_for_inbox_items(
+            &ctx,
+            &coord1,
+            std::time::Duration::from_secs(30),
+            std::time::Duration::from_millis(50),
+        )
+        .expect("must pick up the concurrently published item before the 30s timeout");
+        assert_eq!(items.len(), 1);
+        publisher.join().unwrap();
     }
 }
