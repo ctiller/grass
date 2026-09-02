@@ -303,11 +303,22 @@ initialization path is `MemoryState.commit`'s byte list, which is why the error
 never reached memory. Review found both the defect and the false claim.
 -/
 def committedWriteRange (d : AccessDescriptor) (status : AccessStatus) : ByteRange :=
-  d.range.take (status.committedWrites d.range.size)
+  d.range.take status.committedWrites
 
-@[simp] theorem committedWriteRange_completed (d : AccessDescriptor) :
-    d.committedWriteRange .completed = d.range := by
+@[simp] theorem committedWriteRange_completed (d : AccessDescriptor) (reads : Nat) :
+    d.committedWriteRange (.completed reads d.range.size) = d.range := by
   simp [committedWriteRange]
+
+/--
+**A completed load writes nothing.**
+
+The case the previous shape got wrong: `completed` answered "the whole range" for
+both counts, so a load — and every ordinary load lands on `completed` — mapped to
+its whole range under a function named for what an access *writes*.
+-/
+@[simp] theorem committedWriteRange_completed_read (d : AccessDescriptor) (reads : Nat) :
+    d.committedWriteRange (.completed reads 0) = ByteRange.empty d.range.start := by
+  simp [committedWriteRange, ByteRange.take, ByteRange.empty]
 
 /--
 The committed range never escapes the named range.
@@ -325,7 +336,7 @@ theorem committedWriteRange_contained (d : AccessDescriptor) (status : AccessSta
 with no saturation. -/
 theorem committedWriteRange_size (d : AccessDescriptor) {status : AccessStatus}
     (h : status.WellFormed d.range.size) :
-    (d.committedWriteRange status).size = status.committedWrites d.range.size := by
+    (d.committedWriteRange status).size = status.committedWrites := by
   rw [AccessStatus.WellFormed] at h
   simp [committedWriteRange, Nat.min_eq_left h.2]
 

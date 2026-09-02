@@ -177,6 +177,17 @@ structure WellFormed (e : MemoryEvent) : Prop where
   writeWithinRange : e.writeCommitted ≤ e.range.size
   /-- The status does not claim more bytes than the range covers. -/
   statusWellFormed : e.status.WellFormed e.range.size
+  /-- **The status and the counts are the same two facts.**
+
+  An event records how much it read and wrote twice, once in `status` and once in
+  its own fields, and nothing compared them: review built an event whose status
+  said it observed nothing while `readCommitted` said eight, discharged every
+  other clause by `decide`, and wrapped it in a `ValidMemoryEvent`. Two records of
+  one fact with no clause tying them is the defect this layer keeps finding
+  elsewhere, inside the structure that exists to prevent it. -/
+  statusAgreesWithReads : e.status.committedReads = e.readCommitted
+  /-- The write half of `statusAgreesWithReads`. -/
+  statusAgreesWithWrites : e.status.committedWrites = e.writeCommitted
 
 /--
 `Conflicts a b` holds when two events contend for the same bytes.
@@ -446,7 +457,7 @@ def status : AccessOutcome d → AccessStatus
   | .completed c =>
       if (!d.intent.reads || c.readCount == d.range.size) &&
          (!d.intent.writes || c.writeCount == d.range.size) then
-        .completed
+        .completed c.readCount c.writeCount
       else .partialCommit c.readCount c.writeCount
   | .faulted fault c => .faulted fault c.readCount c.writeCount
   | .denied _ => .partialCommit 0 0
@@ -474,9 +485,7 @@ theorem status_wellFormed (outcome : AccessOutcome d) :
     have hr := c.readCount_le
     have hw := c.writeCount_le
     simp only [status]
-    split
-    · exact ⟨Nat.le_refl _, Nat.le_refl _⟩
-    · exact ⟨hr, hw⟩
+    split <;> exact ⟨hr, hw⟩
   | faulted fault c =>
     exact ⟨c.readCount_le, c.writeCount_le⟩
   | denied _ =>
@@ -593,7 +602,39 @@ def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
                     omega
                   readWithinRange := c.readCount_le
                   writeWithinRange := c.writeCount_le
-                  statusWellFormed := outcome.status_wellFormed } }
+                  statusWellFormed := outcome.status_wellFormed
+                  statusAgreesWithReads := by
+                    cases houtcome' : outcome with
+                    | completed c' =>
+                      subst houtcome'
+                      simp only [AccessOutcome.committed?] at houtcome
+                      cases Option.some.inj houtcome
+                      simp only [AccessOutcome.status]
+                      split <;> rfl
+                    | faulted f c' =>
+                      subst houtcome'
+                      simp only [AccessOutcome.committed?] at houtcome
+                      cases Option.some.inj houtcome
+                      rfl
+                    | denied v =>
+                      subst houtcome'
+                      simp [AccessOutcome.committed?] at houtcome
+                  statusAgreesWithWrites := by
+                    cases houtcome' : outcome with
+                    | completed c' =>
+                      subst houtcome'
+                      simp only [AccessOutcome.committed?] at houtcome
+                      cases Option.some.inj houtcome
+                      simp only [AccessOutcome.status]
+                      split <;> rfl
+                    | faulted f c' =>
+                      subst houtcome'
+                      simp only [AccessOutcome.committed?] at houtcome
+                      cases Option.some.inj houtcome
+                      rfl
+                    | denied v =>
+                      subst houtcome'
+                      simp [AccessOutcome.committed?] at houtcome } }
 
 /-- The event an access produces records exactly the access's own range. -/
 @[simp] theorem range_of_ofOutcome {id : EventId} {contextKind : ContextKind}

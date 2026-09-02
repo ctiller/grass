@@ -1150,18 +1150,23 @@ unconditionally on intent. A write-only access has `readCount = 0` by
 `Committed.observedAbsent`, so every ordinary load and store recorded
 `partialCommit` -- whose docstring says "stopped early without faulting" -- and
 `AccessStatus.IsComplete` was false for every access this model can perform except
-a full-width read-modify-write. -/
+a full-width read-modify-write.
+
+The counts below are the second half of the same defect, found a round later: a
+completed load reports `8 0` and a completed store `0 8`, where `completed`
+previously carried no counts and both accessors answered "the whole range" — so a
+completed load claimed to have written eight bytes. -/
 
 theorem a_completed_load_reports_completed :
     ∀ s, (stepAlpha state₀ .load).state? = some s →
-      s.events.map (·.event.status) = [AccessStatus.completed] := by
+      s.events.map (·.event.status) = [AccessStatus.completed 8 0] := by
   intro s hs
   cases hs
   decide
 
 theorem a_completed_store_reports_completed :
     ∀ s, (stepAlpha state₀ .store).state? = some s →
-      s.events.map (·.event.status) = [AccessStatus.completed] := by
+      s.events.map (·.event.status) = [AccessStatus.completed 0 8] := by
   intro s hs
   cases hs
   decide
