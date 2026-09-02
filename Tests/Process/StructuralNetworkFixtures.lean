@@ -92,6 +92,65 @@ theorem shared_protocol_distinct_roles :
   refine ⟨rfl, ?_⟩
   decide
 
+/-! ## A wrapper keeps the short author spelling
+
+`docs/SEMANTICS.md`'s `ProcessPresentationNetwork` wraps a structural network in
+a field called `roles` and adds a composition law. `g-design:28` observed that
+its consumers — `docs/REFINEMENT.md` and Spike 5 — write `network.RoleSchema`
+and `network.protocol schema`, which a bare wrapper does not provide, and that
+making every consumer spell `network.roles.protocol` would leak the wrapper's
+representation and add permanent ceremony.
+
+The fix is forwarding accessors, now declared in `SEMANTICS.md`. That structure
+has no Lean layer yet, so what is pinned here is the *pattern*, on the structure
+this layer does own: a wrapper with forwarding abbreviations is transparent, and
+the short spelling means exactly the long one. When `Grass.Semantics` lands, its
+own fixture replaces this one.
+-/
+
+/-- A wrapper shaped like `ProcessPresentationNetwork`. -/
+structure WrappedNetwork where
+  roles : StructuralProcessNetwork ProcessSpec.{0, 0} requestOf
+
+namespace WrappedNetwork
+
+abbrev RoleSchema (network : WrappedNetwork) : Type := network.roles.RoleSchema
+
+abbrev protocol (network : WrappedNetwork) :
+    network.RoleSchema → ProcessSpec.{0, 0} := network.roles.protocol
+
+abbrev Instance (network : WrappedNetwork) : network.RoleSchema → Type :=
+  network.roles.Instance
+
+abbrev schemas (network : WrappedNetwork) : List network.RoleSchema :=
+  network.roles.schemas
+
+end WrappedNetwork
+
+/-- The wrapped server. -/
+def wrappedServer : WrappedNetwork := ⟨serverNetwork⟩
+
+/-- The short spelling elaborates, which is the whole point of the accessors. -/
+theorem wrapper_role_schema_usable (schema : wrappedServer.RoleSchema) :
+    schema ∈ wrappedServer.schemas := serverNetwork.schemasComplete schema
+
+/-- And it means exactly the long spelling; the wrapper is transparent. -/
+theorem wrapper_protocol_agrees (schema : wrappedServer.RoleSchema) :
+    wrappedServer.protocol schema = wrappedServer.roles.protocol schema := rfl
+
+/--
+A consumer written against the short spelling type-checks.
+
+This is the shape `docs/REFINEMENT.md` uses for `resourceView`, and the reason
+`g-design:28` asked for the accessors rather than accepting `network.roles.*`
+at every use site.
+-/
+def rolePredicate (network : WrappedNetwork) : Type :=
+  network.RoleSchema → Prop
+
+theorem rolePredicate_is_over_roles :
+    rolePredicate wrappedServer = (ServerRole → Prop) := rfl
+
 /-! ## Neither historical field family can return
 
 Each case names a field from one of the two old declarations. If anyone adds it
