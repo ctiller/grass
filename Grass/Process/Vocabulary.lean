@@ -53,10 +53,13 @@ the receiving vocabulary's, exactly as `ChildDemandBinding.classify` does at a
 child boundary: an empty class is then a proof that the transition is
 unreachable for this process, not a way to skip it.
 
-That classification is `Grass/Process/Network/Transition.lean` and is scheduled
-in M2. Until it exists, a `PEmpty` fault or violation class is an *assumption*
-about the environment, not a discharged obligation, and this module says so
-rather than implying otherwise.
+That classification is `Grass/Process/Network/Delivery.lean`, and it now
+exists. `VocabularyDelivery` is three total functions, so a delivery into a
+vocabulary whose class is `PEmpty` is available only from a side that can
+produce no such value — which is
+`VocabularyDelivery.nothing_deliverable_into_quiescent`. A `PEmpty` class is
+therefore a *theorem* about what can arrive, not an assumption about the
+environment.
 
 ## Why the event family is closed
 
@@ -114,10 +117,13 @@ fault, and will never be told its environment broke a contract.
 
 Read the three `PEmpty` fields as assertions, not as omissions. They do not say
 "this process has nothing to say about faults"; they say *no fault can occur*,
-*no cancellation can arrive*, and *the environment never violates*. That is a
-strong claim about the setting the process runs in, and the network transition
-that would deliver such an event owes a proof that it cannot arise here. See the
-module note.
+*no cancellation can arrive*, and *the environment never violates*.
+
+That is a strong claim, and it is discharged rather than assumed:
+`VocabularyDelivery.nothing_deliverable_into_quiescent` proves that a sender who
+can deliver into this vocabulary at all has no such event to send.
+`Tests/Process/DeliveryFixtures.lean` shows the other side — a worker that *can*
+fail has no delivery into a quiescent auditor.
 
 `PEmpty` rather than `Unit` because the claim has to be enforced by
 constructibility. With `Unit` an author could write a `Step` case for
