@@ -428,7 +428,7 @@ law 3 forbids an executed example standing in for a proof.
 
 ## 4. M2 — Network semantics
 
-**Status: twelve of fourteen modules, written, unmerged, unratified.** Written
+**Status: thirteen of fourteen modules, written, unmerged, unratified.** Written
 with fixtures: `Network/Exposure.lean`, `Network/Graph.lean`,
 `Network/Topology.lean`, `Network/Structural.lean` (the canonical network,
 `coord1:4`), `Network/Delivery.lean` (the total cross-vocabulary classifier that
@@ -439,23 +439,26 @@ outcome), `Network/Mailbox.lean` (ordering profiles and selective receive),
 `Network/Death.lean` and `Network/Instance.lean` (incarnations, parentage and the
 lifecycle), `Network/Escrow.lean` (the escrow ledger and its prefix laws), and
 `Network/World.lean` (`LogicalProcessNetworkCore` and the canonical agreement),
-and `Network/Channel.lean` (`ChannelContract`, its footprint discipline, and the
-laws that discipline derives). Not started: the plan, the transition family, and
-the commit law.
+`Network/Channel.lean` (`ChannelContract`, its footprint discipline, and the
+laws that discipline derives), and `Network/Plan.lean` (`ProcessPlan`,
+`LogicalProcessNetwork`, and the boundary projection). Not started: the
+transition family and the commit law.
 
 `Channel.lean` is where standing risk 2 got smaller rather than larger.
-[PROCESS.md](PROCESS.md) §3 declares `ChannelContract` with fifteen fields, seven
-of them opaque law names, and an opaque field is a promise nothing checks. Four
-of the seven are replaced by a *footprint discipline*: `escrowLocal`,
-`receiverPreLocal` and `sessionLocal` bound what the author's own assertions may
-read, and from those bounds `escrow_survives_unrelated_steps`,
+[PROCESS.md](PROCESS.md) §3 declares `ChannelContract` with seventeen fields,
+seven of them opaque law names, and an opaque field of an undeclared type is a
+promise nothing checks. The Lean structure has fourteen. **Three** of the seven
+— `escrowStable`, `session` and `frame` — are replaced by a *footprint
+discipline*: `escrowLocal`, `receiverPreLocal` and `sessionLocal` bound what the
+author's own assertions may read, `sendOnOpenSession` makes the session law a
+demand rather than a conditional, and from those `escrow_survives_unrelated_steps`,
 `frame_unmentioned` and `receiverPre_separate_from_escrow` are theorems. The
-third of those is the one that matters most, because §3 requires
-`ReceiverPre * Escrow` to be *formable*, and it is formable only because
-`NetworkFragment` splits `escrow` from `session`.
+third is the one that matters most, because §3 requires `ReceiverPre * Escrow`
+to be *formable*, and it is formable only because `NetworkFragment` splits
+`escrow` from `session`.
 
-Three of the seven stayed opaque, for a reason stated in the module rather than
-left implicit. `prefixConservation` and `atMostOneResolution` are
+The other **four** are not fields at all, and are deferred to owners the module
+names rather than dropped. `prefixConservation` and `atMostOneResolution` are
 `Network/Escrow.lean`'s, proved there over the ledger, and a contract cannot
 restate them because it cannot see a ledger through an abstract agreement.
 `resolutions` and `transferExact` quantify over the transition family, so they
@@ -463,6 +466,18 @@ are `Transition.lean`'s. `ChannelSteps` is the seam that lets the contract be
 written and checked first: the send and receive relations are parameters, and
 the family instantiates them. That divergence from the declared field list is
 §10.14.
+
+An earlier revision of this paragraph said "fifteen fields, four replaced, three
+stayed opaque", and every one of those numbers was wrong. `Channel.lean`
+reproduced them from here. The counts above are from the declarations.
+
+`Plan.lean` closes the loop decision 128 opened, and turned out to be the
+smallest module in M2 rather than the largest, because every law it was supposed
+to own was statable one layer down. Its `boundaryProjection` is derived from
+`ProcessGraph.rootBoundary` rather than declared again (§10.15), and its `Sound`
+is a wrapper around the world's `WellFormed` until the transition family gives
+it something of its own — including the reroute-landing obligation
+`Network/Escrow.lean` records as the plan's, which is the world's.
 
 An earlier revision of this line said "five of ten" while listing seven modules
 and a twelve-row module table. The count was stale in both directions and is
@@ -560,7 +575,7 @@ Grass/Process/Network/Instance.lean    incarnations, parentage, lifecycle, witne
 Grass/Process/Network/Escrow.lean      the escrow ledger and its prefix laws
 Grass/Process/Network/World.lean       LogicalProcessNetworkCore, the canonical agreement
 Grass/Process/Network/Channel.lean     ChannelContract and its footprint discipline
-Grass/Process/Network/Plan.lean        ProcessPlan, LogicalProcessNetwork
+Grass/Process/Network/Plan.lean        ProcessPlan, LogicalProcessNetwork, the projection
 Grass/Process/Network/Transition.lean  NetworkTransition, NetworkStep, freshness
 Grass/Process/Network/Child.lean       child requests, bindings, lifecycle events
 Grass/Process/Network/Mailbox.lean     ordering profiles, selective receive
@@ -1234,21 +1249,36 @@ declares nowhere. This plan's standing risk 2 is the field count; the sharper
 problem is that an opaque field of an undeclared type is a promise no consumer
 can check, and a contract author discharges it by writing anything at all.
 
-Four of them do not need to be fields. `Grass/Process/Network/Channel.lean`
-carries a *footprint discipline* instead: `escrowLocal` bounds what the escrow
-assertion may read to its own session's escrow fragment, `receiverPreLocal`
-bounds the receiver's precondition to that session's cursor, and `sessionLocal`
-does the same for the session predicate. Those are checkable claims about values
-the author supplies, and they yield `escrowStable` and `frame` as theorems
-(`escrow_survives_unrelated_steps`, `frame_unmentioned`) plus the property §3
-needs and never states — that `ReceiverPre * Escrow` can be *formed*
-(`receiverPre_separate_from_escrow`).
+Three of them do not need to be fields — `escrowStable`, `session` and `frame`.
+`Grass/Process/Network/Channel.lean` carries a *footprint discipline* instead:
+`escrowLocal` bounds what the escrow assertion may read to its own session's
+escrow fragment or the nominal history, `receiverPreLocal` bounds the receiver's
+precondition to that session's cursor or the receiving process's own slot, and
+`sessionLocal` does the same for the session predicate. `sendOnOpenSession`
+makes the session law a demand rather than a conditional on `send`, which is
+what stops a contract discharging it with a never-satisfiable `SessionOpen`.
+Those are checkable claims about values the author supplies, and they yield
+`escrowStable` and `frame` as theorems (`escrow_survives_unrelated_steps`,
+`frame_unmentioned`) plus the property §3 needs and never states — that
+`ReceiverPre * Escrow` can be *formed* (`receiverPre_separate_from_escrow`).
 
-Three stay opaque and the module says why. `prefixConservation` and
-`atMostOneResolution` are already proved in `Network/Escrow.lean` over the
-ledger, and a contract quantifying over an abstract `WorldAgreement` cannot see
-a ledger to restate them. `resolutions` and `transferExact` quantify over the
-transition family, which is `Transition.lean`'s.
+Two of those bounds were too tight in a first attempt and are worth recording,
+because both made a real contract unwritable. Bounding `Escrow` to the escrow
+fragment alone forbade any dependency on `usedNominals`, which is exactly what
+§3's "affine resolve token" needs and what `Network/Assertion.lean` gives the
+`nominals` fragment *for*. Bounding `ReceiverPre` to the session fragment alone
+read §3's "the receiver's independently evolving **local**/session cursor" as if
+`local` were not there, so a contract whose receive depended on the receiving
+process's own state could not exist. Both bounds are now disjunctions, and
+`receiverPre_separate_from_escrow` still holds because no admitted fragment on
+one side is admitted on the other.
+
+The other four are not fields here at all, and the module says where they went.
+`prefixConservation` and `atMostOneResolution` are already proved in
+`Network/Escrow.lean` over the ledger, and a contract quantifying over an
+abstract `WorldAgreement` cannot see a ledger to restate them. `resolutions` and
+`transferExact` quantify over the transition family, which is
+`Transition.lean`'s.
 
 The remaining divergence is `ChannelSteps`. §3's `send` and `receive` are
 `HoareTransition`s with no step relation named, because the transition family is
@@ -1260,3 +1290,75 @@ Whether the normative declaration should shed the four fields is a ruling, not
 c-process's call. Blocks: nothing — the Lean is stricter than the declaration in
 the direction that matters, since every law the declaration names is either
 proved or explicitly deferred with a named owner.
+
+### 10.15 The boundary projection is declared twice, and at two different levels
+
+[PROCESS.md](PROCESS.md) §3 declares `ProcessGraph.rootBoundary :
+ProtocolExposesBoundary (registry.protocol (protocolKey root)) boundary` and,
+about a hundred lines later, `ProcessPlan.boundaryProjection :
+RootLocalDemandProjection toProcessTopologyCore boundary`. `RootLocalDemandProjection`
+is declared nowhere. Both name the same job — selecting which of the root
+protocol's demands the driver boundary sees, with the rest staying private — and
+the first one already has a partial map (`exportDemand : Demand -> Option
+boundary.Demand`) that does it.
+
+`Grass/Process/Network/Plan.lean` therefore *derives*
+`rootLocalDemandProjection` from `rootBoundary` rather than carrying a second
+field. Two objects with one job is the defect class §10.1 already found once, in
+`AbstractSpecificationProcessNetwork`.
+
+There is a real difference between them that the derivation does not capture,
+and it is a second gap rather than a reason to keep both fields. §3 describes the
+plan-level projection as running "from selected root-local **occurrences** to
+`DriverBoundary` occurrences", and the execution-complete simulation is supposed
+to prove "the exported projection is exact". Occurrences, not demands. This
+layer's outstanding demands are a `Grass/Process/Bag.lean` multiset: it has
+multiplicities, so two outstanding `log` demands are two elements, but it has no
+*identities*, so neither of them can be projected to a particular boundary
+occurrence. An occurrence-level projection is not statable here at all.
+
+The fix is to give outstanding demands nominal identities, which is
+`Grass/Process/Nominal.lean` territory and touches `ProcessRunState`,
+`TerminalDemandClassification` and the child binding. That is a substantial
+change to M1's author surface and it needs a ruling, not a unilateral edit.
+Blocks: the exactness half of the boundary projection, and any later theorem
+that needs to say *which* outstanding demand a boundary result answered.
+
+### 10.16 A network's live population is not related to its declared bound
+
+`ProcessGraph.population` gives each kind a `PopulationBound` — `exactlyOne`,
+`boundedByResourcePolicy`, and so on — and nothing in
+`LogicalProcessNetworkCore.WellFormed` relates it to the instances a network
+actually holds. A topology declaring `.exactlyOne` of its listener may hold
+several, and every other well-formedness clause is satisfied.
+
+The obstacle is counting. A network's instances are a function from
+`InstanceId kind`, which is an arbitrary type with no finiteness or
+enumerability, so "how many live instances of this kind are there" has no
+statement. `.exactlyOne` could be stated without counting — at most one slot
+holds an instance — but `boundedByResourcePolicy` cannot, and stating one and
+not the other would leave the harder case looking discharged.
+
+Recorded rather than half-implemented. It plausibly wants the same nominal
+machinery as §10.15, since a live-instance census and a live-occurrence census
+are the same shape of problem. Blocks: nothing today; `Transition.lean` will
+need it, because a spawn transition has to be refused when the bound is reached.
+
+### 10.17 Every §3 citation in the process layer is currently uncheckable in-tree
+
+`docs/DECISIONS.md` on this branch ends at decision 115, and the §3 paragraphs
+that decisions 128, 129 and 130 added — `LogicalProcessNetworkCore`,
+`WorldAgreement`, `NetworkAssertion`, `logicalWorldAgreement`, the indexed
+`ProcessLifecycle`, and `ProcessParentage` — exist only on
+`agent/g-design/normative-design`. `Grass/Process/Network/{Assertion,World,
+Instance,Channel,Plan}.lean` quote and cite all of them.
+
+Nothing is wrong with the citations; they are accurate against the branch that
+will merge first. But a link or quotation checker run against this branch alone
+cannot verify any of them, and a reviewer reading this branch in isolation will
+find the references dangling. This is the same forward-reference window
+`c-reviewer:7` accepted for the spikes and `c-process:41` described, one merge
+later and pointing the other way.
+
+Recorded so it is expected rather than discovered at merge. It closes when
+`g-design`'s branch lands, which the settled order puts first.
