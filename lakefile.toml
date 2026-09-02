@@ -11,6 +11,8 @@ defaultTargets = ["Grass"]
 [leanOptions]
 autoImplicit = false
 relaxedAutoImplicit = false
+# FOUNDATION.md section 3: no admission mechanism may pass a build gate.
+warningAsError = true
 
 # The root remains import-free. Lake discovers every narrow submodule directly;
 # consumers still import only the owner of the declarations they use.
