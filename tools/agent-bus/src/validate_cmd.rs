@@ -408,7 +408,12 @@ mod tests {
         let tag = format!("refs/tags/agent-candidate/bob/{candidate}");
         let _guard = MockGit::new()
             .on(
-                &["rev-parse", "--verify", "--quiet", &tag],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{tag}^{{object}}"),
+                ],
                 GitOutput::err(""),
             )
             .install();
@@ -437,7 +442,12 @@ mod tests {
         let tag = format!("refs/tags/agent-candidate/bob/{candidate}");
         let _guard = MockGit::new()
             .on(
-                &["rev-parse", "--verify", "--quiet", &tag],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{tag}^{{object}}"),
+                ],
                 GitOutput::ok(candidate.clone()),
             )
             .on(
@@ -473,7 +483,12 @@ mod tests {
         let tag = format!("refs/tags/agent-candidate/bob/{candidate}");
         let mut mock = MockGit::new()
             .on(
-                &["rev-parse", "--verify", "--quiet", &tag],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{tag}^{{object}}"),
+                ],
                 GitOutput::ok(candidate.clone()),
             )
             .on(
@@ -520,7 +535,12 @@ mod tests {
         let tag = format!("refs/tags/agent-candidate/bob/{candidate}");
         let mut mock = MockGit::new()
             .on(
-                &["rev-parse", "--verify", "--quiet", &tag],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{tag}^{{object}}"),
+                ],
                 GitOutput::ok(candidate.clone()),
             )
             .on(
@@ -560,7 +580,12 @@ mod tests {
         let tag = format!("refs/tags/agent-candidate/bob/{candidate}");
         let mut mock = MockGit::new()
             .on(
-                &["rev-parse", "--verify", "--quiet", &tag],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{tag}^{{object}}"),
+                ],
                 GitOutput::ok(candidate.clone()),
             )
             .on(
@@ -573,11 +598,21 @@ mod tests {
             )
             // previous_main is fetchable, reviewed_commit is not.
             .on(
-                &["rev-parse", "--verify", "--quiet", &prev],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{prev}^{{object}}"),
+                ],
                 GitOutput::ok(prev.clone()),
             )
             .on(
-                &["rev-parse", "--verify", "--quiet", &reviewed],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{reviewed}^{{object}}"),
+                ],
                 GitOutput::err(""),
             );
         mock = generic_interpret_trailers(mock);
@@ -610,7 +645,12 @@ mod tests {
         let tag = format!("refs/tags/agent-candidate/bob/{candidate}");
         let mut mock = MockGit::new()
             .on(
-                &["rev-parse", "--verify", "--quiet", &tag],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{tag}^{{object}}"),
+                ],
                 GitOutput::ok(candidate.clone()),
             )
             .on(
@@ -622,11 +662,21 @@ mod tests {
                 GitOutput::ok("candidate\n\nAgent-Bus-Reviewer: bob".to_string()),
             )
             .on(
-                &["rev-parse", "--verify", "--quiet", &prev],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{prev}^{{object}}"),
+                ],
                 GitOutput::ok(prev.clone()),
             )
             .on(
-                &["rev-parse", "--verify", "--quiet", &reviewed],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{reviewed}^{{object}}"),
+                ],
                 GitOutput::ok(reviewed.clone()),
             );
         mock = generic_interpret_trailers(mock);
@@ -660,7 +710,12 @@ mod tests {
         let range = format!("{prev}..{reviewed}");
         let mut mock = MockGit::new()
             .on(
-                &["rev-parse", "--verify", "--quiet", &tag],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{tag}^{{object}}"),
+                ],
                 GitOutput::ok(candidate.clone()),
             )
             .on(
@@ -672,11 +727,21 @@ mod tests {
                 GitOutput::ok("candidate\n\nAgent-Bus-Reviewer: bob".to_string()),
             )
             .on(
-                &["rev-parse", "--verify", "--quiet", &prev],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{prev}^{{object}}"),
+                ],
                 GitOutput::ok(prev.clone()),
             )
             .on(
-                &["rev-parse", "--verify", "--quiet", &reviewed],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{reviewed}^{{object}}"),
+                ],
                 GitOutput::ok(reviewed.clone()),
             )
             .on(&["rev-list", &range], GitOutput::ok(introduced.clone()))
@@ -716,7 +781,12 @@ mod tests {
         let range = format!("{prev}..{reviewed}");
         let mut mock = MockGit::new()
             .on(
-                &["rev-parse", "--verify", "--quiet", &tag],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{tag}^{{object}}"),
+                ],
                 GitOutput::ok(candidate.clone()),
             )
             .on(
@@ -728,11 +798,21 @@ mod tests {
                 GitOutput::ok("candidate\n\nAgent-Bus-Reviewer: bob".to_string()),
             )
             .on(
-                &["rev-parse", "--verify", "--quiet", &prev],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{prev}^{{object}}"),
+                ],
                 GitOutput::ok(prev.clone()),
             )
             .on(
-                &["rev-parse", "--verify", "--quiet", &reviewed],
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{reviewed}^{{object}}"),
+                ],
                 GitOutput::ok(reviewed.clone()),
             )
             .on(&["rev-list", &range], GitOutput::ok(introduced.clone()))

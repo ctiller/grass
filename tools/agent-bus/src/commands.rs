@@ -26,11 +26,25 @@ fn from_value<T: serde::de::DeserializeOwned>(v: Value) -> AbResult<T> {
 pub fn register(ctx: &BusCtx, args: &crate::cli::RegisterArgs) -> AbResult<()> {
     let agent = Agent::parse(args.agent.clone())?;
     let role = parse_role(&args.role)?;
+    let product_base = args.product_base.clone().map(ObjectId::parse).transpose()?;
+    // g-design:42: agent.registered is sequence zero -- immutable, never
+    // amendable -- so a product_base that only *looks* like a valid object
+    // id (format-checked) but doesn't actually resolve to anything in this
+    // repository would be permanently unrecoverable. A later scope.set can
+    // disclose the intended base, but nothing can correct or withdraw the
+    // original registration.
+    if let Some(base) = &product_base {
+        if crate::gitrepo::rev_parse_opt(&ctx.repo_root, base.as_str())?.is_none() {
+            return Err(invalid(format!(
+                "product_base {base} does not resolve to an object in this repository"
+            )));
+        }
+    }
     let data = EventData::AgentRegistered(AgentRegistered {
         display_name: Short::parse(args.display_name.clone())?,
         primary_role: role,
         purpose: Text::parse(args.purpose.clone())?,
-        product_base: args.product_base.clone().map(ObjectId::parse).transpose()?,
+        product_base,
         product_branch: args.product_branch.clone().map(Branch::parse).transpose()?,
         provider: args.provider.clone().map(Short::parse).transpose()?,
         model: args.model.clone().map(Short::parse).transpose()?,
@@ -1210,6 +1224,47 @@ mod tests {
         args.product_base = Some("not-a-hash".to_string());
         let err = register(&ctx, &args).unwrap_err();
         assert!(err.to_string().contains("invalid object id"), "{err}");
+    }
+
+    /// g-design:42: agent.registered is sequence zero and immutable, so a
+    /// product_base that's well-formed (40 hex chars) but doesn't actually
+    /// resolve to any object in the repository would be permanently
+    /// unrecoverable -- nothing can amend or withdraw it later.
+    #[test]
+    fn register_rejects_a_well_formed_but_nonexistent_product_base() {
+        let dir = init_real_repo();
+        let ctx = BusCtx {
+            repo_root: dir.path().to_path_buf(),
+            has_origin: false,
+        };
+        let coord1 = a("coord1");
+        bus::bootstrap_init(&ctx, std::slice::from_ref(&coord1), &oid(1)).unwrap();
+        let mut args = base_register_args();
+        args.agent = "alice".to_string();
+        args.product_base = Some(hash(999)); // well-formed, but no such object here
+        let err = register(&ctx, &args).unwrap_err();
+        assert!(
+            err.to_string().contains("does not resolve to an object"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn register_accepts_a_product_base_that_actually_resolves() {
+        let dir = init_real_repo();
+        let ctx = BusCtx {
+            repo_root: dir.path().to_path_buf(),
+            has_origin: false,
+        };
+        let coord1 = a("coord1");
+        bus::bootstrap_init(&ctx, std::slice::from_ref(&coord1), &oid(1)).unwrap();
+        // The bootstrap root itself is a real, locally-resolvable object.
+        let root = crate::gitrepo::rev_parse(&ctx.repo_root, bus::BUS_BRANCH).unwrap();
+        let mut args = base_register_args();
+        args.agent = "alice".to_string();
+        args.role = "implementor".to_string();
+        args.product_base = Some(root);
+        register(&ctx, &args).expect("a genuinely resolvable product_base must be accepted");
     }
 
     #[test]
