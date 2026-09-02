@@ -1,4 +1,5 @@
 import Grass.Process.Network.Delivery
+import Grass.Process.Network.Instance
 import Grass.Process.Protocol.Registry
 
 /-!
@@ -44,16 +45,6 @@ namespace Grass.Process
 
 universe u w v
 
-/-- Why a child stopped existing without finishing its protocol. -/
-inductive ChildDeathReason
-  /-- Its parent died, and it was not detached. -/
-  | parentDied
-  /-- A supervisor stopped it. -/
-  | supervised
-  /-- The provider realizing it disappeared. -/
-  | providerLost
-  deriving DecidableEq, Repr
-
 /-- Why an outcome never reaches the parent. -/
 inductive NonReturningReason
   /-- The parent had already stopped waiting for this occurrence. -/
@@ -87,8 +78,14 @@ inductive ChildLifecycleOutcome (child : ProcessSpec.{u, w}) (request : child.Re
   | faulted (fault : child.LogicalFault)
   /-- The child's environment broke a contract. -/
   | environmentViolation (violation : child.EnvironmentViolation)
-  /-- The child stopped existing without finishing. -/
-  | died (reason : ChildDeathReason)
+  /-- The child stopped existing without finishing.
+
+  The reason is `Grass/Process/Network/Instance.lean`'s `ProcessDeathReason`,
+  not a child-specific one. It used to be declared here as `ChildDeathReason`,
+  which was wrong twice over: none of its three reasons is about being a child,
+  and `docs/PROCESS.md` §4 gives `senderDeath` and `receiverDeath` transitions to
+  processes that may be roots. -/
+  | died (reason : ProcessDeathReason)
 
 /--
 Where a child outcome goes in the parent.

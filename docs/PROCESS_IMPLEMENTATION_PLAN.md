@@ -428,14 +428,20 @@ law 3 forbids an executed example standing in for a proof.
 
 ## 4. M2 — Network semantics
 
-**Status: five of ten modules, unmerged.** Committed with fixtures:
-`Network/Exposure.lean`, `Network/Graph.lean`, `Network/Topology.lean`,
+**Status: nine of thirteen modules, written, unmerged, unratified.** Written with
+fixtures: `Network/Exposure.lean`, `Network/Graph.lean`, `Network/Topology.lean`,
 `Network/Structural.lean` (the canonical network, `coord1:4`), and
 `Network/Delivery.lean` (the total cross-vocabulary classifier that `g-design:4`
 made a condition of per-vocabulary fault classes), and `Network/Child.lean` (the
 binding that authorizes a spawn and routes every child outcome), and
-`Network/Mailbox.lean` (ordering profiles and selective receive). Not started:
-assertions, channels, the plan, the transition family, and the commit law.
+`Network/Mailbox.lean` (ordering profiles and selective receive), and
+`Network/Assertion.lean` (network assertions and separating conjunction), and
+`Network/Instance.lean` (incarnations and the lifecycle). Not started: channels,
+the plan, the transition family, and the commit law.
+
+An earlier revision of this line said "five of ten" while listing seven modules
+and a twelve-row module table. The count was stale in both directions and is
+corrected here rather than quietly re-based.
 
 `Child.lean` was taken before `Assertion.lean` deliberately. The assertion
 language is standing risk 1 — the one most likely to eat this milestone if it
@@ -446,6 +452,40 @@ fault classes, which translate as free functions because they carry no dependent
 result, and the binding handles the case that is not free, where a child's
 success answers a specific parent demand whose answer type depends on which
 demand it was. **None of the exit criteria below is discharged.**
+
+`Assertion.lean` was then taken as soon as the branch was held with no imminent
+candidate selection, which is the one window in which the risky module can be
+written without a merge deadline pressing on it. It came in at the size the risk
+note asks for: six declarations and eleven theorems, no points-to, no magic
+wand, no heap, no entailment relation. What it does carry that the normative
+declaration does not is a world parameter — see §10.11.
+
+Its first draft was wrong in a way worth recording, because the mistake is the
+one standing risk 1 is really about. It claimed that `framed` — an assertion's
+proof that it reads nothing outside its footprint — was "the whole content" of
+the type. It was not. `WorldAgreement` supplied only an equivalence relation per
+fragment, so a caller could supply equality, discharge every `framed` by `subst`
+at any footprint whatsoever, and reduce every framing obligation in the weave to
+"the worlds are identical". Nothing was unsound; everything was useless, and no
+theorem in the module noticed. The fix is `agreesGlue`: any two worlds can be
+mixed along any set of fragments, which is the statement that the fragments are
+a complete independent decomposition of the world, and which the equality
+agreement fails. Two further defects came from the same review: the frame rule
+was not stated in the shape `docs/PROCESS.md` §8 asks for (scope-disjointness
+implies preservation, not agreement-implies-preservation), and `Separate` had no
+consumer anywhere, so the separating conjunction's formation gate gated nothing.
+`frame_of_disjoint_scope` and `sep_right_survives_left_step` are those.
+
+`Instance.lean` followed because `ProcessLifecycle` is named in
+[PROCESS.md](PROCESS.md) §3 and declared nowhere. Its states are derived rather
+than invented: each is entered by a transition §4 names, and the three
+transitions that reach none of them — `restart`, `detach`, `requestCancel` —
+are the design content. A cancelling process is *running*. The terminal states
+carry no payload; `LifecycleWitnessed` requires a terminated instance's state to
+be protocol-terminal, so the result is recoverable and there is exactly one
+record of it. `ChildDeathReason` was renamed `ProcessDeathReason` and moved here
+in the same change: none of its three reasons was about being a child, and §4
+gives `senderDeath`/`receiverDeath` to processes that may be roots.
 
 Two structures here are named for what they are rather than for what a reader
 might assume. `ProcessTopologyCore` carries graph, channels and spawn authority
@@ -466,6 +506,7 @@ Grass/Process/Network/Topology.lean    refs, generations, channel ids, epochs
 Grass/Process/Network/Structural.lean  the one canonical structural network
 Grass/Process/Network/Delivery.lean    total cross-vocabulary fault classification
 Grass/Process/Network/Assertion.lean   network assertions, separating conjunction
+Grass/Process/Network/Instance.lean    incarnations, ProcessLifecycle, witnessing
 Grass/Process/Network/Channel.lean     ChannelContract, escrow, session, resolution
 Grass/Process/Network/Plan.lean        ProcessPlan, LogicalProcessNetwork
 Grass/Process/Network/Transition.lean  NetworkTransition, NetworkStep, freshness
@@ -508,15 +549,16 @@ representation relation.
 
 ## 5. M3 — Cancellation and lifecycle
 
-**Status: one module landed early.** `coord1:6` ruled the canonical scoped
-cancellation form while M2 was in progress, so `Cancellation/Policy.lean` and its
-two invalidation fixtures were built out of order to discharge that disposition.
+**Status: one module written early, unmerged, unratified.** `coord1:6` ruled the
+canonical scoped cancellation form while M2 was in progress, so
+`Cancellation/Policy.lean` and its two invalidation fixtures were built out of
+order to discharge that disposition.
 The rest of M3 — masks, the `|>` algebra, termination contracts, facets, and all
 of byte flow — has not started, and the exit criterion below is undischarged.
 
 ```text
-Grass/Process/Cancellation/Policy.lean scoped policy and certificate (landed early
-                                       under coord1:6, ahead of the rest of M3)
+Grass/Process/Cancellation/Policy.lean scoped policy and certificate (written
+                                       early under coord1:6, ahead of M3)
 Grass/Process/Cancellation.lean        masks, summaries, the |> algebra
 Grass/Process/Termination.lean         modes, contracts, dispositions
 Grass/Process/Facet.lean               TerminationFacet and its constructors
@@ -734,7 +776,7 @@ their exclusive file.
 Three entries are implemented and closed (`c-process:4`, `:5`, `:6`, `:7`); one
 is implemented on the library side with its spike half delegated (`c-process:3`,
 dependency `c-process:26`); and the three ratification questions are ruled with
-their implementations landed.
+their implementations written on this branch.
 
 | Entry | Bus issue | Ruling | State |
 |---|---|---|---|
@@ -986,3 +1028,41 @@ the serial authoring surface. Blocks: M4 `Sequential/Adapter.lean`.
 Recorded in §2.2. The decision is reversible and local: `Grass/Process/Bag.lean`
 is one module with a documented custody note, and adopting mathlib later is a
 deletion. Blocks: nothing.
+
+### 10.11 `NetworkAssertion topology` has no world to assert about
+
+[PROCESS.md](PROCESS.md) §3 declares assertions as `NetworkAssertion topology`
+and consumes them at that arity throughout `ChannelContract`. It never says
+what an assertion is *about*. The obvious answer — `LogicalProcessNetwork plan`
+— is not available at that arity, and cannot be made available, because
+`ChannelContract` is a field of `ProcessPlan`. The document already knows this:
+it says `ProcessGraph` exists separately "so topology and channel contracts can
+quantify over ... process-network assertions without a self-referential
+structure declaration."
+
+So the world is genuinely below the plan, and most of it is: `instances` and
+`shared` need only `ProcessKind`, `ProcessRef`, `SharedRegion` and
+`SharedState`, all of which `ProcessTopologyCore` has. One field is not.
+`inFlight : ChannelEscrowLedger plan` is indexed by the plan, because each
+edge's `Message` type is a field of that edge's `ChannelContract`. A
+topology-level world therefore does not exist unless the escrow ledger's
+carrier is made opaque at topology level, which is a design choice nobody has
+made.
+
+`Grass/Process/Network/Assertion.lean` does not make it either. It takes a
+`WorldAgreement topology World` — an abstract per-fragment agreement relation
+over a supplied world — so `NetworkAssertion` is indexed by that agreement
+rather than by the topology alone. This is strictly weaker than committing to a
+world: it admits the intended instantiation, at `World := LogicalProcessNetwork
+plan`, once `Plan.lean` supplies one, and it lets `Channel.lean` be written
+against the framing laws without `Plan.lean` existing. It is not the declared
+arity, and pretending otherwise would be the divergence, not the abstraction.
+
+The reconciliation is a normative edit and belongs to whoever holds
+[PROCESS.md](PROCESS.md) when the merge order settles: either the declaration
+gains its world argument, or the corpus commits to an opaque topology-level
+escrow carrier and the world becomes derivable. c-process has a preference — the
+world argument, because the opaque carrier buys nothing that
+`ChannelEscrowLedger plan` does not already provide at the arity where it is
+used — but not the authority. Blocks: the normative surface of `Channel.lean`,
+which cannot match a declaration that does not typecheck.
