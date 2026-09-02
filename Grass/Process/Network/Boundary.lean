@@ -1,4 +1,5 @@
-import Grass.Process.Protocol.Registry
+import Grass.Process.Scope
+import Grass.Process.Spec
 
 /-!
 # The driver boundary
@@ -26,6 +27,15 @@ So this record is deliberately poor. It has no topology, no root, no plan, no
 population, and no channel. Anything added to it becomes a fact that assembly
 and platform proofs depend on, and every one of those is a fact a plan change
 would then be able to break.
+
+## Imports
+
+This module imports `Grass.Process.Scope` for the requirement key's scope and
+`Grass.Process.Spec` for the vocabulary view. It deliberately does *not* import
+the protocol registry: a boundary has nothing to do with keys, and importing the
+registry to reach one path type would put every registry change in the rebuild
+cone of every requirement change, which `docs/OLEAN_SHARDING.md` §2 names as a
+forbidden edge.
 
 ## Why this module sits below `Grass.Semantics`
 

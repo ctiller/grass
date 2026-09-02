@@ -1,3 +1,4 @@
+import Grass.Process.Scope
 import Grass.Process.Spec
 
 /-!
@@ -48,22 +49,6 @@ namespace Grass.Process
 
 universe u w v
 
-/--
-A reviewed nominal scope: the identity of the module that owns a family of keys.
-
-Path segments rather than one string, because scopes nest and a merge has to
-compare them structurally. `docs/PROCESS_SHARDING.md` §1 requires a *reviewed
-nominal identity*; a content hash is a cache key and is not this.
--/
-structure ScopeId where
-  /-- The scope path, outermost first. -/
-  path : List String
-  deriving DecidableEq, Repr
-
--- The universe linter objects that `u` and `v` appear only inside a `max`. That
--- is exactly the intent: a registry's keys and its protocols are independently
--- universe-polymorphic, so that `flatten` can register a process built from the
--- registry back into an extension of it. See the module note.
 set_option linter.checkUnivs false in
 /--
 What one module owns: a scope and its own local key type.
