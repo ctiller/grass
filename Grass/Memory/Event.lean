@@ -547,7 +547,16 @@ the descriptor's own well-formedness already forbids. A denial emits a violation
 not an event: nothing happened to any byte.
 
 The well-formedness proof is discharged here, from the `Committed` fields, so a
-caller never assembles one and never has an opportunity to skip it.
+caller going through this function never assembles one and never has an
+opportunity to skip it.
+
+**Not "the only producer".** `ValidMemoryEvent` is a public structure and its
+constructor is not private, so a caller can assemble one directly — review did, to
+show that the fields as they stood admitted an event whose status disagreed with
+its own counts. What the type gives is that the fields must be *discharged*, which
+is a real barrier and a weaker claim than unrepresentability. The fields are the
+thing to keep honest; `statusAgreesWithReads` and `statusAgreesWithWrites` were
+added because two of them were not being compared.
 -/
 def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
     (space : AddressSpace) (d : AccessDescriptor) (outcome : AccessOutcome d) :

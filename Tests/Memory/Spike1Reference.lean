@@ -182,7 +182,7 @@ def payloadPointer : PointerValue :=
 `mov transferred, 0` — a typed frame-slot write that produces initialization.
 
 `producesInitialized` is a claim about the bytes this access *commits*, not the
-bytes it names; `AccessDescriptor.committedRange` is what a later proof reads.
+bytes it names; `AccessDescriptor.committedWriteRange` is what a later proof reads.
 -/
 def movTransferredZero : SubstepSequence :=
   .single (access transferredProvenance ⟨32, 4⟩ 0x1020 .write .readWrite 4 false true)

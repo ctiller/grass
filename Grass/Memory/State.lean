@@ -583,11 +583,16 @@ structure MachineState where
   violations : AuditViolationLedger
   /-- The memory events performed so far, most recent last.
 
-  `ValidMemoryEvent`, not `MemoryEvent`: the trace cannot contain a malformed
-  event, so "every event in the trace is well formed" holds by construction rather
-  than by a check something could forget. An earlier trace held bare events beside
-  a predicate nothing consulted, and every event the transition minted violated
-  it. -/
+  `ValidMemoryEvent`, not `MemoryEvent`: every event in the trace carries its own
+  well-formedness proof, so the property holds by construction rather than by a
+  check something could forget. An earlier trace held bare events beside a
+  predicate nothing consulted, and every event the transition minted violated it.
+
+  It does not make a malformed trace *unrepresentable*, which §3.11 of the plan
+  used to claim: the structure is public, so a caller can assemble one by
+  discharging the fields. The barrier is that the fields must be discharged, and
+  keeping them strong enough is the real work — two of them went uncompared until
+  review built an event whose status contradicted its own counts. -/
   events : List ValidMemoryEvent
   /-- The supply that mints event identities. -/
   eventSupply : FreshSupply EventTag
@@ -599,13 +604,56 @@ structure MachineState where
   behaviour a specification may permit, a violation is behaviour
   `VerifiedProgram` proves never happens. -/
   faults : List RaisedFault
+  /-- What kind of execution context each identity is.
+
+  `docs/MEMORY_MODEL.md` §7.1 requires an event to carry execution context
+  identity *and* kind. The identity came from the access descriptor and the kind
+  from an argument to `step`, with nothing relating them, so the same
+  `ContextId` could be stepped as a thread once and a device engine the next time
+  and each event carried whatever pair the caller supplied. Two sources of truth
+  for one fact, which is the defect this layer keeps finding; review found this
+  instance after the identity half was closed and the kind half was not.
+
+  A context's kind is a fact about the machine, so it lives in the state. `step`
+  refuses an identity whose kind disagrees with what is recorded here, and records
+  the pairing the first time it sees one. -/
+  contexts : FiniteMap ContextId ContextKind
 
 namespace MachineState
 
 /-- The state a program starts in. -/
 def initial (memory : MemoryState) : MachineState :=
   { memory := memory, obligations := .empty, violations := .empty
-    events := [], eventSupply := .initial, faults := [] }
+    events := [], eventSupply := .initial, faults := [], contexts := .empty }
+
+/-- `state.KindAgrees context kind` holds when the state has not already recorded
+a different kind for that identity. A context the state has never seen agrees with
+any kind, and is recorded by `noteContext`. -/
+def KindAgrees (state : MachineState) (context : ContextId) (kind : ContextKind) : Prop :=
+  state.contexts.lookup context = Option.none ∨
+    state.contexts.lookup context = some kind
+
+instance (state : MachineState) (context : ContextId) (kind : ContextKind) :
+    Decidable (state.KindAgrees context kind) :=
+  inferInstanceAs (Decidable (_ ∨ _))
+
+/-- Record the pairing, so a later step with a different kind disagrees. -/
+def noteContext (state : MachineState) (context : ContextId) (kind : ContextKind) :
+    MachineState :=
+  { state with contexts := state.contexts.insert context kind }
+
+/-- Recording a pairing makes it agree, and makes every other kind disagree. -/
+@[simp] theorem kindAgrees_noteContext (state : MachineState) (context : ContextId)
+    (kind : ContextKind) : (state.noteContext context kind).KindAgrees context kind :=
+  .inr (by simp [noteContext])
+
+theorem not_kindAgrees_noteContext_of_ne (state : MachineState) (context : ContextId)
+    {kind other : ContextKind} (h : other ≠ kind) :
+    ¬ (state.noteContext context kind).KindAgrees context other := by
+  rintro (hn | hs)
+  · simp [noteContext] at hn
+  · simp [noteContext] at hs
+    exact h hs.symm
 
 /-- `state.OutstandingObligations` are the identities still owed. -/
 def outstanding (state : MachineState) : List ObligationId := state.obligations.domain

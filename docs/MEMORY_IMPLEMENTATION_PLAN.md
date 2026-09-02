@@ -335,7 +335,7 @@ instead of a theorem, because it is the stronger form.
 | Property | Enforced by |
 |---|---|
 | step extends the violation ledger | `Op.step_extends_violations` |
-| step emits only well-formed events | `Op.step_events_wellFormed`, and `ValidMemoryEvent` makes a malformed trace unrepresentable |
+| step emits only well-formed events | `Op.step_events_wellFormed`, and every event in the trace carries its own well-formedness proof — not unrepresentability, since the structure is public; see §4.2 |
 | denial prevents undeclared later effects | `Op.runAccesses_stops_at_refusal` for the access list, `Op.runStep_stops_at_refusal` for the faulting branch. The second was missing and the branch was wrong: `runStep` performed the faulting substep's access whether or not a survivor had been refused, so a denial was followed by a committed write. Found by local adversarial review after the property had already been declared closed and merged; `Tests/Op/FakeIsa.lean`'s `denial_stops_the_operation_on_the_fault_path` is the regression. |
 | fault choices are structurally in range | `Op.FaultPlan` carries a `Fin`; the bad case is unrepresentable |
 | partial RMW retains its completed read | `Committed` counts reads and writes separately; `faulted_rmw_keeps_its_read` |
@@ -652,6 +652,17 @@ one outright defect that had already merged — see §3.11's denial row.
   theorem is derivable rather than false. Until it exists, a consumer following the
   prose to `runAccesses_frames_untouched` over the survivors would have an unsound
   framing argument, which is how review found it.
+- **`ValidMemoryEvent`'s constructor is public.** §3.11 says it "makes a malformed
+  trace unrepresentable", and `Grass/Memory/Event.lean` says `ofOutcome` is the
+  only producer. Neither is true of the type as written: the structure can be
+  assembled directly by anyone who can discharge its fields. What is true is that
+  the fields must be discharged, which is a real barrier and not the same claim.
+- **`AccessIntent.isDevice` and `AccessDescriptor.observations` are never read.**
+  §7.5 makes device participation load-bearing and `isDevice` is the field that
+  would carry it. `ObservationLabel` was recorded in §3.13 as having no registry,
+  which understates it: the field has no reader at all.
+- **`InitializationDemand.permitsUninitialized`'s justification names nothing**,
+  like `FaultVisibility.transactional`'s, and unlike that one it was not recorded.
 - **The operation-level `faults` facet is consumed by nothing.**
   `OperationFacets.supplied` reads only `isSome`, so an operation declaring
   `faults = some []` can still raise one. The substep-level lists are checked now;
@@ -670,10 +681,6 @@ one outright defect that had already merged — see §3.11's denial row.
 - **`Restartability` is declared and never read.** A profile can require the facet
   and a descriptor carries a value, but nothing in the transition consults it, so
   [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.4's retry rules have no mechanism here.
-- **`FaultPlan`'s commit counts are unbounded.** `Committed.truncate` clamps by
-  `List.take`, so an over-large count cannot over-claim bytes and soundness holds.
-  It is accepted silently rather than refused, which is the behaviour
-  `StepRejection`'s other constructors exist to avoid.
 - **`AgreesOn` does not carry the refusal decision.** It compares cells, which is
   bytes and initialization. `denialOf` also reads `extent`, `epoch`, `space`,
   `permission` and `live`, so two states can agree and refuse differently — review
@@ -771,6 +778,37 @@ written fast. Nine findings; three were live defects and two of those are on mai
 - `faultWithUndeclaredLedgerEffect` fired on `transactional` sequences, where
   `faultingEffectVisible` proves the faulting access is never performed and the
   effect cannot apply. Now gated on it.
+
+A sixth round, on the fifth round's repairs and on a systematic field census.
+Four more live defects, two of them on main and two in the previous round's fixes.
+
+- **`MemoryState.SharesBytes` compared a single alias hop.**
+  [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.5 makes mapping and sharing typed
+  transitions and those compose, so a file aliased to a view and that view to a
+  second view means all three name the same bytes. The two ends of such a chain
+  were declared non-conflicting and a cross-context write to the far end committed
+  — the same defect `SharesBytes` was introduced to fix, one hop out. It is the
+  bounded transitive closure now.
+- **`Obligation.owner` was consulted by nothing**, so any context could discharge
+  any duty. [OBLIGATIONS.md](OBLIGATIONS.md) opens by making an obligation a duty
+  of its holder. `LedgerDelta.Applicable` takes the acting context now and checks
+  ownership on every delta kind, including `create`, since a context may not
+  fabricate a duty in another's name either.
+- **The read/write split stopped at `AccessStatus.completed`**, which still
+  answered "the whole range" for both counts — and the intent-relative
+  completeness test means every ordinary load and store lands there. A completed
+  load claimed to have written its whole range. `completed` carries its counts now.
+- **`MemoryEvent.WellFormed` never related `status` to the counts**, so an event
+  saying it observed nothing while `readCommitted` said eight discharged every
+  clause and wrapped in a `ValidMemoryEvent`. Two records of one fact with nothing
+  tying them, inside the structure that exists to prevent that.
+- **The context *kind* was still unchecked** after `contextMismatch` closed the
+  identity half: one `ContextId` could be a thread in one step and a device engine
+  in the next. `MachineState.contexts` is the single source of truth now.
+- `faultCommitOutOfRange` bounded both counts by the range, so an impossible read
+  count on a write-only access was approximated to zero rather than refused, while
+  the same impossible claim on a compute substep was refused. The bound is
+  intent-relative now.
 
 ### 4.3 A semantic decision this milestone made and does not own
 

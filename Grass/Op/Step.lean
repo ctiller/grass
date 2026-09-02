@@ -87,6 +87,16 @@ inductive StepRejection where
   nobody wrote: the profile owes a fault rule before such an operation can fault.
   See `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.3. -/
   | faultWithUndeclaredLedgerEffect
+  /-- An execution context is stepped under a kind other than the one the state
+  records for it.
+
+  `docs/MEMORY_MODEL.md` §7.1 requires an event to carry identity *and* kind. The
+  identity came from the descriptor and the kind from an argument, with nothing
+  relating them, so one `ContextId` could be a thread in one step and a device
+  engine in the next. `contextMismatch` closed the identity half and review found
+  the kind half still open a round later. `MachineState.contexts` is the single
+  source of truth now. -/
+  | contextKindMismatch (context : ContextId) (declared recorded : ContextKind)
   /-- An access declares an executing context other than the one running the step.
 
   `MemoryEvent.ofOutcome` takes the event's context *identity* from
@@ -110,12 +120,19 @@ inductive StepRejection where
   `.compute` is the constructor the `div` case exists for, so it is the one most
   likely to carry a profile-invented name. -/
   | computeFaultNotRecognized (fault : FaultClassId)
-  /-- A fault plan claims a commit count larger than the access could produce.
+  /-- A fault plan claims a commit count the access could not have produced.
 
   `Committed.truncate` clamps by `List.take`, so an over-large count cannot
   over-claim bytes and memory stays sound. It was accepted silently, which is what
   `faultPointOutOfRange` existed to prevent for the index: a machine report the
-  model knows is impossible should be refused, not approximated. -/
+  model knows is impossible should be refused, not approximated.
+
+  The bound is **intent-relative**. A write-only access cannot have read anything
+  — `Committed.observedAbsent` forces `readCount = 0` — so a plan claiming a read
+  on a store is exactly such an impossible report, and the first version of this
+  check bounded both counts by the range and let it through to be quietly rewritten
+  to zero. Review found that asymmetry: an impossible count on a compute substep
+  was refused while an impossible count on an access was approximated. -/
   | faultCommitOutOfRange
 deriving DecidableEq, Repr
 
@@ -770,6 +787,10 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
           match sequence.accesses.find? (fun d => d.context != context) with
           | some d => .rejected (.contextMismatch d.context context)
           | Option.none =>
+          if ! decide (state.KindAgrees context contextKind) then
+            .rejected (.contextKindMismatch context contextKind
+              ((state.contexts.lookup context).getD contextKind))
+          else
           -- A compute substep has no descriptor, so `Admits` never checks its
           -- declared faults against the vocabulary. This is the sibling clause.
           match sequence.substeps.findSome? (fun sub =>
@@ -781,12 +802,16 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
           | some fault => .rejected (.computeFaultNotRecognized fault)
           | Option.none =>
           match faultAt sequence with
-          | .none => .ran (runStep policy state sequence context contextKind cause .none)
+          | .none =>
+              .ran (runStep policy (state.noteContext context contextKind) sequence context
+                contextKind cause .none)
           | .before index fault reads writes =>
               if ! decide (fault ∈ sequence.substeps[index].faults) then
                 .rejected (.faultClassNotDeclared fault)
               else if ! (match sequence.substeps[index].descriptor? with
-                  | some d => decide (reads ≤ d.range.size ∧ writes ≤ d.range.size)
+                  | some d =>
+                      decide (reads ≤ (if d.intent.reads then d.range.size else 0) ∧
+                        writes ≤ (if d.intent.writes then d.range.size else 0))
                   | Option.none => decide (reads = 0 ∧ writes = 0)) then
                 .rejected .faultCommitOutOfRange
               else if sequence.faultingEffectVisible &&
@@ -797,8 +822,8 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
                 match sequence.visibleEffects? index.val with
                 | Option.none => .rejected .visibilityRuleUnknown
                 | some _ =>
-                    .ran (runStep policy state sequence context contextKind cause
-                      (.before index fault reads writes))
+                    .ran (runStep policy (state.noteContext context contextKind) sequence
+                      context contextKind cause (.before index fault reads writes))
 
 /-! ## The transition invariants
 

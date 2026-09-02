@@ -988,7 +988,7 @@ not have noticed a write that recorded no event.
 theorem denial_stops_the_operation_on_the_fault_path :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.deniedThenStore) thread₀
         .thread ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 8 8
+          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 0 8
           else .none)).state? = some s →
       s.events = [] ∧ s.violations.recordCount = 1 ∧
       s.memory.byteAt? bufferAlloc 8 = some 0x00 := by
@@ -1002,7 +1002,7 @@ here would be inventing a fault for a substep that did not run. -/
 theorem a_denial_before_the_fault_records_no_fault :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.deniedThenStore) thread₀
         .thread ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 8 8
+          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 0 8
           else .none)).state? = some s →
       s.faults = [] := by
   intro s hs
@@ -1071,11 +1071,57 @@ theorem an_impersonating_access_is_refused :
     Grass.Op.step policy state₀ (SomeOperation.of Alpha.impersonatingDmaWrite) engine₀
       .dmaEngine ⟨⟨"alpha"⟩⟩ = .rejected (.contextMismatch thread₀ engine₀) := rfl
 
-/-- The same descriptor run by the context it names is admitted, so the check
-compares rather than refusing anything unusual. -/
+/-- The same descriptor run by the context it names is admitted *and commits*, so
+the check compares rather than refusing anything unusual.
+
+Asserting only that a state came back would not have said that: `staleEpoch_is_denied`
+shows a denied access also produces a state. Review caught me reintroducing exactly
+the weakness I had repaired two theorems earlier. -/
 theorem the_named_context_may_run_it :
-    ∃ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.impersonatingDmaWrite)
-      thread₀ .thread ⟨⟨"alpha"⟩⟩).state? = some s := ⟨_, rfl⟩
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.impersonatingDmaWrite)
+      thread₀ .thread ⟨⟨"alpha"⟩⟩).state? = some s →
+      s.events.length = 1 ∧ s.violations.IsEmpty := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/--
+**One identity cannot be two kinds.**
+
+`contextMismatch` closed the identity half: an access may not name a context other
+than the one running it. The *kind* came from a separate `step` argument with
+nothing relating it to anything, so the same `ContextId` could be stepped as a
+thread once and a device engine the next time, and each event carried whatever
+pair the caller supplied. `docs/MEMORY_MODEL.md` §7.1 requires identity and kind
+together. `MachineState.contexts` records the pairing the first time a context is
+seen, and disagreement is refused.
+-/
+theorem a_context_cannot_change_kind :
+    ∀ s, (stepAlpha state₀ .store).state? = some s →
+      Grass.Op.step policy s (SomeOperation.of Alpha.load) thread₀ .dmaEngine
+        ⟨⟨"alpha"⟩⟩ = .rejected (.contextKindMismatch thread₀ .dmaEngine .thread) := by
+  intro s hs
+  cases hs
+  rfl
+
+/-- The same context under its own kind still runs, so the check is about
+disagreement and not about refusing a second step. -/
+theorem the_same_kind_still_runs :
+    ∀ s, (stepAlpha state₀ .store).state? = some s →
+      ∀ t, (stepAlpha s .load).state? = some t →
+        t.events.length = 2 ∧ t.violations.IsEmpty := by
+  intro s hs t ht
+  cases hs; cases ht
+  exact ⟨by decide, by decide⟩
+
+/-- And a fresh identity may take any kind, because the state has not seen it. -/
+theorem a_fresh_context_may_take_any_kind :
+    ∀ s, (stepAlpha state₀ .store).state? = some s →
+      ∀ t, (stepBeta s .dmaWrite).state? = some t →
+        (t.contexts.lookup engine₀) = some ContextKind.dmaEngine := by
+  intro s hs t ht
+  cases hs; cases ht
+  decide
 
 /-! ## A compute substep's fault classes are checked too
 
@@ -1092,9 +1138,14 @@ theorem a_compute_substep_with_an_unrecognized_fault_is_refused :
       .rejected (.computeFaultNotRecognized ⟨⟨"fake.neverDeclaredFault"⟩⟩) := rfl
 
 /-- `divide`'s compute substep declares `divideError`, which the vocabulary does
-recognize, so it still runs. -/
+recognize, so it still runs *and commits its load*. Same reason as
+`the_named_context_may_run_it`: "produced a state" is satisfied by a denial. -/
 theorem a_recognized_compute_fault_still_runs :
-    ∃ s, (stepAlpha state₀ .divide).state? = some s := ⟨_, rfl⟩
+    ∀ s, (stepAlpha state₀ .divide).state? = some s →
+      s.events.length = 1 ∧ s.violations.IsEmpty := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
 
 /-! ## What a fault plan may claim
 
@@ -1178,7 +1229,7 @@ separation reaching the status, where it previously stopped at `Committed`. -/
 theorem a_faulted_store_still_reports_its_prefix :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3 3
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 3
           else .none)).state? = some s →
       s.events.map (·.event.status) = [AccessStatus.faulted .pageFault 0 3] := by
   intro s hs
@@ -1221,7 +1272,7 @@ the zeros the allocation started with, rather than the `0xAB` a store writes. -/
 theorem transactional_exposes_nothing :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.atomicSplitStore) thread₀
         .thread ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 4 4
+          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 0 4
           else .none)).state? = some s →
       s.memory.byteAt? bufferAlloc 0 = some 0x00 ∧
       s.memory.byteAt? bufferAlloc 4 = some 0x00 ∧
@@ -1235,7 +1286,7 @@ committed effects, not about whether the machine faulted. -/
 theorem transactional_still_records_its_fault :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.atomicSplitStore) thread₀
         .thread ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 4 4
+          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 0 4
           else .none)).state? = some s →
       s.faults.map RaisedFault.fault = [FaultClassId.pageFault] := by
   intro s hs
@@ -1456,7 +1507,7 @@ theorem divide_fault_at_zero_commits_no_bytes :
 theorem faulted_store_commits_its_declared_prefix :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3 3
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 3
           else .none)).state? = some s →
       ∃ e, s.events = [e] ∧ e.event.writeCommitted = 3 ∧ e.event.status = .faulted .pageFault 0 3 := by
   intro s hs
@@ -1498,7 +1549,7 @@ on which kind of substep failed. -/
 theorem access_fault_is_recorded :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3 3
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 3
           else .none)).state? = some s →
       s.faults.length = 1 ∧ s.events.length = 1 := by
   intro s hs
