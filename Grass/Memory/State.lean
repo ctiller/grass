@@ -175,6 +175,21 @@ def write (state : MemoryState) (id : AllocId) (start : Nat) (bytes : ByteSeq)
 def byteAt? (state : MemoryState) (id : AllocId) (offset : Nat) : Option Byte :=
   (state.allocations.lookup id).bind (·.bytes.byteAt? offset)
 
+/-- What allocation `id` holds at `offset`: the byte and whether it counts as
+initialized. Both from one lookup, for the reason `ByteStore.cellAt?` gives. -/
+def cellAt? (state : MemoryState) (id : AllocId) (offset : Nat) : Option (Byte × Bool) :=
+  (state.allocations.lookup id).bind (·.bytes.cellAt? offset)
+
+/-- `state.InitializedAt id offset` holds when that byte is initialized. The
+pointwise form of `RangeInitialized`, which a padding argument needs because
+padding is a set of offsets rather than a range. -/
+def InitializedAt (state : MemoryState) (id : AllocId) (offset : Nat) : Prop :=
+  (state.cellAt? id offset).map Prod.snd = some true
+
+instance (state : MemoryState) (id : AllocId) (offset : Nat) :
+    Decidable (state.InitializedAt id offset) :=
+  inferInstanceAs (Decidable (_ = _))
+
 /-- The bytes `id` holds over `range`, if every one of them has a value. Partial
 coverage reads as `none` rather than as a shorter sequence, because a caller that
 asked for `range` and received fewer bytes would have to decide which ones it
@@ -334,6 +349,79 @@ theorem rangeInitialized_write_iff_of_disjoint (state : MemoryState) {id : Alloc
   | some record =>
     rw [lookup_write_self state start bytes initializes hfound]
     exact ByteStore.initialized_write_iff_of_disjoint record.bytes hd
+
+/-- Inside the range it wrote, a write determines the cell: byte and
+initialization both come from the run just prepended. -/
+theorem cellAt?_write_of_covers (state : MemoryState) {id : AllocId} {start : Nat}
+    {bytes : ByteSeq} {initializes : Bool} {record : AllocationRecord}
+    (hfound : state.allocations.lookup id = some record) {offset : Nat}
+    (h : (ByteRange.mk start bytes.length).Covers offset) :
+    (state.write id start bytes initializes).cellAt? id offset =
+      (bytes[offset - start]?).map (·, initializes) := by
+  unfold cellAt?
+  rw [lookup_write_self state start bytes initializes hfound]
+  simp only [Option.bind_some]
+  exact ByteStore.cellAt?_write_of_covers record.bytes h
+
+/-- The byte a write leaves inside its own range. -/
+theorem byteAt?_write_of_covers (state : MemoryState) {id : AllocId} {start : Nat}
+    {bytes : ByteSeq} {initializes : Bool} {record : AllocationRecord}
+    (hfound : state.allocations.lookup id = some record) {offset : Nat}
+    (h : (ByteRange.mk start bytes.length).Covers offset) :
+    (state.write id start bytes initializes).byteAt? id offset = bytes[offset - start]? := by
+  unfold byteAt?
+  rw [lookup_write_self state start bytes initializes hfound]
+  simp only [Option.bind_some]
+  unfold ByteStore.byteAt?
+  rw [ByteStore.cellAt?_write_of_covers record.bytes h]
+  cases bytes[offset - start]? <;> simp
+
+/-- An initializing write initializes each byte it covered. -/
+theorem initializedAt_write_of_covers (state : MemoryState) {id : AllocId} {start : Nat}
+    {bytes : ByteSeq} {record : AllocationRecord}
+    (hfound : state.allocations.lookup id = some record) {offset : Nat}
+    (h : (ByteRange.mk start bytes.length).Covers offset) :
+    (state.write id start bytes true).InitializedAt id offset := by
+  unfold InitializedAt
+  rw [cellAt?_write_of_covers state hfound h]
+  cases hb : bytes[offset - start]? with
+  | none =>
+    rw [ByteRange.covers_def] at h
+    exact absurd (List.getElem?_eq_none_iff.mp hb) (by simp at h ⊢; omega)
+  | some b => simp
+
+/-- **A write frames every cell it did not write**, in the same allocation or in
+another: byte and initialization together, so a framing argument can carry a lack
+of initialization across a write as well as its presence. -/
+theorem cellAt?_write_of_not_covers (state : MemoryState) (id : AllocId) {start : Nat}
+    {bytes : ByteSeq} {initializes : Bool} {other : AllocId} {offset : Nat}
+    (h : other ≠ id ∨ ¬ (ByteRange.mk start bytes.length).Covers offset) :
+    (state.write id start bytes initializes).cellAt? other offset =
+      state.cellAt? other offset := by
+  unfold cellAt?
+  cases h with
+  | inl hne => rw [write_preserves_other_allocation state hne]
+  | inr hout =>
+    by_cases hid : other = id
+    · subst hid
+      cases hfound : state.allocations.lookup other with
+      | none =>
+        rw [write_of_missing state start bytes initializes hfound, hfound]
+      | some record =>
+        rw [lookup_write_self state start bytes initializes hfound]
+        simp only [Option.bind_some]
+        exact ByteStore.cellAt?_write_of_not_covers record.bytes hout
+    · rw [write_preserves_other_allocation state hid]
+
+/-- The initialization half of `cellAt?_write_of_not_covers`, in the shape a
+padding argument uses. -/
+theorem initializedAt_write_iff_of_not_covers (state : MemoryState) (id : AllocId)
+    {start : Nat} {bytes : ByteSeq} {initializes : Bool} {other : AllocId} {offset : Nat}
+    (h : other ≠ id ∨ ¬ (ByteRange.mk start bytes.length).Covers offset) :
+    (state.write id start bytes initializes).InitializedAt other offset ↔
+      state.InitializedAt other offset := by
+  unfold InitializedAt
+  rw [cellAt?_write_of_not_covers state id h]
 
 /--
 **Writes to disjoint ranges commute.**

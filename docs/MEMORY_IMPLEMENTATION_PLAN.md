@@ -528,10 +528,32 @@ an access is refused, one order could refuse what the other committed.
 carry a lack of initialization across a write as well as its presence, or an
 `uninitializedRead` could be laundered by writing somewhere else.
 
+`Grass/Memory/Shape.lean` is the `Shape.lean` row, and it is deliberately only
+half of it. `StructLayout` is a `Std.Owned` facility per [STDLIB.md](STDLIB.md):
+it chooses field order, widths, alignment, and padding policy and carries an ABI
+profile, and none of that is the memory layer's. What the memory layer owes is
+the other side of the interface — given *some* aggregate's field ranges, what is
+true of the bytes — and a `Footprint` is exactly that and nothing more.
+
+The obligation is [STDLIB.md](STDLIB.md)'s: "Padding is never silently treated as
+initialized semantic data." `padding_uninitialized_after_writing_fields` is the
+theorem, proved for any list of the aggregate's fields in any order with any
+data, rather than for one convenient write schedule. The reason it matters is
+concrete: without it, writing every field of a struct would make the struct read
+as fully initialized when part of it was never written, and a typed shape could
+launder an `uninitializedRead` that `denialOf` catches on the raw bytes.
+
+The converse half is proved too — `byteAt?_writeField` for
+[STDLIB.md](STDLIB.md)'s serialization law and `initializedAt_writeField` for the
+field's own bytes — so the two together partition the aggregate rather than making
+a one-sided claim. `Tests/Memory/Padding.lean` runs both over a struct that pads
+for a real reason: a one-byte field followed by a four-byte field its alignment
+puts at offset four. Padding there holds no byte at all, not merely an
+uninitialized one, so a store that quietly zero-filled the gap would fail even if
+it kept the initialization flags right.
+
 ### 4.2 What M2 still owes
 
-- Shaped read and write over `StructLayout` footprints — the `Shape.lean` row
-  above. Nothing of it is built.
 - Compaction for the byte store, per §4.1.
 - The straight-line Spike 1 block, which is the actual exit criterion.
 
