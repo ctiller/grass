@@ -3839,6 +3839,48 @@ mod tests {
         assert!(err.to_string().contains("only the opener or a bootstrap coordinator may reassign"), "{err}");
     }
 
+    /// An ordinary, uncontested `dependency.reassigned` must actually move
+    /// the dependency's authoritative state: `current_target`/
+    /// `current_assignment` must point at the new assignment, `status` must
+    /// stay `Open` (not linger at whatever it was), the new assignment must
+    /// be recorded in `reassignment_chain`, and the new target -- not the
+    /// old one -- must gain authority to dispose of it. Every other
+    /// `*_reassigned` exclusive-transition kind (`issue.reassigned` via
+    /// `uncontested_reassign_then_resolve_by_new_target`, `review.reassigned`
+    /// via `uncontested_review_reassign_then_new_reviewer_accepts`) has this
+    /// same positive-path check on `apply_*_reassigned_effect`'s actual
+    /// output; `dependency.reassigned`'s races are covered above, but until
+    /// now nothing asserted on `apply_dependency_reassigned_effect`'s result
+    /// after it runs to completion without being immediately reverted by a
+    /// concurrent sibling, so a bug in that function's field updates could
+    /// have passed the whole suite unnoticed.
+    #[test]
+    fn dependency_reassigned_uncontested_updates_target_and_chain() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
+        b.register(&carol, Role::Implementor);
+        let dep_id = b.push(&alice, &dep_requested(&bob), []);
+        let reassign_id = b.push(&alice, &dep_reassign(&dep_id, &dep_id, &bob, &carol), []);
+
+        let state = b.state().expect("an uncontested dependency reassignment must replay");
+        let dep = state.dependencies.get(&dep_id).unwrap();
+        assert_eq!(dep.current_target, carol, "the new target must become current");
+        assert_eq!(dep.current_assignment, reassign_id, "the reassignment must become the current assignment");
+        assert_eq!(dep.status, ItemStatus::Open);
+        assert!(
+            dep.reassignment_chain.contains(&reassign_id),
+            "the reassignment must be recorded in the chain"
+        );
+
+        // The new target (carol), not the superseded one (bob), must now be
+        // able to acknowledge the dependency.
+        b.push(&carol, &dep_ack(&dep_id, &reassign_id), []);
+        let state2 = b.state().expect("the new target must be able to acknowledge");
+        assert!(state2.dependencies.get(&dep_id).unwrap().acknowledged);
+    }
+
     /// Two genuinely concurrent reassignments off the same predecessor
     /// assignment must both remain valid and reduce to a lifecycle conflict.
     #[test]
