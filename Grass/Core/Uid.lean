@@ -7,24 +7,40 @@ completions never regain authority after numeric reuse."
 
 That law has two halves and they need different mechanisms.
 
-**Grass's own identities are never reused.** A `Uid` can only be produced by
-`FreshSupply.fresh`. The constructor and the index field are `private`, so
-outside this module there is no `Uid.mk`, no way to read an index back out, and
-no way to build a `FreshSupply` at a lower `nextIndex` to replay one. This is
-what makes `never_reissued` a mechanism rather than a convention: it is not that
-no operation happens to lower the counter, it is that no such operation is
-expressible.
+**Grass's own identities are never reused within one supply.** A `Uid` can only be
+produced by `FreshSupply.fresh`. The constructor and the index field are
+`private`, so outside this module there is no `Uid.mk` and no way to read an
+index back out. `never_reissued` is therefore a mechanism rather than a
+convention for a given supply.
+
+What this module does **not** deliver, and cannot: uniqueness of the supply
+itself. `initial` is public, and it must be — something has to start. So a second
+`FreshSupply.initial` for the same tag reissues every identity from zero, and
+nothing here prevents that. Threading one supply per domain through an execution
+is the execution model's obligation, not `Core`'s; `docs/FOUNDATION.md` law 22
+speaks of freshness "over a monotone execution history", and only the thing that
+owns the history can guarantee there is one. `Semantics` inherits this obligation
+when it takes custody of the execution state.
+
+`Uid.rec` and `Uid.casesOn` also remain public, as they do for every Lean
+structure, so a proof can case on a `Uid` and reach its index. The type is opaque
+to construction, not to elimination.
 
 **Externally reused numbers are paired with a generation.** An OS handle, a slot
 index, or an array position genuinely does recycle, and forbidding that is not
 available to us. `Grass/Core/Generational.lean` pairs such a value with a `Uid`
 so that a recycled number in a new generation is a distinct identity.
 
-`Reachable` is the relation an execution actually establishes: a supply reached
-by some number of mints from an earlier one. `never_reissued` is stated over it,
-so it says what law 22 needs — an identity issued once is not returned by *any*
-future mint, however far the history runs — rather than the much weaker fact that
-two particular counters differ.
+`Reachable` is the relation an execution establishes: a supply reached by some
+number of mints from an earlier one. `never_reissued` is stated over it and
+quantifies over every reachable future, which is the shape law 22 needs.
+
+Being precise about its strength: because `FreshSupply` has a single `Nat` field
+that only ever increments, `Reachable s t` is *equivalent* to
+`s.nextIndex ≤ t.nextIndex`. It is not a stronger relation. Its value is as an
+interface — it names the thing an execution produces, and it stays correct if the
+supply ever gains structure that makes the two differ — not as extra proof
+strength today.
 
 The type is `Uid`, not `Id`, because Lean's `Id` is the identity monad and
 `Id.run do` is ubiquitous. A `Grass.Core.Id` would make bare `Id` ambiguous in

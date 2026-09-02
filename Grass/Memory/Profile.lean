@@ -29,8 +29,16 @@ for a name the profile never listed.
 `RequiredProofPackage` is the §10 list, as a record, shipped in M1 even though no
 profile closes it until M10. An ISA author writing their first instruction can
 then see the whole eventual obligation, and closure becomes a field-by-field
-target rather than a discovery. Its fields are `Prop`s the profile owner must
-supply; a profile value cannot be built with one missing.
+target rather than a discovery.
+
+**What it is not.** Its fields are `Prop`s — propositions, not proofs of them —
+so a profile can be built with every field set to `True`, or to `False`. It is a
+checklist, and `PackageHolds` below is the only thing that turns it into a claim:
+a consumer that demands `PackageHolds` demands proofs of all eleven. Nothing in
+M1 demands it, because the statements those props should carry need machinery
+that does not exist until M2 through M9. Treating a constructed `MemoryProfile`
+as evidence that §10 has closed would be a mistake, and an earlier version of
+this docstring invited exactly that reading.
 -/
 
 namespace Grass.Memory
@@ -115,10 +123,11 @@ admits nothing on that axis, which is the safe direction: it rejects rather than
 accepting silently.
 -/
 structure AdmittedVocabulary where
-  /-- Address spaces this profile models. -/
-  addressSpaces : NameRegistry AddressSpaceId
-  /-- Memory types this profile models. -/
-  memoryTypes : NameRegistry MemoryTypeId
+  /-- The address spaces this profile models, with their representations,
+  memory types, and coherence. A table rather than a registry of names, because
+  an access names a space and something other than the access has to decide what
+  that space is; see `Grass/Memory/AddressSpace.lean`. -/
+  addressSpaces : AddressSpaceTable
   /-- Architectural fault classes this profile models. -/
   faultClasses : NameRegistry FaultClassId
   /-- Allocation sources this profile models. -/
@@ -147,33 +156,42 @@ fabricating the §10 proof package. Claiming closure in order to ask a question
 about names would be exactly backwards.
 -/
 def Admits (vocabulary : AdmittedVocabulary) (d : AccessDescriptor) : Prop :=
-  vocabulary.addressSpaces.Recognizes d.space.id ∧
-  vocabulary.memoryTypes.Recognizes d.space.memoryType ∧
+  (∃ space, vocabulary.addressSpaces.find? d.space = some space ∧ d.WellFormedIn space) ∧
   vocabulary.allocationSources.Recognizes d.provenance.source ∧
   (∀ step ∈ d.provenance.path, vocabulary.provenanceStepKinds.Recognizes step.kind) ∧
   (∀ fault ∈ d.admittedFaults, vocabulary.faultClasses.Recognizes fault)
-
-instance (vocabulary : AdmittedVocabulary) (d : AccessDescriptor) :
-    Decidable (vocabulary.Admits d) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- A vocabulary declaring no address spaces admits no access. Rejecting
 everything is the safe failure; admitting everything would be the permissive
 fallback `docs/FOUNDATION.md` law 8 forbids. -/
 theorem not_admits_of_no_address_spaces {vocabulary : AdmittedVocabulary}
-    (h : vocabulary.addressSpaces = NameRegistry.empty) (d : AccessDescriptor) :
+    (h : vocabulary.addressSpaces = AddressSpaceTable.empty) (d : AccessDescriptor) :
     ¬ vocabulary.Admits d := by
-  intro ha
-  have := ha.1
-  rw [h] at this
-  exact NameRegistry.not_recognizes_empty d.space.id this
+  rintro ⟨⟨space, hfind, -⟩, -⟩
+  rw [h] at hfind
+  simp at hfind
 
 /-- An access naming an unrecognized fault class is not admitted. A fault the
 profile never modelled cannot be approximated as one it did. -/
 theorem not_admits_of_unrecognized_fault {vocabulary : AdmittedVocabulary}
     {d : AccessDescriptor} {fault : FaultClassId} (hmem : fault ∈ d.admittedFaults)
     (h : ¬ vocabulary.faultClasses.Recognizes fault) : ¬ vocabulary.Admits d :=
-  fun ha => h (ha.2.2.2.2 fault hmem)
+  fun ha => h (ha.2.2.2 fault hmem)
+
+/--
+A vocabulary never admits an access whose declared space it does not declare, and
+never admits one that is not well formed *in that vocabulary's own version* of the
+space.
+
+This is the clause that closes the hole: a descriptor cannot supply a space whose
+representation makes its own alignment and range checks vacuous, because the
+space it is checked against comes from here.
+-/
+theorem not_admits_of_undeclared_space {vocabulary : AdmittedVocabulary}
+    {d : AccessDescriptor} (h : ¬ vocabulary.addressSpaces.Declares d.space) :
+    ¬ vocabulary.Admits d := by
+  rintro ⟨⟨space, hfind, -⟩, -⟩
+  exact h (by simp [AddressSpaceTable.Declares, hfind])
 
 end AdmittedVocabulary
 
@@ -217,6 +235,30 @@ structure RequiredProofPackage where
   /-- The profile is connected to its citations and probes. -/
   validationMetadata : Prop
 
+namespace RequiredProofPackage
+
+/--
+`package.Holds` is the conjunction of all eleven propositions.
+
+This is what a consumer demands when it wants the §10 package *discharged* rather
+than merely enumerated. `VerifiedProgram` will require it; nothing in M1 does,
+because the propositions themselves are not yet statable.
+-/
+def Holds (package : RequiredProofPackage) : Prop :=
+  package.accessDescriptorSoundness ∧
+  package.rangeProvenanceInitializationPreservation ∧
+  package.permissionEnforcementAndFaultFidelity ∧
+  package.loanMapLaws ∧
+  package.consistencyGraphWellFormedness ∧
+  package.raceFreedomConsequences ∧
+  package.synchronizationAndObligationTransfer ∧
+  package.allocatorFreshnessTeardownEpoch ∧
+  package.callStackFrameLifetime ∧
+  package.erasurePreservation ∧
+  package.validationMetadata
+
+end RequiredProofPackage
+
 /--
 A memory profile: what a target admits, and the proofs that make it usable.
 
@@ -240,13 +282,18 @@ structure MemoryProfile where
 
 namespace MemoryProfile
 
-/-- `profile.Admits d` holds when the profile's vocabulary recognizes everything
-the access descriptor names. -/
+/--
+`profile.Admits d` holds when the profile declares everything the access names and
+the access is well formed in the profile's own version of its address space.
+
+Deliberately not decidable. An earlier version was, and that was a symptom rather
+than a feature: it was decidable because well-formedness was not part of
+admission, so the check amounted to comparing names. Resolving the space through
+the profile is what makes the guards real, and it brings the descriptor's
+universally quantified clauses with it.
+-/
 def Admits (profile : MemoryProfile) (d : AccessDescriptor) : Prop :=
   profile.vocabulary.Admits d
-
-instance (profile : MemoryProfile) (d : AccessDescriptor) : Decidable (profile.Admits d) :=
-  inferInstanceAs (Decidable (profile.vocabulary.Admits d))
 
 end MemoryProfile
 

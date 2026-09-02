@@ -69,16 +69,20 @@ end FacetName
 /--
 The memory-effect facet: what accesses an operation performs.
 
-`wellFormed` is a field rather than a separate obligation, so a facet cannot be
-constructed for an operation whose declared accesses are internally inconsistent.
-The check is intrinsic; whether those accesses are *permitted* against a state is
+Well-formedness is deliberately *not* a field here. It became profile-relative
+when an access stopped carrying its own address space, and a facet cannot know
+which profile will use it — the same instruction model may be admitted by a
+32-bit and a 64-bit profile with different answers. `MemoryProfile.AdmitsOperation`
+in `Grass/Memory/Profile.lean` is where the check happens, against the table that
+profile declares.
+
+The check is still intrinsic in the sense that it is about the declaration rather
+than about a state; whether those accesses are *permitted* against a state is
 M2's `applyAccess`.
 -/
 structure MemoryEffectFacet (Op : Type) (Env : Type) where
   /-- The accesses `op` performs in environment `env`. -/
   substeps : Op → Env → SubstepSequence
-  /-- Every declared access is intrinsically well formed. -/
-  wellFormed : ∀ op env, (substeps op env).WellFormed
 
 /--
 The fault facet: which architectural faults an operation may raise, and whether

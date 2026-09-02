@@ -159,45 +159,73 @@ structure WellFormed (e : MemoryEvent) : Prop where
 /--
 `Conflicts a b` holds when two events contend for the same bytes.
 
-`docs/MEMORY_MODEL.md` §7.3: overlapping live ranges in the same storage, at
-least one writing, and not both atomic. Note carefully what this is *not*: a
-conflict is not a data race. A race additionally requires the two events to be
-unordered by happens-before, which needs the consistency graph of M8. Two
-conflicting events properly ordered by a lock are not a race.
+`docs/MEMORY_MODEL.md` §7.3: two events conflict when "their live byte ranges
+overlap, at least one writes, and they are not both **compatible atomic accesses
+under one profile**."
+
+The last clause is why `compatible` is a parameter rather than
+`both are atomic`. Atomicity alone is not compatibility. A four-byte atomic load
+overlapping an eight-byte atomic store is a mixed-size atomic access, compatible
+under no profile this project targets; so is a `thread`-scoped atomic against a
+`system`-scoped one, and a profile-specific ordering mode against a portable one.
+Reading "not both atomic" as compatibility would silently declare all of those
+non-conflicting, which is weaker than the corpus in the unsafe direction and
+would be inherited by every race-freedom theorem built on it. `atomicsAreNever`
+below is the conservative choice for a profile that has not yet stated a
+compatibility relation.
+
+Note carefully what this is *not*: a conflict is not a data race. A race
+additionally requires the two events to be unordered by happens-before, which
+needs the consistency graph of M8. Two conflicting events properly ordered by a
+lock are not a race.
 
 Overlap is checked on the *committed* ranges, since bytes an event did not commit
 are bytes it did not touch, and on `SameStorage`, since equal offsets in
 different allocations are different bytes.
 -/
-def Conflicts (a b : MemoryEvent) : Prop :=
+def Conflicts (compatible : MemoryEvent → MemoryEvent → Prop) (a b : MemoryEvent) : Prop :=
   a.kind.touchesMemory = true ∧ b.kind.touchesMemory = true ∧
   a.provenance.SameStorage b.provenance ∧
   a.committedRange.Overlaps b.committedRange ∧
   (a.kind.writes = true ∨ b.kind.writes = true) ∧
-  ¬ (a.ordering.atomicity = .atomic ∧ b.ordering.atomicity = .atomic)
+  ¬ compatible a b
 
-theorem Conflicts.symm {a b : MemoryEvent} (h : a.Conflicts b) : b.Conflicts a := by
+/--
+The conservative compatibility relation: no pair of accesses is compatible.
+
+A profile that has not stated which atomic pairs its target actually admits gets
+this one, and every overlapping pair with a writer is then a conflict. That is
+the safe direction: it can only cause a profile to demand more ordering than
+strictly necessary, never less.
+-/
+def atomicsAreNever (_a _b : MemoryEvent) : Prop := False
+
+theorem Conflicts.symm {compatible : MemoryEvent → MemoryEvent → Prop}
+    (symmetric : ∀ x y, compatible x y → compatible y x) {a b : MemoryEvent}
+    (h : Conflicts compatible a b) : Conflicts compatible b a := by
   obtain ⟨ha, hb, hs, ho, hw, hat⟩ := h
-  refine ⟨hb, ha, hs.symm, ?_, hw.symm, fun hc => hat ⟨hc.2, hc.1⟩⟩
+  refine ⟨hb, ha, hs.symm, ?_, hw.symm, fun hc => hat (symmetric b a hc)⟩
   obtain ⟨offset, h₁, h₂⟩ := ho
   exact ⟨offset, h₂, h₁⟩
 
 /-- Two reads never conflict, whatever their ordering. -/
-theorem not_conflicts_of_both_read {a b : MemoryEvent}
-    (ha : a.kind = .read) (hb : b.kind = .read) : ¬ a.Conflicts b := by
+theorem not_conflicts_of_both_read {compatible : MemoryEvent → MemoryEvent → Prop}
+    {a b : MemoryEvent} (ha : a.kind = .read) (hb : b.kind = .read) :
+    ¬ Conflicts compatible a b := by
   rintro ⟨_, _, _, _, hw, _⟩
   rw [ha, hb] at hw
   simp [EventKind.writes] at hw
 
 /-- Events in different storage never conflict, however their offsets compare.
 This is `docs/MEMORY_MODEL.md` §7.5 at the event layer. -/
-theorem not_conflicts_of_not_sameStorage {a b : MemoryEvent}
-    (h : ¬ a.provenance.SameStorage b.provenance) : ¬ a.Conflicts b :=
+theorem not_conflicts_of_not_sameStorage {compatible : MemoryEvent → MemoryEvent → Prop}
+    {a b : MemoryEvent} (h : ¬ a.provenance.SameStorage b.provenance) :
+    ¬ Conflicts compatible a b :=
   fun hc => h hc.2.2.1
 
 /-- A fence conflicts with nothing, because it touches no bytes. -/
-theorem not_conflicts_fence_left {a b : MemoryEvent} (h : a.kind = .fence) :
-    ¬ a.Conflicts b := by
+theorem not_conflicts_fence_left {compatible : MemoryEvent → MemoryEvent → Prop}
+    {a b : MemoryEvent} (h : a.kind = .fence) : ¬ Conflicts compatible a b := by
   rintro ⟨ht, _⟩
   rw [h] at ht
   simp [EventKind.touchesMemory] at ht
@@ -270,17 +298,21 @@ namespace MemoryEvent
 /--
 Build the event recording that `d` was performed with outcome `status`.
 
+`space` is the resolved address space. A descriptor names its space by identity
+and the profile decides what that space is, so the caller — M2's `applyAccess` —
+supplies the resolution rather than this function inventing one.
+
 `none` exactly when the intent is inert, so an operation that declared it touches
 nothing produces no event rather than an empty one.
 -/
 def ofAccess? (id : EventId) (contextKind : ContextKind) (cause : EventCause)
-    (d : AccessDescriptor) (status : AccessStatus)
+    (space : AddressSpace) (d : AccessDescriptor) (status : AccessStatus)
     (valueRead valueWritten : Option ByteSeq) : Option MemoryEvent :=
   (d.intent.eventKind?).map fun kind =>
     { id := id
       context := { id := d.context, kind := contextKind }
       cause := cause
-      space := d.space
+      space := space
       provenance := d.provenance
       range := d.range
       kind := kind
@@ -292,9 +324,9 @@ def ofAccess? (id : EventId) (contextKind : ContextKind) (cause : EventCause)
 /-- The event an access produces records exactly the access's own range. Nothing
 in the bridge widens or narrows what was touched. -/
 @[simp] theorem range_of_ofAccess? {id : EventId} {contextKind : ContextKind}
-    {cause : EventCause} {d : AccessDescriptor} {status : AccessStatus}
-    {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
-    (h : ofAccess? id contextKind cause d status valueRead valueWritten = some e) :
+    {cause : EventCause} {space : AddressSpace} {d : AccessDescriptor}
+    {status : AccessStatus} {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
+    (h : ofAccess? id contextKind cause space d status valueRead valueWritten = some e) :
     e.range = d.range := by
   simp only [ofAccess?, Option.map_eq_some_iff] at h
   obtain ⟨_, _, rfl⟩ := h
@@ -304,9 +336,9 @@ in the bridge widens or narrows what was touched. -/
 access. This is what lets an initialization argument stated on the descriptor be
 used on the event. -/
 theorem committedRange_of_ofAccess? {id : EventId} {contextKind : ContextKind}
-    {cause : EventCause} {d : AccessDescriptor} {status : AccessStatus}
-    {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
-    (h : ofAccess? id contextKind cause d status valueRead valueWritten = some e) :
+    {cause : EventCause} {space : AddressSpace} {d : AccessDescriptor}
+    {status : AccessStatus} {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
+    (h : ofAccess? id contextKind cause space d status valueRead valueWritten = some e) :
     e.committedRange = d.committedRange status := by
   simp only [ofAccess?, Option.map_eq_some_iff] at h
   obtain ⟨_, _, rfl⟩ := h
@@ -321,9 +353,9 @@ of the committed length gets a well-formed event, rather than re-proving the
 event conditions per instruction.
 -/
 theorem wellFormed_ofAccess? {id : EventId} {contextKind : ContextKind}
-    {cause : EventCause} {d : AccessDescriptor} {status : AccessStatus}
-    {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
-    (h : ofAccess? id contextKind cause d status valueRead valueWritten = some e)
+    {cause : EventCause} {space : AddressSpace} {d : AccessDescriptor}
+    {status : AccessStatus} {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
+    (h : ofAccess? id contextKind cause space d status valueRead valueWritten = some e)
     (readPresent : d.intent.reads = true → valueRead.isSome)
     (readAbsent : d.intent.reads = false → valueRead = Option.none)
     (writePresent : d.intent.writes = true → valueWritten.isSome)

@@ -120,19 +120,25 @@ def importProvenance : Provenance :=
 Only to keep the cases below readable. Every field it defaults is one the cases
 genuinely share, and none of them is a field whose default would weaken a check. -/
 
+/-- The address spaces this fixture's profile declares: one 64-bit write-back CPU
+space. The descriptors below name it; its properties come from here, not from
+them. -/
+def spaceTable : AddressSpaceTable := .cpuOnly
+
 /-- Build a plain single-threaded access in the 64-bit CPU space. -/
 def access (provenance : Provenance) (range : ByteRange) (address : MachineAddress)
     (intent : AccessIntent) (permission : Permission) (alignment : Nat)
     (requiresInitialized producesInitialized : Bool) : AccessDescriptor :=
   { context := mainThread
     address := .numeric address
-    space := .cpuVirtual64
+    space := .cpuVirtual
     provenance := provenance
     range := range
     intent := intent
     requiredPermission := permission
     alignment := alignment
-    requiresInitialized := requiresInitialized
+    initialization :=
+      if requiresInitialized then .allBytesInitialized else .readsNothing
     producesInitialized := producesInitialized
     admittedFaults := [.pageFault, .generalProtection] }
 
@@ -313,16 +319,18 @@ theorem access_wellFormed {provenance : Provenance} {range : ByteRange}
     {addr : MachineAddress} {intent : AccessIntent} {perm : Permission} {align : Nat}
     {requiresInit producesInit : Bool}
     (space : provenance.space = AddressSpaceId.cpuVirtual)
+    (permission : perm.Permits intent)
     (nested : provenance.Nested)
     (extent : ∀ e, provenance.extent? = some e → e.Contains range)
     (notInert : ¬ intent.IsInert)
     (bound : range.WithinBound (2 ^ 64))
     (aligned : IsAligned addr.toNat align)
-    (readsIfRequired : requiresInit = true → intent.reads = true)
+    (readsInitialized : intent.reads = true ↔ requiresInit = true)
     (writesIfProduced : producesInit = true → intent.writes = true)
     (nonAtomic : intent.isAtomic = false) :
     (access provenance range addr intent perm align requiresInit
-      producesInit).WellFormed where
+      producesInit).WellFormedIn AddressSpace.cpuVirtual64 where
+  spaceResolved := rfl
   notInert := notInert
   spaceWellFormed := AddressSpace.wellFormed_cpuVirtual64
   addressRepresentable :=
@@ -336,60 +344,72 @@ theorem access_wellFormed {provenance : Provenance} {range : ByteRange}
     exact h ▸ aligned
   rangeFitsSpace := by
     intro bits h
-    simp only [access, AddressSpace.cpuVirtual64, AddressRepr.numeric.injEq] at h
+    simp only [AddressSpace.cpuVirtual64, AddressRepr.numeric.injEq] at h
     exact h ▸ bound
   atomicityAgrees := by simp [access, nonAtomic, OrderingDemand.plain]
-  requiresInitializedOnlyIfReads := readsIfRequired
+  permissionSufficient := permission
+  initializationMatchesIntent := by
+    cases requiresInit <;> simp [access, readsInitialized]
   producesInitializedOnlyIfWrites := writesIfProduced
 
-theorem pushR12_wellFormed : pushR12.WellFormed := by
+theorem pushR12_wellFormed : pushR12.WellFormedIn spaceTable := by
   unfold pushR12
-  refine SubstepSequence.wellFormed_single
-    (access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
-  · exact ⟨by decide, trivial⟩
-  · intro e h; cases h; decide
-  all_goals decide
+  refine SubstepSequence.wellFormedIn_single rfl
+    (access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
+  all_goals first
+    | (intro e h; cases h; decide)
+    | exact ⟨by decide, trivial⟩
+    | decide
 
-theorem movTransferredZero_wellFormed : movTransferredZero.WellFormed := by
+theorem movTransferredZero_wellFormed :
+    movTransferredZero.WellFormedIn spaceTable := by
   unfold movTransferredZero
-  refine SubstepSequence.wellFormed_single
-    (access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
-  · exact ⟨by decide, trivial⟩
-  · intro e h; cases h; decide
-  all_goals decide
+  refine SubstepSequence.wellFormedIn_single rfl
+    (access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
+  all_goals first
+    | (intro e h; cases h; decide)
+    | exact ⟨by decide, trivial⟩
+    | decide
 
-theorem movEaxTransferred_wellFormed : movEaxTransferred.WellFormed := by
+theorem movEaxTransferred_wellFormed :
+    movEaxTransferred.WellFormedIn spaceTable := by
   unfold movEaxTransferred
-  refine SubstepSequence.wellFormed_single
-    (access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
-  · exact ⟨by decide, trivial⟩
-  · intro e h; cases h; decide
-  all_goals decide
+  refine SubstepSequence.wellFormedIn_single rfl
+    (access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
+  all_goals first
+    | (intro e h; cases h; decide)
+    | exact ⟨by decide, trivial⟩
+    | decide
 
-theorem callImportWriteFile_wellFormed : callImportWriteFile.WellFormed := by
+theorem callImportWriteFile_wellFormed :
+    callImportWriteFile.WellFormedIn spaceTable := by
   intro step hstep
   simp only [callImportWriteFile, List.mem_cons, List.not_mem_nil, or_false] at hstep
   rcases hstep with rfl | rfl
-  · refine access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
-    · exact ⟨by decide, trivial⟩
-    · intro e h; cases h; decide
-    all_goals decide
-  · refine access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
-    · exact ⟨by decide, trivial⟩
-    · intro e h; cases h; decide
-    all_goals decide
+  · refine ⟨AddressSpace.cpuVirtual64, rfl, ?_⟩
+    refine access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+    all_goals first
+      | (intro e h; cases h; decide)
+      | exact ⟨by decide, trivial⟩
+      | decide
+  · refine ⟨AddressSpace.cpuVirtual64, rfl, ?_⟩
+    refine access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+    all_goals first
+      | (intro e h; cases h; decide)
+      | exact ⟨by decide, trivial⟩
+      | decide
 
-theorem movEcxImm_wellFormed : movEcxImm.WellFormed := by
-  simp [movEcxImm, SubstepSequence.WellFormed, SubstepSequence.none_]
+theorem movEcxImm_wellFormed : movEcxImm.WellFormedIn spaceTable := by
+  simp [movEcxImm, SubstepSequence.WellFormedIn, SubstepSequence.none_]
 
-theorem leaPayload_wellFormed : leaPayload.WellFormed := by
-  simp [leaPayload, SubstepSequence.WellFormed, SubstepSequence.none_]
+theorem leaPayload_wellFormed : leaPayload.WellFormedIn spaceTable := by
+  simp [leaPayload, SubstepSequence.WellFormedIn, SubstepSequence.none_]
 
-theorem leaTransferred_wellFormed : leaTransferred.WellFormed := by
-  simp [leaTransferred, SubstepSequence.WellFormed, SubstepSequence.none_]
+theorem leaTransferred_wellFormed : leaTransferred.WellFormedIn spaceTable := by
+  simp [leaTransferred, SubstepSequence.WellFormedIn, SubstepSequence.none_]
 
-theorem ud2Containment_wellFormed : ud2Containment.WellFormed := by
-  simp [ud2Containment, SubstepSequence.WellFormed, SubstepSequence.none_]
+theorem ud2Containment_wellFormed : ud2Containment.WellFormedIn spaceTable := by
+  simp [ud2Containment, SubstepSequence.WellFormedIn, SubstepSequence.none_]
 
 /-! ## Obligations across the `WriteFile` call
 
@@ -492,6 +512,58 @@ say so. This is the asymmetry `docs/OBLIGATIONS.md` §3 turns on, and the reason
 platform's permission to abandon is not by itself sufficient. -/
 theorem abandonment_needs_specification_support :
     (Disposition.abandonedUnknown).RequiresSpecificationSupport := trivial
+
+/-! ## Negative fixtures
+
+Each of these was a descriptor an adversarial review constructed and *proved*
+well formed against an earlier version of the predicate. They are kept as
+fixtures so the holes stay closed: if a later change makes any of them well
+formed again, this file stops building. -/
+
+/-- A store that declares it needs only read-only permission. -/
+def writeThroughReadOnly : AccessDescriptor :=
+  access savedSlotProvenance ⟨0, 8⟩ 0x1000 .write .readOnly 8 false true
+
+/--
+It is not well formed, because `WellFormedIn` now demands
+`requiredPermission.Permits intent`.
+
+Without that clause `Permission.Permits` was dead code and
+`docs/MEMORY_MODEL.md` §4's requirement that read, write, and execute be distinct
+was unenforced at the chokepoint that exists to enforce it.
+-/
+theorem writeThroughReadOnly_not_wellFormed :
+    ¬ writeThroughReadOnly.WellFormedIn AddressSpace.cpuVirtual64 := by
+  intro h
+  exact absurd h.permissionSufficient (by decide)
+
+/-- A descriptor naming an address space this profile never declared. -/
+def accessInUndeclaredSpace : AccessDescriptor :=
+  { access savedSlotProvenance ⟨0, 8⟩ 0x1000 .write .readWrite 8 false true with
+    space := .deviceLocal }
+
+/--
+It is not admitted, because the space cannot be resolved.
+
+This is the structural half of the fix. When a descriptor carried its own
+`AddressSpace` value, an author could pair the id `cpu.virtual` with
+`repr := .symbolic` and make the alignment and range-bound clauses vacuous — both
+are conditioned on the representation. Naming the space and resolving it through
+the profile means the guards are checked against the profile's answer, not the
+access's own.
+-/
+theorem accessInUndeclaredSpace_not_admitted (vocabulary : AdmittedVocabulary)
+    (h : vocabulary.addressSpaces = .cpuOnly) :
+    ¬ vocabulary.Admits accessInUndeclaredSpace := by
+  refine AdmittedVocabulary.not_admits_of_undeclared_space ?_
+  rw [h]
+  decide
+
+/-- An empty space table admits nothing at all, which is the safe failure. -/
+theorem nothing_admitted_without_spaces (vocabulary : AdmittedVocabulary)
+    (h : vocabulary.addressSpaces = .empty) (d : AccessDescriptor) :
+    ¬ vocabulary.Admits d :=
+  AdmittedVocabulary.not_admits_of_no_address_spaces h d
 
 /-! ## What the cases establish -/
 

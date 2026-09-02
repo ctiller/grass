@@ -60,6 +60,31 @@ structure ObservationLabel where
 deriving DecidableEq, Repr
 
 /--
+What an access demands of the initialization of the bytes it reads.
+
+`docs/MEMORY_MODEL.md` §4: "Initialization is tracked at the granularity required
+to justify every read." The demand is therefore total and has no default. A
+`Bool` defaulting to `false` would mean a forgotten field silently authorized an
+uninitialized read, which is the permissive default law 8 forbids in the one
+place it costs most.
+
+`permitsUninitialized` exists because §4 also requires typed shapes to "expand
+soundly for partial access, padding, unions, serialization, or external writes".
+A typed copy that moves padding is a real case. It carries the name of what
+justifies it, so the exception is cited rather than assumed.
+-/
+inductive InitializationDemand where
+  /-- Every byte read must already be initialized. -/
+  | allBytesInitialized
+  /-- Some bytes read may be uninitialized, justified by the named rule. -/
+  | permitsUninitialized (justification : Name)
+  /-- The access reads nothing, so it demands nothing. Distinct from
+  `permitsUninitialized`: a write-only store is not an access that tolerates
+  uninitialized bytes, it is one with no reads to justify. -/
+  | readsNothing
+deriving DecidableEq, Repr
+
+/--
 One declared memory access.
 
 Every field group of `docs/MEMORY_MODEL.md` §1 is present: address and range,
@@ -73,8 +98,10 @@ structure AccessDescriptor : Type 1 where
   /-- The computed address of the first byte. Numeric or symbolic according to
   the space; see `Grass/Memory/AddressSpace.lean`. -/
   address : Address
-  /-- The address space the access is performed in. -/
-  space : AddressSpace
+  /-- The address space the access is performed in, by name. The properties of
+  that space come from the profile's `AddressSpaceTable`, not from here: an
+  access that described its own space could switch off its own guards. -/
+  space : AddressSpaceId
   /-- The provenance the access must present to be authorized. -/
   provenance : Provenance
   /-- The byte range accessed, relative to the provenance's root allocation. -/
@@ -83,10 +110,14 @@ structure AccessDescriptor : Type 1 where
   intent : AccessIntent
   /-- The page or section permission the access requires. -/
   requiredPermission : Permission
-  /-- The alignment the access requires of `address`; `1` demands nothing. -/
-  alignment : Nat := 1
-  /-- Whether the accessed bytes must already be initialized. -/
-  requiresInitialized : Bool := false
+  /-- The alignment the access requires of `address`. No default: `1` means "no
+  demand" and would accept every address, which is the permissive default
+  `docs/FOUNDATION.md` law 8 forbids. An access that genuinely has no alignment
+  demand says `1` deliberately. -/
+  alignment : Nat
+  /-- What this access demands of the initialization of the bytes it reads. No
+  default, for the same reason. -/
+  initialization : InitializationDemand
   /-- Whether the committed bytes are initialized afterwards. -/
   producesInitialized : Bool := false
   /-- The atomicity, ordering, and scope the access requests. -/
@@ -106,7 +137,13 @@ namespace AccessDescriptor
 /--
 The intrinsic well-formedness of a descriptor.
 
-These are the conditions checkable from the descriptor alone. Whether the
+`space` is the resolved address space, obtained from a profile's
+`AddressSpaceTable`. It is a parameter rather than a field of the descriptor
+because a descriptor that carried its own space could pair the id `cpu.virtual`
+with `repr := .symbolic` and make both the alignment and range-bound clauses
+vacuous — every numeric guard would be optional in practice.
+
+The remaining conditions are checkable from the descriptor alone. Whether the
 provenance is live, whether the named bytes are actually initialized, and whether
 the address really is the allocation base plus `range.start` are facts about a
 memory state, and belong to M2's `applyAccess` rather than here.
@@ -115,19 +152,22 @@ Stated as a structure of named fields rather than a conjunction so that a failin
 condition names itself, and so that the §10 profile package can cite conditions
 individually.
 -/
-structure WellFormed (d : AccessDescriptor) : Prop where
+structure WellFormedIn (d : AccessDescriptor) (space : AddressSpace) : Prop where
+  /-- The supplied space is the one the descriptor names. A caller obtains it by
+  resolving `d.space` through a profile's table, and cannot substitute another. -/
+  spaceResolved : space.id = d.space
   /-- An access that reads, writes, and executes nothing is not an access.
   `docs/FOUNDATION.md` law 8 forbids treating it as a harmless no-op. -/
   notInert : ¬ d.intent.IsInert
   /-- The declared space is realizable by this vocabulary version. -/
-  spaceWellFormed : d.space.WellFormed
+  spaceWellFormed : space.WellFormed
   /-- The address has the form the space's representation requires. A numeric
   address in a symbolic space, or the converse, is rejected rather than coerced. -/
-  addressRepresentable : d.space.Representable d.address
+  addressRepresentable : space.Representable d.address
   /-- The provenance belongs to the space the access names. Without this, an
   offset match across two address spaces could authorize an access
   (`docs/MEMORY_MODEL.md` §7.5). -/
-  spaceAgrees : d.provenance.space = d.space.id
+  spaceAgrees : d.provenance.space = d.space
   /-- The provenance path is nested, so it designates something. -/
   provenanceNested : d.provenance.Nested
   /-- The accessed range lies inside what the provenance designates. An empty
@@ -143,13 +183,20 @@ structure WellFormed (d : AccessDescriptor) : Prop where
   alias a disjoint one; see the module comment in `Grass/Memory/Range.lean`. The
   tighter bound, the allocation's own size, is a state fact and belongs to M2. -/
   rangeFitsSpace :
-    ∀ bits, d.space.repr = .numeric bits → d.range.WithinBound (2 ^ bits)
+    ∀ bits, space.repr = .numeric bits → d.range.WithinBound (2 ^ bits)
   /-- An atomic intent declares atomic ordering, and conversely. A `lock`-prefixed
   operation that declared `nonAtomic` would be checked by the wrong rules. -/
   atomicityAgrees : (d.intent.isAtomic = true) ↔ (d.ordering.atomicity = .atomic)
-  /-- Only an access that reads can require its bytes initialized. -/
-  requiresInitializedOnlyIfReads :
-    d.requiresInitialized = true → d.intent.reads = true
+  /-- The access requires the permission its intent needs. Without this clause
+  `Permission.Permits` is dead code and `docs/MEMORY_MODEL.md` §4's demand that
+  read, write, and execute be distinct is unenforced: a write could declare it
+  needs only read-only permission and be well formed. -/
+  permissionSufficient : d.requiredPermission.Permits d.intent
+  /-- An access reads exactly when it makes a demand about what it reads. A
+  reading access must choose between requiring initialization and citing a
+  justification for not requiring it; a non-reading one says `readsNothing`. -/
+  initializationMatchesIntent :
+    (d.intent.reads = true) ↔ (d.initialization ≠ .readsNothing)
   /-- Only an access that writes can produce initialization. -/
   producesInitializedOnlyIfWrites :
     d.producesInitialized = true → d.intent.writes = true

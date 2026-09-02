@@ -256,4 +256,61 @@ theorem representable_symbolic {space : AddressSpace} (h : space.repr = .symboli
 
 end AddressSpace
 
+/--
+The address spaces a profile declares, resolvable by identity.
+
+This exists because an access must not be able to describe its own address space.
+If a descriptor carried an `AddressSpace` value, an author could pair the id
+`cpu.virtual` with `repr := .symbolic` and switch off both the address-width and
+the range-bound checks, since each is conditioned on the representation the
+descriptor itself asserted. Every guard would then be optional in practice.
+
+A descriptor therefore names a space by `AddressSpaceId`, and the properties of
+that space come from here — from the profile, which owns what its target's
+address spaces are. `docs/MEMORY_MODEL.md` §7.5 makes spaces non-interchangeable;
+that is only enforceable if something other than the access decides what a space
+is.
+-/
+structure AddressSpaceTable where
+  /-- The declared spaces. -/
+  spaces : List AddressSpace
+deriving Repr
+
+namespace AddressSpaceTable
+
+/-- The table declaring nothing. It resolves no space, so it admits no access. -/
+def empty : AddressSpaceTable := ⟨[]⟩
+
+/-- Resolve a space by identity. `none` for a space this profile never declared,
+which is the rejection `docs/FOUNDATION.md` law 8 requires. -/
+def find? (table : AddressSpaceTable) (id : AddressSpaceId) : Option AddressSpace :=
+  table.spaces.find? fun space => space.id = id
+
+/-- `table.Declares id` holds when the table resolves `id`. -/
+def Declares (table : AddressSpaceTable) (id : AddressSpaceId) : Prop :=
+  (table.find? id).isSome
+
+instance (table : AddressSpaceTable) (id : AddressSpaceId) : Decidable (table.Declares id) :=
+  inferInstanceAs (Decidable (_ = _))
+
+@[simp] theorem find?_empty (id : AddressSpaceId) : empty.find? id = Option.none := rfl
+
+@[simp] theorem not_declares_empty (id : AddressSpaceId) : ¬ empty.Declares id := by
+  simp [Declares]
+
+/-- A resolved space really is the one that was asked for, so a table cannot
+answer with a space under the wrong name. -/
+theorem id_of_find? {table : AddressSpaceTable} {id : AddressSpaceId} {space : AddressSpace}
+    (h : table.find? id = some space) : space.id = id := by
+  have := List.find?_some h
+  simpa using this
+
+/-- The ordinary Win64 table: one 64-bit write-back CPU space. -/
+def cpuOnly : AddressSpaceTable := ⟨[AddressSpace.cpuVirtual64]⟩
+
+@[simp] theorem find?_cpuOnly : cpuOnly.find? .cpuVirtual = some AddressSpace.cpuVirtual64 :=
+  rfl
+
+end AddressSpaceTable
+
 end Grass.Memory

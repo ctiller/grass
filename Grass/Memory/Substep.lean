@@ -119,10 +119,15 @@ def faults : Substep → List FaultClassId
   | .access d => d.admittedFaults
   | .compute faults => faults
 
-/-- `step.WellFormed` holds when an access step's descriptor is well formed and a
-compute step actually has a reason to exist. -/
-def WellFormed : Substep → Prop
-  | .access d => d.WellFormed
+/--
+`step.WellFormedIn table` holds when an access step names a space the table
+declares and is well formed in it, and a compute step has a reason to exist.
+
+Table-relative because `AccessDescriptor.WellFormedIn` is: a descriptor names its
+space and the profile decides what that space is.
+-/
+def WellFormedIn (table : AddressSpaceTable) : Substep → Prop
+  | .access d => ∃ space, table.find? d.space = some space ∧ d.WellFormedIn space
   | .compute faults => faults ≠ []
 
 @[simp] theorem descriptor?_access (d : AccessDescriptor) :
@@ -132,7 +137,15 @@ def WellFormed : Substep → Prop
     (Substep.compute faults).descriptor? = Option.none := rfl
 
 /-- A compute step that cannot fault is not a step. -/
-theorem not_wellFormed_compute_nil : ¬ (Substep.compute []).WellFormed := fun h => h rfl
+theorem not_wellFormedIn_compute_nil (table : AddressSpaceTable) :
+    ¬ (Substep.compute []).WellFormedIn table := fun h => h rfl
+
+/-- A step naming a space the profile never declared is not well formed, whatever
+else is true of it. -/
+theorem not_wellFormedIn_of_undeclared {table : AddressSpaceTable} {d : AccessDescriptor}
+    (h : ¬ table.Declares d.space) : ¬ (Substep.access d).WellFormedIn table := by
+  rintro ⟨space, hfind, -⟩
+  exact h (by simp [AddressSpaceTable.Declares, hfind])
 
 end Substep
 
@@ -226,18 +239,20 @@ theorem mem_substeps_of_mem_visibleEffects? {seq : SubstepSequence} {failedAt : 
   · cases h; simp at hd
   · exact absurd h (by simp)
 
-/-- `seq.WellFormed` holds when every step is well formed. -/
-def WellFormed (seq : SubstepSequence) : Prop :=
-  ∀ step ∈ seq.substeps, step.WellFormed
+/-- `seq.WellFormedIn table` holds when every step is well formed in `table`. -/
+def WellFormedIn (seq : SubstepSequence) (table : AddressSpaceTable) : Prop :=
+  ∀ step ∈ seq.substeps, step.WellFormedIn table
 
-@[simp] theorem wellFormed_none_ : none_.WellFormed := by
-  simp [WellFormed, none_]
+@[simp] theorem wellFormedIn_none_ (table : AddressSpaceTable) :
+    none_.WellFormedIn table := by
+  simp [WellFormedIn, none_]
 
-theorem wellFormed_single {d : AccessDescriptor} (h : d.WellFormed) :
-    (single d).WellFormed := by
-  simp only [WellFormed, single, List.mem_singleton]
+theorem wellFormedIn_single {table : AddressSpaceTable} {d : AccessDescriptor}
+    {space : AddressSpace} (hfind : table.find? d.space = some space)
+    (h : d.WellFormedIn space) : (single d).WellFormedIn table := by
+  simp only [WellFormedIn, single, List.mem_singleton]
   rintro step rfl
-  exact h
+  exact ⟨space, hfind, h⟩
 
 /--
 `seq.ClaimsAtomicity` holds when the sequence asserts more than one step happens
