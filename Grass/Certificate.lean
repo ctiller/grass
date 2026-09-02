@@ -28,7 +28,12 @@ namespace ProgramBehavior
 
 variable {spec : SpecProcess}
 
-/-- Specification-visible observations of one relational execution prefix. -/
+/-- The specification's whole-trace view of one finite execution prefix.
+
+For a nonterminal prefix this is a provisional recomputation, not an append-only
+stream commitment. Functional acceptance consumes this view only with a
+terminal witness; independent demands carry safety and other non-functional
+claims that a projection may not erase. -/
 def observe (behavior : ProgramBehavior spec)
     (execution : behavior.system.ExecutionPrefix) : List spec.Observation :=
   spec.observationProjection.project execution.events
@@ -45,7 +50,7 @@ structure Adequate (behavior : ProgramBehavior spec) : Prop where
     Nonempty { run : behavior.system.ExecutionPrefix //
       behavior.HasInput input run }
   completion : forall run : behavior.system.ExecutionPrefix,
-    Nonempty (behavior.system.Completion run.state run.graph)
+    Nonempty (behavior.system.Completion run.state run.graph run.events)
 
 /-- Transport adequacy along exact behavior equality. -/
 theorem Adequate.cast {behavior replacement : ProgramBehavior spec}
@@ -73,9 +78,9 @@ structure BehaviorRefinement (concrete abstract : ProgramBehavior spec) where
       (mapState nextState) (mapGraph nextGraph)
   terminal : forall {state graph}, concrete.system.Terminal state graph ->
     abstract.system.Terminal (mapState state) (mapGraph graph)
-  infiniteConsistency : forall {stateAt graphAt choiceAt eventAt},
-    concrete.system.InfiniteConsistent stateAt graphAt choiceAt eventAt ->
-    abstract.system.InfiniteConsistent (fun index => mapState (stateAt index))
+  infiniteConsistency : forall {priorEvents stateAt graphAt choiceAt eventAt},
+    concrete.system.InfiniteConsistent priorEvents stateAt graphAt choiceAt eventAt ->
+    abstract.system.InfiniteConsistent priorEvents (fun index => mapState (stateAt index))
       (fun index => mapGraph (graphAt index))
       (fun index => mapChoice (choiceAt index)) eventAt
 
@@ -122,9 +127,10 @@ theorem mapSteps (refinement : BehaviorRefinement concrete abstract)
 /-- Map an infinite execution while retaining its global limit condition. -/
 def mapInfinite (refinement : BehaviorRefinement concrete abstract)
     {state : concrete.system.State} {graph : concrete.system.Graph}
-    (execution : concrete.system.InfiniteContinuation state graph) :
+    {priorEvents : List spec.AuditEvent}
+    (execution : concrete.system.InfiniteContinuation state graph priorEvents) :
     abstract.system.InfiniteContinuation (refinement.mapState state)
-      (refinement.mapGraph graph) where
+      (refinement.mapGraph graph) priorEvents where
   stateAt index := refinement.mapState (execution.stateAt index)
   graphAt index := refinement.mapGraph (execution.graphAt index)
   choiceAt index := refinement.mapChoice (execution.choiceAt index)
@@ -137,8 +143,10 @@ def mapInfinite (refinement : BehaviorRefinement concrete abstract)
 /-- Map a terminal or infinite continuation coherently. -/
 def mapCompletion (refinement : BehaviorRefinement concrete abstract)
     {state : concrete.system.State} {graph : concrete.system.Graph}
-    (completion : concrete.system.Completion state graph) :
-    abstract.system.Completion (refinement.mapState state) (refinement.mapGraph graph) := by
+    {priorEvents : List spec.AuditEvent}
+    (completion : concrete.system.Completion state graph priorEvents) :
+    abstract.system.Completion (refinement.mapState state) (refinement.mapGraph graph)
+      priorEvents := by
   cases completion with
   | finite steps terminal =>
       exact .finite (refinement.mapSteps steps) (refinement.terminal terminal)
