@@ -49,8 +49,12 @@ private def epochs₀ : FreshSupply EpochTag := .initial
 def epoch₀ : EpochId := epochs₀.fresh.1
 
 private def contexts₀ : FreshSupply ContextTag := .initial
-/-- The only thread. -/
+/-- The program thread. -/
 def thread₀ : ContextId := contexts₀.fresh.1
+
+/-- The device engine. A genuinely distinct execution context, which is what
+makes its access to shared bytes a conflict rather than ordinary program order. -/
+def engine₀ : ContextId := contexts₀.fresh.2.fresh.1
 
 private def obligations₀ : FreshSupply ObligationTag := .initial
 /-- The obligation an allocation creates. -/
@@ -74,8 +78,9 @@ def staleProv : Provenance := { bufferProv with epoch := epochs₀.fresh.2.fresh
 /-- A descriptor builder, so the families below read as declarations. -/
 def acc (prov : Provenance) (range : ByteRange) (addr : Nat) (intent : AccessIntent)
     (perm : Permission) (readsInit : Bool) (writesInit : Bool)
-    (effect : LedgerEffect := []) (atomic : Bool := false) : AccessDescriptor :=
-  { context := thread₀, address := .numeric (BitVec.ofNat 64 addr), space := .cpuVirtual
+    (effect : LedgerEffect := []) (atomic : Bool := false)
+    (context : ContextId := thread₀) : AccessDescriptor :=
+  { context := context, address := .numeric (BitVec.ofNat 64 addr), space := .cpuVirtual
     provenance := prov, range := range
     intent := { intent with isAtomic := atomic }
     requiredPermission := perm, alignment := 1
@@ -114,6 +119,8 @@ inductive Alpha where
   | badLedger
   /-- A well-formed store presenting an epoch the allocation has moved past. -/
   | staleEpoch
+  /-- A store split across two substeps under a profile-owned visibility rule. -/
+  | splitStore
 deriving DecidableEq, Repr
 
 /-- The release obligation `reserve` creates. -/
@@ -183,6 +190,14 @@ instance : HasOperationFacets Alpha where
             false true))
           faults := some [], restartability := some .notRestartable
           ordering := some .plain }
+    | .splitStore =>
+        { memoryEffects := some
+            { substeps :=
+                [ .access (acc bufferProv ⟨0, 4⟩ 0x1000 .write .readWrite false true)
+                  , .access (acc bufferProv ⟨4, 4⟩ 0x1004 .write .readWrite false true) ]
+              onFault := .profileSpecific ⟨"fake.splitStore"⟩ }
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
 
 /-! ## Family two: an independently defined device family
 
@@ -201,7 +216,8 @@ instance : HasOperationFacets Beta where
   facets
     | .dmaWrite =>
         { memoryEffects := some (.single
-            { acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite false true with
+            { acc viewProv ⟨0, 8⟩ 0x1000 .write .readWrite false true
+                (context := engine₀) with
               intent := { reads := false, writes := true, isDevice := true } })
           faults := some [.deviceFault], restartability := some .notRestartable
           ordering := some .plain }
@@ -336,22 +352,36 @@ theorem badLedger_is_rejected :
 
 /-! ## 7: alias conflicts across distinct allocations -/
 
-/-- Two stores to the same bytes through *different* allocations conflict.
+/--
+**The stepper denies it**, not merely a lemma about `Conflicts`.
 
-`Provenance.SameStorage` would have said these are unrelated — the allocation
-identities differ, which is exactly what distinct allocations mean — and every
-race-freedom theorem downstream would have inherited that. The aliasing relation
-lives in the state, and the conflict test consults it.
+A thread stores to the buffer; a device engine then stores to the *view*, a
+different allocation naming the same bytes. The second access is refused, nothing
+is committed for it, and a violation is recorded.
+
+`Provenance.SameStorage` would have called these unrelated — the allocation
+identities differ, which is exactly what distinct allocations mean — so the
+conflict is found only because aliasing is recorded in the machine state and the
+transition consults it.
 -/
-theorem aliased_stores_conflict :
+theorem aliased_cross_context_store_is_denied :
     ∀ s, (stepAlpha state₀ .store).state? = some s →
-      ∀ t, (stepAlpha s .storeThroughView).state? = some t →
-        ∃ a b, t.events = [a, b] ∧
-          MemoryEvent.Conflicts t.memory.SharesBytes MemoryEvent.atomicsAreNever a b := by
+      ∀ t, (stepBeta s .dmaWrite).state? = some t →
+        t.events.length = 1 ∧ ¬ t.violations.IsEmpty := by
   intro s hs t ht
   cases hs; cases ht
-  refine ⟨_, _, rfl, ?_⟩
-  decide
+  exact ⟨by decide, by decide⟩
+
+/-- The same two accesses, one context apart, are *not* denied: program order
+sequences a context against itself, and refusing that would refuse ordinary
+sequential code. -/
+theorem same_context_stores_are_not_denied :
+    ∀ s, (stepAlpha state₀ .store).state? = some s →
+      ∀ t, (stepAlpha s .storeThroughView).state? = some t →
+        t.events.length = 2 ∧ t.violations.IsEmpty := by
+  intro s hs t ht
+  cases hs; cases ht
+  exact ⟨by decide, by decide⟩
 
 /-- The same two stores are *not* related by `SameStorage`, so the conflict is
 found only because the state records the alias. -/
@@ -405,5 +435,51 @@ theorem every_alpha_step_extends_violations (op : Alpha) :
     first
       | exact AuditViolationLedger.Extends.refl _
       | exact AuditViolationLedger.extends_append _ _
+
+/-! ## 8 again, through the transition rather than a lemma
+
+The `divide_preserves_its_read` theorem above is a fact about the *facet*: it says
+what `visibleEffects?` answers. That is not the same as saying the transition
+honours it, and an earlier version of this fixture proved only the former while
+the stepper committed every access unconditionally.
+
+These drive the fault path through `step` itself. -/
+
+/-- A compound operation that faults at its second substep. The read before it
+committed, and the state shows one event. -/
+theorem divide_fault_preserves_the_read :
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) .thread
+        ⟨⟨"alpha"⟩⟩ (some ⟨1, ⟨⟨"divideError"⟩⟩, 0⟩)).state? = some s →
+      s.events.length = 1 ∧ s.violations.IsEmpty := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- Faulting at the *first* substep commits nothing. -/
+theorem divide_fault_at_zero_commits_nothing :
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) .thread
+        ⟨⟨"alpha"⟩⟩ (some ⟨0, .pageFault, 0⟩)).state? = some s →
+      s.events.length = 1 := by
+  intro s hs
+  cases hs
+  decide
+
+/-- A faulting access commits the prefix it declares, and the event records it.
+`docs/MEMORY_MODEL.md` §1 forbids assuming a faulted access did nothing. -/
+theorem faulted_store_commits_its_declared_prefix :
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) .thread
+        ⟨⟨"alpha"⟩⟩ (some ⟨0, .pageFault, 3⟩)).state? = some s →
+      ∃ e, s.events = [e] ∧ e.writeCommitted = 3 ∧ e.status = .faulted .pageFault 3 := by
+  intro s hs
+  cases hs
+  exact ⟨_, rfl, by decide, by decide⟩
+
+/-- An operation whose visibility rule belongs to a profile cannot be stepped by
+the generic relation. Refusing is the honest answer; guessing which effects
+survive would be the permissive fallback law 8 forbids. -/
+theorem profile_visibility_rule_is_refused :
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.splitStore) .thread
+      ⟨⟨"alpha"⟩⟩ (some ⟨1, .pageFault, 0⟩)).rejection? =
+        some .visibilityRuleUnknown := by decide
 
 end Grass.Tests.FakeIsa

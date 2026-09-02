@@ -57,6 +57,10 @@ inductive StepRejection where
   | substepsNotWellFormed
   /-- The profile does not admit one of the declared accesses. -/
   | accessNotAdmitted
+  /-- The operation faulted under a visibility rule this relation cannot read.
+  The rule belongs to a profile, and guessing which effects survive would be
+  worse than refusing. -/
+  | visibilityRuleUnknown
 deriving DecidableEq, Repr
 
 /-- What one step produced. -/
@@ -102,8 +106,10 @@ structure StepPolicy where
   requiredFacets : List FacetName
   /-- Which overlapping atomic pairs this target actually admits. Defaults to
   none, which is the conservative direction: every overlapping pair with a writer
-  conflicts. -/
-  compatible : MemoryEvent → MemoryEvent → Prop := MemoryEvent.atomicsAreNever
+  conflicts. `Bool`-valued so the stepper can actually run the check; a
+  `Prop`-valued field would have made the conflict test undecidable and the check
+  would have quietly become documentation. -/
+  compatible : MemoryEvent → MemoryEvent → Bool := fun _ _ => false
 
 namespace StepPolicy
 
@@ -165,6 +171,41 @@ def applyLedgerEffect (obligations : FiniteMap ObligationId Obligation)
         | Option.none => acc
         | some o => acc.insert id (o.transferTo owner)
 
+/--
+`ConflictsWithHistory` holds when an event contends with one already performed.
+
+This is the alias check, and `performAccess` calls it: an access whose event would
+conflict with one already in the trace is denied and recorded, exactly like an
+access the state refuses on any other ground.
+
+It consults `MemoryState.SharesBytes`, so a write through a mapped view conflicts
+with a write through the allocation it maps — which `Provenance.SameStorage` alone
+would have missed, because those are distinct allocations by construction.
+
+**Distinct contexts only.** `docs/MEMORY_MODEL.md` §7.3 defines a race over
+"conflicting events from distinct concurrent contexts... unordered by
+happens-before". Two writes by one context to the same bytes are not a race:
+program order sequences them, and denying them would refuse ordinary sequential
+code. The cross-context case is the one this can decide today; the same-context
+ordering is sequenced-before, and the general happens-before that would let two
+contexts be *proved* ordered is M8's. Until then, denying every cross-context
+conflict is the conservative direction — it can refuse a program a synchronizing
+profile would allow, never admit a racy one.
+-/
+def ConflictsWithHistory (policy : StepPolicy) (state : MachineState)
+    (event : MemoryEvent) : Prop :=
+  ∃ earlier ∈ state.events,
+    earlier.context.id ≠ event.context.id ∧
+    MemoryEvent.Conflicts state.memory.SharesBytes
+      (fun a b => policy.compatible a b = true) earlier event
+
+instance (policy : StepPolicy) (state : MachineState) (event : MemoryEvent) :
+    Decidable (ConflictsWithHistory policy state event) :=
+  inferInstanceAs (Decidable (∃ earlier ∈ state.events,
+    earlier.context.id ≠ event.context.id ∧
+    MemoryEvent.Conflicts state.memory.SharesBytes
+      (fun a b => policy.compatible a b = true) earlier event))
+
 /-- Perform one access against the state, recording an event or a violation. -/
 def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor)
     (status : AccessStatus) (readCommitted writeCommitted : Nat)
@@ -182,35 +223,66 @@ def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescri
               readCommitted writeCommitted Option.none Option.none with
           | Option.none => state
           | some event =>
-              { state with
-                eventSupply := state.eventSupply.fresh.2
-                events := state.events ++ [event]
-                memory :=
-                  if d.producesInitialized then
-                    state.memory.setInitialized d.provenance.root
-                      (d.range.take writeCommitted)
-                  else state.memory
-                obligations := applyLedgerEffect state.obligations d.ledgerEffect }
+              if ConflictsWithHistory policy state event then
+                -- An alias conflict is an authority failure, not a fault: the
+                -- access is refused and nothing commits.
+                { state with
+                  violations := state.violations.append (violationOf d .authorityUnavailable) }
+              else
+                { state with
+                  eventSupply := state.eventSupply.fresh.2
+                  events := state.events ++ [event]
+                  memory :=
+                    if d.producesInitialized then
+                      state.memory.setInitialized d.provenance.root
+                        (d.range.take writeCommitted)
+                    else state.memory
+                  obligations := applyLedgerEffect state.obligations d.ledgerEffect }
 
 /--
-`ConflictsWithHistory` holds when an event contends with one already performed.
+Where an operation faulted, if it did.
 
-This is the alias check. It consults `MemoryState.SharesBytes`, so a write through
-a mapped view conflicts with a write through the allocation it maps, which
-`Provenance.SameStorage` alone would have missed.
+The stepper takes this rather than inventing it: which substep of a `rep movsb`
+faults is a fact about the machine at that moment, and the transition relation's
+job is to say what the state looks like afterwards, not to predict it.
 -/
-def ConflictsWithHistory (policy : StepPolicy) (state : MachineState)
-    (event : MemoryEvent) : Prop :=
-  ∃ earlier ∈ state.events,
-    MemoryEvent.Conflicts state.memory.SharesBytes policy.compatible earlier event
+structure FaultPoint where
+  /-- The index of the substep that did not complete. -/
+  index : Nat
+  /-- The fault it raised. -/
+  fault : FaultClassId
+  /-- How many bytes that substep committed before faulting, if it was an access.
+  A faulting access is not a no-op, and `docs/MEMORY_MODEL.md` §1 forbids assuming
+  it is. -/
+  committed : Nat
+deriving DecidableEq, Repr
+
+/--
+Perform the accesses that survive, in order.
+
+`visibleEffects?` decides which those are, and returning `none` for a
+profile-owned visibility rule is why `step` can reject: the generic relation does
+not know what an x86 split-page store exposes, and guessing would be the
+permissive fallback `docs/FOUNDATION.md` law 8 forbids.
+-/
+def runAccesses (policy : StepPolicy) (state : MachineState)
+    (accesses : List AccessDescriptor) (contextKind : ContextKind) (cause : EventCause) :
+    MachineState :=
+  accesses.foldl (init := state) fun acc d =>
+    performAccess policy acc d .completed
+      (if d.intent.reads then d.range.size else 0)
+      (if d.intent.writes then d.range.size else 0)
+      contextKind cause
 
 /--
 Step one operation.
 
-The whole vertical, in the order the module comment gives.
+The whole vertical, in the order the module comment gives. `faultAt` says whether
+the machine faulted and where; `none` means every substep completed.
 -/
 def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation)
-    (contextKind : ContextKind) (cause : EventCause) : StepOutcome :=
+    (contextKind : ContextKind) (cause : EventCause)
+    (faultAt : Option FaultPoint := Option.none) : StepOutcome :=
   let facets := operation.facets
   match policy.requiredFacets.find? (fun required => !facets.supplied.contains required) with
   | some missing => .rejected (.facetsNotClosed missing)
@@ -223,11 +295,24 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
         else if ! sequence.accesses.all (fun d => decide (policy.Admits d)) then
           .rejected .accessNotAdmitted
         else
-          .ran (sequence.accesses.foldl (init := state) fun acc d =>
-            performAccess policy acc d .completed
-              (if d.intent.reads then d.range.size else 0)
-              (if d.intent.writes then d.range.size else 0)
-              contextKind cause)
+          match faultAt with
+          | Option.none =>
+              .ran (runAccesses policy state sequence.accesses contextKind cause)
+          | some point =>
+              match sequence.visibleEffects? point.index with
+              | Option.none => .rejected .visibilityRuleUnknown
+              | some survivors =>
+                  let afterPrefix := runAccesses policy state survivors contextKind cause
+                  -- The faulting substep itself, when it was an access, commits
+                  -- the prefix it declares and no more.
+                  match sequence.substeps[point.index]? with
+                  | some (.access d) =>
+                      .ran (performAccess policy afterPrefix d
+                        (.faulted point.fault point.committed)
+                        (if d.intent.reads then min point.committed d.range.size else 0)
+                        (if d.intent.writes then min point.committed d.range.size else 0)
+                        contextKind cause)
+                  | _ => .ran afterPrefix
 
 /-! ## The transition invariants
 
@@ -266,6 +351,24 @@ theorem performAccess_extends_violations (policy : StepPolicy) (state : MachineS
     · exact AuditViolationLedger.extends_append _ _
     · split
       · exact AuditViolationLedger.Extends.refl _
-      · exact AuditViolationLedger.Extends.refl _
+      · split
+        · exact AuditViolationLedger.extends_append _ _
+        · exact AuditViolationLedger.Extends.refl _
+
+
+/-- Running a list of accesses extends the violation ledger, by induction over
+the fold. This is the step-level form of the invariant; the per-access form is
+below. -/
+theorem runAccesses_extends_violations (policy : StepPolicy) (state : MachineState)
+    (accesses : List AccessDescriptor) (contextKind : ContextKind) (cause : EventCause) :
+    (runAccesses policy state accesses contextKind cause).violations.Extends
+      state.violations := by
+  unfold runAccesses
+  induction accesses generalizing state with
+  | nil => exact AuditViolationLedger.Extends.refl _
+  | cons d rest ih =>
+    exact AuditViolationLedger.Extends.trans
+      (performAccess_extends_violations policy state d .completed _ _ contextKind cause)
+      (ih _)
 
 end Grass.Op
