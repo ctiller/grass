@@ -82,11 +82,6 @@ No document may override a narrower owner by restating it differently.
   expected Lean source files, including final PE emission and connection
   theorems. They are design fixtures until the Grass libraries are implemented.
 - [MODULES.md](MODULES.md) proposes a dependency-safe Lean/project structure.
-- [PROCESS_IMPLEMENTATION_PLAN.md](PROCESS_IMPLEMENTATION_PLAN.md) is the
-  `c-process` agent's tier-four schedule against [PROCESS.md](PROCESS.md) and
-  [PROCESS_SHARDING.md](PROCESS_SHARDING.md), together with a ledger of
-  defects it found in the normative corpus and the deviations it proposes for
-  [DECISIONS.md](DECISIONS.md).
 - [OLEAN_SHARDING.md](OLEAN_SHARDING.md) specifies how bounded source shards,
   public signatures, opaque certificates, Lake facets, and aggregate `.olean`
   modules localize proof and build invalidation.

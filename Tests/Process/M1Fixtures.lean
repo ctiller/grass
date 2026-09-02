@@ -1,5 +1,6 @@
 import Grass.Process.Correct
 import Grass.Process.Protocol.Registry
+import Grass.Specification.Scope
 
 /-!
 # M1 fixtures for the process author vocabulary
@@ -16,6 +17,8 @@ merely unproved but unconstructible.
 -/
 
 namespace Grass.Process.Tests
+
+open Grass.Specification
 
 open Grass.Process
 
