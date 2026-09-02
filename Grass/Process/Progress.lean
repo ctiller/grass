@@ -1,4 +1,5 @@
 import Grass.Process.Acceptance
+import Grass.Process.Run
 
 /-!
 # Per-process progress
@@ -27,32 +28,57 @@ Every `ProcessRunTransition` consumes an event, so a single process never takes
 an internal step of its own accord; the internal work §7 refers to happens
 *inside* one transition, in a serial call or in the machine realization, and the
 finite-internal-work clause is discharged there. What remains at this layer is a
-sharper question: which arriving events are entropy, and which are the process's
-own work coming back?
+sharper question: which arriving events came from outside the program, and which
+are the program's own activity coming back?
 
-`ProcessEvent.settles` answers it. An `.external` event, a `.fault`, and an
-`.environmentViolation` are entropy: the process was waiting, and waiting
-forever at a declared frontier is legitimate — `docs/PROCESS.md` §7 says
-"Long-lived processes need not terminate". A `.result` or `.interrupted` event
-is the process's own outstanding demand coming back, and a process that issues a
-demand, receives it, issues another, and never emits anything is the livelock
-that a progress theorem exists to exclude.
+`ProcessEvent.externalEntropy` answers it, and `settles` does not. An earlier
+draft used `settles = none` as the frontier disjunct, which gave `.fault` and
+`.environmentViolation` a free pass: a process that faults in a loop, emits
+nothing, and decreases no measure satisfied the condition. A fault is the
+process failing, not the environment speaking — `Grass/Process/Vocabulary.lean`
+lists them as separate constructors for exactly that reason — so only
+`.external` counts as waiting.
 
-So `StepProgresses` below is: entropy arrived, **or** the transition emitted an
-observation the specification demanded, **or** a well-founded measure strictly
-decreased. A server's accept loop satisfies the second disjunct on every
-connection. A silent demand-issuing spin satisfies none, and is rejected.
+So `StepProgresses` is: environment entropy arrived, **or** the transition
+emitted an observation the specification demanded, **or** a well-founded measure
+strictly decreased. A server's accept loop satisfies the second disjunct on
+every connection. A silent demand-issuing spin satisfies none, and so does a
+silent fault loop.
 
-The measure is over `p.State` because it is the process's *internal* measure.
-It is not a bound on how many events arrive.
+Two honest limits. First, this layer has no way to say which frontiers are
+*law-bearing* in §7's sense: `ProcessAcceptance` carries no frontier
+declaration, so "waiting forever for entropy that never comes" passes here, and
+is excluded — if at all — by the network adequacy theorem. Second,
+`StepProgresses` reads the transition's own emitted segment. That is sound
+because a `ProcessSpec.Step`'s segment is authored — §2 gives `Step` an
+observation-segment output — but it also means progress is a per-specification
+property, to be re-proved after a refinement changes the transition structure
+rather than transported across it. Trace *acceptance*, which must transport,
+sees only the flat history.
 
-## Responsiveness is the other half
+## Responsiveness is the other half, and it needs reachability
 
 `docs/FOUNDATION.md` law 5 requires every admitted external or nondeterministic
-result to be handled. A process whose `Step` relation has no successor for a
-result it asked for is stuck, and stuckness is not caught by any measure — the
-measure only constrains steps that happen. `Responsive` is that obligation, and
-it is why `MeetsProcessProgress` has two fields rather than one.
+result to be handled. A process whose `Step` relation has no successor is stuck,
+and stuckness is not caught by any measure — a measure only constrains steps
+that happen.
+
+An earlier draft stated this over a state and an *independently quantified*
+outstanding bag, which made it both too strong and too weak. Too strong, because
+a caller could choose a bag containing a demand the process never issued and
+force a successor for it. Too weak, because it never established that any
+transition was available at all. It is now stated over reachable run states,
+where the state and the bag come from the same execution.
+
+The terminal disjunct had a hole worth naming. It was
+`∃ result, p.Terminal request state result` — the specification's terminal
+*predicate*, which does not by itself make `ProcessRunTransition.terminate`
+available, because that constructor additionally needs a permitted disposition
+of the outstanding bag. A specification could therefore declare a state
+terminal, have no `Step`, and permit no disposition, and the run would be
+permanently stuck while every field was satisfied. The disjunct now demands the
+classification, and `exists_transition` below is the proof that the hole is
+closed.
 -/
 
 namespace Grass.Process
@@ -90,9 +116,9 @@ end ProcessMeasure
 An event is deliverable to a process holding `outstanding` when it settles
 nothing, or settles a demand that is actually outstanding.
 
-This is the precondition of `Responsive`. Without it, responsiveness would
-demand a successor for the completion of a demand the process never issued,
-which no correct process should have.
+On its own this is a weak condition — for any event, *some* bag makes it
+deliverable. It is a real restriction only because `MeetsProcessProgress` pairs
+it with a reachable run state, which fixes the bag.
 -/
 def EventDeliverable {p : ProcessSpec.{u, w}} (outstanding : Bag p.Demand)
     (event : p.Event) : Prop :=
@@ -108,37 +134,59 @@ theorem eventDeliverable_of_settles_none {p : ProcessSpec.{u, w}}
 /--
 The §7 three-way progress condition, for one transition.
 
-See the module note for why the first disjunct is `settles = none` rather than a
-separate frontier predicate.
+See the module note for why the first disjunct is environment entropy rather
+than "settled nothing".
 -/
 def StepProgresses {p : ProcessSpec.{u, w}} (accept : ProcessAcceptance p)
     (measure : ProcessMeasure p) (before after : p.State) (event : p.Event)
     (emitted : p.Segment) : Prop :=
-  event.settles = none ∨
+  (∃ entropy, event.externalEntropy = some entropy) ∨
     accept.SegmentIsDemanded emitted ∨
     measure.Decreases before after
 
 /--
 A process meets its progress contract.
 
-Both fields are quantified over states satisfying an invariant supplied by the
-caller, because a progress claim about unreachable states is neither needed nor
-provable. `Grass/Process/Correct.lean` passes its own `Invariant`.
+`productive` is quantified over states satisfying an invariant supplied by the
+caller; the two responsiveness fields are quantified over reachable run states,
+because a claim about a state and an outstanding bag that no execution reaches
+together is neither needed nor provable.
 -/
-structure MeetsProcessProgress (p : ProcessSpec.{u, w}) (accept : ProcessAcceptance p)
-    (Invariant : p.State → Prop) (request : p.Request) : Type (max (u + 1) (w + 1)) where
+structure MeetsProcessProgress (p : ProcessSpec.{u, w})
+    (accept : ProcessAcceptance p) (Invariant : p.State → Prop)
+    (request : p.Request) : Type (max (u + 1) (w + 1)) where
   /-- The internal measure. -/
   measure : ProcessMeasure p
   /--
-  No stuck state: at any invariant-satisfying state, either the process may
-  terminate, or every deliverable event has a successor.
+  Every deliverable event has a successor.
 
-  This is `docs/FOUNDATION.md` law 5 made checkable at this layer.
+  This is `docs/FOUNDATION.md` law 5 made checkable: an author cannot handle the
+  results they expect and leave the rest, because every event that could arrive
+  at a reachable state must have a transition.
   -/
-  responsive : ∀ (state : p.State) (outstanding : Bag p.Demand) (event : p.Event),
-    Invariant state → EventDeliverable outstanding event →
-    (∃ result, p.Terminal request state result) ∨
-    (∃ after issued emitted, p.Step state event after issued emitted)
+  handlesEveryEvent : ∀ (segmented : Segmented p.Observation) (state : p.State)
+      (outstanding : Bag p.Demand) (observations : Trace p.Observation)
+      (event : p.Event),
+    Reachable accept.terminalRemainder request segmented
+      (.running state outstanding observations) →
+    EventDeliverable outstanding event →
+    ∃ after issued emitted, p.Step state event after issued emitted
+  /--
+  No reachable running state is stuck: it can terminate, or some deliverable
+  event moves it.
+
+  The terminal disjunct demands the classification, not just `p.Terminal`; see
+  the module note for the hole that closes.
+  -/
+  notStuck : ∀ (segmented : Segmented p.Observation) (state : p.State)
+      (outstanding : Bag p.Demand) (observations : Trace p.Observation),
+    Reachable accept.terminalRemainder request segmented
+      (.running state outstanding observations) →
+    (∃ result, p.Terminal request state result ∧
+      Nonempty (TerminalDemandClassification accept.terminalRemainder request state
+        result outstanding)) ∨
+    (∃ event, EventDeliverable outstanding event ∧
+      ∃ after issued emitted, p.Step state event after issued emitted)
   /-- Every step from an invariant-satisfying state progresses. -/
   productive : ∀ (state after : p.State) (event : p.Event)
       (issued : Bag p.Demand) (emitted : p.Segment),
@@ -151,34 +199,84 @@ variable {p : ProcessSpec.{u, w}} {accept : ProcessAcceptance p}
   {Invariant : p.State → Prop} {request : p.Request}
 
 /--
-A settling step that emits nothing demanded must decrease the measure.
+**No reachable running state is stuck.** Every one has an outgoing transition.
 
-This is the contrapositive that makes the definition bite, and it is the form a
-livelock argument uses: if the process's own work comes back and nothing the
+This is the theorem the two responsiveness fields exist for, and it is what
+makes them more than a restatement. Given a reachable running state, `notStuck`
+supplies either a permitted terminal disposition — which builds
+`ProcessRunTransition.terminate` — or a deliverable event with a successor,
+which builds `step` or `settle` according to whether the event settles a demand.
+The `settle` case needs the consumed occurrence to actually be in the bag, and
+that is exactly what `EventDeliverable` provides.
+-/
+theorem exists_transition (progress : MeetsProcessProgress p accept Invariant request)
+    {segmented : Segmented p.Observation} {state : p.State}
+    {outstanding : Bag p.Demand} {observations : Trace p.Observation}
+    (reached : Reachable accept.terminalRemainder request segmented
+      (.running state outstanding observations)) :
+    ∃ after, ProcessRunTransition accept.terminalRemainder request
+      (.running state outstanding observations) after := by
+  rcases progress.notStuck segmented state outstanding observations reached with
+    ⟨result, isTerminal, ⟨classification⟩⟩ |
+      ⟨event, deliverable, after, issued, emitted, stepped⟩
+  · exact ⟨_, .terminate isTerminal classification⟩
+  · match settlesCase : event.settles with
+    | none => exact ⟨_, .step settlesCase stepped⟩
+    | some demand =>
+      obtain ⟨remainder, consume⟩ :=
+        Bag.consume_iff_mem.mpr (deliverable demand settlesCase)
+      exact ⟨_, .settle settlesCase consume stepped⟩
+
+/--
+A step that is not environment entropy and emits nothing demanded must decrease
+the measure.
+
+The contrapositive that makes `StepProgresses` bite, and the form a livelock
+argument uses: if the program's own activity comes back and nothing the
 specification asked for was produced, the state got strictly smaller, and by
 well-foundedness that cannot go on forever.
+
+Stated for any non-entropy event, so it covers faults and environment violations
+as well as results — which is the point of the change from `settles` to
+`externalEntropy`.
 -/
-theorem settling_silent_step_decreases
+theorem silent_nonentropy_step_decreases
     (progress : MeetsProcessProgress p accept Invariant request)
-    {state after : p.State} {event : p.Event} {demand : p.Demand}
+    {state after : p.State} {event : p.Event}
     {issued : Bag p.Demand} {emitted : p.Segment}
     (invariant : Invariant state)
     (transition : p.Step state event after issued emitted)
-    (settles : event.settles = some demand)
+    (notEntropy : event.externalEntropy = none)
     (silent : ¬ accept.SegmentIsDemanded emitted) :
     progress.measure.Decreases state after := by
   rcases progress.productive state after event issued emitted invariant transition with
-    settlesNothing | demanded | decreases
-  · exact absurd (settlesNothing ▸ settles) (by simp)
+    ⟨_, isEntropy⟩ | demanded | decreases
+  · exact absurd (notEntropy ▸ isEntropy) (by simp)
   · exact absurd demanded silent
   · exact decreases
 
 /--
-There is no infinite silently-settling descent.
+A silent fault does not progress for free.
 
-The `WellFounded.apply` accessibility of the measure's rank at the state is what
-a coinductive argument over maximal executions consumes at M4. Stating it here
-keeps the well-foundedness obligation next to the definition that needs it.
+The specific case the earlier `settles`-based definition let through, kept as a
+named corollary so a reviewer can check it directly.
+-/
+theorem silent_fault_decreases
+    (progress : MeetsProcessProgress p accept Invariant request)
+    {state after : p.State} {fault : p.LogicalFault}
+    {issued : Bag p.Demand} {emitted : p.Segment}
+    (invariant : Invariant state)
+    (transition : p.Step state (.fault fault) after issued emitted)
+    (silent : ¬ accept.SegmentIsDemanded emitted) :
+    progress.measure.Decreases state after :=
+  progress.silent_nonentropy_step_decreases invariant transition (by simp) silent
+
+/--
+There is no infinite silent descent.
+
+The accessibility of the measure's rank at a state is what a coinductive
+argument over maximal executions consumes at M4. Stating it here keeps the
+well-foundedness obligation next to the definition that needs it.
 -/
 theorem accessible (progress : MeetsProcessProgress p accept Invariant request)
     (state : p.State) : Acc progress.measure.lt (progress.measure.rank state) :=

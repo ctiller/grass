@@ -1,4 +1,4 @@
-import Grass.Process.Run
+import Grass.Process.Spec
 
 /-!
 # What a specification accepts
@@ -23,6 +23,17 @@ consumes, and leaves its construction to whoever owns the specification:
 `docs/PROCESS_IMPLEMENTATION_PLAN.md` §2.2 records this as a decision, and §10.2
 records the dependency cycle between this layer and `Grass.Semantics` that makes
 it necessary rather than merely tidy.
+
+## The terminal-remainder law arrives here
+
+`terminalRemainder` is the law `docs/PROCESS.md` §2 calls "the specification's
+progress/lifecycle law". It is a field of the acceptance rather than of the
+`ProcessSpec` because §3 is explicit that a lifecycle promise is a facet
+attached where it is exported, and that "uncancellable leaf processes gain no
+new author obligation". A leaf protocol author writes a `ProcessSpec` and
+nothing else; whoever owns the specification supplies the law along with the
+rest of what it accepts. `Grass/Process/Spec.lean` records the withdrawal of the
+earlier design that made it a mandatory spec field.
 
 ## Traces here are prefixes
 
@@ -75,6 +86,14 @@ structure ProcessAcceptance (p : ProcessSpec.{u, w}) where
   process.
   -/
   Demanded : p.Observation → Prop
+  /--
+  How a terminating run may dispose of the demands still outstanding.
+
+  See the module note. `TerminalRemainderLaw.strict` is the right default; a
+  specification with no lifecycle constraint says so with `unconstrained`, which
+  a reviewer can see.
+  -/
+  terminalRemainder : TerminalRemainderLaw p
 
 namespace ProcessAcceptance
 
@@ -97,9 +116,14 @@ The acceptance that constrains nothing.
 
 Useful for a process whose correctness is entirely carried by its invariant, and
 useful as an honest marker: a proof built against `trivial` has proved that the
-machine does what it does, not that what it does is wanted. `Demanded` is
-`fun _ => False` rather than `fun _ => True`, so this acceptance cannot be used
-to discharge progress by emitting anything at all.
+machine does what it does, not that what it does is wanted.
+
+Two fields are deliberately *not* trivial in the permissive direction.
+`Demanded` is `fun _ => False`, so this acceptance cannot discharge a progress
+obligation by emitting anything at all. `terminalRemainder` is `unconstrained`
+rather than `strict`, because a marker for "nothing is checked" should not
+quietly impose the strongest lifecycle law; a reviewer seeing `trivial` should
+read it as no custody claim being checked.
 -/
 def trivial (p : ProcessSpec.{u, w}) : ProcessAcceptance p where
   TerminalAccepts := fun _ _ => True
@@ -107,6 +131,7 @@ def trivial (p : ProcessSpec.{u, w}) : ProcessAcceptance p where
   DemandsWellFormed := fun _ => True
   ViewAccepts := fun _ _ => True
   Demanded := fun _ => False
+  terminalRemainder := TerminalRemainderLaw.unconstrained p
 
 theorem trivial_demands_nothing (p : ProcessSpec.{u, w}) (segment : p.Segment) :
     ¬ (trivial p).SegmentIsDemanded segment := by

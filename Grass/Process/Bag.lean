@@ -123,9 +123,11 @@ section Reduction
 
 /-!
 Every operation above is a `Quotient.liftOn` of a list operation, so each
-reduces definitionally on a representative. These six lemmas are the only place
-that fact is used; everything below goes through `Quotient.inductionOn` and then
-`simp` with these.
+reduces definitionally on a representative. These six lemmas record that, and
+they are what makes the operations usable in `simp` at a use site. The proofs
+below do not go through them: each is `Quotient.inductionOn` followed by the
+corresponding `List` fact applied at the representative, which the reduction
+makes typecheck.
 -/
 
 @[simp] theorem ofList_nil : ofList ([] : List α) = 0 := rfl
@@ -311,9 +313,9 @@ section Map
 
 /-!
 `map` is used where one demand vocabulary is embedded in another: a child
-protocol's demands re-expressed in a parent's, and a boundary projection. These
-five laws are what such a transport needs; the sixth fact it needs — that an
-injective map reflects `ConsumeExactlyOneMatching` — is `map_consume` below.
+protocol's demands re-expressed in a parent's, and a boundary projection. The
+six laws below are what such a transport needs, and `map_consume` adds the
+seventh: a consumption survives the transport.
 -/
 
 @[simp] theorem map_ofList (f : α → β) (elements : List α) :

@@ -41,24 +41,33 @@ This is not a shortcut. It is what makes the frame reasoning of
 the outstanding bag discharges one case, not three, and cannot accidentally omit
 the fourth.
 
-## The history is flat
+## The history is flat, and the segmentation is an index
 
-A run state carries the concatenated trace, not its segmentation. An earlier
-draft carried `Segmented`, which was wrong: `segments.length` is the number of
-transitions taken, so an acceptance relation handed a segmented history could
-distinguish one transition emitting `[a, b]` from two emitting `[a]` and `[b]`.
-`docs/FOUNDATION.md` law 18 makes that batching a replaceable realization
-choice, and law 19 forbids a consumer from assuming provider call boundaries are
-message boundaries. `Segmented` and its origin theorems stay in
-`Grass/Process/Observation.lean`, for the run-level causality bookkeeping that
-`docs/PROCESS.md` §4 keeps out of the application proof.
+A run state carries the concatenated trace. The segmentation is carried by
+`Reachable`, as an index, and `Reachable.segmentation_flat` says the two agree.
+
+Splitting them this way is not arbitrary. An acceptance relation must survive
+refinement: when a role is replaced by a flattened subsystem, the *same*
+observations are produced by a different number of process transitions, so an
+acceptance stated over the segmentation would be broken by a replacement that
+changes nothing observable. Acceptance therefore sees `runState.history` and
+nothing else.
+
+Causality is the opposite case. `docs/PROCESS.md` §4 requires the emitting
+segment of each observation to be *retained* through "later weaving, flattening,
+serialization, machine simulation, and projection", so it cannot be discarded.
+Carrying it as an index of `Reachable` gives `Reachable.observationCausality`
+without letting it reach an acceptance relation.
+
+An earlier draft put `Segmented` inside `ProcessRunState`, which failed the
+first test, and then deleted it from the run entirely, which failed the second.
 -/
 
 namespace Grass.Process
 
 universe u w
 
-variable {p : ProcessSpec.{u, w}} {request : p.Request}
+variable {p : ProcessSpec.{u, w}} {law : TerminalRemainderLaw p} {request : p.Request}
 
 /--
 The state of a run in progress or finished.
@@ -114,69 +123,70 @@ end ProcessRunState
 A terminal transition's account of every demand still outstanding.
 
 The outstanding bag is *partitioned* into the occurrences claimed resolved, the
-ones whose custody is transferred, and the ones the specification permits to
-remain pending; each part must be permitted by `p.TerminalDisposition`.
+ones whose custody is transferred, and the ones left pending, and the partition
+as a whole must be permitted by the specification's `TerminalRemainderLaw`.
 
-A partition rather than a function from demand values to dispositions. That
-distinction is the whole enforcement of `docs/FOUNDATION.md` law 7 here. With a
-function, the obligation would depend only on the bag's *support*, because
-`Bag.Mem` is multiplicity-blind by design: a process holding five outstanding
-`CommitBytes` demands would discharge all five with a single claim about the
-value `CommitBytes`. Under law 20 ("affine transfers are not double-counted")
-and law 16 ("every occurrence has at most one receive or disposition") that is
-exactly the accounting this layer exists to prevent. With the partition,
-`card_partition` below shows that five occurrences are still five, distributed
-across the three outcomes.
+Two things are load-bearing here and they are different.
 
-Within one part the permission is still stated on values, and that is correct:
-whether `transferred` is a legitimate outcome for a `CommitBytes` demand at this
-terminal state is a property of the demand and the state, not of which copy.
+**The partition conserves occurrences.** `card_partition` below: five
+outstanding `CommitBytes` occurrences are five across the three parts, not one
+`CommitBytes` value. A classification by demand *value* would collapse them,
+because `Bag.Mem` is multiplicity-blind by design.
+
+**The law bounds them.** Conservation alone only makes the number visible; it is
+`TerminalRemainderLaw.Accepts` that can refuse a partition with three pending
+writes when the specification allows one. That is why the law takes the three
+bags rather than a demand.
+
+What this does *not* give is any inter-custodian fact. `transferred` names no
+recipient, no escrow, and no affine resolve token, so nothing here prevents two
+processes from each claiming the same interaction was transferred to them.
+`docs/FOUNDATION.md` law 16's "at most one receive or disposition" and law 20's
+no-double-counting are properties of the channel escrow, and they arrive with
+`Grass/Process/Network/Channel.lean` in M2. This structure is the per-process
+half.
 -/
-structure TerminalDemandClassification (p : ProcessSpec.{u, w})
-    (request : p.Request) (state : p.State) (result : p.TerminalResult)
+structure TerminalDemandClassification {p : ProcessSpec.{u, w}}
+    (law : TerminalRemainderLaw p) (request : p.Request)
+    (state : p.State) (result : p.TerminalResult)
     (outstanding : Bag p.Demand) where
   /-- The occurrences claimed answered, or whose effect is known complete. -/
   resolved : Bag p.Demand
   /-- The occurrences whose custody passes to another process or the driver. -/
   transferred : Bag p.Demand
-  /-- The occurrences the specification permits to remain unanswered. -/
+  /-- The occurrences left unanswered. -/
   pending : Bag p.Demand
   /-- Every outstanding occurrence is in exactly one part, and none is invented. -/
   partition : outstanding = resolved + transferred + pending
-  /-- The specification permits `resolved` for each demand claimed resolved. -/
-  resolvedPermitted : ∀ demand ∈ resolved,
-    p.TerminalDisposition request state result demand .resolved
-  /-- The specification permits `transferred` for each demand transferred. -/
-  transferredPermitted : ∀ demand ∈ transferred,
-    p.TerminalDisposition request state result demand .transferred
-  /-- The specification permits `permittedPending` for each demand left pending. -/
-  pendingPermitted : ∀ demand ∈ pending,
-    p.TerminalDisposition request state result demand .permittedPending
+  /-- The specification permits this partition at this terminal state. -/
+  permitted : law.Accepts request state result resolved transferred pending
 
 namespace TerminalDemandClassification
 
-variable {state : p.State} {result : p.TerminalResult} {outstanding : Bag p.Demand}
+variable {p : ProcessSpec.{u, w}} {law : TerminalRemainderLaw p}
+  {request : p.Request} {state : p.State} {result : p.TerminalResult}
+  {outstanding : Bag p.Demand}
 
 /--
 Multiplicity is conserved: the three parts account for every occurrence,
 counted.
 
-This is the theorem that makes the partition load-bearing rather than
-decorative. A resource or obligation law downstream reads `transferred` and gets
-the true number of custody transfers, not the number of distinct demand values.
+This is what makes the partition more than a relabelling. Without it a
+classification could claim to dispose of a bag while its parts held fewer
+occurrences than the bag did.
 -/
 theorem card_partition
-    (classification : TerminalDemandClassification p request state result outstanding) :
+    (classification : TerminalDemandClassification law request state result outstanding) :
     outstanding.card =
       classification.resolved.card + classification.transferred.card +
         classification.pending.card := by
-  obtain ⟨resolved, transferred, pending, partition, _, _, _⟩ := classification
+  obtain ⟨resolved, transferred, pending, partition, _⟩ := classification
   subst partition
   simp
 
 /-- Every outstanding demand value appears in at least one part. -/
 theorem mem_some_part
-    (classification : TerminalDemandClassification p request state result outstanding)
+    (classification : TerminalDemandClassification law request state result outstanding)
     {demand : p.Demand} (live : demand ∈ outstanding) :
     demand ∈ classification.resolved ∨ demand ∈ classification.transferred ∨
       demand ∈ classification.pending := by
@@ -184,39 +194,33 @@ theorem mem_some_part
   simpa [or_assoc] using live
 
 /--
-Every outstanding demand has a permitted disposition.
+A run holding nothing terminates whenever the law permits the empty partition.
 
-The form `docs/PROCESS.md` §2 states — "termination explicitly resolves,
-transfers, or permits pending for every remainder" — recovered from the
-partition, so a consumer that only needs the coverage fact does not have to
-unfold it.
+`docs/PROCESS.md` §3 requires that "uncancellable leaf processes gain no new
+author obligation", and this is where that is true: with nothing outstanding,
+the obligation is whatever the law says about three empty bags, which the strict
+law grants outright.
 -/
-theorem covered
-    (classification : TerminalDemandClassification p request state result outstanding)
-    {demand : p.Demand} (live : demand ∈ outstanding) :
-    ∃ disposition, p.TerminalDisposition request state result demand disposition := by
-  rcases classification.mem_some_part live with inResolved | inTransferred | inPending
-  · exact ⟨.resolved, classification.resolvedPermitted demand inResolved⟩
-  · exact ⟨.transferred, classification.transferredPermitted demand inTransferred⟩
-  · exact ⟨.permittedPending, classification.pendingPermitted demand inPending⟩
-
-/--
-A run holding nothing terminates with the empty classification.
-
-Not a convenience: it is the statement that law 7 costs an author nothing when
-there is nothing outstanding, which is the common case and should not require a
-constructed witness.
--/
-def empty (p : ProcessSpec.{u, w}) (request : p.Request) (state : p.State)
-    (result : p.TerminalResult) :
-    TerminalDemandClassification p request state result 0 where
+def empty (law : TerminalRemainderLaw p) (request : p.Request) (state : p.State)
+    (result : p.TerminalResult)
+    (permitted : law.Accepts request state result 0 0 0) :
+    TerminalDemandClassification law request state result 0 where
   resolved := 0
   transferred := 0
   pending := 0
   partition := by simp
-  resolvedPermitted := by simp
-  transferredPermitted := by simp
-  pendingPermitted := by simp
+  permitted := permitted
+
+/-- Under the strict law, a run may only terminate holding nothing. -/
+theorem strict_forces_empty
+    (classification :
+      TerminalDemandClassification (TerminalRemainderLaw.strict p) request state result
+        outstanding) :
+    outstanding = 0 := by
+  obtain ⟨resolved, transferred, pending, partition, permitted⟩ := classification
+  obtain ⟨noResolved, noTransferred, noPending⟩ := permitted
+  subst partition; subst noResolved; subst noTransferred; subst noPending
+  simp
 
 end TerminalDemandClassification
 
@@ -232,18 +236,19 @@ genuinely terminal rather than a running state followed by a hidden transition.
 It is available only when the initial state also satisfies `Terminal` and every
 initially issued demand already has a permitted disposition.
 -/
-inductive ProcessRunInitial (p : ProcessSpec.{u, w}) (request : p.Request) :
+inductive ProcessRunInitial {p : ProcessSpec.{u, w}}
+    (law : TerminalRemainderLaw p) (request : p.Request) :
     ProcessRunState p request → Prop
   | running {state : p.State} {issued : Bag p.Demand} {emitted : p.Segment}
       (initial : p.Initial request state issued emitted) :
-      ProcessRunInitial p request (.running state issued emitted)
+      ProcessRunInitial law request (.running state issued emitted)
   | terminal {state : p.State} {issued : Bag p.Demand} {emitted : p.Segment}
       {result : p.TerminalResult}
       (initial : p.Initial request state issued emitted)
       (isTerminal : p.Terminal request state result)
       (classification :
-        TerminalDemandClassification p request state result issued) :
-      ProcessRunInitial p request (.terminal state result emitted)
+        TerminalDemandClassification law request state result issued) :
+      ProcessRunInitial law request (.terminal state result emitted)
 
 /--
 One step of a run.
@@ -251,7 +256,8 @@ One step of a run.
 See the module note for the two-constructor form and for the table mapping each
 clause of `docs/PROCESS.md` §2 to a field.
 -/
-inductive ProcessRunTransition (p : ProcessSpec.{u, w}) (request : p.Request) :
+inductive ProcessRunTransition {p : ProcessSpec.{u, w}}
+    (law : TerminalRemainderLaw p) (request : p.Request) :
     ProcessRunState p request → ProcessRunState p request → Prop
   /--
   An event that settles no outstanding demand: external entropy, a fault, or an
@@ -262,7 +268,7 @@ inductive ProcessRunTransition (p : ProcessSpec.{u, w}) (request : p.Request) :
       {event : p.Event}
       (settlesNothing : event.settles = none)
       (transition : p.Step state event after issued emitted) :
-      ProcessRunTransition p request
+      ProcessRunTransition law request
         (.running state outstanding observations)
         (.running after (outstanding + issued) (observations ++ emitted))
   /--
@@ -277,7 +283,7 @@ inductive ProcessRunTransition (p : ProcessSpec.{u, w}) (request : p.Request) :
       (settlesDemand : event.settles = some demand)
       (consume : Bag.ConsumeExactlyOneMatching outstanding demand remainder)
       (transition : p.Step state event after issued emitted) :
-      ProcessRunTransition p request
+      ProcessRunTransition law request
         (.running state outstanding observations)
         (.running after (remainder + issued) (observations ++ emitted))
   /--
@@ -289,8 +295,8 @@ inductive ProcessRunTransition (p : ProcessSpec.{u, w}) (request : p.Request) :
       {observations : Trace p.Observation} {result : p.TerminalResult}
       (isTerminal : p.Terminal request state result)
       (classification :
-        TerminalDemandClassification p request state result outstanding) :
-      ProcessRunTransition p request
+        TerminalDemandClassification law request state result outstanding) :
+      ProcessRunTransition law request
         (.running state outstanding observations)
         (.terminal state result observations)
 
@@ -302,7 +308,7 @@ theorem stepExternal {state after : p.State} {outstanding issued : Bag p.Demand}
     {observations : Trace p.Observation} {emitted : p.Segment}
     {event : p.ExternalEvent}
     (transition : p.Step state (.external event) after issued emitted) :
-    ProcessRunTransition p request
+    ProcessRunTransition law request
       (.running state outstanding observations)
       (.running after (outstanding + issued) (observations ++ emitted)) :=
   .step (by simp) transition
@@ -311,7 +317,7 @@ theorem stepFault {state after : p.State} {outstanding issued : Bag p.Demand}
     {observations : Trace p.Observation} {emitted : p.Segment}
     {fault : p.LogicalFault}
     (transition : p.Step state (.fault fault) after issued emitted) :
-    ProcessRunTransition p request
+    ProcessRunTransition law request
       (.running state outstanding observations)
       (.running after (outstanding + issued) (observations ++ emitted)) :=
   .step (by simp) transition
@@ -322,7 +328,7 @@ theorem stepEnvironmentViolation {state after : p.State}
     {violation : p.EnvironmentViolation}
     (transition :
       p.Step state (.environmentViolation violation) after issued emitted) :
-    ProcessRunTransition p request
+    ProcessRunTransition law request
       (.running state outstanding observations)
       (.running after (outstanding + issued) (observations ++ emitted)) :=
   .step (by simp) transition
@@ -333,7 +339,7 @@ theorem stepResult {state after : p.State}
     {demand : p.Demand} {result : p.Result demand}
     (consume : Bag.ConsumeExactlyOneMatching outstanding demand remainder)
     (transition : p.Step state (.result demand result) after issued emitted) :
-    ProcessRunTransition p request
+    ProcessRunTransition law request
       (.running state outstanding observations)
       (.running after (remainder + issued) (observations ++ emitted)) :=
   .settle (by simp) consume transition
@@ -344,7 +350,7 @@ theorem stepInterrupted {state after : p.State}
     {demand : p.Demand} {reason : p.InterruptReason}
     (consume : Bag.ConsumeExactlyOneMatching outstanding demand remainder)
     (transition : p.Step state (.interrupted demand reason) after issued emitted) :
-    ProcessRunTransition p request
+    ProcessRunTransition law request
       (.running state outstanding observations)
       (.running after (remainder + issued) (observations ++ emitted)) :=
   .settle (by simp) consume transition
@@ -368,7 +374,7 @@ a field of `Grass/Process/Correct.lean`.
 theorem not_from_terminal {state : p.State} {result : p.TerminalResult}
     {observations : Trace p.Observation}
     {after : ProcessRunState p request} :
-    ¬ ProcessRunTransition p request (.terminal state result observations) after := by
+    ¬ ProcessRunTransition law request (.terminal state result observations) after := by
   intro transition; cases transition
 
 /--
@@ -388,7 +394,7 @@ governed by `TerminalDemandClassification` instead.
 theorem card_drops_by_at_most_one
     {state afterState : p.State} {outstanding afterOutstanding : Bag p.Demand}
     {observations afterObservations : Trace p.Observation}
-    (transition : ProcessRunTransition p request
+    (transition : ProcessRunTransition law request
       (.running state outstanding observations)
       (.running afterState afterOutstanding afterObservations)) :
     outstanding.card ≤ afterOutstanding.card + 1 := by
@@ -405,7 +411,7 @@ the history a prefix order, and it is what an acceptance relation stated over
 prefixes relies on.
 -/
 theorem history_extends {before after : ProcessRunState p request}
-    (transition : ProcessRunTransition p request before after) :
+    (transition : ProcessRunTransition law request before after) :
     ∃ emitted, after.history = before.history ++ emitted := by
   cases transition with
   | step _ _ => exact ⟨_, rfl⟩
@@ -415,18 +421,93 @@ theorem history_extends {before after : ProcessRunState p request}
 end ProcessRunTransition
 
 /--
-The states reachable by a finite execution prefix of `p` on `request`.
+The states reachable by a finite execution prefix, together with the
+segmentation that produced their trace.
+
+The `Segmented` index is what keeps `docs/PROCESS.md` §4's observation causality
+available. It is an index rather than a field of the run state so that an
+acceptance relation, which sees only `runState.history`, cannot branch on it —
+see the module note.
 
 Finite by construction: this is the prefix relation, and every statement about
 maximal or infinite executions belongs to `Grass.Semantics`.
 -/
-inductive Reachable (p : ProcessSpec.{u, w}) (request : p.Request) :
-    ProcessRunState p request → Prop
-  | initial {state : ProcessRunState p request}
-      (isInitial : ProcessRunInitial p request state) : Reachable p request state
-  | step {before after : ProcessRunState p request}
-      (prior : Reachable p request before)
-      (transition : ProcessRunTransition p request before after) :
-      Reachable p request after
+inductive Reachable {p : ProcessSpec.{u, w}} (law : TerminalRemainderLaw p)
+    (request : p.Request) :
+    Segmented p.Observation → ProcessRunState p request → Prop
+  | initial {state : p.State} {issued : Bag p.Demand} {emitted : p.Segment}
+      (isInitial : ProcessRunInitial law request (.running state issued emitted)) :
+      Reachable law request (Segmented.empty.emit emitted)
+        (.running state issued emitted)
+  | initialTerminal {state : p.State} {result : p.TerminalResult}
+      {emitted : p.Segment}
+      (isInitial : ProcessRunInitial law request (.terminal state result emitted)) :
+      Reachable law request (Segmented.empty.emit emitted)
+        (.terminal state result emitted)
+  | step {segmented : Segmented p.Observation}
+      {before after : ProcessRunState p request} {emitted : p.Segment}
+      (prior : Reachable law request segmented before)
+      (transition : ProcessRunTransition law request before after)
+      (exact : after.history = before.history ++ emitted) :
+      Reachable law request (segmented.emit emitted) after
+
+namespace Reachable
+
+/--
+The carried segmentation flattens to exactly the state's history.
+
+The invariant that makes the index meaningful rather than decorative: without
+it, `Reachable` could carry any segmentation at all and the causality theorem
+below would say nothing about this run.
+-/
+theorem segmentation_flat {segmented : Segmented p.Observation}
+    {runState : ProcessRunState p request}
+    (reached : Reachable law request segmented runState) :
+    segmented.flat = runState.history := by
+  induction reached with
+  | initial _ => simp
+  | initialTerminal _ => simp
+  | step _ _ exact ih => simp [exact, ih]
+
+/--
+**Observation causality.** Every observation occurrence in a reachable run's
+trace was emitted by exactly one transition of that run.
+
+`docs/PROCESS.md` §4 calls this "generic bookkeeping, not an application proof
+field", and this is where that promise is kept: an author supplies nothing, and
+the fact survives because `Reachable` carries the segmentation.
+
+The conclusion is `Segmented.origin`'s decomposition, and `Segmented.origin_unique`
+says that decomposition is the only one.
+-/
+theorem observationCausality {segmented : Segmented p.Observation}
+    {runState : ProcessRunState p request}
+    (reached : Reachable law request segmented runState)
+    {observation : p.Observation} {before after : Trace p.Observation}
+    (locate : runState.history = before ++ observation :: after) :
+    ∃ segmentsBefore segment segmentsAfter segmentBefore segmentAfter,
+      segmented.segments = segmentsBefore ++ segment :: segmentsAfter ∧
+      segment = segmentBefore ++ observation :: segmentAfter ∧
+      before = segmentsBefore.flatten ++ segmentBefore ∧
+      after = segmentAfter ++ segmentsAfter.flatten :=
+  segmented.origin (by rw [reached.segmentation_flat, locate])
+
+/--
+One segment per transition, including the silent ones.
+
+`segments.length` is the number of steps taken, which is exactly why it must not
+reach an acceptance relation, and exactly why it is available to a causality
+argument that needs to name a transition.
+-/
+theorem segment_count {segmented : Segmented p.Observation}
+    {runState : ProcessRunState p request}
+    (reached : Reachable law request segmented runState) :
+    0 < segmented.segments.length := by
+  induction reached with
+  | initial _ => simp
+  | initialTerminal _ => simp
+  | step _ _ _ ih => simp
+
+end Reachable
 
 end Grass.Process

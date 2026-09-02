@@ -222,6 +222,46 @@ The interface types — external events, demands, results, observations, fault
 classes — live in one universe; the private types — request, state, terminal
 result, view — live in another; a registry's keys live in a third.
 
+**Decided — the terminal-remainder law lives in `ProcessAcceptance`, and is
+indexed by the partition.** See §10.5, which withdraws the earlier claim that it
+had to be a `ProcessSpec` field. A law indexed by a demand value cannot express a
+bound, and a bound is what law 7 and law 20 require; a law that is a mandatory
+spec field is the author obligation [PROCESS.md](PROCESS.md) §3 explicitly
+refuses to impose on a leaf.
+
+**Decided — progress distinguishes entropy from the program's own activity, not
+settling from non-settling.** An earlier draft made a transition progressing
+whenever its event settled no outstanding demand, which gave `.fault` and
+`.environmentViolation` a free pass: a process that faults in a loop, emits
+nothing, and decreases no measure satisfied the condition. The disjunct is now
+`ProcessEvent.externalEntropy`, so only a genuine external event counts as
+waiting. `MeetsProcessProgress.silent_fault_decreases` is the corollary that
+records it.
+
+Two limits of this layer are recorded in the module rather than hidden. There is
+no *declaration* of which frontiers are law-bearing — `ProcessAcceptance` carries
+none — so waiting forever for entropy that never arrives passes here and must be
+excluded by the network adequacy theorem. And `StepProgresses` reads a
+transition's own emitted segment, which makes progress a per-specification
+property to be re-proved after a refinement rather than transported.
+
+**Decided — the segmentation is an index of `Reachable`, not a field of the run
+state and not absent.** Two failed drafts bracket this. Putting `Segmented`
+inside `ProcessRunState` let an acceptance relation branch on the transition
+count, which breaks under a refinement that produces the same observations in a
+different number of steps. Deleting it left `docs/PROCESS.md` §4's observation
+causality with nothing to be stated over — the module was 186 lines with no
+consumer. Carrying it as an index gives `Reachable.observationCausality` while
+keeping it out of reach of `TraceAccepts`, which sees only the flat history.
+
+**Decided — `ProcessCorrect.progress` is indexed by request.**
+[PROCESS.md](PROCESS.md) §4 writes `progress : MeetsProcessProgress p`. The
+implementation writes `∀ request, MeetsProcessProgress p accept Invariant request`,
+because the responsiveness fields quantify over states reachable *for a request*
+and the terminal disjunct mentions `p.Terminal request`. A single un-indexed
+record would have to quantify internally over requests, which is the same
+obligation with a worse shape.
+
 **Decided — `ProtocolRegistry` is universe-polymorphic from M1.**
 [PROCESS.md](PROCESS.md) §4 makes a flattened realization's private state
 `LogicalProcessNetwork r.plan`, which ranges over every registered protocol's
@@ -620,18 +660,49 @@ Proposed resolution: both are the §3 `ProcessPlan`, with `root` an abbreviation
 for a plan whose root protocol is named; `ProcessNetwork` is deleted or defined.
 Blocks: M3 `Policy.lean`, M4 `Proof/Driver.lean`.
 
-### 10.5 `ProcessSpec` has no field for the terminal disposition law
+### 10.5 Withdrawn: `ProcessSpec` does not need a terminal disposition field
 
-[PROCESS.md](PROCESS.md) §2 requires a terminal transition to resolve, transfer,
-or permit-pending every outstanding demand "according to the specification's
-progress/lifecycle law", but the declared `ProcessSpec` contains no field in
-which that law could live, so the classification would be an assignment with no
-acceptance criterion — satisfiable by mapping everything to `permittedPending`,
-which is the disappearance [FOUNDATION.md](FOUNDATION.md) law 7 forbids. This
-plan adds one field, `TerminalDisposition`, and marks it as a deviation.
-Alternative resolutions are to put the law in `ProcessAcceptance` or to make it
-a parameter of the run relation. Blocks: nothing; it is implemented, and needs
-ratification of the shape.
+**This entry previously claimed a corpus defect and was wrong.** It said that
+[PROCESS.md](PROCESS.md) §2 requires a terminating run to dispose of every
+outstanding demand "according to the specification's progress/lifecycle law",
+that the declared `ProcessSpec` contains no field in which that law could live,
+and that a field therefore had to be added.
+
+§3 already owns that law. `ProcessTerminationContract.disposition` and
+`TerminationFacet` are the lifecycle machinery, and the section is explicit that
+they are a *facet* attached where a promise is exported:
+
+> `ProcessCorrect` itself retains only ordinary invariant, terminal,
+> observation, demand, and progress facts. A process plan attaches
+> `TerminationFacet` only when the process exports a cancellation/restart/upgrade
+> promise or another component relies on one. … Pure serial functions,
+> straight-line helpers, and uncancellable leaf processes gain no new author
+> obligation.
+
+A mandatory field on every `ProcessSpec` is exactly the obligation that sentence
+refuses, and the name `TerminalDisposition` was already bound by §3 to a
+different thing — a whole-edge custody transform — which
+[README.md](README.md)'s one-owner rule forbids reusing.
+
+**Resolution, implemented.** The law is `TerminalRemainderLaw` in
+`Grass/Process/Spec.lean`, and it is supplied through `ProcessAcceptance`, which
+the owner of the specification provides and a leaf author never writes. It is
+indexed by the three sub-bags of the terminal partition rather than by a demand
+value, because the obligation law 7 and law 20 need is a *bound*: a law indexed
+by a value permits `tick` to be left pending and thereby permits any number of
+outstanding ticks at once, which the count in `card_partition` makes visible but
+does not prevent. `Tests/Process/M1Fixtures.lean` carries the negative fixture —
+a run holding three ticks provably cannot terminate under a law that permits
+two.
+
+The three outcome names (`resolved`, `transferred`, `pending`) are
+[PROCESS.md](PROCESS.md) §2's own words. Their relation to
+[OBLIGATIONS.md](OBLIGATIONS.md) §3's five terminal dispositions is a mapping
+this layer owes when obligations land; in particular `pending` has no evident
+counterpart there and may turn out to require one.
+
+Blocks: nothing. The withdrawal removes the spike churn §10.7 predicted for this
+entry; §10.6's four-field addition is now three.
 
 ### 10.6 The fault, interruption, and violation classes are carried per vocabulary
 
@@ -648,17 +719,17 @@ implemented, and needs ratification.
 ### 10.7 The spike sources must change with the deviations
 
 `Spikes/4_Web_Server/Process.lean` and `Spikes/5_Spinning_Cube/Process.lean`
-write `ProcessSpec` literals supplying ten fields. The deviations in §10.5 and
-§10.6 add four mandatory fields to every authored spec — `InterruptReason`,
-`LogicalFault`, `EnvironmentViolation`, and `TerminalDisposition` — so neither
-spike literal would elaborate against the declaration as implemented.
+write `ProcessSpec` literals supplying eleven fields. The deviation in §10.6
+adds three mandatory fields to every authored spec — `InterruptReason`,
+`LogicalFault`, and `EnvironmentViolation` — so neither spike literal would
+elaborate against the declaration as implemented.
 [MODULES.md](MODULES.md) makes those files the golden author-surface test, and
 `check-spike-sources.ps1` compares them against the fenced blocks in
 [SPIKE_4.md](SPIKE_4.md) and [SPIKE_5.md](SPIKE_5.md) rather than against the
 library, so the existing gate will not catch it.
 
 The spike sources and their document blocks therefore move in lockstep with
-§10.5 and §10.6 when those are ratified. This plan does not change them
+§10.6 when it is ratified. This plan does not change them
 unilaterally: they are shared review fixtures, and editing them before
 ratification would encode an unratified decision in the golden surface.
 Blocks: nothing yet; it is ratification's first consequence.
@@ -683,7 +754,27 @@ Proposed resolution: cancellation and supervision are certificates over a
 topology rather than fields of it, landing with M3, and the §3 declaration is
 amended. Blocks: nothing; the split is implemented and M3 depends on it.
 
-### 10.9 A multiset is hand-rolled rather than taken from mathlib
+### 10.9 `EffectDemand` and `EffectResult` are undeclared
+
+[PROCESS.md](PROCESS.md) §4 writes
+`SequentialDecision.effect (demand : EffectDemand boundary) (resume : EffectResult demand -> State)`
+and `DirectRelationalProgram` uses `AbstractDemandBag (EffectDemand boundary)`.
+Neither `EffectDemand` nor `EffectResult` is declared anywhere in the corpus —
+the same defect class as §10.4's `ProcessNetwork root`.
+
+`Grass/Process/Sequential/Machine.lean` currently identifies them with
+`boundary.Demand` and `boundary.Result`. The surrounding text does not obviously
+support that: §4 speaks of "structured dynamic effects", "an inventory of
+possible sites", and "one reusable dependent result/boundary constructor" per
+new effect protocol, which suggests a layer between an authored effect and a
+boundary demand.
+
+Proposed resolution: either ratify `EffectDemand boundary := boundary.Demand`,
+or declare the intended type. This matters before M4, because the adapter's
+`Pending` equation is stated over it and the identification is already frozen in
+the serial authoring surface. Blocks: M4 `Sequential/Adapter.lean`.
+
+### 10.10 A multiset is hand-rolled rather than taken from mathlib
 
 Recorded in §2.2. The decision is reversible and local: `Grass/Process/Bag.lean`
 is one module with a documented custody note, and adopting mathlib later is a

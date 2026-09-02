@@ -36,22 +36,28 @@ observation-projection theorem would need transporting through a lift. With the
 split, flattening moves `w` and leaves `u` alone, so those theorems transport by
 identity. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §2.2 records the decision.
 
-## The one added field
+## Where the terminal-remainder law is not
 
-`TerminalDisposition` is not in the normative declaration. It is here because
-§2 requires that on termination the run "explicitly resolves, transfers, or
-permits pending for every remainder **according to the specification's
-progress/lifecycle law**", and the declaration as written contains no field in
-which that law could live. Without it, `ClassifiesEveryOutstandingDemand` in
-`Grass/Process/Run.lean` would be an assignment with no acceptance criterion —
-a function every terminal transition could satisfy by mapping everything to
-`permittedPending`, which is precisely the disappearance `docs/FOUNDATION.md`
-law 7 forbids.
+An earlier version of this module gave `ProcessSpec` a `TerminalDisposition`
+field, on the grounds that `docs/PROCESS.md` §2 requires a terminating run to
+dispose of every outstanding demand "according to the specification's
+progress/lifecycle law" and no declared field could hold that law.
 
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` records this as a deviation needing a
-`docs/DECISIONS.md` entry. It strengthens rather than weakens: a specification
-that genuinely permits anything writes `fun _ _ _ _ _ => True` and a reviewer
-can see that it did.
+That was a misreading, and it was expensive twice over. §3 already owns the
+lifecycle law — `ProcessTerminationContract.disposition` and `TerminationFacet`
+— and is explicit that it is a *facet* attached only when a process exports a
+promise: "`ProcessCorrect` itself retains only ordinary invariant, terminal,
+observation, demand, and progress facts … uncancellable leaf processes gain no
+new author obligation." A mandatory field on every `ProcessSpec` is precisely
+the obligation that sentence refuses. And the name `TerminalDisposition` is
+already bound by §3 to a different thing, a whole-edge custody transform, which
+`docs/README.md`'s one-owner rule forbids reusing.
+
+The law lives in `TerminalRemainderLaw` below and is supplied through
+`ProcessAcceptance`, which the owner of the specification provides and a leaf
+author never writes. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.5 records the
+withdrawal.
+
 -/
 
 namespace Grass.Process
@@ -71,27 +77,6 @@ structure ViewFacet (State : Type w) : Type (w + 1) where
   View : Type w
   /-- The projection. Total and pure. -/
   render : State → View
-
-/--
-What a terminal transition says about a demand still outstanding when the
-process ends.
-
-`docs/PROCESS.md` §2 names exactly these three: a terminal transition
-"explicitly resolves, transfers, or permits pending for every remainder".
-
-The third is not a loophole. `permittedPending` is a *claim* that the
-specification tolerates this interaction never being answered — for instance a
-best-effort log write abandoned at shutdown — and `ProcessSpec.TerminalDisposition`
-is where the specification has to have said so.
--/
-inductive TerminalDemandDisposition
-  /-- The demand was answered, or its effect is known to have completed. -/
-  | resolved
-  /-- Custody of the interaction passed to another process or to the driver. -/
-  | transferred
-  /-- The specification permits this interaction to remain unanswered forever. -/
-  | permittedPending
-  deriving DecidableEq, Repr
 
 set_option linter.checkUnivs false in
 /--
@@ -124,12 +109,6 @@ structure ProcessSpec : Type (max (u + 1) (w + 1)) extends ProcessVocabulary.{u}
   Step : State → ProcessEvent toProcessVocabulary → State → Bag Demand →
     ObservationSegment Observation → Prop
   /--
-  Which dispositions this specification permits for a demand still outstanding
-  at a terminal state. See the module note for why this field exists.
-  -/
-  TerminalDisposition :
-    Request → State → TerminalResult → Demand → TerminalDemandDisposition → Prop
-  /--
   The desired-view projection, when the process has one.
 
   `none` is the normal choice. `docs/PROCESS.md` §2: "`view := none` is the
@@ -145,13 +124,82 @@ variable (p : ProcessSpec.{u, w})
 /-- The event family of this process. -/
 abbrev Event := ProcessEvent p.toProcessVocabulary
 
-/-- The demand multiset type of this process. -/
-abbrev Demands := Bag p.Demand
-
 /-- The observation segment type of this process. -/
 abbrev Segment := ObservationSegment p.Observation
 
 end ProcessSpec
+
+/--
+Which partitions of a still-outstanding demand bag a terminating run may claim.
+
+`docs/PROCESS.md` §2 requires that termination "explicitly resolves, transfers,
+or permits pending for every remainder according to the specification's
+progress/lifecycle law". This is that law, and the three bags are the three
+outcomes the sentence names.
+
+## Why it takes bags and not a demand
+
+Because the obligation is a *bound*, not a classification. A law indexed by a
+single demand value says which outcomes are legitimate for a `CommitBytes`, and
+one such permission then licenses any number of outstanding `CommitBytes`
+occurrences at once. A law over the partition can say "at most two writes may be
+left pending", which is what `docs/FOUNDATION.md` law 7 and law 20 actually
+need: law 20 forbids double-counting an affine transfer, and counting is not
+possible against a predicate on values.
+
+## Why it is not a field of `ProcessSpec`
+
+See the module note. It is supplied through `ProcessAcceptance` by whoever owns
+the specification, so a leaf protocol author writes nothing.
+-/
+structure TerminalRemainderLaw (p : ProcessSpec.{u, w}) where
+  /--
+  The permitted partitions.
+
+  `Accepts request state result resolved transferred pending` holds when a run
+  of `request` finishing at `state` with `result` may claim that exactly those
+  occurrences were resolved, transferred, and left pending.
+  -/
+  Accepts : p.Request → p.State → p.TerminalResult →
+    (resolved transferred pending : Bag p.Demand) → Prop
+
+namespace TerminalRemainderLaw
+
+variable {p : ProcessSpec.{u, w}}
+
+/--
+The law that permits nothing: a run may only terminate holding nothing.
+
+The strictest law, and the right default for a protocol with no lifecycle
+promise. Note that it does permit termination — with all three parts empty — so
+it is not vacuous in the other direction.
+-/
+def strict (p : ProcessSpec.{u, w}) : TerminalRemainderLaw p where
+  Accepts := fun _ _ _ resolved transferred pending =>
+    resolved = 0 ∧ transferred = 0 ∧ pending = 0
+
+/--
+The law that permits anything.
+
+Present so that a specification which genuinely has no lifecycle constraint can
+say so *explicitly*. A reviewer seeing this constructor knows that no terminal
+custody claim is being checked; a reviewer seeing a missing field would not.
+-/
+def unconstrained (p : ProcessSpec.{u, w}) : TerminalRemainderLaw p where
+  Accepts := fun _ _ _ _ _ _ => True
+
+theorem strict_permits_empty (p : ProcessSpec.{u, w}) (request : p.Request)
+    (state : p.State) (result : p.TerminalResult) :
+    (strict p).Accepts request state result 0 0 0 := ⟨rfl, rfl, rfl⟩
+
+theorem strict_forbids_pending (p : ProcessSpec.{u, w}) {request : p.Request}
+    {state : p.State} {result : p.TerminalResult}
+    {resolved transferred pending : Bag p.Demand}
+    (nonempty : pending ≠ 0)
+    (permitted : (strict p).Accepts request state result resolved transferred pending) :
+    False := nonempty permitted.2.2
+
+end TerminalRemainderLaw
 
 set_option linter.checkUnivs false in
 /--
@@ -177,9 +225,6 @@ structure DeterministicProcess (v : ProcessVocabulary.{u}) :
   /-- The unique successor configuration for a state and event. -/
   update : State → ProcessEvent v →
     State × Bag v.Demand × ObservationSegment v.Observation
-  /-- Which terminal dispositions the specification permits. -/
-  terminalDisposition :
-    Request → State → TerminalResult → v.Demand → TerminalDemandDisposition → Prop
   /-- The desired-view projection, when there is one. -/
   view : Option (ViewFacet State)
 
@@ -198,7 +243,6 @@ def toProcessSpec : ProcessSpec.{u, w} where
   Terminal := fun request state result => d.terminal request state = some result
   Step := fun state event after issued emitted =>
     d.update state event = (after, issued, emitted)
-  TerminalDisposition := d.terminalDisposition
   view := d.view
 
 @[simp] theorem toProcessSpec_toProcessVocabulary :

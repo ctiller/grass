@@ -193,6 +193,50 @@ def settles : ProcessEvent v → Option v.Demand
 @[simp] theorem settles_environmentViolation (violation : v.EnvironmentViolation) :
     (ProcessEvent.environmentViolation violation).settles = none := rfl
 
+/--
+The entropy this event carries, if it is entropy at all.
+
+`settles` splits the family by whether an outstanding demand is consumed. This
+splits it by a different question: did something outside the program happen?
+Only `.external` did. A `.result` is the process's own request coming back, and
+a `.fault` is the process failing — `docs/PROCESS.md` §2 lists them as separate
+constructors for that reason.
+
+`Grass/Process/Progress.lean` needs this second split and not the first: a
+process that waits forever for entropy is legitimate, while one that faults in a
+loop without emitting anything is the livelock a progress theorem exists to
+exclude.
+-/
+def externalEntropy : ProcessEvent v → Option v.ExternalEvent
+  | .external event => some event
+  | .result _ _ => none
+  | .interrupted _ _ => none
+  | .fault _ => none
+  | .environmentViolation _ => none
+
+@[simp] theorem externalEntropy_external (event : v.ExternalEvent) :
+    (ProcessEvent.external (v := v) event).externalEntropy = some event := rfl
+
+@[simp] theorem externalEntropy_result (demand : v.Demand) (result : v.Result demand) :
+    (ProcessEvent.result demand result).externalEntropy = none := rfl
+
+@[simp] theorem externalEntropy_interrupted (demand : v.Demand)
+    (reason : v.InterruptReason) :
+    (ProcessEvent.interrupted demand reason).externalEntropy = none := rfl
+
+@[simp] theorem externalEntropy_fault (fault : v.LogicalFault) :
+    (ProcessEvent.fault fault).externalEntropy = none := rfl
+
+@[simp] theorem externalEntropy_environmentViolation
+    (violation : v.EnvironmentViolation) :
+    (ProcessEvent.environmentViolation violation).externalEntropy = none := rfl
+
+/-- Entropy settles nothing: it is not an answer to anything the process asked. -/
+theorem settles_none_of_externalEntropy {event : ProcessEvent v}
+    {entropy : v.ExternalEvent} (isEntropy : event.externalEntropy = some entropy) :
+    event.settles = none := by
+  cases event <;> simp_all [externalEntropy, settles]
+
 end ProcessEvent
 
 end Grass.Process
