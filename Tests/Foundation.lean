@@ -132,6 +132,10 @@ example : Nonempty { execution :
     (artifactFormat.loadedBehavior ByteArray.empty).HasInput true execution } :=
   verified.execution_nonempty true trivial
 
+example : Nonempty ((artifactFormat.loadedBehavior ByteArray.empty).system.Completion
+    (initialExecution true).state (initialExecution true).graph) :=
+  verified.execution_completes (initialExecution true)
+
 example : artifactFormat.Parses (emitProgram verified) () :=
   emitProgram_parses verified
 
