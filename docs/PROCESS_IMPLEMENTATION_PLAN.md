@@ -1,0 +1,577 @@
+# Process implementation plan
+
+Status: implementation plan owned by the `c-process` implementation agent. This
+is a tier-four document under [README.md](README.md) authority ordering: it
+schedules work against the normative demands of [PROCESS.md](PROCESS.md) and
+[PROCESS_SHARDING.md](PROCESS_SHARDING.md). It may not weaken either. Where it
+proposes a structural change outside its ownership, or takes temporary custody
+of a layer another agent owns, it says so explicitly and names the handover.
+
+Section 10 is a ledger of defects this plan found in the normative corpus. Those
+are not this plan's to ratify; they are raised, with a proposed resolution, so
+that the milestone which depends on each one is not scheduled against an
+ambiguity.
+
+## 0. Ownership boundary
+
+Owned by this plan:
+
+| Area | Normative owner |
+|---|---|
+| process vocabulary, events, specs, runs, correctness | [PROCESS.md](PROCESS.md) §2, §4 |
+| protocol registries and their open merge | §3, [PROCESS_SHARDING.md](PROCESS_SHARDING.md) §2 |
+| the driver boundary type and root projection | §2, §5 |
+| topology, population, spawn and supervision law shapes | §3 |
+| typed channels, escrow, session and capacity laws | §3, FOUNDATION law 16 |
+| the exhaustive `NetworkTransition` family and nominal freshness | §3, FOUNDATION law 22 |
+| child and API-call protocols and their lifecycle | §3 |
+| byte-flow ingress/egress and partial I/O | §3, FOUNDATION law 19 |
+| cancellation masks, summaries, termination contracts, facets | §3, §5 |
+| the application proof package and the driver contract | §4, §5 |
+| flattening, serialization, the serial-callable bridge | §4 |
+| process independence, diamonds, syscall linearization | §4 |
+| the commit transition and the desired-view reconciliation law | §6 |
+| per-process progress and the network progress theorem | §7 |
+| weaving, invariant mixins, refinement lenses | §8 |
+| process resource metrics, capacity credit, scope flux | §5, FOUNDATION law 20 |
+| process signatures, shard and facet certificates, SCC summaries | [PROCESS_SHARDING.md](PROCESS_SHARDING.md) |
+| the sequential authoring mode and its adapter | §4 |
+
+Not owned, and this plan must consume rather than restate:
+
+- `SpecProcess`, `BehaviorContract`, `SpecificationSuite`, execution traces, the
+  observation oracle, and the abstract progress/liveness contract belong to
+  [SEMANTICS.md](SEMANTICS.md).
+- the resource algebra classes (`ResourceModel`, ordered partial commutative
+  monoid laws, axis names and limits) belong to [RESOURCES.md](RESOURCES.md) and
+  are being implemented by `c-mem` as `Grass.Resource.*`.
+  `Grass.Process.Resource` *instantiates* them; it must not declare a second
+  algebra.
+- obligation identity, ledger law, and terminal dispositions belong to
+  [OBLIGATIONS.md](OBLIGATIONS.md) (`Grass.Obligation.*`, `c-mem`).
+- loans, provenance, initialization, and race freedom belong to
+  [MEMORY_MODEL.md](MEMORY_MODEL.md) (`c-mem`). Byte-flow read and write *loans*
+  are consumed from there, not redefined here.
+- providers, platform plans, and commits belong to
+  [PLATFORM_ABI.md](PLATFORM_ABI.md); the `ProcessDriver` record is stated here
+  but every provider-side field is that document's.
+- application process graphs (HTTP/2 roles, Vulkan roles, the spike plans) are
+  explicitly **not** owned by this plan. This plan supplies the algebra they
+  instantiate.
+
+Blocked on this plan:
+
+- `Grass.Semantics` itself, for two declarations: `SpecProcess.driverBoundary`
+  needs `DriverBoundary` ([PROCESS.md](PROCESS.md) §2) and `ProcessPresentation`
+  needs the abstract specification process network. See §10.2 — this is a cycle
+  in [MODULES.md](MODULES.md)'s stated chain, and this plan proposes the cut.
+- `Grass.Refinement`, which quantifies over the same abstract network.
+- `Grass.Std.Process.*` (network, supervision, clock, graphics protocols) cannot
+  declare a protocol before `ProcessSpec` and `ChannelContract` are frozen.
+- `Grass.Std.Protocol.Http2` needs the channel, capacity-credit, and child
+  lifecycle vocabulary.
+- `Grass.Verify` cannot state the process leg of `VerifiedProgram` without
+  `RootProcessCertificate`.
+- every spike from 1 upward: even Hello World is a sequential process elaborated
+  by `SequentialAdapter`.
+
+## 1. Sequencing principle
+
+The expensive mistake in this layer is not a missing proof; it is a *vocabulary*
+that forces an application author to write down a realization fact. Three
+foundation laws are specifically about what must **not** appear in a type:
+
+- law 15 (no weave leakage) — no selected topology in the precious root;
+- law 18 (no schedule leakage) — no occurrence identity, batching, or routing in
+  `ProcessSpec.Step`;
+- law 17 (one scalable algebra) — a serial author may not get a second
+  semantics.
+
+So work is ordered:
+
+1. **Author vocabulary.** What a protocol author, a standard-library protocol,
+   a *serial* author, and a spike actually write. Changing this rewrites source
+   everywhere.
+2. **Network semantics.** The exhaustive transition family and the laws that
+   make it exact. Changing this rebuilds proofs, not source.
+3. **Composition and lowering.** Flattening, serialization, weaving, resources.
+4. **Certificates and sharding.** The boundary that keeps 2 and 3 local.
+
+Law 17 puts the serial authoring surface in step 1, not step 3: `SequentialMachine`
+is what a Hello World author writes, so it is author vocabulary by this plan's
+own test, even though the adapter that elaborates it is composition work.
+
+Milestones are ordered, not dated. Each names its exit criterion and who it
+unblocks. A milestone exits on *expressiveness plus what its own fixtures need*,
+not on completing every theorem the normative document eventually demands.
+
+## 2. M0 — Ground
+
+### 2.1 What this plan needs from lower layers
+
+| Need | Owner | Status |
+|---|---|---|
+| a monotone fresh-identity supply (law 22) | `Grass.Core` (`c-mem` custody) | exists on `c-mem`'s branch, unmerged |
+| finite maps with framing lemmas | `Grass.Std.Logical` | exists on `c-mem`'s branch, unmerged |
+| a bag/multiset with a permutation quotient | `Grass.Std.Logical` | **absent**; see §2.2 |
+| `ReadBufferLoan` / `WriteBufferLoan` | `Grass.Memory` (`c-mem`) | **absent**; hard block on M3 byte flow |
+| the resource algebra classes | `Grass.Resource` (`c-mem`) | planned, not landed |
+| obligation ledger and dispositions | `Grass.Obligation` (`c-mem`) | partly landed on branch |
+| `SpecProcess`, `BehaviorContract`, execution traces | `Grass.Semantics` | **unclaimed**; see §10.2 |
+| `lakefile.toml` glob and `warningAsError` | build | made on this branch, textually identical to `c-mem`'s |
+
+The byte-flow loan row matters more than its position suggests.
+[PROCESS.md](PROCESS.md) §3 makes `ReadBufferLoan` and `WriteBufferLoan`
+constructor arguments of `ByteIngressPhase` and `ByteEgressPhase`, so M3's
+byte-flow modules cannot be written against a placeholder without changing every
+phase constructor later. If that deliverable has not landed when M3 starts, the
+byte-flow modules are parameterized over an abstract loan type and the
+instantiation is a named M3 exit item, not a silent substitution.
+
+### 2.2 Decisions taken because the agent bus is not yet available
+
+**Decided — parametricity instead of custody, wherever possible.** Rather than
+squatting on `Grass.Semantics` to obtain `SpecProcess`, this plan keeps the
+process layer parametric in exactly the way [PROCESS.md](PROCESS.md) already
+writes it: `ProcessVocabulary` carries its own `Type` fields and `ProcessSpec` is
+self-contained. The consequence is that `Grass.Process.Spec` and
+`Grass.Process.Run` — the modules every other agent is waiting on — depend on
+nothing outside `Grass.Process` and Lean core.
+
+This does **not** dissolve the dependency cycle between this layer and
+`Grass.Semantics`; §10.2 records that cycle and the proposed cut. Parametricity
+buys the modules that genuinely have no semantic content; it does not buy
+`DriverBoundary`, the abstract network, or `ProcessCorrect`.
+
+**Decided — `ProcessCorrect` takes acceptance as an explicit parameter.**
+[PROCESS.md](PROCESS.md) §4 gives `ProcessCorrect` the fields
+`terminal : ... -> TerminalAccepts p result` and
+`observationsAccept : ... -> TraceAccepts p run.observations`. A bare
+`ProcessSpec` carries no acceptance data, so those relations are relative to a
+contract this plan does not own. Inventing a local acceptance notion would
+create the second oracle [FOUNDATION.md](FOUNDATION.md) law 11 forbids.
+`ProcessCorrect` therefore takes an explicit `ProcessAcceptance p` record —
+terminal acceptance, trace acceptance, view acceptance, demand well-formedness —
+which `Grass.Semantics` supplies from a `BehaviorContract` when it lands, and
+which a standalone protocol supplies directly. The same applies to the third
+disjunct of §7 progress ("produce an *independently specified* observation"),
+which is specification-relative and is a field of that record.
+
+**Decided — temporary custody of one bag type, handed to `c-mem`.**
+`AbstractDemandBag` is used by `ProcessSpec.Step` itself, so it cannot be
+deferred, and no multiset exists in Lean core or on any branch.
+`Grass/Process/Bag.lean` defines `Bag α := Quotient (List.isSetoid α)`
+(`List.isSetoid` and `List.Perm` are Lean 4.33.1 core; verified, no dependency
+added) under explicit custody. The handover addressee is `c-mem`, who already
+ships `Grass.Std.Logical.FiniteMap`; the handover milestone is whichever of M2
+or `c-mem`'s next milestone comes first, and the handover is a rename plus a
+re-export because this module carries no process vocabulary. The
+process-specific *laws* over it (consume exactly one, no fabrication, no joint
+consumption) stay here.
+
+That definition is also mathlib's `Multiset`. [MODULES.md](MODULES.md) permits
+mathlib, so hand-rolling is a choice, and it needs its own record rather than a
+parenthetical: `lakefile.toml` deliberately carries no dependencies,
+[FOUNDATION.md](FOUNDATION.md) §3 puts every selected dependency in the TCB and
+build ledgers, and `c-mem` has already taken the no-dependency route for finite
+maps. Adding mathlib for one quotient would be a repository-wide TCB decision
+taken by the wrong agent. This plan therefore hand-rolls and files the
+alternative in §10.6 for a [DECISIONS.md](DECISIONS.md) entry.
+
+**Decided — the nominal history is finite, not a predicate.** An earlier draft
+of this plan made `usedNominals` a `LogicalNominal -> Prop`. That is wrong.
+[PROCESS.md](PROCESS.md) §3 writes `allocatedNominals : ... -> Finset
+LogicalNominal`, `fresh : Disjoint ...`, and
+`historyExact : after.usedNominals = before.usedNominals ∪ transition.allocatedNominals`.
+An execution *prefix* is finite by construction — the history starts empty and
+each step adds finitely many — so unboundedness is a property of the limit and
+not of any value the union equation ranges over. A `Prop`-valued history would
+make `historyExact` an equality of predicates provable only through `funext`
+and `propext`, lose decidability, and leave the occurrence-count axes of
+[PROCESS.md](PROCESS.md) §5 with nothing to count. The history is therefore a
+finite collection with `∉` freshness and a union equation, matching the
+normative declaration. No `Finset` exists in Lean core, so the representation is
+a list under the same custody note as the bag; the *interface* is the normative
+one.
+
+**Decided — `List` for step segments and for prefix histories; not for maximal
+runs.** [PROCESS.md](PROCESS.md) §2 writes `List Observation` for a step's
+segment, and that is genuinely finite. A `ProcessRunState` carries the history
+of a finite prefix, which is also genuinely finite. A *maximal* run need not be
+finite — [PROCESS.md](PROCESS.md) §7: "Long-lived processes need not terminate"
+— so the trace of a maximal run is not a `List` and this plan does not assume it
+is. Concretely: `Grass.Process` defines segments and prefix histories as `List`,
+proves no lemma by `List` induction over a maximal run, and leaves the maximal
+execution and its limit trace to `Grass.Semantics`. `ProcessAcceptance`'s trace
+field is stated over prefixes so it survives that arrival.
+
+**Decided — `ProtocolRegistry` is universe-polymorphic from M1.**
+[PROCESS.md](PROCESS.md) §4 makes a flattened realization's private state
+`LogicalProcessNetwork r.plan`, which ranges over every registered protocol's
+`State`, so `r.flatten` lives strictly above the registry that produced it, and
+`RegisteredProcess` demands an embedding of the old registry into the extended
+one across that shift. Freezing `protocol : Key -> ProcessSpec` at one universe
+in M1 would guarantee a rewrite of every registry value in M4. The registry's
+key type and its protocols therefore take independent universe parameters from
+the start, and M1 carries a fixture that registers a flattened process into an
+extended registry. This is risk 3 of the earlier draft, resolved rather than
+deferred.
+
+## 3. M1 — Author vocabulary freeze
+
+Goal: a protocol author, a standard-library protocol, a serial author, and the
+sequential adapter can write final source. Exit criterion is expressiveness plus
+a fixture corpus, not depth of proof.
+
+### 3.1 Modules
+
+```text
+Grass/Process/Bag.lean          demand multiset, custody, consume-exactly-one
+Grass/Process/Observation.lean  observation segments, prefix histories, origin
+Grass/Process/Vocabulary.lean   ProcessVocabulary, ProcessEvent, fault classes
+Grass/Process/Spec.lean         ProcessSpec, ViewFacet, DeterministicProcess
+Grass/Process/Run.lean          run states, initial forms, transitions, runs
+Grass/Process/Acceptance.lean   the acceptance record ProcessCorrect consumes
+Grass/Process/Progress.lean     the §7 per-process progress condition
+Grass/Process/Correct.lean      ProcessCorrect and its derived facts
+Grass/Process/Nominal.lean      LogicalNominal, finite monotone history
+Grass/Process/Protocol/Registry.lean  ProtocolRegistry, open fragments, merge
+Grass/Process/Network/Boundary.lean   DriverBoundary, requirement sets
+Grass/Process/Sequential/Machine.lean SequentialMachine, SequentialDecision
+Grass/Process/Sequential/Direct.lean  DirectRelationalProgram
+```
+
+`Sequential/Machine.lean` and `Sequential/Direct.lean` are in M1 by §1's test:
+they are what a serial author writes. Their *adapter* is M4.
+
+### 3.2 Why these and not more
+
+`ProcessSpec` and `ProcessCorrect` are what every other agent's source mentions.
+`ProcessRunTransition` is in M1 rather than M2 because the demand-bag equations
+in it are what make `Step`'s signature *mean* anything; freezing the signature
+without them would freeze a shape whose linearity is unchecked.
+
+`Progress` is in M1 because [PROCESS.md](PROCESS.md) §7 states the per-process
+condition concretely: decrease a well-founded internal measure, reach a
+law-bearing external or demand-result frontier in finite internal work, or
+produce an independently specified observation. Only the third disjunct is
+specification-relative, and it reaches the condition through
+`ProcessAcceptance`. The *network* progress theorem of the same section is
+explicitly not here; see §6.
+
+The view facet, the deterministic constructor, and the `.external`/`.result`/
+`.interrupted`/`.fault`/`.environmentViolation` event split are all M1 because
+they appear in authored `ProcessSpec` values in Spikes 4 and 5.
+
+### 3.3 Fixtures
+
+M1 is not exited on a type-checking file. It is exited on a fixture corpus under
+`Tests/Process/` that an adversarial reviewer can read:
+
+- a zero-demand silent step;
+- two equal-valued demands with distinct multiplicity, one resolved;
+- a result that consumes exactly one item and issues a new one;
+- an interruption consuming an item without a result;
+- a terminal state that classifies a nonempty remainder, and a terminal state
+  that provably cannot, because the specification permits no disposition;
+- a zero-transition terminal run (the `ProcessRunInitial.terminal` case);
+- a deterministic `update` process and its relational image, with the theorem
+  that the image's runs are exactly the function's;
+- a registry extended with a flattened protocol at a higher universe, with the
+  embedding of every prior key (the §2.2 stratification fixture).
+
+Each fixture states a theorem, not an `#eval`. [FOUNDATION.md](FOUNDATION.md)
+law 3 forbids an executed example standing in for a proof.
+
+## 4. M2 — Network semantics
+
+Goal: the exhaustive transition family, with each constructor's exactness
+carried in its own index rather than in an ambient predicate.
+
+```text
+Grass/Process/Network/Graph.lean       ProcessGraph, population, logical access
+Grass/Process/Network/Topology.lean    refs, generations, channel ids, epochs
+Grass/Process/Network/Assertion.lean   network assertions, separating conjunction
+Grass/Process/Network/Channel.lean     ChannelContract, escrow, session, resolution
+Grass/Process/Network/Plan.lean        ProcessPlan, LogicalProcessNetwork
+Grass/Process/Network/Transition.lean  NetworkTransition, NetworkStep, freshness
+Grass/Process/Network/Child.lean       child requests, bindings, lifecycle events
+Grass/Process/Network/Mailbox.lean     ordering profiles, selective receive
+Grass/Process/Network/Commit.lean      the commit transition and view reconciliation
+```
+
+`NetworkTransition` has twenty-three constructors, four of which
+(`requestCancel`, `acknowledgeCancel`, `timeout`, `interrupt`) an earlier draft
+of this plan put in M3 and one of which (`commit`) it scheduled nowhere. That
+was wrong: the transition *indices* are `NetworkTransition` content and belong
+here, while the cancellation *policy* that decides where points may be placed is
+M3. `Commit.lean` carries [PROCESS.md](PROCESS.md) §6, including the rule that
+a reconciler may coalesce pending renders "only when no skipped render has a
+demanded commit observation".
+
+Exit criterion, in three parts, because the earlier single criterion was not
+dischargeable in this milestone:
+
+- routing coverage: every endpoint input and output enters through exactly one
+  constructor, over all twenty-three;
+- the escrow prefix laws — conservation, at-most-one resolution, and stability
+  under unrelated steps — over that same full family;
+- an explicit re-proof obligation, recorded rather than discharged, for the two
+  facts that genuinely need later milestones: `insufficient_credit_disables_send`
+  and `EveryNetworkStepHasExactCapacityTransitionLaw` need M5's credit ledger,
+  so M2 states send-enabledness parametrically in a credit predicate and M5
+  instantiates it.
+
+The known hard part is `NetworkAssertion` and its separating conjunction. This
+plan does **not** build a general separation logic: the assertion language is
+over the logical process network only (instances, shared regions, escrow ledger,
+sessions, obligations, observations), and `*` is disjointness of the named
+fragments. Physical separation is `c-mem`'s and is reached only through the
+representation relation.
+
+## 5. M3 — Cancellation and lifecycle
+
+```text
+Grass/Process/Cancellation.lean        masks, summaries, the |> algebra
+Grass/Process/Termination.lean         modes, contracts, dispositions
+Grass/Process/Facet.lean               TerminationFacet and its constructors
+Grass/Process/Policy.lean              CancellationPolicy, scoped certificates
+Grass/Process/ByteFlow/Ingress.lean    phases, resolutions, conservation
+Grass/Process/ByteFlow/Egress.lean     offered/committed/queued, suffix retention
+Grass/Process/ByteFlow/Rechunk.lean    functional and capacity-aware rechunking
+```
+
+Exit criterion: the `uncancellable |> cancelpoint |> uncancellable` worked
+example from [PROCESS.md](PROCESS.md) §3 is a theorem, the sequential
+composition of summaries is associative up to the stated transport, and both
+byte-flow conservation theorems hold over their full transition families.
+
+Byte flow is here rather than in M2 because its phases are a cancellation race
+in disguise: `cancelling` is a phase, and the resolution tables are the
+substance. Its hard block on `c-mem`'s buffer loans is recorded in §2.1.
+
+`Policy.lean` is scheduled against an unresolved corpus ambiguity; see §10.3.
+It is written last in this milestone, after that entry is ratified.
+
+## 6. M4 — Composition, lowering, and the proof package
+
+```text
+Grass/Process/Trace/Independence.lean   Independent, diamonds, swap congruence
+Grass/Process/Trace/Linearization.lean  syscall partial orders
+Grass/Process/Proof/Adequate.lean       ProcessNetworkAdequate, network progress
+Grass/Process/Proof/Simulation.lean     ProcessNetworkSimulation
+Grass/Process/Proof/Realizes.lean       ProcessPlanRealizes, ProcessRealization
+Grass/Process/Proof/Driver.lean         ProcessDriver, ProcessLoopInvariant
+Grass/Process/Proof/Scope.lean          ScopedProcessPlan, SubsystemRealization
+Grass/Process/Blend.lean                ClosedBlendProvenance, ProcessPlanSource
+Grass/Process/Flatten/Flatten.lean      ProcessRealization.flatten and its theorem
+Grass/Process/Flatten/Serialize.lean    SerializablePlan, serialize, round trips
+Grass/Process/Function/Serial.lean      SerialFunctionContract and the call rule
+Grass/Process/Function/Export.lean      asSerialFunction, the fractal bridge
+Grass/Process/Sequential/Adapter.lean   elaborateMachine and its transport
+Grass/Process/Sequential/Standard.lean  the standard realizer registry and lookup
+Grass/Process/Weave/Mixin.lean          WeaveInvariantMixin, families, aggregate
+Grass/Process/Weave/Lens.lean           ProcessRefinementLens, contextual framing
+```
+
+The `Proof/` directory is [MODULES.md](MODULES.md)'s name for exactly this
+content — "adequacy, simulation, global-loop lifting, physical templates" — and
+`ProcessPlanRealizes` is the closing theorem of Spikes 4 and 5, so this
+milestone is what makes any spike statable. `Blend.lean` is a spike import
+(`Grass.Process.Blend`) and is here for the same reason.
+
+This milestone needs `Grass.Semantics`. If that layer is still unclaimed when M3
+exits, the `SpecProcess`-indexed statements are the only part that waits; the
+adapter, flattening, and independence results are all statable over
+`DriverBoundary` and `ProcessPlan` alone.
+
+Exit criteria:
+
+- `flatten_sequential_roundtrip` and `serialize_refines_flatten`, because those
+  two are what make law 17 true rather than aspirational;
+- the network progress theorem of [PROCESS.md](PROCESS.md) §7: every maximal
+  network execution produces a demanded observation, remains at a declared
+  frontier, or decreases a global well-founded rank across process steps, spawn,
+  retry, cancellation, death, join, and restart, with supervision carrying a
+  restart bound;
+- the five canonical adapter fixtures [PROCESS.md](PROCESS.md) §4 mandates by
+  name — zero-effect transition, duplicate equal-valued effects with distinct
+  occurrences, initially pending effects, issue-then-cancel, and
+  result-plus-new-effect in one transition — each checked in both execution
+  directions against the exact pending equation and child binding;
+- the proof-economics acceptance rule of the same section: selecting a
+  registered standard sequential specification is one expression at the
+  application process boundary. This is checkable — it is a line count on a
+  fixture, not a preference — and if it fails, the constructor is incomplete.
+
+## 7. M5 — Certificates and sharding
+
+```text
+Grass/Process/Shard/Signature.lean      ProcessSignature, RealizesProcessSignature
+Grass/Process/Shard/Certificate.lean    opaque shard certificates
+Grass/Process/Shard/Facet.lean          facet summaries and certificates
+Grass/Process/Shard/Compose.lean        composition, SCC condensation, aggregates
+Grass/Process/Shard/Root.lean           RootProcessCertificate
+Grass/Process/Resource/Metric.lean      NetworkResourceState, ResourceMetric
+Grass/Process/Resource/Credit.lean      capacity credit, ledgers, backpressure
+Grass/Process/Resource/Scope.lean       scope partition, boundary flux, bounds
+```
+
+Exit criteria are theorems, plus a structural check, plus a measurement:
+
+- `ScopedProcessPlan.projectionExact` and
+  `SubsystemRealization.siblingInsensitive` as Lean theorems.
+  [PROCESS.md](PROCESS.md) §5 states the second as "structural: an outside-scope
+  edit leaves the induced nodes, edges, imported summaries, and demand keys
+  definitionally equal", which is provable with no tooling at all;
+- an import-graph check per [OLEAN_SHARDING.md](OLEAN_SHARDING.md) §2: no
+  consumer imports a `ProcessImpl`, and aggregate modules import only child
+  certificate modules;
+- the [PROCESS_SHARDING.md](PROCESS_SHARDING.md) §9 locality scenarios as
+  corroboration *once* the ratchet tooling exists. An earlier draft made this
+  the only exit criterion, which would have discharged a stated theorem through
+  a tool that [IMPLEMENTATION_RATCHET.md](IMPLEMENTATION_RATCHET.md) says does
+  not exist.
+
+## 8. Standing risks
+
+1. **`NetworkAssertion` scope creep.** If the assertion language grows toward a
+   general separation logic it will eat this plan. The mitigation is that it is
+   defined only over the named network fragments and has no frame rule beyond
+   the one `WeaveInvariantMixin` needs.
+2. **The `ChannelContract` field count.** Fifteen fields is a signature an
+   application author must never fill by hand. If the standard channel profiles
+   (identity-correlated reply, ordered mailbox, bounded byte flow) do not cover
+   the spikes, the contract is wrong, not the spikes.
+3. **M4 is large.** It carries the proof package, the adapter, flattening,
+   weaving, and the network progress theorem. It is the milestone most likely to
+   need splitting; the split line, if needed, is between the `Proof/` package
+   (which needs `Grass.Semantics`) and everything statable over `ProcessPlan`
+   alone.
+4. **`import Grass.Process`.** Spikes 4 and 5 import a single module.
+   [OLEAN_SHARDING.md](OLEAN_SHARDING.md) §2 forbids a *leaf* importing an
+   umbrella. A spike is a client, not a leaf, so a curated author-surface facade
+   is defensible — but it must re-export the author vocabulary only, never every
+   certificate module, and no `Grass.Process.*` module may import it.
+
+## 9. Review
+
+Each milestone is reviewed adversarially before it is offered for merge, against
+[REVIEW.md](REVIEW.md) and the [AGENT_REVIEW.md](AGENT_REVIEW.md)
+distinct-author rule. Local iteration review does not substitute for that
+nomination.
+
+The questions a reviewer of this layer should ask first:
+
+- does any authored `ProcessSpec` field mention an occurrence identity, a
+  worker, a queue, or a schedule? (law 18)
+- can a demand bag element be fabricated, duplicated, jointly consumed, or lost
+  by any transition in the family? (§2)
+- is there a transition that resolves an occurrence without consuming its affine
+  token? (law 16)
+- does any freshness claim quantify over the live set rather than the monotone
+  history? (law 22)
+- does a serial author's source mention a channel, population, or escrow?
+  (law 17)
+- is any acceptance, progress, or observation-filter fact defined here rather
+  than consumed from the specification? (law 11)
+
+## 10. Corpus defects found while planning
+
+These are raised for ratification, not resolved by this plan.
+[README.md](README.md) makes [DECISIONS.md](DECISIONS.md) the home for a
+ratified interpretation not yet folded into the owning document, and each entry
+names the milestone that is blocked until it is.
+
+### 10.1 `AbstractSpecificationProcessNetwork` is declared twice, incompatibly
+
+[PROCESS.md](PROCESS.md) §2 declares it with fields `registry`, `root`,
+`channels`, `linearState`, `sharedState`, `abstraction`, `denotation`,
+`traceDenotation`, `exact`. [SEMANTICS.md](SEMANTICS.md) declares a different
+structure of the same name with fields `RoleSchema`, `finiteSchemas`,
+`Instance`, `protocol`, `instances`, `composition`. Every consumer uses the
+second shape: `Spikes/4_Web_Server/Process.lean` passes `roleSchema` and
+`instances`, `Spikes/5_Spinning_Cube/Process.lean` reads `.protocol schema`, and
+[REFINEMENT.md](REFINEMENT.md) mixes both, reading `network.RoleSchema` *and*
+`network.traceDenotation`.
+
+[README.md](README.md) forbids a document restating a narrower owner's term
+differently and requires that every term have one owner. Proposed resolution:
+the [SEMANTICS.md](SEMANTICS.md) shape is normative, because it is the one the
+spikes and [REFINEMENT.md](REFINEMENT.md) instantiate; the
+[PROCESS.md](PROCESS.md) declaration becomes a reference, and the fields it
+carries that the other lacks (`traceDenotation`, `exact`) are relocated to the
+owner or dropped with a reason. Blocks: M4 `Proof/Realizes.lean`.
+
+### 10.2 Process and Semantics are mutually dependent
+
+[SEMANTICS.md](SEMANTICS.md) defines `SpecProcess.driverBoundary` in terms of
+`DriverBoundary` and `ProcessPresentation` in terms of the abstract network,
+both of which [PROCESS.md](PROCESS.md) owns; while [PROCESS.md](PROCESS.md)'s
+abstract network carries `denotation : BehaviorContract resources`, which
+[SEMANTICS.md](SEMANTICS.md) owns. [MODULES.md](MODULES.md) declares the chain
+strict, so this is a cycle rather than a missing edge.
+
+Proposed cut: `DriverBoundary` is a pure interface record — external event,
+demand, dependent result, observation, requirement set — with no semantic
+content, so it belongs in a module strictly *below* `Grass.Semantics`, and
+`Grass.Semantics` imports it. The abstract network's `denotation` field is the
+only genuinely semantic one, so the network splits: the shape (roles,
+instances, protocols) below, the denotation and its exactness above, meeting at
+`ProcessPresentation`. Blocks: any `Grass.Semantics` work, and M4.
+
+### 10.3 `CancellationPolicy` has four incompatible arities
+
+- `Spikes/4_Web_Server/Cancellation.lean` writes `CancellationPolicy memoryServerProcess`
+  — indexed by a `ProcessSpec`.
+- [PROCESS.md](PROCESS.md) §5 writes `CancellationPolicy (network : ProcessNetwork root) (source : MachineSource plan)`.
+- [PROCESS_SHARDING.md](PROCESS_SHARDING.md) §4 writes
+  `CancellationPolicy scope.publicCancellationPoints` — indexed by a scope
+  summary.
+- The field is `policy.blockingCalls` in [PROCESS.md](PROCESS.md) §5 and
+  `policy.calls` in [PROCESS_SHARDING.md](PROCESS_SHARDING.md) §4.
+
+Proposed resolution: the scope-indexed form is normative, because it is the only
+one whose `callsExact` is local; the §5 form is the whole-plan scope; the spike
+form is shorthand for the scope induced by a root protocol; the field is
+`blockingCalls`. Blocks: M3 `Policy.lean`.
+
+### 10.4 `ProcessNetwork root` and `ProcessPlan root` are undeclared arities
+
+[PROCESS.md](PROCESS.md) §5 writes `ProcessNetwork root`, a type that appears
+nowhere else in the corpus, and `ProcessPlan root`, while §3 declares
+`ProcessPlan (registry : ProtocolRegistry) (boundary : DriverBoundary)`.
+Proposed resolution: both are the §3 `ProcessPlan`, with `root` an abbreviation
+for a plan whose root protocol is named; `ProcessNetwork` is deleted or defined.
+Blocks: M3 `Policy.lean`, M4 `Proof/Driver.lean`.
+
+### 10.5 `ProcessSpec` has no field for the terminal disposition law
+
+[PROCESS.md](PROCESS.md) §2 requires a terminal transition to resolve, transfer,
+or permit-pending every outstanding demand "according to the specification's
+progress/lifecycle law", but the declared `ProcessSpec` contains no field in
+which that law could live, so the classification would be an assignment with no
+acceptance criterion — satisfiable by mapping everything to `permittedPending`,
+which is the disappearance [FOUNDATION.md](FOUNDATION.md) law 7 forbids. This
+plan adds one field, `TerminalDisposition`, and marks it as a deviation.
+Alternative resolutions are to put the law in `ProcessAcceptance` or to make it
+a parameter of the run relation. Blocks: nothing; it is implemented, and needs
+ratification of the shape.
+
+### 10.6 The fault, interruption, and violation classes are carried per vocabulary
+
+[PROCESS.md](PROCESS.md) §2 writes `InterruptReason`, `LogicalFault`, and
+`EnvironmentViolation` unqualified in `ProcessEvent`, as one fixed global
+classification. This plan carries them in `ProcessVocabulary`, because a global
+`LogicalFault` is the closed whole-program sum
+[PROCESS_SHARDING.md](PROCESS_SHARDING.md) §10 lists as a foundational failure —
+HTTP/2 error codes, Vulkan device loss, and a Win32 handle violation are the
+fault classes of unrelated subsystems — and [FOUNDATION.md](FOUNDATION.md) law 8
+forbids the `| other (name : String)` escape. Blocks: nothing; it is
+implemented, and needs ratification.
+
+### 10.7 A multiset is hand-rolled rather than taken from mathlib
+
+Recorded in §2.2. The decision is reversible and local: `Grass/Process/Bag.lean`
+is one module with a documented custody note, and adopting mathlib later is a
+deletion. Blocks: nothing.
