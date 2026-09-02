@@ -40,6 +40,8 @@ namespace Id
 
 variable {Tag : Type u}
 
+instance : Repr (Id Tag) := ⟨fun i _ => repr i.index⟩
+
 instance : DecidableEq (Id Tag) := fun a b =>
   if h : a.index = b.index then
     .isTrue (by cases a; cases b; simp_all)
