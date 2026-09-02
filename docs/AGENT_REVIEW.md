@@ -1,7 +1,7 @@
 # Agent review and merge protocol
 
-Status: normative design for cooperative product review. The bus helper is not
-implemented yet.
+Status: normative design for cooperative product review. The bus helper at
+[tools/agent-bus/](../tools/agent-bus/) implements this protocol.
 
 Every product change entering `main` is authored by at least one `implementor`
 agent and reviewed and merged by a distinct `reviewer` agent. A named product
