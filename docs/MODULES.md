@@ -135,6 +135,23 @@ Large instruction/API families are sharded mechanically without creating a
 closed master sum type or duplicating semantic facts. Generated reference or
 test data is versioned separately when size would burden ordinary clones/builds.
 
+The concise imports shown in `Spikes/` are stable authoring facades, not a
+fictional second module tree. `Grass.Spec.Console`, `Grass.Spec.Grammar`,
+`Grass.Spec.Graphics`, and `Grass.Spec.Resource` re-export the corresponding
+typed specification-language signatures. `Grass.Process`,
+`Grass.Process.Cancellation`, and `Grass.Process.Blend` expose the stable process
+authoring surface; the last may be implemented by `Refinement`/`Weave` without
+changing its public import. `Grass.Assembly.X86`, `Grass.Assembly.Spirv`, the
+`Grass.Platform.Win10.*` profiles, and `Grass.Emit` are likewise narrow public
+facades over their owning signature modules.
+
+A facade imports only reviewed logical or `Sig` modules needed for that public
+surface. It never imports an `Impl`, `Cert`, whole-program aggregate, or concrete
+program. This is the deliberate public-re-export exception anticipated by
+`OLEAN_SHARDING.md`, not permission for a leaf to use `import all`. Facade
+dependency cones are measured, and an implementation-only edit must not rewrite
+one.
+
 The same rule applies to process roles, protocol keys, cancellation points, and
 composition witnesses. Large realizations publish module-local signatures and
 opaque facet certificates; they do not construct one whole-program process sum

@@ -70,6 +70,12 @@ structure SpecJunction (left right : ContractFragment resources) where
   totalForDemandedCases : JunctionCoversEveryDemandedValue relation
   preserves : JunctionPreservesObservationsFailuresProgressAndResources relation
 
+structure SpecificationTheoremFamily
+    (contract : BehaviorContract resources) where
+  Key : Type
+  finite : Fintype Key
+  statement : Key -> Prop
+
 structure SpecificationSuite (resources : R) where
   components : FiniteComponentFamily (SomeSpecComponent resources)
   junctions : FiniteJunctionFamily components
@@ -77,6 +83,7 @@ structure SpecificationSuite (resources : R) where
   coherent : NoContradictoryGuaranteesOrResourceSemantics components junctions
   contract : BehaviorContract resources
   contractExact : contract = ComposeFragmentDenotations components junctions
+  theorems : SpecificationTheoremFamily contract
   resourceSemantics : SelectedResourceSemantics resources
   resourceSemanticsExact :
     SuiteUsesSelectedResourceSemantics components resourceSemantics
@@ -108,6 +115,11 @@ targets its trace contract. There is no
 parser-correctness theorem, protocol-correctness theorem, and reactive-
 correctness theorem which can disagree while independently claiming success.
 Local component theorems and junction theorems compose into that one demand.
+The theorem family is precious and independently keyed: it names the properties
+the author wants proved *about* the composed contract rather than treating the
+contract's own definition as its correctness proof. Membership in the family is
+not an implementation choice, and one theorem cannot silently discharge a
+different key.
 
 The root is a semantic process, not an execution topology. A suite may contain
 or connect other spec processes; `capture` existentially hides their internal

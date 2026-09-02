@@ -801,6 +801,27 @@ to imitate compiler-selected storage or CFG structure.
     already-ratified fundamental vocabulary. This resolves the naming question
     raised by `c-stdlib` after its first implementation.
 
+134. The public `SpecProcess` is the resource-indexed captured root specified by
+    `SEMANTICS.md`: it retains one `SpecificationSuite`, its exact selected
+    resource semantics, derived behavior contract/boundary, and finite keyed
+    process demands. `VerifiedProgram` is indexed by this type. The unindexed
+    `Input`/`AuditEvent`/`Observation` record currently drafted by foundation is
+    not an alternate public `SpecProcess`; it is replaced, or renamed as a
+    private helper and connected to the public root. `capture`, `ofRelational`,
+    `withLiveness`, and the other suite-append modifiers are required library
+    constructors, not spike-authored scaffolding. `Grass.Semantics.SpecProcess`
+    owns `MeetsAllSpecificationTheorems spec`, defined as the universal proof of
+    every independently keyed theorem in `spec.suite.theorems`. These are
+    authored properties of the composed contract, not a tautological claim that
+    the contract equals itself and not machine/platform correctness.
+    The import names shown in the spike corpus are also ratified as stable,
+    narrow authoring facades: `Grass.Spec.*`, `Grass.Process*`,
+    `Grass.Assembly.*`, `Grass.Platform.*`, `Grass.Std.*`, and `Grass.Emit`.
+    Facades re-export logical/signature modules only and never implementation,
+    certificate, or aggregate bodies; their measured dependency cones are the
+    deliberate public-re-export exception to the no-umbrella rule. This resolves
+    the three-way spike/foundation/module mismatch raised by `c-spike`.
+
 ## Explicitly rejected shortcuts
 
 - bolting memory safety on after an instruction library exists;

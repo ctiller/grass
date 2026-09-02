@@ -203,6 +203,10 @@ def SpecProcess.driverBoundary (spec : SpecProcess resources) :
 def SpecProcess.progress (spec : SpecProcess resources) :
     AbstractProgressContract := spec.contract.progress
 
+def MeetsAllSpecificationTheorems (spec : SpecProcess resources) : Prop :=
+  forall key : spec.suite.theorems.Key,
+    spec.suite.theorems.statement key
+
 structure AbstractSpecificationProcessNetwork
     {R : Type u} [ResourceModel R] (resources : R) where
   RoleSchema : Type

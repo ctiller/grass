@@ -43,6 +43,14 @@ proof, isolate an independently changing subsystem, or keep a large source
 legible. They require an explanation in the annotated document. A small
 program is not forced into the module shape of a server or game engine.
 
+Import lines are part of this authored surface. The concise `Grass.Spec.*`,
+`Grass.Process*`, `Grass.Assembly.*`, `Grass.Platform.*`, and `Grass.Emit`
+imports shown by a spike are stable signature-only facades that the libraries
+must provide. A facade may deliberately re-export a narrow authoring API; it may
+not hide imports of implementation bodies, certificates, or whole-program
+aggregates. Reviewers cross-check the facade dependency cone as well as whether
+the referenced declaration exists.
+
 ## The annotated spike document
 
 `docs/SPIKE_N.md` contains the information needed to judge the proposal before
