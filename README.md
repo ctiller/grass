@@ -69,7 +69,11 @@ concrete `VerifiedProgram` producers and audits every declaration originating
 in those project modules, including declarations outside the `Grass` namespace.
 It also follows the transitive dependency closure of certificate-bearing and
 emission-consuming declarations across arbitrarily named imported modules, then
-checks configured public theorem roots as an explicit manifest. The build's
+follows their downstream runtime dependencies to reject unverified
+`implemented_by` and `extern` replacements. Participating module cohorts and
+persisted non-meta compiler dependency modules keep scoped `csimp`
+substitutions covered after their attribute state expires. Finally, it checks
+configured public theorem roots as an explicit manifest. The build's
 warning-as-error setting independently rejects admission mechanisms.
 
 The corpus checks verify that annotated spike documents and their comment-free
