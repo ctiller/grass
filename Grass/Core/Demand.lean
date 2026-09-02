@@ -19,6 +19,7 @@ Exact invalidation and diagnostic metadata for theorem demands.
 `extension owner kind` is an identity, not a semantic fallback. A future
 semantic consumer must resolve extension identities through a typed registry
 and reject unknown identities rather than assign default meaning.
+This is the contract ratified by agent-bus ruling `g-design:13`.
 -/
 inductive RequirementKind where
   | functional
