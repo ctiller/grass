@@ -42,10 +42,28 @@ The required successor properties are:
 - offline agents catch up without a separate service; and
 - a transition from version one never rewrites an existing event.
 
-Each physical development host has one registered coordinator role. It is the
-only actor on that host that decides when and how to contact the remote bus.
-This is a publication boundary, not authority to invent or alter another
-agent's event.
+The topology is deliberately a **host-local star with CRDT-style federation**.
+Each physical development host has one registered coordinator role. Local
+agents are spokes: they submit immutable candidates to, and consume validated
+snapshots from, that host coordinator. Only the coordinator decides when the
+host publishes, which remote streams it subscribes to, and when a synchronized
+cut is available. Agents do not bypass the hub merely because they possess Git
+credentials.
+
+Host coordinators are federation peers. They exchange immutable causal events;
+the global bus is the deterministic reduction of their union, not a privileged
+coordinator's mutable database. Event union is associative, commutative, and
+idempotent. Exclusive concurrent lifecycle transitions reduce to an explicit
+conflict which must be resolved by a later authorized event. Timestamps never
+choose a winner.
+
+This boundary permits local policy, batching, disconnected work, and a second
+or later fleet without changing the event model. It also has an availability
+cost: if a host coordinator is unavailable, local submissions and cached reads
+continue, but that host neither publishes nor learns remote facts until it
+recovers or custody passes to a successor. On a one-host fleet, that pauses all
+global publication. The protocol states that limitation rather than claiming
+availability it cannot enforce.
 
 ## 2. Sharded event streams
 
@@ -82,6 +100,26 @@ contention. The loser stops and resolves custody; it must not renumber an
 already published event or force-push. Parallel work uses distinct registered
 identities.
 
+Per-agent refs are durable storage shards, not permission for an agent to
+bypass its host coordinator. An agent may move between hosts without changing
+its stream identity; the registry determines which host custody epoch may
+advance that ref.
+
+Membership and host custody change much less frequently than ordinary events.
+They use one protected, append-only registry ref:
+
+```text
+refs/heads/agent-registry
+```
+
+Registry commits are serialized by remote compare-and-swap and define named
+`RosterEpoch`s. An epoch contains the exact active agent set, roles, host
+bindings, host-coordinator custody epochs, and its parent epoch. Registration,
+retirement, reassignment, and coordinator succession create a new epoch. This
+low-volume serialization point makes membership cuts decidable; it is not on
+the ordinary event publication path. Non-fast-forward update, deletion, and
+force-push are prohibited.
+
 ### 2.2 Causal frontiers
 
 There is no global bus-head commit in version two. The version-one `observed`
@@ -96,8 +134,9 @@ FrontierEntry = {
 }
 
 ObservedFrontier = {
-  kind        : sparse | complete,
-  entries     : StringMap<Agent, FrontierEntry>
+  kind         : sparse | complete,
+  roster_epoch : RosterEpochId,
+  entries      : StringMap<Agent, FrontierEntry>
 }
 ```
 
@@ -108,13 +147,20 @@ contiguous sequence.
 
 Most events use a sparse frontier containing only the streams needed by their
 references and authority. Events that grant merge authority, reassign custody,
-activate schemas, or make another fleet-wide decision use a complete frontier.
-The checked writer constructs a complete frontier by fetching every stream for
-every identity active at the cut. Validation rejects an omitted active identity
-or a head inconsistent with its named commit. As in version one, an event
-consumes the historical state it actually observed; later events do not rewrite
-that verdict and concurrent exclusive transitions become an explicit lifecycle
-conflict.
+activate schemas, resolve an all-active audience, or make another fleet-wide
+decision use a complete frontier relative to one exact `RosterEpoch`. The
+checked writer constructs it by fetching one stream position for every identity
+active in that epoch. Validation rejects an omitted epoch member, an extra
+purported member, or a head inconsistent with its named commit. An agent
+registered in a later epoch does not retroactively make the old frontier
+incomplete.
+
+This is historical completeness, not an unknowable claim to have observed “the
+world now.” Currency-sensitive operations additionally require a synchronized
+receipt naming the remotely probed registry tip and stream tips. As in version
+one, an event consumes the exact historical state it observed; later events do
+not rewrite that verdict and concurrent exclusive transitions become an
+explicit lifecycle conflict.
 
 The helper may keep an incremental local index of reduced events and fetched
 tips. That index is disposable. Authority comes only from stream contents,
@@ -136,7 +182,9 @@ shared filesystem mutex. It:
 3. rejects or accepts each candidate with a durable local receipt;
 4. closes a batch over all event dependencies;
 5. constructs the affected per-agent stream commits; and
-6. decides when to push them, using an atomic multi-ref push when one batch
+6. applies the host's subscription policy and fetches selected remote streams;
+7. materializes validated snapshots by CRDT reduction; and
+8. decides when to push, using an atomic multi-ref push when one batch
    requires several refs to become visible together and the remote advertises
    that capability.
 
@@ -150,16 +198,34 @@ believe they exist.
 The coordinator does not edit event meaning to make a batch valid. A rejected
 candidate remains local evidence; its author submits a replacement. The
 coordinator may choose batch size, push timing, retry timing, and network
-backoff, but cannot suppress an urgent event indefinitely or publish an event
-whose prerequisites are absent.
+backoff. It may never publish an event whose prerequisites are absent.
 
-Coordinator custody is explicit per host and has one epoch. If its agent becomes
-unavailable, another active coordinator records the reassignment and a successor
-on that host resumes the preserved outboxes and validated snapshot. Silence and
-wall-clock expiry alone never grant the successor authority. Because candidates
-are immutable and receipts name the custody epoch, takeover can distinguish
-already-published, locally accepted, rejected, and not-yet-examined work without
-guessing or duplicating an event.
+An urgent-flush request is priority input to that policy, not an unconditional
+liveness theorem. If the coordinator continues taking steps fairly and the
+remote accepts writes, the request must eventually receive either a remote
+publication receipt or a durable rejection/delay receipt. A stopped or unfair
+coordinator can suppress every local event and no remote observer can
+distinguish that failure from a disconnected host. The system must surface the
+last local receipt and coordinator health locally; it must not infer remote
+publication from elapsed time.
+
+Coordinator custody is explicit per host and has one registry epoch. Each host
+may name a pre-authorized standby in that epoch. If the active coordinator
+becomes unavailable, the standby or an authorized coordinator on another host
+proposes the registry succession by compare-and-swap. Only the winner of that
+registry transition may resume the preserved outboxes and advance streams for
+the new epoch. Silence and wall-clock expiry alone never grant authority. A
+deployment with neither a live coordinator nor a pre-authorized or externally
+authorized successor remains locally usable but globally paused.
+
+Because candidates are immutable and receipts name both coordinator custody and
+roster epochs, takeover can distinguish already-published, locally accepted,
+rejected, and not-yet-examined work without guessing or duplicating an event.
+Competing successors produce a visible registry CAS loss or an explicit custody
+conflict; they never resolve it by timestamp or force-push. The role owns policy,
+while a deterministic local helper may execute queue, validation, fetch, and
+push mechanics so ordinary progress does not depend on an LLM turn remaining
+alive.
 
 If the remote does not support atomic multi-ref push, the coordinator publishes
 prerequisite refs first and dependent refs only after observing their receipts.
@@ -183,11 +249,19 @@ The invariant is **every externally consumed fact is published**, not **every
 local commit is pushed**.
 
 An ordinary query reads the last successfully fetched local snapshot without
-taking any writer lock. A freshness request is sent to the host coordinator;
-the caller may continue with the named cached cut or await a newer receipt.
-The coordinator fetches stream refs into temporary remote-tracking refs and
-atomically publishes a new local snapshot after validation. Incremental
-reduction visits only advanced streams.
+taking any writer lock. Every human and machine-readable result states its
+snapshot receipt, roster epoch, causal frontier, last successful synchronization
+time, and freshness class (`cached` or `current-as-of-remote-probe`). Time since
+sync is diagnostic; it never confers authority.
+
+A freshness request is sent to the host coordinator; the caller may continue
+with the explicitly named cached cut or await a newer receipt. The coordinator
+fetches subscribed stream refs into temporary remote-tracking refs and atomically
+publishes a new local snapshot after validation. Incremental reduction visits
+only advanced streams. Merge readiness, reassignment, schema activation,
+all-active audience construction, and other currency-sensitive commands require
+a `current-as-of-remote-probe` receipt and fail closed rather than silently use
+a cached cut.
 
 The expected cost is:
 
@@ -198,7 +272,7 @@ The expected cost is:
 | read cached inbox or tail | local index lookup; no writer lock |
 | incremental sync | advanced stream refs and affected lifecycle reductions |
 | cold validation | linear in all retained events, parallel by stream |
-| complete authority cut | one tip per active identity plus affected state |
+| complete authority cut | one tip per identity in a named roster epoch plus affected state |
 
 ### 2.5 Migration
 
@@ -206,8 +280,10 @@ Migration is an epoch change, not an in-place reinterpretation:
 
 1. the reviewed helper and schemas land in the product repository;
 2. a bootstrap-authorized version-one event activates version two at an exact
-   product commit and exact version-one bus tip;
-3. every existing identity creates its protected stream root, continuing after
+   product commit and exact version-one bus tip, creates the registry root, and
+   fixes the first roster epoch;
+3. every existing identity's host coordinator creates its protected stream
+   root, continuing after
    its final version-one sequence;
 4. validators replay the immutable version-one prefix followed by the set of
    version-two streams; and
@@ -218,8 +294,9 @@ Agents unavailable at migration remain represented by their version-one state.
 Their work is retired or reassigned under the existing lifecycle rules; no one
 fabricates a stream on their behalf without explicit custody authority.
 
-The activation must define recovery for a partially created stream set. Until
-the cutover condition holds, version one remains the publication authority.
+The activation must define recovery for a partially created registry or stream
+set. Until the cutover condition holds, version one remains the publication
+authority.
 After it holds, no version-one event is accepted. There is never a period in
 which an event may be validly authored on either substrate at the author's
 choice.
@@ -357,11 +434,19 @@ Every agent has a replacement `subscription.set` event. Subscriptions combine:
 - safety and active-protocol topics that cannot be muted while the agent is
   active.
 
+The host coordinator turns those declarations into the host's remote fetch set.
+It may prefetch more streams for locality or policy, but it may not omit a
+mandatory subscription. A local agent asks its coordinator for subscription
+changes; it does not independently fetch a private, potentially incompatible
+view and present it as the host snapshot.
+
 An audience selector may name agents, roles, topic subscribers, dependents of
 an interface, or all active agents. The checked publisher resolves the selector
-against its observed frontier and records the exact `audience_snapshot`.
-Later scope, role, or subscription changes do not retroactively change who was
-addressed.
+against one named roster epoch and records the exact `audience_snapshot`.
+Selectors involving all active agents, and every required-ack broadcast to a
+derived audience, require a complete frontier for that epoch. An explicit list
+may use a sparse frontier containing each named identity. Later scope, role, or
+subscription changes do not retroactively change who was addressed.
 
 Relevant unread broadcasts appear in `inbox`, but informational messages do not
 create bus-wide acknowledgement traffic. Reading position is disposable local
@@ -404,33 +489,47 @@ an interface merely by choosing its broadcast topic.
 
 The successor is not ready for activation until checked fixtures demonstrate:
 
-1. two agents can continuously publish without either rebasing on the other;
+1. two local agents can continuously submit while their coordinator publishes
+   either stream without rebasing it on the other;
 2. a cached `inbox` or `tail` completes while another process holds a writer
    lock indefinitely;
 3. concurrent transitions from one causal predecessor reduce to the documented
    lifecycle conflict;
 4. a cross-agent reference outside the declared frontier is rejected;
-5. an authority event with an incomplete active-agent frontier is rejected;
+5. an authority event with a complete frontier missing one member of its named
+   roster epoch is rejected, while a later registration does not invalidate it;
 6. duplicate custody of one agent stream fails closed without force-push;
 7. two host coordinators cannot both publish for one agent custody epoch;
 8. cached reads and local candidate submission complete while the host
-   coordinator is stalled on the network indefinitely;
+   coordinator is stalled on the network indefinitely, and every result labels
+   its stale cut;
 9. a same-host dependent batch is either atomically visible with its complete
    closure or not remotely visible at all;
 10. partial migration cannot admit events on both version-one and version-two
    substrates;
 11. a friction report creates no target obligation and a promoted issue does;
-12. audience resolution is exact and stable under later subscription changes;
+12. audience resolution is exact and stable under later subscription changes,
+    and all-active or required-ack derived audiences reject a sparse frontier;
 13. informational broadcasts cause no mandatory acknowledgement events;
 14. a required-ack broadcast handles retirement and reassignment without an
     immortal wait; and
-15. cold replay and incremental replay produce exactly the same reduced state.
+15. cold replay and incremental replay produce exactly the same reduced state;
+16. two host coordinators receiving the same events in different orders converge
+    to the same reduced state or the same explicit lifecycle conflict;
+17. a currency-sensitive command rejects a cached receipt and accepts a
+    synchronized remote-probe receipt;
+18. an urgent event remains visibly pending while its coordinator is stopped and
+    publishes under a fair live coordinator, without claiming remote detection
+    of the stopped host; and
+19. a pre-authorized successor resumes preserved outboxes exactly once after
+    winning the registry custody transition.
 
-Performance fixtures should use enough concurrent writers and retained history
-to expose asymptotic mistakes, but need not manufacture a fantastically large
-event corpus. The acceptance claim is structural: unrelated publication has no
-shared writable ref or global lock, and incremental work is proportional to
-advanced streams.
+Performance fixtures should use enough concurrent submitters, host coordinators,
+and retained history to expose asymptotic mistakes, but need not manufacture a
+fantastically large event corpus. The acceptance claim is structural: ordinary
+events do not share a fleet-wide writable ref or repository-wide client lock;
+only infrequent membership changes serialize on the registry; and incremental
+work is proportional to advanced subscribed streams.
 
 ## 6. Rejected alternatives
 
@@ -442,11 +541,14 @@ cannot establish the required non-contention property.
 
 ### Add one fleet-wide coordinator writer or merge queue
 
-A single writer converts optimistic contention into an explicit bottleneck and
-makes coordinator unavailability a fleet-wide outage. Coordinators should
-not serialize facts from unrelated hosts. The host-local coordinators above are
-sharded publishers: each owns only its local queues and the agent streams under
-its current custody, so one unavailable host cannot stop another host.
+A fleet-wide writer converts optimistic contention into an explicit global
+bottleneck and makes its unavailability a fleet-wide outage. The chosen star is
+deliberately **per host**. In today's one-host deployment it has the same global
+availability cost, and the design accepts that cost rather than pretending
+otherwise. As more hosts join, their coordinators federate immutable events and
+publish only streams under their custody, so one unavailable host pauses that
+host without stopping the others. The registry remains a low-volume global CAS
+for membership and custody, not a merge queue for ordinary facts.
 
 ### Commit a shared mutable index
 
@@ -472,15 +574,20 @@ may mirror authoritative events later; they are not the authority.
 Review should particularly attack:
 
 - whether sparse and complete frontiers preserve every version-one authority
-  check without reintroducing a hot global ref;
+  check while the roster registry remains off the ordinary publication path;
+- whether the host-local star has any accidental agent-to-remote bypass or
+  hidden claim of availability when its coordinator is unavailable;
+- whether independently ordered replication across two or more hosts actually
+  satisfies associative, commutative, and idempotent reduction;
 - whether stream creation, identity custody, and migration fail closed under
   crashes and silent quota exhaustion;
-- whether any read path still waits on a publication lock;
+- whether any cached read path still waits on a publication lock or can conceal
+  the exact cut and freshness class it read;
 - whether friction stays cheap enough that agents report it, yet structured
   enough to synthesize;
 - whether broadcast authority prevents both spoofing and centralization;
-- whether audience snapshots and acknowledgement rules avoid silent misses
-  without creating event storms; and
+- whether roster-relative audience snapshots and acknowledgement rules avoid
+  silent misses without creating event storms;
 - whether Git hosting limits make one protected ref per active agent
   impractical before another layout is selected.
 
