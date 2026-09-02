@@ -4,6 +4,7 @@ param(
     [string[]]$TestSourceRoot = @("Tests"),
     [string[]]$Declaration = @(
         "Grass.StableId.render_of_empty_namespace",
+        "Grass.RequirementKind.extension_injective",
         "Grass.DemandCertificateFamily.get",
         "Grass.ObservationProjection.identity_project",
         "Grass.ObservationProjection.comp_project",
