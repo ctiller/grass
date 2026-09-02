@@ -64,6 +64,15 @@ $temporaryPath = [System.IO.Path]::Combine(
 $externalProbeModule = "AuditExternalProbe$([System.Guid]::NewGuid().ToString('N'))"
 $externalProbePath = Join-Path (Get-Location).Path "$externalProbeModule.lean"
 $externalProbeOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$externalProbeModule.olean"
+$runtimeProbeModule = "AuditRuntimeProbe$([System.Guid]::NewGuid().ToString('N'))"
+$runtimeProbePath = Join-Path (Get-Location).Path "$runtimeProbeModule.lean"
+$runtimeProbeOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$runtimeProbeModule.olean"
+$csimpProbeModule = "AuditScopedCSimpProbe$([System.Guid]::NewGuid().ToString('N'))"
+$csimpProbePath = Join-Path (Get-Location).Path "$csimpProbeModule.lean"
+$csimpProbeOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$csimpProbeModule.olean"
+$runtimeConsumerModule = "AuditRuntimeConsumer$([System.Guid]::NewGuid().ToString('N'))"
+$runtimeConsumerPath = Join-Path (Get-Location).Path "$runtimeConsumerModule.lean"
+$runtimeConsumerOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$runtimeConsumerModule.olean"
 
 try {
     $commands = @($moduleNames | ForEach-Object { "import $_" })
@@ -176,6 +185,130 @@ try {
         throw "Trust audit ignored a wrapped producer from an imported external module."
     }
 
+    $implementedByProbe = @(
+        "namespace ExternalRuntimeAuditProbe",
+        "unsafe def replacement (_ : ByteArray) : ByteArray := ByteArray.empty",
+        "@[implemented_by replacement]",
+        "def identityBytes (bytes : ByteArray) : ByteArray := bytes",
+        "end ExternalRuntimeAuditProbe"
+    )
+    [System.IO.File]::WriteAllLines($runtimeProbePath, $implementedByProbe)
+    $runtimeBuildOutput = @(& lake env lean $runtimeProbePath -o $runtimeProbeOlean 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        $runtimeBuildOutput | ForEach-Object { Write-Host $_ }
+        throw "Could not compile the implemented_by trust-audit probe."
+    }
+    $runtimeConsumerProbe = @(
+        "import $runtimeProbeModule",
+        "import Tests.Foundation",
+        "open Grass",
+        "def ExternalRuntimeAuditProbe.emittedBytes",
+        "    (verified : VerifiedProgram Grass.Tests.Foundation.spec) : ByteArray :=",
+        "  ExternalRuntimeAuditProbe.identityBytes (emitProgram verified)",
+        "#audit_runtime_dependencies ExternalRuntimeAuditProbe.emittedBytes"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $runtimeConsumerProbe)
+    $runtimeConsumerOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -eq 0 -or
+        -not ($runtimeConsumerOutput -match "ExternalRuntimeAuditProbe.identityBytes.*implemented_by.*ExternalRuntimeAuditProbe.replacement")) {
+        $runtimeConsumerOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit ignored an implemented_by replacement in the runtime dependency closure."
+    }
+
+    $externProbe = @(
+        "namespace ExternalRuntimeAuditProbe",
+        "@[extern `"grass_runtime_probe_identity`"]",
+        "def identityBytes (bytes : ByteArray) : ByteArray := bytes",
+        "end ExternalRuntimeAuditProbe"
+    )
+    [System.IO.File]::WriteAllLines($runtimeProbePath, $externProbe)
+    $runtimeBuildOutput = @(& lake env lean $runtimeProbePath -o $runtimeProbeOlean 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        $runtimeBuildOutput | ForEach-Object { Write-Host $_ }
+        throw "Could not compile the extern trust-audit probe."
+    }
+    $externConsumerProbe = @(
+        "import $runtimeProbeModule",
+        "import Tests.Foundation",
+        "open Grass",
+        "def ExternalRuntimeAuditConsumer.emittedBytes",
+        "    (verified : VerifiedProgram Grass.Tests.Foundation.spec) : ByteArray :=",
+        "  emitProgram verified"
+    )
+    [System.IO.File]::WriteAllLines($runtimeConsumerPath, $externConsumerProbe)
+    $runtimeBuildOutput = @(& lake env lean $runtimeConsumerPath -o $runtimeConsumerOlean 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        $runtimeBuildOutput | ForEach-Object { Write-Host $_ }
+        throw "Could not compile the extern importing-module trust-audit probe."
+    }
+    $externAuditProbe = @(
+        "import $runtimeConsumerModule",
+        "#audit_runtime_dependencies ExternalRuntimeAuditConsumer.emittedBytes"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $externAuditProbe)
+    $runtimeConsumerOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -eq 0 -or
+        -not ($runtimeConsumerOutput -match "ExternalRuntimeAuditProbe.identityBytes.*extern")) {
+        $runtimeConsumerOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit ignored an extern implementation in an ordinarily imported runtime module."
+    }
+
+    $csimpSourceProbe = @(
+        "namespace ExternalRuntimeAuditSource",
+        "def identityBytes (bytes : ByteArray) : ByteArray := bytes",
+        "end ExternalRuntimeAuditSource"
+    )
+    [System.IO.File]::WriteAllLines($runtimeProbePath, $csimpSourceProbe)
+    $runtimeBuildOutput = @(& lake env lean $runtimeProbePath -o $runtimeProbeOlean 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        $runtimeBuildOutput | ForEach-Object { Write-Host $_ }
+        throw "Could not compile the scoped-csimp source probe."
+    }
+    $scopedCSimpProbe = @(
+        "import $runtimeProbeModule",
+        "namespace ExternalScopedCSimpProbe",
+        "unsafe def runtimeReplacement (_ : ByteArray) : ByteArray := ByteArray.empty",
+        "@[implemented_by runtimeReplacement]",
+        "def replacement (bytes : ByteArray) : ByteArray := bytes",
+        "theorem replacement_eq : ExternalRuntimeAuditSource.identityBytes = replacement := rfl",
+        "end ExternalScopedCSimpProbe"
+    )
+    [System.IO.File]::WriteAllLines($csimpProbePath, $scopedCSimpProbe)
+    $runtimeBuildOutput = @(& lake env lean $csimpProbePath -o $csimpProbeOlean 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        $runtimeBuildOutput | ForEach-Object { Write-Host $_ }
+        throw "Could not compile the scoped-csimp replacement probe."
+    }
+    $scopedCSimpConsumer = @(
+        "import $runtimeProbeModule",
+        "import $csimpProbeModule",
+        "import Tests.Foundation",
+        "open Grass",
+        "section",
+        "attribute [local csimp] ExternalScopedCSimpProbe.replacement_eq",
+        "def ExternalScopedCSimpProbe.emittedBytes",
+        "    (verified : VerifiedProgram Grass.Tests.Foundation.spec) : ByteArray :=",
+        "  ExternalRuntimeAuditSource.identityBytes (emitProgram verified)",
+        "end"
+    )
+    [System.IO.File]::WriteAllLines($runtimeConsumerPath, $scopedCSimpConsumer)
+    $runtimeBuildOutput = @(& lake env lean $runtimeConsumerPath -o $runtimeConsumerOlean 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        $runtimeBuildOutput | ForEach-Object { Write-Host $_ }
+        throw "Could not compile the imported scoped-csimp consumer probe."
+    }
+    $scopedCSimpAudit = @(
+        "import $runtimeConsumerModule",
+        "#audit_runtime_dependencies ExternalScopedCSimpProbe.emittedBytes"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $scopedCSimpAudit)
+    $runtimeConsumerOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -eq 0 -or
+        -not ($runtimeConsumerOutput -match "ExternalScopedCSimpProbe.(replacement.*implemented_by.*runtimeReplacement|runtimeReplacement.*unsafe)")) {
+        $runtimeConsumerOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit ignored a scoped csimp replacement after its attribute state expired."
+    }
+
     Write-Host "Trust audit passed for $reported declaration(s)."
 }
 finally {
@@ -187,5 +320,23 @@ finally {
     }
     if ([System.IO.File]::Exists($externalProbeOlean)) {
         [System.IO.File]::Delete($externalProbeOlean)
+    }
+    if ([System.IO.File]::Exists($runtimeProbePath)) {
+        [System.IO.File]::Delete($runtimeProbePath)
+    }
+    if ([System.IO.File]::Exists($runtimeProbeOlean)) {
+        [System.IO.File]::Delete($runtimeProbeOlean)
+    }
+    if ([System.IO.File]::Exists($csimpProbePath)) {
+        [System.IO.File]::Delete($csimpProbePath)
+    }
+    if ([System.IO.File]::Exists($csimpProbeOlean)) {
+        [System.IO.File]::Delete($csimpProbeOlean)
+    }
+    if ([System.IO.File]::Exists($runtimeConsumerPath)) {
+        [System.IO.File]::Delete($runtimeConsumerPath)
+    }
+    if ([System.IO.File]::Exists($runtimeConsumerOlean)) {
+        [System.IO.File]::Delete($runtimeConsumerOlean)
     }
 }
