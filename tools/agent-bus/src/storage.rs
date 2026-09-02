@@ -77,6 +77,7 @@ pub fn read_segment_lines_from_bytes(label: &str, bytes: &[u8]) -> AbResult<Vec<
     Ok(lines)
 }
 
+#[derive(Debug)]
 pub struct AgentLogFile {
     pub segment: u64,
     pub lines: Vec<String>,
@@ -273,6 +274,9 @@ pub fn list_agents(bus_root: &Path) -> AbResult<Vec<Agent>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::AbError;
+    use crate::events::{AgentRegistered, AgentStatusEvent, EventData, LifecycleStatus, Role};
+    use crate::scalars::{Short, StringSet, Text};
 
     #[test]
     fn segment_math_rolls_over_at_1000() {
@@ -305,5 +309,352 @@ mod tests {
     fn accepts_well_formed_segment() {
         let lines = read_segment_lines_from_bytes("t", b"{\"a\":1}\n{\"a\":2}\n").unwrap();
         assert_eq!(lines, vec!["{\"a\":1}".to_string(), "{\"a\":2}".to_string()]);
+    }
+
+    #[test]
+    fn rejects_empty_content() {
+        let err = read_segment_lines_from_bytes("t", b"").unwrap_err();
+        assert!(err.to_string().contains("empty segment content"));
+    }
+
+    #[test]
+    fn rejects_byte_order_mark() {
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(b"{}\n");
+        let err = read_segment_lines_from_bytes("t", &bytes).unwrap_err();
+        assert!(err.to_string().contains("byte-order mark"));
+    }
+
+    #[test]
+    fn rejects_body_that_is_only_a_newline() {
+        // Non-empty bytes, but the body left after stripping the trailing LF
+        // is empty -- must hit the *second* empty-content check, not the
+        // blank-line check (there is no line to split on).
+        let err = read_segment_lines_from_bytes("t", b"\n").unwrap_err();
+        assert!(err.to_string().contains("empty segment content"));
+    }
+
+    #[test]
+    fn rejects_non_utf8() {
+        let err = read_segment_lines_from_bytes("t", &[0xFF, 0xFE, b'\n']).unwrap_err();
+        assert!(err.to_string().contains("not UTF-8"));
+    }
+
+    #[test]
+    fn rejects_line_exceeding_max_bytes() {
+        let mut bytes = vec![b'"'];
+        bytes.extend(std::iter::repeat(b'x').take(MAX_LINE_BYTES + 10));
+        bytes.push(b'"');
+        bytes.push(b'\n');
+        let err = read_segment_lines_from_bytes("t", &bytes).unwrap_err();
+        assert!(err.to_string().contains("line exceeds"));
+    }
+
+    fn agent(name: &str) -> Agent {
+        Agent::parse(name.to_string()).unwrap()
+    }
+
+    fn registered_envelope(name: &str, seq: u64) -> Envelope {
+        let ag = agent(name);
+        let data = EventData::AgentRegistered(AgentRegistered {
+            display_name: Short::parse(name.to_string()).unwrap(),
+            primary_role: Role::Implementor,
+            purpose: Text::parse("x".into()).unwrap(),
+            product_base: None,
+            product_branch: None,
+            provider: None,
+            model: None,
+        });
+        Envelope::new(&ag, seq, None, &data, [])
+    }
+
+    fn status_envelope(name: &str, seq: u64) -> Envelope {
+        let ag = agent(name);
+        let data = EventData::AgentStatus(AgentStatusEvent {
+            status: LifecycleStatus::Active,
+            note: Text::parse("still going".into()).unwrap(),
+            product_branch: None,
+            product_commit: None,
+        });
+        Envelope::new(&ag, seq, None, &data, [])
+    }
+
+    fn write_segment(bus_root: &Path, ag: &Agent, segment: u64, body: &str) {
+        let dir = agent_dir(bus_root, ag);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(segment_path(bus_root, ag, segment), body).unwrap();
+    }
+
+    // ---------------------------------------------------- read_segment_lines
+
+    #[test]
+    fn read_segment_lines_reads_a_real_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("seg.jsonl");
+        fs::write(&path, "{\"a\":1}\n").unwrap();
+        let lines = read_segment_lines(&path).unwrap();
+        assert_eq!(lines, vec!["{\"a\":1}".to_string()]);
+    }
+
+    #[test]
+    fn read_segment_lines_reports_io_error_for_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.jsonl");
+        let err = read_segment_lines(&path).unwrap_err();
+        assert!(matches!(err, AbError::Io { .. }));
+    }
+
+    // -------------------------------------------------- read_agent_segments
+
+    #[test]
+    fn read_agent_segments_rejects_unexpected_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let ag = agent("alice");
+        fs::create_dir_all(agent_dir(dir.path(), &ag)).unwrap();
+        fs::write(agent_dir(dir.path(), &ag).join("notes.txt"), "hi").unwrap();
+        let err = read_agent_segments(dir.path(), &ag).unwrap_err();
+        assert!(err.to_string().contains("unexpected file in agent log dir"));
+    }
+
+    #[test]
+    fn read_agent_segments_rejects_malformed_filename() {
+        let dir = tempfile::tempdir().unwrap();
+        let ag = agent("alice");
+        fs::create_dir_all(agent_dir(dir.path(), &ag)).unwrap();
+        fs::write(agent_dir(dir.path(), &ag).join("12345.jsonl"), "{}\n").unwrap();
+        let err = read_agent_segments(dir.path(), &ag).unwrap_err();
+        assert!(err.to_string().contains("malformed segment filename"));
+    }
+
+    #[test]
+    fn read_agent_segments_rejects_empty_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let ag = agent("alice");
+        fs::create_dir_all(agent_dir(dir.path(), &ag)).unwrap();
+        let err = read_agent_segments(dir.path(), &ag).unwrap_err();
+        assert!(err.to_string().contains("has no segments"));
+    }
+
+    #[test]
+    fn read_agent_segments_rejects_a_gap() {
+        let dir = tempfile::tempdir().unwrap();
+        let ag = agent("alice");
+        write_segment(dir.path(), &ag, 0, "{}\n");
+        write_segment(dir.path(), &ag, 2, "{}\n");
+        let err = read_agent_segments(dir.path(), &ag).unwrap_err();
+        assert!(err.to_string().contains("segment gap"));
+    }
+
+    #[test]
+    fn read_agent_segments_rejects_undersized_closed_segment() {
+        let dir = tempfile::tempdir().unwrap();
+        let ag = agent("alice");
+        // Segment 0 is not the tail (segment 1 exists), so it must have
+        // exactly SEGMENT_SIZE lines -- give it only 2.
+        write_segment(dir.path(), &ag, 0, "{}\n{}\n");
+        write_segment(dir.path(), &ag, 1, "{}\n");
+        let err = read_agent_segments(dir.path(), &ag).unwrap_err();
+        assert!(err.to_string().contains("has 2 events, expected 1000"));
+    }
+
+    #[test]
+    fn read_agent_segments_rejects_oversized_tail_segment() {
+        let dir = tempfile::tempdir().unwrap();
+        let ag = agent("alice");
+        let body: String = (0..(SEGMENT_SIZE + 1)).map(|i| format!("{{\"n\":{i}}}\n")).collect();
+        write_segment(dir.path(), &ag, 0, &body);
+        let err = read_agent_segments(dir.path(), &ag).unwrap_err();
+        assert!(err.to_string().contains("exceeds 1000 events"));
+    }
+
+    #[test]
+    fn read_agent_segments_accepts_closed_plus_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let ag = agent("alice");
+        let closed: String = (0..SEGMENT_SIZE).map(|i| format!("{{\"n\":{i}}}\n")).collect();
+        write_segment(dir.path(), &ag, 0, &closed);
+        write_segment(dir.path(), &ag, 1, "{\"n\":1000}\n{\"n\":1001}\n");
+        let segments = read_agent_segments(dir.path(), &ag).unwrap();
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].lines.len(), 1000);
+        assert_eq!(segments[1].lines.len(), 2);
+    }
+
+    #[test]
+    fn read_agent_segments_reports_io_error_for_missing_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        // No agent directory was ever created under `dir`.
+        let err = read_agent_segments(dir.path(), &agent("alice")).unwrap_err();
+        assert!(matches!(err, AbError::Io { .. }));
+    }
+
+    // ------------------------------------------------------- read_agent_log
+
+    #[test]
+    fn read_agent_log_round_trips_through_append_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let ag = agent("alice");
+        append_event(dir.path(), &registered_envelope("alice", 0)).unwrap();
+        append_event(dir.path(), &status_envelope("alice", 1)).unwrap();
+        let log = read_agent_log(dir.path(), &ag).unwrap();
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0].kind, "agent.registered");
+        assert_eq!(log[1].seq, 1);
+    }
+
+    #[test]
+    fn read_agent_log_rejects_agent_field_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let bob_event = registered_envelope("bob", 0);
+        write_segment(dir.path(), &agent("alice"), 0, &format!("{}\n", bob_event.to_canonical_line()));
+        let err = read_agent_log(dir.path(), &agent("alice")).unwrap_err();
+        assert!(err.to_string().contains("has agent field bob"));
+    }
+
+    #[test]
+    fn read_agent_log_rejects_seq_position_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let ev = registered_envelope("alice", 5);
+        write_segment(dir.path(), &agent("alice"), 0, &format!("{}\n", ev.to_canonical_line()));
+        let err = read_agent_log(dir.path(), &agent("alice")).unwrap_err();
+        assert!(err.to_string().contains("has seq 5 but occupies position 0"));
+    }
+
+    #[test]
+    fn read_agent_log_rejects_non_registered_first_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let ev = status_envelope("alice", 0);
+        write_segment(dir.path(), &agent("alice"), 0, &format!("{}\n", ev.to_canonical_line()));
+        let err = read_agent_log(dir.path(), &agent("alice")).unwrap_err();
+        assert!(err.to_string().contains("must be agent.registered at sequence zero"));
+    }
+
+    // --------------------------------------------------------- append_event
+
+    #[test]
+    fn append_event_creates_a_fresh_segment() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = registered_envelope("alice", 0);
+        append_event(dir.path(), &env).unwrap();
+        let content = fs::read_to_string(segment_path(dir.path(), &agent("alice"), 0)).unwrap();
+        assert_eq!(content, format!("{}\n", env.to_canonical_line()));
+    }
+
+    #[test]
+    fn append_event_appends_to_an_existing_segment() {
+        let dir = tempfile::tempdir().unwrap();
+        append_event(dir.path(), &registered_envelope("alice", 0)).unwrap();
+        let second = registered_envelope("alice", 1);
+        append_event(dir.path(), &second).unwrap();
+        let content = fs::read_to_string(segment_path(dir.path(), &agent("alice"), 0)).unwrap();
+        assert_eq!(content.lines().count(), 2);
+        assert!(content.ends_with(&format!("{}\n", second.to_canonical_line())));
+    }
+
+    #[test]
+    fn append_event_rejects_offset_without_existing_segment() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = registered_envelope("alice", 1); // offset 1, segment 0 not yet created
+        let err = append_event(dir.path(), &env).unwrap_err();
+        assert!(err.to_string().contains("expected existing segment"));
+    }
+
+    #[test]
+    fn append_event_rejects_fresh_segment_that_already_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        write_segment(dir.path(), &agent("alice"), 0, "{}\n");
+        let env = registered_envelope("alice", 0); // offset 0, but segment 0 already there
+        let err = append_event(dir.path(), &env).unwrap_err();
+        assert!(err.to_string().contains("already exists but a fresh segment was expected"));
+    }
+
+    #[test]
+    fn append_event_rejects_an_oversized_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let ag = agent("alice");
+        let env = Envelope {
+            v: 1,
+            id: crate::scalars::EventId::new(&ag, 0),
+            agent: ag.clone(),
+            seq: 0,
+            time: crate::scalars::Timestamp::now_utc(),
+            observed: None,
+            kind: "agent.registered".to_string(),
+            refs: StringSet::default(),
+            data: serde_json::json!({ "blob": "x".repeat(MAX_LINE_BYTES + 10) }),
+        };
+        let err = append_event(dir.path(), &env).unwrap_err();
+        assert!(err.to_string().contains("event line exceeds"));
+    }
+
+    #[test]
+    fn append_event_reports_io_error_when_agent_dir_cannot_be_created() {
+        let dir = tempfile::tempdir().unwrap();
+        // A plain file sits where the agent directory needs to go, so
+        // `create_dir_all` fails.
+        fs::write(dir.path().join("alice"), "not a directory").unwrap();
+        let env = registered_envelope("alice", 0);
+        let err = append_event(dir.path(), &env).unwrap_err();
+        assert!(matches!(err, AbError::Io { .. }));
+    }
+
+    #[test]
+    fn append_event_reports_io_error_when_existing_segment_is_unreadable() {
+        let dir = tempfile::tempdir().unwrap();
+        let ag = agent("alice");
+        // Segment 0 "exists" (as far as `Path::exists` is concerned) but is a
+        // directory, not a file, so reading it as a string fails.
+        fs::create_dir_all(segment_path(dir.path(), &ag, 0)).unwrap();
+        let env = registered_envelope("alice", 1); // offset 1: expects segment 0 to already exist
+        let err = append_event(dir.path(), &env).unwrap_err();
+        assert!(matches!(err, AbError::Io { .. }));
+    }
+
+    // ----------------------------------------------------------- misc/glue
+
+    #[test]
+    fn atomic_write_overwrites_existing_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.txt");
+        atomic_write(&path, b"hello").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "hello");
+        atomic_write(&path, b"world").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "world");
+    }
+
+    #[test]
+    fn atomic_write_reports_io_error_for_missing_parent_directory() {
+        let base = tempfile::tempdir().unwrap();
+        let missing = base.path().join("does-not-exist").join("out.jsonl");
+        let err = atomic_write(&missing, b"hello").unwrap_err();
+        assert!(matches!(err, AbError::Io { .. }));
+    }
+
+    #[test]
+    fn atomic_write_reports_io_error_when_target_is_a_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out");
+        fs::create_dir_all(&path).unwrap();
+        let err = atomic_write(&path, b"hello").unwrap_err();
+        assert!(matches!(err, AbError::Io { .. }));
+    }
+
+    #[test]
+    fn list_agents_sorts_and_excludes_reserved_and_files() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["bob", "alice", "_bus"] {
+            fs::create_dir_all(dir.path().join(name)).unwrap();
+        }
+        fs::write(dir.path().join("README"), "hi").unwrap();
+        let agents = list_agents(dir.path()).unwrap();
+        assert_eq!(agents, vec![agent("alice"), agent("bob")]);
+    }
+
+    #[test]
+    fn list_agents_reports_io_error_for_missing_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("nope");
+        let err = list_agents(&missing).unwrap_err();
+        assert!(matches!(err, AbError::Io { .. }));
     }
 }

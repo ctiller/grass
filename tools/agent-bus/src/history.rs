@@ -12,6 +12,7 @@ use crate::scalars::Agent;
 use std::collections::BTreeMap;
 use std::path::Path;
 
+#[derive(Debug)]
 pub struct WalkedCommit {
     pub commit: String,
     pub index: usize,
@@ -25,6 +26,7 @@ pub struct WalkedCommit {
     pub new_events: Vec<Envelope>,
 }
 
+#[derive(Debug)]
 pub struct Walk {
     pub commits: Vec<WalkedCommit>,
     pub bus_json: BusJson,
@@ -409,4 +411,671 @@ fn walk_one_commit(
         agent: Some(agent),
         new_events,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gitrepo::mock::MockGit;
+    use crate::gitrepo::GitOutput;
+    use crate::scalars::StringSet;
+    use std::path::PathBuf;
+    use std::process::Command as StdCommand;
+
+    // -----------------------------------------------------------------
+    // is_repair_commit: real, throwaway git repositories in a tempdir.
+    //
+    // Repair-commit validation is fundamentally about real git object
+    // relationships (ancestry, tree diffs, blob content), which
+    // `gitrepo::mock::MockGit` cannot fake convincingly here anyway: the
+    // content comparisons go through `blob_bytes`, which shells out to
+    // `git cat-file` directly rather than through `gitrepo::run`, so it
+    // is not interceptable by the mock. Small real commits are simpler
+    // and still fast (milliseconds).
+    // -----------------------------------------------------------------
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let out = StdCommand::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .expect("git invocation failed");
+        assert!(out.status.success(), "git {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    fn init_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        StdCommand::new("git").args(["init", "--quiet", "-b", "main"]).arg(path).status().unwrap();
+        git(path, &["config", "user.email", "test@example.com"]);
+        git(path, &["config", "user.name", "Test"]);
+        dir
+    }
+
+    fn write_file(dir: &Path, rel: &str, content: &str) {
+        let p = dir.join(rel);
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(p, content).unwrap();
+    }
+
+    fn commit_all(dir: &Path, msg: &str) -> String {
+        git(dir, &["add", "-A"]);
+        git(dir, &["commit", "-q", "-m", msg]);
+        git(dir, &["rev-parse", "HEAD"])
+    }
+
+    fn allow_empty_commit(dir: &Path, msg: &str) -> String {
+        git(dir, &["commit", "-q", "--allow-empty", "-m", msg]);
+        git(dir, &["rev-parse", "HEAD"])
+    }
+
+    fn coordinators(names: &[&str]) -> StringSet<Agent> {
+        StringSet::from_iter(names.iter().map(|n| Agent::parse(n.to_string()).unwrap()))
+    }
+
+    #[test]
+    fn is_repair_commit_returns_none_for_an_ordinary_commit() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        let base = commit_all(dir, "base");
+        write_file(dir, "alice/000000.jsonl", "A\nB\n");
+        let normal = commit_all(dir, "ordinary append, not a repair");
+        let result = is_repair_commit(dir, &normal, &base, None).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn is_repair_commit_accepts_a_byte_exact_restoration() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        let base = commit_all(dir, "base");
+        write_file(dir, "alice/000000.jsonl", "A\nB\n");
+        let invalid = commit_all(dir, "corrupt append");
+        write_file(dir, "alice/000000.jsonl", "A\n"); // byte-exact restoration
+        let msg = format!("bus-admin: repair {invalid} restore {base}\n\nAgent-Bus-Coordinator: coord1\n");
+        let repair = commit_all(dir, &msg);
+        let coords = coordinators(&["coord1"]);
+        let result = is_repair_commit(dir, &repair, &invalid, Some(&coords)).unwrap();
+        assert_eq!(result, Some("coord1".to_string()));
+    }
+
+    #[test]
+    fn is_repair_commit_rejects_self_referential_ancestor() {
+        // Regression test: `ancestor == invalid_commit` used to be accepted,
+        // making the "restoration" vacuous -- it would "restore" the invalid
+        // commit from itself, changing nothing.
+        let repo = init_repo();
+        let dir = repo.path();
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        commit_all(dir, "base");
+        write_file(dir, "alice/000000.jsonl", "A\nB\n");
+        let invalid = commit_all(dir, "corrupt append");
+        // No further content change: the self-reference must be rejected
+        // before any tree/blob comparison happens.
+        let msg = format!("bus-admin: repair {invalid} restore {invalid}\n\nAgent-Bus-Coordinator: coord1\n");
+        let repair = allow_empty_commit(dir, &msg);
+        let err = is_repair_commit(dir, &repair, &invalid, None).unwrap_err();
+        assert!(
+            err.to_string().contains("must not be the named invalid commit itself"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn is_repair_commit_rejects_smuggled_unrelated_path() {
+        // Regression test: a repair commit used to be allowed to touch paths
+        // beyond what the named invalid commit changed, because
+        // `walk_one_commit` returns early for repair commits and skips every
+        // normal structural check -- so a "restoration" of one agent's log
+        // could silently also corrupt a completely unrelated agent's log
+        // alongside it.
+        let repo = init_repo();
+        let dir = repo.path();
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        let base = commit_all(dir, "base");
+        write_file(dir, "alice/000000.jsonl", "A\nB\n");
+        let invalid = commit_all(dir, "corrupt append");
+        // Legitimately restore alice's file...
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        // ...but also smuggle in an edit to a completely unrelated path that
+        // the invalid commit never touched.
+        write_file(dir, "bob/000000.jsonl", "sneaky corruption\n");
+        let msg = format!("bus-admin: repair {invalid} restore {base}\n\nAgent-Bus-Coordinator: coord1\n");
+        let repair = commit_all(dir, &msg);
+        let err = is_repair_commit(dir, &repair, &invalid, None).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("bob/000000.jsonl") && msg.contains("did not change"), "unexpected error: {msg}");
+    }
+
+    #[test]
+    fn is_repair_commit_rejects_missing_trailer() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        let base = commit_all(dir, "base");
+        write_file(dir, "alice/000000.jsonl", "A\nB\n");
+        let invalid = commit_all(dir, "corrupt append");
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        let msg = format!("bus-admin: repair {invalid} restore {base}\n");
+        let repair = commit_all(dir, &msg);
+        let err = is_repair_commit(dir, &repair, &invalid, None).unwrap_err();
+        assert!(err.to_string().contains("must have exactly one Agent-Bus-Coordinator trailer"), "{err}");
+    }
+
+    #[test]
+    fn is_repair_commit_rejects_multiple_trailers() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        let base = commit_all(dir, "base");
+        write_file(dir, "alice/000000.jsonl", "A\nB\n");
+        let invalid = commit_all(dir, "corrupt append");
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        let msg = format!(
+            "bus-admin: repair {invalid} restore {base}\n\nAgent-Bus-Coordinator: coord1\nAgent-Bus-Coordinator: coord2\n"
+        );
+        let repair = commit_all(dir, &msg);
+        let err = is_repair_commit(dir, &repair, &invalid, None).unwrap_err();
+        assert!(err.to_string().contains("must have exactly one Agent-Bus-Coordinator trailer"), "{err}");
+    }
+
+    #[test]
+    fn is_repair_commit_rejects_coordinator_not_a_bootstrap_coordinator() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        let base = commit_all(dir, "base");
+        write_file(dir, "alice/000000.jsonl", "A\nB\n");
+        let invalid = commit_all(dir, "corrupt append");
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        let msg = format!("bus-admin: repair {invalid} restore {base}\n\nAgent-Bus-Coordinator: coord1\n");
+        let repair = commit_all(dir, &msg);
+        let coords = coordinators(&["someone-else"]);
+        let err = is_repair_commit(dir, &repair, &invalid, Some(&coords)).unwrap_err();
+        assert!(err.to_string().contains("which is not a bootstrap coordinator"), "{err}");
+    }
+
+    #[test]
+    fn is_repair_commit_rejects_malformed_grammar() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        commit_all(dir, "base");
+        write_file(dir, "alice/000000.jsonl", "A\nB\n");
+        // Wrong shape: missing the "restore <ancestor>" tail.
+        let msg = "bus-admin: repair not-enough-tokens\n\nAgent-Bus-Coordinator: coord1\n";
+        let repair = commit_all(dir, msg);
+        // `parent` is only consulted after grammar parsing succeeds, so it
+        // doesn't need to resolve to anything for this case.
+        let err = is_repair_commit(dir, &repair, "unused", None).unwrap_err();
+        assert!(err.to_string().contains("does not match `bus-admin: repair"), "{err}");
+    }
+
+    #[test]
+    fn is_repair_commit_rejects_ancestor_that_is_not_actually_an_ancestor() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        let _base = commit_all(dir, "base");
+        git(dir, &["checkout", "-b", "side"]);
+        write_file(dir, "side-only.txt", "side\n");
+        let side_tip = commit_all(dir, "side commit");
+        git(dir, &["checkout", "main"]);
+        write_file(dir, "alice/000000.jsonl", "A\nB\n");
+        let invalid = commit_all(dir, "corrupt append");
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        let msg = format!("bus-admin: repair {invalid} restore {side_tip}\n\nAgent-Bus-Coordinator: coord1\n");
+        let repair = commit_all(dir, &msg);
+        let err = is_repair_commit(dir, &repair, &invalid, None).unwrap_err();
+        assert!(err.to_string().contains("is not an ancestor of the named invalid commit"), "{err}");
+    }
+
+    #[test]
+    fn is_repair_commit_rejects_invalid_commit_that_changes_nothing() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        let base = commit_all(dir, "base");
+        let invalid = allow_empty_commit(dir, "empty, changes nothing");
+        let msg = format!("bus-admin: repair {invalid} restore {base}\n\nAgent-Bus-Coordinator: coord1\n");
+        let repair = allow_empty_commit(dir, &msg);
+        let err = is_repair_commit(dir, &repair, &invalid, None).unwrap_err();
+        assert!(err.to_string().contains("changes nothing"), "{err}");
+    }
+
+    // -----------------------------------------------------------------
+    // walk_one_commit: structural checks on ordinary (non-repair)
+    // commits that don't need real blob content -- scripted via
+    // `gitrepo::mock::MockGit` instead of a real repository.
+    // -----------------------------------------------------------------
+
+    fn any_dir() -> PathBuf {
+        PathBuf::from("mock-repo")
+    }
+
+    #[test]
+    fn walk_one_commit_rejects_non_single_parent_commits() {
+        let _guard =
+            MockGit::new().on(&["show", "-s", "--format=%P", "c1"], GitOutput::ok("p1 p2")).install();
+        let mut next_seq = BTreeMap::new();
+        let err = walk_one_commit(&any_dir(), "c1", 1, &mut next_seq, None).unwrap_err();
+        assert!(err.to_string().contains("is not a single-parent commit"), "{err}");
+    }
+
+    #[test]
+    fn walk_one_commit_rejects_a_commit_that_changes_nothing() {
+        let _guard = MockGit::new()
+            .on(&["show", "-s", "--format=%P", "c1"], GitOutput::ok("p1"))
+            .on(&["show", "-s", "--format=%B", "c1"], GitOutput::ok("an ordinary commit message"))
+            .on(&["diff", "--name-status", "p1..c1"], GitOutput::ok(""))
+            .install();
+        let mut next_seq = BTreeMap::new();
+        let err = walk_one_commit(&any_dir(), "c1", 1, &mut next_seq, None).unwrap_err();
+        assert!(err.to_string().contains("changes nothing"), "{err}");
+    }
+
+    #[test]
+    fn walk_one_commit_rejects_a_non_agent_path() {
+        let _guard = MockGit::new()
+            .on(&["show", "-s", "--format=%P", "c1"], GitOutput::ok("p1"))
+            .on(&["show", "-s", "--format=%B", "c1"], GitOutput::ok("an ordinary commit message"))
+            .on(&["diff", "--name-status", "p1..c1"], GitOutput::ok("A\tNotAnAgent/000000.jsonl"))
+            .install();
+        let mut next_seq = BTreeMap::new();
+        let err = walk_one_commit(&any_dir(), "c1", 1, &mut next_seq, None).unwrap_err();
+        assert!(err.to_string().contains("touches non-agent path"), "{err}");
+    }
+
+    #[test]
+    fn walk_one_commit_rejects_multiple_agent_directories() {
+        let _guard = MockGit::new()
+            .on(&["show", "-s", "--format=%P", "c1"], GitOutput::ok("p1"))
+            .on(&["show", "-s", "--format=%B", "c1"], GitOutput::ok("an ordinary commit message"))
+            .on(
+                &["diff", "--name-status", "p1..c1"],
+                GitOutput::ok("A\talice/000000.jsonl\nM\tbob/000001.jsonl"),
+            )
+            .install();
+        let mut next_seq = BTreeMap::new();
+        let err = walk_one_commit(&any_dir(), "c1", 1, &mut next_seq, None).unwrap_err();
+        assert!(err.to_string().contains("touches multiple agent directories"), "{err}");
+    }
+
+    #[test]
+    fn walk_one_commit_rejects_a_disallowed_change_type() {
+        let _guard = MockGit::new()
+            .on(&["show", "-s", "--format=%P", "c1"], GitOutput::ok("p1"))
+            .on(&["show", "-s", "--format=%B", "c1"], GitOutput::ok("an ordinary commit message"))
+            .on(&["diff", "--name-status", "p1..c1"], GitOutput::ok("D\talice/000000.jsonl"))
+            .install();
+        let mut next_seq = BTreeMap::new();
+        let err = walk_one_commit(&any_dir(), "c1", 1, &mut next_seq, None).unwrap_err();
+        assert!(err.to_string().contains("performs disallowed change"), "{err}");
+    }
+
+    #[test]
+    fn walk_one_commit_rejects_a_malformed_segment_path() {
+        let _guard = MockGit::new()
+            .on(&["show", "-s", "--format=%P", "c1"], GitOutput::ok("p1"))
+            .on(&["show", "-s", "--format=%B", "c1"], GitOutput::ok("an ordinary commit message"))
+            .on(&["diff", "--name-status", "p1..c1"], GitOutput::ok("A\talice/not-a-segment.txt"))
+            .install();
+        let mut next_seq = BTreeMap::new();
+        let err = walk_one_commit(&any_dir(), "c1", 1, &mut next_seq, None).unwrap_err();
+        assert!(err.to_string().contains("touches malformed segment path"), "{err}");
+    }
+
+    // -----------------------------------------------------------------
+    // is_repair_commit: the byte-for-byte restore-content check, and
+    // walk_one_commit's own repair-commit dispatch (real repo -- both
+    // depend on `blob_bytes`, so they need real trees/blobs).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn is_repair_commit_rejects_a_restoration_that_is_not_byte_exact() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        let base = commit_all(dir, "base");
+        write_file(dir, "alice/000000.jsonl", "A\nB\n");
+        let invalid = commit_all(dir, "corrupt append");
+        // Claims to restore alice's file, but doesn't actually reproduce the
+        // ancestor's bytes.
+        write_file(dir, "alice/000000.jsonl", "A\nX\n");
+        let msg = format!("bus-admin: repair {invalid} restore {base}\n\nAgent-Bus-Coordinator: coord1\n");
+        let repair = commit_all(dir, &msg);
+        let err = is_repair_commit(dir, &repair, &invalid, None).unwrap_err();
+        assert!(err.to_string().contains("does not byte-for-byte restore"), "{err}");
+    }
+
+    #[test]
+    fn walk_one_commit_recognizes_a_valid_repair_commit() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        let base = commit_all(dir, "base");
+        write_file(dir, "alice/000000.jsonl", "A\nB\n");
+        let invalid = commit_all(dir, "corrupt append");
+        write_file(dir, "alice/000000.jsonl", "A\n");
+        let msg = format!("bus-admin: repair {invalid} restore {base}\n\nAgent-Bus-Coordinator: coord1\n");
+        let repair = commit_all(dir, &msg);
+        let coords = coordinators(&["coord1"]);
+        let mut next_seq = BTreeMap::new();
+        let wc = walk_one_commit(dir, &repair, 3, &mut next_seq, Some(&coords)).unwrap();
+        assert!(wc.is_repair);
+        assert!(!wc.is_bootstrap_root);
+        assert_eq!(wc.commit, repair);
+        assert_eq!(wc.index, 3);
+        assert_eq!(wc.agent, Some(Agent::parse("coord1".to_string()).unwrap()));
+        assert!(wc.new_events.is_empty());
+    }
+
+    // -----------------------------------------------------------------
+    // walk_full / walk_incremental: thin `rev-list` + per-commit-walk
+    // wrappers, scripted via MockGit.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn walk_full_rejects_an_empty_history() {
+        let _guard = MockGit::new()
+            .on(&["rev-list", "--first-parent", "--reverse", "tip"], GitOutput::ok(""))
+            .install();
+        let err = walk_full(&any_dir(), "tip").unwrap_err();
+        assert!(err.to_string().contains("has no commits"), "{err}");
+    }
+
+    #[test]
+    fn walk_incremental_returns_empty_for_an_empty_range() {
+        let _guard = MockGit::new()
+            .on(&["rev-list", "--first-parent", "--reverse", "old..new"], GitOutput::ok(""))
+            .install();
+        let coords = coordinators(&["coord1"]);
+        let out = walk_incremental(&any_dir(), "old", "new", BTreeMap::new(), &coords).unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn walk_incremental_walks_and_propagates_a_per_commit_error() {
+        let _guard = MockGit::new()
+            .on(&["rev-list", "--first-parent", "--reverse", "old..new"], GitOutput::ok("c1"))
+            .on(&["show", "-s", "--format=%P", "c1"], GitOutput::ok("p1"))
+            .on(&["show", "-s", "--format=%B", "c1"], GitOutput::ok("an ordinary commit message"))
+            .on(&["diff", "--name-status", "p1..c1"], GitOutput::ok(""))
+            .install();
+        let coords = coordinators(&["coord1"]);
+        let err = walk_incremental(&any_dir(), "old", "new", BTreeMap::new(), &coords).unwrap_err();
+        assert!(err.to_string().contains("changes nothing"), "{err}");
+    }
+
+    // -----------------------------------------------------------------
+    // walk_bootstrap_commit
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn walk_bootstrap_commit_rejects_a_root_with_parents() {
+        let _guard =
+            MockGit::new().on(&["show", "-s", "--format=%P", "root"], GitOutput::ok("p1")).install();
+        let err = walk_bootstrap_commit(&any_dir(), "root").unwrap_err();
+        assert!(err.to_string().contains("bus root commit must have no parent"), "{err}");
+    }
+
+    /// A canonically-encoded `agent.registered` line for `ag` at `seq`
+    /// (defaulting to `Role::Coordinator`, which is fine for both bootstrap
+    /// registrations and the plain append-loop tests below -- the role isn't
+    /// consulted by anything in this module).
+    fn registered_line(ag: &Agent, seq: u64, observed: Option<crate::scalars::ObjectId>) -> String {
+        use crate::events::{AgentRegistered, EventData, Role};
+        use crate::scalars::{Short, Text};
+        let data = EventData::AgentRegistered(AgentRegistered {
+            display_name: Short::parse(ag.to_string()).unwrap(),
+            primary_role: Role::Coordinator,
+            purpose: Text::parse("x".into()).unwrap(),
+            product_base: None,
+            product_branch: None,
+            provider: None,
+            model: None,
+        });
+        let env = Envelope::new(ag, seq, observed, &data, []);
+        format!("{}\n", env.to_canonical_line())
+    }
+
+    fn write_bootstrap_files(dir: &Path, coordinator_names: &[&str]) -> crate::bootstrap::BusJson {
+        let coordinators: Vec<Agent> =
+            coordinator_names.iter().map(|n| Agent::parse(n.to_string()).unwrap()).collect();
+        let product_review_from = crate::scalars::ObjectId::parse("0".repeat(40)).unwrap();
+        let bus_json = crate::bootstrap::BusJson::new("sha1".to_string(), coordinators.clone(), product_review_from)
+            .expect("git version must match the pinned merge engine version for this test to run");
+        write_file(dir, "_bus/BUS.json", &String::from_utf8(bus_json.to_canonical_bytes()).unwrap());
+        write_file(dir, ".gitattributes", crate::bootstrap::GITATTRIBUTES_CONTENTS);
+        for c in &coordinators {
+            write_file(dir, &format!("{c}/000000.jsonl"), &registered_line(c, 0, None));
+        }
+        bus_json
+    }
+
+    #[test]
+    fn walk_bootstrap_commit_accepts_a_well_formed_root() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_bootstrap_files(dir, &["coord1"]);
+        let root = commit_all(dir, "bootstrap");
+        let (wc, bus_json) = walk_bootstrap_commit(dir, &root).unwrap();
+        assert!(wc.is_bootstrap_root);
+        assert_eq!(wc.new_events.len(), 1);
+        assert_eq!(bus_json.coordinators.len(), 1);
+    }
+
+    #[test]
+    fn walk_bootstrap_commit_rejects_an_unexpected_file() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_bootstrap_files(dir, &["coord1"]);
+        write_file(dir, "junk.txt", "not part of the bootstrap layout\n");
+        let root = commit_all(dir, "bootstrap");
+        let err = walk_bootstrap_commit(dir, &root).unwrap_err();
+        assert!(err.to_string().contains("unexpected bootstrap file: junk.txt"), "{err}");
+    }
+
+    #[test]
+    fn walk_bootstrap_commit_rejects_a_coordinator_missing_its_registration() {
+        let repo = init_repo();
+        let dir = repo.path();
+        // write_bootstrap_files would normally write a registration file per
+        // coordinator; build the BUS.json by hand instead so coord2 is named
+        // but never gets a `coord2/000000.jsonl`.
+        use crate::events::{AgentRegistered, EventData, Role};
+        use crate::scalars::{ObjectId, Short, Text};
+        let coordinators = vec![Agent::parse("coord1".to_string()).unwrap(), Agent::parse("coord2".to_string()).unwrap()];
+        let product_review_from = ObjectId::parse("0".repeat(40)).unwrap();
+        let bus_json = crate::bootstrap::BusJson::new("sha1".to_string(), coordinators, product_review_from)
+            .expect("git version must match the pinned merge engine version for this test to run");
+        write_file(dir, "_bus/BUS.json", &String::from_utf8(bus_json.to_canonical_bytes()).unwrap());
+        write_file(dir, ".gitattributes", crate::bootstrap::GITATTRIBUTES_CONTENTS);
+        let coord1 = Agent::parse("coord1".to_string()).unwrap();
+        let data = EventData::AgentRegistered(AgentRegistered {
+            display_name: Short::parse("coord1".into()).unwrap(),
+            primary_role: Role::Coordinator,
+            purpose: Text::parse("x".into()).unwrap(),
+            product_base: None,
+            product_branch: None,
+            provider: None,
+            model: None,
+        });
+        let env = Envelope::new(&coord1, 0, None, &data, []);
+        write_file(dir, "coord1/000000.jsonl", &format!("{}\n", env.to_canonical_line()));
+        let root = commit_all(dir, "bootstrap");
+        let err = walk_bootstrap_commit(dir, &root).unwrap_err();
+        assert!(err.to_string().contains("coord2") && err.to_string().contains("has no bootstrap registration"), "{err}");
+    }
+
+    #[test]
+    fn walk_bootstrap_commit_rejects_wrong_gitattributes() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_bootstrap_files(dir, &["coord1"]);
+        write_file(dir, ".gitattributes", "* text=auto\n"); // not the required contents
+        let root = commit_all(dir, "bootstrap");
+        let err = walk_bootstrap_commit(dir, &root).unwrap_err();
+        assert!(err.to_string().contains(".gitattributes is not exactly"), "{err}");
+    }
+
+    #[test]
+    fn walk_bootstrap_commit_rejects_registration_for_a_non_coordinator() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_bootstrap_files(dir, &["coord1"]);
+        // alice is not named in BUS.json's coordinators.
+        let alice = Agent::parse("alice".to_string()).unwrap();
+        let line = registered_line(&alice, 0, None);
+        write_file(dir, "alice/000000.jsonl", &line);
+        let root = commit_all(dir, "bootstrap");
+        let err = walk_bootstrap_commit(dir, &root).unwrap_err();
+        assert!(err.to_string().contains("not in BUS.json coordinators"), "{err}");
+    }
+
+    #[test]
+    fn walk_bootstrap_commit_rejects_multiple_events_in_one_registration_file() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_bootstrap_files(dir, &["coord1"]);
+        let coord1 = Agent::parse("coord1".to_string()).unwrap();
+        let mut content = registered_line(&coord1, 0, None);
+        content.push_str(&registered_line(&coord1, 0, None));
+        write_file(dir, "coord1/000000.jsonl", &content); // two lines, not one
+        let root = commit_all(dir, "bootstrap");
+        let err = walk_bootstrap_commit(dir, &root).unwrap_err();
+        assert!(err.to_string().contains("must contain exactly one event"), "{err}");
+    }
+
+    #[test]
+    fn walk_bootstrap_commit_rejects_a_non_registered_first_event() {
+        use crate::events::{AgentStatusEvent, EventData, LifecycleStatus};
+        use crate::scalars::Text;
+        let repo = init_repo();
+        let dir = repo.path();
+        write_bootstrap_files(dir, &["coord1"]);
+        let coord1 = Agent::parse("coord1".to_string()).unwrap();
+        let data = EventData::AgentStatus(AgentStatusEvent {
+            status: LifecycleStatus::Active,
+            note: Text::parse("not a registration".into()).unwrap(),
+            product_branch: None,
+            product_commit: None,
+        });
+        let env = Envelope::new(&coord1, 0, None, &data, []);
+        write_file(dir, "coord1/000000.jsonl", &format!("{}\n", env.to_canonical_line()));
+        let root = commit_all(dir, "bootstrap");
+        let err = walk_bootstrap_commit(dir, &root).unwrap_err();
+        assert!(err.to_string().contains("must contain agent.registered at seq 0"), "{err}");
+    }
+
+    #[test]
+    fn walk_bootstrap_commit_rejects_registration_with_an_observed_value() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_bootstrap_files(dir, &["coord1"]);
+        let coord1 = Agent::parse("coord1".to_string()).unwrap();
+        let oid = crate::scalars::ObjectId::parse("1".repeat(40)).unwrap();
+        let line = registered_line(&coord1, 0, Some(oid));
+        write_file(dir, "coord1/000000.jsonl", &line);
+        let root = commit_all(dir, "bootstrap");
+        let err = walk_bootstrap_commit(dir, &root).unwrap_err();
+        assert!(err.to_string().contains("must have observed: null"), "{err}");
+    }
+
+    #[test]
+    fn walk_bootstrap_commit_rejects_registration_agent_field_mismatch() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_bootstrap_files(dir, &["coord1"]);
+        // The file lives under coord1/, but the event inside is bob's --
+        // impossible to construct through the normal directory-derived-agent
+        // path, but validated defensively here anyway.
+        let bob = Agent::parse("bob".to_string()).unwrap();
+        let line = registered_line(&bob, 0, None);
+        write_file(dir, "coord1/000000.jsonl", &line);
+        let root = commit_all(dir, "bootstrap");
+        let err = walk_bootstrap_commit(dir, &root).unwrap_err();
+        assert!(err.to_string().contains("event agent field does not match directory"), "{err}");
+    }
+
+    // -----------------------------------------------------------------
+    // walk_one_commit: the append-content validation loop (needs real
+    // blob content, so real repos rather than MockGit).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn walk_one_commit_rejects_a_rewrite_disguised_as_an_append() {
+        let repo = init_repo();
+        let dir = repo.path();
+        write_file(dir, "alice/000000.jsonl", "AAAA\n");
+        commit_all(dir, "base");
+        write_file(dir, "alice/000000.jsonl", "ZZZZ\n"); // not a superset of "AAAA\n"
+        let commit = commit_all(dir, "not-a-repair, ordinary looking commit");
+        let mut next_seq = BTreeMap::new();
+        let err = walk_one_commit(dir, &commit, 1, &mut next_seq, None).unwrap_err();
+        assert!(err.to_string().contains("rewrites existing content"), "{err}");
+    }
+
+    #[test]
+    fn walk_one_commit_rejects_an_appended_events_agent_field_mismatch() {
+        let repo = init_repo();
+        let dir = repo.path();
+        let alice = Agent::parse("alice".to_string()).unwrap();
+        // Reuse the exact same seq-0 line bytes for the parent and the
+        // child's prefix, so the append is byte-for-byte a true append
+        // regardless of how long each `registered_line` call takes.
+        let seq0 = registered_line(&alice, 0, None);
+        write_file(dir, "alice/000000.jsonl", &seq0);
+        commit_all(dir, "base");
+        let bob = Agent::parse("bob".to_string()).unwrap();
+        let content = format!("{seq0}{}", registered_line(&bob, 0, None)); // wrong agent for this path
+        write_file(dir, "alice/000000.jsonl", &content);
+        let commit = commit_all(dir, "append with wrong agent field");
+        let mut next_seq = BTreeMap::new();
+        let err = walk_one_commit(dir, &commit, 1, &mut next_seq, None).unwrap_err();
+        assert!(err.to_string().contains("has agent field bob"), "{err}");
+    }
+
+    #[test]
+    fn walk_one_commit_rejects_an_appended_events_position_mismatch() {
+        let repo = init_repo();
+        let dir = repo.path();
+        let alice = Agent::parse("alice".to_string()).unwrap();
+        let seq0 = registered_line(&alice, 0, None);
+        write_file(dir, "alice/000000.jsonl", &seq0);
+        commit_all(dir, "base");
+        // The next line in this file occupies position 1, but claims seq 5.
+        let content = format!("{seq0}{}", registered_line(&alice, 5, None));
+        write_file(dir, "alice/000000.jsonl", &content);
+        let commit = commit_all(dir, "append with wrong seq");
+        let mut next_seq = BTreeMap::new();
+        let err = walk_one_commit(dir, &commit, 1, &mut next_seq, None).unwrap_err();
+        assert!(err.to_string().contains("occupies position 1") && err.to_string().contains("seq field says 5"), "{err}");
+    }
+
+    #[test]
+    fn walk_one_commit_rejects_an_out_of_order_sequence() {
+        let repo = init_repo();
+        let dir = repo.path();
+        let alice = Agent::parse("alice".to_string()).unwrap();
+        let seq0 = registered_line(&alice, 0, None);
+        write_file(dir, "alice/000000.jsonl", &seq0);
+        commit_all(dir, "base");
+        let content = format!("{seq0}{}", registered_line(&alice, 1, None)); // position-correct: occupies seq 1
+        write_file(dir, "alice/000000.jsonl", &content);
+        let commit = commit_all(dir, "append");
+        // Seed the caller's tracked next-expected-sequence as if 5 events had
+        // already been replayed for alice, so this position-correct seq-1
+        // event is nonetheless out of order relative to the caller's state.
+        let mut next_seq = BTreeMap::new();
+        next_seq.insert(alice, 5);
+        let err = walk_one_commit(dir, &commit, 1, &mut next_seq, None).unwrap_err();
+        assert!(err.to_string().contains("out-of-order or non-contiguous sequence"), "{err}");
+    }
 }
