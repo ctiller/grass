@@ -1,4 +1,5 @@
 import Grass.Process.Progress
+import Grass.Process.Run
 
 /-!
 # The application proof package
@@ -20,8 +21,9 @@ later would be the "safety afterthought" `docs/FOUNDATION.md` law 4 rejects.
 `docs/PROCESS.md` §4 lists `terminalNoStep : NoProcessStepFromTerminal p` and,
 separately, the generic `ProcessRun.observationCausality`. The second is not a
 field here for the reason the document itself gives — "generic bookkeeping, not
-an application proof field" — and is `Segmented.origin` in
-`Grass/Process/Observation.lean`, proved once.
+an application proof field". It is `Reachable.observationCausality` in
+`Grass/Process/Run.lean`, proved once over the segmentation that `Reachable`
+carries as an index.
 
 The first *is* a field here, and it is worth saying what it is not.
 `ProcessRunTransition.not_from_terminal` says a run that has taken `terminate`
@@ -92,8 +94,10 @@ structure ProcessCorrect (p : ProcessSpec.{u, w}) (accept : ProcessAcceptance p)
 
   Over prefixes, per `Grass/Process/Acceptance.lean`: this is the safety half.
   -/
-  observationsAccept : ∀ (request : p.Request) (runState : ProcessRunState p request),
-    Reachable p request runState → accept.TraceAccepts runState.history
+  observationsAccept : ∀ (request : p.Request)
+      (segmented : Segmented p.Observation) (runState : ProcessRunState p request),
+    Reachable accept.terminalRemainder request segmented runState →
+    accept.TraceAccepts runState.history
   /-- The process meets its progress contract, for every request. -/
   progress : ∀ request : p.Request,
     MeetsProcessProgress p accept Invariant request
@@ -112,15 +116,17 @@ preservation, view correctness, and process progress"; this theorem is what
 turns the first two of those into a statement about runs.
 -/
 theorem invariant_of_reachable (correct : ProcessCorrect p accept)
-    {runState : ProcessRunState p request}
-    (reached : Reachable p request runState) :
+    {segmented : Segmented p.Observation} {runState : ProcessRunState p request}
+    (reached : Reachable accept.terminalRemainder request segmented runState) :
     correct.Invariant runState.state := by
   induction reached with
   | initial isInitial =>
     cases isInitial with
     | running initial => exact correct.initial _ _ _ _ initial
+  | initialTerminal isInitial =>
+    cases isInitial with
     | terminal initial _ _ => exact correct.initial _ _ _ _ initial
-  | step _ transition ih =>
+  | step _ transition _ ih =>
     cases transition with
     | step _ stepped => exact correct.preserved _ _ _ _ _ ih stepped
     | settle _ _ stepped => exact correct.preserved _ _ _ _ _ ih stepped
@@ -134,9 +140,10 @@ form a caller wants — "if this process finished, its answer was legitimate" �
 and stating it here means the caller does not redo the induction.
 -/
 theorem terminalAccepts_of_reachable (correct : ProcessCorrect p accept)
-    {state : p.State} {result : p.TerminalResult}
-    {observations : Trace p.Observation}
-    (reached : Reachable p request (.terminal state result observations))
+    {segmented : Segmented p.Observation} {state : p.State}
+    {result : p.TerminalResult} {observations : Trace p.Observation}
+    (reached : Reachable accept.terminalRemainder request segmented
+      (.terminal state result observations))
     (isTerminal : p.Terminal request state result) :
     accept.TerminalAccepts request result :=
   correct.terminal request state result

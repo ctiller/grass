@@ -84,8 +84,6 @@ def empty : Segmented Observation where
   flat := []
   flatExact := rfl
 
-instance : EmptyCollection (Segmented Observation) := ⟨empty⟩
-
 /-- Append the segment emitted by one further transition. -/
 def emit (history : Segmented Observation)
     (segment : ObservationSegment Observation) : Segmented Observation where
@@ -107,18 +105,13 @@ def emit (history : Segmented Observation)
     (segment : ObservationSegment Observation) :
     (history.emit segment).flat = history.flat ++ segment := rfl
 
-/--
-Emitting the empty segment is a silent transition: it changes the history's
-segment list but not the trace.
-
-`docs/PROCESS.md` §2 calls these "ordinary silent/stuttering transitions". A
-silent transition still gets a segment entry, because `segments` is a record of
-what each transition emitted and a transition that emitted nothing emitted the
-empty list. That the entry is invisible in `flat` is the point: it is why the
-segmentation must not reach a consumer that could branch on it.
+/-!
+A silent transition still gets a segment entry, because `segments` records what
+each transition emitted and a transition that emitted nothing emitted the empty
+list. It contributes nothing to `flat` — that is `emit_flat` with
+`List.append_nil` — which is why the segmentation is an index of `Reachable` and
+never reaches an acceptance relation.
 -/
-@[simp] theorem emit_nil_flat (history : Segmented Observation) :
-    (history.emit []).flat = history.flat := by simp
 
 /--
 The number of observations is the sum of the segment lengths: a transition
@@ -130,18 +123,9 @@ theorem flat_length (history : Segmented Observation) :
   rw [history.flatExact, List.length_flatten]
 
 /--
-The origin of the observation occurrence at a given position.
-
-`split` locates one occurrence: the trace is `before`, then this occurrence,
-then `after`. The conclusion decomposes the segment list at the emitting
-segment, and that segment at the occurrence, and states how the surrounding
-trace is built from the two.
-
-This is the retained form of `ProcessRun.observationCausality` in
-`docs/PROCESS.md` §4. It is a decomposition rather than an index function
-because that is the form later projections consume: an observation filter that
-keeps a suffix, or a weave that interleaves two histories, needs the
-surrounding context, not an integer.
+`origin` at the representative: the same decomposition, stated over a bare
+segment list rather than a `Segmented`, so that the induction can generalize
+`before` without generalizing a structure projection.
 -/
 private theorem origin_flatten {Observation : Type u}
     {segments : List (ObservationSegment Observation)} {observation : Observation}

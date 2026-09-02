@@ -87,8 +87,6 @@ def empty : RequirementSet where
   keys := []
   distinct := List.nodup_nil
 
-instance : EmptyCollection RequirementSet := ⟨empty⟩
-
 /-- `key` is demanded by this set. -/
 def Demands (requirements : RequirementSet) (key : RequirementKey) : Prop :=
   key ∈ requirements.keys
@@ -175,11 +173,17 @@ def withRequirements (boundary : DriverBoundary.{u})
     (requirements : RequirementSet) : DriverBoundary.{u} :=
   { boundary with requirements := requirements }
 
-theorem withRequirements_covers (boundary : DriverBoundary.{u})
-    {requirements : RequirementSet}
-    (covers : requirements.Covers boundary.requirements) :
-    (boundary.withRequirements requirements).requirements.Covers
-      boundary.requirements := covers
+/--
+The vocabulary view and the requirement-delta operations above have no consumer
+inside `Grass.Process` yet. `toVocabulary` is what the sequential adapter
+elaborates a `SequentialMachine` into, and `withRequirements` with
+`RequirementSet.Covers` is the delta a refinement lens accumulates; both are M4.
+They are declared here, with the boundary they are about, rather than invented
+at the use site.
+-/
+theorem withRequirements_requirements (boundary : DriverBoundary.{u})
+    (requirements : RequirementSet) :
+    (boundary.withRequirements requirements).requirements = requirements := rfl
 
 end DriverBoundary
 
