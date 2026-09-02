@@ -29,7 +29,9 @@ impl BusJson {
         product_review_from: ObjectId,
     ) -> AbResult<BusJson> {
         if object_format != "sha1" && object_format != "sha256" {
-            return Err(invalid(format!("unsupported object_format: {object_format}")));
+            return Err(invalid(format!(
+                "unsupported object_format: {object_format}"
+            )));
         }
         if coordinators.is_empty() {
             return Err(invalid("bootstrap requires at least one coordinator"));
@@ -58,7 +60,8 @@ impl BusJson {
     }
 
     pub fn parse(bytes: &[u8]) -> AbResult<BusJson> {
-        let text = std::str::from_utf8(bytes).map_err(|e| invalid(format!("BUS.json not UTF-8: {e}")))?;
+        let text =
+            std::str::from_utf8(bytes).map_err(|e| invalid(format!("BUS.json not UTF-8: {e}")))?;
         if !text.ends_with('\n') || text.matches('\n').count() != 1 {
             return Err(invalid("BUS.json must be exactly one line plus LF"));
         }
@@ -85,10 +88,16 @@ impl BusJson {
         crate::canon::check_nfc(&value)?;
         let bus: BusJson = serde_json::from_value(value)?;
         if bus.v != crate::envelope::SCHEMA_VERSION {
-            return Err(invalid(format!("unsupported BUS.json schema version {}", bus.v)));
+            return Err(invalid(format!(
+                "unsupported BUS.json schema version {}",
+                bus.v
+            )));
         }
         if bus.object_format != "sha1" && bus.object_format != "sha256" {
-            return Err(invalid(format!("unsupported object_format: {}", bus.object_format)));
+            return Err(invalid(format!(
+                "unsupported object_format: {}",
+                bus.object_format
+            )));
         }
         if bus.coordinators.is_empty() {
             return Err(invalid("coordinators must be nonempty"));
@@ -99,7 +108,11 @@ impl BusJson {
                 bus.merge_engine
             )));
         }
-        if !bus.coordinators.iter().any(|c| c == &bus.merge_engine_epoch.agent()) || bus.merge_engine_epoch.seq() != 0
+        if !bus
+            .coordinators
+            .iter()
+            .any(|c| c == &bus.merge_engine_epoch.agent())
+            || bus.merge_engine_epoch.seq() != 0
         {
             return Err(invalid(
                 "merge_engine_epoch must name a bootstrap coordinator's sequence-zero registration",
@@ -151,14 +164,30 @@ mod tests {
 
     #[test]
     fn new_rejects_unsupported_object_format() {
-        let err = BusJson::new("sha3".to_string(), vec![coord()], ObjectId::parse(hash(1)).unwrap()).unwrap_err();
-        assert!(err.to_string().contains("unsupported object_format"), "{err}");
+        let err = BusJson::new(
+            "sha3".to_string(),
+            vec![coord()],
+            ObjectId::parse(hash(1)).unwrap(),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("unsupported object_format"),
+            "{err}"
+        );
     }
 
     #[test]
     fn new_rejects_empty_coordinators() {
-        let err = BusJson::new("sha1".to_string(), vec![], ObjectId::parse(hash(1)).unwrap()).unwrap_err();
-        assert!(err.to_string().contains("at least one coordinator"), "{err}");
+        let err = BusJson::new(
+            "sha1".to_string(),
+            vec![],
+            ObjectId::parse(hash(1)).unwrap(),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("at least one coordinator"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -166,8 +195,12 @@ mod tests {
         // Coordinators are sorted by `StringSet::from_iter`, so "abby" (not the
         // first argument) ends up first and must own the merge_engine_epoch.
         let abby = Agent::parse("abby".to_string()).unwrap();
-        let bus = BusJson::new("sha256".to_string(), vec![coord(), abby.clone()], ObjectId::parse(hash256(1)).unwrap())
-            .unwrap();
+        let bus = BusJson::new(
+            "sha256".to_string(),
+            vec![coord(), abby.clone()],
+            ObjectId::parse(hash256(1)).unwrap(),
+        )
+        .unwrap();
         assert_eq!(bus.object_format, "sha256");
         assert_eq!(bus.merge_engine_epoch, EventId::new(&abby, 0));
         assert_eq!(bus.object_id_len(), 64);
@@ -176,7 +209,12 @@ mod tests {
     // -------------------------------------------------------------- parse()
 
     fn valid_bus() -> BusJson {
-        BusJson::new("sha1".to_string(), vec![coord()], ObjectId::parse(hash(1)).unwrap()).unwrap()
+        BusJson::new(
+            "sha1".to_string(),
+            vec![coord()],
+            ObjectId::parse(hash(1)).unwrap(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -236,7 +274,11 @@ mod tests {
         // built from `to_value` (field order is preserved from the struct).
         let bytes = format!("{}\n", serde_json::to_string(&line).unwrap()).into_bytes();
         let err = BusJson::parse(&bytes).unwrap_err();
-        assert!(err.to_string().contains("unsupported BUS.json schema version"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("unsupported BUS.json schema version"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -245,7 +287,10 @@ mod tests {
         line["object_format"] = serde_json::json!("sha3");
         let bytes = format!("{}\n", serde_json::to_string(&line).unwrap()).into_bytes();
         let err = BusJson::parse(&bytes).unwrap_err();
-        assert!(err.to_string().contains("unsupported object_format"), "{err}");
+        assert!(
+            err.to_string().contains("unsupported object_format"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -254,7 +299,10 @@ mod tests {
         line["coordinators"] = serde_json::json!([]);
         let bytes = format!("{}\n", serde_json::to_string(&line).unwrap()).into_bytes();
         let err = BusJson::parse(&bytes).unwrap_err();
-        assert!(err.to_string().contains("coordinators must be nonempty"), "{err}");
+        assert!(
+            err.to_string().contains("coordinators must be nonempty"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -263,7 +311,10 @@ mod tests {
         line["merge_engine"] = serde_json::json!("some-other-engine");
         let bytes = format!("{}\n", serde_json::to_string(&line).unwrap()).into_bytes();
         let err = BusJson::parse(&bytes).unwrap_err();
-        assert!(err.to_string().contains("unsupported merge_engine"), "{err}");
+        assert!(
+            err.to_string().contains("unsupported merge_engine"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -273,7 +324,8 @@ mod tests {
         let bytes = format!("{}\n", serde_json::to_string(&line).unwrap()).into_bytes();
         let err = BusJson::parse(&bytes).unwrap_err();
         assert!(
-            err.to_string().contains("must name a bootstrap coordinator's sequence-zero registration"),
+            err.to_string()
+                .contains("must name a bootstrap coordinator's sequence-zero registration"),
             "{err}"
         );
     }
@@ -285,7 +337,8 @@ mod tests {
         let bytes = format!("{}\n", serde_json::to_string(&line).unwrap()).into_bytes();
         let err = BusJson::parse(&bytes).unwrap_err();
         assert!(
-            err.to_string().contains("must name a bootstrap coordinator's sequence-zero registration"),
+            err.to_string()
+                .contains("must name a bootstrap coordinator's sequence-zero registration"),
             "{err}"
         );
     }
@@ -302,7 +355,10 @@ mod tests {
         for (k, v) in obj.iter().rev() {
             reordered.insert(k.clone(), v.clone());
         }
-        let line = format!("{}\n", serde_json::to_string(&serde_json::Value::Object(reordered)).unwrap());
+        let line = format!(
+            "{}\n",
+            serde_json::to_string(&serde_json::Value::Object(reordered)).unwrap()
+        );
         let err = BusJson::parse(line.as_bytes()).unwrap_err();
         assert!(err.to_string().contains("not canonically encoded"), "{err}");
     }
@@ -318,7 +374,11 @@ mod tests {
         assert!(canonical.contains(&hash(1)));
         let line = canonical.replace(&hash(1), &hash256(1));
         let err = BusJson::parse(line.as_bytes()).unwrap_err();
-        assert!(err.to_string().contains("product_review_from length does not match object_format"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("product_review_from length does not match object_format"),
+            "{err}"
+        );
     }
 
     #[test]

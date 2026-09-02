@@ -81,7 +81,9 @@ impl EventId {
             .split_once(':')
             .ok_or_else(|| invalid(format!("malformed event id: {s:?}")))?;
         Agent::parse(agent.to_string())?;
-        if seq.is_empty() || (seq != "0" && seq.starts_with('0')) || !seq.chars().all(|c| c.is_ascii_digit())
+        if seq.is_empty()
+            || (seq != "0" && seq.starts_with('0'))
+            || !seq.chars().all(|c| c.is_ascii_digit())
         {
             return Err(invalid(format!("malformed event id sequence: {s:?}")));
         }
@@ -113,7 +115,11 @@ validated_string!(
 impl ObjectId {
     pub fn parse(s: String) -> AbResult<Self> {
         let ok_len = s.len() == 40 || s.len() == 64;
-        if !ok_len || !s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()) {
+        if !ok_len
+            || !s
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        {
             return Err(invalid(format!("invalid object id: {s:?}")));
         }
         Ok(ObjectId(s))
@@ -135,8 +141,7 @@ validated_string!(
 
 impl Timestamp {
     pub fn parse(s: String) -> AbResult<Self> {
-        let re =
-            regex::Regex::new(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$").unwrap();
+        let re = regex::Regex::new(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$").unwrap();
         if !re.is_match(&s) {
             return Err(invalid(format!("invalid timestamp: {s:?}")));
         }
@@ -162,10 +167,7 @@ impl Timestamp {
     }
 }
 
-validated_string!(
-    Branch,
-    "full ref accepted by `git check-ref-format`"
-);
+validated_string!(Branch, "full ref accepted by `git check-ref-format`");
 
 impl Branch {
     /// Syntactic validation approximating `git check-ref-format --normalize`,
@@ -262,7 +264,9 @@ impl PathClaim {
         // `overlaps()` below treats the string as a plain prefix/exact match,
         // and a real glob character would silently make it match nothing.
         if stripped.contains(['*', '?', '[', ']']) {
-            return Err(invalid(format!("path claim contains an unsupported glob character: {s:?}")));
+            return Err(invalid(format!(
+                "path claim contains an unsupported glob character: {s:?}"
+            )));
         }
         Ok(PathClaim(s))
     }
@@ -272,7 +276,9 @@ impl PathClaim {
             p.strip_suffix("/**")
         }
         match (as_prefix(&self.0), as_prefix(&other.0)) {
-            (Some(a), Some(b)) => a == b || a.starts_with(&format!("{b}/")) || b.starts_with(&format!("{a}/")),
+            (Some(a), Some(b)) => {
+                a == b || a.starts_with(&format!("{b}/")) || b.starts_with(&format!("{a}/"))
+            }
             (Some(a), None) => other.0 == a || other.0.starts_with(&format!("{a}/")),
             (None, Some(b)) => self.0 == b || self.0.starts_with(&format!("{b}/")),
             (None, None) => self.0 == other.0,
@@ -285,7 +291,7 @@ validated_string!(Short, "UTF-8 string of 1..256 bytes after JSON decoding");
 impl Short {
     pub fn parse(s: String) -> AbResult<Self> {
         let n = byte_len(&s);
-        if n < 1 || n > 256 {
+        if !(1..=256).contains(&n) {
             return Err(invalid(format!("Short out of bounds ({n} bytes): {s:?}")));
         }
         Ok(Short(s))
@@ -427,7 +433,10 @@ mod tests {
         assert_eq!(id.as_str(), "alice:17");
         assert_eq!(id.agent(), a);
         assert_eq!(id.seq(), 17);
-        assert!(EventId::parse("alice:017".into()).is_err(), "leading zero must be rejected");
+        assert!(
+            EventId::parse("alice:017".into()).is_err(),
+            "leading zero must be rejected"
+        );
         assert!(EventId::parse("alice:".into()).is_err());
     }
 
