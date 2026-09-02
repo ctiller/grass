@@ -4,8 +4,10 @@
 //! `git` invocation.
 
 use crate::error::{invalid, AbError, AbResult};
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug)]
 pub struct GitOutput {
@@ -36,6 +38,14 @@ impl GitOutput {
     }
 }
 
+/// g-reviewer:29: a stalled or lock-starved remote transport (fetch/push/
+/// ls-remote) left `Command::output` blocked here forever, with every other
+/// bus command hanging behind it since most start with a fetch. Every git
+/// invocation is bounded uniformly (rather than classifying "which
+/// subcommands touch the network") so this stays correct as call sites are
+/// added; local operations never approach this ceiling in practice.
+const GIT_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Every git invocation in this crate funnels through `run` (a plain
 /// argument list dispatch) or `run_stdin` (the one command, `interpret-
 /// trailers`, that needs piped input) — so unit tests can substitute a
@@ -47,17 +57,104 @@ pub fn run(dir: &Path, args: &[&str]) -> AbResult<GitOutput> {
     if let Some(out) = mock::intercept(dir, args, None) {
         return out;
     }
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .map_err(|e| AbError::Git(format!("failed to run git {args:?}: {e}")))?;
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(dir).args(args);
+    run_command_with_timeout(cmd, GIT_TIMEOUT, || format!("git {args:?}"))
+}
+
+/// Spawns `cmd`, polls (with exponential backoff up to 50ms) until it exits
+/// or `timeout` elapses, and on timeout kills the whole process tree rather
+/// than just the immediate child -- git spawns `ssh`/`git-remote-https` as a
+/// subprocess for a remote transport, and killing only the parent leaves
+/// that subprocess running with a closed stdout/stderr pipe, not reliably
+/// terminated by it. `describe` is called only on the error path, so a
+/// caller with an owned `args` slice can defer formatting it.
+fn run_command_with_timeout(
+    mut cmd: Command,
+    timeout: Duration,
+    describe: impl Fn() -> String,
+) -> AbResult<GitOutput> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Own process group so `kill_process_tree` can target the whole
+        // group (including any `ssh`/`git-remote-*` child) with one signal.
+        cmd.process_group(0);
+    }
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| AbError::Git(format!("failed to run {}: {e}", describe())))?;
+
+    let mut stdout_pipe = child.stdout.take().expect("piped stdout");
+    let mut stderr_pipe = child.stderr.take().expect("piped stderr");
+    let stdout_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout_pipe.read_to_end(&mut buf);
+        buf
+    });
+    let stderr_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stderr_pipe.read_to_end(&mut buf);
+        buf
+    });
+
+    let deadline = Instant::now() + timeout;
+    let mut sleep_for = Duration::from_millis(1);
+    let status = loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|e| AbError::Git(format!("failed to poll {}: {e}", describe())))?
+        {
+            break Some(status);
+        }
+        if Instant::now() >= deadline {
+            break None;
+        }
+        std::thread::sleep(sleep_for);
+        sleep_for = (sleep_for * 2).min(Duration::from_millis(50));
+    };
+
+    let Some(status) = status else {
+        kill_process_tree(&mut child);
+        let _ = child.wait();
+        let _ = stdout_thread.join();
+        let _ = stderr_thread.join();
+        return Err(AbError::Git(format!(
+            "{} timed out after {timeout:?} and was killed",
+            describe()
+        )));
+    };
+
+    let stdout = stdout_thread.join().unwrap_or_default();
+    let stderr = stderr_thread.join().unwrap_or_default();
     Ok(GitOutput {
-        success: out.status.success(),
-        stdout: String::from_utf8_lossy(&out.stdout).trim_end().to_string(),
-        stderr: String::from_utf8_lossy(&out.stderr).trim_end().to_string(),
+        success: status.success(),
+        stdout: String::from_utf8_lossy(&stdout).trim_end().to_string(),
+        stderr: String::from_utf8_lossy(&stderr).trim_end().to_string(),
     })
+}
+
+#[cfg(windows)]
+fn kill_process_tree(child: &mut Child) {
+    let _ = Command::new("taskkill")
+        .args(["/PID", &child.id().to_string(), "/T", "/F"])
+        .output();
+}
+
+#[cfg(unix)]
+fn kill_process_tree(child: &mut Child) {
+    // Effective only because `run_command_with_timeout` put the child in its
+    // own process group (pgid == pid) before spawning: negating the pid
+    // targets that whole group, reaching a still-running `ssh`/
+    // `git-remote-*` subprocess, not just the `git` parent.
+    let _ = Command::new("kill")
+        .arg("-9")
+        .arg(format!("-{}", child.id()))
+        .output();
+    let _ = child.kill();
 }
 
 /// Run a git command and turn a nonzero exit into an error.
@@ -842,5 +939,97 @@ mod outer_tests {
         )
         .unwrap_err();
         assert!(format!("{err}").contains("commit-tree failed"), "{err}");
+    }
+
+    // ------------------------------------- run_command_with_timeout (g-reviewer:29)
+
+    #[cfg(windows)]
+    fn sleep_then_touch_command(marker: &std::path::Path) -> Command {
+        let mut cmd = Command::new("cmd");
+        cmd.args([
+            "/C",
+            &format!(
+                "ping -n 3 127.0.0.1 >nul & type nul > \"{}\"",
+                marker.display()
+            ),
+        ]);
+        cmd
+    }
+
+    #[cfg(unix)]
+    fn sleep_then_touch_command(marker: &std::path::Path) -> Command {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", &format!("sleep 2 && touch '{}'", marker.display())]);
+        cmd
+    }
+
+    /// A quick command (well under the given timeout) must return its real
+    /// output and exit status, not be treated as a timeout.
+    #[test]
+    fn run_command_with_timeout_returns_output_when_the_process_finishes_in_time() {
+        let mut cmd = Command::new("git");
+        cmd.arg("--version");
+        let out =
+            run_command_with_timeout(cmd, Duration::from_secs(10), || "git --version".to_string())
+                .unwrap();
+        assert!(out.success);
+        assert!(out.stdout.contains("git version"), "{}", out.stdout);
+    }
+
+    /// A nonzero exit within the timeout is a normal `GitOutput` (`success:
+    /// false`), not an `Err` -- timeouts and process failures are distinct
+    /// outcomes, exactly like the pre-existing `Command::output`-based path
+    /// this replaced.
+    #[test]
+    fn run_command_with_timeout_reports_a_nonzero_exit_as_unsuccessful_not_an_error() {
+        let cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "exit 3"]);
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.args(["-c", "exit 3"]);
+            c
+        };
+        let out = run_command_with_timeout(cmd, Duration::from_secs(10), || "exit 3".to_string())
+            .unwrap();
+        assert!(!out.success);
+    }
+
+    /// g-reviewer:29's core claim: a process that outlives its timeout must
+    /// actually be killed (process tree and all), not merely abandoned to
+    /// keep running in the background undetected while the caller moves on
+    /// with a timeout error. Proven here by racing the kill against the
+    /// child's own longer, independent delay: if the kill didn't reach the
+    /// process, the marker file it writes after that delay would still
+    /// appear.
+    #[test]
+    fn run_command_with_timeout_kills_a_process_that_outlives_its_deadline() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("marker");
+        let cmd = sleep_then_touch_command(&marker);
+
+        let start = Instant::now();
+        let err = run_command_with_timeout(cmd, Duration::from_millis(200), || {
+            "sleep-then-touch".to_string()
+        })
+        .unwrap_err();
+        assert!(format!("{err}").contains("timed out"), "{err}");
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "took {:?}, should return promptly after the 200ms deadline rather than \
+             waiting out the child's own ~2s delay",
+            start.elapsed()
+        );
+
+        // The child's own delay (~2s) comfortably outlives the 200ms
+        // deadline plus everything above; if it's still alive it will have
+        // written the marker well before this wakes up.
+        std::thread::sleep(Duration::from_millis(2500));
+        assert!(
+            !marker.exists(),
+            "process (and any subprocess it spawned) should have been killed, \
+             not left running past the timeout"
+        );
     }
 }
