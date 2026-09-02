@@ -291,164 +291,311 @@ theorem not_conflicts_fence_left {sharesBytes : AllocId → AllocId → Prop}
 end MemoryEvent
 
 /-!
-## From a declared access to an event
+## Intent and outcome are different things
 
-An access declares what an operation *intends*; an event records what happened.
-The bridge is what makes the vocabulary usable rather than decorative: an ISA
-author declares accesses, and M2's `applyAccess` turns each performed access into
-an event without either side inventing a second notion of what was touched.
+An `AccessDescriptor` is what an operation *intends*: a kind, an address, a width,
+a provenance. It is static, so it does not carry the bytes that were read or
+written: those are facts about the machine at the moment the access ran, and
+`Committed` is where they live.
+An earlier bridge tried to build an event from the descriptor alone and passed
+`none` for both values — so **every event the transition minted violated
+`MemoryEvent.WellFormed`**, a predicate the codebase stated, proved a lemma about,
+and then contradicted at its only producer.
+
+The repair is to give the outcome its own type, indexed by the intent it belongs
+to. The transition supplies it from machine state, a device oracle, or a prior
+substep's result. `MemoryEvent.ofOutcome` is the only producer of a
+`ValidMemoryEvent`, and it discharges `MemoryEvent.WellFormed` itself, so the
+trace cannot contain an event that skipped the check.
 -/
+
+/--
+What an access actually committed.
+
+Indexed by the descriptor, so the byte counts and the presence of each value are
+tied to the intent that produced them. The fields are proofs, not conventions: a
+`Committed` for a write-only intent cannot carry observed bytes, and neither value
+can exceed the range the access named.
+
+Read and write are counted separately, which is what lets a partial
+read-modify-write keep its completed read. An `xadd` that observed eight bytes and
+then faulted before storing has `observed = some bs` with `bs.length = 8` and
+`written = none`.
+-/
+structure Committed (d : AccessDescriptor) where
+  /-- The bytes observed, if the access reads. -/
+  observed : Option ByteSeq
+  /-- The bytes written, if the access writes. -/
+  written : Option ByteSeq
+  /-- A reading access observed something. -/
+  observedPresent : d.intent.reads = true → observed.isSome
+  /-- A non-reading access observed nothing. -/
+  observedAbsent : d.intent.reads = false → observed = Option.none
+  /-- A writing access wrote something. -/
+  writtenPresent : d.intent.writes = true → written.isSome
+  /-- A non-writing access wrote nothing. -/
+  writtenAbsent : d.intent.writes = false → written = Option.none
+  /-- Observed bytes fit the named range. -/
+  observedFits : ∀ bytes, observed = some bytes → bytes.length ≤ d.range.size
+  /-- Written bytes fit the named range. -/
+  writtenFits : ∀ bytes, written = some bytes → bytes.length ≤ d.range.size
+
+namespace Committed
+
+variable {d : AccessDescriptor}
+
+/-- How many bytes were observed. -/
+def readCount (c : Committed d) : Nat := (c.observed.map List.length).getD 0
+
+/-- How many bytes were written. -/
+def writeCount (c : Committed d) : Nat := (c.written.map List.length).getD 0
+
+theorem readCount_le (c : Committed d) : c.readCount ≤ d.range.size := by
+  unfold readCount
+  cases hobs : c.observed with
+  | none => simp
+  | some bytes => simpa using c.observedFits bytes hobs
+
+theorem writeCount_le (c : Committed d) : c.writeCount ≤ d.range.size := by
+  unfold writeCount
+  cases hw : c.written with
+  | none => simp
+  | some bytes => simpa using c.writtenFits bytes hw
+
+/-- The outcome of an access that touched nothing. Available only where the
+intent reads and writes nothing, which `AccessDescriptor.WellFormedIn` already
+rejects — so this exists for completeness rather than for use. -/
+def inert (hr : d.intent.reads = false) (hw : d.intent.writes = false) :
+    Committed d :=
+  { observed := Option.none, written := Option.none
+    observedPresent := fun h => absurd (hr ▸ h) (by simp)
+    observedAbsent := fun _ => rfl
+    writtenPresent := fun h => absurd (hw ▸ h) (by simp)
+    writtenAbsent := fun _ => rfl
+    observedFits := fun _ h => absurd h (by simp)
+    writtenFits := fun _ h => absurd h (by simp) }
+
+/-- Truncate a committed outcome to a prefix, for a faulting access. -/
+def truncate {d : AccessDescriptor} (c : Committed d) (count : Nat) : Committed d :=
+  { observed := c.observed.map (·.take count)
+    written := c.written.map (·.take count)
+    observedPresent := fun h => by simpa using c.observedPresent h
+    observedAbsent := fun h => by simp [c.observedAbsent h]
+    writtenPresent := fun h => by simpa using c.writtenPresent h
+    writtenAbsent := fun h => by simp [c.writtenAbsent h]
+    observedFits := by
+      intro bytes hb
+      obtain ⟨original, horig, rfl⟩ := Option.map_eq_some_iff.mp hb
+      have := c.observedFits original horig
+      simp only [List.length_take]
+      omega
+    writtenFits := by
+      intro bytes hb
+      obtain ⟨original, horig, rfl⟩ := Option.map_eq_some_iff.mp hb
+      have := c.writtenFits original horig
+      simp only [List.length_take]
+      omega }
+
+end Committed
+
+/--
+What happened when an access was attempted.
+
+`denied` carries no `Committed`, which is the type-level form of
+`docs/MEMORY_MODEL.md` §1's "Denial preserves the state immediately before the
+denied substep": a denial that reported committed bytes is not expressible.
+-/
+inductive AccessOutcome (d : AccessDescriptor) where
+  /-- The access ran to completion. -/
+  | completed (committed : Committed d)
+  /-- The access faulted, having committed what `committed` records. -/
+  | faulted (fault : FaultClassId) (committed : Committed d)
+  /-- The access was refused before committing anything. -/
+  | denied (violation : AuditViolation)
+
+namespace AccessOutcome
+
+variable {d : AccessDescriptor}
+
+/-- The architectural status this outcome reports. -/
+def status : AccessOutcome d → AccessStatus
+  | .completed c => if c.readCount = d.range.size ∧ c.writeCount = d.range.size then
+      .completed
+    else .partialCommit (max c.readCount c.writeCount)
+  | .faulted fault c => .faulted fault (max c.readCount c.writeCount)
+  | .denied _ => .partialCommit 0
+
+/-- The violation this outcome records, if it was refused. -/
+def violation? : AccessOutcome d → Option AuditViolation
+  | .denied v => some v
+  | .completed _ | .faulted _ _ => Option.none
+
+/-- What this outcome committed, if it committed anything. -/
+def committed? : AccessOutcome d → Option (Committed d)
+  | .completed c | .faulted _ c => some c
+  | .denied _ => Option.none
+
+/-- A denial commits nothing, by construction rather than by convention. -/
+@[simp] theorem committed?_denied (v : AuditViolation) :
+    (AccessOutcome.denied (d := d) v).committed? = Option.none := rfl
+
+/-- The status an outcome reports never claims more bytes than the access named.
+`Committed` carries the bounds, so this is a projection rather than a check. -/
+theorem status_wellFormed (outcome : AccessOutcome d) :
+    outcome.status.WellFormed d.range.size := by
+  cases outcome with
+  | completed c =>
+    have hr := c.readCount_le
+    have hw := c.writeCount_le
+    simp only [status]
+    split
+    · exact Nat.le_refl _
+    · show max c.readCount c.writeCount ≤ d.range.size
+      omega
+  | faulted fault c =>
+    have hr := c.readCount_le
+    have hw := c.writeCount_le
+    simp only [status]
+    show max c.readCount c.writeCount ≤ d.range.size
+    omega
+  | denied _ =>
+    simp only [status]
+    exact Nat.zero_le _
+
+end AccessOutcome
+
+/--
+A memory event together with the proof that it is well formed.
+
+`docs/MEMORY_MODEL.md` §7.1 fixes what an event must carry, and a trace of
+unconstrained `MemoryEvent` values beside an unused predicate is not that. The
+trace holds these, so "every event in the trace is well formed" is true by
+construction rather than by a check something might forget to run — and M8's
+consistency model consumes a type that cannot contain a malformed event.
+-/
+structure ValidMemoryEvent where
+  /-- The event. -/
+  event : MemoryEvent
+  /-- Its well-formedness. -/
+  wellFormed : event.WellFormed
+
+namespace MemoryEvent
 
 /--
 The event kind an intent gives rise to, if any.
 
-`none` for an inert intent, which reads, writes, and executes nothing. That case
-is already rejected by `AccessDescriptor.WellFormed.notInert`; returning `none`
-rather than picking a plausible kind keeps the rejection rather than papering
-over it (`docs/FOUNDATION.md` law 8).
-
-An instruction fetch maps to , because  reads. The
-permission demand that distinguishes a fetch from a data read is carried by the
-descriptor separately, not by the event kind.
+`none` for an inert intent, which reads and writes nothing. That case is already
+rejected by `AccessDescriptor.WellFormedIn.notInert`; returning `none` rather than
+picking a plausible kind keeps the rejection rather than papering over it
+(`docs/FOUNDATION.md` law 8).
 -/
-def AccessIntent.eventKind? (intent : AccessIntent) : Option EventKind :=
+def kindOf (intent : AccessIntent) : Option EventKind :=
   if intent.reads && intent.writes then some .readModifyWrite
   else if intent.writes then some .write
   else if intent.reads then some .read
   else Option.none
 
-@[simp] theorem AccessIntent.eventKind?_read : AccessIntent.read.eventKind? = some .read := rfl
-
-@[simp] theorem AccessIntent.eventKind?_write :
-    AccessIntent.write.eventKind? = some .write := rfl
-
-@[simp] theorem AccessIntent.eventKind?_readWrite :
-    AccessIntent.readWrite.eventKind? = some .readModifyWrite := rfl
-
-/-- An inert intent yields no event, matching the descriptor's own rejection
-of it. -/
-theorem AccessIntent.eventKind?_eq_none_iff {intent : AccessIntent} :
-    intent.eventKind? = Option.none ↔ intent.IsInert := by
+theorem reads_kindOf {intent : AccessIntent} {kind : EventKind}
+    (h : kindOf intent = some kind) : kind.reads = intent.reads := by
   obtain ⟨reads, writes, _, _, _⟩ := intent
-  cases reads <;> cases writes <;> simp [eventKind?, IsInert]
+  cases reads <;> cases writes <;> simp [kindOf] at h <;> subst h <;> rfl
 
-/-- The event kind reads exactly when the intent does. -/
-theorem AccessIntent.reads_eventKind? {intent : AccessIntent} {kind : EventKind}
-    (h : intent.eventKind? = some kind) : kind.reads = intent.reads := by
+theorem writes_kindOf {intent : AccessIntent} {kind : EventKind}
+    (h : kindOf intent = some kind) : kind.writes = intent.writes := by
   obtain ⟨reads, writes, _, _, _⟩ := intent
-  cases reads <;> cases writes <;> simp [eventKind?] at h <;> subst h <;> rfl
+  cases reads <;> cases writes <;> simp [kindOf] at h <;> subst h <;> rfl
 
-/-- The event kind writes exactly when the intent does. -/
-theorem AccessIntent.writes_eventKind? {intent : AccessIntent} {kind : EventKind}
-    (h : intent.eventKind? = some kind) : kind.writes = intent.writes := by
+theorem touchesMemory_kindOf {intent : AccessIntent} {kind : EventKind}
+    (h : kindOf intent = some kind) : kind.touchesMemory = true := by
   obtain ⟨reads, writes, _, _, _⟩ := intent
-  cases reads <;> cases writes <;> simp [eventKind?] at h <;> subst h <;> rfl
-
-/-- Every event an access produces touches memory. An access is never a fence or
-a control event; those arise from operations that declare no access at all. -/
-theorem AccessIntent.touchesMemory_eventKind? {intent : AccessIntent} {kind : EventKind}
-    (h : intent.eventKind? = some kind) : kind.touchesMemory = true := by
-  obtain ⟨reads, writes, _, _, _⟩ := intent
-  cases reads <;> cases writes <;> simp [eventKind?] at h <;> subst h <;> rfl
-
-namespace MemoryEvent
+  cases reads <;> cases writes <;> simp [kindOf] at h <;> subst h <;> rfl
 
 /--
-Build the event recording that `d` was performed with outcome `status`.
+Build the certified event recording that `d` was performed with `outcome`.
 
-`space` is the resolved address space. A descriptor names its space by identity
-and the profile decides what that space is, so the caller — M2's `applyAccess` —
-supplies the resolution rather than this function inventing one.
+`none` exactly when the outcome committed nothing — a denial, or an inert intent
+the descriptor's own well-formedness already forbids. A denial emits a violation,
+not an event: nothing happened to any byte.
 
-`none` exactly when the intent is inert, so an operation that declared it touches
-nothing produces no event rather than an empty one.
+The well-formedness proof is discharged here, from the `Committed` fields, so a
+caller never assembles one and never has an opportunity to skip it.
 -/
-def ofAccess? (id : EventId) (contextKind : ContextKind) (cause : EventCause)
-    (space : AddressSpace) (d : AccessDescriptor) (status : AccessStatus)
-    (readCommitted writeCommitted : Nat)
-    (valueRead valueWritten : Option ByteSeq) : Option MemoryEvent :=
-  (d.intent.eventKind?).map fun kind =>
-    { id := id
-      context := { id := d.context, kind := contextKind }
-      cause := cause
-      space := space
-      provenance := d.provenance
-      range := d.range
-      kind := kind
-      valueRead := valueRead
-      valueWritten := valueWritten
-      ordering := d.ordering
-      status := status
-      readCommitted := readCommitted
-      writeCommitted := writeCommitted }
+def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
+    (space : AddressSpace) (d : AccessDescriptor) (outcome : AccessOutcome d) :
+    Option ValidMemoryEvent :=
+  match houtcome : outcome.committed? with
+  | Option.none => Option.none
+  | some c =>
+      match hkind : kindOf d.intent with
+      | Option.none => Option.none
+      | some kind =>
+          some
+            { event :=
+                { id := id
+                  context := { id := d.context, kind := contextKind }
+                  cause := cause
+                  space := space
+                  provenance := d.provenance
+                  range := d.range
+                  kind := kind
+                  valueRead := c.observed
+                  valueWritten := c.written
+                  ordering := d.ordering
+                  status := outcome.status
+                  readCommitted := c.readCount
+                  writeCommitted := c.writeCount }
+              wellFormed :=
+                { readValuePresent := fun h =>
+                    c.observedPresent (by rw [← reads_kindOf hkind]; exact h)
+                  readValueAbsent := fun h =>
+                    c.observedAbsent (by rw [← reads_kindOf hkind]; exact h)
+                  writeValuePresent := fun h =>
+                    c.writtenPresent (by rw [← writes_kindOf hkind]; exact h)
+                  writeValueAbsent := fun h =>
+                    c.writtenAbsent (by rw [← writes_kindOf hkind]; exact h)
+                  noLocationWhenUntouched := fun hu =>
+                    absurd (touchesMemory_kindOf hkind) (by rw [hu]; simp)
+                  writtenLength := fun bytes hb => by
+                    have hb' : c.written = some bytes := hb
+                    have hcount : c.writeCount = bytes.length := by
+                      simp [Committed.writeCount, hb']
+                    have hfit := c.writtenFits bytes hb'
+                    show bytes.length = (d.range.take c.writeCount).size
+                    rw [ByteRange.take_size, hcount]
+                    omega
+                  readLength := fun bytes hb => by
+                    have hb' : c.observed = some bytes := hb
+                    have hcount : c.readCount = bytes.length := by
+                      simp [Committed.readCount, hb']
+                    have hfit := c.observedFits bytes hb'
+                    show bytes.length = (d.range.take c.readCount).size
+                    rw [ByteRange.take_size, hcount]
+                    omega
+                  readWithinRange := c.readCount_le
+                  writeWithinRange := c.writeCount_le
+                  statusWellFormed := outcome.status_wellFormed } }
 
-/-- The event an access produces records exactly the access's own range. Nothing
-in the bridge widens or narrows what was touched. -/
-@[simp] theorem range_of_ofAccess? {id : EventId} {contextKind : ContextKind}
+/-- The event an access produces records exactly the access's own range. -/
+@[simp] theorem range_of_ofOutcome {id : EventId} {contextKind : ContextKind}
     {cause : EventCause} {space : AddressSpace} {d : AccessDescriptor}
-    {status : AccessStatus} {readCommitted writeCommitted : Nat}
-    {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
-    (h : ofAccess? id contextKind cause space d status readCommitted writeCommitted
-      valueRead valueWritten = some e) :
-    e.range = d.range := by
-  simp only [ofAccess?, Option.map_eq_some_iff] at h
-  obtain ⟨_, _, rfl⟩ := h
-  rfl
+    {outcome : AccessOutcome d} {valid : ValidMemoryEvent}
+    (h : ofOutcome id contextKind cause space d outcome = some valid) :
+    valid.event.range = d.range := by
+  unfold ofOutcome at h
+  split at h
+  · exact absurd h (by simp)
+  · split at h
+    · exact absurd h (by simp)
+    · cases h; rfl
 
-/-- The event records exactly the counts it was given, so an initialization
-argument stated on the descriptor transfers to the event. -/
-theorem committedCounts_of_ofAccess? {id : EventId} {contextKind : ContextKind}
-    {cause : EventCause} {space : AddressSpace} {d : AccessDescriptor}
-    {status : AccessStatus} {readCommitted writeCommitted : Nat}
-    {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
-    (h : ofAccess? id contextKind cause space d status readCommitted writeCommitted
-      valueRead valueWritten = some e) :
-    e.readCommitted = readCommitted ∧ e.writeCommitted = writeCommitted := by
-  simp only [ofAccess?, Option.map_eq_some_iff] at h
-  obtain ⟨_, _, rfl⟩ := h
-  exact ⟨rfl, rfl⟩
-
-/--
-Event well-formedness follows from the values having the lengths the status
-reports.
-
-The payoff: an ISA author who declares a well-formed access and supplies values
-of the committed length gets a well-formed event, rather than re-proving the
-event conditions per instruction.
--/
-theorem wellFormed_ofAccess? {id : EventId} {contextKind : ContextKind}
-    {cause : EventCause} {space : AddressSpace} {d : AccessDescriptor}
-    {status : AccessStatus} {readCommitted writeCommitted : Nat}
-    {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
-    (h : ofAccess? id contextKind cause space d status readCommitted writeCommitted
-      valueRead valueWritten = some e)
-    (readPresent : d.intent.reads = true → valueRead.isSome)
-    (readAbsent : d.intent.reads = false → valueRead = Option.none)
-    (writePresent : d.intent.writes = true → valueWritten.isSome)
-    (writeAbsent : d.intent.writes = false → valueWritten = Option.none)
-    (readLen : ∀ bytes, valueRead = some bytes →
-      bytes.length = (d.range.take readCommitted).size)
-    (writeLen : ∀ bytes, valueWritten = some bytes →
-      bytes.length = (d.range.take writeCommitted).size)
-    (readBound : readCommitted ≤ d.range.size)
-    (writeBound : writeCommitted ≤ d.range.size)
-    (statusOk : status.WellFormed d.range.size) : e.WellFormed := by
-  simp only [ofAccess?, Option.map_eq_some_iff] at h
-  obtain ⟨kind, hkind, rfl⟩ := h
-  have hreads := AccessIntent.reads_eventKind? hkind
-  have hwrites := AccessIntent.writes_eventKind? hkind
-  have htouches := AccessIntent.touchesMemory_eventKind? hkind
-  exact
-    { readValuePresent := fun hr => readPresent (hreads ▸ hr)
-      readValueAbsent := fun hr => readAbsent (hreads ▸ hr)
-      writeValuePresent := fun hw => writePresent (hwrites ▸ hw)
-      writeValueAbsent := fun hw => writeAbsent (hwrites ▸ hw)
-      noLocationWhenUntouched := fun hu => absurd htouches (by rw [hu]; simp)
-      writtenLength := fun bytes hb => writeLen bytes hb
-      readLength := fun bytes hb => readLen bytes hb
-      readWithinRange := readBound
-      writeWithinRange := writeBound
-      statusWellFormed := statusOk }
+/-- A denied outcome produces no event. Nothing was touched, so nothing is
+recorded in the trace; the violation ledger is where a denial appears. -/
+@[simp] theorem ofOutcome_denied (id : EventId) (contextKind : ContextKind)
+    (cause : EventCause) (space : AddressSpace) (d : AccessDescriptor)
+    (violation : AuditViolation) :
+    ofOutcome id contextKind cause space d (.denied violation) = Option.none := by
+  unfold ofOutcome
+  simp
 
 end MemoryEvent
 

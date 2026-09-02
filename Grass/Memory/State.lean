@@ -138,8 +138,14 @@ structure MachineState where
   obligations : FiniteMap ObligationId Obligation
   /-- The append-only violation ledger. -/
   violations : AuditViolationLedger
-  /-- The memory events performed so far, most recent last. -/
-  events : List MemoryEvent
+  /-- The memory events performed so far, most recent last.
+
+  `ValidMemoryEvent`, not `MemoryEvent`: the trace cannot contain a malformed
+  event, so "every event in the trace is well formed" holds by construction rather
+  than by a check something could forget. An earlier trace held bare events beside
+  a predicate nothing consulted, and every event the transition minted violated
+  it. -/
+  events : List ValidMemoryEvent
   /-- The supply that mints event identities. -/
   eventSupply : FreshSupply EventTag
 
@@ -152,6 +158,17 @@ def initial (memory : MemoryState) : MachineState :=
 
 /-- `state.OutstandingObligations` are the identities still owed. -/
 def outstanding (state : MachineState) : List ObligationId := state.obligations.domain
+
+/--
+Every event in the trace is well formed.
+
+A projection, not a check. `docs/MEMORY_MODEL.md` §7.1's field requirements hold
+of the whole trace because `ValidMemoryEvent` carries the proof, and the only
+producer is `MemoryEvent.ofOutcome`.
+-/
+theorem events_wellFormed (state : MachineState) :
+    ∀ valid ∈ state.events, valid.event.WellFormed :=
+  fun valid _ => valid.wellFormed
 
 end MachineState
 

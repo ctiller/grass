@@ -120,8 +120,9 @@ end MemoryScope
 /--
 The complete ordering declaration of one access.
 
-Bundled so that an access cannot declare an order without a scope: an acquire
-with no stated scope is not a claim a consistency profile can check.
+Bundled so that an access cannot declare an order without a scope: the fields of
+`OrderingDemand` are total, so an acquire with no stated scope is not
+expressible. An unstated scope is not a claim a consistency profile could check.
 -/
 structure OrderingDemand where
   /-- Whether the access is atomic. -/

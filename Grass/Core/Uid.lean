@@ -13,8 +13,7 @@ produced by `FreshSupply.fresh`. The constructor and the index field are
 index back out. `never_reissued` is therefore a mechanism rather than a
 convention for a given supply.
 
-What this module does **not** deliver, and cannot: uniqueness of the supply
-itself. `initial` is public, and it must be — something has to start. So a second
+What this module does not deliver: uniqueness of the supply itself. `initial` is public, and it must be — something has to start. So a second
 `FreshSupply.initial` for the same tag reissues every identity from zero, and
 nothing here prevents that. Threading one supply per domain through an execution
 is the execution model's obligation, not `Core`'s; `docs/FOUNDATION.md` law 22
@@ -179,8 +178,8 @@ theorem never_reissued {s t : FreshSupply Tag} {i : Uid Tag}
   exact absurd (eq ▸ Issued.mono h issued) (fresh_not_issued t)
 
 /--
-The same law in live-set form: a stale identity is never live again as a *new*
-identity, so authority attached to it cannot be regained by a later mint.
+`never_reissued` in live-set form: a stale identity is never live again as a
+*new* identity, so authority attached to it is not regained by a later mint.
 -/
 theorem never_reissued_along_history {s : FreshSupply Tag} {i : Uid Tag}
     (issued : s.Issued i) :

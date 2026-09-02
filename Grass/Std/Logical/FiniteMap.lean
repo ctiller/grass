@@ -218,9 +218,9 @@ theorem Equiv.erase {m n : FiniteMap K V} (h : m.Equiv n) (key : K) :
 `IsEmpty` transports along `Equiv`.
 
 This is the transport that matters most. `docs/MEMORY_MODEL.md` §3 restores
-exclusive authority only when the loan map is empty, so emptiness is the loan
-layer's central predicate and must not depend on which extensionally equal
-representation the map happens to have.
+exclusive authority when the loan map is empty, so emptiness is the loan layer's
+central predicate, and `Equiv.isEmpty` is what stops it depending on which
+extensionally equal representation the map happens to have.
 -/
 theorem Equiv.isEmpty {m n : FiniteMap K V} (h : m.Equiv n) (hm : m.IsEmpty) :
     n.IsEmpty := fun key => (h key).symm.trans (hm key)

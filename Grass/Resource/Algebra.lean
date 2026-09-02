@@ -331,7 +331,8 @@ proof from combining two claims to the same one.
 
 namespace Exclusive
 
-/-- Two exclusive holdings coexist only if at most one of them is nonzero. -/
+/-- Two exclusive holdings coexist only if at most one of them is nonzero;
+`not_compatible_of_both_held` is the consequence that matters. -/
 def compatible (a b : Nat) : Prop := a = 0 ∨ b = 0
 
 /-- Combining exclusive holdings adds them, which is only meaningful where they

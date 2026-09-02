@@ -97,6 +97,51 @@ instance (outcome : StepOutcome) : Decidable outcome.Ran :=
 end StepOutcome
 
 /--
+How the machine answered an access.
+
+The transition does not invent this. Which bytes a load observed is a fact about
+memory, a device, or a previous substep, and an `AccessDescriptor` is a static
+declaration that cannot carry it — an earlier bridge passed `none` for both values
+and minted a trace of events that violated the project's own well-formedness
+predicate.
+
+An `Oracle` supplies the answer. A profile backs it with the byte store, a device
+model, or recorded results; this module only requires that whatever it returns is
+a `Committed` for the descriptor in question, which ties the byte counts to the
+intent by construction.
+-/
+structure Oracle where
+  /-- What the machine committed for this access, given the state it ran against. -/
+  answer : MachineState → (d : AccessDescriptor) → Committed d
+
+/--
+The oracle that commits the whole named range with zero-valued bytes.
+
+Enough to exercise the transition without a byte store, and honest about what it
+is: it reports the counts the intent implies and supplies zero bytes of content.
+M2's store replaces it. It is *not* a default — `StepPolicy` requires an oracle,
+so a profile chooses this one deliberately.
+-/
+def Oracle.zeroed : Oracle where
+  answer _ d :=
+    { observed := if d.intent.reads then some (List.replicate d.range.size 0) else Option.none
+      written := if d.intent.writes then some (List.replicate d.range.size 0) else Option.none
+      observedPresent := by intro h; simp [h]
+      observedAbsent := by intro h; simp [h]
+      writtenPresent := by intro h; simp [h]
+      writtenAbsent := by intro h; simp [h]
+      observedFits := by
+        intro bytes hb
+        split at hb
+        · cases hb; simp
+        · exact absurd hb (by simp)
+      writtenFits := by
+        intro bytes hb
+        split at hb
+        · cases hb; simp
+        · exact absurd hb (by simp) }
+
+/--
 The configuration a step runs against: the memory profile, the facets every
 operation must supply, and the profile's atomic-compatibility relation.
 
@@ -109,6 +154,10 @@ structure StepPolicy where
   profile : MemoryProfile
   /-- The facets every reachable operation must supply. -/
   requiredFacets : List FacetName
+  /-- How the machine answers an access. Required, not defaulted: what a load
+  observed is a fact about the target, and a transition that invented it would be
+  inventing the trace M8 reads. -/
+  oracle : Oracle
   /-- The profile declares every violation class this relation can record.
 
   Without it `AdmittedVocabulary.auditViolationClasses` was a registry nothing
@@ -236,64 +285,91 @@ would have missed, because those are distinct allocations by construction.
 "conflicting events from distinct concurrent contexts... unordered by
 happens-before". Two writes by one context to the same bytes are not a race:
 program order sequences them, and denying them would refuse ordinary sequential
-code. The cross-context case is the one this can decide today; the same-context
-ordering is sequenced-before, and the general happens-before that would let two
-contexts be *proved* ordered is M8's. Until then, denying every cross-context
-conflict is the conservative direction — it can refuse a program a synchronizing
-profile would allow, never admit a racy one.
+code. The cross-context case is the one this can decide today; the general
+happens-before that would let two contexts be *proved* ordered is M8's. Until
+then, denying every cross-context conflict is the conservative direction — it can
+refuse a program a synchronizing profile would allow, never admit a racy one.
 -/
 def ConflictsWithHistory (policy : StepPolicy) (state : MachineState)
     (event : MemoryEvent) : Prop :=
   ∃ earlier ∈ state.events,
-    earlier.context.id ≠ event.context.id ∧
+    earlier.event.context.id ≠ event.context.id ∧
     MemoryEvent.Conflicts state.memory.SharesBytes
-      (fun a b => policy.compatible a b = true) earlier event
+      (fun a b => policy.compatible a b = true) earlier.event event
 
 instance (policy : StepPolicy) (state : MachineState) (event : MemoryEvent) :
     Decidable (ConflictsWithHistory policy state event) :=
   inferInstanceAs (Decidable (∃ earlier ∈ state.events,
-    earlier.context.id ≠ event.context.id ∧
+    earlier.event.context.id ≠ event.context.id ∧
     MemoryEvent.Conflicts state.memory.SharesBytes
-      (fun a b => policy.compatible a b = true) earlier event))
+      (fun a b => policy.compatible a b = true) earlier.event event))
 
-/-- Perform one access against the state, recording an event or a violation. -/
-def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor)
-    (status : AccessStatus) (readCommitted writeCommitted : Nat)
-    (contextKind : ContextKind) (cause : EventCause) : MachineState :=
+/--
+Why this access is refused, or `none` if nothing refuses it.
+
+Every reason an access can be denied, in one place and one order, so that the
+recorded class names the first thing that was wrong. `docs/MEMORY_MODEL.md` §1
+requires the check to happen before anything commits; `performAccess` calls this
+first and commits only on `none`.
+
+`prospective` is the event the access *would* record, needed for the alias check.
+-/
+def refusalOf (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor)
+    (prospective : Option MemoryEvent) : Option AuditViolationClass :=
   match denialOf state.memory d with
-  | some class_ =>
-      -- Denied. The prior state is preserved exactly; only the ledger grows.
-      { state with violations := state.violations.append (violationOf d class_) }
+  | some class_ => some class_
   | Option.none =>
-      match policy.profile.vocabulary.addressSpaces.find? d.space with
+      if ¬ LedgerEffectApplicable state.obligations d.ledgerEffect then
+        some .obligationNotAuthorized
+      else
+        match prospective with
+        | some event =>
+            if ConflictsWithHistory policy state event then some .authorityUnavailable
+            else Option.none
+        | Option.none => Option.none
+
+/--
+Perform one access, recording a certified event or a violation.
+
+The shape is the one `docs/MEMORY_MODEL.md` §1 demands: every authority check runs
+against the pre-access state, gathered by `refusalOf`, and the access commits
+only on `none`.
+A refusal leaves memory, obligations, events, and the event supply exactly as they
+were and appends to the violation ledger — see `refused_preserves_everything_but_the_ledger`.
+-/
+def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor)
+    (outcome : AccessOutcome d) (contextKind : ContextKind) (cause : EventCause) :
+    MachineState :=
+  match policy.profile.vocabulary.addressSpaces.find? d.space with
+  | Option.none =>
+      { state with
+        violations := state.violations.append (violationOf d .wrongAddressSpace) }
+  | some space =>
+      match MemoryEvent.ofOutcome state.eventSupply.fresh.1 contextKind cause space d
+          outcome with
       | Option.none =>
-          { state with violations := state.violations.append (violationOf d .outOfBounds) }
-      | some space =>
-          match MemoryEvent.ofAccess? state.eventSupply.fresh.1 contextKind cause space d status
-              readCommitted writeCommitted Option.none Option.none with
+          -- The outcome committed nothing, so there is no event. A denial carries
+          -- its own violation; anything else touched no bytes.
+          match outcome.violation? with
+          | some violation => { state with violations := state.violations.append violation }
           | Option.none => state
-          | some event =>
-              if ¬ LedgerEffectApplicable state.obligations d.ledgerEffect then
-                -- The declared ledger effect is not authorized against the
-                -- obligations actually outstanding. Nothing commits.
-                { state with
-                  violations :=
-                    state.violations.append (violationOf d .obligationNotAuthorized) }
-              else if ConflictsWithHistory policy state event then
-                -- An alias conflict is an authority failure, not a fault: the
-                -- access is refused and nothing commits.
-                { state with
-                  violations := state.violations.append (violationOf d .authorityUnavailable) }
-              else
-                { state with
-                  eventSupply := state.eventSupply.fresh.2
-                  events := state.events ++ [event]
-                  memory :=
-                    if d.producesInitialized then
-                      state.memory.setInitialized d.provenance.root
-                        (d.range.take writeCommitted)
-                    else state.memory
-                  obligations := applyLedgerEffect state.obligations d.ledgerEffect }
+      | some valid =>
+          match refusalOf policy state d (some valid.event) with
+          | some class_ =>
+              { state with violations := state.violations.append (violationOf d class_) }
+          | Option.none =>
+              { state with
+                eventSupply := state.eventSupply.fresh.2
+                events := state.events ++ [valid]
+                memory :=
+                  match outcome.committed? with
+                  | some c =>
+                      if d.producesInitialized then
+                        state.memory.setInitialized d.provenance.root
+                          (d.range.take c.writeCount)
+                      else state.memory
+                  | Option.none => state.memory
+                obligations := applyLedgerEffect state.obligations d.ledgerEffect }
 
 /--
 Where an operation faulted, if it did.
@@ -328,10 +404,6 @@ fault, and the conservative reading is that the operation does not proceed.
 `none` for a profile-owned visibility rule is why `step` can reject: the generic
 relation does not know what an x86 split-page store exposes.
 -/
-def committedCounts (d : AccessDescriptor) : Nat × Nat :=
-  (if d.intent.reads then d.range.size else 0,
-   if d.intent.writes then d.range.size else 0)
-
 def runAccesses (policy : StepPolicy) (state : MachineState)
     (accesses : List AccessDescriptor) (contextKind : ContextKind) (cause : EventCause) :
     MachineState :=
@@ -339,12 +411,32 @@ def runAccesses (policy : StepPolicy) (state : MachineState)
   | [] => state
   | d :: rest =>
       let next :=
-        performAccess policy state d .completed
-          (committedCounts d).1 (committedCounts d).2 contextKind cause
+        performAccess policy state d (.completed (policy.oracle.answer state d))
+          contextKind cause
       if next.violations.recordCount = state.violations.recordCount then
         runAccesses policy next rest contextKind cause
       else
         next
+
+/--
+Where an operation faulted, if it did.
+
+`before index` names the substep that did not complete, and `index` is a `Fin`
+over the sequence, so an out-of-range fault is **unrepresentable**. It used to be
+a bare `Nat`: `visibleEffects?` then took the whole list, the substep lookup
+missed, and the fallback committed every access to completion while `step`
+returned `.ran` — a reported fault silently becoming a successful operation.
+
+The stepper takes this rather than inventing it. Which substep of a `rep movsb`
+faults is a fact about the machine at that moment, and a transition relation that
+predicted it would be modelling something else.
+-/
+inductive FaultPlan (sequence : SubstepSequence) where
+  /-- Every substep completed. -/
+  | none
+  /-- The substep at `index` did not complete, raising `fault` after committing
+  `committed` bytes. -/
+  | before (index : Fin sequence.substeps.length) (fault : FaultClassId) (committed : Nat)
 
 /--
 The state a running step produces.
@@ -356,18 +448,17 @@ case analysis over the rejection paths, and it means a new rejection reason
 cannot silently acquire an unproved state transition.
 -/
 def runStep (policy : StepPolicy) (state : MachineState) (sequence : SubstepSequence)
-    (contextKind : ContextKind) (cause : EventCause) : Option FaultPoint → MachineState
-  | Option.none => runAccesses policy state sequence.accesses contextKind cause
-  | some point =>
-      match sequence.visibleEffects? point.index with
+    (contextKind : ContextKind) (cause : EventCause) : FaultPlan sequence → MachineState
+  | .none => runAccesses policy state sequence.accesses contextKind cause
+  | .before index fault committed =>
+      match sequence.visibleEffects? index.val with
       | Option.none => state
       | some survivors =>
-          match sequence.substeps[point.index]? with
+          match sequence.substeps[index.val]? with
           | some (.access d) =>
-              performAccess policy (runAccesses policy state survivors contextKind cause) d
-                (.faulted point.fault point.committed)
-                (if d.intent.reads then min point.committed d.range.size else 0)
-                (if d.intent.writes then min point.committed d.range.size else 0)
+              let after := runAccesses policy state survivors contextKind cause
+              performAccess policy after d
+                (.faulted fault ((policy.oracle.answer after d).truncate committed))
                 contextKind cause
           | _ => runAccesses policy state survivors contextKind cause
 
@@ -375,11 +466,13 @@ def runStep (policy : StepPolicy) (state : MachineState) (sequence : SubstepSequ
 Step one operation.
 
 The whole vertical, in the order the module comment gives. `faultAt` says whether
-the machine faulted and where; `none` means every substep completed.
+the machine faulted and where, as a function of the sequence so that the index it
+names is in range by construction.
 -/
 def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation)
     (contextKind : ContextKind) (cause : EventCause)
-    (faultAt : Option FaultPoint := Option.none) : StepOutcome :=
+    (faultAt : (sequence : SubstepSequence) → FaultPlan sequence :=
+      fun _ => .none) : StepOutcome :=
   match policy.requiredFacets.find?
       (fun required => !operation.facets.supplied.contains required) with
   | some missing =>
@@ -396,96 +489,104 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
         else if ! sequence.accesses.all (fun d => decide (policy.Admits d)) then
           .rejected .accessNotAdmitted
         else
-          match faultAt with
-          | Option.none => .ran (runStep policy state sequence contextKind cause Option.none)
-          | some point =>
-              if point.index ≥ sequence.substeps.length then
-                .rejected .faultPointOutOfRange
-              else
-                match sequence.visibleEffects? point.index with
-                | Option.none => .rejected .visibilityRuleUnknown
-                | some _ => .ran (runStep policy state sequence contextKind cause (some point))
+          match faultAt sequence with
+          | .none => .ran (runStep policy state sequence contextKind cause .none)
+          | .before index fault committed =>
+              match sequence.visibleEffects? index.val with
+              | Option.none => .rejected .visibilityRuleUnknown
+              | some _ =>
+                  .ran (runStep policy state sequence contextKind cause
+                    (.before index fault committed))
 
 /-! ## The transition invariants
 
-These are what the docstrings elsewhere point at. A property claimed as
-"cannot" or "append-only" has to be one of these or a theorem; prose describing a
-mechanism is not one. -/
-
-/-- A denied access leaves memory and obligations exactly as they were. This is
-`docs/MEMORY_MODEL.md` §1's "Denial preserves the state immediately before the
-denied substep". -/
-theorem denied_preserves_everything_but_the_ledger (policy : StepPolicy)
-    (state : MachineState) (d : AccessDescriptor) (status : AccessStatus) (r w : Nat)
-    (contextKind : ContextKind) (cause : EventCause)
-    (h : (denialOf state.memory d).isSome) :
-    (performAccess policy state d status r w contextKind cause).memory = state.memory ∧
-    (performAccess policy state d status r w contextKind cause).obligations =
-      state.obligations ∧
-    (performAccess policy state d status r w contextKind cause).events = state.events ∧
-    (performAccess policy state d status r w contextKind cause).eventSupply =
-      state.eventSupply := by
-  unfold performAccess
-  cases hd : denialOf state.memory d with
-  | none => rw [hd] at h; simp at h
-  | some class_ => exact ⟨rfl, rfl, rfl, rfl⟩
+These are the properties the docstrings elsewhere point at. Under the rule in
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §3.10, a comment saying "ensures",
+"prevents", "cannot", "only", or "preserves" must name one of these or a type;
+otherwise it is an intended invariant or an open obligation and says so. -/
 
 /--
-The other two denial paths preserve everything but the ledger too.
+**A refused access changes nothing but the violation ledger.**
 
-`denialOf` is not the only way an access is refused: an inapplicable ledger effect
-and an alias conflict both deny after it passes. An earlier version proved
-preservation only for the `denialOf` branch, so the two branches added later were
-uncovered — and named three of the state's five fields, which is not "the state is
-untouched" however true it happened to be.
+Every refusal path, not one. `refusalOf` gathers them — the state's own denial,
+an inapplicable ledger effect, an alias conflict — so a new refusal reason cannot
+acquire an unproved transition. `docs/MEMORY_MODEL.md` §1: "Denial preserves the
+state immediately before the denied substep."
 -/
-theorem ledger_denial_preserves_everything_but_the_ledger (policy : StepPolicy)
-    (state : MachineState) (d : AccessDescriptor) (status : AccessStatus) (r w : Nat)
-    (contextKind : ContextKind) (cause : EventCause)
-    (hallowed : denialOf state.memory d = Option.none)
-    (h : ¬ LedgerEffectApplicable state.obligations d.ledgerEffect) :
-    (performAccess policy state d status r w contextKind cause).memory = state.memory ∧
-    (performAccess policy state d status r w contextKind cause).obligations =
+theorem refused_preserves_everything_but_the_ledger (policy : StepPolicy)
+    (state : MachineState) (d : AccessDescriptor) (outcome : AccessOutcome d)
+    (contextKind : ContextKind) (cause : EventCause) (space : AddressSpace)
+    (hspace : policy.profile.vocabulary.addressSpaces.find? d.space = some space)
+    (valid : ValidMemoryEvent)
+    (hevent : MemoryEvent.ofOutcome state.eventSupply.fresh.1 contextKind cause space d
+      outcome = some valid)
+    (class_ : AuditViolationClass)
+    (hrefused : refusalOf policy state d (some valid.event) = some class_) :
+    (performAccess policy state d outcome contextKind cause).memory = state.memory ∧
+    (performAccess policy state d outcome contextKind cause).obligations =
       state.obligations ∧
-    (performAccess policy state d status r w contextKind cause).events = state.events ∧
-    (performAccess policy state d status r w contextKind cause).eventSupply =
+    (performAccess policy state d outcome contextKind cause).events = state.events ∧
+    (performAccess policy state d outcome contextKind cause).eventSupply =
       state.eventSupply := by
   unfold performAccess
-  rw [hallowed]
+  rw [hspace]
+  simp only []
+  rw [hevent]
+  simp only []
+  rw [hrefused]
+  exact ⟨rfl, rfl, rfl, rfl⟩
+
+/--
+**The ledger changes exactly when the access commits.**
+
+`applyLedgerEffect` runs on the committing branch and nowhere else, so a refused
+access — for any reason, including an inapplicable ledger effect — leaves the
+obligations untouched. This is the "ledger mutation occurs iff the delta is
+applicable" half that a fold could not give.
+-/
+theorem obligations_unchanged_unless_committed (policy : StepPolicy)
+    (state : MachineState) (d : AccessDescriptor) (outcome : AccessOutcome d)
+    (contextKind : ContextKind) (cause : EventCause)
+    (hrefused : ∀ space valid,
+      policy.profile.vocabulary.addressSpaces.find? d.space = some space →
+      MemoryEvent.ofOutcome state.eventSupply.fresh.1 contextKind cause space d outcome
+        = some valid →
+      (refusalOf policy state d (some valid.event)).isSome) :
+    (performAccess policy state d outcome contextKind cause).obligations =
+      state.obligations := by
+  unfold performAccess
   split
-  · exact ⟨rfl, rfl, rfl, rfl⟩
-  · split
-    · exact ⟨rfl, rfl, rfl, rfl⟩
-    · split
-      · exact ⟨rfl, rfl, rfl, rfl⟩
-      · split
-        · exact ⟨rfl, rfl, rfl, rfl⟩
-        · rename_i hn
-          exact (hn h).elim
+  · rfl
+  · rename_i space hspace
+    split
+    · split <;> rfl
+    · rename_i valid hevent
+      have := hrefused space valid hspace hevent
+      cases hr : refusalOf policy state d (some valid.event) with
+      | none => rw [hr] at this; simp at this
+      | some class_ => rfl
 
 /-- Performing an access extends the violation ledger; it never shortens it.
 This is the per-access form of the invariant `docs/MEMORY_MODEL.md` §8 names, and
 the one the ledger type deliberately does not try to enforce by construction. -/
 theorem performAccess_extends_violations (policy : StepPolicy) (state : MachineState)
-    (d : AccessDescriptor) (status : AccessStatus) (r w : Nat)
+    (d : AccessDescriptor) (outcome : AccessOutcome d)
     (contextKind : ContextKind) (cause : EventCause) :
-    (performAccess policy state d status r w contextKind cause).violations.Extends
+    (performAccess policy state d outcome contextKind cause).violations.Extends
       state.violations := by
   unfold performAccess
   split
   · exact AuditViolationLedger.extends_append _ _
   · split
-    · exact AuditViolationLedger.extends_append _ _
     · split
+      · exact AuditViolationLedger.extends_append _ _
       · exact AuditViolationLedger.Extends.refl _
-      · split
-        · exact AuditViolationLedger.extends_append _ _
-        · split
-          · exact AuditViolationLedger.extends_append _ _
-          · exact AuditViolationLedger.Extends.refl _
+    · split
+      · exact AuditViolationLedger.extends_append _ _
+      · exact AuditViolationLedger.Extends.refl _
 
 /-- Running a list of accesses extends the violation ledger, including when it
-stops early at a denial. Built from the per-access form above. -/
+stops early at a refusal. Built from the per-access form above. -/
 theorem runAccesses_extends_violations (policy : StepPolicy) (state : MachineState)
     (accesses : List AccessDescriptor) (contextKind : ContextKind) (cause : EventCause) :
     (runAccesses policy state accesses contextKind cause).violations.Extends
@@ -493,8 +594,8 @@ theorem runAccesses_extends_violations (policy : StepPolicy) (state : MachineSta
   induction accesses generalizing state with
   | nil => exact AuditViolationLedger.Extends.refl _
   | cons d rest ih =>
-    have hp := performAccess_extends_violations policy state d .completed
-      (committedCounts d).1 (committedCounts d).2 contextKind cause
+    have hp := performAccess_extends_violations policy state d
+      (.completed (policy.oracle.answer state d)) contextKind cause
     rw [runAccesses]
     split
     · exact AuditViolationLedger.Extends.trans hp (ih _)
@@ -505,8 +606,8 @@ the whole sequence, a surviving prefix, or a prefix followed by the faulting
 access itself. -/
 theorem runStep_extends_violations (policy : StepPolicy) (state : MachineState)
     (sequence : SubstepSequence) (contextKind : ContextKind) (cause : EventCause)
-    (faultAt : Option FaultPoint) :
-    (runStep policy state sequence contextKind cause faultAt).violations.Extends
+    (plan : FaultPlan sequence) :
+    (runStep policy state sequence contextKind cause plan).violations.Extends
       state.violations := by
   unfold runStep
   split
@@ -516,7 +617,7 @@ theorem runStep_extends_violations (policy : StepPolicy) (state : MachineState)
     · split
       · exact AuditViolationLedger.Extends.trans
           (runAccesses_extends_violations _ _ _ _ _)
-          (performAccess_extends_violations _ _ _ _ _ _ _ _)
+          (performAccess_extends_violations _ _ _ _ _ _)
       · exact runAccesses_extends_violations _ _ _ _ _
 
 /--
@@ -524,13 +625,11 @@ theorem runStep_extends_violations (policy : StepPolicy) (state : MachineState)
 
 This is the theorem the module comment points at, and the transition invariant
 `docs/MEMORY_MODEL.md` §8 actually names. A rejection produces no state at all; a
-run produces `runStep`, which extends. An earlier module comment named a theorem
-`stepPreservesViolationExtends` that did not exist, and only the per-access and
-per-list forms were proved, leaving the fault path's composition uncovered.
+run produces `runStep`, which extends.
 -/
 theorem step_extends_violations (policy : StepPolicy) (state : MachineState)
     (operation : SomeOperation) (contextKind : ContextKind) (cause : EventCause)
-    (faultAt : Option FaultPoint) (final : MachineState)
+    (faultAt : (sequence : SubstepSequence) → FaultPlan sequence) (final : MachineState)
     (h : step policy state operation contextKind cause faultAt = .ran final) :
     final.violations.Extends state.violations := by
   unfold step at h
@@ -539,5 +638,20 @@ theorem step_extends_violations (policy : StepPolicy) (state : MachineState)
     first
       | exact StepOutcome.noConfusion h
       | (injection h with h; subst h; exact runStep_extends_violations _ _ _ _ _ _)
+
+/--
+**Every event a step records is well formed.**
+
+True by construction: `MachineState.events` holds `ValidMemoryEvent`, whose
+well-formedness is a field, and `MemoryEvent.ofOutcome` is the only producer.
+Stated anyway, because it is the property M8's consistency model depends on and a
+reader should be able to find it named rather than infer it from a type.
+-/
+theorem step_events_wellFormed (policy : StepPolicy) (state : MachineState)
+    (operation : SomeOperation) (contextKind : ContextKind) (cause : EventCause)
+    (faultAt : (sequence : SubstepSequence) → FaultPlan sequence) (final : MachineState)
+    (_ : step policy state operation contextKind cause faultAt = .ran final) :
+    ∀ valid ∈ final.events, valid.event.WellFormed :=
+  final.events_wellFormed
 
 end Grass.Op

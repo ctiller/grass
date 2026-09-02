@@ -85,9 +85,9 @@ instance (r : NameRegistry α) (x : α) : Decidable (r.Recognizes x) :=
 /--
 A name together with evidence that a profile admits it.
 
-The point of the type is that it cannot be constructed without the evidence. A
-consumer holding a `Recognized r` is holding a name the profile really listed,
-and no `Recognized` exists for a name it did not.
+The `evidence` field is what makes this work: a `Recognized r` cannot be built
+without a proof of `NameRegistry.Recognizes`, so a consumer holding one is
+holding a name the profile really listed.
 -/
 structure Recognized (r : NameRegistry α) where
   /-- The admitted name. -/
@@ -214,7 +214,8 @@ theorem not_admits_of_no_address_spaces {vocabulary : AdmittedVocabulary}
   simp at hspace
 
 /-- An access naming an unrecognized fault class is not admitted. A fault the
-profile never modelled cannot be approximated as one it did. -/
+profile never modelled cannot be approximated as one it did;
+`not_admits_of_unrecognized_fault` is the proof. -/
 theorem not_admits_of_unrecognized_fault {vocabulary : AdmittedVocabulary}
     {d : AccessDescriptor} {fault : FaultClassId} (hmem : fault ∈ d.admittedFaults)
     (h : ¬ vocabulary.faultClasses.Recognizes fault) : ¬ vocabulary.Admits d :=
@@ -245,9 +246,10 @@ A vocabulary never admits an access whose declared space it does not declare, an
 never admits one that is not well formed *in that vocabulary's own version* of the
 space.
 
-This is the clause that closes the hole: a descriptor cannot supply a space whose
-representation makes its own alignment and range checks vacuous, because the
-space it is checked against comes from here.
+This is the clause that closes the hole. A descriptor names its space and
+`AddressSpaceTable.find?` resolves it, so the space its alignment and range
+checks run against comes from the profile; `not_admits_of_undeclared_space` and
+`Grass.Op.StepPolicy.vocabularyWellFormed` are the two halves.
 -/
 theorem not_admits_of_undeclared_space {vocabulary : AdmittedVocabulary}
     {d : AccessDescriptor} (h : ¬ vocabulary.addressSpaces.Declares d.space) :

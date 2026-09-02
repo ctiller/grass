@@ -9,6 +9,11 @@ name: Library build
 # failure. The axiom audit then enforces docs/FOUNDATION.md section 3: only the
 # reviewed logical-foundation constants are permitted, and `sorryAx` or any
 # dependency-declared axiom fails the gate.
+#
+# A third check is about prose. Four adversarial review rounds each found a
+# docstring asserting a property the code did not have, including one naming a
+# theorem that did not exist. Tools/DocstringAudit.py requires a strong claim in
+# a definition or module comment to name the type or theorem enforcing it.
 
 on:
   push:
@@ -44,3 +49,6 @@ jobs:
 
       - name: Audit axioms
         run: lake env lean Tools/AxiomAudit.lean
+
+      - name: Audit docstring claims
+        run: python3 Tools/DocstringAudit.py

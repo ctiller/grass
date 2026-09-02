@@ -34,10 +34,12 @@ leaves initialized, and the second is a claim about the *committed* bytes, not
 about the range it named.
 
 **Denial is not a fault.** §1 distinguishes an authority or audit check, which
-happens before the substep commits and preserves the prior state, from an
+happens before the substep commits and leaves the prior state alone, from an
 architectural fault, which is modelled behavior with its own committed prefix.
-`AccessResult` keeps them apart, and there is no constructor that lets a denial
-report committed bytes.
+`AccessOutcome.denied` carries no `Committed`, so a denial reporting committed
+bytes is not expressible, and
+`Grass.Op.refused_preserves_everything_but_the_ledger` is the transition-level
+statement.
 
 This module is vocabulary. `applyAccess`, the state it runs over, and the framing
 lemmas are M2.
@@ -300,9 +302,9 @@ def committedRange (d : AccessDescriptor) (status : AccessStatus) : ByteRange :=
 /--
 The committed range never escapes the named range.
 
-Unconditional, because `committedRange` saturates through `ByteRange.take`. Even
-a status claiming more committed bytes than the access covered cannot describe an
-effect outside the access's own range.
+Unconditional, because `committedRange` saturates through `ByteRange.take`. A
+status claiming more committed bytes than the access covered therefore describes
+no effect outside the access's own range.
 -/
 theorem committedRange_contained (d : AccessDescriptor) (status : AccessStatus) :
     d.range.Contains (d.committedRange status) :=
@@ -366,8 +368,8 @@ def committedBytes : AccessResult → Nat → Nat
 @[simp] theorem committedBytes_denied (violation : AuditViolation) (size : Nat) :
     (AccessResult.denied violation).committedBytes size = 0 := rfl
 
-/-- A denial commits nothing whatever the access named. This is the statement
-that denial preserves the pre-substep state. -/
+/-- A denial commits nothing whatever the access named. The transition-level
+form is `Grass.Op.refused_preserves_everything_but_the_ledger`. -/
 theorem committedBytes_eq_zero_of_isDenied {result : AccessResult}
     (h : result.IsDenied) (size : Nat) : result.committedBytes size = 0 := by
   cases result with

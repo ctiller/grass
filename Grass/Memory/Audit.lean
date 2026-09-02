@@ -189,8 +189,9 @@ without the private field. -/
 theorem isEmpty_iff_records?_nil (ledger : AuditViolationLedger) :
     ledger.IsEmpty ↔ ledger.records? = [] := Iff.rfl
 
-/-- Appending never produces an empty ledger. A violation cannot be masked by
-recording something after it. -/
+/-- Appending never produces an empty ledger, by `records?_append`, so recording
+something after a violation does not mask it. `Grass.Op.step_extends_violations`
+is what makes this hold of a whole execution. -/
 @[simp] theorem not_isEmpty_append (ledger : AuditViolationLedger)
     (violation : AuditViolation) : ¬ (ledger.append violation).IsEmpty := by
   simp [IsEmpty, append]
@@ -242,9 +243,10 @@ transition built from it preserves `Extends` by construction. -/
 theorem extends_append (ledger : AuditViolationLedger) (violation : AuditViolation) :
     (ledger.append violation).Extends ledger := append_isPrefix ledger violation
 
-/-- A step that extends a non-empty ledger cannot report emptiness. This is the
-form `VerifiedProgram` uses: emptiness at the end propagates backwards through
-every step that preserved `Extends`. -/
+/-- A step that extends a non-empty ledger cannot report emptiness, by
+`isEmpty_of_isPrefix_of_isEmpty`. This is the form `VerifiedProgram` uses:
+emptiness at the end propagates backwards through every step that preserved
+`Extends`. -/
 theorem isEmpty_of_extends {later earlier : AuditViolationLedger}
     (h : later.Extends earlier) (hempty : later.IsEmpty) : earlier.IsEmpty :=
   isEmpty_of_isPrefix_of_isEmpty h hempty

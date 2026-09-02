@@ -130,7 +130,8 @@ Whether an operation may be restarted after an interruption or fault.
 
 `docs/MEMORY_MODEL.md` §7.4 requires restartable or partially executed
 instructions to declare the state handlers observe them from and the rules for
-retry, so this cannot default.
+retry. `Grass.Op.FacetName.restartability` is how a profile demands it and
+`Grass.Op.OperationFacets.Closes` is the check, so this has no default.
 -/
 inductive Restartability where
   /-- The operation may be re-executed from its start with the same effect. -/

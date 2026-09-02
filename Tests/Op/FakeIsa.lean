@@ -296,7 +296,9 @@ def profile : MemoryProfile :=
 
 /-- Every operation must declare its memory effects and its faults. -/
 def policy : StepPolicy :=
-  { profile := profile, requiredFacets := [.memoryEffects, .faults]
+  { profile := profile
+    requiredFacets := [.memoryEffects, .faults, .restartability]
+    oracle := .zeroed
     violationClassesDeclared := by decide
     vocabularyWellFormed := by decide }
 
@@ -354,7 +356,7 @@ theorem store_runs :
 write. -/
 theorem atomicAdd_is_a_read_modify_write :
     ∃ s e, (stepAlpha state₀ .atomicAdd).state? = some s ∧ s.events = [e] ∧
-      e.kind = .readModifyWrite ∧ e.ordering.atomicity = .atomic := by
+      e.event.kind = .readModifyWrite ∧ e.event.ordering.atomicity = .atomic := by
   refine ⟨_, _, rfl, rfl, ?_, ?_⟩ <;> decide
 
 /-! ## 4: obligations move through the same step -/
@@ -467,20 +469,28 @@ theorem denial_stops_the_operation :
   cases hs
   exact ⟨by decide, by decide⟩
 
-/-! ## A reported fault is never discarded
+/-! ## A reported fault cannot be discarded
 
 An out-of-range fault index used to mean "no fault at all": `visibleEffects?` took
 the whole list, the substep lookup missed, and every access committed to
 completion while `step` returned `.ran`. A fault turning into a success is the
-law-8 failure running in the most dangerous direction. -/
+law-8 failure running in the most dangerous direction.
 
-theorem out_of_range_fault_is_refused :
-    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) .thread ⟨⟨"alpha"⟩⟩
-      (some ⟨99, .pageFault, 0⟩)).rejection? = some .faultPointOutOfRange := by decide
+There is no fixture for it any more, because `FaultPlan.before` carries a
+`Fin sequence.substeps.length` and the bad case is **unrepresentable**. That is
+the stronger repair: a negative fixture proves a check runs, while a type that
+cannot express the mistake needs no check. The `if h : _ < _` guards in the
+theorems above are how a caller obtains the `Fin`, and they are discharged
+statically for a known sequence. -/
 
-theorem out_of_range_fault_on_compound_is_refused :
-    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) .thread ⟨⟨"alpha"⟩⟩
-      (some ⟨99, .pageFault, 0⟩)).rejection? = some .faultPointOutOfRange := by decide
+/-- The store sequence has exactly one substep, so index zero is the only fault
+position that exists. -/
+theorem store_has_one_substep :
+    ∀ seq, (HasOperationFacets.facets Alpha.store).memoryEffects = some seq →
+      seq.substeps.length = 1 := by
+  intro seq h
+  cases h
+  rfl
 
 /-! ## 7: alias conflicts across distinct allocations -/
 
@@ -581,7 +591,10 @@ These drive the fault path through `step` itself. -/
 committed, and the state shows one event. -/
 theorem divide_fault_preserves_the_read :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) .thread
-        ⟨⟨"alpha"⟩⟩ (some ⟨1, ⟨⟨"divideError"⟩⟩, 0⟩)).state? = some s →
+        ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+          if h : 1 < seq.substeps.length then
+            .before ⟨1, h⟩ ⟨⟨"divideError"⟩⟩ 0
+          else .none)).state? = some s →
       s.events.length = 1 ∧ s.violations.IsEmpty := by
   intro s hs
   cases hs
@@ -598,8 +611,10 @@ range.
 -/
 theorem divide_fault_at_zero_commits_no_bytes :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) .thread
-        ⟨⟨"alpha"⟩⟩ (some ⟨0, .pageFault, 0⟩)).state? = some s →
-      ∃ e, s.events = [e] ∧ e.readCommitted = 0 ∧ e.writeCommitted = 0 := by
+        ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0
+          else .none)).state? = some s →
+      ∃ e, s.events = [e] ∧ e.event.readCommitted = 0 ∧ e.event.writeCommitted = 0 := by
   intro s hs
   cases hs
   exact ⟨_, rfl, by decide, by decide⟩
@@ -608,8 +623,10 @@ theorem divide_fault_at_zero_commits_no_bytes :
 `docs/MEMORY_MODEL.md` §1 forbids assuming a faulted access did nothing. -/
 theorem faulted_store_commits_its_declared_prefix :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) .thread
-        ⟨⟨"alpha"⟩⟩ (some ⟨0, .pageFault, 3⟩)).state? = some s →
-      ∃ e, s.events = [e] ∧ e.writeCommitted = 3 ∧ e.status = .faulted .pageFault 3 := by
+        ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3
+          else .none)).state? = some s →
+      ∃ e, s.events = [e] ∧ e.event.writeCommitted = 3 ∧ e.event.status = .faulted .pageFault 3 := by
   intro s hs
   cases hs
   exact ⟨_, rfl, by decide, by decide⟩
@@ -619,7 +636,8 @@ the generic relation. Refusing is the honest answer; guessing which effects
 survive would be the permissive fallback law 8 forbids. -/
 theorem profile_visibility_rule_is_refused :
     (Grass.Op.step policy state₀ (SomeOperation.of Alpha.splitStore) .thread
-      ⟨⟨"alpha"⟩⟩ (some ⟨1, .pageFault, 0⟩)).rejection? =
-        some .visibilityRuleUnknown := by decide
+      ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 0
+        else .none)).rejection? = some .visibilityRuleUnknown := by decide
 
 end Grass.Tests.FakeIsa
