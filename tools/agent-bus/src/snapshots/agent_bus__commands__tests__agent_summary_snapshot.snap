@@ -1,0 +1,19 @@
+---
+source: src/commands.rs
+expression: agent_summary(&ag)
+---
+{
+  "active": true,
+  "agent": "alice",
+  "display_name": "alice",
+  "model": null,
+  "plan": null,
+  "primary_role": "implementor",
+  "product_branch": null,
+  "product_commit": null,
+  "provider": null,
+  "purpose": "purpose",
+  "retired": false,
+  "scope": null,
+  "status": "active"
+}

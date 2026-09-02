@@ -24,3 +24,26 @@ jobs:
       - name: Check local documentation links
         shell: pwsh
         run: ./check-doc-links.ps1
+
+  agent-bus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: tools/agent-bus
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Configure git identity for test fixtures
+        run: |
+          git config --global user.email "agent-bus-ci@invalid"
+          git config --global user.name "agent-bus-ci"
+
+      - name: Build
+        run: cargo build --locked --verbose
+
+      - name: Test
+        run: cargo test --locked --verbose
