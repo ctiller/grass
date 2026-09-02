@@ -353,6 +353,21 @@ def runBlock (state : MemoryState) (indeterminate : Nat → Byte) :
       let after := runBlock step.2 indeterminate rest
       (step.1 :: after.1, after.2)
 
+/--
+**What memory looks like afterwards does not depend on what an indeterminate read
+would have observed.**
+
+`indeterminate` answers reads of bytes the store has no value for. This says that
+answer stays in the observation and never reaches memory — so a profile choosing
+differently changes what a program *sees*, never what it *leaves behind*. Without
+it every downstream fact about a block's final state would be parameterized by a
+choice that provably does not affect it.
+-/
+theorem applyAccess_state_indep (state : MemoryState) (d : AccessDescriptor)
+    (writeData : ByteSeq) (ind ind' : Nat → Byte) :
+    (applyAccess state d writeData ind).2 = (applyAccess state d writeData ind').2 := by
+  rw [applyAccess_state, applyAccess_state]
+
 /-- `step.Touches id offset` holds when this step's declared range covers that
 byte of that allocation. Everything else the step provably leaves alone. -/
 def Touches (step : AccessDescriptor × ByteSeq) (id : AllocId) (offset : Nat) : Prop :=
@@ -397,6 +412,15 @@ theorem cellAt?_runBlock_of_untouched (indeterminate : Nat → Byte) :
         (fun step hstep => hall step (List.mem_cons_of_mem _ hstep)),
       cellAt?_applyAccess_of_untouched state d writeData indeterminate
         (hall (d, writeData) List.mem_cons_self)]
+
+/-- The same independence for a whole block. -/
+theorem runBlock_state_indep (ind ind' : Nat → Byte) :
+    ∀ (block : List (AccessDescriptor × ByteSeq)) (state : MemoryState),
+      (runBlock state ind block).2 = (runBlock state ind' block).2
+  | [], _ => rfl
+  | (d, writeData) :: rest, state => by
+    rw [runBlock, runBlock, applyAccess_state_indep state d writeData ind ind',
+      runBlock_state_indep ind ind' rest _]
 
 /-- The byte form, which is what a load's observation is read through. -/
 theorem byteAt?_runBlock_of_untouched (indeterminate : Nat → Byte)

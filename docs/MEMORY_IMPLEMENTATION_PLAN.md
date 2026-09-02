@@ -574,12 +574,36 @@ supposed to do. There the state is universally quantified, the data arbitrary,
 and every proof a single application of a named exported theorem. One local
 declaration exists and is a wrapper, not content.
 
+`Tests/Memory/Spike1Block.lean` runs that discharge on the actual instruction
+mix: `mov transferred, 0`, then the two accesses inside
+`call [rip + __imp_WriteFile]`, then `mov eax, transferred`. The claim the
+spike's correctness argument turns on is that the reload observes what the store
+wrote, and the `call` in between reads a different allocation and writes a part of
+this one thirty-two bytes below.
+
+The split between what is decided and what is proved is the point. The side
+conditions — allocation live, epoch and space match, range in bounds, permission
+allows the write, no intervening declared range covers the slot — are `decide`d,
+because those are exactly what a front end computes and deciding them is their
+intended use. The framing is not decided: it is one application of
+`byteAt?_write_survives_block`. A proof that closed the whole thing by `decide`
+would compute the answer from that particular state and would still compile if
+every framing theorem were deleted.
+
+The file also carries the control the claim needs: the same reload *is* refused
+as an `uninitializedRead` against the state before the store, so
+`the_reload_is_not_refused` is evidence the initialization check ran rather than
+evidence it was skipped.
+
+One lemma fell out that is worth naming: `applyAccess_state_indep` and
+`runBlock_state_indep` say what memory looks like afterwards does not depend on
+what an indeterminate read would have observed. The `indeterminate` answer stays
+in the observation and never reaches memory, so a profile choosing differently
+changes what a program sees and never what it leaves behind.
+
 ### 4.2 What M2 still owes
 
 - Compaction for the byte store, per §4.1.
-- The Spike 1 block itself, over the reference instruction mix in
-  `Tests/Memory/Spike1Reference.lean`. The general discharge is proved and
-  checked symbolically; what is not yet done is running that particular block.
 
 Exit criteria: the M1 reference instruction set steps end to end over a
 hand-built `MemState`; the framing lemma set is sufficient to discharge a
