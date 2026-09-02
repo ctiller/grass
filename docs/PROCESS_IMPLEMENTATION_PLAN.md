@@ -341,6 +341,7 @@ Goal: the exhaustive transition family, with each constructor's exactness
 carried in its own index rather than in an ambient predicate.
 
 ```text
+Grass/Process/Network/Exposure.lean    ProtocolExposesBoundary, observation projection
 Grass/Process/Network/Graph.lean       ProcessGraph, population, logical access
 Grass/Process/Network/Topology.lean    refs, generations, channel ids, epochs
 Grass/Process/Network/Assertion.lean   network assertions, separating conjunction
@@ -643,7 +644,27 @@ unilaterally: they are shared review fixtures, and editing them before
 ratification would encode an unratified decision in the golden surface.
 Blocks: nothing yet; it is ratification's first consequence.
 
-### 10.8 A multiset is hand-rolled rather than taken from mathlib
+### 10.8 Cancellation and supervision are facets, not `ProcessTopology` fields
+
+[PROCESS.md](PROCESS.md) §3 declares `ProcessTopology` with three law fields:
+`spawn`, `cancellation`, and `supervision`. The implementation carries only
+`spawnAuthority`.
+
+[PROCESS_SHARDING.md](PROCESS_SHARDING.md) §3 requires a composition invariant
+to depend "on the smallest named facet that supplies its facts", and §10 lists
+as a foundational failure "a composition witness indexed by the complete
+realization plan when each field consumes only a facet". A `ChannelContract`
+consumes the endpoints and the spawn authority; it does not consume a restart
+intensity window. With all three in one record, every channel proof would depend
+on the supervision policy, and adding a cancellation point would rebuild proofs
+that cannot mention one — which is exactly the mutation
+[PROCESS_SHARDING.md](PROCESS_SHARDING.md) §9 requires to stay local.
+
+Proposed resolution: cancellation and supervision are certificates over a
+topology rather than fields of it, landing with M3, and the §3 declaration is
+amended. Blocks: nothing; the split is implemented and M3 depends on it.
+
+### 10.9 A multiset is hand-rolled rather than taken from mathlib
 
 Recorded in §2.2. The decision is reversible and local: `Grass/Process/Bag.lean`
 is one module with a documented custody note, and adopting mathlib later is a
