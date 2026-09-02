@@ -192,6 +192,21 @@ structure MessageOccurrence {edge : topology.ChannelKind}
   /-- It is a message occurrence and not some other identity. -/
   isMessage : id.kind = .messageOccurrence
 
+/--
+An occurrence together with the session it is on.
+
+`docs/PROCESS.md` §3's `ChannelOccurrence`. `ChannelContract` quantifies over
+occurrences of an *edge* without having chosen a session, so the session has to
+travel with the occurrence rather than be a separate parameter: a contract that
+took `channel` and `occurrence` apart could be instantiated with an occurrence
+from one session and a session index from another, and nothing in the types
+would object.
+-/
+abbrev ChannelOccurrence (edge : topology.ChannelKind) {Message : Type w}
+    (message : Message) : Type r :=
+  Sigma fun channel : topology.ChannelId edge =>
+    topology.MessageOccurrence channel message
+
 namespace ProcessRef
 
 variable {registry : ProtocolRegistry.{u, w, v}} {boundary : DriverBoundary.{u}}
