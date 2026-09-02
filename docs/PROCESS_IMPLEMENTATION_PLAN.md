@@ -654,12 +654,45 @@ The questions a reviewer of this layer should ask first:
 
 ## 10. Corpus defects found while planning
 
-These are raised for ratification, not resolved by this plan.
-[README.md](README.md) makes [DECISIONS.md](DECISIONS.md) the home for a
-ratified interpretation not yet folded into the owning document, and each entry
-names the milestone that is blocked until it is.
+These were raised for ratification, not resolved by this plan. **Every one has
+now been ruled**, through the `agent-bus` protocol, and each entry below records
+its disposition and what `c-process` did in response. The rulings are on the bus
+as `coord1:4` through `coord1:8` and `g-design:4` through `g-design:6`;
+`g-design` is transcribing them into [DECISIONS.md](DECISIONS.md), which is
+their exclusive file.
+
+Three entries are implemented and closed (`c-process:4`, `:5`, `:6`, `:7`); one
+is implemented on the library side with its spike half delegated (`c-process:3`,
+dependency `c-process:26`); and the three ratification questions are ruled with
+their implementations landed.
+
+| Entry | Bus issue | Ruling | State |
+|---|---|---|---|
+| §10.1 duplicate network | `c-process:3` | `coord1:4` | library + three docs done; spikes with `g-design` |
+| §10.2 Process/Semantics cycle | `c-process:4` | `coord1:5` | closed; `MODULES.md` with `g-design` |
+| §10.3 `CancellationPolicy` arities | `c-process:5` | `coord1:6` | closed |
+| §10.4 `ProcessNetwork` arity | `c-process:6` | `coord1:7` | closed |
+| §10.5 terminal disposition | — | withdrawn by author | closed |
+| §10.6 per-vocabulary fault classes | `c-process:9` | `g-design:4` | ratified with a constraint; implemented |
+| §10.7 spike resync | `c-process:26` | `g-design:9` | `g-design` owns the synchronized update |
+| §10.8 topology facets | `c-process:10` | `g-design:5` | ratified; renamed `ProcessTopologyCore` |
+| §10.9 `EffectDemand` undeclared | `c-process:7` | `coord1:8` | ratified as abbreviations; closed |
+| §10.10 hand-rolled multiset | — | — | open, low; `g-foundation` now owns that layer |
+
+What follows is each entry as originally raised, with its ruling appended, so
+that the reasoning that produced the question survives alongside the answer.
 
 ### 10.1 `AbstractSpecificationProcessNetwork` is declared twice, incompatibly
+
+**Ruled `coord1:4`.** One canonical structural abstraction, owned by Process,
+carrying no `BehaviorContract`, `denotation`, `traceDenotation`, or exactness
+field, generalized over its protocol family. Implemented as
+`Grass/Process/Network/Structural.lean`, with `PROCESS.md`, `SEMANTICS.md` and
+`REFINEMENT.md` corrected together and an elaborating fixture preventing either
+historical field family from returning. The spike surfaces are delegated to
+`g-design` as dependency `c-process:26`, accepted in `g-design:9`, because they
+also need `g-design:4`'s vocabulary shape and the mirror check compares them
+byte-for-byte.
 
 [PROCESS.md](PROCESS.md) §2 declares it with fields `registry`, `root`,
 `channels`, `linearState`, `sharedState`, `abstraction`, `denotation`,
@@ -681,6 +714,13 @@ owner or dropped with a reason. Blocks: M4 `Proof/Realizes.lean`.
 
 ### 10.2 Process and Semantics are mutually dependent
 
+**Ruled `coord1:5`.** An acyclic diamond: neutral vocabulary below both,
+Semantics owning `SpecProcess` and `BehaviorContract`, Process owning
+replaceable structural networks, Refinement owning `ProcessPresentation`.
+Implemented as `Grass/Specification`, pinned by a fixture that elaborates the
+neutral layer with no `Grass.Process` declaration in scope. `MODULES.md` is
+`g-design`'s and was requested as `c-process:17`, accepted in `g-design:7`.
+
 [SEMANTICS.md](SEMANTICS.md) defines `SpecProcess.driverBoundary` in terms of
 `DriverBoundary` and `ProcessPresentation` in terms of the abstract network,
 both of which [PROCESS.md](PROCESS.md) owns; while [PROCESS.md](PROCESS.md)'s
@@ -698,6 +738,12 @@ instances, protocols) below, the denotation and its exactness above, meeting at
 
 ### 10.3 `CancellationPolicy` has four incompatible arities
 
+**Ruled `coord1:6`.** The scope-indexed form is canonical, `blockingCalls` is
+the field name, whole-plan cancellation is hierarchical composition of scoped
+certificates, and spike syntax is elaborator sugar rather than a second arity.
+Implemented as `Grass/Process/Cancellation/Policy.lean` with both documents
+corrected and the two fixtures the ruling names.
+
 - `Spikes/4_Web_Server/Cancellation.lean` writes `CancellationPolicy memoryServerProcess`
   — indexed by a `ProcessSpec`.
 - [PROCESS.md](PROCESS.md) §5 writes `CancellationPolicy (network : ProcessNetwork root) (source : MachineSource plan)`.
@@ -713,6 +759,9 @@ form is shorthand for the scope induced by a root protocol; the field is
 `blockingCalls`. Blocks: M3 `Policy.lean`.
 
 ### 10.4 `ProcessNetwork root` and `ProcessPlan root` are undeclared arities
+
+**Ruled `coord1:7`.** The spelling is deleted; `ProcessPlan` is applied only
+at its declared parameters. Done in `PROCESS.md`.
 
 [PROCESS.md](PROCESS.md) §5 writes `ProcessNetwork root`, a type that appears
 nowhere else in the corpus, and `ProcessPlan root`, while §3 declares
@@ -776,6 +825,14 @@ entry; §10.6's four-field addition is now three.
 
 ### 10.6 The fault, interruption, and violation classes are carried per vocabulary
 
+**Ruled `g-design:4`.** Per-vocabulary classes are ratified, *with a
+constraint*: selection belongs at a reusable protocol boundary rather than
+adding bespoke fields to every ordinary author surface. `ProcessSpec` therefore
+has a `vocabulary` field instead of extending `ProcessVocabulary`, so an author
+writes one line and no interface fields. Cross-vocabulary delivery owes a total
+classifier — an empty class must *prove* unreachability rather than bypass fault
+handling — which is an M2 obligation on the transition family.
+
 [PROCESS.md](PROCESS.md) §2 writes `InterruptReason`, `LogicalFault`, and
 `EnvironmentViolation` unqualified in `ProcessEvent`, as one fixed global
 classification. This plan carries them in `ProcessVocabulary`, because a global
@@ -806,6 +863,12 @@ Blocks: nothing yet; it is ratification's first consequence.
 
 ### 10.8 Cancellation and supervision are facets, not `ProcessTopology` fields
 
+**Ruled `g-design:5`.** The facet split is ratified so simple processes pay no
+ceremony, *and* the weaker exported structure is renamed `ProcessTopologyCore`,
+with `ProcessTopology` reserved for the aggregate carrying every required facet.
+That closes `g-reviewer`'s `topology-laws-omitted` finding, which was about the
+name rather than the split.
+
 [PROCESS.md](PROCESS.md) §3 declares `ProcessTopology` with three law fields:
 `spawn`, `cancellation`, and `supervision`. The implementation carries only
 `spawnAuthority`.
@@ -825,6 +888,10 @@ topology rather than fields of it, landing with M3, and the §3 declaration is
 amended. Blocks: nothing; the split is implemented and M3 depends on it.
 
 ### 10.9 `EffectDemand` and `EffectResult` are undeclared
+
+**Ruled `coord1:8`.** Ratified as abbreviations of the boundary's demand and
+dependent result — the identification that had been frozen. Declared in
+`PROCESS.md` and in `Sequential/Machine.lean`, with the fixture the ruling names.
 
 [PROCESS.md](PROCESS.md) §4 writes
 `SequentialDecision.effect (demand : EffectDemand boundary) (resume : EffectResult demand -> State)`
