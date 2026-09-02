@@ -45,6 +45,18 @@ CLAIM_WORDS = (
     "guarantees", "makes it impossible", "is enforced", "only if", "only when",
 )
 
+# A sentence *beginning* "Must ..." is a constraint on the thing it annotates,
+# which is a mechanised claim. A "must" later in a sentence usually describes a
+# duty in the modelled domain instead -- "a lock was acquired and must be
+# released" is what an obligation kind *means*, not an assertion about this
+# code -- so the word alone is too coarse and the position carries the meaning.
+#
+# This rule exists because a real defect escaped through it. The docstring on
+# `AuthorityProvider.violationClass` read "Must be one the profile declares",
+# nothing enforced it, and `g-reviewer:14` found what the auditor did not:
+# a provider could record a violation class outside the admitted vocabulary.
+CLAIM_PATTERNS = (re.compile(r"^\*{0,2}must\s"),)
+
 # A sentence that says a property is aspirational, absent, or owed elsewhere is
 # not making a mechanised claim, and the rule explicitly permits it.
 HEDGES = (
@@ -93,7 +105,8 @@ def check(path: Path) -> list[str]:
     for line, block in doc_blocks(source):
         for sentence in sentences(block):
             lowered = sentence.lower()
-            if not any(word in lowered for word in CLAIM_WORDS):
+            if not (any(word in lowered for word in CLAIM_WORDS)
+                    or any(pattern.match(lowered) for pattern in CLAIM_PATTERNS)):
                 continue
             if any(hedge.lower() in lowered for hedge in HEDGES):
                 continue
