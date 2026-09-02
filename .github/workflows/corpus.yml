@@ -42,8 +42,24 @@ jobs:
           git config --global user.email "agent-bus-ci@invalid"
           git config --global user.name "agent-bus-ci"
 
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
       - name: Build
         run: cargo build --locked --verbose
 
       - name: Test
         run: cargo test --locked --verbose
+
+      - name: Install cargo-llvm-cov
+        run: |
+          rustup component add llvm-tools-preview
+          cargo install cargo-llvm-cov --locked
+
+      # Enforces this crate's nominated ≥95% coverage claim (AGENT_REVIEW.md
+      # `required_checks`) so a later change can't silently regress it.
+      - name: Coverage threshold
+        run: cargo llvm-cov --locked --all-targets --fail-under-lines 95 --fail-under-regions 95

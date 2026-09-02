@@ -117,7 +117,11 @@ pub fn status_set(ctx: &BusCtx, args: &crate::cli::StatusSetArgs) -> AbResult<()
         status: parse_status(&args.status)?,
         note: Text::parse(args.note.clone())?,
         product_branch: args.product_branch.clone().map(Branch::parse).transpose()?,
-        product_commit: args.product_commit.clone().map(ObjectId::parse).transpose()?,
+        product_commit: args
+            .product_commit
+            .clone()
+            .map(ObjectId::parse)
+            .transpose()?,
     });
     let env = bus::publish_event(ctx, &agent, data, vec![])?;
     println!("published {}", env.id);
@@ -133,7 +137,12 @@ pub fn resume(ctx: &BusCtx, args: &crate::cli::ResumeArgs) -> AbResult<()> {
     Ok(())
 }
 
-fn build_resume(state: &BusState, agent: &Agent, reason: &str, user_authority: &str) -> AbResult<(EventData, Vec<EventId>)> {
+fn build_resume(
+    state: &BusState,
+    agent: &Agent,
+    reason: &str,
+    user_authority: &str,
+) -> AbResult<(EventData, Vec<EventId>)> {
     let ag = state
         .agent(agent)
         .ok_or_else(|| invalid(format!("{agent} is not registered")))?;
@@ -156,7 +165,12 @@ pub fn retire(ctx: &BusCtx, args: &crate::cli::RetireArgs) -> AbResult<()> {
     Ok(())
 }
 
-fn build_retire(state: &BusState, target: &Agent, reason: &str, user_authority: &str) -> AbResult<(EventData, Vec<EventId>)> {
+fn build_retire(
+    state: &BusState,
+    target: &Agent,
+    reason: &str,
+    user_authority: &str,
+) -> AbResult<(EventData, Vec<EventId>)> {
     let tgt = state
         .agent(target)
         .ok_or_else(|| invalid(format!("{target} is not registered")))?;
@@ -182,7 +196,10 @@ pub fn schema_activate(ctx: &BusCtx, args: &crate::cli::SchemaActivateArgs) -> A
     Ok(())
 }
 
-pub fn merge_engine_activate(ctx: &BusCtx, args: &crate::cli::MergeEngineActivateArgs) -> AbResult<()> {
+pub fn merge_engine_activate(
+    ctx: &BusCtx,
+    args: &crate::cli::MergeEngineActivateArgs,
+) -> AbResult<()> {
     let agent = Agent::parse(args.agent.clone())?;
     let previous_epoch = EventId::parse(args.previous_epoch.clone())?;
     let data = EventData::MergeEngineActivated(MergeEngineActivated {
@@ -233,7 +250,12 @@ pub fn issue_open(ctx: &BusCtx, agent: &str, to: &str, file: &str) -> AbResult<(
     let v = bus::read_json_file(std::path::Path::new(file))?;
     let v = inject(v, &[("target", Value::String(to.to_string()))]);
     let data: IssueOpened = from_value(v)?;
-    let extra_refs: Vec<EventId> = data.blocks.iter().chain(data.evidence.iter()).cloned().collect();
+    let extra_refs: Vec<EventId> = data
+        .blocks
+        .iter()
+        .chain(data.evidence.iter())
+        .cloned()
+        .collect();
     let env = bus::publish_event(ctx, &agent, EventData::IssueOpened(data), extra_refs)?;
     println!("opened {}", env.id);
     Ok(())
@@ -249,7 +271,11 @@ pub fn issue_acknowledge(ctx: &BusCtx, agent: &str, issue_id: &str, note: &str) 
     Ok(())
 }
 
-fn build_issue_ack(state: &BusState, issue_id: &EventId, note: &str) -> AbResult<(EventData, Vec<EventId>)> {
+fn build_issue_ack(
+    state: &BusState,
+    issue_id: &EventId,
+    note: &str,
+) -> AbResult<(EventData, Vec<EventId>)> {
     let issue = state
         .issues
         .get(issue_id)
@@ -271,7 +297,13 @@ pub fn issue_reject(ctx: &BusCtx, agent: &str, issue_id: &str, file: &str) -> Ab
     issue_terminal(ctx, agent, issue_id, file, false)
 }
 
-fn issue_terminal(ctx: &BusCtx, agent: &str, issue_id: &str, file: &str, resolve: bool) -> AbResult<()> {
+fn issue_terminal(
+    ctx: &BusCtx,
+    agent: &str,
+    issue_id: &str,
+    file: &str,
+    resolve: bool,
+) -> AbResult<()> {
     let agent = Agent::parse(agent.to_string())?;
     let issue_id = EventId::parse(issue_id.to_string())?;
     let state = ctx.load_state()?;
@@ -282,7 +314,12 @@ fn issue_terminal(ctx: &BusCtx, agent: &str, issue_id: &str, file: &str, resolve
     Ok(())
 }
 
-fn build_issue_terminal(state: &BusState, issue_id: &EventId, v: Value, resolve: bool) -> AbResult<(EventData, Vec<EventId>)> {
+fn build_issue_terminal(
+    state: &BusState,
+    issue_id: &EventId,
+    v: Value,
+    resolve: bool,
+) -> AbResult<(EventData, Vec<EventId>)> {
     let issue = state
         .issues
         .get(issue_id)
@@ -297,14 +334,26 @@ fn build_issue_terminal(state: &BusState, issue_id: &EventId, v: Value, resolve:
     );
     if resolve {
         let d: IssueResolved = from_value(v)?;
-        Ok((EventData::IssueResolved(d), vec![issue_id.clone(), assignment]))
+        Ok((
+            EventData::IssueResolved(d),
+            vec![issue_id.clone(), assignment],
+        ))
     } else {
         let d: IssueRejected = from_value(v)?;
-        Ok((EventData::IssueRejected(d), vec![issue_id.clone(), assignment]))
+        Ok((
+            EventData::IssueRejected(d),
+            vec![issue_id.clone(), assignment],
+        ))
     }
 }
 
-pub fn issue_reassign(ctx: &BusCtx, agent: &str, issue_id: &str, new_target: &str, reason: &str) -> AbResult<()> {
+pub fn issue_reassign(
+    ctx: &BusCtx,
+    agent: &str,
+    issue_id: &str,
+    new_target: &str,
+    reason: &str,
+) -> AbResult<()> {
     let agent = Agent::parse(agent.to_string())?;
     let issue_id = EventId::parse(issue_id.to_string())?;
     let new_target = Agent::parse(new_target.to_string())?;
@@ -315,7 +364,12 @@ pub fn issue_reassign(ctx: &BusCtx, agent: &str, issue_id: &str, new_target: &st
     Ok(())
 }
 
-fn build_issue_reassign(state: &BusState, issue_id: &EventId, new_target: Agent, reason: &str) -> AbResult<(EventData, Vec<EventId>)> {
+fn build_issue_reassign(
+    state: &BusState,
+    issue_id: &EventId,
+    new_target: Agent,
+    reason: &str,
+) -> AbResult<(EventData, Vec<EventId>)> {
     let issue = state
         .issues
         .get(issue_id)
@@ -355,7 +409,11 @@ pub fn dependency_acknowledge(ctx: &BusCtx, agent: &str, dep_id: &str, note: &st
     Ok(())
 }
 
-fn build_dependency_ack(state: &BusState, dep_id: &EventId, note: &str) -> AbResult<(EventData, Vec<EventId>)> {
+fn build_dependency_ack(
+    state: &BusState,
+    dep_id: &EventId,
+    note: &str,
+) -> AbResult<(EventData, Vec<EventId>)> {
     let dep = state
         .dependencies
         .get(dep_id)
@@ -380,7 +438,11 @@ pub fn dependency_resolve(ctx: &BusCtx, agent: &str, dep_id: &str, file: &str) -
     Ok(())
 }
 
-fn build_dependency_resolve(state: &BusState, dep_id: &EventId, v: Value) -> AbResult<(EventData, Vec<EventId>)> {
+fn build_dependency_resolve(
+    state: &BusState,
+    dep_id: &EventId,
+    v: Value,
+) -> AbResult<(EventData, Vec<EventId>)> {
     let dep = state
         .dependencies
         .get(dep_id)
@@ -394,7 +456,10 @@ fn build_dependency_resolve(state: &BusState, dep_id: &EventId, v: Value) -> AbR
         ],
     );
     let data: DependencyResolved = from_value(v)?;
-    Ok((EventData::DependencyResolved(data), vec![dep_id.clone(), assignment]))
+    Ok((
+        EventData::DependencyResolved(data),
+        vec![dep_id.clone(), assignment],
+    ))
 }
 
 pub fn dependency_reject(ctx: &BusCtx, agent: &str, dep_id: &str, reason: &str) -> AbResult<()> {
@@ -407,7 +472,11 @@ pub fn dependency_reject(ctx: &BusCtx, agent: &str, dep_id: &str, reason: &str) 
     Ok(())
 }
 
-fn build_dependency_reject(state: &BusState, dep_id: &EventId, reason: &str) -> AbResult<(EventData, Vec<EventId>)> {
+fn build_dependency_reject(
+    state: &BusState,
+    dep_id: &EventId,
+    reason: &str,
+) -> AbResult<(EventData, Vec<EventId>)> {
     let dep = state
         .dependencies
         .get(dep_id)
@@ -421,7 +490,13 @@ fn build_dependency_reject(state: &BusState, dep_id: &EventId, reason: &str) -> 
     Ok((data, vec![dep_id.clone(), assignment]))
 }
 
-pub fn dependency_reassign(ctx: &BusCtx, agent: &str, dep_id: &str, new_target: &str, reason: &str) -> AbResult<()> {
+pub fn dependency_reassign(
+    ctx: &BusCtx,
+    agent: &str,
+    dep_id: &str,
+    new_target: &str,
+    reason: &str,
+) -> AbResult<()> {
     let agent = Agent::parse(agent.to_string())?;
     let dep_id = EventId::parse(dep_id.to_string())?;
     let new_target = Agent::parse(new_target.to_string())?;
@@ -460,7 +535,12 @@ pub fn handoff_offer(ctx: &BusCtx, agent: &str, file: &str) -> AbResult<()> {
     let agent = Agent::parse(agent.to_string())?;
     let v = bus::read_json_file(std::path::Path::new(file))?;
     let data: HandoffOffered = from_value(v)?;
-    let refs: Vec<EventId> = data.known_issues.iter().chain(data.evidence.iter()).cloned().collect();
+    let refs: Vec<EventId> = data
+        .known_issues
+        .iter()
+        .chain(data.evidence.iter())
+        .cloned()
+        .collect();
     let env = bus::publish_event(ctx, &agent, EventData::HandoffOffered(data), refs)?;
     println!("offered {}", env.id);
     Ok(())
@@ -510,7 +590,12 @@ pub fn lifecycle_resolve(ctx: &BusCtx, args: &crate::cli::FileAgentArgs) -> AbRe
     let data: LifecycleConflictResolved = from_value(v)?;
     let mut refs = vec![data.root.clone()];
     refs.extend(data.competing.iter().cloned());
-    let env = bus::publish_event(ctx, &agent, EventData::LifecycleConflictResolved(data), refs)?;
+    let env = bus::publish_event(
+        ctx,
+        &agent,
+        EventData::LifecycleConflictResolved(data),
+        refs,
+    )?;
     println!("published {}", env.id);
     Ok(())
 }
@@ -551,7 +636,9 @@ fn select_agents<'a>(state: &'a BusState, agent: &Option<String>) -> AbResult<Ve
     match agent {
         Some(a) => {
             let a = Agent::parse(a.clone())?;
-            Ok(vec![state.agent(&a).ok_or_else(|| invalid(format!("unknown agent {a}")))?])
+            Ok(vec![state
+                .agent(&a)
+                .ok_or_else(|| invalid(format!("unknown agent {a}")))?])
         }
         None => Ok(state.agents.values().collect()),
     }
@@ -674,7 +761,11 @@ pub fn tail(ctx: &BusCtx, args: &crate::cli::TailArgs) -> AbResult<()> {
     Ok(())
 }
 
-fn tail_events(walk: &crate::history::Walk, agent_filter: Option<&str>, count: usize) -> Vec<crate::envelope::Envelope> {
+fn tail_events(
+    walk: &crate::history::Walk,
+    agent_filter: Option<&str>,
+    count: usize,
+) -> Vec<crate::envelope::Envelope> {
     let mut events = Vec::new();
     for c in &walk.commits {
         for e in &c.new_events {
@@ -711,7 +802,8 @@ fn conflicts_items(state: &BusState) -> Vec<Value> {
 
     // Scope conflicts (AGENT_BUS.md section 6.2): exclusive/exclusive overlap
     // is a hard conflict; exclusive/shared overlap is merely reported.
-    let actives: Vec<&crate::state::AgentState> = state.agents.values().filter(|a| a.active()).collect();
+    let actives: Vec<&crate::state::AgentState> =
+        state.agents.values().filter(|a| a.active()).collect();
     for i in 0..actives.len() {
         for j in (i + 1)..actives.len() {
             let (a, b) = (actives[i], actives[j]);
@@ -810,7 +902,10 @@ mod tests {
     /// themselves are reached and their errors propagate.
     fn dummy_ctx() -> (tempfile::TempDir, BusCtx) {
         let dir = tempfile::tempdir().unwrap();
-        let ctx = BusCtx { repo_root: dir.path().to_path_buf(), has_origin: false };
+        let ctx = BusCtx {
+            repo_root: dir.path().to_path_buf(),
+            has_origin: false,
+        };
         (dir, ctx)
     }
 
@@ -886,7 +981,12 @@ mod tests {
         }
     }
 
-    fn mk_dependency(requester: &Agent, target: &Agent, id: &EventId, status: ItemStatus) -> DependencyState {
+    fn mk_dependency(
+        requester: &Agent,
+        target: &Agent,
+        id: &EventId,
+        status: ItemStatus,
+    ) -> DependencyState {
         DependencyState {
             id: id.clone(),
             requester: requester.clone(),
@@ -907,7 +1007,12 @@ mod tests {
         }
     }
 
-    fn mk_handoff(offerer: &Agent, receiver: &Agent, id: &EventId, status: ItemStatus) -> HandoffState {
+    fn mk_handoff(
+        offerer: &Agent,
+        receiver: &Agent,
+        id: &EventId,
+        status: ItemStatus,
+    ) -> HandoffState {
         HandoffState {
             id: id.clone(),
             offerer: offerer.clone(),
@@ -978,7 +1083,10 @@ mod tests {
                 new_events: events,
             });
         }
-        Walk { commits: wcs, bus_json }
+        Walk {
+            commits: wcs,
+            bus_json,
+        }
     }
 
     // ---------------------------------------------------------- register()
@@ -1047,7 +1155,10 @@ mod tests {
         let mut args = base_register_args();
         args.product_branch = Some("main".to_string());
         let err = register(&ctx, &args).unwrap_err();
-        assert!(err.to_string().contains("branch must start with refs/"), "{err}");
+        assert!(
+            err.to_string().contains("branch must start with refs/"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1074,7 +1185,11 @@ mod tests {
         let mut args = base_register_args();
         args.role = "coordinator".to_string();
         let err = register(&ctx, &args).unwrap_err();
-        assert!(err.to_string().contains("coordinators register only via bootstrap-init"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("coordinators register only via bootstrap-init"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1151,14 +1266,22 @@ mod tests {
     #[test]
     fn resume_rejects_invalid_agent() {
         let (_d, ctx) = dummy_ctx();
-        let args = crate::cli::ResumeArgs { agent: "BAD".to_string(), reason: "r".to_string(), user_authority: "u".to_string() };
+        let args = crate::cli::ResumeArgs {
+            agent: "BAD".to_string(),
+            reason: "r".to_string(),
+            user_authority: "u".to_string(),
+        };
         assert!(resume(&ctx, &args).is_err());
     }
 
     #[test]
     fn resume_propagates_state_load_failure() {
         let (_d, ctx) = dummy_ctx();
-        let args = crate::cli::ResumeArgs { agent: "alice".to_string(), reason: "r".to_string(), user_authority: "u".to_string() };
+        let args = crate::cli::ResumeArgs {
+            agent: "alice".to_string(),
+            reason: "r".to_string(),
+            user_authority: "u".to_string(),
+        };
         assert!(resume(&ctx, &args).is_err());
     }
 
@@ -1229,7 +1352,12 @@ mod tests {
     // ------------------------------------------------- schema/merge-engine
 
     fn base_schema_activate_args() -> crate::cli::SchemaActivateArgs {
-        crate::cli::SchemaActivateArgs { agent: "alice".to_string(), version: 1, design_commit: hash(1), helper_commit: hash(2) }
+        crate::cli::SchemaActivateArgs {
+            agent: "alice".to_string(),
+            version: 1,
+            design_commit: hash(1),
+            helper_commit: hash(2),
+        }
     }
 
     #[test]
@@ -1304,7 +1432,10 @@ mod tests {
     #[test]
     fn scope_set_rejects_missing_file() {
         let (_d, ctx) = dummy_ctx();
-        let args = crate::cli::FileAgentArgs { agent: "alice".to_string(), file: "/no/such/file.json".to_string() };
+        let args = crate::cli::FileAgentArgs {
+            agent: "alice".to_string(),
+            file: "/no/such/file.json".to_string(),
+        };
         let err = scope_set(&ctx, &args).unwrap_err();
         assert!(matches!(err, crate::error::AbError::Io { .. }), "{err}");
     }
@@ -1313,7 +1444,10 @@ mod tests {
     fn scope_set_rejects_malformed_payload() {
         let (_d, ctx) = dummy_ctx();
         let (_t, path) = temp_json("{}");
-        let args = crate::cli::FileAgentArgs { agent: "alice".to_string(), file: path };
+        let args = crate::cli::FileAgentArgs {
+            agent: "alice".to_string(),
+            file: path,
+        };
         let err = scope_set(&ctx, &args).unwrap_err();
         assert!(err.to_string().contains("invalid payload"), "{err}");
     }
@@ -1322,7 +1456,10 @@ mod tests {
     fn scope_set_rejects_invalid_agent() {
         let (_d, ctx) = dummy_ctx();
         let (_t, path) = temp_json("{}");
-        let args = crate::cli::FileAgentArgs { agent: "BAD".to_string(), file: path };
+        let args = crate::cli::FileAgentArgs {
+            agent: "BAD".to_string(),
+            file: path,
+        };
         assert!(scope_set(&ctx, &args).is_err());
     }
 
@@ -1330,7 +1467,10 @@ mod tests {
     fn plan_set_rejects_malformed_payload() {
         let (_d, ctx) = dummy_ctx();
         let (_t, path) = temp_json("{}");
-        let args = crate::cli::FileAgentArgs { agent: "alice".to_string(), file: path };
+        let args = crate::cli::FileAgentArgs {
+            agent: "alice".to_string(),
+            file: path,
+        };
         let err = plan_set(&ctx, &args).unwrap_err();
         assert!(err.to_string().contains("invalid payload"), "{err}");
     }
@@ -1339,7 +1479,10 @@ mod tests {
     fn progress_rejects_malformed_payload() {
         let (_d, ctx) = dummy_ctx();
         let (_t, path) = temp_json("{}");
-        let args = crate::cli::ProgressArgs { agent: "alice".to_string(), file: path };
+        let args = crate::cli::ProgressArgs {
+            agent: "alice".to_string(),
+            file: path,
+        };
         let err = progress(&ctx, &args).unwrap_err();
         assert!(err.to_string().contains("invalid payload"), "{err}");
     }
@@ -1348,7 +1491,10 @@ mod tests {
     fn progress_rejects_invalid_agent() {
         let (_d, ctx) = dummy_ctx();
         let (_t, path) = temp_json("{}");
-        let args = crate::cli::ProgressArgs { agent: "BAD".to_string(), file: path };
+        let args = crate::cli::ProgressArgs {
+            agent: "BAD".to_string(),
+            file: path,
+        };
         assert!(progress(&ctx, &args).is_err());
     }
 
@@ -1413,7 +1559,10 @@ mod tests {
         let opener = a("alice");
         let target = a("bob");
         let assignment = eid(&opener, 0);
-        state.issues.insert(assignment.clone(), mk_issue(&opener, &target, &assignment, ItemStatus::Open));
+        state.issues.insert(
+            assignment.clone(),
+            mk_issue(&opener, &target, &assignment, ItemStatus::Open),
+        );
         let (data, refs) = build_issue_ack(&state, &assignment, "hi").unwrap();
         match data {
             EventData::IssueAcknowledged(d) => {
@@ -1448,7 +1597,10 @@ mod tests {
         let opener = a("alice");
         let target = a("bob");
         let id = eid(&opener, 0);
-        state.issues.insert(id.clone(), mk_issue(&opener, &target, &id, ItemStatus::Open));
+        state.issues.insert(
+            id.clone(),
+            mk_issue(&opener, &target, &id, ItemStatus::Open),
+        );
         let v = serde_json::json!({"summary": "fixed it", "verification": ["checked"]});
         let (data, refs) = build_issue_terminal(&state, &id, v, true).unwrap();
         match data {
@@ -1467,7 +1619,10 @@ mod tests {
         let opener = a("alice");
         let target = a("bob");
         let id = eid(&opener, 0);
-        state.issues.insert(id.clone(), mk_issue(&opener, &target, &id, ItemStatus::Open));
+        state.issues.insert(
+            id.clone(),
+            mk_issue(&opener, &target, &id, ItemStatus::Open),
+        );
         let v = serde_json::json!({"reason": "wontfix", "normative_refs": []});
         let (data, _refs) = build_issue_terminal(&state, &id, v, false).unwrap();
         assert!(matches!(data, EventData::IssueRejected(ref d) if d.reason.as_str() == "wontfix"));
@@ -1479,7 +1634,10 @@ mod tests {
         let opener = a("alice");
         let target = a("bob");
         let id = eid(&opener, 0);
-        state.issues.insert(id.clone(), mk_issue(&opener, &target, &id, ItemStatus::Open));
+        state.issues.insert(
+            id.clone(),
+            mk_issue(&opener, &target, &id, ItemStatus::Open),
+        );
         let err = build_issue_terminal(&state, &id, serde_json::json!({}), true).unwrap_err();
         assert!(err.to_string().contains("invalid payload"), "{err}");
     }
@@ -1505,7 +1663,10 @@ mod tests {
         let target = a("bob");
         let carol = a("carol");
         let id = eid(&opener, 0);
-        state.issues.insert(id.clone(), mk_issue(&opener, &target, &id, ItemStatus::Open));
+        state.issues.insert(
+            id.clone(),
+            mk_issue(&opener, &target, &id, ItemStatus::Open),
+        );
         let (data, refs) = build_issue_reassign(&state, &id, carol.clone(), "handoff").unwrap();
         match data {
             EventData::IssueReassigned(d) => {
@@ -1557,9 +1718,14 @@ mod tests {
         let requester = a("alice");
         let target = a("bob");
         let id = eid(&requester, 0);
-        state.dependencies.insert(id.clone(), mk_dependency(&requester, &target, &id, ItemStatus::Open));
+        state.dependencies.insert(
+            id.clone(),
+            mk_dependency(&requester, &target, &id, ItemStatus::Open),
+        );
         let (data, refs) = build_dependency_ack(&state, &id, "hi").unwrap();
-        assert!(matches!(data, EventData::DependencyAcknowledged(ref d) if d.note.as_str() == "hi"));
+        assert!(
+            matches!(data, EventData::DependencyAcknowledged(ref d) if d.note.as_str() == "hi")
+        );
         assert_eq!(refs, vec![id.clone(), id]);
     }
 
@@ -1578,10 +1744,15 @@ mod tests {
         let requester = a("alice");
         let target = a("bob");
         let id = eid(&requester, 0);
-        state.dependencies.insert(id.clone(), mk_dependency(&requester, &target, &id, ItemStatus::Open));
+        state.dependencies.insert(
+            id.clone(),
+            mk_dependency(&requester, &target, &id, ItemStatus::Open),
+        );
         let v = serde_json::json!({"summary": "done", "verification": []});
         let (data, refs) = build_dependency_resolve(&state, &id, v).unwrap();
-        assert!(matches!(data, EventData::DependencyResolved(ref d) if d.summary.as_str() == "done"));
+        assert!(
+            matches!(data, EventData::DependencyResolved(ref d) if d.summary.as_str() == "done")
+        );
         assert_eq!(refs, vec![id.clone(), id]);
     }
 
@@ -1591,7 +1762,10 @@ mod tests {
         let requester = a("alice");
         let target = a("bob");
         let id = eid(&requester, 0);
-        state.dependencies.insert(id.clone(), mk_dependency(&requester, &target, &id, ItemStatus::Open));
+        state.dependencies.insert(
+            id.clone(),
+            mk_dependency(&requester, &target, &id, ItemStatus::Open),
+        );
         let err = build_dependency_resolve(&state, &id, serde_json::json!({})).unwrap_err();
         assert!(err.to_string().contains("invalid payload"), "{err}");
     }
@@ -1610,9 +1784,14 @@ mod tests {
         let requester = a("alice");
         let target = a("bob");
         let id = eid(&requester, 0);
-        state.dependencies.insert(id.clone(), mk_dependency(&requester, &target, &id, ItemStatus::Open));
+        state.dependencies.insert(
+            id.clone(),
+            mk_dependency(&requester, &target, &id, ItemStatus::Open),
+        );
         let (data, refs) = build_dependency_reject(&state, &id, "nope").unwrap();
-        assert!(matches!(data, EventData::DependencyRejected(ref d) if d.reason.as_str() == "nope"));
+        assert!(
+            matches!(data, EventData::DependencyRejected(ref d) if d.reason.as_str() == "nope")
+        );
         assert_eq!(refs, vec![id.clone(), id]);
     }
 
@@ -1631,7 +1810,10 @@ mod tests {
         let target = a("bob");
         let carol = a("carol");
         let id = eid(&requester, 0);
-        state.dependencies.insert(id.clone(), mk_dependency(&requester, &target, &id, ItemStatus::Open));
+        state.dependencies.insert(
+            id.clone(),
+            mk_dependency(&requester, &target, &id, ItemStatus::Open),
+        );
         let (data, refs) = build_dependency_reassign(&state, &id, carol.clone(), "moving").unwrap();
         match data {
             EventData::DependencyReassigned(d) => {
@@ -1662,9 +1844,11 @@ mod tests {
     #[test]
     fn handoff_offer_builds_refs_then_attempts_publish() {
         let (_d, ctx) = dummy_ctx();
-        let body = r#"{"receiver":"bob","scope":[],"product_branch":"refs/heads/x","product_commit":""#.to_string()
-            + &hash(1)
-            + r#"","verification":[],"known_issues":["alice:0"],"evidence":["bob:1"],"summary":"s"}"#;
+        let body =
+            r#"{"receiver":"bob","scope":[],"product_branch":"refs/heads/x","product_commit":""#
+                .to_string()
+                + &hash(1)
+                + r#"","verification":[],"known_issues":["alice:0"],"evidence":["bob:1"],"summary":"s"}"#;
         let (_t, path) = temp_json(&body);
         let err = handoff_offer(&ctx, "alice", &path).unwrap_err();
         assert!(!err.to_string().contains("invalid payload"), "{err}");
@@ -1694,7 +1878,10 @@ mod tests {
     fn lifecycle_resolve_rejects_malformed_payload() {
         let (_d, ctx) = dummy_ctx();
         let (_t, path) = temp_json("{}");
-        let args = crate::cli::FileAgentArgs { agent: "alice".to_string(), file: path };
+        let args = crate::cli::FileAgentArgs {
+            agent: "alice".to_string(),
+            file: path,
+        };
         let err = lifecycle_resolve(&ctx, &args).unwrap_err();
         assert!(err.to_string().contains("invalid payload"), "{err}");
     }
@@ -1704,7 +1891,10 @@ mod tests {
         let (_d, ctx) = dummy_ctx();
         let body = r#"{"root":"alice:0","competing":["alice:0","bob:0"],"selected":"alice:0","reason":"r","user_authority":"u"}"#;
         let (_t, path) = temp_json(body);
-        let args = crate::cli::FileAgentArgs { agent: "alice".to_string(), file: path };
+        let args = crate::cli::FileAgentArgs {
+            agent: "alice".to_string(),
+            file: path,
+        };
         let err = lifecycle_resolve(&ctx, &args).unwrap_err();
         assert!(!err.to_string().contains("invalid payload"), "{err}");
     }
@@ -1714,7 +1904,9 @@ mod tests {
     #[test]
     fn sync_rejects_invalid_agent() {
         let (_d, ctx) = dummy_ctx();
-        let args = crate::cli::SyncArgs { agent: "BAD".to_string() };
+        let args = crate::cli::SyncArgs {
+            agent: "BAD".to_string(),
+        };
         assert!(sync(&ctx, &args).is_err());
     }
 
@@ -1788,14 +1980,20 @@ mod tests {
     #[test]
     fn status_rejects_invalid_agent_filter() {
         let (_d, ctx) = dummy_ctx();
-        let args = crate::cli::StatusArgs { agent: Some("BAD".to_string()), json: true };
+        let args = crate::cli::StatusArgs {
+            agent: Some("BAD".to_string()),
+            json: true,
+        };
         assert!(status(&ctx, &args).is_err());
     }
 
     #[test]
     fn status_propagates_state_load_failure() {
         let (_d, ctx) = dummy_ctx();
-        let args = crate::cli::StatusArgs { agent: None, json: true };
+        let args = crate::cli::StatusArgs {
+            agent: None,
+            json: true,
+        };
         assert!(status(&ctx, &args).is_err());
     }
 
@@ -1808,23 +2006,50 @@ mod tests {
         let bob = a("bob");
 
         let issue_open_id = eid(&bob, 0);
-        state.issues.insert(issue_open_id.clone(), mk_issue(&bob, &alice, &issue_open_id, ItemStatus::Open));
+        state.issues.insert(
+            issue_open_id.clone(),
+            mk_issue(&bob, &alice, &issue_open_id, ItemStatus::Open),
+        );
         let issue_done_id = eid(&bob, 1);
-        state.issues.insert(issue_done_id.clone(), mk_issue(&bob, &alice, &issue_done_id, ItemStatus::Terminal("resolved")));
+        state.issues.insert(
+            issue_done_id.clone(),
+            mk_issue(
+                &bob,
+                &alice,
+                &issue_done_id,
+                ItemStatus::Terminal("resolved"),
+            ),
+        );
 
         let dep_id = eid(&bob, 2);
-        state.dependencies.insert(dep_id.clone(), mk_dependency(&bob, &alice, &dep_id, ItemStatus::Open));
+        state.dependencies.insert(
+            dep_id.clone(),
+            mk_dependency(&bob, &alice, &dep_id, ItemStatus::Open),
+        );
 
         let handoff_id = eid(&bob, 3);
-        state.handoffs.insert(handoff_id.clone(), mk_handoff(&bob, &alice, &handoff_id, ItemStatus::Open));
+        state.handoffs.insert(
+            handoff_id.clone(),
+            mk_handoff(&bob, &alice, &handoff_id, ItemStatus::Open),
+        );
 
         let review_root = eid(&bob, 4);
-        state.reviews.insert(review_root.clone(), mk_review_chain(&review_root, &alice, false));
-        state.review_chain_by_nomination.insert(review_root.clone(), review_root.clone());
+        state.reviews.insert(
+            review_root.clone(),
+            mk_review_chain(&review_root, &alice, false),
+        );
+        state
+            .review_chain_by_nomination
+            .insert(review_root.clone(), review_root.clone());
 
         let closed_review_root = eid(&bob, 5);
-        state.reviews.insert(closed_review_root.clone(), mk_review_chain(&closed_review_root, &alice, true));
-        state.review_chain_by_nomination.insert(closed_review_root.clone(), closed_review_root.clone());
+        state.reviews.insert(
+            closed_review_root.clone(),
+            mk_review_chain(&closed_review_root, &alice, true),
+        );
+        state
+            .review_chain_by_nomination
+            .insert(closed_review_root.clone(), closed_review_root.clone());
 
         let items = inbox_items(&state, &alice);
         let kinds: Vec<&str> = items.iter().map(|v| v["kind"].as_str().unwrap()).collect();
@@ -1840,6 +2065,49 @@ mod tests {
         assert!(inbox_items(&state, &a("alice")).is_empty());
     }
 
+    /// g-reviewer:15: `ReviewChain::is_closed` used to check only
+    /// `merged`/`reconciled`, never `decline_or_withdraw_or_reassign_
+    /// status` -- so a review the author had validly withdrawn (or the
+    /// reviewer had declined) kept showing up in `inbox` as actionable
+    /// forever, since nothing else ever moved it out of `merged`/
+    /// `reconciled` either.
+    #[test]
+    fn inbox_items_excludes_a_withdrawn_review() {
+        let mut state = empty_state();
+        let alice = a("alice");
+        let bob = a("bob");
+        let review_root = eid(&bob, 0);
+        let mut chain = mk_review_chain(&review_root, &alice, false);
+        chain.decline_or_withdraw_or_reassign_status = ItemStatus::Terminal("withdrawn");
+        state.reviews.insert(review_root.clone(), chain);
+        state
+            .review_chain_by_nomination
+            .insert(review_root.clone(), review_root.clone());
+
+        assert!(
+            inbox_items(&state, &alice).is_empty(),
+            "a withdrawn review must not remain actionable in the reviewer's inbox"
+        );
+    }
+
+    /// Same bug class, the decline side: a reviewer's own decline must also
+    /// stop the review from showing as actionable to them.
+    #[test]
+    fn inbox_items_excludes_a_declined_review() {
+        let mut state = empty_state();
+        let alice = a("alice");
+        let bob = a("bob");
+        let review_root = eid(&bob, 0);
+        let mut chain = mk_review_chain(&review_root, &alice, false);
+        chain.decline_or_withdraw_or_reassign_status = ItemStatus::Terminal("declined");
+        state.reviews.insert(review_root.clone(), chain);
+        state
+            .review_chain_by_nomination
+            .insert(review_root.clone(), review_root.clone());
+
+        assert!(inbox_items(&state, &alice).is_empty());
+    }
+
     /// Golden-file coverage of `agent-bus inbox --json`'s actual UX shape:
     /// one open item of each kind (issue/dependency/handoff/review), field
     /// names and all. A field rename, a dropped kind, or a wrong summary
@@ -1852,14 +2120,28 @@ mod tests {
         let bob = a("bob");
 
         let issue_id = eid(&bob, 0);
-        state.issues.insert(issue_id.clone(), mk_issue(&bob, &alice, &issue_id, ItemStatus::Open));
+        state.issues.insert(
+            issue_id.clone(),
+            mk_issue(&bob, &alice, &issue_id, ItemStatus::Open),
+        );
         let dep_id = eid(&bob, 1);
-        state.dependencies.insert(dep_id.clone(), mk_dependency(&bob, &alice, &dep_id, ItemStatus::Open));
+        state.dependencies.insert(
+            dep_id.clone(),
+            mk_dependency(&bob, &alice, &dep_id, ItemStatus::Open),
+        );
         let handoff_id = eid(&bob, 2);
-        state.handoffs.insert(handoff_id.clone(), mk_handoff(&bob, &alice, &handoff_id, ItemStatus::Open));
+        state.handoffs.insert(
+            handoff_id.clone(),
+            mk_handoff(&bob, &alice, &handoff_id, ItemStatus::Open),
+        );
         let review_root = eid(&bob, 3);
-        state.reviews.insert(review_root.clone(), mk_review_chain(&review_root, &alice, false));
-        state.review_chain_by_nomination.insert(review_root.clone(), review_root.clone());
+        state.reviews.insert(
+            review_root.clone(),
+            mk_review_chain(&review_root, &alice, false),
+        );
+        state
+            .review_chain_by_nomination
+            .insert(review_root.clone(), review_root.clone());
 
         insta::assert_json_snapshot!(inbox_items(&state, &alice));
     }
@@ -1874,11 +2156,20 @@ mod tests {
         let carol = a("carol");
 
         let d1 = eid(&alice, 0);
-        state.dependencies.insert(d1.clone(), mk_dependency(&alice, &bob, &d1, ItemStatus::Open));
+        state.dependencies.insert(
+            d1.clone(),
+            mk_dependency(&alice, &bob, &d1, ItemStatus::Open),
+        );
         let d2 = eid(&bob, 0);
-        state.dependencies.insert(d2.clone(), mk_dependency(&bob, &alice, &d2, ItemStatus::Open));
+        state.dependencies.insert(
+            d2.clone(),
+            mk_dependency(&bob, &alice, &d2, ItemStatus::Open),
+        );
         let d3 = eid(&bob, 1);
-        state.dependencies.insert(d3.clone(), mk_dependency(&bob, &carol, &d3, ItemStatus::Open));
+        state.dependencies.insert(
+            d3.clone(),
+            mk_dependency(&bob, &carol, &d3, ItemStatus::Open),
+        );
 
         let items = dependencies_items(&state, &alice);
         assert_eq!(items.len(), 2, "{items:?}");
@@ -1893,9 +2184,15 @@ mod tests {
         let bob = a("bob");
 
         let requested = eid(&alice, 0);
-        state.dependencies.insert(requested.clone(), mk_dependency(&alice, &bob, &requested, ItemStatus::Open));
+        state.dependencies.insert(
+            requested.clone(),
+            mk_dependency(&alice, &bob, &requested, ItemStatus::Open),
+        );
         let targeted = eid(&bob, 0);
-        state.dependencies.insert(targeted.clone(), mk_dependency(&bob, &alice, &targeted, ItemStatus::Open));
+        state.dependencies.insert(
+            targeted.clone(),
+            mk_dependency(&bob, &alice, &targeted, ItemStatus::Open),
+        );
 
         insta::assert_json_snapshot!(dependencies_items(&state, &alice));
     }
@@ -1905,8 +2202,16 @@ mod tests {
     fn scope_set_fixture(exclusive: &[&str], shared: &[&str]) -> ScopeSet {
         ScopeSet {
             base_code_commit: oid(1),
-            exclusive: StringSet::from_iter(exclusive.iter().map(|s| PathClaim::parse(s.to_string()).unwrap())),
-            shared: StringSet::from_iter(shared.iter().map(|s| PathClaim::parse(s.to_string()).unwrap())),
+            exclusive: StringSet::from_iter(
+                exclusive
+                    .iter()
+                    .map(|s| PathClaim::parse(s.to_string()).unwrap()),
+            ),
+            shared: StringSet::from_iter(
+                shared
+                    .iter()
+                    .map(|s| PathClaim::parse(s.to_string()).unwrap()),
+            ),
             exports: StringSet::default(),
             depends_on: vec![],
             note: text(""),
@@ -1955,7 +2260,10 @@ mod tests {
         state.agents.insert(bob_ag.agent.clone(), bob_ag);
 
         let out = conflicts_items(&state);
-        assert!(out.iter().any(|v| v["kind"] == "scope_exclusive_shared"), "{out:?}");
+        assert!(
+            out.iter().any(|v| v["kind"] == "scope_exclusive_shared"),
+            "{out:?}"
+        );
     }
 
     #[test]
@@ -1977,10 +2285,16 @@ mod tests {
         let mut state = empty_state();
         state.exclusive.insert(
             "issue:carol:0".to_string(),
-            ExclusiveTracker { transitions: vec![(eid(&a("carol"), 1), 1), (eid(&a("dave"), 1), 2)], resolved: None },
+            ExclusiveTracker {
+                transitions: vec![(eid(&a("carol"), 1), 1), (eid(&a("dave"), 1), 2)],
+                resolved: None,
+            },
         );
         let out = conflicts_items(&state);
-        assert!(out.iter().any(|v| v["kind"] == "lifecycle_conflict"), "{out:?}");
+        assert!(
+            out.iter().any(|v| v["kind"] == "lifecycle_conflict"),
+            "{out:?}"
+        );
     }
 
     #[test]
@@ -2015,7 +2329,11 @@ mod tests {
     fn tail_events_filters_by_agent_and_truncates_to_count() {
         let alice = a("alice");
         let bob = a("bob");
-        let walk = mk_walk(vec![(alice.clone(), vec![0, 1]), (bob.clone(), vec![0]), (alice.clone(), vec![2])]);
+        let walk = mk_walk(vec![
+            (alice.clone(), vec![0, 1]),
+            (bob.clone(), vec![0]),
+            (alice.clone(), vec![2]),
+        ]);
 
         let all = tail_events(&walk, None, 100);
         assert_eq!(all.len(), 4);
@@ -2043,42 +2361,61 @@ mod tests {
     #[test]
     fn tail_snapshot_canonical_lines() {
         let walk = mk_walk(vec![(a("alice"), vec![0, 1]), (a("bob"), vec![0])]);
-        let lines: Vec<String> = tail_events(&walk, None, 100).iter().map(|e| e.to_canonical_line()).collect();
+        let lines: Vec<String> = tail_events(&walk, None, 100)
+            .iter()
+            .map(|e| e.to_canonical_line())
+            .collect();
         insta::assert_snapshot!(lines.join("\n"));
     }
 
     #[test]
     fn tail_propagates_state_load_failure() {
         let (_d, ctx) = dummy_ctx();
-        let args = crate::cli::TailArgs { agent: None, count: 20, json: false };
+        let args = crate::cli::TailArgs {
+            agent: None,
+            count: 20,
+            json: false,
+        };
         assert!(tail(&ctx, &args).is_err());
     }
 
     #[test]
     fn inbox_rejects_invalid_agent() {
         let (_d, ctx) = dummy_ctx();
-        let args = crate::cli::InboxArgs { agent: "BAD".to_string(), json: false };
+        let args = crate::cli::InboxArgs {
+            agent: "BAD".to_string(),
+            json: false,
+        };
         assert!(inbox(&ctx, &args).is_err());
     }
 
     #[test]
     fn inbox_propagates_state_load_failure() {
         let (_d, ctx) = dummy_ctx();
-        let args = crate::cli::InboxArgs { agent: "alice".to_string(), json: false };
+        let args = crate::cli::InboxArgs {
+            agent: "alice".to_string(),
+            json: false,
+        };
         assert!(inbox(&ctx, &args).is_err());
     }
 
     #[test]
     fn dependencies_rejects_invalid_agent() {
         let (_d, ctx) = dummy_ctx();
-        let args = crate::cli::DependenciesArgs { agent: "BAD".to_string(), json: false };
+        let args = crate::cli::DependenciesArgs {
+            agent: "BAD".to_string(),
+            json: false,
+        };
         assert!(dependencies(&ctx, &args).is_err());
     }
 
     #[test]
     fn dependencies_propagates_state_load_failure() {
         let (_d, ctx) = dummy_ctx();
-        let args = crate::cli::DependenciesArgs { agent: "alice".to_string(), json: false };
+        let args = crate::cli::DependenciesArgs {
+            agent: "alice".to_string(),
+            json: false,
+        };
         assert!(dependencies(&ctx, &args).is_err());
     }
 
@@ -2167,15 +2504,22 @@ mod tests {
     fn plan_set_reaches_publish_with_valid_payload() {
         let (_d, ctx) = dummy_ctx();
         let (_t, path) = temp_json(r#"{"summary":"s","steps":[],"risks":[]}"#);
-        let args = crate::cli::FileAgentArgs { agent: "alice".to_string(), file: path };
+        let args = crate::cli::FileAgentArgs {
+            agent: "alice".to_string(),
+            file: path,
+        };
         assert!(plan_set(&ctx, &args).is_err());
     }
 
     #[test]
     fn progress_reaches_publish_with_valid_payload() {
         let (_d, ctx) = dummy_ctx();
-        let (_t, path) = temp_json(r#"{"completed":[],"current":[],"next":[],"blockers":[],"verification":[]}"#);
-        let args = crate::cli::ProgressArgs { agent: "alice".to_string(), file: path };
+        let (_t, path) =
+            temp_json(r#"{"completed":[],"current":[],"next":[],"blockers":[],"verification":[]}"#);
+        let args = crate::cli::ProgressArgs {
+            agent: "alice".to_string(),
+            file: path,
+        };
         assert!(progress(&ctx, &args).is_err());
     }
 
@@ -2219,7 +2563,11 @@ mod tests {
     fn init_real_repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path();
-        std::process::Command::new("git").args(["init", "--quiet", "-b", "main"]).arg(path).status().unwrap();
+        std::process::Command::new("git")
+            .args(["init", "--quiet", "-b", "main"])
+            .arg(path)
+            .status()
+            .unwrap();
         std::process::Command::new("git")
             .arg("-C")
             .arg(path)
@@ -2238,9 +2586,12 @@ mod tests {
     #[test]
     fn report_and_lifecycle_commands_against_a_real_repo() {
         let dir = init_real_repo();
-        let ctx = BusCtx { repo_root: dir.path().to_path_buf(), has_origin: false };
+        let ctx = BusCtx {
+            repo_root: dir.path().to_path_buf(),
+            has_origin: false,
+        };
         let coord1 = a("coord1");
-        bus::bootstrap_init(&ctx, &[coord1.clone()], &oid(1)).unwrap();
+        bus::bootstrap_init(&ctx, std::slice::from_ref(&coord1), &oid(1)).unwrap();
 
         // register(): full success path through `register_new_agent`.
         let mut reg_args = base_register_args();
@@ -2258,19 +2609,45 @@ mod tests {
             r#"{{"base_code_commit":"{}","exclusive":["Grass/Alice/**"],"shared":[],"exports":[],"depends_on":[],"note":""}}"#,
             hash(1)
         ));
-        scope_set(&ctx, &crate::cli::FileAgentArgs { agent: "alice".to_string(), file: scope_path }).unwrap();
+        scope_set(
+            &ctx,
+            &crate::cli::FileAgentArgs {
+                agent: "alice".to_string(),
+                file: scope_path,
+            },
+        )
+        .unwrap();
 
         let (_t2, plan_path) = temp_json(r#"{"summary":"s","steps":[],"risks":[]}"#);
-        plan_set(&ctx, &crate::cli::FileAgentArgs { agent: "alice".to_string(), file: plan_path }).unwrap();
+        plan_set(
+            &ctx,
+            &crate::cli::FileAgentArgs {
+                agent: "alice".to_string(),
+                file: plan_path,
+            },
+        )
+        .unwrap();
 
         let (_t3, progress_path) =
             temp_json(r#"{"completed":[],"current":[],"next":[],"blockers":[],"verification":[]}"#);
-        progress(&ctx, &crate::cli::ProgressArgs { agent: "alice".to_string(), file: progress_path }).unwrap();
+        progress(
+            &ctx,
+            &crate::cli::ProgressArgs {
+                agent: "alice".to_string(),
+                file: progress_path,
+            },
+        )
+        .unwrap();
 
         // schema/merge-engine activation: full success paths.
         schema_activate(
             &ctx,
-            &crate::cli::SchemaActivateArgs { agent: "coord1".to_string(), version: 1, design_commit: hash(2), helper_commit: hash(3) },
+            &crate::cli::SchemaActivateArgs {
+                agent: "coord1".to_string(),
+                version: 1,
+                design_commit: hash(2),
+                helper_commit: hash(3),
+            },
         )
         .unwrap();
         merge_engine_activate(
@@ -2287,18 +2664,35 @@ mod tests {
         .unwrap();
 
         // issue open/acknowledge/resolve: full success path.
-        let (_t4, issue_path) =
-            temp_json(r#"{"issue_kind":"bug","severity":"normal","summary":"s","locations":[],"reproduction":[],"blocks":[],"evidence":[]}"#);
+        let (_t4, issue_path) = temp_json(
+            r#"{"issue_kind":"bug","severity":"normal","summary":"s","locations":[],"reproduction":[],"blocks":[],"evidence":[]}"#,
+        );
         issue_open(&ctx, "coord1", "alice", &issue_path).unwrap();
-        let issue_id = ctx.load_state().unwrap().issues.keys().next().cloned().unwrap();
+        let issue_id = ctx
+            .load_state()
+            .unwrap()
+            .issues
+            .keys()
+            .next()
+            .cloned()
+            .unwrap();
         issue_acknowledge(&ctx, "alice", issue_id.as_str(), "on it").unwrap();
         let (_t5, resolve_path) = temp_json(r#"{"summary":"fixed","verification":[]}"#);
         issue_resolve(&ctx, "alice", issue_id.as_str(), &resolve_path).unwrap();
 
         // dependency request/acknowledge/resolve: full success path.
-        let (_t6, dep_path) = temp_json(r#"{"interface":"i","needed_by":"asap","blocking":true,"summary":"s","evidence":[]}"#);
+        let (_t6, dep_path) = temp_json(
+            r#"{"interface":"i","needed_by":"asap","blocking":true,"summary":"s","evidence":[]}"#,
+        );
         dependency_request(&ctx, "alice", "coord1", &dep_path).unwrap();
-        let dep_id = ctx.load_state().unwrap().dependencies.keys().next().cloned().unwrap();
+        let dep_id = ctx
+            .load_state()
+            .unwrap()
+            .dependencies
+            .keys()
+            .next()
+            .cloned()
+            .unwrap();
         dependency_acknowledge(&ctx, "coord1", dep_id.as_str(), "on it").unwrap();
         let (_t7, dep_resolve_path) = temp_json(r#"{"summary":"done","verification":[]}"#);
         dependency_resolve(&ctx, "coord1", dep_id.as_str(), &dep_resolve_path).unwrap();
@@ -2310,44 +2704,131 @@ mod tests {
             hash(6)
         ));
         handoff_offer(&ctx, "alice", &handoff_path).unwrap();
-        let handoff_id = ctx.load_state().unwrap().handoffs.keys().next().cloned().unwrap();
+        let handoff_id = ctx
+            .load_state()
+            .unwrap()
+            .handoffs
+            .keys()
+            .next()
+            .cloned()
+            .unwrap();
         handoff_accept(&ctx, "coord1", handoff_id.as_str(), "got it").unwrap();
 
         // sync(): full success path.
-        sync(&ctx, &crate::cli::SyncArgs { agent: "alice".to_string() }).unwrap();
+        sync(
+            &ctx,
+            &crate::cli::SyncArgs {
+                agent: "alice".to_string(),
+            },
+        )
+        .unwrap();
 
         // Report commands: both json and non-json branches, now against a
         // real, populated (and, for coord1's inbox / scope conflicts, empty)
         // state -- exercising the `(empty)`/`(no conflicts)` branches too.
-        status(&ctx, &crate::cli::StatusArgs { agent: None, json: true }).unwrap();
-        status(&ctx, &crate::cli::StatusArgs { agent: Some("alice".to_string()), json: false }).unwrap();
+        status(
+            &ctx,
+            &crate::cli::StatusArgs {
+                agent: None,
+                json: true,
+            },
+        )
+        .unwrap();
+        status(
+            &ctx,
+            &crate::cli::StatusArgs {
+                agent: Some("alice".to_string()),
+                json: false,
+            },
+        )
+        .unwrap();
 
-        inbox(&ctx, &crate::cli::InboxArgs { agent: "coord1".to_string(), json: false }).unwrap();
-        inbox(&ctx, &crate::cli::InboxArgs { agent: "alice".to_string(), json: true }).unwrap();
+        inbox(
+            &ctx,
+            &crate::cli::InboxArgs {
+                agent: "coord1".to_string(),
+                json: false,
+            },
+        )
+        .unwrap();
+        inbox(
+            &ctx,
+            &crate::cli::InboxArgs {
+                agent: "alice".to_string(),
+                json: true,
+            },
+        )
+        .unwrap();
 
-        dependencies(&ctx, &crate::cli::DependenciesArgs { agent: "alice".to_string(), json: false }).unwrap();
-        dependencies(&ctx, &crate::cli::DependenciesArgs { agent: "alice".to_string(), json: true }).unwrap();
+        dependencies(
+            &ctx,
+            &crate::cli::DependenciesArgs {
+                agent: "alice".to_string(),
+                json: false,
+            },
+        )
+        .unwrap();
+        dependencies(
+            &ctx,
+            &crate::cli::DependenciesArgs {
+                agent: "alice".to_string(),
+                json: true,
+            },
+        )
+        .unwrap();
 
         conflicts(&ctx, &crate::cli::ConflictsArgs { json: false }).unwrap();
         conflicts(&ctx, &crate::cli::ConflictsArgs { json: true }).unwrap();
 
-        tail(&ctx, &crate::cli::TailArgs { agent: None, count: 50, json: false }).unwrap();
-        tail(&ctx, &crate::cli::TailArgs { agent: Some("alice".to_string()), count: 1, json: true }).unwrap();
+        tail(
+            &ctx,
+            &crate::cli::TailArgs {
+                agent: None,
+                count: 50,
+                json: false,
+            },
+        )
+        .unwrap();
+        tail(
+            &ctx,
+            &crate::cli::TailArgs {
+                agent: Some("alice".to_string()),
+                count: 1,
+                json: true,
+            },
+        )
+        .unwrap();
 
         // resume/retire/lifecycle_resolve: reach `build_*`/refs-building and
         // attempt to publish; not asserted to succeed since satisfying
         // `apply::dry_run`'s preconditions exactly is not the point here --
         // the wrapper's own lines all execute either way.
-        let _ = resume(&ctx, &crate::cli::ResumeArgs { agent: "alice".to_string(), reason: "back".to_string(), user_authority: "self".to_string() });
-        let _ = retire(&ctx, &crate::cli::RetireArgs {
-            agent: "coord1".to_string(),
-            target: "alice".to_string(),
-            reason: "done".to_string(),
-            user_authority: "coordinator".to_string(),
-        });
+        let _ = resume(
+            &ctx,
+            &crate::cli::ResumeArgs {
+                agent: "alice".to_string(),
+                reason: "back".to_string(),
+                user_authority: "self".to_string(),
+            },
+        );
+        let _ = retire(
+            &ctx,
+            &crate::cli::RetireArgs {
+                agent: "coord1".to_string(),
+                target: "alice".to_string(),
+                reason: "done".to_string(),
+                user_authority: "coordinator".to_string(),
+            },
+        );
         let (_t9, lifecycle_path) = temp_json(&format!(
             r#"{{"root":"{issue_id}","competing":["{issue_id}"],"selected":"{issue_id}","reason":"r","user_authority":"u"}}"#
         ));
-        let _ = lifecycle_resolve(&ctx, &crate::cli::FileAgentArgs { agent: "coord1".to_string(), file: lifecycle_path });
+        let _ = lifecycle_resolve(
+            &ctx,
+            &crate::cli::FileAgentArgs {
+                agent: "coord1".to_string(),
+                file: lifecycle_path,
+            },
+        );
     }
 }

@@ -54,7 +54,8 @@ pub fn read_segment_lines_from_bytes(label: &str, bytes: &[u8]) -> AbResult<Vec<
     if bytes.contains(&b'\r') {
         return Err(invalid(format!("CR byte in {label}")));
     }
-    let text = std::str::from_utf8(bytes).map_err(|e| invalid(format!("{label} not UTF-8: {e}")))?;
+    let text =
+        std::str::from_utf8(bytes).map_err(|e| invalid(format!("{label} not UTF-8: {e}")))?;
     if !text.ends_with('\n') {
         return Err(invalid(format!(
             "{label} has a partial final line (missing trailing LF)"
@@ -70,7 +71,9 @@ pub fn read_segment_lines_from_bytes(label: &str, bytes: &[u8]) -> AbResult<Vec<
             return Err(invalid(format!("blank line in {label}")));
         }
         if line.len() > MAX_LINE_BYTES {
-            return Err(invalid(format!("line exceeds {MAX_LINE_BYTES} bytes in {label}")));
+            return Err(invalid(format!(
+                "line exceeds {MAX_LINE_BYTES} bytes in {label}"
+            )));
         }
         lines.push(line.to_string());
     }
@@ -101,22 +104,35 @@ pub fn read_agent_segments(bus_root: &Path, agent: &Agent) -> AbResult<Vec<Agent
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if !name.ends_with(".jsonl") {
-            return Err(invalid(format!("unexpected file in agent log dir: {}", path.display())));
+            return Err(invalid(format!(
+                "unexpected file in agent log dir: {}",
+                path.display()
+            )));
         }
         let stem = &name[..name.len() - ".jsonl".len()];
         if stem.len() != 6 || !stem.chars().all(|c| c.is_ascii_digit()) {
-            return Err(invalid(format!("malformed segment filename: {}", path.display())));
+            return Err(invalid(format!(
+                "malformed segment filename: {}",
+                path.display()
+            )));
         }
-        let segment: u64 = stem.parse().map_err(|_| invalid(format!("malformed segment number: {name}")))?;
+        let segment: u64 = stem
+            .parse()
+            .map_err(|_| invalid(format!("malformed segment number: {name}")))?;
         segments.insert(segment, path);
     }
     if segments.is_empty() {
-        return Err(invalid(format!("agent log has no segments: {}", dir.display())));
+        return Err(invalid(format!(
+            "agent log has no segments: {}",
+            dir.display()
+        )));
     }
     let max_segment = *segments.keys().max().unwrap();
     for i in 0..=max_segment {
         if !segments.contains_key(&i) {
-            return Err(invalid(format!("segment gap: missing segment {i} for agent {agent}")));
+            return Err(invalid(format!(
+                "segment gap: missing segment {i} for agent {agent}"
+            )));
         }
     }
     let mut out = Vec::new();
@@ -125,7 +141,9 @@ pub fn read_agent_segments(bus_root: &Path, agent: &Agent) -> AbResult<Vec<Agent
         let is_tail = segment == max_segment;
         if is_tail {
             if lines.len() as u64 > SEGMENT_SIZE {
-                return Err(invalid(format!("active segment {segment} exceeds {SEGMENT_SIZE} events")));
+                return Err(invalid(format!(
+                    "active segment {segment} exceeds {SEGMENT_SIZE} events"
+                )));
             }
         } else if lines.len() as u64 != SEGMENT_SIZE {
             return Err(invalid(format!(
@@ -216,7 +234,9 @@ pub fn append_event(bus_root: &Path, env: &Envelope) -> AbResult<()> {
 
     let line = env.to_canonical_line();
     if line.len() > MAX_LINE_BYTES {
-        return Err(invalid(format!("event line exceeds {MAX_LINE_BYTES} bytes")));
+        return Err(invalid(format!(
+            "event line exceeds {MAX_LINE_BYTES} bytes"
+        )));
     }
     existing.push_str(&line);
     existing.push('\n');
@@ -232,14 +252,17 @@ pub fn atomic_write(path: &Path, contents: &[u8]) -> AbResult<()> {
         path: dir.display().to_string(),
         source: e,
     })?;
-    tmp.write_all(contents).map_err(|e| crate::error::AbError::Io {
-        path: path.display().to_string(),
-        source: e,
-    })?;
-    tmp.as_file().sync_all().map_err(|e| crate::error::AbError::Io {
-        path: path.display().to_string(),
-        source: e,
-    })?;
+    tmp.write_all(contents)
+        .map_err(|e| crate::error::AbError::Io {
+            path: path.display().to_string(),
+            source: e,
+        })?;
+    tmp.as_file()
+        .sync_all()
+        .map_err(|e| crate::error::AbError::Io {
+            path: path.display().to_string(),
+            source: e,
+        })?;
     tmp.persist(path).map_err(|e| crate::error::AbError::Io {
         path: path.display().to_string(),
         source: e.error,
@@ -308,7 +331,10 @@ mod tests {
     #[test]
     fn accepts_well_formed_segment() {
         let lines = read_segment_lines_from_bytes("t", b"{\"a\":1}\n{\"a\":2}\n").unwrap();
-        assert_eq!(lines, vec!["{\"a\":1}".to_string(), "{\"a\":2}".to_string()]);
+        assert_eq!(
+            lines,
+            vec!["{\"a\":1}".to_string(), "{\"a\":2}".to_string()]
+        );
     }
 
     #[test]
@@ -343,7 +369,7 @@ mod tests {
     #[test]
     fn rejects_line_exceeding_max_bytes() {
         let mut bytes = vec![b'"'];
-        bytes.extend(std::iter::repeat(b'x').take(MAX_LINE_BYTES + 10));
+        bytes.extend(std::iter::repeat_n(b'x', MAX_LINE_BYTES + 10));
         bytes.push(b'"');
         bytes.push(b'\n');
         let err = read_segment_lines_from_bytes("t", &bytes).unwrap_err();
@@ -461,7 +487,9 @@ mod tests {
     fn read_agent_segments_rejects_oversized_tail_segment() {
         let dir = tempfile::tempdir().unwrap();
         let ag = agent("alice");
-        let body: String = (0..(SEGMENT_SIZE + 1)).map(|i| format!("{{\"n\":{i}}}\n")).collect();
+        let body: String = (0..(SEGMENT_SIZE + 1))
+            .map(|i| format!("{{\"n\":{i}}}\n"))
+            .collect();
         write_segment(dir.path(), &ag, 0, &body);
         let err = read_agent_segments(dir.path(), &ag).unwrap_err();
         assert!(err.to_string().contains("exceeds 1000 events"));
@@ -471,7 +499,9 @@ mod tests {
     fn read_agent_segments_accepts_closed_plus_tail() {
         let dir = tempfile::tempdir().unwrap();
         let ag = agent("alice");
-        let closed: String = (0..SEGMENT_SIZE).map(|i| format!("{{\"n\":{i}}}\n")).collect();
+        let closed: String = (0..SEGMENT_SIZE)
+            .map(|i| format!("{{\"n\":{i}}}\n"))
+            .collect();
         write_segment(dir.path(), &ag, 0, &closed);
         write_segment(dir.path(), &ag, 1, "{\"n\":1000}\n{\"n\":1001}\n");
         let segments = read_agent_segments(dir.path(), &ag).unwrap();
@@ -506,7 +536,12 @@ mod tests {
     fn read_agent_log_rejects_agent_field_mismatch() {
         let dir = tempfile::tempdir().unwrap();
         let bob_event = registered_envelope("bob", 0);
-        write_segment(dir.path(), &agent("alice"), 0, &format!("{}\n", bob_event.to_canonical_line()));
+        write_segment(
+            dir.path(),
+            &agent("alice"),
+            0,
+            &format!("{}\n", bob_event.to_canonical_line()),
+        );
         let err = read_agent_log(dir.path(), &agent("alice")).unwrap_err();
         assert!(err.to_string().contains("has agent field bob"));
     }
@@ -515,18 +550,32 @@ mod tests {
     fn read_agent_log_rejects_seq_position_mismatch() {
         let dir = tempfile::tempdir().unwrap();
         let ev = registered_envelope("alice", 5);
-        write_segment(dir.path(), &agent("alice"), 0, &format!("{}\n", ev.to_canonical_line()));
+        write_segment(
+            dir.path(),
+            &agent("alice"),
+            0,
+            &format!("{}\n", ev.to_canonical_line()),
+        );
         let err = read_agent_log(dir.path(), &agent("alice")).unwrap_err();
-        assert!(err.to_string().contains("has seq 5 but occupies position 0"));
+        assert!(err
+            .to_string()
+            .contains("has seq 5 but occupies position 0"));
     }
 
     #[test]
     fn read_agent_log_rejects_non_registered_first_event() {
         let dir = tempfile::tempdir().unwrap();
         let ev = status_envelope("alice", 0);
-        write_segment(dir.path(), &agent("alice"), 0, &format!("{}\n", ev.to_canonical_line()));
+        write_segment(
+            dir.path(),
+            &agent("alice"),
+            0,
+            &format!("{}\n", ev.to_canonical_line()),
+        );
         let err = read_agent_log(dir.path(), &agent("alice")).unwrap_err();
-        assert!(err.to_string().contains("must be agent.registered at sequence zero"));
+        assert!(err
+            .to_string()
+            .contains("must be agent.registered at sequence zero"));
     }
 
     // --------------------------------------------------------- append_event
@@ -565,7 +614,9 @@ mod tests {
         write_segment(dir.path(), &agent("alice"), 0, "{}\n");
         let env = registered_envelope("alice", 0); // offset 0, but segment 0 already there
         let err = append_event(dir.path(), &env).unwrap_err();
-        assert!(err.to_string().contains("already exists but a fresh segment was expected"));
+        assert!(err
+            .to_string()
+            .contains("already exists but a fresh segment was expected"));
     }
 
     #[test]
