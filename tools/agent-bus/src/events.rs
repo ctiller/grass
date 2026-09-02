@@ -675,8 +675,8 @@ impl EventData {
 mod tests {
     use super::*;
     use crate::common::{
-        CheckOutcome, CheckResult, DependencyImport, Finding, FindingDisposition, FindingDispositionKind,
-        FindingRef, PlanStep, PlanStepState, Priority,
+        CheckOutcome, CheckResult, DependencyImport, Finding, FindingDisposition,
+        FindingDispositionKind, FindingRef, PlanStep, PlanStepState, Priority,
     };
     use crate::scalars::PathClaim;
 
@@ -744,7 +744,11 @@ mod tests {
 
         assert!(EventData::from_kind_and_value("not.a.kind", serde_json::json!({})).is_err());
         // Well-formed kind, malformed data for it.
-        assert!(EventData::from_kind_and_value("schema.activated", serde_json::json!({"nonsense": true})).is_err());
+        assert!(EventData::from_kind_and_value(
+            "schema.activated",
+            serde_json::json!({"nonsense": true})
+        )
+        .is_err());
     }
 
     #[test]
@@ -812,22 +816,35 @@ mod tests {
         };
         assert!(EventData::AgentStatus(status).referenced_ids().is_empty());
 
-        let schema = SchemaActivated { version: 1, design_commit: oid(1), helper_commit: oid(2) };
-        assert!(EventData::SchemaActivated(schema).referenced_ids().is_empty());
+        let schema = SchemaActivated {
+            version: 1,
+            design_commit: oid(1),
+            helper_commit: oid(2),
+        };
+        assert!(EventData::SchemaActivated(schema)
+            .referenced_ids()
+            .is_empty());
 
         let scope = ScopeSet {
             base_code_commit: oid(3),
             exclusive: StringSet::build(vec![pc("a/**")]),
             shared: StringSet::default(),
             exports: StringSet::default(),
-            depends_on: vec![DependencyImport { agent: bob.clone(), interface: short("api") }],
+            depends_on: vec![DependencyImport {
+                agent: bob.clone(),
+                interface: short("api"),
+            }],
             note: text("n"),
         };
         assert!(EventData::ScopeSet(scope).referenced_ids().is_empty());
 
         let plan = PlanSet {
             summary: text("s"),
-            steps: vec![PlanStep { id: short("s1"), state: PlanStepState::Active, text: text("t") }],
+            steps: vec![PlanStep {
+                id: short("s1"),
+                state: PlanStepState::Active,
+                text: text("t"),
+            }],
             risks: vec![text("r")],
         };
         assert!(EventData::PlanSet(plan).referenced_ids().is_empty());
@@ -840,12 +857,21 @@ mod tests {
             blockers: vec![],
             verification: vec![],
         };
-        assert!(EventData::ProgressReported(progress).referenced_ids().is_empty());
+        assert!(EventData::ProgressReported(progress)
+            .referenced_ids()
+            .is_empty());
 
         // ---- single previous_lifecycle / previous_epoch ----
         let prev = eid(&alice, 3);
-        let resumed = AgentResumed { previous_lifecycle: prev.clone(), reason: text("r"), user_authority: text("u") };
-        assert_eq!(EventData::AgentResumed(resumed).referenced_ids(), BTreeSet::from([prev.clone()]));
+        let resumed = AgentResumed {
+            previous_lifecycle: prev.clone(),
+            reason: text("r"),
+            user_authority: text("u"),
+        };
+        assert_eq!(
+            EventData::AgentResumed(resumed).referenced_ids(),
+            BTreeSet::from([prev.clone()])
+        );
 
         let retired = AgentRetired {
             target: alice.clone(),
@@ -853,7 +879,10 @@ mod tests {
             reason: text("r"),
             user_authority: text("u"),
         };
-        assert_eq!(EventData::AgentRetired(retired).referenced_ids(), BTreeSet::from([prev.clone()]));
+        assert_eq!(
+            EventData::AgentRetired(retired).referenced_ids(),
+            BTreeSet::from([prev.clone()])
+        );
 
         let epoch = eid(&alice, 0);
         let mea = MergeEngineActivated {
@@ -863,7 +892,10 @@ mod tests {
             design_commit: oid(5),
             helper_commit: oid(6),
         };
-        assert_eq!(EventData::MergeEngineActivated(mea).referenced_ids(), BTreeSet::from([epoch.clone()]));
+        assert_eq!(
+            EventData::MergeEngineActivated(mea).referenced_ids(),
+            BTreeSet::from([epoch.clone()])
+        );
 
         // ---- issue.* ----
         let ev1 = eid(&alice, 1);
@@ -888,7 +920,11 @@ mod tests {
 
         let issue_id = eid(&bob, 1);
         let assign_id = eid(&bob, 2);
-        let ack = IssueAcknowledged { issue: issue_id.clone(), assignment: assign_id.clone(), note: text("n") };
+        let ack = IssueAcknowledged {
+            issue: issue_id.clone(),
+            assignment: assign_id.clone(),
+            note: text("n"),
+        };
         assert_eq!(
             EventData::IssueAcknowledged(ack).referenced_ids(),
             BTreeSet::from([issue_id.clone(), assign_id.clone()])
@@ -906,8 +942,12 @@ mod tests {
             BTreeSet::from([issue_id.clone(), assign_id.clone()])
         );
 
-        let rejected =
-            IssueRejected { issue: issue_id.clone(), assignment: assign_id.clone(), reason: text("r"), normative_refs: vec![] };
+        let rejected = IssueRejected {
+            issue: issue_id.clone(),
+            assignment: assign_id.clone(),
+            reason: text("r"),
+            normative_refs: vec![],
+        };
         assert_eq!(
             EventData::IssueRejected(rejected).referenced_ids(),
             BTreeSet::from([issue_id.clone(), assign_id.clone()])
@@ -934,11 +974,18 @@ mod tests {
             summary: text("s"),
             evidence: StringSet::build(vec![ev1.clone()]),
         };
-        assert_eq!(EventData::DependencyRequested(dep_requested).referenced_ids(), BTreeSet::from([ev1.clone()]));
+        assert_eq!(
+            EventData::DependencyRequested(dep_requested).referenced_ids(),
+            BTreeSet::from([ev1.clone()])
+        );
 
         let dep_id = eid(&alice, 5);
         let dep_assign = eid(&alice, 6);
-        let dep_ack = DependencyAcknowledged { dependency: dep_id.clone(), assignment: dep_assign.clone(), note: text("n") };
+        let dep_ack = DependencyAcknowledged {
+            dependency: dep_id.clone(),
+            assignment: dep_assign.clone(),
+            note: text("n"),
+        };
         assert_eq!(
             EventData::DependencyAcknowledged(dep_ack).referenced_ids(),
             BTreeSet::from([dep_id.clone(), dep_assign.clone()])
@@ -956,8 +1003,11 @@ mod tests {
             BTreeSet::from([dep_id.clone(), dep_assign.clone()])
         );
 
-        let dep_rejected =
-            DependencyRejected { dependency: dep_id.clone(), assignment: dep_assign.clone(), reason: text("r") };
+        let dep_rejected = DependencyRejected {
+            dependency: dep_id.clone(),
+            assignment: dep_assign.clone(),
+            reason: text("r"),
+        };
         assert_eq!(
             EventData::DependencyRejected(dep_rejected).referenced_ids(),
             BTreeSet::from([dep_id.clone(), dep_assign.clone()])
@@ -994,13 +1044,28 @@ mod tests {
         );
 
         let handoff_id = eid(&alice, 11);
-        let handoff_accepted = HandoffAccepted { handoff: handoff_id.clone(), note: text("n") };
-        assert_eq!(EventData::HandoffAccepted(handoff_accepted).referenced_ids(), BTreeSet::from([handoff_id.clone()]));
+        let handoff_accepted = HandoffAccepted {
+            handoff: handoff_id.clone(),
+            note: text("n"),
+        };
+        assert_eq!(
+            EventData::HandoffAccepted(handoff_accepted).referenced_ids(),
+            BTreeSet::from([handoff_id.clone()])
+        );
 
-        let handoff_declined = HandoffDeclined { handoff: handoff_id.clone(), reason: text("r") };
-        assert_eq!(EventData::HandoffDeclined(handoff_declined).referenced_ids(), BTreeSet::from([handoff_id.clone()]));
+        let handoff_declined = HandoffDeclined {
+            handoff: handoff_id.clone(),
+            reason: text("r"),
+        };
+        assert_eq!(
+            EventData::HandoffDeclined(handoff_declined).referenced_ids(),
+            BTreeSet::from([handoff_id.clone()])
+        );
 
-        let handoff_withdrawn = HandoffWithdrawn { handoff: handoff_id.clone(), reason: text("r") };
+        let handoff_withdrawn = HandoffWithdrawn {
+            handoff: handoff_id.clone(),
+            reason: text("r"),
+        };
         assert_eq!(
             EventData::HandoffWithdrawn(handoff_withdrawn).referenced_ids(),
             BTreeSet::from([handoff_id.clone()])
@@ -1026,13 +1091,19 @@ mod tests {
         assert_eq!(req.reviewer, bob);
 
         let nomination_id = eid(&alice, 13);
-        let nom_accepted = ReviewNominationAccepted { nomination: nomination_id.clone(), note: text("n") };
+        let nom_accepted = ReviewNominationAccepted {
+            nomination: nomination_id.clone(),
+            note: text("n"),
+        };
         assert_eq!(
             EventData::ReviewNominationAccepted(nom_accepted).referenced_ids(),
             BTreeSet::from([nomination_id.clone()])
         );
 
-        let nom_declined = ReviewNominationDeclined { nomination: nomination_id.clone(), reason: text("r") };
+        let nom_declined = ReviewNominationDeclined {
+            nomination: nomination_id.clone(),
+            reason: text("r"),
+        };
         assert_eq!(
             EventData::ReviewNominationDeclined(nom_declined).referenced_ids(),
             BTreeSet::from([nomination_id.clone()])
@@ -1092,15 +1163,29 @@ mod tests {
             evidence: StringSet::build(vec![review_evidence.clone()]),
             replaces: replaces.clone(),
             reason: text("r"),
-            inherited_findings: vec![FindingRef { changes_event: changes_event.clone(), finding_id: short("f1") }],
+            inherited_findings: vec![FindingRef {
+                changes_event: changes_event.clone(),
+                finding_id: short("f1"),
+            }],
         };
-        let expected: BTreeSet<EventId> =
-            [replaces.clone(), changes_event.clone(), review_evidence.clone()].into_iter().collect();
-        assert_eq!(EventData::ReviewReassigned(review_reassigned.clone()).referenced_ids(), expected);
+        let expected: BTreeSet<EventId> = [
+            replaces.clone(),
+            changes_event.clone(),
+            review_evidence.clone(),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            EventData::ReviewReassigned(review_reassigned.clone()).referenced_ids(),
+            expected
+        );
         let req2 = review_reassigned.request();
         assert_eq!(req2.reviewer, bob);
 
-        let review_withdrawn = ReviewWithdrawn { nomination: nomination_id.clone(), reason: text("r") };
+        let review_withdrawn = ReviewWithdrawn {
+            nomination: nomination_id.clone(),
+            reason: text("r"),
+        };
         assert_eq!(
             EventData::ReviewWithdrawn(review_withdrawn).referenced_ids(),
             BTreeSet::from([nomination_id.clone()])
@@ -1116,7 +1201,11 @@ mod tests {
             reviewed_commit: oid(14),
             candidate: oid(15),
             merge_engine_epoch: merge_epoch.clone(),
-            checks: vec![CheckResult { command: text("build"), result: CheckOutcome::Passed, evidence: None }],
+            checks: vec![CheckResult {
+                command: text("build"),
+                result: CheckOutcome::Passed,
+                evidence: None,
+            }],
             finding_dispositions: vec![FindingDisposition {
                 changes_event: fd_changes_event.clone(),
                 finding_id: short("f1"),
@@ -1128,11 +1217,18 @@ mod tests {
             limitations: vec![],
             summary: text("s"),
         };
-        let expected: BTreeSet<EventId> =
-            [nomination_id.clone(), merge_epoch.clone(), fd_changes_event.clone(), merge_evidence.clone()]
-                .into_iter()
-                .collect();
-        assert_eq!(EventData::ReviewMergeAuthorized(merge_authorized).referenced_ids(), expected);
+        let expected: BTreeSet<EventId> = [
+            nomination_id.clone(),
+            merge_epoch.clone(),
+            fd_changes_event.clone(),
+            merge_evidence.clone(),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            EventData::ReviewMergeAuthorized(merge_authorized).referenced_ids(),
+            expected
+        );
 
         let authorization_id = eid(&bob, 18);
         let review_merged = ReviewMerged {
@@ -1173,7 +1269,12 @@ mod tests {
             reason: text("r"),
             user_authority: text("u"),
         };
-        let expected: BTreeSet<EventId> = [root.clone(), comp1.clone(), comp2.clone()].into_iter().collect();
-        assert_eq!(EventData::LifecycleConflictResolved(lifecycle_resolved).referenced_ids(), expected);
+        let expected: BTreeSet<EventId> = [root.clone(), comp1.clone(), comp2.clone()]
+            .into_iter()
+            .collect();
+        assert_eq!(
+            EventData::LifecycleConflictResolved(lifecycle_resolved).referenced_ids(),
+            expected
+        );
     }
 }

@@ -83,4 +83,3 @@ pub struct CheckResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<Text>,
 }
-

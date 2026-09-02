@@ -29,7 +29,11 @@ fn git(dir: &Path, args: &[&str]) -> String {
 fn init_repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path();
-    StdCommand::new("git").args(["init", "--quiet", "-b", "main"]).arg(path).status().unwrap();
+    StdCommand::new("git")
+        .args(["init", "--quiet", "-b", "main"])
+        .arg(path)
+        .status()
+        .unwrap();
     git(path, &["config", "user.email", "test@example.com"]);
     git(path, &["config", "user.name", "Test"]);
     std::fs::write(path.join("README.md"), "hello\n").unwrap();
@@ -62,67 +66,147 @@ fn dispatch_table_coverage() {
     let some_hash = root.clone();
 
     bus(dir)
-        .args(["bootstrap-init", "--coordinator", "coord1", "--product-review-from", &root])
+        .args([
+            "bootstrap-init",
+            "--coordinator",
+            "coord1",
+            "--product-review-from",
+            &root,
+        ])
         .assert()
         .success();
 
-    for (agent, role) in [("alice", "implementor"), ("bob", "reviewer"), ("carol", "implementor"), ("dan", "implementor")]
-    {
+    for (agent, role) in [
+        ("alice", "implementor"),
+        ("bob", "reviewer"),
+        ("carol", "implementor"),
+        ("dan", "implementor"),
+    ] {
         bus(dir)
-            .args(["register", "--agent", agent, "--display-name", agent, "--role", role, "--purpose", "x"])
+            .args([
+                "register",
+                "--agent",
+                agent,
+                "--display-name",
+                agent,
+                "--role",
+                role,
+                "--purpose",
+                "x",
+            ])
             .assert()
             .success();
     }
 
     // ---- agent.status / agent.resumed / agent.retired ----
     bus(dir)
-        .args(["status-set", "--agent", "alice", "--status", "blocked", "--note", "stuck"])
+        .args([
+            "status-set",
+            "--agent",
+            "alice",
+            "--status",
+            "blocked",
+            "--note",
+            "stuck",
+        ])
         .assert()
         .success();
     bus(dir)
-        .args(["status-set", "--agent", "alice", "--status", "done", "--note", ""])
+        .args([
+            "status-set",
+            "--agent",
+            "alice",
+            "--status",
+            "done",
+            "--note",
+            "",
+        ])
         .assert()
         .success();
     bus(dir)
-        .args(["resume", "--agent", "alice", "--reason", "back", "--user-authority", "user"])
+        .args([
+            "resume",
+            "--agent",
+            "alice",
+            "--reason",
+            "back",
+            "--user-authority",
+            "user",
+        ])
         .assert()
         .success();
     bus(dir)
-        .args(["retire", "--agent", "coord1", "--target", "dan", "--reason", "done", "--user-authority", "user"])
+        .args([
+            "retire",
+            "--agent",
+            "coord1",
+            "--target",
+            "dan",
+            "--reason",
+            "done",
+            "--user-authority",
+            "user",
+        ])
         .assert()
         .success();
 
     // ---- schema.activated / merge_engine.activated ----
     bus(dir)
         .args([
-            "schema-activate", "--agent", "coord1", "--version", "2",
-            "--design-commit", &some_hash, "--helper-commit", &some_hash,
+            "schema-activate",
+            "--agent",
+            "coord1",
+            "--version",
+            "2",
+            "--design-commit",
+            &some_hash,
+            "--helper-commit",
+            &some_hash,
         ])
         .assert()
         .success();
     bus(dir)
         .args([
-            "merge-engine-activate", "--agent", "coord1", "--previous-epoch", "coord1:0",
-            "--merge-engine", "git-ort", "--merge-engine-version", "2.53.0",
-            "--design-commit", &some_hash, "--helper-commit", &some_hash,
+            "merge-engine-activate",
+            "--agent",
+            "coord1",
+            "--previous-epoch",
+            "coord1:0",
+            "--merge-engine",
+            "git-ort",
+            "--merge-engine-version",
+            "2.53.0",
+            "--design-commit",
+            &some_hash,
+            "--helper-commit",
+            &some_hash,
         ])
         .assert()
         .success();
 
     // ---- status query (json + text, all + single agent) ----
     bus(dir).args(["status", "--json"]).assert().success();
-    bus(dir).args(["status", "--agent", "alice"]).assert().success();
+    bus(dir)
+        .args(["status", "--agent", "alice"])
+        .assert()
+        .success();
 
     // ---- plan.set / progress.reported ----
     let plan = serde_json::json!({
         "summary": "ship it", "steps": [{"id": "s1", "state": "active", "text": "do the thing"}], "risks": [],
     });
     let plan_file = write_json(dir, "plan.json", &plan);
-    bus(dir).args(["plan", "set", "--agent", "alice", "--file", &plan_file]).assert().success();
+    bus(dir)
+        .args(["plan", "set", "--agent", "alice", "--file", &plan_file])
+        .assert()
+        .success();
 
     let progress = serde_json::json!({"completed": [], "current": ["doing x"], "next": [], "blockers": [], "verification": []});
     let progress_file = write_json(dir, "progress.json", &progress);
-    bus(dir).args(["progress", "--agent", "alice", "--file", &progress_file]).assert().success();
+    bus(dir)
+        .args(["progress", "--agent", "alice", "--file", &progress_file])
+        .assert()
+        .success();
 
     // ---- issue.acknowledged / issue.rejected / issue.reassigned ----
     let issue_ack_payload = serde_json::json!({
@@ -130,20 +214,62 @@ fn dispatch_table_coverage() {
         "locations": [], "reproduction": [], "blocks": [], "evidence": [],
     });
     let issue_ack_file = write_json(dir, "issue_ack.json", &issue_ack_payload);
-    bus(dir).args(["issue", "open", "--agent", "bob", "--to", "alice", "--file", &issue_ack_file]).assert().success();
-    let issue_ack_out = stdout_of(bus(dir).args(["inbox", "--agent", "alice", "--json"]).assert().success());
+    bus(dir)
+        .args([
+            "issue",
+            "open",
+            "--agent",
+            "bob",
+            "--to",
+            "alice",
+            "--file",
+            &issue_ack_file,
+        ])
+        .assert()
+        .success();
+    let issue_ack_out = stdout_of(
+        bus(dir)
+            .args(["inbox", "--agent", "alice", "--json"])
+            .assert()
+            .success(),
+    );
     let issue_ack_id = serde_json::from_str::<serde_json::Value>(&issue_ack_out).unwrap()[0]["id"]
         .as_str()
         .unwrap()
         .to_string();
     bus(dir)
-        .args(["issue", "acknowledge", "--agent", "alice", &issue_ack_id, "--note", "on it"])
+        .args([
+            "issue",
+            "acknowledge",
+            "--agent",
+            "alice",
+            &issue_ack_id,
+            "--note",
+            "on it",
+        ])
         .assert()
         .success();
 
     let issue_rej_file = write_json(dir, "issue_rej.json", &issue_ack_payload);
-    bus(dir).args(["issue", "open", "--agent", "bob", "--to", "alice", "--file", &issue_rej_file]).assert().success();
-    let inbox = stdout_of(bus(dir).args(["inbox", "--agent", "alice", "--json"]).assert().success());
+    bus(dir)
+        .args([
+            "issue",
+            "open",
+            "--agent",
+            "bob",
+            "--to",
+            "alice",
+            "--file",
+            &issue_rej_file,
+        ])
+        .assert()
+        .success();
+    let inbox = stdout_of(
+        bus(dir)
+            .args(["inbox", "--agent", "alice", "--json"])
+            .assert()
+            .success(),
+    );
     let inbox_items: serde_json::Value = serde_json::from_str(&inbox).unwrap();
     let issue_rej_id = inbox_items
         .as_array()
@@ -156,19 +282,61 @@ fn dispatch_table_coverage() {
         .to_string();
     let reject_payload = serde_json::json!({"reason": "not reproducible", "normative_refs": []});
     let reject_file = write_json(dir, "issue_reject_payload.json", &reject_payload);
-    bus(dir).args(["issue", "reject", "--agent", "alice", &issue_rej_id, "--file", &reject_file]).assert().success();
+    bus(dir)
+        .args([
+            "issue",
+            "reject",
+            "--agent",
+            "alice",
+            &issue_rej_id,
+            "--file",
+            &reject_file,
+        ])
+        .assert()
+        .success();
 
     let issue_reassign_file = write_json(dir, "issue_reassign.json", &issue_ack_payload);
-    bus(dir).args(["issue", "open", "--agent", "bob", "--to", "alice", "--file", &issue_reassign_file]).assert().success();
-    let inbox = stdout_of(bus(dir).args(["inbox", "--agent", "alice", "--json"]).assert().success());
+    bus(dir)
+        .args([
+            "issue",
+            "open",
+            "--agent",
+            "bob",
+            "--to",
+            "alice",
+            "--file",
+            &issue_reassign_file,
+        ])
+        .assert()
+        .success();
+    let inbox = stdout_of(
+        bus(dir)
+            .args(["inbox", "--agent", "alice", "--json"])
+            .assert()
+            .success(),
+    );
     let inbox_items: serde_json::Value = serde_json::from_str(&inbox).unwrap();
-    let issue_reassign_id = inbox_items.as_array().unwrap().iter().find(|i| i["kind"] == "issue").expect("an open issue")
-        ["id"]
+    let issue_reassign_id = inbox_items
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["kind"] == "issue")
+        .expect("an open issue")["id"]
         .as_str()
         .unwrap()
         .to_string();
     bus(dir)
-        .args(["issue", "reassign", "--agent", "bob", &issue_reassign_id, "--new-target", "carol", "--reason", "reassigning"])
+        .args([
+            "issue",
+            "reassign",
+            "--agent",
+            "bob",
+            &issue_reassign_id,
+            "--new-target",
+            "carol",
+            "--reason",
+            "reassigning",
+        ])
         .assert()
         .success();
 
@@ -178,37 +346,134 @@ fn dispatch_table_coverage() {
     });
     let dep_file = write_json(dir, "dep1.json", &dep_payload);
     let dep_open_out = stdout_of(
-        bus(dir).args(["dependency", "request", "--agent", "alice", "--to", "bob", "--file", &dep_file]).assert().success(),
+        bus(dir)
+            .args([
+                "dependency",
+                "request",
+                "--agent",
+                "alice",
+                "--to",
+                "bob",
+                "--file",
+                &dep_file,
+            ])
+            .assert()
+            .success(),
     );
-    let dep_id = dep_open_out.trim().strip_prefix("opened ").unwrap().to_string();
-    bus(dir).args(["dependency", "acknowledge", "--agent", "bob", &dep_id, "--note", "on it"]).assert().success();
+    let dep_id = dep_open_out
+        .trim()
+        .strip_prefix("opened ")
+        .unwrap()
+        .to_string();
+    bus(dir)
+        .args([
+            "dependency",
+            "acknowledge",
+            "--agent",
+            "bob",
+            &dep_id,
+            "--note",
+            "on it",
+        ])
+        .assert()
+        .success();
     let dep_resolve_payload = serde_json::json!({"summary": "shipped", "verification": []});
     let dep_resolve_file = write_json(dir, "dep1_resolve.json", &dep_resolve_payload);
-    bus(dir).args(["dependency", "resolve", "--agent", "bob", &dep_id, "--file", &dep_resolve_file]).assert().success();
+    bus(dir)
+        .args([
+            "dependency",
+            "resolve",
+            "--agent",
+            "bob",
+            &dep_id,
+            "--file",
+            &dep_resolve_file,
+        ])
+        .assert()
+        .success();
 
     let dep2_file = write_json(dir, "dep2.json", &dep_payload);
     let dep2_open_out = stdout_of(
-        bus(dir).args(["dependency", "request", "--agent", "alice", "--to", "bob", "--file", &dep2_file]).assert().success(),
+        bus(dir)
+            .args([
+                "dependency",
+                "request",
+                "--agent",
+                "alice",
+                "--to",
+                "bob",
+                "--file",
+                &dep2_file,
+            ])
+            .assert()
+            .success(),
     );
-    let dep2_id = dep2_open_out.trim().strip_prefix("opened ").unwrap().to_string();
-    bus(dir).args(["dependency", "reject", "--agent", "bob", &dep2_id, "--reason", "not needed"]).assert().success();
+    let dep2_id = dep2_open_out
+        .trim()
+        .strip_prefix("opened ")
+        .unwrap()
+        .to_string();
+    bus(dir)
+        .args([
+            "dependency",
+            "reject",
+            "--agent",
+            "bob",
+            &dep2_id,
+            "--reason",
+            "not needed",
+        ])
+        .assert()
+        .success();
 
     let dep3_file = write_json(dir, "dep3.json", &dep_payload);
     let dep3_open_out = stdout_of(
-        bus(dir).args(["dependency", "request", "--agent", "alice", "--to", "bob", "--file", &dep3_file]).assert().success(),
+        bus(dir)
+            .args([
+                "dependency",
+                "request",
+                "--agent",
+                "alice",
+                "--to",
+                "bob",
+                "--file",
+                &dep3_file,
+            ])
+            .assert()
+            .success(),
     );
-    let dep3_id = dep3_open_out.trim().strip_prefix("opened ").unwrap().to_string();
+    let dep3_id = dep3_open_out
+        .trim()
+        .strip_prefix("opened ")
+        .unwrap()
+        .to_string();
     // Dependency reassignment authority is the requester (alice), unlike
     // issue reassignment which is keyed off the opener of the issue itself —
     // for a dependency alice is both.
     bus(dir)
-        .args(["dependency", "reassign", "--agent", "alice", &dep3_id, "--new-target", "carol", "--reason", "wrong owner"])
+        .args([
+            "dependency",
+            "reassign",
+            "--agent",
+            "alice",
+            &dep3_id,
+            "--new-target",
+            "carol",
+            "--reason",
+            "wrong owner",
+        ])
         .assert()
         .success();
 
     // ---- dependencies query ----
-    bus(dir).args(["dependencies", "--agent", "alice", "--json"]).assert().success();
-    bus(dir).args(["dependencies", "--agent", "bob"]).assert().success();
+    bus(dir)
+        .args(["dependencies", "--agent", "alice", "--json"])
+        .assert()
+        .success();
+    bus(dir)
+        .args(["dependencies", "--agent", "bob"])
+        .assert()
+        .success();
 
     // ---- handoff.* (offer/accept, offer/decline, offer/withdraw) ----
     let feature_branch = "refs/heads/agent/alice/handoff-feature";
@@ -217,22 +482,100 @@ fn dispatch_table_coverage() {
         "product_commit": root, "verification": [], "known_issues": [], "evidence": [], "summary": "handing off",
     });
     let handoff1_file = write_json(dir, "handoff1.json", &handoff_payload);
-    let handoff1_out =
-        stdout_of(bus(dir).args(["handoff", "offer", "--agent", "alice", "--file", &handoff1_file]).assert().success());
-    let handoff1_id = handoff1_out.trim().strip_prefix("offered ").unwrap().to_string();
-    bus(dir).args(["handoff", "accept", "--agent", "bob", &handoff1_id, "--note", "got it"]).assert().success();
+    let handoff1_out = stdout_of(
+        bus(dir)
+            .args([
+                "handoff",
+                "offer",
+                "--agent",
+                "alice",
+                "--file",
+                &handoff1_file,
+            ])
+            .assert()
+            .success(),
+    );
+    let handoff1_id = handoff1_out
+        .trim()
+        .strip_prefix("offered ")
+        .unwrap()
+        .to_string();
+    bus(dir)
+        .args([
+            "handoff",
+            "accept",
+            "--agent",
+            "bob",
+            &handoff1_id,
+            "--note",
+            "got it",
+        ])
+        .assert()
+        .success();
 
     let handoff2_file = write_json(dir, "handoff2.json", &handoff_payload);
-    let handoff2_out =
-        stdout_of(bus(dir).args(["handoff", "offer", "--agent", "alice", "--file", &handoff2_file]).assert().success());
-    let handoff2_id = handoff2_out.trim().strip_prefix("offered ").unwrap().to_string();
-    bus(dir).args(["handoff", "decline", "--agent", "bob", &handoff2_id, "--reason", "not ready"]).assert().success();
+    let handoff2_out = stdout_of(
+        bus(dir)
+            .args([
+                "handoff",
+                "offer",
+                "--agent",
+                "alice",
+                "--file",
+                &handoff2_file,
+            ])
+            .assert()
+            .success(),
+    );
+    let handoff2_id = handoff2_out
+        .trim()
+        .strip_prefix("offered ")
+        .unwrap()
+        .to_string();
+    bus(dir)
+        .args([
+            "handoff",
+            "decline",
+            "--agent",
+            "bob",
+            &handoff2_id,
+            "--reason",
+            "not ready",
+        ])
+        .assert()
+        .success();
 
     let handoff3_file = write_json(dir, "handoff3.json", &handoff_payload);
-    let handoff3_out =
-        stdout_of(bus(dir).args(["handoff", "offer", "--agent", "alice", "--file", &handoff3_file]).assert().success());
-    let handoff3_id = handoff3_out.trim().strip_prefix("offered ").unwrap().to_string();
-    bus(dir).args(["handoff", "withdraw", "--agent", "alice", &handoff3_id, "--reason", "changed mind"]).assert().success();
+    let handoff3_out = stdout_of(
+        bus(dir)
+            .args([
+                "handoff",
+                "offer",
+                "--agent",
+                "alice",
+                "--file",
+                &handoff3_file,
+            ])
+            .assert()
+            .success(),
+    );
+    let handoff3_id = handoff3_out
+        .trim()
+        .strip_prefix("offered ")
+        .unwrap()
+        .to_string();
+    bus(dir)
+        .args([
+            "handoff",
+            "withdraw",
+            "--agent",
+            "alice",
+            &handoff3_id,
+            "--reason",
+            "changed mind",
+        ])
+        .assert()
+        .success();
 
     // ---- review.nomination_declined / review.withdrawn ----
     let base = git(dir, &["rev-parse", "main"]);
@@ -240,12 +583,23 @@ fn dispatch_table_coverage() {
         "base_code_commit": base, "exclusive": ["dispatch.txt"], "shared": [], "exports": [], "depends_on": [], "note": "n",
     });
     let scope_file = write_json(dir, "scope.json", &scope);
-    bus(dir).args(["scope", "set", "--agent", "alice", "--file", &scope_file]).assert().success();
+    bus(dir)
+        .args(["scope", "set", "--agent", "alice", "--file", &scope_file])
+        .assert()
+        .success();
 
     git(dir, &["checkout", "-b", "agent/alice/dispatch", "main"]);
     std::fs::write(dir.join("dispatch.txt"), "content\n").unwrap();
     git(dir, &["add", "dispatch.txt"]);
-    git(dir, &["commit", "-q", "-m", "add dispatch.txt\n\nAgent-Bus-Agent: alice"]);
+    git(
+        dir,
+        &[
+            "commit",
+            "-q",
+            "-m",
+            "add dispatch.txt\n\nAgent-Bus-Agent: alice",
+        ],
+    );
     git(dir, &["checkout", "main"]);
 
     let nom_payload = serde_json::json!({
@@ -254,19 +608,58 @@ fn dispatch_table_coverage() {
         "target_branch": "refs/heads/main", "evidence": [],
     });
     let nom1_file = write_json(dir, "nom1.json", &nom_payload);
-    let nom1_out =
-        stdout_of(bus(dir).args(["review", "nominate", "--agent", "alice", "--file", &nom1_file]).assert().success());
-    let nom1_id = nom1_out.trim().strip_prefix("nominated ").unwrap().to_string();
-    bus(dir).args(["review", "decline", "--agent", "bob", &nom1_id, "--reason", "too busy"]).assert().success();
+    let nom1_out = stdout_of(
+        bus(dir)
+            .args([
+                "review", "nominate", "--agent", "alice", "--file", &nom1_file,
+            ])
+            .assert()
+            .success(),
+    );
+    let nom1_id = nom1_out
+        .trim()
+        .strip_prefix("nominated ")
+        .unwrap()
+        .to_string();
+    bus(dir)
+        .args([
+            "review", "decline", "--agent", "bob", &nom1_id, "--reason", "too busy",
+        ])
+        .assert()
+        .success();
 
     let nom2_file = write_json(dir, "nom2.json", &nom_payload);
-    let nom2_out =
-        stdout_of(bus(dir).args(["review", "nominate", "--agent", "alice", "--file", &nom2_file]).assert().success());
-    let nom2_id = nom2_out.trim().strip_prefix("nominated ").unwrap().to_string();
-    bus(dir).args(["review", "withdraw", "--agent", "alice", &nom2_id, "--reason", "changed mind"]).assert().success();
+    let nom2_out = stdout_of(
+        bus(dir)
+            .args([
+                "review", "nominate", "--agent", "alice", "--file", &nom2_file,
+            ])
+            .assert()
+            .success(),
+    );
+    let nom2_id = nom2_out
+        .trim()
+        .strip_prefix("nominated ")
+        .unwrap()
+        .to_string();
+    bus(dir)
+        .args([
+            "review",
+            "withdraw",
+            "--agent",
+            "alice",
+            &nom2_id,
+            "--reason",
+            "changed mind",
+        ])
+        .assert()
+        .success();
 
     // ---- sync ----
-    bus(dir).args(["sync", "--agent", "alice"]).assert().success();
+    bus(dir)
+        .args(["sync", "--agent", "alice"])
+        .assert()
+        .success();
 
     bus(dir).arg("validate").assert().success();
 }

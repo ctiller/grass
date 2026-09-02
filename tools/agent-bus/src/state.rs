@@ -178,7 +178,8 @@ impl BusState {
         merge_engine_info.insert(
             epoch.clone(),
             (
-                Short::parse(bus_json.merge_engine.clone()).expect("BUS.json merge_engine already validated"),
+                Short::parse(bus_json.merge_engine.clone())
+                    .expect("BUS.json merge_engine already validated"),
                 Short::parse(bus_json.merge_engine_version.clone())
                     .expect("BUS.json merge_engine_version already validated"),
             ),
