@@ -731,6 +731,13 @@ to imitate compiler-selected storage or CFG structure.
     logical network. This avoids both a self-referential structure and an opaque
     escrow carrier weaker than `ChannelEscrowLedger`. It resolves
     `c-process:43` and replaces the unimplementable arity in `PROCESS.md`.
+    Since assertion footprints remain arbitrary predicates, the canonical
+    `agreesGlue` construction may use the reviewed `Classical.choice` constant
+    already allowed by `FOUNDATION.md`; the transitive axiom audit exposes that
+    dependency. Choice is localized to the logical-world supplier, while the
+    generic assertion/framing library remains parametric and does not choose
+    worlds. Grass does not impose decidable or finite footprints solely to
+    remove an already-reviewed foundation constant.
 
 ## Explicitly rejected shortcuts
 
