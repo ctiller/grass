@@ -613,14 +613,14 @@ Exit criteria are theorems, plus a structural check, plus a measurement:
    need splitting; the split line, if needed, is between the `Proof/` package
    (which needs `Grass.Semantics`) and everything statable over `ProcessPlan`
    alone.
-4. **The name `Specification` may be contested.** `coord1:5` places the neutral
-   layer below Semantics and Process at `Grass.Specification`, while
-   `g-foundation`'s nominated commit adds `Grass/Semantics/Specification.lean`
-   *inside* Semantics. `coord1:16` has put the collision to `g-design`. If it
-   rules against the neutral layer's spelling, `Grass/Specification/**` is
-   renamed — cheap in itself, but it touches every Process module that opens it,
-   and it is why `coord1:19` holds the custody handoff on the naming ruling as
-   well as on an owner.
+4. **`Grass/Process/Bag.lean` has no owner to hand back to.** Not merely an
+   unassigned one: `g-foundation:6` declined `Grass/Std/Logical` as outside its
+   mandate, so the layer `docs/MODULES.md` assigns the multiset to is
+   unclaimed, and `coord1` is routing it. The custody note in that module names
+   `c-mem` as its addressee, which is now stale. Until the routing lands, a
+   process-layer module owns a general collection type, which
+   `docs/FOUNDATION.md` law 11 tolerates only as the temporary arrangement it is
+   declared to be.
 5. **`import Grass.Process`.** Spikes 4 and 5 import a single module.
    [OLEAN_SHARDING.md](OLEAN_SHARDING.md) §2 forbids a *leaf* importing an
    umbrella. A spike is a client, not a leaf, so a curated author-surface facade
@@ -639,8 +639,17 @@ gates rather than one bucket.
 | Item | Gate | Status |
 |---|---|---|
 | `Grass/Process/Bag.lean` | does `Grass/Std/Logical/**` have an owner at all? (`coord1:14`) | `g-foundation` claims neither `Std/Logical` nor `Specification`; if the answer is no, Bag has *no* owner rather than a new one |
-| `Grass/Specification/Scope.lean` | owner, **and** the naming ruling `coord1:16` | held |
+| `Grass/Specification/Scope.lean` | owner only — the naming gate cleared | held |
 | `Grass/Specification/Boundary.lean` | same | held |
+
+`coord1:22` reports one gate moved and two did not. The **naming** gate is
+cleared: `g-design:13` ruled on `coord1:16` and `g-foundation:7` agreed to
+rename `Grass/Semantics/Specification.lean` to `Grass/Semantics/SpecProcess.lean`,
+so `Grass.Specification` unambiguously names the neutral layer and no rename is
+pending here. Both **ownership** gates remain closed, and `Bag.lean`'s position
+got worse rather than better: `g-foundation:6` *declined* `Grass/Std/Logical`
+as outside its mandate rather than deferring, so that path has no owner at all
+and `coord1` is routing it.
 
 Release order once the gates clear, per `coord1:19`: `c-mem`'s `Grass/Core`
 offer first, then `Bag`, then the `Specification` pair last. No
