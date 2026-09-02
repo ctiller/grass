@@ -1,3 +1,4 @@
+import Grass.Memory.ByteStore
 import Grass.Memory.Audit
 import Grass.Memory.Authority
 import Grass.Memory.Event
@@ -48,10 +49,12 @@ structure AllocationRecord where
   /-- Whether it is live. A dead allocation authorizes nothing, whatever
   provenance is presented. -/
   live : Bool
-  /-- The offsets currently initialized. A list rather than a byte store, because
-  the vertical needs to decide initialization, not to model byte values; M2 owns
-  the store. -/
-  initialized : List Nat
+  /-- The allocation's bytes.
+
+  Initialization is read off this rather than tracked beside it: a separate list
+  of initialized offsets was a second source of truth that could disagree with
+  the values, and `RangeInitialized` now cannot drift from what was written. -/
+  bytes : ByteStore
 deriving DecidableEq, Repr
 
 /--
@@ -150,29 +153,131 @@ def allocate (state : MemoryState) (id : AllocId) (record : AllocationRecord) :
 def alias (state : MemoryState) (a b : AllocId) : MemoryState :=
   { state with aliases := (a, b) :: state.aliases }
 
-/-- Mark a range initialized. -/
-def setInitialized (state : MemoryState) (id : AllocId) (range : ByteRange) : MemoryState :=
+/--
+Write `bytes` at `start` in allocation `id`.
+
+`initializes` is `AccessDescriptor.producesInitialized`: a completed write does
+not always credit initialization, and `ByteStore` carries that per run so the two
+facts cannot disagree. A write to an allocation that is not there changes
+nothing; `performAccess` reaches this only after `denialOf` has found the record,
+so the missing case is unreachable there rather than silently permissive.
+-/
+def write (state : MemoryState) (id : AllocId) (start : Nat) (bytes : ByteSeq)
+    (initializes : Bool) : MemoryState :=
   match state.allocations.lookup id with
   | Option.none => state
   | some record =>
       { state with
         allocations := state.allocations.insert id
-          { record with
-            initialized := record.initialized ++
-              (List.range range.size).map (range.start + ·) } }
+          { record with bytes := record.bytes.write start bytes initializes } }
+
+/-- The byte allocation `id` holds at `offset`, if it holds one. -/
+def byteAt? (state : MemoryState) (id : AllocId) (offset : Nat) : Option Byte :=
+  (state.allocations.lookup id).bind (·.bytes.byteAt? offset)
+
+/-- The bytes `id` holds over `range`, if every one of them has a value. Partial
+coverage reads as `none` rather than as a shorter sequence, because a caller that
+asked for `range` and received fewer bytes would have to decide which ones it
+got. -/
+def readBytes (state : MemoryState) (id : AllocId) (range : ByteRange) :
+    Option ByteSeq :=
+  match state.allocations.lookup id with
+  | Option.none => Option.none
+  | some record =>
+      (List.range range.size).mapM fun i => record.bytes.byteAt? (range.start + i)
 
 /-- `state.RangeInitialized id range` holds when every offset of `range` is
-initialized in `id`. -/
+initialized in `id`. Read off the byte store, so it says what the writes said. -/
 def RangeInitialized (state : MemoryState) (id : AllocId) (range : ByteRange) : Prop :=
   match state.allocations.lookup id with
   | Option.none => False
-  | some record =>
-      ∀ offset ∈ (List.range range.size).map (range.start + ·),
-        offset ∈ record.initialized
+  | some record => record.bytes.Initialized range
 
 instance (state : MemoryState) (id : AllocId) (range : ByteRange) :
     Decidable (state.RangeInitialized id range) := by
   unfold RangeInitialized; split <;> infer_instance
+
+/-! ### Framing
+
+What a write does *not* change. `applyAccess` reasons by disjointness, and
+disjointness is only useful with lemmas saying that everything outside the
+written range survives. `docs/MEMORY_MODEL.md` §2 makes provenance the authority,
+so the two axes are "a different allocation" and "a disjoint range within the
+same one"; both are below. -/
+
+/-- A write changes no allocation's metadata: extent, epoch, space, permission,
+and liveness come back unchanged. `denialOf` reads exactly those five fields, so
+`write_preserves_metadata` is what says a write cannot quietly widen what a later
+access may reach. -/
+theorem write_preserves_metadata (state : MemoryState) (id : AllocId) (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) (other : AllocId) (record : AllocationRecord)
+    (h : (state.write id start bytes initializes).allocations.lookup other = some record) :
+    ∃ before, state.allocations.lookup other = some before ∧
+      before.extent = record.extent ∧ before.epoch = record.epoch ∧
+      before.space = record.space ∧ before.permission = record.permission ∧
+      before.live = record.live := by
+  unfold write at h
+  split at h
+  · exact ⟨record, h, rfl, rfl, rfl, rfl, rfl⟩
+  · rename_i found hfound
+    by_cases hid : other = id
+    · subst hid
+      rw [FiniteMap.lookup_insert_self] at h
+      cases h
+      exact ⟨found, hfound, rfl, rfl, rfl, rfl, rfl⟩
+    · rw [FiniteMap.lookup_insert_ne _ hid _] at h
+      exact ⟨record, h, rfl, rfl, rfl, rfl, rfl⟩
+
+/-- **A write to one allocation leaves every other allocation alone.**
+
+Distinct `AllocId`s are distinct storage by construction, which is what
+`docs/MEMORY_MODEL.md` §2 means by making provenance rather than address the
+authority. -/
+theorem write_preserves_other_allocation (state : MemoryState) {id other : AllocId}
+    (hne : other ≠ id) (start : Nat) (bytes : ByteSeq) (initializes : Bool) :
+    (state.write id start bytes initializes).allocations.lookup other =
+      state.allocations.lookup other := by
+  unfold write
+  split
+  · rfl
+  · exact FiniteMap.lookup_insert_ne _ hne _
+
+/-- Initialization of another allocation survives a write. -/
+theorem rangeInitialized_write_of_other_allocation (state : MemoryState)
+    {id other : AllocId} (hne : other ≠ id) (start : Nat) (bytes : ByteSeq)
+    (initializes : Bool) {range : ByteRange} (h : state.RangeInitialized other range) :
+    (state.write id start bytes initializes).RangeInitialized other range := by
+  unfold RangeInitialized at h ⊢
+  rw [write_preserves_other_allocation state hne start bytes initializes]
+  exact h
+
+/-- **Initialization of a disjoint range in the same allocation survives a
+write.** The state-level form of `ByteStore.initialized_write_of_disjoint`, and
+the one a framing argument about two fields of one object needs. -/
+theorem rangeInitialized_write_of_disjoint (state : MemoryState) (id : AllocId)
+    {start : Nat} {bytes : ByteSeq} {initializes : Bool} {range : ByteRange}
+    (hd : (ByteRange.mk start bytes.length).Disjoint range)
+    (h : state.RangeInitialized id range) :
+    (state.write id start bytes initializes).RangeInitialized id range := by
+  unfold RangeInitialized at h ⊢
+  unfold write
+  cases hfound : state.allocations.lookup id with
+  | none => rw [hfound] at h; exact absurd h (by simp)
+  | some record =>
+    rw [hfound] at h
+    rw [FiniteMap.lookup_insert_self]
+    exact ByteStore.initialized_write_of_disjoint record.bytes hd h
+
+/-- An initializing write initializes what it wrote, provided the allocation is
+there. The state-level form of `ByteStore.initialized_write`. -/
+theorem rangeInitialized_write (state : MemoryState) {id : AllocId} {start : Nat}
+    {bytes : ByteSeq} {record : AllocationRecord}
+    (hfound : state.allocations.lookup id = some record) :
+    (state.write id start bytes true).RangeInitialized id ⟨start, bytes.length⟩ := by
+  unfold RangeInitialized write
+  simp only [hfound, FiniteMap.lookup_insert_self]
+  exact ByteStore.initialized_write record.bytes start bytes
+
 
 end MemoryState
 

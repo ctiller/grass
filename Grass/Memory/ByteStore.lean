@@ -32,11 +32,23 @@ owed, and is recorded as owed in `docs/MEMORY_IMPLEMENTATION_PLAN.md`.
 
 ## Initialization is a consequence, not a field
 
-A byte is initialized exactly when the store has a value for it. An earlier
+A byte is initialized exactly when the newest run covering it says so. An earlier
 placeholder carried a separate list of initialized offsets, which is a second
 source of truth that can disagree with the first; `docs/MEMORY_MODEL.md` §4 says
 "a write initializes only the bytes it actually completes", and reading that off
 the store is the way to keep those two facts from drifting apart.
+
+Which is why a run carries `initializes` rather than the store being pure bytes.
+`AccessDescriptor.producesInitialized` exists precisely because a write can
+complete without its bytes counting as initialized afterwards, and a value-only
+store would report those bytes as initialized because it had a value for them.
+That is the permissive direction `docs/FOUNDATION.md` law 8 forbids, so the flag
+travels with the run.
+
+Newest wins for initialization as it does for value, so a non-initializing write
+over initialized bytes leaves them uninitialized. The corpus does not settle that
+case; it is the conservative reading, and it is the one that cannot admit a
+program a stricter model would refuse.
 -/
 
 namespace Grass.Memory
@@ -49,6 +61,10 @@ structure Run where
   start : Nat
   /-- The bytes, in order. -/
   bytes : ByteSeq
+  /-- Whether these bytes count as initialized afterwards. Carried per run rather
+  than assumed, because `AccessDescriptor.producesInitialized` lets a completed
+  write decline to initialize; see the module comment. -/
+  initializes : Bool
 deriving DecidableEq, Repr
 
 namespace Run
@@ -110,29 +126,100 @@ namespace ByteStore
 def empty : ByteStore := ⟨[]⟩
 
 /--
-The byte at `offset`, if any run holds one.
+What the store holds at `offset`: the byte, and whether it counts as initialized.
 
-Newest run wins, which is what makes a prepending write a real overwrite.
+Newest run wins, which is what makes a prepending write a real overwrite. Both
+facts come from the same run: `byteAt?` and `InitializedAt` are projections of
+this, and `initializedAt_iff_cellAt?` is the statement that a byte and its
+initialization status cannot come from different writes.
 -/
+def cellAt? (store : ByteStore) (offset : Nat) : Option (Byte × Bool) :=
+  store.runs.findSome? fun run => (run.byteAt? offset).map (·, run.initializes)
+
+/-- The byte at `offset`, if the store holds one. -/
 def byteAt? (store : ByteStore) (offset : Nat) : Option Byte :=
-  store.runs.findSome? (·.byteAt? offset)
+  (store.cellAt? offset).map Prod.fst
 
-/-- Write `bytes` starting at `start`. Constant time; see the module comment. -/
-def write (store : ByteStore) (start : Nat) (bytes : ByteSeq) : ByteStore :=
-  ⟨⟨start, bytes⟩ :: store.runs⟩
+/--
+Write `bytes` starting at `start`. Constant time; see the module comment.
 
-/-- `store.Initialized range` holds when every byte of `range` has a value. -/
+`initializes` says whether the written bytes count as initialized afterwards,
+which is `AccessDescriptor.producesInitialized`. It is not defaulted: a write
+that does not initialize is a real case rather than an oversight, and a default
+here would pick one silently.
+-/
+def write (store : ByteStore) (start : Nat) (bytes : ByteSeq) (initializes : Bool) :
+    ByteStore :=
+  ⟨⟨start, bytes, initializes⟩ :: store.runs⟩
+
+/-- `store.InitializedAt offset` holds when the newest run covering `offset`
+initialized it. -/
+def InitializedAt (store : ByteStore) (offset : Nat) : Prop :=
+  (store.cellAt? offset).map Prod.snd = some true
+
+instance (store : ByteStore) (offset : Nat) : Decidable (store.InitializedAt offset) :=
+  inferInstanceAs (Decidable (_ = _))
+
+/-- `store.Initialized range` holds when every byte of `range` is initialized. -/
 def Initialized (store : ByteStore) (range : ByteRange) : Prop :=
-  ∀ offset, range.Covers offset → (store.byteAt? offset).isSome
+  ∀ offset, range.Covers offset → store.InitializedAt offset
+
+/--
+A byte and its initialization status come from one run.
+
+`byteAt?` and `InitializedAt` are both projections of `cellAt?`, so where the
+store holds byte `b`, being initialized is exactly that same cell carrying
+`true`. Had the two been independent lookups they could have disagreed about
+which write a byte came from, which is why the store is defined this way round.
+-/
+theorem initializedAt_iff_cellAt? (store : ByteStore) {offset : Nat} {b : Byte}
+    (h : store.byteAt? offset = some b) :
+    store.InitializedAt offset ↔ store.cellAt? offset = some (b, true) := by
+  unfold byteAt? at h
+  unfold InitializedAt
+  cases hc : store.cellAt? offset with
+  | none => rw [hc] at h; simp at h
+  | some cell =>
+    rw [hc] at h
+    simp only [Option.map_some, Option.some.injEq] at h
+    obtain ⟨value, initializes⟩ := cell
+    simp only [Option.map_some, Option.some.injEq] at h ⊢
+    subst h
+    cases initializes <;> simp
+
+/-- `Initialized` quantifies over every `Nat`, which is not decidable as stated;
+this bounds it to the range's own offsets so that the transition can run the
+check rather than merely state it. -/
+theorem initialized_iff (store : ByteStore) (range : ByteRange) :
+    store.Initialized range ↔
+      ∀ i ∈ List.range range.size, store.InitializedAt (range.start + i) := by
+  constructor
+  · intro h i hi
+    rw [List.mem_range] at hi
+    exact h _ (ByteRange.covers_of (Nat.le_add_right _ _) (by omega))
+  · intro h offset hcov
+    rw [ByteRange.covers_def] at hcov
+    have hmem : offset - range.start ∈ List.range range.size := by
+      rw [List.mem_range]; omega
+    have := h (offset - range.start) hmem
+    rwa [Nat.add_sub_cancel' hcov.1] at this
+
+instance (store : ByteStore) (range : ByteRange) : Decidable (store.Initialized range) :=
+  decidable_of_iff _ (initialized_iff store range).symm
+
+@[simp] theorem cellAt?_empty (offset : Nat) : empty.cellAt? offset = Option.none := rfl
 
 @[simp] theorem byteAt?_empty (offset : Nat) : empty.byteAt? offset = Option.none := rfl
+
+@[simp] theorem not_initializedAt_empty (offset : Nat) : ¬ empty.InitializedAt offset := by
+  simp [InitializedAt]
 
 theorem not_initialized_empty {range : ByteRange} (h : ¬ range.IsEmpty) :
     ¬ empty.Initialized range := by
   intro hinit
   rw [ByteRange.isEmpty_def] at h
-  exact absurd (hinit range.start (ByteRange.covers_of (Nat.le_refl _) (by omega)))
-    (by simp)
+  exact not_initializedAt_empty range.start
+    (hinit range.start (ByteRange.covers_of (Nat.le_refl _) (by omega)))
 
 /-- Every store initializes the empty range, vacuously. -/
 @[simp] theorem initialized_empty_range (store : ByteStore) (start : Nat) :
@@ -140,32 +227,46 @@ theorem not_initialized_empty {range : ByteRange} (h : ¬ range.IsEmpty) :
   intro offset hcov
   exact absurd hcov (by simp)
 
-theorem byteAt?_write (store : ByteStore) (start : Nat) (bytes : ByteSeq) (offset : Nat) :
-    (store.write start bytes).byteAt? offset =
-      ((Run.mk start bytes).byteAt? offset).or (store.byteAt? offset) := by
-  simp only [write, byteAt?, List.findSome?_cons]
-  cases (Run.mk start bytes).byteAt? offset <;> simp
+theorem cellAt?_write (store : ByteStore) (start : Nat) (bytes : ByteSeq)
+    (initializes : Bool) (offset : Nat) :
+    (store.write start bytes initializes).cellAt? offset =
+      (((Run.mk start bytes initializes).byteAt? offset).map (·, initializes)).or
+        (store.cellAt? offset) := by
+  simp only [write, cellAt?, List.findSome?_cons]
+  cases (Run.mk start bytes initializes).byteAt? offset <;> simp
 
 /--
 **The framing law.**
 
-A write outside `offset` leaves the byte at `offset` exactly as it was. This is
-the base case of every disjointness argument `applyAccess` makes, and it is one
-case split because the journal never rewrites what is already there.
+A write outside `offset` leaves both the byte at `offset` and its initialization
+exactly as they were. This is the base case of every disjointness argument
+`applyAccess` makes, and it is one case split because the journal never rewrites
+what is already there.
+
+Stated over `cellAt?` rather than over `byteAt?` so that it frames initialization
+too: a lemma about values alone would let a non-initializing write outside the
+range change whether a byte inside it counted as initialized.
 -/
-theorem byteAt?_write_of_not_covers (store : ByteStore) {start : Nat} {bytes : ByteSeq}
-    {offset : Nat} (h : ¬ (ByteRange.mk start bytes.length).Covers offset) :
-    (store.write start bytes).byteAt? offset = store.byteAt? offset := by
-  rw [byteAt?_write]
-  have hnone : (Run.mk start bytes).byteAt? offset = Option.none := by
-    cases hrun : (Run.mk start bytes).byteAt? offset with
+theorem cellAt?_write_of_not_covers (store : ByteStore) {start : Nat} {bytes : ByteSeq}
+    {initializes : Bool} {offset : Nat}
+    (h : ¬ (ByteRange.mk start bytes.length).Covers offset) :
+    (store.write start bytes initializes).cellAt? offset = store.cellAt? offset := by
+  rw [cellAt?_write]
+  have hnone : (Run.mk start bytes initializes).byteAt? offset = Option.none := by
+    cases hrun : (Run.mk start bytes initializes).byteAt? offset with
     | none => rfl
     | some b =>
-      have hcov : (Run.mk start bytes).range.Covers offset :=
+      have hcov : (Run.mk start bytes initializes).range.Covers offset :=
         Run.byteAt?_isSome_iff.mp (by rw [hrun]; simp)
       exact absurd (show (ByteRange.mk start bytes.length).Covers offset from hcov) h
   rw [hnone]
   simp
+
+theorem byteAt?_write_of_not_covers (store : ByteStore) {start : Nat} {bytes : ByteSeq}
+    {initializes : Bool} {offset : Nat}
+    (h : ¬ (ByteRange.mk start bytes.length).Covers offset) :
+    (store.write start bytes initializes).byteAt? offset = store.byteAt? offset := by
+  simp [byteAt?, cellAt?_write_of_not_covers store h]
 
 /--
 A write frames every disjoint range: reading anywhere in `other` is unaffected by
@@ -173,32 +274,69 @@ a write confined to a disjoint range.
 
 The range-level form the memory layer uses, derived from the pointwise one.
 -/
-theorem byteAt?_write_of_disjoint (store : ByteStore) {start : Nat} {bytes : ByteSeq}
-    {other : ByteRange} (hd : (ByteRange.mk start bytes.length).Disjoint other)
+theorem cellAt?_write_of_disjoint (store : ByteStore) {start : Nat} {bytes : ByteSeq}
+    {initializes : Bool} {other : ByteRange}
+    (hd : (ByteRange.mk start bytes.length).Disjoint other)
     {offset : Nat} (hcov : other.Covers offset) :
-    (store.write start bytes).byteAt? offset = store.byteAt? offset :=
-  byteAt?_write_of_not_covers store (fun hin => hd.not_covers hin hcov)
+    (store.write start bytes initializes).cellAt? offset = store.cellAt? offset :=
+  cellAt?_write_of_not_covers store (fun hin => hd.not_covers hin hcov)
 
-/-- Initialization of a disjoint range survives a write. -/
+/-- Initialization of a disjoint range survives a write, initializing or not. -/
 theorem initialized_write_of_disjoint (store : ByteStore) {start : Nat} {bytes : ByteSeq}
-    {other : ByteRange} (hd : (ByteRange.mk start bytes.length).Disjoint other)
+    {initializes : Bool} {other : ByteRange}
+    (hd : (ByteRange.mk start bytes.length).Disjoint other)
     (hinit : store.Initialized other) :
-    (store.write start bytes).Initialized other := by
+    (store.write start bytes initializes).Initialized other := by
   intro offset hcov
-  rw [byteAt?_write_of_disjoint store hd hcov]
+  unfold InitializedAt
+  rw [cellAt?_write_of_disjoint store hd hcov]
   exact hinit offset hcov
 
-/-- A write initializes exactly the bytes it wrote. `docs/MEMORY_MODEL.md` §4:
-"A write initializes only the bytes it actually completes." -/
+/-- An initializing write initializes exactly the bytes it wrote.
+`docs/MEMORY_MODEL.md` §4: "A write initializes only the bytes it actually
+completes." -/
 theorem initialized_write (store : ByteStore) (start : Nat) (bytes : ByteSeq) :
-    (store.write start bytes).Initialized ⟨start, bytes.length⟩ := by
+    (store.write start bytes true).Initialized ⟨start, bytes.length⟩ := by
   intro offset hcov
-  rw [byteAt?_write]
-  have hsome : ((Run.mk start bytes).byteAt? offset).isSome :=
-    Run.byteAt?_isSome_iff.mpr hcov
-  cases h : (Run.mk start bytes).byteAt? offset with
-  | none => rw [h] at hsome; simp at hsome
+  unfold InitializedAt
+  rw [cellAt?_write]
+  cases h : (Run.mk start bytes true).byteAt? offset with
+  | none =>
+    exact absurd (Run.byteAt?_isSome_iff.mpr
+      (show ((Run.mk start bytes true).range).Covers offset from hcov)) (by rw [h]; simp)
   | some b => simp
+
+/--
+**A non-initializing write does not initialize.**
+
+The reason `Run.initializes` exists. With a value-only store the bytes below
+would report as initialized because the store had values for them, and an
+`uninitializedRead` that `AccessDescriptor.initialization` demands be caught
+would pass instead — a permissive fallback of exactly the kind
+`docs/FOUNDATION.md` law 8 forbids.
+-/
+theorem not_initializedAt_write_false (store : ByteStore) {start : Nat} {bytes : ByteSeq}
+    {offset : Nat} (hcov : (ByteRange.mk start bytes.length).Covers offset) :
+    ¬ (store.write start bytes false).InitializedAt offset := by
+  unfold InitializedAt
+  rw [cellAt?_write]
+  cases h : (Run.mk start bytes false).byteAt? offset with
+  | none =>
+    exact absurd (Run.byteAt?_isSome_iff.mpr
+      (show ((Run.mk start bytes false).range).Covers offset from hcov)) (by rw [h]; simp)
+  | some b => simp
+
+/-- A non-initializing write over initialized bytes leaves them uninitialized:
+newest wins for initialization as it does for value. The conservative reading of
+a case `docs/MEMORY_MODEL.md` §4 does not settle; see the module comment. -/
+theorem not_initialized_write_false (store : ByteStore) {start : Nat} {bytes : ByteSeq}
+    (h : ¬ (ByteRange.mk start bytes.length).IsEmpty) :
+    ¬ (store.write start bytes false).Initialized ⟨start, bytes.length⟩ := by
+  rw [ByteRange.isEmpty_def] at h
+  have hlen : bytes.length ≠ 0 := h
+  have hcov : (ByteRange.mk start bytes.length).Covers start :=
+    ByteRange.covers_of (Nat.le_refl _) (by show start < start + bytes.length; omega)
+  exact fun hinit => not_initializedAt_write_false store hcov (hinit start hcov)
 
 end ByteStore
 

@@ -440,11 +440,28 @@ def rogueProvider : AuthorityProvider where
   violationClass := ⟨⟨"fake.undeclaredClass"⟩⟩
   refuses _ _ := true
 
+/-! ## What this profile stores and what it would observe of the indeterminate
+
+`Oracle.ofMemory` takes both as parameters rather than inventing either. -/
+
+/-- What a store writes here: a pattern distinct from the zeros every allocation
+starts with, so observing it after a store is evidence that the load read the
+store's bytes rather than the initial contents. -/
+def storedBytes : MachineState → AccessDescriptor → ByteSeq :=
+  fun _ d => List.replicate d.range.size 0xAB
+
+/-- What an indeterminate read would observe. No theorem below depends on its
+value: every allocation here starts fully initialized, so `denialOf` refuses an
+uninitialized read before the oracle is consulted. It is supplied because
+`Oracle.ofMemory` requires it rather than defaulting it. -/
+def indeterminateByte : MachineState → (d : AccessDescriptor) → Nat → Byte :=
+  fun _ _ _ => 0xEE
+
 /-- Every operation must declare its memory effects and its faults. -/
 def policy : StepPolicy :=
   { profile := profile
     requiredFacets := [.memoryEffects, .faults, .restartability]
-    oracle := .zeroed
+    oracle := .ofMemory storedBytes indeterminateByte
     authorities := [loanProvider, frameProvider]
     violationClassesDeclared := by decide
     vocabularyWellFormed := by decide }
@@ -460,6 +477,12 @@ theorem duplicate_space_vocabulary_is_rejected :
                             , AddressSpace.cpuVirtual64 ]⟩ } :
         AdmittedVocabulary).WellFormed := by decide
 
+/-- Sixty-four initialized zero bytes: the starting contents of every allocation
+in this fixture. Written through `ByteStore.write` with `initializes := true`
+rather than assembled by hand, so the fixture's notion of initialized is the same
+one `RangeInitialized` reads. -/
+def zeroed64 : ByteStore := ByteStore.empty.write 0 (List.replicate 64 0) true
+
 /-- The buffer, its aliasing view, and a read-only allocation. The alias is
 declared here, in the state, because whether two allocations name the same bytes
 is a fact about the machine and not about provenance. -/
@@ -467,22 +490,22 @@ def memory₀ : MemoryState :=
   (((MemoryState.empty.allocate bufferAlloc
       { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
         permission := .readWrite, live := true
-        initialized := (List.range 64) }).allocate viewAlloc
+        bytes := zeroed64 }).allocate viewAlloc
       { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
         permission := .readWrite, live := true
-        initialized := (List.range 64) }).allocate constAlloc
+        bytes := zeroed64 }).allocate constAlloc
       { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
         permission := .readOnly, live := true
-        initialized := (List.range 64) }).alias bufferAlloc viewAlloc
+        bytes := zeroed64 }).alias bufferAlloc viewAlloc
 
 /-- The stack reservation the frame provider guards. -/
 def memory₁ : MemoryState :=
   (memory₀.allocate stackAlloc
     { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-      permission := .readWrite, live := true, initialized := List.range 64 }).allocate
+      permission := .readWrite, live := true, bytes := zeroed64 }).allocate
     borrowedAlloc
     { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-      permission := .readWrite, live := true, initialized := List.range 64 }
+      permission := .readWrite, live := true, bytes := zeroed64 }
 
 /-- The starting machine state: allocations exist, but no authority is held. -/
 def state₀ : MachineState := .initial memory₁
@@ -683,6 +706,52 @@ theorem write_through_loan_succeeds_with_the_loan :
   intro s hs
   cases hs
   exact ⟨by decide, by decide⟩
+
+/-! ## Reads observe writes
+
+The M1 fixture ran against `Oracle.zeroed`, which reported the counts an intent
+implied and supplied zero bytes of content. That was enough to exercise the
+transition and not enough to say memory held anything. With `Oracle.ofMemory`
+over `Grass/Memory/ByteStore.lean` the trace carries values that came from
+somewhere. -/
+
+/--
+**A load observes the prior store.**
+
+The store writes `0xAB` over bytes that began as `0x00`, and the load that
+follows observes `0xAB`. Both facts are read off the recorded trace rather than
+off memory, so this says the event model reports what the store committed and not
+merely that the store changed a field.
+-/
+theorem a_load_observes_the_prior_store :
+    ∃ s, (stepAlpha state₀ .store).state? = some s ∧
+      ∃ t, (stepAlpha s .load).state? = some t ∧
+        t.events.getLast?.bind (·.event.valueRead) = some (List.replicate 8 0xAB) :=
+  ⟨_, rfl, _, rfl, by decide⟩
+
+/-- Before the store, a load observes the zeros the allocation started with. The
+control for the theorem above: without it, `0xAB` could have been what a load
+always observes. -/
+theorem a_load_before_the_store_observes_the_initial_bytes :
+    ∃ s, (stepAlpha state₀ .load).state? = some s ∧
+      s.events.getLast?.bind (·.event.valueRead) = some (List.replicate 8 0x00) :=
+  ⟨_, rfl, by decide⟩
+
+/-- A store leaves bytes outside its range alone. `MemoryState.write` goes
+through `ByteStore.write`, and `ByteStore.cellAt?_write_of_not_covers` is the
+framing law; this is that law observed through a real transition. -/
+theorem a_store_leaves_neighbouring_bytes_alone :
+    ∃ s, (stepAlpha state₀ .store).state? = some s ∧
+      s.memory.byteAt? bufferAlloc 8 = some 0x00 ∧
+      s.memory.byteAt? bufferAlloc 0 = some 0xAB :=
+  ⟨_, rfl, by decide, by decide⟩
+
+/-- A store to the buffer leaves the read-only allocation untouched, which is
+`MemoryState.write_preserves_other_allocation` observed through a transition. -/
+theorem a_store_leaves_other_allocations_alone :
+    ∃ s, (stepAlpha state₀ .store).state? = some s ∧
+      s.memory.byteAt? constAlloc 0 = some 0x00 :=
+  ⟨_, rfl, by decide⟩
 
 /-- Without a live frame, the stack write is refused. -/
 theorem stack_write_is_refused_without_a_frame :
@@ -1086,3 +1155,4 @@ theorem profile_visibility_rule_is_refused :
         else .none)).rejection? = some .visibilityRuleUnknown := by decide
 
 end Grass.Tests.FakeIsa
+

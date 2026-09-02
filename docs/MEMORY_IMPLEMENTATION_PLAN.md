@@ -462,6 +462,61 @@ satisfying `WithinBound`, offset disjointness implies address non-aliasing.
 Without it every framing lemma proves something about offsets that no one has
 connected to memory.
 
+### 4.1 What is built
+
+Three of the four files above exist, under different names than the sketch.
+
+`Grass/Memory/Addressing.lean` is the bridge. `addressOf` places an offset in an
+allocation based at a `MachineAddress`, and `disjoint_ranges_do_not_alias` is the
+lemma the section above records as owed. It is conditioned on `FitsAllocation`:
+the allocation's own bytes do not wrap. That is not a convenience — an allocation
+whose last byte wraps past `2^64` has two offsets at one address, so no
+disjointness argument about it could be sound, and a profile admitting one has
+already lost.
+
+`Grass/Memory/ByteStore.lean` is the store, and it is a journal: a write prepends
+a run, nothing is merged. Writes are constant time and framing is one case split.
+The cost is that reads scan runs and degrade over a long program, and **that cost
+is not paid off here.** What makes it acceptable rather than deferred forever is
+that every lemma is stated over `cellAt?`, never over `runs`, so a compacting
+store agreeing pointwise satisfies all of them unchanged. Compaction is owed.
+
+A run carries `initializes` as well as bytes. `AccessDescriptor.producesInitialized`
+lets a completed write decline to credit initialization, and a value-only store
+would have reported those bytes as initialized because it held values for them —
+the permissive direction [FOUNDATION.md](FOUNDATION.md) law 8 forbids.
+`not_initializedAt_write_false` is the theorem. Newest wins for initialization as
+it does for value, so a non-initializing write over initialized bytes leaves them
+uninitialized; the corpus does not settle that case, and this is the reading that
+cannot admit a program a stricter model would refuse.
+
+`AllocationRecord.initialized : List Nat` is gone. Initialization is read off the
+store, so `RangeInitialized` cannot drift from what was written.
+`MemoryState.write_preserves_metadata`, `write_preserves_other_allocation`,
+`rangeInitialized_write_of_other_allocation`, `rangeInitialized_write_of_disjoint`,
+and `rangeInitialized_write` are the state-level framing set.
+
+`Op.Oracle.ofMemory` replaces `Oracle.zeroed`, and `Tests/Op/FakeIsa.lean` now
+runs the whole M1 seam over it unchanged, which is the evidence that the store
+did not cost a redesign. It takes what a store writes *and* what an indeterminate
+read observes as parameters. The second is the one worth naming: bytes that are
+not initialized have no value the model can read off the store, an access
+demanding `.allBytesInitialized` never reaches the oracle because `denialOf`
+refuses it first, and so the oracle is consulted only where a profile has already
+admitted an indeterminate read — at which point the profile owes what it
+observes. Defaulting it to zero would be law 8's permissive fallback wearing a
+plausible number.
+
+### 4.2 What M2 still owes
+
+- `applyAccess` as a named total function. The write path exists inside
+  `Op.performAccess`; it has not been factored out, so nothing yet states the
+  read-after-write and commutation laws as equations over one function.
+- Shaped read and write over `StructLayout` footprints — the `Shape.lean` row
+  above. Nothing of it is built.
+- Compaction for the byte store, per §4.1.
+- The straight-line Spike 1 block, which is the actual exit criterion.
+
 Exit criteria: the M1 reference instruction set steps end to end over a
 hand-built `MemState`; the framing lemma set is sufficient to discharge a
 straight-line Spike 1 block without a bespoke local lemma; and the bridge lemma

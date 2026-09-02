@@ -142,6 +142,61 @@ def Oracle.zeroed : Oracle where
         · exact absurd hb (by simp) }
 
 /--
+The oracle that reads committed bytes out of the memory state.
+
+What `Oracle.zeroed` was a placeholder for. An access that reads observes what
+the byte store holds, so a load after a store to the same bytes observes what the
+store wrote — `Tests/Op/FakeIsa.lean`'s `a_load_observes_the_prior_store`.
+
+Two things it does not invent.
+
+`writeData` is a parameter, not a computation. What a store writes is the
+operation's data, and `AccessDescriptor` does not carry it: the descriptor says
+which bytes an access touches and what it is allowed to do to them, and putting
+values on it would make every well-formedness proof about ranges also about
+contents. A profile supplies the data because a profile is what knows it.
+
+`indeterminate` is a parameter for the same reason and a stronger one. Bytes that
+are not initialized have no value the model can read off the store, and
+`AccessDescriptor.initialization` lets a profile permit reading them — an access
+demanding `.allBytesInitialized` never reaches this, because `denialOf` refuses
+it as `uninitializedRead` first. So this is reached only where a profile has
+already said an indeterminate read is admissible, and the profile then owes what
+such a read observes. Defaulting it to zero would be `docs/FOUNDATION.md` law 8's
+permissive fallback wearing a plausible number: a program reading uninitialized
+memory would observe a definite value the machine never promised, and every proof
+downstream would inherit that promise.
+-/
+def Oracle.ofMemory
+    (writeData : MachineState → AccessDescriptor → ByteSeq)
+    (indeterminate : MachineState → (d : AccessDescriptor) → Nat → Byte) : Oracle where
+  answer state d :=
+    { observed :=
+        if d.intent.reads then
+          some ((List.range d.range.size).map fun i =>
+            match state.memory.byteAt? d.provenance.root (d.range.start + i) with
+            | some byte => byte
+            | Option.none => indeterminate state d i)
+        else Option.none
+      written :=
+        if d.intent.writes then some ((writeData state d).take d.range.size)
+        else Option.none
+      observedPresent := by intro h; simp [h]
+      observedAbsent := by intro h; simp [h]
+      writtenPresent := by intro h; simp [h]
+      writtenAbsent := by intro h; simp [h]
+      observedFits := by
+        intro bytes hb
+        split at hb
+        · cases hb; simp
+        · exact absurd hb (by simp)
+      writtenFits := by
+        intro bytes hb
+        split at hb
+        · cases hb; simp; omega
+        · exact absurd hb (by simp) }
+
+/--
 An extensible source of authority evidence.
 
 `denialOf` checks what the memory state itself knows: liveness, space, bounds,
@@ -524,13 +579,20 @@ def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescri
               { state with
                 eventSupply := state.eventSupply.fresh.2
                 events := state.events ++ [valid]
+                -- The bytes the write actually completed, not the bytes it
+                -- asked for. `Committed.writtenFits` bounds them by the range,
+                -- and `docs/MEMORY_MODEL.md` §4 credits initialization only to
+                -- the bytes a write completes. `producesInitialized` rides along
+                -- rather than gating the write, because a non-initializing write
+                -- still changes the values it wrote.
                 memory :=
                   match outcome.committed? with
                   | some c =>
-                      if d.producesInitialized then
-                        state.memory.setInitialized d.provenance.root
-                          (d.range.take c.writeCount)
-                      else state.memory
+                      match c.written with
+                      | some bytes =>
+                          state.memory.write d.provenance.root d.range.start bytes
+                            d.producesInitialized
+                      | Option.none => state.memory
                   | Option.none => state.memory
                 obligations := applyLedgerEffect state.obligations d.ledgerEffect }
 
