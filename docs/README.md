@@ -48,6 +48,10 @@ No document may override a narrower owner by restating it differently.
 | [STDLIB.md](STDLIB.md) | fundamental data structures and reusable proof laws |
 | [PROTOCOL_STDLIB.md](PROTOCOL_STDLIB.md) | candidate protocol-package shape, staged obligations, and HTTP/2/gRPC composition |
 
+Coordination protocol evolution is drafted separately in
+[AGENT_COORDINATION_EVOLUTION.md](AGENT_COORDINATION_EVOLUTION.md). It is a
+review candidate, not an amendment to the active version-one bus.
+
 ## Review and delivery
 
 - [VISION.md](VISION.md) explains the large-system objective and the tradeoffs
