@@ -657,6 +657,17 @@ one outright defect that had already merged — see §3.11's denial row.
   only producer. Neither is true of the type as written: the structure can be
   assembled directly by anyone who can discharge its fields. What is true is that
   the fields must be discharged, which is a real barrier and not the same claim.
+- **`AddressSpace.memoryType` and `AddressSpace.coherence` are never read.**
+  [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.1 makes them load-bearing: write-back and
+  write-combining differ in what is visible and when. Nothing consults either.
+- **`MemoryProfile.vocabularyVersion` is never read**, so nothing checks that a
+  profile's vocabulary version is one the transition understands.
+- **`MemoryProfile.package` is never read.** The §10 required proof package is a
+  checklist of propositions that the transition never consults, so a profile
+  carrying an unproved package steps exactly like one carrying a proved package.
+- **`ProtocolAuthority.issuer` and `TerminalOutcome`'s obligation and disposition
+  are never read**, so [OBLIGATIONS.md](OBLIGATIONS.md) §3's terminal dispositions
+  are recorded rather than enforced.
 - **`AccessIntent.isDevice` and `AccessDescriptor.observations` are never read.**
   §7.5 makes device participation load-bearing and `isDevice` is the field that
   would carry it. `ObservationLabel` was recorded in §3.13 as having no registry,
@@ -809,6 +820,39 @@ Four more live defects, two of them on main and two in the previous round's fixe
   count on a write-only access was approximated to zero rather than refused, while
   the same impossible claim on a compute substep was refused. The bound is
   intent-relative now.
+
+### 4.2.1 A gate for the defect class, because review was not converging
+
+Six adversarial rounds found eight defects that had already passed a merge review.
+All but one had the same shape — the model carries a fact and nothing consults it
+— and rounds four, five and six each found defects in the immediately preceding
+round's repairs. A process that finds a fixed fraction of a population per pass,
+and adds to the population with each repair, is not converging, and running a
+seventh round would have been the same bet again.
+
+A field with no reader is a *syntactic* property, so `Tools/ConsultedAudit.py`
+checks it directly and CI runs it. It reports every structure field nothing
+projects, with an allowlist where each entry states why the field is carried
+anyway. An unlisted field with no reader fails the build, so the judgement is made
+once and recorded rather than rediscovered.
+
+It found six things six review rounds had not, all now in §4.2's owed list:
+`AddressSpace.memoryType` and `coherence`, which [MEMORY_MODEL.md](MEMORY_MODEL.md)
+§7.1 makes load-bearing — write-back versus write-combining changes what is
+visible — and which nothing reads; `MemoryProfile.vocabularyVersion`, so nothing
+checks a profile's vocabulary version; `MemoryProfile.package`, so the §10 proof
+checklist is never consulted by the transition that depends on it;
+`ProtocolAuthority.issuer`; and `TerminalOutcome`'s obligation and disposition, so
+[OBLIGATIONS.md](OBLIGATIONS.md) §3's terminal dispositions are recorded and not
+enforced.
+
+Two honest limits. It cannot see a field consumed by pattern matching rather than
+projection, so those are allowlisted structurally and it under-reports. And it
+says nothing about whether a field *should* be read — that is what the allowlist
+reasons are for. It was itself wrong on first run: an early version treated a
+field docstring as the end of a structure, saw almost no fields, and reported a
+clean tree. Probing it against a field already known to have no reader is what
+caught that, and is the only way to tell a working audit from a silent one.
 
 ### 4.3 A semantic decision this milestone made and does not own
 
