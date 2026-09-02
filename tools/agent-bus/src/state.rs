@@ -16,9 +16,12 @@ use std::collections::BTreeMap;
 pub enum ItemStatus {
     Open,
     Terminal(&'static str),
-    /// Reserved for a future per-item conflict marker; today `agent-bus
-    /// conflicts` is the authoritative, tested signal for this (backed by
-    /// `BusState::exclusive`), so no code path constructs this variant yet.
+    /// Set by the `reset_*_to_conflict` family (apply.rs) the moment a
+    /// second, genuinely concurrent transition is found for the same
+    /// exclusive-transition predecessor (AGENT_BUS.md section 10) -- the
+    /// item's derived "current" state is neutral until a coordinator's
+    /// `lifecycle.conflict_resolved` picks a winner. `agent-bus conflicts`
+    /// (backed by `BusState::exclusive`) is the query surface for this.
     LifecycleConflict,
 }
 
@@ -103,8 +106,21 @@ pub struct ReviewChain {
 }
 
 impl ReviewChain {
+    /// A chain is closed once it's actually merged/reconciled, or once its
+    /// current nomination link has been terminally declined or withdrawn
+    /// (`decline_or_withdraw_or_reassign_status`'s only two `Terminal`
+    /// labels -- a *confirmed* reassignment resets that status back to
+    /// `Open` for the new link, since the chain continues under a new
+    /// reviewer rather than ending). g-reviewer:15: `inbox` used to keep
+    /// showing an author-withdrawn review as actionable forever, because
+    /// this check never looked at that status at all.
     pub fn is_closed(&self) -> bool {
-        !self.merged.is_empty() || !self.reconciled.is_empty()
+        !self.merged.is_empty()
+            || !self.reconciled.is_empty()
+            || matches!(
+                self.decline_or_withdraw_or_reassign_status,
+                ItemStatus::Terminal(_)
+            )
     }
 
     pub fn accepted(&self) -> bool {
@@ -178,7 +194,8 @@ impl BusState {
         merge_engine_info.insert(
             epoch.clone(),
             (
-                Short::parse(bus_json.merge_engine.clone()).expect("BUS.json merge_engine already validated"),
+                Short::parse(bus_json.merge_engine.clone())
+                    .expect("BUS.json merge_engine already validated"),
                 Short::parse(bus_json.merge_engine_version.clone())
                     .expect("BUS.json merge_engine_version already validated"),
             ),

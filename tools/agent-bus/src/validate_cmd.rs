@@ -22,7 +22,10 @@ pub fn validate(
             if json {
                 println!("{}", serde_json::to_string_pretty(&summary)?);
             } else {
-                println!("valid: {} commits, {} agents", summary["commits"], summary["agents"]);
+                println!(
+                    "valid: {} commits, {} agents",
+                    summary["commits"], summary["agents"]
+                );
             }
             Ok(())
         }
@@ -45,7 +48,11 @@ fn validate_full(ctx: &BusCtx, linked: bool) -> AbResult<Value> {
     // so every consumer gets it automatically, not just this command.
     let walk = crate::history::walk_full(&ctx.repo_root, crate::bus::BUS_BRANCH)?;
     let state = crate::apply::replay(&walk)?;
-    let linked_report = if linked { Some(linked_validate(ctx, &state)?) } else { None };
+    let linked_report = if linked {
+        Some(linked_validate(ctx, &state)?)
+    } else {
+        None
+    };
     Ok(serde_json::json!({
         "schema_version": crate::envelope::SCHEMA_VERSION,
         "schema_kinds": crate::events::EventData::all_kinds().len(),
@@ -64,11 +71,20 @@ fn validate_incremental(ctx: &BusCtx, range: &str, linked: bool) -> AbResult<Val
         .split_once("..")
         .ok_or_else(|| invalid("--incremental expects <old>..<new>"))?;
     let base = ctx.load_state_at(old)?;
-    let seed = base.agents.iter().map(|(a, s)| (a.clone(), s.next_seq)).collect();
+    let seed = base
+        .agents
+        .iter()
+        .map(|(a, s)| (a.clone(), s.next_seq))
+        .collect();
     let bus_json = ctx.bus_json()?;
-    let commits = crate::history::walk_incremental(&ctx.repo_root, old, new, seed, &bus_json.coordinators)?;
+    let commits =
+        crate::history::walk_incremental(&ctx.repo_root, old, new, seed, &bus_json.coordinators)?;
     let state = crate::apply::replay_onto(base, &commits)?;
-    let linked_report = if linked { Some(linked_validate(ctx, &state)?) } else { None };
+    let linked_report = if linked {
+        Some(linked_validate(ctx, &state)?)
+    } else {
+        None
+    };
     Ok(serde_json::json!({
         "commits": commits.len(),
         "agents": state.agents.len(),
@@ -98,13 +114,19 @@ fn linked_validate(ctx: &BusCtx, state: &crate::state::BusState) -> AbResult<Val
             _ => continue,
         };
         let tag = format!("agent-candidate/{}/{}", env.agent, auth.candidate);
-        let candidate_exists = crate::gitrepo::rev_parse_opt(repo, &format!("refs/tags/{tag}"))?.is_some();
+        let candidate_exists =
+            crate::gitrepo::rev_parse_opt(repo, &format!("refs/tags/{tag}"))?.is_some();
         if !candidate_exists {
             unverifiable.push(serde_json::json!({"event": env.id.to_string(), "missing": format!("refs/tags/{tag}")}));
             continue;
         }
         let parents = crate::gitrepo::parents_of(repo, auth.candidate.as_str())?;
-        if parents != vec![auth.previous_main.as_str().to_string(), auth.reviewed_commit.as_str().to_string()] {
+        if parents
+            != vec![
+                auth.previous_main.as_str().to_string(),
+                auth.reviewed_commit.as_str().to_string(),
+            ]
+        {
             invalid_items.push(serde_json::json!({
                 "event": env.id.to_string(),
                 "problem": "candidate parents do not match previous_main/reviewed_commit",
@@ -112,8 +134,10 @@ fn linked_validate(ctx: &BusCtx, state: &crate::state::BusState) -> AbResult<Val
             continue;
         }
         let trailers = crate::gitrepo::commit_message_trailers(repo, auth.candidate.as_str())?;
-        let reviewer_trailers: Vec<&(String, String)> =
-            trailers.iter().filter(|(k, _)| k == "Agent-Bus-Reviewer").collect();
+        let reviewer_trailers: Vec<&(String, String)> = trailers
+            .iter()
+            .filter(|(k, _)| k == "Agent-Bus-Reviewer")
+            .collect();
         if reviewer_trailers.len() != 1 || reviewer_trailers[0].1 != env.agent.as_str() {
             invalid_items.push(serde_json::json!({
                 "event": env.id.to_string(),
@@ -127,7 +151,8 @@ fn linked_validate(ctx: &BusCtx, state: &crate::state::BusState) -> AbResult<Val
         // byte-exact match, exactly like `review authorize` does at
         // publication time — this is what catches a `review.merge_authorized`
         // line appended by a direct push that bypassed `authorize` entirely.
-        let objects_present = crate::gitrepo::rev_parse_opt(repo, auth.previous_main.as_str())?.is_some()
+        let objects_present = crate::gitrepo::rev_parse_opt(repo, auth.previous_main.as_str())?
+            .is_some()
             && crate::gitrepo::rev_parse_opt(repo, auth.reviewed_commit.as_str())?.is_some();
         if !objects_present {
             unverifiable.push(serde_json::json!({
@@ -188,7 +213,8 @@ fn quarantine_scan(ctx: &BusCtx, reason: &str) -> AbResult<Value> {
     for a in agents {
         match validate_one_agent(ctx, &a) {
             Ok(()) => valid.push(a.to_string()),
-            Err(e) => quarantined.push(serde_json::json!({"agent": a.to_string(), "error": e.to_string()})),
+            Err(e) => quarantined
+                .push(serde_json::json!({"agent": a.to_string(), "error": e.to_string()})),
         }
     }
     Ok(serde_json::json!({
@@ -203,6 +229,27 @@ fn validate_one_agent(ctx: &BusCtx, agent: &Agent) -> AbResult<()> {
     let dir = worktree_snapshot(ctx)?;
     crate::storage::read_agent_log(&dir, agent)?;
     Ok(())
+}
+
+/// A read-only checkout of the current `agent-bus` tip, for quarantine-mode
+/// per-agent structural scanning (which needs plain files on disk).
+fn worktree_snapshot(ctx: &BusCtx) -> AbResult<std::path::PathBuf> {
+    let path = ctx.worktrees_root()?.join("_validate_snapshot");
+    if path.exists() {
+        crate::gitrepo::run_ok(
+            &path,
+            &[
+                "fetch",
+                ctx.repo_root.to_string_lossy().as_ref(),
+                crate::bus::BUS_BRANCH,
+            ],
+        )?;
+        let tip = crate::gitrepo::rev_parse(&ctx.repo_root, crate::bus::BUS_BRANCH)?;
+        crate::gitrepo::checkout_detach(&path, &tip)?;
+    } else {
+        crate::gitrepo::ensure_bus_worktree(&ctx.repo_root, &path, crate::bus::BUS_BRANCH)?;
+    }
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -230,7 +277,10 @@ mod tests {
     // below for that scenario.
 
     fn fake_ctx() -> BusCtx {
-        BusCtx { repo_root: PathBuf::from("fake-repo"), has_origin: false }
+        BusCtx {
+            repo_root: PathBuf::from("fake-repo"),
+            has_origin: false,
+        }
     }
 
     fn empty_state() -> BusState {
@@ -242,13 +292,20 @@ mod tests {
     /// `authors`, reviewer `reviewer`) directly into `state`, bypassing
     /// `apply::replay` entirely — every field on `ReviewChain`/`BusState` is
     /// `pub`, so a unit test can just build the state it needs.
-    fn insert_chain(state: &mut BusState, nomination: &EventId, authors: Vec<Agent>, reviewer: &Agent) {
+    fn insert_chain(
+        state: &mut BusState,
+        nomination: &EventId,
+        authors: Vec<Agent>,
+        reviewer: &Agent,
+    ) {
         let request = ReviewRequest {
             authors: StringSet::from_iter(authors),
             product_branch: Branch::parse("refs/heads/agent/alice/feature".to_string()).unwrap(),
             reviewer: reviewer.clone(),
             required_checks: vec![],
-            review_scope: StringSet::from_iter(vec![PathClaim::parse("feature.txt".to_string()).unwrap()]),
+            review_scope: StringSet::from_iter(vec![
+                PathClaim::parse("feature.txt".to_string()).unwrap()
+            ]),
             summary: Text::parse("s".into()).unwrap(),
             target_branch: Branch::parse("refs/heads/main".to_string()).unwrap(),
             evidence: StringSet::default(),
@@ -273,15 +330,33 @@ mod tests {
                 reconciled: vec![],
             },
         );
-        state.review_chain_by_nomination.insert(nomination.clone(), nomination.clone());
+        state
+            .review_chain_by_nomination
+            .insert(nomination.clone(), nomination.clone());
     }
 
-    fn insert_authorization(state: &mut BusState, reviewer: &Agent, seq: u64, auth: ReviewMergeAuthorized) {
-        let env = Envelope::new(reviewer, seq, None, &EventData::ReviewMergeAuthorized(auth), []);
+    fn insert_authorization(
+        state: &mut BusState,
+        reviewer: &Agent,
+        seq: u64,
+        auth: ReviewMergeAuthorized,
+    ) {
+        let env = Envelope::new(
+            reviewer,
+            seq,
+            None,
+            &EventData::ReviewMergeAuthorized(auth),
+            [],
+        );
         state.events.insert(env.id.clone(), env);
     }
 
-    fn sample_auth(nomination: &EventId, previous_main: &str, reviewed_commit: &str, candidate: &str) -> ReviewMergeAuthorized {
+    fn sample_auth(
+        nomination: &EventId,
+        previous_main: &str,
+        reviewed_commit: &str,
+        candidate: &str,
+    ) -> ReviewMergeAuthorized {
         ReviewMergeAuthorized {
             nomination: nomination.clone(),
             product_branch: Branch::parse("refs/heads/agent/alice/feature".to_string()).unwrap(),
@@ -292,7 +367,9 @@ mod tests {
             checks: vec![],
             finding_dispositions: vec![],
             evidence: StringSet::default(),
-            reviewed_scope: StringSet::from_iter(vec![PathClaim::parse("feature.txt".to_string()).unwrap()]),
+            reviewed_scope: StringSet::from_iter(vec![
+                PathClaim::parse("feature.txt".to_string()).unwrap()
+            ]),
             limitations: vec![],
             summary: Text::parse("s".into()).unwrap(),
         }
@@ -321,10 +398,20 @@ mod tests {
         let (prev, reviewed, candidate) = (hash(1), hash(2), hash(3));
         let mut state = empty_state();
         insert_chain(&mut state, &nomination, vec![a("alice")], &bob);
-        insert_authorization(&mut state, &bob, 2, sample_auth(&nomination, &prev, &reviewed, &candidate));
+        insert_authorization(
+            &mut state,
+            &bob,
+            2,
+            sample_auth(&nomination, &prev, &reviewed, &candidate),
+        );
 
         let tag = format!("refs/tags/agent-candidate/bob/{candidate}");
-        let _guard = MockGit::new().on(&["rev-parse", "--verify", "--quiet", &tag], GitOutput::err("")).install();
+        let _guard = MockGit::new()
+            .on(
+                &["rev-parse", "--verify", "--quiet", &tag],
+                GitOutput::err(""),
+            )
+            .install();
 
         let result = linked_validate(&fake_ctx(), &state).unwrap();
         assert_eq!(result["invalid"].as_array().unwrap().len(), 0);
@@ -340,18 +427,32 @@ mod tests {
         let (prev, reviewed, candidate) = (hash(1), hash(2), hash(3));
         let mut state = empty_state();
         insert_chain(&mut state, &nomination, vec![a("alice")], &bob);
-        insert_authorization(&mut state, &bob, 2, sample_auth(&nomination, &prev, &reviewed, &candidate));
+        insert_authorization(
+            &mut state,
+            &bob,
+            2,
+            sample_auth(&nomination, &prev, &reviewed, &candidate),
+        );
 
         let tag = format!("refs/tags/agent-candidate/bob/{candidate}");
         let _guard = MockGit::new()
-            .on(&["rev-parse", "--verify", "--quiet", &tag], GitOutput::ok(candidate.clone()))
-            .on(&["show", "-s", "--format=%P", &candidate], GitOutput::ok(format!("{} {}", hash(9), reviewed)))
+            .on(
+                &["rev-parse", "--verify", "--quiet", &tag],
+                GitOutput::ok(candidate.clone()),
+            )
+            .on(
+                &["show", "-s", "--format=%P", &candidate],
+                GitOutput::ok(format!("{} {}", hash(9), reviewed)),
+            )
             .install();
 
         let result = linked_validate(&fake_ctx(), &state).unwrap();
         let invalid = result["invalid"].as_array().unwrap();
         assert_eq!(invalid.len(), 1);
-        assert!(invalid[0]["problem"].as_str().unwrap().contains("candidate parents do not match"));
+        assert!(invalid[0]["problem"]
+            .as_str()
+            .unwrap()
+            .contains("candidate parents do not match"));
         assert_eq!(result["unverifiable"].as_array().unwrap().len(), 0);
     }
 
@@ -362,13 +463,27 @@ mod tests {
         let (prev, reviewed, candidate) = (hash(1), hash(2), hash(3));
         let mut state = empty_state();
         insert_chain(&mut state, &nomination, vec![a("alice")], &bob);
-        insert_authorization(&mut state, &bob, 2, sample_auth(&nomination, &prev, &reviewed, &candidate));
+        insert_authorization(
+            &mut state,
+            &bob,
+            2,
+            sample_auth(&nomination, &prev, &reviewed, &candidate),
+        );
 
         let tag = format!("refs/tags/agent-candidate/bob/{candidate}");
         let mut mock = MockGit::new()
-            .on(&["rev-parse", "--verify", "--quiet", &tag], GitOutput::ok(candidate.clone()))
-            .on(&["show", "-s", "--format=%P", &candidate], GitOutput::ok(format!("{prev} {reviewed}")))
-            .on(&["show", "-s", "--format=%B", &candidate], GitOutput::ok("candidate commit, no trailer".to_string()));
+            .on(
+                &["rev-parse", "--verify", "--quiet", &tag],
+                GitOutput::ok(candidate.clone()),
+            )
+            .on(
+                &["show", "-s", "--format=%P", &candidate],
+                GitOutput::ok(format!("{prev} {reviewed}")),
+            )
+            .on(
+                &["show", "-s", "--format=%B", &candidate],
+                GitOutput::ok("candidate commit, no trailer".to_string()),
+            );
         mock = generic_interpret_trailers(mock);
         let _guard = mock.install();
 
@@ -395,13 +510,27 @@ mod tests {
         let (prev, reviewed, candidate) = (hash(1), hash(2), hash(3));
         let mut state = empty_state();
         insert_chain(&mut state, &nomination, vec![a("alice")], &bob);
-        insert_authorization(&mut state, &bob, 2, sample_auth(&nomination, &prev, &reviewed, &candidate));
+        insert_authorization(
+            &mut state,
+            &bob,
+            2,
+            sample_auth(&nomination, &prev, &reviewed, &candidate),
+        );
 
         let tag = format!("refs/tags/agent-candidate/bob/{candidate}");
         let mut mock = MockGit::new()
-            .on(&["rev-parse", "--verify", "--quiet", &tag], GitOutput::ok(candidate.clone()))
-            .on(&["show", "-s", "--format=%P", &candidate], GitOutput::ok(format!("{prev} {reviewed}")))
-            .on(&["show", "-s", "--format=%B", &candidate], GitOutput::ok("candidate\n\nAgent-Bus-Reviewer: mallory".to_string()));
+            .on(
+                &["rev-parse", "--verify", "--quiet", &tag],
+                GitOutput::ok(candidate.clone()),
+            )
+            .on(
+                &["show", "-s", "--format=%P", &candidate],
+                GitOutput::ok(format!("{prev} {reviewed}")),
+            )
+            .on(
+                &["show", "-s", "--format=%B", &candidate],
+                GitOutput::ok("candidate\n\nAgent-Bus-Reviewer: mallory".to_string()),
+            );
         mock = generic_interpret_trailers(mock);
         let _guard = mock.install();
 
@@ -421,16 +550,36 @@ mod tests {
         let (prev, reviewed, candidate) = (hash(1), hash(2), hash(3));
         let mut state = empty_state();
         insert_chain(&mut state, &nomination, vec![a("alice")], &bob);
-        insert_authorization(&mut state, &bob, 2, sample_auth(&nomination, &prev, &reviewed, &candidate));
+        insert_authorization(
+            &mut state,
+            &bob,
+            2,
+            sample_auth(&nomination, &prev, &reviewed, &candidate),
+        );
 
         let tag = format!("refs/tags/agent-candidate/bob/{candidate}");
         let mut mock = MockGit::new()
-            .on(&["rev-parse", "--verify", "--quiet", &tag], GitOutput::ok(candidate.clone()))
-            .on(&["show", "-s", "--format=%P", &candidate], GitOutput::ok(format!("{prev} {reviewed}")))
-            .on(&["show", "-s", "--format=%B", &candidate], GitOutput::ok(format!("candidate\n\nAgent-Bus-Reviewer: bob")))
+            .on(
+                &["rev-parse", "--verify", "--quiet", &tag],
+                GitOutput::ok(candidate.clone()),
+            )
+            .on(
+                &["show", "-s", "--format=%P", &candidate],
+                GitOutput::ok(format!("{prev} {reviewed}")),
+            )
+            .on(
+                &["show", "-s", "--format=%B", &candidate],
+                GitOutput::ok("candidate\n\nAgent-Bus-Reviewer: bob"),
+            )
             // previous_main is fetchable, reviewed_commit is not.
-            .on(&["rev-parse", "--verify", "--quiet", &prev], GitOutput::ok(prev.clone()))
-            .on(&["rev-parse", "--verify", "--quiet", &reviewed], GitOutput::err(""));
+            .on(
+                &["rev-parse", "--verify", "--quiet", &prev],
+                GitOutput::ok(prev.clone()),
+            )
+            .on(
+                &["rev-parse", "--verify", "--quiet", &reviewed],
+                GitOutput::err(""),
+            );
         mock = generic_interpret_trailers(mock);
         let _guard = mock.install();
 
@@ -438,7 +587,10 @@ mod tests {
         assert_eq!(result["invalid"].as_array().unwrap().len(), 0);
         let unverifiable = result["unverifiable"].as_array().unwrap();
         assert_eq!(unverifiable.len(), 1);
-        assert!(unverifiable[0]["missing"].as_str().unwrap().contains("not fetchable locally"));
+        assert!(unverifiable[0]["missing"]
+            .as_str()
+            .unwrap()
+            .contains("not fetchable locally"));
     }
 
     #[test]
@@ -448,22 +600,45 @@ mod tests {
         let nomination = EventId::parse("alice:2".to_string()).unwrap();
         let (prev, reviewed, candidate) = (hash(1), hash(2), hash(3));
         let mut state = empty_state();
-        insert_authorization(&mut state, &bob, 2, sample_auth(&nomination, &prev, &reviewed, &candidate));
+        insert_authorization(
+            &mut state,
+            &bob,
+            2,
+            sample_auth(&nomination, &prev, &reviewed, &candidate),
+        );
 
         let tag = format!("refs/tags/agent-candidate/bob/{candidate}");
         let mut mock = MockGit::new()
-            .on(&["rev-parse", "--verify", "--quiet", &tag], GitOutput::ok(candidate.clone()))
-            .on(&["show", "-s", "--format=%P", &candidate], GitOutput::ok(format!("{prev} {reviewed}")))
-            .on(&["show", "-s", "--format=%B", &candidate], GitOutput::ok("candidate\n\nAgent-Bus-Reviewer: bob".to_string()))
-            .on(&["rev-parse", "--verify", "--quiet", &prev], GitOutput::ok(prev.clone()))
-            .on(&["rev-parse", "--verify", "--quiet", &reviewed], GitOutput::ok(reviewed.clone()));
+            .on(
+                &["rev-parse", "--verify", "--quiet", &tag],
+                GitOutput::ok(candidate.clone()),
+            )
+            .on(
+                &["show", "-s", "--format=%P", &candidate],
+                GitOutput::ok(format!("{prev} {reviewed}")),
+            )
+            .on(
+                &["show", "-s", "--format=%B", &candidate],
+                GitOutput::ok("candidate\n\nAgent-Bus-Reviewer: bob".to_string()),
+            )
+            .on(
+                &["rev-parse", "--verify", "--quiet", &prev],
+                GitOutput::ok(prev.clone()),
+            )
+            .on(
+                &["rev-parse", "--verify", "--quiet", &reviewed],
+                GitOutput::ok(reviewed.clone()),
+            );
         mock = generic_interpret_trailers(mock);
         let _guard = mock.install();
 
         let result = linked_validate(&fake_ctx(), &state).unwrap();
         let invalid = result["invalid"].as_array().unwrap();
         assert_eq!(invalid.len(), 1);
-        assert!(invalid[0]["problem"].as_str().unwrap().contains("authorization's nomination is unknown"));
+        assert!(invalid[0]["problem"]
+            .as_str()
+            .unwrap()
+            .contains("authorization's nomination is unknown"));
     }
 
     #[test]
@@ -474,20 +649,43 @@ mod tests {
         let introduced = hash(4);
         let mut state = empty_state();
         insert_chain(&mut state, &nomination, vec![a("alice")], &bob);
-        insert_authorization(&mut state, &bob, 2, sample_auth(&nomination, &prev, &reviewed, &candidate));
+        insert_authorization(
+            &mut state,
+            &bob,
+            2,
+            sample_auth(&nomination, &prev, &reviewed, &candidate),
+        );
 
         let tag = format!("refs/tags/agent-candidate/bob/{candidate}");
         let range = format!("{prev}..{reviewed}");
         let mut mock = MockGit::new()
-            .on(&["rev-parse", "--verify", "--quiet", &tag], GitOutput::ok(candidate.clone()))
-            .on(&["show", "-s", "--format=%P", &candidate], GitOutput::ok(format!("{prev} {reviewed}")))
-            .on(&["show", "-s", "--format=%B", &candidate], GitOutput::ok("candidate\n\nAgent-Bus-Reviewer: bob".to_string()))
-            .on(&["rev-parse", "--verify", "--quiet", &prev], GitOutput::ok(prev.clone()))
-            .on(&["rev-parse", "--verify", "--quiet", &reviewed], GitOutput::ok(reviewed.clone()))
+            .on(
+                &["rev-parse", "--verify", "--quiet", &tag],
+                GitOutput::ok(candidate.clone()),
+            )
+            .on(
+                &["show", "-s", "--format=%P", &candidate],
+                GitOutput::ok(format!("{prev} {reviewed}")),
+            )
+            .on(
+                &["show", "-s", "--format=%B", &candidate],
+                GitOutput::ok("candidate\n\nAgent-Bus-Reviewer: bob".to_string()),
+            )
+            .on(
+                &["rev-parse", "--verify", "--quiet", &prev],
+                GitOutput::ok(prev.clone()),
+            )
+            .on(
+                &["rev-parse", "--verify", "--quiet", &reviewed],
+                GitOutput::ok(reviewed.clone()),
+            )
             .on(&["rev-list", &range], GitOutput::ok(introduced.clone()))
             // The lone introduced commit is authored by bob — the reviewer
             // himself — which `verify_authorship` must refuse.
-            .on(&["show", "-s", "--format=%B", &introduced], GitOutput::ok("work\n\nAgent-Bus-Agent: bob".to_string()));
+            .on(
+                &["show", "-s", "--format=%B", &introduced],
+                GitOutput::ok("work\n\nAgent-Bus-Agent: bob".to_string()),
+            );
         mock = generic_interpret_trailers(mock);
         let _guard = mock.install();
 
@@ -507,21 +705,47 @@ mod tests {
         let introduced = hash(4);
         let mut state = empty_state();
         insert_chain(&mut state, &nomination, vec![a("alice")], &bob);
-        insert_authorization(&mut state, &bob, 2, sample_auth(&nomination, &prev, &reviewed, &candidate));
+        insert_authorization(
+            &mut state,
+            &bob,
+            2,
+            sample_auth(&nomination, &prev, &reviewed, &candidate),
+        );
 
         let tag = format!("refs/tags/agent-candidate/bob/{candidate}");
         let range = format!("{prev}..{reviewed}");
         let mut mock = MockGit::new()
-            .on(&["rev-parse", "--verify", "--quiet", &tag], GitOutput::ok(candidate.clone()))
-            .on(&["show", "-s", "--format=%P", &candidate], GitOutput::ok(format!("{prev} {reviewed}")))
-            .on(&["show", "-s", "--format=%B", &candidate], GitOutput::ok("candidate\n\nAgent-Bus-Reviewer: bob".to_string()))
-            .on(&["rev-parse", "--verify", "--quiet", &prev], GitOutput::ok(prev.clone()))
-            .on(&["rev-parse", "--verify", "--quiet", &reviewed], GitOutput::ok(reviewed.clone()))
+            .on(
+                &["rev-parse", "--verify", "--quiet", &tag],
+                GitOutput::ok(candidate.clone()),
+            )
+            .on(
+                &["show", "-s", "--format=%P", &candidate],
+                GitOutput::ok(format!("{prev} {reviewed}")),
+            )
+            .on(
+                &["show", "-s", "--format=%B", &candidate],
+                GitOutput::ok("candidate\n\nAgent-Bus-Reviewer: bob".to_string()),
+            )
+            .on(
+                &["rev-parse", "--verify", "--quiet", &prev],
+                GitOutput::ok(prev.clone()),
+            )
+            .on(
+                &["rev-parse", "--verify", "--quiet", &reviewed],
+                GitOutput::ok(reviewed.clone()),
+            )
             .on(&["rev-list", &range], GitOutput::ok(introduced.clone()))
-            .on(&["show", "-s", "--format=%B", &introduced], GitOutput::ok("work\n\nAgent-Bus-Agent: alice".to_string()))
+            .on(
+                &["show", "-s", "--format=%B", &introduced],
+                GitOutput::ok("work\n\nAgent-Bus-Agent: alice".to_string()),
+            )
             // Two merge bases: `reconstruct_candidate` must refuse before
             // ever attempting `merge-tree`/`commit-tree`.
-            .on(&["merge-base", "--all", &prev, &reviewed], GitOutput::ok(format!("{}\n{}", hash(5), hash(6))));
+            .on(
+                &["merge-base", "--all", &prev, &reviewed],
+                GitOutput::ok(format!("{}\n{}", hash(5), hash(6))),
+            );
         mock = generic_interpret_trailers(mock);
         let _guard = mock.install();
 
@@ -530,7 +754,10 @@ mod tests {
         assert_eq!(invalid.len(), 1);
         let problem = invalid[0]["problem"].as_str().unwrap();
         assert!(problem.starts_with("reconstruction:"), "{problem}");
-        assert!(problem.contains("do not have exactly one merge base"), "{problem}");
+        assert!(
+            problem.contains("do not have exactly one merge base"),
+            "{problem}"
+        );
     }
 
     #[test]
@@ -576,7 +803,14 @@ mod tests {
         let previous_main = git(&path, &["rev-parse", "main"]);
         let feature = author_commit(&path, &previous_main, "feature.txt", "content\n", "alice");
         git(&path, &["checkout", "--quiet", "main"]);
-        let nomination = nominate(&ctx, &alice, &bob, "refs/heads/agent/alice/feature", &["feature.txt"], &["build"]);
+        let nomination = nominate(
+            &ctx,
+            &alice,
+            &bob,
+            "refs/heads/agent/alice/feature",
+            &["feature.txt"],
+            &["build"],
+        );
         take(&ctx, &bob, &nomination);
         let mut state = ctx.load_state().unwrap();
 
@@ -586,9 +820,25 @@ mod tests {
         let tree = git(&path, &["rev-parse", &format!("{feature}^{{tree}}")]);
         let wrong_candidate = git(
             &path,
-            &["commit-tree", &tree, "-p", &previous_main, "-p", &feature, "-m", "hand-built\n\nAgent-Bus-Reviewer: bob"],
+            &[
+                "commit-tree",
+                &tree,
+                "-p",
+                &previous_main,
+                "-p",
+                &feature,
+                "-m",
+                "hand-built\n\nAgent-Bus-Reviewer: bob",
+            ],
         );
-        git(&path, &["tag", &format!("agent-candidate/bob/{wrong_candidate}"), &wrong_candidate]);
+        git(
+            &path,
+            &[
+                "tag",
+                &format!("agent-candidate/bob/{wrong_candidate}"),
+                &wrong_candidate,
+            ],
+        );
 
         let auth = sample_auth(&nomination, &previous_main, &feature, &wrong_candidate);
         insert_authorization(&mut state, &bob, 2, auth);
@@ -597,7 +847,12 @@ mod tests {
         let invalid = result["invalid"].as_array().unwrap();
         assert_eq!(invalid.len(), 1, "{invalid:?}");
         let problem = invalid[0]["problem"].as_str().unwrap();
-        assert!(problem.contains(&format!("candidate {wrong_candidate} does not match reconstruction")), "{problem}");
+        assert!(
+            problem.contains(&format!(
+                "candidate {wrong_candidate} does not match reconstruction"
+            )),
+            "{problem}"
+        );
     }
 
     #[test]
@@ -618,7 +873,8 @@ mod tests {
         // The top-level dispatcher's `Some(range) => validate_incremental`
         // arm is otherwise never exercised (`tests/cli_flow.rs` only calls
         // full, non-incremental `validate`).
-        validate(&ctx, Some(&range), false, false, false).expect("incremental validate via the CLI-level dispatcher");
+        validate(&ctx, Some(&range), false, false, false)
+            .expect("incremental validate via the CLI-level dispatcher");
     }
 
     #[test]
@@ -636,7 +892,15 @@ mod tests {
         existing.push_str("not-json-at-all\n");
         std::fs::write(&log_path, existing).unwrap();
         git(alice_wt, &["add", "-A"]);
-        git(alice_wt, &["commit", "-q", "-m", "agent-bus: corrupt alice log for a quarantine test"]);
+        git(
+            alice_wt,
+            &[
+                "commit",
+                "-q",
+                "-m",
+                "agent-bus: corrupt alice log for a quarantine test",
+            ],
+        );
         git(alice_wt, &["push", ".", "HEAD:refs/heads/agent-bus"]);
     }
 
@@ -658,27 +922,21 @@ mod tests {
         validate(&ctx, None, false, true, false).expect("quarantine mode must itself succeed");
 
         let summary = quarantine_scan(&ctx, "boom").unwrap();
-        let quarantined: Vec<String> =
-            summary["quarantined"].as_array().unwrap().iter().map(|q| q["agent"].as_str().unwrap().to_string()).collect();
+        let quarantined: Vec<String> = summary["quarantined"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|q| q["agent"].as_str().unwrap().to_string())
+            .collect();
         assert_eq!(quarantined, vec!["alice".to_string()]);
-        let valid: Vec<String> =
-            summary["valid_agents"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+        let valid: Vec<String> = summary["valid_agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
         assert!(valid.contains(&"coord1".to_string()), "{valid:?}");
         assert!(valid.contains(&"bob".to_string()), "{valid:?}");
         assert!(!valid.contains(&"alice".to_string()), "{valid:?}");
     }
-}
-
-/// A read-only checkout of the current `agent-bus` tip, for quarantine-mode
-/// per-agent structural scanning (which needs plain files on disk).
-fn worktree_snapshot(ctx: &BusCtx) -> AbResult<std::path::PathBuf> {
-    let path = ctx.worktrees_root()?.join("_validate_snapshot");
-    if path.exists() {
-        crate::gitrepo::run_ok(&path, &["fetch", ctx.repo_root.to_string_lossy().as_ref(), crate::bus::BUS_BRANCH])?;
-        let tip = crate::gitrepo::rev_parse(&ctx.repo_root, crate::bus::BUS_BRANCH)?;
-        crate::gitrepo::checkout_detach(&path, &tip)?;
-    } else {
-        crate::gitrepo::ensure_bus_worktree(&ctx.repo_root, &path, crate::bus::BUS_BRANCH)?;
-    }
-    Ok(path)
 }

@@ -32,15 +32,17 @@ Run the repository's current consistency check from its root:
 
 ```powershell
 lake build
-lake build GrassTests
+lake build Tests
 pwsh ./audit-trust.ps1
 pwsh ./check-spike-sources.ps1
 pwsh ./check-doc-links.ps1
 ```
 
-These check that every spike code block is classified, that each authored Lean
-block exactly matches its file under `Spikes/`, and that relative documentation
-targets exist. They are not a Lean build or an end-to-end proof check.
+The Lake commands compile the Lean libraries, and the trust command audits
+project declarations and named public roots for rejected transitive axioms.
+The last two commands classify spike code, compare authored blocks with their
+files under `Spikes/`, and check relative documentation targets. None of these
+commands is an end-to-end proof of the eventual assembler or executable.
 
 ## Review
 

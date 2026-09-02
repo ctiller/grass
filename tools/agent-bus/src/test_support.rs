@@ -77,7 +77,10 @@ pub fn init_repo() -> tempfile::TempDir {
 /// `coordinators`, `product_review_from` set to the repo's current `main`.
 pub fn bootstrap(dir: &Path, coordinators: &[&str]) -> BusCtx {
     let root = git(dir, &["rev-parse", "HEAD"]);
-    let ctx = BusCtx { repo_root: dir.to_path_buf(), has_origin: false };
+    let ctx = BusCtx {
+        repo_root: dir.to_path_buf(),
+        has_origin: false,
+    };
     let coords: Vec<Agent> = coordinators.iter().map(|s| a(s)).collect();
     bus::bootstrap_init(&ctx, &coords, &ObjectId::parse(root).unwrap()).unwrap();
     ctx
@@ -118,8 +121,15 @@ pub fn nominate(
         authors: StringSet::from_iter(vec![author.clone()]),
         product_branch: Branch::parse(product_branch.to_string()).unwrap(),
         reviewer: reviewer.clone(),
-        required_checks: required_checks.iter().map(|c| Text::parse(c.to_string()).unwrap()).collect(),
-        review_scope: StringSet::from_iter(review_scope.iter().map(|p| PathClaim::parse(p.to_string()).unwrap())),
+        required_checks: required_checks
+            .iter()
+            .map(|c| Text::parse(c.to_string()).unwrap())
+            .collect(),
+        review_scope: StringSet::from_iter(
+            review_scope
+                .iter()
+                .map(|p| PathClaim::parse(p.to_string()).unwrap()),
+        ),
         summary: Text::parse("add feature".into()).unwrap(),
         target_branch: Branch::parse("refs/heads/main".to_string()).unwrap(),
         evidence: StringSet::default(),
@@ -143,7 +153,15 @@ pub fn author_commit(dir: &Path, base: &str, path: &str, content: &str, author: 
     git(dir, &["checkout", "--quiet", "--detach", base]);
     std::fs::write(dir.join(path), content).unwrap();
     git(dir, &["add", path]);
-    git(dir, &["commit", "-q", "-m", &format!("work\n\nAgent-Bus-Agent: {author}")]);
+    git(
+        dir,
+        &[
+            "commit",
+            "-q",
+            "-m",
+            &format!("work\n\nAgent-Bus-Agent: {author}"),
+        ],
+    );
     git(dir, &["rev-parse", "HEAD"])
 }
 

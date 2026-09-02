@@ -159,18 +159,28 @@ pub(crate) fn verify_authorship(
     previous_main: &str,
     reviewed_commit: &str,
 ) -> AbResult<Vec<String>> {
-    let introduced = crate::gitrepo::commits_between_first_parent_exclusive(repo, previous_main, reviewed_commit)?;
+    let introduced = crate::gitrepo::commits_between_first_parent_exclusive(
+        repo,
+        previous_main,
+        reviewed_commit,
+    )?;
     if introduced.is_empty() {
-        return Err(invalid("reviewed_commit introduces no content over previous_main"));
+        return Err(invalid(
+            "reviewed_commit introduces no content over previous_main",
+        ));
     }
     let mut authors = BTreeSet::new();
     for c in &introduced {
         let a = commit_authors(repo, c)?;
         if a.is_empty() {
-            return Err(invalid(format!("commit {c} has no Agent-Bus-Agent trailer")));
+            return Err(invalid(format!(
+                "commit {c} has no Agent-Bus-Agent trailer"
+            )));
         }
         if a.contains(reviewer) {
-            return Err(invalid(format!("reviewer {reviewer} authored commit {c}; ineligible to merge")));
+            return Err(invalid(format!(
+                "reviewer {reviewer} authored commit {c}; ineligible to merge"
+            )));
         }
         authors.extend(a);
     }
@@ -194,16 +204,28 @@ pub(crate) fn reconstruct_candidate(
     reviewer: &Agent,
 ) -> AbResult<String> {
     if crate::gitrepo::merge_base_count(repo, previous_main, reviewed_commit)? != 1 {
-        return Err(invalid("previous_main and reviewed_commit do not have exactly one merge base"));
+        return Err(invalid(
+            "previous_main and reviewed_commit do not have exactly one merge base",
+        ));
     }
     let tree = crate::gitrepo::merge_tree_write_tree(repo, previous_main, reviewed_commit)?;
     let message = format!("agent-bus candidate\n\nAgent-Bus-Reviewer: {reviewer}\n");
-    crate::gitrepo::commit_tree_deterministic(repo, &tree, &[previous_main, reviewed_commit], &message)
+    crate::gitrepo::commit_tree_deterministic(
+        repo,
+        &tree,
+        &[previous_main, reviewed_commit],
+        &message,
+    )
 }
 
 /// AGENT_REVIEW.md section 7: construct the no-conflict candidate merge
 /// commit and publish its immutable candidate tag.
-pub fn prepare_merge(ctx: &BusCtx, agent: &str, nomination: &str, reviewed_commit: &str) -> AbResult<()> {
+pub fn prepare_merge(
+    ctx: &BusCtx,
+    agent: &str,
+    nomination: &str,
+    reviewed_commit: &str,
+) -> AbResult<()> {
     let reviewer = Agent::parse(agent.to_string())?;
     let nomination = EventId::parse(nomination.to_string())?;
     let reviewed_commit = ObjectId::parse(reviewed_commit.to_string())?;
@@ -222,13 +244,30 @@ pub fn prepare_merge(ctx: &BusCtx, agent: &str, nomination: &str, reviewed_commi
     let repo = &ctx.repo_root;
     let previous_main = crate::gitrepo::rev_parse(repo, "refs/heads/main")?;
     let expected_authors: BTreeSet<Agent> = chain.current_request.authors.iter().cloned().collect();
-    verify_authorship(repo, &reviewer, &expected_authors, &previous_main, reviewed_commit.as_str())?;
+    verify_authorship(
+        repo,
+        &reviewer,
+        &expected_authors,
+        &previous_main,
+        reviewed_commit.as_str(),
+    )?;
 
-    let candidate = reconstruct_candidate(repo, &previous_main, reviewed_commit.as_str(), &reviewer)?;
+    let candidate =
+        reconstruct_candidate(repo, &previous_main, reviewed_commit.as_str(), &reviewer)?;
     let tag = format!("agent-candidate/{reviewer}/{candidate}");
     crate::gitrepo::tag_lightweight(repo, &tag, &candidate)?;
+    // g-reviewer:4: a candidate whose tag never reached origin cannot be
+    // fetched or verified by any other agent (or `--linked` validator) --
+    // that must fail `prepare-merge` outright, not silently proceed to print
+    // a `candidate` line the reviewer might go on to authorize anyway.
     if ctx.has_origin {
-        let _ = crate::gitrepo::run(repo, &["push", "origin", &format!("refs/tags/{tag}")]);
+        let out = crate::gitrepo::run(repo, &["push", "origin", &format!("refs/tags/{tag}")])?;
+        if !out.success {
+            return Err(invalid(format!(
+                "failed to publish candidate tag refs/tags/{tag} to origin: {}",
+                out.stderr
+            )));
+        }
     }
     println!("candidate {candidate}");
     println!("previous_main {previous_main}");
@@ -261,19 +300,35 @@ pub fn authorize(ctx: &BusCtx, agent: &str, file: &str) -> AbResult<()> {
         data.previous_main.as_str(),
         data.reviewed_commit.as_str(),
     )?;
-    let reconstructed = reconstruct_candidate(repo, data.previous_main.as_str(), data.reviewed_commit.as_str(), &reviewer)?;
+    let reconstructed = reconstruct_candidate(
+        repo,
+        data.previous_main.as_str(),
+        data.reviewed_commit.as_str(),
+        &reviewer,
+    )?;
     if reconstructed != data.candidate.as_str() {
         return Err(invalid(format!(
             "candidate {} does not match the deterministic reconstruction {reconstructed} from previous_main/reviewed_commit/reviewer",
             data.candidate
         )));
     }
-    if !crate::gitrepo::tag_exists_at(
-        repo,
-        &format!("agent-candidate/{reviewer}/{}", data.candidate),
-        data.candidate.as_str(),
-    )? {
-        return Err(invalid("candidate tag is not fetchable before authorization"));
+    let tag = format!("agent-candidate/{reviewer}/{}", data.candidate);
+    if !crate::gitrepo::tag_exists_at(repo, &tag, data.candidate.as_str())? {
+        return Err(invalid(
+            "candidate tag is not fetchable before authorization",
+        ));
+    }
+    // g-reviewer:4: local presence alone proves nothing about whether any
+    // *other* agent (or a `--linked` validator elsewhere) can fetch this
+    // candidate -- only origin can. Without this, a candidate tag that
+    // failed to push (or was later deleted from origin) could still pass
+    // authorization on the strength of the reviewer's own local clone.
+    if ctx.has_origin
+        && !crate::gitrepo::remote_tag_matches(repo, "origin", &tag, data.candidate.as_str())?
+    {
+        return Err(invalid(format!(
+            "candidate tag refs/tags/{tag} is not fetchable from origin; other agents could not verify this merge"
+        )));
     }
 
     let mut refs = vec![data.nomination.clone(), data.merge_engine_epoch.clone()];
@@ -297,27 +352,42 @@ pub fn merge_ready(ctx: &BusCtx, agent: &str, authorization: &str, json: bool) -
         .ok_or_else(|| invalid(format!("unknown authorization {authorization}")))?;
     let auth: ReviewMergeAuthorized = match auth_env.typed_data()? {
         EventData::ReviewMergeAuthorized(d) => d,
-        _ => return Err(invalid(format!("{authorization} is not a review.merge_authorized event"))),
+        _ => {
+            return Err(invalid(format!(
+                "{authorization} is not a review.merge_authorized event"
+            )))
+        }
     };
     if auth_env.agent != reviewer {
-        return Err(invalid("authorization was not published by the given reviewer"));
+        return Err(invalid(
+            "authorization was not published by the given reviewer",
+        ));
     }
     let chain = state
         .review_chain(&auth.nomination)
         .ok_or_else(|| invalid("unknown nomination for this authorization"))?;
     if chain.current_request.reviewer != reviewer || !chain.accepted() {
-        return Err(invalid("reviewer is not the accepted eligible reviewer for this nomination"));
+        return Err(invalid(
+            "reviewer is not the accepted eligible reviewer for this nomination",
+        ));
     }
-    for (_, f) in chain.findings.iter() {
+    for f in chain.findings.values() {
         if f.disposition == FindingDisposition::Open {
-            return Err(invalid(format!("finding {} has no terminal disposition", f.finding_id)));
+            return Err(invalid(format!(
+                "finding {} has no terminal disposition",
+                f.finding_id
+            )));
         }
     }
     if let Some(blocking) = crate::apply::blocking_issue_for_chain(&state, chain) {
-        return Err(invalid(format!("issue {blocking} explicitly blocks this nomination chain")));
+        return Err(invalid(format!(
+            "issue {blocking} explicitly blocks this nomination chain"
+        )));
     }
     if auth.reviewed_scope != chain.current_request.review_scope {
-        return Err(invalid("authorization reviewed_scope does not exactly equal the nomination's review_scope"));
+        return Err(invalid(
+            "authorization reviewed_scope does not exactly equal the nomination's review_scope",
+        ));
     }
     let repo = &ctx.repo_root;
     let current_main = crate::gitrepo::rev_parse(repo, "refs/heads/main")?;
@@ -328,19 +398,32 @@ pub fn merge_ready(ctx: &BusCtx, agent: &str, authorization: &str, json: bool) -
         )));
     }
     let parents = crate::gitrepo::parents_of(repo, auth.candidate.as_str())?;
-    if parents != vec![auth.previous_main.as_str().to_string(), auth.reviewed_commit.as_str().to_string()] {
-        return Err(invalid("candidate parents do not match previous_main/reviewed_commit in order"));
+    if parents
+        != vec![
+            auth.previous_main.as_str().to_string(),
+            auth.reviewed_commit.as_str().to_string(),
+        ]
+    {
+        return Err(invalid(
+            "candidate parents do not match previous_main/reviewed_commit in order",
+        ));
     }
     let trailers = crate::gitrepo::commit_message_trailers(repo, auth.candidate.as_str())?;
-    let reviewer_trailers: Vec<&(String, String)> =
-        trailers.iter().filter(|(k, _)| k == "Agent-Bus-Reviewer").collect();
+    let reviewer_trailers: Vec<&(String, String)> = trailers
+        .iter()
+        .filter(|(k, _)| k == "Agent-Bus-Reviewer")
+        .collect();
     if reviewer_trailers.len() != 1 || reviewer_trailers[0].1 != reviewer.as_str() {
-        return Err(invalid("candidate must have exactly one matching Agent-Bus-Reviewer trailer"));
+        return Err(invalid(
+            "candidate must have exactly one matching Agent-Bus-Reviewer trailer",
+        ));
     }
     let changed = crate::gitrepo::diff_name_status(repo, &current_main, auth.candidate.as_str())?;
     for (_, path) in &changed {
         if !auth.reviewed_scope.iter().any(|p| path_in_claim(path, p)) {
-            return Err(invalid(format!("changed path {path} is outside reviewed_scope")));
+            return Err(invalid(format!(
+                "changed path {path} is outside reviewed_scope"
+            )));
         }
     }
     for c in &auth.checks {
@@ -350,7 +433,10 @@ pub fn merge_ready(ctx: &BusCtx, agent: &str, authorization: &str, json: bool) -
     }
 
     if json {
-        println!("{}", serde_json::json!({"ready": true, "candidate": auth.candidate.as_str()}));
+        println!(
+            "{}",
+            serde_json::json!({"ready": true, "candidate": auth.candidate.as_str()})
+        );
     } else {
         println!("merge-ready: {}", auth.candidate);
     }
@@ -371,11 +457,15 @@ pub fn merged(ctx: &BusCtx, agent: &str, file: &str) -> AbResult<()> {
     let repo = &ctx.repo_root;
     let parents = crate::gitrepo::parents_of(repo, data.main_commit.as_str())?;
     if parents.first().map(|s| s.as_str()) != Some(data.previous_main.as_str()) {
-        return Err(invalid("main_commit's first parent does not match previous_main"));
+        return Err(invalid(
+            "main_commit's first parent does not match previous_main",
+        ));
     }
     let current_main = crate::gitrepo::rev_parse(repo, "refs/heads/main")?;
     if current_main != data.main_commit.as_str() {
-        return Err(invalid("refs/heads/main does not currently equal main_commit"));
+        return Err(invalid(
+            "refs/heads/main does not currently equal main_commit",
+        ));
     }
     let refs = vec![data.authorization.clone()];
     let env = bus::publish_event(ctx, &reviewer, EventData::ReviewMerged(data), refs)?;
@@ -388,17 +478,25 @@ pub fn reconcile(ctx: &BusCtx, agent: &str, file: &str) -> AbResult<()> {
     let v = bus::read_json_file(std::path::Path::new(file))?;
     let data: ReviewMergeReconciled = from_value(v)?;
     let repo = &ctx.repo_root;
-    let is_first_parent_of_main =
-        crate::gitrepo::rev_list_first_parent(repo, data.previous_main.as_str(), "refs/heads/main")?
-            .iter()
-            .any(|c| c == data.main_commit.as_str());
+    let is_first_parent_of_main = crate::gitrepo::rev_list_first_parent(
+        repo,
+        data.previous_main.as_str(),
+        "refs/heads/main",
+    )?
+    .iter()
+    .any(|c| c == data.main_commit.as_str());
     if !is_first_parent_of_main {
         return Err(invalid(
             "main_commit is not a first-parent successor of previous_main on current main",
         ));
     }
     let refs = vec![data.authorization.clone()];
-    let env = bus::publish_event(ctx, &coordinator, EventData::ReviewMergeReconciled(data), refs)?;
+    let env = bus::publish_event(
+        ctx,
+        &coordinator,
+        EventData::ReviewMergeReconciled(data),
+        refs,
+    )?;
     println!("published {}", env.id);
     Ok(())
 }
@@ -411,6 +509,17 @@ pub fn reconcile(ctx: &BusCtx, agent: &str, file: &str) -> AbResult<()> {
 /// introduced commit's authorship trailers directly — so a hand-crafted merge
 /// commit that merely carries a plausible `Agent-Bus-Reviewer` trailer cannot
 /// pass as authorized.
+///
+/// Known, accepted gap: a commit that landed on `main` through ordinary git
+/// *before* this protocol was ever wired up in a given repository (i.e.
+/// between `bootstrap-init`'s `product_review_from` and that repository's
+/// first real review-authorized candidate) will not be shaped as a
+/// two-parent review-candidate merge, and audit-main will flag it as such.
+/// This is a one-time adoption artifact, not a code defect: `main`'s history
+/// prior to actual agent-bus adoption cannot retroactively become
+/// protocol-compliant. Treat any audit-main finding whose commit predates a
+/// repository's first successful `review merged` receipt as this known
+/// bootstrap gap rather than a live regression.
 pub fn audit_main(ctx: &BusCtx, to: Option<&str>, json: bool) -> AbResult<()> {
     let findings = audit_main_findings(ctx, to)?;
 
@@ -435,7 +544,8 @@ fn audit_main_findings(ctx: &BusCtx, to: Option<&str>) -> AbResult<Vec<Value>> {
     let to = to.unwrap_or("refs/heads/main").to_string();
     let state = ctx.load_state()?;
 
-    let commits = crate::gitrepo::rev_list_first_parent(repo, bus_json.product_review_from.as_str(), &to)?;
+    let commits =
+        crate::gitrepo::rev_list_first_parent(repo, bus_json.product_review_from.as_str(), &to)?;
     let mut findings = Vec::new();
     let mut previous = bus_json.product_review_from.as_str().to_string();
     for commit in commits {
@@ -450,8 +560,10 @@ fn audit_main_findings(ctx: &BusCtx, to: Option<&str>) -> AbResult<Vec<Value>> {
         }
         let reviewed_commit = parents[1].clone();
         let trailers = crate::gitrepo::commit_message_trailers(repo, &commit)?;
-        let reviewer_trailers: Vec<&(String, String)> =
-            trailers.iter().filter(|(k, _)| k == "Agent-Bus-Reviewer").collect();
+        let reviewer_trailers: Vec<&(String, String)> = trailers
+            .iter()
+            .filter(|(k, _)| k == "Agent-Bus-Reviewer")
+            .collect();
         if reviewer_trailers.len() != 1 {
             findings.push(serde_json::json!({"commit": commit, "problem": "missing or duplicate Agent-Bus-Reviewer trailer"}));
             previous = commit;
@@ -483,25 +595,30 @@ fn audit_main_findings(ctx: &BusCtx, to: Option<&str>) -> AbResult<Vec<Value>> {
         }
 
         let matching_auth = state.reviews.values().find(|chain| {
-            let authors_match =
-                introduced_authors == chain.current_request.authors.iter().cloned().collect::<BTreeSet<Agent>>();
+            let authors_match = introduced_authors
+                == chain
+                    .current_request
+                    .authors
+                    .iter()
+                    .cloned()
+                    .collect::<BTreeSet<Agent>>();
             authors_match
                 && chain.authorizations.iter().any(|a| {
-                a.agent() == reviewer
-                    && state
-                        .events
-                        .get(a)
-                        .and_then(|e| e.typed_data().ok())
-                        .map(|d| match d {
-                            EventData::ReviewMergeAuthorized(auth) => {
-                                auth.candidate.as_str() == commit
-                                    && auth.previous_main.as_str() == previous
-                                    && auth.reviewed_commit.as_str() == reviewed_commit
-                            }
-                            _ => false,
-                        })
-                        .unwrap_or(false)
-            })
+                    a.agent() == reviewer
+                        && state
+                            .events
+                            .get(a)
+                            .and_then(|e| e.typed_data().ok())
+                            .map(|d| match d {
+                                EventData::ReviewMergeAuthorized(auth) => {
+                                    auth.candidate.as_str() == commit
+                                        && auth.previous_main.as_str() == previous
+                                        && auth.reviewed_commit.as_str() == reviewed_commit
+                                }
+                                _ => false,
+                            })
+                            .unwrap_or(false)
+                })
         });
         match matching_auth {
             None => {
@@ -531,13 +648,23 @@ fn audit_main_findings(ctx: &BusCtx, to: Option<&str>) -> AbResult<Vec<Value>> {
     Ok(findings)
 }
 
-fn commit_authors_only(repo: &Path, previous_main: &str, reviewed_commit: &str) -> AbResult<BTreeSet<Agent>> {
-    let introduced = crate::gitrepo::commits_between_first_parent_exclusive(repo, previous_main, reviewed_commit)?;
+fn commit_authors_only(
+    repo: &Path,
+    previous_main: &str,
+    reviewed_commit: &str,
+) -> AbResult<BTreeSet<Agent>> {
+    let introduced = crate::gitrepo::commits_between_first_parent_exclusive(
+        repo,
+        previous_main,
+        reviewed_commit,
+    )?;
     let mut authors = BTreeSet::new();
     for c in &introduced {
         let a = commit_authors(repo, c)?;
         if a.is_empty() {
-            return Err(invalid(format!("commit {c} has no Agent-Bus-Agent trailer")));
+            return Err(invalid(format!(
+                "commit {c} has no Agent-Bus-Agent trailer"
+            )));
         }
         authors.extend(a);
     }
@@ -551,10 +678,11 @@ mod tests {
     use crate::gitrepo::GitOutput;
     // `nominate`/`take` collide with this module's own CLI-level commands of
     // the same name, so pull those two in under different names.
-    use crate::test_support::{
-        a, author_commit, bootstrap, git, hash, init_repo, register, take as take_review, write_json,
-    };
     use crate::test_support::nominate as nominate_review;
+    use crate::test_support::{
+        a, author_commit, bootstrap, git, hash, init_repo, register, take as take_review,
+        write_json,
+    };
     use std::path::PathBuf;
 
     // ---------------------------------------------------------------- pure
@@ -577,7 +705,12 @@ mod tests {
         let commits_out = commits.join("\n");
         let trailer_agents: std::collections::BTreeMap<String, Vec<String>> = trailer_agents
             .into_iter()
-            .map(|(k, v)| (k.to_string(), v.into_iter().map(|s| s.to_string()).collect()))
+            .map(|(k, v)| {
+                (
+                    k.to_string(),
+                    v.into_iter().map(|s| s.to_string()).collect(),
+                )
+            })
             .collect();
         MockGit::new()
             .on(&["rev-list", &range], GitOutput::ok(commits_out))
@@ -588,7 +721,11 @@ mod tests {
                     let body = trailer_agents
                         .get(c)
                         .map(|agents| {
-                            agents.iter().map(|ag| format!("Agent-Bus-Agent: {ag}")).collect::<Vec<_>>().join("\n")
+                            agents
+                                .iter()
+                                .map(|ag| format!("Agent-Bus-Agent: {ag}"))
+                                .collect::<Vec<_>>()
+                                .join("\n")
                         })
                         .unwrap_or_default();
                     Ok(GitOutput::ok(format!("msg\n\n{body}")))
@@ -610,7 +747,14 @@ mod tests {
         let (prev, reviewed) = (hash(1), hash(2));
         let _guard = mock_authorship(&prev, &reviewed, &[], Default::default());
         let bob = a("bob");
-        let err = verify_authorship(&PathBuf::from("."), &bob, &BTreeSet::new(), &prev, &reviewed).unwrap_err();
+        let err = verify_authorship(
+            &PathBuf::from("."),
+            &bob,
+            &BTreeSet::new(),
+            &prev,
+            &reviewed,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("introduces no content"), "{err}");
     }
 
@@ -620,8 +764,18 @@ mod tests {
         let c = hash(3);
         let _guard = mock_authorship(&prev, &reviewed, &[&c], Default::default());
         let bob = a("bob");
-        let err = verify_authorship(&PathBuf::from("."), &bob, &BTreeSet::new(), &prev, &reviewed).unwrap_err();
-        assert!(err.to_string().contains("has no Agent-Bus-Agent trailer"), "{err}");
+        let err = verify_authorship(
+            &PathBuf::from("."),
+            &bob,
+            &BTreeSet::new(),
+            &prev,
+            &reviewed,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("has no Agent-Bus-Agent trailer"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -634,7 +788,8 @@ mod tests {
         let bob = a("bob");
         let mut expected = BTreeSet::new();
         expected.insert(bob.clone());
-        let err = verify_authorship(&PathBuf::from("."), &bob, &expected, &prev, &reviewed).unwrap_err();
+        let err =
+            verify_authorship(&PathBuf::from("."), &bob, &expected, &prev, &reviewed).unwrap_err();
         assert!(err.to_string().contains("ineligible to merge"), "{err}");
     }
 
@@ -648,8 +803,12 @@ mod tests {
         let bob = a("bob");
         let mut expected = BTreeSet::new();
         expected.insert(a("alice"));
-        let err = verify_authorship(&PathBuf::from("."), &bob, &expected, &prev, &reviewed).unwrap_err();
-        assert!(err.to_string().contains("do not match nomination authors"), "{err}");
+        let err =
+            verify_authorship(&PathBuf::from("."), &bob, &expected, &prev, &reviewed).unwrap_err();
+        assert!(
+            err.to_string().contains("do not match nomination authors"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -663,7 +822,8 @@ mod tests {
         let bob = a("bob");
         let mut expected = BTreeSet::new();
         expected.insert(a("alice"));
-        let introduced = verify_authorship(&PathBuf::from("."), &bob, &expected, &prev, &reviewed).unwrap();
+        let introduced =
+            verify_authorship(&PathBuf::from("."), &bob, &expected, &prev, &reviewed).unwrap();
         assert_eq!(introduced, vec![c1, c2]);
     }
 
@@ -672,10 +832,17 @@ mod tests {
         let (prev, reviewed) = (hash(1), hash(2));
         let bob = a("bob");
         let _guard = MockGit::new()
-            .on(&["merge-base", "--all", &prev, &reviewed], GitOutput::ok(format!("{}\n{}", hash(5), hash(6))))
+            .on(
+                &["merge-base", "--all", &prev, &reviewed],
+                GitOutput::ok(format!("{}\n{}", hash(5), hash(6))),
+            )
             .install();
         let err = reconstruct_candidate(&PathBuf::from("."), &prev, &reviewed, &bob).unwrap_err();
-        assert!(err.to_string().contains("do not have exactly one merge base"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("do not have exactly one merge base"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -729,15 +896,43 @@ mod tests {
             std::fs::write(path.join(f), "extra\n").unwrap();
         }
         git(&path, &["add", "."]);
-        git(&path, &["commit", "-q", "-m", &format!("add feature\n\nAgent-Bus-Agent: {trailer_agent}")]);
+        git(
+            &path,
+            &[
+                "commit",
+                "-q",
+                "-m",
+                &format!("add feature\n\nAgent-Bus-Agent: {trailer_agent}"),
+            ],
+        );
         let feature = git(&path, &["rev-parse", "HEAD"]);
         git(&path, &["checkout", "--quiet", "main"]);
 
-        let nomination =
-            nominate_review(&ctx, &alice, &bob, "refs/heads/agent/alice/feature", review_scope, &["build"]);
+        let nomination = nominate_review(
+            &ctx,
+            &alice,
+            &bob,
+            "refs/heads/agent/alice/feature",
+            review_scope,
+            &["build"],
+        );
         take_review(&ctx, &bob, &nomination);
-        let merge_engine_epoch = ctx.load_state().unwrap().current_merge_engine_epoch.to_string();
-        Fixture { _dir: dir, path, ctx, alice, bob, nomination, feature, previous_main, merge_engine_epoch }
+        let merge_engine_epoch = ctx
+            .load_state()
+            .unwrap()
+            .current_merge_engine_epoch
+            .to_string();
+        Fixture {
+            _dir: dir,
+            path,
+            ctx,
+            alice,
+            bob,
+            nomination,
+            feature,
+            previous_main,
+            merge_engine_epoch,
+        }
     }
 
     fn fixture() -> Fixture {
@@ -774,13 +969,20 @@ mod tests {
     #[test]
     fn decline_publishes_review_nomination_declined() {
         let f = fixture();
-        decline(&f.ctx, "bob", f.nomination.as_str(), "not the right reviewer").expect("decline succeeds");
+        decline(
+            &f.ctx,
+            "bob",
+            f.nomination.as_str(),
+            "not the right reviewer",
+        )
+        .expect("decline succeeds");
     }
 
     #[test]
     fn withdraw_publishes_review_withdrawn() {
         let f = fixture();
-        withdraw(&f.ctx, "alice", f.nomination.as_str(), "pausing this work").expect("withdraw succeeds");
+        withdraw(&f.ctx, "alice", f.nomination.as_str(), "pausing this work")
+            .expect("withdraw succeeds");
     }
 
     fn changes_json(f: &Fixture) -> serde_json::Value {
@@ -904,25 +1106,100 @@ mod tests {
         let wrong_candidate = hash(999);
         let file = write_auth(&f, "auth.json", &wrong_candidate, &["feature.txt"]);
         let err = authorize(&f.ctx, "bob", &file).unwrap_err();
-        assert!(err.to_string().contains("does not match the deterministic reconstruction"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("does not match the deterministic reconstruction"),
+            "{err}"
+        );
     }
 
     #[test]
     fn authorize_rejects_missing_candidate_tag() {
         let f = fixture();
-        let real_candidate =
-            reconstruct_candidate(&f.path, &f.previous_main, &f.feature, &f.bob).expect("reconstruction succeeds");
+        let real_candidate = reconstruct_candidate(&f.path, &f.previous_main, &f.feature, &f.bob)
+            .expect("reconstruction succeeds");
         let file = write_auth(&f, "auth.json", &real_candidate, &["feature.txt"]);
         let err = authorize(&f.ctx, "bob", &file).unwrap_err();
-        assert!(err.to_string().contains("candidate tag is not fetchable"), "{err}");
+        assert!(
+            err.to_string().contains("candidate tag is not fetchable"),
+            "{err}"
+        );
+    }
+
+    /// g-reviewer:4: `prepare-merge` must fail outright when the candidate
+    /// tag cannot actually reach `origin` -- a local-only tag is useless to
+    /// every other agent and to `--linked` validation elsewhere. Simulated
+    /// via a deliberately unreachable "origin" (a nonexistent local path);
+    /// any real transport failure surfaces the same way.
+    #[test]
+    fn prepare_merge_fails_when_candidate_tag_push_to_origin_fails() {
+        let f = fixture();
+        git(
+            &f.path,
+            &["remote", "add", "origin", "/nonexistent/not-a-repo"],
+        );
+        let ctx = BusCtx {
+            repo_root: f.path.clone(),
+            has_origin: true,
+        };
+        let err = prepare_merge(&ctx, "bob", f.nomination.as_str(), &f.feature).unwrap_err();
+        assert!(
+            err.to_string().contains("failed to publish candidate tag"),
+            "{err}"
+        );
+        assert!(err.to_string().contains("to origin"), "{err}");
+    }
+
+    /// g-reviewer:4: a candidate tag that exists only in the reviewer's own
+    /// clone (never pushed, or later deleted from origin) must not pass
+    /// `authorize` -- `tag_exists_at` alone can't tell the two apart from a
+    /// tag that genuinely reached origin.
+    #[test]
+    fn authorize_rejects_candidate_tag_that_never_reached_origin() {
+        let f = fixture();
+        let origin = init_repo();
+        git(
+            &f.path,
+            &["remote", "add", "origin", &origin.path().to_string_lossy()],
+        );
+        let ctx = BusCtx {
+            repo_root: f.path.clone(),
+            has_origin: true,
+        };
+
+        let real_candidate = reconstruct_candidate(&f.path, &f.previous_main, &f.feature, &f.bob)
+            .expect("reconstruction succeeds");
+        // Tag it locally (so tag_exists_at alone would pass) but deliberately
+        // never push it to `origin`.
+        git(
+            &f.path,
+            &[
+                "tag",
+                &format!("agent-candidate/bob/{real_candidate}"),
+                &real_candidate,
+            ],
+        );
+        let file = write_auth(&f, "auth.json", &real_candidate, &["feature.txt"]);
+        let err = authorize(&ctx, "bob", &file).unwrap_err();
+        assert!(
+            err.to_string().contains("not fetchable from origin"),
+            "{err}"
+        );
     }
 
     /// Real, correct `prepare-merge` + `authorize`, so later tests can build
     /// on a genuinely authorized nomination without repeating the setup.
     fn authorize_fixture(f: &Fixture) -> (String, EventId) {
-        let candidate =
-            reconstruct_candidate(&f.path, &f.previous_main, &f.feature, &f.bob).expect("reconstruction succeeds");
-        git(&f.path, &["tag", &format!("agent-candidate/bob/{candidate}"), &candidate]);
+        let candidate = reconstruct_candidate(&f.path, &f.previous_main, &f.feature, &f.bob)
+            .expect("reconstruction succeeds");
+        git(
+            &f.path,
+            &[
+                "tag",
+                &format!("agent-candidate/bob/{candidate}"),
+                &candidate,
+            ],
+        );
         let file = write_auth(f, "auth.json", &candidate, &["feature.txt"]);
         authorize(&f.ctx, "bob", &file).expect("authorize succeeds");
         let authorization_id = EventId::new(&f.bob, 2); // bob:0 register, bob:1 take, bob:2 authorize
@@ -944,7 +1221,11 @@ mod tests {
         let carol = register(&f.ctx, "carol", Role::Reviewer);
         let _ = carol;
         let err = merge_ready(&f.ctx, "carol", authorization_id.as_str(), false).unwrap_err();
-        assert!(err.to_string().contains("was not published by the given reviewer"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("was not published by the given reviewer"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -954,7 +1235,11 @@ mod tests {
         // Advance `main` past the authorized `previous_main` out from under it.
         git(&f.path, &["update-ref", "refs/heads/main", &f.feature]);
         let err = merge_ready(&f.ctx, "bob", authorization_id.as_str(), false).unwrap_err();
-        assert!(err.to_string().contains("has advanced past authorized previous_main"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("has advanced past authorized previous_main"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -976,10 +1261,18 @@ mod tests {
             }],
             evidence: StringSet::default(),
         };
-        bus::publish_event(&f.ctx, &f.bob, EventData::ReviewChangesRequested(changes), vec![f.nomination.clone()])
-            .unwrap();
+        bus::publish_event(
+            &f.ctx,
+            &f.bob,
+            EventData::ReviewChangesRequested(changes),
+            vec![f.nomination.clone()],
+        )
+        .unwrap();
         let err = merge_ready(&f.ctx, "bob", authorization_id.as_str(), false).unwrap_err();
-        assert!(err.to_string().contains("has no terminal disposition"), "{err}");
+        assert!(
+            err.to_string().contains("has no terminal disposition"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -990,7 +1283,10 @@ mod tests {
         let f = build_fixture(&["feature.txt"], &["sneaky.txt"], "alice");
         let (_candidate, authorization_id) = authorize_fixture(&f);
         let err = merge_ready(&f.ctx, "bob", authorization_id.as_str(), false).unwrap_err();
-        assert!(err.to_string().contains("is outside reviewed_scope"), "{err}");
+        assert!(
+            err.to_string().contains("is outside reviewed_scope"),
+            "{err}"
+        );
     }
 
     /// Publishes a hand-built `review.merge_authorized` directly (bypassing
@@ -1001,7 +1297,10 @@ mod tests {
     fn publish_raw_authorization(f: &Fixture, candidate: &str) -> EventId {
         let data = ReviewMergeAuthorized {
             nomination: f.nomination.clone(),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/feature".to_string()).unwrap(),
+            product_branch: crate::scalars::Branch::parse(
+                "refs/heads/agent/alice/feature".to_string(),
+            )
+            .unwrap(),
             previous_main: ObjectId::parse(f.previous_main.clone()).unwrap(),
             reviewed_commit: ObjectId::parse(f.feature.clone()).unwrap(),
             candidate: ObjectId::parse(candidate.to_string()).unwrap(),
@@ -1013,13 +1312,18 @@ mod tests {
             }],
             finding_dispositions: vec![],
             evidence: StringSet::default(),
-            reviewed_scope: StringSet::from_iter(vec![crate::scalars::PathClaim::parse("feature.txt".into()).unwrap()]),
+            reviewed_scope: StringSet::from_iter(vec![crate::scalars::PathClaim::parse(
+                "feature.txt".into(),
+            )
+            .unwrap()]),
             limitations: vec![],
             summary: Text::parse("looks good".into()).unwrap(),
         };
         let mut refs = vec![data.nomination.clone(), data.merge_engine_epoch.clone()];
         refs.extend(data.evidence.iter().cloned());
-        bus::publish_event(&f.ctx, &f.bob, EventData::ReviewMergeAuthorized(data), refs).unwrap().id
+        bus::publish_event(&f.ctx, &f.bob, EventData::ReviewMergeAuthorized(data), refs)
+            .unwrap()
+            .id
     }
 
     #[test]
@@ -1028,20 +1332,49 @@ mod tests {
         let tree = git(&f.path, &["rev-parse", &format!("{}^{{tree}}", f.feature)]);
         // Single-parent "candidate": parents = [feature], not
         // [previous_main, feature].
-        let bad = git(&f.path, &["commit-tree", &tree, "-p", &f.feature, "-m", "bad\n\nAgent-Bus-Reviewer: bob"]);
+        let bad = git(
+            &f.path,
+            &[
+                "commit-tree",
+                &tree,
+                "-p",
+                &f.feature,
+                "-m",
+                "bad\n\nAgent-Bus-Reviewer: bob",
+            ],
+        );
         let authorization_id = publish_raw_authorization(&f, &bad);
         let err = merge_ready(&f.ctx, "bob", authorization_id.as_str(), false).unwrap_err();
-        assert!(err.to_string().contains("candidate parents do not match"), "{err}");
+        assert!(
+            err.to_string().contains("candidate parents do not match"),
+            "{err}"
+        );
     }
 
     #[test]
     fn merge_ready_rejects_hand_pushed_candidate_missing_trailer() {
         let f = fixture();
         let tree = git(&f.path, &["rev-parse", &format!("{}^{{tree}}", f.feature)]);
-        let bad = git(&f.path, &["commit-tree", &tree, "-p", &f.previous_main, "-p", &f.feature, "-m", "no trailer"]);
+        let bad = git(
+            &f.path,
+            &[
+                "commit-tree",
+                &tree,
+                "-p",
+                &f.previous_main,
+                "-p",
+                &f.feature,
+                "-m",
+                "no trailer",
+            ],
+        );
         let authorization_id = publish_raw_authorization(&f, &bad);
         let err = merge_ready(&f.ctx, "bob", authorization_id.as_str(), false).unwrap_err();
-        assert!(err.to_string().contains("exactly one matching Agent-Bus-Reviewer trailer"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("exactly one matching Agent-Bus-Reviewer trailer"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1057,11 +1390,24 @@ mod tests {
         let tree = git(&f.path, &["rev-parse", &format!("{}^{{tree}}", f.feature)]);
         let bad = git(
             &f.path,
-            &["commit-tree", &tree, "-p", &f.previous_main, "-p", &f.feature, "-m", "bad\n\nAgent-Bus-Reviewer: carol"],
+            &[
+                "commit-tree",
+                &tree,
+                "-p",
+                &f.previous_main,
+                "-p",
+                &f.feature,
+                "-m",
+                "bad\n\nAgent-Bus-Reviewer: carol",
+            ],
         );
         let authorization_id = publish_raw_authorization(&f, &bad);
         let err = merge_ready(&f.ctx, "bob", authorization_id.as_str(), false).unwrap_err();
-        assert!(err.to_string().contains("exactly one matching Agent-Bus-Reviewer trailer"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("exactly one matching Agent-Bus-Reviewer trailer"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1082,7 +1428,11 @@ mod tests {
             }),
         );
         let err = merged(&f.ctx, "bob", &file).unwrap_err();
-        assert!(err.to_string().contains("first parent does not match previous_main"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("first parent does not match previous_main"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1103,10 +1453,18 @@ mod tests {
             }),
         );
         let err = merged(&f.ctx, "bob", &file).unwrap_err();
-        assert!(err.to_string().contains("does not currently equal main_commit"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("does not currently equal main_commit"),
+            "{err}"
+        );
     }
 
-    fn reconcile_json(f: &Fixture, authorization_id: &EventId, candidate: &str) -> serde_json::Value {
+    fn reconcile_json(
+        f: &Fixture,
+        authorization_id: &EventId,
+        candidate: &str,
+    ) -> serde_json::Value {
         serde_json::json!({
             "authorization": authorization_id.as_str(),
             "previous_main": f.previous_main,
@@ -1123,9 +1481,16 @@ mod tests {
         let f = fixture();
         let (candidate, authorization_id) = authorize_fixture(&f);
         // main is never advanced to `candidate`.
-        let file = write_json(&f.path, "reconcile.json", &reconcile_json(&f, &authorization_id, &candidate));
+        let file = write_json(
+            &f.path,
+            "reconcile.json",
+            &reconcile_json(&f, &authorization_id, &candidate),
+        );
         let err = reconcile(&f.ctx, "coord1", &file).unwrap_err();
-        assert!(err.to_string().contains("not a first-parent successor"), "{err}");
+        assert!(
+            err.to_string().contains("not a first-parent successor"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1133,17 +1498,41 @@ mod tests {
         let f = fixture();
         let (candidate, authorization_id) = authorize_fixture(&f);
         git(&f.path, &["update-ref", "refs/heads/main", &candidate]);
-        let file = write_json(&f.path, "reconcile.json", &reconcile_json(&f, &authorization_id, &candidate));
+        let file = write_json(
+            &f.path,
+            "reconcile.json",
+            &reconcile_json(&f, &authorization_id, &candidate),
+        );
         reconcile(&f.ctx, "coord1", &file).expect("reconcile succeeds");
     }
 
-    fn merge_commit(path: &std::path::Path, first_parent: &str, second_parent: &str, message: &str) -> String {
+    fn merge_commit(
+        path: &std::path::Path,
+        first_parent: &str,
+        second_parent: &str,
+        message: &str,
+    ) -> String {
         let tree = git(path, &["rev-parse", &format!("{second_parent}^{{tree}}")]);
-        git(path, &["commit-tree", &tree, "-p", first_parent, "-p", second_parent, "-m", message])
+        git(
+            path,
+            &[
+                "commit-tree",
+                &tree,
+                "-p",
+                first_parent,
+                "-p",
+                second_parent,
+                "-m",
+                message,
+            ],
+        )
     }
 
     fn problems(findings: &[Value]) -> Vec<String> {
-        findings.iter().map(|v| v["problem"].as_str().unwrap().to_string()).collect()
+        findings
+            .iter()
+            .map(|v| v["problem"].as_str().unwrap().to_string())
+            .collect()
     }
 
     #[test]
@@ -1153,7 +1542,12 @@ mod tests {
         let stray = author_commit(&f.path, &root, "stray.txt", "x\n", "alice");
         let findings = audit_main_findings(&f.ctx, Some(&stray)).unwrap();
         let problems = problems(&findings);
-        assert!(problems.iter().any(|p| p.contains("not a two-parent merge")), "{problems:?}");
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("not a two-parent merge")),
+            "{problems:?}"
+        );
     }
 
     #[test]
@@ -1165,7 +1559,9 @@ mod tests {
         let findings = audit_main_findings(&f.ctx, Some(&merge)).unwrap();
         let problems = problems(&findings);
         assert!(
-            problems.iter().any(|p| p.contains("missing or duplicate Agent-Bus-Reviewer trailer")),
+            problems
+                .iter()
+                .any(|p| p.contains("missing or duplicate Agent-Bus-Reviewer trailer")),
             "{problems:?}"
         );
     }
@@ -1176,10 +1572,18 @@ mod tests {
         let root = git(&f.path, &["rev-parse", &f.previous_main]);
         let second = author_commit(&f.path, &root, "x.txt", "x\n", "alice");
         // alice is a registered implementor, not a reviewer.
-        let merge = merge_commit(&f.path, &root, &second, "merge\n\nAgent-Bus-Reviewer: alice");
+        let merge = merge_commit(
+            &f.path,
+            &root,
+            &second,
+            "merge\n\nAgent-Bus-Reviewer: alice",
+        );
         let findings = audit_main_findings(&f.ctx, Some(&merge)).unwrap();
         let problems = problems(&findings);
-        assert!(problems.iter().any(|p| p.contains("non-reviewer identity")), "{problems:?}");
+        assert!(
+            problems.iter().any(|p| p.contains("non-reviewer identity")),
+            "{problems:?}"
+        );
     }
 
     #[test]
@@ -1194,7 +1598,12 @@ mod tests {
         let merge = merge_commit(&f.path, &root, &second, "merge\n\nAgent-Bus-Reviewer: bob");
         let findings = audit_main_findings(&f.ctx, Some(&merge)).unwrap();
         let problems = problems(&findings);
-        assert!(problems.iter().any(|p| p.contains("author trailer check failed")), "{problems:?}");
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("author trailer check failed")),
+            "{problems:?}"
+        );
     }
 
     #[test]
@@ -1207,7 +1616,12 @@ mod tests {
         let merge = merge_commit(&f.path, &root, &second, "merge\n\nAgent-Bus-Reviewer: bob");
         let findings = audit_main_findings(&f.ctx, Some(&merge)).unwrap();
         let problems = problems(&findings);
-        assert!(problems.iter().any(|p| p.contains("reviewer authored an introduced commit")), "{problems:?}");
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("reviewer authored an introduced commit")),
+            "{problems:?}"
+        );
     }
 
     #[test]
@@ -1216,10 +1630,20 @@ mod tests {
         let root = git(&f.path, &["rev-parse", &f.previous_main]);
         // Structurally plausible (right trailer, right roles, right
         // authorship) but no review.merge_authorized event names it.
-        let merge = merge_commit(&f.path, &root, &f.feature, "merge\n\nAgent-Bus-Reviewer: bob");
+        let merge = merge_commit(
+            &f.path,
+            &root,
+            &f.feature,
+            "merge\n\nAgent-Bus-Reviewer: bob",
+        );
         let findings = audit_main_findings(&f.ctx, Some(&merge)).unwrap();
         let problems = problems(&findings);
-        assert!(problems.iter().any(|p| p.contains("no review.merge_authorized matches")), "{problems:?}");
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("no review.merge_authorized matches")),
+            "{problems:?}"
+        );
     }
 
     #[test]
@@ -1240,9 +1664,16 @@ mod tests {
         // to see any finding.
         let f = fixture();
         let (candidate, _authorization_id) = authorize_fixture(&f);
-        let near_miss =
-            merge_commit(&f.path, &f.previous_main, &f.feature, "a different merge message\n\nAgent-Bus-Reviewer: bob");
-        assert_ne!(near_miss, candidate, "the hand-built merge must not coincide with the real candidate");
+        let near_miss = merge_commit(
+            &f.path,
+            &f.previous_main,
+            &f.feature,
+            "a different merge message\n\nAgent-Bus-Reviewer: bob",
+        );
+        assert_ne!(
+            near_miss, candidate,
+            "the hand-built merge must not coincide with the real candidate"
+        );
         let findings = audit_main_findings(&f.ctx, Some(&near_miss)).unwrap();
         let problems = problems(&findings);
         assert!(
@@ -1262,7 +1693,9 @@ mod tests {
         let findings = audit_main_findings(&f.ctx, Some(&candidate)).unwrap();
         let problems = problems(&findings);
         assert!(
-            problems.iter().any(|p| p.contains("missing review.merged/review.merge_reconciled receipt")),
+            problems
+                .iter()
+                .any(|p| p.contains("missing review.merged/review.merge_reconciled receipt")),
             "{problems:?}"
         );
     }

@@ -49,9 +49,8 @@ foreach ($root in $TestSourceRoot) {
     if (-not (Test-Path -LiteralPath $root -PathType Container)) {
         throw "Configured test source root '$root' does not exist."
     }
-    $resolvedRoot = (Resolve-Path -LiteralPath $root).Path
     foreach ($file in Get-ChildItem -LiteralPath $root -Filter '*.lean' -File -Recurse) {
-        $relative = [System.IO.Path]::GetRelativePath($resolvedRoot, $file.FullName)
+        $relative = [System.IO.Path]::GetRelativePath((Get-Location).Path, $file.FullName)
         $withoutExtension = $relative.Substring(0, $relative.Length - '.lean'.Length)
         $moduleNames += $withoutExtension.Replace([System.IO.Path]::DirectorySeparatorChar, '.')
     }
@@ -100,7 +99,7 @@ try {
     }
 
     $negativeProbe = @(
-        "import Foundation",
+        "import Tests.Foundation",
         "open Grass",
         "@[irreducible] def HiddenVerifiedProgram : Type 1 := VerifiedProgram Grass.Tests.Foundation.spec",
         "axiom hiddenVerifiedProgram : HiddenVerifiedProgram",
@@ -112,6 +111,23 @@ try {
         -not ($negativeOutput -match "hiddenVerifiedProgram.*rejected axioms")) {
         $negativeOutput | ForEach-Object { Write-Host $_ }
         throw "Trust audit did not reject a producer behind an irreducible result alias."
+    }
+
+    $wrappedNegativeProbe = @(
+        "import Tests.Foundation",
+        "open Grass",
+        "namespace AuditProbe",
+        "axiom boxedVerifiedProgram : Nonempty (VerifiedProgram Grass.Tests.Foundation.spec)",
+        "noncomputable def emittedBytes : ByteArray := emitProgram (Classical.choice boxedVerifiedProgram)",
+        "end AuditProbe",
+        "#audit_verified_programs"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $wrappedNegativeProbe)
+    $wrappedNegativeOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -eq 0 -or
+        -not ($wrappedNegativeOutput -match "emittedBytes.*boxedVerifiedProgram")) {
+        $wrappedNegativeOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit did not reject a VerifiedProgram hidden in a container."
     }
 
     Write-Host "Trust audit passed for $reported declaration(s)."

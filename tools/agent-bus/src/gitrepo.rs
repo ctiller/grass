@@ -14,13 +14,25 @@ pub struct GitOutput {
     pub stderr: String,
 }
 
+// `ok`/`err` are mock-construction convenience constructors used from other
+// modules' `#[cfg(test)]` test code; a plain (non-test) clippy/build pass
+// can't see that cross-module usage and reports them dead.
+#[allow(dead_code)]
 impl GitOutput {
     pub fn ok(stdout: impl Into<String>) -> Self {
-        GitOutput { success: true, stdout: stdout.into(), stderr: String::new() }
+        GitOutput {
+            success: true,
+            stdout: stdout.into(),
+            stderr: String::new(),
+        }
     }
 
     pub fn err(stderr: impl Into<String>) -> Self {
-        GitOutput { success: false, stdout: String::new(), stderr: stderr.into() }
+        GitOutput {
+            success: false,
+            stdout: String::new(),
+            stderr: stderr.into(),
+        }
     }
 }
 
@@ -52,10 +64,7 @@ pub fn run(dir: &Path, args: &[&str]) -> AbResult<GitOutput> {
 pub fn run_ok(dir: &Path, args: &[&str]) -> AbResult<String> {
     let out = run(dir, args)?;
     if !out.success {
-        return Err(AbError::Git(format!(
-            "git {args:?} failed: {}",
-            out.stderr
-        )));
+        return Err(AbError::Git(format!("git {args:?} failed: {}", out.stderr)));
     }
     Ok(out.stdout)
 }
@@ -143,7 +152,11 @@ pub fn push(dir: &Path, remote: &str, refspec: &str) -> AbResult<GitOutput> {
 /// Ensure a detached worktree checked out at `origin/agent-bus` exists at
 /// `worktree_path`, creating it if necessary (AGENT_BUS.md section 2: "Multiple
 /// agents sharing one clone use detached worktrees").
-pub fn ensure_bus_worktree(repo_dir: &Path, worktree_path: &Path, start_point: &str) -> AbResult<()> {
+pub fn ensure_bus_worktree(
+    repo_dir: &Path,
+    worktree_path: &Path,
+    start_point: &str,
+) -> AbResult<()> {
     if worktree_path.exists() {
         return Ok(());
     }
@@ -202,7 +215,10 @@ pub fn commit_message_trailers(dir: &Path, rev: &str) -> AbResult<Vec<(String, S
     let body = run_ok(dir, &["show", "-s", "--format=%B", rev])?;
     let out = run_stdin(dir, &["interpret-trailers", "--parse"], &body)?;
     if !out.success {
-        return Err(AbError::Git(format!("interpret-trailers failed: {}", out.stderr)));
+        return Err(AbError::Git(format!(
+            "interpret-trailers failed: {}",
+            out.stderr
+        )));
     }
     let mut trailers = Vec::new();
     for line in out.stdout.split('\n') {
@@ -256,12 +272,18 @@ pub fn run_stdin(dir: &Path, args: &[&str], stdin: &str) -> AbResult<GitOutput> 
 /// rather than only on `ours`/`theirs`.
 fn pinned_merge_config_args() -> Vec<&'static str> {
     vec![
-        "-c", "core.autocrlf=false",
-        "-c", "core.safecrlf=false",
-        "-c", "core.symlinks=true",
-        "-c", "merge.renormalize=false",
-        "-c", "merge.renames=true",
-        "-c", "diff.renameLimit=0",
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "core.safecrlf=false",
+        "-c",
+        "core.symlinks=true",
+        "-c",
+        "merge.renormalize=false",
+        "-c",
+        "merge.renames=true",
+        "-c",
+        "diff.renameLimit=0",
     ]
 }
 
@@ -272,7 +294,11 @@ pub fn merge_tree_write_tree(dir: &Path, ours: &str, theirs: &str) -> AbResult<S
     if !out.success {
         return Err(invalid(format!(
             "merge-tree could not cleanly merge {theirs} into {ours}: {}",
-            if out.stderr.is_empty() { &out.stdout } else { &out.stderr }
+            if out.stderr.is_empty() {
+                &out.stdout
+            } else {
+                &out.stderr
+            }
         )));
     }
     let tree = out.stdout.lines().next().unwrap_or("").trim().to_string();
@@ -285,9 +311,11 @@ pub fn merge_tree_write_tree(dir: &Path, ours: &str, theirs: &str) -> AbResult<S
 /// Committer-date unix timestamp (seconds) of `rev`.
 pub fn committer_timestamp(dir: &Path, rev: &str) -> AbResult<i64> {
     let out = run_ok(dir, &["show", "-s", "--format=%ct", rev])?;
-    out.trim()
-        .parse()
-        .map_err(|e| invalid(format!("could not parse committer timestamp for {rev}: {e}")))
+    out.trim().parse().map_err(|e| {
+        invalid(format!(
+            "could not parse committer timestamp for {rev}: {e}"
+        ))
+    })
 }
 
 /// The exact number of merge bases between `a` and `b` (AGENT_REVIEW.md
@@ -364,6 +392,28 @@ pub fn tag_exists_at(dir: &Path, name: &str, target: &str) -> AbResult<bool> {
     }
 }
 
+/// Whether `remote` actually has a tag named `name` pointing at `target` --
+/// a real `ls-remote` network round trip, not a check against anything
+/// already fetched into the local repository. `tag_exists_at` alone cannot
+/// tell the difference between "this tag reached origin" and "this tag only
+/// ever existed in the reviewer's own clone" (AGENT_BUS_SCHEMA.md's linked
+/// validation, and every other agent, need the former).
+pub fn remote_tag_matches(dir: &Path, remote: &str, name: &str, target: &str) -> AbResult<bool> {
+    let refspec = format!("refs/tags/{name}");
+    let out = run(dir, &["ls-remote", "--tags", remote, &refspec])?;
+    if !out.success {
+        return Ok(false);
+    }
+    // Lightweight tags (the only kind this crate creates) list the target
+    // commit's own sha directly, one "<sha>\t<ref>" line per match.
+    let sha = out
+        .stdout
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().next());
+    Ok(sha == Some(target))
+}
+
 pub fn diff_name_status(dir: &Path, from: &str, to: &str) -> AbResult<Vec<(String, String)>> {
     let out = run_ok(dir, &["diff", "--name-status", &format!("{from}..{to}")])?;
     let mut result = Vec::new();
@@ -436,11 +486,19 @@ pub mod mock {
     /// missing or wrong expectation fails loudly at the exact `git`
     /// invocation that was unexpected, rather than silently returning empty
     /// output that then fails some unrelated assertion downstream.
+    ///
+    /// The construction API below (`new`/`on`/`on_prefix`/`on_with`/
+    /// `install`) is only ever called from other modules' `#[cfg(test)]`
+    /// test code; a plain (non-test) clippy/build pass can't see that
+    /// cross-module usage and reports it dead. `MockGit` the *type* stays
+    /// unconditionally compiled (not `#[cfg(test)]`) because `ACTIVE`'s
+    /// thread-local, used by `intercept` in every build, is typed with it.
     #[derive(Default)]
     pub struct MockGit {
         rules: Vec<Rule>,
     }
 
+    #[allow(dead_code)]
     impl MockGit {
         pub fn new() -> Self {
             MockGit { rules: Vec::new() }
@@ -451,7 +509,9 @@ pub mod mock {
         pub fn on(self, args: &[&str], output: GitOutput) -> Self {
             let expected: Vec<String> = args.iter().map(|s| s.to_string()).collect();
             self.on_with(
-                move |_, a, _| a.len() == expected.len() && a.iter().zip(&expected).all(|(x, y)| x == y),
+                move |_, a, _| {
+                    a.len() == expected.len() && a.iter().zip(&expected).all(|(x, y)| x == y)
+                },
                 move |_, _, _| Ok(output.clone()),
             )
         }
@@ -462,7 +522,13 @@ pub mod mock {
         pub fn on_prefix(self, prefix: &[&str], output: GitOutput) -> Self {
             let expected: Vec<String> = prefix.iter().map(|s| s.to_string()).collect();
             self.on_with(
-                move |_, a, _| a.len() >= expected.len() && a[..expected.len()].iter().zip(&expected).all(|(x, y)| x == y),
+                move |_, a, _| {
+                    a.len() >= expected.len()
+                        && a[..expected.len()]
+                            .iter()
+                            .zip(&expected)
+                            .all(|(x, y)| x == y)
+                },
                 move |_, _, _| Ok(output.clone()),
             )
         }
@@ -476,7 +542,10 @@ pub mod mock {
             matcher: impl Fn(&Path, &[&str], Option<&str>) -> bool + 'static,
             responder: impl Fn(&Path, &[&str], Option<&str>) -> AbResult<GitOutput> + 'static,
         ) -> Self {
-            self.rules.push(Rule { matcher: Box::new(matcher), responder: Box::new(responder) });
+            self.rules.push(Rule {
+                matcher: Box::new(matcher),
+                responder: Box::new(responder),
+            });
             self
         }
 
@@ -491,6 +560,8 @@ pub mod mock {
         }
     }
 
+    // Only ever constructed from other modules' `#[cfg(test)]` test code.
+    #[allow(dead_code)]
     pub struct MockGuard(());
 
     impl Drop for MockGuard {
@@ -499,7 +570,11 @@ pub mod mock {
         }
     }
 
-    pub(crate) fn intercept(dir: &Path, args: &[&str], stdin: Option<&str>) -> Option<AbResult<GitOutput>> {
+    pub(crate) fn intercept(
+        dir: &Path,
+        args: &[&str],
+        stdin: Option<&str>,
+    ) -> Option<AbResult<GitOutput>> {
         ACTIVE.with(|a| {
             let borrow = a.borrow();
             let mock = borrow.as_ref()?;
@@ -508,7 +583,11 @@ pub mod mock {
                     return Some((rule.responder)(dir, args, stdin));
                 }
             }
-            panic!("MockGit: no rule matched `git {}` in {}", args.join(" "), dir.display());
+            panic!(
+                "MockGit: no rule matched `git {}` in {}",
+                args.join(" "),
+                dir.display()
+            );
         })
     }
 
@@ -524,17 +603,32 @@ pub mod mock {
 
         #[test]
         fn on_matches_exact_args_and_ignores_dir() {
-            let _guard = MockGit::new().on(&["rev-parse", "--verify", "HEAD"], GitOutput::ok("deadbeef")).install();
-            let out = crate::gitrepo::run(&PathBuf::from("/some/repo"), &["rev-parse", "--verify", "HEAD"]).unwrap();
+            let _guard = MockGit::new()
+                .on(
+                    &["rev-parse", "--verify", "HEAD"],
+                    GitOutput::ok("deadbeef"),
+                )
+                .install();
+            let out = crate::gitrepo::run(
+                &PathBuf::from("/some/repo"),
+                &["rev-parse", "--verify", "HEAD"],
+            )
+            .unwrap();
             assert!(out.success);
             assert_eq!(out.stdout, "deadbeef");
         }
 
         #[test]
         fn on_prefix_matches_a_variable_tail() {
-            let _guard =
-                MockGit::new().on_prefix(&["diff", "--name-status"], GitOutput::ok("A\tfoo/bar.jsonl")).install();
-            let out = crate::gitrepo::run(&PathBuf::from("."), &["diff", "--name-status", "aaa..bbb"]).unwrap();
+            let _guard = MockGit::new()
+                .on_prefix(
+                    &["diff", "--name-status"],
+                    GitOutput::ok("A\tfoo/bar.jsonl"),
+                )
+                .install();
+            let out =
+                crate::gitrepo::run(&PathBuf::from("."), &["diff", "--name-status", "aaa..bbb"])
+                    .unwrap();
             assert_eq!(out.stdout, "A\tfoo/bar.jsonl");
         }
 
@@ -560,9 +654,13 @@ pub mod mock {
         #[test]
         fn on_with_can_return_an_error() {
             let _guard = MockGit::new()
-                .on_with(|_, a, _| a.first() == Some(&"push"), |_, _, _| Err(crate::error::AbError::Git("denied".into())))
+                .on_with(
+                    |_, a, _| a.first() == Some(&"push"),
+                    |_, _, _| Err(crate::error::AbError::Git("denied".into())),
+                )
                 .install();
-            let err = crate::gitrepo::run(&PathBuf::from("."), &["push", "origin", "agent-bus"]).unwrap_err();
+            let err = crate::gitrepo::run(&PathBuf::from("."), &["push", "origin", "agent-bus"])
+                .unwrap_err();
             assert!(format!("{err}").contains("denied"));
         }
     }
@@ -579,7 +677,11 @@ mod outer_tests {
     /// as-is, not re-joined onto `start`.
     #[test]
     fn common_dir_returns_an_absolute_result_unchanged() {
-        let abs = if cfg!(windows) { "C:\\repo\\.git" } else { "/repo/.git" };
+        let abs = if cfg!(windows) {
+            "C:\\repo\\.git"
+        } else {
+            "/repo/.git"
+        };
         let _guard = MockGit::new()
             .on(&["rev-parse", "--git-common-dir"], GitOutput::ok(abs))
             .install();
@@ -605,7 +707,10 @@ mod outer_tests {
     #[test]
     fn object_format_defaults_to_sha1_when_the_command_fails() {
         let _guard = MockGit::new()
-            .on(&["rev-parse", "--show-object-format"], GitOutput::err("unknown option"))
+            .on(
+                &["rev-parse", "--show-object-format"],
+                GitOutput::err("unknown option"),
+            )
             .install();
         let got = object_format(&PathBuf::from(".")).unwrap();
         assert_eq!(got, "sha1");
@@ -614,7 +719,10 @@ mod outer_tests {
     #[test]
     fn object_format_returns_the_reported_format_on_success() {
         let _guard = MockGit::new()
-            .on(&["rev-parse", "--show-object-format"], GitOutput::ok("sha256"))
+            .on(
+                &["rev-parse", "--show-object-format"],
+                GitOutput::ok("sha256"),
+            )
             .install();
         let got = object_format(&PathBuf::from(".")).unwrap();
         assert_eq!(got, "sha256");
@@ -639,7 +747,12 @@ mod outer_tests {
         let blocking_file = dir.path().join("not_a_dir");
         std::fs::write(&blocking_file, "x").unwrap();
         let worktree_path = blocking_file.join("nested").join("wt");
-        let err = ensure_bus_worktree(&PathBuf::from("/unused"), &worktree_path, "origin/agent-bus").unwrap_err();
+        let err = ensure_bus_worktree(
+            &PathBuf::from("/unused"),
+            &worktree_path,
+            "origin/agent-bus",
+        )
+        .unwrap_err();
         assert!(matches!(err, AbError::Io { .. }), "{err:?}");
     }
 
@@ -649,8 +762,15 @@ mod outer_tests {
     fn ensure_bus_worktree_creates_a_new_worktree() {
         let dir = tempfile::tempdir().unwrap();
         let worktree_path = dir.path().join("nested").join("wt");
-        let _guard = MockGit::new().on_prefix(&["worktree", "add", "--detach"], GitOutput::ok("")).install();
-        ensure_bus_worktree(&PathBuf::from("/unused"), &worktree_path, "origin/agent-bus").unwrap();
+        let _guard = MockGit::new()
+            .on_prefix(&["worktree", "add", "--detach"], GitOutput::ok(""))
+            .install();
+        ensure_bus_worktree(
+            &PathBuf::from("/unused"),
+            &worktree_path,
+            "origin/agent-bus",
+        )
+        .unwrap();
     }
 
     /// A failing `git interpret-trailers --parse` invocation must surface as
@@ -658,11 +778,20 @@ mod outer_tests {
     #[test]
     fn commit_message_trailers_reports_interpret_trailers_failure() {
         let _guard = MockGit::new()
-            .on_prefix(&["show", "-s", "--format=%B"], GitOutput::ok("subject\n\nAgent-Bus-Agent: alice"))
-            .on(&["interpret-trailers", "--parse"], GitOutput::err("bad format"))
+            .on_prefix(
+                &["show", "-s", "--format=%B"],
+                GitOutput::ok("subject\n\nAgent-Bus-Agent: alice"),
+            )
+            .on(
+                &["interpret-trailers", "--parse"],
+                GitOutput::err("bad format"),
+            )
             .install();
         let err = commit_message_trailers(&PathBuf::from("."), "HEAD").unwrap_err();
-        assert!(format!("{err}").contains("interpret-trailers failed"), "{err}");
+        assert!(
+            format!("{err}").contains("interpret-trailers failed"),
+            "{err}"
+        );
     }
 
     /// A non-clean `merge-tree --write-tree` (conflicting merge) must be
@@ -670,7 +799,12 @@ mod outer_tests {
     /// a bogus tree id.
     #[test]
     fn merge_tree_write_tree_reports_a_conflicting_merge() {
-        let _guard = MockGit::new().on_prefix(&["-c"], GitOutput::err("CONFLICT (content): merge conflict")).install();
+        let _guard = MockGit::new()
+            .on_prefix(
+                &["-c"],
+                GitOutput::err("CONFLICT (content): merge conflict"),
+            )
+            .install();
         let err = merge_tree_write_tree(&PathBuf::from("."), "ours-sha", "theirs-sha").unwrap_err();
         assert!(err.to_string().contains("could not cleanly merge"), "{err}");
     }
@@ -679,7 +813,9 @@ mod outer_tests {
     /// on stdout must still be rejected rather than returning an empty tree.
     #[test]
     fn merge_tree_write_tree_reports_empty_output_as_an_error() {
-        let _guard = MockGit::new().on_prefix(&["-c"], GitOutput::ok("")).install();
+        let _guard = MockGit::new()
+            .on_prefix(&["-c"], GitOutput::ok(""))
+            .install();
         let err = merge_tree_write_tree(&PathBuf::from("."), "ours-sha", "theirs-sha").unwrap_err();
         assert!(err.to_string().contains("produced no tree id"), "{err}");
     }
@@ -692,8 +828,13 @@ mod outer_tests {
     #[test]
     fn commit_tree_deterministic_reports_a_real_git_failure() {
         let repo = crate::test_support::init_repo();
-        let err = commit_tree_deterministic(repo.path(), "0000000000000000000000000000000000000000", &[], "msg")
-            .unwrap_err();
+        let err = commit_tree_deterministic(
+            repo.path(),
+            "0000000000000000000000000000000000000000",
+            &[],
+            "msg",
+        )
+        .unwrap_err();
         assert!(format!("{err}").contains("commit-tree failed"), "{err}");
     }
 }

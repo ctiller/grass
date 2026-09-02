@@ -123,14 +123,21 @@ looks up the issue's current assignment itself).
   `validate` does, not just `validate`. The message grammar this helper
   expects is `bus-admin: repair <invalid-commit> restore <ancestor-commit>`;
   the spec does not pin an exact grammar beyond "names the invalid commit and
-  restored ancestor". **Known gap**: because `history::walk_one_commit`
-  returns an error immediately on any structurally invalid commit, a repair
-  commit appearing *later* in history than the invalid commit it fixes is
-  never reached by a single forward walk — the walk stops at the invalid
-  commit before it can discover the repair. Recovering in that situation
-  today requires inspecting the reported error externally and constructing
-  the repair with that knowledge; `--quarantine-invalid` remains available as
-  a degraded-but-live fallback in the meantime.
+  restored ancestor". A repair commit appearing *later* in history than the
+  invalid commit it fixes is discoverable: `history::scan_repair_targets`
+  pre-scans the walked commit range's messages (grammar parsing only, not
+  validation) to find which invalid-commit shas some later commit *claims*
+  to repair, and `walk_one_commit_or_defer` uses that map to defer judgment
+  on a structurally failing commit — treating it as contributing no events —
+  rather than aborting the whole walk on the spot. The claim is never taken
+  on faith: when the walk reaches the claimed repair commit's own position,
+  it still goes through the exact same full `is_repair_commit` validation
+  (authority, ancestor, byte-exact restoration, no smuggling) as any other
+  repair commit, so a bogus "repair" can never excuse a genuinely invalid
+  commit — it only gives a *legitimate*, later, fully-valid repair the
+  chance to actually be reached. `--quarantine-invalid` remains available as
+  a degraded-but-live fallback for the case where no repair (real or
+  claimed) exists yet.
 - **Generated artifacts** (AGENT_BUS_SCHEMA.md section 11 — standalone JSON
   Schema files, canonical fixture corpus, `--version` schema fingerprint) are
   not yet produced; `agent-bus validate --json` reports `schema_version` and

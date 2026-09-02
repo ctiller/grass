@@ -1,7 +1,11 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "agent-bus", version, about = "Helper for the Grass agent-bus coordination protocol")]
+#[command(
+    name = "agent-bus",
+    version,
+    about = "Helper for the Grass agent-bus coordination protocol"
+)]
 pub struct Cli {
     /// Path to the product repository (defaults to the current directory's repo).
     #[arg(long, global = true)]
