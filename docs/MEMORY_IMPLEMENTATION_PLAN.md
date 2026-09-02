@@ -342,7 +342,7 @@ instead of a theorem, because it is the stronger form.
 | ledger mutation occurs iff the delta is applicable | `Op.obligations_unchanged_unless_committed`; `LedgerDelta.Applicable` requires a typed `ProtocolAuthority`, and `Op.LedgerEffectApplicable` checks each delta against the ledger the previous ones left |
 | a recorded fault is never discarded | `Op.runStep_records_the_fault`, with `Op.performAccess_preserves_faults` |
 | failed ledger mutation is recorded and non-mutating | `Op.ledger_refusal_is_recorded`, `Op.refused_preserves_everything_but_the_ledger` |
-| every emitted violation class is declared | `Op.StepPolicy.violationClassesDeclared` |
+| every emitted violation class is declared | `Op.refusalOf_class_declared`, over `Op.AuthorityProvider.emittedClasses` — the set grows with the provider list, so an authority's own nominal class is covered too; `Tests/Op/FakeIsa.lean`'s `undeclared_provider_class_cannot_form_a_policy` and `custom_violation_class_is_usable` are the two sides |
 | external operation families require no Grass edits | `Tests/Op/FakeIsa.lean`, and reproduced independently by a reviewer building three families outside the repo |
 
 The last is evidence rather than a theorem, and is labelled so. A fixture cannot

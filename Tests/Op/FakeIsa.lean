@@ -357,13 +357,26 @@ instance : HasOperationFacets Beta where
 
 /-! ## The profile and the starting state -/
 
+/--
+A violation class this profile names for itself.
+
+`AuthorityProvider.violationClass` is open nominal, so an authority a profile
+adds can report a failure the generic transition has no name for: "there was no
+live frame" is not "the loan state did not authorize this", and collapsing them
+into `authorityUnavailable` would lose which authority was missing. Declaring it
+below is what makes it usable — see `custom_violation_class_is_usable` and
+`undeclared_provider_class_cannot_form_a_policy`.
+-/
+def frameAuthorityUnavailable : AuditViolationClass := ⟨⟨"fake.frameAuthorityUnavailable"⟩⟩
+
 /-- The profile's address spaces, obligation kinds, and fault classes. -/
 def vocabulary : AdmittedVocabulary :=
   { addressSpaces := .cpuOnly
     faultClasses := ⟨[.pageFault, .deviceFault, divideError]⟩
     allocationSources := ⟨[.virtualAlloc, .mappedFile, .imageMapping, .stack]⟩
     provenanceStepKinds := ⟨[]⟩
-    auditViolationClasses := ⟨AuditViolationClass.emittedByTransition⟩
+    auditViolationClasses :=
+      ⟨AuditViolationClass.emittedByTransition ++ [frameAuthorityUnavailable]⟩
     obligationKinds := ⟨[.releaseAllocation, .closeHandle]⟩ }
 
 /-- A profile whose §10 package is explicitly unproved. It is a checklist of
@@ -410,10 +423,22 @@ provider over the same grant table, distinguished only by the grant kind it
 demands — which is the point: two authority kinds, one mechanism. -/
 def frameProvider : AuthorityProvider where
   id := ⟨"fake.frame"⟩
-  violationClass := .authorityUnavailable
+  violationClass := frameAuthorityUnavailable
   refuses state d :=
     decide (d.provenance.root = stackAlloc) &&
     !decide (state.memory.GrantedOfKind .frame d.context d.provenance d.range d.intent)
+
+/--
+A provider whose violation class this profile never declared.
+
+The adversary for `undeclared_provider_class_cannot_form_a_policy`. It is
+well-typed and behaves like any other provider; the only thing wrong with it is
+that its class is not in the vocabulary.
+-/
+def rogueProvider : AuthorityProvider where
+  id := ⟨"fake.rogue"⟩
+  violationClass := ⟨⟨"fake.undeclaredClass"⟩⟩
+  refuses _ _ := true
 
 /-- Every operation must declare its memory effects and its faults. -/
 def policy : StepPolicy :=
@@ -688,6 +713,72 @@ theorem a_loan_is_not_a_frame :
             { kind := .loan, holder := thread₀, provenance := frameProv
               range := ⟨0, 64⟩, rights := .readWrite } } : MemoryState).GrantedOfKind
         .frame thread₀ frameProv ⟨0, 8⟩ .write) := by decide
+
+/-! ## An authority cannot smuggle in a violation class the profile never declared
+
+`AuthorityProvider.violationClass` is open nominal so that a profile can name its
+own failures, and `refusalOf` records it directly. That is a hole unless the
+class is required to be declared: a profile could add a provider with a fresh
+class, and the transition would record a class outside the admitted vocabulary
+while `docs/MEMORY_IMPLEMENTATION_PLAN.md` §3.11 claimed every emitted class was
+declared. `docs/FOUNDATION.md` law 8 forbids exactly this shape of escape — the
+open extension point is not permission to bypass the registry.
+
+`StepPolicy.violationClassesDeclared` quantifies over
+`AuthorityProvider.emittedClasses authorities`, which grows with the provider
+list. The two theorems below are the two halves of the claim: a custom class that
+is declared works, and one that is not cannot form a policy at all. -/
+
+/--
+A declared profile-specific class is usable.
+
+`frameProvider` reports `frameAuthorityUnavailable`, which is not one of the
+classes the generic transition emits. The vocabulary declares it, so `policy`
+exists — this file would not compile otherwise. That the refusal actually
+*records* the custom class rather than the generic `authorityUnavailable` is
+`refused_stack_write_records_the_custom_class`, below.
+-/
+theorem custom_violation_class_is_usable :
+    frameProvider.violationClass ∉ AuditViolationClass.emittedByTransition ∧
+    frameProvider.violationClass ∈
+      AuthorityProvider.emittedClasses policy.authorities ∧
+    vocabulary.auditViolationClasses.Recognizes frameProvider.violationClass := by
+  refine ⟨by decide, ?_, by decide⟩
+  exact AuthorityProvider.mem_emittedClasses_of_provider (by simp [policy])
+
+/--
+**An undeclared provider class cannot form a `StepPolicy`.**
+
+The `violationClassesDeclared` field is exactly this proposition, so a policy
+whose providers include `rogueProvider` is unconstructible against this profile
+— not merely ill-advised. Compare `custom_violation_class_is_usable`: the
+difference between the two providers is declaration and nothing else.
+-/
+theorem undeclared_provider_class_cannot_form_a_policy :
+    ¬ (∀ class_ ∈ AuthorityProvider.emittedClasses [loanProvider, rogueProvider],
+        profile.vocabulary.auditViolationClasses.Recognizes class_) := by decide
+
+/--
+The refused stack write records the custom class.
+
+Read off the ledger's public view, so this is the class an audit report would
+show. Without it `custom_violation_class_is_usable` would only establish that the
+class is *declarable*, not that anything ever emits it.
+-/
+theorem refused_stack_write_records_the_custom_class :
+    ∀ s, (stepAlpha state₀ .writeStackSlot).state? = some s →
+      s.violations.records?.map AuditViolation.class_ = [frameAuthorityUnavailable] := by
+  intro s hs
+  cases hs
+  decide
+
+/-- The rogue provider is rejected for its class alone. Its behaviour is
+irrelevant — it never gets to run, because the policy that would consult it does
+not exist. -/
+theorem the_rogue_is_rejected_for_its_class_alone :
+    ¬ vocabulary.auditViolationClasses.Recognizes rogueProvider.violationClass ∧
+    (∀ class_ ∈ AuthorityProvider.emittedClasses [loanProvider],
+      profile.vocabulary.auditViolationClasses.Recognizes class_) := by decide
 
 /-- Authority is not ambient: a grant held by the device engine does not
 authorize the program thread. -/

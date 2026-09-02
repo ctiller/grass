@@ -163,11 +163,49 @@ undecidable and the check documentation.
 structure AuthorityProvider where
   /-- This provider's nominal identity, for diagnostics and profile declaration. -/
   id : Name
-  /-- The class recorded when it refuses. Must be one the profile declares; see
-  `StepPolicy.violationClassesDeclared`. -/
+  /-- The class recorded when it refuses.
+
+  Open nominal, so a profile names its own. `StepPolicy.violationClassesDeclared`
+  requires the profile to declare it, via `AuthorityProvider.emittedClasses`. -/
   violationClass : AuditViolationClass
   /-- Whether this provider refuses the access against the given state. -/
   refuses : MachineState → AccessDescriptor → Bool
+
+namespace AuthorityProvider
+
+/--
+Every violation class a transition configured with these providers can record.
+
+The transition's own fixed list, plus one class per provider.
+
+The provider list is where this stopped being a fixed set. `violationClass` is an
+open nominal field, so a profile can name a class of its own; an earlier version
+of `StepPolicy.violationClassesDeclared` quantified only over
+`AuditViolationClass.emittedByTransition`, which meant a provider carrying a fresh
+undeclared class satisfied the proof and the transition then recorded a class the
+profile's vocabulary never admitted. The closure property in
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §3.11 is that every emitted class is
+declared, and it is only true if the quantified set grows with the providers.
+-/
+def emittedClasses (providers : List AuthorityProvider) : List AuditViolationClass :=
+  AuditViolationClass.emittedByTransition ++
+    providers.map AuthorityProvider.violationClass
+
+/-- A provider's class is one of the classes its policy can emit. -/
+theorem mem_emittedClasses_of_provider {providers : List AuthorityProvider}
+    {provider : AuthorityProvider} (h : provider ∈ providers) :
+    provider.violationClass ∈ emittedClasses providers :=
+  List.mem_append_right _ (List.mem_map_of_mem h)
+
+/-- A class the transition itself emits is one of the classes its policy can
+emit, whatever the providers are. -/
+theorem mem_emittedClasses_of_transition {providers : List AuthorityProvider}
+    {class_ : AuditViolationClass}
+    (h : class_ ∈ AuditViolationClass.emittedByTransition) :
+    class_ ∈ emittedClasses providers :=
+  List.mem_append_left _ h
+
+end AuthorityProvider
 
 /--
 The configuration a step runs against: the memory profile, the facets every
@@ -195,9 +233,16 @@ structure StepPolicy where
   Without it `AdmittedVocabulary.auditViolationClasses` was a registry nothing
   consulted, while the module comment on `Grass/Memory/Profile.lean` claimed
   every registry was. A profile that has not declared `permissionDenied` cannot
-  be stepped, rather than silently recording a class it never admitted. -/
+  be stepped, rather than silently recording a class it never admitted.
+
+  The set is `AuthorityProvider.emittedClasses authorities`, which depends on the
+  provider list rather than being fixed. Quantifying over the fixed list alone
+  left the open nominal `AuthorityProvider.violationClass` unconstrained, so a
+  provider with a fresh class satisfied this proof and `refusalOf` then recorded
+  a class the vocabulary never admitted. `refusalOf_class_declared` is the
+  theorem that this field now actually supports. -/
   violationClassesDeclared :
-    ∀ class_ ∈ AuditViolationClass.emittedByTransition,
+    ∀ class_ ∈ AuthorityProvider.emittedClasses authorities,
       profile.vocabulary.auditViolationClasses.Recognizes class_
   /-- The profile's vocabulary is coherent.
 
@@ -380,6 +425,71 @@ def refusalOf (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor
                 if ConflictsWithHistory policy state event then some .authorityUnavailable
                 else Option.none
             | Option.none => Option.none
+
+/-- Every class `denialOf` can return is one the transition declares. -/
+theorem denialOf_mem_emittedByTransition {state : MemoryState} {d : AccessDescriptor}
+    {class_ : AuditViolationClass} (h : denialOf state d = some class_) :
+    class_ ∈ AuditViolationClass.emittedByTransition := by
+  unfold denialOf at h
+  repeat' split at h
+  all_goals
+    first
+      | (injection h with h; subst h; simp [AuditViolationClass.emittedByTransition])
+      | exact absurd h (by simp)
+
+/--
+Every class `refusalOf` can return is one the policy's providers and the
+transition between them can emit.
+
+The bridge between the open nominal `AuthorityProvider.violationClass` and the
+declaration proof `StepPolicy` carries. Without the provider branch this was the
+step that quietly widened the emitted set past what the profile had declared.
+-/
+theorem refusalOf_mem_emittedClasses {policy : StepPolicy} {state : MachineState}
+    {d : AccessDescriptor} {prospective : Option MemoryEvent}
+    {class_ : AuditViolationClass}
+    (h : refusalOf policy state d prospective = some class_) :
+    class_ ∈ AuthorityProvider.emittedClasses policy.authorities := by
+  unfold refusalOf at h
+  split at h
+  · rename_i denied hd
+    injection h with h
+    subst h
+    exact AuthorityProvider.mem_emittedClasses_of_transition
+      (denialOf_mem_emittedByTransition hd)
+  · split at h
+    · injection h with h
+      subst h
+      exact AuthorityProvider.mem_emittedClasses_of_transition
+        (by simp [AuditViolationClass.emittedByTransition])
+    · split at h
+      · rename_i provider hfind
+        injection h with h
+        subst h
+        exact AuthorityProvider.mem_emittedClasses_of_provider
+          (List.mem_of_find?_eq_some hfind)
+      · repeat' split at h
+        all_goals
+          first
+            | (injection h with h; subst h
+               exact AuthorityProvider.mem_emittedClasses_of_transition
+                 (by simp [AuditViolationClass.emittedByTransition]))
+            | exact absurd h (by simp)
+
+/--
+**Every violation class the transition records is one the profile declared.**
+
+The closure property `docs/MEMORY_IMPLEMENTATION_PLAN.md` §3.11 names. It holds
+for authority-provider refusals as well as the transition's own, which is what
+`StepPolicy.violationClassesDeclared` quantifying over
+`AuthorityProvider.emittedClasses` buys.
+-/
+theorem refusalOf_class_declared {policy : StepPolicy} {state : MachineState}
+    {d : AccessDescriptor} {prospective : Option MemoryEvent}
+    {class_ : AuditViolationClass}
+    (h : refusalOf policy state d prospective = some class_) :
+    policy.profile.vocabulary.auditViolationClasses.Recognizes class_ :=
+  policy.violationClassesDeclared class_ (refusalOf_mem_emittedClasses h)
 
 /--
 Perform one access, recording a certified event or a violation.
