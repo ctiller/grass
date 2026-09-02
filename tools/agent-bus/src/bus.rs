@@ -36,16 +36,16 @@ impl BusCtx {
         Ok(BusCtx { repo_root, has_origin })
     }
 
-    pub fn worktrees_root(&self) -> PathBuf {
-        self.repo_root.join(".git").join("agent-bus-worktrees")
+    pub fn worktrees_root(&self) -> AbResult<PathBuf> {
+        Ok(gitrepo::common_dir(&self.repo_root)?.join("agent-bus-worktrees"))
     }
 
-    pub fn worktree_path(&self, agent: &Agent) -> PathBuf {
-        self.worktrees_root().join(agent.as_str())
+    pub fn worktree_path(&self, agent: &Agent) -> AbResult<PathBuf> {
+        Ok(self.worktrees_root()?.join(agent.as_str()))
     }
 
     pub fn lock(&self) -> AbResult<BusLock> {
-        BusLock::acquire(&self.repo_root.join(".git"))
+        BusLock::acquire(&gitrepo::common_dir(&self.repo_root)?)
     }
 
     pub fn bus_ref_exists(&self) -> AbResult<bool> {
@@ -79,7 +79,7 @@ impl BusCtx {
     }
 
     pub fn ensure_worktree(&self, agent: &Agent) -> AbResult<PathBuf> {
-        let wt = self.worktree_path(agent);
+        let wt = self.worktree_path(agent)?;
         if !wt.exists() {
             gitrepo::ensure_bus_worktree(&self.repo_root, &wt, BUS_BRANCH)?;
         }
@@ -243,7 +243,7 @@ pub fn bootstrap_init(
     let object_format = gitrepo::object_format(&ctx.repo_root)?;
     let bus_json = BusJson::new(object_format, coordinators.to_vec(), product_review_from.clone())?;
 
-    let staging = ctx.worktrees_root().join("_bootstrap");
+    let staging = ctx.worktrees_root()?.join("_bootstrap");
     if staging.exists() {
         std::fs::remove_dir_all(&staging).map_err(|e| crate::error::AbError::Io {
             path: staging.display().to_string(),

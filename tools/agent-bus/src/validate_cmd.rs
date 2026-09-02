@@ -208,7 +208,7 @@ fn validate_one_agent(ctx: &BusCtx, agent: &Agent) -> AbResult<()> {
 /// A read-only checkout of the current `agent-bus` tip, for quarantine-mode
 /// per-agent structural scanning (which needs plain files on disk).
 fn worktree_snapshot(ctx: &BusCtx) -> AbResult<std::path::PathBuf> {
-    let path = ctx.worktrees_root().join("_validate_snapshot");
+    let path = ctx.worktrees_root()?.join("_validate_snapshot");
     if path.exists() {
         crate::gitrepo::run_ok(&path, &["fetch", ctx.repo_root.to_string_lossy().as_ref(), crate::bus::BUS_BRANCH])?;
         let tip = crate::gitrepo::rev_parse(&ctx.repo_root, crate::bus::BUS_BRANCH)?;

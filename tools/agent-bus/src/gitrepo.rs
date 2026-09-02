@@ -87,6 +87,25 @@ pub fn repo_root(start: &Path) -> AbResult<PathBuf> {
     Ok(PathBuf::from(out))
 }
 
+/// The repository's single shared git directory (AGENT_BUS.md section 2:
+/// "Multiple agents sharing one clone use detached worktrees"). In a linked
+/// worktree, `<repo_root>/.git` is a *file* pointing elsewhere, not a
+/// directory — callers must not join onto it directly (`repo_root.join(
+/// ".git")` breaks under a linked worktree with an OS "not a directory"
+/// error). `--git-common-dir` (not `--git-dir`) deliberately resolves to the
+/// *main* checkout's git directory even from a linked worktree, so agent-bus
+/// staging worktrees and the cross-process lock are shared repo-wide rather
+/// than fragmented per linked worktree.
+pub fn common_dir(start: &Path) -> AbResult<PathBuf> {
+    let out = run_ok(start, &["rev-parse", "--git-common-dir"])?;
+    let dir = PathBuf::from(out);
+    if dir.is_absolute() {
+        Ok(dir)
+    } else {
+        Ok(start.join(dir))
+    }
+}
+
 pub fn object_format(dir: &Path) -> AbResult<String> {
     let out = run(dir, &["rev-parse", "--show-object-format"])?;
     if out.success && !out.stdout.is_empty() {
