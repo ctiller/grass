@@ -130,13 +130,16 @@ def spec : SpecProcess resources := cubeSpec resources
 inductive CubeRole
   | input | sceneAnimator | surfacePresenter | termination
 
-def cubeProtocol : AbstractSpecificationProcessNetwork resources :=
+def cubeProtocol : ProcessPresentationNetwork resources :=
   Graphics.interactivePresentationProtocol
     (roles := CubeRole) (resources := resources)
     (scene := scene) (accepts := CubeObservation.Accepts)
 
+/-! The network is replaceable shape. The selected trace is separate, so the
+network itself cannot silently become a second precious behavior specification. -/
 def cubeProcessPresentation : ProcessPresentation spec where
   network := cubeProtocol
+  trace := Graphics.interactivePresentationTrace
   denotationExact := Graphics.interactivePresentationDenotesSceneContract
   requirementsExact := Graphics.interactivePresentationRequirementsExact
 
@@ -181,16 +184,21 @@ def CubeResult : CubeDemand -> Type
   | .commitFrame view => FrameCommitResult scene view
   | .finish outcome => FinishResult outcome
 
+/-! Every platform/API failure is already an explicit dependent result and
+user exit is external input. `quiescent` therefore states the proof demand that
+no separate interruption, logical-fault, or environment-violation event can be
+delivered to this application process; it does not discard such an event. -/
+def cubeVocabulary : ProcessVocabulary :=
+  ProcessVocabulary.quiescent
+    (CubeInput ⊕ FrameOpportunity) CubeDemand CubeResult CubeObservation
+
 /-! This is the replaceable portable proof model. It contains no host message, swapchain,
 queue, callback, or shader convention. -/
 def cubeApplication : ProcessSpec where
+  vocabulary := cubeVocabulary
   Request := Unit
   State := CubeState
   TerminalResult := CubeOutcome
-  ExternalEvent := CubeInput ⊕ FrameOpportunity
-  Demand := CubeDemand
-  Result := CubeResult
-  Observation := CubeObservation
   Initial := CubeState.InitialWithDemands scene
   Terminal := CubeState.Terminal
   Step := CubeState.Step scene
@@ -3385,15 +3393,18 @@ inductive CubeRole
   | surfacePresenter
   | termination
 
-def cubeProtocol : AbstractSpecificationProcessNetwork resources :=
+def cubeProtocol : ProcessPresentationNetwork resources :=
   Graphics.interactivePresentationProtocol
     (roles := CubeRole)
     (resources := resources)
     (scene := scene)
     (accepts := CubeObservation.Accepts)
 
+/-! The network is replaceable shape. The selected trace is separate, so the
+network itself cannot silently become a second precious behavior specification. -/
 def cubeProcessPresentation : ProcessPresentation spec where
   network := cubeProtocol
+  trace := Graphics.interactivePresentationTrace
   denotationExact := Graphics.interactivePresentationDenotesSceneContract
   requirementsExact := Graphics.interactivePresentationRequirementsExact
 
@@ -3452,14 +3463,19 @@ def CubeResult : CubeDemand → Type
   | .commitFrame view => FrameCommitResult view
   | .finish outcome => FinishResult outcome
 
+/-! Every platform/API failure is already an explicit dependent result and
+user exit is external input. `quiescent` therefore states the proof demand that
+no separate interruption, logical-fault, or environment-violation event can be
+delivered to this application process; it does not discard such an event. -/
+def cubeVocabulary : ProcessVocabulary :=
+  ProcessVocabulary.quiescent
+    (CubeInput ⊕ FrameOpportunity) CubeDemand CubeResult CubeObservation
+
 def cubeApplication : ProcessSpec where
+  vocabulary := cubeVocabulary
   Request := Unit
   State := CubeState
   TerminalResult := CubeOutcome
-  ExternalEvent := CubeInput ⊕ FrameOpportunity
-  Demand := CubeDemand
-  Result := CubeResult
-  Observation := CubeObservation
   Initial := CubeState.InitialWithDemands scene
   Terminal := CubeState.Terminal
   Step := CubeState.Step scene
