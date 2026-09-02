@@ -62,6 +62,15 @@ elab "#audit_verified_programs" : command => do
       roots := roots.push (name, info)
   if roots.isEmpty then
     throwError "trust audit found no concrete VerifiedProgram declarations"
+  -- Root discovery is intentionally global: downstream users may invoke the
+  -- command from modules outside the repository's namespace conventions.
+  for (name, info) in roots do
+    if info.isUnsafe then
+      throwError "VerifiedProgram root '{name}' is unsafe"
+    let axioms ← collectAxioms name
+    let rejected := axioms.filter fun axiomName => !allowedAxiom axiomName
+    unless rejected.isEmpty do
+      throwError "VerifiedProgram root '{name}' uses rejected axioms: {rejected.toList}"
   let projectDeclarations := declarations.filter fun candidate =>
     isProjectDeclaration environment candidate.1
   for (name, info) in projectDeclarations do
