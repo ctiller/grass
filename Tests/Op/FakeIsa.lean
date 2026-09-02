@@ -98,6 +98,13 @@ def constProv : Provenance := { bufferProv with root := constAlloc, source := .i
 /-- Provenance of the stack reservation. -/
 def frameProv : Provenance := { bufferProv with root := stackAlloc, source := .stack }
 
+/-- A third allocation, aliased to `viewAlloc` rather than to `bufferAlloc`, so
+reaching it from the buffer takes two declared hops. -/
+def chainedAlloc : AllocId := allocs₂.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- Provenance of the far end of the alias chain. -/
+def chainedProv : Provenance := { bufferProv with root := chainedAlloc, source := .mappedFile }
+
 /-- Provenance of the borrowed storage. -/
 def borrowedProv : Provenance := { bufferProv with root := borrowedAlloc }
 
@@ -366,6 +373,11 @@ import it, and is packaged the same way. -/
 inductive Beta where
   /-- A device engine writes the buffer. -/
   | dmaWrite
+  /-- A device engine writes the far end of an alias chain: the same storage as
+  the buffer, two declared hops away. -/
+  | dmaWriteChained
+  /-- A device engine discharges a duty the program thread holds. -/
+  | dmaDischargesTheThreadsDuty
   /-- An operation that declares no memory effects at all. -/
   | undeclared
 deriving DecidableEq, Repr
@@ -375,6 +387,21 @@ instance : HasOperationFacets Beta where
     | .dmaWrite =>
         { memoryEffects := some (.single
             { acc viewProv ⟨0, 8⟩ 0x1000 .write .readWrite false true
+                (context := engine₀) with
+              intent := { reads := false, writes := true, isDevice := true } })
+          faults := some [.deviceFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .dmaWriteChained =>
+        { memoryEffects := some (.single
+            { acc chainedProv ⟨0, 8⟩ 0x4000 .write .readWrite false true
+                (context := engine₀) with
+              intent := { reads := false, writes := true, isDevice := true } })
+          faults := some [.deviceFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .dmaDischargesTheThreadsDuty =>
+        { memoryEffects := some (.single
+            { acc borrowedProv ⟨0, 8⟩ 0x5000 .write .readWrite false true
+                [.discharge bufferProtocol bufferAuthority releaseObligationId]
                 (context := engine₀) with
               intent := { reads := false, writes := true, isDevice := true } })
           faults := some [.deviceFault], restartability := some .notRestartable
@@ -528,12 +555,14 @@ def memory₀ : MemoryState :=
 
 /-- The stack reservation the frame provider guards. -/
 def memory₁ : MemoryState :=
-  (memory₀.allocate stackAlloc
-    { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-      permission := .readWrite, live := true, bytes := zeroed64 }).allocate
-    borrowedAlloc
-    { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-      permission := .readWrite, live := true, bytes := zeroed64 }
+  ((((memory₀.allocate stackAlloc
+      { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+        permission := .readWrite, live := true, bytes := zeroed64 }).allocate borrowedAlloc
+      { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+        permission := .readWrite, live := true, bytes := zeroed64 }).allocate chainedAlloc
+      { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+        permission := .readWrite, live := true, bytes := zeroed64 }).alias viewAlloc
+    chainedAlloc)
 
 /-- The starting machine state: allocations exist, but no authority is held. -/
 def state₀ : MachineState := .initial memory₁
@@ -902,16 +931,20 @@ theorem both_creates_are_individually_applicable :
     LedgerDelta.Applicable ((FiniteMap.empty : FiniteMap ObligationId Obligation).domain)
       (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
         Obligation.protocol)
+      (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
+        Obligation.owner) thread₀
       (.create bufferProtocol bufferAuthority collidingFirst) ∧
     LedgerDelta.Applicable ((FiniteMap.empty : FiniteMap ObligationId Obligation).domain)
       (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
         Obligation.protocol)
+      (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
+        Obligation.owner) thread₀
       (.create bufferProtocol bufferAuthority collidingSecond) := by decide
 
 /-- Together in one effect they are not applicable, because the second is checked
 against the ledger the first left. -/
 theorem the_pair_is_not_applicable :
-    ¬ LedgerEffectApplicable (FiniteMap.empty : FiniteMap ObligationId Obligation)
+    ¬ LedgerEffectApplicable (FiniteMap.empty : FiniteMap ObligationId Obligation) thread₀
       [ .create bufferProtocol bufferAuthority collidingFirst
       , .create bufferProtocol bufferAuthority collidingSecond ] := by decide
 
@@ -975,6 +1008,43 @@ theorem a_denial_before_the_fault_records_no_fault :
   intro s hs
   cases hs
   decide
+
+/-! ## A duty is discharged by its holder
+
+`docs/OBLIGATIONS.md` opens by making an obligation a duty of "its holder" and §1
+lists the owner as part of its form. `Obligation.owner` was carried, printed, and
+consulted by nothing: `LedgerDelta.Applicable` checked liveness and protocol and
+never ownership, so any context could discharge any duty. Local adversarial review
+stepped a device engine through a discharge of the program thread's release
+obligation and the duty vanished with no violation. -/
+
+/-- The thread reserves, creating a duty it owns. -/
+theorem the_thread_owns_what_it_reserved :
+    ∀ s, (stepAlpha state₀ .reserve).state? = some s →
+      (s.obligations.lookup releaseObligationId).map Obligation.owner = some thread₀ := by
+  intro s hs
+  cases hs
+  decide
+
+/-- **Another context cannot discharge it.** The duty survives and the attempt is
+recorded, rather than the duty vanishing silently. -/
+theorem another_context_cannot_discharge_it :
+    ∀ s, (stepAlpha state₀ .reserve).state? = some s →
+      ∀ t, (stepBeta s .dmaDischargesTheThreadsDuty).state? = some t →
+        (t.obligations.lookup releaseObligationId).isSome ∧ ¬ t.violations.IsEmpty := by
+  intro s hs t ht
+  cases hs; cases ht
+  exact ⟨by decide, by decide⟩
+
+/-- The holder still can, so the check is about ownership and not about refusing
+every discharge. -/
+theorem the_holder_can_discharge_it :
+    ∀ s, (stepAlpha state₀ .reserve).state? = some s →
+      ∀ t, (stepAlpha s .release).state? = some t →
+        t.obligations.lookup releaseObligationId = Option.none ∧ t.violations.IsEmpty := by
+  intro s hs t ht
+  cases hs; cases ht
+  exact ⟨by decide, by decide⟩
 
 /-! ## An access cannot declare a context other than the one running it
 
@@ -1211,6 +1281,34 @@ theorem aliased_cross_context_store_is_denied :
   intro s hs t ht
   cases hs; cases ht
   exact ⟨by decide, by decide⟩
+
+/--
+**An alias chain is followed, not just one hop.**
+
+`state₀` declares the buffer aliased to the view and the view aliased to
+`chainedAlloc`, so all three name the same bytes. `SharesBytes` compared a single
+hop, so the two ends of the chain were declared non-conflicting and a
+cross-context write to the far end committed with no violation — the same defect
+`SharesBytes` was introduced to fix, one hop further out.
+`docs/MEMORY_MODEL.md` §7.5 makes mapping and sharing typed transitions, and those
+compose.
+-/
+theorem chained_alias_store_is_denied :
+    ∀ s, (stepAlpha state₀ .store).state? = some s →
+      ∀ t, (stepBeta s .dmaWriteChained).state? = some t →
+        t.events.length = 1 ∧ ¬ t.violations.IsEmpty := by
+  intro s hs t ht
+  cases hs; cases ht
+  exact ⟨by decide, by decide⟩
+
+/-- The chain really is two hops: the buffer and `chainedAlloc` are not directly
+declared aliased, so the theorem above is about transitivity and not about a
+declaration that was there all along. -/
+theorem the_chain_is_two_hops :
+    ¬ (state₀.memory.AliasHop bufferAlloc chainedAlloc) ∧
+    state₀.memory.AliasHop bufferAlloc viewAlloc ∧
+    state₀.memory.AliasHop viewAlloc chainedAlloc ∧
+    state₀.memory.SharesBytes bufferAlloc chainedAlloc := by decide
 
 /-- The same two accesses, one context apart, are *not* denied: program order
 sequences a context against itself, and refusing that would refuse ordinary

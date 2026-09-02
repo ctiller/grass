@@ -125,24 +125,69 @@ theorem not_granted_empty (context : ContextId) (provenance : Provenance)
   rintro ⟨entry, hmem, -⟩
   simp [empty, FiniteMap.empty] at hmem
 
-/-- `state.SharesBytes a b` holds when two allocations name the same storage,
-either because they are the same allocation or because the profile declared them
-aliased. -/
+/-- One declared aliasing hop, in either direction. Aliasing is symmetric by
+convention and this is where the convention is discharged. -/
+def AliasHop (state : MemoryState) (a b : AllocId) : Prop :=
+  (a, b) ∈ state.aliases ∨ (b, a) ∈ state.aliases
+
+instance (state : MemoryState) (a b : AllocId) : Decidable (state.AliasHop a b) :=
+  inferInstanceAs (Decidable (_ ∨ _))
+
+/-- `state.SharesAfter n a b` holds when `b` is reachable from `a` in at most `n`
+declared hops. The bounded form, so the closure below is decidable. -/
+def SharesAfter (state : MemoryState) : Nat → AllocId → AllocId → Prop
+  | 0, a, b => a = b
+  | n + 1, a, b =>
+      a = b ∨ ∃ mid ∈ state.allocations.domain, state.AliasHop a mid ∧
+        state.SharesAfter n mid b
+
+instance decSharesAfter (state : MemoryState) : (n : Nat) → (a b : AllocId) →
+    Decidable (state.SharesAfter n a b)
+  | 0, _, _ => inferInstanceAs (Decidable (_ = _))
+  | n + 1, _, b =>
+      have : ∀ mid, Decidable (state.SharesAfter n mid b) := fun mid =>
+        decSharesAfter state n mid b
+      inferInstanceAs (Decidable (_ ∨ ∃ _ ∈ _, _))
+
+/--
+`state.SharesBytes a b` holds when two allocations name the same storage.
+
+**Transitively.** `docs/MEMORY_MODEL.md` §7.5 makes mapping, pinning and sharing
+typed transitions, and those compose: a profile that declares a file aliased to a
+view, and that view aliased to a second view, has said all three name the same
+bytes. This was a single hop, so the two ends of such a chain were declared
+non-conflicting and a cross-context write to the far end committed with no
+violation — the same defect `SharesBytes` was introduced to fix, one hop further
+out. Local adversarial review built the chain.
+
+The bound is the number of declared aliases, which is the longest simple path any
+chain can have, so `SharesAfter` at that bound is the full closure and stays
+decidable.
+-/
 def SharesBytes (state : MemoryState) (a b : AllocId) : Prop :=
-  a = b ∨ (a, b) ∈ state.aliases ∨ (b, a) ∈ state.aliases
+  state.SharesAfter state.aliases.length a b
 
 instance (state : MemoryState) (a b : AllocId) : Decidable (state.SharesBytes a b) :=
-  inferInstanceAs (Decidable (_ ∨ _ ∨ _))
+  inferInstanceAs (Decidable (state.SharesAfter _ a b))
+
+theorem sharesAfter_zero_of_eq {state : MemoryState} {n : Nat} {a b : AllocId}
+    (h : a = b) : state.SharesAfter n a b := by
+  cases n with
+  | zero => exact h
+  | succ m => exact .inl h
 
 theorem sharesBytes_refl (state : MemoryState) (a : AllocId) : state.SharesBytes a a :=
-  .inl rfl
+  sharesAfter_zero_of_eq rfl
 
-theorem SharesBytes.symm {state : MemoryState} {a b : AllocId}
-    (h : state.SharesBytes a b) : state.SharesBytes b a := by
-  rcases h with rfl | h | h
-  · exact .inl rfl
-  · exact .inr (.inr h)
-  · exact .inr (.inl h)
+/-- One declared hop shares bytes, provided the intermediate allocation exists.
+The direction a profile's `alias` declaration is used in. -/
+theorem sharesBytes_of_hop {state : MemoryState} {a b : AllocId}
+    (hhop : state.AliasHop a b) (hb : b ∈ state.allocations.domain)
+    (hpos : 0 < state.aliases.length) : state.SharesBytes a b := by
+  unfold SharesBytes
+  cases hn : state.aliases.length with
+  | zero => omega
+  | succ m => exact .inr ⟨b, hb, hhop, sharesAfter_zero_of_eq rfl⟩
 
 /-- Record a new allocation. -/
 def allocate (state : MemoryState) (id : AllocId) (record : AllocationRecord) :
