@@ -38,7 +38,7 @@ deriving Repr, DecidableEq
 
 namespace RequirementKind
 
-/-- Distinct nominal owner/kind pairs cannot collapse to one extension key. -/
+/-- `RequirementKind.extension_injective` proves nominal pairs cannot collapse. -/
 theorem extension_injective {ownerA kindA ownerB kindB : StableId} :
     extension ownerA kindA = extension ownerB kindB ↔
       ownerA = ownerB ∧ kindA = kindB := by
