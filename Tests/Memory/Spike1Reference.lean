@@ -1,3 +1,4 @@
+import Grass.Obligation.Disposition
 import Grass.Memory.Facet
 import Grass.Memory.Profile
 
@@ -41,7 +42,6 @@ Each identity comes from advancing a supply, exactly as an execution would. -/
 
 private def allocSupply₀ : FreshSupply AllocTag := FreshSupply.initial
 private def allocSupply₁ := allocSupply₀.fresh.2
-private def allocSupply₂ := allocSupply₁.fresh.2
 
 /-- The process stack reservation. -/
 def stackAlloc : AllocId := allocSupply₀.fresh.1
@@ -319,6 +319,108 @@ theorem leaTransferred_wellFormed : leaTransferred.WellFormed := by
 
 theorem ud2Containment_wellFormed : ud2Containment.WellFormed := by
   simp [ud2Containment, SubstepSequence.WellFormed, SubstepSequence.none_]
+
+/-! ## Obligations across the `WriteFile` call
+
+`docs/MEMORY_MODEL.md` §6 says an ABI call profile "constructs the pending
+frontier state and completion obligation". The framing theorem that does so is
+M4, but the *vocabulary* has to be able to express the ledger movement now, and
+this section checks that it can.
+
+The interesting question is whether `LedgerDelta` works with no `preserve`
+constructor. Spike 1 holds a live obligation across the call — the console handle
+from `GetStdHandle` must eventually reach process teardown — and the call must
+not disturb it. With framing that is not something the call declares; it is
+something the call's silence already says. -/
+
+private def obligationSupply₀ : FreshSupply ObligationTag := FreshSupply.initial
+private def obligationSupply₁ := obligationSupply₀.fresh.2
+
+/-- The obligation created by `GetStdHandle`: the returned handle is a resource
+with a lifecycle. -/
+def handleObligationId : ObligationId := obligationSupply₀.fresh.1
+
+/-- The obligation created by the `WriteFile` call: it must run to completion, or
+its partial result must be accounted for. -/
+def writeCompletionId : ObligationId := obligationSupply₁.fresh.1
+
+/-- The Win32 handle protocol. -/
+def win32HandleProtocol : ObligationProtocolId := ⟨⟨"win32.handle"⟩⟩
+
+/-- The Win32 synchronous I/O protocol. -/
+def win32WriteProtocol : ObligationProtocolId := ⟨⟨"win32.write"⟩⟩
+
+/-- The obligation to account for the console handle. -/
+def handleObligation : Obligation :=
+  { id := handleObligationId, kind := .closeHandle, protocol := win32HandleProtocol
+    owner := mainThread, payload := ⟨Unit, ()⟩ }
+
+/-- The obligation to complete the write. -/
+def writeCompletionObligation : Obligation :=
+  { id := writeCompletionId, kind := .completePartialIo, protocol := win32WriteProtocol
+    owner := mainThread, payload := ⟨Unit, ()⟩ }
+
+/-- The ledger effect of entering the `WriteFile` call: one obligation created,
+and nothing said about the handle obligation. -/
+def callLedgerEffect : LedgerEffect := [.create writeCompletionObligation]
+
+/-- The ledger effect of a returning call that wrote everything: the completion
+obligation is discharged. -/
+def returnLedgerEffect : LedgerEffect := [.discharge writeCompletionId]
+
+/--
+The call does not touch the handle obligation, and says so by not mentioning it.
+
+This is the framing story `Grass/Obligation/Delta.lean` is built on. Had
+`preserve` been a constructor, the call would have had to enumerate every
+obligation it was leaving alone — and could have listed one it also discharged.
+-/
+theorem call_preserves_handle_obligation :
+    callLedgerEffect.PreservesIdentity handleObligationId := by
+  intro delta hd
+  simp only [callLedgerEffect, List.mem_cons, List.not_mem_nil, or_false] at hd
+  subst hd
+  refine ⟨by simp, ?_⟩
+  simp only [LedgerDelta.produces_create, List.mem_singleton]
+  intro h
+  exact absurd h.symm (FreshSupply.never_reissued (.refl _) (by decide))
+
+/-- Returning discharges exactly the completion obligation. -/
+theorem return_discharges_write_completion :
+    returnLedgerEffect.consumes = [writeCompletionId] := rfl
+
+/-- Returning does not touch the handle obligation either. -/
+theorem return_preserves_handle_obligation :
+    returnLedgerEffect.PreservesIdentity handleObligationId := by
+  intro delta hd
+  simp only [returnLedgerEffect, List.mem_cons, List.not_mem_nil, or_false] at hd
+  subst hd
+  refine LedgerDelta.preservesIdentity_discharge_of_ne ?_
+  intro h
+  exact absurd h (FreshSupply.never_reissued (.refl _) (by decide)).symm
+
+/--
+The handle obligation reaches process exit and is adopted by teardown.
+
+`docs/OBLIGATIONS.md` §3 permits this: "Process exit may transfer virtual memory,
+handles, and similar resources to a modeled OS teardown contract." It is a normal
+disposition, so successful exit is not left holding an abnormal one.
+-/
+def handleDisposition : TerminalOutcome :=
+  { obligation := handleObligationId, disposition := .teardownAdopted ⟨"win32.processExit"⟩ }
+
+theorem handleDisposition_isNormal : handleDisposition.disposition.IsNormal := trivial
+
+/-- Teardown adoption needs no licence from the program's specification, unlike
+an abandonment. -/
+theorem handleDisposition_needs_no_specification_support :
+    ¬ handleDisposition.disposition.RequiresSpecificationSupport := fun h => h
+
+/-- Had the handle instead been abandoned, the specification would have had to
+say so. This is the asymmetry `docs/OBLIGATIONS.md` §3 turns on, and the reason a
+platform's permission to abandon is not by itself sufficient. -/
+theorem abandonment_needs_specification_support :
+    (Disposition.abandonedUnknown).RequiresSpecificationSupport := trivial
 
 /-! ## What the cases establish -/
 
