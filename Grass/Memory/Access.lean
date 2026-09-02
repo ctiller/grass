@@ -177,6 +177,12 @@ because a descriptor that carried its own space could pair the id `cpu.virtual`
 with `repr := .symbolic` and make both the alignment and range-bound clauses
 vacuous — every numeric guard would be optional in practice.
 
+Being a parameter is not by itself the guarantee. Applied to a hand-made space,
+this predicate proves only what it says. What makes it a seal is that the
+transition never applies it to a hand-made space: `Substep.WellFormedIn` resolves
+through the profile's table, and `StepPolicy.vocabularyWellFormed` rules out a
+table that answers ambiguously.
+
 The remaining conditions are checkable from the descriptor alone. Whether the
 provenance is live, whether the named bytes are actually initialized, and whether
 the address really is the allocation base plus `range.start` are facts about a
@@ -187,8 +193,14 @@ condition names itself, and so that the §10 profile package can cite conditions
 individually.
 -/
 structure WellFormedIn (d : AccessDescriptor) (space : AddressSpace) : Prop where
-  /-- The supplied space is the one the descriptor names. A caller obtains it by
-  resolving `d.space` through a profile's table, and cannot substitute another. -/
+  /-- The supplied space is the one the descriptor names.
+
+  This clause checks identity only, and `space` is a parameter, so this predicate
+  on its own does **not** stop a caller passing a space it invented under the
+  right name. The seal is one level up: `Substep.WellFormedIn` and
+  `AdmittedVocabulary.Admits` resolve `d.space` through a profile's table, and
+  `StepPolicy` cannot be built on a table that declares one identity twice. Read
+  this as a component of that check, not as the check. -/
   spaceResolved : space.id = d.space
   /-- An access that reads, writes, and executes nothing is not an access.
   `docs/FOUNDATION.md` law 8 forbids treating it as a harmless no-op. -/
