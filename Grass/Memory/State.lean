@@ -180,6 +180,13 @@ initialized. Both from one lookup, for the reason `ByteStore.cellAt?` gives. -/
 def cellAt? (state : MemoryState) (id : AllocId) (offset : Nat) : Option (Byte × Bool) :=
   (state.allocations.lookup id).bind (·.bytes.cellAt? offset)
 
+/-- The byte is the cell's first component. Both go through one lookup, so a
+framing fact proved for cells is immediately a framing fact for bytes. -/
+@[simp] theorem byteAt?_eq_map_cellAt? (state : MemoryState) (id : AllocId) (offset : Nat) :
+    state.byteAt? id offset = (state.cellAt? id offset).map Prod.fst := by
+  unfold byteAt? cellAt? ByteStore.byteAt?
+  cases state.allocations.lookup id <;> simp
+
 /-- `state.InitializedAt id offset` holds when that byte is initialized. The
 pointwise form of `RangeInitialized`, which a padding argument needs because
 padding is a set of offsets rather than a range. -/

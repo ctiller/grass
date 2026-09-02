@@ -329,4 +329,105 @@ theorem applyAccess_comm (state : MemoryState) (dA dB : AccessDescriptor)
     · simp only [if_neg hA, if_neg hB]
       exact MemoryState.AgreesOn.refl _
 
+/-! ## Straight-line blocks
+
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4's exit criterion is that the framing set
+suffices to discharge a straight-line Spike 1 block *without a bespoke local
+lemma*. A block is a list of accesses run in order, and the law it needs is that
+a byte no step touched is the byte it was before the block began.
+
+The hypothesis is stated over each step's declared `range` rather than over the
+bytes it actually wrote. That is the weaker fact and the useful one: a caller
+reasoning about a block knows the ranges from the descriptors, and does not know
+how much data each store carried. `applyAccess` only ever writes inside the
+declared range, so the stronger hypothesis would buy nothing and cost every
+caller an extra obligation.
+-/
+
+/-- Run a block of accesses in order, threading the state. -/
+def runBlock (state : MemoryState) (indeterminate : Nat → Byte) :
+    List (AccessDescriptor × ByteSeq) → List AccessResult × MemoryState
+  | [] => ([], state)
+  | (d, writeData) :: rest =>
+      let step := applyAccess state d writeData indeterminate
+      let after := runBlock step.2 indeterminate rest
+      (step.1 :: after.1, after.2)
+
+/-- `step.Touches id offset` holds when this step's declared range covers that
+byte of that allocation. Everything else the step provably leaves alone. -/
+def Touches (step : AccessDescriptor × ByteSeq) (id : AllocId) (offset : Nat) : Prop :=
+  step.1.provenance.root = id ∧ step.1.range.Covers offset
+
+instance (step : AccessDescriptor × ByteSeq) (id : AllocId) (offset : Nat) :
+    Decidable (Touches step id offset) := inferInstanceAs (Decidable (_ ∧ _))
+
+/-- **One access frames every cell it does not touch**, byte and initialization
+together. The cell-level form the block law is built from. -/
+theorem cellAt?_applyAccess_of_untouched (state : MemoryState) (d : AccessDescriptor)
+    (writeData : ByteSeq) (indeterminate : Nat → Byte) {id : AllocId} {offset : Nat}
+    (h : ¬ Touches (d, writeData) id offset) :
+    (applyAccess state d writeData indeterminate).2.cellAt? id offset =
+      state.cellAt? id offset := by
+  rw [applyAccess_state]
+  split
+  · refine MemoryState.cellAt?_write_of_not_covers state d.provenance.root ?_
+    by_cases hid : id = d.provenance.root
+    · subst hid
+      refine Or.inr fun hin => h ⟨rfl, ?_⟩
+      simp only [ByteRange.covers_def, List.length_take] at hin ⊢
+      omega
+    · exact Or.inl hid
+  · rfl
+
+/--
+**A straight-line block frames every cell no step of it touches.**
+
+The exit criterion's lemma. A caller discharges a block by checking each step's
+declared range against the bytes it cares about — which is decidable, and is what
+`Touches` is for — and needs nothing else about what the block did.
+-/
+theorem cellAt?_runBlock_of_untouched (indeterminate : Nat → Byte) :
+    ∀ (block : List (AccessDescriptor × ByteSeq)) (state : MemoryState) {id : AllocId}
+      {offset : Nat}, (∀ step ∈ block, ¬ Touches step id offset) →
+      (runBlock state indeterminate block).2.cellAt? id offset = state.cellAt? id offset
+  | [], _, _, _, _ => rfl
+  | (d, writeData) :: rest, state, id, offset, hall => by
+    rw [runBlock,
+      cellAt?_runBlock_of_untouched indeterminate rest _
+        (fun step hstep => hall step (List.mem_cons_of_mem _ hstep)),
+      cellAt?_applyAccess_of_untouched state d writeData indeterminate
+        (hall (d, writeData) List.mem_cons_self)]
+
+/-- The byte form, which is what a load's observation is read through. -/
+theorem byteAt?_runBlock_of_untouched (indeterminate : Nat → Byte)
+    (block : List (AccessDescriptor × ByteSeq)) (state : MemoryState) {id : AllocId}
+    {offset : Nat} (hall : ∀ step ∈ block, ¬ Touches step id offset) :
+    (runBlock state indeterminate block).2.byteAt? id offset = state.byteAt? id offset := by
+  rw [MemoryState.byteAt?_eq_map_cellAt?, MemoryState.byteAt?_eq_map_cellAt?,
+    cellAt?_runBlock_of_untouched indeterminate block state hall]
+
+/--
+**What a step wrote survives the rest of the block.**
+
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4's exit criterion, stated as one theorem: a
+store's bytes are still there at the end of a straight-line block, provided no
+later step's declared range covers them. Everything a caller must check is
+decidable from the descriptors — `Touches` is — so discharging a block is
+checking ranges rather than reasoning about the store.
+-/
+theorem byteAt?_write_survives_block (state : MemoryState) (d : AccessDescriptor)
+    (writeData : ByteSeq) (indeterminate : Nat → Byte)
+    (block : List (AccessDescriptor × ByteSeq)) {record : AllocationRecord}
+    (hfound : state.allocations.lookup d.provenance.root = some record)
+    (hden : denialOf state d = Option.none) (hwrites : d.intent.writes = true)
+    {offset : Nat}
+    (hcov : (ByteRange.mk d.range.start (writeData.take d.range.size).length).Covers offset)
+    (hall : ∀ step ∈ block, ¬ Touches step d.provenance.root offset) :
+    (runBlock (applyAccess state d writeData indeterminate).2 indeterminate
+        block).2.byteAt? d.provenance.root offset =
+      (writeData.take d.range.size)[offset - d.range.start]? := by
+  rw [byteAt?_runBlock_of_untouched indeterminate block _ hall, applyAccess_state,
+    if_pos (And.intro hden hwrites)]
+  exact MemoryState.byteAt?_write_of_covers _ hfound hcov
+
 end Grass.Memory

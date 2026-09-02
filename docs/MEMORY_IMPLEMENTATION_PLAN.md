@@ -552,10 +552,34 @@ puts at offset four. Padding there holds no byte at all, not merely an
 uninitialized one, so a store that quietly zero-filled the gap would fail even if
 it kept the initialization flags right.
 
+The exit criterion is that the framing set discharges a straight-line block
+*without a bespoke local lemma*. `runBlock` runs a list of accesses in order and
+`byteAt?_write_survives_block` is the discharge: a store's bytes are still there
+at the end of a block, provided no later step's declared range covers them.
+Everything a caller checks is decidable from the descriptors, which is what
+`Touches` is for, so discharging a block is checking ranges rather than reasoning
+about the store.
+
+The hypothesis is each step's *declared* range rather than the bytes it actually
+wrote. That is deliberate: a caller knows ranges from descriptors and does not
+know how much data each store carried, and `applyAccess` only ever writes inside
+the declared range, so the stronger hypothesis would buy nothing and cost every
+caller an obligation.
+
+`Tests/Memory/StraightLineBlock.lean` is the check, and it is symbolic rather
+than concrete on purpose. A fixture that fixed the allocation, the data, and the
+offsets and closed everything by `decide` would prove the arithmetic and say
+nothing about the lemma set — the kernel would be doing the work the theorems are
+supposed to do. There the state is universally quantified, the data arbitrary,
+and every proof a single application of a named exported theorem. One local
+declaration exists and is a wrapper, not content.
+
 ### 4.2 What M2 still owes
 
 - Compaction for the byte store, per §4.1.
-- The straight-line Spike 1 block, which is the actual exit criterion.
+- The Spike 1 block itself, over the reference instruction mix in
+  `Tests/Memory/Spike1Reference.lean`. The general discharge is proved and
+  checked symbolically; what is not yet done is running that particular block.
 
 Exit criteria: the M1 reference instruction set steps end to end over a
 hand-built `MemState`; the framing lemma set is sufficient to discharge a
