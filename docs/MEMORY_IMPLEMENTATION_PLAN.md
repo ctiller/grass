@@ -335,9 +335,6 @@ type, the docstring says so and names what does enforce it.
   compare and swap operands.
 - The descriptor carries a `ContextId` but no `ContextKind`, though §7.1 requires
   identity *and* kind; the stepper supplies the kind out of band.
-- `AdmittedVocabulary` and `MemoryProfile` have no well-formedness of their own,
-  so a vocabulary can declare one address-space id twice with different
-  representations. `AddressSpaceTable.WellFormed` exists; requiring it does not.
 - Five open-name axes have no registry: the `profileSpecific` cases of ordering,
   scope, restartability, and fault visibility, plus `ObservationLabel`.
 - `xchg`'s implicit `LOCK` cannot be declared as a demand rather than a choice.

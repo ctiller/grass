@@ -157,6 +157,21 @@ deriving Repr
 namespace AdmittedVocabulary
 
 /--
+`vocabulary.WellFormed` holds when the vocabulary itself is coherent.
+
+Without it the law-8 chain terminated in an unchecked record. A vocabulary could
+declare `cpu.virtual` twice — once honestly and once with `repr := .symbolic` —
+and `AddressSpaceTable.find?` returns the first match, so which version an access
+was checked against depended on list order. Resolving a descriptor's space
+through the profile is only a guarantee if the profile's own table is checked.
+-/
+def WellFormed (vocabulary : AdmittedVocabulary) : Prop :=
+  vocabulary.addressSpaces.WellFormed
+
+instance (vocabulary : AdmittedVocabulary) : Decidable vocabulary.WellFormed :=
+  inferInstanceAs (Decidable (_ ∧ _))
+
+/--
 `vocabulary.Admits d` holds when every open name the access descriptor uses is
 one this vocabulary declared.
 

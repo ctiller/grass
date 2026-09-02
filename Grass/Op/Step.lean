@@ -104,6 +104,13 @@ structure StepPolicy where
   profile : MemoryProfile
   /-- The facets every reachable operation must supply. -/
   requiredFacets : List FacetName
+  /-- The profile's vocabulary is coherent.
+
+  A field rather than a check inside `step`, so a policy with an incoherent
+  vocabulary cannot be constructed at all. A vocabulary that declared one
+  address-space identity twice with different representations would make which
+  version an access was checked against depend on list order. -/
+  vocabularyWellFormed : profile.vocabulary.WellFormed
   /-- Which overlapping atomic pairs this target actually admits. Defaults to
   none, which is the conservative direction: every overlapping pair with a writer
   conflicts. `Bool`-valued so the stepper can actually run the check; a

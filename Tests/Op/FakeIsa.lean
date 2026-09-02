@@ -251,7 +251,19 @@ def profile : MemoryProfile :=
 
 /-- Every operation must declare its memory effects and its faults. -/
 def policy : StepPolicy :=
-  { profile := profile, requiredFacets := [.memoryEffects, .faults] }
+  { profile := profile, requiredFacets := [.memoryEffects, .faults]
+    vocabularyWellFormed := by decide }
+
+/-- A vocabulary that declares one address-space identity twice, with different
+representations, is not well formed — so no `StepPolicy` can be built from it.
+`find?` returns the first match, so without this check which version an access was
+validated against would depend on list order. -/
+theorem duplicate_space_vocabulary_is_rejected :
+    ¬ ({ vocabulary with
+          addressSpaces := ⟨[ { id := .cpuVirtual, repr := .symbolic
+                                memoryType := .writeBack, coherence := .hostCoherent }
+                            , AddressSpace.cpuVirtual64 ]⟩ } :
+        AdmittedVocabulary).WellFormed := by decide
 
 /-- The buffer, its aliasing view, and a read-only allocation. The alias is
 declared here, in the state, because whether two allocations name the same bytes
