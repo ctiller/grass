@@ -754,6 +754,18 @@ to imitate compiler-selected storage or CFG structure.
     is generated transition bookkeeping, not an additional process-author
     proof field. It resolves `c-process:46` and supersedes the unindexed
     lifecycle field reprinted in decision 128's `ProcessInstance` surface.
+130. `ProcessInstance` stores typed three-way `ProcessParentage`, not an optional
+    current parent. The cases are the topology root, an attached child naming
+    its current parent incarnation, and a detached child retaining its exact
+    former parent incarnation. Detachment removes current parent authority but
+    does not erase history. Its exact transition changes `.attached parent` to
+    `.detached parent` and proves the same reference, which lets the resulting
+    network state justify `NonReturningReason.detached` without replaying
+    another process's transition history. The root constructor is indexed at
+    the topology's root kind; network well-formedness separately proves root
+    uniqueness and valid spawn/parent relationships. These laws are not fields
+    an ordinary process author fills. This resolves `c-process:47` and replaces
+    the `Option` field that conflated roots with detached children.
 
 ## Explicitly rejected shortcuts
 

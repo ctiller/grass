@@ -462,10 +462,21 @@ inductive ProcessLifecycle (p : ProcessSpec)
   | violated (violation : p.EnvironmentViolation)
   | died (reason : ProcessDeathReason)
 
+inductive ProcessParentage (topology : ProcessTopology registry boundary) :
+    topology.ProcessKind -> Type
+  | root : ProcessParentage topology topology.root
+  | attached {kind : topology.ProcessKind}
+      (parentKind : topology.ProcessKind)
+      (parent : ProcessRef topology parentKind) : ProcessParentage topology kind
+  | detached {kind : topology.ProcessKind}
+      (formerParentKind : topology.ProcessKind)
+      (formerParent : ProcessRef topology formerParentKind) :
+      ProcessParentage topology kind
+
 structure ProcessInstance (topology : ProcessTopology registry boundary) where
   kind : topology.ProcessKind
   ref : ProcessRef topology kind
-  parent : Option (Sigma fun parentKind => ProcessRef topology parentKind)
+  parentage : ProcessParentage topology kind
   request : (registry.protocol (topology.protocolKey kind)).Request
   local : (registry.protocol (topology.protocolKey kind)).State
   lifecycle : ProcessLifecycle (registry.protocol (topology.protocolKey kind))
@@ -582,6 +593,19 @@ the exact payload committed by its lifecycle transition. Carrying the payload
 does not duplicate an independent fact: the transition owns one value and
 records that same value in the child event, parent projection when applicable,
 and resulting instance state through equality proofs.
+
+`ProcessParentage` preserves both current authority and the history needed to
+justify its loss. `.root` is indexed at exactly the topology's root kind;
+`.attached parent` names the current parent incarnation; and
+`.detached formerParent` records the exact incarnation from which the process
+was detached without granting that incarnation any continuing parent authority.
+The detach transition changes only `.attached parent` to
+`.detached parent`, proves the references identical, and establishes the
+corresponding non-returning child disposition. Thus a root and a detached child
+are distinguishable from network state, and an audit can validate detachment
+without replaying the transition history. Root uniqueness and the validity of
+attached parent/spawn relationships remain network well-formedness laws rather
+than proof fields paid by each instance author.
 
 `usedNominals` contains every process generation, channel epoch, child demand,
 message occurrence, and coalesced replacement ever allocated in the execution
