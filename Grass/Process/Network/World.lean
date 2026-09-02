@@ -35,12 +35,13 @@ real obligation — it says the named fragments are a complete, independent
 decomposition of the world.
 
 `logicalWorldAgreement` discharges it, and the shape of `Core` below is what
-makes that possible rather than a coincidence. Every field is a function of the
-index its fragment names: `instances` of a slot, `shared` of a region,
-`inFlight` and `sessions` of an edge-and-session pair. The mixed world takes
-each component from one side or the other according to whether its fragment is
-inside the split, which is only writable because there is exactly one component
-per fragment.
+makes that possible rather than a coincidence. There is **exactly one component
+per fragment**: the four indexed fields are functions of the index their
+fragment names — `instances` of a slot, `shared` of a region, `inFlight` and
+`sessions` of an edge-and-session pair — and the other three are single values
+matching the three unindexed fragments. The mixed world takes each component
+from one side or the other according to whether its fragment is inside the
+split, which is writable exactly because no two fragments read one component.
 
 The construction decides an arbitrary predicate, so it is classical.
 `Grass/Process/Network/Assertion.lean` itself is not — `agreesGlue` is a
@@ -103,6 +104,27 @@ inductive SessionStatus
   deriving DecidableEq, Repr
 
 /--
+One session's endpoint state.
+
+`NetworkFragment.session` is documented as "one channel session's endpoint
+cursors", and an earlier revision of this module stored only the status — so a
+`ChannelContract`'s `ReceiverPre`, whose footprint is bounded to that fragment,
+could say nothing except whether the session was open. `docs/PROCESS.md` §3
+requires it to own "the receiver's independently evolving local/session cursor",
+so there has to be a cursor to own.
+
+`delivered` counts what the receiver has consumed on this session. It is a
+count and not a list because the occurrences themselves are the escrow ledger's;
+this is the receiver's position in them.
+-/
+structure ChannelSession where
+  /-- Whether the session accepts sends. -/
+  status : SessionStatus
+  /-- How many occurrences the receiver has consumed here. -/
+  delivered : Nat
+  deriving DecidableEq, Repr
+
+/--
 The logical world a plan steps through, before the plan exists.
 
 `docs/PROCESS.md` §3's `LogicalProcessNetworkCore`, over the topology and the
@@ -126,8 +148,8 @@ structure LogicalProcessNetworkCore {registry : ProtocolRegistry.{u, w, v}}
   /-- What each session is holding in escrow. -/
   inFlight : (edge : topology.ChannelKind) → topology.ChannelId edge →
     EscrowLedger (EdgeOccurrence topology Message edge) (topology.ChannelId edge)
-  /-- Whether each session is open, closed, or dead. -/
-  sessions : (edge : topology.ChannelKind) → topology.ChannelId edge → SessionStatus
+  /-- Each session's status and receiver cursor. -/
+  sessions : (edge : topology.ChannelKind) → topology.ChannelId edge → ChannelSession
   /-- The obligation ledger, whose shape belongs to another layer. -/
   obligations : Obligations
   /-- The observations emitted so far, in order. -/
@@ -242,14 +264,89 @@ variable {registry : ProtocolRegistry.{u, w, v}} {boundary : DriverBoundary.{u}}
   (network : LogicalProcessNetworkCore topology Message Obligations)
 
 /--
-Every instance the network holds is in the slot it says it is.
+**Every instance the network holds is in the slot it says it is.**
 
-Without it a slot could hold an incarnation whose own `ref` names a different
-slot, and a lookup would disagree with the thing it found.
+Both halves: the incarnation's kind is the kind it was looked up under, *and*
+its own reference names this slot. An earlier revision checked only the kind,
+and its docstring described the defect the missing half left open — a slot
+holding an incarnation whose `ref` names a different slot, so a lookup disagreed
+with the thing it found. That was constructible, and a fixture claiming to cover
+this clause did not.
 -/
 def SlotsAgree : Prop :=
   ∀ kind slot incarnation, network.instances kind slot = some incarnation →
-    incarnation.kind = kind
+    ∃ sameKind : incarnation.kind = kind,
+      sameKind ▸ incarnation.ref.instanceId = slot
+
+/--
+**At most one root, in one slot.**
+
+An earlier revision concluded only that two roots had the same *kind*, which
+`ProcessParentage.root`'s own index already gives — every root instance has kind
+`topology.root` by construction — so the clause was implied by `SlotsAgree` and
+added nothing. Two distinct root incarnations in two slots satisfied it.
+
+Stated at the root kind's slots because `SlotsAgree` puts every root there:
+a root's kind is `topology.root`, so the slot it is stored under is one of that
+kind's.
+-/
+def RootUnique : Prop :=
+  ∀ leftSlot rightSlot leftInstance rightInstance,
+    network.instances topology.root leftSlot = some leftInstance →
+    network.instances topology.root rightSlot = some rightInstance →
+    leftInstance.IsRoot → rightInstance.IsRoot → leftSlot = rightSlot
+
+/--
+**Every parent relationship the network records is one the topology permits.**
+
+`docs/DECISIONS.md` decision 130 asks for this beside root uniqueness — "root
+uniqueness and the validity of attached parent/spawn relationships remain
+network well-formedness laws" — and an earlier revision implemented neither
+properly.
+
+Stated over `knownParent` rather than `currentParent`, so a *detached* child's
+former parent is checked too: detachment removes authority, and
+`Grass/Process/Network/Child.lean`'s `NonReturningReason.detached` is
+justifiable from state only if the recorded former parent was a legitimate one.
+-/
+def ParentageValid : Prop :=
+  ∀ kind slot incarnation, network.instances kind slot = some incarnation →
+    ∀ parentKind parent,
+      incarnation.parentage.knownParent = some ⟨parentKind, parent⟩ →
+      topology.maySpawn parentKind incarnation.kind
+
+/--
+**Every live incarnation's generation was actually allocated.**
+
+`docs/FOUNDATION.md` law 22: freshness is absence from the monotone history, not
+from the current live set. The history is `usedNominals`, and nothing below the
+network can tie an instance to it — `Grass/Process/Network/Instance.lean` has no
+history to check against — so this is the network's law or nobody's.
+
+Without it a network can hold an incarnation whose generation was never
+allocated, or two incarnations sharing one generation, and every other clause is
+satisfied.
+-/
+def NominalsAllocated : Prop :=
+  ∀ kind slot incarnation, network.instances kind slot = some incarnation →
+    incarnation.ref.Allocated network.usedNominals
+
+/--
+**Every rerouted occurrence lands where it was rerouted to.**
+
+`Grass/Process/Network/Escrow.lean` names this obligation and says a ledger
+cannot discharge it, being one session's. That module was right that a ledger
+cannot and slightly wrong about who can: it named `Plan.lean`, but `inFlight`
+here already holds every session's ledger of every edge, and a reroute's
+destination is a `ChannelId` of the same edge. So the obligation is dischargeable
+one layer lower than it was recorded, and here it is.
+
+Without it, `rerouted` is a drop with a forwarding address nobody checks.
+-/
+def ReroutesLand : Prop :=
+  ∀ (edge : topology.ChannelKind) (session : topology.ChannelId edge),
+    (network.inFlight edge session).ReroutedElsewhere
+      (fun destination arrival => arrival ∈ (network.inFlight edge destination).created)
 
 /--
 **Every instance's stored ending is one its protocol reaches.**
@@ -265,34 +362,31 @@ def LifecyclesWitnessed : Prop :=
     incarnation.LifecycleWitnessed
 
 /--
-**There is exactly one root incarnation.**
-
-Decision 130 puts root uniqueness at the network rather than on each instance's
-author, and this is it: at most one instance claims `ProcessParentage.root`.
-Existence is a separate matter, since a network between transitions may hold
-none.
--/
-def RootUnique : Prop :=
-  ∀ leftKind leftSlot leftInstance rightKind rightSlot rightInstance,
-    network.instances leftKind leftSlot = some leftInstance →
-    network.instances rightKind rightSlot = some rightInstance →
-    leftInstance.IsRoot → rightInstance.IsRoot →
-    leftKind = rightKind
-
-/--
 Everything a network must satisfy before its assertions mean anything.
 
 Gathered rather than scattered, so `Plan.lean` and `Transition.lean` have one
 name to require and a reader has one place to look.
+
+One law that belongs here and is not here: nothing relates the live instance
+population to `ProcessGraph.population`, so a topology declaring
+`.exactlyOne` of a kind may hold several. That needs a way to count live
+instances per kind, which needs the slot type to be finite or enumerable, and
+neither is available. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.16 records it.
 -/
 structure WellFormed
     (network : LogicalProcessNetworkCore topology Message Obligations) : Prop where
-  /-- Slots hold what they say they hold. -/
+  /-- Slots hold what they say they hold, by kind and by identity. -/
   slotsAgree : network.SlotsAgree
   /-- Stored endings are endings the protocol reaches. -/
   lifecyclesWitnessed : network.LifecyclesWitnessed
-  /-- At most one root. -/
+  /-- At most one root, in one slot. -/
   rootUnique : network.RootUnique
+  /-- Recorded parenthood is parenthood the topology permits. -/
+  parentageValid : network.ParentageValid
+  /-- Live generations were allocated. -/
+  nominalsAllocated : network.NominalsAllocated
+  /-- Rerouted occurrences land. -/
+  reroutesLand : network.ReroutesLand
 
 /-- A terminated instance in a well-formed network yields its exact result. -/
 theorem terminated_result_is_exact

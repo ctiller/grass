@@ -20,38 +20,54 @@ and on the object at the centre of it:
 > consumes `ReceiverPre * Escrow` and establishes `ReceiverPost`; the sender
 > never fabricates receiver state.
 
-## Fewer fields than the declaration, and the ones that went are now theorems
+## Three opaque laws replaced, four deferred to named owners
 
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` standing risk 2 is that `ChannelContract`
-has fifteen fields, seven of which are opaque law names — `escrowStable`,
-`prefixConservation`, `atMostOneResolution`, `resolutions`, `transferExact`,
-`session`, `frame`. An opaque field is a promise: nothing checks that a
-`StableUnderUnrelatedProcessSteps` really is one.
+`docs/PROCESS.md` §3 declares `ChannelContract` with seventeen fields, seven of
+them opaque law names — `escrowStable`, `prefixConservation`,
+`atMostOneResolution`, `resolutions`, `transferExact`, `session`, `frame` — each
+typed by a name the corpus declares nowhere.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` standing risk 2 records the count; the
+sharper problem is that an opaque field of an undeclared type is a promise
+nothing checks, and an author discharges it by writing anything at all.
 
-This module replaces four of them with a *footprint discipline* and derives the
-laws. `escrowLocal` says the escrow assertion reads the escrow fragment of its
-own session and nothing else; `sessionLocal` and `receiverPreLocal` say the same
-for theirs. Those are checkable claims about an assertion the author supplies,
-and from them:
+This structure has fourteen fields. **Three** of the seven — `escrowStable`,
+`session` and `frame` — are replaced by a *footprint discipline*: `escrowLocal`,
+`receiverPreLocal` and `sessionLocal` bound what the author's own assertions may
+read, `sendOnOpenSession` makes the session law a demand rather than a
+conditional, and from those:
 
-* `escrow_survives_unrelated_steps` — §3's "unrelated transitions must preserve
-  `Escrow`; this makes buffered delay sound" — is `frame_of_disjoint_scope`.
-* `frame_unmentioned` is the same theorem at the receiver's precondition.
-* `receiverPre_separate_from_escrow` is the reason `escrow` and `session` are two
+* `escrow_survives_unrelated_steps` and `frame_unmentioned` are
+  `frame_of_disjoint_scope`.
+* `receiverPre_separate_from_escrow` is why `escrow` and `session` are separate
   `NetworkFragment` constructors: §3 requires `ReceiverPre * Escrow` to be
   *formable*, and with one fragment covering both it would not be.
-* `receive_precondition` builds that conjunction, so `receive`'s precondition is
+* `receivePrecondition` builds that conjunction, so `receive`'s precondition is
   the separating conjunction §3 writes rather than a plain one.
 
-Three of the seven stay, and stay opaque for a stated reason.
-`prefixConservation` and `atMostOneResolution` are
-`Grass/Process/Network/Escrow.lean`'s, proved there over the ledger, and a
-contract cannot restate them because it cannot see the ledger through an
-abstract agreement. `resolutions` and `transferExact` quantify over the
-transition family, which is `Transition.lean`'s. `ChannelSteps` below is the
-seam: the contract takes its send and receive relations as parameters, so it can
-be written and checked before that family exists, and `Transition.lean`
-instantiates them.
+The other **four** are not fields here at all, and are deferred to owners this
+note names rather than dropped. `prefixConservation` and `atMostOneResolution`
+are `Grass/Process/Network/Escrow.lean`'s, proved there over the ledger, and a
+contract cannot restate them because it cannot see a ledger through an abstract
+agreement. `resolutions` and `transferExact` quantify over the transition
+family, which is `Transition.lean`'s. `ChannelSteps` below is the seam that lets
+the contract be written first: it takes its send and receive relations as
+parameters, and the family instantiates them.
+
+## What `escrow_survives_unrelated_steps` does and does not cover
+
+It covers steps that leave this session's escrow *ledger* untouched, which is
+weaker than §3's "unrelated transitions must preserve `Escrow`; this makes
+buffered delay sound". A second send on the *same* session, or a resolution of a
+different occurrence on it, changes that ledger, so this theorem says nothing
+about them — and those are exactly the buffered-delay cases.
+
+That is a consequence of fragment granularity rather than an error in the
+theorem: the escrow fragment is per session, the world holds one ledger per
+session, and no finer scope exists to be disjoint from. The same-session case is
+`Grass/Process/Network/Escrow.lean`'s, where `LedgerExtends` gives
+`resolvedStaysResolved`, `noLoss` and `settled_monotone` across any number of
+intervening sends and resolutions. An earlier revision of this note claimed this
+theorem was §3's sentence outright; it is one half of it.
 
 ## Why the world stays abstract here
 
@@ -145,8 +161,9 @@ def HoareTransition {registry : ProtocolRegistry.{u, w, v}}
 /--
 The contract on one channel edge.
 
-Eleven fields where `docs/PROCESS.md` §3 declares fifteen; see the module note
-for which four became theorems and why the three that stayed opaque had to.
+Fourteen fields where `docs/PROCESS.md` §3 declares seventeen; see the module
+note for which three opaque laws became theorems and where the other four
+went.
 -/
 structure ChannelContract {registry : ProtocolRegistry.{u, w, v}}
     {boundary : DriverBoundary.{u}}
@@ -175,28 +192,57 @@ structure ChannelContract {registry : ProtocolRegistry.{u, w, v}}
   ReceiverPost : (message : Message) →
     topology.ChannelOccurrence edge message → NetworkAssertion agreement
   /--
-  **The escrow reads its own session's escrow fragment and nothing else.**
+  **The escrow reads its own session's escrow fragment, or the nominal history,
+  and nothing else.**
 
   The field that replaces `escrowStable` and half of `frame`. An opaque
   `StableUnderUnrelatedProcessSteps` is a promise; this is a checkable bound, and
   `escrow_survives_unrelated_steps` derives the promise from it.
+
+  `nominals` is admitted because `docs/PROCESS.md` §3 says `Escrow` contains "the
+  transferred payload **and affine resolve token**", and
+  `Grass/Process/Network/Assertion.lean` gives `nominals` as a fragment precisely
+  so that a claim about at-most-one resolution has something to read. An earlier
+  revision bounded the footprint to the escrow fragment alone, which made the
+  token half of §3's sentence unstatable — and left `Assertion.lean`'s stated
+  reason for the `nominals` constructor unreachable from any contract.
   -/
   escrowLocal : ∀ message occurrence fragment,
     (Escrow message occurrence).footprint fragment →
-    fragment = .escrow edge occurrence.1
+    fragment = .escrow edge occurrence.1 ∨ fragment = .nominals
   /--
-  **The receiver's precondition reads its own session cursor and nothing else.**
+  **The receiver's precondition reads its own session cursor and its own local
+  state, and nothing else.**
 
-  §3: "`ReceiverPre` owns the receiver's independently evolving local/session
-  cursor." This is that ownership made checkable, and with `escrowLocal` it is
-  what makes `ReceiverPre * Escrow` formable.
+  §3: "`ReceiverPre` owns the receiver's independently evolving **local**/session
+  cursor." Both halves. An earlier revision bounded it to the session fragment
+  alone, which read the sentence as if `local` were not there: a contract whose
+  receive depended on the receiving process's own state was unwritable, and
+  three docstrings said otherwise.
+
+  With `escrowLocal` this is still what makes `ReceiverPre * Escrow` formable,
+  because neither admitted fragment is an escrow fragment.
   -/
   receiverPreLocal : ∀ message occurrence fragment,
     (ReceiverPre message occurrence).footprint fragment →
-    fragment = .session edge occurrence.1
+    fragment = .session edge occurrence.1 ∨
+      ∃ slot, fragment = .instanceState (topology.endpoints edge).2 slot
   /-- And the session predicate reads the session fragment. -/
   sessionLocal : ∀ session fragment,
     (SessionOpen session).footprint fragment → fragment = .session edge session
+  /--
+  **A send happens only on an open session.**
+
+  Without this the session law is a conditional postcondition, and a conditional
+  demands nothing: an earlier revision let a contract set `SessionOpen` to a
+  never-satisfiable assertion, satisfy `sessionLocal` vacuously with an empty
+  footprint, and discharge `send` for free while sends genuinely occurred. That
+  is the same "an opaque field is a promise" shape this module set out to
+  remove, reappearing one level in.
+  -/
+  sendOnOpenSession : ∀ message occurrence before after,
+    steps.Send message occurrence before after →
+    (SessionOpen occurrence.1).holds before
   /--
   **Send.** From the sender's exit condition, and an open session, to the
   sender's postcondition conjoined with the escrow the channel now owns.
@@ -249,14 +295,18 @@ theorem escrow_survives_unrelated_steps (message : Message)
     (occurrence : topology.ChannelOccurrence edge message)
     (scope : NetworkFragment topology → Prop)
     (unrelated : ¬ scope (.escrow edge occurrence.1))
+    (nominalsUntouched : ¬ scope .nominals)
     {before after : World}
     (touchesOnly : ∀ fragment, ¬ scope fragment →
       agreement.Agrees fragment before after)
     (held : (contract.Escrow message occurrence).holds before) :
     (contract.Escrow message occurrence).holds after :=
   (contract.Escrow message occurrence).frame_of_disjoint_scope scope
-    (fun fragment inScope inFootprint =>
-      unrelated (contract.escrowLocal message occurrence fragment inFootprint ▸ inScope))
+    (fun fragment inScope inFootprint => by
+      rcases contract.escrowLocal message occurrence fragment inFootprint with
+        isEscrow | isNominals
+      · exact unrelated (isEscrow ▸ inScope)
+      · exact nominalsUntouched (isNominals ▸ inScope))
     touchesOnly held
 
 /--
@@ -271,15 +321,19 @@ theorem frame_unmentioned (message : Message)
     (occurrence : topology.ChannelOccurrence edge message)
     (scope : NetworkFragment topology → Prop)
     (unrelated : ¬ scope (.session edge occurrence.1))
+    (receiverUntouched : ∀ slot,
+      ¬ scope (.instanceState (topology.endpoints edge).2 slot))
     {before after : World}
     (touchesOnly : ∀ fragment, ¬ scope fragment →
       agreement.Agrees fragment before after)
     (held : (contract.ReceiverPre message occurrence).holds before) :
     (contract.ReceiverPre message occurrence).holds after :=
   (contract.ReceiverPre message occurrence).frame_of_disjoint_scope scope
-    (fun fragment inScope inFootprint =>
-      unrelated
-        (contract.receiverPreLocal message occurrence fragment inFootprint ▸ inScope))
+    (fun fragment inScope inFootprint => by
+      rcases contract.receiverPreLocal message occurrence fragment inFootprint with
+        isSession | ⟨slot, isSlot⟩
+      · exact unrelated (isSession ▸ inScope)
+      · exact receiverUntouched slot (isSlot ▸ inScope))
     touchesOnly held
 
 /--
@@ -287,10 +341,10 @@ theorem frame_unmentioned (message : Message)
 
 The theorem `docs/PROCESS.md` §3 needs in order to write
 `ReceiverPre message occurrence * Escrow message occurrence` at all, and the
-reason `Grass/Process/Network/Assertion.lean` has two constructors where an
-earlier revision had one: with a single `channel` fragment covering both the
-escrowed payload and the receiver's cursor, these two would overlap, `Separate`
-would be false, and the conjunction §3 requires would be unformable.
+reason `Grass/Process/Network/Assertion.lean` gives `escrow` and `session`
+separate constructors: with a single fragment covering both the escrowed payload
+and the receiver's cursor, these two would overlap, `Separate` would be false,
+and the conjunction §3 requires would be unformable.
 -/
 theorem receiverPre_separate_from_escrow (message : Message)
     (occurrence : topology.ChannelOccurrence edge message) :
@@ -298,11 +352,14 @@ theorem receiverPre_separate_from_escrow (message : Message)
       (contract.ReceiverPre message occurrence)
       (contract.Escrow message occurrence) := by
   intro fragment inReceiver inEscrow
-  have isSession :=
-    contract.receiverPreLocal message occurrence fragment inReceiver
-  have isEscrow := contract.escrowLocal message occurrence fragment inEscrow
-  rw [isSession] at isEscrow
-  exact absurd isEscrow (by simp)
+  rcases contract.receiverPreLocal message occurrence fragment inReceiver with
+    isSession | ⟨_, isSlot⟩ <;>
+    rcases contract.escrowLocal message occurrence fragment inEscrow with
+      isEscrow | isNominals
+  · rw [isSession] at isEscrow; exact absurd isEscrow (by simp)
+  · rw [isSession] at isNominals; exact absurd isNominals (by simp)
+  · rw [isSlot] at isEscrow; exact absurd isEscrow (by simp)
+  · rw [isSlot] at isNominals; exact absurd isNominals (by simp)
 
 /-- So the separating conjunction exists. This is `receive`'s real precondition. -/
 def receivePrecondition (message : Message)
@@ -334,37 +391,49 @@ theorem send_establishes_conjunction (message : Message)
     (occurrence : topology.ChannelOccurrence edge message)
     (senderAvoidsEscrow : ¬ (contract.SenderPost message occurrence).footprint
       (.escrow edge occurrence.1))
+    (senderAvoidsNominals :
+      ¬ (contract.SenderPost message occurrence).footprint .nominals)
     {before after : World}
     (stepped : steps.Send message occurrence before after)
     (sendPre : (contract.SendPre message).holds before)
     (sessionOpen : (contract.SessionOpen occurrence.1).holds before) :
     ((contract.SenderPost message occurrence).sep
       (contract.Escrow message occurrence)
-      (fun fragment inSender inEscrow =>
-        senderAvoidsEscrow
-          (contract.escrowLocal message occurrence fragment inEscrow ▸ inSender))).holds
+      (fun fragment inSender inEscrow => by
+        rcases contract.escrowLocal message occurrence fragment inEscrow with
+          isEscrow | isNominals
+        · exact senderAvoidsEscrow (isEscrow ▸ inSender)
+        · exact senderAvoidsNominals (isNominals ▸ inSender))).holds
       after :=
   contract.send message occurrence before after stepped sendPre sessionOpen
 
 /--
-A send happens on an open session.
+**A send happens on an open session, and the caller need not prove it.**
 
-`ChannelSessionLaw` in §3's field list, and the reason `SessionOpen` is a
-supplied assertion rather than a projection: at this layer the world is abstract,
-so "open" is whatever the plan's own predicate on `LogicalProcessNetworkCore`'s
-`sessions` says, and all this layer needs is that `send` demands it.
+`ChannelSessionLaw` in §3's field list. `SessionOpen` is a supplied assertion
+rather than a projection because at this layer the world is abstract, so "open"
+is whatever the plan's own predicate on `LogicalProcessNetworkCore.sessions`
+says — but the *demand* is `sendOnOpenSession`, and this theorem takes it from
+there rather than from a hypothesis.
+
+An earlier revision made the session law a hypothesis of `send` alone. That
+demands nothing: a contract could set `SessionOpen` to a never-satisfiable
+assertion, satisfy `sessionLocal` vacuously with an empty footprint, and
+discharge `send` for free while sends genuinely occurred.
 -/
 theorem send_needs_an_open_session (message : Message)
     (occurrence : topology.ChannelOccurrence edge message)
     {before after : World}
     (stepped : steps.Send message occurrence before after)
-    (sendPre : (contract.SendPre message).holds before)
-    (sessionOpen : (contract.SessionOpen occurrence.1).holds before) :
-    (contract.Escrow message occurrence).holds after :=
-  (contract.send message occurrence before after stepped sendPre sessionOpen).2
+    (sendPre : (contract.SendPre message).holds before) :
+    (contract.SessionOpen occurrence.1).holds before ∧
+      (contract.Escrow message occurrence).holds after :=
+  ⟨contract.sendOnOpenSession message occurrence before after stepped,
+    (contract.send message occurrence before after stepped sendPre
+      (contract.sendOnOpenSession message occurrence before after stepped)).2⟩
 
-/-- A message discharges the sender's demand and arrives as the receiver's event. -/
-theorem message_is_routed (message : Message) :
+/-- A delivered message settles none of the receiver's own demands. -/
+theorem delivery_settles_nothing (message : Message) :
     (contract.receiverInput.arrives message).settles = none :=
   contract.receiverInput.arrivesUnsettled message
 

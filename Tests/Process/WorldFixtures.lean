@@ -15,17 +15,30 @@ requires — has the same shape, and that `logicalWorldAgreement` therefore
 discharges the same law. Here it is at the M2 fixture topology, with an
 assertion framed across a step that touches a different fragment.
 
-It also pins `WellFormed`'s three clauses as things a network can *fail*:
+It also pins `WellFormed`'s clauses as things a network can *fail*. Each of
+these is a network that satisfies every other clause:
 
-* `lying_network_is_not_witnessed` — a network holding an instance tagged
-  `terminated` whose state is not terminal. Decision 129 puts this obligation at
-  the network, and `Grass/Process/Network/Instance.lean` says plainly it cannot
-  enforce it, having no network to enforce it over. This is the enforcement, and
-  this is it biting.
-* `two_roots_are_not_unique` — decision 130 puts root uniqueness at the network
-  rather than on each instance's author, so a network with two roots is a
-  network that fails a law, not an instance that fails one.
+* `lying_network_is_not_witnessed` — an instance tagged `terminated` whose state
+  is not terminal. Decision 129 puts this at the network, and
+  `Grass/Process/Network/Instance.lean` says plainly it cannot enforce it.
 * `mislabelled_slot_fails` — a slot holding an incarnation of another kind.
+* `misplaced_instance_fails` — the half an earlier revision of `SlotsAgree`
+  left open: an incarnation whose own `ref` names a *different* slot of the
+  right kind, so a lookup disagrees with what it found. The old clause checked
+  only the kind, and the fixture that claimed to cover it did not.
+* `unallocated_generation_fails` — an incarnation whose generation is not in
+  `usedNominals`. `docs/FOUNDATION.md` law 22 is the network's to enforce or
+  nobody's, and an earlier revision of `WellFormed` had no clause for it at all.
+* `unauthorized_parent_fails` — a recorded parent the topology's `maySpawn` does
+  not permit. Decision 130 asks for this beside root uniqueness.
+
+Root uniqueness has no failing fixture here and that is recorded rather than
+papered over: `serverTopology`'s root kind has `InstanceId = Unit`, so it has
+exactly one slot and two roots cannot be placed. An earlier revision claimed a
+fixture for it whose hypotheses were jointly unsatisfiable — a connection
+instance cannot be a root, because `ProcessParentage.root` is indexed at the
+topology's root kind — so it proved nothing. `root_is_unique_here` states the
+weaker true thing.
 -/
 
 namespace Grass.Process.Tests.World
@@ -44,7 +57,7 @@ open Grass.Process.Tests.Instances (counting finished lying listenerZero)
 abbrev ServerWorld :=
   LogicalProcessNetworkCore serverTopology serverMessage NoObligations
 
-/-- A quiet network: the listener is running, nothing is in flight. -/
+/-- A quiet network: no instances, nothing in flight, no history. -/
 def quiet : ServerWorld where
   instances := fun kind _ =>
     match kind with
@@ -54,7 +67,7 @@ def quiet : ServerWorld where
     | .routeTable => ⟨[]⟩
     | .acceptCount => ⟨0⟩
   inFlight := fun _ _ => EscrowLedger.empty
-  sessions := fun _ _ => .open
+  sessions := fun _ _ => ⟨.open, 0⟩
   obligations := ()
   observations := []
   usedNominals := NominalHistory.initial
@@ -152,34 +165,62 @@ theorem quiet_is_wellFormed : quiet.WellFormed where
     intro kind slot incarnation found
     cases kind <;> exact absurd found (by simp [quiet])
   rootUnique := by
-    intro leftKind _ _ _ _ _ found _ _ _
-    cases leftKind <;> exact absurd found (by simp [quiet])
+    intro _ _ _ _ found _ _ _
+    exact absurd found (by simp [quiet])
+  parentageValid := by
+    intro kind slot incarnation found
+    cases kind <;> exact absurd found (by simp [quiet])
+  nominalsAllocated := by
+    intro kind slot incarnation found
+    cases kind <;> exact absurd found (by simp [quiet])
+  reroutesLand := by
+    intro _ _ _ _ rerouted
+    exact absurd rerouted (by simp [quiet, EscrowLedger.empty])
 
-/-- A network holding the finished connection, in its slot. -/
-def withFinished : ServerWorld :=
+/-! ### The ways a network fails
+
+Each of these differs from `quiet` in exactly one respect.
+-/
+
+/-- The listener slot, and the one incarnation this fixture puts in it. -/
+def listenerSlot : serverTopology.InstanceId .listener := ()
+
+/-- A listener incarnation that is the root, correctly placed and allocated. -/
+def rootListener : ProcessInstance serverTopology where
+  kind := .listener
+  ref := Instances.listenerZero
+  parentage := .root
+  request := ⟨0⟩
+  localState := ⟨0⟩
+  lifecycle := .running
+
+/-- A network holding it, with its generation actually allocated. -/
+def withRoot : ServerWorld :=
   { quiet with
     instances := fun kind _ =>
       match kind with
-      | .listener => none
-      | .connection => some finished }
+      | .listener => some rootListener
+      | .connection => none
+    usedNominals := ⟨[⟨.processGeneration, 0⟩], by decide⟩ }
 
-/-- Which is well formed: the stored result is one the protocol reaches. -/
-theorem withFinished_lifecycles_witnessed : withFinished.LifecyclesWitnessed := by
-  intro kind slot incarnation found
-  cases kind with
-  | listener => exact absurd found (by simp [withFinished, quiet])
-  | connection =>
-    have same : incarnation = finished := by
-      simp [withFinished, quiet] at found
-      exact found.symm
-    rw [same]
-    exact Instances.terminated_at_zero_is_witnessed
+/--
+**Root uniqueness holds here, and cannot fail here.**
+
+`serverTopology`'s root kind has `InstanceId = Unit`, so there is one root slot
+and two roots cannot be placed. The clause is real — it says two root
+incarnations occupy the *same slot* — but this topology cannot witness its
+failure, and saying so is better than a fixture whose hypotheses are jointly
+unsatisfiable, which is what an earlier revision had.
+-/
+theorem root_is_unique_here : withRoot.RootUnique := by
+  intro leftSlot rightSlot _ _ _ _ _ _
+  exact Subsingleton.elim leftSlot rightSlot
 
 /--
 **A network cannot hold a process tagged terminated that has not terminated.**
 
-Decision 129's network-level obligation, biting. `lying` is `counting` with its
-tag changed and nothing else, and putting it in a slot makes the network fail.
+Decision 129's obligation, biting. `lying` is `counting` with its tag changed
+and nothing else.
 -/
 theorem lying_network_is_not_witnessed :
     ¬ ({ quiet with
@@ -192,10 +233,10 @@ theorem lying_network_is_not_witnessed :
     (witnessed .connection 7 lying rfl)
 
 /--
-**A slot holds what it says it holds.**
+**A slot holds an incarnation of its own kind.**
 
-Putting the connection incarnation in a listener slot fails `SlotsAgree`. Without
-it a lookup would disagree with the thing it found.
+Putting the connection incarnation in a listener slot fails the first half of
+`SlotsAgree`.
 -/
 theorem mislabelled_slot_fails :
     ¬ ({ quiet with
@@ -204,30 +245,112 @@ theorem mislabelled_slot_fails :
           | .listener => some counting
           | .connection => none } : ServerWorld).SlotsAgree := by
   intro agree
-  exact absurd (agree .listener () counting rfl) (by decide)
+  obtain ⟨sameKind, _⟩ := agree .listener () counting rfl
+  exact absurd sameKind (by decide)
 
 /--
-**Two roots are a network defect, not an instance defect.**
+**And it holds the incarnation whose reference names *that* slot.**
 
-Decision 130 puts root uniqueness at the network "rather than proof fields paid
-by each instance author", so both instances below are perfectly well formed on
-their own and the network holding both is not.
+The second half, and the one an earlier revision left open. `counting`'s `ref`
+is `connectionSeven 0`, whose instance id is 7, so putting it in connection slot
+3 is a network where a lookup disagrees with the thing it found — and under the
+old kind-only clause it was well formed.
 -/
-theorem two_roots_are_not_unique
-    (listenerRoot : ProcessInstance serverTopology)
-    (connectionRoot : ProcessInstance serverTopology)
-    (_listenerIsListener : listenerRoot.kind = .listener)
-    (_connectionIsConnection : connectionRoot.kind = .connection)
-    (bothRoots : listenerRoot.IsRoot ∧ connectionRoot.IsRoot) :
+theorem misplaced_instance_fails :
     ¬ ({ quiet with
         instances := fun kind _ =>
           match kind with
-          | .listener => some listenerRoot
-          | .connection => some connectionRoot } : ServerWorld).RootUnique := by
-  intro unique
-  have sameKind :=
-    unique .listener () listenerRoot .connection 7 connectionRoot rfl rfl
-      bothRoots.1 bothRoots.2
-  exact absurd sameKind (by decide)
+          | .listener => none
+          | .connection => some counting } : ServerWorld).SlotsAgree := by
+  intro agree
+  obtain ⟨sameKind, sameSlot⟩ := agree .connection 3 counting rfl
+  cases sameKind
+  exact absurd sameSlot (by decide)
+
+/--
+**A live incarnation's generation was allocated.**
+
+`docs/FOUNDATION.md` law 22. `quiet.usedNominals` is empty, so any instance in
+it has a generation that was never allocated — and every other clause is
+satisfied.
+-/
+theorem unallocated_generation_fails :
+    ¬ ({ quiet with
+        instances := fun kind _ =>
+          match kind with
+          | .listener => some rootListener
+          | .connection => none } : ServerWorld).NominalsAllocated := by
+  intro allocated
+  have inHistory := allocated .listener () rootListener rfl
+  exact absurd inHistory (by simp [quiet, ProcessTopologyCore.ProcessRef.Allocated,
+    NominalHistory.initial, rootListener])
+
+/-- With the generation allocated, the same network passes. -/
+theorem withRoot_nominals_allocated : withRoot.NominalsAllocated := by
+  intro kind slot incarnation found
+  cases kind with
+  | listener =>
+    have same : incarnation = rootListener := by
+      simp [withRoot, quiet] at found
+      exact found.symm
+    rw [same]
+    simp [ProcessTopologyCore.ProcessRef.Allocated, withRoot, rootListener,
+      Instances.listenerZero]
+  | connection => exact absurd found (by simp [withRoot, quiet])
+
+/--
+**A recorded parent is one the topology permits.**
+
+`serverTopology.maySpawn` allows only listener-spawns-connection, so a listener
+claiming a connection parent fails. Decision 130 puts this at the network beside
+root uniqueness, and an earlier revision had no clause for it.
+-/
+theorem unauthorized_parent_fails :
+    ¬ ({ quiet with
+        instances := fun kind _ =>
+          match kind with
+          | .listener =>
+            some { rootListener with
+                    parentage := .attached .connection (connectionSeven 0) }
+          | .connection => none } : ServerWorld).ParentageValid := by
+  intro valid
+  have permitted := valid .listener () _ rfl .connection (connectionSeven 0) rfl
+  exact absurd permitted.1 (by decide)
+
+/-- A network holding the finished connection, in its own slot. -/
+def withFinished : ServerWorld :=
+  { quiet with
+    instances := fun kind slot =>
+      match kind, slot with
+      | .listener, _ => none
+      | .connection, n => if n = 7 then some finished else none }
+
+/-- Which is well formed on the lifecycle clause: the stored result is reachable. -/
+theorem withFinished_lifecycles_witnessed : withFinished.LifecyclesWitnessed := by
+  intro kind slot incarnation found
+  cases kind with
+  | listener => exact absurd found (by simp [withFinished, quiet])
+  | connection =>
+    by_cases isSeven : slot = 7
+    · have same : incarnation = finished := by
+        simp [withFinished, quiet, isSeven] at found
+        exact found.symm
+      rw [same]
+      exact Instances.terminated_at_zero_is_witnessed
+    · exact absurd found (by simp [withFinished, quiet, isSeven])
+
+/-- And it is correctly placed, which the old clause could not have said. -/
+theorem withFinished_slots_agree : withFinished.SlotsAgree := by
+  intro kind slot incarnation found
+  cases kind with
+  | listener => exact absurd found (by simp [withFinished, quiet])
+  | connection =>
+    by_cases isSeven : slot = 7
+    · have same : incarnation = finished := by
+        simp [withFinished, quiet, isSeven] at found
+        exact found.symm
+      subst same
+      exact ⟨rfl, by simp [finished, Instances.finished, Instances.counting, isSeven]⟩
+    · exact absurd found (by simp [withFinished, quiet, isSeven])
 
 end Grass.Process.Tests.World
