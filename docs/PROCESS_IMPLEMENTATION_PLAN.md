@@ -428,7 +428,7 @@ law 3 forbids an executed example standing in for a proof.
 
 ## 4. M2 — Network semantics
 
-**Status: thirteen of fourteen modules, written, unmerged, unratified.** Written
+**Status: fourteen of fourteen modules begun, one of them partial; written, unmerged, unratified.** Written
 with fixtures: `Network/Exposure.lean`, `Network/Graph.lean`,
 `Network/Topology.lean`, `Network/Structural.lean` (the canonical network,
 `coord1:4`), `Network/Delivery.lean` (the total cross-vocabulary classifier that
@@ -441,8 +441,33 @@ lifecycle), `Network/Escrow.lean` (the escrow ledger and its prefix laws), and
 `Network/World.lean` (`LogicalProcessNetworkCore` and the canonical agreement),
 `Network/Channel.lean` (`ChannelContract`, its footprint discipline, and the
 laws that discipline derives), and `Network/Plan.lean` (`ProcessPlan`,
-`LogicalProcessNetwork`, and the boundary projection). Not started: the
-transition family and the commit law.
+`LogicalProcessNetwork`, and the boundary projection), and `Network/Transition.lean`
+(**partial** — the step shapes and their scope discipline, not the twenty-three
+constructors). Not started: the commit law.
+
+`Transition.lean` is where the milestone stops short and the plan should say so
+rather than round up. What it has is the organising idea the corpus does not
+state and which makes §3's declaration checkable: **every step carries the set
+of fragments it may change, and a proof that it changed nothing else**.
+`TouchesOnly` is that, over the same `Agrees` relation the assertion layer frames
+with, so it is §8's `TransitionScope step` and it turns
+`Channel.lean`'s `escrow_survives_unrelated_steps` from a theorem with a caller-
+supplied hypothesis into a theorem about steps.
+
+Three step shapes are built on it: `ResolvesEscrow`, which is what all ten of
+§3's competing endings do to the world; `SendsEscrow`, the only transition that
+adds to a ledger, tied to the plan by requiring the edge's own `ChannelSteps.Send`
+to admit it; and `EndsInstance`, which stores decision 129's exact ending.
+`Tests/Process/TransitionFixtures.lean` builds the first `ProcessPlan` — nothing
+until now had shown a topology, a message family, the step relations and a
+contract per edge could be satisfied together — and takes a receive step of it.
+
+What is missing is the `NetworkTransition` inductive itself and therefore M2's
+first exit criterion: routing coverage over all twenty-three constructors. The
+shapes above cover the ten endings and the send; the twelve instance- and
+observation-side constructors have `ChangesOneInstance` and `EndsInstance` to
+build on and are not built. `allocatedNominals` and `NetworkStep` are also
+absent, and §10.18 records the specific gap they leave.
 
 `Channel.lean` is where standing risk 2 got smaller rather than larger.
 [PROCESS.md](PROCESS.md) §3 declares `ChannelContract` with seventeen fields,
@@ -576,6 +601,7 @@ Grass/Process/Network/Escrow.lean      the escrow ledger and its prefix laws
 Grass/Process/Network/World.lean       LogicalProcessNetworkCore, the canonical agreement
 Grass/Process/Network/Channel.lean     ChannelContract and its footprint discipline
 Grass/Process/Network/Plan.lean        ProcessPlan, LogicalProcessNetwork, the projection
+Grass/Process/Network/Transition.lean  step scopes and shapes (partial)
 Grass/Process/Network/Transition.lean  NetworkTransition, NetworkStep, freshness
 Grass/Process/Network/Child.lean       child requests, bindings, lifecycle events
 Grass/Process/Network/Mailbox.lean     ordering profiles, selective receive
@@ -1362,3 +1388,29 @@ later and pointing the other way.
 
 Recorded so it is expected rather than discovered at merge. It closes when
 `g-design`'s branch lands, which the settled order puts first.
+
+### 10.18 A transition's allocation is not checked against what it allocates
+
+`Grass/Process/Nominal.lean` already carries `Allocation`, `NominalHistory`,
+`Fresh`, `Admissible` and `extend`, so `docs/PROCESS.md` §3's `NetworkStep` —
+`fresh` and `historyExact` — is a thin wrapper and not the hard part.
+
+The hard part is the correspondence §3 states informally: "`allocatedNominals`
+… contains every new process generation, channel epoch, local/child/message
+occurrence, restart identity, and coalesced replacement". A step supplies its own
+allocation, and nothing relates that allocation to the identities the step
+actually introduced. A spawn can allocate the empty set and still install an
+incarnation with a fresh generation; the history then omits it, and
+`LogicalProcessNetworkCore.NominalsAllocated` — which does check that live
+generations are in the history — rejects the resulting network, but only after
+the fact and without saying which step lied.
+
+The fix is per-constructor: each one's exactness record has to name the
+identities it introduces and require its allocation to be exactly those. That is
+part of building the twenty-three constructors rather than a separate task, and
+it is why `Transition.lean` does not yet declare `NetworkStep`: a step wrapper
+whose freshness law ranges over an unconstrained allocation would look like the
+law and not be it.
+
+Blocks: M2's first exit criterion, which is routing coverage over the full
+family.

@@ -77,6 +77,7 @@ open Grass.Specification
 
 universe u w v r m o
 
+set_option linter.checkUnivs false in
 /--
 A plan: a topology, the message family its channels carry, and a contract for
 every edge.
@@ -86,9 +87,17 @@ every edge.
 memory layer, and `Grass.Process` importing it to state its own world is the
 edge `coord1:5`'s diamond exists to prevent. A plan chooses it, and every
 transition family over that plan inherits the choice.
+
+The universe linter is disabled here for the same reason `Grass/Process/Spec.lean`
+disables it: `r` and `m` — the topology's universe and the message family's —
+appear only inside a `max`, because they are independent choices this structure
+never has to separate. Naming a spurious parameter to satisfy the linter would
+be worse than saying so, and an earlier revision did exactly that: it carried an
+unused `Message : Type (m + 1)` parameter that every caller had to supply and
+nothing read.
 -/
 structure ProcessPlan (registry : ProtocolRegistry.{u, w, v})
-    (boundary : DriverBoundary.{u}) (Obligations : Type o) (Message : Type (m + 1)) :
+    (boundary : DriverBoundary.{u}) (Obligations : Type o) :
     Type (max (u + 1) (w + 1) (v + 1) (r + 1) (m + 1) (o + 1)) where
   /-- The topology this plan realizes. -/
   topology : ProcessTopologyCore.{u, w, v, r} registry boundary
@@ -110,8 +119,8 @@ structure ProcessPlan (registry : ProtocolRegistry.{u, w, v})
 namespace ProcessPlan
 
 variable {registry : ProtocolRegistry.{u, w, v}} {boundary : DriverBoundary.{u}}
-  {Obligations : Type o} {Message : Type (m + 1)}
-  (plan : ProcessPlan.{u, w, v, r, m, o} registry boundary Obligations Message)
+  {Obligations : Type o}
+  (plan : ProcessPlan.{u, w, v, r, m, o} registry boundary Obligations)
 
 /--
 The world a plan steps through.

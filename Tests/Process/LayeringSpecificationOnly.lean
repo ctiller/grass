@@ -3,9 +3,28 @@ import Grass.Specification.Boundary
 /-!
 # The neutral layer, elaborated without Process in scope
 
-This module imports `Grass.Specification.Boundary` and **nothing else**. That
-single-line import list is the whole fixture: everything below has to elaborate
-with no `Grass.Process` declaration, instance, or notation available.
+This module imports `Grass.Specification.Boundary` and **nothing else**, and
+everything below elaborates with no `Grass.Process` declaration in scope.
+
+An earlier revision said that the single-line import list *was* the fixture.
+`g-foundation:46` pointed out that this is a check a human performs and the
+build does not: if `Grass/Specification/Boundary.lean` ever acquired a Process
+import, this file would still build, because it would simply inherit it. The
+positive theorems below cannot detect that — they would elaborate either way.
+
+The `#guard_msgs` pair at the end is the check that fails. Each names a
+Process-side declaration and asserts the elaborator cannot find it, so an import
+arriving anywhere under `Grass.Specification` breaks this file rather than
+passing unnoticed.
+
+The check is necessarily per-name and not per-namespace: Lean has no way to
+assert that a namespace is empty, so a guard catches an import exactly when that
+import transitively provides the guarded name. `ProcessSpec` is
+`Grass/Process/Spec.lean`'s and sits under most of the layer, and
+`LogicalNominal` is `Grass/Process/Nominal.lean`'s, which `Spec.lean` does not
+import — so the two together cover both sides of the Process tree's fork rather
+than one path through it. Both were checked against a scratch module that does
+import them, so neither guard is vacuous.
 
 `Tests/Process/LayeringFixtures.lean` then re-derives the same facts with the
 Process layer present and checks they are unchanged. Together they pin both
@@ -47,5 +66,29 @@ def trivialBoundary : DriverBoundary.{0} where
 theorem delta_is_monotone (key : RequirementKey) :
     (trivialBoundary.demandAlso key).requirements.Covers trivialBoundary.requirements :=
   trivialBoundary.demandAlso_covers key
+
+/-! ## The Process layer is not in scope, and the build says so
+
+`g-foundation:46`: everything above would elaborate whether or not
+`Grass.Specification` transitively imported `Grass.Process`, so the positive
+theorems cannot detect the edge this file exists to forbid. These can. If any
+module under `Grass/Specification` acquires a Process import, these names start
+resolving and the guards stop matching.
+
+See the module note on why this is two guards and on what per-name checking can
+and cannot catch.
+-/
+
+/--
+error: Unknown identifier `Grass.Process.ProcessSpec`
+-/
+#guard_msgs in
+example := Grass.Process.ProcessSpec
+
+/--
+error: Unknown identifier `Grass.Process.LogicalNominal`
+-/
+#guard_msgs in
+example := Grass.Process.LogicalNominal
 
 end Grass.Process.Tests.LayeringSpecificationOnly
