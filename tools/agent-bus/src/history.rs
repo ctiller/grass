@@ -61,21 +61,24 @@ pub fn walk_incremental(
         &["rev-list", "--first-parent", "--reverse", &range],
     )?;
     let commits: Vec<&str> = list.lines().collect();
+    let repair_targets = scan_repair_targets(git_dir, &commits)?;
     let mut out = Vec::new();
     let mut next_seq = starting_next_seq;
     for (i, commit) in commits.iter().enumerate() {
-        out.push(walk_one_commit(
+        out.push(walk_one_commit_or_defer(
             git_dir,
             commit,
             i + 1,
             &mut next_seq,
             Some(coordinators),
+            &repair_targets,
         )?);
     }
     Ok(out)
 }
 
 fn walk_commits(git_dir: &Path, commits: &[&str], expect_bootstrap: bool) -> AbResult<Walk> {
+    let repair_targets = scan_repair_targets(git_dir, commits)?;
     let mut out = Vec::new();
     let mut bus_json = None;
     let mut next_seq: BTreeMap<Agent, u64> = BTreeMap::new();
@@ -90,12 +93,13 @@ fn walk_commits(git_dir: &Path, commits: &[&str], expect_bootstrap: bool) -> AbR
             out.push(wc);
         } else {
             let coordinators = bus_json.as_ref().map(|bj: &BusJson| &bj.coordinators);
-            out.push(walk_one_commit(
+            out.push(walk_one_commit_or_defer(
                 git_dir,
                 commit,
                 i,
                 &mut next_seq,
                 coordinators,
+                &repair_targets,
             )?);
         }
     }
@@ -104,6 +108,95 @@ fn walk_commits(git_dir: &Path, commits: &[&str], expect_bootstrap: bool) -> AbR
         commits: out,
         bus_json,
     })
+}
+
+/// Cheap, lenient parse of a possible repair-commit message's first line,
+/// extracting just the invalid-commit sha it names -- used only to build
+/// the deferral map below. A message that merely *looks* malformed here is
+/// simply not a repair claim as far as deferral is concerned; `is_repair_
+/// commit` still gives it a precise, hard error if the walk ever reaches it
+/// as a commit in its own right (this function and that one are
+/// deliberately independent, so a bug in this lenient pre-scan can never
+/// weaken that function's own strict validation).
+fn try_parse_repair_grammar(msg: &str) -> Option<String> {
+    let first_line = msg.lines().next()?;
+    let parts: Vec<&str> = first_line.split_whitespace().collect();
+    if parts.len() == 5 && parts[0] == "bus-admin:" && parts[1] == "repair" && parts[3] == "restore"
+    {
+        Some(parts[2].to_string())
+    } else {
+        None
+    }
+}
+
+/// AGENT_BUS.md section 11: a repair commit may appear *later* in linear
+/// history than the invalid commit it fixes, so a single forward walk that
+/// aborts the instant it hits a structurally invalid commit would never
+/// reach — or even look for — that later repair. This pre-scan (message
+/// parsing only, over the same commit range the real walk will process) is
+/// what makes that later repair discoverable: it maps each candidate
+/// invalid-commit sha to the walk index of the first later commit whose
+/// message *claims* to repair it, purely so `walk_one_commit_or_defer` knows
+/// which structural failures are even worth deferring judgment on. The
+/// claim is never trusted on its own -- see that function's doc comment.
+fn scan_repair_targets(git_dir: &Path, commits: &[&str]) -> AbResult<BTreeMap<String, usize>> {
+    let mut targets = BTreeMap::new();
+    for (i, commit) in commits.iter().enumerate() {
+        let msg = gitrepo::run_ok(git_dir, &["show", "-s", "--format=%B", commit])?;
+        if let Some(invalid_commit) = try_parse_repair_grammar(&msg) {
+            targets.entry(invalid_commit).or_insert(i);
+        }
+    }
+    Ok(targets)
+}
+
+/// Wraps `walk_one_commit`: on success, behaves identically. On failure,
+/// defers judgment -- treating the commit as contributing no events, rather
+/// than aborting the whole walk -- *only if* some later commit in this same
+/// range claims (per `scan_repair_targets`) to repair this exact commit.
+/// That claim is not taken on faith: when the walk reaches the claimed
+/// repair commit's own position (later in this same loop), it goes through
+/// the SAME full `is_repair_commit` validation — authority, ancestor,
+/// byte-exact restoration, no smuggling — as any other repair commit; if
+/// that fails, the walk still aborts there. A bogus "repair" therefore can
+/// never excuse a genuinely invalid commit; it only buys the *legitimate*
+/// case (a real, later, fully-valid repair) the chance to actually be
+/// reached instead of the walk giving up before ever seeing it.
+///
+/// `next_seq` is only threaded through on success: `walk_one_commit` mutates
+/// it incrementally as it accepts each event within a commit, even for a
+/// commit that ultimately fails partway through, so deferring a failed
+/// commit must not let its partial mutations leak into the real sequence
+/// state used to validate every later commit.
+fn walk_one_commit_or_defer(
+    git_dir: &Path,
+    commit: &str,
+    index: usize,
+    next_seq: &mut BTreeMap<Agent, u64>,
+    coordinators: Option<&crate::scalars::StringSet<Agent>>,
+    repair_targets: &BTreeMap<String, usize>,
+) -> AbResult<WalkedCommit> {
+    let mut trial_next_seq = next_seq.clone();
+    match walk_one_commit(git_dir, commit, index, &mut trial_next_seq, coordinators) {
+        Ok(wc) => {
+            *next_seq = trial_next_seq;
+            Ok(wc)
+        }
+        Err(e) => {
+            if repair_targets.contains_key(commit) {
+                Ok(WalkedCommit {
+                    commit: commit.to_string(),
+                    index,
+                    is_bootstrap_root: false,
+                    is_repair: false,
+                    agent: None,
+                    new_events: Vec::new(),
+                })
+            } else {
+                Err(e)
+            }
+        }
+    }
 }
 
 fn blob_bytes(git_dir: &Path, commit: &str, path: &str) -> AbResult<Option<Vec<u8>>> {
@@ -1301,6 +1394,122 @@ mod tests {
             err.to_string()
                 .contains("out-of-order or non-contiguous sequence"),
             "{err}"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // g-reviewer:6 -- a repair commit *later* in linear history recovering
+    // a structurally invalid commit, via `scan_repair_targets`/
+    // `walk_one_commit_or_defer`. README.md used to document this as an
+    // unrecoverable gap (the forward walk stopped at the invalid commit
+    // before ever reaching the repair); these are full `walk_full` runs
+    // against a real bootstrapped repo, not just `walk_one_commit` in
+    // isolation, so they exercise the actual recovery path a real
+    // `agent-bus validate` would take.
+    // -----------------------------------------------------------------
+
+    /// Bootstraps, then a real, valid `alice` commit (a well-formed
+    /// `agent.registered` envelope line, not arbitrary text -- `walk_full`
+    /// actually parses non-repair commits' content as JSON, unlike the
+    /// `is_repair_commit`-only tests above which never do). Returns the base
+    /// commit sha and the *exact* content string written, so a later
+    /// "restoration" can reuse the identical bytes -- `registered_line`
+    /// embeds a real wall-clock timestamp, so calling it a second time would
+    /// produce different (and thus non-byte-exact) content.
+    fn base_bootstrap_and_alice_log(dir: &Path) -> (String, String) {
+        write_bootstrap_files(dir, &["coord1"]);
+        commit_all(dir, "bootstrap");
+        let alice = Agent::parse("alice".to_string()).unwrap();
+        let content = registered_line(&alice, 0, None);
+        write_file(dir, "alice/000000.jsonl", &content);
+        let base = commit_all(dir, "alice base");
+        (base, content)
+    }
+
+    #[test]
+    fn walk_full_recovers_via_a_later_valid_repair_commit() {
+        let repo = init_repo();
+        let dir = repo.path();
+        let (base, content) = base_bootstrap_and_alice_log(dir);
+
+        // A structurally invalid commit: rewrites alice's existing content
+        // instead of appending to it.
+        write_file(dir, "alice/000000.jsonl", "CORRUPTED\n");
+        let invalid = commit_all(dir, "corrupt append");
+
+        // A later, fully valid repair commit restoring it byte-for-byte.
+        write_file(dir, "alice/000000.jsonl", &content);
+        let msg = format!(
+            "bus-admin: repair {invalid} restore {base}\n\nAgent-Bus-Coordinator: coord1\n"
+        );
+        let repair = commit_all(dir, &msg);
+
+        let walk = walk_full(dir, &repair)
+            .expect("a later, fully valid repair commit must let the walk recover");
+        assert_eq!(walk.commits.len(), 4, "root, alice-base, invalid, repair");
+        let invalid_wc = &walk.commits[2];
+        assert_eq!(invalid_wc.commit, invalid);
+        assert!(
+            !invalid_wc.is_repair,
+            "the invalid commit itself is not a repair commit"
+        );
+        assert!(
+            invalid_wc.new_events.is_empty(),
+            "a deferred invalid commit must contribute no events"
+        );
+        let repair_wc = &walk.commits[3];
+        assert_eq!(repair_wc.commit, repair);
+        assert!(repair_wc.is_repair);
+    }
+
+    #[test]
+    fn walk_full_still_fails_when_no_repair_claims_the_invalid_commit() {
+        let repo = init_repo();
+        let dir = repo.path();
+        let _ = base_bootstrap_and_alice_log(dir);
+        write_file(dir, "alice/000000.jsonl", "CORRUPTED\n");
+        let invalid = commit_all(dir, "corrupt append");
+
+        let err = walk_full(dir, &invalid).unwrap_err();
+        assert!(
+            err.to_string().contains("rewrites existing content"),
+            "an invalid commit with no repair claiming it must still fail exactly as before: {err}"
+        );
+    }
+
+    #[test]
+    fn walk_full_still_fails_when_the_claimed_repair_commit_is_itself_invalid() {
+        // The deferral claim in `scan_repair_targets` is never trusted on
+        // its own: a commit that merely *looks* like a repair (matches the
+        // message grammar) but fails `is_repair_commit`'s own validation
+        // must not excuse the invalid commit it claims to fix.
+        let repo = init_repo();
+        let dir = repo.path();
+        let (base, content) = base_bootstrap_and_alice_log(dir);
+        write_file(dir, "alice/000000.jsonl", "CORRUPTED\n");
+        let invalid = commit_all(dir, "corrupt append");
+
+        // Restores the right content, but is missing the required
+        // Agent-Bus-Coordinator trailer -- is_repair_commit must reject it.
+        write_file(dir, "alice/000000.jsonl", &content);
+        let msg = format!("bus-admin: repair {invalid} restore {base}\n");
+        let bogus_repair = commit_all(dir, &msg);
+
+        let err = walk_full(dir, &bogus_repair).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("must have exactly one Agent-Bus-Coordinator trailer"),
+            "a bogus claimed repair must fail on its own terms, not be silently accepted: {err}"
+        );
+    }
+
+    #[test]
+    fn scan_repair_targets_ignores_a_message_that_only_resembles_the_grammar() {
+        assert_eq!(try_parse_repair_grammar("bus-admin: repair X\n"), None);
+        assert_eq!(try_parse_repair_grammar("not a repair message\n"), None);
+        assert_eq!(
+            try_parse_repair_grammar("bus-admin: repair X restore Y\n"),
+            Some("X".to_string())
         );
     }
 }

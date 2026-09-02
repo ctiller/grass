@@ -509,6 +509,17 @@ pub fn reconcile(ctx: &BusCtx, agent: &str, file: &str) -> AbResult<()> {
 /// introduced commit's authorship trailers directly — so a hand-crafted merge
 /// commit that merely carries a plausible `Agent-Bus-Reviewer` trailer cannot
 /// pass as authorized.
+///
+/// Known, accepted gap: a commit that landed on `main` through ordinary git
+/// *before* this protocol was ever wired up in a given repository (i.e.
+/// between `bootstrap-init`'s `product_review_from` and that repository's
+/// first real review-authorized candidate) will not be shaped as a
+/// two-parent review-candidate merge, and audit-main will flag it as such.
+/// This is a one-time adoption artifact, not a code defect: `main`'s history
+/// prior to actual agent-bus adoption cannot retroactively become
+/// protocol-compliant. Treat any audit-main finding whose commit predates a
+/// repository's first successful `review merged` receipt as this known
+/// bootstrap gap rather than a live regression.
 pub fn audit_main(ctx: &BusCtx, to: Option<&str>, json: bool) -> AbResult<()> {
     let findings = audit_main_findings(ctx, to)?;
 
