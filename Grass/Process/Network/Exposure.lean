@@ -1,4 +1,5 @@
-import Grass.Process.Network.Boundary
+import Grass.Process.Spec
+import Grass.Specification.Boundary
 
 /-!
 # How a root protocol exposes a driver boundary
@@ -40,6 +41,8 @@ M4 work.
 -/
 
 namespace Grass.Process
+
+open Grass.Specification
 
 universe u w
 

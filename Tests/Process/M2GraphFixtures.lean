@@ -1,5 +1,6 @@
 import Grass.Process.Network.Topology
 import Tests.Process.M1Fixtures
+import Grass.Specification.Boundary
 
 /-!
 # Fixtures for the M2 graph and topology
@@ -15,6 +16,8 @@ only the listener writes.
 -/
 
 namespace Grass.Process.Tests
+
+open Grass.Specification
 
 open Grass.Process
 

@@ -1,5 +1,5 @@
-import Grass.Process.Scope
 import Grass.Process.Spec
+import Grass.Specification.Scope
 
 /-!
 # Protocol registries
@@ -46,6 +46,8 @@ frozen at one universe would have to be rewritten when flattening arrives;
 -/
 
 namespace Grass.Process
+
+open Grass.Specification
 
 universe u w v
 

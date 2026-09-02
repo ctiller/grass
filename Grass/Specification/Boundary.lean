@@ -1,5 +1,4 @@
-import Grass.Process.Scope
-import Grass.Process.Spec
+import Grass.Specification.Scope
 
 /-!
 # The driver boundary
@@ -28,38 +27,46 @@ population, and no channel. Anything added to it becomes a fact that assembly
 and platform proofs depend on, and every one of those is a fact a plan change
 would then be able to break.
 
-## Imports
+## Why it is in the neutral layer
 
-This module imports `Grass.Process.Scope` for the requirement key's scope and
-`Grass.Process.Spec` for the vocabulary view. It deliberately does *not* import
-the protocol registry: a boundary has nothing to do with keys, and importing the
-registry to reach one path type would put every registry change in the rebuild
-cone of every requirement change, which `docs/OLEAN_SHARDING.md` §2 names as a
-forbidden edge.
+`agent-bus` disposition `coord1:5`, ruling on issue `c-process:4`:
 
-## Why this module sits below `Grass.Semantics`
+> ratify an acyclic diamond. Move pure DriverBoundary/common demand-result
+> vocabulary into the neutral Specification layer below both Semantics and
+> Process. Semantics owns SpecProcess and BehaviorContract; Process owns
+> replaceable structural networks and execution machinery; Refinement/Weave owns
+> ProcessPresentation and theorems relating network traces to a SpecProcess.
+> Neither Semantics nor Process may import the other merely to state its core
+> objects.
 
-`docs/SEMANTICS.md` defines `SpecProcess.driverBoundary` and therefore imports
-this type, while `docs/MODULES.md` puts `Process` above `Semantics`. That is a
-cycle, and `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.2 proposes the cut taken
-here: `DriverBoundary` carries no semantic content — no contract, no oracle, no
-resource model — so it can and does sit below the semantics layer, and only the
-*projection* from a plan's root demands to this boundary needs anything above.
+The cycle that ruling resolves was real: `docs/SEMANTICS.md` states
+`SpecProcess.driverBoundary` in terms of this record, while
+`docs/PROCESS.md`'s abstract network carried a `BehaviorContract`, which
+`Grass.Semantics` owns. `docs/MODULES.md` declares a strict chain, so neither
+layer could be written first.
 
-That projection is M2 work. This module is the boundary alone.
+An earlier version of this module lived at `Grass/Process/Network/Boundary.lean`
+and imported `Grass.Process.Spec` in order to offer a `toVocabulary` view. That
+edge is what made the placement wrong rather than merely unconventional: a
+neutral record cannot depend on the layer that consumes it. The view moved to
+`Grass/Process/Network/Exposure.lean`, which is Process-side and is allowed to
+know both.
+
+This module therefore imports exactly one thing: the scope identity its
+requirement keys are named in.
 -/
 
-namespace Grass.Process
+namespace Grass.Specification
 
-universe u v
+universe u
 
 /--
 A nominal requirement key: what a realization demands of its platform.
 
 `docs/FOUNDATION.md` law 6 forbids ambient provider choice, and law 14 requires
 that changing one requirement invalidate only what depends on it. Both need
-requirements to be *named*, scoped, and comparable, which is why this is a
-scope plus a name and not a proposition.
+requirements to be *named*, scoped, and comparable, which is why this is a scope
+plus a name and not a proposition.
 -/
 structure RequirementKey where
   /-- The scope that owns this requirement. -/
@@ -134,37 +141,6 @@ structure DriverBoundary : Type (u + 1) where
 namespace DriverBoundary
 
 /--
-The vocabulary of a process that exposes exactly this boundary.
-
-The fault, interruption, and violation classes are `PEmpty` because they are not
-boundary concepts: a driver delivers entropy, results, and nothing else, and a
-process's own fault classification is private to it. A realization that needs to
-surface a provider failure does so as a `Result` value of the demand that
-failed, which is what makes it a dependent, exhaustively-handled outcome rather
-than an out-of-band channel.
--/
-def toVocabulary (boundary : DriverBoundary.{u}) : ProcessVocabulary.{u} where
-  ExternalEvent := boundary.ExternalEvent
-  Demand := boundary.Demand
-  Result := boundary.Result
-  Observation := boundary.Observation
-  InterruptReason := PEmpty
-  LogicalFault := PEmpty
-  EnvironmentViolation := PEmpty
-
-@[simp] theorem toVocabulary_ExternalEvent (boundary : DriverBoundary.{u}) :
-    boundary.toVocabulary.ExternalEvent = boundary.ExternalEvent := rfl
-
-@[simp] theorem toVocabulary_Demand (boundary : DriverBoundary.{u}) :
-    boundary.toVocabulary.Demand = boundary.Demand := rfl
-
-@[simp] theorem toVocabulary_Observation (boundary : DriverBoundary.{u}) :
-    boundary.toVocabulary.Observation = boundary.Observation := rfl
-
-@[simp] theorem toVocabulary_Result (boundary : DriverBoundary.{u}) :
-    boundary.toVocabulary.Result = boundary.Result := rfl
-
-/--
 Replace a boundary's requirement set, leaving its interface alone.
 
 Replacement, not strengthening: an earlier docstring claimed the result
@@ -211,14 +187,6 @@ theorem demandAlso_demands (boundary : DriverBoundary.{u}) (key : RequirementKey
   · assumption
   · exact List.mem_cons_self
 
-/-!
-`toVocabulary` and the requirement-delta operations above have no consumer inside
-`Grass.Process` yet. `toVocabulary` is what the sequential adapter elaborates a
-`SequentialMachine` into, and `demandAlso` with `RequirementSet.Covers` is the
-delta a refinement lens accumulates; both are M4. They are declared here, with
-the boundary they are about, rather than invented at the use site.
--/
-
 end DriverBoundary
 
-end Grass.Process
+end Grass.Specification

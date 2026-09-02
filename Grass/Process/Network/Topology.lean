@@ -1,5 +1,6 @@
 import Grass.Process.Network.Graph
 import Grass.Process.Nominal
+import Grass.Specification.Boundary
 
 /-!
 # Topology: instances, generations, channel sessions, and message occurrences
@@ -67,6 +68,8 @@ topology, landing with the rest of M3. `docs/PROCESS_IMPLEMENTATION_PLAN.md`
 -/
 
 namespace Grass.Process
+
+open Grass.Specification
 
 universe u w v r
 

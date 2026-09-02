@@ -1,4 +1,5 @@
-import Grass.Process.Network.Boundary
+import Grass.Process.Observation
+import Grass.Specification.Boundary
 
 /-!
 # The sequential authoring surface
@@ -39,6 +40,8 @@ they do not prove anything about frontiers.
 -/
 
 namespace Grass.Process
+
+open Grass.Specification
 
 universe u
 

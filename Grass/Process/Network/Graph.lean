@@ -1,5 +1,6 @@
 import Grass.Process.Network.Exposure
 import Grass.Process.Protocol.Registry
+import Grass.Specification.Boundary
 
 /-!
 # The process graph: which processes exist, and over what state
@@ -45,6 +46,8 @@ declaration those invariants are framed against.
 -/
 
 namespace Grass.Process
+
+open Grass.Specification
 
 universe u w v r
 
