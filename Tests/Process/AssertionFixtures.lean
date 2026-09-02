@@ -35,8 +35,8 @@ is not incidental convenience: `agreesGlue` demands that the fragments be a
 complete independent decomposition of the world, so a world shaped any other way
 could not discharge it. An earlier draft of this fixture had a single
 `listenerCursor : Nat` read by every `instanceState` fragment, which made two
-assertions about different incarnations `Separate` while reading the same field
-— exactly the aliasing `agreesGlue` now forbids.
+assertions about different slots `Separate` while reading the same field —
+exactly the aliasing `agreesGlue` now forbids.
 -/
 
 namespace Grass.Process.Tests.NetworkAssertions
@@ -62,16 +62,16 @@ open Grass.Process.Tests
 A concrete world for the fixture topology: one component per fragment family.
 
 The instance and channel components are functions of their index, so that
-`instanceState kind ref` reads *that* incarnation and no other. See the module
-note on why this shape is forced rather than chosen.
+`instanceState kind slot` reads *that* slot and no other. See the module note on
+why this shape is forced rather than chosen.
 -/
 structure FixtureWorld where
   /-- `region .routeTable`. -/
   routeTable : List String
   /-- `region .acceptCount`. -/
   acceptCount : Nat
-  /-- `instanceState kind ref`, per incarnation. -/
-  cursor : (kind : Role) → serverTopology.ProcessRef kind → Nat
+  /-- `instanceState kind slot`, per instance slot. -/
+  cursor : (kind : Role) → serverTopology.InstanceId kind → Nat
   /-- `escrow () session`: the payload in flight, if any. -/
   escrow : (edge : serverTopology.ChannelKind) →
     serverTopology.ChannelId edge → Option Nat
@@ -88,7 +88,7 @@ structure FixtureWorld where
 /-- Agreement, fragment by fragment: each fragment reads exactly its component. -/
 def fixtureAgrees : NetworkFragment serverTopology →
     FixtureWorld → FixtureWorld → Prop
-  | .instanceState kind ref, left, right => left.cursor kind ref = right.cursor kind ref
+  | .instanceState kind slot, left, right => left.cursor kind slot = right.cursor kind slot
   | .region .routeTable, left, right => left.routeTable = right.routeTable
   | .region .acceptCount, left, right => left.acceptCount = right.acceptCount
   | .escrow edge session, left, right => left.escrow edge session = right.escrow edge session
@@ -134,8 +134,9 @@ noncomputable def fixtureAgreement : WorldAgreement serverTopology FixtureWorld 
     refine ⟨{
       routeTable := if inside (.region .routeTable) then left.routeTable else right.routeTable
       acceptCount := if inside (.region .acceptCount) then left.acceptCount else right.acceptCount
-      cursor := fun kind ref =>
-        if inside (.instanceState kind ref) then left.cursor kind ref else right.cursor kind ref
+      cursor := fun kind slot =>
+        if inside (.instanceState kind slot) then left.cursor kind slot
+        else right.cursor kind slot
       escrow := fun edge session =>
         if inside (.escrow edge session) then left.escrow edge session
         else right.escrow edge session

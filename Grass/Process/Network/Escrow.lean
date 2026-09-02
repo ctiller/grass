@@ -86,7 +86,7 @@ they hold anyway.
 
 namespace Grass.Process
 
-universe u
+universe u s
 
 /--
 How an escrowed occurrence stopped being in flight.
@@ -103,7 +103,8 @@ carries a payload exactly when nothing else determines it. A cancellation
 acknowledgement happens at a declared point, and an endpoint death has a reason;
 neither is recoverable from the ledger otherwise.
 -/
-inductive ChannelResolution (Occurrence : Type u) (Session : Type u)
+inductive ChannelResolution (Occurrence : Type u) (Session : Type s) :
+    Type (max u s)
   /-- The receiver consumed it. The ordinary ending. -/
   | received
   /-- A cancellation was *acknowledged*, at this point. Requesting one does not
@@ -130,7 +131,7 @@ inductive ChannelResolution (Occurrence : Type u) (Session : Type u)
 
 namespace ChannelResolution
 
-variable {Occurrence Session : Type u}
+variable {Occurrence : Type u} {Session : Type s}
 
 /-- The occurrence *in this ledger* that carries this one's payload onward. -/
 def carrier : ChannelResolution Occurrence Session → Option Occurrence
@@ -176,7 +177,7 @@ The escrow held by one channel, at one point of an execution.
 `docs/PROCESS.md` §3 spells the plan-level object `ChannelEscrowLedger topology
 Message`; that will be the per-edge family of these, and `Plan.lean` names it.
 -/
-structure EscrowLedger (Occurrence : Type u) (Session : Type u) where
+structure EscrowLedger (Occurrence : Type u) (Session : Type s) where
   /-- Every occurrence ever escrowed here, oldest first. -/
   created : List Occurrence
   /-- Each occurrence's position in the monotone allocation history. -/
@@ -220,7 +221,24 @@ structure EscrowLedger (Occurrence : Type u) (Session : Type u) where
 
 namespace EscrowLedger
 
-variable {Occurrence Session : Type u} (ledger : EscrowLedger Occurrence Session)
+variable {Occurrence : Type u} {Session : Type s} (ledger : EscrowLedger Occurrence Session)
+
+/--
+The ledger of a session that has never escrowed anything.
+
+Every law is vacuous here, which is the point: a network holds one of these for
+each session before its first send, and a plan should not have to construct the
+proofs to say "nothing in flight".
+-/
+def empty : EscrowLedger Occurrence Session where
+  created := []
+  rank := fun _ => 0
+  rankOrdersCreated := by simp
+  resolution := fun _ => none
+  noFabrication := by simp
+  coalesceCarrierLater := by simp
+  cancelRequested := fun _ => false
+  acknowledgedWasRequested := by simp
 
 /-- This occurrence has ended. -/
 def Resolved (occurrence : Occurrence) : Bool := (ledger.resolution occurrence).isSome
@@ -269,7 +287,7 @@ end EscrowLedger
 /-! ## Coalescing cannot go in circles -/
 
 /-- One occurrence's payload reaches another by one or more coalesces. -/
-inductive CoalescesTo {Occurrence Session : Type u}
+inductive CoalescesTo {Occurrence : Type u} {Session : Type s}
     (ledger : EscrowLedger Occurrence Session) : Occurrence → Occurrence → Prop
   /-- One coalesce. -/
   | step {source carrier : Occurrence}
@@ -283,7 +301,7 @@ inductive CoalescesTo {Occurrence Session : Type u}
 
 namespace CoalescesTo
 
-variable {Occurrence Session : Type u} {ledger : EscrowLedger Occurrence Session}
+variable {Occurrence : Type u} {Session : Type s} {ledger : EscrowLedger Occurrence Session}
 
 /-- Rank strictly increases along every coalesce path. -/
 theorem rank_increases {source target : Occurrence}
@@ -328,7 +346,7 @@ private theorem length_filter_add_filter_not {α : Type u} (predicate : α → B
 
 namespace EscrowLedger
 
-variable {Occurrence Session : Type u} (ledger : EscrowLedger Occurrence Session)
+variable {Occurrence : Type u} {Session : Type s} (ledger : EscrowLedger Occurrence Session)
 
 /--
 **Accounting.**
@@ -406,7 +424,7 @@ One ledger is a later point of the same execution than another.
 
 The prefix relation `docs/PROCESS.md` §3's unconditional laws are stated over.
 -/
-structure LedgerExtends {Occurrence Session : Type u}
+structure LedgerExtends {Occurrence : Type u} {Session : Type s}
     (earlier later : EscrowLedger Occurrence Session) where
   /-- Occurrences are only appended. -/
   createdPrefix : earlier.created.IsPrefix later.created
@@ -428,7 +446,7 @@ structure LedgerExtends {Occurrence Session : Type u}
 
 namespace LedgerExtends
 
-variable {Occurrence Session : Type u} {earlier later : EscrowLedger Occurrence Session}
+variable {Occurrence : Type u} {Session : Type s} {earlier later : EscrowLedger Occurrence Session}
 
 /-- An escrowed occurrence stays escrowed. -/
 theorem created_preserved (extension : LedgerExtends earlier later)

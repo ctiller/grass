@@ -86,7 +86,7 @@ namespace Grass.Process
 
 open Grass.Specification
 
-universe u w v r
+universe u w v r msg
 
 /--
 A graph plus the things that have identity: instances, the edges between roles,
@@ -186,7 +186,7 @@ whose Lean value is assumed noncopyable." A Lean record field is copyable, so a
 field claiming affinity would claim something the type system does not enforce.
 -/
 structure MessageOccurrence {edge : topology.ChannelKind}
-    (channel : topology.ChannelId edge) {Message : Type w} (message : Message) where
+    (channel : topology.ChannelId edge) {Message : Type msg} (message : Message) where
   /-- The occurrence's identity. -/
   id : LogicalNominal topology.Carrier
   /-- It is a message occurrence and not some other identity. -/
@@ -202,7 +202,7 @@ took `channel` and `occurrence` apart could be instantiated with an occurrence
 from one session and a session index from another, and nothing in the types
 would object.
 -/
-abbrev ChannelOccurrence (edge : topology.ChannelKind) {Message : Type w}
+abbrev ChannelOccurrence (edge : topology.ChannelKind) {Message : Type msg}
     (message : Message) : Type r :=
   Sigma fun channel : topology.ChannelId edge =>
     topology.MessageOccurrence channel message
