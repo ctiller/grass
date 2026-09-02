@@ -89,6 +89,30 @@ theorem step {Event : Type u} {system : RelationalSystem Event}
     system.Runs initialState initialGraph nextState nextGraph (events ++ [event]) :=
   ⟨prior.initialValid, .step prior.steps transition⟩
 
+/--
+Compatibility induction over the historical initial/step view of a run.
+The recursion is delegated to `Steps`, so extensions still have one inductive
+proof source.
+-/
+protected theorem inductionOn {Event : Type u} {system : RelationalSystem Event}
+    {initialState state : system.State} {initialGraph graph : system.Graph}
+    {events : List Event}
+    (execution : system.Runs initialState initialGraph state graph events)
+    (motive : forall {state graph events},
+      system.Runs initialState initialGraph state graph events -> Prop)
+    (initialCase : forall valid : system.Initial initialState initialGraph,
+      motive (.initial valid))
+    (stepCase : forall {state graph events choice event nextState nextGraph}
+      (prior : system.Runs initialState initialGraph state graph events)
+      (transition : system.Step graph state choice event nextState nextGraph),
+      motive prior -> motive (.step prior transition)) :
+    motive execution := by
+  rcases execution with ⟨valid, steps⟩
+  induction steps with
+  | refl => exact initialCase valid
+  | step prior transition inductionHypothesis =>
+      exact stepCase ⟨valid, prior⟩ transition inductionHypothesis
+
 end Runs
 
 /-- A finite suffix monotonically extends its starting graph. -/

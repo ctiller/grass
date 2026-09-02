@@ -52,6 +52,12 @@ def initialExecution (input : Bool) : system.ExecutionPrefix :=
   @RelationalSystem.ExecutionPrefix.initial spec.AuditEvent system input (0 : Nat)
     rfl (.finite .refl trivial)
 
+example : True :=
+  (initialExecution true).runs.inductionOn
+    (motive := fun _ => True)
+    (fun _ => trivial)
+    (fun _ _ _ => trivial)
+
 theorem behaviorAdequate : behavior.Adequate where
   execution input _ := ⟨initialExecution input, rfl⟩
 

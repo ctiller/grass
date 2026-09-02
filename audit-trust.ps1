@@ -9,6 +9,7 @@ param(
         "Grass.ObservationProjection.identity_project",
         "Grass.ObservationProjection.comp_project",
         "Grass.RelationalSystem.Steps.graphExtends",
+        "Grass.RelationalSystem.Runs.inductionOn",
         "Grass.RelationalSystem.Runs.graphExtends",
         "Grass.BehaviorRefinement.mapSteps",
         "Grass.BehaviorRefinement.mapInfinite",
