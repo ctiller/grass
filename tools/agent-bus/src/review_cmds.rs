@@ -1045,6 +1045,26 @@ mod tests {
     }
 
     #[test]
+    fn merge_ready_rejects_hand_pushed_candidate_with_wrong_reviewer_trailer_name() {
+        // Right parents, exactly one Agent-Bus-Reviewer trailer -- but it
+        // names a different agent than the reviewer running `merge-ready`.
+        // The `reviewer_trailers.len() != 1` branch is already covered by
+        // `merge_ready_rejects_hand_pushed_candidate_missing_trailer` (zero
+        // trailers); this exercises the other half of that check's `||`
+        // (exactly one trailer, wrong identity), which nothing else here
+        // constructs a plausible-enough forged candidate to reach.
+        let f = fixture();
+        let tree = git(&f.path, &["rev-parse", &format!("{}^{{tree}}", f.feature)]);
+        let bad = git(
+            &f.path,
+            &["commit-tree", &tree, "-p", &f.previous_main, "-p", &f.feature, "-m", "bad\n\nAgent-Bus-Reviewer: carol"],
+        );
+        let authorization_id = publish_raw_authorization(&f, &bad);
+        let err = merge_ready(&f.ctx, "bob", authorization_id.as_str(), false).unwrap_err();
+        assert!(err.to_string().contains("exactly one matching Agent-Bus-Reviewer trailer"), "{err}");
+    }
+
+    #[test]
     fn merged_rejects_previous_main_mismatch() {
         let f = fixture();
         let (candidate, authorization_id) = authorize_fixture(&f);
@@ -1200,6 +1220,35 @@ mod tests {
         let findings = audit_main_findings(&f.ctx, Some(&merge)).unwrap();
         let problems = problems(&findings);
         assert!(problems.iter().any(|p| p.contains("no review.merge_authorized matches")), "{problems:?}");
+    }
+
+    #[test]
+    fn audit_main_flags_authorized_nomination_but_wrong_exact_commit() {
+        // AGENT_BUS_SCHEMA.md section 9 requires the correlation to match the
+        // *exact* candidate/previous_main/reviewed_commit of a real
+        // review.merge_authorized event, not merely "some authorization
+        // exists for a nomination with the same authors/reviewer". Build a
+        // genuinely authorized nomination (real candidate `candidate`), then
+        // present a *different* hand-built merge commit on the same
+        // previous_main/reviewed_commit pair, with the same authors and the
+        // same Agent-Bus-Reviewer identity (bob) -- everything a name-only
+        // correlation would accept -- but not the commit the authorization
+        // actually names. If `audit_main_findings` ever weakened its match to
+        // authors+reviewer only (dropping the candidate/previous_main/
+        // reviewed_commit equality checks), this near-miss would wrongly
+        // correlate against the real authorization and this test would fail
+        // to see any finding.
+        let f = fixture();
+        let (candidate, _authorization_id) = authorize_fixture(&f);
+        let near_miss =
+            merge_commit(&f.path, &f.previous_main, &f.feature, "a different merge message\n\nAgent-Bus-Reviewer: bob");
+        assert_ne!(near_miss, candidate, "the hand-built merge must not coincide with the real candidate");
+        let findings = audit_main_findings(&f.ctx, Some(&near_miss)).unwrap();
+        let problems = problems(&findings);
+        assert!(
+            problems.iter().any(|p| p.contains("no review.merge_authorized matches this exact candidate/previous_main/reviewed_commit")),
+            "{problems:?}"
+        );
     }
 
     #[test]

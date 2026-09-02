@@ -382,6 +382,39 @@ mod tests {
     }
 
     #[test]
+    fn linked_validate_wrong_reviewer_trailer_name_is_invalid() {
+        // Exactly one Agent-Bus-Reviewer trailer (so the `len() != 1` half of
+        // the check is satisfied) but it names a different agent than the one
+        // (`env.agent`) who actually published this review.merge_authorized
+        // event. `linked_validate_missing_reviewer_trailer_is_invalid` only
+        // covers the zero-trailers case; this covers the other half of that
+        // check's `||` so a bug that dropped the identity comparison
+        // (accepting any single trailer, regardless of name) would be caught.
+        let bob = a("bob");
+        let nomination = EventId::parse("alice:2".to_string()).unwrap();
+        let (prev, reviewed, candidate) = (hash(1), hash(2), hash(3));
+        let mut state = empty_state();
+        insert_chain(&mut state, &nomination, vec![a("alice")], &bob);
+        insert_authorization(&mut state, &bob, 2, sample_auth(&nomination, &prev, &reviewed, &candidate));
+
+        let tag = format!("refs/tags/agent-candidate/bob/{candidate}");
+        let mut mock = MockGit::new()
+            .on(&["rev-parse", "--verify", "--quiet", &tag], GitOutput::ok(candidate.clone()))
+            .on(&["show", "-s", "--format=%P", &candidate], GitOutput::ok(format!("{prev} {reviewed}")))
+            .on(&["show", "-s", "--format=%B", &candidate], GitOutput::ok("candidate\n\nAgent-Bus-Reviewer: mallory".to_string()));
+        mock = generic_interpret_trailers(mock);
+        let _guard = mock.install();
+
+        let result = linked_validate(&fake_ctx(), &state).unwrap();
+        let invalid = result["invalid"].as_array().unwrap();
+        assert_eq!(invalid.len(), 1);
+        assert!(invalid[0]["problem"]
+            .as_str()
+            .unwrap()
+            .contains("does not have exactly one matching Agent-Bus-Reviewer trailer"));
+    }
+
+    #[test]
     fn linked_validate_objects_not_fetchable_is_unverifiable() {
         let bob = a("bob");
         let nomination = EventId::parse("alice:2".to_string()).unwrap();
