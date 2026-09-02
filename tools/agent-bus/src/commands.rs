@@ -234,6 +234,16 @@ pub fn scope_set(ctx: &BusCtx, args: &crate::cli::FileAgentArgs) -> AbResult<()>
     let agent = Agent::parse(args.agent.clone())?;
     let v = bus::read_json_file(std::path::Path::new(&args.file))?;
     let data: ScopeSet = from_value(v)?;
+    // c-agent:15 (same exposure class as g-design:42's product_base, flagged
+    // by coord1:36): unlike product_base, a bad base_code_commit here is
+    // correctable by a follow-up scope.set, but a silent typo should still be
+    // caught rather than published.
+    if crate::gitrepo::rev_parse_opt(&ctx.repo_root, data.base_code_commit.as_str())?.is_none() {
+        return Err(invalid(format!(
+            "base_code_commit {} does not resolve to an object in this repository",
+            data.base_code_commit
+        )));
+    }
     let env = bus::publish_event(ctx, &agent, EventData::ScopeSet(data), vec![])?;
     println!("published {}", env.id);
     Ok(())
@@ -264,6 +274,17 @@ pub fn issue_open(ctx: &BusCtx, agent: &str, to: &str, file: &str) -> AbResult<(
     let v = bus::read_json_file(std::path::Path::new(file))?;
     let v = inject(v, &[("target", Value::String(to.to_string()))]);
     let data: IssueOpened = from_value(v)?;
+    // c-agent:15: same rationale as scope_set's base_code_commit check --
+    // code_commit is evidence rather than a binding field, so the failure
+    // mode is lower-stakes than product_base, but a well-formed-but-wrong
+    // object id is still worth catching at publish time.
+    if let Some(code_commit) = &data.code_commit {
+        if crate::gitrepo::rev_parse_opt(&ctx.repo_root, code_commit.as_str())?.is_none() {
+            return Err(invalid(format!(
+                "code_commit {code_commit} does not resolve to an object in this repository"
+            )));
+        }
+    }
     let extra_refs: Vec<EventId> = data
         .blocks
         .iter()
@@ -1581,6 +1602,35 @@ mod tests {
         assert!(scope_set(&ctx, &args).is_err());
     }
 
+    /// c-agent:15: same rationale as g-design:42's product_base check, for
+    /// scope.set's base_code_commit.
+    #[test]
+    fn scope_set_rejects_a_well_formed_but_nonexistent_base_code_commit() {
+        let dir = init_real_repo();
+        let ctx = BusCtx {
+            repo_root: dir.path().to_path_buf(),
+            has_origin: false,
+        };
+        let coord1 = a("coord1");
+        bus::bootstrap_init(&ctx, std::slice::from_ref(&coord1), &oid(1)).unwrap();
+        let mut reg_args = base_register_args();
+        reg_args.agent = "alice".to_string();
+        register(&ctx, &reg_args).unwrap();
+        let (_t, path) = temp_json(&format!(
+            r#"{{"base_code_commit":"{}","exclusive":[],"shared":[],"exports":[],"depends_on":[],"note":""}}"#,
+            hash(999)
+        ));
+        let args = crate::cli::FileAgentArgs {
+            agent: "alice".to_string(),
+            file: path,
+        };
+        let err = scope_set(&ctx, &args).unwrap_err();
+        assert!(
+            err.to_string().contains("does not resolve to an object"),
+            "{err}"
+        );
+    }
+
     #[test]
     fn plan_set_rejects_malformed_payload() {
         let (_d, ctx) = dummy_ctx();
@@ -1631,6 +1681,29 @@ mod tests {
         let (_t, path) = temp_json("{}");
         let err = issue_open(&ctx, "alice", "bob", &path).unwrap_err();
         assert!(err.to_string().contains("invalid payload"), "{err}");
+    }
+
+    /// c-agent:15: same rationale as g-design:42's product_base check, for
+    /// issue.opened's optional code_commit.
+    #[test]
+    fn issue_open_rejects_a_well_formed_but_nonexistent_code_commit() {
+        let dir = init_real_repo();
+        let ctx = BusCtx {
+            repo_root: dir.path().to_path_buf(),
+            has_origin: false,
+        };
+        let coord1 = a("coord1");
+        bus::bootstrap_init(&ctx, std::slice::from_ref(&coord1), &oid(1)).unwrap();
+        let body = format!(
+            r#"{{"issue_kind":"bug","severity":"normal","summary":"s","code_commit":"{}","locations":[],"reproduction":[],"blocks":[],"evidence":[]}}"#,
+            hash(999)
+        );
+        let (_t, path) = temp_json(&body);
+        let err = issue_open(&ctx, "coord1", "coord1", &path).unwrap_err();
+        assert!(
+            err.to_string().contains("does not resolve to an object"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -2726,10 +2799,12 @@ mod tests {
         ss_args.agent = "alice".to_string();
         status_set(&ctx, &ss_args).unwrap();
 
-        // scope/plan/progress: full success paths.
+        // scope/plan/progress: full success paths. base_code_commit must be a
+        // real, resolvable object (c-agent:15) -- the bus branch tip itself
+        // qualifies.
+        let real_object = crate::gitrepo::rev_parse(&ctx.repo_root, bus::BUS_BRANCH).unwrap();
         let (_t1, scope_path) = temp_json(&format!(
-            r#"{{"base_code_commit":"{}","exclusive":["Grass/Alice/**"],"shared":[],"exports":[],"depends_on":[],"note":""}}"#,
-            hash(1)
+            r#"{{"base_code_commit":"{real_object}","exclusive":["Grass/Alice/**"],"shared":[],"exports":[],"depends_on":[],"note":""}}"#
         ));
         scope_set(
             &ctx,
