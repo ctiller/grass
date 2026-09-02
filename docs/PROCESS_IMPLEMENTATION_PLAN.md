@@ -256,6 +256,13 @@ source says so rather than implying the obligation is gone.
 
 ## 3. M1 — Author vocabulary freeze
 
+**Status: landed.** The modules and fixtures below are in the tree and
+`lake build` is green with `warningAsError`. A transitive axiom audit over the
+new declarations reports only `propext`, `Quot.sound`, and `Classical.choice`,
+which is the [FOUNDATION.md](FOUNDATION.md) §3 allowlist. Two adversarial review
+rounds have been absorbed; the second found a linearity hole in the terminal
+disposition that is now closed.
+
 Goal: a protocol author, a standard-library protocol, a serial author, and the
 sequential adapter can write final source. Exit criterion is expressiveness plus
 a fixture corpus, not depth of proof.
@@ -263,6 +270,7 @@ a fixture corpus, not depth of proof.
 ### 3.1 Modules
 
 ```text
+Grass/Process/Scope.lean        nominal scope identities and containment
 Grass/Process/Bag.lean          demand multiset, custody, consume-exactly-one
 Grass/Process/Observation.lean  observation segments, prefix histories, origin
 Grass/Process/Vocabulary.lean   ProcessVocabulary, ProcessEvent, fault classes
@@ -337,6 +345,11 @@ law 3 forbids an executed example standing in for a proof.
 
 ## 4. M2 — Network semantics
 
+**Status: started.** `Network/Exposure.lean`, `Network/Graph.lean`, and
+`Network/Topology.lean` have landed with fixtures. The channel contracts, the
+plan, the transition family, the child bindings, the mailbox profiles, and the
+commit law have not. None of the exit criteria below is discharged yet.
+
 Goal: the exhaustive transition family, with each constructor's exactness
 carried in its own index rather than in an ambient predicate.
 
@@ -387,6 +400,8 @@ representation relation.
 
 ## 5. M3 — Cancellation and lifecycle
 
+**Status: not started.**
+
 ```text
 Grass/Process/Cancellation.lean        masks, summaries, the |> algebra
 Grass/Process/Termination.lean         modes, contracts, dispositions
@@ -410,6 +425,8 @@ substance. Its hard block on `c-mem`'s buffer loans is recorded in §2.1.
 It is written last in this milestone, after that entry is ratified.
 
 ## 6. M4 — Composition, lowering, and the proof package
+
+**Status: not started.**
 
 ```text
 Grass/Process/Trace/Independence.lean   Independent, diamonds, swap congruence
@@ -461,6 +478,8 @@ Exit criteria:
   fixture, not a preference — and if it fails, the constructor is incomplete.
 
 ## 7. M5 — Certificates and sharding
+
+**Status: not started.**
 
 ```text
 Grass/Process/Shard/Signature.lean      ProcessSignature, RealizesProcessSignature
