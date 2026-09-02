@@ -201,6 +201,16 @@ theorem disjoint_iff_not_overlaps {r s : ByteRange} : r.Disjoint s ↔ ¬ r.Over
           covers_of (Nat.le_max_right _ _) (by omega)⟩
         hno
 
+/-- Two ranges that are not disjoint overlap, with an explicit witness. -/
+theorem overlaps_of_not_disjoint {r s : ByteRange} (h : ¬ r.Disjoint s) : r.Overlaps s := by
+  rw [disjoint_def] at h
+  exact ⟨max r.start s.start, covers_of (Nat.le_max_left _ _) (by omega),
+    covers_of (Nat.le_max_right _ _) (by omega)⟩
+
+instance (r s : ByteRange) : Decidable (r.Overlaps s) :=
+  if h : r.Disjoint s then .isFalse (disjoint_iff_not_overlaps.mp h)
+  else .isTrue (overlaps_of_not_disjoint h)
+
 theorem Disjoint.symm {r s : ByteRange} (h : r.Disjoint s) : s.Disjoint r := by
   rw [disjoint_def] at h ⊢
   omega

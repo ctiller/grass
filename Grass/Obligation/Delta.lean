@@ -118,6 +118,13 @@ def WellFormed : LedgerDelta → Prop
   | .join sources _ => sources ≠ [] ∧ sources.Nodup
   | .transfer _ _ => True
 
+instance : (delta : LedgerDelta) → Decidable delta.WellFormed
+  | .create _ => .isTrue trivial
+  | .discharge _ => .isTrue trivial
+  | .split _ _ => inferInstanceAs (Decidable (_ ∧ _))
+  | .join _ _ => inferInstanceAs (Decidable (_ ∧ _))
+  | .transfer _ _ => .isTrue trivial
+
 @[simp] theorem wellFormed_create (obligation : Obligation) :
     (LedgerDelta.create obligation).WellFormed := trivial
 
@@ -209,6 +216,18 @@ def consumes (effect : LedgerEffect) : List ObligationId :=
 def produces (effect : LedgerEffect) : List ObligationId :=
   effect.flatMap LedgerDelta.produces
 
+/-- The obligation kinds this effect creates, including through split and join.
+
+A profile checks these, so a protocol cannot introduce a duty of a kind the
+target never declared. -/
+def createdKinds (effect : LedgerEffect) : List ObligationKindId :=
+  effect.flatMap fun delta =>
+    match delta with
+    | .create o => [o.kind]
+    | .split _ into => into.map Obligation.kind
+    | .join _ into => [into.kind]
+    | .discharge _ | .transfer _ _ => []
+
 /-- Every identity this effect reassigns to a new owner. -/
 def reowns (effect : LedgerEffect) : List ObligationId :=
   effect.flatMap LedgerDelta.reowns
@@ -224,6 +243,11 @@ def WellFormed (effect : LedgerEffect) : Prop :=
 @[simp] theorem wellFormed_nil : WellFormed [] := by simp [WellFormed]
 
 @[simp] theorem reowns_nil : reowns [] = [] := rfl
+
+@[simp] theorem createdKinds_nil : createdKinds [] = [] := rfl
+
+instance (effect : LedgerEffect) : Decidable effect.WellFormed :=
+  inferInstanceAs (Decidable (∀ _ ∈ _, _))
 
 /-- The empty effect changes nothing, which is the framing base case. -/
 @[simp] theorem preservesIdentity_nil (id : ObligationId) :

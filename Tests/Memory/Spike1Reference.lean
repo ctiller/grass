@@ -1,5 +1,5 @@
 import Grass.Obligation.Disposition
-import Grass.Memory.Facet
+import Grass.Op.Facets
 import Grass.Memory.Profile
 
 /-!

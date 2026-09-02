@@ -1,5 +1,5 @@
 import Grass.Memory.Audit
-import Grass.Memory.Facet
+import Grass.Memory.Access
 import Grass.Obligation.Core
 
 /-!
@@ -23,6 +23,20 @@ is rejected by profile applicability, never modeled as harmless."
 `recognize?` returns an `Option`, so a consumer either holds a `Recognized` value
 carrying evidence or has to handle the `none`. There is no way to obtain evidence
 for a name the profile never listed.
+
+**Every registry here is consulted.** A registry nothing dispatches through is
+documentation, not a mechanism, and two of these were exactly that until
+`Admits` was extended to check the obligation kinds an access creates and the
+violation classes a profile may record. Open extensibility does not by itself
+require a registry — the existential operation package carries its own evidence
+(`Grass/Op/Facets.lean`) — so a registry earns its place only by being checked.
+
+## What this profile does not hold
+
+Operation facets. A profile describes a target's *memory policy*; holding facets
+would make the memory model depend on a closed operation universe and would force
+`Memory` to import ISA definitions. `Grass/Op/Facets.lean` owns that seam, and
+`Grass/Op/Step.lean` is where the two meet.
 
 ## The required proof package
 
@@ -156,10 +170,23 @@ fabricating the §10 proof package. Claiming closure in order to ask a question
 about names would be exactly backwards.
 -/
 def Admits (vocabulary : AdmittedVocabulary) (d : AccessDescriptor) : Prop :=
-  (∃ space, vocabulary.addressSpaces.find? d.space = some space ∧ d.WellFormedIn space) ∧
+  (match vocabulary.addressSpaces.find? d.space with
+   | some space => d.WellFormedIn space
+   | Option.none => False) ∧
   vocabulary.allocationSources.Recognizes d.provenance.source ∧
   (∀ step ∈ d.provenance.path, vocabulary.provenanceStepKinds.Recognizes step.kind) ∧
-  (∀ fault ∈ d.admittedFaults, vocabulary.faultClasses.Recognizes fault)
+  (∀ fault ∈ d.admittedFaults, vocabulary.faultClasses.Recognizes fault) ∧
+  d.ledgerEffect.WellFormed ∧
+  (∀ id ∈ d.ledgerEffect.createdKinds, vocabulary.obligationKinds.Recognizes id)
+
+instance (vocabulary : AdmittedVocabulary) (d : AccessDescriptor) :
+    Decidable (vocabulary.Admits d) := by
+  unfold Admits
+  have : Decidable (match vocabulary.addressSpaces.find? d.space with
+      | some space => d.WellFormedIn space
+      | Option.none => False) := by
+    cases vocabulary.addressSpaces.find? d.space <;> simp <;> infer_instance
+  infer_instance
 
 /-- A vocabulary declaring no address spaces admits no access. Rejecting
 everything is the safe failure; admitting everything would be the permissive
@@ -167,16 +194,36 @@ fallback `docs/FOUNDATION.md` law 8 forbids. -/
 theorem not_admits_of_no_address_spaces {vocabulary : AdmittedVocabulary}
     (h : vocabulary.addressSpaces = AddressSpaceTable.empty) (d : AccessDescriptor) :
     ¬ vocabulary.Admits d := by
-  rintro ⟨⟨space, hfind, -⟩, -⟩
-  rw [h] at hfind
-  simp at hfind
+  rintro ⟨hspace, -⟩
+  rw [h] at hspace
+  simp at hspace
 
 /-- An access naming an unrecognized fault class is not admitted. A fault the
 profile never modelled cannot be approximated as one it did. -/
 theorem not_admits_of_unrecognized_fault {vocabulary : AdmittedVocabulary}
     {d : AccessDescriptor} {fault : FaultClassId} (hmem : fault ∈ d.admittedFaults)
     (h : ¬ vocabulary.faultClasses.Recognizes fault) : ¬ vocabulary.Admits d :=
-  fun ha => h (ha.2.2.2 fault hmem)
+  fun ha => h (ha.2.2.2.1 fault hmem)
+
+/--
+An access whose ledger effect would drop or fabricate a duty is not admitted.
+
+This is what makes `LedgerDelta.WellFormed` a mechanism rather than documentation:
+until it was a premise here, `split source []` and `join [] into` were rejected by
+a theorem nothing consumed. `docs/OBLIGATIONS.md` §2 and
+`docs/FOUNDATION.md` law 7.
+-/
+theorem not_admits_of_ill_formed_ledger_effect {vocabulary : AdmittedVocabulary}
+    {d : AccessDescriptor} (h : ¬ d.ledgerEffect.WellFormed) : ¬ vocabulary.Admits d :=
+  fun ha => h ha.2.2.2.2.1
+
+/-- An access creating an obligation of a kind the profile never declared is not
+admitted. -/
+theorem not_admits_of_undeclared_obligation_kind {vocabulary : AdmittedVocabulary}
+    {d : AccessDescriptor} {kind : ObligationKindId}
+    (hmem : kind ∈ d.ledgerEffect.createdKinds)
+    (h : ¬ vocabulary.obligationKinds.Recognizes kind) : ¬ vocabulary.Admits d :=
+  fun ha => h (ha.2.2.2.2.2 kind hmem)
 
 /--
 A vocabulary never admits an access whose declared space it does not declare, and
@@ -190,8 +237,10 @@ space it is checked against comes from here.
 theorem not_admits_of_undeclared_space {vocabulary : AdmittedVocabulary}
     {d : AccessDescriptor} (h : ¬ vocabulary.addressSpaces.Declares d.space) :
     ¬ vocabulary.Admits d := by
-  rintro ⟨⟨space, hfind, -⟩, -⟩
-  exact h (by simp [AddressSpaceTable.Declares, hfind])
+  rintro ⟨hspace, -⟩
+  cases hfind : vocabulary.addressSpaces.find? d.space with
+  | none => rw [hfind] at hspace; simp at hspace
+  | some space => exact h (by simp [AddressSpaceTable.Declares, hfind])
 
 end AdmittedVocabulary
 
@@ -275,8 +324,6 @@ structure MemoryProfile where
   vocabularyVersion : Nat
   /-- The open names this profile admits. -/
   vocabulary : AdmittedVocabulary
-  /-- The facets every reachable operation of this profile must supply. -/
-  requiredFacets : List FacetName
   /-- The §10 package. -/
   package : RequiredProofPackage
 

@@ -232,89 +232,115 @@ changes every one of those name types.
 Unblocks: ISA instruction authoring, `Std.Owned` type design, and the
 `Semantics` statement of `SpecProcess`.
 
-### 3.7 Freeze status: not yet
+### 3.7 Freeze status: the seam is the acceptance criterion
 
-The M1 vocabulary is **not** frozen, and two rounds of adversarial review are the
-reason. Recording why, because the freeze is the step this plan exists to get
-right on the first try.
+The M1 vocabulary is **not** frozen, and the condition for freezing it is no
+longer "the vocabulary looks sufficient". It is that a fake ISA module *outside*
+`Grass/Memory/` can be written cleanly. That fixture is
+`Tests/Op/FakeIsa.lean`, and it must be able to:
 
-Round one found three type-level defects — an identity type colliding with Lean's
-`Id` monad, a `BitVec 64` address falsified by Spike 5's own
-`OpMemoryModel Logical GLSL450`, and an alignment predicate that accepted
-everything at its default value. Round two, run with fresh context, found that
-the sealed descriptor did not seal:
+1. introduce a new operation type without modifying a master sum or a registry;
+2. package it existentially;
+3. declare read, write, read-modify-write, allocation, release, atomic, fault, and
+   obligation facets;
+4. have the generic transition relation consume those facets;
+5. reject invalid provenance, ranges, ledger effects, and alias conflicts;
+6. preserve partial effects when a compound operation faults;
+7. coexist with a second, independently defined operation family.
 
-- a descriptor carried its own `AddressSpace`, so it could choose a
-  representation that made its own alignment and range checks vacuous;
-- nothing related `requiredPermission` to `intent`, so a store could declare it
-  needed only read-only permission, and `Permission.Permits` was dead code;
-- `alignment` and `requiresInitialized` had permissive defaults;
-- a `div [mem]` could not be expressed at all, because its `#DE` is raised by a
-  step that performs no access and a list of accesses had no index to name it;
-- the audit violation ledger could be erased in one line, and the axiom audit had
-  already stopped covering six modules.
+All seven now hold. What that means is narrower than "M1 is done": it means the
+seam is real, and the remaining §3.8 gaps are about depth rather than about
+whether an ISA author can start.
 
-All of those are closed, with negative fixtures for the ones that were
-constructible. The lesson worth carrying is narrower than "review works": in
-every case the docstring already asserted the property. Prose describing a
-mechanism is not the mechanism, and the reviews found the gap by executing rather
-than reading.
+### 3.8 Where the seam lives, and why not in the profile
 
-A third round, again with fresh context, confirmed the round-two fixes that were
-checkable by execution and refuted two of them, plus found holes neither earlier
-round reached. Closed since:
+`MemoryProfile` describes a target's memory policy and holds no operation facets.
+Putting them there would make the memory model depend on a closed operation
+universe: every new instruction family would edit `Memory`, and `Memory` would
+import ISA definitions, inverting the dependency direction
+[MODULES.md](MODULES.md) fixes. It also fights the existential packaging that
+`docs/INSTRUCTIONS.md` §1 requires.
 
-- **An empty provenance path made every range condition vacuous.** A sixteen-
-  exabyte write was well formed against the honest 64-bit CPU space, because
-  `Provenance.extent?` was `none` for a path-free provenance and the condition was
-  stated over the `Option`. Provenance now carries a `rootExtent`, `extent` is
-  total, and the condition is unconditional.
-- **The corpus's own `WebServerResources` sketch does not elaborate.**
-  [SEMANTICS.md](SEMANTICS.md) writes it as
-  `extends HasResourceLimit R .residentBytes, HasResourceLimit R .connections, …`;
-  Lean deduplicates parent structures by head constant, so every axis after the
-  first is silently dropped — and under `warningAsError` it is a hard error. A
-  multi-axis specification now holds `ResourceLimit R axis` values as fields. This
-  is a finding about the specification, not only about this implementation, and
-  the Semantics owner needs it.
-- **The resource laws admitted `max`.** Commutativity, associativity, identity,
-  monotonicity and the order laws are all satisfied by an algebra reporting that
-  one socket combined with one socket is one socket — a double count running in
-  the under-counting direction. `combineCancel` and `combineEqLeft` rule it out,
-  and `max` now fails them by construction.
-- **The audit ledger's append-only claim was still false**, and cannot be made
-  true of the type: `records?` reads the list out and `append` folds it back in,
-  so a laundered ledger is three lines. The property belongs to the transition
-  relation, not the type. `Extends` states it and M2's step relation owes the
-  proof; the docstring now says so instead of claiming a guarantee it cannot give.
+Three pieces stay separate:
 
-Gaps that remain open, and must be closed or accepted before the freeze:
+```text
+MemoryProfile          memory policy; knows nothing about operations
+HasOperationFacets Op  supplied independently by each operation family
+SomeOperation          the family erased, so stepping consumes facets blindly
+```
 
-- **`WellFormedIn d space` takes the space as a free parameter**, so it can be
-  applied to a fabricated space. The real seal is at `Substep.WellFormedIn` and
-  `AdmittedVocabulary.Admits`, which resolve through a table — but
-  `AdmittedVocabulary` and `MemoryProfile` still have no well-formedness of their
-  own, so a vocabulary can declare one id twice with different representations.
-  `AddressSpaceTable.WellFormed` now exists; requiring it is not yet wired.
-- **The facet seam is unwired.** `OperationFacets.Closes` and
-  `MemoryProfile.requiredFacets` have no consumer, `MemoryProfile` is not
-  parameterized by the operation type, and an ISA author cannot register anything
-  with a profile today.
-- **`LedgerEffect.WellFormed` is enforced nowhere**, so the split/join laws have
-  no consumer.
-- **Two registries are dead and five open-name axes have none.**
-  `obligationKinds` and `auditViolationClasses` are never consulted, and the
-  `profileSpecific` cases of ordering, scope, restartability and fault visibility,
-  plus `ObservationLabel`, have no registry at all.
-- **`Conflicts` requires `SameStorage`**, which excludes aliased mappings — a
-  host-visible device buffer and a file view over the same bytes are declared
-  non-conflicting.
-- **A faulted read-modify-write cannot record the read it performed**, because
-  read and write share one committed count.
-- **`Address.symbolic` is an atom, not an expression**; **the descriptor carries
-  no values**, so `lock cmpxchg16b` cannot declare its operands; **`WellFormedIn`
-  is not decidable**; **`ObligationPayload` is write-only**; and **the descriptor
-  carries no `ContextKind`** though §7.1 requires identity *and* kind.
+`Grass/Op/Step.lean` imports Memory and Obligation, consumes facets, and updates
+both state machines. Memory does not import operations. A new ISA family
+participates by declaring an instance; nothing below it changes.
+
+`StepPolicy.requiredFacets` lives with the stepper rather than on the profile, for
+the same reason: which facets an operation must supply is a fact about operations.
+
+### 3.9 What review closed, and how
+
+Four rounds of adversarial review, each with fresh context. The pattern in every
+round was the same and is worth stating once: **a docstring asserted a property
+the code did not have, and the reviewer found it by executing rather than
+reading.** Closed since the vocabulary was first written:
+
+- an identity type colliding with Lean's `Id` monad, and freshness that was
+  convention rather than mechanism;
+- a `BitVec 64` address falsified by Spike 5's own `OpMemoryModel Logical GLSL450`;
+- `IsAligned addr 0` universally true, so an unpopulated field accepted everything;
+- a descriptor carrying its own `AddressSpace`, able to choose a representation
+  that made its own guards vacuous;
+- no clause relating `requiredPermission` to `intent`, leaving `Permission.Permits`
+  dead code;
+- an empty provenance path making every range condition vacuous — a sixteen-exabyte
+  write was well formed against the honest 64-bit space;
+- `div [mem]` inexpressible, because its faulting step performs no access and a
+  list of accesses had no index to name it;
+- `visibleEffects?` guessing the `priorEffectsVisible` answer for a profile-owned
+  rule;
+- `LedgerDelta` able to drop and fabricate duties, and `PreservesIdentity` holding
+  for the obligation a transfer had just re-owned;
+- `Conflicts` requiring `SameStorage`, so aliased mappings never conflicted;
+- a faulted read-modify-write unable to record the read it performed;
+- the resource laws admitting `max` as a parallel composition, and then — after
+  that was fixed — forbidding `max` as a temporal aggregation, where it is correct;
+- the axiom audit silently covering six fewer modules than the build;
+- `lake build` exiting 0 on a `sorry`.
+
+Two claims were **withdrawn** rather than fixed, because they could not be made
+true as stated:
+
+- the audit violation ledger cannot be append-only *by construction*. `records?`
+  reads the list out and `append` folds it back in, so laundering is three lines
+  whatever the constructor's visibility, and no arrangement of a type with a
+  readable projection avoids that. The property belongs to the transition
+  relation; `AuditViolationLedger.Extends` states it and
+  `Op.performAccess_extends_violations` proves the stepper preserves it.
+- `FreshSupply` cannot guarantee supply uniqueness. `initial` is public and must
+  be, so threading one supply per domain is the execution model's obligation.
+
+### 3.10 Docstring discipline
+
+Every public docstring that says "ensures", "prevents", "cannot", or
+"append-only" must point to either a theorem or a named transition invariant.
+Mechanism-shaped prose reads as verification and is not; this corpus produced four
+rounds of evidence for that. Where a property genuinely cannot be enforced by the
+type, the docstring says so and names what does enforce it.
+
+### 3.11 Gaps that remain open
+
+- `Address.symbolic` is an atom where §1 asks for an address *expression*. A
+  SPIR-V `OpAccessChain` derives a pointer from a base and a runtime index, and
+  nothing relates a symbolic address to its provenance.
+- The descriptor carries no values, so `lock cmpxchg16b` cannot declare its
+  compare and swap operands.
+- The descriptor carries a `ContextId` but no `ContextKind`, though §7.1 requires
+  identity *and* kind; the stepper supplies the kind out of band.
+- `AdmittedVocabulary` and `MemoryProfile` have no well-formedness of their own,
+  so a vocabulary can declare one address-space id twice with different
+  representations. `AddressSpaceTable.WellFormed` exists; requiring it does not.
+- Five open-name axes have no registry: the `profileSpecific` cases of ordering,
+  scope, restartability, and fault visibility, plus `ObservationLabel`.
+- `xchg`'s implicit `LOCK` cannot be declared as a demand rather than a choice.
 
 ## 4. M2 — Executable single-thread memory semantics
 
@@ -617,6 +643,8 @@ carries a consequence for another agent:
 
 One item remains open, and it is the one worth the most care:
 
+- the resource-class defect filed against the Semantics owner in
+  [DEFECT_SEMANTICS_RESOURCE_CLASSES.md](DEFECT_SEMANTICS_RESOURCE_CLASSES.md);
 - the reviewer identity that will take the M1 freeze under
   [AGENT_REVIEW.md](AGENT_REVIEW.md). The freeze is the highest-cost irreversible
   step in this plan, and §9 risk 1 makes its sufficiency a claim about

@@ -119,13 +119,31 @@ structure MemoryEvent where
   ordering : OrderingDemand
   /-- Whether the event completed, completed partially, or faulted. -/
   status : AccessStatus
+  /-- How many bytes this event actually observed. -/
+  readCommitted : Nat
+  /-- How many bytes this event actually wrote. -/
+  writeCommitted : Nat
 deriving DecidableEq, Repr
 
 namespace MemoryEvent
 
-/-- The bytes this event actually committed, as a range. -/
+/--
+The bytes this event actually observed.
+
+Separate from the written range, because a read-modify-write can do one and not
+the other. An `xadd` that read eight bytes and then faulted before storing has
+`readCommitted = 8` and `writeCommitted = 0`; a single shared count would have
+forced it to claim it read nothing, while `readValuePresent` still demanded a
+value — so a faulted RMW could not be recorded at all.
+-/
+def committedReadRange (e : MemoryEvent) : ByteRange := e.range.take e.readCommitted
+
+/-- The bytes this event actually wrote. -/
+def committedWriteRange (e : MemoryEvent) : ByteRange := e.range.take e.writeCommitted
+
+/-- The bytes this event touched at all, read or written. -/
 def committedRange (e : MemoryEvent) : ByteRange :=
-  e.range.take (e.status.committedBytes e.range.size)
+  e.range.take (max e.readCommitted e.writeCommitted)
 
 /--
 `e.WellFormed` holds when the event's values agree with what its kind claims.
@@ -149,10 +167,14 @@ structure WellFormed (e : MemoryEvent) : Prop where
   connects `docs/MEMORY_MODEL.md` §4's "a write initializes only the bytes it
   actually completes" to the event record. -/
   writtenLength :
-    ∀ bytes, e.valueWritten = some bytes → bytes.length = e.committedRange.size
-  /-- Observed bytes number exactly what the status says completed. -/
+    ∀ bytes, e.valueWritten = some bytes → bytes.length = e.committedWriteRange.size
+  /-- Observed bytes number exactly what the event says it read. -/
   readLength :
-    ∀ bytes, e.valueRead = some bytes → bytes.length = e.committedRange.size
+    ∀ bytes, e.valueRead = some bytes → bytes.length = e.committedReadRange.size
+  /-- Neither count exceeds the range. -/
+  readWithinRange : e.readCommitted ≤ e.range.size
+  /-- Neither count exceeds the range. -/
+  writeWithinRange : e.writeCommitted ≤ e.range.size
   /-- The status does not claim more bytes than the range covers. -/
   statusWellFormed : e.status.WellFormed e.range.size
 
@@ -179,13 +201,23 @@ additionally requires the two events to be unordered by happens-before, which
 needs the consistency graph of M8. Two conflicting events properly ordered by a
 lock are not a race.
 
+`sharesBytes` is the other parameter, and it replaces an earlier
+`Provenance.SameStorage` clause that was wrong in the unsafe direction.
+`SameStorage` demands equal `AllocId`s, so a host-visible device buffer and the
+device allocation behind it, a `MapViewOfFile` view and the file it maps, and a
+physical/virtual pair were all declared non-conflicting — while
+`docs/MEMORY_MODEL.md` §7.5 explicitly contemplates mapping and sharing. Whether
+two allocations name the same bytes is a fact about the machine state, not about
+provenance, so `MemoryState.SharesBytes` supplies it.
+
 Overlap is checked on the *committed* ranges, since bytes an event did not commit
-are bytes it did not touch, and on `SameStorage`, since equal offsets in
-different allocations are different bytes.
+are bytes it did not touch.
 -/
-def Conflicts (compatible : MemoryEvent → MemoryEvent → Prop) (a b : MemoryEvent) : Prop :=
+def Conflicts (sharesBytes : AllocId → AllocId → Prop)
+    (compatible : MemoryEvent → MemoryEvent → Prop) (a b : MemoryEvent) : Prop :=
   a.kind.touchesMemory = true ∧ b.kind.touchesMemory = true ∧
-  a.provenance.SameStorage b.provenance ∧
+  a.provenance.space = b.provenance.space ∧
+  sharesBytes a.provenance.root b.provenance.root ∧
   a.committedRange.Overlaps b.committedRange ∧
   (a.kind.writes = true ∨ b.kind.writes = true) ∧
   ¬ compatible a b
@@ -200,32 +232,58 @@ strictly necessary, never less.
 -/
 def atomicsAreNever (_a _b : MemoryEvent) : Prop := False
 
-theorem Conflicts.symm {compatible : MemoryEvent → MemoryEvent → Prop}
+instance (a b : MemoryEvent) : Decidable (atomicsAreNever a b) := .isFalse (fun h => h)
+
+instance {sharesBytes : AllocId → AllocId → Prop}
+    [∀ x y, Decidable (sharesBytes x y)]
+    {compatible : MemoryEvent → MemoryEvent → Prop}
+    [∀ x y, Decidable (compatible x y)] (a b : MemoryEvent) :
+    Decidable (Conflicts sharesBytes compatible a b) :=
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+
+theorem Conflicts.symm {sharesBytes : AllocId → AllocId → Prop}
+    {compatible : MemoryEvent → MemoryEvent → Prop}
+    (shareSymm : ∀ x y, sharesBytes x y → sharesBytes y x)
     (symmetric : ∀ x y, compatible x y → compatible y x) {a b : MemoryEvent}
-    (h : Conflicts compatible a b) : Conflicts compatible b a := by
-  obtain ⟨ha, hb, hs, ho, hw, hat⟩ := h
-  refine ⟨hb, ha, hs.symm, ?_, hw.symm, fun hc => hat (symmetric b a hc)⟩
+    (h : Conflicts sharesBytes compatible a b) :
+    Conflicts sharesBytes compatible b a := by
+  obtain ⟨ha, hb, hspace, hshare, ho, hw, hat⟩ := h
+  refine ⟨hb, ha, hspace.symm, shareSymm _ _ hshare, ?_, hw.symm,
+    fun hc => hat (symmetric b a hc)⟩
   obtain ⟨offset, h₁, h₂⟩ := ho
   exact ⟨offset, h₂, h₁⟩
 
 /-- Two reads never conflict, whatever their ordering. -/
-theorem not_conflicts_of_both_read {compatible : MemoryEvent → MemoryEvent → Prop}
+theorem not_conflicts_of_both_read {sharesBytes : AllocId → AllocId → Prop}
+    {compatible : MemoryEvent → MemoryEvent → Prop}
     {a b : MemoryEvent} (ha : a.kind = .read) (hb : b.kind = .read) :
-    ¬ Conflicts compatible a b := by
-  rintro ⟨_, _, _, _, hw, _⟩
+    ¬ Conflicts sharesBytes compatible a b := by
+  rintro ⟨_, _, _, _, _, hw, _⟩
   rw [ha, hb] at hw
   simp [EventKind.writes] at hw
 
 /-- Events in different storage never conflict, however their offsets compare.
 This is `docs/MEMORY_MODEL.md` §7.5 at the event layer. -/
-theorem not_conflicts_of_not_sameStorage {compatible : MemoryEvent → MemoryEvent → Prop}
-    {a b : MemoryEvent} (h : ¬ a.provenance.SameStorage b.provenance) :
-    ¬ Conflicts compatible a b :=
+theorem not_conflicts_of_unshared {sharesBytes : AllocId → AllocId → Prop}
+    {compatible : MemoryEvent → MemoryEvent → Prop} {a b : MemoryEvent}
+    (h : ¬ sharesBytes a.provenance.root b.provenance.root) :
+    ¬ Conflicts sharesBytes compatible a b :=
+  fun hc => h hc.2.2.2.1
+
+/-- Events in different address spaces never conflict, however their offsets
+compare. This is `docs/MEMORY_MODEL.md` §7.5 at the event layer, and unlike the
+allocation test it really is a provenance fact. -/
+theorem not_conflicts_of_different_space {sharesBytes : AllocId → AllocId → Prop}
+    {compatible : MemoryEvent → MemoryEvent → Prop} {a b : MemoryEvent}
+    (h : a.provenance.space ≠ b.provenance.space) :
+    ¬ Conflicts sharesBytes compatible a b :=
   fun hc => h hc.2.2.1
 
 /-- A fence conflicts with nothing, because it touches no bytes. -/
-theorem not_conflicts_fence_left {compatible : MemoryEvent → MemoryEvent → Prop}
-    {a b : MemoryEvent} (h : a.kind = .fence) : ¬ Conflicts compatible a b := by
+theorem not_conflicts_fence_left {sharesBytes : AllocId → AllocId → Prop}
+    {compatible : MemoryEvent → MemoryEvent → Prop}
+    {a b : MemoryEvent} (h : a.kind = .fence) :
+    ¬ Conflicts sharesBytes compatible a b := by
   rintro ⟨ht, _⟩
   rw [h] at ht
   simp [EventKind.touchesMemory] at ht
@@ -307,6 +365,7 @@ nothing produces no event rather than an empty one.
 -/
 def ofAccess? (id : EventId) (contextKind : ContextKind) (cause : EventCause)
     (space : AddressSpace) (d : AccessDescriptor) (status : AccessStatus)
+    (readCommitted writeCommitted : Nat)
     (valueRead valueWritten : Option ByteSeq) : Option MemoryEvent :=
   (d.intent.eventKind?).map fun kind =>
     { id := id
@@ -319,30 +378,35 @@ def ofAccess? (id : EventId) (contextKind : ContextKind) (cause : EventCause)
       valueRead := valueRead
       valueWritten := valueWritten
       ordering := d.ordering
-      status := status }
+      status := status
+      readCommitted := readCommitted
+      writeCommitted := writeCommitted }
 
 /-- The event an access produces records exactly the access's own range. Nothing
 in the bridge widens or narrows what was touched. -/
 @[simp] theorem range_of_ofAccess? {id : EventId} {contextKind : ContextKind}
     {cause : EventCause} {space : AddressSpace} {d : AccessDescriptor}
-    {status : AccessStatus} {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
-    (h : ofAccess? id contextKind cause space d status valueRead valueWritten = some e) :
+    {status : AccessStatus} {readCommitted writeCommitted : Nat}
+    {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
+    (h : ofAccess? id contextKind cause space d status readCommitted writeCommitted
+      valueRead valueWritten = some e) :
     e.range = d.range := by
   simp only [ofAccess?, Option.map_eq_some_iff] at h
   obtain ⟨_, _, rfl⟩ := h
   rfl
 
-/-- The committed range of the event agrees with the committed range of the
-access. This is what lets an initialization argument stated on the descriptor be
-used on the event. -/
-theorem committedRange_of_ofAccess? {id : EventId} {contextKind : ContextKind}
+/-- The event records exactly the counts it was given, so an initialization
+argument stated on the descriptor transfers to the event. -/
+theorem committedCounts_of_ofAccess? {id : EventId} {contextKind : ContextKind}
     {cause : EventCause} {space : AddressSpace} {d : AccessDescriptor}
-    {status : AccessStatus} {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
-    (h : ofAccess? id contextKind cause space d status valueRead valueWritten = some e) :
-    e.committedRange = d.committedRange status := by
+    {status : AccessStatus} {readCommitted writeCommitted : Nat}
+    {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
+    (h : ofAccess? id contextKind cause space d status readCommitted writeCommitted
+      valueRead valueWritten = some e) :
+    e.readCommitted = readCommitted ∧ e.writeCommitted = writeCommitted := by
   simp only [ofAccess?, Option.map_eq_some_iff] at h
   obtain ⟨_, _, rfl⟩ := h
-  rfl
+  exact ⟨rfl, rfl⟩
 
 /--
 Event well-formedness follows from the values having the lengths the status
@@ -354,18 +418,21 @@ event conditions per instruction.
 -/
 theorem wellFormed_ofAccess? {id : EventId} {contextKind : ContextKind}
     {cause : EventCause} {space : AddressSpace} {d : AccessDescriptor}
-    {status : AccessStatus} {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
-    (h : ofAccess? id contextKind cause space d status valueRead valueWritten = some e)
+    {status : AccessStatus} {readCommitted writeCommitted : Nat}
+    {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
+    (h : ofAccess? id contextKind cause space d status readCommitted writeCommitted
+      valueRead valueWritten = some e)
     (readPresent : d.intent.reads = true → valueRead.isSome)
     (readAbsent : d.intent.reads = false → valueRead = Option.none)
     (writePresent : d.intent.writes = true → valueWritten.isSome)
     (writeAbsent : d.intent.writes = false → valueWritten = Option.none)
     (readLen : ∀ bytes, valueRead = some bytes →
-      bytes.length = (d.committedRange status).size)
+      bytes.length = (d.range.take readCommitted).size)
     (writeLen : ∀ bytes, valueWritten = some bytes →
-      bytes.length = (d.committedRange status).size)
+      bytes.length = (d.range.take writeCommitted).size)
+    (readBound : readCommitted ≤ d.range.size)
+    (writeBound : writeCommitted ≤ d.range.size)
     (statusOk : status.WellFormed d.range.size) : e.WellFormed := by
-  have hcommitted := committedRange_of_ofAccess? h
   simp only [ofAccess?, Option.map_eq_some_iff] at h
   obtain ⟨kind, hkind, rfl⟩ := h
   have hreads := AccessIntent.reads_eventKind? hkind
@@ -377,8 +444,10 @@ theorem wellFormed_ofAccess? {id : EventId} {contextKind : ContextKind}
       writeValuePresent := fun hw => writePresent (hwrites ▸ hw)
       writeValueAbsent := fun hw => writeAbsent (hwrites ▸ hw)
       noLocationWhenUntouched := fun hu => absurd htouches (by rw [hu]; simp)
-      writtenLength := fun bytes hb => hcommitted ▸ writeLen bytes hb
-      readLength := fun bytes hb => hcommitted ▸ readLen bytes hb
+      writtenLength := fun bytes hb => writeLen bytes hb
+      readLength := fun bytes hb => readLen bytes hb
+      readWithinRange := readBound
+      writeWithinRange := writeBound
       statusWellFormed := statusOk }
 
 end MemoryEvent
