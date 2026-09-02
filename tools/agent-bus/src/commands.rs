@@ -44,7 +44,7 @@ pub fn register(ctx: &BusCtx, args: &crate::cli::RegisterArgs) -> AbResult<()> {
     register_new_agent(ctx, &agent, data)
 }
 
-fn register_new_agent(ctx: &BusCtx, agent: &Agent, data: EventData) -> AbResult<()> {
+pub(crate) fn register_new_agent(ctx: &BusCtx, agent: &Agent, data: EventData) -> AbResult<()> {
     let _lock = ctx.lock()?;
     ctx.fetch_remote()?;
     let wt = ctx.ensure_worktree(agent)?;

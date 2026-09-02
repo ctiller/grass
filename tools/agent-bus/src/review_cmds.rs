@@ -412,6 +412,24 @@ pub fn reconcile(ctx: &BusCtx, agent: &str, file: &str) -> AbResult<()> {
 /// commit that merely carries a plausible `Agent-Bus-Reviewer` trailer cannot
 /// pass as authorized.
 pub fn audit_main(ctx: &BusCtx, to: Option<&str>, json: bool) -> AbResult<()> {
+    let findings = audit_main_findings(ctx, to)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&findings)?);
+    } else if findings.is_empty() {
+        println!("audit-main: clean");
+    } else {
+        for f in &findings {
+            println!("{f}");
+        }
+    }
+    Ok(())
+}
+
+/// The pure correlation walk behind `audit_main`, split out so unit tests can
+/// inspect the findings directly instead of parsing `audit_main`'s printed
+/// output.
+fn audit_main_findings(ctx: &BusCtx, to: Option<&str>) -> AbResult<Vec<Value>> {
     let repo = &ctx.repo_root;
     let bus_json = ctx.bus_json()?;
     let to = to.unwrap_or("refs/heads/main").to_string();
@@ -510,16 +528,7 @@ pub fn audit_main(ctx: &BusCtx, to: Option<&str>, json: bool) -> AbResult<()> {
         previous = commit;
     }
 
-    if json {
-        println!("{}", serde_json::to_string_pretty(&findings)?);
-    } else if findings.is_empty() {
-        println!("audit-main: clean");
-    } else {
-        for f in &findings {
-            println!("{f}");
-        }
-    }
-    Ok(())
+    Ok(findings)
 }
 
 fn commit_authors_only(repo: &Path, previous_main: &str, reviewed_commit: &str) -> AbResult<BTreeSet<Agent>> {
@@ -533,4 +542,699 @@ fn commit_authors_only(repo: &Path, previous_main: &str, reviewed_commit: &str) 
         authors.extend(a);
     }
     Ok(authors)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gitrepo::mock::{MockGit, MockGuard};
+    use crate::gitrepo::GitOutput;
+    // `nominate`/`take` collide with this module's own CLI-level commands of
+    // the same name, so pull those two in under different names.
+    use crate::test_support::{
+        a, author_commit, bootstrap, git, hash, init_repo, register, take as take_review, write_json,
+    };
+    use crate::test_support::nominate as nominate_review;
+    use std::path::PathBuf;
+
+    // ---------------------------------------------------------------- pure
+    // `verify_authorship`/`reconstruct_candidate`/`path_in_claim` take an
+    // explicit `repo: &Path` and make no filesystem assumptions about it, so
+    // these are tested with a scripted `MockGit` and no real repository.
+
+    /// Installs a MockGit answering `rev-list <previous_main>..<reviewed_commit>`
+    /// with `commits` (newline-joined, in order), and for each commit the two
+    /// calls `commit_message_trailers` always makes (`show -s --format=%B`
+    /// then `interpret-trailers --parse`), reconstructing exactly the
+    /// `Agent-Bus-Agent` trailers named in `trailer_agents` for that commit.
+    fn mock_authorship(
+        previous_main: &str,
+        reviewed_commit: &str,
+        commits: &[&str],
+        trailer_agents: std::collections::BTreeMap<&str, Vec<&str>>,
+    ) -> MockGuard {
+        let range = format!("{previous_main}..{reviewed_commit}");
+        let commits_out = commits.join("\n");
+        let trailer_agents: std::collections::BTreeMap<String, Vec<String>> = trailer_agents
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.into_iter().map(|s| s.to_string()).collect()))
+            .collect();
+        MockGit::new()
+            .on(&["rev-list", &range], GitOutput::ok(commits_out))
+            .on_with(
+                |_, a: &[&str], _| a.first() == Some(&"show") && a.get(1) == Some(&"-s"),
+                move |_, a: &[&str], _| {
+                    let c = *a.last().unwrap();
+                    let body = trailer_agents
+                        .get(c)
+                        .map(|agents| {
+                            agents.iter().map(|ag| format!("Agent-Bus-Agent: {ag}")).collect::<Vec<_>>().join("\n")
+                        })
+                        .unwrap_or_default();
+                    Ok(GitOutput::ok(format!("msg\n\n{body}")))
+                },
+            )
+            .on_with(
+                |_, a: &[&str], _| a == ["interpret-trailers", "--parse"],
+                |_, _, stdin: Option<&str>| {
+                    let body = stdin.unwrap_or("");
+                    let lines: Vec<&str> = body.lines().filter(|l| l.contains(": ")).collect();
+                    Ok(GitOutput::ok(lines.join("\n")))
+                },
+            )
+            .install()
+    }
+
+    #[test]
+    fn verify_authorship_rejects_empty_introduced_range() {
+        let (prev, reviewed) = (hash(1), hash(2));
+        let _guard = mock_authorship(&prev, &reviewed, &[], Default::default());
+        let bob = a("bob");
+        let err = verify_authorship(&PathBuf::from("."), &bob, &BTreeSet::new(), &prev, &reviewed).unwrap_err();
+        assert!(err.to_string().contains("introduces no content"), "{err}");
+    }
+
+    #[test]
+    fn verify_authorship_rejects_missing_author_trailer() {
+        let (prev, reviewed) = (hash(1), hash(2));
+        let c = hash(3);
+        let _guard = mock_authorship(&prev, &reviewed, &[&c], Default::default());
+        let bob = a("bob");
+        let err = verify_authorship(&PathBuf::from("."), &bob, &BTreeSet::new(), &prev, &reviewed).unwrap_err();
+        assert!(err.to_string().contains("has no Agent-Bus-Agent trailer"), "{err}");
+    }
+
+    #[test]
+    fn verify_authorship_rejects_reviewer_authored_commit() {
+        let (prev, reviewed) = (hash(1), hash(2));
+        let c = hash(3);
+        let mut trailers = std::collections::BTreeMap::new();
+        trailers.insert(c.as_str(), vec!["bob"]);
+        let _guard = mock_authorship(&prev, &reviewed, &[&c], trailers);
+        let bob = a("bob");
+        let mut expected = BTreeSet::new();
+        expected.insert(bob.clone());
+        let err = verify_authorship(&PathBuf::from("."), &bob, &expected, &prev, &reviewed).unwrap_err();
+        assert!(err.to_string().contains("ineligible to merge"), "{err}");
+    }
+
+    #[test]
+    fn verify_authorship_rejects_author_mismatch() {
+        let (prev, reviewed) = (hash(1), hash(2));
+        let c = hash(3);
+        let mut trailers = std::collections::BTreeMap::new();
+        trailers.insert(c.as_str(), vec!["carol"]);
+        let _guard = mock_authorship(&prev, &reviewed, &[&c], trailers);
+        let bob = a("bob");
+        let mut expected = BTreeSet::new();
+        expected.insert(a("alice"));
+        let err = verify_authorship(&PathBuf::from("."), &bob, &expected, &prev, &reviewed).unwrap_err();
+        assert!(err.to_string().contains("do not match nomination authors"), "{err}");
+    }
+
+    #[test]
+    fn verify_authorship_succeeds_and_returns_introduced_commits() {
+        let (prev, reviewed) = (hash(1), hash(2));
+        let (c1, c2) = (hash(3), hash(4));
+        let mut trailers = std::collections::BTreeMap::new();
+        trailers.insert(c1.as_str(), vec!["alice"]);
+        trailers.insert(c2.as_str(), vec!["alice"]);
+        let _guard = mock_authorship(&prev, &reviewed, &[&c1, &c2], trailers);
+        let bob = a("bob");
+        let mut expected = BTreeSet::new();
+        expected.insert(a("alice"));
+        let introduced = verify_authorship(&PathBuf::from("."), &bob, &expected, &prev, &reviewed).unwrap();
+        assert_eq!(introduced, vec![c1, c2]);
+    }
+
+    #[test]
+    fn reconstruct_candidate_rejects_multiple_merge_bases() {
+        let (prev, reviewed) = (hash(1), hash(2));
+        let bob = a("bob");
+        let _guard = MockGit::new()
+            .on(&["merge-base", "--all", &prev, &reviewed], GitOutput::ok(format!("{}\n{}", hash(5), hash(6))))
+            .install();
+        let err = reconstruct_candidate(&PathBuf::from("."), &prev, &reviewed, &bob).unwrap_err();
+        assert!(err.to_string().contains("do not have exactly one merge base"), "{err}");
+    }
+
+    #[test]
+    fn path_in_claim_prefix_and_exact() {
+        let glob = crate::scalars::PathClaim::parse("src/**".to_string()).unwrap();
+        assert!(path_in_claim("src/lib.rs", &glob));
+        assert!(path_in_claim("src", &glob));
+        assert!(!path_in_claim("other/lib.rs", &glob));
+        let exact = crate::scalars::PathClaim::parse("README.md".to_string()).unwrap();
+        assert!(path_in_claim("README.md", &exact));
+        assert!(!path_in_claim("README.md.bak", &exact));
+    }
+
+    // --------------------------------------------------------- real-repo
+    // `authorize`/`merge_ready`/`merged`/`reconcile`/`audit_main` all call
+    // `ctx.load_state()`, which walks real git history through a couple of
+    // call sites that bypass the `MockGit` seam (`history::blob_bytes`,
+    // `BusCtx::bus_json`) — so these are exercised against a small real
+    // throwaway repository instead, calling the Rust functions directly
+    // (not the CLI binary) so individual error branches can be triggered
+    // precisely.
+
+    struct Fixture {
+        _dir: tempfile::TempDir,
+        path: std::path::PathBuf,
+        ctx: BusCtx,
+        #[allow(dead_code)]
+        alice: Agent,
+        bob: Agent,
+        nomination: EventId,
+        feature: String,
+        previous_main: String,
+        merge_engine_epoch: String,
+    }
+
+    /// Bootstraps a repo, registers alice (implementor) and bob (reviewer),
+    /// commits `feature.txt` plus `extra_files` (each with an
+    /// `Agent-Bus-Agent: alice` trailer, or `trailer_agent` if given) on top
+    /// of `main`, and nominates+takes it with `review_scope`.
+    fn build_fixture(review_scope: &[&str], extra_files: &[&str], trailer_agent: &str) -> Fixture {
+        let dir = init_repo();
+        let path = dir.path().to_path_buf();
+        let ctx = bootstrap(&path, &["coord1"]);
+        let alice = register(&ctx, "alice", Role::Implementor);
+        let bob = register(&ctx, "bob", Role::Reviewer);
+        let previous_main = git(&path, &["rev-parse", "main"]);
+
+        git(&path, &["checkout", "--quiet", "--detach", &previous_main]);
+        std::fs::write(path.join("feature.txt"), "feature content\n").unwrap();
+        for f in extra_files {
+            std::fs::write(path.join(f), "extra\n").unwrap();
+        }
+        git(&path, &["add", "."]);
+        git(&path, &["commit", "-q", "-m", &format!("add feature\n\nAgent-Bus-Agent: {trailer_agent}")]);
+        let feature = git(&path, &["rev-parse", "HEAD"]);
+        git(&path, &["checkout", "--quiet", "main"]);
+
+        let nomination =
+            nominate_review(&ctx, &alice, &bob, "refs/heads/agent/alice/feature", review_scope, &["build"]);
+        take_review(&ctx, &bob, &nomination);
+        let merge_engine_epoch = ctx.load_state().unwrap().current_merge_engine_epoch.to_string();
+        Fixture { _dir: dir, path, ctx, alice, bob, nomination, feature, previous_main, merge_engine_epoch }
+    }
+
+    fn fixture() -> Fixture {
+        build_fixture(&["feature.txt"], &[], "alice")
+    }
+
+    fn auth_json(f: &Fixture, candidate: &str, review_scope: &[&str]) -> serde_json::Value {
+        serde_json::json!({
+            "nomination": f.nomination.as_str(),
+            "product_branch": "refs/heads/agent/alice/feature",
+            "previous_main": f.previous_main,
+            "reviewed_commit": f.feature,
+            "candidate": candidate,
+            "merge_engine_epoch": f.merge_engine_epoch,
+            "checks": [{"command": "build", "result": "passed"}],
+            "finding_dispositions": [],
+            "evidence": [],
+            "reviewed_scope": review_scope,
+            "limitations": [],
+            "summary": "looks good",
+        })
+    }
+
+    fn write_auth(f: &Fixture, name: &str, candidate: &str, review_scope: &[&str]) -> String {
+        write_json(&f.path, name, &auth_json(f, candidate, review_scope))
+    }
+
+    // ------------------------------------------------- simple CLI wrappers
+    // `decline`/`withdraw`/`changes`/`clear`/`supersede`/`reassign` are thin
+    // wrappers around `bus::publish_event`; `tests/cli_flow.rs` never
+    // exercises them (it only nominates, takes, authorizes, and merges), so
+    // they get a direct success-path test each here.
+
+    #[test]
+    fn decline_publishes_review_nomination_declined() {
+        let f = fixture();
+        decline(&f.ctx, "bob", f.nomination.as_str(), "not the right reviewer").expect("decline succeeds");
+    }
+
+    #[test]
+    fn withdraw_publishes_review_withdrawn() {
+        let f = fixture();
+        withdraw(&f.ctx, "alice", f.nomination.as_str(), "pausing this work").expect("withdraw succeeds");
+    }
+
+    fn changes_json(f: &Fixture) -> serde_json::Value {
+        serde_json::json!({
+            "nomination": f.nomination.as_str(),
+            "reviewed_commit": f.feature,
+            "findings": [{
+                "id": "f1", "priority": "normal", "locations": [],
+                "rationale": "needs work", "closure_conditions": "fix it",
+            }],
+            "evidence": [],
+        })
+    }
+
+    #[test]
+    fn changes_publishes_review_changes_requested() {
+        let f = fixture();
+        let file = write_json(&f.path, "changes.json", &changes_json(&f));
+        changes(&f.ctx, "bob", &file).expect("changes succeeds");
+    }
+
+    #[test]
+    fn clear_publishes_review_findings_cleared() {
+        let f = fixture();
+        let file = write_json(&f.path, "changes.json", &changes_json(&f));
+        changes(&f.ctx, "bob", &file).unwrap();
+        let changes_event = EventId::new(&f.bob, 2); // bob:0 register, bob:1 take, bob:2 changes
+        let clear_file = write_json(
+            &f.path,
+            "clear.json",
+            &serde_json::json!({
+                "nomination": f.nomination.as_str(),
+                "changes_event": changes_event.as_str(),
+                "finding_id": "f1",
+                "resolved_commit": f.feature,
+                "summary": "fixed it",
+            }),
+        );
+        clear(&f.ctx, "bob", &clear_file).expect("clear succeeds");
+    }
+
+    #[test]
+    fn supersede_publishes_review_findings_superseded() {
+        let f = fixture();
+        let file = write_json(&f.path, "changes.json", &changes_json(&f));
+        changes(&f.ctx, "bob", &file).unwrap();
+        let changes_event = EventId::new(&f.bob, 2);
+        let supersede_file = write_json(
+            &f.path,
+            "supersede.json",
+            &serde_json::json!({
+                "nomination": f.nomination.as_str(),
+                "changes_event": changes_event.as_str(),
+                "finding_id": "f1",
+                "rationale": "no longer applies",
+            }),
+        );
+        supersede(&f.ctx, "bob", &supersede_file).expect("supersede succeeds");
+    }
+
+    #[test]
+    fn reassign_publishes_review_reassigned_to_a_new_reviewer() {
+        let f = fixture();
+        register(&f.ctx, "carol", Role::Reviewer);
+        let file = write_json(
+            &f.path,
+            "reassign.json",
+            &serde_json::json!({
+                "authors": ["alice"],
+                "product_branch": "refs/heads/agent/alice/feature",
+                "reviewer": "carol",
+                "required_checks": ["build"],
+                "review_scope": ["feature.txt"],
+                "summary": "add feature",
+                "target_branch": "refs/heads/main",
+                "evidence": [],
+                "replaces": f.nomination.as_str(),
+                "reason": "bob is away",
+            }),
+        );
+        reassign(&f.ctx, "alice", &file).expect("reassign succeeds");
+    }
+
+    #[test]
+    fn authorize_rejects_unknown_nomination() {
+        let f = fixture();
+        let bogus = EventId::parse("alice:99".to_string()).unwrap();
+        let file = write_json(
+            &f.path,
+            "auth.json",
+            &serde_json::json!({
+                "nomination": bogus.as_str(),
+                "product_branch": "refs/heads/agent/alice/feature",
+                "previous_main": f.previous_main,
+                "reviewed_commit": f.feature,
+                "candidate": hash(1),
+                "merge_engine_epoch": f.merge_engine_epoch,
+                "checks": [{"command": "build", "result": "passed"}],
+                "finding_dispositions": [],
+                "evidence": [],
+                "reviewed_scope": ["feature.txt"],
+                "limitations": [],
+                "summary": "looks good",
+            }),
+        );
+        let err = authorize(&f.ctx, "bob", &file).unwrap_err();
+        assert!(err.to_string().contains("unknown nomination"), "{err}");
+    }
+
+    #[test]
+    fn authorize_rejects_when_reviewer_authored_a_commit() {
+        let f = build_fixture(&["feature.txt"], &[], "bob");
+        let file = write_auth(&f, "auth.json", &hash(1), &["feature.txt"]);
+        let err = authorize(&f.ctx, "bob", &file).unwrap_err();
+        assert!(err.to_string().contains("ineligible to merge"), "{err}");
+    }
+
+    #[test]
+    fn authorize_rejects_reconstruction_mismatch() {
+        let f = fixture();
+        let wrong_candidate = hash(999);
+        let file = write_auth(&f, "auth.json", &wrong_candidate, &["feature.txt"]);
+        let err = authorize(&f.ctx, "bob", &file).unwrap_err();
+        assert!(err.to_string().contains("does not match the deterministic reconstruction"), "{err}");
+    }
+
+    #[test]
+    fn authorize_rejects_missing_candidate_tag() {
+        let f = fixture();
+        let real_candidate =
+            reconstruct_candidate(&f.path, &f.previous_main, &f.feature, &f.bob).expect("reconstruction succeeds");
+        let file = write_auth(&f, "auth.json", &real_candidate, &["feature.txt"]);
+        let err = authorize(&f.ctx, "bob", &file).unwrap_err();
+        assert!(err.to_string().contains("candidate tag is not fetchable"), "{err}");
+    }
+
+    /// Real, correct `prepare-merge` + `authorize`, so later tests can build
+    /// on a genuinely authorized nomination without repeating the setup.
+    fn authorize_fixture(f: &Fixture) -> (String, EventId) {
+        let candidate =
+            reconstruct_candidate(&f.path, &f.previous_main, &f.feature, &f.bob).expect("reconstruction succeeds");
+        git(&f.path, &["tag", &format!("agent-candidate/bob/{candidate}"), &candidate]);
+        let file = write_auth(f, "auth.json", &candidate, &["feature.txt"]);
+        authorize(&f.ctx, "bob", &file).expect("authorize succeeds");
+        let authorization_id = EventId::new(&f.bob, 2); // bob:0 register, bob:1 take, bob:2 authorize
+        (candidate, authorization_id)
+    }
+
+    #[test]
+    fn merge_ready_rejects_unknown_authorization() {
+        let f = fixture();
+        let bogus = EventId::parse("bob:99".to_string()).unwrap();
+        let err = merge_ready(&f.ctx, "bob", bogus.as_str(), false).unwrap_err();
+        assert!(err.to_string().contains("unknown authorization"), "{err}");
+    }
+
+    #[test]
+    fn merge_ready_rejects_wrong_authorizer() {
+        let f = fixture();
+        let (_candidate, authorization_id) = authorize_fixture(&f);
+        let carol = register(&f.ctx, "carol", Role::Reviewer);
+        let _ = carol;
+        let err = merge_ready(&f.ctx, "carol", authorization_id.as_str(), false).unwrap_err();
+        assert!(err.to_string().contains("was not published by the given reviewer"), "{err}");
+    }
+
+    #[test]
+    fn merge_ready_rejects_main_advanced() {
+        let f = fixture();
+        let (_candidate, authorization_id) = authorize_fixture(&f);
+        // Advance `main` past the authorized `previous_main` out from under it.
+        git(&f.path, &["update-ref", "refs/heads/main", &f.feature]);
+        let err = merge_ready(&f.ctx, "bob", authorization_id.as_str(), false).unwrap_err();
+        assert!(err.to_string().contains("has advanced past authorized previous_main"), "{err}");
+    }
+
+    #[test]
+    fn merge_ready_rejects_open_finding_surfacing_after_authorization() {
+        let f = fixture();
+        let (_candidate, authorization_id) = authorize_fixture(&f);
+        // A finding filed *after* authorization (the code does not forbid
+        // this) must still block `merge-ready` from using the now-stale
+        // authorization.
+        let changes = ReviewChangesRequested {
+            nomination: f.nomination.clone(),
+            reviewed_commit: ObjectId::parse(f.feature.clone()).unwrap(),
+            findings: vec![crate::common::Finding {
+                id: crate::scalars::Short::parse("f1".into()).unwrap(),
+                priority: crate::common::Priority::Normal,
+                locations: vec![],
+                rationale: Text::parse("late finding".into()).unwrap(),
+                closure_conditions: Text::parse("fix it".into()).unwrap(),
+            }],
+            evidence: StringSet::default(),
+        };
+        bus::publish_event(&f.ctx, &f.bob, EventData::ReviewChangesRequested(changes), vec![f.nomination.clone()])
+            .unwrap();
+        let err = merge_ready(&f.ctx, "bob", authorization_id.as_str(), false).unwrap_err();
+        assert!(err.to_string().contains("has no terminal disposition"), "{err}");
+    }
+
+    #[test]
+    fn merge_ready_rejects_changed_path_outside_reviewed_scope() {
+        // The reviewed commit touches sneaky.txt too, but review_scope only
+        // ever names feature.txt — merge-ready's own diff check is what
+        // catches this (authorize/apply never inspect changed paths).
+        let f = build_fixture(&["feature.txt"], &["sneaky.txt"], "alice");
+        let (_candidate, authorization_id) = authorize_fixture(&f);
+        let err = merge_ready(&f.ctx, "bob", authorization_id.as_str(), false).unwrap_err();
+        assert!(err.to_string().contains("is outside reviewed_scope"), "{err}");
+    }
+
+    /// Publishes a hand-built `review.merge_authorized` directly (bypassing
+    /// `review_cmds::authorize`'s own reconstruction/tag gate entirely, the
+    /// way a direct push onto the bus branch would), so `merge_ready`'s
+    /// independent real-git checks on the *content* of `candidate` can be
+    /// exercised on their own.
+    fn publish_raw_authorization(f: &Fixture, candidate: &str) -> EventId {
+        let data = ReviewMergeAuthorized {
+            nomination: f.nomination.clone(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/feature".to_string()).unwrap(),
+            previous_main: ObjectId::parse(f.previous_main.clone()).unwrap(),
+            reviewed_commit: ObjectId::parse(f.feature.clone()).unwrap(),
+            candidate: ObjectId::parse(candidate.to_string()).unwrap(),
+            merge_engine_epoch: EventId::parse(f.merge_engine_epoch.clone()).unwrap(),
+            checks: vec![crate::common::CheckResult {
+                command: Text::parse("build".into()).unwrap(),
+                result: crate::common::CheckOutcome::Passed,
+                evidence: None,
+            }],
+            finding_dispositions: vec![],
+            evidence: StringSet::default(),
+            reviewed_scope: StringSet::from_iter(vec![crate::scalars::PathClaim::parse("feature.txt".into()).unwrap()]),
+            limitations: vec![],
+            summary: Text::parse("looks good".into()).unwrap(),
+        };
+        let mut refs = vec![data.nomination.clone(), data.merge_engine_epoch.clone()];
+        refs.extend(data.evidence.iter().cloned());
+        bus::publish_event(&f.ctx, &f.bob, EventData::ReviewMergeAuthorized(data), refs).unwrap().id
+    }
+
+    #[test]
+    fn merge_ready_rejects_hand_pushed_candidate_with_wrong_parents() {
+        let f = fixture();
+        let tree = git(&f.path, &["rev-parse", &format!("{}^{{tree}}", f.feature)]);
+        // Single-parent "candidate": parents = [feature], not
+        // [previous_main, feature].
+        let bad = git(&f.path, &["commit-tree", &tree, "-p", &f.feature, "-m", "bad\n\nAgent-Bus-Reviewer: bob"]);
+        let authorization_id = publish_raw_authorization(&f, &bad);
+        let err = merge_ready(&f.ctx, "bob", authorization_id.as_str(), false).unwrap_err();
+        assert!(err.to_string().contains("candidate parents do not match"), "{err}");
+    }
+
+    #[test]
+    fn merge_ready_rejects_hand_pushed_candidate_missing_trailer() {
+        let f = fixture();
+        let tree = git(&f.path, &["rev-parse", &format!("{}^{{tree}}", f.feature)]);
+        let bad = git(&f.path, &["commit-tree", &tree, "-p", &f.previous_main, "-p", &f.feature, "-m", "no trailer"]);
+        let authorization_id = publish_raw_authorization(&f, &bad);
+        let err = merge_ready(&f.ctx, "bob", authorization_id.as_str(), false).unwrap_err();
+        assert!(err.to_string().contains("exactly one matching Agent-Bus-Reviewer trailer"), "{err}");
+    }
+
+    #[test]
+    fn merged_rejects_previous_main_mismatch() {
+        let f = fixture();
+        let (candidate, authorization_id) = authorize_fixture(&f);
+        git(&f.path, &["update-ref", "refs/heads/main", &candidate]);
+        let file = write_json(
+            &f.path,
+            "merged.json",
+            &serde_json::json!({
+                "authorization": authorization_id.as_str(),
+                "previous_main": f.feature, // wrong: should be f.previous_main
+                "main_commit": candidate,
+                "product_branch": "refs/heads/agent/alice/feature",
+                "reviewed_commit": f.feature,
+                "summary": "merged",
+            }),
+        );
+        let err = merged(&f.ctx, "bob", &file).unwrap_err();
+        assert!(err.to_string().contains("first parent does not match previous_main"), "{err}");
+    }
+
+    #[test]
+    fn merged_rejects_when_main_not_advanced() {
+        let f = fixture();
+        let (candidate, authorization_id) = authorize_fixture(&f);
+        // main is deliberately left pointing at previous_main.
+        let file = write_json(
+            &f.path,
+            "merged.json",
+            &serde_json::json!({
+                "authorization": authorization_id.as_str(),
+                "previous_main": f.previous_main,
+                "main_commit": candidate,
+                "product_branch": "refs/heads/agent/alice/feature",
+                "reviewed_commit": f.feature,
+                "summary": "merged",
+            }),
+        );
+        let err = merged(&f.ctx, "bob", &file).unwrap_err();
+        assert!(err.to_string().contains("does not currently equal main_commit"), "{err}");
+    }
+
+    fn reconcile_json(f: &Fixture, authorization_id: &EventId, candidate: &str) -> serde_json::Value {
+        serde_json::json!({
+            "authorization": authorization_id.as_str(),
+            "previous_main": f.previous_main,
+            "main_commit": candidate,
+            "product_branch": "refs/heads/agent/alice/feature",
+            "reviewed_commit": f.feature,
+            "reason": "manual merge outside the bus",
+            "user_authority": "repo owner",
+        })
+    }
+
+    #[test]
+    fn reconcile_rejects_non_first_parent_successor() {
+        let f = fixture();
+        let (candidate, authorization_id) = authorize_fixture(&f);
+        // main is never advanced to `candidate`.
+        let file = write_json(&f.path, "reconcile.json", &reconcile_json(&f, &authorization_id, &candidate));
+        let err = reconcile(&f.ctx, "coord1", &file).unwrap_err();
+        assert!(err.to_string().contains("not a first-parent successor"), "{err}");
+    }
+
+    #[test]
+    fn reconcile_succeeds_when_main_was_advanced_out_of_band() {
+        let f = fixture();
+        let (candidate, authorization_id) = authorize_fixture(&f);
+        git(&f.path, &["update-ref", "refs/heads/main", &candidate]);
+        let file = write_json(&f.path, "reconcile.json", &reconcile_json(&f, &authorization_id, &candidate));
+        reconcile(&f.ctx, "coord1", &file).expect("reconcile succeeds");
+    }
+
+    fn merge_commit(path: &std::path::Path, first_parent: &str, second_parent: &str, message: &str) -> String {
+        let tree = git(path, &["rev-parse", &format!("{second_parent}^{{tree}}")]);
+        git(path, &["commit-tree", &tree, "-p", first_parent, "-p", second_parent, "-m", message])
+    }
+
+    fn problems(findings: &[Value]) -> Vec<String> {
+        findings.iter().map(|v| v["problem"].as_str().unwrap().to_string()).collect()
+    }
+
+    #[test]
+    fn audit_main_flags_non_merge_commit() {
+        let f = fixture();
+        let root = git(&f.path, &["rev-parse", &f.previous_main]);
+        let stray = author_commit(&f.path, &root, "stray.txt", "x\n", "alice");
+        let findings = audit_main_findings(&f.ctx, Some(&stray)).unwrap();
+        let problems = problems(&findings);
+        assert!(problems.iter().any(|p| p.contains("not a two-parent merge")), "{problems:?}");
+    }
+
+    #[test]
+    fn audit_main_flags_missing_reviewer_trailer() {
+        let f = fixture();
+        let root = git(&f.path, &["rev-parse", &f.previous_main]);
+        let second = author_commit(&f.path, &root, "x.txt", "x\n", "alice");
+        let merge = merge_commit(&f.path, &root, &second, "merge without trailer");
+        let findings = audit_main_findings(&f.ctx, Some(&merge)).unwrap();
+        let problems = problems(&findings);
+        assert!(
+            problems.iter().any(|p| p.contains("missing or duplicate Agent-Bus-Reviewer trailer")),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn audit_main_flags_non_reviewer_identity() {
+        let f = fixture();
+        let root = git(&f.path, &["rev-parse", &f.previous_main]);
+        let second = author_commit(&f.path, &root, "x.txt", "x\n", "alice");
+        // alice is a registered implementor, not a reviewer.
+        let merge = merge_commit(&f.path, &root, &second, "merge\n\nAgent-Bus-Reviewer: alice");
+        let findings = audit_main_findings(&f.ctx, Some(&merge)).unwrap();
+        let problems = problems(&findings);
+        assert!(problems.iter().any(|p| p.contains("non-reviewer identity")), "{problems:?}");
+    }
+
+    #[test]
+    fn audit_main_flags_missing_author_trailer() {
+        let f = fixture();
+        let root = git(&f.path, &["rev-parse", &f.previous_main]);
+        git(&f.path, &["checkout", "--quiet", "--detach", &root]);
+        std::fs::write(f.path.join("untrailered.txt"), "x\n").unwrap();
+        git(&f.path, &["add", "untrailered.txt"]);
+        git(&f.path, &["commit", "-q", "-m", "no trailer at all"]);
+        let second = git(&f.path, &["rev-parse", "HEAD"]);
+        let merge = merge_commit(&f.path, &root, &second, "merge\n\nAgent-Bus-Reviewer: bob");
+        let findings = audit_main_findings(&f.ctx, Some(&merge)).unwrap();
+        let problems = problems(&findings);
+        assert!(problems.iter().any(|p| p.contains("author trailer check failed")), "{problems:?}");
+    }
+
+    #[test]
+    fn audit_main_flags_reviewer_authored_introduced_commit() {
+        let f = fixture();
+        let root = git(&f.path, &["rev-parse", &f.previous_main]);
+        // The introduced commit is trailered to bob, who is also the named
+        // Agent-Bus-Reviewer on the merge itself.
+        let second = author_commit(&f.path, &root, "x.txt", "x\n", "bob");
+        let merge = merge_commit(&f.path, &root, &second, "merge\n\nAgent-Bus-Reviewer: bob");
+        let findings = audit_main_findings(&f.ctx, Some(&merge)).unwrap();
+        let problems = problems(&findings);
+        assert!(problems.iter().any(|p| p.contains("reviewer authored an introduced commit")), "{problems:?}");
+    }
+
+    #[test]
+    fn audit_main_flags_no_matching_authorization() {
+        let f = fixture();
+        let root = git(&f.path, &["rev-parse", &f.previous_main]);
+        // Structurally plausible (right trailer, right roles, right
+        // authorship) but no review.merge_authorized event names it.
+        let merge = merge_commit(&f.path, &root, &f.feature, "merge\n\nAgent-Bus-Reviewer: bob");
+        let findings = audit_main_findings(&f.ctx, Some(&merge)).unwrap();
+        let problems = problems(&findings);
+        assert!(problems.iter().any(|p| p.contains("no review.merge_authorized matches")), "{problems:?}");
+    }
+
+    #[test]
+    fn audit_main_flags_missing_receipt() {
+        let f = fixture();
+        let (candidate, _authorization_id) = authorize_fixture(&f);
+        // Authorized for real, but neither `merged` nor `reconcile` was ever
+        // published — `refs/heads/main` is advanced out of band instead, the
+        // way a hand-pushed merge would.
+        git(&f.path, &["update-ref", "refs/heads/main", &candidate]);
+        let findings = audit_main_findings(&f.ctx, Some(&candidate)).unwrap();
+        let problems = problems(&findings);
+        assert!(
+            problems.iter().any(|p| p.contains("missing review.merged/review.merge_reconciled receipt")),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn audit_main_clean_when_fully_correlated() {
+        let f = fixture();
+        let (candidate, authorization_id) = authorize_fixture(&f);
+        git(&f.path, &["update-ref", "refs/heads/main", &candidate]);
+        let file = write_json(&f.path, "merged.json", &{
+            serde_json::json!({
+                "authorization": authorization_id.as_str(),
+                "previous_main": f.previous_main,
+                "main_commit": candidate,
+                "product_branch": "refs/heads/agent/alice/feature",
+                "reviewed_commit": f.feature,
+                "summary": "merged",
+            })
+        });
+        merged(&f.ctx, "bob", &file).expect("merged succeeds");
+        let findings = audit_main_findings(&f.ctx, Some(&candidate)).unwrap();
+        assert!(findings.is_empty(), "{findings:?}");
+    }
 }

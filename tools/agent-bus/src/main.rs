@@ -15,6 +15,8 @@ mod review_cmds;
 mod scalars;
 mod state;
 mod storage;
+#[cfg(test)]
+mod test_support;
 mod validate_cmd;
 
 use clap::Parser;
