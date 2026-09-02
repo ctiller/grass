@@ -37,7 +37,7 @@ depend on it.
 
 ## What is not here
 
-An earlier version of this module gave `ProcessTopology` an `edgeRolesRelated`
+An earlier version of this module gave `ProcessTopologyCore` an `edgeRolesRelated`
 field requiring every channel edge's endpoints to be spawn-adjacent or to share
 a spawner. `docs/PROCESS.md` §3 declares no such field, and it was wrong on its
 own terms: nothing spawns the root, so it rejected every edge between the root
@@ -48,10 +48,25 @@ Channel connectivity is a plan-level obligation — an edge no execution can use
 is dead weight, and that is checked where the population and the channel
 contracts are, not as a well-formedness condition on the topology.
 
-## Cancellation and supervision are facets, not fields
+## Why this is `ProcessTopologyCore` and not `ProcessTopology`
 
 `docs/PROCESS.md` §3 declares `ProcessTopology` with three law fields: spawn,
-cancellation, and supervision. This module carries only spawn.
+cancellation, and supervision. This structure carries only spawn, and it is
+named `ProcessTopologyCore` for exactly that reason.
+
+`agent-bus` disposition `g-design:5`, ruling on issue `c-process:10`:
+
+> Ratify cancellation and supervision as optional topology facets so simple
+> processes pay no ceremony. Rename the weaker exported structure
+> `ProcessTopologyCore`; reserve `ProcessTopology` for the aggregate carrying
+> every facet required by the selected specification, with named composition
+> theorems recovering cancellation and supervision contracts.
+
+An earlier version of this module exported the weaker record *as*
+`ProcessTopology`, and `g-reviewer` was right to block on it: a downstream
+consumer could hold a value of that name while assuming the lifecycle authority
+its type does not contain. The name is now reserved for the aggregate, which
+lands with the facets in M3; nothing may claim it until then.
 
 The reason is `docs/PROCESS_SHARDING.md` §3 and §10, which require a composition
 invariant to depend "on the smallest named facet that supplies its facts" and
@@ -80,7 +95,7 @@ and the authority to create an instance.
 Extends `ProcessGraph`, so a topology is a graph and the substitution of one
 topology for another is still a substitution of graphs.
 -/
-structure ProcessTopology (registry : ProtocolRegistry.{u, w, v})
+structure ProcessTopologyCore (registry : ProtocolRegistry.{u, w, v})
     (boundary : DriverBoundary.{u})
     extends ProcessGraph.{u, w, v, r} registry boundary where
   /--
@@ -116,10 +131,10 @@ structure ProcessTopology (registry : ProtocolRegistry.{u, w, v})
   spawnAuthority : ∀ parent child : ProcessKind,
     maySpawn parent child → InstanceId parent → InstanceId child → Prop
 
-namespace ProcessTopology
+namespace ProcessTopologyCore
 
 variable {registry : ProtocolRegistry.{u, w, v}} {boundary : DriverBoundary.{u}}
-  (topology : ProcessTopology.{u, w, v, r} registry boundary)
+  (topology : ProcessTopologyCore.{u, w, v, r} registry boundary)
 
 instance : DecidableEq topology.Carrier := topology.carrierDecidableEq
 
@@ -180,7 +195,7 @@ structure MessageOccurrence {edge : topology.ChannelKind}
 namespace ProcessRef
 
 variable {registry : ProtocolRegistry.{u, w, v}} {boundary : DriverBoundary.{u}}
-  {topology : ProcessTopology.{u, w, v, r} registry boundary}
+  {topology : ProcessTopologyCore.{u, w, v, r} registry boundary}
   {kind : topology.ProcessKind}
 
 /--
@@ -248,7 +263,7 @@ end ProcessRef
 section KindTags
 
 variable {registry : ProtocolRegistry.{u, w, v}} {boundary : DriverBoundary.{u}}
-  {topology : ProcessTopology.{u, w, v, r} registry boundary}
+  {topology : ProcessTopologyCore.{u, w, v, r} registry boundary}
 
 /--
 A message occurrence's identity is never a process generation.
@@ -279,6 +294,6 @@ theorem epoch_kind_distinct {edge : topology.ChannelKind}
 
 end KindTags
 
-end ProcessTopology
+end ProcessTopologyCore
 
 end Grass.Process

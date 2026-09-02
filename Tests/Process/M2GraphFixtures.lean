@@ -168,7 +168,7 @@ theorem listener_bound_is_not_deferred :
 
 /-- The topology over that graph. Connections are identified by a number. -/
 @[reducible] def serverTopology :
-    ProcessTopology.{0, 1, 0, 0} graphRegistry fixtureBoundary where
+    ProcessTopologyCore.{0, 1, 0, 0} graphRegistry fixtureBoundary where
   toProcessGraph := serverGraph
   Carrier := Nat
   carrierDecidableEq := inferInstance
@@ -194,7 +194,7 @@ the instance identity is the same, and the reference is still stale.
 -/
 theorem reused_instance_is_stale :
     (connectionSeven 0).Stale (connectionSeven 1) := by
-  apply ProcessTopology.ProcessRef.stale_of_generation_ne
+  apply ProcessTopologyCore.ProcessRef.stale_of_generation_ne
   intro equal
   exact absurd (congrArg LogicalNominal.carrier equal) (by decide)
 
@@ -215,7 +215,7 @@ theorem allocated_is_not_fresh
     (history : NominalHistory Nat)
     (allocated : (connectionSeven 2).Allocated history) :
     ¬ history.Fresh (connectionSeven 2).generation :=
-  ProcessTopology.ProcessRef.not_fresh_of_allocated allocated
+  ProcessTopologyCore.ProcessRef.not_fresh_of_allocated allocated
 
 /-- A message occurrence's identity is never a process generation. -/
 theorem occurrence_is_not_a_generation
@@ -223,6 +223,6 @@ theorem occurrence_is_not_a_generation
     (occurrence :
       serverTopology.MessageOccurrence channel (Message := ULift Unit) (.up ())) :
     occurrence.id ≠ (connectionSeven 0).generation :=
-  ProcessTopology.occurrence_kind_distinct occurrence (connectionSeven 0)
+  ProcessTopologyCore.occurrence_kind_distinct occurrence (connectionSeven 0)
 
 end Grass.Process.Tests

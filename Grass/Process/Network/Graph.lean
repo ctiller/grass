@@ -20,7 +20,7 @@ rewrite.
 
 ## What is deliberately not here
 
-Channels. `docs/PROCESS.md` §3 splits `ProcessGraph` from `ProcessTopology` for
+Channels. `docs/PROCESS.md` §3 splits `ProcessGraph` from `ProcessTopologyCore` for
 a stated reason:
 
 > `ProcessGraph` exists separately so topology and channel contracts can
