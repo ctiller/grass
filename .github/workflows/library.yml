@@ -12,11 +12,12 @@ name: Library build
 #
 # A third check is about prose. Four adversarial review rounds each found a
 # docstring asserting a property the code did not have, including one naming a
-# theorem that did not exist. Tools/ConsultedAudit.py exists for a different
-# recurring failure: a fact the model carries that nothing consults. Six rounds of
-# adversarial review found eight such defects one at a time, each repair exposing
-# another, which is a process that was not converging on a syntactic property.
-# Tools/DocstringAudit.py requires a strong claim in
+# theorem that did not exist. Tools/ConsultedAudit.py is a cheap net over a
+# different recurring failure: a fact the model carries that nothing consults. It
+# checks a lexical property -- that a declared field name is projected somewhere --
+# which is weaker than "every field is read" and is not evidence that the class is
+# closed; its own docstring lists what it cannot see. Run it with --self-test after
+# changing the scanner. Tools/DocstringAudit.py requires a strong claim in
 # a definition or module comment to name the type or theorem enforcing it.
 
 on:
@@ -57,5 +58,8 @@ jobs:
       - name: Audit docstring claims
         run: python3 Tools/DocstringAudit.py
 
-      - name: Audit declared facts with no reader
+      - name: Self-test the consulted audit
+        run: python3 Tools/ConsultedAudit.py --self-test
+
+      - name: Audit declared field names never projected
         run: python3 Tools/ConsultedAudit.py

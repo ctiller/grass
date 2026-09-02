@@ -830,11 +830,22 @@ round's repairs. A process that finds a fixed fraction of a population per pass,
 and adds to the population with each repair, is not converging, and running a
 seventh round would have been the same bet again.
 
-A field with no reader is a *syntactic* property, so `Tools/ConsultedAudit.py`
-checks it directly and CI runs it. It reports every structure field nothing
-projects, with an allowlist where each entry states why the field is carried
-anyway. An unlisted field with no reader fails the build, so the judgement is made
-once and recorded rather than rediscovered.
+A field whose name is never projected is a *lexical* property, so
+`Tools/ConsultedAudit.py` checks that directly and CI runs it, with an allowlist
+where each entry states why a field is carried anyway. An unlisted one fails the
+build, so the judgement is made once rather than rediscovered.
+
+**It is a net, not a proof, and the difference matters** because this section used
+to present it as closing the class. It keys on the field name rather than the
+declaring structure, so two structures sharing a field name are indistinguishable
+without elaborating Lean. A clean run means no declared field name is entirely
+unprojected across `Grass/` and `Tests/` — not that every field is meaningfully
+consumed. Review corrected the overstatement, and also two false negatives it did
+have: comments and string literals are stripped before scanning, and a
+construction `name := value` no longer counts as a read. `--self-test` seeds each
+of those classes and fails if the scanner stops discriminating; it also asserts
+the same-named-field blind spot is still a blind spot, so that cannot quietly
+become a silent pass mistaken for coverage.
 
 It found six things six review rounds had not, all now in §4.2's owed list:
 `AddressSpace.memoryType` and `coherence`, which [MEMORY_MODEL.md](MEMORY_MODEL.md)
@@ -846,13 +857,13 @@ checklist is never consulted by the transition that depends on it;
 [OBLIGATIONS.md](OBLIGATIONS.md) §3's terminal dispositions are recorded and not
 enforced.
 
-Two honest limits. It cannot see a field consumed by pattern matching rather than
-projection, so those are allowlisted structurally and it under-reports. And it
-says nothing about whether a field *should* be read — that is what the allowlist
-reasons are for. It was itself wrong on first run: an early version treated a
-field docstring as the end of a structure, saw almost no fields, and reported a
-clean tree. Probing it against a field already known to have no reader is what
-caught that, and is the only way to tell a working audit from a silent one.
+Limits, stated rather than discovered later. It cannot see a field consumed by
+pattern matching rather than projection, so those are allowlisted structurally and
+it under-reports. It says nothing about whether a field *should* be read — that is
+what the allowlist reasons are for. And it was itself wrong on first run: an early
+version treated a field docstring as the end of a structure, saw almost no fields,
+and reported a clean tree. Probing it against a field already known to have no
+reader is what caught that, which is why the self-test exists.
 
 ### 4.3 A semantic decision this milestone made and does not own
 

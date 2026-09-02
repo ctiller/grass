@@ -92,6 +92,15 @@ error: the spaces are not interchangeable, so reporting it as `outOfBounds` woul
 lose which rule was broken. -/
 def wrongAddressSpace : AuditViolationClass := ⟨⟨"wrongAddressSpace"⟩⟩
 
+/-- The machine could not complete an access the profile admitted.
+
+`Oracle.answer` returns `none` when it cannot fill a completed access, and the
+transition records this rather than accepting a short answer as success. It is a
+statement about the *model*, not about the program: an oracle that cannot supply
+the bytes a store declared is a machine description that does not match the
+access, and `docs/FOUNDATION.md` law 8 says refuse rather than approximate. -/
+def machineAnswerIncomplete : AuditViolationClass := ⟨⟨"machineAnswerIncomplete"⟩⟩
+
 /--
 The classes the generic transition relation can emit.
 
@@ -101,7 +110,8 @@ field nothing reads. `StepPolicy` carries the proof.
 -/
 def emittedByTransition : List AuditViolationClass :=
   [outOfBounds, deadProvenance, permissionDenied, uninitializedRead, misaligned,
-   authorityUnavailable, obligationNotAuthorized, wrongAddressSpace]
+   authorityUnavailable, obligationNotAuthorized, wrongAddressSpace,
+   machineAnswerIncomplete]
 
 end AuditViolationClass
 

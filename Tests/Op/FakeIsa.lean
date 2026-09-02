@@ -1194,6 +1194,62 @@ theorem a_fault_on_a_ledger_bearing_substep_is_refused :
         else .none) =
       .rejected .faultWithUndeclaredLedgerEffect := rfl
 
+/-! ## A machine that cannot fill an access is refused, not padded
+
+`Oracle.answer` used to return a bare `Committed`, whose length obligations are
+upper bounds. A profile supplying no write data for a nonempty store therefore
+produced a `completed` outcome, `AccessOutcome.status` relabelled it
+`partialCommit 0 0`, and the operation carried on to its later substeps having
+committed nothing, with no fault and no denial. A malformed machine answer became
+a successful execution, which is the shape `docs/FOUNDATION.md` law 8 names.
+g-reviewer type-checked that counterexample against this fixture.
+
+`CompleteCommitted` makes a short completion unrepresentable and the answer is an
+`Option`, so an oracle that cannot fill an access says so rather than padding. -/
+
+/-- A policy whose machine supplies no write data at all. Everything else matches
+`policy`. -/
+def starvedPolicy : StepPolicy :=
+  { policy with oracle := .ofMemory (fun _ _ => []) indeterminateByte }
+
+/-- **The store is refused, and refused before its later effects.**
+
+`Alpha.reserve` writes eight bytes and creates a release obligation. Under the
+starved machine nothing is written, the violation is recorded, and the obligation
+is *not* created -- the operation stopped rather than reporting a successful
+partial completion. -/
+theorem a_machine_that_cannot_fill_a_store_is_refused :
+    ∀ s, (Grass.Op.step starvedPolicy state₀ (SomeOperation.of Alpha.reserve) thread₀
+        .thread ⟨⟨"alpha"⟩⟩).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 ∧
+      s.obligations.lookup releaseObligationId = Option.none ∧
+      s.memory.byteAt? bufferAlloc 0 = some 0x00 := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-- It reports `machineAnswerIncomplete` rather than a class that would read as a
+program error: the program did nothing wrong, the machine description did. -/
+theorem the_starved_store_records_the_right_class :
+    ∀ s, (Grass.Op.step starvedPolicy state₀ (SomeOperation.of Alpha.reserve) thread₀
+        .thread ⟨⟨"alpha"⟩⟩).state? = some s →
+      s.violations.records?.map AuditViolation.class_ =
+        [AuditViolationClass.machineAnswerIncomplete] := by
+  intro s hs
+  cases hs
+  decide
+
+/-- A read is unaffected: the starved machine supplies no *write* data, and
+`observedBytes` builds a full-width read from the store itself. So the check
+discriminates on what is actually missing. -/
+theorem the_starved_machine_still_completes_a_load :
+    ∀ s, (Grass.Op.step starvedPolicy state₀ (SomeOperation.of Alpha.load) thread₀
+        .thread ⟨⟨"alpha"⟩⟩).state? = some s →
+      s.events.length = 1 ∧ s.violations.IsEmpty := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
 /-! ## A completed access reports that it completed
 
 The completeness test demanded that reads *and* writes both cover the range,

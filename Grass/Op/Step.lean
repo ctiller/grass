@@ -179,8 +179,16 @@ a `Committed` for the descriptor in question, which ties the byte counts to the
 intent by construction.
 -/
 structure Oracle where
-  /-- What the machine committed for this access, given the state it ran against. -/
-  answer : MachineState → (d : AccessDescriptor) → Committed d
+  /--
+  What the machine committed for this access, or `none` if it cannot complete it.
+
+  `CompleteCommitted` rather than `Committed`, so an answer that does not fill the
+  access is not expressible as a completion. `Option`, so an oracle that cannot
+  fill one has somewhere to say so — the alternative would be padding the answer,
+  and inventing bytes the machine did not supply is worse than refusing.
+  `runAccesses` records `machineAnswerIncomplete` and stops.
+  -/
+  answer : MachineState → (d : AccessDescriptor) → Option (CompleteCommitted d)
 
 /--
 The oracle that commits the whole named range with zero-valued bytes.
@@ -191,23 +199,28 @@ M2's store replaces it. It is *not* a default — `StepPolicy` requires an oracl
 so a profile chooses this one deliberately.
 -/
 def Oracle.zeroed : Oracle where
-  answer _ d :=
-    { observed := if d.intent.reads then some (List.replicate d.range.size 0) else Option.none
-      written := if d.intent.writes then some (List.replicate d.range.size 0) else Option.none
-      observedPresent := by intro h; simp [h]
-      observedAbsent := by intro h; simp [h]
-      writtenPresent := by intro h; simp [h]
-      writtenAbsent := by intro h; simp [h]
-      observedFits := by
-        intro bytes hb
-        split at hb
-        · cases hb; simp
-        · exact absurd hb (by simp)
-      writtenFits := by
-        intro bytes hb
-        split at hb
-        · cases hb; simp
-        · exact absurd hb (by simp) }
+  answer _ d := some
+    { committed :=
+        { observed :=
+            if d.intent.reads then some (List.replicate d.range.size 0) else Option.none
+          written :=
+            if d.intent.writes then some (List.replicate d.range.size 0) else Option.none
+          observedPresent := by intro h; simp [h]
+          observedAbsent := by intro h; simp [h]
+          writtenPresent := by intro h; simp [h]
+          writtenAbsent := by intro h; simp [h]
+          observedFits := by
+            intro bytes hb
+            split at hb
+            · cases hb; simp
+            · exact absurd hb (by simp)
+          writtenFits := by
+            intro bytes hb
+            split at hb
+            · cases hb; simp
+            · exact absurd hb (by simp) }
+      readsFull := by intro h; simp [Committed.readCount, h]
+      writesFull := by intro h; simp [Committed.writeCount, h] }
 
 /--
 The oracle that reads committed bytes out of the memory state.
@@ -246,27 +259,45 @@ def Oracle.ofMemory
     (writeData : MachineState → AccessDescriptor → ByteSeq)
     (indeterminate : MachineState → (d : AccessDescriptor) → Nat → Byte) : Oracle where
   answer state d :=
-    { observed :=
-        if d.intent.reads then
-          some (observedBytes state.memory d (indeterminate state d))
-        else Option.none
-      written :=
-        if d.intent.writes then some ((writeData state d).take d.range.size)
-        else Option.none
-      observedPresent := by intro h; simp [h]
-      observedAbsent := by intro h; simp [h]
-      writtenPresent := by intro h; simp [h]
-      writtenAbsent := by intro h; simp [h]
-      observedFits := by
-        intro bytes hb
-        split at hb
-        · cases hb; simp [observedBytes]
-        · exact absurd hb (by simp)
-      writtenFits := by
-        intro bytes hb
-        split at hb
-        · cases hb; simp; omega
-        · exact absurd hb (by simp) }
+    if hfits : ¬ d.intent.writes ∨ d.range.size ≤ (writeData state d).length then
+      some
+        { committed :=
+            { observed :=
+                if d.intent.reads then
+                  some (observedBytes state.memory d (indeterminate state d))
+                else Option.none
+              written :=
+                if d.intent.writes then some ((writeData state d).take d.range.size)
+                else Option.none
+              observedPresent := by intro h; simp [h]
+              observedAbsent := by intro h; simp [h]
+              writtenPresent := by intro h; simp [h]
+              writtenAbsent := by intro h; simp [h]
+              observedFits := by
+                intro bytes hb
+                split at hb
+                · cases hb; simp [observedBytes]
+                · exact absurd hb (by simp)
+              writtenFits := by
+                intro bytes hb
+                split at hb
+                · cases hb; simp; omega
+                · exact absurd hb (by simp) }
+          readsFull := by
+            intro h
+            simp [Committed.readCount, h, observedBytes]
+          writesFull := by
+            intro h
+            rcases hfits with hno | hlen
+            · exact absurd h (by simp [hno])
+            · simp [Committed.writeCount, h]
+              omega }
+    else
+      -- Short write data is not padded and not reinterpreted. The profile said
+      -- this access writes `range.size` bytes and the machine supplied fewer, so
+      -- the machine description does not match the access; `runAccesses` records
+      -- `machineAnswerIncomplete`.
+      Option.none
 
 /--
 An extensible source of authority evidence.
@@ -661,13 +692,22 @@ def runAccesses (policy : StepPolicy) (state : MachineState)
   match accesses with
   | [] => state
   | d :: rest =>
-      let next :=
-        performAccess policy state d (.completed (policy.oracle.answer state d))
-          contextKind cause
-      if next.violations.recordCount = state.violations.recordCount then
-        runAccesses policy next rest contextKind cause
-      else
-        next
+      match policy.oracle.answer state d with
+      | Option.none =>
+          -- The machine cannot complete an access the profile admitted. Recorded
+          -- and stopped, exactly like a denial: an oracle that cannot supply the
+          -- bytes a store declared is a machine description that does not match
+          -- the access, and accepting a short answer as success was how a
+          -- malformed answer became a successful execution.
+          { state with
+            violations :=
+              state.violations.append (violationOf d .machineAnswerIncomplete) }
+      | some complete =>
+          let next := performAccess policy state d (.completed complete) contextKind cause
+          if next.violations.recordCount = state.violations.recordCount then
+            runAccesses policy next rest contextKind cause
+          else
+            next
 
 /--
 Where an operation faulted, if it did.
@@ -742,9 +782,15 @@ def runStep (policy : StepPolicy) (state : MachineState) (sequence : SubstepSequ
                 -- discarded its completed substeps and kept the faulting one's
                 -- prefix, which is the reverse of what `transactional` declares.
                 if sequence.faultingEffectVisible then
-                  performAccess policy faulted d
-                    (.faulted fault ((policy.oracle.answer faulted d).truncate reads writes))
-                    contextKind cause
+                  match policy.oracle.answer faulted d with
+                  | Option.none =>
+                      { faulted with
+                        violations := faulted.violations.append
+                          (violationOf d .machineAnswerIncomplete) }
+                  | some complete =>
+                      performAccess policy faulted d
+                        (.faulted fault (complete.committed.truncate reads writes))
+                        contextKind cause
                 else faulted
             | _ => faulted
 
@@ -904,15 +950,35 @@ not that.
 -/
 theorem runAccesses_stops_at_refusal (policy : StepPolicy) (state : MachineState)
     (d : AccessDescriptor) (rest : List AccessDescriptor) (contextKind : ContextKind)
-    (cause : EventCause)
+    (cause : EventCause) (complete : CompleteCommitted d)
+    (hanswer : policy.oracle.answer state d = some complete)
     (hrefused :
-      (performAccess policy state d (.completed (policy.oracle.answer state d))
+      (performAccess policy state d (.completed complete)
         contextKind cause).violations.recordCount ≠ state.violations.recordCount) :
     runAccesses policy state (d :: rest) contextKind cause =
-      performAccess policy state d (.completed (policy.oracle.answer state d))
-        contextKind cause := by
-  rw [runAccesses]
+      performAccess policy state d (.completed complete) contextKind cause := by
+  rw [runAccesses, hanswer]
   simp [hrefused]
+
+/--
+**An access the machine cannot complete is recorded and stops the operation.**
+
+The other way `runAccesses` refuses. `Oracle.answer` returning `none` means the
+machine cannot fill an access the profile admitted, and accepting a short answer
+as success is how a malformed answer became a successful execution: an oracle
+supplying no bytes for a nonempty store produced a `completed` outcome that
+`AccessOutcome.status` relabelled `partialCommit 0 0`, committing nothing while
+later substeps carried on. Review type-checked that against the seam fixture.
+-/
+theorem runAccesses_stops_when_the_machine_cannot_answer (policy : StepPolicy)
+    (state : MachineState) (d : AccessDescriptor) (rest : List AccessDescriptor)
+    (contextKind : ContextKind) (cause : EventCause)
+    (hanswer : policy.oracle.answer state d = Option.none) :
+    runAccesses policy state (d :: rest) contextKind cause =
+      { state with
+        violations :=
+          state.violations.append (violationOf d .machineAnswerIncomplete) } := by
+  rw [runAccesses, hanswer]
 
 /--
 **A denial stops the operation on the faulting path too.**
@@ -952,9 +1018,15 @@ theorem runStep_stops_at_refusal (policy : StepPolicy) (state : MachineState)
           match sequence.substeps[index.val]? with
           | some (.access d) =>
               if sequence.faultingEffectVisible then
-                performAccess policy faulted d
-                  (.faulted fault ((policy.oracle.answer faulted d).truncate reads writes))
-                  contextKind cause
+                match policy.oracle.answer faulted d with
+                | Option.none =>
+                    { faulted with
+                      violations := faulted.violations.append
+                        (violationOf d .machineAnswerIncomplete) }
+                | some complete =>
+                    performAccess policy faulted d
+                      (.faulted fault (complete.committed.truncate reads writes))
+                      contextKind cause
               else faulted
           | _ => faulted) = _
   rw [hvisible]
@@ -1095,12 +1167,16 @@ theorem runAccesses_extends_violations (policy : StepPolicy) (state : MachineSta
   induction accesses generalizing state with
   | nil => exact AuditViolationLedger.Extends.refl _
   | cons d rest ih =>
-    have hp := performAccess_extends_violations policy state d
-      (.completed (policy.oracle.answer state d)) contextKind cause
     rw [runAccesses]
     split
-    · exact AuditViolationLedger.Extends.trans hp (ih _)
-    · exact hp
+    · exact AuditViolationLedger.extends_append _ _
+    · rename_i complete _
+      have hp := performAccess_extends_violations policy state d
+        (.completed complete) contextKind cause
+      dsimp only
+      split
+      · exact AuditViolationLedger.Extends.trans hp (ih _)
+      · exact hp
 
 /-- Running a step extends the violation ledger, whichever shape the run takes:
 the whole sequence, a surviving prefix, or a prefix followed by the faulting
@@ -1123,6 +1199,9 @@ theorem runStep_extends_violations (policy : StepPolicy) (state : MachineState)
           | exact AuditViolationLedger.Extends.trans
               (runAccesses_extends_violations _ _ _ _ _)
               (performAccess_extends_violations _ _ _ _ _ _)
+          | exact AuditViolationLedger.Extends.trans
+              (runAccesses_extends_violations _ _ _ _ _)
+              (AuditViolationLedger.extends_append _ _)
 
 /-! ## The memory framing laws apply to this transition
 
@@ -1183,21 +1262,30 @@ theorem runAccesses_frames_untouched (policy : StepPolicy) {id : AllocId} {offse
         state.memory.cellAt? id offset
   | [], _, _, _, _ => rfl
   | d :: rest, state, contextKind, cause, hall => by
-    have hhead := performAccess_frames_untouched policy state d
-      (AccessOutcome.completed (policy.oracle.answer state d)) contextKind cause
-      (hall d List.mem_cons_self)
-    show (if (performAccess policy state d (.completed (policy.oracle.answer state d))
-              contextKind cause).violations.recordCount = state.violations.recordCount then
-            runAccesses policy (performAccess policy state d
-              (.completed (policy.oracle.answer state d)) contextKind cause) rest
-              contextKind cause
-          else performAccess policy state d (.completed (policy.oracle.answer state d))
-              contextKind cause).memory.cellAt? id offset = _
+    show ((match policy.oracle.answer state d with
+            | Option.none =>
+                { state with
+                  violations :=
+                    state.violations.append (violationOf d .machineAnswerIncomplete) }
+            | some complete =>
+                if (performAccess policy state d (.completed complete)
+                      contextKind cause).violations.recordCount =
+                    state.violations.recordCount then
+                  runAccesses policy (performAccess policy state d (.completed complete)
+                    contextKind cause) rest contextKind cause
+                else performAccess policy state d (.completed complete)
+                  contextKind cause) : MachineState).memory.cellAt? id offset = _
     split
-    · rw [runAccesses_frames_untouched policy rest _ contextKind cause
-        (fun x hx => hall x (List.mem_cons_of_mem _ hx))]
-      exact hhead
-    · exact hhead
+    · rfl
+    · rename_i complete _
+      have hhead := performAccess_frames_untouched policy state d
+        (AccessOutcome.completed complete) contextKind cause
+        (hall d List.mem_cons_self)
+      split
+      · rw [runAccesses_frames_untouched policy rest _ contextKind cause
+          (fun x hx => hall x (List.mem_cons_of_mem _ hx))]
+        exact hhead
+      · exact hhead
 
 /-- Performing an access does not touch the fault record: a fault is raised by a
 substep, and `performAccess` runs one access. -/
@@ -1247,9 +1335,15 @@ theorem runStep_records_the_fault (policy : StepPolicy) (state : MachineState)
           match sequence.substeps[index.val]? with
           | some (.access d) =>
               if sequence.faultingEffectVisible then
-                performAccess policy faulted d
-                  (.faulted fault ((policy.oracle.answer faulted d).truncate reads writes))
-                  contextKind cause
+                match policy.oracle.answer faulted d with
+                | Option.none =>
+                    { faulted with
+                      violations := faulted.violations.append
+                        (violationOf d .machineAnswerIncomplete) }
+                | some complete =>
+                    performAccess policy faulted d
+                      (.faulted fault (complete.committed.truncate reads writes))
+                      contextKind cause
               else faulted
           | _ => faulted).faults, record.fault = fault
   rw [hvisible]

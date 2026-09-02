@@ -422,6 +422,31 @@ def truncate {d : AccessDescriptor} (c : Committed d) (reads writes : Nat) :
 end Committed
 
 /--
+A `Committed` that filled the access it answers.
+
+`Committed`'s length obligations are upper bounds — `observedFits` and
+`writtenFits` say a committed list is *no longer* than the range, never that it
+fills it. That is right for a faulting access, whose whole point is a prefix. It
+is wrong for a completed one, and nothing said so: an oracle returning an empty
+write for a nonempty store produced a `completed` outcome, `AccessOutcome.status`
+quietly relabelled it `partialCommit 0 0`, and the operation continued to its
+later substeps with nothing committed and no fault or denial. A malformed machine
+answer became successful execution, which is the shape `docs/FOUNDATION.md` law 8
+names. Review type-checked that counterexample against the seam fixture.
+
+The counts are **intent-relative**: an access that does not read owes no read
+bytes. Carrying the evidence here rather than checking it later makes a short
+completion unrepresentable instead of detectable.
+-/
+structure CompleteCommitted (d : AccessDescriptor) where
+  /-- What the machine committed. -/
+  committed : Committed d
+  /-- A reading access observed its whole range. -/
+  readsFull : d.intent.reads = true → committed.readCount = d.range.size
+  /-- A writing access wrote its whole range. -/
+  writesFull : d.intent.writes = true → committed.writeCount = d.range.size
+
+/--
 What happened when an access was attempted.
 
 `denied` carries no `Committed`, which is the type-level form of
@@ -429,8 +454,10 @@ What happened when an access was attempted.
 denied substep": a denial that reported committed bytes is not expressible.
 -/
 inductive AccessOutcome (d : AccessDescriptor) where
-  /-- The access ran to completion. -/
-  | completed (committed : Committed d)
+  /-- The access ran to completion, filling every count its intent implies.
+  `CompleteCommitted` carries that evidence, so a short answer cannot be dressed
+  as a completion. -/
+  | completed (complete : CompleteCommitted d)
   /-- The access faulted, having committed what `committed` records. -/
   | faulted (fault : FaultClassId) (committed : Committed d)
   /-- The access was refused before committing anything. -/
@@ -454,11 +481,7 @@ reports. `Tests/Op/FakeIsa.lean`'s `a_completed_load_reports_completed` is the
 regression.
 -/
 def status : AccessOutcome d → AccessStatus
-  | .completed c =>
-      if (!d.intent.reads || c.readCount == d.range.size) &&
-         (!d.intent.writes || c.writeCount == d.range.size) then
-        .completed c.readCount c.writeCount
-      else .partialCommit c.readCount c.writeCount
+  | .completed c => .completed c.committed.readCount c.committed.writeCount
   | .faulted fault c => .faulted fault c.readCount c.writeCount
   | .denied _ => .partialCommit 0 0
 
@@ -469,7 +492,8 @@ def violation? : AccessOutcome d → Option AuditViolation
 
 /-- What this outcome committed, if it committed anything. -/
 def committed? : AccessOutcome d → Option (Committed d)
-  | .completed c | .faulted _ c => some c
+  | .completed c => some c.committed
+  | .faulted _ c => some c
   | .denied _ => Option.none
 
 /-- A denial commits nothing, by construction rather than by convention. -/
@@ -482,10 +506,7 @@ theorem status_wellFormed (outcome : AccessOutcome d) :
     outcome.status.WellFormed d.range.size := by
   cases outcome with
   | completed c =>
-    have hr := c.readCount_le
-    have hw := c.writeCount_le
-    simp only [status]
-    split <;> exact ⟨hr, hw⟩
+    exact ⟨c.committed.readCount_le, c.committed.writeCount_le⟩
   | faulted fault c =>
     exact ⟨c.readCount_le, c.writeCount_le⟩
   | denied _ =>
@@ -618,8 +639,7 @@ def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
                       subst houtcome'
                       simp only [AccessOutcome.committed?] at houtcome
                       cases Option.some.inj houtcome
-                      simp only [AccessOutcome.status]
-                      split <;> rfl
+                      rfl
                     | faulted f c' =>
                       subst houtcome'
                       simp only [AccessOutcome.committed?] at houtcome
@@ -634,8 +654,7 @@ def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
                       subst houtcome'
                       simp only [AccessOutcome.committed?] at houtcome
                       cases Option.some.inj houtcome
-                      simp only [AccessOutcome.status]
-                      split <;> rfl
+                      rfl
                     | faulted f c' =>
                       subst houtcome'
                       simp only [AccessOutcome.committed?] at houtcome

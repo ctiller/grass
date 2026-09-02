@@ -1,24 +1,40 @@
 #!/usr/bin/env python3
-"""Report declared facts that nothing reads.
+"""Report structure fields whose name is never projected anywhere.
 
 Six rounds of adversarial review on the memory layer found eight defects that had
 already passed a merge review, and all but one had the same shape: the model
-carries a fact and nothing consults it. `AuthorityProvider.violationClass` against
-the vocabulary. `Substep.faults`. `Obligation.owner`, so any context could
-discharge any duty. `AccessIntent.isDevice`, which section 7.5 makes load-bearing.
-`MemoryOrder.IsPortable`, whose own docstring says a consumer that skips it is the
-permissive fallback law 8 forbids.
+carries a fact and nothing consults it. `Obligation.owner`, so any context could
+discharge any duty. `Substep.faults`. `AccessIntent.isDevice`, which section 7.5
+makes load-bearing.
 
-Review found those one at a time and each repair exposed another, so rounds four,
-five and six each found defects in the immediately preceding round's fixes. That
-is not a process converging. A field with no reader is a syntactic property, and
-this checks it directly rather than hoping the next reader notices.
+**What this checks, exactly.** For each field name declared in a `structure`, it
+searches the sources for the token `.name`. If that token never appears, the field
+is reported. That is a *lexical* property and it is weaker than "nothing reads
+this field" in ways worth naming, because an earlier version of this file
+advertised the stronger reading and review corrected it:
 
-What it does NOT do: decide whether a field *should* be read. Plenty of declared
-data is legitimately inert -- a diagnostic label, a name carried for reporting.
-The allowlist below is where that judgement goes, and every entry needs a reason.
-An unlisted field with no reader fails the build, so the decision is made once and
-recorded rather than rediscovered by a reviewer.
+- It keys on the field name, not on the declaring structure. Two structures with a
+  field of the same name are indistinguishable, so a projection of one satisfies
+  the other. Lean would need to be elaborated to do better; a text scan cannot.
+- It cannot tell a projection from a suffix that merely looks like one.
+- Comments and string literals are stripped before scanning, so prose mentioning
+  `.owner` no longer counts as a reader. That was a real false negative.
+- A construction `name := value` is a write, not a read, and is not counted. That
+  was also a real false negative: an external constructor made an unread field
+  pass.
+
+So a clean run means **no declared field name is entirely absent from the
+sources**. It does not mean every field is meaningfully consumed, and it is not
+evidence that the defect class is closed. It is one cheap net over a class that
+six rounds of human-style review kept missing, and it under-reports by design.
+
+The allowlist is where "carried deliberately without a reader" is recorded, with a
+reason per entry. An unlisted field with no reader fails the build, so the
+judgement is made once rather than rediscovered.
+
+`--self-test` seeds each false-negative class this file claims to have closed and
+asserts the tool still reports the field. Run it after changing the scanner; a
+silent audit is worse than no audit, and this one was silent on its first version.
 """
 
 from __future__ import annotations
@@ -28,7 +44,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCES = sorted((ROOT / "Grass").rglob("*.lean"))
+DECLARED_IN = sorted((ROOT / "Grass").rglob("*.lean"))
+# Readers are looked for in the fixtures too: a field a fixture projects is read,
+# and excluding them made AuditViolation.class_ look inert when Tests/ reads it.
+READERS_IN = DECLARED_IN + sorted((ROOT / "Tests").rglob("*.lean"))
 
 # A field is *read* by a projection `.name`, by pattern-matching `name := x` in a
 # `with`-update or destructuring, or by `open`ed dot-notation. Construction sites
@@ -76,6 +95,16 @@ ALLOWED = {
     "issuer",             # ProtocolAuthority's issuer is carried, not checked
     "obligation",         # TerminalOutcome: dispositions are recorded, not enforced
     "disposition",
+    # Proof obligations: their purpose is that a constructor had to discharge
+    # them, so nothing projects them. The structure-suffix rule above misses these
+    # because they sit on structures with other names.
+    "readsFull",
+    "writesFull",
+    "vocabularyWellFormed",
+    # Diagnostic provenance carried into the trace for a report to read, never
+    # dispatched on, like `id` and `origin` above.
+    "cause",
+    "substep",
     # The resource layer is built ahead of its consumers, which arrive at M7 and
     # M9. Nothing outside Grass/Resource projects any of it yet.
     "combine",
@@ -90,8 +119,22 @@ ALLOWED = {
     "lifecycle",
 }
 
-def fields_of(path: Path) -> list[tuple[str, str, int]]:
-    """Yield (structure, field, line) for every structure field in one file.
+BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
+LINE = re.compile(r"--.*?$", re.MULTILINE)
+STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+
+
+def scannable(text: str) -> str:
+    """Strip block comments, line comments, and string literals.
+
+    Prose mentioning `.owner` and a docstring quoting a field name are not
+    readers, and counting them was a false negative review found.
+    """
+    return STRING.sub('""', LINE.sub("", BLOCK.sub(" ", text)))
+
+
+def fields_in(text: str) -> list[tuple[str, str, int]]:
+    """Yield (structure, field, line) for every structure field in one source.
 
     A structure runs until `deriving` or until a line at column zero that is not
     blank. Field docstrings are skipped rather than treated as the end -- an
@@ -103,7 +146,7 @@ def fields_of(path: Path) -> list[tuple[str, str, int]]:
     out: list[tuple[str, str, int]] = []
     current: str | None = None
     in_doc = False
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for number, line in enumerate(text.splitlines(), 1):
         stripped = line.strip()
         if in_doc:
             if "-/" in stripped:
@@ -128,27 +171,87 @@ def fields_of(path: Path) -> list[tuple[str, str, int]]:
     return out
 
 
-def main() -> int:
-    corpus = {path: path.read_text(encoding="utf-8") for path in SOURCES}
+def analyse(raw: dict[str, str],
+            readers: dict[str, str] | None = None) -> list[str]:
+    """Report `path:line: Structure.field` for every field name never projected.
+
+    Takes the sources as text so the self-test can seed them. Only a projection
+    counts: `name := value` is construction, which is a write, and counting it let
+    an external constructor make an unread field pass.
+    """
+    corpus = {name: scannable(text) for name, text in (readers or raw).items()}
     unread: list[str] = []
-    for path, _ in corpus.items():
-        for structure, field, line in fields_of(path):
+    for name, text in raw.items():
+        for structure, field, line in fields_in(text):
             if field in ALLOWED:
                 continue
             if any(structure.endswith(suffix) for suffix in PROOF_BUNDLES):
                 continue
             projection = re.compile(r"\.%s\b" % re.escape(field))
-            binder = re.compile(r"\b%s\s*:=\s*[a-z_(]" % re.escape(field))
-            readers = 0
-            for other, text in corpus.items():
-                readers += len(projection.findall(text))
-                if other != path:
-                    readers += len(binder.findall(text))
-            if readers == 0:
+            if not any(projection.search(body) for body in corpus.values()):
                 unread.append(
-                    f"  {path.relative_to(ROOT).as_posix()}:{line}: "
-                    f"{structure}.{field} is declared and nothing reads it"
+                    f"  {name}:{line}: {structure}.{field} is declared and "
+                    "its name is never projected"
                 )
+    return unread
+
+
+def self_test() -> int:
+    """Seed each false-negative class this file claims to have closed.
+
+    A silent audit is worse than no audit, and the first version of this file was
+    silent -- it treated a field docstring as the end of a structure, saw almost
+    nothing, and reported a clean tree. These cases fail loudly if the scanner
+    stops discriminating.
+    """
+    decl = 'structure Probe where\n  /-- doc -/\n  quarry : Nat\n'
+    cases = [
+        ("bare declaration", {"a.lean": decl}, True),
+        ("real projection", {"a.lean": decl, "b.lean": "def f (p : Probe) := p.quarry\n"}, False),
+        ("block comment mentioning .quarry",
+         {"a.lean": decl, "b.lean": "/-- see .quarry for details -/\ndef f := 1\n"}, True),
+        ("line comment mentioning .quarry",
+         {"a.lean": decl, "b.lean": "-- reads .quarry eventually\ndef f := 1\n"}, True),
+        ("string literal mentioning .quarry",
+         {"a.lean": decl, "b.lean": 'def f := "look at .quarry"\n'}, True),
+        ("construction only",
+         {"a.lean": decl, "b.lean": "def p : Probe := { quarry := 3 }\n"}, True),
+    ]
+    failures = 0
+    for label, sources, should_report in cases:
+        reported = any("Probe.quarry" in line for line in analyse(sources))
+        if reported != should_report:
+            want = "reported" if should_report else "not reported"
+            print(f"  SELF-TEST FAILED [{label}]: expected {want}")
+            failures += 1
+
+    # Documented blind spot, asserted so it cannot quietly become a silent pass
+    # that someone mistakes for coverage. Distinguishing these needs elaboration.
+    other = ('structure Probe where\n  /-- doc -/\n  quarry : Nat\n\n'
+             'structure Decoy where\n  /-- doc -/\n  quarry : Nat\n')
+    missed = not any("Probe.quarry" in line
+                     for line in analyse({"a.lean": other,
+                                          "b.lean": "def f (d : Decoy) := d.quarry\n"}))
+    if not missed:
+        print("  SELF-TEST FAILED [same-named field]: blind spot has changed; "
+              "update the module docstring, which documents it as unhandled")
+        failures += 1
+
+    if failures:
+        print(f"consulted audit self-test: {failures} failure(s)")
+        return 1
+    print("consulted audit self-test: all cases discriminate as documented")
+    return 0
+
+
+def main() -> int:
+    if "--self-test" in sys.argv:
+        return self_test()
+    declared = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
+                for path in DECLARED_IN}
+    readers = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
+               for path in READERS_IN}
+    unread = analyse(declared, readers)
 
     if unread:
         print("\n".join(sorted(unread)))
@@ -158,7 +261,10 @@ def main() -> int:
             "or add it to ALLOWED with the reason it is carried."
         )
         return 1
-    print("consulted audit: every declared field has a reader")
+    print(
+        "consulted audit: no declared field name is entirely unprojected "
+        "(a lexical check; see the module docstring for what it does not cover)"
+    )
     return 0
 
 
