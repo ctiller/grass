@@ -8,15 +8,19 @@
 name = "grass"
 defaultTargets = ["Grass"]
 
+# `warningAsError` is the build gate, not a style preference. Without it a
+# declaration using `sorry` is a warning and `lake build` exits 0, which would
+# make a green build carry no information about docs/FOUNDATION.md section 3.
 [leanOptions]
 autoImplicit = false
 relaxedAutoImplicit = false
+warningAsError = true
 
-# The library currently has only its root module. The first commit that adds a
-# module under `Grass/` must change this to `globs = ["Grass.+"]`, which builds
-# the root and every submodule without an umbrella module importing them. An
-# umbrella that imported every leaf would violate the aggregate rules in
-# docs/OLEAN_SHARDING.md. The glob cannot be set before `Grass/` exists, because
-# Lake fails to resolve a glob over a missing directory in a fresh clone.
+# `Grass.+` builds the root module and every submodule, so a new file under
+# `Grass/` is checked without an umbrella module importing it. An umbrella that
+# imported every leaf would violate the aggregate rules in
+# docs/OLEAN_SHARDING.md.
+
 [[lean_lib]]
 name = "Grass"
+globs = ["Grass.+"]
