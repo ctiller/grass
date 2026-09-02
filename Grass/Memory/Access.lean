@@ -170,10 +170,13 @@ structure WellFormedIn (d : AccessDescriptor) (space : AddressSpace) : Prop wher
   spaceAgrees : d.provenance.space = d.space
   /-- The provenance path is nested, so it designates something. -/
   provenanceNested : d.provenance.Nested
-  /-- The accessed range lies inside what the provenance designates. An empty
-  path designates the whole root allocation, whose size is a state fact. -/
-  rangeInProvenance :
-    ∀ extent, d.provenance.extent? = some extent → extent.Contains d.range
+  /-- The accessed range lies inside what the provenance designates.
+
+  Unconditional, because `Provenance.extent` is total. It used to be stated over
+  an `Option` that was `none` for an empty path, which made it vacuous for every
+  descriptor rooted directly in an allocation — a sixteen-exabyte write was well
+  formed against the honest 64-bit CPU space. -/
+  rangeInProvenance : d.provenance.extent.Contains d.range
   /-- A numeric address satisfies the declared alignment. A symbolic address has
   no numeric value to align; SPIR-V alignment is a property of types, and a
   profile that needs it states it there rather than here. -/

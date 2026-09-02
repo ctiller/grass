@@ -18,21 +18,26 @@ from this one. The types here are named `AuditViolation` and
 the `@audit(.stdoutUnavailable)` annotations in the Spike 1 source, which
 classify an ordinary modelled failure, are visibly not violations of this kind.
 
-The append-only property is enforced structurally: the constructor and the record
-list are `private`, so outside this module the only way to obtain a ledger is
-`empty` or `append`. There is no erase, no filter, no mask, and no way to build a
-shorter ledger from a longer one — not by convention, but because
-`AuditViolationLedger.mk` and the `records` field do not exist to a consumer.
+## What "append-only" can and cannot mean
 
-That is worth stating plainly, because an earlier version of this module carried
-this same paragraph while leaving the constructor public, which made it false:
-`⟨dirty.records.drop 1⟩` laundered a ledger in one line, and `VerifiedProgram`'s
-emptiness proof would then have been a claim about a value any caller could
-manufacture.
+The constructor and the record list are `private`, so outside this module the
+only way to obtain a ledger is `empty` or `append`.
 
-`append_isPrefix` makes growth monotone, so a violation recorded at any point in
-an execution is present in every later ledger, which is what makes `IsEmpty` at
-the end a statement about the whole run.
+That is **not** the same as "no shorter ledger can be built", and an earlier
+version of this comment claimed it was. Since `records?` reads the list out and
+`append` folds it back in, anyone can construct
+`(l.records?.filter keep).foldl append empty` — a laundered ledger, provable
+equal to `empty` by `decide`. No private field prevents that, and no arrangement
+of this type could: any type with a readable projection and a constructor can be
+rebuilt.
+
+So the property `docs/MEMORY_MODEL.md` §8 demands — "they cannot be erased or
+masked" — is not a property of the type. It is a property of the *transition
+relation*: the ledger threaded through an execution must only ever grow.
+`Extends` states that, and M2's step relation owes a proof that every step
+preserves it. What laundering produces is a different value that never enters the
+execution; what would be a real violation is a step returning a ledger that does
+not extend its input, and that is what `Extends` is there to forbid.
 
 `recordCount` and `records?` are the read-only views diagnostics need. Reading a
 ledger is safe; the prohibition is on constructing one.
@@ -190,6 +195,37 @@ theorem isEmpty_of_isPrefix_of_isEmpty {earlier later : AuditViolationLedger}
   rw [isEmpty_iff_records?_nil] at h ⊢
   rw [h] at hs
   exact List.append_eq_nil_iff.mp hs |>.1
+
+/--
+`earlier.Extends` into `later` when `later` records everything `earlier` did, in
+order, and possibly more.
+
+This is the property M2's step relation must preserve, and the one that carries
+§8's meaning. It is stated here rather than left implicit because the type alone
+cannot enforce it; see the module comment.
+-/
+def Extends (later earlier : AuditViolationLedger) : Prop :=
+  earlier.records? <+: later.records?
+
+theorem Extends.refl (ledger : AuditViolationLedger) : ledger.Extends ledger :=
+  List.prefix_refl _
+
+theorem Extends.trans {a b c : AuditViolationLedger}
+    (h₁ : b.Extends a) (h₂ : c.Extends b) : c.Extends a :=
+  List.IsPrefix.trans h₁ h₂
+
+/-- Appending extends. This is the only ledger-to-ledger operation, so every
+transition built from it preserves `Extends` by construction. -/
+theorem extends_append (ledger : AuditViolationLedger) (violation : AuditViolation) :
+    (ledger.append violation).Extends ledger := append_isPrefix ledger violation
+
+/-- A step that extends a non-empty ledger cannot report emptiness. This is the
+form `VerifiedProgram` uses: emptiness at the end propagates backwards through
+every step that preserved `Extends`. -/
+theorem isEmpty_of_extends {later earlier : AuditViolationLedger}
+    (h : later.Extends earlier) (hempty : later.IsEmpty) : earlier.IsEmpty :=
+  isEmpty_of_isPrefix_of_isEmpty h hempty
+
 
 end AuditViolationLedger
 

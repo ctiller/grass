@@ -80,6 +80,20 @@ structure OrderedPartialCommutativeResourceLaws {Value : Type u}
   /-- Combining is monotone in each argument, where the results are defined. -/
   combineMonotone : ∀ a b c,
     le a b → compatible a c → compatible b c → le (combine a c) (combine b c)
+  /-- Combining is cancellative: what a composite holds determines each part.
+
+  This is `docs/PROCESS.md`'s `cancellation : LeftCancellationLaw`, and without
+  it the laws above admit `max`. A `max` algebra satisfies commutativity,
+  associativity, identity, monotonicity, and the order laws, and reports that one
+  socket combined with one socket is one socket. That is the double count
+  `docs/FOUNDATION.md` law 20 forbids, running in the direction that
+  *under*-counts. -/
+  combineCancel : ∀ a b c,
+    compatible a c → compatible b c → combine a c = combine b c → a = b
+  /-- A composite strictly exceeds a part unless the other part is empty. Stated
+  as the contrapositive of absorption, this is what makes an additive reading
+  mandatory rather than merely permitted. -/
+  combineEqLeft : ∀ a b, compatible a b → combine a b = a → b = zero
 
 /--
 A resource algebra on `R`.
@@ -152,6 +166,50 @@ class HasResourceLimit (R : Type u) [ResourceModel R] (axis : ResourceAxisName)
   /-- How holdings on this axis compose. -/
   lifecycle : R → ResourceLifecyclePolicy axis
 
+/--
+One axis's limit, as a structure rather than a class instance.
+
+**Why this exists.** `docs/SEMANTICS.md` sketches a multi-axis specification as
+`class WebServerResources (R) extends HasResourceLimit R .residentBytes,
+HasResourceLimit R .connections, ...`. That does not elaborate: Lean deduplicates
+parent structures by head constant, not by full type, so every axis after the
+first is silently dropped with a `Duplicate parent structure` warning — and under
+this repository's `warningAsError` it is a hard error. The sketch in the corpus
+is not implementable as written.
+
+A multi-axis specification therefore holds `ResourceLimit R axis` values as
+*fields*:
+
+```lean
+class WebServerResources (R : Type) [ResourceModel R] where
+  residentBytes : ResourceLimit R .residentBytes
+  connections : ResourceLimit R .connections
+  fixedAfterReady : R → Prop
+```
+
+`HasResourceLimit` remains for the single-axis case, where instance resolution is
+the convenient thing.
+-/
+structure ResourceLimit (R : Type u) (axis : ResourceAxisName) where
+  /-- The type of quantities on this axis. -/
+  Value : Type
+  /-- Which quantities may lawfully coexist. -/
+  compatible : Value → Value → Prop
+  /-- How two compatible quantities compose. -/
+  combine : Value → Value → Value
+  /-- The quantity holding nothing. -/
+  zero : Value
+  /-- The order in which the bound is stated. -/
+  le : Value → Value → Prop
+  /-- The axis's laws. -/
+  laws : OrderedPartialCommutativeResourceLaws compatible combine zero le
+  /-- The bound this resource value exports. -/
+  limit : R → Value
+  /-- What the product does when the bound is reached. -/
+  exhaustion : R → ResourceExhaustionPolicy axis
+  /-- How holdings on this axis compose. -/
+  lifecycle : R → ResourceLifecyclePolicy axis
+
 /-!
 ## The counting algebra
 
@@ -183,6 +241,8 @@ theorem laws : OrderedPartialCommutativeResourceLaws compatible combine 0 (· �
   zeroLe := fun a => Nat.zero_le a
   leCombine := fun a b _ => Nat.le_add_right a b
   combineMonotone := fun _ _ c hab _ _ => Nat.add_le_add_right hab c
+  combineCancel := fun _ _ _ _ _ h => Nat.add_right_cancel h
+  combineEqLeft := fun a b _ h => by simp only [combine] at h; omega
 
 /-- The counting algebra as a `ResourceAlgebra`, usable as the model for a
 resource parameter that is a single count. -/
@@ -229,6 +289,8 @@ theorem laws : OrderedPartialCommutativeResourceLaws compatible combine 0 (· �
   zeroLe := fun a => Nat.zero_le a
   leCombine := fun a b _ => Nat.le_add_right a b
   combineMonotone := fun _ _ c hab _ _ => Nat.add_le_add_right hab c
+  combineCancel := fun _ _ _ _ _ h => Nat.add_right_cancel h
+  combineEqLeft := fun a b _ h => by simp only [combine] at h; omega
 
 /-- Two held exclusive resources are incompatible. This is the fact that makes
 `h2.credit.double` fail rather than silently double count. -/

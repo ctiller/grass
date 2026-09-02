@@ -305,8 +305,31 @@ theorem id_of_find? {table : AddressSpaceTable} {id : AddressSpaceId} {space : A
   have := List.find?_some h
   simpa using this
 
+/--
+`table.WellFormed` holds when every declared space is realizable and no identity
+is declared twice.
+
+Without it the law-8 chain terminated in an unchecked record: a table could list
+`cpu.virtual` twice, once honestly and once with `repr := .symbolic`, and
+`find?` returns the first match. Resolving a descriptor's space through the
+profile is only a guarantee if the profile's own table is checked.
+-/
+def WellFormed (table : AddressSpaceTable) : Prop :=
+  (∀ space ∈ table.spaces, space.WellFormed) ∧
+  (table.spaces.map AddressSpace.id).Nodup
+
+@[simp] theorem wellFormed_empty : empty.WellFormed := by
+  simp [WellFormed, empty]
+
 /-- The ordinary Win64 table: one 64-bit write-back CPU space. -/
 def cpuOnly : AddressSpaceTable := ⟨[AddressSpace.cpuVirtual64]⟩
+
+@[simp] theorem wellFormed_cpuOnly : cpuOnly.WellFormed := by
+  refine ⟨?_, ?_⟩
+  · intro space hs
+    simp only [cpuOnly, List.mem_singleton] at hs
+    exact hs ▸ AddressSpace.wellFormed_cpuVirtual64
+  · simp [cpuOnly]
 
 @[simp] theorem find?_cpuOnly : cpuOnly.find? .cpuVirtual = some AddressSpace.cpuVirtual64 :=
   rfl

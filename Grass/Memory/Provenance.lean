@@ -145,6 +145,13 @@ structure Provenance where
   epoch : EpochId
   /-- Which allocator or mapping produced the root allocation. -/
   source : AllocationSourceId
+  /-- The declared byte extent of the root allocation. An empty path designates
+  this. It is a field rather than a lookup because without it `extent` would be
+  partial, and a descriptor with an empty path would satisfy every range
+  condition vacuously — a sixteen-exabyte access was well formed before this
+  existed. M2 checks it against the allocation table; the point here is that no
+  descriptor escapes having *some* declared bound. -/
+  rootExtent : ByteRange
   /-- The hierarchical path from the root allocation to what this designates. -/
   path : List ProvenanceStep
 deriving DecidableEq, Repr
@@ -154,10 +161,18 @@ namespace Provenance
 /--
 The byte extent this provenance designates, relative to its root allocation.
 
-`none` means the whole root allocation: an empty path designates the allocation
-itself, whose size is held by the allocation table rather than by the provenance.
+Total. An empty path designates the whole root allocation, whose extent the
+provenance carries; a non-empty one designates its last step. Nothing here can be
+`none`, which is what makes every range condition stated against it actually
+bite.
 -/
-def extent? (p : Provenance) : Option ByteRange := p.path.getLast?.map (·.extent)
+def extent (p : Provenance) : ByteRange :=
+  match p.path.getLast? with
+  | some step => step.extent
+  | Option.none => p.rootExtent
+
+@[simp] theorem extent_of_path_nil {p : Provenance} (h : p.path = []) :
+    p.extent = p.rootExtent := by simp [extent, h]
 
 /-- `NestedPath steps` holds when each step lies within the step before it. -/
 def NestedPath : List ProvenanceStep → Prop
@@ -167,24 +182,57 @@ def NestedPath : List ProvenanceStep → Prop
       parent.extent.Contains child.extent ∧ NestedPath (child :: rest)
 
 /--
-`p.Nested` holds when each step of the path lies within its parent.
+`p.Nested` holds when the path starts inside the root allocation and each step
+lies within its parent.
 
 An unnested path is not a provenance of anything, so this is a well-formedness
 condition consumers must establish, not a fact about arbitrary `Provenance`
 values. Descending therefore requires a containment proof; it is not free.
+
+The first conjunct is what stops a path escaping its own allocation: without it a
+step could name an extent the root does not contain, and `extent` would report
+it.
 -/
-def Nested (p : Provenance) : Prop := NestedPath p.path
+def Nested (p : Provenance) : Prop :=
+  (∀ step, p.path.head? = some step → p.rootExtent.Contains step.extent) ∧
+  NestedPath p.path
 
-@[simp] theorem nestedPath_nil : NestedPath [] := trivial
+/-- An empty path is nested, and designates the whole root allocation. -/
+@[simp] theorem nested_of_path_nil {p : Provenance} (h : p.path = []) : p.Nested := by
+  refine ⟨?_, ?_⟩
+  · intro step hs; rw [h] at hs; simp at hs
+  · show NestedPath p.path
+    rw [h]
+    trivial
 
-@[simp] theorem nestedPath_singleton (step : ProvenanceStep) : NestedPath [step] := trivial
+/-- Along a nested path, the first step contains the last. -/
+private theorem nestedPath_first_contains_last :
+    ∀ (steps : List ProvenanceStep) (first last : ProvenanceStep),
+      steps.head? = some first → steps.getLast? = some last →
+      NestedPath steps → first.extent.Contains last.extent
+  | [], _, _, hh, _, _ => by simp at hh
+  | [a], first, last, hh, hl, _ => by
+      simp at hh hl
+      exact hh ▸ hl ▸ ByteRange.Contains.refl _
+  | a :: b :: rest, first, last, hh, hl, hn => by
+      simp at hh
+      subst hh
+      refine ByteRange.Contains.trans hn.1 ?_
+      exact nestedPath_first_contains_last (b :: rest) b last (by simp) (by simpa using hl) hn.2
 
-theorem NestedPath.tail {parent child : ProvenanceStep} {rest : List ProvenanceStep}
-    (h : NestedPath (parent :: child :: rest)) : NestedPath (child :: rest) := h.2
-
-theorem NestedPath.head {parent child : ProvenanceStep} {rest : List ProvenanceStep}
-    (h : NestedPath (parent :: child :: rest)) :
-    parent.extent.Contains child.extent := h.1
+/-- A nested provenance never designates anything outside its root allocation. -/
+theorem extent_within_root {p : Provenance} (h : p.Nested) :
+    p.rootExtent.Contains p.extent := by
+  unfold extent
+  cases hlast : p.path.getLast? with
+  | none => exact ByteRange.Contains.refl _
+  | some last =>
+    obtain ⟨first, hfirst⟩ : ∃ first, p.path.head? = some first := by
+      match hp : p.path with
+      | [] => rw [hp] at hlast; simp at hlast
+      | a :: _ => exact ⟨a, by simp⟩
+    exact ByteRange.Contains.trans (h.1 first hfirst)
+      (nestedPath_first_contains_last p.path first last hfirst hlast h.2)
 
 /-- Two provenances designate the same storage generation. -/
 def SameStorage (p q : Provenance) : Prop :=
@@ -242,9 +290,9 @@ def descend (p : Provenance) (step : ProvenanceStep) : Provenance :=
 theorem sameStorage_descend (p : Provenance) (step : ProvenanceStep) :
     p.SameStorage (p.descend step) := ⟨rfl, rfl, rfl⟩
 
-@[simp] theorem extent?_descend (p : Provenance) (step : ProvenanceStep) :
-    (p.descend step).extent? = some step.extent := by
-  simp [extent?, descend]
+@[simp] theorem extent_descend (p : Provenance) (step : ProvenanceStep) :
+    (p.descend step).extent = step.extent := by
+  simp [extent, descend]
 
 end Provenance
 

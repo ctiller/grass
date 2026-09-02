@@ -260,21 +260,61 @@ every case the docstring already asserted the property. Prose describing a
 mechanism is not the mechanism, and the reviews found the gap by executing rather
 than reading.
 
-Known gaps that remain open, and must be closed or accepted before the freeze:
+A third round, again with fresh context, confirmed the round-two fixes that were
+checkable by execution and refuted two of them, plus found holes neither earlier
+round reached. Closed since:
 
-- **`Address.symbolic` is an atom, not an expression.** §1 asks for an "address
-  expression". A SPIR-V `OpAccessChain` derives a pointer from a base and a
-  runtime index, and a bare `Uid` records none of that — nothing relates a
-  symbolic address to its provenance. This is enough for Spike 5 to *name* a
-  pointer and not enough to *derive* one.
-- **`AccessDescriptor` carries no values.** `lock cmpxchg16b` cannot declare its
-  compare and swap operands, and nothing relates a descriptor to the events it
-  licenses. `MemoryEvent` has the value fields; the descriptor does not.
-- **`WellFormedIn` is not decidable**, unlike every other predicate in the layer,
-  because the `Type 1` universe bump from `ObligationPayload` propagates through
-  the descriptor. An ISA author cannot check a declaration by computation.
-- **`ObligationPayload` is write-only.** A protocol can store evidence and has no
-  supported route to retrieve it.
+- **An empty provenance path made every range condition vacuous.** A sixteen-
+  exabyte write was well formed against the honest 64-bit CPU space, because
+  `Provenance.extent?` was `none` for a path-free provenance and the condition was
+  stated over the `Option`. Provenance now carries a `rootExtent`, `extent` is
+  total, and the condition is unconditional.
+- **The corpus's own `WebServerResources` sketch does not elaborate.**
+  [SEMANTICS.md](SEMANTICS.md) writes it as
+  `extends HasResourceLimit R .residentBytes, HasResourceLimit R .connections, …`;
+  Lean deduplicates parent structures by head constant, so every axis after the
+  first is silently dropped — and under `warningAsError` it is a hard error. A
+  multi-axis specification now holds `ResourceLimit R axis` values as fields. This
+  is a finding about the specification, not only about this implementation, and
+  the Semantics owner needs it.
+- **The resource laws admitted `max`.** Commutativity, associativity, identity,
+  monotonicity and the order laws are all satisfied by an algebra reporting that
+  one socket combined with one socket is one socket — a double count running in
+  the under-counting direction. `combineCancel` and `combineEqLeft` rule it out,
+  and `max` now fails them by construction.
+- **The audit ledger's append-only claim was still false**, and cannot be made
+  true of the type: `records?` reads the list out and `append` folds it back in,
+  so a laundered ledger is three lines. The property belongs to the transition
+  relation, not the type. `Extends` states it and M2's step relation owes the
+  proof; the docstring now says so instead of claiming a guarantee it cannot give.
+
+Gaps that remain open, and must be closed or accepted before the freeze:
+
+- **`WellFormedIn d space` takes the space as a free parameter**, so it can be
+  applied to a fabricated space. The real seal is at `Substep.WellFormedIn` and
+  `AdmittedVocabulary.Admits`, which resolve through a table — but
+  `AdmittedVocabulary` and `MemoryProfile` still have no well-formedness of their
+  own, so a vocabulary can declare one id twice with different representations.
+  `AddressSpaceTable.WellFormed` now exists; requiring it is not yet wired.
+- **The facet seam is unwired.** `OperationFacets.Closes` and
+  `MemoryProfile.requiredFacets` have no consumer, `MemoryProfile` is not
+  parameterized by the operation type, and an ISA author cannot register anything
+  with a profile today.
+- **`LedgerEffect.WellFormed` is enforced nowhere**, so the split/join laws have
+  no consumer.
+- **Two registries are dead and five open-name axes have none.**
+  `obligationKinds` and `auditViolationClasses` are never consulted, and the
+  `profileSpecific` cases of ordering, scope, restartability and fault visibility,
+  plus `ObservationLabel`, have no registry at all.
+- **`Conflicts` requires `SameStorage`**, which excludes aliased mappings — a
+  host-visible device buffer and a file view over the same bytes are declared
+  non-conflicting.
+- **A faulted read-modify-write cannot record the read it performed**, because
+  read and write share one committed count.
+- **`Address.symbolic` is an atom, not an expression**; **the descriptor carries
+  no values**, so `lock cmpxchg16b` cannot declare its operands; **`WellFormedIn`
+  is not decidable**; **`ObligationPayload` is write-only**; and **the descriptor
+  carries no `ContextKind`** though §7.1 requires identity *and* kind.
 
 ## 4. M2 — Executable single-thread memory semantics
 

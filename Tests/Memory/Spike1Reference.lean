@@ -67,7 +67,7 @@ descend from the first; sections and symbols from the second. -/
 /-- Provenance of the whole stack reservation. -/
 def stackProvenance : Provenance :=
   { space := .cpuVirtual, root := stackAlloc, epoch := epoch₀
-    source := .stack, path := [] }
+    source := .stack, rootExtent := ⟨0, 4096⟩, path := [] }
 
 /-- The `HelloWorld` call frame, 64 bytes of the reservation. -/
 def frameStep : ProvenanceStep :=
@@ -93,7 +93,7 @@ def savedSlotProvenance : Provenance :=
 /-- Provenance of the loaded image. -/
 def imageProvenance : Provenance :=
   { space := .cpuVirtual, root := imageAlloc, epoch := epoch₀
-    source := .imageMapping, path := [] }
+    source := .imageMapping, rootExtent := ⟨0, 8192⟩, path := [] }
 
 /-- The `.rdata` section. -/
 def rdataStep : ProvenanceStep :=
@@ -321,7 +321,7 @@ theorem access_wellFormed {provenance : Provenance} {range : ByteRange}
     (space : provenance.space = AddressSpaceId.cpuVirtual)
     (permission : perm.Permits intent)
     (nested : provenance.Nested)
-    (extent : ∀ e, provenance.extent? = some e → e.Contains range)
+    (extent : provenance.extent.Contains range)
     (notInert : ¬ intent.IsInert)
     (bound : range.WithinBound (2 ^ 64))
     (aligned : IsAligned addr.toNat align)
@@ -357,8 +357,7 @@ theorem pushR12_wellFormed : pushR12.WellFormedIn spaceTable := by
   refine SubstepSequence.wellFormedIn_single rfl
     (access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
   all_goals first
-    | (intro e h; cases h; decide)
-    | exact ⟨by decide, trivial⟩
+    | exact ⟨by decide, by decide, trivial⟩
     | decide
 
 theorem movTransferredZero_wellFormed :
@@ -367,8 +366,7 @@ theorem movTransferredZero_wellFormed :
   refine SubstepSequence.wellFormedIn_single rfl
     (access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
   all_goals first
-    | (intro e h; cases h; decide)
-    | exact ⟨by decide, trivial⟩
+    | exact ⟨by decide, by decide, trivial⟩
     | decide
 
 theorem movEaxTransferred_wellFormed :
@@ -377,8 +375,7 @@ theorem movEaxTransferred_wellFormed :
   refine SubstepSequence.wellFormedIn_single rfl
     (access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
   all_goals first
-    | (intro e h; cases h; decide)
-    | exact ⟨by decide, trivial⟩
+    | exact ⟨by decide, by decide, trivial⟩
     | decide
 
 theorem callImportWriteFile_wellFormed :
@@ -389,14 +386,12 @@ theorem callImportWriteFile_wellFormed :
   · refine ⟨AddressSpace.cpuVirtual64, rfl, ?_⟩
     refine access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
     all_goals first
-      | (intro e h; cases h; decide)
-      | exact ⟨by decide, trivial⟩
+      | exact ⟨by decide, by decide, trivial⟩
       | decide
   · refine ⟨AddressSpace.cpuVirtual64, rfl, ?_⟩
     refine access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
     all_goals first
-      | (intro e h; cases h; decide)
-      | exact ⟨by decide, trivial⟩
+      | exact ⟨by decide, by decide, trivial⟩
       | decide
 
 theorem movEcxImm_wellFormed : movEcxImm.WellFormedIn spaceTable := by
@@ -574,7 +569,7 @@ theorem lea_performs_no_access : leaPayload.substeps = [] := rfl
 /-- The pointer `lea` produces carries `payload`'s provenance, not the image
 root's. Descending is not free: it required the nesting the provenance records. -/
 theorem payloadPointer_provenance :
-    payloadPointer.provenance.extent? = some ⟨0, 14⟩ := rfl
+    payloadPointer.provenance.extent = ⟨0, 14⟩ := rfl
 
 /-- A `call` through the import table is two accesses, not one. -/
 theorem call_has_two_substeps : callImportWriteFile.substeps.length = 2 := rfl
