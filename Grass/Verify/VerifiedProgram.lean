@@ -70,6 +70,16 @@ theorem execution_nonempty (verified : VerifiedProgram spec)
   verified.loadedBehavior_exact ▸
     verified.artifact.adequate.execution input admitted
 
+/-- Every reachable finite frontier of the loaded behavior can either reach a
+terminal state or continue as an infinite execution. -/
+theorem execution_completes (verified : VerifiedProgram spec)
+    (execution : (verified.artifact.format.loadedBehavior
+      (emitProgram verified)).system.ExecutionPrefix) :
+    Nonempty ((verified.artifact.format.loadedBehavior
+      (emitProgram verified)).system.Completion execution.state execution.graph) := by
+  exact (ProgramBehavior.Adequate.cast verified.loadedBehavior_exact
+    verified.artifact.adequate).completion execution
+
 end VerifiedProgram
 
 /-- The canonical parser accepts the exact bytes returned by emission. -/

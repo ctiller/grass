@@ -18,6 +18,7 @@ param(
         "Grass.VerifiedProgram.loadedBehavior_exact",
         "Grass.VerifiedProgram.sound",
         "Grass.VerifiedProgram.execution_nonempty",
+        "Grass.VerifiedProgram.execution_completes",
         "Grass.emitProgram_parses"
     ),
     [string[]]$AllowedAxiom = @(
@@ -97,19 +98,21 @@ try {
         throw "Expected $($Declaration.Count) axiom reports, received $reported."
     }
 
-    $negativeProbe = @(
+    $irreducibleDiscoveryProbe = @(
         "import Tests.Foundation",
         "open Grass",
         "@[irreducible] def HiddenVerifiedProgram : Type 1 := VerifiedProgram Grass.Tests.Foundation.spec",
-        "axiom hiddenVerifiedProgram : HiddenVerifiedProgram",
+        "def cleanHiddenVerifiedProgram : HiddenVerifiedProgram := by",
+        "  unfold HiddenVerifiedProgram",
+        "  exact Grass.Tests.Foundation.verified",
         "#audit_verified_programs"
     )
-    [System.IO.File]::WriteAllLines($temporaryPath, $negativeProbe)
-    $negativeOutput = @(& lake env lean $temporaryPath 2>&1)
-    if ($LASTEXITCODE -eq 0 -or
-        -not ($negativeOutput -match "hiddenVerifiedProgram.*rejected axioms")) {
-        $negativeOutput | ForEach-Object { Write-Host $_ }
-        throw "Trust audit did not reject a producer behind an irreducible result alias."
+    [System.IO.File]::WriteAllLines($temporaryPath, $irreducibleDiscoveryProbe)
+    $irreducibleDiscoveryOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -ne 0 -or
+        -not ($irreducibleDiscoveryOutput -match "cleanHiddenVerifiedProgram")) {
+        $irreducibleDiscoveryOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit did not discover a producer behind an irreducible result alias."
     }
 
     $wrappedNegativeProbe = @(

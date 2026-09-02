@@ -47,6 +47,13 @@ structure Adequate (behavior : ProgramBehavior spec) : Prop where
   completion : forall run : behavior.system.ExecutionPrefix,
     Nonempty (behavior.system.Completion run.state run.graph)
 
+/-- Transport adequacy along exact behavior equality. -/
+theorem Adequate.cast {behavior replacement : ProgramBehavior spec}
+    (exact : behavior = replacement) (adequate : replacement.Adequate) :
+    behavior.Adequate := by
+  cases exact
+  exact adequate
+
 end ProgramBehavior
 
 variable {spec : SpecProcess}
