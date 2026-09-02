@@ -411,35 +411,54 @@ structure ProcessGraph (registry : ProtocolRegistry)
   sharedAccess : ProcessKind -> SharedRegion -> LogicalAccess
   population : PopulationLaw ProcessKind
 
-structure ProcessTopology (registry : ProtocolRegistry)
+structure ProcessTopologyCore (registry : ProtocolRegistry)
     (boundary : DriverBoundary) extends ProcessGraph registry boundary where
   ChannelKind : Type
   endpoints : ChannelKind -> ProcessKind × ProcessKind
   spawn : SpawnAuthorityAndParenthood toProcessGraph
-  cancellation : CancellationAuthorityAndRaceLaw toProcessGraph
-  supervision : JoinDetachRestartAndDeathLaw toProcessGraph
 
-structure ProcessRef (topology : ProcessTopology registry boundary)
+structure ProcessTopology (registry : ProtocolRegistry)
+    (boundary : DriverBoundary) (requirements : FacetRequirements)
+    extends ProcessTopologyCore registry boundary where
+  facets : DemandedFacetFamily toProcessTopologyCore requirements
+  lifecycle : ExportsDemandedLifecycleTheorems facets
+
+structure ProcessRef (topology : ProcessTopologyCore registry boundary)
     (kind : topology.ProcessKind) where
   id : ProcessId kind
   generation : Generation
 
-structure ChannelId (topology : ProcessTopology registry boundary)
+structure ChannelId (topology : ProcessTopologyCore registry boundary)
     (edge : topology.ChannelKind) where
   sender : ProcessRef topology (topology.endpoints edge).1
   receiver : ProcessRef topology (topology.endpoints edge).2
   epoch : SessionEpoch
 
-structure MessageOccurrence (topology : ProcessTopology registry boundary)
+structure MessageOccurrence (topology : ProcessTopologyCore registry boundary)
     (edge : topology.ChannelKind) (channel : ChannelId topology edge)
     (Message : Type) (message : Message) where
   id : OccurrenceId channel message
 
-abbrev ChannelOccurrence (topology : ProcessTopology registry boundary)
+abbrev ChannelOccurrence (topology : ProcessTopologyCore registry boundary)
     (edge : topology.ChannelKind) (Message : Type) (message : Message) :=
   Sigma fun channel : ChannelId topology edge =>
     MessageOccurrence topology edge channel Message message
 ```
+
+The split between `ProcessTopologyCore` and `ProcessTopology` is
+`docs/DECISIONS.md` decision 122, ruling `agent-bus` issue `c-process:10`.
+Cancellation and supervision are *optional imported facets*, not fields every
+topology carries, so a process with no lifecycle promise pays no ceremony for
+one. `ProcessTopologyCore` is the graph, channels, and spawn authority — what a
+`ChannelContract` actually consumes — and `ProcessTopology requirements`
+aggregates exactly the facets the selected specification demands and exports the
+corresponding lifecycle theorems.
+
+The weaker object may not carry the unqualified name. A consumer holding a value
+called `ProcessTopology` is entitled to assume the lifecycle authority its type
+names, and the earlier declaration — one structure with `cancellation` and
+`supervision` fields, referenced everywhere below — gave that name to an object
+that had them by construction rather than by demand.
 
 `ProcessGraph` exists separately so topology and channel contracts can quantify over the
 endpoint protocols, spawn/population laws, shared-state interference, and
@@ -482,7 +501,7 @@ fact, and obligation transferred with it until receive or an explicitly modeled
 cancellation/disposition transition consumes it.
 
 ```lean
-structure ChannelContract (topology : ProcessTopology registry boundary)
+structure ChannelContract (topology : ProcessTopologyCore registry boundary)
     (edge : topology.ChannelKind) where
   Message : Type
   senderOutput : SenderDemandEmbedding topology (topology.endpoints edge).1 Message
@@ -514,10 +533,10 @@ structure ChannelContract (topology : ProcessTopology registry boundary)
   frame : UnmentionedProcessesAndRegionsPreserved
 
 structure ProcessPlan (registry : ProtocolRegistry) (boundary : DriverBoundary)
-    extends ProcessTopology registry boundary where
+    extends ProcessTopologyCore registry boundary where
   channel : (edge : ChannelKind) ->
-    ChannelContract toProcessTopology edge
-  boundaryProjection : RootLocalDemandProjection toProcessTopology boundary
+    ChannelContract toProcessTopologyCore edge
+  boundaryProjection : RootLocalDemandProjection toProcessTopologyCore boundary
 ```
 
 The definitions above make each occurrence nominally indexed by the exact
@@ -525,7 +544,7 @@ channel edge, sender and receiver incarnations, session epoch, message, and
 pre-send world. The logical network then has this dependent shape:
 
 ```lean
-structure ProcessInstance (topology : ProcessTopology registry boundary) where
+structure ProcessInstance (topology : ProcessTopologyCore registry boundary) where
   kind : topology.ProcessKind
   ref : ProcessRef topology kind
   parent : Option (Sigma fun parentKind => ProcessRef topology parentKind)
@@ -536,7 +555,7 @@ structure ProcessInstance (topology : ProcessTopology registry boundary) where
 structure LogicalProcessNetwork
     (plan : ProcessPlan registry boundary) where
   instances : (kind : plan.ProcessKind) ->
-    ProcessId kind -> Option (ProcessInstance plan.toProcessTopology)
+    ProcessId kind -> Option (ProcessInstance plan.toProcessTopologyCore)
   shared : (region : plan.SharedRegion) -> plan.SharedState region
   inFlight : ChannelEscrowLedger plan
   sessions : ChannelSessionLedger plan
@@ -959,14 +978,14 @@ structure ChildRequest (registry : ProtocolRegistry) where
 structure LocalDemandOccurrence
     (plan : ProcessPlan registry boundary)
     (parentKind : plan.ProcessKind)
-    (parent : ProcessRef plan.toProcessTopology parentKind)
+    (parent : ProcessRef plan.toProcessTopologyCore parentKind)
     (demand : (registry.protocol (plan.protocolKey parentKind)).Demand) where
   id : ParentLocalDemandId parent demand
 
 structure ChildDemandBinding
     (plan : ProcessPlan registry boundary)
     (parentKind : plan.ProcessKind)
-    (parent : ProcessRef plan.toProcessTopology parentKind)
+    (parent : ProcessRef plan.toProcessTopologyCore parentKind)
     (demand : (registry.protocol (plan.protocolKey parentKind)).Demand)
     (occurrence : LocalDemandOccurrence plan parentKind parent demand)
     (request : ChildRequest registry) where
@@ -984,13 +1003,13 @@ structure ChildDemandBinding
 structure ChildOccurrence (plan : ProcessPlan registry boundary)
     (request : ChildRequest registry) where
   parentKind : plan.ProcessKind
-  parent : ProcessRef plan.toProcessTopology parentKind
+  parent : ProcessRef plan.toProcessTopologyCore parentKind
   parentDemand : (registry.protocol (plan.protocolKey parentKind)).Demand
   occurrence : LocalDemandOccurrence plan parentKind parent parentDemand
   binding : ChildDemandBinding plan parentKind parent parentDemand occurrence request
   kind : plan.ProcessKind
   protocol : plan.protocolKey kind = request.key
-  ref : ProcessRef plan.toProcessTopology kind
+  ref : ProcessRef plan.toProcessTopologyCore kind
   live : LiveChildAt plan ref parent occurrence
 
 inductive ChildLifecycleEvent (occurrence : ChildOccurrence plan request)
