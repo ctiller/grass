@@ -33,11 +33,24 @@ boundary as exported theorems rather than as a representation consumers unfold.
 Compaction is owed, and is recorded as owed in
 `docs/MEMORY_IMPLEMENTATION_PLAN.md`.
 
-That is a claim about the *exported* lemmas, and it was not true when it was
-first written: `cellAt?_write` and three `Run` lemmas were public and stated over
-the representation, so a compacting store could not have satisfied them. Review
-found it. They are private now, which is what makes the sentence above hold by
-construction rather than by intention.
+That is a claim about the exported *theorems*, and it needs both halves of that
+qualification. It was not true of the theorems when first written: `cellAt?_write`
+and three `Run` lemmas were public and stated over the representation, so a
+compacting store could not have satisfied them. They are private now.
+
+It is still not true of the derived `DecidableEq` and `Repr` instances, and
+review demonstrated that with a machine-checked pair: `empty.write 0 [7] true` and
+`(empty.write 0 [7] true).write 0 [7] true` agree at every offset and are provably
+distinct, using only exported names. `Repr` prints the runs. So structural
+equality on `ByteStore` observes the journal, and a compacting store would be a
+drop-in for every theorem here and *not* for `=`.
+
+That is a real limit and it is stated rather than argued away. The instances exist
+because `AllocationRecord` and `MemoryState` derive `DecidableEq`, which is what
+lets fixtures close concrete goals by `decide`. Nothing in the memory layer's
+reasoning depends on `ByteStore` equality meaning agreement — the framing and
+commutation laws are all stated over `AgreesOn` or `cellAt?` precisely because it
+does not.
 
 The exported lemmas are stated over `cellAt?` rather than `byteAt?`, and that
 matters: framing over values alone would let a non-initializing write outside a

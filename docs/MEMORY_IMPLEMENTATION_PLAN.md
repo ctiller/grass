@@ -336,7 +336,7 @@ instead of a theorem, because it is the stronger form.
 |---|---|
 | step extends the violation ledger | `Op.step_extends_violations` |
 | step emits only well-formed events | `Op.step_events_wellFormed`, and `ValidMemoryEvent` makes a malformed trace unrepresentable |
-| denial prevents undeclared later effects | `Op.runAccesses_stops_at_refusal` |
+| denial prevents undeclared later effects | `Op.runAccesses_stops_at_refusal` for the access list, `Op.runStep_stops_at_refusal` for the faulting branch. The second was missing and the branch was wrong: `runStep` performed the faulting substep's access whether or not a survivor had been refused, so a denial was followed by a committed write. Found by local adversarial review after the property had already been declared closed and merged; `Tests/Op/FakeIsa.lean`'s `denial_stops_the_operation_on_the_fault_path` is the regression. |
 | fault choices are structurally in range | `Op.FaultPlan` carries a `Fin`; the bad case is unrepresentable |
 | partial RMW retains its completed read | `Committed` counts reads and writes separately; `faulted_rmw_keeps_its_read` |
 | ledger mutation occurs iff the delta is applicable | `Op.obligations_unchanged_unless_committed`; `LedgerDelta.Applicable` requires a typed `ProtocolAuthority`, and `Op.LedgerEffectApplicable` checks each delta against the ledger the previous ones left |
@@ -500,7 +500,8 @@ store, so `RangeInitialized` cannot drift from what was written.
 `rangeInitialized_write_of_other_allocation`, `rangeInitialized_write_of_disjoint`,
 and `rangeInitialized_write` are the state-level framing set.
 
-`Op.Oracle.ofMemory` replaces `Oracle.zeroed`, and `Tests/Op/FakeIsa.lean` now
+`Op.Oracle.ofMemory` is what fixtures now use; `Oracle.zeroed` remains, unused,
+because a profile may still want a machine that reads zeros. It and `Tests/Op/FakeIsa.lean` now
 runs the whole M1 seam over it unchanged, which is the evidence that the store
 did not cost a redesign. It takes what a store writes *and* what an indeterminate
 read observes as parameters. The second is the one worth naming: bytes that are
@@ -517,7 +518,8 @@ It is not what `Grass/Op/Step.lean` calls — `performAccess` remains the
 transition's own path — but both write memory through `MemoryState.commit` and
 nothing else, so the framing results are results about the transition.
 `Op.performAccess_frames_untouched` and `Op.runAccesses_frames_untouched` state
-them for `step` directly. An earlier version of this section said `applyAccess`
+them for `performAccess` and `runAccesses`. **Not for `step`** — §4.2 records why
+that gap is real and why it is derivable rather than false. An earlier version of this section said `applyAccess`
 had been factored out of `performAccess`; it had been written alongside it, with
 two write paths and framing proved about one. Review found it and `commit` is the
 repair.
@@ -527,11 +529,14 @@ the framing half of "reads and writes to disjoint ranges commute and frame";
 `applyAccess_comm` is the commutation half — for two accesses within one
 allocation, and about the resulting state rather than about the results.
 
-Commutation is stated as `MemoryState.AgreesOn` — agreement at every offset — and
-not as state equality. That is forced rather than chosen: a journal records two
-writes in whichever order they arrived, so the two orders leave different `runs`
-and no proof could make those states equal. Everything downstream reads memory
-through `byteAt?`, which is what agrees.
+Commutation is stated as `MemoryState.AgreesOn` — agreement at every offset, in
+byte and in initialization — and not as state equality. That is forced rather than
+chosen: a journal records two writes in whichever order they arrived, so the two
+orders leave different write histories and no proof could make those states equal.
+`AgreesOn` compares cells rather than bytes because `denialOf` reads
+initialization: a values-only agreement would let two orders disagree about
+whether a later access is refused, which review demonstrated with a concrete pair
+before it was fixed.
 
 Commutation needed a second half that is easy to miss. Bytes agreeing is not
 enough if the *decision* can move: were a write elsewhere able to change whether
@@ -619,8 +624,9 @@ changes what a program sees and never what it leaves behind.
 
 ### 4.2 What M2 still owes
 
-Recorded rather than implied, and expanded after an adversarial review that found
-three of these stated as done.
+Recorded rather than implied, and expanded twice after adversarial review. The
+first round found three of these stated as done; the second found three more, and
+one outright defect that had already merged — see §3.11's denial row.
 
 - **Wiring `Addressing.lean` to `MemoryState`.** `AllocationRecord` has no base
   address, so `addressOf`, `FitsAllocation`, and `disjoint_ranges_do_not_alias`
@@ -641,6 +647,21 @@ three of these stated as done.
   `MemoryState.commit`. Nothing proves they agree on the recorded trace, so a
   straight-line argument over `runBlock` is an argument about memory and not about
   what a program's event log says.
+- **A `step`-level framing theorem.** `Op.runAccesses_frames_untouched` covers the
+  access list. `runStep`'s faulting branch runs it over `visibleEffects?`, which
+  *excludes* the faulting substep, and then performs that substep's access
+  separately — so the survivor-list framing says nothing about the byte that
+  access writes. `Op.performAccess_frames_untouched` covers it individually, so the
+  theorem is derivable rather than false. Until it exists, a consumer following the
+  prose to `runAccesses_frames_untouched` over the survivors would have an unsound
+  framing argument, which is how review found it.
+- **`ByteStore` structural equality observes the journal.** Every exported
+  *theorem* is representation-independent, but the derived `DecidableEq` is not:
+  two pointwise-identical stores built by different write sequences are provably
+  distinct. A compacting store is a drop-in for the theorems and not for `=`.
+  Nothing in the layer's reasoning depends on that equality — the framing and
+  commutation laws are over `AgreesOn` and `cellAt?` precisely because it does not
+  — but it is a limit rather than an oversight, and compaction will change it.
 
 - Compaction for the byte store, per §4.1.
 

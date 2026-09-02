@@ -912,6 +912,44 @@ theorem denial_stops_the_operation :
   cases hs
   exact ⟨by decide, by decide⟩
 
+/--
+**A denial stops the operation on the faulting path too.**
+
+`denial_stops_the_operation` covers the clean run. It did not cover the faulting
+run, and the faulting run was broken: `runStep` performed the faulting substep's
+access whether or not a survivor had been refused, so the denied first substep was
+followed by a committed second one. Local adversarial review built exactly this
+case and it went the other way.
+
+Reported at substep 1, the surviving prefix is substep 0, which is denied for a
+stale epoch. Nothing after it commits, and the store's bytes are untouched — the
+last conjunct is the one that failed before, because counting events alone would
+not have noticed a write that recorded no event.
+-/
+theorem denial_stops_the_operation_on_the_fault_path :
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.deniedThenStore) thread₀
+        .thread ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 8
+          else .none)).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 ∧
+      s.memory.byteAt? bufferAlloc 8 = some 0x00 := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- And no fault is recorded, because the faulting substep was never reached.
+`Op.runStep_records_no_fault_after_refusal` is the general form; recording one
+here would be inventing a fault for a substep that did not run. -/
+theorem a_denial_before_the_fault_records_no_fault :
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.deniedThenStore) thread₀
+        .thread ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 8
+          else .none)).state? = some s →
+      s.faults = [] := by
+  intro s hs
+  cases hs
+  decide
+
 /-! ## A reported fault cannot be discarded
 
 An out-of-range fault index used to mean "no fault at all": `visibleEffects?` took

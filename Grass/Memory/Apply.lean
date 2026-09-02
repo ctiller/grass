@@ -19,10 +19,19 @@ are equations over it rather than statements about a transition's branches.
 has its own `performAccess`, which does event minting and ledger work `applyAccess`
 knows nothing about, and it is `step` that a program runs through.
 
-What ties them is `MemoryState.commit`: both write memory through it and through
-nothing else. So the framing results here are results about the transition, and
+What ties them is `MemoryState.commit`: every access that commits, commits
+through it. So the framing results here are results about the transition, and
 `Op.performAccess_frames_untouched` and `Op.runAccesses_frames_untouched` are
-those results stated for `step` directly.
+those results stated for `performAccess` and `runAccesses` directly.
+
+**Not for `step`.** There is no `step`-level framing theorem, and an earlier
+version of this comment said there was. It matters: `runStep`'s faulting branch
+runs `runAccesses` over `visibleEffects?`, which *excludes* the faulting substep,
+and then performs that substep's access separately. So framing established over
+the survivor list says nothing about the byte the faulting access writes.
+`performAccess_frames_untouched` covers that access individually, so the
+`step`-level theorem is derivable; it is not derived.
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records it as owed.
 
 This is spelled out because an earlier version of this comment claimed
 `applyAccess` had been *factored out of* `performAccess` when it had been written
@@ -127,12 +136,19 @@ def observedBytes (state : MemoryState) (d : AccessDescriptor)
 /--
 Commit an access's written bytes to memory.
 
-**The single write path.** `Grass/Op/Step.lean`'s `performAccess` and
-`applyAccess` below both go through this, so the framing laws stated here are
-laws about the transition and not about a parallel implementation that happens to
-agree. An earlier arrangement had the two writing memory separately, which is the
-same two-sources-of-truth defect this branch removed from `AllocationRecord`, and
-review found it.
+**The single path by which an access commits.** `Grass/Op/Step.lean`'s
+`performAccess` and `applyAccess` below both go through this, so the framing laws
+stated here are laws about the transition and not about a parallel implementation
+that happens to agree. An earlier arrangement had the two writing memory
+separately, which is the same two-sources-of-truth defect this branch removed from
+`AllocationRecord`, and review found it.
+
+Not the single *write* primitive: that is `MemoryState.write`, which `commit`
+wraps and which `Grass/Memory/Shape.lean`'s `writeField` also calls, since a
+typed field store is not an access. An earlier version of this paragraph said
+"the single write path" flatly and review corrected it. What is true is narrower
+and is the thing the laws need: every `AccessDescriptor` that commits, commits
+here.
 
 `none` means the access wrote nothing, which is not the same as writing zero
 bytes: a read commits no write at all.
@@ -198,11 +214,12 @@ def applyAccess (state : MemoryState) (d : AccessDescriptor) (writeData : ByteSe
 These are the ones about memory alone; the ones about events, obligations, and
 the audit ledger are `Grass/Op/Step.lean`'s.
 
-Framing is stated over `byteAt?` rather than over states, deliberately. Two writes
-to disjoint ranges leave the byte store's `runs` in different orders, so the
+Framing is stated over cells rather than over states, deliberately. Two writes to
+disjoint ranges leave the byte store's write history in different orders, so the
 states are not equal and no amount of proving will make them equal. What is true
-— and what every downstream argument actually uses — is that they agree at every
-offset. `docs/OLEAN_SHARDING.md` §1 asks for facts to cross the boundary as
+is that they agree at every offset, in byte *and* in initialization — the second
+half matters because `denialOf` reads initialization, so a values-only agreement
+would not carry the refusal decision. `docs/OLEAN_SHARDING.md` §1 asks for facts to cross the boundary as
 exported theorems rather than as a representation consumers unfold, which is the
 same discipline seen from the other side.
 -/
@@ -359,9 +376,12 @@ commute and frame", commutation half. Two accesses to disjoint ranges of one
 allocation leave memory agreeing at every offset whichever order they ran in.
 
 Agreement rather than equality, and that is not a weakening to make a proof go
-through: the byte store is a journal, so the two orders leave `runs` in different
-orders and no proof could make those states equal. Every argument downstream
-reads memory through `byteAt?`, which is exactly what agrees.
+through: the byte store is a journal, so the two orders leave different write
+histories and no proof could make those states equal. `AgreesOn` compares *cells*,
+so it carries initialization as well as values — which matters, because `denialOf`
+reads `RangeInitialized`, and a byte-only agreement would leave two orders able to
+disagree about whether a later access is refused. An earlier version compared
+bytes only and review built that pair.
 
 Read the conclusion precisely: it is about the resulting *state*, not about the
 `AccessResult`s. Decision stability is a proof ingredient rather than part of what

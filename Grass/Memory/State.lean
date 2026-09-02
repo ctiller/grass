@@ -290,11 +290,33 @@ theorem rangeInitialized_write_of_disjoint (state : MemoryState) (id : AllocId)
     rw [FiniteMap.lookup_insert_self]
     exact ByteStore.initialized_write_of_disjoint record.bytes hd h
 
-/-- Two memory states agree when every allocation holds the same byte at every
-offset. This, and not structural equality, is what a framing law can say about a
-journal-backed store. -/
+/--
+Two memory states agree when every allocation holds the same *cell* — byte and
+initialization — at every offset. This, and not structural equality, is what a
+framing law can say about a journal-backed store.
+
+Over `cellAt?` rather than `byteAt?`, and that is the whole point. An earlier
+version compared bytes only, which made the commutation laws unable to carry the
+refusal decision across: `denialOf` reads `RangeInitialized`, so two states
+agreeing on every byte can still disagree about whether a later access is refused.
+Review built exactly that pair. It is the same mistake `ByteStore`'s module
+comment warns about, made one layer up.
+-/
 def AgreesOn (a b : MemoryState) : Prop :=
-  ∀ id offset, a.byteAt? id offset = b.byteAt? id offset
+  ∀ id offset, a.cellAt? id offset = b.cellAt? id offset
+
+/-- Agreeing states hold the same bytes. The `byteAt?` consequence, for callers
+that only need values. -/
+theorem AgreesOn.byteAt? {a b : MemoryState} (h : a.AgreesOn b) (id : AllocId)
+    (offset : Nat) : a.byteAt? id offset = b.byteAt? id offset := by
+  rw [byteAt?_eq_map_cellAt?, byteAt?_eq_map_cellAt?, h id offset]
+
+/-- Agreeing states agree on what is initialized, which is what lets a
+commutation argument carry the refusal decision. -/
+theorem AgreesOn.initializedAt {a b : MemoryState} (h : a.AgreesOn b) (id : AllocId)
+    (offset : Nat) : a.InitializedAt id offset ↔ b.InitializedAt id offset := by
+  unfold InitializedAt
+  rw [h id offset]
 
 theorem AgreesOn.refl (state : MemoryState) : state.AgreesOn state := fun _ _ => rfl
 
@@ -322,6 +344,16 @@ theorem lookup_write_self (state : MemoryState) {id : AllocId} (start : Nat)
   unfold write
   rw [h]
   exact FiniteMap.lookup_insert_self _ _ _
+
+/-- The cell a write leaves at an offset, in terms of the store's own law. -/
+theorem cellAt?_write_self (state : MemoryState) {id : AllocId} (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) {record : AllocationRecord}
+    (h : state.allocations.lookup id = some record) (offset : Nat) :
+    (state.write id start bytes initializes).cellAt? id offset =
+      (record.bytes.write start bytes initializes).cellAt? offset := by
+  unfold cellAt?
+  rw [lookup_write_self state start bytes initializes h]
+  rfl
 
 /-- The byte a write leaves at an offset, in terms of the store's own law. -/
 theorem byteAt?_write_self (state : MemoryState) {id : AllocId} (start : Nat)
@@ -434,9 +466,11 @@ theorem initializedAt_write_iff_of_not_covers (state : MemoryState) (id : AllocI
 **Writes to disjoint ranges commute.**
 
 Stated as `AgreesOn` rather than as state equality: the byte store is a journal,
-so the two orders leave different `runs`, and no proof will make those equal.
-Agreement at every offset is what a disjointness argument actually uses, and
-`ByteStore.cellAt?_write_comm` is where the content is.
+so the two orders leave different write histories, and no proof will make those
+equal. `AgreesOn` compares cells, so it carries initialization as well as values
+and a caller can conclude both `AgreesOn.byteAt?` and `AgreesOn.initializedAt`.
+`ByteStore.cellAt?_write_comm` is where the content is, and this wrapper no longer
+throws away half of what it proves.
 -/
 theorem write_comm (state : MemoryState) (id : AllocId) {a b : Nat}
     {bytesA bytesB : ByteSeq} {initA initB : Bool}
@@ -452,13 +486,12 @@ theorem write_comm (state : MemoryState) (id : AllocId) {a b : Nat}
         write_of_missing state b bytesB initB hfound,
         write_of_missing state a bytesA initA hfound]
     | some record =>
-      rw [byteAt?_write_self _ b bytesB initB
+      rw [cellAt?_write_self _ b bytesB initB
             (lookup_write_self state a bytesA initA hfound),
-        byteAt?_write_self _ a bytesA initA
+        cellAt?_write_self _ a bytesA initA
             (lookup_write_self state b bytesB initB hfound)]
-      unfold ByteStore.byteAt?
-      rw [ByteStore.cellAt?_write_comm record.bytes hd]
-  · unfold byteAt?
+      exact ByteStore.cellAt?_write_comm record.bytes hd offset
+  · unfold cellAt?
     rw [write_preserves_other_allocation _ hid, write_preserves_other_allocation _ hid,
       write_preserves_other_allocation _ hid, write_preserves_other_allocation _ hid]
 

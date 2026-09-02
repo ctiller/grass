@@ -159,14 +159,21 @@ contents. A profile supplies the data because a profile is what knows it.
 
 `indeterminate` is a parameter for the same reason and a stronger one. Bytes that
 are not initialized have no value the model can read off the store, and
-`AccessDescriptor.initialization` lets a profile permit reading them — an access
-demanding `.allBytesInitialized` never reaches this, because `denialOf` refuses
-it as `uninitializedRead` first. So this is reached only where a profile has
-already said an indeterminate read is admissible, and the profile then owes what
-such a read observes. Defaulting it to zero would be `docs/FOUNDATION.md` law 8's
-permissive fallback wearing a plausible number: a program reading uninitialized
-memory would observe a definite value the machine never promised, and every proof
-downstream would inherit that promise.
+`AccessDescriptor.initialization` lets a profile permit reading them, so the
+profile that admitted such a read owes what it observes. Defaulting it to zero
+would be `docs/FOUNDATION.md` law 8's permissive fallback wearing a plausible
+number: a program reading uninitialized memory would observe a definite value the
+machine never promised, and every proof downstream would inherit that promise.
+
+**Note what is not true here.** `runAccesses` builds `oracle.answer state d`
+before calling `performAccess`, so the oracle is consulted whether or not the
+access is refused. An earlier version of this comment said `denialOf` refuses an
+`.allBytesInitialized` access first; that is true of `Grass/Memory/Apply.lean`'s
+`applyAccess`, which does match on `denialOf` before reading, and false here.
+Review found it. What holds instead is that a refusal discards the answer:
+`refused_preserves_everything_but_the_ledger` says a refused access leaves memory,
+obligations, events, and the supply as they were and appends only a violation
+record, which carries no bytes.
 -/
 def Oracle.ofMemory
     (writeData : MachineState → AccessDescriptor → ByteSeq)
@@ -565,24 +572,6 @@ def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescri
                 obligations := applyLedgerEffect state.obligations d.ledgerEffect }
 
 /--
-Where an operation faulted, if it did.
-
-The stepper takes this rather than inventing it: which substep of a `rep movsb`
-faults is a fact about the machine at that moment, and the transition relation's
-job is to say what the state looks like afterwards, not to predict it.
--/
-structure FaultPoint where
-  /-- The index of the substep that did not complete. -/
-  index : Nat
-  /-- The fault it raised. -/
-  fault : FaultClassId
-  /-- How many bytes that substep committed before faulting, if it was an access.
-  A faulting access is not a no-op, and `docs/MEMORY_MODEL.md` §1 forbids assuming
-  it is. -/
-  committed : Nat
-deriving DecidableEq, Repr
-
-/--
 Perform the accesses that survive, in order, stopping at the first denial.
 
 **Stopping is the point.** An earlier version folded over every access
@@ -648,24 +637,38 @@ def runStep (policy : StepPolicy) (state : MachineState) (sequence : SubstepSequ
       match sequence.visibleEffects? index.val with
       | Option.none => state
       | some survivors =>
-          -- The fault is recorded before the branch on what kind of substep
-          -- faulted, so no branch can discard it. An earlier version took the
-          -- fault as an argument and dropped it wherever the faulting substep was
-          -- not an access -- which is exactly the compute substep a divide faults
-          -- on, so the one case the `compute` constructor exists for was the one
-          -- that lost its fault.
           let survived := runAccesses policy state survivors contextKind cause
-          let faulted :=
-            { survived with
-              faults := survived.faults ++
-                [{ fault := fault, context := context, cause := cause
-                   substep := index.val }] }
-          match sequence.substeps[index.val]? with
-          | some (.access d) =>
-              performAccess policy faulted d
-                (.faulted fault ((policy.oracle.answer faulted d).truncate committed))
-                contextKind cause
-          | _ => faulted
+          -- A denial among the survivors stops the operation, exactly as it does
+          -- in `runAccesses`. The faulting substep is never reached, so it
+          -- neither commits nor records its fault.
+          --
+          -- This branch used to omit the check and perform the faulting substep's
+          -- access unconditionally, which meant a refused earlier substep was
+          -- followed by a committed later write: the continue-after-denial
+          -- behaviour `runAccesses` exists to prevent, surviving on the branch
+          -- `runAccesses_stops_at_refusal` does not reach. Review found it with a
+          -- machine-checked counterexample. `runStep_stops_at_refusal` is the
+          -- theorem that now covers this branch.
+          if survived.violations.recordCount ≠ state.violations.recordCount then
+            survived
+          else
+            -- The fault is recorded before the branch on what kind of substep
+            -- faulted, so no branch can discard it. An earlier version took the
+            -- fault as an argument and dropped it wherever the faulting substep
+            -- was not an access -- which is exactly the compute substep a divide
+            -- faults on, so the one case the `compute` constructor exists for was
+            -- the one that lost its fault.
+            let faulted :=
+              { survived with
+                faults := survived.faults ++
+                  [{ fault := fault, context := context, cause := cause
+                     substep := index.val }] }
+            match sequence.substeps[index.val]? with
+            | some (.access d) =>
+                performAccess policy faulted d
+                  (.faulted fault ((policy.oracle.answer faulted d).truncate committed))
+                  contextKind cause
+            | _ => faulted
 
 /--
 Step one operation.
@@ -718,7 +721,7 @@ otherwise it is an intended invariant or an open obligation and says so. -/
 /--
 **A refused access changes nothing but the violation ledger.**
 
-Every refusal path, not one. `refusalOf` gathers them — the state's own denial,
+Every refusal path `refusalOf` gathers. `refusalOf` gathers those — the state's own denial,
 an inapplicable ledger effect, an alias conflict — so a new refusal reason cannot
 acquire an unproved transition. `docs/MEMORY_MODEL.md` §1: "Denial preserves the
 state immediately before the denied substep."
@@ -798,6 +801,91 @@ theorem runAccesses_stops_at_refusal (policy : StepPolicy) (state : MachineState
   simp [hrefused]
 
 /--
+**A denial stops the operation on the faulting path too.**
+
+`runAccesses_stops_at_refusal` covers the access list. It does not cover
+`runStep`'s faulting branch, which runs the survivors and then performs the
+faulting substep's own access — and that branch used to perform it whether or not
+a survivor had been refused. The result was continue-after-denial behaviour
+surviving in the one place no theorem reached: a refused substep followed by a
+committed write, with the denial duly recorded beside it. Local adversarial review
+found it with a machine-checked counterexample, on code that had already merged.
+
+`docs/FOUNDATION.md` law 8 is the rule it broke. `docs/MEMORY_MODEL.md` §1 lets a
+profile say which *completed* effects survive a fault; a denied substep did not
+complete, so nothing licenses what follows it.
+-/
+theorem runStep_stops_at_refusal (policy : StepPolicy) (state : MachineState)
+    (sequence : SubstepSequence) (context : ContextId) (contextKind : ContextKind)
+    (cause : EventCause) (index : Fin sequence.substeps.length) (fault : FaultClassId)
+    (committed : Nat) (survivors : List AccessDescriptor)
+    (hvisible : sequence.visibleEffects? index.val = some survivors)
+    (hrefused : (runAccesses policy state survivors contextKind cause).violations.recordCount
+      ≠ state.violations.recordCount) :
+    runStep policy state sequence context contextKind cause (.before index fault committed) =
+      runAccesses policy state survivors contextKind cause := by
+  show (match sequence.visibleEffects? index.val with
+    | Option.none => state
+    | some survivors =>
+        let survived := runAccesses policy state survivors contextKind cause
+        if survived.violations.recordCount ≠ state.violations.recordCount then survived
+        else
+          let faulted :=
+            { survived with
+              faults := survived.faults ++
+                [({ fault := fault, context := context, cause := cause
+                    substep := index.val } : RaisedFault)] }
+          match sequence.substeps[index.val]? with
+          | some (.access d) =>
+              performAccess policy faulted d
+                (.faulted fault ((policy.oracle.answer faulted d).truncate committed))
+                contextKind cause
+          | _ => faulted) = _
+  rw [hvisible]
+  dsimp only
+  rw [if_pos hrefused]
+
+/-- A denial on the faulting path records no fault, because the faulting substep
+was never reached. The complement of `runStep_records_the_fault`'s `hreached`. -/
+theorem runStep_records_no_fault_after_refusal (policy : StepPolicy) (state : MachineState)
+    (sequence : SubstepSequence) (context : ContextId) (contextKind : ContextKind)
+    (cause : EventCause) (index : Fin sequence.substeps.length) (fault : FaultClassId)
+    (committed : Nat) (survivors : List AccessDescriptor)
+    (hvisible : sequence.visibleEffects? index.val = some survivors)
+    (hrefused : (runAccesses policy state survivors contextKind cause).violations.recordCount
+      ≠ state.violations.recordCount) :
+    (runStep policy state sequence context contextKind cause
+      (.before index fault committed)).faults =
+      (runAccesses policy state survivors contextKind cause).faults := by
+  rw [runStep_stops_at_refusal policy state sequence context contextKind cause index fault
+    committed survivors hvisible hrefused]
+
+/--
+The refusal path `refusalOf` does not gather.
+
+An access naming an address space the profile never declared is refused by the
+space lookup, before `refusalOf` runs, so
+`refused_preserves_everything_but_the_ledger` excludes it by hypothesis. Review
+pointed out that its docstring claimed *every* refusal path while this one sat
+outside. `unknown_space_preserves_everything_but_the_ledger` is that path's proof,
+so the pair of them together do cover every refusal.
+
+`step` rejects an access the profile does not admit before reaching here, so the
+branch is not reachable through `step` today. It is proved anyway: `performAccess`
+is public, and unreachable-by-construction-elsewhere is not the same as proved
+harmless.
+-/
+theorem unknown_space_preserves_everything_but_the_ledger (policy : StepPolicy)
+    (state : MachineState) (d : AccessDescriptor) (outcome : AccessOutcome d)
+    (contextKind : ContextKind) (cause : EventCause)
+    (hspace : policy.profile.vocabulary.addressSpaces.find? d.space = Option.none) :
+    performAccess policy state d outcome contextKind cause =
+      { state with
+        violations := state.violations.append (violationOf d .wrongAddressSpace) } := by
+  unfold performAccess
+  rw [hspace]
+
+/--
 **A refused ledger mutation is recorded, not silent.**
 
 The companion to `obligations_unchanged_unless_committed`: an inapplicable delta
@@ -875,19 +963,31 @@ theorem runStep_extends_violations (policy : StepPolicy) (state : MachineState)
   · exact runAccesses_extends_violations _ _ _ _ _
   · split
     · exact AuditViolationLedger.Extends.refl _
-    · split
-      · exact AuditViolationLedger.Extends.trans
-          (runAccesses_extends_violations _ _ _ _ _)
-          (performAccess_extends_violations _ _ _ _ _ _)
+    · dsimp only
+      split
       · exact runAccesses_extends_violations _ _ _ _ _
+      · split
+        · exact AuditViolationLedger.Extends.trans
+            (runAccesses_extends_violations _ _ _ _ _)
+            (performAccess_extends_violations _ _ _ _ _ _)
+        · exact runAccesses_extends_violations _ _ _ _ _
 
 /-! ## The memory framing laws apply to this transition
 
 `Grass/Memory/Apply.lean` proves framing over `MemoryState.commit`. Because
-`performAccess` writes through `commit` and nothing else, those laws are laws
-about `step`. These theorems are the statement of that, and they exist because
-review found the earlier arrangement — two write paths, framing proved about one
-of them, and prose claiming it covered both. -/
+every committing access goes through `commit`, those laws are laws about this
+transition. These theorems state that for `performAccess` and `runAccesses`, and
+they exist because review found the earlier arrangement — two write paths, framing
+proved about one of them, and prose claiming it covered both.
+
+**They do not cover `step`.** `runStep`'s faulting branch runs `runAccesses` over
+the survivors, which exclude the faulting substep, and then performs that
+substep's access itself. `runAccesses_frames_untouched` applied to the survivors
+is therefore not a framing law for the whole step, and a second review round
+found the earlier comment here claiming it was.
+`performAccess_frames_untouched` covers the faulting access individually, so the
+missing theorem is derivable rather than false; it is recorded as owed in
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2. -/
 
 /--
 **Performing an access frames every cell it did not declare.**
@@ -965,31 +1065,41 @@ substep failed, so the fault the machine reported is present in the resulting
 state whether or not that substep touched memory. An earlier version dropped it
 on the non-access branch, which is exactly the compute substep a divide faults
 on — the one case `Substep.compute` exists for was the one that lost its fault.
+
+`hreached` is required and is not a weakening. If a surviving substep was refused,
+the operation stopped there and the faulting substep was never reached, so there
+is no fault of its to record; `runStep_stops_at_refusal` is that case. The
+guarantee is that a fault the operation actually reached is never discarded, not
+that a fault is invented for a substep that never ran.
 -/
 theorem runStep_records_the_fault (policy : StepPolicy) (state : MachineState)
     (sequence : SubstepSequence) (context : ContextId) (contextKind : ContextKind)
     (cause : EventCause) (index : Fin sequence.substeps.length) (fault : FaultClassId)
     (committed : Nat) (survivors : List AccessDescriptor)
-    (hvisible : sequence.visibleEffects? index.val = some survivors) :
+    (hvisible : sequence.visibleEffects? index.val = some survivors)
+    (hreached : (runAccesses policy state survivors contextKind cause).violations.recordCount =
+      state.violations.recordCount) :
     ∃ record ∈ (runStep policy state sequence context contextKind cause
       (.before index fault committed)).faults, record.fault = fault := by
   show ∃ record ∈ (match sequence.visibleEffects? index.val with
     | Option.none => state
     | some survivors =>
         let survived := runAccesses policy state survivors contextKind cause
-        let faulted :=
-          { survived with
-            faults := survived.faults ++
-              [({ fault := fault, context := context, cause := cause
-                  substep := index.val } : RaisedFault)] }
-        match sequence.substeps[index.val]? with
-        | some (.access d) =>
-            performAccess policy faulted d
-              (.faulted fault ((policy.oracle.answer faulted d).truncate committed))
-              contextKind cause
-        | _ => faulted).faults, record.fault = fault
+        if survived.violations.recordCount ≠ state.violations.recordCount then survived
+        else
+          let faulted :=
+            { survived with
+              faults := survived.faults ++
+                [({ fault := fault, context := context, cause := cause
+                    substep := index.val } : RaisedFault)] }
+          match sequence.substeps[index.val]? with
+          | some (.access d) =>
+              performAccess policy faulted d
+                (.faulted fault ((policy.oracle.answer faulted d).truncate committed))
+                contextKind cause
+          | _ => faulted).faults, record.fault = fault
   rw [hvisible]
-  simp only []
+  simp only [hreached, ne_eq, not_true_eq_false, if_false]
   split
   · rw [performAccess_preserves_faults]
     exact ⟨{ fault := fault, context := context, cause := cause, substep := index.val },

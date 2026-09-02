@@ -69,8 +69,16 @@ namespace Footprint
 `f.WellFormed` holds when the footprint could describe a real aggregate.
 
 The three conditions are `docs/ASSEMBLY_CONSTRUCTION.md` §3's `uniqueNames`,
-`disjoint`, and `contained`. A `StructLayout` carries proofs of all three; this
-is what the memory layer needs of them, restated over byte ranges.
+`disjoint`, and `contained`, restated over byte ranges. A `StructLayout` carries
+proofs of all three.
+
+Only `fieldsDisjoint` is consumed here, by `cellAt?_writeField_of_other_field`.
+The other two are carried because a footprint claiming to describe a real
+aggregate should not be constructible without them: `namesUnique` is what makes
+`field?` a function rather than a choice, and `fieldsContained` is what makes
+`IsPadding`'s `extent` clause meaningful. Neither is load-bearing for the padding
+theorem, and the padding theorem deliberately does not require `WellFormed` at
+all.
 -/
 structure WellFormed (f : Footprint) : Prop where
   /-- No two fields share a name. -/
@@ -129,12 +137,6 @@ framing proofs use. -/
 theorem not_covers_of_isPadding {f : Footprint} {offset : Nat} {field : FieldFootprint}
     (hpad : f.IsPadding offset) (hmem : field ∈ f.fields) :
     ¬ field.range.Covers offset := hpad.2 field hmem
-
-/-- A field's bytes are not padding. The converse direction, which is what says
-the two notions partition rather than merely differ. -/
-theorem not_isPadding_of_covers {f : Footprint} {offset : Nat} {field : FieldFootprint}
-    (hmem : field ∈ f.fields) (hcov : field.range.Covers offset) :
-    ¬ f.IsPadding offset := fun hpad => hpad.2 field hmem hcov
 
 end Footprint
 
