@@ -249,9 +249,12 @@ theorem get?_set (v : Vec α) (i j : Nat) (a : α) :
 /-- Append one element at the end. -/
 def push (v : Vec α) (a : α) : Vec α := ⟨v.toList ++ [a]⟩
 
-/-- Remove and return the last element, or `none` when there is none. -/
+/-- Remove and return the last element, or `none` when there is none.
+
+`Vec.pop?_push` is the law this exists for: it inverts `Vec.push`. A `Vec` is not
+built by cases, so an operation on its end has no other characterisation. -/
 def pop? (v : Vec α) : Option (Vec α × α) :=
-  v.toList.reverse.casesOn none (fun a rest => some (⟨rest.reverse⟩, a))
+  v.toList.getLast?.map (fun a => (⟨v.toList.dropLast⟩, a))
 
 @[simp] theorem length_push (v : Vec α) (a : α) : (v.push a).length = v.length + 1 := by
   simp [length, push]
@@ -263,6 +266,28 @@ theorem get?_push_lt (v : Vec α) (a : α) {i : Nat} (h : i < v.length) :
 
 @[simp] theorem get?_push_self (v : Vec α) (a : α) : (v.push a).get? v.length = some a := by
   simp [get?, push, length]
+
+@[simp] theorem pop?_empty : (empty : Vec α).pop? = none := rfl
+
+/-- `pop?` inverts `push`. -/
+@[simp] theorem pop?_push (v : Vec α) (a : α) : (v.push a).pop? = some (v, a) := by
+  simp [pop?, push]
+
+/-- A successful pop shortens by exactly one, and `Vec.pop?_isSome_iff` says when
+one succeeds. -/
+theorem length_of_pop? {v w : Vec α} {a : α} (h : v.pop? = some (w, a)) :
+    v.length = w.length + 1 := by
+  simp only [pop?, Option.map_eq_some_iff] at h
+  obtain ⟨b, hb, heq⟩ := h
+  have hne : v.toList ≠ [] := fun hnil => by simp [hnil] at hb
+  have hw : v.toList.dropLast = w.toList := congrArg toList (congrArg Prod.fst heq)
+  have hpos : v.toList.length ≠ 0 := by simpa using hne
+  simp only [length, ← hw, List.length_dropLast]
+  omega
+
+/-- A pop succeeds exactly when there is an element to remove. -/
+theorem pop?_isSome_iff (v : Vec α) : v.pop?.isSome = true ↔ v.length ≠ 0 := by
+  simp [pop?, length, List.getLast?_isSome]
 
 /-!
 ## Composition
@@ -385,11 +410,28 @@ theorem map_append (f : α → β) (v w : Vec α) : (v ++ w).map f = v.map f ++ 
     (zipWith f v w).length = min v.length w.length := by
   simp [length, zipWith]
 
+/-- Pointwise combination is pointwise at every index, which is the truncation to
+the shorter sequence stated as a law rather than as a length. -/
+theorem get?_zipWith (f : α → β → γ) (v : Vec α) (w : Vec β) (i : Nat) :
+    (zipWith f v w).get? i = (v.get? i).bind (fun a => (w.get? i).map (f a)) := by
+  simp only [get?, zipWith, toList_fromList, List.getElem?_zipWith']
+  cases v.toList[i]? <;> rfl
+
 @[simp] theorem foldl_empty (f : β → α → β) (init : β) :
     foldl f init (empty : Vec α) = init := rfl
 
 @[simp] theorem foldr_empty (f : α → β → β) (init : β) :
     foldr f init (empty : Vec α) = init := rfl
+
+/-- The recursion law for `foldl`: the last element is folded last. -/
+@[simp] theorem foldl_push (f : β → α → β) (init : β) (v : Vec α) (a : α) :
+    foldl f init (v.push a) = f (foldl f init v) a := by
+  simp [foldl, push]
+
+/-- The recursion law for `foldr`: the last element is folded first. -/
+@[simp] theorem foldr_push (f : α → β → β) (init : β) (v : Vec α) (a : α) :
+    foldr f init (v.push a) = foldr f (f a init) v := by
+  simp [foldr, push]
 
 /-!
 ## Predicates and search
@@ -413,6 +455,36 @@ def Mem (a : α) (v : Vec α) : Prop := a ∈ v.toList
 instance : Membership α (Vec α) := ⟨fun v a => Mem a v⟩
 
 theorem mem_iff_mem_toList {a : α} {v : Vec α} : a ∈ v ↔ a ∈ v.toList := Iff.rfl
+
+/--
+Membership is occurrence at some index.
+
+This is the law that keeps a consumer off `Vec.toList`. `Vec.mem_iff_mem_toList`
+is true but reaches the representation, and the module comment's whole argument
+for wrapping `List` is that consumers should not have to.
+-/
+theorem mem_iff_exists_get? {a : α} {v : Vec α} : a ∈ v ↔ ∃ i, v.get? i = some a :=
+  List.mem_iff_getElem?
+
+@[simp] theorem not_mem_empty (a : α) : a ∉ (empty : Vec α) := by
+  simp [mem_iff_mem_toList, empty]
+
+theorem all_eq_true_iff (p : α → Bool) (v : Vec α) : v.all p = true ↔ ∀ a ∈ v, p a := by
+  simp [all, mem_iff_mem_toList]
+
+theorem any_eq_true_iff (p : α → Bool) (v : Vec α) : v.any p = true ↔ ∃ a ∈ v, p a := by
+  simp [any, mem_iff_mem_toList]
+
+theorem contains_iff_mem [BEq α] [LawfulBEq α] (v : Vec α) (a : α) :
+    v.contains a = true ↔ a ∈ v := by
+  simp [contains, mem_iff_mem_toList]
+
+/-- A found element is present and satisfies the predicate. The converse direction,
+that `find?` returns the *first* such element, needs an index and is left until a
+consumer needs it. -/
+theorem find?_eq_some {p : α → Bool} {v : Vec α} {a : α} (h : v.find? p = some a) :
+    a ∈ v ∧ p a = true :=
+  ⟨List.mem_of_find?_eq_some h, List.find?_some h⟩
 
 /-!
 ## Positional insertion and removal
