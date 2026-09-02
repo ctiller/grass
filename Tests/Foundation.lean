@@ -52,11 +52,12 @@ def initialExecution (input : Bool) : system.ExecutionPrefix :=
   @RelationalSystem.ExecutionPrefix.initial spec.AuditEvent system input (0 : Nat)
     rfl
 
-example : True :=
-  (initialExecution true).runs.inductionOn
-    (motive := fun _ => True)
-    (fun _ => trivial)
-    (fun _ _ _ => trivial)
+example {initialState state : system.State} {initialGraph graph : system.Graph}
+    {events : List spec.AuditEvent}
+    (execution : system.Runs initialState initialGraph state graph events) : True := by
+  induction execution with
+  | initial _ => trivial
+  | step _ _ _ => trivial
 
 theorem behaviorAdequate : behavior.Adequate where
   execution input _ := ⟨initialExecution input, rfl⟩
