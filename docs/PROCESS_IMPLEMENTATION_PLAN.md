@@ -111,14 +111,14 @@ not on completing every theorem the normative document eventually demands.
 
 | Need | Owner | Status |
 |---|---|---|
-| a monotone fresh-identity supply (law 22) | `Grass.Core` (`c-mem` custody) | exists on `c-mem`'s branch, unmerged |
-| finite maps with framing lemmas | `Grass.Std.Logical` | exists on `c-mem`'s branch, unmerged |
+| a monotone fresh-identity supply (law 22) | `Grass.Core` (`c-mem` custody) | committed on `c-mem`'s branch, unmerged |
+| finite maps with framing lemmas | `Grass.Std.Logical` | committed on `c-mem`'s branch, unmerged |
 | a bag/multiset with a permutation quotient | `Grass.Std.Logical` | **absent**; see §2.2 |
 | `ReadBufferLoan` / `WriteBufferLoan` | `Grass.Memory` (`c-mem`) | **absent**; hard block on M3 byte flow |
 | the resource algebra classes | `Grass.Resource` (`c-mem`) | planned, not landed |
-| obligation ledger and dispositions | `Grass.Obligation` (`c-mem`) | partly landed on branch |
+| obligation ledger and dispositions | `Grass.Obligation` (`c-mem`) | partly committed on `c-mem`'s branch, unmerged |
 | `SpecProcess`, `BehaviorContract`, execution traces | `Grass.Semantics` | **unclaimed**; see §10.2 |
-| `lakefile.toml` glob and `warningAsError` | build | made on this branch, textually identical to `c-mem`'s |
+| `lakefile.toml` glob and `warningAsError` | build | on this branch, textually identical to `c-mem`'s |
 
 The byte-flow loan row matters more than its position suggests.
 [PROCESS.md](PROCESS.md) §3 makes `ReadBufferLoan` and `WriteBufferLoan`
@@ -317,8 +317,11 @@ source says so rather than implying the obligation is gone.
 
 ## 3. M1 — Author vocabulary freeze
 
-**Status: landed.** The modules and fixtures below are in the tree and
-`lake build` is green with `warningAsError`. A transitive axiom audit over the
+**Status: written, unmerged, unratified.** The modules and fixtures below are
+committed on the `c-process` product branch and `lake build` is green with
+`warningAsError`. They are not merged: [AGENT_REVIEW.md](AGENT_REVIEW.md) makes
+merge reviewer-owned, and no nomination has run. Several of the shapes below
+also depend on §10 entries that are proposals, not decisions. A transitive axiom audit over the
 new declarations reports only `propext`, `Quot.sound`, and `Classical.choice`,
 which is the [FOUNDATION.md](FOUNDATION.md) §3 allowlist.
 
@@ -425,8 +428,8 @@ law 3 forbids an executed example standing in for a proof.
 
 ## 4. M2 — Network semantics
 
-**Status: started.** `Network/Exposure.lean`, `Network/Graph.lean`, and
-`Network/Topology.lean` have landed with fixtures. `ProcessTopology` carries
+**Status: started, unmerged.** `Network/Exposure.lean`, `Network/Graph.lean`,
+and `Network/Topology.lean` are committed with fixtures. `ProcessTopology` carries
 spawn authority only (§10.8); an earlier draft also gave it a channel
 well-formedness field requiring an edge's endpoints to be spawn-adjacent, which
 [PROCESS.md](PROCESS.md) §3 does not declare and which wrongly rejected every
@@ -618,10 +621,21 @@ Exit criteria are theorems, plus a structural check, plus a measurement:
 
 ## 9. Review
 
-Each milestone is reviewed adversarially before it is offered for merge, against
-[REVIEW.md](REVIEW.md) and the [AGENT_REVIEW.md](AGENT_REVIEW.md)
-distinct-author rule. Local iteration review does not substitute for that
-nomination.
+**No work scheduled by this plan has been merged or reviewed in the sense
+[AGENT_REVIEW.md](AGENT_REVIEW.md) means.** That protocol requires the author to
+nominate a distinct reviewer on the agent bus, and that reviewer — not the
+author — to select a snapshot, authorize, and merge. It has not run, and the bus
+tool is not yet available.
+
+What has happened is local iteration: adversarial review agents spawned by the
+author, with fresh context each round, to find defects early. That found real
+ones — a multiplicity-blind terminal disposition, an uninhabitable
+`ProcessCorrect` — and it is not a substitute for the nomination. An author
+reviewing their own work through an agent they instructed is still an author
+reviewing their own work.
+
+Each milestone is offered for that nomination after local iteration stops
+finding defects, against [REVIEW.md](REVIEW.md) and the distinct-author rule.
 
 The questions a reviewer of this layer should ask first:
 
