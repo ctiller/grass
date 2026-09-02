@@ -177,6 +177,31 @@ instance (state : MemoryState) (id : AllocId) (range : ByteRange) :
 end MemoryState
 
 /--
+One architectural fault that was raised.
+
+`docs/MEMORY_MODEL.md` §8: "Architectural faults are modeled events/transitions."
+A faulting substep that performs no memory access — a divide error between two
+operand reads, say — produces no `MemoryEvent`, so without this record the fault
+leaves no trace and a faulting execution is indistinguishable from a clean one.
+That was true of an earlier transition, which took the fault as an argument and
+dropped it on the branch where the faulting substep was not an access.
+
+This is not the fault *model*. It records that a fault of a named class was
+raised by a named context at a named substep; the ISA profile owns what each
+class means, and `docs/SEMANTICS.md` owns how a fault reaches the program result.
+-/
+structure RaisedFault where
+  /-- Which fault was raised. -/
+  fault : FaultClassId
+  /-- The context it was raised in. -/
+  context : ContextId
+  /-- The instruction or API that raised it. -/
+  cause : EventCause
+  /-- The index of the substep that did not complete. -/
+  substep : Nat
+deriving DecidableEq, Repr
+
+/--
 The whole machine state a transition threads.
 
 The three ledgers are separate because they answer different questions and have
@@ -200,13 +225,21 @@ structure MachineState where
   events : List ValidMemoryEvent
   /-- The supply that mints event identities. -/
   eventSupply : FreshSupply EventTag
+  /-- The architectural faults raised so far, most recent last.
+
+  Separate from `events` because a fault is not a memory event: it may touch no
+  bytes, and `MemoryEvent` requires a location. Separate from `violations`
+  because `docs/MEMORY_MODEL.md` §8 draws exactly that line — a fault is
+  behaviour a specification may permit, a violation is behaviour
+  `VerifiedProgram` proves never happens. -/
+  faults : List RaisedFault
 
 namespace MachineState
 
 /-- The state a program starts in. -/
 def initial (memory : MemoryState) : MachineState :=
   { memory := memory, obligations := .empty, violations := .empty
-    events := [], eventSupply := .initial }
+    events := [], eventSupply := .initial, faults := [] }
 
 /-- `state.OutstandingObligations` are the identities still owed. -/
 def outstanding (state : MachineState) : List ObligationId := state.obligations.domain

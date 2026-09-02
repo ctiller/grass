@@ -26,7 +26,7 @@ only `Grass.Op.Facets`.
 
 namespace Grass.Tests.FakeIsa
 
-open Grass.Core Grass.Memory Grass.Obligation Grass.Op
+open Grass.Core Grass.Memory Grass.Obligation Grass.Op Grass.Std.Logical
 
 /-! ## Shared setting -/
 
@@ -78,6 +78,11 @@ def ghostObligationId₂ : ObligationId := obligations₀.fresh.2.fresh.2.fresh.
 /-- An identity a fabricating delta would install. -/
 def fabricatedObligationId : ObligationId :=
   obligations₀.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- An identity that is fresh before the effect runs, which two creates in one
+effect both target. -/
+def collidingObligationId : ObligationId :=
+  obligations₀.fresh.2.fresh.2.fresh.2.fresh.2.fresh.1
 
 /-- Provenance of the buffer. -/
 def bufferProv : Provenance :=
@@ -161,7 +166,16 @@ inductive Alpha where
   | writeThroughLoan
   /-- Writes a stack slot, which requires a live frame. -/
   | writeStackSlot
+  /-- One effect containing two creates of the same initially-fresh identity,
+  with distinguishable payloads. Each delta is individually applicable against
+  the ledger as it stands before the effect runs. -/
+  | createTwice
 deriving DecidableEq, Repr
+
+/-- The divide-error fault this family can raise. Named so the fixtures can
+compare against the fault the transition recorded, rather than restating a
+string. -/
+def divideError : FaultClassId := ⟨⟨"divideError"⟩⟩
 
 /-- The buffer protocol, and the authority this family holds under it. A real
 family obtains this from its profile; the fixture mints one so the seam can be
@@ -178,6 +192,18 @@ def otherProtocol : ObligationProtocolId := ⟨⟨"fake.other"⟩⟩
 
 /-- Authority to act under `otherProtocol`, which governs nothing here. -/
 def otherAuthority : ProtocolAuthority otherProtocol := ⟨⟨"fake.isa"⟩⟩
+
+/-- Two duties sharing one identity, distinguishable by kind. A single effect
+creating both is the collision `LedgerEffectApplicable` must catch. -/
+def collidingFirst : Obligation :=
+  { id := collidingObligationId, kind := .releaseAllocation
+    protocol := bufferProtocol, owner := thread₀ }
+
+/-- The second, same identity and a different kind, so the two are telling
+apart in the resulting ledger. -/
+def collidingSecond : Obligation :=
+  { id := collidingObligationId, kind := .closeHandle
+    protocol := bufferProtocol, owner := thread₀ }
 
 /-- The duty a fabricating delta would conjure. -/
 def fabricatedObligation : Obligation :=
@@ -222,9 +248,9 @@ instance : HasOperationFacets Alpha where
         { memoryEffects := some
             { substeps :=
                 [ .access (acc bufferProv ⟨0, 8⟩ 0x1000 .read .readWrite true false)
-                  , .compute [⟨⟨"divideError"⟩⟩] ]
+                  , .compute [divideError] ]
               onFault := .priorEffectsVisible }
-          faults := some [⟨⟨"divideError"⟩⟩], restartability := some .notRestartable
+          faults := some [divideError], restartability := some .notRestartable
           ordering := some .plain }
     | .storeThroughView =>
         { memoryEffects := some (.single (acc viewProv ⟨0, 8⟩ 0x1000 .write .readWrite
@@ -274,6 +300,13 @@ instance : HasOperationFacets Alpha where
     | .writeStackSlot =>
         { memoryEffects := some (.single (acc frameProv ⟨0, 8⟩ 0x2000 .write .readWrite
             false true))
+          faults := some [], restartability := some .notRestartable
+          ordering := some .plain }
+    | .createTwice =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true
+            [ .create bufferProtocol bufferAuthority collidingFirst
+            , .create bufferProtocol bufferAuthority collidingSecond ]))
           faults := some [], restartability := some .notRestartable
           ordering := some .plain }
     | .dischargeWithWrongAuthority =>
@@ -327,11 +360,11 @@ instance : HasOperationFacets Beta where
 /-- The profile's address spaces, obligation kinds, and fault classes. -/
 def vocabulary : AdmittedVocabulary :=
   { addressSpaces := .cpuOnly
-    faultClasses := ⟨[.pageFault, .deviceFault, ⟨⟨"divideError"⟩⟩]⟩
+    faultClasses := ⟨[.pageFault, .deviceFault, divideError]⟩
     allocationSources := ⟨[.virtualAlloc, .mappedFile, .imageMapping, .stack]⟩
     provenanceStepKinds := ⟨[]⟩
     auditViolationClasses := ⟨AuditViolationClass.emittedByTransition⟩
-    obligationKinds := ⟨[.releaseAllocation]⟩ }
+    obligationKinds := ⟨[.releaseAllocation, .closeHandle]⟩ }
 
 /-- A profile whose §10 package is explicitly unproved. It is a checklist of
 propositions, not evidence for them, and this fixture does not pretend otherwise:
@@ -449,11 +482,11 @@ def stateWithAuthority : MachineState :=
 
 /-- Step one `Alpha` operation. -/
 def stepAlpha (state : MachineState) (op : Alpha) : StepOutcome :=
-  Grass.Op.step policy state (SomeOperation.of op) .thread ⟨⟨"alpha"⟩⟩
+  Grass.Op.step policy state (SomeOperation.of op) thread₀ .thread ⟨⟨"alpha"⟩⟩
 
 /-- Step one `Beta` operation. Same function, different family. -/
 def stepBeta (state : MachineState) (op : Beta) : StepOutcome :=
-  Grass.Op.step policy state (SomeOperation.of op) .dmaEngine ⟨⟨"beta"⟩⟩
+  Grass.Op.step policy state (SomeOperation.of op) engine₀ .dmaEngine ⟨⟨"beta"⟩⟩
 
 /-! ## 1-5: the seam carries a new family end to end -/
 
@@ -665,6 +698,45 @@ theorem authority_is_not_ambient :
               range := ⟨0, 64⟩, rights := .readWrite } } : MemoryState).GrantedOfKind
         .loan thread₀ borrowedProv ⟨0, 8⟩ .write) := by decide
 
+/-! ## One effect cannot create the same identity twice
+
+`LedgerDelta.Applicable` closes duplication per delta. That is not enough on its
+own: an effect is a *sequence*, and checking every delta against the ledger as it
+stood before the effect began lets two creates of one initially-fresh identity
+both pass, after which the fold inserts one over the other and a duty is lost.
+`docs/OBLIGATIONS.md` §2 forbids exactly that.
+
+The two obligations below share an identity and differ in kind, so if the second
+overwrote the first the resulting ledger would be observably wrong rather than
+merely suspicious. -/
+
+theorem both_creates_are_individually_applicable :
+    LedgerDelta.Applicable ((FiniteMap.empty : FiniteMap ObligationId Obligation).domain)
+      (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
+        Obligation.protocol)
+      (.create bufferProtocol bufferAuthority collidingFirst) ∧
+    LedgerDelta.Applicable ((FiniteMap.empty : FiniteMap ObligationId Obligation).domain)
+      (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
+        Obligation.protocol)
+      (.create bufferProtocol bufferAuthority collidingSecond) := by decide
+
+/-- Together in one effect they are not applicable, because the second is checked
+against the ledger the first left. -/
+theorem the_pair_is_not_applicable :
+    ¬ LedgerEffectApplicable (FiniteMap.empty : FiniteMap ObligationId Obligation)
+      [ .create bufferProtocol bufferAuthority collidingFirst
+      , .create bufferProtocol bufferAuthority collidingSecond ] := by decide
+
+/-- The transition refuses the operation, leaves the obligations untouched, and
+records the violation. -/
+theorem create_twice_is_refused :
+    ∀ s, (stepAlpha state₀ .createTwice).state? = some s →
+      s.obligations.lookup collidingObligationId = Option.none ∧
+        s.events = [] ∧ s.violations.recordCount = 1 := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide⟩
+
 /-! ## A denied access stops the operation
 
 An earlier `runAccesses` folded over every access unconditionally, so an operation
@@ -763,7 +835,7 @@ written had to claim it read nothing, while `readValuePresent` still demanded a
 value. Reads and writes now count separately. -/
 
 theorem faulted_rmw_keeps_its_read :
-    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.atomicAdd) .thread
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.atomicAdd) thread₀ .thread
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
           if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 8
           else .none)).state? = some s →
@@ -776,7 +848,7 @@ theorem faulted_rmw_keeps_its_read :
 /-- Truncated to three bytes, the read is three bytes and still present. The
 count is the committed prefix, not the width the access named. -/
 theorem partially_faulted_rmw_records_its_prefix :
-    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.atomicAdd) .thread
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.atomicAdd) thread₀ .thread
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
           if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3
           else .none)).state? = some s →
@@ -830,10 +902,10 @@ These drive the fault path through `step` itself. -/
 /-- A compound operation that faults at its second substep. The read before it
 committed, and the state shows one event. -/
 theorem divide_fault_preserves_the_read :
-    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) .thread
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) thread₀ .thread
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
           if h : 1 < seq.substeps.length then
-            .before ⟨1, h⟩ ⟨⟨"divideError"⟩⟩ 0
+            .before ⟨1, h⟩ divideError 0
           else .none)).state? = some s →
       s.events.length = 1 ∧ s.violations.IsEmpty := by
   intro s hs
@@ -850,7 +922,7 @@ version of this theorem said "commits nothing" in its docstring and checked only
 range.
 -/
 theorem divide_fault_at_zero_commits_no_bytes :
-    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) .thread
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) thread₀ .thread
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
           if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0
           else .none)).state? = some s →
@@ -862,7 +934,7 @@ theorem divide_fault_at_zero_commits_no_bytes :
 /-- A faulting access commits the prefix it declares, and the event records it.
 `docs/MEMORY_MODEL.md` §1 forbids assuming a faulted access did nothing. -/
 theorem faulted_store_commits_its_declared_prefix :
-    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) .thread
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
           if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3
           else .none)).state? = some s →
@@ -871,11 +943,53 @@ theorem faulted_store_commits_its_declared_prefix :
   cases hs
   exact ⟨_, rfl, by decide, by decide⟩
 
+/-! ### The fault itself is recoverable from the step result
+
+A compute substep produces no memory event, so before the state carried a fault
+record a `divideError` left no trace at all: the theorems above could see that the
+read survived, but nothing distinguished a faulting execution from a clean one.
+That is the fault being discarded, which is what `Substep.compute` exists to
+prevent. -/
+
+/-- The divide error is present in the resulting state, with its class, its
+context, and the substep it came from. -/
+theorem divide_fault_is_recoverable :
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) thread₀ .thread
+        ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+          if h : 1 < seq.substeps.length then
+            .before ⟨1, h⟩ divideError 0
+          else .none)).state? = some s →
+      s.faults = [{ fault := divideError, context := thread₀, cause := ⟨⟨"alpha"⟩⟩
+                    substep := 1 }] := by
+  intro s hs
+  cases hs
+  decide
+
+/-- A clean run of the same operation records no fault, so the two are
+distinguishable. -/
+theorem clean_divide_records_no_fault :
+    ∀ s, (stepAlpha state₀ .divide).state? = some s → s.faults = [] := by
+  intro s hs
+  cases hs
+  decide
+
+/-- A fault on an *access* substep is recorded too, so the record does not depend
+on which kind of substep failed. -/
+theorem access_fault_is_recorded :
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
+        ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3
+          else .none)).state? = some s →
+      s.faults.length = 1 ∧ s.events.length = 1 := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
 /-- An operation whose visibility rule belongs to a profile cannot be stepped by
 the generic relation. Refusing is the honest answer; guessing which effects
 survive would be the permissive fallback law 8 forbids. -/
 theorem profile_visibility_rule_is_refused :
-    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.splitStore) .thread
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.splitStore) thread₀ .thread
       ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
         if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 0
         else .none)).rejection? = some .visibilityRuleUnknown := by decide

@@ -339,7 +339,8 @@ instead of a theorem, because it is the stronger form.
 | denial prevents undeclared later effects | `Op.runAccesses_stops_at_refusal` |
 | fault choices are structurally in range | `Op.FaultPlan` carries a `Fin`; the bad case is unrepresentable |
 | partial RMW retains its completed read | `Committed` counts reads and writes separately; `faulted_rmw_keeps_its_read` |
-| ledger mutation occurs iff the delta is applicable | `Op.obligations_unchanged_unless_committed`; `LedgerDelta.Applicable` now requires a typed `ProtocolAuthority` rather than a protocol-name comparison |
+| ledger mutation occurs iff the delta is applicable | `Op.obligations_unchanged_unless_committed`; `LedgerDelta.Applicable` requires a typed `ProtocolAuthority`, and `Op.LedgerEffectApplicable` checks each delta against the ledger the previous ones left |
+| a recorded fault is never discarded | `Op.runStep_records_the_fault`, with `Op.performAccess_preserves_faults` |
 | failed ledger mutation is recorded and non-mutating | `Op.ledger_refusal_is_recorded`, `Op.refused_preserves_everything_but_the_ledger` |
 | every emitted violation class is declared | `Op.StepPolicy.violationClassesDeclared` |
 | external operation families require no Grass edits | `Tests/Op/FakeIsa.lean`, and reproduced independently by a reviewer building three families outside the repo |
@@ -387,7 +388,9 @@ expect additive change.
   so an operation whose behaviour depends on a comparison against a supplied
   operand has nowhere to put it.
 - The descriptor carries a `ContextId` but no `ContextKind`, though §7.1 requires
-  identity *and* kind; the stepper supplies the kind out of band.
+  identity *and* kind; the stepper supplies the kind out of band, and now also
+  takes the operation's executing context so that a fault on a substep with no
+  descriptor still has one.
 - `address` is unconnected to `range`. Two writes declaring the same address with
   different ranges are judged non-conflicting. `Access.lean` defers this to M2,
   but `ConflictsWithHistory` is now live and decides aliasing on a field the

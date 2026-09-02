@@ -259,8 +259,29 @@ def violationOf (d : AccessDescriptor) (class_ : AuditViolationClass) : AuditVio
   { class_ := class_, context := d.context, provenance := d.provenance, range := d.range }
 
 /--
+Apply one delta to the ledger.
+
+Factored out of the fold so that `LedgerEffectApplicable` and `applyLedgerEffect`
+walk the same evolution. Only ever reached for a delta applicability has accepted.
+-/
+def applyDelta (obligations : FiniteMap ObligationId Obligation)
+    (delta : LedgerDelta) : FiniteMap ObligationId Obligation :=
+  match delta with
+  | .create _ _ o => obligations.insert o.id o
+  | .discharge _ _ id => obligations.erase id
+  | .split _ _ source into =>
+      into.foldl (init := obligations.erase source) fun inner o => inner.insert o.id o
+  | .join _ _ sources into =>
+      (sources.foldl (init := obligations) fun inner id => inner.erase id).insert
+        into.id into
+  | .transfer _ _ id owner =>
+      match obligations.lookup id with
+      | Option.none => obligations
+      | some o => obligations.insert id (o.transferTo owner)
+
+/--
 `LedgerEffectApplicable` holds when every delta of an effect can lawfully act on
-the obligations actually outstanding.
+the ledger the deltas before it left.
 
 `StepPolicy.Admits` already required `LedgerEffect.WellFormed`, which checks
 *shape*. Shape is not enough and the gap was not hypothetical: with shape alone
@@ -270,38 +291,35 @@ of one identity into one row. `docs/OBLIGATIONS.md` §2 names all three.
 
 Liveness is a fact about the state, so it cannot be checked at admission and is
 checked here.
+
+**Each delta is checked against the ledger the previous ones left.** An earlier
+version checked every delta against the *initial* map, which reintroduced at the
+whole-effect level exactly the duplication `LedgerDelta.Applicable` closes at the
+delta level: two `create`s of one initially-fresh identity are each individually
+applicable against the initial map, and the fold then inserts one over the other
+and loses a duty. Threading `applyDelta` through both makes applicability and
+application walk one evolution, so checking the first tells you about the second.
 -/
-def LedgerEffectApplicable (obligations : FiniteMap ObligationId Obligation)
-    (effect : LedgerEffect) : Prop :=
-  ∀ delta ∈ effect,
-    LedgerDelta.Applicable obligations.domain
-      (fun id => (obligations.lookup id).map Obligation.protocol) delta
+def LedgerEffectApplicable (obligations : FiniteMap ObligationId Obligation) :
+    LedgerEffect → Prop
+  | [] => True
+  | delta :: rest =>
+      LedgerDelta.Applicable obligations.domain
+        (fun id => (obligations.lookup id).map Obligation.protocol) delta ∧
+      LedgerEffectApplicable (applyDelta obligations delta) rest
 
-instance (obligations : FiniteMap ObligationId Obligation) (effect : LedgerEffect) :
-    Decidable (LedgerEffectApplicable obligations effect) :=
-  inferInstanceAs (Decidable (∀ _ ∈ _, _))
+instance decLedgerEffectApplicable (obligations : FiniteMap ObligationId Obligation) :
+    (effect : LedgerEffect) → Decidable (LedgerEffectApplicable obligations effect)
+  | [] => .isTrue trivial
+  | delta :: rest =>
+      have : Decidable (LedgerEffectApplicable (applyDelta obligations delta) rest) :=
+        decLedgerEffectApplicable (applyDelta obligations delta) rest
+      inferInstanceAs (Decidable (_ ∧ _))
 
-/--
-Apply the ledger effect of one access.
-
-Only ever called on an effect `LedgerEffectApplicable` has accepted, so every
-consumed identity is live and every produced one is fresh.
--/
+/-- Apply a whole effect, one delta at a time. -/
 def applyLedgerEffect (obligations : FiniteMap ObligationId Obligation)
     (effect : LedgerEffect) : FiniteMap ObligationId Obligation :=
-  effect.foldl (init := obligations) fun acc delta =>
-    match delta with
-    | .create _ _ o => acc.insert o.id o
-    | .discharge _ _ id => acc.erase id
-    | .split _ _ source into =>
-        into.foldl (init := acc.erase source) fun inner o => inner.insert o.id o
-    | .join _ _ sources into =>
-        (sources.foldl (init := acc) fun inner id => inner.erase id).insert into.id into
-    | .transfer _ _ id owner =>
-        match acc.lookup id with
-        | Option.none => acc
-        | some o => acc.insert id (o.transferTo owner)
-
+  effect.foldl applyDelta obligations
 /--
 `ConflictsWithHistory` holds when an event contends with one already performed.
 
@@ -483,19 +501,31 @@ case analysis over the rejection paths, and it means a new rejection reason
 cannot silently acquire an unproved state transition.
 -/
 def runStep (policy : StepPolicy) (state : MachineState) (sequence : SubstepSequence)
-    (contextKind : ContextKind) (cause : EventCause) : FaultPlan sequence → MachineState
+    (context : ContextId) (contextKind : ContextKind) (cause : EventCause) :
+    FaultPlan sequence → MachineState
   | .none => runAccesses policy state sequence.accesses contextKind cause
   | .before index fault committed =>
       match sequence.visibleEffects? index.val with
       | Option.none => state
       | some survivors =>
+          -- The fault is recorded before the branch on what kind of substep
+          -- faulted, so no branch can discard it. An earlier version took the
+          -- fault as an argument and dropped it wherever the faulting substep was
+          -- not an access -- which is exactly the compute substep a divide faults
+          -- on, so the one case the `compute` constructor exists for was the one
+          -- that lost its fault.
+          let survived := runAccesses policy state survivors contextKind cause
+          let faulted :=
+            { survived with
+              faults := survived.faults ++
+                [{ fault := fault, context := context, cause := cause
+                   substep := index.val }] }
           match sequence.substeps[index.val]? with
           | some (.access d) =>
-              let after := runAccesses policy state survivors contextKind cause
-              performAccess policy after d
-                (.faulted fault ((policy.oracle.answer after d).truncate committed))
+              performAccess policy faulted d
+                (.faulted fault ((policy.oracle.answer faulted d).truncate committed))
                 contextKind cause
-          | _ => runAccesses policy state survivors contextKind cause
+          | _ => faulted
 
 /--
 Step one operation.
@@ -503,9 +533,14 @@ Step one operation.
 The whole vertical, in the order the module comment gives. `faultAt` says whether
 the machine faulted and where, as a function of the sequence so that the index it
 names is in range by construction.
+
+`context` is the executing context. It is an operation-level argument because a
+faulting substep need not be an access, so there is not always a descriptor to
+read one from — `docs/MEMORY_MODEL.md` §7.1 wants context identity *and* kind on
+every event, and this supplies the identity for a fault that touches no bytes.
 -/
 def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation)
-    (contextKind : ContextKind) (cause : EventCause)
+    (context : ContextId) (contextKind : ContextKind) (cause : EventCause)
     (faultAt : (sequence : SubstepSequence) → FaultPlan sequence :=
       fun _ => .none) : StepOutcome :=
   match policy.requiredFacets.find?
@@ -525,12 +560,12 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
           .rejected .accessNotAdmitted
         else
           match faultAt sequence with
-          | .none => .ran (runStep policy state sequence contextKind cause .none)
+          | .none => .ran (runStep policy state sequence context contextKind cause .none)
           | .before index fault committed =>
               match sequence.visibleEffects? index.val with
               | Option.none => .rejected .visibilityRuleUnknown
               | some _ =>
-                  .ran (runStep policy state sequence contextKind cause
+                  .ran (runStep policy state sequence context contextKind cause
                     (.before index fault committed))
 
 /-! ## The transition invariants
@@ -691,9 +726,9 @@ theorem runAccesses_extends_violations (policy : StepPolicy) (state : MachineSta
 the whole sequence, a surviving prefix, or a prefix followed by the faulting
 access itself. -/
 theorem runStep_extends_violations (policy : StepPolicy) (state : MachineState)
-    (sequence : SubstepSequence) (contextKind : ContextKind) (cause : EventCause)
-    (plan : FaultPlan sequence) :
-    (runStep policy state sequence contextKind cause plan).violations.Extends
+    (sequence : SubstepSequence) (context : ContextId) (contextKind : ContextKind)
+    (cause : EventCause) (plan : FaultPlan sequence) :
+    (runStep policy state sequence context contextKind cause plan).violations.Extends
       state.violations := by
   unfold runStep
   split
@@ -706,6 +741,61 @@ theorem runStep_extends_violations (policy : StepPolicy) (state : MachineState)
           (performAccess_extends_violations _ _ _ _ _ _)
       · exact runAccesses_extends_violations _ _ _ _ _
 
+/-- Performing an access does not touch the fault record: a fault is raised by a
+substep, and `performAccess` runs one access. -/
+theorem performAccess_preserves_faults (policy : StepPolicy) (state : MachineState)
+    (d : AccessDescriptor) (outcome : AccessOutcome d) (contextKind : ContextKind)
+    (cause : EventCause) :
+    (performAccess policy state d outcome contextKind cause).faults = state.faults := by
+  unfold performAccess
+  split
+  · rfl
+  · split
+    · split <;> rfl
+    · split
+      · rfl
+      · split <;> rfl
+
+/--
+**A recorded fault is never discarded.**
+
+Every branch of a faulting run appends the fault before deciding what kind of
+substep failed, so the fault the machine reported is present in the resulting
+state whether or not that substep touched memory. An earlier version dropped it
+on the non-access branch, which is exactly the compute substep a divide faults
+on — the one case `Substep.compute` exists for was the one that lost its fault.
+-/
+theorem runStep_records_the_fault (policy : StepPolicy) (state : MachineState)
+    (sequence : SubstepSequence) (context : ContextId) (contextKind : ContextKind)
+    (cause : EventCause) (index : Fin sequence.substeps.length) (fault : FaultClassId)
+    (committed : Nat) (survivors : List AccessDescriptor)
+    (hvisible : sequence.visibleEffects? index.val = some survivors) :
+    ∃ record ∈ (runStep policy state sequence context contextKind cause
+      (.before index fault committed)).faults, record.fault = fault := by
+  show ∃ record ∈ (match sequence.visibleEffects? index.val with
+    | Option.none => state
+    | some survivors =>
+        let survived := runAccesses policy state survivors contextKind cause
+        let faulted :=
+          { survived with
+            faults := survived.faults ++
+              [({ fault := fault, context := context, cause := cause
+                  substep := index.val } : RaisedFault)] }
+        match sequence.substeps[index.val]? with
+        | some (.access d) =>
+            performAccess policy faulted d
+              (.faulted fault ((policy.oracle.answer faulted d).truncate committed))
+              contextKind cause
+        | _ => faulted).faults, record.fault = fault
+  rw [hvisible]
+  simp only []
+  split
+  · rw [performAccess_preserves_faults]
+    exact ⟨{ fault := fault, context := context, cause := cause, substep := index.val },
+      by simp, rfl⟩
+  · exact ⟨{ fault := fault, context := context, cause := cause, substep := index.val },
+      by simp, rfl⟩
+
 /--
 **Every step extends the violation ledger.**
 
@@ -714,16 +804,17 @@ This is the theorem the module comment points at, and the transition invariant
 run produces `runStep`, which extends.
 -/
 theorem step_extends_violations (policy : StepPolicy) (state : MachineState)
-    (operation : SomeOperation) (contextKind : ContextKind) (cause : EventCause)
+    (operation : SomeOperation) (context : ContextId) (contextKind : ContextKind)
+    (cause : EventCause)
     (faultAt : (sequence : SubstepSequence) → FaultPlan sequence) (final : MachineState)
-    (h : step policy state operation contextKind cause faultAt = .ran final) :
+    (h : step policy state operation context contextKind cause faultAt = .ran final) :
     final.violations.Extends state.violations := by
   unfold step at h
   repeat' split at h
   all_goals
     first
       | exact StepOutcome.noConfusion h
-      | (injection h with h; subst h; exact runStep_extends_violations _ _ _ _ _ _)
+      | (injection h with h; subst h; exact runStep_extends_violations _ _ _ _ _ _ _)
 
 /--
 **Every event a step records is well formed.**
@@ -734,9 +825,10 @@ Stated anyway, because it is the property M8's consistency model depends on and 
 reader should be able to find it named rather than infer it from a type.
 -/
 theorem step_events_wellFormed (policy : StepPolicy) (state : MachineState)
-    (operation : SomeOperation) (contextKind : ContextKind) (cause : EventCause)
+    (operation : SomeOperation) (context : ContextId) (contextKind : ContextKind)
+    (cause : EventCause)
     (faultAt : (sequence : SubstepSequence) → FaultPlan sequence) (final : MachineState)
-    (_ : step policy state operation contextKind cause faultAt = .ran final) :
+    (_ : step policy state operation context contextKind cause faultAt = .ran final) :
     ∀ valid ∈ final.events, valid.event.WellFormed :=
   final.events_wellFormed
 
