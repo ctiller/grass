@@ -204,8 +204,8 @@ permissions.
 -/
 def callImportWriteFile : SubstepSequence :=
   { substeps :=
-      [ access importProvenance ⟨2048, 8⟩ 0x3000 .read .readOnly 8 true false,
-        access savedSlotProvenance ⟨0, 8⟩ 0x0FF8 .write .readWrite 8 false true ]
+      [ .access (access importProvenance ⟨2048, 8⟩ 0x3000 .read .readOnly 8 true false),
+        .access (access savedSlotProvenance ⟨0, 8⟩ 0x0FF8 .write .readWrite 8 false true) ]
     onFault := .priorEffectsVisible }
 
 /--
@@ -232,6 +232,69 @@ be the "silently considering obligations discharged on process failure" shortcut
 `docs/DECISIONS.md` rejects.
 -/
 def ud2Containment : SubstepSequence := .none_
+
+/-! ## Two cases from outside Spike 1
+
+Spike 1 does not contain either of these. They are here because an adversarial
+review named them as the cases that would break the sealed descriptor, and a
+freeze that has only been tested against instructions it was designed for has not
+been tested. Both are declared with names the ISA agent will replace; the fault
+taxonomy belongs to that profile, not to a fixture. -/
+
+/-- The x86 divide-error fault. Named here only so the case below can be written;
+the real taxonomy is the ISA profile's. -/
+def divideError : FaultClassId := ⟨⟨"divideError"⟩⟩
+
+/--
+`div dword ptr [rbp - 8]` — reads its divisor, then faults from the division.
+
+The `#DE` is raised by a step that performs no memory access, and the read before
+it has already happened. This is the case a sequence of accesses alone cannot
+state: there would be no index to name the faulting step. With `Substep.compute`
+it is index 1, and the read survives.
+-/
+def divMem : SubstepSequence :=
+  { substeps :=
+      [ .access (access transferredProvenance ⟨32, 4⟩ 0x1020 .read .readWrite 4 true false),
+        .compute [divideError] ]
+    onFault := .priorEffectsVisible }
+
+/--
+An eight-byte store at `0x1FFF`, crossing a page boundary.
+
+Two substeps, because permissions on x86-64 are per page and the second page may
+carry different ones — the descriptor holds one `requiredPermission`, so one
+descriptor cannot demand both. The visibility rule is `profileSpecific` because
+Intel does not guarantee that a split store is all-or-nothing to other agents,
+and this module has no business guessing what the profile says.
+-/
+def splitPageStore : SubstepSequence :=
+  { substeps :=
+      [ .access (access savedSlotProvenance ⟨0, 1⟩ 0x1FFF .write .readWrite 1 false true),
+        .access (access savedSlotProvenance ⟨1, 7⟩ 0x2000 .write .readWrite 1 false true) ]
+    onFault := .profileSpecific ⟨"x86.splitPageStore"⟩ }
+
+/-- The divisor read survives the divide-error fault. -/
+theorem div_read_survives_divide_error :
+    divMem.visibleEffects? 1 =
+      some [access transferredProvenance ⟨32, 4⟩ 0x1020 .read .readWrite 4 true false] :=
+  rfl
+
+/-- A compute step declares the fault it raises, so the fault is not floating
+free of the sequence that can produce it. -/
+theorem div_compute_step_declares_fault :
+    divMem.substeps.map Substep.faults =
+      [[FaultClassId.pageFault, FaultClassId.generalProtection], [divideError]] := rfl
+
+/--
+This module refuses to answer what survives a split-page store.
+
+`none` is the honest result: the rule belongs to the profile. An earlier version
+returned the `priorEffectsVisible` answer here, which is a plausible guess and
+therefore the worst available behavior.
+-/
+theorem splitPage_visibility_is_not_answerable_here :
+    splitPageStore.visibleEffects? 1 = Option.none := rfl
 
 /-! ## The cases are well formed
 
@@ -279,34 +342,42 @@ theorem access_wellFormed {provenance : Provenance} {range : ByteRange}
   requiresInitializedOnlyIfReads := readsIfRequired
   producesInitializedOnlyIfWrites := writesIfProduced
 
-theorem pushR12_wellFormed : pushR12.WellFormed :=
-  SubstepSequence.wellFormed_single
-    (access_wellFormed rfl ⟨by decide, trivial⟩
-      (by intro e h; cases h; decide)
-      (by decide) (by decide) (by decide) (by decide) (by decide) (by decide))
+theorem pushR12_wellFormed : pushR12.WellFormed := by
+  unfold pushR12
+  refine SubstepSequence.wellFormed_single
+    (access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
+  · exact ⟨by decide, trivial⟩
+  · intro e h; cases h; decide
+  all_goals decide
 
-theorem movTransferredZero_wellFormed : movTransferredZero.WellFormed :=
-  SubstepSequence.wellFormed_single
-    (access_wellFormed rfl ⟨by decide, trivial⟩
-      (by intro e h; cases h; decide)
-      (by decide) (by decide) (by decide) (by decide) (by decide) (by decide))
+theorem movTransferredZero_wellFormed : movTransferredZero.WellFormed := by
+  unfold movTransferredZero
+  refine SubstepSequence.wellFormed_single
+    (access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
+  · exact ⟨by decide, trivial⟩
+  · intro e h; cases h; decide
+  all_goals decide
 
-theorem movEaxTransferred_wellFormed : movEaxTransferred.WellFormed :=
-  SubstepSequence.wellFormed_single
-    (access_wellFormed rfl ⟨by decide, trivial⟩
-      (by intro e h; cases h; decide)
-      (by decide) (by decide) (by decide) (by decide) (by decide) (by decide))
+theorem movEaxTransferred_wellFormed : movEaxTransferred.WellFormed := by
+  unfold movEaxTransferred
+  refine SubstepSequence.wellFormed_single
+    (access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
+  · exact ⟨by decide, trivial⟩
+  · intro e h; cases h; decide
+  all_goals decide
 
 theorem callImportWriteFile_wellFormed : callImportWriteFile.WellFormed := by
-  intro d hd
-  simp only [callImportWriteFile, List.mem_cons, List.not_mem_nil, or_false] at hd
-  rcases hd with rfl | rfl
-  · exact access_wellFormed rfl ⟨by decide, trivial⟩
-      (by intro e h; cases h; decide)
-      (by decide) (by decide) (by decide) (by decide) (by decide) (by decide)
-  · exact access_wellFormed rfl ⟨by decide, trivial⟩
-      (by intro e h; cases h; decide)
-      (by decide) (by decide) (by decide) (by decide) (by decide) (by decide)
+  intro step hstep
+  simp only [callImportWriteFile, List.mem_cons, List.not_mem_nil, or_false] at hstep
+  rcases hstep with rfl | rfl
+  · refine access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+    · exact ⟨by decide, trivial⟩
+    · intro e h; cases h; decide
+    all_goals decide
+  · refine access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
+    · exact ⟨by decide, trivial⟩
+    · intro e h; cases h; decide
+    all_goals decide
 
 theorem movEcxImm_wellFormed : movEcxImm.WellFormed := by
   simp [movEcxImm, SubstepSequence.WellFormed, SubstepSequence.none_]
@@ -380,7 +451,7 @@ theorem call_preserves_handle_obligation :
   intro delta hd
   simp only [callLedgerEffect, List.mem_cons, List.not_mem_nil, or_false] at hd
   subst hd
-  refine ⟨by simp, ?_⟩
+  refine ⟨by simp, ?_, by simp [LedgerDelta.reowns]⟩
   simp only [LedgerDelta.produces_create, List.mem_singleton]
   intro h
   exact absurd h.symm (FreshSupply.never_reissued (.refl _) (by decide))
@@ -439,7 +510,8 @@ theorem call_has_two_substeps : callImportWriteFile.substeps.length = 2 := rfl
 /-- If the return-address write faults, the import-table read has already
 happened. This is the fact `docs/MEMORY_MODEL.md` §1 forbids assuming away. -/
 theorem call_import_read_survives_stack_fault :
-    (callImportWriteFile.visibleEffects 1).length = 1 := rfl
+    callImportWriteFile.visibleEffects? 1 =
+      some [access importProvenance ⟨2048, 8⟩ 0x3000 .read .readOnly 8 true false] := rfl
 
 /-- The `call` claims no atomicity across its two accesses, so its profile owes
 no justification for one. -/

@@ -204,4 +204,151 @@ theorem not_conflicts_fence_left {a b : MemoryEvent} (h : a.kind = .fence) :
 
 end MemoryEvent
 
+/-!
+## From a declared access to an event
+
+An access declares what an operation *intends*; an event records what happened.
+The bridge is what makes the vocabulary usable rather than decorative: an ISA
+author declares accesses, and M2's `applyAccess` turns each performed access into
+an event without either side inventing a second notion of what was touched.
+-/
+
+/--
+The event kind an intent gives rise to, if any.
+
+`none` for an inert intent, which reads, writes, and executes nothing. That case
+is already rejected by `AccessDescriptor.WellFormed.notInert`; returning `none`
+rather than picking a plausible kind keeps the rejection rather than papering
+over it (`docs/FOUNDATION.md` law 8).
+
+An instruction fetch maps to , because  reads. The
+permission demand that distinguishes a fetch from a data read is carried by the
+descriptor separately, not by the event kind.
+-/
+def AccessIntent.eventKind? (intent : AccessIntent) : Option EventKind :=
+  if intent.reads && intent.writes then some .readModifyWrite
+  else if intent.writes then some .write
+  else if intent.reads then some .read
+  else Option.none
+
+@[simp] theorem AccessIntent.eventKind?_read : AccessIntent.read.eventKind? = some .read := rfl
+
+@[simp] theorem AccessIntent.eventKind?_write :
+    AccessIntent.write.eventKind? = some .write := rfl
+
+@[simp] theorem AccessIntent.eventKind?_readWrite :
+    AccessIntent.readWrite.eventKind? = some .readModifyWrite := rfl
+
+/-- An inert intent yields no event, matching the descriptor's own rejection
+of it. -/
+theorem AccessIntent.eventKind?_eq_none_iff {intent : AccessIntent} :
+    intent.eventKind? = Option.none ↔ intent.IsInert := by
+  obtain ⟨reads, writes, _, _, _⟩ := intent
+  cases reads <;> cases writes <;> simp [eventKind?, IsInert]
+
+/-- The event kind reads exactly when the intent does. -/
+theorem AccessIntent.reads_eventKind? {intent : AccessIntent} {kind : EventKind}
+    (h : intent.eventKind? = some kind) : kind.reads = intent.reads := by
+  obtain ⟨reads, writes, _, _, _⟩ := intent
+  cases reads <;> cases writes <;> simp [eventKind?] at h <;> subst h <;> rfl
+
+/-- The event kind writes exactly when the intent does. -/
+theorem AccessIntent.writes_eventKind? {intent : AccessIntent} {kind : EventKind}
+    (h : intent.eventKind? = some kind) : kind.writes = intent.writes := by
+  obtain ⟨reads, writes, _, _, _⟩ := intent
+  cases reads <;> cases writes <;> simp [eventKind?] at h <;> subst h <;> rfl
+
+/-- Every event an access produces touches memory. An access is never a fence or
+a control event; those arise from operations that declare no access at all. -/
+theorem AccessIntent.touchesMemory_eventKind? {intent : AccessIntent} {kind : EventKind}
+    (h : intent.eventKind? = some kind) : kind.touchesMemory = true := by
+  obtain ⟨reads, writes, _, _, _⟩ := intent
+  cases reads <;> cases writes <;> simp [eventKind?] at h <;> subst h <;> rfl
+
+namespace MemoryEvent
+
+/--
+Build the event recording that `d` was performed with outcome `status`.
+
+`none` exactly when the intent is inert, so an operation that declared it touches
+nothing produces no event rather than an empty one.
+-/
+def ofAccess? (id : EventId) (contextKind : ContextKind) (cause : EventCause)
+    (d : AccessDescriptor) (status : AccessStatus)
+    (valueRead valueWritten : Option ByteSeq) : Option MemoryEvent :=
+  (d.intent.eventKind?).map fun kind =>
+    { id := id
+      context := { id := d.context, kind := contextKind }
+      cause := cause
+      space := d.space
+      provenance := d.provenance
+      range := d.range
+      kind := kind
+      valueRead := valueRead
+      valueWritten := valueWritten
+      ordering := d.ordering
+      status := status }
+
+/-- The event an access produces records exactly the access's own range. Nothing
+in the bridge widens or narrows what was touched. -/
+@[simp] theorem range_of_ofAccess? {id : EventId} {contextKind : ContextKind}
+    {cause : EventCause} {d : AccessDescriptor} {status : AccessStatus}
+    {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
+    (h : ofAccess? id contextKind cause d status valueRead valueWritten = some e) :
+    e.range = d.range := by
+  simp only [ofAccess?, Option.map_eq_some_iff] at h
+  obtain ⟨_, _, rfl⟩ := h
+  rfl
+
+/-- The committed range of the event agrees with the committed range of the
+access. This is what lets an initialization argument stated on the descriptor be
+used on the event. -/
+theorem committedRange_of_ofAccess? {id : EventId} {contextKind : ContextKind}
+    {cause : EventCause} {d : AccessDescriptor} {status : AccessStatus}
+    {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
+    (h : ofAccess? id contextKind cause d status valueRead valueWritten = some e) :
+    e.committedRange = d.committedRange status := by
+  simp only [ofAccess?, Option.map_eq_some_iff] at h
+  obtain ⟨_, _, rfl⟩ := h
+  rfl
+
+/--
+Event well-formedness follows from the values having the lengths the status
+reports.
+
+The payoff: an ISA author who declares a well-formed access and supplies values
+of the committed length gets a well-formed event, rather than re-proving the
+event conditions per instruction.
+-/
+theorem wellFormed_ofAccess? {id : EventId} {contextKind : ContextKind}
+    {cause : EventCause} {d : AccessDescriptor} {status : AccessStatus}
+    {valueRead valueWritten : Option ByteSeq} {e : MemoryEvent}
+    (h : ofAccess? id contextKind cause d status valueRead valueWritten = some e)
+    (readPresent : d.intent.reads = true → valueRead.isSome)
+    (readAbsent : d.intent.reads = false → valueRead = Option.none)
+    (writePresent : d.intent.writes = true → valueWritten.isSome)
+    (writeAbsent : d.intent.writes = false → valueWritten = Option.none)
+    (readLen : ∀ bytes, valueRead = some bytes →
+      bytes.length = (d.committedRange status).size)
+    (writeLen : ∀ bytes, valueWritten = some bytes →
+      bytes.length = (d.committedRange status).size)
+    (statusOk : status.WellFormed d.range.size) : e.WellFormed := by
+  have hcommitted := committedRange_of_ofAccess? h
+  simp only [ofAccess?, Option.map_eq_some_iff] at h
+  obtain ⟨kind, hkind, rfl⟩ := h
+  have hreads := AccessIntent.reads_eventKind? hkind
+  have hwrites := AccessIntent.writes_eventKind? hkind
+  have htouches := AccessIntent.touchesMemory_eventKind? hkind
+  exact
+    { readValuePresent := fun hr => readPresent (hreads ▸ hr)
+      readValueAbsent := fun hr => readAbsent (hreads ▸ hr)
+      writeValuePresent := fun hw => writePresent (hwrites ▸ hw)
+      writeValueAbsent := fun hw => writeAbsent (hwrites ▸ hw)
+      noLocationWhenUntouched := fun hu => absurd htouches (by rw [hu]; simp)
+      writtenLength := fun bytes hb => hcommitted ▸ writeLen bytes hb
+      readLength := fun bytes hb => hcommitted ▸ readLen bytes hb
+      statusWellFormed := statusOk }
+
+end MemoryEvent
+
 end Grass.Memory

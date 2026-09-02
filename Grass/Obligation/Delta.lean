@@ -68,17 +68,71 @@ def produces : LedgerDelta → List ObligationId
   | .transfer _ _ => []
 
 /--
-`delta.PreservesIdentity id` holds when `delta` leaves `id` exactly where it was.
+The identities this delta leaves in place but reassigns to another owner.
 
-This is the framing predicate the M5 ledger law uses to justify not mentioning
-an obligation: an untouched obligation is preserved because no delta consumed or
-produced it.
+Separate from `consumes` and `produces` because a transfer does neither: the duty
+survives with its identity intact. It is nonetheless a change to that
+obligation's row in the ledger, which is why `PreservesIdentity` has to see it.
+-/
+def reowns : LedgerDelta → List ObligationId
+  | .transfer id _ => [id]
+  | .create _ | .discharge _ | .split _ _ | .join _ _ => []
+
+/--
+`delta.PreservesIdentity id` holds when `delta` leaves `id` exactly as it was.
+
+This is the framing predicate the M5 ledger law uses to justify not mentioning an
+obligation. It must therefore mean *untouched*, and an earlier version did not:
+it checked only `consumes` and `produces`, so it held for the very obligation a
+transfer had just re-owned. Any frame rule of the form
+`PreservesIdentity id → ledger[id] unchanged` would have been false at exactly
+the transfers `docs/OBLIGATIONS.md` §1 cares most about.
 -/
 def PreservesIdentity (delta : LedgerDelta) (id : ObligationId) : Prop :=
-  id ∉ delta.consumes ∧ id ∉ delta.produces
+  id ∉ delta.consumes ∧ id ∉ delta.produces ∧ id ∉ delta.reowns
 
 instance (delta : LedgerDelta) (id : ObligationId) : Decidable (delta.PreservesIdentity id) :=
-  inferInstanceAs (Decidable (_ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+
+/--
+`delta.WellFormed` rules out the deltas that would drop or fabricate a duty.
+
+`docs/OBLIGATIONS.md` §2: "Dropping, duplicating, or fabricating obligations is
+forbidden", and `docs/FOUNDATION.md` law 7 is the same rule stated as no
+obligation disappearance. Two constructors can express a violation on their own,
+and this is what closes them:
+
+- `split source []` consumes an obligation and produces nothing, destroying a
+  duty without discharging it;
+- `join [] into` produces an obligation from no sources, inventing one.
+
+The `Nodup` conditions close the duplication half: a split that produced the same
+identity twice, or a join that consumed one twice, would let a single duty be
+counted as two.
+-/
+def WellFormed : LedgerDelta → Prop
+  | .create _ => True
+  | .discharge _ => True
+  | .split _ into => into ≠ [] ∧ (into.map Obligation.id).Nodup
+  | .join sources _ => sources ≠ [] ∧ sources.Nodup
+  | .transfer _ _ => True
+
+@[simp] theorem wellFormed_create (obligation : Obligation) :
+    (LedgerDelta.create obligation).WellFormed := trivial
+
+@[simp] theorem wellFormed_discharge (id : ObligationId) :
+    (LedgerDelta.discharge id).WellFormed := trivial
+
+@[simp] theorem wellFormed_transfer (id : ObligationId) (owner : ContextId) :
+    (LedgerDelta.transfer id owner).WellFormed := trivial
+
+/-- A split into nothing is not a split; it is a disappearance. -/
+theorem not_wellFormed_split_nil (source : ObligationId) :
+    ¬ (LedgerDelta.split source []).WellFormed := fun h => h.1 rfl
+
+/-- A join from nothing is not a join; it is a fabrication. -/
+theorem not_wellFormed_join_nil (into : Obligation) :
+    ¬ (LedgerDelta.join [] into).WellFormed := fun h => h.1 rfl
 
 @[simp] theorem consumes_transfer (id : ObligationId) (owner : ContextId) :
     (LedgerDelta.transfer id owner).consumes = [] := rfl
@@ -99,22 +153,39 @@ instance (delta : LedgerDelta) (id : ObligationId) : Decidable (delta.PreservesI
     (LedgerDelta.discharge id).produces = [] := rfl
 
 /--
-A transfer preserves every identity, including the one it moves.
+A transfer leaves every *other* identity alone.
 
-This is worth stating because it is the fact that distinguishes transfer from
-discharge-and-recreate: `docs/OBLIGATIONS.md` §3 lets a terminal edge report
-`transferred` only when "a named live owner accepted it", and a transfer that
-minted a new identity would break the correspondence between the obligation that
-was created and the one that was accepted.
+Note the `h`. The obligation being moved is emphatically not preserved: its owner
+changes, which is the whole content of a transfer. An earlier version of this
+theorem quantified over all `id`, which made `PreservesIdentity` useless as a
+frame rule precisely where transfers occur.
+
+What a transfer does preserve about the moved obligation is its *identity*, and
+that is `identity_survives_transfer` below. `docs/OBLIGATIONS.md` §3 lets a
+terminal edge report `transferred` only when "a named live owner accepted it", so
+the correspondence between the obligation created and the one accepted has to
+survive; a transfer that minted a new identity would break it.
 -/
-theorem preservesIdentity_transfer (moved : ObligationId) (owner : ContextId)
-    (id : ObligationId) : (LedgerDelta.transfer moved owner).PreservesIdentity id :=
-  ⟨by simp, by simp⟩
+theorem preservesIdentity_transfer_of_ne {moved id : ObligationId} (h : id ≠ moved)
+    (owner : ContextId) : (LedgerDelta.transfer moved owner).PreservesIdentity id :=
+  ⟨by simp, by simp, by simp [reowns, h]⟩
+
+/-- The moved obligation is not preserved: a transfer is a change to its row. -/
+theorem not_preservesIdentity_transfer_self (moved : ObligationId) (owner : ContextId) :
+    ¬ (LedgerDelta.transfer moved owner).PreservesIdentity moved := by
+  rintro ⟨_, _, hr⟩
+  exact hr (by simp [reowns])
+
+/-- A transfer neither consumes nor produces, so the duty's identity survives it.
+This is what distinguishes transfer from discharge-and-recreate. -/
+theorem identity_survives_transfer (moved : ObligationId) (owner : ContextId) :
+    (LedgerDelta.transfer moved owner).consumes = [] ∧
+      (LedgerDelta.transfer moved owner).produces = [] := ⟨rfl, rfl⟩
 
 /-- A discharge consumes exactly the obligation it names and no other. -/
 theorem preservesIdentity_discharge_of_ne {discharged id : ObligationId}
     (h : id ≠ discharged) : (LedgerDelta.discharge discharged).PreservesIdentity id :=
-  ⟨by simp [h], by simp⟩
+  ⟨by simp [h], by simp, by simp [reowns]⟩
 
 end LedgerDelta
 
@@ -137,9 +208,21 @@ def consumes (effect : LedgerEffect) : List ObligationId :=
 def produces (effect : LedgerEffect) : List ObligationId :=
   effect.flatMap LedgerDelta.produces
 
+/-- Every identity this effect reassigns to a new owner. -/
+def reowns (effect : LedgerEffect) : List ObligationId :=
+  effect.flatMap LedgerDelta.reowns
+
 /-- `effect.PreservesIdentity id` holds when no delta of `effect` touches `id`. -/
 def PreservesIdentity (effect : LedgerEffect) (id : ObligationId) : Prop :=
   ∀ delta ∈ effect, delta.PreservesIdentity id
+
+/-- `effect.WellFormed` holds when every delta is well formed. -/
+def WellFormed (effect : LedgerEffect) : Prop :=
+  ∀ delta ∈ effect, delta.WellFormed
+
+@[simp] theorem wellFormed_nil : WellFormed [] := by simp [WellFormed]
+
+@[simp] theorem reowns_nil : reowns [] = [] := rfl
 
 /-- The empty effect changes nothing, which is the framing base case. -/
 @[simp] theorem preservesIdentity_nil (id : ObligationId) :

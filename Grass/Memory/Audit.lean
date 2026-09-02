@@ -18,11 +18,24 @@ from this one. The types here are named `AuditViolation` and
 the `@audit(.stdoutUnavailable)` annotations in the Spike 1 source, which
 classify an ordinary modelled failure, are visibly not violations of this kind.
 
-The append-only property is enforced structurally: this module exposes `append`
-and nothing else. There is no erase, no filter, no mask, and no way to construct
-a shorter ledger from a longer one. `append_isPrefix` makes growth monotone, so a
-violation recorded at any point in an execution is present in every later ledger,
-which is what makes `IsEmpty` at the end a statement about the whole run.
+The append-only property is enforced structurally: the constructor and the record
+list are `private`, so outside this module the only way to obtain a ledger is
+`empty` or `append`. There is no erase, no filter, no mask, and no way to build a
+shorter ledger from a longer one — not by convention, but because
+`AuditViolationLedger.mk` and the `records` field do not exist to a consumer.
+
+That is worth stating plainly, because an earlier version of this module carried
+this same paragraph while leaving the constructor public, which made it false:
+`⟨dirty.records.drop 1⟩` laundered a ledger in one line, and `VerifiedProgram`'s
+emptiness proof would then have been a claim about a value any caller could
+manufacture.
+
+`append_isPrefix` makes growth monotone, so a violation recorded at any point in
+an execution is present in every later ledger, which is what makes `IsEmpty` at
+the end a statement about the whole run.
+
+`recordCount` and `records?` are the read-only views diagnostics need. Reading a
+ledger is safe; the prohibition is on constructing one.
 -/
 
 namespace Grass.Memory
@@ -88,11 +101,19 @@ The append-only ledger of audit violations.
 Exposed operations are `empty` and `append`. Nothing removes a record.
 -/
 structure AuditViolationLedger where
-  /-- The recorded violations, oldest first. -/
-  records : List AuditViolation
-deriving DecidableEq, Repr
+  private mk ::
+  private records : List AuditViolation
 
 namespace AuditViolationLedger
+
+instance : DecidableEq AuditViolationLedger := fun a b =>
+  if h : a.records = b.records then
+    .isTrue (by cases a; cases b; simp_all)
+  else
+    .isFalse (by intro eq; exact h (congrArg AuditViolationLedger.records eq))
+
+instance : Repr AuditViolationLedger :=
+  ⟨fun ledger prec => reprPrec ledger.records prec⟩
 
 /-- The ledger of a program that has violated nothing. -/
 def empty : AuditViolationLedger := ⟨[]⟩
@@ -117,16 +138,34 @@ def IsEmpty (ledger : AuditViolationLedger) : Prop := ledger.records = []
 instance (ledger : AuditViolationLedger) : Decidable ledger.IsEmpty :=
   inferInstanceAs (Decidable (_ = _))
 
+/-- A read-only view of the recorded violations, for diagnostics and reports. -/
+def records? (ledger : AuditViolationLedger) : List AuditViolation := ledger.records
+
+/-- How many violations have been recorded. -/
+def recordCount (ledger : AuditViolationLedger) : Nat := ledger.records.length
+
 @[simp] theorem isEmpty_empty : empty.IsEmpty := rfl
 
-@[simp] theorem records_append (ledger : AuditViolationLedger) (violation : AuditViolation) :
-    (ledger.append violation).records = ledger.records ++ [violation] := rfl
+@[simp] theorem recordCount_empty : empty.recordCount = 0 := rfl
+
+@[simp] theorem records?_append (ledger : AuditViolationLedger) (violation : AuditViolation) :
+    (ledger.append violation).records? = ledger.records? ++ [violation] := rfl
+
+@[simp] theorem recordCount_append (ledger : AuditViolationLedger)
+    (violation : AuditViolation) :
+    (ledger.append violation).recordCount = ledger.recordCount + 1 := by
+  simp [recordCount, append]
+
+/-- Emptiness is visible through the read-only view, so a consumer can check it
+without the private field. -/
+theorem isEmpty_iff_records?_nil (ledger : AuditViolationLedger) :
+    ledger.IsEmpty ↔ ledger.records? = [] := Iff.rfl
 
 /-- Appending never produces an empty ledger. A violation cannot be masked by
 recording something after it. -/
 @[simp] theorem not_isEmpty_append (ledger : AuditViolationLedger)
     (violation : AuditViolation) : ¬ (ledger.append violation).IsEmpty := by
-  simp [IsEmpty]
+  simp [IsEmpty, append]
 
 /--
 Growth is monotone: every earlier ledger is a prefix of every later one.
@@ -136,7 +175,7 @@ violation were recorded at any step, the prefix property carries it forward to
 the final ledger, where `IsEmpty` fails.
 -/
 theorem append_isPrefix (ledger : AuditViolationLedger) (violation : AuditViolation) :
-    ledger.records <+: (ledger.append violation).records :=
+    ledger.records? <+: (ledger.append violation).records? :=
   ⟨[violation], rfl⟩
 
 /--
@@ -146,9 +185,9 @@ Contrapositive of the prefix law, and the form a `VerifiedProgram` proof uses:
 from emptiness at the end, nothing was ever recorded.
 -/
 theorem isEmpty_of_isPrefix_of_isEmpty {earlier later : AuditViolationLedger}
-    (prefix_ : earlier.records <+: later.records) (h : later.IsEmpty) : earlier.IsEmpty := by
+    (prefix_ : earlier.records? <+: later.records?) (h : later.IsEmpty) : earlier.IsEmpty := by
   obtain ⟨suffix, hs⟩ := prefix_
-  rw [IsEmpty] at h ⊢
+  rw [isEmpty_iff_records?_nil] at h ⊢
   rw [h] at hs
   exact List.append_eq_nil_iff.mp hs |>.1
 

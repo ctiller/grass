@@ -46,8 +46,16 @@ def write : AccessIntent := { writes := true }
 /-- A non-atomic read-modify-write, such as `add [mem], reg`. -/
 def readWrite : AccessIntent := { reads := true, writes := true }
 
-/-- An instruction fetch. -/
-def execute : AccessIntent := { executes := true }
+/--
+An instruction fetch.
+
+`reads` as well as `executes`: a fetch really does observe the bytes, and the
+consistency model has to account for that observation like any other. What
+`executes` adds is the permission demand, which `Permission.Permits` checks
+separately. An intent that executed without reading would describe an operation
+that consumed instructions it never looked at.
+-/
+def execute : AccessIntent := { reads := true, executes := true }
 
 /-- An atomic read-modify-write, such as a `lock`-prefixed operation. -/
 def atomicReadWrite : AccessIntent := { reads := true, writes := true, isAtomic := true }
@@ -58,13 +66,21 @@ def atomicRead : AccessIntent := { reads := true, isAtomic := true }
 /-- An atomic store. -/
 def atomicWrite : AccessIntent := { writes := true, isAtomic := true }
 
-/-- An access that does nothing is not an access; profiles must reject it rather
-than treat it as a harmless no-op (`docs/FOUNDATION.md` law 8). -/
+/--
+An access that touches no bytes is not an access; profiles must reject it rather
+than treat it as a harmless no-op (`docs/FOUNDATION.md` law 8).
+
+Inertness is about `reads` and `writes` only. `executes` is a permission demand
+rather than a way of touching bytes — see `execute` above, which reads — so an
+intent that set `executes` alone would still be inert, and is rejected. That is
+the strict direction: it describes an operation that consumed instructions it
+never observed.
+-/
 def IsInert (intent : AccessIntent) : Prop :=
-  intent.reads = false ∧ intent.writes = false ∧ intent.executes = false
+  intent.reads = false ∧ intent.writes = false
 
 instance (intent : AccessIntent) : Decidable intent.IsInert :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _))
 
 @[simp] theorem not_isInert_read : ¬ read.IsInert := by simp [IsInert, read]
 
