@@ -378,10 +378,9 @@ allocation leave memory agreeing at every offset whichever order they ran in.
 Agreement rather than equality, and that is not a weakening to make a proof go
 through: the byte store is a journal, so the two orders leave different write
 histories and no proof could make those states equal. `AgreesOn` compares *cells*,
-so it carries initialization as well as values — which matters, because `denialOf`
-reads `RangeInitialized`, and a byte-only agreement would leave two orders able to
-disagree about whether a later access is refused. An earlier version compared
-bytes only and review built that pair.
+so it carries initialization as well as values. It does not carry the refusal
+decision — `denialOf` reads allocation metadata too — and an earlier version of
+this paragraph said it did.
 
 Read the conclusion precisely: it is about the resulting *state*, not about the
 `AccessResult`s. Decision stability is a proof ingredient rather than part of what

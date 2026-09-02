@@ -197,17 +197,6 @@ instance (state : MemoryState) (id : AllocId) (offset : Nat) :
     Decidable (state.InitializedAt id offset) :=
   inferInstanceAs (Decidable (_ = _))
 
-/-- The bytes `id` holds over `range`, if every one of them has a value. Partial
-coverage reads as `none` rather than as a shorter sequence, because a caller that
-asked for `range` and received fewer bytes would have to decide which ones it
-got. -/
-def readBytes (state : MemoryState) (id : AllocId) (range : ByteRange) :
-    Option ByteSeq :=
-  match state.allocations.lookup id with
-  | Option.none => Option.none
-  | some record =>
-      (List.range range.size).mapM fun i => record.bytes.byteAt? (range.start + i)
-
 /-- `state.RangeInitialized id range` holds when every offset of `range` is
 initialized in `id`. Read off the byte store, so it says what the writes said. -/
 def RangeInitialized (state : MemoryState) (id : AllocId) (range : ByteRange) : Prop :=
@@ -467,10 +456,10 @@ theorem initializedAt_write_iff_of_not_covers (state : MemoryState) (id : AllocI
 
 Stated as `AgreesOn` rather than as state equality: the byte store is a journal,
 so the two orders leave different write histories, and no proof will make those
-equal. `AgreesOn` compares cells, so it carries initialization as well as values
-and a caller can conclude both `AgreesOn.byteAt?` and `AgreesOn.initializedAt`.
-`ByteStore.cellAt?_write_comm` is where the content is, and this wrapper no longer
-throws away half of what it proves.
+equal. `AgreesOn` compares cells, so a caller can conclude both `AgreesOn.byteAt?`
+and `AgreesOn.initializedAt`. `ByteStore.cellAt?_write_comm` is where the content
+is. It does not carry the refusal decision, which needs allocation metadata as
+well; see `AgreesOn`.
 -/
 theorem write_comm (state : MemoryState) (id : AllocId) {a b : Nat}
     {bytesA bytesB : ByteSeq} {initA initB : Bool}

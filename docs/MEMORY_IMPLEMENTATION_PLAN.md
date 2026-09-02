@@ -340,7 +340,7 @@ instead of a theorem, because it is the stronger form.
 | fault choices are structurally in range | `Op.FaultPlan` carries a `Fin`; the bad case is unrepresentable |
 | partial RMW retains its completed read | `Committed` counts reads and writes separately; `faulted_rmw_keeps_its_read` |
 | ledger mutation occurs iff the delta is applicable | `Op.obligations_unchanged_unless_committed`; `LedgerDelta.Applicable` requires a typed `ProtocolAuthority`, and `Op.LedgerEffectApplicable` checks each delta against the ledger the previous ones left |
-| a recorded fault is never discarded | `Op.runStep_records_the_fault`, with `Op.performAccess_preserves_faults` |
+| a fault the operation reached is never discarded | `Op.runStep_records_the_fault`, with `Op.performAccess_preserves_faults`. **The property is weaker than the row used to claim.** A fault reported for a substep the operation never reached, because an earlier one was denied, is not recorded: `Op.runStep_records_no_fault_after_refusal`. That is a semantic decision and it is provisional — see §4.3. |
 | failed ledger mutation is recorded and non-mutating | `Op.ledger_refusal_is_recorded`, `Op.refused_preserves_everything_but_the_ledger` |
 | every emitted violation class is declared | `Op.refusalOf_class_declared`, over `Op.AuthorityProvider.emittedClasses` — the set grows with the provider list, so an authority's own nominal class is covered too; `Tests/Op/FakeIsa.lean`'s `undeclared_provider_class_cannot_form_a_policy` and `custom_violation_class_is_usable` are the two sides |
 | external operation families require no Grass edits | `Tests/Op/FakeIsa.lean`, and reproduced independently by a reviewer building three families outside the repo |
@@ -505,11 +505,8 @@ because a profile may still want a machine that reads zeros. It and `Tests/Op/Fa
 runs the whole M1 seam over it unchanged, which is the evidence that the store
 did not cost a redesign. It takes what a store writes *and* what an indeterminate
 read observes as parameters. The second is the one worth naming: bytes that are
-not initialized have no value the model can read off the store, an access
-demanding `.allBytesInitialized` never reaches the oracle because `denialOf`
-refuses it first, and so the oracle is consulted only where a profile has already
-admitted an indeterminate read — at which point the profile owes what it
-observes. Defaulting it to zero would be law 8's permissive fallback wearing a
+not initialized have no value the model can read off the store, a profile that admits an
+indeterminate read owes what it observes. Defaulting it to zero would be law 8's permissive fallback wearing a
 plausible number.
 
 `Grass/Memory/Apply.lean` is `applyAccess`, total and executable, with the laws
@@ -655,6 +652,17 @@ one outright defect that had already merged — see §3.11's denial row.
   theorem is derivable rather than false. Until it exists, a consumer following the
   prose to `runAccesses_frames_untouched` over the survivors would have an unsound
   framing argument, which is how review found it.
+- **`AgreesOn` does not carry the refusal decision.** It compares cells, which is
+  bytes and initialization. `denialOf` also reads `extent`, `epoch`, `space`,
+  `permission` and `live`, so two states can agree and refuse differently — review
+  built that pair. `applyAccess_comm` is sound because `write_preserves_metadata`
+  holds separately, but there is no `AgreesOn → denialOf` lemma and a caller
+  wanting decision stability has to assemble it.
+- **`runStep_records_the_fault`'s `hreached` has no abstract discharge.** A caller
+  can close it by `decide` on a concrete fixture. There is no lemma taking "no
+  survivor is refused" to it, because that has to thread state through the
+  `runAccesses` recursion. The theorem is not vacuous and is currently only usable
+  concretely.
 - **`ByteStore` structural equality observes the journal.** Every exported
   *theorem* is representation-independent, but the derived `DecidableEq` is not:
   two pointwise-identical stores built by different write sequences are provably
@@ -664,6 +672,38 @@ one outright defect that had already merged — see §3.11's denial row.
   — but it is a limit rather than an oversight, and compaction will change it.
 
 - Compaction for the byte store, per §4.1.
+
+One more defect this milestone found in already-merged code, recorded because a
+closure property depended on it. `FaultVisibility.transactional` declares "no step
+is visible unless all are". `visibleEffects?` returned `[]` for it, which answers
+for the substeps *before* the failure — and nothing answered for the faulting
+substep's own partial write, so `runStep` committed it. A transactional sequence
+therefore discarded its completed substeps and kept the faulting one's prefix,
+which is the reverse of what it declares.
+`Grass/Memory/Substep.lean`'s `faultingEffectVisible` is the missing question, and
+`Tests/Op/FakeIsa.lean`'s `transactional_exposes_nothing` is the regression. The
+fault is still recorded: nothing being visible is a claim about committed effects,
+not about whether the machine faulted.
+
+### 4.3 A semantic decision this milestone made and does not own
+
+Fixing the denial defect forced a question the corpus does not answer: **when a
+denial stops an operation before the substep the machine reported a fault at, is
+that fault recorded?**
+
+M2 answers *no*, on the reasoning that a denied substep did not complete, the
+model has declined to follow the execution past it, and attaching a fact about
+substep *n* to a state frozen at substep *k < n* would be inventing history. The
+opposite reading is arguable and was argued in review: a `RaisedFault` is
+diagnostic rather than an effect, keeping it commits nothing, and `FaultPlan` is
+documented as a fact the stepper is *given* rather than one it predicts, so
+discarding it is the model overruling its own input.
+
+This plan is tier four and cannot settle it. The behaviour is implemented and
+tested, the property in §3.11 is stated to match, and the decision is provisional
+until [MEMORY_MODEL.md](MEMORY_MODEL.md) §1 or [DECISIONS.md](DECISIONS.md) rules.
+Raised with the design owner rather than left in a code comment, which is where it
+sat when review found it.
 
 Exit criteria: the M1 reference instruction set steps end to end over a
 hand-built `MemState`; the framing lemma set is sufficient to discharge a

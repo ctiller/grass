@@ -151,6 +151,8 @@ inductive Alpha where
   | staleEpoch
   /-- A store split across two substeps under a profile-owned visibility rule. -/
   | splitStore
+  /-- The same split store, declared transactional. -/
+  | atomicSplitStore
   /-- Discharges an obligation that was never live. -/
   | dischargeGhost
   /-- Joins two obligations that were never live into a new one. -/
@@ -328,6 +330,14 @@ instance : HasOperationFacets Alpha where
                 [ .access (acc bufferProv ⟨0, 4⟩ 0x1000 .write .readWrite false true)
                   , .access (acc bufferProv ⟨4, 4⟩ 0x1004 .write .readWrite false true) ]
               onFault := .profileSpecific ⟨"fake.splitStore"⟩ }
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .atomicSplitStore =>
+        { memoryEffects := some
+            { substeps :=
+                [ .access (acc bufferProv ⟨0, 4⟩ 0x1000 .write .readWrite false true)
+                  , .access (acc bufferProv ⟨4, 4⟩ 0x1004 .write .readWrite false true) ]
+              onFault := .transactional ⟨"fake.atomicSplitStore"⟩ }
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
 
@@ -946,6 +956,43 @@ theorem a_denial_before_the_fault_records_no_fault :
           if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 8
           else .none)).state? = some s →
       s.faults = [] := by
+  intro s hs
+  cases hs
+  decide
+
+/-! ## A transactional sequence exposes nothing when it faults
+
+`FaultVisibility.transactional` says "no step is visible unless all are".
+`visibleEffects?` returned `[]` for it, which handles the substeps *before* the
+failure — and `runStep` then committed the faulting substep's own partial write
+anyway, because nothing asked whether that one was visible. So a transactional
+sequence discarded its completed substep and kept the faulting one's prefix, which
+is the reverse of what it declares. Local adversarial review built the case.
+`SubstepSequence.faultingEffectVisible` is the missing question. -/
+
+/-- With the fault at the second substep, neither half is visible: not the
+completed first, and not the faulting second's prefix. Both bytes still read as
+the zeros the allocation started with, rather than the `0xAB` a store writes. -/
+theorem transactional_exposes_nothing :
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.atomicSplitStore) thread₀
+        .thread ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 4
+          else .none)).state? = some s →
+      s.memory.byteAt? bufferAlloc 0 = some 0x00 ∧
+      s.memory.byteAt? bufferAlloc 4 = some 0x00 ∧
+      s.events = [] := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- The fault is still recorded. Nothing being *visible* is a statement about
+committed effects, not about whether the machine faulted. -/
+theorem transactional_still_records_its_fault :
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.atomicSplitStore) thread₀
+        .thread ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+          if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 4
+          else .none)).state? = some s →
+      s.faults.map RaisedFault.fault = [FaultClassId.pageFault] := by
   intro s hs
   cases hs
   decide

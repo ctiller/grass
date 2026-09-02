@@ -212,6 +212,42 @@ def visibleEffects? (seq : SubstepSequence) (failedAt : Nat) :
   | .transactional _ => some []
   | .profileSpecific _ => Option.none
 
+/--
+Whether the faulting substep's *own* committed prefix survives.
+
+`visibleEffects?` answers for the substeps before the failure. This answers for
+the failing one, and they are different questions: a store that faults partway
+through has written the bytes it wrote, which `priorEffectsVisible` admits and
+`transactional` does not.
+
+Not having asked the second question was a defect. `runStep` took
+`visibleEffects?`'s answer for the prefix and then committed the faulting
+substep unconditionally, so a `transactional` sequence discarded every completed
+substep and kept the faulting one's partial write — the exact reverse of "no step
+is visible unless all are". Local adversarial review built that case.
+
+`profileSpecific` answers `false` because this module cannot answer for it;
+`visibleEffects?` returns `none` there and `step` rejects, so the value is the
+conservative one for a branch that is not reached rather than a guess that is.
+-/
+def faultingEffectVisible (seq : SubstepSequence) : Bool :=
+  match seq.onFault with
+  | .priorEffectsVisible => true
+  | .transactional _ => false
+  | .profileSpecific _ => false
+
+@[simp] theorem faultingEffectVisible_priorEffectsVisible (substeps : List Substep) :
+    (SubstepSequence.mk substeps .priorEffectsVisible).faultingEffectVisible = true := rfl
+
+/-- **A transactional sequence exposes nothing when it faults**, its own faulting
+substep included. With `visibleEffects?_transactional`, this is the pair that makes
+`FaultVisibility.transactional`'s "no step is visible unless all are" true of the
+transition rather than only of the prefix. -/
+@[simp] theorem faultingEffectVisible_transactional (substeps : List Substep)
+    (justification : Name) :
+    (SubstepSequence.mk substeps (.transactional justification)).faultingEffectVisible =
+      false := rfl
+
 @[simp] theorem visibleEffects?_priorEffectsVisible (substeps : List Substep)
     (failedAt : Nat) :
     (SubstepSequence.mk substeps .priorEffectsVisible).visibleEffects? failedAt =

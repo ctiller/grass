@@ -665,9 +665,16 @@ def runStep (policy : StepPolicy) (state : MachineState) (sequence : SubstepSequ
                      substep := index.val }] }
             match sequence.substeps[index.val]? with
             | some (.access d) =>
-                performAccess policy faulted d
-                  (.faulted fault ((policy.oracle.answer faulted d).truncate committed))
-                  contextKind cause
+                -- The faulting substep's own partial commit is governed by the
+                -- sequence's visibility rule, like every other substep's.
+                -- Committing it unconditionally meant a `transactional` sequence
+                -- discarded its completed substeps and kept the faulting one's
+                -- prefix, which is the reverse of what `transactional` declares.
+                if sequence.faultingEffectVisible then
+                  performAccess policy faulted d
+                    (.faulted fault ((policy.oracle.answer faulted d).truncate committed))
+                    contextKind cause
+                else faulted
             | _ => faulted
 
 /--
@@ -837,9 +844,11 @@ theorem runStep_stops_at_refusal (policy : StepPolicy) (state : MachineState)
                     substep := index.val } : RaisedFault)] }
           match sequence.substeps[index.val]? with
           | some (.access d) =>
-              performAccess policy faulted d
-                (.faulted fault ((policy.oracle.answer faulted d).truncate committed))
-                contextKind cause
+              if sequence.faultingEffectVisible then
+                performAccess policy faulted d
+                  (.faulted fault ((policy.oracle.answer faulted d).truncate committed))
+                  contextKind cause
+              else faulted
           | _ => faulted) = _
   rw [hvisible]
   dsimp only
@@ -867,8 +876,10 @@ An access naming an address space the profile never declared is refused by the
 space lookup, before `refusalOf` runs, so
 `refused_preserves_everything_but_the_ledger` excludes it by hypothesis. Review
 pointed out that its docstring claimed *every* refusal path while this one sat
-outside. `unknown_space_preserves_everything_but_the_ledger` is that path's proof,
-so the pair of them together do cover every refusal.
+outside. `unknown_space_preserves_everything_but_the_ledger` is that path's proof.
+
+Two is still not all of them: `no_event_records_nothing` is the third, and review
+found the sentence claiming a pair sufficed.
 
 `step` rejects an access the profile does not admit before reaching here, so the
 branch is not reachable through `step` today. It is proved anyway: `performAccess`
@@ -884,6 +895,40 @@ theorem unknown_space_preserves_everything_but_the_ledger (policy : StepPolicy)
         violations := state.violations.append (violationOf d .wrongAddressSpace) } := by
   unfold performAccess
   rw [hspace]
+
+/--
+The branch that refuses nothing and records nothing.
+
+When `MemoryEvent.ofOutcome` yields no event and the outcome carries no violation,
+`performAccess` returns the state untouched without consulting `refusalOf` at all.
+So this is a third path distinct from the two theorems above, and review found the
+docstring there claiming a pair covered every refusal.
+
+It reaches this only for an *inert* access — one that neither reads nor writes —
+because `MemoryEvent.ofOutcome` returns `none` for a committed outcome only in that
+case. `AccessDescriptor.WellFormedIn.notInert` makes such a descriptor
+unadmittable, so `step` never gets here. The theorem exists anyway, for the reason
+`unknown_space_preserves_everything_but_the_ledger` gives: `performAccess` is
+public, and unreachable-by-construction-elsewhere is not proved harmless.
+
+Worth naming precisely, because it is the one place a *denial* goes unrecorded: an
+inert access over dead provenance is refused by `denialOf` and this branch returns
+before anything asks. Nothing commits either, so `docs/MEMORY_MODEL.md` §8's ban on
+erasing a violation is not broken by any reachable execution — but the branch is
+why `runStep`'s guard, which watches the violation count, cannot see it.
+-/
+theorem no_event_records_nothing (policy : StepPolicy) (state : MachineState)
+    (d : AccessDescriptor) (outcome : AccessOutcome d) (contextKind : ContextKind)
+    (cause : EventCause) (space : AddressSpace)
+    (hspace : policy.profile.vocabulary.addressSpaces.find? d.space = some space)
+    (hnoevent : MemoryEvent.ofOutcome state.eventSupply.fresh.1 contextKind cause space d
+      outcome = Option.none)
+    (hnoviolation : outcome.violation? = Option.none) :
+    performAccess policy state d outcome contextKind cause = state := by
+  unfold performAccess
+  rw [hspace]
+  simp only []
+  rw [hnoevent, hnoviolation]
 
 /--
 **A refused ledger mutation is recorded, not silent.**
@@ -964,13 +1009,13 @@ theorem runStep_extends_violations (policy : StepPolicy) (state : MachineState)
   · split
     · exact AuditViolationLedger.Extends.refl _
     · dsimp only
-      split
-      · exact runAccesses_extends_violations _ _ _ _ _
-      · split
-        · exact AuditViolationLedger.Extends.trans
-            (runAccesses_extends_violations _ _ _ _ _)
-            (performAccess_extends_violations _ _ _ _ _ _)
-        · exact runAccesses_extends_violations _ _ _ _ _
+      repeat' split
+      all_goals
+        first
+          | exact runAccesses_extends_violations _ _ _ _ _
+          | exact AuditViolationLedger.Extends.trans
+              (runAccesses_extends_violations _ _ _ _ _)
+              (performAccess_extends_violations _ _ _ _ _ _)
 
 /-! ## The memory framing laws apply to this transition
 
@@ -1094,18 +1139,22 @@ theorem runStep_records_the_fault (policy : StepPolicy) (state : MachineState)
                     substep := index.val } : RaisedFault)] }
           match sequence.substeps[index.val]? with
           | some (.access d) =>
-              performAccess policy faulted d
-                (.faulted fault ((policy.oracle.answer faulted d).truncate committed))
-                contextKind cause
+              if sequence.faultingEffectVisible then
+                performAccess policy faulted d
+                  (.faulted fault ((policy.oracle.answer faulted d).truncate committed))
+                  contextKind cause
+              else faulted
           | _ => faulted).faults, record.fault = fault
   rw [hvisible]
   simp only [hreached, ne_eq, not_true_eq_false, if_false]
-  split
-  · rw [performAccess_preserves_faults]
-    exact ⟨{ fault := fault, context := context, cause := cause, substep := index.val },
-      by simp, rfl⟩
-  · exact ⟨{ fault := fault, context := context, cause := cause, substep := index.val },
-      by simp, rfl⟩
+  repeat' split
+  all_goals
+    first
+      | (rw [performAccess_preserves_faults]
+         exact ⟨{ fault := fault, context := context, cause := cause, substep := index.val },
+           by simp, rfl⟩)
+      | exact ⟨{ fault := fault, context := context, cause := cause, substep := index.val },
+          by simp, rfl⟩
 
 /--
 **Every step extends the violation ledger.**
