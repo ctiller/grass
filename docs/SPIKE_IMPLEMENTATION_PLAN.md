@@ -142,6 +142,18 @@ target-side work it measures. `check-spike-sources.ps1` is the existing partial
 form; the ratchet requires the eventual command to emit a classified manifest
 rather than print a pass line.
 
+The baseline that ratchet starts from is clean. The two-view mirror contract
+holds today: all 123 fenced blocks across the five spike documents carry an
+immediate classification, block identities are unique, and all 20 authored
+blocks match their files in `Spikes/` byte for byte after newline
+normalization. The script itself cannot run on this machine, which has no
+PowerShell 7, so this was checked by reimplementing its three tests and
+negative-testing the reimplementation: changing one byte of
+`Spikes/1_Hello_World/Spec.lean` reports the mismatch, and deleting one
+classification comment from `docs/SPIKE_2.md` reports the unclassified block.
+So the drift this plan guards against is drift from a known-good state, not an
+unknown one.
+
 ## 6. Ordered plan
 
 Phases P0 and P1 are sequencing constraints on everything else. P2, P3 and P4
