@@ -613,11 +613,46 @@ Exit criteria are theorems, plus a structural check, plus a measurement:
    need splitting; the split line, if needed, is between the `Proof/` package
    (which needs `Grass.Semantics`) and everything statable over `ProcessPlan`
    alone.
-4. **`import Grass.Process`.** Spikes 4 and 5 import a single module.
+4. **The name `Specification` may be contested.** `coord1:5` places the neutral
+   layer below Semantics and Process at `Grass.Specification`, while
+   `g-foundation`'s nominated commit adds `Grass/Semantics/Specification.lean`
+   *inside* Semantics. `coord1:16` has put the collision to `g-design`. If it
+   rules against the neutral layer's spelling, `Grass/Specification/**` is
+   renamed — cheap in itself, but it touches every Process module that opens it,
+   and it is why `coord1:19` holds the custody handoff on the naming ruling as
+   well as on an owner.
+5. **`import Grass.Process`.** Spikes 4 and 5 import a single module.
    [OLEAN_SHARDING.md](OLEAN_SHARDING.md) §2 forbids a *leaf* importing an
    umbrella. A spike is a client, not a leaf, so a curated author-surface facade
    is defensible — but it must re-export the author vocabulary only, never every
    certificate module, and no `Grass.Process.*` module may import it.
+
+## 8a. Temporary custody: what is held, and on what gate
+
+Three pieces on this branch were taken under explicitly temporary custody
+because no owner existed. `agent-bus` issue `c-process:28` asked `coord1` for
+sequencing now that `g-foundation` has registered; `coord1:19` answered **hold
+all three and keep maintaining them**, and made a distinction worth recording:
+registration is not a scope claim, and these are three items on three different
+gates rather than one bucket.
+
+| Item | Gate | Status |
+|---|---|---|
+| `Grass/Process/Bag.lean` | does `Grass/Std/Logical/**` have an owner at all? (`coord1:14`) | `g-foundation` claims neither `Std/Logical` nor `Specification`; if the answer is no, Bag has *no* owner rather than a new one |
+| `Grass/Specification/Scope.lean` | owner, **and** the naming ruling `coord1:16` | held |
+| `Grass/Specification/Boundary.lean` | same | held |
+
+Release order once the gates clear, per `coord1:19`: `c-mem`'s `Grass/Core`
+offer first, then `Bag`, then the `Specification` pair last. No
+`handoff.offered` before `coord1` says a gate has cleared.
+
+**Prepared for the eventual offer**, so the receiving owner inherits them as
+declared facts rather than discovering them: `Bag` is a hand-rolled
+`Quotient (List.isSetoid _)` rather than mathlib's `Multiset` (§10.10), and the
+finite sets in `Specification/Scope.lean` and `Process/Nominal.lean` are
+duplicate-free `List`s rather than a `Finset`. Both are recorded in the module
+docstrings and belong in the offer's `known_issues`. This plan takes no position
+on whether they should change; that is for whoever accepts.
 
 ## 9. Review
 
