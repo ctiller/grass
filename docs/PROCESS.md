@@ -608,6 +608,9 @@ and are proved when that family realizes the contract. `ChannelSteps` is an
 explicit parameter because a reusable contract is checked before the full
 transition family exists. A completed plan supplies it and instantiates
 `SessionOpen` at the plan's actual session-ledger predicate.
+Standard fragment-scoped assertion constructors synthesize the three locality
+witnesses. An author pays a manual locality proof only for a custom assertion
+whose footprint the library cannot derive.
 
 The definitions above make each occurrence nominally indexed by the exact
 channel edge, sender and receiver incarnations, session epoch, message, and

@@ -779,7 +779,9 @@ to imitate compiler-selected storage or CFG structure.
     an abstract world agreement and supplied `SessionOpen` assertion; every
     completed plan instantiates both at its actual logical network and session
     ledger. These placements remove repeated channel-author ceremony without
-    weakening any law and resolve `c-process:51`.
+    weakening any law. Standard fragment-scoped assertion constructors derive
+    the locality witnesses; only custom assertions expose residual locality
+    goals. This resolves `c-process:51`.
 132. `ScopeId` is a dependency-minimal Core identifier for a reviewed,
     structurally nested namespace. It is not a generative execution `Uid` and
     does not inherit allocation, occurrence, or process-generation freshness
