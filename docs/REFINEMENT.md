@@ -159,30 +159,32 @@ structure StagedProcessPresentation
     {R : Type u} [ResourceModel R] {resources : R}
     (spec : SpecProcess resources) where
   network : ProcessPresentationNetwork resources
+  trace : NetworkTraceDenotation network
   resourceView : network.RoleSchema -> RequiredResourceView resources
   resourceRestrictionExact : forall schema,
     (network.protocol schema).resourceSemantics.restrict (resourceView schema) =
       spec.resourceSemantics.restrict (resourceView schema)
   resourceViewsCoverRoot : ExactUnionOfRequiredResourceViews
     resourceView spec.resourceSemantics.requiredAxes
-  denotationExact : presentation.trace = spec.contract
+  denotationExact : trace.contract = spec.contract
   requirementsExact : TransportedProcessRequirements network denotationExact =
     spec.requirements
 
 def StagedProcessPresentation.ofNetwork
     (spec : SpecProcess resources)
     (network : ProcessPresentationNetwork resources)
+    (trace : NetworkTraceDenotation network)
     (resourceView : network.RoleSchema -> RequiredResourceView resources)
     (resourceRestrictionExact : forall schema,
       (network.protocol schema).resourceSemantics.restrict (resourceView schema) =
         spec.resourceSemantics.restrict (resourceView schema))
     (resourceViewsCoverRoot : ExactUnionOfRequiredResourceViews
       resourceView spec.resourceSemantics.requiredAxes)
-    (denotationExact : presentation.trace = spec.contract)
+    (denotationExact : trace.contract = spec.contract)
     (requirementsExact :
       TransportedProcessRequirements network denotationExact = spec.requirements) :
     StagedProcessPresentation spec :=
-  { network, resourceView, resourceRestrictionExact, resourceViewsCoverRoot,
+  { network, trace, resourceView, resourceRestrictionExact, resourceViewsCoverRoot,
     denotationExact, requirementsExact }
 
 def StagedProcessPresentation.ofProtocol

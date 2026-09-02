@@ -203,19 +203,37 @@ def SpecProcess.driverBoundary (spec : SpecProcess resources) :
 def SpecProcess.progress (spec : SpecProcess resources) :
     AbstractProgressContract := spec.contract.progress
 
+/-!
+`ProcessPresentationNetwork` is PROCESS.md's `StructuralProcessNetwork`,
+instantiated at this document's protocol family, plus the composition law that
+network satisfies. The structural shape is declared *there* and not here.
+
+An earlier version of this document declared a second structure named
+`AbstractSpecificationProcessNetwork`, incompatible with PROCESS.md's, and
+consumers read fields from both. The role-schema shape survived, because it is
+the one the spikes instantiate. The semantic fields did not: a structural
+network carrying a `BehaviorContract` puts the process layer above this one and
+makes the dependency cyclic, which is what agent-bus dispositions coord1:4 and
+coord1:5 settled.
+
+The denotation is therefore *selected* rather than carried. A
+`NetworkTraceDenotation` is a chosen reading of one network's traces as a
+behavior contract; `ProcessPresentation.denotationExact` is the claim that the
+chosen reading agrees with the specification. Two different presentations of one
+network may select different denotations, which a field on the network could not
+express.
+-/
+
 structure ProcessPresentationNetwork {R : Type u} [ResourceModel R]
     (resources : R) where
-  structure : StructuralProcessNetwork (SpecProcess resources) ProtocolInstance
-  composition : AbstractNetworkCompositionLaw structure
+  roles : StructuralProcessNetwork (SpecProcess resources) ProtocolInstance
+  composition : AbstractNetworkCompositionLaw roles
 
-The shape above is [PROCESS.md](PROCESS.md)'s `StructuralProcessNetwork`,
-instantiated at this document's protocol family. It is declared there and not
-here: an earlier version of this document declared a second structure named
-`AbstractSpecificationProcessNetwork`, incompatible with the one in
-[PROCESS.md](PROCESS.md), and consumers read fields from both. The role-schema
-shape survived because it is the one the spikes instantiate; the semantic
-fields did not, because a structural network carrying a `BehaviorContract` puts
-the process layer above this one and makes the dependency cyclic.
+structure NetworkTraceDenotation {R : Type u} [ResourceModel R]
+    {resources : R} (network : ProcessPresentationNetwork resources) where
+  contract : BehaviorContract resources
+  denotes : EveryNetworkExecutionTraceAccepted network contract
+  exact : EveryContractBehaviorHasNetworkExecution network contract
 
 def SpecProcess.capture
     (suite : SpecificationSuite resources) : SpecProcess resources :=
