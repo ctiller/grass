@@ -268,6 +268,105 @@ theorem rangeInitialized_write_of_disjoint (state : MemoryState) (id : AllocId)
     rw [FiniteMap.lookup_insert_self]
     exact ByteStore.initialized_write_of_disjoint record.bytes hd h
 
+/-- Two memory states agree when every allocation holds the same byte at every
+offset. This, and not structural equality, is what a framing law can say about a
+journal-backed store. -/
+def AgreesOn (a b : MemoryState) : Prop :=
+  ∀ id offset, a.byteAt? id offset = b.byteAt? id offset
+
+theorem AgreesOn.refl (state : MemoryState) : state.AgreesOn state := fun _ _ => rfl
+
+theorem AgreesOn.symm {a b : MemoryState} (h : a.AgreesOn b) : b.AgreesOn a :=
+  fun id offset => (h id offset).symm
+
+theorem AgreesOn.trans {a b c : MemoryState} (hab : a.AgreesOn b) (hbc : b.AgreesOn c) :
+    a.AgreesOn c := fun id offset => (hab id offset).trans (hbc id offset)
+
+/-- A write to a missing allocation changes nothing. `performAccess` reaches
+`write` only after `denialOf` has found the record, so this case does not arise
+there; it is stated because `write` is total and a caller may not have checked. -/
+theorem write_of_missing (state : MemoryState) {id : AllocId} (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool)
+    (h : state.allocations.lookup id = Option.none) :
+    state.write id start bytes initializes = state := by
+  unfold write; rw [h]
+
+/-- A write leaves its own allocation present, with the written store. -/
+theorem lookup_write_self (state : MemoryState) {id : AllocId} (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) {record : AllocationRecord}
+    (h : state.allocations.lookup id = some record) :
+    (state.write id start bytes initializes).allocations.lookup id =
+      some { record with bytes := record.bytes.write start bytes initializes } := by
+  unfold write
+  rw [h]
+  exact FiniteMap.lookup_insert_self _ _ _
+
+/-- The byte a write leaves at an offset, in terms of the store's own law. -/
+theorem byteAt?_write_self (state : MemoryState) {id : AllocId} (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) {record : AllocationRecord}
+    (h : state.allocations.lookup id = some record) (offset : Nat) :
+    (state.write id start bytes initializes).byteAt? id offset =
+      (record.bytes.write start bytes initializes).byteAt? offset := by
+  unfold byteAt?
+  rw [lookup_write_self state start bytes initializes h]
+  rfl
+
+/-- Two states whose allocation records agree at `id` agree on what is
+initialized there. -/
+theorem rangeInitialized_congr_of_lookup {a b : MemoryState} {id : AllocId}
+    {range : ByteRange} (h : a.allocations.lookup id = b.allocations.lookup id) :
+    a.RangeInitialized id range ↔ b.RangeInitialized id range := by
+  unfold RangeInitialized
+  rw [h]
+
+/-- **A write neither creates nor destroys initialization outside its own range.**
+The `iff` rather than the forward direction alone: framing has to carry a *lack*
+of initialization across a write too, or an `uninitializedRead` could be laundered
+by writing somewhere else. -/
+theorem rangeInitialized_write_iff_of_disjoint (state : MemoryState) {id : AllocId}
+    {start : Nat} {bytes : ByteSeq} {initializes : Bool} {range : ByteRange}
+    (hd : (ByteRange.mk start bytes.length).Disjoint range) :
+    (state.write id start bytes initializes).RangeInitialized id range ↔
+      state.RangeInitialized id range := by
+  unfold RangeInitialized
+  cases hfound : state.allocations.lookup id with
+  | none => rw [write_of_missing state _ _ _ hfound, hfound]
+  | some record =>
+    rw [lookup_write_self state start bytes initializes hfound]
+    exact ByteStore.initialized_write_iff_of_disjoint record.bytes hd
+
+/--
+**Writes to disjoint ranges commute.**
+
+Stated as `AgreesOn` rather than as state equality: the byte store is a journal,
+so the two orders leave different `runs`, and no proof will make those equal.
+Agreement at every offset is what a disjointness argument actually uses, and
+`ByteStore.cellAt?_write_comm` is where the content is.
+-/
+theorem write_comm (state : MemoryState) (id : AllocId) {a b : Nat}
+    {bytesA bytesB : ByteSeq} {initA initB : Bool}
+    (hd : (ByteRange.mk a bytesA.length).Disjoint (ByteRange.mk b bytesB.length)) :
+    ((state.write id a bytesA initA).write id b bytesB initB).AgreesOn
+      ((state.write id b bytesB initB).write id a bytesA initA) := by
+  intro other offset
+  by_cases hid : other = id
+  · subst hid
+    cases hfound : state.allocations.lookup other with
+    | none =>
+      rw [write_of_missing state a bytesA initA hfound,
+        write_of_missing state b bytesB initB hfound,
+        write_of_missing state a bytesA initA hfound]
+    | some record =>
+      rw [byteAt?_write_self _ b bytesB initB
+            (lookup_write_self state a bytesA initA hfound),
+        byteAt?_write_self _ a bytesA initA
+            (lookup_write_self state b bytesB initB hfound)]
+      unfold ByteStore.byteAt?
+      rw [ByteStore.cellAt?_write_comm record.bytes hd]
+  · unfold byteAt?
+    rw [write_preserves_other_allocation _ hid, write_preserves_other_allocation _ hid,
+      write_preserves_other_allocation _ hid, write_preserves_other_allocation _ hid]
+
 /-- An initializing write initializes what it wrote, provided the allocation is
 there. The state-level form of `ByteStore.initialized_write`. -/
 theorem rangeInitialized_write (state : MemoryState) {id : AllocId} {start : Nat}

@@ -6,6 +6,7 @@ import Grass.Core.Uid
 import Grass.Memory.Access
 import Grass.Memory.AddressSpace
 import Grass.Memory.Addressing
+import Grass.Memory.Apply
 import Grass.Memory.Audit
 import Grass.Memory.Authority
 import Grass.Memory.Event

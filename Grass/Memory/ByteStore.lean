@@ -268,6 +268,49 @@ theorem byteAt?_write_of_not_covers (store : ByteStore) {start : Nat} {bytes : B
     (store.write start bytes initializes).byteAt? offset = store.byteAt? offset := by
   simp [byteAt?, cellAt?_write_of_not_covers store h]
 
+/-- Inside the range it wrote, a write determines the cell outright: the newest
+run covers the offset, so `cellAt?_write_of_covers` reports the written byte
+whatever was underneath. -/
+theorem cellAt?_write_of_covers (store : ByteStore) {start : Nat} {bytes : ByteSeq}
+    {initializes : Bool} {offset : Nat}
+    (h : (ByteRange.mk start bytes.length).Covers offset) :
+    (store.write start bytes initializes).cellAt? offset =
+      (bytes[offset - start]?).map (·, initializes) := by
+  rw [cellAt?_write]
+  have hsome : ((Run.mk start bytes initializes).byteAt? offset).isSome :=
+    Run.byteAt?_isSome_iff.mpr
+      (show ((Run.mk start bytes initializes).range).Covers offset from h)
+  rw [ByteRange.covers_def] at h
+  have hrun : (Run.mk start bytes initializes).byteAt? offset = bytes[offset - start]? := by
+    simp [Run.byteAt?, h.1]
+  rw [hrun]
+  cases hb : bytes[offset - start]? with
+  | none => rw [hrun, hb] at hsome; simp at hsome
+  | some b => simp
+
+/--
+**Writes to disjoint ranges commute.**
+
+Not as store equality — the journal records them in whichever order they arrived,
+so `runs` differs — but as agreement at every offset, which is what every framing
+argument actually uses. This is why the lemmas here are stated over `cellAt?`.
+-/
+theorem cellAt?_write_comm (store : ByteStore) {a b : Nat} {bytesA bytesB : ByteSeq}
+    {initA initB : Bool}
+    (hd : (ByteRange.mk a bytesA.length).Disjoint (ByteRange.mk b bytesB.length))
+    (offset : Nat) :
+    ((store.write a bytesA initA).write b bytesB initB).cellAt? offset =
+      ((store.write b bytesB initB).write a bytesA initA).cellAt? offset := by
+  by_cases hina : (ByteRange.mk a bytesA.length).Covers offset
+  · have hinb : ¬ (ByteRange.mk b bytesB.length).Covers offset := fun hb => hd.not_covers hina hb
+    rw [cellAt?_write_of_not_covers _ hinb, cellAt?_write_of_covers _ hina,
+      cellAt?_write_of_covers _ hina]
+  · by_cases hinb : (ByteRange.mk b bytesB.length).Covers offset
+    · rw [cellAt?_write_of_covers _ hinb, cellAt?_write_of_not_covers _ hina,
+        cellAt?_write_of_covers _ hinb]
+    · rw [cellAt?_write_of_not_covers _ hinb, cellAt?_write_of_not_covers _ hina,
+        cellAt?_write_of_not_covers _ hina, cellAt?_write_of_not_covers _ hinb]
+
 /--
 A write frames every disjoint range: reading anywhere in `other` is unaffected by
 a write confined to a disjoint range.
@@ -280,6 +323,24 @@ theorem cellAt?_write_of_disjoint (store : ByteStore) {start : Nat} {bytes : Byt
     {offset : Nat} (hcov : other.Covers offset) :
     (store.write start bytes initializes).cellAt? offset = store.cellAt? offset :=
   cellAt?_write_of_not_covers store (fun hin => hd.not_covers hin hcov)
+
+/-- **A write neither creates nor destroys initialization outside its own range.**
+The `iff`, not just the forward direction: a framing argument needs to carry a
+*lack* of initialization across a write as well as its presence, or an
+`uninitializedRead` could be laundered by writing somewhere else. -/
+theorem initialized_write_iff_of_disjoint (store : ByteStore) {start : Nat}
+    {bytes : ByteSeq} {initializes : Bool} {other : ByteRange}
+    (hd : (ByteRange.mk start bytes.length).Disjoint other) :
+    (store.write start bytes initializes).Initialized other ↔ store.Initialized other := by
+  constructor
+  · intro h offset hcov
+    have := h offset hcov
+    unfold InitializedAt at this ⊢
+    rwa [cellAt?_write_of_disjoint store hd hcov] at this
+  · intro h offset hcov
+    have := h offset hcov
+    unfold InitializedAt at this ⊢
+    rwa [cellAt?_write_of_disjoint store hd hcov]
 
 /-- Initialization of a disjoint range survives a write, initializing or not. -/
 theorem initialized_write_of_disjoint (store : ByteStore) {start : Nat} {bytes : ByteSeq}

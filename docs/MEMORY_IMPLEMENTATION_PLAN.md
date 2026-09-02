@@ -507,11 +507,29 @@ admitted an indeterminate read — at which point the profile owes what it
 observes. Defaulting it to zero would be law 8's permissive fallback wearing a
 plausible number.
 
+`Grass/Memory/Apply.lean` is `applyAccess`, total and executable, with the laws
+stated as equations over it rather than as claims about a transition's branches.
+`applyAccess_refused_preserves_state` is §4's first required law.
+`applyAccess_frames_other_allocation` and `applyAccess_frames_disjoint_range` are
+the framing half of "reads and writes to disjoint ranges commute and frame";
+`applyAccess_comm` is the commutation half.
+
+Commutation is stated as `MemoryState.AgreesOn` — agreement at every offset — and
+not as state equality. That is forced rather than chosen: a journal records two
+writes in whichever order they arrived, so the two orders leave different `runs`
+and no proof could make those states equal. Everything downstream reads memory
+through `byteAt?`, which is what agrees.
+
+Commutation needed a second half that is easy to miss. Bytes agreeing is not
+enough if the *decision* can move: were a write elsewhere able to change whether
+an access is refused, one order could refuse what the other committed.
+`denialOf_write_of_disjoint` rules that out, and it rests on
+`ByteStore.initialized_write_iff_of_disjoint` being an `iff` — framing has to
+carry a lack of initialization across a write as well as its presence, or an
+`uninitializedRead` could be laundered by writing somewhere else.
+
 ### 4.2 What M2 still owes
 
-- `applyAccess` as a named total function. The write path exists inside
-  `Op.performAccess`; it has not been factored out, so nothing yet states the
-  read-after-write and commutation laws as equations over one function.
 - Shaped read and write over `StructLayout` footprints — the `Shape.lean` row
   above. Nothing of it is built.
 - Compaction for the byte store, per §4.1.
