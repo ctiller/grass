@@ -28,10 +28,10 @@ authored ceremony in the spike directory, and the proof-economy claim in
 ordered by how much authored surface it prevents, not by how close it is to the
 metal.
 
-And a surface nothing measures is a surface that drifts. `Spikes/` is in no
-`lakefile.toml` target, so today no build gate notices when a library change
-falsifies a drafted import. That is why the measuring instrument is scheduled
-before most of the libraries rather than after them.
+And `Spikes/` is in no `lakefile.toml` target, so no build gate notices when a
+library change falsifies a drafted import. That is a gap in the build, not a
+missing instrument: the fix is to put the corpus in the build once it can
+compile, which is what section 5 argues and P1 schedules.
 
 ## 2. What the drafts demand, measured
 
@@ -124,66 +124,56 @@ manifests, label-to-cancellation dictionaries, ABI/frame/relocation records, and
 the generated internal network of the standard sequential adapter. Each is a
 category of file that appears under `Spikes/` if the library declines it.
 
-## 5. The measuring instrument
+## 5. Measuring the surface
 
-`docs/IMPLEMENTATION_RATCHET.md` specifies `grass spike mirror` and
-`grass spike authority-report`. The second resolves every identifier a spike
-references, classifies it into the six categories, and fails on `unresolved`.
+Three questions have to be answered mechanically rather than by somebody
+reading the corpus, and none of them needs a new tool.
 
-That command is the quantitative form of this entire document, and for a reason
-worth separating from mere name resolution. Resolution alone reports what is
-missing. The classification reports whether a name which *does* resolve is
-resolving as something the author typed or as something the library derived,
-and that distinction is the whole of section 4. It is the only mechanical way
-to notice the 95 block contracts migrating out of `generated-structural` and
-into authored files.
+**Does every name resolve?** That is `lake build`, as soon as `Spikes/` is in a
+Lake target. An unresolved name is a compile error at the exact line that
+referenced it. A separate report which says the same thing afterwards, in JSON,
+is worse than the compiler: later, and one more thing to keep true.
 
-The instrument splits in two, and the plan is only correct if they are kept
-apart.
+**Is the surface still small?** That is the file and line count under
+`Spikes/`. The failure mode section 4 describes is a block contract migrating
+from generated-structural to authored, and when that happens it appears as a
+new declaration in a file under `Spikes/` -- in the diff, in review, in the
+count. It does not hide.
 
-The full report is a *post*-elaboration instrument. It runs under
-`lake env grass`, resolves through the elaborator, and reports measured
-residual goals and proof-term bytes; section 1 of the ratchet is explicit that
-pre-implementation burden classes are replaced by measured evidence and are
-never copied into the report as if they were measurements. None of that can
-exist before the libraries it measures. It arrives with them, per spike, and it
-is the acceptance evidence for each spike rather than a precondition of the
-work.
-
-What can exist now, and is what P1 actually schedules, is the weaker precursor:
-resolve every referenced identifier against the declared module surfaces of the
-live branches, and publish the `unresolved` count per spike as a ratchet. That
-is what section 2's table is, done by hand with known false positives -- a
-dotted name scores resolvable when only its head type exists -- and it is worth
-mechanizing precisely because those false positives are the difference between
-a number that can gate a build and one that cannot. It needs no elaborator, no
-libraries, and no `grass` binary; it needs the classification vocabulary of
-`SPIKE_PROOF_BURDEN.md` section 1 and the discipline of failing on `unresolved`.
-
-Scheduling the precursor early is cheap and it is what makes every phase below
-report as a falling count rather than as prose. Scheduling the full report
-early is not possible, and a plan which claimed otherwise would be promising
-measurement it cannot take. `check-spike-sources.ps1` is the existing partial
-form; the ratchet requires the eventual command to emit a classified manifest
-rather than print a pass line.
-
-The baseline that ratchet starts from is clean. The two-view mirror contract
-holds today: all 123 fenced blocks across the five spike documents carry an
-immediate classification, block identities are unique, and all 20 authored
-blocks match their files in `Spikes/` byte for byte after newline
-normalization. The script itself cannot run on this machine, which has no
-PowerShell 7, so this was checked by reimplementing its three tests and
-negative-testing the reimplementation: changing one byte of
-`Spikes/1_Hello_World/Spec.lean` reports the mismatch, and deleting one
+**Do the two views still match?** That is `check-spike-sources.ps1`, which
+exists and passes. Checked rather than assumed: all 123 fenced blocks across
+the five documents carry an immediate classification, block identities are
+unique, and all 20 authored blocks match their files byte for byte after
+newline normalization. The script needs PowerShell 7 and this machine has only
+5.1, so that was established by reimplementing its three tests and
+negative-testing the reimplementation -- changing one byte of
+`Spikes/1_Hello_World/Spec.lean` reports the mismatch, deleting one
 classification comment from `docs/SPIKE_2.md` reports the unclassified block.
-So the drift this plan guards against is drift from a known-good state, not an
-unknown one.
+So the drift this plan guards against is drift from a known-good state.
+
+The inventory in section 2 is sizing evidence, not an instrument. It answered
+"how much work is there and who owns it" once, well enough to order this plan.
+It does not need an owner, a schema version, or a report envelope, and
+promoting it to one would be this document inventing work for the same reason
+the plan exists to prevent elsewhere.
+
+`docs/IMPLEMENTATION_RATCHET.md` specifies seven `grass spike` subcommands.
+Two of them measure something the compiler genuinely cannot: `mutate`, which
+checks that weakening a named invariant actually breaks the check it is
+supposed to break, and `locality`, which measures the rebuild cone of a change.
+Those are the proof-economy claims, they belong at implementation acceptance
+per that document's own section 7, and they are not prerequisites for any
+library. This plan does not schedule them. The rest of that command surface is
+an evidence-projection format for review, and it should be built when somebody
+is actually blocked for want of it.
 
 ## 6. Ordered plan
 
-Phases P0 and P1 are sequencing constraints on everything else. P2, P3 and P4
-have no dependencies on each other and should run in parallel across their
-owning agents; the spike order inside P4 is what serializes.
+P0 is the only sequencing constraint on everything else. P2, P3 and P4 have no
+dependencies on each other and should run in parallel across their owning
+agents; the spike order inside P4 is what serializes. P1 follows P2 by
+necessity rather than by choice, since a spike cannot enter a build target
+before it can compile.
 
 ### P0 — Reconcile the surface (blocking)
 
@@ -196,19 +186,20 @@ Exit: every `import` line in `Spikes/*/*.lean` names a module `docs/MODULES.md`
 says will exist, and every specification-side type in Spikes 1 and 2 resolves to
 a decided owner.
 
-### P1 — Make the surface measurable
+### P1 — Put the corpus in the build
 
-Owner: needs a `Tools/` owner beyond agent-bus; c-spike consumes it.
+Owner: c-spike.
 
-`grass spike mirror` per `docs/IMPLEMENTATION_RATCHET.md` section 1, plus the
-pre-elaboration resolution precursor described above. Not the full
-`authority-report`, which cannot run before the libraries exist. Make both a
-build failure rather than a report somebody reads: `Spikes/` is in no Lake
-target today, so nothing notices drift.
+`Spikes/` is in no `lakefile.toml` target, so nothing notices when a library
+change falsifies a drafted import. Add each spike to the default target as soon
+as it can compile -- which for every spike means after P0 and P2 -- and keep the
+mirror check running in CI until then. That is the whole of this phase.
 
-Exit: the `unresolved` count per spike is published, mechanical, and can only
-go down; the mirror check runs in CI rather than requiring a PowerShell 7 the
-build machines may not have.
+`check-spike-sources.ps1` needs PowerShell 7 for `GetRelativePath`, which not
+every machine has; making it portable is worth more than any new command.
+
+Exit: `lake build` fails when a spike references a name the libraries no longer
+provide.
 
 ### P2 — The target side (blocking every spike)
 
