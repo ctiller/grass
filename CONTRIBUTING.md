@@ -32,7 +32,7 @@ Run the repository's current consistency check from its root:
 
 ```powershell
 lake build
-lake build GrassTests
+lake build Tests
 pwsh ./audit-trust.ps1
 pwsh ./check-spike-sources.ps1
 pwsh ./check-doc-links.ps1

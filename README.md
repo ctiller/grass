@@ -54,7 +54,6 @@ with:
 
 ```powershell
 lake build
-lake build GrassTests
 pwsh ./audit-trust.ps1
 ```
 

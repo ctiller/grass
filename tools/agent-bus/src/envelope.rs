@@ -66,7 +66,10 @@ impl Envelope {
         // minimal escaping. Byte-identity with the original line is exactly
         // AGENT_BUS_SCHEMA.md section 2's canonical-encoding requirement.
         if env.to_canonical_line() != line {
-            return Err(invalid(format!("{}: line is not canonically encoded", env.id)));
+            return Err(invalid(format!(
+                "{}: line is not canonically encoded",
+                env.id
+            )));
         }
         crate::canon::check_nfc(&env.data)?;
 
@@ -91,7 +94,9 @@ impl Envelope {
 
         // Unknown top-level envelope fields.
         if let serde_json::Value::Object(map) = &value {
-            let known = ["v", "id", "agent", "seq", "time", "observed", "kind", "refs", "data"];
+            let known = [
+                "v", "id", "agent", "seq", "time", "observed", "kind", "refs", "data",
+            ];
             for k in map.keys() {
                 if !known.contains(&k.as_str()) {
                     return Err(invalid(format!("unknown envelope field: {k}")));
@@ -196,7 +201,10 @@ mod tests {
         assert!(canonical.contains(needle), "{canonical}");
         let tampered = canonical.replacen(needle, "\"agent\":\"mallory\"", 1);
         let err = Envelope::parse_line(&tampered).unwrap_err();
-        assert!(err.to_string().contains("does not match agent field"), "{err}");
+        assert!(
+            err.to_string().contains("does not match agent field"),
+            "{err}"
+        );
     }
 
     /// `id`'s embedded seq must agree with the top-level `seq` field.
@@ -210,7 +218,10 @@ mod tests {
         assert!(canonical.contains(needle), "{canonical}");
         let tampered = canonical.replacen(needle, "\"seq\":1,", 1);
         let err = Envelope::parse_line(&tampered).unwrap_err();
-        assert!(err.to_string().contains("does not match seq field"), "{err}");
+        assert!(
+            err.to_string().contains("does not match seq field"),
+            "{err}"
+        );
     }
 
     /// Only schema version 1 is currently supported.
@@ -224,7 +235,10 @@ mod tests {
         assert!(canonical.contains(needle), "{canonical}");
         let tampered = canonical.replacen(needle, "\"v\":2,", 1);
         let err = Envelope::parse_line(&tampered).unwrap_err();
-        assert!(err.to_string().contains("unsupported schema version"), "{err}");
+        assert!(
+            err.to_string().contains("unsupported schema version"),
+            "{err}"
+        );
     }
 
     /// `refs` must equal exactly the event IDs the typed `data` references

@@ -45,10 +45,14 @@ fn apply_commit(state: &mut BusState, commit: &WalkedCommit) -> AbResult<()> {
     if commit.is_repair {
         // Structural content validation of repair commits happens in
         // `commands::validate`; replay simply does not treat them as events.
-        state.commit_index_of.insert(commit.commit.clone(), commit.index);
+        state
+            .commit_index_of
+            .insert(commit.commit.clone(), commit.index);
         return Ok(());
     }
-    state.commit_index_of.insert(commit.commit.clone(), commit.index);
+    state
+        .commit_index_of
+        .insert(commit.commit.clone(), commit.index);
     for env in &commit.new_events {
         apply_event(state, env, commit.index, commit.is_bootstrap_root)?;
         state
@@ -75,7 +79,11 @@ fn observed_index(state: &BusState, env: &crate::envelope::Envelope) -> AbResult
     }
 }
 
-fn check_refs_visible(state: &BusState, env: &crate::envelope::Envelope, observed_idx: Option<usize>) -> AbResult<()> {
+fn check_refs_visible(
+    state: &BusState,
+    env: &crate::envelope::Envelope,
+    observed_idx: Option<usize>,
+) -> AbResult<()> {
     for r in env.refs.iter() {
         if r.agent() == env.agent && r.seq() < env.seq {
             continue; // same-agent earlier contiguous local event
@@ -114,7 +122,9 @@ fn require_active_role<'a>(state: &'a BusState, a: &Agent, role: Role) -> AbResu
 
 fn require_bootstrap_coordinator(state: &BusState, a: &Agent) -> AbResult<()> {
     if !state.is_bootstrap_coordinator(a) {
-        return Err(invalid(format!("{a} is not named in BUS.json coordinators")));
+        return Err(invalid(format!(
+            "{a} is not named in BUS.json coordinators"
+        )));
     }
     require_active_role(state, a, Role::Coordinator)?;
     Ok(())
@@ -133,7 +143,9 @@ fn require_bootstrap_coordinator(state: &BusState, a: &Agent) -> AbResult<()> {
 /// predecessor it was built on never actually won its own race.
 fn predecessor_is_contested(state: &BusState, id: &EventId) -> bool {
     state.exclusive.values().any(|t| {
-        t.transitions.len() > 1 && t.transitions.iter().any(|(member, _)| member == id) && t.resolved.as_ref() != Some(id)
+        t.transitions.len() > 1
+            && t.transitions.iter().any(|(member, _)| member == id)
+            && t.resolved.as_ref() != Some(id)
     })
 }
 
@@ -169,7 +181,9 @@ fn record_exclusive(
         )));
     }
     if tracker.transitions.is_empty() {
-        tracker.transitions.push((this_event.clone(), this_commit_idx));
+        tracker
+            .transitions
+            .push((this_event.clone(), this_commit_idx));
         return Ok(Exclusivity::Apply);
     }
     // Did this event causally observe any existing transition?
@@ -183,7 +197,9 @@ fn record_exclusive(
             "{this_event}: predecessor already causally observed a disposition ({prev})"
         )));
     }
-    tracker.transitions.push((this_event.clone(), this_commit_idx));
+    tracker
+        .transitions
+        .push((this_event.clone(), this_commit_idx));
     Ok(Exclusivity::Concurrent)
 }
 
@@ -199,7 +215,10 @@ fn apply_event(
 
     if env.seq == 0 {
         if !matches!(data, EventData::AgentRegistered(_)) {
-            return Err(invalid(format!("{}: sequence zero must be agent.registered", env.id)));
+            return Err(invalid(format!(
+                "{}: sequence zero must be agent.registered",
+                env.id
+            )));
         }
     } else {
         let expected = state
@@ -221,44 +240,90 @@ fn apply_event(
         EventData::AgentResumed(d) => apply_resumed(state, env, d)?,
         EventData::AgentRetired(d) => apply_retired(state, env, d)?,
         EventData::SchemaActivated(d) => apply_schema_activated(state, env, d)?,
-        EventData::MergeEngineActivated(d) => apply_merge_engine_activated(state, env, commit_idx, d)?,
+        EventData::MergeEngineActivated(d) => {
+            apply_merge_engine_activated(state, env, commit_idx, d)?
+        }
         EventData::ScopeSet(d) => apply_scope_set(state, env, d)?,
         EventData::PlanSet(d) => apply_plan_set(state, env, d)?,
         EventData::ProgressReported(d) => apply_progress(state, env, d)?,
         EventData::IssueOpened(d) => apply_issue_opened(state, env, d)?,
         EventData::IssueAcknowledged(d) => apply_issue_ack(state, env, d)?,
-        EventData::IssueResolved(d) => {
-            apply_issue_terminal(state, env, &data, commit_idx, &d.issue, &d.assignment, "resolved")?
-        }
-        EventData::IssueRejected(d) => {
-            apply_issue_terminal(state, env, &data, commit_idx, &d.issue, &d.assignment, "rejected")?
-        }
+        EventData::IssueResolved(d) => apply_issue_terminal(
+            state,
+            env,
+            &data,
+            commit_idx,
+            &d.issue,
+            &d.assignment,
+            "resolved",
+        )?,
+        EventData::IssueRejected(d) => apply_issue_terminal(
+            state,
+            env,
+            &data,
+            commit_idx,
+            &d.issue,
+            &d.assignment,
+            "rejected",
+        )?,
         EventData::IssueReassigned(d) => apply_issue_reassigned(state, env, commit_idx, d)?,
         EventData::DependencyRequested(d) => apply_dependency_requested(state, env, d)?,
         EventData::DependencyAcknowledged(d) => apply_dependency_ack(state, env, d)?,
-        EventData::DependencyResolved(d) => {
-            apply_dependency_terminal(state, env, &data, commit_idx, &d.dependency, &d.assignment, "resolved")?
+        EventData::DependencyResolved(d) => apply_dependency_terminal(
+            state,
+            env,
+            &data,
+            commit_idx,
+            &d.dependency,
+            &d.assignment,
+            "resolved",
+        )?,
+        EventData::DependencyRejected(d) => apply_dependency_terminal(
+            state,
+            env,
+            &data,
+            commit_idx,
+            &d.dependency,
+            &d.assignment,
+            "rejected",
+        )?,
+        EventData::DependencyReassigned(d) => {
+            apply_dependency_reassigned(state, env, commit_idx, d)?
         }
-        EventData::DependencyRejected(d) => {
-            apply_dependency_terminal(state, env, &data, commit_idx, &d.dependency, &d.assignment, "rejected")?
-        }
-        EventData::DependencyReassigned(d) => apply_dependency_reassigned(state, env, commit_idx, d)?,
         EventData::HandoffOffered(d) => apply_handoff_offered(state, env, d)?,
-        EventData::HandoffAccepted(d) => apply_handoff_terminal(state, env, commit_idx, &d.handoff, "accepted")?,
-        EventData::HandoffDeclined(d) => apply_handoff_terminal(state, env, commit_idx, &d.handoff, "declined")?,
-        EventData::HandoffWithdrawn(d) => apply_handoff_terminal(state, env, commit_idx, &d.handoff, "withdrawn")?,
+        EventData::HandoffAccepted(d) => {
+            apply_handoff_terminal(state, env, commit_idx, &d.handoff, "accepted")?
+        }
+        EventData::HandoffDeclined(d) => {
+            apply_handoff_terminal(state, env, commit_idx, &d.handoff, "declined")?
+        }
+        EventData::HandoffWithdrawn(d) => {
+            apply_handoff_terminal(state, env, commit_idx, &d.handoff, "withdrawn")?
+        }
         EventData::ReviewNominated(d) => apply_review_nominated(state, env, d)?,
         EventData::ReviewNominationAccepted(d) => apply_review_accept(state, env, d)?,
         EventData::ReviewNominationDeclined(d) => {
             apply_review_closing(state, env, commit_idx, &d.nomination, "declined")?
         }
         EventData::ReviewChangesRequested(d) => apply_review_changes(state, env, d)?,
-        EventData::ReviewFindingsCleared(d) => {
-            apply_finding_disposition(state, env, &data, commit_idx, &d.nomination, &d.changes_event, &d.finding_id)?
-        }
-        EventData::ReviewFindingsSuperseded(d) => {
-            apply_finding_disposition(state, env, &data, commit_idx, &d.nomination, &d.changes_event, &d.finding_id)?
-        }
+        EventData::ReviewFindingsCleared(d) => apply_finding_disposition(
+            state,
+            env,
+            &data,
+            commit_idx,
+            &d.nomination,
+            &d.changes_event,
+            &d.finding_id,
+        )?,
+        EventData::ReviewFindingsSuperseded(d) => apply_finding_disposition(
+            state,
+            env,
+            &data,
+            commit_idx,
+            &d.nomination,
+            &d.changes_event,
+            &d.finding_id,
+        )?,
         EventData::ReviewReassigned(d) => apply_review_reassigned(state, env, commit_idx, d)?,
         EventData::ReviewWithdrawn(d) => {
             apply_review_closing(state, env, commit_idx, &d.nomination, "withdrawn")?
@@ -282,13 +347,19 @@ fn apply_registered(
     is_bootstrap_root: bool,
 ) -> AbResult<()> {
     if env.seq != 0 {
-        return Err(invalid(format!("{}: agent.registered must be sequence zero", env.id)));
+        return Err(invalid(format!(
+            "{}: agent.registered must be sequence zero",
+            env.id
+        )));
     }
     if state.agents.contains_key(&env.agent) {
         return Err(invalid(format!("{} is already registered", env.agent)));
     }
     if crate::scalars::Agent::is_reserved(env.agent.as_str()) {
-        return Err(invalid(format!("{} begins with reserved prefix _", env.agent)));
+        return Err(invalid(format!(
+            "{} begins with reserved prefix _",
+            env.agent
+        )));
     }
     if d.primary_role == Role::Coordinator {
         if !state.is_bootstrap_coordinator(&env.agent) {
@@ -315,7 +386,9 @@ fn apply_registered(
             env.id
         )));
     }
-    if (d.product_base.is_some() || d.product_branch.is_some()) && d.primary_role != Role::Implementor {
+    if (d.product_base.is_some() || d.product_branch.is_some())
+        && d.primary_role != Role::Implementor
+    {
         return Err(invalid(format!(
             "{}: product_base/product_branch are permitted only for implementor",
             env.id
@@ -354,7 +427,11 @@ fn apply_registered(
     Ok(())
 }
 
-fn apply_status(state: &mut BusState, env: &crate::envelope::Envelope, d: &AgentStatusEvent) -> AbResult<()> {
+fn apply_status(
+    state: &mut BusState,
+    env: &crate::envelope::Envelope,
+    d: &AgentStatusEvent,
+) -> AbResult<()> {
     let role = require_agent(state, &env.agent)?.primary_role;
     if (d.product_branch.is_some() || d.product_commit.is_some()) && role != Role::Implementor {
         return Err(invalid(format!(
@@ -383,7 +460,11 @@ fn apply_status(state: &mut BusState, env: &crate::envelope::Envelope, d: &Agent
     Ok(())
 }
 
-fn apply_resumed(state: &mut BusState, env: &crate::envelope::Envelope, d: &AgentResumed) -> AbResult<()> {
+fn apply_resumed(
+    state: &mut BusState,
+    env: &crate::envelope::Envelope,
+    d: &AgentResumed,
+) -> AbResult<()> {
     // AGENT_BUS_SCHEMA.md section 4: "The referenced event is either the same
     // identity's latest own lifecycle event of any status or the latest
     // `agent.retired` targeting it." `AgentState::last_lifecycle_event` is
@@ -404,10 +485,17 @@ fn apply_resumed(state: &mut BusState, env: &crate::envelope::Envelope, d: &Agen
     Ok(())
 }
 
-fn apply_retired(state: &mut BusState, env: &crate::envelope::Envelope, d: &AgentRetired) -> AbResult<()> {
+fn apply_retired(
+    state: &mut BusState,
+    env: &crate::envelope::Envelope,
+    d: &AgentRetired,
+) -> AbResult<()> {
     require_bootstrap_coordinator(state, &env.agent)?;
     if d.target == env.agent {
-        return Err(invalid(format!("{}: coordinator cannot retire itself", env.id)));
+        return Err(invalid(format!(
+            "{}: coordinator cannot retire itself",
+            env.id
+        )));
     }
     let target = require_agent(state, &d.target)?;
     if d.previous_lifecycle != target.last_lifecycle_event {
@@ -422,7 +510,11 @@ fn apply_retired(state: &mut BusState, env: &crate::envelope::Envelope, d: &Agen
     Ok(())
 }
 
-fn apply_schema_activated(state: &mut BusState, env: &crate::envelope::Envelope, d: &SchemaActivated) -> AbResult<()> {
+fn apply_schema_activated(
+    state: &mut BusState,
+    env: &crate::envelope::Envelope,
+    d: &SchemaActivated,
+) -> AbResult<()> {
     require_bootstrap_coordinator(state, &env.agent)?;
     if d.version <= state.activated_schema_version {
         return Err(invalid(format!(
@@ -460,12 +552,25 @@ fn apply_merge_engine_activated(
         )));
     }
     if d.merge_engine.as_str() != crate::bootstrap::SUPPORTED_MERGE_ENGINE {
-        return Err(invalid(format!("{}: unsupported merge_engine {}", env.id, d.merge_engine)));
+        return Err(invalid(format!(
+            "{}: unsupported merge_engine {}",
+            env.id, d.merge_engine
+        )));
     }
     let idx = observed_index(state, env)?;
-    let outcome = record_exclusive(state, format!("engine_epoch:{}", d.previous_epoch), &env.id, commit_idx, idx)?;
+    let outcome = record_exclusive(
+        state,
+        format!("engine_epoch:{}", d.previous_epoch),
+        &env.id,
+        commit_idx,
+        idx,
+    )?;
     match outcome {
-        Exclusivity::Apply => apply_merge_engine_activated_effect(state, &env.id, &EventData::MergeEngineActivated(d.clone())),
+        Exclusivity::Apply => apply_merge_engine_activated_effect(
+            state,
+            &env.id,
+            &EventData::MergeEngineActivated(d.clone()),
+        ),
         Exclusivity::Concurrent => {
             // Neither racer becomes the selected epoch (AGENT_BUS_SCHEMA.md
             // section 4: "no candidate may use either until a coordinator
@@ -482,15 +587,20 @@ fn apply_merge_engine_activated_effect(state: &mut BusState, event_id: &EventId,
         EventData::MergeEngineActivated(d) => d,
         _ => return,
     };
-    state
-        .merge_engine_info
-        .insert(event_id.clone(), (d.merge_engine.clone(), d.merge_engine_version.clone()));
+    state.merge_engine_info.insert(
+        event_id.clone(),
+        (d.merge_engine.clone(), d.merge_engine_version.clone()),
+    );
     state.current_merge_engine_epoch = event_id.clone();
 }
 
 // ------------------------------------------------------------ scope/plan/progress
 
-fn apply_scope_set(state: &mut BusState, env: &crate::envelope::Envelope, d: &ScopeSet) -> AbResult<()> {
+fn apply_scope_set(
+    state: &mut BusState,
+    env: &crate::envelope::Envelope,
+    d: &ScopeSet,
+) -> AbResult<()> {
     require_active_role(state, &env.agent, Role::Implementor)?;
     let mut seen: Vec<(Agent, crate::scalars::Short)> = Vec::new();
     for dep in &d.depends_on {
@@ -499,7 +609,10 @@ fn apply_scope_set(state: &mut BusState, env: &crate::envelope::Envelope, d: &Sc
     let mut sorted = seen.clone();
     sorted.sort_by(|a, b| (a.0.as_str(), a.1.as_str()).cmp(&(b.0.as_str(), b.1.as_str())));
     if sorted != seen {
-        return Err(invalid(format!("{}: depends_on is not sorted by (agent, interface)", env.id)));
+        return Err(invalid(format!(
+            "{}: depends_on is not sorted by (agent, interface)",
+            env.id
+        )));
     }
     for w in sorted.windows(2) {
         if w[0] == w[1] {
@@ -511,27 +624,41 @@ fn apply_scope_set(state: &mut BusState, env: &crate::envelope::Envelope, d: &Sc
     Ok(())
 }
 
-fn apply_plan_set(state: &mut BusState, env: &crate::envelope::Envelope, d: &PlanSet) -> AbResult<()> {
+fn apply_plan_set(
+    state: &mut BusState,
+    env: &crate::envelope::Envelope,
+    d: &PlanSet,
+) -> AbResult<()> {
     require_agent(state, &env.agent)?;
     let mut ids = std::collections::BTreeSet::new();
     let mut active_count = 0;
     for step in &d.steps {
         if !ids.insert(step.id.as_str().to_string()) {
-            return Err(invalid(format!("{}: duplicate plan step id {}", env.id, step.id)));
+            return Err(invalid(format!(
+                "{}: duplicate plan step id {}",
+                env.id, step.id
+            )));
         }
         if step.state == crate::common::PlanStepState::Active {
             active_count += 1;
         }
     }
     if active_count > 1 {
-        return Err(invalid(format!("{}: at most one plan step may be active", env.id)));
+        return Err(invalid(format!(
+            "{}: at most one plan step may be active",
+            env.id
+        )));
     }
     let ag = state.agents.get_mut(&env.agent).unwrap();
     ag.plan = Some(d.clone());
     Ok(())
 }
 
-fn apply_progress(state: &mut BusState, env: &crate::envelope::Envelope, d: &ProgressReported) -> AbResult<()> {
+fn apply_progress(
+    state: &mut BusState,
+    env: &crate::envelope::Envelope,
+    d: &ProgressReported,
+) -> AbResult<()> {
     let role = require_agent(state, &env.agent)?.primary_role;
     if d.product_commit.is_some() && role != Role::Implementor {
         return Err(invalid(format!(
@@ -549,7 +676,11 @@ fn apply_progress(state: &mut BusState, env: &crate::envelope::Envelope, d: &Pro
 
 // ------------------------------------------------------------------- issues
 
-fn apply_issue_opened(state: &mut BusState, env: &crate::envelope::Envelope, d: &IssueOpened) -> AbResult<()> {
+fn apply_issue_opened(
+    state: &mut BusState,
+    env: &crate::envelope::Envelope,
+    d: &IssueOpened,
+) -> AbResult<()> {
     require_agent(state, &env.agent)?;
     require_agent(state, &d.target)?;
     for b in d.blocks.iter() {
@@ -583,7 +714,11 @@ fn apply_issue_opened(state: &mut BusState, env: &crate::envelope::Envelope, d: 
     Ok(())
 }
 
-fn apply_issue_ack(state: &mut BusState, env: &crate::envelope::Envelope, d: &IssueAcknowledged) -> AbResult<()> {
+fn apply_issue_ack(
+    state: &mut BusState,
+    env: &crate::envelope::Envelope,
+    d: &IssueAcknowledged,
+) -> AbResult<()> {
     let issue = state
         .issues
         .get(&d.issue)
@@ -593,7 +728,10 @@ fn apply_issue_ack(state: &mut BusState, env: &crate::envelope::Envelope, d: &Is
         .get(&d.assignment)
         .ok_or_else(|| invalid(format!("{}: unknown assignment {}", env.id, d.assignment)))?;
     if expected_target != &env.agent {
-        return Err(invalid(format!("{}: only that assignment's target may acknowledge", env.id)));
+        return Err(invalid(format!(
+            "{}: only that assignment's target may acknowledge",
+            env.id
+        )));
     }
     if issue.acknowledged {
         return Err(invalid(format!("{}: issue already acknowledged", env.id)));
@@ -628,7 +766,10 @@ fn apply_issue_terminal(
         .get(assignment)
         .ok_or_else(|| invalid(format!("{}: unknown assignment {assignment}", env.id)))?;
     if expected_target != &env.agent {
-        return Err(invalid(format!("{}: only that assignment's target may dispose of this issue", env.id)));
+        return Err(invalid(format!(
+            "{}: only that assignment's target may dispose of this issue",
+            env.id
+        )));
     }
     if predecessor_is_contested(state, assignment) {
         return Err(invalid(format!(
@@ -690,9 +831,17 @@ fn apply_issue_reassigned(
     let expected_target = issue
         .assignment_target
         .get(&d.previous_assignment)
-        .ok_or_else(|| invalid(format!("{}: unknown assignment {}", env.id, d.previous_assignment)))?;
+        .ok_or_else(|| {
+            invalid(format!(
+                "{}: unknown assignment {}",
+                env.id, d.previous_assignment
+            ))
+        })?;
     if expected_target != &d.previous_target {
-        return Err(invalid(format!("{}: previous_target does not match that assignment's target", env.id)));
+        return Err(invalid(format!(
+            "{}: previous_target does not match that assignment's target",
+            env.id
+        )));
     }
     if predecessor_is_contested(state, &d.previous_assignment) {
         return Err(invalid(format!(
@@ -708,7 +857,13 @@ fn apply_issue_reassigned(
     }
     require_agent(state, &d.new_target)?;
     let idx = observed_index(state, env)?;
-    let outcome = record_exclusive(state, issue_key(&d.previous_assignment), &env.id, commit_idx, idx)?;
+    let outcome = record_exclusive(
+        state,
+        issue_key(&d.previous_assignment),
+        &env.id,
+        commit_idx,
+        idx,
+    )?;
     let this_event_id = env.id.clone();
     let issue_id = d.issue.clone();
     let previous_assignment = d.previous_assignment.clone();
@@ -716,12 +871,16 @@ fn apply_issue_reassigned(
     // on it, e.g. acknowledge or resolve) regardless of whether this specific
     // reassignment turns out to be the issue's confirmed winner.
     if let Some(issue) = state.issues.get_mut(&issue_id) {
-        issue.assignment_target.insert(this_event_id.clone(), d.new_target.clone());
+        issue
+            .assignment_target
+            .insert(this_event_id.clone(), d.new_target.clone());
     }
     match outcome {
-        Exclusivity::Apply => {
-            apply_issue_reassigned_effect(state, &this_event_id, &EventData::IssueReassigned(d.clone()))
-        }
+        Exclusivity::Apply => apply_issue_reassigned_effect(
+            state,
+            &this_event_id,
+            &EventData::IssueReassigned(d.clone()),
+        ),
         Exclusivity::Concurrent => reset_issue_to_conflict(state, &issue_id, &previous_assignment),
     }
     Ok(())
@@ -735,7 +894,9 @@ fn apply_issue_reassigned_effect(state: &mut BusState, event_id: &EventId, data:
     if let Some(issue) = state.issues.get_mut(&d.issue) {
         issue.current_target = d.new_target.clone();
         issue.current_assignment = event_id.clone();
-        issue.assignment_target.insert(event_id.clone(), d.new_target.clone());
+        issue
+            .assignment_target
+            .insert(event_id.clone(), d.new_target.clone());
         issue.reassignment_chain.push(event_id.clone());
         // A confirmed reassignment (whether uncontested or the winner of a
         // resolved conflict) leaves the issue open and actionable again, not
@@ -787,9 +948,16 @@ fn apply_dependency_ack(
         .get(&d.assignment)
         .ok_or_else(|| invalid(format!("{}: unknown assignment {}", env.id, d.assignment)))?;
     if expected_target != &env.agent {
-        return Err(invalid(format!("{}: only that assignment's target may acknowledge", env.id)));
+        return Err(invalid(format!(
+            "{}: only that assignment's target may acknowledge",
+            env.id
+        )));
     }
-    state.dependencies.get_mut(&d.dependency).unwrap().acknowledged = true;
+    state
+        .dependencies
+        .get_mut(&d.dependency)
+        .unwrap()
+        .acknowledged = true;
     Ok(())
 }
 
@@ -813,7 +981,10 @@ fn apply_dependency_terminal(
         .get(assignment)
         .ok_or_else(|| invalid(format!("{}: unknown assignment {assignment}", env.id)))?;
     if expected_target != &env.agent {
-        return Err(invalid(format!("{}: only that assignment's target may dispose of this dependency", env.id)));
+        return Err(invalid(format!(
+            "{}: only that assignment's target may dispose of this dependency",
+            env.id
+        )));
     }
     if predecessor_is_contested(state, assignment) {
         return Err(invalid(format!(
@@ -866,9 +1037,17 @@ fn apply_dependency_reassigned(
     let expected_target = dep
         .assignment_target
         .get(&d.previous_assignment)
-        .ok_or_else(|| invalid(format!("{}: unknown assignment {}", env.id, d.previous_assignment)))?;
+        .ok_or_else(|| {
+            invalid(format!(
+                "{}: unknown assignment {}",
+                env.id, d.previous_assignment
+            ))
+        })?;
     if expected_target != &d.previous_target {
-        return Err(invalid(format!("{}: previous_target does not match that assignment's target", env.id)));
+        return Err(invalid(format!(
+            "{}: previous_target does not match that assignment's target",
+            env.id
+        )));
     }
     if predecessor_is_contested(state, &d.previous_assignment) {
         return Err(invalid(format!(
@@ -884,18 +1063,29 @@ fn apply_dependency_reassigned(
     }
     require_agent(state, &d.new_target)?;
     let idx = observed_index(state, env)?;
-    let outcome = record_exclusive(state, dependency_key(&d.previous_assignment), &env.id, commit_idx, idx)?;
+    let outcome = record_exclusive(
+        state,
+        dependency_key(&d.previous_assignment),
+        &env.id,
+        commit_idx,
+        idx,
+    )?;
     let this_event_id = env.id.clone();
     let dep_id = d.dependency.clone();
     let previous_assignment = d.previous_assignment.clone();
     if let Some(dep) = state.dependencies.get_mut(&dep_id) {
-        dep.assignment_target.insert(this_event_id.clone(), d.new_target.clone());
+        dep.assignment_target
+            .insert(this_event_id.clone(), d.new_target.clone());
     }
     match outcome {
-        Exclusivity::Apply => {
-            apply_dependency_reassigned_effect(state, &this_event_id, &EventData::DependencyReassigned(d.clone()))
+        Exclusivity::Apply => apply_dependency_reassigned_effect(
+            state,
+            &this_event_id,
+            &EventData::DependencyReassigned(d.clone()),
+        ),
+        Exclusivity::Concurrent => {
+            reset_dependency_to_conflict(state, &dep_id, &previous_assignment)
         }
-        Exclusivity::Concurrent => reset_dependency_to_conflict(state, &dep_id, &previous_assignment),
     }
     Ok(())
 }
@@ -908,7 +1098,8 @@ fn apply_dependency_reassigned_effect(state: &mut BusState, event_id: &EventId, 
     if let Some(dep) = state.dependencies.get_mut(&d.dependency) {
         dep.current_target = d.new_target.clone();
         dep.current_assignment = event_id.clone();
-        dep.assignment_target.insert(event_id.clone(), d.new_target.clone());
+        dep.assignment_target
+            .insert(event_id.clone(), d.new_target.clone());
         dep.reassignment_chain.push(event_id.clone());
         dep.status = ItemStatus::Open;
     }
@@ -916,7 +1107,11 @@ fn apply_dependency_reassigned_effect(state: &mut BusState, event_id: &EventId, 
 
 // ----------------------------------------------------------------- handoffs
 
-fn apply_handoff_offered(state: &mut BusState, env: &crate::envelope::Envelope, d: &HandoffOffered) -> AbResult<()> {
+fn apply_handoff_offered(
+    state: &mut BusState,
+    env: &crate::envelope::Envelope,
+    d: &HandoffOffered,
+) -> AbResult<()> {
     require_active_role(state, &env.agent, Role::Implementor)?;
     require_agent(state, &d.receiver)?;
     if !d.product_branch.is_product_branch_for(&env.agent) {
@@ -954,7 +1149,10 @@ fn apply_handoff_terminal(
         _ => false,
     };
     if !ok_actor {
-        return Err(invalid(format!("{}: {label} emitted by unauthorized agent", env.id)));
+        return Err(invalid(format!(
+            "{}: {label} emitted by unauthorized agent",
+            env.id
+        )));
     }
     let idx = observed_index(state, env)?;
     let outcome = record_exclusive(state, handoff_key(handoff_id), &env.id, commit_idx, idx)?;
@@ -984,7 +1182,10 @@ fn apply_review_nominated(
 ) -> AbResult<()> {
     require_active_role(state, &env.agent, Role::Implementor)?;
     if !d.authors.iter().any(|a| a == &env.agent) {
-        return Err(invalid(format!("{}: nominating author must be in authors", env.id)));
+        return Err(invalid(format!(
+            "{}: nominating author must be in authors",
+            env.id
+        )));
     }
     for a in d.authors.iter() {
         require_active_role(state, a, Role::Implementor)?;
@@ -994,12 +1195,19 @@ fn apply_review_nominated(
         return Err(invalid(format!("{}: reviewer cannot be an author", env.id)));
     }
     if d.target_branch.as_str() != "refs/heads/main" {
-        return Err(invalid(format!("{}: target_branch must be refs/heads/main in V1", env.id)));
+        return Err(invalid(format!(
+            "{}: target_branch must be refs/heads/main in V1",
+            env.id
+        )));
     }
     // AGENT_BUS_SCHEMA.md section 1 / AGENT_REVIEW.md section 1 rule 1:
     // product branches match refs/heads/agent/<Agent>/<topic> and are never
     // `main` itself; a multi-author branch names its coordinating author.
-    if !d.authors.iter().any(|a| d.product_branch.is_product_branch_for(a)) {
+    if !d
+        .authors
+        .iter()
+        .any(|a| d.product_branch.is_product_branch_for(a))
+    {
         return Err(invalid(format!(
             "{}: product_branch must match refs/heads/agent/<author>/<topic> for some author",
             env.id
@@ -1024,7 +1232,9 @@ fn apply_review_nominated(
             reconciled: Vec::new(),
         },
     );
-    state.review_chain_by_nomination.insert(env.id.clone(), env.id.clone());
+    state
+        .review_chain_by_nomination
+        .insert(env.id.clone(), env.id.clone());
     Ok(())
 }
 
@@ -1039,9 +1249,17 @@ fn apply_review_accept(
     let expected_reviewer = chain
         .nomination_reviewer
         .get(&d.nomination)
-        .ok_or_else(|| invalid(format!("{}: unknown nomination link {}", env.id, d.nomination)))?;
+        .ok_or_else(|| {
+            invalid(format!(
+                "{}: unknown nomination link {}",
+                env.id, d.nomination
+            ))
+        })?;
     if expected_reviewer != &env.agent {
-        return Err(invalid(format!("{}: only the named reviewer may accept", env.id)));
+        return Err(invalid(format!(
+            "{}: only the named reviewer may accept",
+            env.id
+        )));
     }
     if chain.accepted_nominations.contains(&d.nomination) {
         return Err(invalid(format!("{}: nomination already accepted", env.id)));
@@ -1079,11 +1297,18 @@ fn apply_review_closing(
         .clone();
     let ok_actor = match label {
         "declined" => env.agent == link_reviewer,
-        "withdrawn" => chain.current_request.authors.iter().any(|a| a == &env.agent),
+        "withdrawn" => chain
+            .current_request
+            .authors
+            .iter()
+            .any(|a| a == &env.agent),
         _ => false,
     };
     if !ok_actor {
-        return Err(invalid(format!("{}: {label} emitted by unauthorized agent", env.id)));
+        return Err(invalid(format!(
+            "{}: {label} emitted by unauthorized agent",
+            env.id
+        )));
     }
     if predecessor_is_contested(state, nomination) {
         return Err(invalid(format!(
@@ -1096,11 +1321,18 @@ fn apply_review_closing(
     // allows declining after taking review, e.g. "the reviewer may request a
     // narrower branch or decline"). Withdraw uses the identical bound.
     if (label == "declined" || label == "withdrawn") && !chain.authorizations.is_empty() {
-        return Err(invalid(format!("{}: cannot {label} after authorization", env.id)));
+        return Err(invalid(format!(
+            "{}: cannot {label} after authorization",
+            env.id
+        )));
     }
     let idx = observed_index(state, env)?;
     let outcome = record_exclusive(state, review_key(nomination), &env.id, commit_idx, idx)?;
-    let root = state.review_chain_by_nomination.get(nomination).unwrap().clone();
+    let root = state
+        .review_chain_by_nomination
+        .get(nomination)
+        .unwrap()
+        .clone();
     match outcome {
         Exclusivity::Apply => apply_review_closing_effect(state, &root, label),
         Exclusivity::Concurrent => {
@@ -1133,7 +1365,10 @@ fn apply_review_changes(
         )));
     }
     if !chain.accepted() || chain.current_request.reviewer != env.agent {
-        return Err(invalid(format!("{}: only the accepting reviewer may request changes", env.id)));
+        return Err(invalid(format!(
+            "{}: only the accepting reviewer may request changes",
+            env.id
+        )));
     }
     if d.findings.is_empty() {
         return Err(invalid(format!("{}: findings must be nonempty", env.id)));
@@ -1141,7 +1376,10 @@ fn apply_review_changes(
     let mut ids = std::collections::BTreeSet::new();
     for f in &d.findings {
         if !ids.insert(f.id.as_str().to_string()) {
-            return Err(invalid(format!("{}: duplicate finding id {}", env.id, f.id)));
+            return Err(invalid(format!(
+                "{}: duplicate finding id {}",
+                env.id, f.id
+            )));
         }
     }
     let chain = state.review_chain_mut(&d.nomination).unwrap();
@@ -1175,7 +1413,10 @@ fn apply_finding_disposition(
         .review_chain(nomination)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {nomination}", env.id)))?;
     if chain.current_nomination != *nomination {
-        return Err(invalid(format!("{}: nomination is no longer current", env.id)));
+        return Err(invalid(format!(
+            "{}: nomination is no longer current",
+            env.id
+        )));
     }
     if !chain.accepted() || chain.current_request.reviewer != env.agent {
         return Err(invalid(format!(
@@ -1185,7 +1426,10 @@ fn apply_finding_disposition(
     }
     let fkey = (changes_event.clone(), finding_id.as_str().to_string());
     if !chain.findings.contains_key(&fkey) {
-        return Err(invalid(format!("{}: unknown finding {}", env.id, finding_id)));
+        return Err(invalid(format!(
+            "{}: unknown finding {}",
+            env.id, finding_id
+        )));
     }
     // No pre-guard on the finding's current disposition here: that would
     // duplicate (and, worse, preempt) what `record_exclusive` below already
@@ -1198,8 +1442,18 @@ fn apply_finding_disposition(
     // concurrent case too, since by the time it replays the first racer's
     // effect has already flipped the finding out of `Open`.
     let idx = observed_index(state, env)?;
-    let outcome = record_exclusive(state, finding_key(changes_event, finding_id), &env.id, commit_idx, idx)?;
-    let root = state.review_chain_by_nomination.get(nomination).unwrap().clone();
+    let outcome = record_exclusive(
+        state,
+        finding_key(changes_event, finding_id),
+        &env.id,
+        commit_idx,
+        idx,
+    )?;
+    let root = state
+        .review_chain_by_nomination
+        .get(nomination)
+        .unwrap()
+        .clone();
     // On genuine concurrency, the finding simply stays `Open` (its existing
     // default) rather than either racer's disposition — no explicit revert
     // needed, and `authorize`'s "no open finding" check already blocks
@@ -1237,7 +1491,10 @@ fn apply_finding_disposition_effect(
 ) {
     let (disp, rationale) = match data {
         EventData::ReviewFindingsCleared(_) => (FindingDispositionKind::Cleared, None),
-        EventData::ReviewFindingsSuperseded(d) => (FindingDispositionKind::Superseded, Some(d.rationale.clone())),
+        EventData::ReviewFindingsSuperseded(d) => (
+            FindingDispositionKind::Superseded,
+            Some(d.rationale.clone()),
+        ),
         _ => return,
     };
     if let Some(chain) = state.reviews.get_mut(root) {
@@ -1267,7 +1524,12 @@ fn apply_review_reassigned(
     let replaced_reviewer = chain
         .nomination_reviewer
         .get(&d.replaces)
-        .ok_or_else(|| invalid(format!("{}: unknown nomination link {}", env.id, d.replaces)))?
+        .ok_or_else(|| {
+            invalid(format!(
+                "{}: unknown nomination link {}",
+                env.id, d.replaces
+            ))
+        })?
         .clone();
     if predecessor_is_contested(state, &d.replaces) {
         return Err(invalid(format!(
@@ -1292,11 +1554,17 @@ fn apply_review_reassigned(
         )));
     }
     if d.reviewer == replaced_reviewer {
-        return Err(invalid(format!("{}: replacement reviewer must differ", env.id)));
+        return Err(invalid(format!(
+            "{}: replacement reviewer must differ",
+            env.id
+        )));
     }
     require_active_role(state, &d.reviewer, Role::Reviewer)?;
     if d.authors.iter().any(|a| a == &d.reviewer) {
-        return Err(invalid(format!("{}: replacement reviewer cannot be an author", env.id)));
+        return Err(invalid(format!(
+            "{}: replacement reviewer cannot be an author",
+            env.id
+        )));
     }
     if !(d.authors.iter().any(|a| a == &env.agent) || state.is_bootstrap_coordinator(&env.agent)) {
         return Err(invalid(format!(
@@ -1316,7 +1584,10 @@ fn apply_review_reassigned(
         .map(|f| (f.changes_event.clone(), f.finding_id.as_str().to_string()))
         .collect();
     if inherited.len() != d.inherited_findings.len() {
-        return Err(invalid(format!("{}: inherited_findings has duplicates", env.id)));
+        return Err(invalid(format!(
+            "{}: inherited_findings has duplicates",
+            env.id
+        )));
     }
     if inherited != open_findings {
         return Err(invalid(format!(
@@ -1326,20 +1597,31 @@ fn apply_review_reassigned(
     }
     let idx = observed_index(state, env)?;
     let outcome = record_exclusive(state, review_key(&d.replaces), &env.id, commit_idx, idx)?;
-    let root = state.review_chain_by_nomination.get(&d.replaces).unwrap().clone();
+    let root = state
+        .review_chain_by_nomination
+        .get(&d.replaces)
+        .unwrap()
+        .clone();
     let this_event_id = env.id.clone();
     // The new link is always registered/referenceable (e.g. so its named
     // reviewer can `take` or `decline` it, or a later reassignment can name
     // it as *its* `replaces`) regardless of whether this reassignment turns
     // out to be the chain's confirmed winner.
-    state.review_chain_by_nomination.insert(this_event_id.clone(), root.clone());
+    state
+        .review_chain_by_nomination
+        .insert(this_event_id.clone(), root.clone());
     if let Some(chain) = state.reviews.get_mut(&root) {
-        chain.nomination_reviewer.insert(this_event_id.clone(), d.reviewer.clone());
+        chain
+            .nomination_reviewer
+            .insert(this_event_id.clone(), d.reviewer.clone());
     }
     match outcome {
-        Exclusivity::Apply => {
-            apply_review_reassigned_effect(state, &root, &this_event_id, &EventData::ReviewReassigned(d.clone()))
-        }
+        Exclusivity::Apply => apply_review_reassigned_effect(
+            state,
+            &root,
+            &this_event_id,
+            &EventData::ReviewReassigned(d.clone()),
+        ),
         Exclusivity::Concurrent => {
             let replaces = d.replaces.clone();
             let replaced_reviewer = replaced_reviewer.clone();
@@ -1353,7 +1635,12 @@ fn apply_review_reassigned(
     Ok(())
 }
 
-fn apply_review_reassigned_effect(state: &mut BusState, root: &EventId, event_id: &EventId, data: &EventData) {
+fn apply_review_reassigned_effect(
+    state: &mut BusState,
+    root: &EventId,
+    event_id: &EventId,
+    data: &EventData,
+) {
     let d = match data {
         EventData::ReviewReassigned(d) => d,
         _ => return,
@@ -1379,10 +1666,16 @@ fn apply_review_authorized(
         .review_chain(&d.nomination)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {}", env.id, d.nomination)))?;
     if chain.current_nomination != d.nomination {
-        return Err(invalid(format!("{}: nomination is no longer current", env.id)));
+        return Err(invalid(format!(
+            "{}: nomination is no longer current",
+            env.id
+        )));
     }
     if !chain.accepted() || chain.current_request.reviewer != env.agent {
-        return Err(invalid(format!("{}: only the accepting reviewer may authorize", env.id)));
+        return Err(invalid(format!(
+            "{}: only the accepting reviewer may authorize",
+            env.id
+        )));
     }
     // AGENT_BUS.md section 10: decline/withdraw/reassign are the nomination's
     // own exclusive set; a declined/withdrawn nomination (or one still in an
@@ -1390,14 +1683,20 @@ fn apply_review_authorized(
     // `current_nomination == d.nomination` above already rules out a
     // *confirmed* reassignment away from this link, but not a decline,
     // withdrawal, or a still-unresolved race on this exact link.
-    if !matches!(chain.decline_or_withdraw_or_reassign_status, ItemStatus::Open) {
+    if !matches!(
+        chain.decline_or_withdraw_or_reassign_status,
+        ItemStatus::Open
+    ) {
         return Err(invalid(format!(
             "{}: nomination has a decline/withdraw/reassign disposition and cannot authorize",
             env.id
         )));
     }
     if chain.is_closed() {
-        return Err(invalid(format!("{}: nomination already merged/reconciled", env.id)));
+        return Err(invalid(format!(
+            "{}: nomination already merged/reconciled",
+            env.id
+        )));
     }
     require_active_role(state, &env.agent, Role::Reviewer)?;
     let chain = state.review_chain(&d.nomination).unwrap();
@@ -1416,28 +1715,51 @@ fn apply_review_authorized(
             env.id
         )));
     }
-    let mut expected_dispositions: std::collections::BTreeSet<(EventId, String, FindingDispositionKind)> =
-        std::collections::BTreeSet::new();
+    let mut expected_dispositions: std::collections::BTreeSet<(
+        EventId,
+        String,
+        FindingDispositionKind,
+    )> = std::collections::BTreeSet::new();
     for (key, f) in chain.findings.iter() {
         match &f.disposition {
             FindingDisposition::Open => {
-                return Err(invalid(format!("{}: unresolved finding {}", env.id, f.finding_id)))
+                return Err(invalid(format!(
+                    "{}: unresolved finding {}",
+                    env.id, f.finding_id
+                )))
             }
             FindingDisposition::Cleared { .. } => {
-                expected_dispositions.insert((key.0.clone(), key.1.clone(), FindingDispositionKind::Cleared));
+                expected_dispositions.insert((
+                    key.0.clone(),
+                    key.1.clone(),
+                    FindingDispositionKind::Cleared,
+                ));
             }
             FindingDisposition::Superseded { .. } => {
-                expected_dispositions.insert((key.0.clone(), key.1.clone(), FindingDispositionKind::Superseded));
+                expected_dispositions.insert((
+                    key.0.clone(),
+                    key.1.clone(),
+                    FindingDispositionKind::Superseded,
+                ));
             }
         }
     }
-    let actual_dispositions: std::collections::BTreeSet<(EventId, String, FindingDispositionKind)> = d
-        .finding_dispositions
-        .iter()
-        .map(|fd| (fd.changes_event.clone(), fd.finding_id.as_str().to_string(), fd.disposition))
-        .collect();
+    let actual_dispositions: std::collections::BTreeSet<(EventId, String, FindingDispositionKind)> =
+        d.finding_dispositions
+            .iter()
+            .map(|fd| {
+                (
+                    fd.changes_event.clone(),
+                    fd.finding_id.as_str().to_string(),
+                    fd.disposition,
+                )
+            })
+            .collect();
     if actual_dispositions.len() != d.finding_dispositions.len() {
-        return Err(invalid(format!("{}: duplicate finding_dispositions entry", env.id)));
+        return Err(invalid(format!(
+            "{}: duplicate finding_dispositions entry",
+            env.id
+        )));
     }
     if actual_dispositions != expected_dispositions {
         return Err(invalid(format!(
@@ -1463,15 +1785,25 @@ fn apply_review_authorized(
     }
     for required in &chain.current_request.required_checks {
         if !d.checks.iter().any(|c| &c.command == required) {
-            return Err(invalid(format!("{}: missing required check {:?}", env.id, required)));
+            return Err(invalid(format!(
+                "{}: missing required check {:?}",
+                env.id, required
+            )));
         }
     }
     for c in &d.checks {
         if c.result != crate::common::CheckOutcome::Passed {
-            return Err(invalid(format!("{}: check {:?} did not pass", env.id, c.command)));
+            return Err(invalid(format!(
+                "{}: check {:?} did not pass",
+                env.id, c.command
+            )));
         }
     }
-    state.review_chain_mut(&d.nomination).unwrap().authorizations.push(env.id.clone());
+    state
+        .review_chain_mut(&d.nomination)
+        .unwrap()
+        .authorizations
+        .push(env.id.clone());
     Ok(())
 }
 
@@ -1480,7 +1812,8 @@ fn apply_review_authorized(
 /// authorization time (previously this was only checked by the separate
 /// `merge-ready` gate, which a reviewer could simply not run).
 pub fn blocking_issue_for_chain(state: &BusState, chain: &ReviewChain) -> Option<EventId> {
-    let chain_members: std::collections::BTreeSet<&EventId> = chain.nomination_events.iter().collect();
+    let chain_members: std::collections::BTreeSet<&EventId> =
+        chain.nomination_events.iter().collect();
     for issue in state.issues.values() {
         // "Unresolved" means not yet terminally resolved/rejected — an issue
         // sitting in `LifecycleConflict` (a race whose winner hasn't been
@@ -1505,7 +1838,9 @@ fn authorization_data(state: &BusState, auth_id: &EventId) -> AbResult<ReviewMer
         .ok_or_else(|| invalid(format!("unknown authorization {auth_id}")))?;
     match env.typed_data()? {
         EventData::ReviewMergeAuthorized(d) => Ok(d),
-        _ => Err(invalid(format!("{auth_id} is not a review.merge_authorized event"))),
+        _ => Err(invalid(format!(
+            "{auth_id} is not a review.merge_authorized event"
+        ))),
     }
 }
 
@@ -1517,11 +1852,22 @@ fn authorization_data(state: &BusState, auth_id: &EventId) -> AbResult<ReviewMer
 /// by construction: any two receipts citing the *same* authorization are
 /// forced to carry identical values by this check, so no separate identity
 /// comparison between receipts is needed.
-fn apply_review_merged(state: &mut BusState, env: &crate::envelope::Envelope, d: &ReviewMerged) -> AbResult<()> {
-    let root = find_authorization_root(state, &d.authorization)
-        .ok_or_else(|| invalid(format!("{}: unknown authorization {}", env.id, d.authorization)))?;
+fn apply_review_merged(
+    state: &mut BusState,
+    env: &crate::envelope::Envelope,
+    d: &ReviewMerged,
+) -> AbResult<()> {
+    let root = find_authorization_root(state, &d.authorization).ok_or_else(|| {
+        invalid(format!(
+            "{}: unknown authorization {}",
+            env.id, d.authorization
+        ))
+    })?;
     if d.authorization.agent() != env.agent {
-        return Err(invalid(format!("{}: only the authorizing reviewer may emit review.merged", env.id)));
+        return Err(invalid(format!(
+            "{}: only the authorizing reviewer may emit review.merged",
+            env.id
+        )));
     }
     let auth = authorization_data(state, &d.authorization)?;
     if d.previous_main != auth.previous_main
@@ -1534,7 +1880,12 @@ fn apply_review_merged(state: &mut BusState, env: &crate::envelope::Envelope, d:
             env.id
         )));
     }
-    state.reviews.get_mut(&root).unwrap().merged.push(env.id.clone());
+    state
+        .reviews
+        .get_mut(&root)
+        .unwrap()
+        .merged
+        .push(env.id.clone());
     Ok(())
 }
 
@@ -1544,8 +1895,12 @@ fn apply_review_reconciled(
     d: &ReviewMergeReconciled,
 ) -> AbResult<()> {
     require_bootstrap_coordinator(state, &env.agent)?;
-    let root = find_authorization_root(state, &d.authorization)
-        .ok_or_else(|| invalid(format!("{}: unknown authorization {}", env.id, d.authorization)))?;
+    let root = find_authorization_root(state, &d.authorization).ok_or_else(|| {
+        invalid(format!(
+            "{}: unknown authorization {}",
+            env.id, d.authorization
+        ))
+    })?;
     let auth = authorization_data(state, &d.authorization)?;
     if d.previous_main != auth.previous_main
         || d.main_commit != auth.candidate
@@ -1563,7 +1918,12 @@ fn apply_review_reconciled(
     // receipt with identical authorization-derived values is a valid
     // redundant receipt, not a lifecycle conflict" (AGENT_BUS_SCHEMA.md
     // section 8), regardless of which kind or order the receipts arrive in.
-    state.reviews.get_mut(&root).unwrap().reconciled.push(env.id.clone());
+    state
+        .reviews
+        .get_mut(&root)
+        .unwrap()
+        .reconciled
+        .push(env.id.clone());
     Ok(())
 }
 
@@ -1606,7 +1966,10 @@ fn apply_conflict_resolved(
         (Some(k), _) => k,
         (None, [only]) => only.clone(),
         (None, []) => {
-            return Err(invalid(format!("{}: no unresolved conflict found for root {}", env.id, d.root)))
+            return Err(invalid(format!(
+                "{}: no unresolved conflict found for root {}",
+                env.id, d.root
+            )))
         }
         (None, _) => {
             return Err(invalid(format!(
@@ -1617,7 +1980,11 @@ fn apply_conflict_resolved(
     };
 
     let tracker = state.exclusive.get(&key).unwrap();
-    let members: std::collections::BTreeSet<EventId> = tracker.transitions.iter().map(|(id, _)| id.clone()).collect();
+    let members: std::collections::BTreeSet<EventId> = tracker
+        .transitions
+        .iter()
+        .map(|(id, _)| id.clone())
+        .collect();
     let competing: std::collections::BTreeSet<EventId> = d.competing.iter().cloned().collect();
     if members != competing {
         return Err(invalid(format!(
@@ -1626,7 +1993,10 @@ fn apply_conflict_resolved(
         )));
     }
     if !competing.contains(&d.selected) {
-        return Err(invalid(format!("{}: selected must be a member of competing", env.id)));
+        return Err(invalid(format!(
+            "{}: selected must be a member of competing",
+            env.id
+        )));
     }
     state.exclusive.get_mut(&key).unwrap().resolved = Some(d.selected.clone());
     apply_selected_transition_effect(state, &d.selected)?;
@@ -1647,19 +2017,35 @@ fn apply_selected_transition_effect(state: &mut BusState, selected: &EventId) ->
         .clone();
     let data = env.typed_data()?;
     match &data {
-        EventData::IssueResolved(d) => apply_issue_terminal_effect(state, &EventData::IssueResolved(d.clone()), "resolved"),
-        EventData::IssueRejected(d) => apply_issue_terminal_effect(state, &EventData::IssueRejected(d.clone()), "rejected"),
+        EventData::IssueResolved(d) => {
+            apply_issue_terminal_effect(state, &EventData::IssueResolved(d.clone()), "resolved")
+        }
+        EventData::IssueRejected(d) => {
+            apply_issue_terminal_effect(state, &EventData::IssueRejected(d.clone()), "rejected")
+        }
         EventData::IssueReassigned(_) => apply_issue_reassigned_effect(state, selected, &data),
-        EventData::DependencyResolved(d) => {
-            apply_dependency_terminal_effect(state, &EventData::DependencyResolved(d.clone()), "resolved")
+        EventData::DependencyResolved(d) => apply_dependency_terminal_effect(
+            state,
+            &EventData::DependencyResolved(d.clone()),
+            "resolved",
+        ),
+        EventData::DependencyRejected(d) => apply_dependency_terminal_effect(
+            state,
+            &EventData::DependencyRejected(d.clone()),
+            "rejected",
+        ),
+        EventData::DependencyReassigned(_) => {
+            apply_dependency_reassigned_effect(state, selected, &data)
         }
-        EventData::DependencyRejected(d) => {
-            apply_dependency_terminal_effect(state, &EventData::DependencyRejected(d.clone()), "rejected")
+        EventData::HandoffAccepted(d) => {
+            apply_handoff_terminal_effect(state, &d.handoff, "accepted")
         }
-        EventData::DependencyReassigned(_) => apply_dependency_reassigned_effect(state, selected, &data),
-        EventData::HandoffAccepted(d) => apply_handoff_terminal_effect(state, &d.handoff, "accepted"),
-        EventData::HandoffDeclined(d) => apply_handoff_terminal_effect(state, &d.handoff, "declined"),
-        EventData::HandoffWithdrawn(d) => apply_handoff_terminal_effect(state, &d.handoff, "withdrawn"),
+        EventData::HandoffDeclined(d) => {
+            apply_handoff_terminal_effect(state, &d.handoff, "declined")
+        }
+        EventData::HandoffWithdrawn(d) => {
+            apply_handoff_terminal_effect(state, &d.handoff, "withdrawn")
+        }
         EventData::ReviewNominationDeclined(d) => {
             let root = state
                 .review_chain_by_nomination
@@ -1702,8 +2088,14 @@ fn apply_selected_transition_effect(state: &mut BusState, selected: &EventId) ->
             let fkey = (d.changes_event.clone(), d.finding_id.as_str().to_string());
             apply_finding_disposition_effect(state, &root, &fkey, selected, &data);
         }
-        EventData::MergeEngineActivated(_) => apply_merge_engine_activated_effect(state, selected, &data),
-        _ => return Err(invalid(format!("{selected} is not an exclusive-transition event"))),
+        EventData::MergeEngineActivated(_) => {
+            apply_merge_engine_activated_effect(state, selected, &data)
+        }
+        _ => {
+            return Err(invalid(format!(
+                "{selected} is not an exclusive-transition event"
+            )))
+        }
     }
     Ok(())
 }
@@ -1728,7 +2120,12 @@ mod tests {
         ObjectId::parse(hash(n)).unwrap()
     }
 
-    fn wc(commit: &str, index: usize, agent: &Agent, events: Vec<crate::envelope::Envelope>) -> WalkedCommit {
+    fn wc(
+        commit: &str,
+        index: usize,
+        agent: &Agent,
+        events: Vec<crate::envelope::Envelope>,
+    ) -> WalkedCommit {
         WalkedCommit {
             commit: commit.to_string(),
             index,
@@ -1795,8 +2192,18 @@ mod tests {
             provider: None,
             model: None,
         });
-        let c1 = wc(&hash(1), 1, &alice, vec![env(&alice, 0, Some(root_oid.clone()), &alice_reg, [])]);
-        let c2 = wc(&hash(2), 2, &bob, vec![env(&bob, 0, Some(root_oid), &bob_reg, [])]);
+        let c1 = wc(
+            &hash(1),
+            1,
+            &alice,
+            vec![env(&alice, 0, Some(root_oid.clone()), &alice_reg, [])],
+        );
+        let c2 = wc(
+            &hash(2),
+            2,
+            &bob,
+            vec![env(&bob, 0, Some(root_oid), &bob_reg, [])],
+        );
 
         (
             Walk {
@@ -1826,7 +2233,12 @@ mod tests {
             for a in seeded_agents {
                 next_seq.insert(a.clone(), 1);
             }
-            SeqBuilder { walk, tip, next_index, next_seq }
+            SeqBuilder {
+                walk,
+                tip,
+                next_index,
+                next_seq,
+            }
         }
 
         fn register(&mut self, agent: &Agent, role: Role) -> EventId {
@@ -1844,7 +2256,12 @@ mod tests {
             id
         }
 
-        fn push(&mut self, agent: &Agent, data: &EventData, refs: impl IntoIterator<Item = EventId>) -> EventId {
+        fn push(
+            &mut self,
+            agent: &Agent,
+            data: &EventData,
+            refs: impl IntoIterator<Item = EventId>,
+        ) -> EventId {
             let seq = *self.next_seq.get(agent).unwrap_or(&0);
             let id = self.push_with_seq(agent, seq, data, refs);
             self.next_seq.insert(agent.clone(), seq + 1);
@@ -1862,7 +2279,9 @@ mod tests {
             let e = env(agent, seq, Some(observed), data, refs);
             let id = e.id.clone();
             let commit = hash(1000 + self.next_index as u64);
-            self.walk.commits.push(wc(&commit, self.next_index, agent, vec![e]));
+            self.walk
+                .commits
+                .push(wc(&commit, self.next_index, agent, vec![e]));
             self.next_index += 1;
             self.tip = commit;
             id
@@ -1891,7 +2310,9 @@ mod tests {
             let e = env(agent, seq, Some(observed.clone()), data, refs);
             let id = e.id.clone();
             let commit = hash(1000 + self.next_index as u64);
-            self.walk.commits.push(wc(&commit, self.next_index, agent, vec![e]));
+            self.walk
+                .commits
+                .push(wc(&commit, self.next_index, agent, vec![e]));
             self.next_index += 1;
             self.tip = commit;
             self.next_seq.insert(agent.clone(), seq + 1);
@@ -1903,7 +2324,12 @@ mod tests {
         }
 
         /// Build (but do not append) an envelope, for `dry_run` tests.
-        fn trial(&self, agent: &Agent, data: &EventData, refs: impl IntoIterator<Item = EventId>) -> crate::envelope::Envelope {
+        fn trial(
+            &self,
+            agent: &Agent,
+            data: &EventData,
+            refs: impl IntoIterator<Item = EventId>,
+        ) -> crate::envelope::Envelope {
             let seq = *self.next_seq.get(agent).unwrap_or(&0);
             env(agent, seq, Some(self.tip_oid()), data, refs)
         }
@@ -1925,7 +2351,12 @@ mod tests {
         })
     }
 
-    fn reassign(issue: &EventId, prev_assignment: &EventId, prev_target: &Agent, new_target: &Agent) -> EventData {
+    fn reassign(
+        issue: &EventId,
+        prev_assignment: &EventId,
+        prev_target: &Agent,
+        new_target: &Agent,
+    ) -> EventData {
         EventData::IssueReassigned(IssueReassigned {
             issue: issue.clone(),
             previous_assignment: prev_assignment.clone(),
@@ -1996,9 +2427,15 @@ mod tests {
             fix_commit: None,
             verification: vec![],
         });
-        b.push(&carol, &resolve_data, [issue_id.clone(), reassign_id.clone()]);
+        b.push(
+            &carol,
+            &resolve_data,
+            [issue_id.clone(), reassign_id.clone()],
+        );
 
-        let state = b.replay().expect("an ordinary reassign-then-resolve sequence must replay");
+        let state = b
+            .replay()
+            .expect("an ordinary reassign-then-resolve sequence must replay");
         let issue = state.issues.get(&issue_id).unwrap();
         assert_eq!(issue.status, ItemStatus::Terminal("resolved"));
         assert_eq!(issue.current_target, carol);
@@ -2018,7 +2455,8 @@ mod tests {
 
         let nom = ReviewNominated {
             authors: StringSet::from_iter(vec![alice.clone()]),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewer: rev1.clone(),
             required_checks: vec![],
             review_scope: StringSet::default(),
@@ -2030,7 +2468,8 @@ mod tests {
 
         let reassign = ReviewReassigned {
             authors: StringSet::from_iter(vec![alice.clone()]),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewer: rev2.clone(),
             required_checks: vec![],
             review_scope: StringSet::default(),
@@ -2041,15 +2480,25 @@ mod tests {
             reason: Text::parse("bob unavailable".into()).unwrap(),
             inherited_findings: vec![],
         };
-        let reassign_id = b.push(&alice, &EventData::ReviewReassigned(reassign), [nom_id.clone()]);
+        let reassign_id = b.push(
+            &alice,
+            &EventData::ReviewReassigned(reassign),
+            [nom_id.clone()],
+        );
 
         let accept = ReviewNominationAccepted {
             nomination: reassign_id.clone(),
             note: Text::parse("ok".into()).unwrap(),
         };
-        b.push(&rev2, &EventData::ReviewNominationAccepted(accept), [reassign_id.clone()]);
+        b.push(
+            &rev2,
+            &EventData::ReviewNominationAccepted(accept),
+            [reassign_id.clone()],
+        );
 
-        let state = b.replay().expect("the successor reviewer must be able to accept");
+        let state = b
+            .replay()
+            .expect("the successor reviewer must be able to accept");
         let chain = state.review_chain(&reassign_id).unwrap();
         assert_eq!(chain.current_nomination, reassign_id);
         assert!(chain.accepted());
@@ -2070,7 +2519,8 @@ mod tests {
 
         let nom = ReviewNominated {
             authors: StringSet::from_iter(vec![alice.clone()]),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewer: rev1.clone(),
             required_checks: vec![],
             review_scope: StringSet::default(),
@@ -2079,12 +2529,20 @@ mod tests {
             evidence: StringSet::default(),
         };
         let nom_id = b.push(&alice, &EventData::ReviewNominated(nom), []);
-        let accept = ReviewNominationAccepted { nomination: nom_id.clone(), note: Text::parse("".into()).unwrap() };
-        b.push(&rev1, &EventData::ReviewNominationAccepted(accept), [nom_id.clone()]);
+        let accept = ReviewNominationAccepted {
+            nomination: nom_id.clone(),
+            note: Text::parse("".into()).unwrap(),
+        };
+        b.push(
+            &rev1,
+            &EventData::ReviewNominationAccepted(accept),
+            [nom_id.clone()],
+        );
 
         let reassign = ReviewReassigned {
             authors: StringSet::from_iter(vec![alice.clone()]),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewer: rev2.clone(),
             required_checks: vec![],
             review_scope: StringSet::default(),
@@ -2095,7 +2553,11 @@ mod tests {
             reason: Text::parse("bob unavailable".into()).unwrap(),
             inherited_findings: vec![],
         };
-        b.push(&alice, &EventData::ReviewReassigned(reassign), [nom_id.clone()]);
+        b.push(
+            &alice,
+            &EventData::ReviewReassigned(reassign),
+            [nom_id.clone()],
+        );
 
         // rev1, superseded, tries to file a finding under the stale nomination.
         let changes = ReviewChangesRequested {
@@ -2110,7 +2572,11 @@ mod tests {
             }],
             evidence: StringSet::default(),
         };
-        b.push(&rev1, &EventData::ReviewChangesRequested(changes), [nom_id.clone()]);
+        b.push(
+            &rev1,
+            &EventData::ReviewChangesRequested(changes),
+            [nom_id.clone()],
+        );
 
         let result = b.replay();
         assert!(
@@ -2134,7 +2600,11 @@ mod tests {
             design_commit: oid(10),
             helper_commit: oid(11),
         };
-        let first_id = b.push(&coord, &EventData::MergeEngineActivated(first), [bootstrap_epoch]);
+        let first_id = b.push(
+            &coord,
+            &EventData::MergeEngineActivated(first),
+            [bootstrap_epoch],
+        );
 
         let second = MergeEngineActivated {
             previous_epoch: first_id.clone(),
@@ -2195,7 +2665,13 @@ mod tests {
             &hash(4),
             4,
             &carol,
-            vec![env(&carol, 0, Some(observed_after_issue.clone()), &carol_reg, [])],
+            vec![env(
+                &carol,
+                0,
+                Some(observed_after_issue.clone()),
+                &carol_reg,
+                [],
+            )],
         );
         walk.commits.push(c4);
 
@@ -2236,7 +2712,8 @@ mod tests {
         walk.commits.push(c5);
         walk.commits.push(c6);
 
-        let state = replay(&walk).expect("both concurrent transitions must remain valid, not hard-fail replay");
+        let state = replay(&walk)
+            .expect("both concurrent transitions must remain valid, not hard-fail replay");
 
         let issue = state.issues.get(&issue_id).unwrap();
         // Neither transition's effect wins outright: whichever was walked
@@ -2246,18 +2723,29 @@ mod tests {
         // either candidate's guess, and current_target stays at its
         // pre-conflict value.
         assert_eq!(issue.status, ItemStatus::LifecycleConflict);
-        assert_eq!(issue.current_target, bob, "reassignment must not have applied unilaterally");
+        assert_eq!(
+            issue.current_target, bob,
+            "reassignment must not have applied unilaterally"
+        );
 
         let tracker = state
             .exclusive
             .get(&issue_key(&issue_id))
             .expect("a conflict tracker must exist for the raced predecessor");
         assert!(tracker.resolved.is_none());
-        assert_eq!(tracker.transitions.len(), 2, "both racing transitions must be recorded");
+        assert_eq!(
+            tracker.transitions.len(),
+            2,
+            "both racing transitions must be recorded"
+        );
 
         // Now a coordinator resolves the conflict in favor of the reassignment.
         let selected = tracker.transitions[1].0.clone(); // the reassignment (published second)
-        let competing: Vec<EventId> = tracker.transitions.iter().map(|(id, _)| id.clone()).collect();
+        let competing: Vec<EventId> = tracker
+            .transitions
+            .iter()
+            .map(|(id, _)| id.clone())
+            .collect();
         let resolved_data = EventData::LifecycleConflictResolved(LifecycleConflictResolved {
             root: issue_id.clone(),
             competing: StringSet::from_sorted_unique(competing).unwrap(),
@@ -2272,10 +2760,16 @@ mod tests {
             coord_next_seq,
             Some(ObjectId::parse(hash(6)).unwrap()),
             &resolved_data,
-            [issue_id.clone(), selected.clone(), tracker.transitions[0].0.clone()],
+            [
+                issue_id.clone(),
+                selected.clone(),
+                tracker.transitions[0].0.clone(),
+            ],
         );
         let mut walk2 = walk;
-        walk2.commits.push(wc(&hash(7), 7, &coord, vec![resolve_conflict_env]));
+        walk2
+            .commits
+            .push(wc(&hash(7), 7, &coord, vec![resolve_conflict_env]));
 
         let state2 = replay(&walk2).expect("conflict resolution must replay cleanly");
         let issue2 = state2.issues.get(&issue_id).unwrap();
@@ -2305,20 +2799,38 @@ mod tests {
         let race_point = b.tip_oid();
 
         let r_resolve = b.push_observing(&bob, &race_point, &resolve(&issue_id, &issue_id), []);
-        let r_reassign_alice =
-            b.push_observing(&alice, &race_point, &reassign(&issue_id, &issue_id, &bob, &carol), []);
-        let r_reassign_coord =
-            b.push_observing(&coord, &race_point, &reassign(&issue_id, &issue_id, &bob, &alice), []);
+        let r_reassign_alice = b.push_observing(
+            &alice,
+            &race_point,
+            &reassign(&issue_id, &issue_id, &bob, &carol),
+            [],
+        );
+        let r_reassign_coord = b.push_observing(
+            &coord,
+            &race_point,
+            &reassign(&issue_id, &issue_id, &bob, &alice),
+            [],
+        );
 
-        let state = b.state().expect("three concurrent transitions must all remain valid");
+        let state = b
+            .state()
+            .expect("three concurrent transitions must all remain valid");
         let tracker = state.exclusive.get(&issue_key(&issue_id)).expect("tracker");
-        assert_eq!(tracker.transitions.len(), 3, "all three racers must be recorded");
+        assert_eq!(
+            tracker.transitions.len(),
+            3,
+            "all three racers must be recorded"
+        );
         assert!(tracker.resolved.is_none());
         let issue = state.issues.get(&issue_id).unwrap();
         assert_eq!(issue.status, ItemStatus::LifecycleConflict);
         assert_eq!(issue.current_target, bob, "no racer may unilaterally win");
 
-        let competing: Vec<EventId> = vec![r_resolve.clone(), r_reassign_alice.clone(), r_reassign_coord.clone()];
+        let competing: Vec<EventId> = vec![
+            r_resolve.clone(),
+            r_reassign_alice.clone(),
+            r_reassign_coord.clone(),
+        ];
         let resolved = EventData::LifecycleConflictResolved(LifecycleConflictResolved {
             root: issue_id.clone(),
             competing: StringSet::from_sorted_unique(competing).unwrap(),
@@ -2329,10 +2841,20 @@ mod tests {
         b.push(&coord, &resolved, []);
         let state2 = b.state().expect("3-way conflict resolution must replay");
         let issue2 = state2.issues.get(&issue_id).unwrap();
-        assert_eq!(issue2.current_target, alice, "exactly the selected transition must apply");
+        assert_eq!(
+            issue2.current_target, alice,
+            "exactly the selected transition must apply"
+        );
         assert_eq!(issue2.current_assignment, r_reassign_coord);
         assert_eq!(issue2.status, ItemStatus::Open);
-        assert_eq!(state2.exclusive.get(&issue_key(&issue_id)).unwrap().resolved, Some(r_reassign_coord));
+        assert_eq!(
+            state2
+                .exclusive
+                .get(&issue_key(&issue_id))
+                .unwrap()
+                .resolved,
+            Some(r_reassign_coord)
+        );
     }
 
     #[test]
@@ -2347,19 +2869,51 @@ mod tests {
         b.push_observing(&bob, &race_point, &resolve(&issue_id, &issue_id), []);
 
         let state_before = b.state().expect("resolve alone replays");
-        assert_eq!(state_before.exclusive.get(&issue_key(&issue_id)).unwrap().transitions.len(), 1);
+        assert_eq!(
+            state_before
+                .exclusive
+                .get(&issue_key(&issue_id))
+                .unwrap()
+                .transitions
+                .len(),
+            1
+        );
         let trial = b.trial(&alice, &reassign(&issue_id, &issue_id, &bob, &carol), []);
-        let err = dry_run(&state_before, &trial).expect_err("causally-aware transition must be rejected");
-        assert!(format!("{err}").contains("already causally observed"), "unexpected error: {err}");
+        let err =
+            dry_run(&state_before, &trial).expect_err("causally-aware transition must be rejected");
+        assert!(
+            format!("{err}").contains("already causally observed"),
+            "unexpected error: {err}"
+        );
 
         assert_eq!(
-            state_before.exclusive.get(&issue_key(&issue_id)).unwrap().transitions.len(),
+            state_before
+                .exclusive
+                .get(&issue_key(&issue_id))
+                .unwrap()
+                .transitions
+                .len(),
             1,
             "a rejected dry-run must not mutate the real tracker"
         );
-        b.push_observing(&alice, &race_point, &reassign(&issue_id, &issue_id, &bob, &carol), []);
-        let state_after = b.state().expect("a genuinely concurrent racer must still be accepted");
-        assert_eq!(state_after.exclusive.get(&issue_key(&issue_id)).unwrap().transitions.len(), 2);
+        b.push_observing(
+            &alice,
+            &race_point,
+            &reassign(&issue_id, &issue_id, &bob, &carol),
+            [],
+        );
+        let state_after = b
+            .state()
+            .expect("a genuinely concurrent racer must still be accepted");
+        assert_eq!(
+            state_after
+                .exclusive
+                .get(&issue_key(&issue_id))
+                .unwrap()
+                .transitions
+                .len(),
+            2
+        );
     }
 
     #[test]
@@ -2373,7 +2927,12 @@ mod tests {
         let issue_id = b.push(&alice, &simple_issue(&bob, StringSet::default()), []);
         let race_point = b.tip_oid();
         let r_resolve = b.push_observing(&bob, &race_point, &resolve(&issue_id, &issue_id), []);
-        let r_reassign = b.push_observing(&alice, &race_point, &reassign(&issue_id, &issue_id, &bob, &carol), []);
+        let r_reassign = b.push_observing(
+            &alice,
+            &race_point,
+            &reassign(&issue_id, &issue_id, &bob, &carol),
+            [],
+        );
 
         let resolved = EventData::LifecycleConflictResolved(LifecycleConflictResolved {
             root: issue_id.clone(),
@@ -2414,7 +2973,8 @@ mod tests {
             assignment: reassign_id.clone(),
             note: Text::parse("on it".into()).unwrap(),
         });
-        dry_run(&state, &b.trial(&carol, &ack, [])).expect("dry_run must see the eager reassignment");
+        dry_run(&state, &b.trial(&carol, &ack, []))
+            .expect("dry_run must see the eager reassignment");
         let bad_ack = EventData::IssueAcknowledged(IssueAcknowledged {
             issue: issue_id.clone(),
             assignment: reassign_id.clone(),
@@ -2435,18 +2995,37 @@ mod tests {
         b.register(&carol, Role::Implementor);
         let issue_id = b.push(&alice, &simple_issue(&bob, StringSet::default()), []);
         let race_point = b.tip_oid();
-        let r_reassign = b.push_observing(&alice, &race_point, &reassign(&issue_id, &issue_id, &bob, &carol), []);
+        let r_reassign = b.push_observing(
+            &alice,
+            &race_point,
+            &reassign(&issue_id, &issue_id, &bob, &carol),
+            [],
+        );
         b.push_observing(&bob, &race_point, &reject(&issue_id, &issue_id), []);
         let mid = b.state().unwrap();
-        assert_eq!(mid.issues.get(&issue_id).unwrap().status, ItemStatus::LifecycleConflict);
-        assert_eq!(mid.exclusive.get(&issue_key(&issue_id)).unwrap().transitions.len(), 2);
+        assert_eq!(
+            mid.issues.get(&issue_id).unwrap().status,
+            ItemStatus::LifecycleConflict
+        );
+        assert_eq!(
+            mid.exclusive
+                .get(&issue_key(&issue_id))
+                .unwrap()
+                .transitions
+                .len(),
+            2
+        );
 
         // carol -- target of a reassignment that has NOT been confirmed --
         // must not be able to resolve the issue off that unconfirmed id.
         let trial = b.trial(&carol, &resolve(&issue_id, &r_reassign), []);
-        let err = dry_run(&mid, &trial)
-            .expect_err("resolving off an unconfirmed, still-contested reassignment must be rejected");
-        assert!(format!("{err}").contains("unresolved lifecycle conflict"), "unexpected error: {err}");
+        let err = dry_run(&mid, &trial).expect_err(
+            "resolving off an unconfirmed, still-contested reassignment must be rejected",
+        );
+        assert!(
+            format!("{err}").contains("unresolved lifecycle conflict"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -2498,18 +3077,36 @@ mod tests {
         });
 
         let st = b.state().unwrap();
-        let err = dry_run(&st, &b.trial(&rev1, &authorize, [])).expect_err("open blocking issue must block");
-        assert!(format!("{err}").contains("blocks this nomination chain"), "unexpected: {err}");
+        let err = dry_run(&st, &b.trial(&rev1, &authorize, []))
+            .expect_err("open blocking issue must block");
+        assert!(
+            format!("{err}").contains("blocks this nomination chain"),
+            "unexpected: {err}"
+        );
 
         let race_point = b.tip_oid();
         b.push_observing(&bob, &race_point, &resolve(&issue_id, &issue_id), []);
-        b.push_observing(&alice, &race_point, &reassign(&issue_id, &issue_id, &bob, &rev1), []);
+        b.push_observing(
+            &alice,
+            &race_point,
+            &reassign(&issue_id, &issue_id, &bob, &rev1),
+            [],
+        );
         let st2 = b.state().unwrap();
-        assert_eq!(st2.issues.get(&issue_id).unwrap().status, ItemStatus::LifecycleConflict);
-        assert!(st2.exclusive.get(&issue_key(&issue_id)).unwrap().resolved.is_none());
+        assert_eq!(
+            st2.issues.get(&issue_id).unwrap().status,
+            ItemStatus::LifecycleConflict
+        );
+        assert!(st2
+            .exclusive
+            .get(&issue_key(&issue_id))
+            .unwrap()
+            .resolved
+            .is_none());
 
-        dry_run(&st2, &b.trial(&rev1, &authorize, []))
-            .expect_err("an unresolved lifecycle-conflicted blocking issue must still block authorization");
+        dry_run(&st2, &b.trial(&rev1, &authorize, [])).expect_err(
+            "an unresolved lifecycle-conflicted blocking issue must still block authorization",
+        );
     }
 
     #[test]
@@ -2574,8 +3171,20 @@ mod tests {
         );
 
         let st = b.state().unwrap();
-        assert_eq!(st.exclusive.get(&review_key(&nom_id)).unwrap().transitions.len(), 2);
-        assert!(st.exclusive.get(&review_key(&nom_id)).unwrap().resolved.is_none());
+        assert_eq!(
+            st.exclusive
+                .get(&review_key(&nom_id))
+                .unwrap()
+                .transitions
+                .len(),
+            2
+        );
+        assert!(st
+            .exclusive
+            .get(&review_key(&nom_id))
+            .unwrap()
+            .resolved
+            .is_none());
 
         let authorize = EventData::ReviewMergeAuthorized(ReviewMergeAuthorized {
             nomination: nom_id.clone(),
@@ -2591,8 +3200,9 @@ mod tests {
             limitations: vec![],
             summary: Text::parse("ok".into()).unwrap(),
         });
-        dry_run(&st, &b.trial(&rev1, &authorize, []))
-            .expect_err("a chain with an unresolved decline/reassign conflict must not authorize a merge");
+        dry_run(&st, &b.trial(&rev1, &authorize, [])).expect_err(
+            "a chain with an unresolved decline/reassign conflict must not authorize a merge",
+        );
     }
 
     #[test]
@@ -2637,7 +3247,9 @@ mod tests {
         );
         let st = b.state().unwrap();
         assert_eq!(
-            st.review_chain(&nom_id).unwrap().decline_or_withdraw_or_reassign_status,
+            st.review_chain(&nom_id)
+                .unwrap()
+                .decline_or_withdraw_or_reassign_status,
             ItemStatus::Terminal("declined")
         );
 
@@ -2886,10 +3498,18 @@ mod tests {
         });
 
         let race = b.tip_oid();
-        let r_reassign = b.push_observing(&alice, &race, &reassign(&issue_id, &issue_id, &bob, &carol), []);
+        let r_reassign = b.push_observing(
+            &alice,
+            &race,
+            &reassign(&issue_id, &issue_id, &bob, &carol),
+            [],
+        );
         b.push_observing(&bob, &race, &reject(&issue_id, &issue_id), []);
         let st = b.state().unwrap();
-        assert_eq!(st.issues.get(&issue_id).unwrap().status, ItemStatus::LifecycleConflict);
+        assert_eq!(
+            st.issues.get(&issue_id).unwrap().status,
+            ItemStatus::LifecycleConflict
+        );
         dry_run(&st, &b.trial(&rev1, &authorize, []))
             .expect_err("conflicted blocking issue must block (this part now works)");
 
@@ -2924,15 +3544,28 @@ mod tests {
         let e1 = b.push_observing(&coord, &race_point, &mk(&bootstrap, 10), []);
         b.push_observing(&coord, &race_point, &mk(&bootstrap, 20), []);
         let st = b.state().unwrap();
-        assert_eq!(st.exclusive.get(&format!("engine_epoch:{bootstrap}")).unwrap().transitions.len(), 2);
-        assert_eq!(st.current_merge_engine_epoch, bootstrap, "conflict reverts to the pre-race epoch");
+        assert_eq!(
+            st.exclusive
+                .get(&format!("engine_epoch:{bootstrap}"))
+                .unwrap()
+                .transitions
+                .len(),
+            2
+        );
+        assert_eq!(
+            st.current_merge_engine_epoch, bootstrap,
+            "conflict reverts to the pre-race epoch"
+        );
 
         // Chain a third activation off the *unresolved* racer e1: must be
         // rejected, not accepted.
         let trial = b.trial(&coord, &mk(&e1, 30), []);
         let err = dry_run(&st, &trial)
             .expect_err("an epoch chained off an unresolved racer must be rejected outright");
-        assert!(format!("{err}").contains("unresolved lifecycle conflict"), "unexpected error: {err}");
+        assert!(
+            format!("{err}").contains("unresolved lifecycle conflict"),
+            "unexpected error: {err}"
+        );
     }
 
     // ---------------------------------------------------------------- stage1
@@ -2988,9 +3621,13 @@ mod tests {
         let alice = a("alice");
         let bogus = oid(9999);
         let e = env(&alice, 1, Some(bogus.clone()), &scope_data(), []);
-        walk.commits.push(wc(&hash(501), walk.commits.len(), &alice, vec![e]));
+        walk.commits
+            .push(wc(&hash(501), walk.commits.len(), &alice, vec![e]));
         let err = replay(&walk).err().unwrap();
-        assert!(err.to_string().contains("is not part of known bus history"), "{err}");
+        assert!(
+            err.to_string().contains("is not part of known bus history"),
+            "{err}"
+        );
     }
 
     /// A `refs` entry naming an event that isn't yet visible from the
@@ -3003,7 +3640,11 @@ mod tests {
         let phantom = EventId::new(&bob, 999);
         b.push(&alice, &scope_data(), [phantom]);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("is not visible from its observed state"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("is not visible from its observed state"),
+            "{err}"
+        );
     }
 
     /// `scope.set` requires the `implementor` role; a reviewer attempting it
@@ -3039,10 +3680,18 @@ mod tests {
         let alice = a("alice");
         let bob = a("bob");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
-        let data = EventData::SchemaActivated(SchemaActivated { version: 2, design_commit: oid(1), helper_commit: oid(2) });
+        let data = EventData::SchemaActivated(SchemaActivated {
+            version: 2,
+            design_commit: oid(1),
+            helper_commit: oid(2),
+        });
         b.push(&alice, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("not named in BUS.json coordinators"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("not named in BUS.json coordinators"),
+            "{err}"
+        );
     }
 
     /// `agent.registered` must always carry `seq == 0`.
@@ -3070,7 +3719,11 @@ mod tests {
         });
         b.push(&carol, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("agent.registered must be sequence zero"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("agent.registered must be sequence zero"),
+            "{err}"
+        );
     }
 
     /// Registering an already-registered agent identity a second time must
@@ -3096,7 +3749,9 @@ mod tests {
         // envelope at seq 0 to isolate the "already registered" branch from
         // the (already-covered) sequence-zero-mismatch branch.
         let e = env(&alice, 0, Some(b.tip_oid()), &data, []);
-        b.walk.commits.push(wc(&hash(2000), b.next_index, &alice, vec![e]));
+        b.walk
+            .commits
+            .push(wc(&hash(2000), b.next_index, &alice, vec![e]));
         let err = b.replay().err().unwrap();
         assert!(err.to_string().contains("is already registered"), "{err}");
     }
@@ -3120,7 +3775,11 @@ mod tests {
         });
         b.push_with_seq(&carol, 0, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("registers as coordinator but is not named in BUS.json"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("registers as coordinator but is not named in BUS.json"),
+            "{err}"
+        );
     }
 
     /// A coordinator registration must have `observed: null`; a *named*
@@ -3130,7 +3789,12 @@ mod tests {
     fn coordinator_registration_must_have_null_observed() {
         let coord1 = a("coord1");
         let coord2 = a("coord2");
-        let bus_json = crate::bootstrap::BusJson::new("sha1".to_string(), vec![coord1.clone(), coord2.clone()], oid(999)).unwrap();
+        let bus_json = crate::bootstrap::BusJson::new(
+            "sha1".to_string(),
+            vec![coord1.clone(), coord2.clone()],
+            oid(999),
+        )
+        .unwrap();
         let coord1_reg = EventData::AgentRegistered(AgentRegistered {
             display_name: Short::parse("coord1".into()).unwrap(),
             primary_role: Role::Coordinator,
@@ -3150,7 +3814,10 @@ mod tests {
             new_events: vec![env(&coord1, 0, None, &coord1_reg, [])],
         };
         let root_oid = ObjectId::parse(root_commit.clone()).unwrap();
-        let mut walk = Walk { commits: vec![root], bus_json };
+        let mut walk = Walk {
+            commits: vec![root],
+            bus_json,
+        };
 
         let coord2_reg = EventData::AgentRegistered(AgentRegistered {
             display_name: Short::parse("coord2".into()).unwrap(),
@@ -3166,7 +3833,11 @@ mod tests {
         let e = env(&coord2, 0, Some(root_oid), &coord2_reg, []);
         walk.commits.push(wc(&hash(1), 1, &coord2, vec![e]));
         let err = replay(&walk).err().unwrap();
-        assert!(err.to_string().contains("coordinator registration must have observed: null"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("coordinator registration must have observed: null"),
+            "{err}"
+        );
     }
 
     /// A non-coordinator registration must always carry a non-null
@@ -3185,10 +3856,12 @@ mod tests {
             model: None,
         });
         let e = env(&carol, 0, None, &data, []);
-        walk.commits.push(wc(&hash(501), walk.commits.len(), &carol, vec![e]));
+        walk.commits
+            .push(wc(&hash(501), walk.commits.len(), &carol, vec![e]));
         let err = replay(&walk).err().unwrap();
         assert!(
-            err.to_string().contains("only bootstrap coordinator registrations may have observed: null"),
+            err.to_string()
+                .contains("only bootstrap coordinator registrations may have observed: null"),
             "{err}"
         );
     }
@@ -3200,7 +3873,12 @@ mod tests {
     fn coordinator_registration_outside_bootstrap_root_is_rejected() {
         let coord1 = a("coord1");
         let coord2 = a("coord2");
-        let bus_json = crate::bootstrap::BusJson::new("sha1".to_string(), vec![coord1.clone(), coord2.clone()], oid(999)).unwrap();
+        let bus_json = crate::bootstrap::BusJson::new(
+            "sha1".to_string(),
+            vec![coord1.clone(), coord2.clone()],
+            oid(999),
+        )
+        .unwrap();
         let coord1_reg = EventData::AgentRegistered(AgentRegistered {
             display_name: Short::parse("coord1".into()).unwrap(),
             primary_role: Role::Coordinator,
@@ -3219,7 +3897,10 @@ mod tests {
             agent: None,
             new_events: vec![env(&coord1, 0, None, &coord1_reg, [])],
         };
-        let mut walk = Walk { commits: vec![root], bus_json };
+        let mut walk = Walk {
+            commits: vec![root],
+            bus_json,
+        };
 
         let coord2_reg = EventData::AgentRegistered(AgentRegistered {
             display_name: Short::parse("coord2".into()).unwrap(),
@@ -3234,7 +3915,11 @@ mod tests {
         let e = env(&coord2, 0, None, &coord2_reg, []);
         walk.commits.push(wc(&hash(1), 1, &coord2, vec![e]));
         let err = replay(&walk).err().unwrap();
-        assert!(err.to_string().contains("coordinator registrations occur only in the bootstrap root commit"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("coordinator registrations occur only in the bootstrap root commit"),
+            "{err}"
+        );
     }
 
     /// `product_base`/`product_branch` at registration time are permitted
@@ -3250,13 +3935,19 @@ mod tests {
             primary_role: Role::Reviewer,
             purpose: Text::parse("x".into()).unwrap(),
             product_base: None,
-            product_branch: Some(crate::scalars::Branch::parse("refs/heads/agent/rev1/x".into()).unwrap()),
+            product_branch: Some(
+                crate::scalars::Branch::parse("refs/heads/agent/rev1/x".into()).unwrap(),
+            ),
             provider: None,
             model: None,
         });
         b.push_with_seq(&rev1, 0, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("product_base/product_branch are permitted only for implementor"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("product_base/product_branch are permitted only for implementor"),
+            "{err}"
+        );
     }
 
     /// An implementor's registration-time `product_branch` must match
@@ -3273,13 +3964,19 @@ mod tests {
             purpose: Text::parse("x".into()).unwrap(),
             product_base: None,
             // Wrong agent name in the branch.
-            product_branch: Some(crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap()),
+            product_branch: Some(
+                crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            ),
             provider: None,
             model: None,
         });
         b.push_with_seq(&carol, 0, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("product_branch must match refs/heads/agent"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("product_branch must match refs/heads/agent"),
+            "{err}"
+        );
     }
 
     /// `agent.status`'s `product_branch`/`product_commit` are permitted only
@@ -3299,7 +3996,11 @@ mod tests {
         });
         b.push(&rev1, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("product fields are permitted only for implementor"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("product fields are permitted only for implementor"),
+            "{err}"
+        );
     }
 
     /// `agent.status`'s `product_branch`, when present, must match this
@@ -3312,12 +4013,18 @@ mod tests {
         let data = EventData::AgentStatus(AgentStatusEvent {
             status: LifecycleStatus::Active,
             note: Text::parse("".into()).unwrap(),
-            product_branch: Some(crate::scalars::Branch::parse("refs/heads/agent/bob/x".into()).unwrap()),
+            product_branch: Some(
+                crate::scalars::Branch::parse("refs/heads/agent/bob/x".into()).unwrap(),
+            ),
             product_commit: None,
         });
         b.push(&alice, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("product_branch must match refs/heads/agent"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("product_branch must match refs/heads/agent"),
+            "{err}"
+        );
     }
 
     /// A well-formed `agent.status` actually sets `product_branch`/
@@ -3355,7 +4062,10 @@ mod tests {
         });
         b.push(&alice, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("previous_lifecycle must be"), "{err}");
+        assert!(
+            err.to_string().contains("previous_lifecycle must be"),
+            "{err}"
+        );
     }
 
     /// A coordinator cannot retire itself.
@@ -3373,7 +4083,10 @@ mod tests {
         });
         b.push(&coord, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("coordinator cannot retire itself"), "{err}");
+        assert!(
+            err.to_string().contains("coordinator cannot retire itself"),
+            "{err}"
+        );
     }
 
     /// `agent.retired`'s `previous_lifecycle` must name the target's actual
@@ -3392,7 +4105,10 @@ mod tests {
         });
         b.push(&coord, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("previous_lifecycle must be"), "{err}");
+        assert!(
+            err.to_string().contains("previous_lifecycle must be"),
+            "{err}"
+        );
     }
 
     /// `schema.activated`'s `version` must strictly increase.
@@ -3402,10 +4118,18 @@ mod tests {
         let bob = a("bob");
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone(), coord.clone()]);
-        let data = EventData::SchemaActivated(SchemaActivated { version: 0, design_commit: oid(1), helper_commit: oid(2) });
+        let data = EventData::SchemaActivated(SchemaActivated {
+            version: 0,
+            design_commit: oid(1),
+            helper_commit: oid(2),
+        });
         b.push(&coord, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("is not greater than the last activated version"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("is not greater than the last activated version"),
+            "{err}"
+        );
     }
 
     /// `merge_engine.activated`'s `previous_epoch` must be a known
@@ -3425,7 +4149,11 @@ mod tests {
         });
         b.push(&coord, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("is not a known bootstrap registration or prior engine activation"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("is not a known bootstrap registration or prior engine activation"),
+            "{err}"
+        );
     }
 
     /// `merge_engine.activated`'s `merge_engine` must be the one supported
@@ -3445,7 +4173,10 @@ mod tests {
         });
         b.push(&coord, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("unsupported merge_engine"), "{err}");
+        assert!(
+            err.to_string().contains("unsupported merge_engine"),
+            "{err}"
+        );
     }
 
     /// `scope.set`'s `depends_on` must be sorted by `(agent, interface)`.
@@ -3460,14 +4191,23 @@ mod tests {
             shared: StringSet::default(),
             exports: StringSet::default(),
             depends_on: vec![
-                crate::common::DependencyImport { agent: bob.clone(), interface: Short::parse("z".into()).unwrap() },
-                crate::common::DependencyImport { agent: bob.clone(), interface: Short::parse("a".into()).unwrap() },
+                crate::common::DependencyImport {
+                    agent: bob.clone(),
+                    interface: Short::parse("z".into()).unwrap(),
+                },
+                crate::common::DependencyImport {
+                    agent: bob.clone(),
+                    interface: Short::parse("a".into()).unwrap(),
+                },
             ],
             note: Text::parse("n".into()).unwrap(),
         });
         b.push(&alice, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("depends_on is not sorted"), "{err}");
+        assert!(
+            err.to_string().contains("depends_on is not sorted"),
+            "{err}"
+        );
     }
 
     /// `scope.set`'s `depends_on` must not contain a duplicate
@@ -3484,14 +4224,23 @@ mod tests {
             shared: StringSet::default(),
             exports: StringSet::default(),
             depends_on: vec![
-                crate::common::DependencyImport { agent: bob.clone(), interface: Short::parse("api".into()).unwrap() },
-                crate::common::DependencyImport { agent: bob.clone(), interface: Short::parse("api".into()).unwrap() },
+                crate::common::DependencyImport {
+                    agent: bob.clone(),
+                    interface: Short::parse("api".into()).unwrap(),
+                },
+                crate::common::DependencyImport {
+                    agent: bob.clone(),
+                    interface: Short::parse("api".into()).unwrap(),
+                },
             ],
             note: Text::parse("n".into()).unwrap(),
         });
         b.push(&alice, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("duplicate depends_on pair"), "{err}");
+        assert!(
+            err.to_string().contains("duplicate depends_on pair"),
+            "{err}"
+        );
     }
 
     /// `plan.set` rejects duplicate step ids.
@@ -3507,7 +4256,10 @@ mod tests {
         };
         let data = EventData::PlanSet(PlanSet {
             summary: Text::parse("s".into()).unwrap(),
-            steps: vec![step(crate::common::PlanStepState::Pending), step(crate::common::PlanStepState::Pending)],
+            steps: vec![
+                step(crate::common::PlanStepState::Pending),
+                step(crate::common::PlanStepState::Pending),
+            ],
             risks: vec![],
         });
         b.push(&alice, &data, []);
@@ -3533,7 +4285,11 @@ mod tests {
         });
         b.push(&alice, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("at most one plan step may be active"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("at most one plan step may be active"),
+            "{err}"
+        );
     }
 
     /// `progress.reported`'s `product_commit` is permitted only for
@@ -3555,7 +4311,11 @@ mod tests {
         });
         b.push(&rev1, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("product_commit is permitted only for implementor"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("product_commit is permitted only for implementor"),
+            "{err}"
+        );
     }
 
     /// The progress tail keeps at most the most recent 20 reports.
@@ -3594,7 +4354,11 @@ mod tests {
         let data = simple_issue(&bob, StringSet::build(vec![not_a_nomination]));
         b.push(&alice, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("is not a review.nominated/reassigned event"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("is not a review.nominated/reassigned event"),
+            "{err}"
+        );
     }
 
     /// An issue cannot be acknowledged twice by its target.
@@ -3612,7 +4376,10 @@ mod tests {
         b.push(&bob, &ack, [issue_id.clone()]);
         b.push(&bob, &ack, [issue_id.clone()]);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("issue already acknowledged"), "{err}");
+        assert!(
+            err.to_string().contains("issue already acknowledged"),
+            "{err}"
+        );
     }
 
     /// Only the assignment's actual target may resolve/reject an issue —
@@ -3626,7 +4393,11 @@ mod tests {
         // alice (the opener, not the target) tries to resolve it herself.
         b.push(&alice, &resolve(&issue_id, &issue_id), [issue_id.clone()]);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("only that assignment's target may dispose of this issue"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("only that assignment's target may dispose of this issue"),
+            "{err}"
+        );
     }
 
     // ---------------------------------------------------------------- stage2
@@ -3676,7 +4447,12 @@ mod tests {
         })
     }
 
-    fn dep_reassign(dependency: &EventId, prev_assignment: &EventId, prev_target: &Agent, new_target: &Agent) -> EventData {
+    fn dep_reassign(
+        dependency: &EventId,
+        prev_assignment: &EventId,
+        prev_target: &Agent,
+        new_target: &Agent,
+    ) -> EventData {
         EventData::DependencyReassigned(DependencyReassigned {
             dependency: dependency.clone(),
             previous_assignment: prev_assignment.clone(),
@@ -3710,7 +4486,10 @@ mod tests {
             authors: StringSet::from_iter(authors),
             product_branch: crate::scalars::Branch::parse(product_branch.into()).unwrap(),
             reviewer: reviewer.clone(),
-            required_checks: required_checks.into_iter().map(|c| Text::parse(c.into()).unwrap()).collect(),
+            required_checks: required_checks
+                .into_iter()
+                .map(|c| Text::parse(c.into()).unwrap())
+                .collect(),
             review_scope,
             summary: Text::parse("s".into()).unwrap(),
             target_branch: crate::scalars::Branch::parse("refs/heads/main".into()).unwrap(),
@@ -3747,7 +4526,11 @@ mod tests {
         // alice (the requester, not the target) tries to acknowledge.
         b.push(&alice, &dep_ack(&dep_id, &dep_id), []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("only that assignment's target may acknowledge"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("only that assignment's target may acknowledge"),
+            "{err}"
+        );
     }
 
     /// Only the assignment's actual target may resolve/reject a dependency.
@@ -3759,7 +4542,11 @@ mod tests {
         let dep_id = b.push(&alice, &dep_requested(&bob), []);
         b.push(&alice, &dep_resolve(&dep_id, &dep_id), []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("only that assignment's target may dispose of this dependency"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("only that assignment's target may dispose of this dependency"),
+            "{err}"
+        );
     }
 
     /// Two genuinely concurrent dependency dispositions on the same
@@ -3775,7 +4562,9 @@ mod tests {
         let race_tip = b.tip_oid();
         b.push_observing(&bob, &race_tip, &dep_resolve(&dep_id, &dep_id), []);
         b.push_observing(&bob, &race_tip, &dep_reject(&dep_id, &dep_id), []);
-        let state = b.state().expect("both concurrent dependency dispositions must remain valid");
+        let state = b
+            .state()
+            .expect("both concurrent dependency dispositions must remain valid");
         let dep = state.dependencies.get(&dep_id).unwrap();
         assert_eq!(dep.status, ItemStatus::LifecycleConflict);
     }
@@ -3799,17 +4588,29 @@ mod tests {
         b.register(&carol, Role::Implementor);
         let dep_id = b.push(&alice, &dep_requested(&bob), []);
         let race_point = b.tip_oid();
-        let r_reassign = b.push_observing(&alice, &race_point, &dep_reassign(&dep_id, &dep_id, &bob, &carol), []);
+        let r_reassign = b.push_observing(
+            &alice,
+            &race_point,
+            &dep_reassign(&dep_id, &dep_id, &bob, &carol),
+            [],
+        );
         b.push_observing(&bob, &race_point, &dep_reject(&dep_id, &dep_id), []);
         let mid = b.state().unwrap();
-        assert_eq!(mid.dependencies.get(&dep_id).unwrap().status, ItemStatus::LifecycleConflict);
+        assert_eq!(
+            mid.dependencies.get(&dep_id).unwrap().status,
+            ItemStatus::LifecycleConflict
+        );
 
         // carol -- target of a reassignment that has NOT been confirmed --
         // must not be able to resolve the dependency off that unconfirmed id.
         let trial = b.trial(&carol, &dep_resolve(&dep_id, &r_reassign), []);
-        let err = dry_run(&mid, &trial)
-            .expect_err("resolving off an unconfirmed, still-contested reassignment must be rejected");
-        assert!(format!("{err}").contains("unresolved lifecycle conflict"), "unexpected error: {err}");
+        let err = dry_run(&mid, &trial).expect_err(
+            "resolving off an unconfirmed, still-contested reassignment must be rejected",
+        );
+        assert!(
+            format!("{err}").contains("unresolved lifecycle conflict"),
+            "unexpected error: {err}"
+        );
     }
 
     /// `dependency.reassigned`'s `previous_target` must match that
@@ -3822,7 +4623,11 @@ mod tests {
         let dep_id = b.push(&alice, &dep_requested(&bob), []);
         b.push(&alice, &dep_reassign(&dep_id, &dep_id, &alice, &bob), []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("previous_target does not match that assignment's target"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("previous_target does not match that assignment's target"),
+            "{err}"
+        );
     }
 
     /// Only the requester or a bootstrap coordinator may reassign a
@@ -3836,7 +4641,11 @@ mod tests {
         // bob (the target, neither requester nor coordinator) tries to reassign.
         b.push(&bob, &dep_reassign(&dep_id, &dep_id, &bob, &alice), []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("only the opener or a bootstrap coordinator may reassign"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("only the opener or a bootstrap coordinator may reassign"),
+            "{err}"
+        );
     }
 
     /// An ordinary, uncontested `dependency.reassigned` must actually move
@@ -3864,10 +4673,18 @@ mod tests {
         let dep_id = b.push(&alice, &dep_requested(&bob), []);
         let reassign_id = b.push(&alice, &dep_reassign(&dep_id, &dep_id, &bob, &carol), []);
 
-        let state = b.state().expect("an uncontested dependency reassignment must replay");
+        let state = b
+            .state()
+            .expect("an uncontested dependency reassignment must replay");
         let dep = state.dependencies.get(&dep_id).unwrap();
-        assert_eq!(dep.current_target, carol, "the new target must become current");
-        assert_eq!(dep.current_assignment, reassign_id, "the reassignment must become the current assignment");
+        assert_eq!(
+            dep.current_target, carol,
+            "the new target must become current"
+        );
+        assert_eq!(
+            dep.current_assignment, reassign_id,
+            "the reassignment must become the current assignment"
+        );
         assert_eq!(dep.status, ItemStatus::Open);
         assert!(
             dep.reassignment_chain.contains(&reassign_id),
@@ -3877,7 +4694,9 @@ mod tests {
         // The new target (carol), not the superseded one (bob), must now be
         // able to acknowledge the dependency.
         b.push(&carol, &dep_ack(&dep_id, &reassign_id), []);
-        let state2 = b.state().expect("the new target must be able to acknowledge");
+        let state2 = b
+            .state()
+            .expect("the new target must be able to acknowledge");
         assert!(state2.dependencies.get(&dep_id).unwrap().acknowledged);
     }
 
@@ -3892,12 +4711,27 @@ mod tests {
         b.register(&carol, Role::Implementor);
         let dep_id = b.push(&alice, &dep_requested(&bob), []);
         let race_tip = b.tip_oid();
-        b.push_observing(&alice, &race_tip, &dep_reassign(&dep_id, &dep_id, &bob, &carol), []);
-        b.push_observing(&alice, &race_tip, &dep_reassign(&dep_id, &dep_id, &bob, &alice), []);
-        let state = b.state().expect("both concurrent reassignments must remain valid");
+        b.push_observing(
+            &alice,
+            &race_tip,
+            &dep_reassign(&dep_id, &dep_id, &bob, &carol),
+            [],
+        );
+        b.push_observing(
+            &alice,
+            &race_tip,
+            &dep_reassign(&dep_id, &dep_id, &bob, &alice),
+            [],
+        );
+        let state = b
+            .state()
+            .expect("both concurrent reassignments must remain valid");
         let dep = state.dependencies.get(&dep_id).unwrap();
         assert_eq!(dep.status, ItemStatus::LifecycleConflict);
-        assert_eq!(dep.current_target, bob, "neither racer's reassignment may apply unilaterally");
+        assert_eq!(
+            dep.current_target, bob,
+            "neither racer's reassignment may apply unilaterally"
+        );
     }
 
     // ---- handoff.* ----
@@ -3911,7 +4745,11 @@ mod tests {
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.push(&alice, &handoff_offer(&bob, "refs/heads/agent/bob/x"), []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("product_branch must match refs/heads/agent"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("product_branch must match refs/heads/agent"),
+            "{err}"
+        );
     }
 
     /// Someone other than the receiver (for accept/decline) or offerer (for
@@ -3924,11 +4762,17 @@ mod tests {
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&carol, Role::Implementor);
         let handoff_id = b.push(&alice, &handoff_offer(&bob, "refs/heads/agent/alice/x"), []);
-        let data = EventData::HandoffAccepted(HandoffAccepted { handoff: handoff_id.clone(), note: Text::parse("n".into()).unwrap() });
+        let data = EventData::HandoffAccepted(HandoffAccepted {
+            handoff: handoff_id.clone(),
+            note: Text::parse("n".into()).unwrap(),
+        });
         // carol is neither offerer nor receiver.
         b.push(&carol, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("emitted by unauthorized agent"), "{err}");
+        assert!(
+            err.to_string().contains("emitted by unauthorized agent"),
+            "{err}"
+        );
     }
 
     /// Two genuinely concurrent handoff dispositions (offerer withdraws,
@@ -3941,12 +4785,23 @@ mod tests {
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         let handoff_id = b.push(&alice, &handoff_offer(&bob, "refs/heads/agent/alice/x"), []);
         let race_tip = b.tip_oid();
-        let withdraw = EventData::HandoffWithdrawn(HandoffWithdrawn { handoff: handoff_id.clone(), reason: Text::parse("r".into()).unwrap() });
-        let decline = EventData::HandoffDeclined(HandoffDeclined { handoff: handoff_id.clone(), reason: Text::parse("r".into()).unwrap() });
+        let withdraw = EventData::HandoffWithdrawn(HandoffWithdrawn {
+            handoff: handoff_id.clone(),
+            reason: Text::parse("r".into()).unwrap(),
+        });
+        let decline = EventData::HandoffDeclined(HandoffDeclined {
+            handoff: handoff_id.clone(),
+            reason: Text::parse("r".into()).unwrap(),
+        });
         b.push_observing(&alice, &race_tip, &withdraw, []);
         b.push_observing(&bob, &race_tip, &decline, []);
-        let state = b.state().expect("both concurrent handoff dispositions must remain valid");
-        assert_eq!(state.handoffs.get(&handoff_id).unwrap().status, ItemStatus::LifecycleConflict);
+        let state = b
+            .state()
+            .expect("both concurrent handoff dispositions must remain valid");
+        assert_eq!(
+            state.handoffs.get(&handoff_id).unwrap().status,
+            ItemStatus::LifecycleConflict
+        );
     }
 
     // ---- review.* ----
@@ -3960,9 +4815,23 @@ mod tests {
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
         // alice nominates, but names only bob as author.
-        b.push(&alice, &review_nom(vec![bob.clone()], "refs/heads/agent/bob/x", &rev1, vec![], StringSet::default()), []);
+        b.push(
+            &alice,
+            &review_nom(
+                vec![bob.clone()],
+                "refs/heads/agent/bob/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("nominating author must be in authors"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("nominating author must be in authors"),
+            "{err}"
+        );
     }
 
     // NOTE: `apply_review_nominated`'s "reviewer cannot be an author" check
@@ -3990,7 +4859,8 @@ mod tests {
         b.register(&rev1, Role::Reviewer);
         let data = EventData::ReviewNominated(ReviewNominated {
             authors: StringSet::from_iter(vec![alice.clone()]),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewer: rev1.clone(),
             required_checks: vec![],
             review_scope: StringSet::default(),
@@ -4000,7 +4870,11 @@ mod tests {
         });
         b.push(&alice, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("target_branch must be refs/heads/main"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("target_branch must be refs/heads/main"),
+            "{err}"
+        );
     }
 
     /// `product_branch` must match `refs/heads/agent/<author>/<topic>` for
@@ -4012,9 +4886,23 @@ mod tests {
         let rev1 = a("rev1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/bob/x", &rev1, vec![], StringSet::default()), []);
+        b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/bob/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("product_branch must match refs/heads/agent/<author>/<topic>"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("product_branch must match refs/heads/agent/<author>/<topic>"),
+            "{err}"
+        );
     }
 
     /// Only the named reviewer may accept a nomination.
@@ -4027,10 +4915,24 @@ mod tests {
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
         b.register(&rev2, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev2, &review_accept(&nom_id), []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("only the named reviewer may accept"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("only the named reviewer may accept"),
+            "{err}"
+        );
     }
 
     /// A nomination cannot be accepted twice.
@@ -4041,11 +4943,24 @@ mod tests {
         let rev1 = a("rev1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         b.push(&rev1, &review_accept(&nom_id), []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("nomination already accepted"), "{err}");
+        assert!(
+            err.to_string().contains("nomination already accepted"),
+            "{err}"
+        );
     }
 
     /// Someone other than the linked reviewer (decline) or an author
@@ -4057,12 +4972,28 @@ mod tests {
         let rev1 = a("rev1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
-        let data = EventData::ReviewNominationDeclined(ReviewNominationDeclined { nomination: nom_id.clone(), reason: Text::parse("r".into()).unwrap() });
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
+        let data = EventData::ReviewNominationDeclined(ReviewNominationDeclined {
+            nomination: nom_id.clone(),
+            reason: Text::parse("r".into()).unwrap(),
+        });
         // bob is neither the linked reviewer nor an author.
         b.push(&bob, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("emitted by unauthorized agent"), "{err}");
+        assert!(
+            err.to_string().contains("emitted by unauthorized agent"),
+            "{err}"
+        );
     }
 
     /// Two genuinely concurrent closings (decline vs. withdraw) on the same
@@ -4075,15 +5006,37 @@ mod tests {
         let rev1 = a("rev1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         let race_tip = b.tip_oid();
-        let decline = EventData::ReviewNominationDeclined(ReviewNominationDeclined { nomination: nom_id.clone(), reason: Text::parse("r".into()).unwrap() });
-        let withdraw = EventData::ReviewWithdrawn(ReviewWithdrawn { nomination: nom_id.clone(), reason: Text::parse("r".into()).unwrap() });
+        let decline = EventData::ReviewNominationDeclined(ReviewNominationDeclined {
+            nomination: nom_id.clone(),
+            reason: Text::parse("r".into()).unwrap(),
+        });
+        let withdraw = EventData::ReviewWithdrawn(ReviewWithdrawn {
+            nomination: nom_id.clone(),
+            reason: Text::parse("r".into()).unwrap(),
+        });
         b.push_observing(&rev1, &race_tip, &decline, []);
         b.push_observing(&alice, &race_tip, &withdraw, []);
-        let state = b.state().expect("both concurrent closings must remain valid");
+        let state = b
+            .state()
+            .expect("both concurrent closings must remain valid");
         assert_eq!(
-            state.reviews.get(&nom_id).unwrap().decline_or_withdraw_or_reassign_status,
+            state
+                .reviews
+                .get(&nom_id)
+                .unwrap()
+                .decline_or_withdraw_or_reassign_status,
             ItemStatus::LifecycleConflict
         );
     }
@@ -4106,12 +5059,23 @@ mod tests {
         b.register(&rev1, Role::Reviewer);
         b.register(&rev2, Role::Reviewer);
         b.register(&rev3, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         let race_point = b.tip_oid();
         let mk_reassign = |reviewer: &Agent| {
             EventData::ReviewReassigned(ReviewReassigned {
                 authors: StringSet::from_iter(vec![alice.clone()]),
-                product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+                product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                    .unwrap(),
                 reviewer: reviewer.clone(),
                 required_checks: vec![],
                 review_scope: StringSet::default(),
@@ -4129,7 +5093,10 @@ mod tests {
         b.push_observing(&alice, &race_point, &to_rev3, []);
         let mid = b.state().unwrap();
         assert_eq!(
-            mid.reviews.get(&nom_id).unwrap().decline_or_withdraw_or_reassign_status,
+            mid.reviews
+                .get(&nom_id)
+                .unwrap()
+                .decline_or_withdraw_or_reassign_status,
             ItemStatus::LifecycleConflict
         );
 
@@ -4141,9 +5108,13 @@ mod tests {
             reason: Text::parse("r".into()).unwrap(),
         });
         let trial = b.trial(&rev2, &decline, []);
-        let err = dry_run(&mid, &trial)
-            .expect_err("declining off an unconfirmed, still-contested reassignment link must be rejected");
-        assert!(format!("{err}").contains("unresolved lifecycle conflict"), "unexpected error: {err}");
+        let err = dry_run(&mid, &trial).expect_err(
+            "declining off an unconfirmed, still-contested reassignment link must be rejected",
+        );
+        assert!(
+            format!("{err}").contains("unresolved lifecycle conflict"),
+            "unexpected error: {err}"
+        );
     }
 
     /// Neither decline nor withdraw may follow an authorization on the same
@@ -4155,12 +5126,23 @@ mod tests {
         let rev1 = a("rev1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let coord = a("coord1");
         let auth = EventData::ReviewMergeAuthorized(ReviewMergeAuthorized {
             nomination: nom_id.clone(),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             previous_main: oid(1),
             reviewed_commit: oid(2),
             candidate: oid(3),
@@ -4173,10 +5155,17 @@ mod tests {
             summary: Text::parse("s".into()).unwrap(),
         });
         b.push(&rev1, &auth, []);
-        let decline = EventData::ReviewNominationDeclined(ReviewNominationDeclined { nomination: nom_id.clone(), reason: Text::parse("r".into()).unwrap() });
+        let decline = EventData::ReviewNominationDeclined(ReviewNominationDeclined {
+            nomination: nom_id.clone(),
+            reason: Text::parse("r".into()).unwrap(),
+        });
         b.push(&rev1, &decline, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("cannot declined after authorization"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("cannot declined after authorization"),
+            "{err}"
+        );
     }
 
     /// `review.changes_requested` requires an already-accepted nomination
@@ -4188,7 +5177,17 @@ mod tests {
         let rev1 = a("rev1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         // No acceptance yet; rev1 tries to request changes anyway.
         let changes = EventData::ReviewChangesRequested(ReviewChangesRequested {
             nomination: nom_id.clone(),
@@ -4198,7 +5197,11 @@ mod tests {
         });
         b.push(&rev1, &changes, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("only the accepting reviewer may request changes"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("only the accepting reviewer may request changes"),
+            "{err}"
+        );
     }
 
     /// `review.changes_requested` must carry at least one finding.
@@ -4209,7 +5212,17 @@ mod tests {
         let rev1 = a("rev1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let changes = EventData::ReviewChangesRequested(ReviewChangesRequested {
             nomination: nom_id.clone(),
@@ -4219,7 +5232,10 @@ mod tests {
         });
         b.push(&rev1, &changes, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("findings must be nonempty"), "{err}");
+        assert!(
+            err.to_string().contains("findings must be nonempty"),
+            "{err}"
+        );
     }
 
     /// `review.changes_requested` must not name the same finding id twice.
@@ -4230,7 +5246,17 @@ mod tests {
         let rev1 = a("rev1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let changes = EventData::ReviewChangesRequested(ReviewChangesRequested {
             nomination: nom_id.clone(),
@@ -4254,7 +5280,17 @@ mod tests {
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
         b.register(&rev2, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let changes = EventData::ReviewChangesRequested(ReviewChangesRequested {
             nomination: nom_id.clone(),
@@ -4265,7 +5301,8 @@ mod tests {
         let changes_id = b.push(&rev1, &changes, []);
         let reassign = EventData::ReviewReassigned(ReviewReassigned {
             authors: StringSet::from_iter(vec![alice.clone()]),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewer: rev2.clone(),
             required_checks: vec![],
             review_scope: StringSet::default(),
@@ -4274,7 +5311,10 @@ mod tests {
             evidence: StringSet::default(),
             replaces: nom_id.clone(),
             reason: Text::parse("r".into()).unwrap(),
-            inherited_findings: vec![crate::common::FindingRef { changes_event: changes_id.clone(), finding_id: Short::parse("f1".into()).unwrap() }],
+            inherited_findings: vec![crate::common::FindingRef {
+                changes_event: changes_id.clone(),
+                finding_id: Short::parse("f1".into()).unwrap(),
+            }],
         });
         b.push(&alice, &reassign, []);
         let cleared = EventData::ReviewFindingsCleared(ReviewFindingsCleared {
@@ -4286,7 +5326,10 @@ mod tests {
         });
         b.push(&rev1, &cleared, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("nomination is no longer current"), "{err}");
+        assert!(
+            err.to_string().contains("nomination is no longer current"),
+            "{err}"
+        );
     }
 
     /// Only the accepting reviewer may dispose of findings.
@@ -4297,7 +5340,17 @@ mod tests {
         let rev1 = a("rev1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let changes = EventData::ReviewChangesRequested(ReviewChangesRequested {
             nomination: nom_id.clone(),
@@ -4316,7 +5369,11 @@ mod tests {
         // alice (an author, not the accepting reviewer) tries to clear it.
         b.push(&alice, &cleared, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("only the accepting reviewer may dispose of findings"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("only the accepting reviewer may dispose of findings"),
+            "{err}"
+        );
     }
 
     /// A causally-later duplicate disposition of the same finding (the same
@@ -4329,7 +5386,17 @@ mod tests {
         let rev1 = a("rev1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let changes = EventData::ReviewChangesRequested(ReviewChangesRequested {
             nomination: nom_id.clone(),
@@ -4348,7 +5415,11 @@ mod tests {
         b.push(&rev1, &cleared, []);
         b.push(&rev1, &cleared, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("already causally observed a disposition"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("already causally observed a disposition"),
+            "{err}"
+        );
     }
 
     /// Two genuinely concurrent (neither observing the other) dispositions
@@ -4374,7 +5445,17 @@ mod tests {
         let rev1 = a("rev1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let changes = EventData::ReviewChangesRequested(ReviewChangesRequested {
             nomination: nom_id.clone(),
@@ -4400,7 +5481,9 @@ mod tests {
         // Neither observes the other: genuinely concurrent by construction.
         b.push_observing(&rev1, &race_tip, &cleared, []);
         b.push_observing(&rev1, &race_tip, &superseded, []);
-        let state = b.state().expect("two genuinely concurrent dispositions must not hard-fail replay");
+        let state = b
+            .state()
+            .expect("two genuinely concurrent dispositions must not hard-fail replay");
         let chain = state.review_chain(&nom_id).unwrap();
         let fkey = (changes_id.clone(), "f1".to_string());
         assert_eq!(
@@ -4408,7 +5491,13 @@ mod tests {
             FindingDisposition::Open,
             "neither racer's disposition may win; the finding must stay Open until lifecycle.conflict_resolved"
         );
-        let tracker = state.exclusive.get(&finding_key(&changes_id, &Short::parse("f1".into()).unwrap())).unwrap();
+        let tracker = state
+            .exclusive
+            .get(&finding_key(
+                &changes_id,
+                &Short::parse("f1".into()).unwrap(),
+            ))
+            .unwrap();
         assert_eq!(tracker.transitions.len(), 2, "both racers must be recorded");
         assert!(tracker.resolved.is_none());
     }
@@ -4424,7 +5513,17 @@ mod tests {
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone(), coord.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let changes = EventData::ReviewChangesRequested(ReviewChangesRequested {
             nomination: nom_id.clone(),
@@ -4452,7 +5551,8 @@ mod tests {
 
         let resolved = EventData::LifecycleConflictResolved(LifecycleConflictResolved {
             root: changes_id.clone(),
-            competing: StringSet::from_sorted_unique(vec![cleared_id, superseded_id.clone()]).unwrap(),
+            competing: StringSet::from_sorted_unique(vec![cleared_id, superseded_id.clone()])
+                .unwrap(),
             selected: superseded_id.clone(),
             reason: Text::parse("clearing was premature".into()).unwrap(),
             user_authority: Text::parse("user".into()).unwrap(),
@@ -4463,15 +5563,24 @@ mod tests {
         let fkey = (changes_id.clone(), "f1".to_string());
         assert_eq!(
             chain.findings.get(&fkey).unwrap().disposition,
-            FindingDisposition::Superseded { by_event: superseded_id.clone(), rationale: Text::parse("moot".into()).unwrap() },
+            FindingDisposition::Superseded {
+                by_event: superseded_id.clone(),
+                rationale: Text::parse("moot".into()).unwrap()
+            },
             "the selected racer's effect must apply once resolved"
         );
         assert_eq!(
-            state.exclusive.get(&finding_key(&changes_id, &Short::parse("f1".into()).unwrap())).unwrap().resolved,
+            state
+                .exclusive
+                .get(&finding_key(
+                    &changes_id,
+                    &Short::parse("f1".into()).unwrap()
+                ))
+                .unwrap()
+                .resolved,
             Some(superseded_id)
         );
     }
-
 
     /// A `review.reassigned` naming `replaces` = a nomination link that is
     /// itself an *unconfirmed* (still-contested) reassignment candidate must
@@ -4493,12 +5602,23 @@ mod tests {
         b.register(&rev2, Role::Reviewer);
         b.register(&rev3, Role::Reviewer);
         b.register(&rev4, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         let race_point = b.tip_oid();
         let mk_reassign = |reviewer: &Agent| {
             EventData::ReviewReassigned(ReviewReassigned {
                 authors: StringSet::from_iter(vec![alice.clone()]),
-                product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+                product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                    .unwrap(),
                 reviewer: reviewer.clone(),
                 required_checks: vec![],
                 review_scope: StringSet::default(),
@@ -4517,7 +5637,8 @@ mod tests {
         // (rev2's link) as *its* `replaces`.
         let reassign_again = EventData::ReviewReassigned(ReviewReassigned {
             authors: StringSet::from_iter(vec![alice.clone()]),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewer: rev4.clone(),
             required_checks: vec![],
             review_scope: StringSet::default(),
@@ -4530,7 +5651,11 @@ mod tests {
         });
         b.push(&alice, &reassign_again, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("is itself part of an unresolved lifecycle conflict"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("is itself part of an unresolved lifecycle conflict"),
+            "{err}"
+        );
     }
 
     /// A `review.reassigned` must copy the request exactly, except reviewer.
@@ -4543,10 +5668,21 @@ mod tests {
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
         b.register(&rev2, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         let reassign = EventData::ReviewReassigned(ReviewReassigned {
             authors: StringSet::from_iter(vec![alice.clone()]),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewer: rev2.clone(),
             required_checks: vec![],
             review_scope: StringSet::default(),
@@ -4559,7 +5695,11 @@ mod tests {
         });
         b.push(&alice, &reassign, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("reassignment must copy the request exactly except reviewer"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("reassignment must copy the request exactly except reviewer"),
+            "{err}"
+        );
     }
 
     /// A `review.reassigned`'s replacement reviewer must differ from the one
@@ -4571,10 +5711,21 @@ mod tests {
         let rev1 = a("rev1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         let reassign = EventData::ReviewReassigned(ReviewReassigned {
             authors: StringSet::from_iter(vec![alice.clone()]),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewer: rev1.clone(),
             required_checks: vec![],
             review_scope: StringSet::default(),
@@ -4587,7 +5738,10 @@ mod tests {
         });
         b.push(&alice, &reassign, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("replacement reviewer must differ"), "{err}");
+        assert!(
+            err.to_string().contains("replacement reviewer must differ"),
+            "{err}"
+        );
     }
 
     // NOTE: `apply_review_reassigned`'s "replacement reviewer cannot be an
@@ -4609,10 +5763,21 @@ mod tests {
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
         b.register(&rev2, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         let reassign = EventData::ReviewReassigned(ReviewReassigned {
             authors: StringSet::from_iter(vec![alice.clone()]),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewer: rev2.clone(),
             required_checks: vec![],
             review_scope: StringSet::default(),
@@ -4626,7 +5791,11 @@ mod tests {
         // bob is neither an author nor a coordinator.
         b.push(&bob, &reassign, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("only a request author or bootstrap coordinator may reassign"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("only a request author or bootstrap coordinator may reassign"),
+            "{err}"
+        );
     }
 
     /// `inherited_findings` must not contain duplicates.
@@ -4639,7 +5808,17 @@ mod tests {
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
         b.register(&rev2, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let changes = EventData::ReviewChangesRequested(ReviewChangesRequested {
             nomination: nom_id.clone(),
@@ -4648,10 +5827,14 @@ mod tests {
             evidence: StringSet::default(),
         });
         let changes_id = b.push(&rev1, &changes, []);
-        let fref = crate::common::FindingRef { changes_event: changes_id.clone(), finding_id: Short::parse("f1".into()).unwrap() };
+        let fref = crate::common::FindingRef {
+            changes_event: changes_id.clone(),
+            finding_id: Short::parse("f1".into()).unwrap(),
+        };
         let reassign = EventData::ReviewReassigned(ReviewReassigned {
             authors: StringSet::from_iter(vec![alice.clone()]),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewer: rev2.clone(),
             required_checks: vec![],
             review_scope: StringSet::default(),
@@ -4664,7 +5847,11 @@ mod tests {
         });
         b.push(&alice, &reassign, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("inherited_findings has duplicates"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("inherited_findings has duplicates"),
+            "{err}"
+        );
     }
 
     /// `inherited_findings` must equal every still-open finding exactly
@@ -4678,7 +5865,17 @@ mod tests {
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
         b.register(&rev2, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let changes = EventData::ReviewChangesRequested(ReviewChangesRequested {
             nomination: nom_id.clone(),
@@ -4690,7 +5887,8 @@ mod tests {
         // Omit the still-open finding entirely.
         let reassign = EventData::ReviewReassigned(ReviewReassigned {
             authors: StringSet::from_iter(vec![alice.clone()]),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewer: rev2.clone(),
             required_checks: vec![],
             review_scope: StringSet::default(),
@@ -4704,10 +5902,21 @@ mod tests {
         let _ = changes_id;
         b.push(&alice, &reassign, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("inherited_findings must equal every still-open finding exactly once"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("inherited_findings must equal every still-open finding exactly once"),
+            "{err}"
+        );
     }
 
-    fn merge_auth(nomination: &EventId, product_branch: &str, epoch: &EventId, checks: Vec<crate::common::CheckResult>, dispositions: Vec<crate::common::FindingDisposition>, reviewed_scope: StringSet<crate::scalars::PathClaim>) -> EventData {
+    fn merge_auth(
+        nomination: &EventId,
+        product_branch: &str,
+        epoch: &EventId,
+        checks: Vec<crate::common::CheckResult>,
+        dispositions: Vec<crate::common::FindingDisposition>,
+        reviewed_scope: StringSet<crate::scalars::PathClaim>,
+    ) -> EventData {
         EventData::ReviewMergeAuthorized(ReviewMergeAuthorized {
             nomination: nomination.clone(),
             product_branch: crate::scalars::Branch::parse(product_branch.into()).unwrap(),
@@ -4736,10 +5945,21 @@ mod tests {
         b.register(&rev1, Role::Reviewer);
         b.register(&rev2, Role::Reviewer);
         let coord = a("coord1");
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         let reassign = EventData::ReviewReassigned(ReviewReassigned {
             authors: StringSet::from_iter(vec![alice.clone()]),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewer: rev2.clone(),
             required_checks: vec![],
             review_scope: StringSet::default(),
@@ -4751,10 +5971,20 @@ mod tests {
             inherited_findings: vec![],
         });
         b.push(&alice, &reassign, []);
-        let auth = merge_auth(&nom_id, "refs/heads/agent/alice/x", &EventId::new(&coord, 0), vec![], vec![], StringSet::default());
+        let auth = merge_auth(
+            &nom_id,
+            "refs/heads/agent/alice/x",
+            &EventId::new(&coord, 0),
+            vec![],
+            vec![],
+            StringSet::default(),
+        );
         b.push(&rev1, &auth, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("nomination is no longer current"), "{err}");
+        assert!(
+            err.to_string().contains("nomination is no longer current"),
+            "{err}"
+        );
     }
 
     /// Only the accepting reviewer may authorize.
@@ -4766,12 +5996,33 @@ mod tests {
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         // No acceptance yet.
-        let auth = merge_auth(&nom_id, "refs/heads/agent/alice/x", &EventId::new(&coord, 0), vec![], vec![], StringSet::default());
+        let auth = merge_auth(
+            &nom_id,
+            "refs/heads/agent/alice/x",
+            &EventId::new(&coord, 0),
+            vec![],
+            vec![],
+            StringSet::default(),
+        );
         b.push(&rev1, &auth, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("only the accepting reviewer may authorize"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("only the accepting reviewer may authorize"),
+            "{err}"
+        );
     }
 
     /// `reviewed_scope` must exactly equal the nomination's `review_scope`.
@@ -4783,7 +6034,17 @@ mod tests {
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let auth = merge_auth(
             &nom_id,
@@ -4791,11 +6052,17 @@ mod tests {
             &EventId::new(&coord, 0),
             vec![],
             vec![],
-            StringSet::build(vec![crate::scalars::PathClaim::parse("src/**".into()).unwrap()]),
+            StringSet::build(vec![
+                crate::scalars::PathClaim::parse("src/**".into()).unwrap()
+            ]),
         );
         b.push(&rev1, &auth, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("reviewed_scope must exactly equal the nomination's review_scope"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("reviewed_scope must exactly equal the nomination's review_scope"),
+            "{err}"
+        );
     }
 
     /// `product_branch` on the authorization must exactly equal the
@@ -4808,16 +6075,38 @@ mod tests {
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
-        let mut auth_data = match merge_auth(&nom_id, "refs/heads/agent/alice/x", &EventId::new(&coord, 0), vec![], vec![], StringSet::default()) {
+        let mut auth_data = match merge_auth(
+            &nom_id,
+            "refs/heads/agent/alice/x",
+            &EventId::new(&coord, 0),
+            vec![],
+            vec![],
+            StringSet::default(),
+        ) {
             EventData::ReviewMergeAuthorized(d) => d,
             _ => unreachable!(),
         };
-        auth_data.product_branch = crate::scalars::Branch::parse("refs/heads/agent/alice/other".into()).unwrap();
+        auth_data.product_branch =
+            crate::scalars::Branch::parse("refs/heads/agent/alice/other".into()).unwrap();
         b.push(&rev1, &EventData::ReviewMergeAuthorized(auth_data), []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("product_branch must exactly equal the nomination's product_branch"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("product_branch must exactly equal the nomination's product_branch"),
+            "{err}"
+        );
     }
 
     /// Authorization must not proceed while any finding is still `Open`.
@@ -4829,7 +6118,17 @@ mod tests {
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let changes = EventData::ReviewChangesRequested(ReviewChangesRequested {
             nomination: nom_id.clone(),
@@ -4838,7 +6137,14 @@ mod tests {
             evidence: StringSet::default(),
         });
         b.push(&rev1, &changes, []);
-        let auth = merge_auth(&nom_id, "refs/heads/agent/alice/x", &EventId::new(&coord, 0), vec![], vec![], StringSet::default());
+        let auth = merge_auth(
+            &nom_id,
+            "refs/heads/agent/alice/x",
+            &EventId::new(&coord, 0),
+            vec![],
+            vec![],
+            StringSet::default(),
+        );
         b.push(&rev1, &auth, []);
         let err = b.replay().err().unwrap();
         assert!(err.to_string().contains("unresolved finding"), "{err}");
@@ -4853,7 +6159,17 @@ mod tests {
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let changes = EventData::ReviewChangesRequested(ReviewChangesRequested {
             nomination: nom_id.clone(),
@@ -4876,10 +6192,21 @@ mod tests {
             disposition: FindingDispositionKind::Cleared,
             rationale: Text::parse("".into()).unwrap(),
         };
-        let auth = merge_auth(&nom_id, "refs/heads/agent/alice/x", &EventId::new(&coord, 0), vec![], vec![fd.clone(), fd], StringSet::default());
+        let auth = merge_auth(
+            &nom_id,
+            "refs/heads/agent/alice/x",
+            &EventId::new(&coord, 0),
+            vec![],
+            vec![fd.clone(), fd],
+            StringSet::default(),
+        );
         b.push(&rev1, &auth, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("duplicate finding_dispositions entry"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("duplicate finding_dispositions entry"),
+            "{err}"
+        );
     }
 
     /// `finding_dispositions` must exactly match every finding's actual
@@ -4892,7 +6219,17 @@ mod tests {
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let changes = EventData::ReviewChangesRequested(ReviewChangesRequested {
             nomination: nom_id.clone(),
@@ -4916,10 +6253,21 @@ mod tests {
             disposition: FindingDispositionKind::Superseded,
             rationale: Text::parse("".into()).unwrap(),
         };
-        let auth = merge_auth(&nom_id, "refs/heads/agent/alice/x", &EventId::new(&coord, 0), vec![], vec![fd], StringSet::default());
+        let auth = merge_auth(
+            &nom_id,
+            "refs/heads/agent/alice/x",
+            &EventId::new(&coord, 0),
+            vec![],
+            vec![fd],
+            StringSet::default(),
+        );
         b.push(&rev1, &auth, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("finding_dispositions must exactly match"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("finding_dispositions must exactly match"),
+            "{err}"
+        );
     }
 
     /// `merge_engine_epoch` must be the currently-selected epoch.
@@ -4931,13 +6279,34 @@ mod tests {
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone(), coord.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         // alice:0 is a real, visible event, but never activated as an epoch.
-        let auth = merge_auth(&nom_id, "refs/heads/agent/alice/x", &EventId::new(&alice, 0), vec![], vec![], StringSet::default());
+        let auth = merge_auth(
+            &nom_id,
+            "refs/heads/agent/alice/x",
+            &EventId::new(&alice, 0),
+            vec![],
+            vec![],
+            StringSet::default(),
+        );
         b.push(&rev1, &auth, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("is not the currently selected epoch"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("is not the currently selected epoch"),
+            "{err}"
+        );
     }
 
     /// Every `required_checks` entry must be present among `checks`.
@@ -4949,9 +6318,26 @@ mod tests {
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec!["build"], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec!["build"],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
-        let auth = merge_auth(&nom_id, "refs/heads/agent/alice/x", &EventId::new(&coord, 0), vec![], vec![], StringSet::default());
+        let auth = merge_auth(
+            &nom_id,
+            "refs/heads/agent/alice/x",
+            &EventId::new(&coord, 0),
+            vec![],
+            vec![],
+            StringSet::default(),
+        );
         b.push(&rev1, &auth, []);
         let err = b.replay().err().unwrap();
         assert!(err.to_string().contains("missing required check"), "{err}");
@@ -4978,16 +6364,44 @@ mod tests {
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec!["build"], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec!["build"],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let checks = vec![crate::common::CheckResult {
             command: Text::parse("build".into()).unwrap(),
             result: crate::common::CheckOutcome::Passed,
             evidence: None,
         }];
-        let auth_id = b.push(&rev1, &merge_auth(&nom_id, "refs/heads/agent/alice/x", &EventId::new(&coord, 0), checks, vec![], StringSet::default()), []);
-        let state = b.replay().expect("a fully well-formed authorization must replay");
-        assert!(state.reviews.get(&nom_id).unwrap().authorizations.contains(&auth_id));
+        let auth_id = b.push(
+            &rev1,
+            &merge_auth(
+                &nom_id,
+                "refs/heads/agent/alice/x",
+                &EventId::new(&coord, 0),
+                checks,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
+        let state = b
+            .replay()
+            .expect("a fully well-formed authorization must replay");
+        assert!(state
+            .reviews
+            .get(&nom_id)
+            .unwrap()
+            .authorizations
+            .contains(&auth_id));
     }
 
     /// Authorizing an already-merged/reconciled nomination is rejected.
@@ -4999,27 +6413,60 @@ mod tests {
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
-        let auth1 = merge_auth(&nom_id, "refs/heads/agent/alice/x", &EventId::new(&coord, 0), vec![], vec![], StringSet::default());
+        let auth1 = merge_auth(
+            &nom_id,
+            "refs/heads/agent/alice/x",
+            &EventId::new(&coord, 0),
+            vec![],
+            vec![],
+            StringSet::default(),
+        );
         let (auth1_id, previous_main, candidate) = match &auth1 {
-            EventData::ReviewMergeAuthorized(d) => (b.push(&rev1, &auth1, []), d.previous_main.clone(), d.candidate.clone()),
+            EventData::ReviewMergeAuthorized(d) => (
+                b.push(&rev1, &auth1, []),
+                d.previous_main.clone(),
+                d.candidate.clone(),
+            ),
             _ => unreachable!(),
         };
         let merged = EventData::ReviewMerged(ReviewMerged {
             authorization: auth1_id,
             previous_main,
             main_commit: candidate,
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewed_commit: oid(2),
             summary: Text::parse("s".into()).unwrap(),
         });
         b.push(&rev1, &merged, []);
         // Second authorization attempt on the (now closed) nomination.
-        let auth2 = merge_auth(&nom_id, "refs/heads/agent/alice/x", &EventId::new(&coord, 0), vec![], vec![], StringSet::default());
+        let auth2 = merge_auth(
+            &nom_id,
+            "refs/heads/agent/alice/x",
+            &EventId::new(&coord, 0),
+            vec![],
+            vec![],
+            StringSet::default(),
+        );
         b.push(&rev1, &auth2, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("nomination already merged/reconciled"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("nomination already merged/reconciled"),
+            "{err}"
+        );
     }
 
     /// Only the authorizing reviewer may emit `review.merged`.
@@ -5031,22 +6478,44 @@ mod tests {
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
-        let auth = merge_auth(&nom_id, "refs/heads/agent/alice/x", &EventId::new(&coord, 0), vec![], vec![], StringSet::default());
+        let auth = merge_auth(
+            &nom_id,
+            "refs/heads/agent/alice/x",
+            &EventId::new(&coord, 0),
+            vec![],
+            vec![],
+            StringSet::default(),
+        );
         let auth_id = b.push(&rev1, &auth, []);
         let merged = EventData::ReviewMerged(ReviewMerged {
             authorization: auth_id,
             previous_main: oid(1),
             main_commit: oid(3),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewed_commit: oid(2),
             summary: Text::parse("s".into()).unwrap(),
         });
         // alice (an author, not rev1) emits the merge receipt.
         b.push(&alice, &merged, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("only the authorizing reviewer may emit review.merged"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("only the authorizing reviewer may emit review.merged"),
+            "{err}"
+        );
     }
 
     /// `review.merged`'s values must match the cited authorization exactly.
@@ -5058,21 +6527,43 @@ mod tests {
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
-        let auth = merge_auth(&nom_id, "refs/heads/agent/alice/x", &EventId::new(&coord, 0), vec![], vec![], StringSet::default());
+        let auth = merge_auth(
+            &nom_id,
+            "refs/heads/agent/alice/x",
+            &EventId::new(&coord, 0),
+            vec![],
+            vec![],
+            StringSet::default(),
+        );
         let auth_id = b.push(&rev1, &auth, []);
         let merged = EventData::ReviewMerged(ReviewMerged {
             authorization: auth_id,
             previous_main: oid(1),
             main_commit: oid(999), // does not match the authorization's `candidate`
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewed_commit: oid(2),
             summary: Text::parse("s".into()).unwrap(),
         });
         b.push(&rev1, &merged, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("receipt values do not match the cited authorization"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("receipt values do not match the cited authorization"),
+            "{err}"
+        );
     }
 
     /// `review.merge_reconciled`'s values must match the cited authorization
@@ -5085,22 +6576,44 @@ mod tests {
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone(), coord.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
-        let auth = merge_auth(&nom_id, "refs/heads/agent/alice/x", &EventId::new(&coord, 0), vec![], vec![], StringSet::default());
+        let auth = merge_auth(
+            &nom_id,
+            "refs/heads/agent/alice/x",
+            &EventId::new(&coord, 0),
+            vec![],
+            vec![],
+            StringSet::default(),
+        );
         let auth_id = b.push(&rev1, &auth, []);
         let reconciled = EventData::ReviewMergeReconciled(ReviewMergeReconciled {
             authorization: auth_id,
             previous_main: oid(1),
             main_commit: oid(999),
-            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                .unwrap(),
             reviewed_commit: oid(2),
             reason: Text::parse("out of band merge".into()).unwrap(),
             user_authority: Text::parse("user".into()).unwrap(),
         });
         b.push(&coord, &reconciled, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("receipt values do not match the cited authorization"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("receipt values do not match the cited authorization"),
+            "{err}"
+        );
     }
 
     /// `authorization_data` (private helper shared by `review.merged` and
@@ -5117,8 +6630,14 @@ mod tests {
         let bob = a("bob");
         let b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         let state = b.state().unwrap();
-        let err = authorization_data(&state, &EventId::new(&alice, 0)).err().unwrap();
-        assert!(err.to_string().contains("is not a review.merge_authorized event"), "{err}");
+        let err = authorization_data(&state, &EventId::new(&alice, 0))
+            .err()
+            .unwrap();
+        assert!(
+            err.to_string()
+                .contains("is not a review.merge_authorized event"),
+            "{err}"
+        );
     }
 
     // ---- lifecycle.conflict_resolved ----
@@ -5141,7 +6660,11 @@ mod tests {
         });
         b.push(&coord, &data, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("no unresolved conflict found for root"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("no unresolved conflict found for root"),
+            "{err}"
+        );
     }
 
     /// A root naming two distinct still-open findings under the same
@@ -5164,7 +6687,17 @@ mod tests {
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone(), coord.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let changes = EventData::ReviewChangesRequested(ReviewChangesRequested {
             nomination: nom_id.clone(),
@@ -5183,7 +6716,10 @@ mod tests {
             state.exclusive.insert(
                 key,
                 ExclusiveTracker {
-                    transitions: vec![(EventId::new(&rev1, 900), 90), (EventId::new(&rev1, 901), 91)],
+                    transitions: vec![
+                        (EventId::new(&rev1, 900), 90),
+                        (EventId::new(&rev1, 901), 91),
+                    ],
                     resolved: None,
                 },
             );
@@ -5196,9 +6732,21 @@ mod tests {
             reason: Text::parse("r".into()).unwrap(),
             user_authority: Text::parse("u".into()).unwrap(),
         };
-        let coord_env = env(&coord, state.agents.get(&coord).unwrap().next_seq, Some(b.tip_oid()), &EventData::LifecycleConflictResolved(d.clone()), []);
-        let err = apply_conflict_resolved(&mut state, &coord_env, &d).err().unwrap();
-        assert!(err.to_string().contains("names multiple ambiguous finding conflicts"), "{err}");
+        let coord_env = env(
+            &coord,
+            state.agents.get(&coord).unwrap().next_seq,
+            Some(b.tip_oid()),
+            &EventData::LifecycleConflictResolved(d.clone()),
+            [],
+        );
+        let err = apply_conflict_resolved(&mut state, &coord_env, &d)
+            .err()
+            .unwrap();
+        assert!(
+            err.to_string()
+                .contains("names multiple ambiguous finding conflicts"),
+            "{err}"
+        );
     }
 
     /// `competing` must equal exactly the tracker's recorded transitions.
@@ -5213,7 +6761,12 @@ mod tests {
         let issue_id = b.push(&alice, &simple_issue(&bob, StringSet::default()), []);
         let race_tip = b.tip_oid();
         let winner = b.push_observing(&bob, &race_tip, &resolve(&issue_id, &issue_id), []);
-        b.push_observing(&alice, &race_tip, &reassign(&issue_id, &issue_id, &bob, &carol), []);
+        b.push_observing(
+            &alice,
+            &race_tip,
+            &reassign(&issue_id, &issue_id, &bob, &carol),
+            [],
+        );
 
         let resolved = EventData::LifecycleConflictResolved(LifecycleConflictResolved {
             root: issue_id.clone(),
@@ -5225,7 +6778,11 @@ mod tests {
         });
         b.push(&coord, &resolved, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("competing set does not match the recorded conflict set"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("competing set does not match the recorded conflict set"),
+            "{err}"
+        );
     }
 
     /// `selected` must itself be a member of `competing`.
@@ -5240,7 +6797,12 @@ mod tests {
         let issue_id = b.push(&alice, &simple_issue(&bob, StringSet::default()), []);
         let race_tip = b.tip_oid();
         let r1 = b.push_observing(&bob, &race_tip, &resolve(&issue_id, &issue_id), []);
-        let r2 = b.push_observing(&alice, &race_tip, &reassign(&issue_id, &issue_id, &bob, &carol), []);
+        let r2 = b.push_observing(
+            &alice,
+            &race_tip,
+            &reassign(&issue_id, &issue_id, &bob, &carol),
+            [],
+        );
 
         let resolved = EventData::LifecycleConflictResolved(LifecycleConflictResolved {
             root: issue_id.clone(),
@@ -5251,7 +6813,11 @@ mod tests {
         });
         b.push(&coord, &resolved, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("selected must be a member of competing"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("selected must be a member of competing"),
+            "{err}"
+        );
     }
 
     // ---- `lifecycle.conflict_resolved`'s re-applied-effect dispatch table
@@ -5285,17 +6851,31 @@ mod tests {
         let race1 = b.tip_oid();
         let win1 = b.push_observing(&bob, &race1, &resolve(&issue1, &issue1), []);
         let lose1 = b.push_observing(&bob, &race1, &reject(&issue1, &issue1), []);
-        b.push(&coord, &resolve_conflict(&issue1, vec![win1.clone(), lose1], &win1), []);
+        b.push(
+            &coord,
+            &resolve_conflict(&issue1, vec![win1.clone(), lose1], &win1),
+            [],
+        );
 
         let issue2 = b.push(&alice, &simple_issue(&bob, StringSet::default()), []);
         let race2 = b.tip_oid();
         let lose2 = b.push_observing(&bob, &race2, &resolve(&issue2, &issue2), []);
         let win2 = b.push_observing(&bob, &race2, &reject(&issue2, &issue2), []);
-        b.push(&coord, &resolve_conflict(&issue2, vec![lose2, win2.clone()], &win2), []);
+        b.push(
+            &coord,
+            &resolve_conflict(&issue2, vec![lose2, win2.clone()], &win2),
+            [],
+        );
 
         let state = b.replay().expect("both conflict resolutions must replay");
-        assert_eq!(state.issues.get(&issue1).unwrap().status, ItemStatus::Terminal("resolved"));
-        assert_eq!(state.issues.get(&issue2).unwrap().status, ItemStatus::Terminal("rejected"));
+        assert_eq!(
+            state.issues.get(&issue1).unwrap().status,
+            ItemStatus::Terminal("resolved")
+        );
+        assert_eq!(
+            state.issues.get(&issue2).unwrap().status,
+            ItemStatus::Terminal("rejected")
+        );
     }
 
     #[test]
@@ -5308,9 +6888,18 @@ mod tests {
         let race = b.tip_oid();
         let lose = b.push_observing(&bob, &race, &dep_resolve(&dep_id, &dep_id), []);
         let win = b.push_observing(&bob, &race, &dep_reject(&dep_id, &dep_id), []);
-        b.push(&coord, &resolve_conflict(&dep_id, vec![lose, win.clone()], &win), []);
-        let state = b.replay().expect("dependency conflict resolution must replay");
-        assert_eq!(state.dependencies.get(&dep_id).unwrap().status, ItemStatus::Terminal("rejected"));
+        b.push(
+            &coord,
+            &resolve_conflict(&dep_id, vec![lose, win.clone()], &win),
+            [],
+        );
+        let state = b
+            .replay()
+            .expect("dependency conflict resolution must replay");
+        assert_eq!(
+            state.dependencies.get(&dep_id).unwrap().status,
+            ItemStatus::Terminal("rejected")
+        );
     }
 
     #[test]
@@ -5323,34 +6912,75 @@ mod tests {
         // accepted wins over withdrawn
         let h1 = b.push(&alice, &handoff_offer(&bob, "refs/heads/agent/alice/x"), []);
         let race1 = b.tip_oid();
-        let accept = EventData::HandoffAccepted(HandoffAccepted { handoff: h1.clone(), note: Text::parse("".into()).unwrap() });
-        let withdraw1 = EventData::HandoffWithdrawn(HandoffWithdrawn { handoff: h1.clone(), reason: Text::parse("r".into()).unwrap() });
+        let accept = EventData::HandoffAccepted(HandoffAccepted {
+            handoff: h1.clone(),
+            note: Text::parse("".into()).unwrap(),
+        });
+        let withdraw1 = EventData::HandoffWithdrawn(HandoffWithdrawn {
+            handoff: h1.clone(),
+            reason: Text::parse("r".into()).unwrap(),
+        });
         let acc_id = b.push_observing(&bob, &race1, &accept, []);
         let wd1_id = b.push_observing(&alice, &race1, &withdraw1, []);
-        b.push(&coord, &resolve_conflict(&h1, vec![acc_id.clone(), wd1_id], &acc_id), []);
+        b.push(
+            &coord,
+            &resolve_conflict(&h1, vec![acc_id.clone(), wd1_id], &acc_id),
+            [],
+        );
 
         // declined wins over withdrawn
         let h2 = b.push(&alice, &handoff_offer(&bob, "refs/heads/agent/alice/x"), []);
         let race2 = b.tip_oid();
-        let decline = EventData::HandoffDeclined(HandoffDeclined { handoff: h2.clone(), reason: Text::parse("r".into()).unwrap() });
-        let withdraw2 = EventData::HandoffWithdrawn(HandoffWithdrawn { handoff: h2.clone(), reason: Text::parse("r".into()).unwrap() });
+        let decline = EventData::HandoffDeclined(HandoffDeclined {
+            handoff: h2.clone(),
+            reason: Text::parse("r".into()).unwrap(),
+        });
+        let withdraw2 = EventData::HandoffWithdrawn(HandoffWithdrawn {
+            handoff: h2.clone(),
+            reason: Text::parse("r".into()).unwrap(),
+        });
         let dec_id = b.push_observing(&bob, &race2, &decline, []);
         let wd2_id = b.push_observing(&alice, &race2, &withdraw2, []);
-        b.push(&coord, &resolve_conflict(&h2, vec![dec_id.clone(), wd2_id], &dec_id), []);
+        b.push(
+            &coord,
+            &resolve_conflict(&h2, vec![dec_id.clone(), wd2_id], &dec_id),
+            [],
+        );
 
         // withdrawn wins over accepted
         let h3 = b.push(&alice, &handoff_offer(&bob, "refs/heads/agent/alice/x"), []);
         let race3 = b.tip_oid();
-        let accept3 = EventData::HandoffAccepted(HandoffAccepted { handoff: h3.clone(), note: Text::parse("".into()).unwrap() });
-        let withdraw3 = EventData::HandoffWithdrawn(HandoffWithdrawn { handoff: h3.clone(), reason: Text::parse("r".into()).unwrap() });
+        let accept3 = EventData::HandoffAccepted(HandoffAccepted {
+            handoff: h3.clone(),
+            note: Text::parse("".into()).unwrap(),
+        });
+        let withdraw3 = EventData::HandoffWithdrawn(HandoffWithdrawn {
+            handoff: h3.clone(),
+            reason: Text::parse("r".into()).unwrap(),
+        });
         let acc3_id = b.push_observing(&bob, &race3, &accept3, []);
         let wd3_id = b.push_observing(&alice, &race3, &withdraw3, []);
-        b.push(&coord, &resolve_conflict(&h3, vec![acc3_id, wd3_id.clone()], &wd3_id), []);
+        b.push(
+            &coord,
+            &resolve_conflict(&h3, vec![acc3_id, wd3_id.clone()], &wd3_id),
+            [],
+        );
 
-        let state = b.replay().expect("all three handoff conflict resolutions must replay");
-        assert_eq!(state.handoffs.get(&h1).unwrap().status, ItemStatus::Terminal("accepted"));
-        assert_eq!(state.handoffs.get(&h2).unwrap().status, ItemStatus::Terminal("declined"));
-        assert_eq!(state.handoffs.get(&h3).unwrap().status, ItemStatus::Terminal("withdrawn"));
+        let state = b
+            .replay()
+            .expect("all three handoff conflict resolutions must replay");
+        assert_eq!(
+            state.handoffs.get(&h1).unwrap().status,
+            ItemStatus::Terminal("accepted")
+        );
+        assert_eq!(
+            state.handoffs.get(&h2).unwrap().status,
+            ItemStatus::Terminal("declined")
+        );
+        assert_eq!(
+            state.handoffs.get(&h3).unwrap().status,
+            ItemStatus::Terminal("withdrawn")
+        );
     }
 
     #[test]
@@ -5362,29 +6992,79 @@ mod tests {
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone(), coord.clone()]);
         b.register(&rev1, Role::Reviewer);
 
-        let nom1 = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom1 = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         let race1 = b.tip_oid();
-        let decline1 = EventData::ReviewNominationDeclined(ReviewNominationDeclined { nomination: nom1.clone(), reason: Text::parse("r".into()).unwrap() });
-        let withdraw1 = EventData::ReviewWithdrawn(ReviewWithdrawn { nomination: nom1.clone(), reason: Text::parse("r".into()).unwrap() });
+        let decline1 = EventData::ReviewNominationDeclined(ReviewNominationDeclined {
+            nomination: nom1.clone(),
+            reason: Text::parse("r".into()).unwrap(),
+        });
+        let withdraw1 = EventData::ReviewWithdrawn(ReviewWithdrawn {
+            nomination: nom1.clone(),
+            reason: Text::parse("r".into()).unwrap(),
+        });
         let dec1_id = b.push_observing(&rev1, &race1, &decline1, []);
         let wd1_id = b.push_observing(&alice, &race1, &withdraw1, []);
-        b.push(&coord, &resolve_conflict(&nom1, vec![dec1_id.clone(), wd1_id], &dec1_id), []);
+        b.push(
+            &coord,
+            &resolve_conflict(&nom1, vec![dec1_id.clone(), wd1_id], &dec1_id),
+            [],
+        );
 
-        let nom2 = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom2 = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         let race2 = b.tip_oid();
-        let decline2 = EventData::ReviewNominationDeclined(ReviewNominationDeclined { nomination: nom2.clone(), reason: Text::parse("r".into()).unwrap() });
-        let withdraw2 = EventData::ReviewWithdrawn(ReviewWithdrawn { nomination: nom2.clone(), reason: Text::parse("r".into()).unwrap() });
+        let decline2 = EventData::ReviewNominationDeclined(ReviewNominationDeclined {
+            nomination: nom2.clone(),
+            reason: Text::parse("r".into()).unwrap(),
+        });
+        let withdraw2 = EventData::ReviewWithdrawn(ReviewWithdrawn {
+            nomination: nom2.clone(),
+            reason: Text::parse("r".into()).unwrap(),
+        });
         let dec2_id = b.push_observing(&rev1, &race2, &decline2, []);
         let wd2_id = b.push_observing(&alice, &race2, &withdraw2, []);
-        b.push(&coord, &resolve_conflict(&nom2, vec![dec2_id, wd2_id.clone()], &wd2_id), []);
+        b.push(
+            &coord,
+            &resolve_conflict(&nom2, vec![dec2_id, wd2_id.clone()], &wd2_id),
+            [],
+        );
 
-        let state = b.replay().expect("both review-closing conflict resolutions must replay");
+        let state = b
+            .replay()
+            .expect("both review-closing conflict resolutions must replay");
         assert_eq!(
-            state.reviews.get(&nom1).unwrap().decline_or_withdraw_or_reassign_status,
+            state
+                .reviews
+                .get(&nom1)
+                .unwrap()
+                .decline_or_withdraw_or_reassign_status,
             ItemStatus::Terminal("declined")
         );
         assert_eq!(
-            state.reviews.get(&nom2).unwrap().decline_or_withdraw_or_reassign_status,
+            state
+                .reviews
+                .get(&nom2)
+                .unwrap()
+                .decline_or_withdraw_or_reassign_status,
             ItemStatus::Terminal("withdrawn")
         );
     }
@@ -5401,12 +7081,23 @@ mod tests {
         b.register(&rev1, Role::Reviewer);
         b.register(&rev2, Role::Reviewer);
         b.register(&rev3, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         let race = b.tip_oid();
         let mk_reassign = |reviewer: &Agent| {
             EventData::ReviewReassigned(ReviewReassigned {
                 authors: StringSet::from_iter(vec![alice.clone()]),
-                product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+                product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                    .unwrap(),
                 reviewer: reviewer.clone(),
                 required_checks: vec![],
                 review_scope: StringSet::default(),
@@ -5422,8 +7113,14 @@ mod tests {
         let to_rev3 = mk_reassign(&rev3);
         let r2_id = b.push_observing(&alice, &race, &to_rev2, []);
         let r3_id = b.push_observing(&alice, &race, &to_rev3, []);
-        b.push(&coord, &resolve_conflict(&nom_id, vec![r2_id.clone(), r3_id], &r2_id), []);
-        let state = b.replay().expect("review reassignment conflict resolution must replay");
+        b.push(
+            &coord,
+            &resolve_conflict(&nom_id, vec![r2_id.clone(), r3_id], &r2_id),
+            [],
+        );
+        let state = b
+            .replay()
+            .expect("review reassignment conflict resolution must replay");
         let chain = state.reviews.get(&nom_id).unwrap();
         assert_eq!(chain.current_nomination, r2_id);
         assert_eq!(chain.current_request.reviewer, rev2);
@@ -5447,7 +7144,17 @@ mod tests {
         let coord = a("coord1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone(), coord.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         b.push(&rev1, &review_accept(&nom_id), []);
         let changes = EventData::ReviewChangesRequested(ReviewChangesRequested {
             nomination: nom_id.clone(),
@@ -5483,7 +7190,10 @@ mod tests {
         let supersede1_id = register_candidate(&mut state, 901, &supersede1);
         state.exclusive.insert(
             finding_key(&changes_id, &Short::parse("f1".into()).unwrap()),
-            ExclusiveTracker { transitions: vec![(clear1_id.clone(), 90), (supersede1_id.clone(), 91)], resolved: None },
+            ExclusiveTracker {
+                transitions: vec![(clear1_id.clone(), 90), (supersede1_id.clone(), 91)],
+                resolved: None,
+            },
         );
         let d1 = LifecycleConflictResolved {
             root: changes_id.clone(),
@@ -5492,8 +7202,15 @@ mod tests {
             reason: Text::parse("r".into()).unwrap(),
             user_authority: Text::parse("u".into()).unwrap(),
         };
-        let coord_env1 = env(&coord, state.agents.get(&coord).unwrap().next_seq, Some(b.tip_oid()), &EventData::LifecycleConflictResolved(d1.clone()), []);
-        apply_conflict_resolved(&mut state, &coord_env1, &d1).expect("resolving the f1 finding conflict must succeed");
+        let coord_env1 = env(
+            &coord,
+            state.agents.get(&coord).unwrap().next_seq,
+            Some(b.tip_oid()),
+            &EventData::LifecycleConflictResolved(d1.clone()),
+            [],
+        );
+        apply_conflict_resolved(&mut state, &coord_env1, &d1)
+            .expect("resolving the f1 finding conflict must succeed");
 
         // f2: resolve to "superseded".
         let clear2 = EventData::ReviewFindingsCleared(ReviewFindingsCleared {
@@ -5513,7 +7230,10 @@ mod tests {
         let supersede2_id = register_candidate(&mut state, 903, &supersede2);
         state.exclusive.insert(
             finding_key(&changes_id, &Short::parse("f2".into()).unwrap()),
-            ExclusiveTracker { transitions: vec![(clear2_id.clone(), 92), (supersede2_id.clone(), 93)], resolved: None },
+            ExclusiveTracker {
+                transitions: vec![(clear2_id.clone(), 92), (supersede2_id.clone(), 93)],
+                resolved: None,
+            },
         );
         let d2 = LifecycleConflictResolved {
             root: changes_id.clone(),
@@ -5522,14 +7242,30 @@ mod tests {
             reason: Text::parse("r".into()).unwrap(),
             user_authority: Text::parse("u".into()).unwrap(),
         };
-        let coord_env2 = env(&coord, state.agents.get(&coord).unwrap().next_seq + 1, Some(b.tip_oid()), &EventData::LifecycleConflictResolved(d2.clone()), []);
-        apply_conflict_resolved(&mut state, &coord_env2, &d2).expect("resolving the f2 finding conflict must succeed");
+        let coord_env2 = env(
+            &coord,
+            state.agents.get(&coord).unwrap().next_seq + 1,
+            Some(b.tip_oid()),
+            &EventData::LifecycleConflictResolved(d2.clone()),
+            [],
+        );
+        apply_conflict_resolved(&mut state, &coord_env2, &d2)
+            .expect("resolving the f2 finding conflict must succeed");
 
         let chain = state.reviews.get(&nom_id).unwrap();
-        let f1 = chain.findings.get(&(changes_id.clone(), "f1".to_string())).unwrap();
+        let f1 = chain
+            .findings
+            .get(&(changes_id.clone(), "f1".to_string()))
+            .unwrap();
         assert!(matches!(f1.disposition, FindingDisposition::Cleared { .. }));
-        let f2 = chain.findings.get(&(changes_id.clone(), "f2".to_string())).unwrap();
-        assert!(matches!(f2.disposition, FindingDisposition::Superseded { .. }));
+        let f2 = chain
+            .findings
+            .get(&(changes_id.clone(), "f2".to_string()))
+            .unwrap();
+        assert!(matches!(
+            f2.disposition,
+            FindingDisposition::Superseded { .. }
+        ));
     }
 
     #[test]
@@ -5551,8 +7287,14 @@ mod tests {
         };
         let e1 = b.push_observing(&coord, &race, &mk(1), [bootstrap_epoch.clone()]);
         let e2 = b.push_observing(&coord, &race, &mk(2), [bootstrap_epoch.clone()]);
-        b.push(&coord, &resolve_conflict(&bootstrap_epoch, vec![e1.clone(), e2], &e1), []);
-        let state = b.replay().expect("merge engine conflict resolution must replay");
+        b.push(
+            &coord,
+            &resolve_conflict(&bootstrap_epoch, vec![e1.clone(), e2], &e1),
+            [],
+        );
+        let state = b
+            .replay()
+            .expect("merge engine conflict resolution must replay");
         assert_eq!(state.current_merge_engine_epoch, e1);
     }
 
@@ -5592,7 +7334,10 @@ mod tests {
         apply_finding_disposition_effect(&mut state, &root, &fkey, &id, &wrong);
 
         // State is otherwise untouched: the issue we opened is still open.
-        assert_eq!(state.issues.get(&issue_id).unwrap().status, ItemStatus::Open);
+        assert_eq!(
+            state.issues.get(&issue_id).unwrap().status,
+            ItemStatus::Open
+        );
     }
 
     /// `apply_handoff_terminal`'s `ok_actor` match has a `_ => false` arm for
@@ -5606,9 +7351,20 @@ mod tests {
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         let handoff_id = b.push(&alice, &handoff_offer(&bob, "refs/heads/agent/alice/x"), []);
         let mut state = b.state().unwrap();
-        let bogus_env = env(&bob, state.agents.get(&bob).unwrap().next_seq, Some(b.tip_oid()), &scope_data(), []);
-        let err = apply_handoff_terminal(&mut state, &bogus_env, 999, &handoff_id, "bogus").err().unwrap();
-        assert!(err.to_string().contains("emitted by unauthorized agent"), "{err}");
+        let bogus_env = env(
+            &bob,
+            state.agents.get(&bob).unwrap().next_seq,
+            Some(b.tip_oid()),
+            &scope_data(),
+            [],
+        );
+        let err = apply_handoff_terminal(&mut state, &bogus_env, 999, &handoff_id, "bogus")
+            .err()
+            .unwrap();
+        assert!(
+            err.to_string().contains("emitted by unauthorized agent"),
+            "{err}"
+        );
     }
 
     /// Symmetric direct-call test for `apply_review_closing`'s `ok_actor`
@@ -5620,11 +7376,32 @@ mod tests {
         let rev1 = a("rev1");
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.register(&rev1, Role::Reviewer);
-        let nom_id = b.push(&alice, &review_nom(vec![alice.clone()], "refs/heads/agent/alice/x", &rev1, vec![], StringSet::default()), []);
+        let nom_id = b.push(
+            &alice,
+            &review_nom(
+                vec![alice.clone()],
+                "refs/heads/agent/alice/x",
+                &rev1,
+                vec![],
+                StringSet::default(),
+            ),
+            [],
+        );
         let mut state = b.state().unwrap();
-        let bogus_env = env(&rev1, state.agents.get(&rev1).unwrap().next_seq, Some(b.tip_oid()), &scope_data(), []);
-        let err = apply_review_closing(&mut state, &bogus_env, 999, &nom_id, "bogus").err().unwrap();
-        assert!(err.to_string().contains("emitted by unauthorized agent"), "{err}");
+        let bogus_env = env(
+            &rev1,
+            state.agents.get(&rev1).unwrap().next_seq,
+            Some(b.tip_oid()),
+            &scope_data(),
+            [],
+        );
+        let err = apply_review_closing(&mut state, &bogus_env, 999, &nom_id, "bogus")
+            .err()
+            .unwrap();
+        assert!(
+            err.to_string().contains("emitted by unauthorized agent"),
+            "{err}"
+        );
     }
 
     /// A well-formed, non-empty `depends_on` with no duplicates succeeds
@@ -5641,13 +7418,20 @@ mod tests {
             shared: StringSet::default(),
             exports: StringSet::default(),
             depends_on: vec![
-                crate::common::DependencyImport { agent: bob.clone(), interface: Short::parse("a".into()).unwrap() },
-                crate::common::DependencyImport { agent: bob.clone(), interface: Short::parse("z".into()).unwrap() },
+                crate::common::DependencyImport {
+                    agent: bob.clone(),
+                    interface: Short::parse("a".into()).unwrap(),
+                },
+                crate::common::DependencyImport {
+                    agent: bob.clone(),
+                    interface: Short::parse("z".into()).unwrap(),
+                },
             ],
             note: Text::parse("n".into()).unwrap(),
         });
         b.push(&alice, &data, []);
-        b.replay().expect("a sorted, duplicate-free depends_on must replay");
+        b.replay()
+            .expect("a sorted, duplicate-free depends_on must replay");
     }
 
     /// A successful registration whose `product_branch` *does* match the
@@ -5668,9 +7452,13 @@ mod tests {
             model: None,
         });
         let e = env(&carol, 0, Some(ObjectId::parse(tip).unwrap()), &data, []);
-        walk.commits.push(wc(&hash(501), walk.commits.len(), &carol, vec![e]));
+        walk.commits
+            .push(wc(&hash(501), walk.commits.len(), &carol, vec![e]));
         let state = replay(&walk).expect("a matching product_branch at registration must replay");
-        assert_eq!(state.agents.get(&carol).unwrap().product_branch, Some(branch));
+        assert_eq!(
+            state.agents.get(&carol).unwrap().product_branch,
+            Some(branch)
+        );
     }
 
     /// A non-`agent.registered` event may never carry `seq == 0`.
@@ -5681,7 +7469,11 @@ mod tests {
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone()]);
         b.push_with_seq(&alice, 0, &scope_data(), []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("sequence zero must be agent.registered"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("sequence zero must be agent.registered"),
+            "{err}"
+        );
     }
 
     /// An event's `seq` must exactly equal the agent's actual next expected
@@ -5714,16 +7506,33 @@ mod tests {
         let mut b = SeqBuilder::new(base_walk(), &[alice.clone(), bob.clone(), coord.clone()]);
         let h1 = b.push(&alice, &handoff_offer(&bob, "refs/heads/agent/alice/x"), []);
         let race = b.tip_oid();
-        let accept = EventData::HandoffAccepted(HandoffAccepted { handoff: h1.clone(), note: Text::parse("".into()).unwrap() });
-        let withdraw = EventData::HandoffWithdrawn(HandoffWithdrawn { handoff: h1.clone(), reason: Text::parse("r".into()).unwrap() });
+        let accept = EventData::HandoffAccepted(HandoffAccepted {
+            handoff: h1.clone(),
+            note: Text::parse("".into()).unwrap(),
+        });
+        let withdraw = EventData::HandoffWithdrawn(HandoffWithdrawn {
+            handoff: h1.clone(),
+            reason: Text::parse("r".into()).unwrap(),
+        });
         let acc_id = b.push_observing(&bob, &race, &accept, []);
         let wd_id = b.push_observing(&alice, &race, &withdraw, []);
-        b.push(&coord, &resolve_conflict(&h1, vec![acc_id.clone(), wd_id], &acc_id), []);
+        b.push(
+            &coord,
+            &resolve_conflict(&h1, vec![acc_id.clone(), wd_id], &acc_id),
+            [],
+        );
 
         // A further disposition of the same (now coordinator-resolved) handoff.
-        let decline = EventData::HandoffDeclined(HandoffDeclined { handoff: h1.clone(), reason: Text::parse("late".into()).unwrap() });
+        let decline = EventData::HandoffDeclined(HandoffDeclined {
+            handoff: h1.clone(),
+            reason: Text::parse("late".into()).unwrap(),
+        });
         b.push(&bob, &decline, []);
         let err = b.replay().err().unwrap();
-        assert!(err.to_string().contains("predecessor already has a coordinator-resolved disposition"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("predecessor already has a coordinator-resolved disposition"),
+            "{err}"
+        );
     }
 }

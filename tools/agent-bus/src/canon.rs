@@ -47,7 +47,9 @@ mod tests {
 
     #[test]
     fn nfc_string_is_accepted() {
-        assert!(check_nfc(&serde_json::json!({"a": "e\u{0301}".chars().collect::<String>()})).is_err());
+        assert!(
+            check_nfc(&serde_json::json!({"a": "e\u{0301}".chars().collect::<String>()})).is_err()
+        );
         assert!(check_nfc(&serde_json::json!({"a": "\u{e9}"})).is_ok());
     }
 
