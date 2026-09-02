@@ -12,11 +12,13 @@ defaultTargets = ["Grass"]
 autoImplicit = false
 relaxedAutoImplicit = false
 
-# The library currently has only its root module. The first commit that adds a
-# module under `Grass/` must change this to `globs = ["Grass.+"]`, which builds
-# the root and every submodule without an umbrella module importing them. An
-# umbrella that imported every leaf would violate the aggregate rules in
-# docs/OLEAN_SHARDING.md. The glob cannot be set before `Grass/` exists, because
-# Lake fails to resolve a glob over a missing directory in a fresh clone.
+# The root remains import-free. Lake discovers every narrow submodule directly;
+# consumers still import only the owner of the declarations they use.
 [[lean_lib]]
 name = "Grass"
+globs = ["Grass", "Grass.+"]
+
+[[lean_lib]]
+name = "GrassTests"
+srcDir = "Tests"
+globs = ["Foundation"]

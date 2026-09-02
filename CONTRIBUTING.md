@@ -1,10 +1,11 @@
 # Contributing to Grass
 
-Grass is currently a pre-implementation specification corpus. Contributions
-should improve the reviewed architecture, its proof-economics pressure tests,
-or the small validation tools around them. The imported `Grass.*` Lean modules
-shown in `Spikes/` do not exist yet; the spike files are design fixtures, not a
-package that can currently be built.
+Grass is currently an early foundation implementation plus specification
+corpus. Contributions may extend the minimal compiling `Grass.*` foundation,
+improve the reviewed architecture and proof-economics pressure tests, or improve
+the validation tools around them. Most modules imported by `Spikes/` do not yet
+exist; the spike files remain design fixtures, not a package that currently
+builds.
 
 Start with the [specification corpus index](docs/README.md), which defines
 document authority and the meaning of normative language. For spike changes,
@@ -30,6 +31,9 @@ both the annotated document and its comment-free authored source.
 Run the repository's current consistency check from its root:
 
 ```powershell
+lake build
+lake build GrassTests
+pwsh ./audit-trust.ps1
 pwsh ./check-spike-sources.ps1
 pwsh ./check-doc-links.ps1
 ```

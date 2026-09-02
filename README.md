@@ -3,10 +3,10 @@
 Grass is a high-level, extensible assembler for building programs whose emitted
 machine code is proved safe and equivalent to a Lean specification.
 
-> **Project status:** pre-implementation specification and spike corpus. Grass
-> does not yet provide a buildable assembler, verified executable, or supported
-> release. The Lean files under `Spikes/` are reviewed authoring fixtures whose
-> imported `Grass.*` libraries are deliberately not built yet.
+> **Project status:** early foundation implementation and spike corpus. Grass
+> provides a minimal compiling foundation API, but not yet a buildable
+> assembler, verified executable, or supported release. The Lean files under
+> `Spikes/` remain reviewed authoring fixtures and are not expected to compile.
 
 Its target is large, long-lived systems—games, databases, operating systems,
 compilers, graphics and storage engines—not merely small verified examples. The
@@ -48,16 +48,31 @@ snapshot of the named product branch.
 
 ## Repository validation
 
-The current executable check verifies that annotated spike documents and their
-comment-free authored Lean views remain exact:
+Build and check the foundation API and its transitive trust closure with:
+
+```powershell
+lake build
+lake build GrassTests
+pwsh ./audit-trust.ps1
+```
+
+The trust script generates a temporary audit import over every library and test
+module. Its Lean command discovers every concrete `VerifiedProgram` producer
+from the normalized elaborated result type, then checks its exact fully
+qualified declaration and transitive axiom closure. Auditing only the generic
+composition theorem would not inspect axioms used to construct a concrete
+certificate.
+
+The corpus checks verify that annotated spike documents and their comment-free
+authored Lean views remain exact:
 
 ```powershell
 pwsh ./check-spike-sources.ps1
 pwsh ./check-doc-links.ps1
 ```
 
-These are corpus consistency checks, not compilation or proof checking. The
-conditions for beginning implementation are tracked in
+The last two commands are corpus consistency checks, not compilation or proof
+checking. The implementation ratchet remains documented in
 [docs/IMPLEMENTATION_RATCHET.md](docs/IMPLEMENTATION_RATCHET.md).
 
 ## Contributing and security
