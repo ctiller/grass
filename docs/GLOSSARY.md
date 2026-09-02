@@ -76,6 +76,16 @@ decomposition are not.
 refinement to the root `SpecProcess`. Its population,
 state partition, channels, scheduling, and execution strategy are not precious.
 
+**Structural process network** — The Process-owned, protocol-family-generic
+role/instance/protocol shape. It contains no behavior contract, selected trace,
+denotation, or exactness theorem.
+
+**Process presentation network** — The Semantics-owned wrapper that instantiates
+one structural process network at semantic protocols and supplies its abstract
+composition law. A separate `ProcessPresentation` selects a trace of that
+wrapper and proves the trace and transported requirements exactly match the
+precious `SpecProcess`.
+
 **Partial process realization** — A graph indexed by an exact staged process
 presentation of the root in which some finite role schemas have subsystem
 certificates and others remain abstract. It carries proofs and accumulated

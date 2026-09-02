@@ -616,9 +616,14 @@ to imitate compiler-selected storage or CFG structure.
     by `Process`, is generic over its protocol family, preserves the role-schema,
     instance, protocol, and composition shape used by the spikes, and contains
     no `BehaviorContract`, denotation, trace-denotation, or exactness field.
-    A separate presentation/refinement object above `Process` and `Semantics`
-    proves exact behavior and requirement correspondence. This records
-    `coord1:4`, originating at `c-process:3`.
+    `Semantics` may instantiate that structure inside the wrapper
+    `ProcessPresentationNetwork`; this is not a second structural declaration.
+    `ProcessPresentation` then selects an explicit trace for that wrapper and
+    proves exact behavior and requirement correspondence. Neither the selected
+    trace nor its exactness theorem is a field of `StructuralProcessNetwork`.
+    This records `coord1:4`, originating at `c-process:3`, and names the wrapper
+    consumed by the synchronized Spike 4/5 surface under dependency
+    `g-design:23`.
 118. Cancellation coverage is scope-indexed. One core `CancellationPolicy` is
     indexed by a scoped cancellation-point family and consistently names its
     discovered `blockingCalls`; `ScopedCancellationCertificate` ties both
