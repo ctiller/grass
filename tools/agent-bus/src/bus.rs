@@ -59,7 +59,20 @@ impl BusCtx {
         if !self.has_origin {
             return Ok(());
         }
-        gitrepo::fetch(&self.repo_root, "origin", "refs/heads/agent-bus:refs/remotes/origin/agent-bus")?;
+        // `origin` legitimately may not have `agent-bus` yet (freshly
+        // bootstrapped and not yet pushed, or a brand-new clone before
+        // anyone has published) -- that is not a fetch failure, it just
+        // means there is nothing to reconcile against. Only a *transport*
+        // failure (no network, auth, bad remote URL, ...) should be a hard
+        // error; a missing ref specifically must not block every other bus
+        // command from working purely off local state.
+        let out = gitrepo::run(&self.repo_root, &["fetch", "origin", "refs/heads/agent-bus:refs/remotes/origin/agent-bus"])?;
+        if !out.success && !out.stderr.contains("couldn't find remote ref") {
+            return Err(crate::error::AbError::Git(format!(
+                "git fetch origin refs/heads/agent-bus failed: {}",
+                out.stderr
+            )));
+        }
         let local = gitrepo::rev_parse_opt(&self.repo_root, BUS_BRANCH)?;
         let remote = gitrepo::rev_parse_opt(&self.repo_root, "refs/remotes/origin/agent-bus")?;
         match (local, remote) {

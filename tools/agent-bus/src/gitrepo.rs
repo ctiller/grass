@@ -136,11 +136,6 @@ pub fn check_ref_format(refname: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub fn fetch(dir: &Path, remote: &str, refspec: &str) -> AbResult<()> {
-    run_ok(dir, &["fetch", remote, refspec])?;
-    Ok(())
-}
-
 pub fn push(dir: &Path, remote: &str, refspec: &str) -> AbResult<GitOutput> {
     run(dir, &["push", remote, refspec])
 }
