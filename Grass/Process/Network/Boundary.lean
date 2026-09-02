@@ -161,29 +161,63 @@ def toVocabulary (boundary : DriverBoundary.{u}) : ProcessVocabulary.{u} where
 @[simp] theorem toVocabulary_Observation (boundary : DriverBoundary.{u}) :
     boundary.toVocabulary.Observation = boundary.Observation := rfl
 
-/--
-Strengthen a boundary's requirements without changing its interface.
+@[simp] theorem toVocabulary_Result (boundary : DriverBoundary.{u}) :
+    boundary.toVocabulary.Result = boundary.Result := rfl
 
-`docs/PROCESS.md` §8: a local refinement "introduces a finite requirement
-delta". Adding requirements is the whole of that delta at this layer, and the
-returned boundary provably covers the original, so a proof stated against the
-weaker requirements still applies.
+/--
+Replace a boundary's requirement set, leaving its interface alone.
+
+Replacement, not strengthening: an earlier docstring claimed the result
+"provably covers the original", which is false — passing `RequirementSet.empty`
+drops everything. Use `demandAlso` for the monotone operation.
 -/
 def withRequirements (boundary : DriverBoundary.{u})
     (requirements : RequirementSet) : DriverBoundary.{u} :=
   { boundary with requirements := requirements }
 
-/--
-The vocabulary view and the requirement-delta operations above have no consumer
-inside `Grass.Process` yet. `toVocabulary` is what the sequential adapter
-elaborates a `SequentialMachine` into, and `withRequirements` with
-`RequirementSet.Covers` is the delta a refinement lens accumulates; both are M4.
-They are declared here, with the boundary they are about, rather than invented
-at the use site.
--/
-theorem withRequirements_requirements (boundary : DriverBoundary.{u})
+@[simp] theorem withRequirements_requirements (boundary : DriverBoundary.{u})
     (requirements : RequirementSet) :
     (boundary.withRequirements requirements).requirements = requirements := rfl
+
+/--
+Demand one more thing of the platform.
+
+`docs/PROCESS.md` §8: a local refinement "introduces a finite requirement
+delta", and deltas accumulate rather than replace — a lowering step may add
+requirements but may not silently drop one. `demandAlso_covers` is that
+guarantee, so a proof stated against the weaker boundary still applies.
+-/
+def demandAlso (boundary : DriverBoundary.{u}) (key : RequirementKey) :
+    DriverBoundary.{u} :=
+  if present : key ∈ boundary.requirements.keys then
+    boundary
+  else
+    boundary.withRequirements
+      ⟨key :: boundary.requirements.keys,
+        List.nodup_cons.mpr ⟨present, boundary.requirements.distinct⟩⟩
+
+theorem demandAlso_covers (boundary : DriverBoundary.{u}) (key : RequirementKey) :
+    (boundary.demandAlso key).requirements.Covers boundary.requirements := by
+  intro demanded member
+  unfold demandAlso
+  split
+  · exact member
+  · exact List.mem_cons_of_mem key member
+
+theorem demandAlso_demands (boundary : DriverBoundary.{u}) (key : RequirementKey) :
+    (boundary.demandAlso key).requirements.Demands key := by
+  unfold demandAlso
+  split
+  · assumption
+  · exact List.mem_cons_self
+
+/-!
+`toVocabulary` and the requirement-delta operations above have no consumer inside
+`Grass.Process` yet. `toVocabulary` is what the sequential adapter elaborates a
+`SequentialMachine` into, and `demandAlso` with `RequirementSet.Covers` is the
+delta a refinement lens accumulates; both are M4. They are declared here, with
+the boundary they are about, rather than invented at the use site.
+-/
 
 end DriverBoundary
 

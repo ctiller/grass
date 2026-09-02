@@ -79,6 +79,35 @@ terminal, have no `Step`, and permit no disposition, and the run would be
 permanently stuck while every field was satisfied. The disjunct now demands the
 classification, and `exists_transition` below is the proof that the hole is
 closed.
+
+`handlesEveryEvent` then needs its non-terminality guard, and the reason is
+worth stating because the first version of it made this record *uninhabitable*.
+`ProcessCorrect.terminalNoStep` forbids any `p.Step` from a state satisfying
+`p.Terminal`. An unguarded `handlesEveryEvent` demands a `p.Step` at every
+reachable running state — and the running state a terminating run fires
+`terminate` from is reachable and terminal. The two fields contradicted each
+other for every process that terminates other than immediately, so no
+terminating process had a `ProcessCorrect` at all. Law 5 applies where the
+process is still working; at a terminal state the obligation is to terminate,
+which is `notStuck`'s left disjunct.
+
+## What this layer still cannot exclude
+
+The module note above records that "waiting forever for entropy that never
+comes" passes, because nothing here declares which frontiers are law-bearing.
+The dual passes too, and is worth naming: `ExternalEvent` is chosen by the
+specification author, so a process can route its own internal work through a
+self-delivered tick, satisfy the entropy disjunct forever, never terminate,
+never emit, and never decrease its measure. A total livelock of that shape has a
+`ProcessCorrect`.
+
+Excluding it needs a frontier declaration — a statement that a given external
+event is genuinely produced by the environment and not by the program — which
+`ProcessAcceptance` does not carry and which this layer has no way to check.
+`docs/PROCESS.md` §7 puts the burden on the network: "An infinite network run
+must produce a specification-demanded observation or remain at a declared
+external frontier". `docs/PROCESS_IMPLEMENTATION_PLAN.md` §6 records it as an M4
+exit obligation rather than leaving it implied.
 -/
 
 namespace Grass.Process
@@ -158,17 +187,22 @@ structure MeetsProcessProgress (p : ProcessSpec.{u, w})
   /-- The internal measure. -/
   measure : ProcessMeasure p
   /--
-  Every deliverable event has a successor.
+  Every deliverable event has a successor, at every reachable state the process
+  has not finished at.
 
   This is `docs/FOUNDATION.md` law 5 made checkable: an author cannot handle the
   results they expect and leave the rest, because every event that could arrive
-  at a reachable state must have a transition.
+  while the process is still working must have a transition.
+
+  The non-terminality guard is not a weakening; without it this record is
+  uninhabitable. See the module note.
   -/
   handlesEveryEvent : ∀ (segmented : Segmented p.Observation) (state : p.State)
       (outstanding : Bag p.Demand) (observations : Trace p.Observation)
       (event : p.Event),
     Reachable accept.terminalRemainder request segmented
       (.running state outstanding observations) →
+    ¬ (∃ result, p.Terminal request state result) →
     EventDeliverable outstanding event →
     ∃ after issued emitted, p.Step state event after issued emitted
   /--

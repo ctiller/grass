@@ -90,10 +90,25 @@ namespace ProtocolExposesBoundary
 
 variable {p : ProcessSpec.{u, w}} {boundary : DriverBoundary.{u}}
 
-/-- A demand this protocol answers internally rather than at the boundary. -/
-def Private (exposure : ProtocolExposesBoundary p boundary)
+/--
+A demand this protocol answers internally rather than at the boundary.
+
+`docs/PROCESS.md` §3: "nested and flattened internal demands remain private".
+Named here because it is the side condition the plan's `boundaryProjection`
+exactness theorem is stated against in M2, and because a reviewer looking for
+what the driver is *not* asked to do should find a name for it.
+-/
+def Internal (exposure : ProtocolExposesBoundary p boundary)
     (demand : p.Demand) : Prop :=
   exposure.exportDemand demand = none
+
+theorem not_internal_of_export {exposure : ProtocolExposesBoundary p boundary}
+    {demand : p.Demand} {exported : boundary.Demand}
+    (exports : exposure.exportDemand demand = some exported) :
+    ¬ exposure.Internal demand := by
+  intro internal
+  rw [internal] at exports
+  exact absurd exports (by simp)
 
 /-- An observation the boundary does not see. -/
 def Hidden (exposure : ProtocolExposesBoundary p boundary)

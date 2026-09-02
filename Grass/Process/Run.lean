@@ -493,6 +493,35 @@ theorem observationCausality {segmented : Segmented p.Observation}
   segmented.origin (by rw [reached.segmentation_flat, locate])
 
 /--
+The emitting segment is the only one.
+
+`observationCausality` produces a decomposition; this says no other decomposition
+of the same run at the same position exists. Together they are
+`docs/PROCESS.md` §4's "exactly one", which the existence half alone does not
+give — a trace may contain the same observation value many times, so an
+existential over values would identify no particular emission.
+-/
+theorem observationCausality_unique {segmented : Segmented p.Observation}
+    {observation : p.Observation} {before : Trace p.Observation}
+    {leftSegmentsBefore leftSegmentsAfter rightSegmentsBefore rightSegmentsAfter :
+      List (ObservationSegment p.Observation)}
+    {leftSegment rightSegment : ObservationSegment p.Observation}
+    {leftSegmentBefore leftSegmentAfter rightSegmentBefore rightSegmentAfter :
+      Trace p.Observation}
+    (leftSplit : segmented.segments =
+      leftSegmentsBefore ++ leftSegment :: leftSegmentsAfter)
+    (leftInner : leftSegment = leftSegmentBefore ++ observation :: leftSegmentAfter)
+    (leftBefore : before = leftSegmentsBefore.flatten ++ leftSegmentBefore)
+    (rightSplit : segmented.segments =
+      rightSegmentsBefore ++ rightSegment :: rightSegmentsAfter)
+    (rightInner : rightSegment = rightSegmentBefore ++ observation :: rightSegmentAfter)
+    (rightBefore : before = rightSegmentsBefore.flatten ++ rightSegmentBefore) :
+    leftSegmentsBefore = rightSegmentsBefore ∧ leftSegment = rightSegment ∧
+      leftSegmentsAfter = rightSegmentsAfter :=
+  segmented.origin_unique leftSplit leftInner leftBefore rightSplit rightInner
+    rightBefore
+
+/--
 One segment per transition, including the silent ones.
 
 `segments.length` is the number of steps taken, which is exactly why it must not

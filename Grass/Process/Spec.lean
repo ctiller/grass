@@ -49,14 +49,19 @@ lifecycle law — `ProcessTerminationContract.disposition` and `TerminationFacet
 promise: "`ProcessCorrect` itself retains only ordinary invariant, terminal,
 observation, demand, and progress facts … uncancellable leaf processes gain no
 new author obligation." A mandatory field on every `ProcessSpec` is precisely
-the obligation that sentence refuses. And the name `TerminalDisposition` is
-already bound by §3 to a different thing, a whole-edge custody transform, which
-`docs/README.md`'s one-owner rule forbids reusing.
+the obligation that sentence refuses. The name also collides: §3 already binds
+`TerminalDisposition p state` to the per-state disposition a termination
+contract produces, carrying `exactTransfer` over state, resources, loans and
+obligations. That is a related concept, which is what makes reusing the name for
+a second thing a `docs/README.md` one-owner violation rather than a coincidence.
 
 The law lives in `TerminalRemainderLaw` below and is supplied through
-`ProcessAcceptance`, which the owner of the specification provides and a leaf
-author never writes. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.5 records the
-withdrawal.
+`ProcessAcceptance`. For a *derived* acceptance — one built from a
+`BehaviorContract`, or composed by a weave — that genuinely removes the
+obligation from the protocol author. For a standalone protocol whose author
+writes both records, it does not: it moves one field to a place where a reviewer
+can see that a lifecycle claim is being made. `docs/PROCESS_IMPLEMENTATION_PLAN.md`
+§10.5 records the withdrawal and this caveat.
 
 -/
 
@@ -139,13 +144,26 @@ outcomes the sentence names.
 
 ## Why it takes bags and not a demand
 
-Because the obligation is a *bound*, not a classification. A law indexed by a
-single demand value says which outcomes are legitimate for a `CommitBytes`, and
-one such permission then licenses any number of outstanding `CommitBytes`
-occurrences at once. A law over the partition can say "at most two writes may be
-left pending", which is what `docs/FOUNDATION.md` law 7 and law 20 actually
-need: law 20 forbids double-counting an affine transfer, and counting is not
-possible against a predicate on values.
+Because the obligation is a *bound*, and a bound cannot be stated against a
+predicate on values. A law indexed by a single demand says which outcomes are
+legitimate for a `CommitBytes`; one such permission then licenses any number of
+outstanding `CommitBytes` occurrences at once, which is exactly the accounting
+`docs/FOUNDATION.md` law 7 and law 20 forbid.
+
+## What a law must constrain to bound anything
+
+All three bags. The terminating side chooses the partition, and at this layer
+`resolved`, `transferred`, and `pending` are three *labels* with no independent
+content: nothing yet requires evidence that a demand placed in `resolved` was
+resolved. A law reading only `pending` therefore bounds nothing — the same
+occurrences can be relabelled `resolved` and the bound evaded.
+`Tests/Process/M1Fixtures.lean` carries that as a negative fixture, so the trap
+is written down rather than warned about.
+
+The labels acquire content when the escrow arrives: `transferred` will name a
+recipient and consume an affine resolve token, and `resolved` will carry the
+completion. Until then a specification that wants a bound states it over the
+whole partition.
 
 ## Why it is not a field of `ProcessSpec`
 
