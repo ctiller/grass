@@ -328,16 +328,44 @@ type, the docstring says so and names what does enforce it.
 
 ### 3.11 Gaps that remain open
 
+- **Every event the transition mints is ill-formed by the project's own
+  definition.** `AccessDescriptor` carries no operand values, so `ofAccess?` is
+  called with `valueRead := none` and `valueWritten := none`, and
+  `MemoryEvent.WellFormed.readValuePresent` demands otherwise. That predicate is
+  referenced by nothing, and M8's consistency graph is specified to read this
+  trace. Either the descriptor carries values or the event predicate is wrong;
+  both readings are live, and the descriptor is the more likely.
 - `Address.symbolic` is an atom where §1 asks for an address *expression*. A
   SPIR-V `OpAccessChain` derives a pointer from a base and a runtime index, and
   nothing relates a symbolic address to its provenance.
-- The descriptor carries no values, so `lock cmpxchg16b` cannot declare its
-  compare and swap operands.
+- The descriptor carries no operand values, so `lock cmpxchg16b` cannot declare
+  its compare and swap operands.
 - The descriptor carries a `ContextId` but no `ContextKind`, though §7.1 requires
   identity *and* kind; the stepper supplies the kind out of band.
+- `address` is unconnected to `range`. Two writes declaring the same address with
+  different ranges are judged non-conflicting. `Access.lean` defers this to M2,
+  but `ConflictsWithHistory` is now live and decides aliasing on a field the
+  alignment check does not constrain.
 - Five open-name axes have no registry: the `profileSpecific` cases of ordering,
   scope, restartability, and fault visibility, plus `ObservationLabel`.
 - `xchg`'s implicit `LOCK` cannot be declared as a demand rather than a choice.
+- `AccessResult` is unreached by the transition. Its module comment makes "there
+  is no constructor that lets a denial report committed bytes" a centerpiece, and
+  `performAccess` returns a `MachineState` instead, so the guarantee constrains
+  nothing today.
+- An operation declaring `onFault := .profileSpecific` cannot be stepped by the
+  generic relation at all. Refusing beats guessing, but it means a profile with
+  split-store semantics owes a stepper extension before it can express one.
+
+### 3.12 What the seam does *not* yet demonstrate
+
+Worth stating separately from the gaps, because it bears on when M1 can freeze.
+`Tests/Op/FakeIsa.lean` shows an externally authored family reaching memory
+events, authority checks, obligations, and the violation ledger. It does not show
+that family reaching an *emitted artifact*, or any interaction with loans (M3),
+frames (M4), or arenas (M6) — those milestones are unstarted, and the seam will
+meet them. The claim the fixture supports is that the facet interface carries an
+operation through the transition, not that the transition is complete.
 
 ## 4. M2 — Executable single-thread memory semantics
 

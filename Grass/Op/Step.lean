@@ -415,18 +415,53 @@ mechanism is not one. -/
 /-- A denied access leaves memory and obligations exactly as they were. This is
 `docs/MEMORY_MODEL.md` §1's "Denial preserves the state immediately before the
 denied substep". -/
-theorem denied_preserves_memory (policy : StepPolicy) (state : MachineState)
-    (d : AccessDescriptor) (status : AccessStatus) (r w : Nat)
+theorem denied_preserves_everything_but_the_ledger (policy : StepPolicy)
+    (state : MachineState) (d : AccessDescriptor) (status : AccessStatus) (r w : Nat)
     (contextKind : ContextKind) (cause : EventCause)
     (h : (denialOf state.memory d).isSome) :
     (performAccess policy state d status r w contextKind cause).memory = state.memory ∧
     (performAccess policy state d status r w contextKind cause).obligations =
       state.obligations ∧
-    (performAccess policy state d status r w contextKind cause).events = state.events := by
+    (performAccess policy state d status r w contextKind cause).events = state.events ∧
+    (performAccess policy state d status r w contextKind cause).eventSupply =
+      state.eventSupply := by
   unfold performAccess
   cases hd : denialOf state.memory d with
   | none => rw [hd] at h; simp at h
-  | some class_ => exact ⟨rfl, rfl, rfl⟩
+  | some class_ => exact ⟨rfl, rfl, rfl, rfl⟩
+
+/--
+The other two denial paths preserve everything but the ledger too.
+
+`denialOf` is not the only way an access is refused: an inapplicable ledger effect
+and an alias conflict both deny after it passes. An earlier version proved
+preservation only for the `denialOf` branch, so the two branches added later were
+uncovered — and named three of the state's five fields, which is not "the state is
+untouched" however true it happened to be.
+-/
+theorem ledger_denial_preserves_everything_but_the_ledger (policy : StepPolicy)
+    (state : MachineState) (d : AccessDescriptor) (status : AccessStatus) (r w : Nat)
+    (contextKind : ContextKind) (cause : EventCause)
+    (hallowed : denialOf state.memory d = Option.none)
+    (h : ¬ LedgerEffectApplicable state.obligations d.ledgerEffect) :
+    (performAccess policy state d status r w contextKind cause).memory = state.memory ∧
+    (performAccess policy state d status r w contextKind cause).obligations =
+      state.obligations ∧
+    (performAccess policy state d status r w contextKind cause).events = state.events ∧
+    (performAccess policy state d status r w contextKind cause).eventSupply =
+      state.eventSupply := by
+  unfold performAccess
+  rw [hallowed]
+  split
+  · exact ⟨rfl, rfl, rfl, rfl⟩
+  · split
+    · exact ⟨rfl, rfl, rfl, rfl⟩
+    · split
+      · exact ⟨rfl, rfl, rfl, rfl⟩
+      · split
+        · exact ⟨rfl, rfl, rfl, rfl⟩
+        · rename_i hn
+          exact (hn h).elim
 
 /-- Performing an access extends the violation ledger; it never shortens it.
 This is the per-access form of the invariant `docs/MEMORY_MODEL.md` §8 names, and
