@@ -87,6 +87,36 @@ inductive StepRejection where
   nobody wrote: the profile owes a fault rule before such an operation can fault.
   See `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.3. -/
   | faultWithUndeclaredLedgerEffect
+  /-- An access declares an executing context other than the one running the step.
+
+  `MemoryEvent.ofOutcome` takes the event's context *identity* from
+  `AccessDescriptor.context` and its *kind* from `step`'s argument, and nothing
+  compared them. `ConflictsWithHistory` discriminates on that identity, so
+  `docs/MEMORY_MODEL.md` §7.3's race rule — conflicting events from *distinct*
+  contexts — was defeated by a one-field declaration: a device write naming the
+  program thread aliased the thread's bytes and committed. The minted event also
+  carried an incoherent pair, thread identity with engine kind, while §7.1 requires
+  identity *and* kind. Two sources of truth for one fact, which is the defect this
+  layer removed from `AllocationRecord`; review found it surviving here. -/
+  | contextMismatch (declared executing : ContextId)
+  /-- A compute substep declares a fault class the profile's vocabulary does not
+  recognize.
+
+  `MemoryProfile.Admits` closes this for an access, because it quantifies over
+  `admittedFaults`. A compute substep has no descriptor, so `sequence.accesses`
+  never contains it and `Admits` never sees it — the only thing checked about one
+  was that its fault list is non-empty. `faultClassNotDeclared` then validated a
+  plan against a list that was itself unvalidated. Review found it, and noted that
+  `.compute` is the constructor the `div` case exists for, so it is the one most
+  likely to carry a profile-invented name. -/
+  | computeFaultNotRecognized (fault : FaultClassId)
+  /-- A fault plan claims a commit count larger than the access could produce.
+
+  `Committed.truncate` clamps by `List.take`, so an over-large count cannot
+  over-claim bytes and memory stays sound. It was accepted silently, which is what
+  `faultPointOutOfRange` existed to prevent for the index: a machine report the
+  model knows is impossible should be refused, not approximated. -/
+  | faultCommitOutOfRange
 deriving DecidableEq, Repr
 
 /-- What one step produced. -/
@@ -731,13 +761,35 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
         else if ! sequence.accesses.all (fun d => decide (policy.Admits d)) then
           .rejected .accessNotAdmitted
         else
+          -- Every access must name the context actually running the step. The
+          -- event's identity comes from the descriptor and its kind from here, so
+          -- without this the two disagree and the race check keys on the
+          -- descriptor's word for it.
+          match sequence.accesses.find? (fun d => d.context != context) with
+          | some d => .rejected (.contextMismatch d.context context)
+          | Option.none =>
+          -- A compute substep has no descriptor, so `Admits` never checks its
+          -- declared faults against the vocabulary. This is the sibling clause.
+          match sequence.substeps.findSome? (fun sub =>
+              match sub with
+              | .access _ => Option.none
+              | .compute faults =>
+                  faults.find? (fun f =>
+                    ! decide (policy.profile.vocabulary.faultClasses.Recognizes f))) with
+          | some fault => .rejected (.computeFaultNotRecognized fault)
+          | Option.none =>
           match faultAt sequence with
           | .none => .ran (runStep policy state sequence context contextKind cause .none)
           | .before index fault reads writes =>
               if ! decide (fault ∈ sequence.substeps[index].faults) then
                 .rejected (.faultClassNotDeclared fault)
-              else if ! (sequence.substeps[index].descriptor?.elim true
-                  (fun d => d.ledgerEffect.isEmpty)) then
+              else if ! (match sequence.substeps[index].descriptor? with
+                  | some d => decide (reads ≤ d.range.size ∧ writes ≤ d.range.size)
+                  | Option.none => decide (reads = 0 ∧ writes = 0)) then
+                .rejected .faultCommitOutOfRange
+              else if sequence.faultingEffectVisible &&
+                  ! (sequence.substeps[index].descriptor?.elim true
+                    (fun d => d.ledgerEffect.isEmpty)) then
                 .rejected .faultWithUndeclaredLedgerEffect
               else
                 match sequence.visibleEffects? index.val with

@@ -54,27 +54,44 @@ end FaultClassId
 /--
 How much of an access actually happened.
 
-`committed` is the count of bytes whose effect is visible afterwards. It is
-carried by every non-complete outcome because §1 requires a profile to state
-which earlier effects survive a later substep's fault, and a status that omitted
-the count could not express that.
+Reads and writes are counted **separately**, for the reason `Committed` counts
+them separately: a read-modify-write that observed its operand and faulted before
+storing committed eight bytes of read and none of write, and one number cannot say
+that. A single count was carried here until review pointed out that the separation
+`Committed` gained stopped at the outcome and never reached the status — so the
+event recorded `max`, and `committedBytes` answered eight for an access that wrote
+nothing.
+
+§1 requires a profile to state which earlier effects survive a later substep's
+fault, which is why the counts are carried at all.
 -/
 inductive AccessStatus where
-  /-- Every byte the access named took effect. -/
+  /-- Every byte the access named took effect, for each thing its intent said it
+  would do. -/
   | completed
-  /-- The access stopped early without faulting, committing `committed` bytes. -/
-  | partialCommit (committed : Nat)
-  /-- The access faulted after committing `committed` bytes. -/
-  | faulted (fault : FaultClassId) (committed : Nat)
+  /-- The access stopped early without faulting, having observed `reads` bytes and
+  written `writes`. -/
+  | partialCommit (reads writes : Nat)
+  /-- The access faulted having observed `reads` bytes and written `writes`. -/
+  | faulted (fault : FaultClassId) (reads writes : Nat)
 deriving DecidableEq, Repr
 
 namespace AccessStatus
 
-/-- The number of bytes this outcome committed, given the size the access named. -/
-def committedBytes : AccessStatus → Nat → Nat
+/-- The number of bytes this outcome *wrote*, given the size the access named.
+The count an initialization or framing argument wants: what a read observed does
+not change memory. -/
+def committedWrites : AccessStatus → Nat → Nat
   | .completed, size => size
-  | .partialCommit committed, _ => committed
-  | .faulted _ committed, _ => committed
+  | .partialCommit _ writes, _ => writes
+  | .faulted _ _ writes, _ => writes
+
+/-- The number of bytes this outcome *observed*, given the size the access
+named. -/
+def committedReads : AccessStatus → Nat → Nat
+  | .completed, size => size
+  | .partialCommit reads _, _ => reads
+  | .faulted _ reads _, _ => reads
 
 /-- `status.IsComplete` holds when the whole access took effect.
 
@@ -89,45 +106,56 @@ def IsComplete : AccessStatus → Prop
 
 instance : (status : AccessStatus) → Decidable status.IsComplete
   | .completed => .isTrue trivial
-  | .partialCommit _ | .faulted _ _ => .isFalse (fun h => h)
+  | .partialCommit _ _ | .faulted _ _ _ => .isFalse (fun h => h)
 
 /-- `status.IsFaulted` holds when the access raised an architectural fault. -/
 def IsFaulted : AccessStatus → Prop
-  | .faulted _ _ => True
+  | .faulted _ _ _ => True
   | _ => False
 
 instance : (status : AccessStatus) → Decidable status.IsFaulted
-  | .faulted _ _ => .isTrue trivial
-  | .completed | .partialCommit _ => .isFalse (fun h => h)
+  | .faulted _ _ _ => .isTrue trivial
+  | .completed | .partialCommit _ _ => .isFalse (fun h => h)
 
 /--
-`status.WellFormed size` holds when the committed count does not exceed the size
-the access named.
+`status.WellFormed size` holds when neither committed count exceeds the size the
+access named.
 
 A status committing more bytes than the access covered would describe an effect
-outside the access's own range, which no profile may declare.
+outside the access's own range, which no profile may declare. Both counts, because
+a status that bounded only the larger of them would let the other exceed the range
+unnoticed — which is what a single conflated count did.
 -/
 def WellFormed (status : AccessStatus) (size : Nat) : Prop :=
-  status.committedBytes size ≤ size
+  status.committedReads size ≤ size ∧ status.committedWrites size ≤ size
 
 instance (status : AccessStatus) (size : Nat) : Decidable (status.WellFormed size) :=
-  inferInstanceAs (Decidable (_ ≤ _))
+  inferInstanceAs (Decidable (_ ∧ _))
 
-@[simp] theorem committedBytes_completed (size : Nat) :
-    AccessStatus.completed.committedBytes size = size := rfl
+@[simp] theorem committedWrites_completed (size : Nat) :
+    AccessStatus.completed.committedWrites size = size := rfl
+
+@[simp] theorem committedReads_completed (size : Nat) :
+    AccessStatus.completed.committedReads size = size := rfl
 
 @[simp] theorem wellFormed_completed (size : Nat) :
-    AccessStatus.completed.WellFormed size := Nat.le_refl _
+    AccessStatus.completed.WellFormed size := ⟨Nat.le_refl _, Nat.le_refl _⟩
 
-@[simp] theorem not_isComplete_faulted (fault : FaultClassId) (committed : Nat) :
-    ¬ (AccessStatus.faulted fault committed).IsComplete := fun h => h
+@[simp] theorem not_isComplete_faulted (fault : FaultClassId) (reads writes : Nat) :
+    ¬ (AccessStatus.faulted fault reads writes).IsComplete := fun h => h
 
 /--
-A faulting access is not a no-op. Its committed prefix is exactly what it says,
-and a proof may not assume it is zero.
+A faulting access is not a no-op. Its committed prefixes are exactly what it says,
+and a proof may not assume either is zero.
 -/
-theorem committedBytes_faulted (fault : FaultClassId) (committed size : Nat) :
-    (AccessStatus.faulted fault committed).committedBytes size = committed := rfl
+theorem committedWrites_faulted (fault : FaultClassId) (reads writes size : Nat) :
+    (AccessStatus.faulted fault reads writes).committedWrites size = writes := rfl
+
+/-- **A faulted read-modify-write can report a read it kept and a write it did
+not make.** The outcome `Committed`'s two counts exist for, now expressible at the
+status as well; it was not, and the event recorded the maximum of the two. -/
+theorem committedReads_faulted (fault : FaultClassId) (reads writes size : Nat) :
+    (AccessStatus.faulted fault reads writes).committedReads size = reads := rfl
 
 end AccessStatus
 

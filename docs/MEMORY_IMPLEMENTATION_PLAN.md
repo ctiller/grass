@@ -652,6 +652,15 @@ one outright defect that had already merged — see §3.11's denial row.
   theorem is derivable rather than false. Until it exists, a consumer following the
   prose to `runAccesses_frames_untouched` over the survivors would have an unsound
   framing argument, which is how review found it.
+- **The operation-level `faults` facet is consumed by nothing.**
+  `OperationFacets.supplied` reads only `isSome`, so an operation declaring
+  `faults = some []` can still raise one. The substep-level lists are checked now;
+  the operation-level declaration is not cross-checked against them.
+- **Ordering modes are unchecked.** `MemoryOrder.IsPortable` and
+  `MemoryScope.IsPortable` have no consumer, `AdmittedVocabulary` has no ordering
+  registry, and an access declaring `profileSpecific` with an unregistered name
+  steps and mints an event carrying it. [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.1
+  says unsupported mappings are rejected.
 - **`FaultVisibility.transactional`'s `justification` names nothing.**
   `RequiresJustification` and `SubstepSequence.ClaimsAtomicity` exist so a §10
   package can enumerate outstanding claims, and nothing under `Grass/` consults
@@ -731,6 +740,37 @@ input the transition took on trust.
   second is a leak. The asymmetry review named is the sharp part: the alias check
   treats a zero-byte faulted access as having touched nothing, while the ledger
   treated the same access as fully performed, and both cannot be right. See §4.3.
+
+A fifth round, aimed at the fourth round's own fixes because they were new code
+written fast. Nine findings; three were live defects and two of those are on main.
+
+- **An access could declare a context other than the one running it.**
+  `MemoryEvent.ofOutcome` took the event's identity from
+  `AccessDescriptor.context` and its kind from `step`'s argument, and nothing
+  compared them. `ConflictsWithHistory` keys on that identity, so
+  [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.3's race rule was defeated by one field: a
+  device write naming the program thread aliased the thread's bytes and committed,
+  and the event it minted paired thread identity with engine kind, which §7.1
+  forbids. `StepRejection.contextMismatch` closes it.
+- **A `.compute` substep's fault classes were checked against no registry.** The
+  round-four fix closed the access case; a compute substep has no descriptor, so
+  `MemoryProfile.Admits` never saw it and the only thing checked about one was that
+  its fault list is non-empty. `faultClassNotDeclared` was validating a plan
+  against a list that was itself unvalidated — and `.compute` is the constructor
+  the `div` case exists for. `StepRejection.computeFaultNotRecognized` is the
+  sibling clause.
+- **The read/write separation stopped at `Committed`.** `AccessStatus` still
+  carried one number, the `max`, so the very outcome round four added — an `xadd`
+  that read eight bytes and wrote none — recorded `faulted 8`, `committedBytes`
+  answered eight for an access that wrote nothing, and `committedRange` mapped it
+  onto the whole range. `AccessStatus` carries both counts now and
+  `committedWriteRange` is named for what it means.
+- `FaultPlan`'s commit counts are bounded by `StepRejection.faultCommitOutOfRange`
+  rather than saturating silently, which is what `faultPointOutOfRange` did for the
+  index.
+- `faultWithUndeclaredLedgerEffect` fired on `transactional` sequences, where
+  `faultingEffectVisible` proves the faulting access is never performed and the
+  effect cannot apply. Now gated on it.
 
 ### 4.3 A semantic decision this milestone made and does not own
 

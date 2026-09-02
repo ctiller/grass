@@ -67,6 +67,15 @@ meaning.
 
 A consumer that accepts a non-portable order without knowing its profile is
 exactly the "permissive fallback" `docs/FOUNDATION.md` law 8 forbids.
+
+**No consumer.** Nothing under `Grass/` calls this, `AdmittedVocabulary` has no
+ordering registry, and `MemoryProfile.Admits` does not consult `d.ordering` beyond
+`atomicityAgrees` — so an access declaring `profileSpecific` with a name no profile
+ever registered steps and mints an event carrying it. `docs/MEMORY_MODEL.md` §7.1
+says unsupported mappings are rejected, and this predicate was written to be the
+rejection. Recorded as owed in `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2; review
+found the gap and the sentence below, which described a consumer that does not
+exist.
 -/
 def IsPortable : MemoryOrder → Prop
   | .profileSpecific _ => False

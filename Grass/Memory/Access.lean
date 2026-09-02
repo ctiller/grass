@@ -290,44 +290,61 @@ def IsPlainWrite (d : AccessDescriptor) : Prop :=
   d.intent = .write ∧ d.ordering.IsPlain
 
 /--
-The bytes a given outcome commits, as a range.
+The bytes a given outcome **writes**, as a range.
 
 `docs/MEMORY_MODEL.md` §4: "A write initializes only the bytes it actually
-completes." The committed range is therefore a prefix of the named range, and
-this is the function every initialization and framing argument goes through.
--/
-def committedRange (d : AccessDescriptor) (status : AccessStatus) : ByteRange :=
-  d.range.take (status.committedBytes d.range.size)
+completes." The committed write range is therefore a prefix of the named range.
 
-@[simp] theorem committedRange_completed (d : AccessDescriptor) :
-    d.committedRange .completed = d.range := by
-  simp [committedRange]
+Writes, not "commits". It used to read the status's single conflated count, so a
+read-modify-write that observed eight bytes and wrote none mapped to the *whole*
+eight-byte range — the opposite of what §4 says, in the function whose docstring
+claimed to be what every initialization argument goes through. It was not: the
+initialization path is `MemoryState.commit`'s byte list, which is why the error
+never reached memory. Review found both the defect and the false claim.
+-/
+def committedWriteRange (d : AccessDescriptor) (status : AccessStatus) : ByteRange :=
+  d.range.take (status.committedWrites d.range.size)
+
+@[simp] theorem committedWriteRange_completed (d : AccessDescriptor) :
+    d.committedWriteRange .completed = d.range := by
+  simp [committedWriteRange]
 
 /--
 The committed range never escapes the named range.
 
-Unconditional, because `committedRange` saturates through `ByteRange.take`. A
+Unconditional, because `committedWriteRange` saturates through `ByteRange.take`. A
 status claiming more committed bytes than the access covered therefore describes
-no effect outside the access's own range.
+no effect outside the access's own range — though `Grass/Op/Step.lean` rejects such
+a claim rather than relying on the saturation.
 -/
-theorem committedRange_contained (d : AccessDescriptor) (status : AccessStatus) :
-    d.range.Contains (d.committedRange status) :=
+theorem committedWriteRange_contained (d : AccessDescriptor) (status : AccessStatus) :
+    d.range.Contains (d.committedWriteRange status) :=
   d.range.contains_take _
 
 /-- For a well-formed status the committed range is exactly the claimed prefix,
 with no saturation. -/
-theorem committedRange_size (d : AccessDescriptor) {status : AccessStatus}
+theorem committedWriteRange_size (d : AccessDescriptor) {status : AccessStatus}
     (h : status.WellFormed d.range.size) :
-    (d.committedRange status).size = status.committedBytes d.range.size := by
+    (d.committedWriteRange status).size = status.committedWrites d.range.size := by
   rw [AccessStatus.WellFormed] at h
-  simp [committedRange, Nat.min_eq_left h]
+  simp [committedWriteRange, Nat.min_eq_left h.2]
 
-/-- A faulting access commits its declared prefix, which may be nonempty. Nothing
-here permits a proof to assume a fault committed no bytes. -/
-theorem committedRange_faulted (d : AccessDescriptor) (fault : FaultClassId)
-    {committed : Nat} (h : committed ≤ d.range.size) :
-    d.committedRange (.faulted fault committed) = ⟨d.range.start, committed⟩ := by
-  simp [committedRange, AccessStatus.committedBytes, ByteRange.take, Nat.min_eq_left h]
+/-- A faulting access writes its declared prefix, which may be nonempty. Nothing
+here permits a proof to assume a fault wrote no bytes. -/
+theorem committedWriteRange_faulted (d : AccessDescriptor) (fault : FaultClassId)
+    {reads writes : Nat} (h : writes ≤ d.range.size) :
+    d.committedWriteRange (.faulted fault reads writes) =
+      ⟨d.range.start, writes⟩ := by
+  simp [committedWriteRange, AccessStatus.committedWrites, ByteRange.take,
+    Nat.min_eq_left h]
+
+/-- **A faulted read-modify-write writes only what it wrote.** The read count does
+not widen the write range, which is what the conflated count did. -/
+theorem committedWriteRange_faulted_read_only (d : AccessDescriptor)
+    (fault : FaultClassId) (reads : Nat) :
+    d.committedWriteRange (.faulted fault reads 0) = ByteRange.empty d.range.start := by
+  simp [committedWriteRange, AccessStatus.committedWrites, ByteRange.take,
+    ByteRange.empty]
 
 end AccessDescriptor
 

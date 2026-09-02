@@ -153,6 +153,11 @@ inductive Alpha where
   | splitStore
   /-- The same split store, declared transactional. -/
   | atomicSplitStore
+  /-- A device write that declares the program thread as its context, to defeat the
+  race check. -/
+  | impersonatingDmaWrite
+  /-- A compute substep declaring a fault class the vocabulary never admitted. -/
+  | computeWithPhantomFault
   /-- Discharges an obligation that was never live. -/
   | dischargeGhost
   /-- Joins two obligations that were never live into a new one. -/
@@ -332,6 +337,17 @@ instance : HasOperationFacets Alpha where
               onFault := .profileSpecific ⟨"fake.splitStore"⟩ }
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
+    | .impersonatingDmaWrite =>
+        { memoryEffects := some (.single (acc viewProv ⟨0, 8⟩ 0x2000 .write .readWrite
+            false true [] false thread₀))
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .computeWithPhantomFault =>
+        { memoryEffects := some
+            { substeps := [ .compute [⟨⟨"fake.neverDeclaredFault"⟩⟩] ]
+              onFault := .priorEffectsVisible }
+          faults := some [⟨⟨"fake.neverDeclaredFault"⟩⟩]
+          restartability := some .restartable, ordering := some .plain }
     | .atomicSplitStore =>
         { memoryEffects := some
             { substeps :=
@@ -960,6 +976,56 @@ theorem a_denial_before_the_fault_records_no_fault :
   cases hs
   decide
 
+/-! ## An access cannot declare a context other than the one running it
+
+`MemoryEvent.ofOutcome` takes the event's context identity from
+`AccessDescriptor.context` and its kind from `step`'s argument, and nothing
+compared them. `ConflictsWithHistory` discriminates on that identity, so
+`docs/MEMORY_MODEL.md` §7.3's race rule was defeated by one field: a device write
+naming the program thread aliased the thread's bytes and committed, and the event
+it minted carried thread identity with engine kind, an incoherent pair §7.1
+forbids. Two sources of truth for one fact. -/
+
+/-- The honest device write is denied, which is the existing behaviour. -/
+theorem the_honest_device_write_is_denied :
+    ∀ s, (stepAlpha state₀ .store).state? = some s →
+      ∀ t, (stepBeta s .dmaWrite).state? = some t →
+        t.violations.recordCount = 1 := by
+  intro s hs t ht
+  cases hs
+  cases ht
+  decide
+
+/-- The impersonating one is refused before it runs, rather than committing. -/
+theorem an_impersonating_access_is_refused :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.impersonatingDmaWrite) engine₀
+      .dmaEngine ⟨⟨"alpha"⟩⟩ = .rejected (.contextMismatch thread₀ engine₀) := rfl
+
+/-- The same descriptor run by the context it names is admitted, so the check
+compares rather than refusing anything unusual. -/
+theorem the_named_context_may_run_it :
+    ∃ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.impersonatingDmaWrite)
+      thread₀ .thread ⟨⟨"alpha"⟩⟩).state? = some s := ⟨_, rfl⟩
+
+/-! ## A compute substep's fault classes are checked too
+
+`MemoryProfile.Admits` closes this for an access, quantifying over
+`admittedFaults`. A compute substep has no descriptor, so `sequence.accesses`
+never contains it and `Admits` never saw it: the only thing checked about one was
+that its fault list is non-empty. `faultClassNotDeclared` then validated a plan
+against a list that was itself unvalidated, and `.compute` is the constructor the
+`div` case exists for. -/
+
+theorem a_compute_substep_with_an_unrecognized_fault_is_refused :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.computeWithPhantomFault) thread₀
+      .thread ⟨⟨"alpha"⟩⟩ =
+      .rejected (.computeFaultNotRecognized ⟨⟨"fake.neverDeclaredFault"⟩⟩) := rfl
+
+/-- `divide`'s compute substep declares `divideError`, which the vocabulary does
+recognize, so it still runs. -/
+theorem a_recognized_compute_fault_still_runs :
+    ∃ s, (stepAlpha state₀ .divide).state? = some s := ⟨_, rfl⟩
+
 /-! ## What a fault plan may claim
 
 Three things the transition took on trust from its caller and now checks. Each was
@@ -982,13 +1048,19 @@ theorem an_undeclared_fault_class_is_refused :
         else .none) =
       .rejected (.faultClassNotDeclared ⟨⟨"fake.neverDeclaredFault"⟩⟩) := rfl
 
-/-- The declared class on the same substep still runs, so the check discriminates
-rather than refusing every fault. -/
+/-- The declared class on the same substep still runs *and is recorded*, so the
+check discriminates rather than refusing every fault. Asserting only that the step
+produced a state would have passed with the guard deleted and with the fault
+silently dropped; review pointed that out. -/
 theorem a_declared_fault_class_still_runs :
-    ∃ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
       ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
-        if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3 3
-        else .none)).state? = some s := ⟨_, rfl⟩
+        if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 3
+        else .none)).state? = some s →
+      s.faults.map RaisedFault.fault = [FaultClassId.pageFault] := by
+  intro s hs
+  cases hs
+  decide
 
 /-- A fault on a substep carrying an obligation ledger effect is refused, because
 nothing says what becomes of the effect. Before this, a `reserve` that faulted
@@ -1024,14 +1096,16 @@ theorem a_completed_store_reports_completed :
   cases hs
   decide
 
-/-- A genuinely partial access still reports `partialCommit`, so the fix did not
-make the status say "completed" unconditionally. -/
+/-- A genuinely partial access still reports its prefix, so the fix did not make
+the status say "completed" unconditionally. The store read nothing, so its read
+count is zero rather than the three the plan named -- which is the read/write
+separation reaching the status, where it previously stopped at `Committed`. -/
 theorem a_faulted_store_still_reports_its_prefix :
     ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
           if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3 3
           else .none)).state? = some s →
-      s.events.map (·.event.status) = [AccessStatus.faulted .pageFault 3] := by
+      s.events.map (·.event.status) = [AccessStatus.faulted .pageFault 0 3] := by
   intro s hs
   cases hs
   decide
@@ -1281,7 +1355,7 @@ theorem faulted_store_commits_its_declared_prefix :
         ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
           if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3 3
           else .none)).state? = some s →
-      ∃ e, s.events = [e] ∧ e.event.writeCommitted = 3 ∧ e.event.status = .faulted .pageFault 3 := by
+      ∃ e, s.events = [e] ∧ e.event.writeCommitted = 3 ∧ e.event.status = .faulted .pageFault 0 3 := by
   intro s hs
   cases hs
   exact ⟨_, rfl, by decide, by decide⟩

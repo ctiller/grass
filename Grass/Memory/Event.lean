@@ -447,9 +447,9 @@ def status : AccessOutcome d → AccessStatus
       if (!d.intent.reads || c.readCount == d.range.size) &&
          (!d.intent.writes || c.writeCount == d.range.size) then
         .completed
-      else .partialCommit (max c.readCount c.writeCount)
-  | .faulted fault c => .faulted fault (max c.readCount c.writeCount)
-  | .denied _ => .partialCommit 0
+      else .partialCommit c.readCount c.writeCount
+  | .faulted fault c => .faulted fault c.readCount c.writeCount
+  | .denied _ => .partialCommit 0 0
 
 /-- The violation this outcome records, if it was refused. -/
 def violation? : AccessOutcome d → Option AuditViolation
@@ -475,18 +475,12 @@ theorem status_wellFormed (outcome : AccessOutcome d) :
     have hw := c.writeCount_le
     simp only [status]
     split
-    · exact Nat.le_refl _
-    · show max c.readCount c.writeCount ≤ d.range.size
-      omega
+    · exact ⟨Nat.le_refl _, Nat.le_refl _⟩
+    · exact ⟨hr, hw⟩
   | faulted fault c =>
-    have hr := c.readCount_le
-    have hw := c.writeCount_le
-    simp only [status]
-    show max c.readCount c.writeCount ≤ d.range.size
-    omega
+    exact ⟨c.readCount_le, c.writeCount_le⟩
   | denied _ =>
-    simp only [status]
-    exact Nat.zero_le _
+    exact ⟨Nat.zero_le _, Nat.zero_le _⟩
 
 end AccessOutcome
 
