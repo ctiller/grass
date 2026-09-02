@@ -699,6 +699,24 @@ to imitate compiler-selected storage or CFG structure.
     machine history. A tool may retain the offered plan in a separate attempt or
     oracle diagnostic, but it is not part of the architectural fault ledger.
     This resolves `c-mem:21` and makes the provisional M2 behavior normative.
+127. Obligation-ledger transformation is indexed by the exact operation exit
+    and is independent of memory-effect visibility. An operation that can
+    complete, fault, interrupt, cancel, or commit partially declares, through
+    its owning protocol theorem, the exact ledger transformation for every
+    admitted outcome and the linearization point or staged points at which each
+    transformation takes effect. A fault before such a point preserves that
+    obligation fragment; a fault after it applies the declared transformation.
+    Staged transformations require separate substeps or an explicit
+    outcome-indexed relation. Grass may not infer ledger behavior from committed
+    byte counts or from the delta constructor: always applying a discharge can
+    leak a duty, while always preserving it can resurrect a duty whose protocol
+    action already occurred; the analogous create cases are equally
+    protocol-dependent. If a faulting outcome carries a ledger effect but has no
+    declared fault rule, the operation/fault combination is rejected rather
+    than assigned a default. This ratifies M2's
+    `faultWithUndeclaredLedgerEffect` behavior as the fail-closed interim rule
+    and resolves `c-mem:28`; a later outcome-indexed interface may admit the
+    operation only with its complete protocol proof.
 
 ## Explicitly rejected shortcuts
 
