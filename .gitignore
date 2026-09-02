@@ -22,3 +22,7 @@ Desktop.ini
 
 # Native helper build products
 target/
+
+# Python bytecode from the audit tools
+__pycache__/
+*.pyc
