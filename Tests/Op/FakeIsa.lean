@@ -139,17 +139,36 @@ inductive Alpha where
   | splitGhost
   /-- Two substeps, the first of which the state denies. -/
   | deniedThenStore
+  /-- Discharges the release obligation while presenting authority under a
+  protocol that does not govern it. -/
+  | dischargeWithWrongAuthority
 deriving DecidableEq, Repr
+
+/-- The buffer protocol, and the authority this family holds under it. A real
+family obtains this from its profile; the fixture mints one so the seam can be
+exercised, which is exactly the gap `ProtocolAuthority`'s docstring records as an
+M10 obligation. -/
+def bufferProtocol : ObligationProtocolId := ⟨⟨"fake.buffer"⟩⟩
+
+/-- Authority to act under `bufferProtocol`. -/
+def bufferAuthority : ProtocolAuthority bufferProtocol := ⟨⟨"fake.isa"⟩⟩
+
+/-- A different protocol, and authority under it. Used to show that authority for
+one protocol does not authorize a duty governed by another. -/
+def otherProtocol : ObligationProtocolId := ⟨⟨"fake.other"⟩⟩
+
+/-- Authority to act under `otherProtocol`, which governs nothing here. -/
+def otherAuthority : ProtocolAuthority otherProtocol := ⟨⟨"fake.isa"⟩⟩
 
 /-- The duty a fabricating delta would conjure. -/
 def fabricatedObligation : Obligation :=
   { id := fabricatedObligationId, kind := .releaseAllocation
-    protocol := ⟨⟨"fake.buffer"⟩⟩, owner := thread₀ }
+    protocol := bufferProtocol, owner := thread₀ }
 
 /-- The release obligation `reserve` creates. -/
 def releaseObligation : Obligation :=
   { id := releaseObligationId, kind := .releaseAllocation
-    protocol := ⟨⟨"fake.buffer"⟩⟩, owner := thread₀ }
+    protocol := bufferProtocol, owner := thread₀ }
 
 /-- The first family's facet declaration. This is the whole of what a family
 supplies; nothing else in the tree changes. -/
@@ -172,12 +191,12 @@ instance : HasOperationFacets Alpha where
           ordering := some { atomicity := .atomic, order := .acquireRelease } }
     | .reserve =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
-            false true [.create releaseObligation]))
+            false true [.create bufferProtocol bufferAuthority releaseObligation]))
           faults := some [], restartability := some .notRestartable
           ordering := some .plain }
     | .release =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
-            false true [.discharge releaseObligationId]))
+            false true [.discharge bufferProtocol bufferAuthority releaseObligationId]))
           faults := some [], restartability := some .notRestartable
           ordering := some .plain }
     | .divide =>
@@ -205,7 +224,7 @@ instance : HasOperationFacets Alpha where
           ordering := some .plain }
     | .badLedger =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
-            false true [.split releaseObligationId []]))
+            false true [.split bufferProtocol bufferAuthority releaseObligationId []]))
           faults := some [], restartability := some .notRestartable
           ordering := some .plain }
     | .staleEpoch =>
@@ -215,17 +234,22 @@ instance : HasOperationFacets Alpha where
           ordering := some .plain }
     | .dischargeGhost =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
-            false true [.discharge ghostObligationId]))
+            false true [.discharge bufferProtocol bufferAuthority ghostObligationId]))
           faults := some [], restartability := some .notRestartable
           ordering := some .plain }
     | .joinGhosts =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
-            false true [.join [ghostObligationId, ghostObligationId₂] fabricatedObligation]))
+            false true [.join bufferProtocol bufferAuthority [ghostObligationId, ghostObligationId₂] fabricatedObligation]))
           faults := some [], restartability := some .notRestartable
           ordering := some .plain }
     | .splitGhost =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
-            false true [.split ghostObligationId [fabricatedObligation]]))
+            false true [.split bufferProtocol bufferAuthority ghostObligationId [fabricatedObligation]]))
+          faults := some [], restartability := some .notRestartable
+          ordering := some .plain }
+    | .dischargeWithWrongAuthority =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true [.discharge otherProtocol otherAuthority releaseObligationId]))
           faults := some [], restartability := some .notRestartable
           ordering := some .plain }
     | .deniedThenStore =>
@@ -455,6 +479,38 @@ theorem creating_a_live_identity_is_denied :
   intro s hs t ht
   cases hs; cases ht
   decide
+
+/-! ## Authority is typed, and claimed authority must match the live duty
+
+`ProtocolAuthority` is indexed by its protocol, so a `ProtocolAuthority
+otherProtocol` cannot be passed where a `ProtocolAuthority bufferProtocol` is
+expected — that half is the elaborator's, and there is no fixture for it because
+the mistake does not typecheck. What a fixture *can* show is the state-level
+half: a delta may present well-typed authority under a protocol that does not
+govern the obligation it names, and `LedgerDelta.Applicable` refuses it.
+
+An earlier version compared protocol identities only, which is comparing strings
+any caller could write down, and carried no authority at all. -/
+
+theorem wrong_protocol_authority_is_refused :
+    ∀ s, (stepAlpha state₀ .reserve).state? = some s →
+      ∀ t, (stepAlpha s .dischargeWithWrongAuthority).state? = some t →
+        t.obligations.lookup releaseObligationId = some releaseObligation ∧
+          t.violations.recordCount = 1 := by
+  intro s hs t ht
+  cases hs; cases ht
+  exact ⟨by decide, by decide⟩
+
+/-- The same discharge with the governing protocol's authority succeeds, so the
+refusal above is about the protocol and not about the discharge. -/
+theorem right_protocol_authority_succeeds :
+    ∀ s, (stepAlpha state₀ .reserve).state? = some s →
+      ∀ t, (stepAlpha s .release).state? = some t →
+        t.obligations.lookup releaseObligationId = Option.none ∧
+          t.violations.IsEmpty := by
+  intro s hs t ht
+  cases hs; cases ht
+  exact ⟨by decide, by decide⟩
 
 /-! ## A denied access stops the operation
 

@@ -259,13 +259,13 @@ def applyLedgerEffect (obligations : FiniteMap ObligationId Obligation)
     (effect : LedgerEffect) : FiniteMap ObligationId Obligation :=
   effect.foldl (init := obligations) fun acc delta =>
     match delta with
-    | .create o => acc.insert o.id o
-    | .discharge id => acc.erase id
-    | .split source into =>
+    | .create _ _ o => acc.insert o.id o
+    | .discharge _ _ id => acc.erase id
+    | .split _ _ source into =>
         into.foldl (init := acc.erase source) fun inner o => inner.insert o.id o
-    | .join sources into =>
+    | .join _ _ sources into =>
         (sources.foldl (init := acc) fun inner id => inner.erase id).insert into.id into
-    | .transfer id owner =>
+    | .transfer _ _ id owner =>
         match acc.lookup id with
         | Option.none => acc
         | some o => acc.insert id (o.transferTo owner)

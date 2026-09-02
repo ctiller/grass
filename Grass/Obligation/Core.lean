@@ -106,6 +106,32 @@ structure ObligationProtocolId where
 deriving DecidableEq, Repr
 
 /--
+Evidence that its holder may act under `protocol`.
+
+`docs/OBLIGATIONS.md` §2 permits the ledger to change "only through the owning
+protocol theorem". A ledger delta that merely *named* a protocol satisfied nothing
+— comparing `ObligationProtocolId` values is comparing strings, and any caller
+could write down any name. `ProtocolAuthority` is indexed by the protocol instead: the type of an authority
+for one protocol differs from the type of an authority for another, so the
+elaborator rejects presenting one where the other is required.
+
+That is the type-level half. The state-level half is in `LedgerDelta.Applicable`,
+which checks that the protocol a delta claims authority under is the protocol the
+live obligation actually has. Neither half suffices alone: typing stops authority
+being carried across protocols, and applicability stops it being claimed over an
+obligation it does not govern.
+
+What this does **not** establish is that the holder legitimately obtained the
+authority. `issuer` records which profile minted it, and a profile that hands out
+authority it should not is a profile defect; nothing in this module can detect
+that. This is an open obligation for the profile-closure work of M10.
+-/
+structure ProtocolAuthority (protocol : ObligationProtocolId) where
+  /-- The profile that minted this authority. -/
+  issuer : Name
+deriving DecidableEq, Repr
+
+/--
 An obligation: a linear ghost resource with an owner and a governing protocol.
 
 The precondition, accepted discharge events, transfer rules, and cancellation

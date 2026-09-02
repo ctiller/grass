@@ -339,7 +339,7 @@ instead of a theorem, because it is the stronger form.
 | denial prevents undeclared later effects | `Op.runAccesses_stops_at_refusal` |
 | fault choices are structurally in range | `Op.FaultPlan` carries a `Fin`; the bad case is unrepresentable |
 | partial RMW retains its completed read | `Committed` counts reads and writes separately; `faulted_rmw_keeps_its_read` |
-| ledger mutation occurs iff the delta is applicable | `Op.obligations_unchanged_unless_committed` |
+| ledger mutation occurs iff the delta is applicable | `Op.obligations_unchanged_unless_committed`; `LedgerDelta.Applicable` now requires a typed `ProtocolAuthority` rather than a protocol-name comparison |
 | failed ledger mutation is recorded and non-mutating | `Op.ledger_refusal_is_recorded`, `Op.refused_preserves_everything_but_the_ledger` |
 | every emitted violation class is declared | `Op.StepPolicy.violationClassesDeclared` |
 | external operation families require no Grass edits | `Tests/Op/FakeIsa.lean`, and reproduced independently by a reviewer building three families outside the repo |

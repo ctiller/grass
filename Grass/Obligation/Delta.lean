@@ -34,15 +34,20 @@ An obligation not named by any delta of a transition is preserved unchanged.
 -/
 inductive LedgerDelta where
   /-- A protocol created a new obligation. -/
-  | create (obligation : Obligation)
+  | create (claimed : ObligationProtocolId) (authority : ProtocolAuthority claimed)
+      (obligation : Obligation)
   /-- The required action occurred and this obligation ends. -/
-  | discharge (obligation : ObligationId)
+  | discharge (claimed : ObligationProtocolId) (authority : ProtocolAuthority claimed)
+      (obligation : ObligationId)
   /-- One obligation becomes several, together covering the same duty. -/
-  | split (source : ObligationId) (into : List Obligation)
+  | split (claimed : ObligationProtocolId) (authority : ProtocolAuthority claimed)
+      (source : ObligationId) (into : List Obligation)
   /-- Several obligations become one. -/
-  | join (sources : List ObligationId) (into : Obligation)
+  | join (claimed : ObligationProtocolId) (authority : ProtocolAuthority claimed)
+      (sources : List ObligationId) (into : Obligation)
   /-- Responsibility moves to another context; the duty itself is unchanged. -/
-  | transfer (obligation : ObligationId) (newOwner : ContextId)
+  | transfer (claimed : ObligationProtocolId) (authority : ProtocolAuthority claimed)
+      (obligation : ObligationId) (newOwner : ContextId)
 deriving DecidableEq, Repr
 
 namespace LedgerDelta
@@ -54,19 +59,24 @@ A transfer consumes nothing: `docs/OBLIGATIONS.md` §1 makes transfer a change o
 owner, not an end of the duty, and the identity survives it.
 -/
 def consumes : LedgerDelta → List ObligationId
-  | .create _ => []
-  | .discharge id => [id]
-  | .split source _ => [source]
-  | .join sources _ => sources
-  | .transfer _ _ => []
+  | .create _ _ _ => []
+  | .discharge _ _ id => [id]
+  | .split _ _ source _ => [source]
+  | .join _ _ sources _ => sources
+  | .transfer _ _ _ _ => []
+
+/-- The protocol this delta claims authority under. -/
+def claimedProtocol : LedgerDelta → ObligationProtocolId
+  | .create claimed _ _ | .discharge claimed _ _ | .split claimed _ _ _
+  | .join claimed _ _ _ | .transfer claimed _ _ _ => claimed
 
 /-- The identities this delta adds to the ledger. -/
 def produces : LedgerDelta → List ObligationId
-  | .create obligation => [obligation.id]
-  | .discharge _ => []
-  | .split _ into => into.map Obligation.id
-  | .join _ into => [into.id]
-  | .transfer _ _ => []
+  | .create _ _ obligation => [obligation.id]
+  | .discharge _ _ _ => []
+  | .split _ _ _ into => into.map Obligation.id
+  | .join _ _ _ into => [into.id]
+  | .transfer _ _ _ _ => []
 
 /--
 The identities this delta leaves in place but reassigns to another owner.
@@ -76,8 +86,8 @@ survives with its identity intact. It is nonetheless a change to that
 obligation's row in the ledger, which is why `PreservesIdentity` has to see it.
 -/
 def reowns : LedgerDelta → List ObligationId
-  | .transfer id _ => [id]
-  | .create _ | .discharge _ | .split _ _ | .join _ _ => []
+  | .transfer _ _ id _ => [id]
+  | .create _ _ _ | .discharge _ _ _ | .split _ _ _ _ | .join _ _ _ _ => []
 
 /--
 `delta.PreservesIdentity id` holds when `delta` leaves `id` exactly as it was.
@@ -112,53 +122,64 @@ identity twice, or a join that consumed one twice, would let a single duty be
 counted as two.
 -/
 def WellFormed : LedgerDelta → Prop
-  | .create _ => True
-  | .discharge _ => True
-  | .split _ into => into ≠ [] ∧ (into.map Obligation.id).Nodup
-  | .join sources _ => sources ≠ [] ∧ sources.Nodup
-  | .transfer _ _ => True
+  | .create _ _ _ => True
+  | .discharge _ _ _ => True
+  | .split _ _ _ into => into ≠ [] ∧ (into.map Obligation.id).Nodup
+  | .join _ _ sources _ => sources ≠ [] ∧ sources.Nodup
+  | .transfer _ _ _ _ => True
 
 instance : (delta : LedgerDelta) → Decidable delta.WellFormed
-  | .create _ => .isTrue trivial
-  | .discharge _ => .isTrue trivial
-  | .split _ _ => inferInstanceAs (Decidable (_ ∧ _))
-  | .join _ _ => inferInstanceAs (Decidable (_ ∧ _))
-  | .transfer _ _ => .isTrue trivial
+  | .create _ _ _ => .isTrue trivial
+  | .discharge _ _ _ => .isTrue trivial
+  | .split _ _ _ _ => inferInstanceAs (Decidable (_ ∧ _))
+  | .join _ _ _ _ => inferInstanceAs (Decidable (_ ∧ _))
+  | .transfer _ _ _ _ => .isTrue trivial
 
-@[simp] theorem wellFormed_create (obligation : Obligation) :
-    (LedgerDelta.create obligation).WellFormed := trivial
+@[simp] theorem wellFormed_create (claimed : ObligationProtocolId)
+    (authority : ProtocolAuthority claimed) (obligation : Obligation) :
+    (LedgerDelta.create claimed authority obligation).WellFormed := trivial
 
-@[simp] theorem wellFormed_discharge (id : ObligationId) :
-    (LedgerDelta.discharge id).WellFormed := trivial
+@[simp] theorem wellFormed_discharge (claimed : ObligationProtocolId)
+    (authority : ProtocolAuthority claimed) (id : ObligationId) :
+    (LedgerDelta.discharge claimed authority id).WellFormed := trivial
 
-@[simp] theorem wellFormed_transfer (id : ObligationId) (owner : ContextId) :
-    (LedgerDelta.transfer id owner).WellFormed := trivial
+@[simp] theorem wellFormed_transfer (claimed : ObligationProtocolId)
+    (authority : ProtocolAuthority claimed) (id : ObligationId) (owner : ContextId) :
+    (LedgerDelta.transfer claimed authority id owner).WellFormed := trivial
 
 /-- A split into nothing is not a split; it is a disappearance. -/
-theorem not_wellFormed_split_nil (source : ObligationId) :
-    ¬ (LedgerDelta.split source []).WellFormed := fun h => h.1 rfl
+theorem not_wellFormed_split_nil (claimed : ObligationProtocolId)
+    (authority : ProtocolAuthority claimed) (source : ObligationId) :
+    ¬ (LedgerDelta.split claimed authority source []).WellFormed := fun h => h.1 rfl
 
 /-- A join from nothing is not a join; it is a fabrication. -/
-theorem not_wellFormed_join_nil (into : Obligation) :
-    ¬ (LedgerDelta.join [] into).WellFormed := fun h => h.1 rfl
+theorem not_wellFormed_join_nil (claimed : ObligationProtocolId)
+    (authority : ProtocolAuthority claimed) (into : Obligation) :
+    ¬ (LedgerDelta.join claimed authority [] into).WellFormed := fun h => h.1 rfl
 
-@[simp] theorem consumes_transfer (id : ObligationId) (owner : ContextId) :
-    (LedgerDelta.transfer id owner).consumes = [] := rfl
+@[simp] theorem consumes_transfer (claimed : ObligationProtocolId)
+    (authority : ProtocolAuthority claimed) (id : ObligationId) (owner : ContextId) :
+    (LedgerDelta.transfer claimed authority id owner).consumes = [] := rfl
 
-@[simp] theorem produces_transfer (id : ObligationId) (owner : ContextId) :
-    (LedgerDelta.transfer id owner).produces = [] := rfl
+@[simp] theorem produces_transfer (claimed : ObligationProtocolId)
+    (authority : ProtocolAuthority claimed) (id : ObligationId) (owner : ContextId) :
+    (LedgerDelta.transfer claimed authority id owner).produces = [] := rfl
 
-@[simp] theorem consumes_create (obligation : Obligation) :
-    (LedgerDelta.create obligation).consumes = [] := rfl
+@[simp] theorem consumes_create (claimed : ObligationProtocolId)
+    (authority : ProtocolAuthority claimed) (obligation : Obligation) :
+    (LedgerDelta.create claimed authority obligation).consumes = [] := rfl
 
-@[simp] theorem produces_create (obligation : Obligation) :
-    (LedgerDelta.create obligation).produces = [obligation.id] := rfl
+@[simp] theorem produces_create (claimed : ObligationProtocolId)
+    (authority : ProtocolAuthority claimed) (obligation : Obligation) :
+    (LedgerDelta.create claimed authority obligation).produces = [obligation.id] := rfl
 
-@[simp] theorem consumes_discharge (id : ObligationId) :
-    (LedgerDelta.discharge id).consumes = [id] := rfl
+@[simp] theorem consumes_discharge (claimed : ObligationProtocolId)
+    (authority : ProtocolAuthority claimed) (id : ObligationId) :
+    (LedgerDelta.discharge claimed authority id).consumes = [id] := rfl
 
-@[simp] theorem produces_discharge (id : ObligationId) :
-    (LedgerDelta.discharge id).produces = [] := rfl
+@[simp] theorem produces_discharge (claimed : ObligationProtocolId)
+    (authority : ProtocolAuthority claimed) (id : ObligationId) :
+    (LedgerDelta.discharge claimed authority id).produces = [] := rfl
 
 /--
 A transfer leaves every *other* identity alone.
@@ -175,24 +196,30 @@ the correspondence between the obligation created and the one accepted has to
 survive; a transfer that minted a new identity would break it.
 -/
 theorem preservesIdentity_transfer_of_ne {moved id : ObligationId} (h : id ≠ moved)
-    (owner : ContextId) : (LedgerDelta.transfer moved owner).PreservesIdentity id :=
+    (claimed : ObligationProtocolId) (authority : ProtocolAuthority claimed)
+    (owner : ContextId) :
+    (LedgerDelta.transfer claimed authority moved owner).PreservesIdentity id :=
   ⟨by simp, by simp, by simp [reowns, h]⟩
 
 /-- The moved obligation is not preserved: a transfer is a change to its row. -/
-theorem not_preservesIdentity_transfer_self (moved : ObligationId) (owner : ContextId) :
-    ¬ (LedgerDelta.transfer moved owner).PreservesIdentity moved := by
+theorem not_preservesIdentity_transfer_self (claimed : ObligationProtocolId)
+    (authority : ProtocolAuthority claimed) (moved : ObligationId) (owner : ContextId) :
+    ¬ (LedgerDelta.transfer claimed authority moved owner).PreservesIdentity moved := by
   rintro ⟨_, _, hr⟩
   exact hr (by simp [reowns])
 
 /-- A transfer neither consumes nor produces, so the duty's identity survives it.
 This is what distinguishes transfer from discharge-and-recreate. -/
-theorem identity_survives_transfer (moved : ObligationId) (owner : ContextId) :
-    (LedgerDelta.transfer moved owner).consumes = [] ∧
-      (LedgerDelta.transfer moved owner).produces = [] := ⟨rfl, rfl⟩
+theorem identity_survives_transfer (claimed : ObligationProtocolId)
+    (authority : ProtocolAuthority claimed) (moved : ObligationId) (owner : ContextId) :
+    (LedgerDelta.transfer claimed authority moved owner).consumes = [] ∧
+      (LedgerDelta.transfer claimed authority moved owner).produces = [] := ⟨rfl, rfl⟩
 
 /-- A discharge consumes exactly the obligation it names and no other. -/
 theorem preservesIdentity_discharge_of_ne {discharged id : ObligationId}
-    (h : id ≠ discharged) : (LedgerDelta.discharge discharged).PreservesIdentity id :=
+    (h : id ≠ discharged) (claimed : ObligationProtocolId)
+    (authority : ProtocolAuthority claimed) :
+    (LedgerDelta.discharge claimed authority discharged).PreservesIdentity id :=
   ⟨by simp [h], by simp, by simp [reowns]⟩
 
 /--
@@ -209,52 +236,73 @@ obligations is forbidden" — and `docs/FOUNDATION.md` law 7 states as no obliga
 disappearance.
 
 The protocol conditions are §2's other half: the ledger changes "only through the
-owning protocol theorem", so a split may not produce duties governed by a
-different protocol than the one it divides, and a join may not merge duties from
-several.
+owning protocol theorem".
+
+That half is now split between the type and this predicate. Every delta carries a
+`ProtocolAuthority claimed` — indexed by the protocol, so authority for one cannot
+be presented for another — and the clauses below check that `claimed` is the
+protocol the live obligation actually has. An earlier version compared
+`ObligationProtocolId` values only, which is comparing strings any caller could
+write down, and carried no authority at all.
 -/
 def Applicable (live : List ObligationId)
     (protocolOf : ObligationId → Option ObligationProtocolId) : LedgerDelta → Prop
-  | .create o => o.id ∉ live
-  | .discharge id => id ∈ live
-  | .split source into =>
-      source ∈ live ∧
+  | .create claimed _ o => o.id ∉ live ∧ o.protocol = claimed
+  | .discharge claimed _ id => id ∈ live ∧ protocolOf id = some claimed
+  | .split claimed _ source into =>
+      source ∈ live ∧ protocolOf source = some claimed ∧
       (∀ o ∈ into, o.id ∉ live ∨ o.id = source) ∧
-      (∀ o ∈ into, protocolOf source = some o.protocol)
-  | .join sources into =>
+      (∀ o ∈ into, o.protocol = claimed)
+  | .join claimed _ sources into =>
       (∀ id ∈ sources, id ∈ live) ∧
+      (∀ id ∈ sources, protocolOf id = some claimed) ∧
       (into.id ∉ live ∨ into.id ∈ sources) ∧
-      (∀ id ∈ sources, protocolOf id = some into.protocol)
-  | .transfer id _ => id ∈ live
+      into.protocol = claimed
+  | .transfer claimed _ id _ => id ∈ live ∧ protocolOf id = some claimed
 
 instance (live : List ObligationId)
     (protocolOf : ObligationId → Option ObligationProtocolId) :
     (delta : LedgerDelta) → Decidable (Applicable live protocolOf delta)
-  | .create _ => inferInstanceAs (Decidable (_ ∉ _))
-  | .discharge _ => inferInstanceAs (Decidable (_ ∈ _))
-  | .split _ _ => inferInstanceAs (Decidable (_ ∧ _ ∧ _))
-  | .join _ _ => inferInstanceAs (Decidable (_ ∧ _ ∧ _))
-  | .transfer _ _ => inferInstanceAs (Decidable (_ ∈ _))
+  | .create _ _ _ => inferInstanceAs (Decidable (_ ∧ _))
+  | .discharge _ _ _ => inferInstanceAs (Decidable (_ ∧ _))
+  | .split _ _ _ _ => inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
+  | .join _ _ _ _ => inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
+  | .transfer _ _ _ _ => inferInstanceAs (Decidable (_ ∧ _))
 
 /-- A discharge of an identity that is not live is not applicable. This is the
 silent drop the transition used to perform. -/
 theorem not_applicable_discharge_of_not_live {live : List ObligationId}
     {protocolOf : ObligationId → Option ObligationProtocolId} {id : ObligationId}
-    (h : id ∉ live) : ¬ Applicable live protocolOf (.discharge id) := h
+    {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
+    (h : id ∉ live) :
+    ¬ Applicable live protocolOf (.discharge claimed authority id) := fun ha => h ha.1
+
+/-- Authority for one protocol does not authorize a duty governed by another.
+This is the state-level half; the type-level half is that a
+`ProtocolAuthority p` is not a `ProtocolAuthority q`. -/
+theorem not_applicable_discharge_of_wrong_protocol {live : List ObligationId}
+    {protocolOf : ObligationId → Option ObligationProtocolId} {id : ObligationId}
+    {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
+    (h : protocolOf id ≠ some claimed) :
+    ¬ Applicable live protocolOf (.discharge claimed authority id) := fun ha => h ha.2
 
 /-- A join whose sources were never live is not applicable. This is the
 fabrication. -/
 theorem not_applicable_join_of_dead_source {live : List ObligationId}
     {protocolOf : ObligationId → Option ObligationProtocolId}
     {sources : List ObligationId} {into : Obligation} {id : ObligationId}
+    {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
     (hmem : id ∈ sources) (h : id ∉ live) :
-    ¬ Applicable live protocolOf (.join sources into) := fun ha => h (ha.1 id hmem)
+    ¬ Applicable live protocolOf (.join claimed authority sources into) :=
+  fun ha => h (ha.1 id hmem)
 
 /-- A create of an identity that is already live is not applicable. This is the
 duplication that silently overwrote a live duty. -/
 theorem not_applicable_create_of_live {live : List ObligationId}
     {protocolOf : ObligationId → Option ObligationProtocolId} {o : Obligation}
-    (h : o.id ∈ live) : ¬ Applicable live protocolOf (.create o) := fun ha => ha h
+    {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
+    (h : o.id ∈ live) :
+    ¬ Applicable live protocolOf (.create claimed authority o) := fun ha => ha.1 h
 
 end LedgerDelta
 
@@ -284,10 +332,10 @@ target never declared. -/
 def createdKinds (effect : LedgerEffect) : List ObligationKindId :=
   effect.flatMap fun delta =>
     match delta with
-    | .create o => [o.kind]
-    | .split _ into => into.map Obligation.kind
-    | .join _ into => [into.kind]
-    | .discharge _ | .transfer _ _ => []
+    | .create _ _ o => [o.kind]
+    | .split _ _ _ into => into.map Obligation.kind
+    | .join _ _ _ into => [into.kind]
+    | .discharge _ _ _ | .transfer _ _ _ _ => []
 
 /-- Every identity this effect reassigns to a new owner. -/
 def reowns (effect : LedgerEffect) : List ObligationId :=
