@@ -364,6 +364,24 @@ pub fn tag_exists_at(dir: &Path, name: &str, target: &str) -> AbResult<bool> {
     }
 }
 
+/// Whether `remote` actually has a tag named `name` pointing at `target` --
+/// a real `ls-remote` network round trip, not a check against anything
+/// already fetched into the local repository. `tag_exists_at` alone cannot
+/// tell the difference between "this tag reached origin" and "this tag only
+/// ever existed in the reviewer's own clone" (AGENT_BUS_SCHEMA.md's linked
+/// validation, and every other agent, need the former).
+pub fn remote_tag_matches(dir: &Path, remote: &str, name: &str, target: &str) -> AbResult<bool> {
+    let refspec = format!("refs/tags/{name}");
+    let out = run(dir, &["ls-remote", "--tags", remote, &refspec])?;
+    if !out.success {
+        return Ok(false);
+    }
+    // Lightweight tags (the only kind this crate creates) list the target
+    // commit's own sha directly, one "<sha>\t<ref>" line per match.
+    let sha = out.stdout.lines().next().and_then(|l| l.split_whitespace().next());
+    Ok(sha == Some(target))
+}
+
 pub fn diff_name_status(dir: &Path, from: &str, to: &str) -> AbResult<Vec<(String, String)>> {
     let out = run_ok(dir, &["diff", "--name-status", &format!("{from}..{to}")])?;
     let mut result = Vec::new();

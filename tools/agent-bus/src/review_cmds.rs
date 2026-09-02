@@ -227,8 +227,18 @@ pub fn prepare_merge(ctx: &BusCtx, agent: &str, nomination: &str, reviewed_commi
     let candidate = reconstruct_candidate(repo, &previous_main, reviewed_commit.as_str(), &reviewer)?;
     let tag = format!("agent-candidate/{reviewer}/{candidate}");
     crate::gitrepo::tag_lightweight(repo, &tag, &candidate)?;
+    // g-reviewer:4: a candidate whose tag never reached origin cannot be
+    // fetched or verified by any other agent (or `--linked` validator) --
+    // that must fail `prepare-merge` outright, not silently proceed to print
+    // a `candidate` line the reviewer might go on to authorize anyway.
     if ctx.has_origin {
-        let _ = crate::gitrepo::run(repo, &["push", "origin", &format!("refs/tags/{tag}")]);
+        let out = crate::gitrepo::run(repo, &["push", "origin", &format!("refs/tags/{tag}")])?;
+        if !out.success {
+            return Err(invalid(format!(
+                "failed to publish candidate tag refs/tags/{tag} to origin: {}",
+                out.stderr
+            )));
+        }
     }
     println!("candidate {candidate}");
     println!("previous_main {previous_main}");
@@ -268,12 +278,19 @@ pub fn authorize(ctx: &BusCtx, agent: &str, file: &str) -> AbResult<()> {
             data.candidate
         )));
     }
-    if !crate::gitrepo::tag_exists_at(
-        repo,
-        &format!("agent-candidate/{reviewer}/{}", data.candidate),
-        data.candidate.as_str(),
-    )? {
+    let tag = format!("agent-candidate/{reviewer}/{}", data.candidate);
+    if !crate::gitrepo::tag_exists_at(repo, &tag, data.candidate.as_str())? {
         return Err(invalid("candidate tag is not fetchable before authorization"));
+    }
+    // g-reviewer:4: local presence alone proves nothing about whether any
+    // *other* agent (or a `--linked` validator elsewhere) can fetch this
+    // candidate -- only origin can. Without this, a candidate tag that
+    // failed to push (or was later deleted from origin) could still pass
+    // authorization on the strength of the reviewer's own local clone.
+    if ctx.has_origin && !crate::gitrepo::remote_tag_matches(repo, "origin", &tag, data.candidate.as_str())? {
+        return Err(invalid(format!(
+            "candidate tag refs/tags/{tag} is not fetchable from origin; other agents could not verify this merge"
+        )));
     }
 
     let mut refs = vec![data.nomination.clone(), data.merge_engine_epoch.clone()];
@@ -915,6 +932,42 @@ mod tests {
         let file = write_auth(&f, "auth.json", &real_candidate, &["feature.txt"]);
         let err = authorize(&f.ctx, "bob", &file).unwrap_err();
         assert!(err.to_string().contains("candidate tag is not fetchable"), "{err}");
+    }
+
+    /// g-reviewer:4: `prepare-merge` must fail outright when the candidate
+    /// tag cannot actually reach `origin` -- a local-only tag is useless to
+    /// every other agent and to `--linked` validation elsewhere. Simulated
+    /// via a deliberately unreachable "origin" (a nonexistent local path);
+    /// any real transport failure surfaces the same way.
+    #[test]
+    fn prepare_merge_fails_when_candidate_tag_push_to_origin_fails() {
+        let f = fixture();
+        git(&f.path, &["remote", "add", "origin", "/nonexistent/not-a-repo"]);
+        let ctx = BusCtx { repo_root: f.path.clone(), has_origin: true };
+        let err = prepare_merge(&ctx, "bob", f.nomination.as_str(), &f.feature).unwrap_err();
+        assert!(err.to_string().contains("failed to publish candidate tag"), "{err}");
+        assert!(err.to_string().contains("to origin"), "{err}");
+    }
+
+    /// g-reviewer:4: a candidate tag that exists only in the reviewer's own
+    /// clone (never pushed, or later deleted from origin) must not pass
+    /// `authorize` -- `tag_exists_at` alone can't tell the two apart from a
+    /// tag that genuinely reached origin.
+    #[test]
+    fn authorize_rejects_candidate_tag_that_never_reached_origin() {
+        let f = fixture();
+        let origin = init_repo();
+        git(&f.path, &["remote", "add", "origin", &origin.path().to_string_lossy()]);
+        let ctx = BusCtx { repo_root: f.path.clone(), has_origin: true };
+
+        let real_candidate =
+            reconstruct_candidate(&f.path, &f.previous_main, &f.feature, &f.bob).expect("reconstruction succeeds");
+        // Tag it locally (so tag_exists_at alone would pass) but deliberately
+        // never push it to `origin`.
+        git(&f.path, &["tag", &format!("agent-candidate/bob/{real_candidate}"), &real_candidate]);
+        let file = write_auth(&f, "auth.json", &real_candidate, &["feature.txt"]);
+        let err = authorize(&ctx, "bob", &file).unwrap_err();
+        assert!(err.to_string().contains("not fetchable from origin"), "{err}");
     }
 
     /// Real, correct `prepare-merge` + `authorize`, so later tests can build
