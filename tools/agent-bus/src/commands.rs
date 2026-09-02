@@ -1840,6 +1840,30 @@ mod tests {
         assert!(inbox_items(&state, &a("alice")).is_empty());
     }
 
+    /// Golden-file coverage of `agent-bus inbox --json`'s actual UX shape:
+    /// one open item of each kind (issue/dependency/handoff/review), field
+    /// names and all. A field rename, a dropped kind, or a wrong summary
+    /// source (e.g. accidentally pulling `interface` instead of `summary`)
+    /// changes this snapshot's content, not just its length.
+    #[test]
+    fn inbox_items_snapshot() {
+        let mut state = empty_state();
+        let alice = a("alice");
+        let bob = a("bob");
+
+        let issue_id = eid(&bob, 0);
+        state.issues.insert(issue_id.clone(), mk_issue(&bob, &alice, &issue_id, ItemStatus::Open));
+        let dep_id = eid(&bob, 1);
+        state.dependencies.insert(dep_id.clone(), mk_dependency(&bob, &alice, &dep_id, ItemStatus::Open));
+        let handoff_id = eid(&bob, 2);
+        state.handoffs.insert(handoff_id.clone(), mk_handoff(&bob, &alice, &handoff_id, ItemStatus::Open));
+        let review_root = eid(&bob, 3);
+        state.reviews.insert(review_root.clone(), mk_review_chain(&review_root, &alice, false));
+        state.review_chain_by_nomination.insert(review_root.clone(), review_root.clone());
+
+        insta::assert_json_snapshot!(inbox_items(&state, &alice));
+    }
+
     // ------------------------------------------------------- dependencies()
 
     #[test]
@@ -1858,6 +1882,22 @@ mod tests {
 
         let items = dependencies_items(&state, &alice);
         assert_eq!(items.len(), 2, "{items:?}");
+    }
+
+    /// Golden-file coverage of `agent-bus dependencies --json`'s UX shape:
+    /// one dependency alice requested, one she's the target of.
+    #[test]
+    fn dependencies_items_snapshot() {
+        let mut state = empty_state();
+        let alice = a("alice");
+        let bob = a("bob");
+
+        let requested = eid(&alice, 0);
+        state.dependencies.insert(requested.clone(), mk_dependency(&alice, &bob, &requested, ItemStatus::Open));
+        let targeted = eid(&bob, 0);
+        state.dependencies.insert(targeted.clone(), mk_dependency(&bob, &alice, &targeted, ItemStatus::Open));
+
+        insta::assert_json_snapshot!(dependencies_items(&state, &alice));
     }
 
     // ----------------------------------------------------------- conflicts()
@@ -1885,6 +1925,23 @@ mod tests {
 
         let out = conflicts_items(&state);
         assert!(out.iter().any(|v| v["kind"] == "scope"), "{out:?}");
+    }
+
+    /// Golden-file coverage of `agent-bus conflicts --json`'s UX shape: one
+    /// exclusive/exclusive scope overlap between two active implementors,
+    /// pinning down the reported field names (`a`/`b`/`path_a`/`path_b`) and
+    /// which agent lands in which slot.
+    #[test]
+    fn conflicts_items_snapshot() {
+        let mut state = empty_state();
+        let mut alice_ag = mk_agent("alice", Role::Implementor);
+        alice_ag.scope = Some(scope_set_fixture(&["Grass/X/**"], &[]));
+        let mut bob_ag = mk_agent("bob", Role::Implementor);
+        bob_ag.scope = Some(scope_set_fixture(&["Grass/X/Y.lean"], &[]));
+        state.agents.insert(alice_ag.agent.clone(), alice_ag);
+        state.agents.insert(bob_ag.agent.clone(), bob_ag);
+
+        insta::assert_json_snapshot!(conflicts_items(&state));
     }
 
     #[test]
@@ -1976,6 +2033,18 @@ mod tests {
     fn tail_events_empty_walk_slice_when_count_zero() {
         let walk = mk_walk(vec![(a("alice"), vec![0, 1])]);
         assert!(tail_events(&walk, None, 0).is_empty());
+    }
+
+    /// Golden-file coverage of `agent-bus tail`'s actual UX: what the user
+    /// sees is each event's canonical JSONL line (`Envelope::
+    /// to_canonical_line`), not a Rust `Debug` dump of the struct -- this
+    /// snapshot is on that exact text, one line per event, matching what
+    /// both the `--json` and plain-text CLI output modes are built from.
+    #[test]
+    fn tail_snapshot_canonical_lines() {
+        let walk = mk_walk(vec![(a("alice"), vec![0, 1]), (a("bob"), vec![0])]);
+        let lines: Vec<String> = tail_events(&walk, None, 100).iter().map(|e| e.to_canonical_line()).collect();
+        insta::assert_snapshot!(lines.join("\n"));
     }
 
     #[test]

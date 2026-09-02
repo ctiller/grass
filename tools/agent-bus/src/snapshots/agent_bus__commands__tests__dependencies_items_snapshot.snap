@@ -1,0 +1,22 @@
+---
+source: src/commands.rs
+expression: "dependencies_items(&state, &alice)"
+---
+[
+  {
+    "blocking": true,
+    "id": "alice:0",
+    "interface": "iface",
+    "requester": "alice",
+    "status": "Open",
+    "target": "bob"
+  },
+  {
+    "blocking": true,
+    "id": "bob:0",
+    "interface": "iface",
+    "requester": "bob",
+    "status": "Open",
+    "target": "alice"
+  }
+]
