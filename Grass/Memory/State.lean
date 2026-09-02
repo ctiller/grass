@@ -1,4 +1,5 @@
 import Grass.Memory.Audit
+import Grass.Memory.Authority
 import Grass.Memory.Event
 import Grass.Memory.Profile
 import Grass.Std.Logical.FiniteMap
@@ -64,11 +65,62 @@ structure MemoryState where
   allocations : FiniteMap AllocId AllocationRecord
   /-- Pairs of allocations whose bytes are the same storage. -/
   aliases : List (AllocId × AllocId)
+  /-- The authority grants currently live.
+
+  `docs/MEMORY_MODEL.md` §3 makes this map the authoritative borrowing state.
+  What is here is the map and nothing else: the split, join, freeze, and
+  exclusivity-iff-empty laws are M3's, and the frame lifetime discipline is
+  M4's. It exists a milestone early so that `Grass/Op/Step.lean`'s
+  `AuthorityProvider` has a real table to check against, which is what shows a
+  new authority kind needs no change to operation packaging. -/
+  grants : FiniteMap GrantId AuthorityGrant
 
 namespace MemoryState
 
 /-- The state with nothing allocated. -/
-def empty : MemoryState := { allocations := .empty, aliases := [] }
+def empty : MemoryState := { allocations := .empty, aliases := [], grants := .empty }
+
+/-- Record a grant of authority. -/
+def grant (state : MemoryState) (id : GrantId) (record : AuthorityGrant) : MemoryState :=
+  { state with grants := state.grants.insert id record }
+
+/--
+`state.Granted context provenance range intent` holds when some live grant
+authorizes that access.
+
+Existentially quantified over the grant, because an access does not name the one
+it relies on; see `Grass/Memory/Authority.lean`. Decidable because the grant table
+is finite.
+-/
+def Granted (state : MemoryState) (context : ContextId) (provenance : Provenance)
+    (range : ByteRange) (intent : AccessIntent) : Prop :=
+  ∃ entry ∈ state.grants.entries,
+    entry.2.Authorizes context provenance range intent
+
+instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
+    (range : ByteRange) (intent : AccessIntent) :
+    Decidable (state.Granted context provenance range intent) :=
+  inferInstanceAs (Decidable (∃ _ ∈ _, _))
+
+/-- `state.GrantedOfKind` additionally requires the authorizing grant to be of a
+particular kind, which is how one provider distinguishes itself from another over
+the same table. -/
+def GrantedOfKind (state : MemoryState) (kind : GrantKind) (context : ContextId)
+    (provenance : Provenance) (range : ByteRange) (intent : AccessIntent) : Prop :=
+  ∃ entry ∈ state.grants.entries,
+    entry.2.kind = kind ∧ entry.2.Authorizes context provenance range intent
+
+instance (state : MemoryState) (kind : GrantKind) (context : ContextId)
+    (provenance : Provenance) (range : ByteRange) (intent : AccessIntent) :
+    Decidable (state.GrantedOfKind kind context provenance range intent) :=
+  inferInstanceAs (Decidable (∃ _ ∈ _, _))
+
+/-- A state with no grants authorizes nothing. Authority is held, not assumed. -/
+theorem not_granted_empty (context : ContextId) (provenance : Provenance)
+    (range : ByteRange) (intent : AccessIntent) :
+    ¬ empty.Granted context provenance range intent := by
+  rintro ⟨entry, hmem, -⟩
+  simp [empty, FiniteMap.empty] at hmem
 
 /-- `state.SharesBytes a b` holds when two allocations name the same storage,
 either because they are the same allocation or because the profile declared them

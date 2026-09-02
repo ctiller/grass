@@ -142,6 +142,34 @@ def Oracle.zeroed : Oracle where
         · exact absurd hb (by simp) }
 
 /--
+An extensible source of authority evidence.
+
+`denialOf` checks what the memory state itself knows: liveness, space, bounds,
+permission, initialization. Those are fixed, because they are what an allocation
+record means. Authority is open-ended. `docs/MEMORY_MODEL.md` §3 has loans, §5.1 has pins, §6
+has frame lifetimes, §7.4 has lock tokens, and §7.5 has device queue ownership;
+`MemoryProfile` does not enumerate them, and a fixed list here would have to.
+
+A provider is a predicate the profile carries. `refusalOf` consults every one
+after its own checks, so adding an authority kind is adding a provider — not
+changing `AccessDescriptor`, `OperationFacets`, `HasOperationFacets`,
+`SomeOperation`, or the shape of `step`. `Tests/Op/FakeIsa.lean` adds two, a loan
+and a stack frame, with no edit under `Grass/`.
+
+`refuses` is `Bool` rather than `Prop` for the reason `StepPolicy.compatible` is:
+the transition has to run the check, and a `Prop`-valued field would make it
+undecidable and the check documentation.
+-/
+structure AuthorityProvider where
+  /-- This provider's nominal identity, for diagnostics and profile declaration. -/
+  id : Name
+  /-- The class recorded when it refuses. Must be one the profile declares; see
+  `StepPolicy.violationClassesDeclared`. -/
+  violationClass : AuditViolationClass
+  /-- Whether this provider refuses the access against the given state. -/
+  refuses : MachineState → AccessDescriptor → Bool
+
+/--
 The configuration a step runs against: the memory profile, the facets every
 operation must supply, and the profile's atomic-compatibility relation.
 
@@ -158,6 +186,10 @@ structure StepPolicy where
   observed is a fact about the target, and a transition that invented it would be
   inventing the trace M8 reads. -/
   oracle : Oracle
+  /-- Authority providers this profile consults, in order. Empty means the
+  profile checks no authority beyond what the memory state itself knows, which is
+  the right default only for a target that has none. -/
+  authorities : List AuthorityProvider := []
   /-- The profile declares every violation class this relation can record.
 
   Without it `AdmittedVocabulary.auditViolationClasses` was a registry nothing
@@ -322,11 +354,14 @@ def refusalOf (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor
       if ¬ LedgerEffectApplicable state.obligations d.ledgerEffect then
         some .obligationNotAuthorized
       else
-        match prospective with
-        | some event =>
-            if ConflictsWithHistory policy state event then some .authorityUnavailable
-            else Option.none
-        | Option.none => Option.none
+        match policy.authorities.find? (fun provider => provider.refuses state d) with
+        | some provider => some provider.violationClass
+        | Option.none =>
+            match prospective with
+            | some event =>
+                if ConflictsWithHistory policy state event then some .authorityUnavailable
+                else Option.none
+            | Option.none => Option.none
 
 /--
 Perform one access, recording a certified event or a violation.

@@ -44,6 +44,15 @@ def viewAlloc : AllocId := allocs₁.fresh.1
 /-- A read-only allocation. -/
 def constAlloc : AllocId := allocs₂.fresh.1
 
+/-- A stack reservation, used by the frame authority provider. -/
+def stackAlloc : AllocId := allocs₂.fresh.2.fresh.1
+
+/-- Storage reachable only through a borrow, used by the loan authority
+provider. Separate from `bufferAlloc` so that guarding it does not put every
+ordinary buffer access behind a loan — a loan provider guards what is borrowed,
+not everything the program can name. -/
+def borrowedAlloc : AllocId := allocs₂.fresh.2.fresh.2.fresh.1
+
 private def epochs₀ : FreshSupply EpochTag := .initial
 /-- The first epoch. -/
 def epoch₀ : EpochId := epochs₀.fresh.1
@@ -80,6 +89,12 @@ def viewProv : Provenance := { bufferProv with root := viewAlloc, source := .map
 
 /-- Provenance of the read-only allocation. -/
 def constProv : Provenance := { bufferProv with root := constAlloc, source := .imageMapping }
+
+/-- Provenance of the stack reservation. -/
+def frameProv : Provenance := { bufferProv with root := stackAlloc, source := .stack }
+
+/-- Provenance of the borrowed storage. -/
+def borrowedProv : Provenance := { bufferProv with root := borrowedAlloc }
 
 /-- Provenance naming the buffer in an epoch it has moved past. Structurally
 impeccable; the state is what refuses it. -/
@@ -142,6 +157,10 @@ inductive Alpha where
   /-- Discharges the release obligation while presenting authority under a
   protocol that does not govern it. -/
   | dischargeWithWrongAuthority
+  /-- Writes the buffer through a borrowed slice, which requires a live loan. -/
+  | writeThroughLoan
+  /-- Writes a stack slot, which requires a live frame. -/
+  | writeStackSlot
 deriving DecidableEq, Repr
 
 /-- The buffer protocol, and the authority this family holds under it. A real
@@ -247,6 +266,16 @@ instance : HasOperationFacets Alpha where
             false true [.split bufferProtocol bufferAuthority ghostObligationId [fabricatedObligation]]))
           faults := some [], restartability := some .notRestartable
           ordering := some .plain }
+    | .writeThroughLoan =>
+        { memoryEffects := some (.single (acc borrowedProv ⟨0, 8⟩ 0x3000 .write .readWrite
+            false true))
+          faults := some [], restartability := some .notRestartable
+          ordering := some .plain }
+    | .writeStackSlot =>
+        { memoryEffects := some (.single (acc frameProv ⟨0, 8⟩ 0x2000 .write .readWrite
+            false true))
+          faults := some [], restartability := some .notRestartable
+          ordering := some .plain }
     | .dischargeWithWrongAuthority =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
             false true [.discharge otherProtocol otherAuthority releaseObligationId]))
@@ -299,7 +328,7 @@ instance : HasOperationFacets Beta where
 def vocabulary : AdmittedVocabulary :=
   { addressSpaces := .cpuOnly
     faultClasses := ⟨[.pageFault, .deviceFault, ⟨⟨"divideError"⟩⟩]⟩
-    allocationSources := ⟨[.virtualAlloc, .mappedFile, .imageMapping]⟩
+    allocationSources := ⟨[.virtualAlloc, .mappedFile, .imageMapping, .stack]⟩
     provenanceStepKinds := ⟨[]⟩
     auditViolationClasses := ⟨AuditViolationClass.emittedByTransition⟩
     obligationKinds := ⟨[.releaseAllocation]⟩ }
@@ -318,11 +347,47 @@ def profile : MemoryProfile :=
         allocatorFreshnessTeardownEpoch := True, callStackFrameLifetime := True
         erasurePreservation := True, validationMetadata := True } }
 
+/-! ## Two authority providers, authored outside `Grass/`
+
+This is the extension test. `docs/MEMORY_MODEL.md` has several kinds of authority
+— loans in §3, pins in §5.1, frame lifetimes in §6, lock tokens in §7.4, device
+queue ownership in §7.5 — and a memory profile cannot enumerate them ahead of
+time. The question is whether adding one costs a redesign of how operations are
+packaged.
+
+It does not. Both providers below are defined in this file. Neither
+`AccessDescriptor`, `OperationFacets`, `HasOperationFacets`, `SomeOperation`, nor
+the shape of `step` changes to accommodate them, and the operations that need
+them declare their accesses exactly as every other operation does.
+
+What this does *not* demonstrate is a loan or frame **model**. There is no split,
+join, freeze, exclusivity-iff-empty, pinning, rebasing, or call-framing theorem
+here; those are M3 and M4. The claim is about the seam, not about borrowing. -/
+
+/-- A borrowed slice must be covered by a live grant of kind `loan`. -/
+def loanProvider : AuthorityProvider where
+  id := ⟨"fake.loan"⟩
+  violationClass := .authorityUnavailable
+  refuses state d :=
+    decide (d.provenance.root = borrowedAlloc) &&
+    !decide (state.memory.GrantedOfKind .loan d.context d.provenance d.range d.intent)
+
+/-- Stack storage must be covered by a live grant of kind `frame`. A distinct
+provider over the same grant table, distinguished only by the grant kind it
+demands — which is the point: two authority kinds, one mechanism. -/
+def frameProvider : AuthorityProvider where
+  id := ⟨"fake.frame"⟩
+  violationClass := .authorityUnavailable
+  refuses state d :=
+    decide (d.provenance.root = stackAlloc) &&
+    !decide (state.memory.GrantedOfKind .frame d.context d.provenance d.range d.intent)
+
 /-- Every operation must declare its memory effects and its faults. -/
 def policy : StepPolicy :=
   { profile := profile
     requiredFacets := [.memoryEffects, .faults, .restartability]
     oracle := .zeroed
+    authorities := [loanProvider, frameProvider]
     violationClassesDeclared := by decide
     vocabularyWellFormed := by decide }
 
@@ -352,8 +417,35 @@ def memory₀ : MemoryState :=
         permission := .readOnly, live := true
         initialized := (List.range 64) }).alias bufferAlloc viewAlloc
 
-/-- The starting machine state. -/
-def state₀ : MachineState := .initial memory₀
+/-- The stack reservation the frame provider guards. -/
+def memory₁ : MemoryState :=
+  (memory₀.allocate stackAlloc
+    { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+      permission := .readWrite, live := true, initialized := List.range 64 }).allocate
+    borrowedAlloc
+    { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+      permission := .readWrite, live := true, initialized := List.range 64 }
+
+/-- The starting machine state: allocations exist, but no authority is held. -/
+def state₀ : MachineState := .initial memory₁
+
+private def grants₀ : FreshSupply GrantTag := .initial
+
+/-- A loan over the buffer, held by the program thread. -/
+def bufferLoan : GrantId := grants₀.fresh.1
+
+/-- A live call frame over the stack reservation. -/
+def liveFrame : GrantId := grants₀.fresh.2.fresh.1
+
+/-- The same state with both grants live. -/
+def stateWithAuthority : MachineState :=
+  { state₀ with
+    memory :=
+      (state₀.memory.grant bufferLoan
+        { kind := .loan, holder := thread₀, provenance := borrowedProv
+          range := ⟨0, 64⟩, rights := .readWrite }).grant liveFrame
+        { kind := .frame, holder := thread₀, provenance := frameProv
+          range := ⟨0, 64⟩, rights := .readWrite } }
 
 /-- Step one `Alpha` operation. -/
 def stepAlpha (state : MachineState) (op : Alpha) : StepOutcome :=
@@ -511,6 +603,67 @@ theorem right_protocol_authority_succeeds :
   intro s hs t ht
   cases hs; cases ht
   exact ⟨by decide, by decide⟩
+
+/-! ## Authority evidence extends the seam without redesigning it
+
+Each pair is the same operation against two states differing only in whether the
+grant is held. The refusal and the success both come out of `step`, through
+providers this file defines. -/
+
+/-- Without a loan, the borrowed write is refused and nothing commits. -/
+theorem write_through_loan_is_refused_without_the_loan :
+    ∀ s, (stepAlpha state₀ .writeThroughLoan).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- With the loan held, the same write commits. -/
+theorem write_through_loan_succeeds_with_the_loan :
+    ∀ s, (stepAlpha stateWithAuthority .writeThroughLoan).state? = some s →
+      s.events.length = 1 ∧ s.violations.IsEmpty := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- Without a live frame, the stack write is refused. -/
+theorem stack_write_is_refused_without_a_frame :
+    ∀ s, (stepAlpha state₀ .writeStackSlot).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- With the frame live, the same write commits. -/
+theorem stack_write_succeeds_with_a_frame :
+    ∀ s, (stepAlpha stateWithAuthority .writeStackSlot).state? = some s →
+      s.events.length = 1 ∧ s.violations.IsEmpty := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/--
+The two kinds do not substitute for one another.
+
+A grant of kind `loan` over the stack reservation does not satisfy the frame
+provider, so the two providers are genuinely distinct authorities over one table
+rather than one authority wearing two names.
+-/
+theorem a_loan_is_not_a_frame :
+    ¬ (({ state₀.memory with
+          grants := state₀.memory.grants.insert liveFrame
+            { kind := .loan, holder := thread₀, provenance := frameProv
+              range := ⟨0, 64⟩, rights := .readWrite } } : MemoryState).GrantedOfKind
+        .frame thread₀ frameProv ⟨0, 8⟩ .write) := by decide
+
+/-- Authority is not ambient: a grant held by the device engine does not
+authorize the program thread. -/
+theorem authority_is_not_ambient :
+    ¬ (({ state₀.memory with
+          grants := state₀.memory.grants.insert bufferLoan
+            { kind := .loan, holder := engine₀, provenance := borrowedProv
+              range := ⟨0, 64⟩, rights := .readWrite } } : MemoryState).GrantedOfKind
+        .loan thread₀ borrowedProv ⟨0, 8⟩ .write) := by decide
 
 /-! ## A denied access stops the operation
 

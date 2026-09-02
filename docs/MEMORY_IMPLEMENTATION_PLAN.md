@@ -348,15 +348,36 @@ The last is evidence rather than a theorem, and is labelled so. A fixture cannot
 prove that *no* family would require an edit; what it establishes is that the ones
 tried did not, which is what the seam claim rests on.
 
-**Still not a freeze.** The properties above are the closure conditions, not the
-whole bar. §3.12 lists what the seam has not met, and an interface freeze also
-wants at least one synthetic loan or frame authority provider carried through the
-seam — not the M3 and M4 models, but enough to show that authority evidence can
-be extended without redesigning operation packaging. Until then the seam is a
-clearly versioned **provisional** interface, and an ISA author starting against it
-should expect additive change.
+### 3.12 Authority evidence extends the seam
 
-### 3.12 Gaps that remain open
+The remaining precondition was one synthetic loan or frame authority provider
+carried through the seam — not the M3 and M4 models, but enough to show that
+authority evidence extends without redesigning operation packaging.
+
+`Grass/Memory/Authority.lean` supplies the grant table
+[MEMORY_MODEL.md](MEMORY_MODEL.md) §3 describes, `MemoryState` holds it, and
+`Grass/Op/Step.lean`'s `AuthorityProvider` is the extension point `refusalOf`
+consults. `Tests/Op/FakeIsa.lean` then defines **two** authority kinds — a loan
+and a stack frame — entirely in the fixture, with no edit under `Grass/`, and
+proves each refuses without its grant and admits with it.
+
+What that establishes, precisely: `AccessDescriptor`, `OperationFacets`,
+`HasOperationFacets`, `SomeOperation`, and the shape of `step` are unchanged by
+adding an authority kind. An access does not name the grant it relies on, so the
+descriptor gains no field; returning a grant is a ledger operation and already
+goes through `LedgerDelta` with its typed `ProtocolAuthority`.
+
+What it does **not** establish: there is no loan or frame *model* here. No split,
+join, freeze, exclusivity-iff-empty, pinning, rebasing, or call-framing theorem —
+M3 and M4 own those, and a grant is simply live while it is in the table. Adding
+the table was itself an edit under `Grass/`; the claim is that the *seam* absorbed
+a new authority kind, not that nothing anywhere changed.
+
+**Still not a freeze.** §3.13 lists what remains open. The seam is a clearly
+versioned **provisional** interface, and an ISA author starting against it should
+expect additive change.
+
+### 3.13 Gaps that remain open
 
 - `Address.symbolic` is an atom where §1 asks for an address *expression*. A
   SPIR-V `OpAccessChain` derives a pointer from a base and a runtime index, and
@@ -378,15 +399,16 @@ should expect additive change.
   generic relation at all. Refusing beats guessing, but it means a profile with
   split-store semantics owes a stepper extension before it can express one.
 
-### 3.13 What the seam does *not* yet demonstrate
+### 3.14 What the seam does *not* yet demonstrate
 
 Worth stating separately from the gaps, because it bears on when M1 can freeze.
 `Tests/Op/FakeIsa.lean` shows an externally authored family reaching memory
-events, authority checks, obligations, and the violation ledger. It does not show
-that family reaching an *emitted artifact*, or any interaction with loans (M3),
-frames (M4), or arenas (M6) — those milestones are unstarted, and the seam will
-meet them. The claim the fixture supports is that the facet interface carries an
-operation through the transition, not that the transition is complete.
+events, authority checks, obligations, the violation ledger, and — since §3.12 —
+two externally authored authority kinds. It does not show that family reaching an
+*emitted artifact*, and it does not exercise the loan, frame, or arena **models**,
+which remain M3, M4, and M6. The claim the fixture supports is that the facet
+interface carries an operation through the transition and absorbs new authority
+evidence, not that the transition is complete.
 
 ## 4. M2 — Executable single-thread memory semantics
 
