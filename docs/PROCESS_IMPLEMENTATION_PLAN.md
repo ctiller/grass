@@ -432,9 +432,20 @@ law 3 forbids an executed example standing in for a proof.
 `Network/Exposure.lean`, `Network/Graph.lean`, `Network/Topology.lean`,
 `Network/Structural.lean` (the canonical network, `coord1:4`), and
 `Network/Delivery.lean` (the total cross-vocabulary classifier that `g-design:4`
-made a condition of per-vocabulary fault classes). Not started: assertions,
-channels, the plan, the transition family, child bindings, mailbox profiles, and
-the commit law. **None of the exit criteria below is discharged.**
+made a condition of per-vocabulary fault classes), and `Network/Child.lean` (the
+binding that authorizes a spawn and routes every child outcome). Not started:
+assertions, channels, the plan, the transition family, mailbox profiles, and the
+commit law.
+
+`Child.lean` was taken before `Assertion.lean` deliberately. The assertion
+language is standing risk 1 — the one most likely to eat this milestone if it
+drifts toward a general separation logic — and it is the wrong thing to start
+while the branch is in a holding pattern awaiting a merge. The child binding is
+the natural complement to `Delivery.lean` instead: delivery handles the three
+fault classes, which translate as free functions because they carry no dependent
+result, and the binding handles the case that is not free, where a child's
+success answers a specific parent demand whose answer type depends on which
+demand it was. **None of the exit criteria below is discharged.**
 
 Two structures here are named for what they are rather than for what a reader
 might assume. `ProcessTopologyCore` carries graph, channels and spawn authority
