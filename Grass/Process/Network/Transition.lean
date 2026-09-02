@@ -256,6 +256,382 @@ theorem not_live_after {before after kind slot ending}
 
 end EndsInstance
 
+
+/--
+One instance takes a protocol step.
+
+Its private state moves by the protocol's own `Step` relation, and observations
+may be appended — which is why the scope is two fragments rather than one. An
+earlier draft scoped it to the instance slot alone, which would have been a
+false claim about any step that emits.
+-/
+structure StepsLocally (before after : plan.LogicalProcessNetwork)
+    (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
+    (event : (plan.topology.protocol kind).Event) : Prop where
+  /-- It was live, and this is the state it stepped from. -/
+  from' : ∃ incarnation, before.instances kind slot = some incarnation ∧
+    incarnation.Live ∧ incarnation.kind = kind
+  /-- It is still live afterwards; a step that ends a process is a different
+  constructor. -/
+  stillLive : ∃ incarnation, after.instances kind slot = some incarnation ∧
+    incarnation.Live
+  /-- Observations only grow. -/
+  observationsExtend : ∃ emitted, after.observations = before.observations ++ emitted
+  /-- Its slot and the observation trace, and nothing else. -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .instanceState kind slot ∨ fragment = .observations)
+
+/--
+A new incarnation appears in a slot that was empty.
+
+`allocation` is what `docs/PROCESS.md` §3 calls the transition's
+`allocatedNominals`, and `allocatesTheGeneration` is the correspondence §10.18
+records as missing everywhere else: the identity the spawned instance carries is
+one this step allocated, so the history cannot omit it.
+-/
+structure Spawns (before after : plan.LogicalProcessNetwork)
+    (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
+    (allocation : Allocation plan.topology.Carrier) : Prop where
+  /-- The slot was empty. -/
+  wasEmpty : before.instances kind slot = none
+  /-- It now holds a live incarnation of the right kind. -/
+  nowLive : ∃ incarnation, after.instances kind slot = some incarnation ∧
+    incarnation.Live ∧ incarnation.kind = kind
+  /-- Whose parent the topology permits. -/
+  authorized : ∀ incarnation, after.instances kind slot = some incarnation →
+    ∀ parentKind parent, incarnation.parentage.knownParent = some ⟨parentKind, parent⟩ →
+      plan.topology.maySpawn parentKind incarnation.kind
+  /-- And whose generation this step allocated. -/
+  allocatesTheGeneration : ∀ incarnation, after.instances kind slot = some incarnation →
+    incarnation.ref.generation ∈ allocation.entries
+  /-- That slot and the nominal history, and nothing else. -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals)
+
+/--
+A cancellation is requested against an in-flight occurrence.
+
+It does *not* resolve the escrow, which is the whole point:
+`docs/PROCESS.md` §3 says "requesting cancellation does not reclaim escrow", and
+`stillOutstanding` is that stated as a field rather than left to the reader.
+-/
+structure RequestsCancel (before after : plan.LogicalProcessNetwork)
+    (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
+    (occurrence : EdgeOccurrence plan.topology plan.message edge) : Prop where
+  /-- It was in flight. -/
+  wasOutstanding : (before.inFlight edge session).Outstanding occurrence
+  /-- The request is recorded. -/
+  nowRequested : (after.inFlight edge session).cancelRequested occurrence = true
+  /-- **And it is still in flight.** -/
+  stillOutstanding : (after.inFlight edge session).Outstanding occurrence
+  /-- That session's escrow, and nothing else. -/
+  scope : plan.TouchesOnly before after (fun fragment => fragment = .escrow edge session)
+
+/--
+A commit appends to the observation trace.
+
+`docs/PROCESS.md` §6's transition, at the only fragment it touches. Appending
+rather than replacing is the content: a trace that could be rewritten would let
+a reconciler drop an observation a specification demanded.
+-/
+structure Commits (before after : plan.LogicalProcessNetwork)
+    (emitted : Trace boundary.Observation) : Prop where
+  /-- The trace grew by exactly this much. -/
+  appended : after.observations = before.observations ++ emitted
+  /-- The observation trace, and nothing else. -/
+  scope : plan.TouchesOnly before after (fun fragment => fragment = .observations)
+
+/--
+A parent lets a child go.
+
+`docs/DECISIONS.md` decision 130's detach, at the network: the parentage moves
+from `attached` to `detached` with the same reference, so authority is gone and
+the history is not.
+-/
+structure Detaches (before after : plan.LogicalProcessNetwork)
+    (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind) : Prop where
+  /-- It had a parent with authority. -/
+  wasAttached : ∃ incarnation, before.instances kind slot = some incarnation ∧
+    incarnation.parentage.currentParent ≠ none
+  /-- It no longer does, and remembers which. -/
+  nowDetached : ∃ incarnation, after.instances kind slot = some incarnation ∧
+    incarnation.IsDetached ∧ incarnation.parentage.knownParent ≠ none
+  /-- That slot, and nothing else. -/
+  onlyThatSlot : plan.ChangesOneInstance before after kind slot
+
+namespace Detaches
+
+variable {plan}
+
+/-- A detached child keeps a recorded former parent, which is what makes
+`Grass/Process/Network/Child.lean`'s `NonReturningReason.detached` checkable. -/
+theorem former_parent_is_recorded {before after kind slot}
+    (detached : plan.Detaches before after kind slot) :
+    ∃ incarnation, after.instances kind slot = some incarnation ∧
+      incarnation.parentage.knownParent ≠ none := by
+  obtain ⟨incarnation, found, _, remembered⟩ := detached.nowDetached
+  exact ⟨incarnation, found, remembered⟩
+
+end Detaches
+
+/--
+**One step of a logical process network.**
+
+`docs/PROCESS.md` §3's twenty-three constructors. Ten of them are the competing
+escrow resolutions and share `ResolvesEscrow`, distinguished by the resolution
+each writes; the rest carry the shape their own effect needs.
+
+Every constructor determines a scope, and `touchesOnly` below proves each one
+respects it. That is what §3's routing coverage means here: there is no
+transition without a scope, so there is no way for a step to change a fragment
+it did not declare, and §8's framing quantifies over the family rather than over
+a hypothesis a caller supplies.
+-/
+inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (max u w v r m o)
+  /-- One instance takes a protocol step. -/
+  | processStep (kind : plan.topology.ProcessKind)
+      (slot : plan.topology.InstanceId kind)
+      (event : (plan.topology.protocol kind).Event)
+      (step : plan.StepsLocally before after kind slot event)
+  /-- A new incarnation appears. -/
+  | spawn (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
+      (allocation : Allocation plan.topology.Carrier)
+      (step : plan.Spawns before after kind slot allocation)
+  /-- A message enters escrow. -/
+  | send (edge : plan.topology.ChannelKind) (message : plan.message edge)
+      (occurrence : plan.topology.ChannelOccurrence edge message)
+      (step : plan.SendsEscrow before after edge message occurrence)
+  /-- The receiver consumes it. -/
+  | receive (edge session occurrence)
+      (step : plan.ResolvesEscrow before after edge session occurrence .received)
+  /-- Observations are committed. -/
+  | commit (emitted : Trace boundary.Observation)
+      (step : plan.Commits before after emitted)
+  /-- A cancellation is requested. Escrow is untouched. -/
+  | requestCancel (edge session occurrence)
+      (step : plan.RequestsCancel before after edge session occurrence)
+  /-- And acknowledged, which resolves it. -/
+  | acknowledgeCancel (edge session occurrence) (reason : CancelReason)
+      (step : plan.ResolvesEscrow before after edge session occurrence
+        (.cancelAcknowledged reason))
+  /-- It timed out. -/
+  | timeout (edge session occurrence)
+      (step : plan.ResolvesEscrow before after edge session occurrence .timedOut)
+  /-- An instance's outstanding demand was abandoned. -/
+  | interrupt (kind slot) (reason : (plan.topology.protocol kind).InterruptReason)
+      (step : plan.EndsInstance before after kind slot (.interrupted reason))
+  /-- An instance faulted. -/
+  | fault (kind slot) (fault : (plan.topology.protocol kind).LogicalFault)
+      (step : plan.EndsInstance before after kind slot (.faulted fault))
+  /-- Its environment broke a contract. -/
+  | environmentViolation (kind slot)
+      (violation : (plan.topology.protocol kind).EnvironmentViolation)
+      (step : plan.EndsInstance before after kind slot (.violated violation))
+  /-- A child ended, with the exact result decision 129 stores. -/
+  | childLifecycle (kind slot)
+      (ending : ProcessLifecycle (plan.topology.protocol kind))
+      (step : plan.EndsInstance before after kind slot ending)
+  /-- A non-child instance terminated. -/
+  | processTermination (kind slot)
+      (result : (plan.topology.protocol kind).TerminalResult)
+      (step : plan.EndsInstance before after kind slot (.terminated result))
+  /-- The session was closed in the ordinary way. -/
+  | channelClose (edge session occurrence)
+      (step : plan.ResolvesEscrow before after edge session occurrence .channelClosed)
+  /-- The sender died. -/
+  | senderDeath (edge session occurrence) (reason : ProcessDeathReason)
+      (step : plan.ResolvesEscrow before after edge session occurrence (.senderDied reason))
+  /-- The receiver died. -/
+  | receiverDeath (edge session occurrence) (reason : ProcessDeathReason)
+      (step : plan.ResolvesEscrow before after edge session occurrence
+        (.receiverDied reason))
+  /-- The session died. -/
+  | channelDeath (edge session occurrence)
+      (step : plan.ResolvesEscrow before after edge session occurrence .channelDied)
+  /-- An explicit disposition dropped it. -/
+  | drop (edge session occurrence)
+      (step : plan.ResolvesEscrow before after edge session occurrence .dropped)
+  /-- It moved to another session. -/
+  | reroute (edge session occurrence) (destination : plan.topology.ChannelId edge)
+      (step : plan.ResolvesEscrow before after edge session occurrence
+        (.rerouted destination))
+  /-- It merged into another occurrence. -/
+  | coalesce (edge session occurrence)
+      (carrier : EdgeOccurrence plan.topology plan.message edge)
+      (step : plan.ResolvesEscrow before after edge session occurrence (.coalesced carrier))
+  /-- A parent joined a finished child. -/
+  | join (kind slot) (step : plan.ChangesOneInstance before after kind slot)
+  /-- A parent let a child go. -/
+  | detach (kind slot) (step : plan.Detaches before after kind slot)
+  /-- A supervisor started a fresh incarnation. -/
+  | restart (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
+      (allocation : Allocation plan.topology.Carrier)
+      (step : plan.Spawns before after kind slot allocation)
+
+namespace NetworkTransition
+
+variable {plan} {before after : plan.LogicalProcessNetwork}
+
+/--
+The fragments a step may have changed.
+
+`docs/PROCESS.md` §8's `TransitionScope step`. Total by construction: the match
+is exhaustive over the family, so there is no transition whose scope is
+undefined and none that can change a fragment without declaring it.
+-/
+def scope : plan.NetworkTransition before after → NetworkFragment plan.topology → Prop
+  | .processStep kind slot _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨ fragment = .observations
+  | .spawn kind slot _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals
+  | .restart kind slot _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals
+  | .send edge _ occurrence _ => fun fragment => fragment = .escrow edge occurrence.1
+  | .commit _ _ => fun fragment => fragment = .observations
+  | .receive edge session _ _ => fun fragment => fragment = .escrow edge session
+  | .requestCancel edge session _ _ => fun fragment => fragment = .escrow edge session
+  | .acknowledgeCancel edge session _ _ _ => fun fragment => fragment = .escrow edge session
+  | .timeout edge session _ _ => fun fragment => fragment = .escrow edge session
+  | .channelClose edge session _ _ => fun fragment => fragment = .escrow edge session
+  | .senderDeath edge session _ _ _ => fun fragment => fragment = .escrow edge session
+  | .receiverDeath edge session _ _ _ => fun fragment => fragment = .escrow edge session
+  | .channelDeath edge session _ _ => fun fragment => fragment = .escrow edge session
+  | .drop edge session _ _ => fun fragment => fragment = .escrow edge session
+  | .reroute edge session _ _ _ => fun fragment => fragment = .escrow edge session
+  | .coalesce edge session _ _ _ => fun fragment => fragment = .escrow edge session
+  | .interrupt kind slot _ _ => fun fragment => fragment = .instanceState kind slot
+  | .fault kind slot _ _ => fun fragment => fragment = .instanceState kind slot
+  | .environmentViolation kind slot _ _ => fun fragment => fragment = .instanceState kind slot
+  | .childLifecycle kind slot _ _ => fun fragment => fragment = .instanceState kind slot
+  | .processTermination kind slot _ _ => fun fragment => fragment = .instanceState kind slot
+  | .join kind slot _ => fun fragment => fragment = .instanceState kind slot
+  | .detach kind slot _ => fun fragment => fragment = .instanceState kind slot
+
+/--
+**Routing coverage: every step respects the scope it declares.**
+
+`docs/PROCESS.md` §3's "no fabrication, bypass, or unclassified death is
+possible", in the form this layer can state: a transition is a constructor, every
+constructor determines a `scope`, and every one of them changed nothing outside
+it. There is no path through the family that reaches a fragment without
+declaring it, because the proof is by cases over the whole family and each case
+is the step's own scope field.
+
+This is what makes `Grass/Process/Network/Channel.lean`'s framing usable at a
+weave: `docs/PROCESS.md` §8's `Disjoint (TransitionScope step) Scope` now has a
+`TransitionScope` to be disjoint from.
+-/
+theorem touchesOnly (transition : plan.NetworkTransition before after) :
+    plan.TouchesOnly before after transition.scope := by
+  cases transition with
+  | processStep _ _ _ step => exact step.scope
+  | spawn _ _ _ step => exact step.scope
+  | restart _ _ _ step => exact step.scope
+  | send _ _ _ step => exact step.scope
+  | commit _ step => exact step.scope
+  | receive _ _ _ step => exact step.scope
+  | requestCancel _ _ _ step => exact step.scope
+  | acknowledgeCancel _ _ _ _ step => exact step.scope
+  | timeout _ _ _ step => exact step.scope
+  | channelClose _ _ _ step => exact step.scope
+  | senderDeath _ _ _ _ step => exact step.scope
+  | receiverDeath _ _ _ _ step => exact step.scope
+  | channelDeath _ _ _ step => exact step.scope
+  | drop _ _ _ step => exact step.scope
+  | reroute _ _ _ _ step => exact step.scope
+  | coalesce _ _ _ _ step => exact step.scope
+  | interrupt _ _ _ step => exact step.onlyThatSlot.scope
+  | fault _ _ _ step => exact step.onlyThatSlot.scope
+  | environmentViolation _ _ _ step => exact step.onlyThatSlot.scope
+  | childLifecycle _ _ _ step => exact step.onlyThatSlot.scope
+  | processTermination _ _ _ step => exact step.onlyThatSlot.scope
+  | join _ _ step => exact step.scope
+  | detach _ _ step => exact step.onlyThatSlot.scope
+
+/--
+The nominals a step allocates.
+
+`docs/PROCESS.md` §3: "definitionally empty for nonallocating transitions". Two
+constructors allocate — `spawn` and `restart` — and both carry the allocation
+whose entries `Spawns.allocatesTheGeneration` requires to contain the new
+incarnation's generation. Every other case is `Allocation.empty` by definition,
+not by a proof.
+-/
+def allocatedNominals :
+    plan.NetworkTransition before after → Allocation plan.topology.Carrier
+  | .spawn _ _ allocation _ => allocation
+  | .restart _ _ allocation _ => allocation
+  | _ => Allocation.empty
+
+@[simp] theorem allocatedNominals_receive {edge session occurrence step} :
+    (NetworkTransition.receive (plan := plan) (before := before) (after := after)
+      edge session occurrence step).allocatedNominals = Allocation.empty := rfl
+
+@[simp] theorem allocatedNominals_commit {emitted step} :
+    (NetworkTransition.commit (plan := plan) (before := before) (after := after)
+      emitted step).allocatedNominals = Allocation.empty := rfl
+
+end NetworkTransition
+
+/--
+**A step of an execution: a transition, plus the freshness law.**
+
+`docs/PROCESS.md` §3's `NetworkStep`. `admissible` is its `fresh` — every
+allocated identity was absent from the monotone history, which
+`Grass/Process/Nominal.lean` defines as absence from `used` and not from a live
+set — and `historyExact` is its union equation.
+
+`Grass/Process/Nominal.lean` already carried `Allocation`, `Fresh`, `Admissible`
+and `extend`, so this is thin. What makes it more than a wrapper is
+`Spawns.allocatesTheGeneration`: without it a spawn could allocate nothing while
+installing a fresh generation, and the freshness law would range over an
+allocation unrelated to what the step introduced.
+-/
+structure NetworkStep (before after : plan.LogicalProcessNetwork) where
+  /-- Which step. -/
+  transition : plan.NetworkTransition before after
+  /-- Everything it allocates was fresh. -/
+  admissible : before.usedNominals.Admissible transition.allocatedNominals
+  /-- And the history afterwards is exactly the union. -/
+  historyExact :
+    after.usedNominals = before.usedNominals.extend transition.allocatedNominals admissible
+
+namespace NetworkStep
+
+variable {plan} {before after : plan.LogicalProcessNetwork}
+
+/-- A step changed nothing outside its transition's scope. -/
+theorem touchesOnly (step : plan.NetworkStep before after) :
+    plan.TouchesOnly before after step.transition.scope :=
+  step.transition.touchesOnly
+
+/--
+**An identity allocated by this step was never allocated before it.**
+
+Law 22 at the step: freshness is absence from the history, so an identity this
+step introduces cannot be one a resolved or tombstoned occurrence already used.
+-/
+theorem allocations_were_fresh (step : plan.NetworkStep before after)
+    {nominal} (allocated : nominal ∈ step.transition.allocatedNominals.entries) :
+    before.usedNominals.Fresh nominal :=
+  step.admissible nominal allocated
+
+/-- And it is in the history afterwards, so no later step can allocate it again. -/
+theorem allocations_are_recorded (step : plan.NetworkStep before after)
+    {nominal} (allocated : nominal ∈ step.transition.allocatedNominals.entries) :
+    nominal ∈ after.usedNominals.used := by
+  rw [step.historyExact]
+  exact NominalHistory.mem_extend.mpr (Or.inl allocated)
+
+/-- A non-allocating step leaves the history exactly as it was. -/
+theorem nonallocating_preserves_history (step : plan.NetworkStep before after)
+    (nothing : step.transition.allocatedNominals = Allocation.empty) :
+    after.usedNominals = before.usedNominals := by
+  rw [step.historyExact]
+  simp [nothing]
+
+end NetworkStep
+
 end ProcessPlan
 
 end Grass.Process

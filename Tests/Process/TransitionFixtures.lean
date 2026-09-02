@@ -234,4 +234,51 @@ theorem instances_did_not_move (kind : serverTopology.ProcessKind)
     beforeReceive.instances kind slot = afterReceive.instances kind slot :=
   receiving_resolves_the_escrow.scope (.instanceState kind slot) (by simp)
 
+/-! ## The step as a member of the family -/
+
+/-- The receive, as a `NetworkTransition`. -/
+def receiveStep : serverPlan.NetworkTransition beforeReceive afterReceive :=
+  .receive () wire escrowed receiving_resolves_the_escrow
+
+/--
+**Its scope is one fragment, and it respected it.**
+
+`touchesOnly` is proved once over the whole family, so this is not a fact about
+this step in particular — but reading it back at a concrete step is what shows
+the general theorem is about something. `docs/PROCESS.md` §8's
+`Disjoint (TransitionScope step) Scope` now has a `TransitionScope` to be
+disjoint from.
+-/
+theorem receive_touches_only_its_session :
+    serverPlan.TouchesOnly beforeReceive afterReceive receiveStep.scope :=
+  receiveStep.touchesOnly
+
+/-- And that scope is the one session's escrow, nothing more. -/
+theorem receive_scope_is_the_session (fragment : NetworkFragment serverTopology) :
+    receiveStep.scope fragment ↔ fragment = .escrow () wire := Iff.rfl
+
+/-- A receive allocates nothing, definitionally. -/
+theorem receive_allocates_nothing :
+    receiveStep.allocatedNominals = Allocation.empty := rfl
+
+/--
+**So it is a step, and the history did not move.**
+
+`NetworkStep` bundles the transition with `docs/PROCESS.md` §3's freshness law.
+For a non-allocating transition the law is vacuous and the history equation says
+the history is unchanged, which `nonallocating_preserves_history` reads back.
+-/
+def receiveAsStep : serverPlan.NetworkStep beforeReceive afterReceive where
+  transition := receiveStep
+  admissible := by
+    intro nominal allocated
+    have nothing : nominal ∈ (Allocation.empty : Allocation serverTopology.Carrier).entries :=
+      receive_allocates_nothing ▸ allocated
+    exact absurd nothing (fun inEmpty => List.not_mem_nil inEmpty)
+  historyExact := (NominalHistory.extend_empty _ _).symm
+
+theorem history_did_not_move :
+    afterReceive.usedNominals = beforeReceive.usedNominals :=
+  receiveAsStep.nonallocating_preserves_history rfl
+
 end Grass.Process.Tests.Transition
