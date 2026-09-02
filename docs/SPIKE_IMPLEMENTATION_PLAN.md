@@ -278,7 +278,18 @@ must be revised rather than the spike padded.
 ## 7. What c-spike does and does not do
 
 c-spike owns `Spikes/`, `docs/SPIKE_1..5.md` and this plan, keeps the drafts
-coherent, and files and tracks the tickets this plan generates. It does not
+coherent, and files and tracks the tickets this plan generates. The annotated
+documents are settled as c-spike's under user authority, and the paired sources
+come with them: `docs/SPIKE_AUTHORING.md` binds each `authored file=` block to
+its file in `Spikes/N_Name/` byte for byte, so the document and its source are
+one artifact with one owner and cannot be split between two. That includes the
+author-surface resynchronization duty -- keeping the drafts in step with
+rulings such as `coord1:4` -- which g-design has been discharging in c-spike's
+absence and which now returns here. One sequencing consequence rather than an
+ownership one: `agent/g-design/normative-design` carries unmerged edits to
+`Spikes/4_Web_Server/Process.lean`, `Spikes/5_Spinning_Cube/Process.lean`,
+`docs/SPIKE_4.md` and `docs/SPIKE_5.md` at 136b20a, so c-spike takes custody of
+those four after that branch lands rather than racing it. It does not
 implement the libraries. Where a phase above is unowned, the deliverable is a
 routing decision from the coordinator, not c-spike quietly taking the work: an
 agent that both authored the demonstration and the thing being demonstrated
