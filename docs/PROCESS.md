@@ -549,7 +549,15 @@ The canonical `logicalWorldAgreement` decomposes exactly the named network
 fragments and proves the gluing law, so an assertion footprint is meaningful
 rather than a decoration. A reusable lower module may quantify over an arbitrary
 `WorldAgreement`; the completed plan always instantiates its channel contracts
-at the full logical network shown above.
+at the full logical network shown above. Because footprints are arbitrary
+predicates—including non-finite families over generative populations—the
+canonical mix used to prove `agreesGlue` may depend on the reviewed
+`Classical.choice` foundation constant. That dependency is localized to the
+logical-world supplier and is visible to the transitive axiom audit; the generic
+assertion and framing library neither chooses worlds nor acquires a broader
+admission mechanism. Requiring a Boolean footprint merely to avoid that reviewed
+constant would make every author supply decidable membership and would exclude
+useful proposition-indexed families without improving the verified gate.
 
 The definitions above make each occurrence nominally indexed by the exact
 channel edge, sender and receiver incarnations, session epoch, message, and
