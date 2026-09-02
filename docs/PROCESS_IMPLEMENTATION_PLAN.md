@@ -731,37 +731,45 @@ Exit criteria are theorems, plus a structural check, plus a measurement:
 
 Three pieces on this branch were taken under explicitly temporary custody
 because no owner existed. `agent-bus` issue `c-process:28` asked `coord1` for
-sequencing now that `g-foundation` has registered; `coord1:19` answered **hold
-all three and keep maintaining them**, and made a distinction worth recording:
-registration is not a scope claim, and these are three items on three different
-gates rather than one bucket.
+sequencing once `g-foundation` registered; `coord1:19` answered **hold all three
+and keep maintaining them**, and made a distinction worth recording: regis-
+tration is not a scope claim, and these were three items on three different
+gates rather than one bucket. That turned out to matter, because the gates then
+cleared separately and one of them cleared the other way.
+
+**Both ownership gates are now answered, by the user.** `coord1:24` relays it:
+`Grass/Specification/**` is assigned to `g-foundation`, and `Grass/Std/Logical`
+is not being folded into an existing mandate — a dedicated standard-library
+agent is being stood up for it. The naming gate had already cleared earlier
+(`g-design:13` on `coord1:16`, with `g-foundation:7` agreeing to rename
+`Grass/Semantics/Specification.lean` to `SpecProcess.lean`), so
+`Grass.Specification` unambiguously names the neutral layer.
 
 | Item | Gate | Status |
 |---|---|---|
-| `Grass/Process/Bag.lean` | does `Grass/Std/Logical/**` have an owner at all? (`coord1:14`) | `g-foundation` claims neither `Std/Logical` nor `Specification`; if the answer is no, Bag has *no* owner rather than a new one |
-| `Grass/Specification/Scope.lean` | owner only — the naming gate cleared | held |
-| `Grass/Specification/Boundary.lean` | same | held |
+| `Grass/Specification/Scope.lean` | owner | **offered**, `c-process:49` to `g-foundation` |
+| `Grass/Specification/Boundary.lean` | owner | **offered**, same |
+| `Grass/Process/Bag.lean` | owner | parked, and directed: it goes to the stdlib agent when that identity registers. `coord1` will name the receiver; no offer before then |
 
-`coord1:22` reports one gate moved and two did not. The **naming** gate is
-cleared: `g-design:13` ruled on `coord1:16` and `g-foundation:7` agreed to
-rename `Grass/Semantics/Specification.lean` to `Grass/Semantics/SpecProcess.lean`,
-so `Grass.Specification` unambiguously names the neutral layer and no rename is
-pending here. Both **ownership** gates remain closed, and `Bag.lean`'s position
-got worse rather than better: `g-foundation:6` *declined* `Grass/Std/Logical`
-as outside its mandate rather than deferring, so that path has no owner at all
-and `coord1` is routing it.
+`Bag`'s wait is now bounded rather than open. `g-foundation:6` *declined*
+`Grass/Std/Logical` as outside its mandate, so it is not the receiver, and
+`coord1:24` says plainly not to offer before the stdlib identity appears.
 
-Release order once the gates clear, per `coord1:19`: `c-mem`'s `Grass/Core`
-offer first, then `Bag`, then the `Specification` pair last. No
-`handoff.offered` before `coord1` says a gate has cleared.
+The representation choices went into the offer so the receiving owner inherits
+them as stated facts rather than discovering them: `RequirementSet` is a
+hand-rolled `List` with `Covers` as pointwise implication and no deduplication
+law; `withRequirements` replaces rather than extends and deliberately proves no
+coverage; `DriverBoundary.Result` is a dependent family that
+`ProtocolExposesBoundary` consumes as one; and `ScopeId`'s own note says it may
+belong in `Grass.Core` once that layer has a `Uid` discipline. They went in the
+offer's `summary` rather than its `known_issues`, because that field takes event
+ids and not prose — `c-process:49` says so where it says them.
 
-**Prepared for the eventual offer**, so the receiving owner inherits them as
-declared facts rather than discovering them: `Bag` is a hand-rolled
+`Bag`'s own note, for when its turn comes: it is a hand-rolled
 `Quotient (List.isSetoid _)` rather than mathlib's `Multiset` (§10.10), and the
-finite sets in `Specification/Scope.lean` and `Process/Nominal.lean` are
-duplicate-free `List`s rather than a `Finset`. Both are recorded in the module
-docstrings and belong in the offer's `known_issues`. This plan takes no position
-on whether they should change; that is for whoever accepts.
+finite sets in `Process/Nominal.lean` are duplicate-free `List`s rather than a
+`Finset`. This plan takes no position on whether either should change; that is
+for whoever accepts.
 
 ## 9. Review
 
