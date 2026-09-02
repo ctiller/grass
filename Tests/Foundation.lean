@@ -11,6 +11,7 @@ def noDemands : DemandFamily where
   unique := by simp
   identity := fun key => nomatch key
   identityInjective := fun left => nomatch left
+  kind := fun key => nomatch key
   statement := fun key => nomatch key
 
 theorem noDemandCertificates : DemandCertificateFamily noDemands where
