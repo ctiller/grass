@@ -3,30 +3,14 @@ import Grass.Core.Identifiers
 /-!
 # Independently keyed theorem demands
 
-The family is deliberately open in both keys and kinds.  Finiteness is exposed
-as an explicit, duplicate-free enumeration so diagnostics and future build
-manifests need not recover it from an implementation-specific map.
+The family is open in its key type. Finiteness is exposed as an explicit,
+duplicate-free enumeration so diagnostics and future build manifests need not
+recover it from an implementation-specific map.
 -/
 
 namespace Grass
 
 universe u
-
-/-- Stable invalidation facets for the foundation-owned requirement kinds. -/
-inductive RequirementKind where
-  | functional
-  | safety
-  | memory
-  | concurrency
-  | progress
-  | termination
-  | resource
-  | obligation
-  | diagnostic
-  | applicability
-  | artifact
-  | extension (owner kind : StableId)
-deriving Repr, DecidableEq
 
 /-- A finite family of propositions which must be certified independently. -/
 structure DemandFamily where
@@ -36,7 +20,6 @@ structure DemandFamily where
   unique : keys.Nodup
   identity : Key -> RequirementKey
   identityInjective : Function.Injective identity
-  kind : Key -> RequirementKind
   statement : Key -> Prop
 
 /-- Evidence for every member of one exact demand family. -/

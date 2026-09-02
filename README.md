@@ -48,7 +48,9 @@ snapshot of the named product branch.
 
 ## Repository validation
 
-Build and check the foundation API and its transitive trust closure with:
+Build the foundation API without warnings (so `sorry` is an error), audit every
+concrete `VerifiedProgram` producer, and check the named public theorem roots
+with:
 
 ```powershell
 lake build
@@ -57,11 +59,11 @@ pwsh ./audit-trust.ps1
 ```
 
 The trust script generates a temporary audit import over every library and test
-module. Its Lean command discovers every concrete `VerifiedProgram` producer
-from the normalized elaborated result type, then checks its exact fully
-qualified declaration and transitive axiom closure. Auditing only the generic
-composition theorem would not inspect axioms used to construct a concrete
-certificate.
+module. Its Lean command unfolds even irreducible result aliases to discover
+every concrete `VerifiedProgram` producer, then checks each exact fully
+qualified producer and the configured public theorem roots for rejected
+transitive axioms. The build's warning-as-error setting independently rejects
+admission mechanisms in declarations outside those named closures.
 
 The corpus checks verify that annotated spike documents and their comment-free
 authored Lean views remain exact:

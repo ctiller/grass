@@ -24,9 +24,10 @@ private def allowedAxiom (name : Name) : Bool :=
   name == ``propext || name == ``Classical.choice || name == ``Quot.sound
 
 private def producesVerifiedProgram (type : Expr) : MetaM Bool :=
-  forallTelescopeReducing type fun _ result => do
-    let reduced ← whnf result
-    return reduced.getAppFn.constName? == some ``Grass.VerifiedProgram
+  withTransparency .all do
+    forallTelescopeReducing type fun _ result => do
+      let reduced ← whnf result
+      return reduced.getAppFn.constName? == some ``Grass.VerifiedProgram
 
 /-- Audit every concrete `VerifiedProgram` producer visible in the environment. -/
 elab "#audit_verified_programs" : command => do

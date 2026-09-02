@@ -1,6 +1,6 @@
 import Grass.Semantics.Execution
 import Grass.Semantics.Observation
-import Grass.Semantics.Specification
+import Grass.Semantics.SpecProcess
 
 /-!
 # Stratified certificate interfaces
@@ -8,6 +8,11 @@ import Grass.Semantics.Specification
 Executions are relational prefixes, observations come from an explicit trace
 projection, and every adjacent layer supplies a prefix simulation. Domain,
 process, platform, machine, and artifact libraries own the concrete witnesses.
+
+`ArtifactFormat.loadedBehavior` is a declared model of the selected target
+loader. Its correspondence to an external loader is a profile assumption that
+later platform code must expose and discharge; this foundation slice proves
+only the exact relationship between that model and canonical emitted bytes.
 -/
 
 namespace Grass

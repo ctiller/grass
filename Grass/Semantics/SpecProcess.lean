@@ -4,7 +4,7 @@ import Grass.Semantics.Observation
 /-!
 # Minimal captured specification boundary
 
-This is the foundation-level root consumed by certificates.  Domain DSLs and
+This is the foundation-level root consumed by certificates. Domain DSLs and
 resource libraries construct values of this type; they do not extend the
 verified gate with alternate correctness routes.
 -/

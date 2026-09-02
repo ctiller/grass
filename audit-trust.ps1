@@ -97,6 +97,21 @@ try {
         throw "Expected $($Declaration.Count) axiom reports, received $reported."
     }
 
+    $negativeProbe = @(
+        "import Foundation",
+        "open Grass",
+        "@[irreducible] def HiddenVerifiedProgram : Type 1 := VerifiedProgram Grass.Tests.Foundation.spec",
+        "axiom hiddenVerifiedProgram : HiddenVerifiedProgram",
+        "#audit_verified_programs"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $negativeProbe)
+    $negativeOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -eq 0 -or
+        -not ($negativeOutput -match "hiddenVerifiedProgram.*rejected axioms")) {
+        $negativeOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit did not reject a producer behind an irreducible result alias."
+    }
+
     Write-Host "Trust audit passed for $reported declaration(s)."
 }
 finally {
