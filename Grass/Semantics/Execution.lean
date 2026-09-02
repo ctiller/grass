@@ -60,15 +60,36 @@ inductive Completion {Event : Type u} (system : RelationalSystem Event)
   | infinite (execution : InfiniteContinuation system state graph) :
       Completion system state graph
 
-/-- A finite execution proof retaining one monotonically extended graph. -/
-inductive Runs {Event : Type u} (system : RelationalSystem Event) : system.State ->
-    system.Graph -> system.State -> system.Graph -> List Event -> Prop where
-  | initial {state graph} (valid : system.Initial state graph) :
-      Runs system state graph state graph []
-  | step {initialState initialGraph state graph events choice event nextState nextGraph}
-      (prior : Runs system initialState initialGraph state graph events)
-      (transition : system.Step graph state choice event nextState nextGraph) :
-      Runs system initialState initialGraph nextState nextGraph (events ++ [event])
+/--
+A finite execution is one valid initial configuration plus its coherent suffix.
+Keeping `Steps` as the sole inductive step closure avoids a second proof source
+for graph extension and refinement mapping.
+-/
+structure Runs {Event : Type u} (system : RelationalSystem Event)
+    (initialState : system.State) (initialGraph : system.Graph)
+    (state : system.State) (graph : system.Graph) (events : List Event) : Prop where
+  initialValid : system.Initial initialState initialGraph
+  steps : system.Steps initialState initialGraph events state graph
+
+namespace Runs
+
+/-- Package a valid initial configuration as the empty run. -/
+theorem initial {Event : Type u} {system : RelationalSystem Event}
+    {state : system.State} {graph : system.Graph}
+    (valid : system.Initial state graph) : system.Runs state graph state graph [] :=
+  ⟨valid, .refl⟩
+
+/-- Extend a run by one admitted relational step. -/
+theorem step {Event : Type u} {system : RelationalSystem Event}
+    {initialState state : system.State} {initialGraph graph : system.Graph}
+    {events : List Event} {choice : system.Choice} {event : Event}
+    {nextState : system.State} {nextGraph : system.Graph}
+    (prior : system.Runs initialState initialGraph state graph events)
+    (transition : system.Step graph state choice event nextState nextGraph) :
+    system.Runs initialState initialGraph nextState nextGraph (events ++ [event]) :=
+  ⟨prior.initialValid, .step prior.steps transition⟩
+
+end Runs
 
 /-- A finite suffix monotonically extends its starting graph. -/
 theorem Steps.graphExtends
@@ -88,11 +109,8 @@ theorem Runs.graphExtends
     {initialState state : system.State} {initialGraph graph : system.Graph}
     {events : List Event}
     (execution : system.Runs initialState initialGraph state graph events) :
-    system.Extends initialGraph graph := by
-  induction execution with
-  | initial valid => exact system.extendsRefl _
-  | step prior transition inductionHypothesis =>
-      exact system.extendsTrans inductionHypothesis (system.stepExtends transition)
+    system.Extends initialGraph graph :=
+  execution.steps.graphExtends
 
 /-- A packaged finite prefix suitable for runners and prefix-safety theorems. -/
 structure ExecutionPrefix {Event : Type u} (system : RelationalSystem Event) where

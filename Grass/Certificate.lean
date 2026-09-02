@@ -141,11 +141,9 @@ theorem mapRuns (refinement : BehaviorRefinement concrete abstract)
     (execution : concrete.system.Runs initialState initialGraph state graph events) :
     abstract.system.Runs (refinement.mapState initialState)
       (refinement.mapGraph initialGraph) (refinement.mapState state)
-      (refinement.mapGraph graph) events := by
-  induction execution with
-  | initial valid => exact .initial (refinement.initial valid)
-  | step prior transition inductionHypothesis =>
-      exact .step inductionHypothesis (refinement.step transition)
+      (refinement.mapGraph graph) events :=
+  ⟨refinement.initial execution.initialValid,
+    refinement.mapSteps execution.steps⟩
 
 /-- Prefix mapping is derived from the coherent state/graph simulation. -/
 def mapPrefix (refinement : BehaviorRefinement concrete abstract)
