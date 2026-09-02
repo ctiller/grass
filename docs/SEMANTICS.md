@@ -203,16 +203,19 @@ def SpecProcess.driverBoundary (spec : SpecProcess resources) :
 def SpecProcess.progress (spec : SpecProcess resources) :
     AbstractProgressContract := spec.contract.progress
 
-structure AbstractSpecificationProcessNetwork
-    {R : Type u} [ResourceModel R] (resources : R) where
-  RoleSchema : Type
-  finiteSchemas : Fintype RoleSchema
-  Instance : RoleSchema -> Type
-  protocol : forall schema,
-    SpecProcess resources
-  instances : forall schema,
-    Instance schema -> ProtocolInstance (protocol schema)
-  composition : AbstractNetworkCompositionLaw protocol instances
+structure ProcessPresentationNetwork {R : Type u} [ResourceModel R]
+    (resources : R) where
+  structure : StructuralProcessNetwork (SpecProcess resources) ProtocolInstance
+  composition : AbstractNetworkCompositionLaw structure
+
+The shape above is [PROCESS.md](PROCESS.md)'s `StructuralProcessNetwork`,
+instantiated at this document's protocol family. It is declared there and not
+here: an earlier version of this document declared a second structure named
+`AbstractSpecificationProcessNetwork`, incompatible with the one in
+[PROCESS.md](PROCESS.md), and consumers read fields from both. The role-schema
+shape survived because it is the one the spikes instantiate; the semantic
+fields did not, because a structural network carrying a `BehaviorContract` puts
+the process layer above this one and makes the dependency cyclic.
 
 def SpecProcess.capture
     (suite : SpecificationSuite resources) : SpecProcess resources :=
@@ -231,9 +234,18 @@ def SpecProcess.ofRelational
     SpecProcess resources :=
   SpecProcess.capture (SpecificationSuite.singletonRelational contract)
 
+`ProcessPresentation` is where a chosen network is connected to precious
+behavior, and it is the only place that connection lives. The network itself
+carries no denotation: `trace` is a *selected* denotation of a *chosen*
+structural network, and `denotationExact` is the claim that it agrees with the
+specification. Putting those fields on the network instead would make every
+structural network carry a semantic commitment, which is what made the two
+historical declarations irreconcilable.
+
 structure ProcessPresentation (spec : SpecProcess resources) where
-  network : AbstractSpecificationProcessNetwork resources
-  denotationExact : network.traceDenotation = spec.contract
+  network : ProcessPresentationNetwork resources
+  trace : NetworkTraceDenotation network
+  denotationExact : trace.contract = spec.contract
   requirementsExact : TransportedProcessRequirements network denotationExact =
     spec.requirements
 

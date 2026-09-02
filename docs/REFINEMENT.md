@@ -158,27 +158,27 @@ from an arbitrary behavior contract:
 structure StagedProcessPresentation
     {R : Type u} [ResourceModel R] {resources : R}
     (spec : SpecProcess resources) where
-  network : AbstractSpecificationProcessNetwork resources
+  network : ProcessPresentationNetwork resources
   resourceView : network.RoleSchema -> RequiredResourceView resources
   resourceRestrictionExact : forall schema,
     (network.protocol schema).resourceSemantics.restrict (resourceView schema) =
       spec.resourceSemantics.restrict (resourceView schema)
   resourceViewsCoverRoot : ExactUnionOfRequiredResourceViews
     resourceView spec.resourceSemantics.requiredAxes
-  denotationExact : network.traceDenotation = spec.contract
+  denotationExact : presentation.trace = spec.contract
   requirementsExact : TransportedProcessRequirements network denotationExact =
     spec.requirements
 
 def StagedProcessPresentation.ofNetwork
     (spec : SpecProcess resources)
-    (network : AbstractSpecificationProcessNetwork resources)
+    (network : ProcessPresentationNetwork resources)
     (resourceView : network.RoleSchema -> RequiredResourceView resources)
     (resourceRestrictionExact : forall schema,
       (network.protocol schema).resourceSemantics.restrict (resourceView schema) =
         spec.resourceSemantics.restrict (resourceView schema))
     (resourceViewsCoverRoot : ExactUnionOfRequiredResourceViews
       resourceView spec.resourceSemantics.requiredAxes)
-    (denotationExact : network.traceDenotation = spec.contract)
+    (denotationExact : presentation.trace = spec.contract)
     (requirementsExact :
       TransportedProcessRequirements network denotationExact = spec.requirements) :
     StagedProcessPresentation spec :=

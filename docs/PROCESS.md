@@ -98,18 +98,30 @@ structure DeterministicProcess (v : ProcessVocabulary) where
 Grass uses explicit terminology:
 
 ```lean
-structure AbstractSpecificationProcessNetwork
-    {R : Type u} [ResourceModel R] (resources : R) where
-  registry : ProtocolRegistry
-  root : registry.Key
-  channels : AbstractTypedChannelFamily registry
-  linearState : AbstractLinearCustodyFamily registry
-  sharedState : AbstractSharedLogicalStateFamily registry
-  abstraction : UsesNoPlatformThreadSchedulerBufferHandleLayoutOrISAIdentity
-  denotation : BehaviorContract resources
-  traceDenotation : ProcessTraceDenotation registry root channels
-  exact : denotation = traceDenotation
+structure StructuralProcessNetwork (Protocol : Type v)
+    (InstanceOf : Protocol -> Type r) where
+  RoleSchema : Type r
+  schemas : List RoleSchema
+  schemasComplete : forall schema, schema ∈ schemas
+  schemasDistinct : schemas.Nodup
+  protocol : RoleSchema -> Protocol
+  Instance : RoleSchema -> Type r
+  instanceOf : forall schema, Instance schema -> InstanceOf (protocol schema)
 ```
+
+There is exactly one structural process-network abstraction and this is it. It
+is owned by this document's layer and carries **no** `BehaviorContract`,
+`denotation`, `traceDenotation`, or exactness field: it says which roles exist,
+how many instances each has, and which protocol each speaks, and says nothing
+about what the network means. `Protocol` is a parameter so that this layer does
+not import [SEMANTICS.md](SEMANTICS.md)'s; that document instantiates it at
+`SpecProcess resources`.
+
+Connecting a chosen network trace to `spec.contract` and its requirements is a
+`ProcessPresentation`, which lives above both layers with
+[REFINEMENT.md](REFINEMENT.md)'s theorems. This structure is a reviewed
+replaceable construction input under [FOUNDATION.md](FOUNDATION.md) law 15, not
+program meaning.
 
 A `ProcessSpec` contained in this network is a **spec process**. A
 `ProcessPlan`, `ProcessRealization`, or driver network is a **process
