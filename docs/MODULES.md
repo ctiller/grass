@@ -9,8 +9,8 @@ Grass/
   Std/
     Logical/     pure Vec/ByteArray, lists, maps, iterators and algebraic laws
     Owned/       OwnedVec, physical slices, allocation and cleanup realizations
-  Semantics/     execution, traces, observations, oracle, progress
-  Specification/ common contract fragments, typed junctions, suite composition
+  Specification/ neutral boundaries, demands/results, requirement keys and typed junctions
+  Semantics/     precious SpecProcess behavior, traces, observations, oracle, progress
   Grammar/       typed text/binary formats, derivations, streaming parser and writer laws
   Process/
     Protocol/    nominal registries, demands/results, optional view facets
@@ -24,6 +24,7 @@ Grass/
   Memory/        regions, provenance, loans, events, concurrency, arenas
   Obligation/    existential obligations, ledger, dispositions
   Effect/        abstract law-bearing monads and requirements
+  Refinement/    presentations and proofs connecting semantics to replaceable realizations
   Weave/         composition and noninteraction
   CFG/           block contracts, edges, loops, calls, stack shapes
   Construct/     layouts, placement, verified instruction-fragment generators
@@ -89,13 +90,20 @@ one ISA or platform. ISA and platform profiles may depend on common memory/event
 vocabulary but own their consistency and applicability rules. Artifact writers
 consume raw layout/link descriptions, not high-level specifications.
 
-The dependency chain is strict:
+The foundational dependency graph is an acyclic diamond rather than a single
+chain:
 
 ```text
 Core
   -> Std.Logical
-  -> Semantics / Memory / Obligation
-  -> Std.Owned
+      -> Specification
+          -> Semantics
+          -> Process
+      -> Memory / Obligation
+          -> Std.Owned
+
+Semantics + Process
+  -> Refinement / Weave
   -> higher consumers
 ```
 
@@ -105,6 +113,16 @@ specializes the already-owned memory and obligation models into physical
 containers; Memory and Obligation must never import it. Artifact, CFG, decoder,
 trace, and program modules consume the lowest suitable layer and must not
 introduce competing byte-array or ordered-buffer foundations.
+
+`Specification` is neutral vocabulary, not precious program behavior and not a
+process realization. It imports neither `Semantics` nor `Process`.
+`Semantics` owns `SpecProcess` and `BehaviorContract`; `Process` owns replaceable
+network shapes and execution machinery. Neither imports the other to state its
+core objects. `Refinement` or `Weave` imports both when proving that one selected
+process presentation has exactly the behavior and requirements of a
+`SpecProcess`. This cut prevents a convenient boundary record from creating a
+Semantics/Process import cycle and keeps the non-precious process presentation
+out of precious program identity.
 
 Large instruction/API families are sharded mechanically without creating a
 closed master sum type or duplicating semantic facts. Generated reference or

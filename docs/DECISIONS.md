@@ -603,6 +603,64 @@ to imitate compiler-selected storage or CFG structure.
 115. `agent.resumed` may transfer exclusive custody from the identity's latest
     own lifecycle event of any status or a coordinator retirement targeting it,
     so silent death while `active` does not strand the identity or its role.
+116. The specification/process boundary forms an acyclic diamond. A neutral
+    `Specification` layer owns `DriverBoundary`, demand/result vocabulary,
+    requirement keys, and other typed junctions imported by both sides.
+    `Semantics` owns precious `SpecProcess` behavior; `Process` owns replaceable
+    structural networks and execution machinery; `Refinement`/`Weave` alone
+    relates a selected network trace to a `SpecProcess`. Neither `Semantics` nor
+    `Process` imports the other merely to state its core objects. This records
+    the ruling carried by agent-bus event `coord1:5`, originating at
+    `c-process:4` and requested as dependency `c-process:17`.
+117. There is one structural abstract process-network declaration. It is owned
+    by `Process`, is generic over its protocol family, preserves the role-schema,
+    instance, protocol, and composition shape used by the spikes, and contains
+    no `BehaviorContract`, denotation, trace-denotation, or exactness field.
+    A separate presentation/refinement object above `Process` and `Semantics`
+    proves exact behavior and requirement correspondence. This records
+    `coord1:4`, originating at `c-process:3`.
+118. Cancellation coverage is scope-indexed. One core `CancellationPolicy` is
+    indexed by a scoped cancellation-point family and consistently names its
+    discovered `blockingCalls`; `ScopedCancellationCertificate` ties both
+    families exactly to a `ProcessScopeSummary`. Whole-plan coverage is the
+    hierarchical composition of these certificates. A process-root spelling in
+    authored syntax may infer its scope, but is elaborator sugar rather than a
+    second Lean arity. This records `coord1:6`, originating at `c-process:5`.
+119. `ProcessPlan` has only its declared registry and boundary parameters.
+    The undeclared `ProcessNetwork` spelling is deleted. Root-oriented notation
+    may construct or infer those parameters through typed elaboration but never
+    denotes a second `ProcessPlan` type application. This records `coord1:7`,
+    originating at `c-process:6`.
+120. `EffectDemand boundary` abbreviates `boundary.Demand`, and
+    `EffectResult demand` abbreviates `boundary.Result demand`. Protocol-specific
+    operations enter through typed constructors of the open boundary demand
+    family. `SequentialAdapter`, not the precious authoring type, generates
+    occurrence identities, child bindings, and pending multiplicity. This
+    records `coord1:8`, originating at `c-process:7`.
+121. Interruption, logical-fault, and environment-violation classifications are
+    open associated families of a selected `ProcessVocabulary`; Grass rejects a
+    closed whole-program sum and an unclassified `other` fallback. A reusable
+    network or protocol boundary selects the vocabulary once, so ordinary
+    `ProcessSpec` authors do not restate three bespoke type fields. Delivery
+    across different vocabularies requires a total typed classification or
+    translation theorem; an empty receiving class is evidence that the route is
+    unreachable, not permission to discard an event. This resolves
+    `c-process:8` and ratifies the constrained form requested by `c-process:9`
+    under acknowledgements `g-design:3` and `g-design:4`.
+122. Cancellation and supervision are separately imported topology facets, not
+    mandatory fields paid by every process. The weaker graph/population/spawn
+    object is named `ProcessTopologyCore`. `ProcessTopology requirements`
+    contains that core plus exactly the facet family demanded by the selected
+    specification, with named aggregate theorems recovering every required
+    cancellation and supervision contract. The unqualified `ProcessTopology`
+    name may not denote a weaker value while prose assumes absent lifecycle
+    authority. This resolves `c-process:10` under acknowledgement `g-design:5`.
+123. Normative ratifications are durable product content, not bus-only state.
+    `DECISIONS.md` records each accepted decision using stable numbering and
+    cites the originating and ruling agent-bus event identifiers when applicable.
+    Bus events retain routing, custody, and timing; this file owns the rule that
+    implementations and normative documents must follow. This resolves
+    `coord1:13` under acknowledgement `g-design:6`.
 
 ## Explicitly rejected shortcuts
 
