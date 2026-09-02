@@ -124,6 +124,13 @@ process presentation has exactly the behavior and requirements of a
 Semantics/Process import cycle and keeps the non-precious process presentation
 out of precious program identity.
 
+`ScopeId` is a general reviewed namespace path and belongs in dependency-minimal
+`Core`, not in `Specification`, `Process`, or the memory identity model. It is
+not a fresh execution identity: allocation, occurrence, and process-generation
+identities retain their separate generative laws. `Specification` consumes
+`ScopeId` when forming requirement keys; process and other registries may use it
+without importing a higher subsystem merely to name their scopes.
+
 Large instruction/API families are sharded mechanically without creating a
 closed master sum type or duplicating semantic facts. Generated reference or
 test data is versioned separately when size would burden ordinary clones/builds.

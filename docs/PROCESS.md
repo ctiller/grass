@@ -361,6 +361,9 @@ structure DriverBoundary where
   Observation : Type
   requirements : RequirementSet
 
+-- RequirementSet equality is membership-extensional. Its canonical storage
+-- order is not observable behavior or dependent interface identity.
+
 structure ProcessGraph (registry : ProtocolRegistry)
     (boundary : DriverBoundary) where
   ProcessKind : Type
@@ -519,12 +522,20 @@ def logicalWorldAgreement
     (Message : topology.ChannelKind -> Type) :
     WorldAgreement topology (LogicalProcessNetworkCore topology Message) := ...
 
+structure ChannelSteps (topology : ProcessTopology registry boundary)
+    (edge : topology.ChannelKind) (Message World : Type) where
+  Send : (message : Message) ->
+    ChannelOccurrence topology edge Message message -> World -> World -> Prop
+  Receive : (message : Message) ->
+    ChannelOccurrence topology edge Message message -> World -> World -> Prop
+
 structure ChannelContract (topology : ProcessTopology registry boundary)
-    (Message : Type) {World : Type}
+    (edge : topology.ChannelKind) (Message : Type) {World : Type}
     (agreement : WorldAgreement topology World)
-    (edge : topology.ChannelKind) where
+    (steps : ChannelSteps topology edge Message World) where
   senderOutput : SenderDemandEmbedding topology (topology.endpoints edge).1 Message
   receiverInput : ReceiverEventEmbedding topology (topology.endpoints edge).2 Message
+  SessionOpen : ChannelId topology edge -> NetworkAssertion agreement
   SendPre : Message -> NetworkAssertion agreement
   SenderPost : (message : Message) ->
     ChannelOccurrence topology edge Message message -> NetworkAssertion agreement
@@ -534,29 +545,36 @@ structure ChannelContract (topology : ProcessTopology registry boundary)
     ChannelOccurrence topology edge Message message -> NetworkAssertion agreement
   ReceiverPost : (message : Message) ->
     ChannelOccurrence topology edge Message message -> NetworkAssertion agreement
-  send : forall message,
-         HoareTransition
-           (SendPre message)
-           (fun occurrence =>
-             SenderPost message occurrence * Escrow message occurrence)
-  receive : forall message occurrence,
-            HoareTransition
-              (ReceiverPre message occurrence * Escrow message occurrence)
-              (ReceiverPost message occurrence)
-  escrowStable : StableUnderUnrelatedProcessSteps Escrow
-  prefixConservation : NoFabricationDuplicationOrLoss Escrow
-  atMostOneResolution : ResolveTokenIsAffine Escrow
-  resolutions : ExhaustiveResolutionTransitions
-  transferExact : ExactLogicalStateAndObligationTransfer
-  session : ChannelSessionLaw Message
-  frame : UnmentionedProcessesAndRegionsPreserved
+  escrowLocal : forall message occurrence fragment,
+    (Escrow message occurrence).footprint fragment ->
+      fragment = .escrow edge occurrence.session
+  receiverPreLocal : forall message occurrence fragment,
+    (ReceiverPre message occurrence).footprint fragment ->
+      fragment = .session edge occurrence.session
+  sessionLocal : forall session fragment,
+    (SessionOpen session).footprint fragment -> fragment = .session edge session
+  send : forall message occurrence before after,
+    steps.Send message occurrence before after ->
+    (SendPre message).holds before ->
+    (SessionOpen occurrence.session).holds before ->
+    (SenderPost message occurrence).holds after /\
+      (Escrow message occurrence).holds after
+  receive : forall message occurrence before after,
+    steps.Receive message occurrence before after ->
+    (ReceiverPre message occurrence).holds before ->
+    (Escrow message occurrence).holds before ->
+    (ReceiverPost message occurrence).holds after
 
 structure ProcessPlan (registry : ProtocolRegistry) (boundary : DriverBoundary)
     extends ProcessTopology registry boundary where
   Message : ChannelKind -> Type
+  channelSteps : (edge : ChannelKind) ->
+    ChannelSteps toProcessTopology edge (Message edge)
+      (LogicalProcessNetworkCore toProcessTopology Message)
   channel : (edge : ChannelKind) ->
-    ChannelContract toProcessTopology (Message edge)
-      (logicalWorldAgreement toProcessTopology Message) edge
+    ChannelContract toProcessTopology edge (Message edge)
+      (logicalWorldAgreement toProcessTopology Message)
+      (channelSteps edge)
   boundaryProjection : RootLocalDemandProjection toProcessTopology boundary
 
 abbrev LogicalProcessNetwork (plan : ProcessPlan registry boundary) :=
@@ -578,6 +596,18 @@ assertion and framing library neither chooses worlds nor acquires a broader
 admission mechanism. Requiring a Boolean footprint merely to avoid that reviewed
 constant would make every author supply decidable membership and would exclude
 useful proposition-indexed families without improving the verified gate.
+
+The contract's locality fields are checkable bounds on the assertions the
+author chose; they are not opaque restatements of desired consequences. The
+assertion frame rule derives escrow stability and preservation of unmentioned
+receiver state from those bounds, and proves that `ReceiverPre * Escrow` is
+formable. Prefix conservation and affine resolution are theorems of the escrow
+ledger, not promises repeated by every channel. Exhaustive resolution and exact
+logical state/obligation transfer quantify over the completed transition family
+and are proved when that family realizes the contract. `ChannelSteps` is an
+explicit parameter because a reusable contract is checked before the full
+transition family exists. A completed plan supplies it and instantiates
+`SessionOpen` at the plan's actual session-ledger predicate.
 
 The definitions above make each occurrence nominally indexed by the exact
 channel edge, sender and receiver incarnations, session epoch, message, and

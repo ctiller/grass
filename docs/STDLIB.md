@@ -20,6 +20,14 @@ Grass must not introduce a second unrelated byte-container primitive. Adapters
 to Lean's host `ByteArray`, OS buffers, or foreign vectors require connection
 theorems preserving order, length, and byte values.
 
+Lean's prelude already uses the unqualified name `_root_.ByteArray` for its
+packed host container. Grass deliberately keeps
+`Grass.Std.Logical.ByteArray := Vec Byte`: the representations must not silently
+unify. Modules that can see both qualify the Grass type (or introduce a narrow
+local alias) and name host adapters explicitly. The small qualification cost
+makes the representation boundary visible; it is not a reason to rename the
+logical type or weaken its connection theorems.
+
 `Vec α` itself is a pure finite sequence. Its equality and high-level laws are
 extensional over length and indexed elements, independent of capacity, allocator
 choice, or address. Physical ownership is a distinct type, conceptually
