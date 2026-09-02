@@ -21,6 +21,33 @@ handle. A specification that wants a later demand to depend on an earlier
 result expresses it as state: `docs/PROCESS.md` §2 says "a later demand is not
 enabled until the transition which accepts the prerequisite result".
 
+## The vocabulary is selected, not spelled
+
+`agent-bus` disposition `g-design:4`, ruling on issue `c-process:9`:
+
+> Per-`ProcessVocabulary` classes are ratified, but vocabulary selection belongs
+> at a reusable network/protocol boundary rather than adding bespoke fields to
+> every ordinary `ProcessSpec` author surface. Cross-vocabulary delivery owes a
+> total classifier; an empty target class proves unreachability.
+
+An earlier version had `ProcessSpec extends ProcessVocabulary`, which meant that
+carrying the fault, interruption, and violation classes per vocabulary added
+three fields to every authored specification. `g-reviewer` blocked on exactly
+that, and rightly: the golden spike literals stopped elaborating.
+
+`vocabulary` is therefore a field. An author writes one line selecting a
+reusable vocabulary — `vocabulary := Http2.serverVocabulary`, or
+`ProcessVocabulary.quiescent ...` for a process with no faults — and writes no
+interface fields at all. That is *fewer* fields than before the fault classes
+were carried, not more.
+
+The accessors below mean no consumer noticed: `p.Demand`, `p.Observation`,
+`p.Event` and the rest are what they always were.
+
+The other half of the ruling — that cross-vocabulary delivery owes a total
+classifier, so an empty class is a proof of unreachability rather than a bypass
+— is an obligation on the network transition family, and is M2 work.
+
 ## Two universes, not one
 
 The interface types — external events, demands, results, observations, and the
@@ -87,10 +114,18 @@ set_option linter.checkUnivs false in
 /--
 One process: its interface, its state, and its relational behavior.
 
-Extends `ProcessVocabulary`, so a `ProcessSpec` is a vocabulary plus a machine
-over it, and a child protocol registry can hold either.
+A vocabulary is *selected* by the `vocabulary` field rather than inherited, so
+an ordinary author writes one line of interface instead of seven fields.
 -/
-structure ProcessSpec : Type (max (u + 1) (w + 1)) extends ProcessVocabulary.{u} where
+structure ProcessSpec : Type (max (u + 1) (w + 1)) where
+  /--
+  The interface this process speaks, selected rather than spelled out.
+
+  A field and not `extends`, per `agent-bus` disposition `g-design:4`: an
+  ordinary author selects a reusable vocabulary in one line instead of filling
+  seven interface fields inline. See the module note.
+  -/
+  vocabulary : ProcessVocabulary.{u}
   /-- The parameter this process is started with. -/
   Request : Type w
   /-- Private local state. Not visible to a parent; see `docs/PROCESS.md` §3. -/
@@ -101,7 +136,8 @@ structure ProcessSpec : Type (max (u + 1) (w + 1)) extends ProcessVocabulary.{u}
   The permitted initial configurations for a request: a state, the demands
   issued before any event arrives, and the observations emitted by starting.
   -/
-  Initial : Request → State → Bag Demand → ObservationSegment Observation → Prop
+  Initial : Request → State → Bag vocabulary.Demand →
+    ObservationSegment vocabulary.Observation → Prop
   /-- The states at which this request may finish, and with what result. -/
   Terminal : Request → State → TerminalResult → Prop
   /--
@@ -111,8 +147,8 @@ structure ProcessSpec : Type (max (u + 1) (w + 1)) extends ProcessVocabulary.{u}
   The bag and the segment are the output of *this* transition only. Outstanding
   demands and the accumulated trace live in the run, not in `State`.
   -/
-  Step : State → ProcessEvent toProcessVocabulary → State → Bag Demand →
-    ObservationSegment Observation → Prop
+  Step : State → ProcessEvent vocabulary → State → Bag vocabulary.Demand →
+    ObservationSegment vocabulary.Observation → Prop
   /--
   The desired-view projection, when the process has one.
 
@@ -126,8 +162,36 @@ namespace ProcessSpec
 
 variable (p : ProcessSpec.{u, w})
 
+/-! ### The interface, reached through the selected vocabulary
+
+These are the names every consumer already used when `ProcessSpec` extended
+`ProcessVocabulary`. They are abbreviations now, so moving the vocabulary behind
+a field changed the author surface and not a single use site.
+-/
+
+/-- Entropy arriving from outside. -/
+abbrev ExternalEvent := p.vocabulary.ExternalEvent
+
+/-- The interactions this process asks for. -/
+abbrev Demand := p.vocabulary.Demand
+
+/-- The permitted answers to each. -/
+abbrev Result := p.vocabulary.Result
+
+/-- What the specification may observe. -/
+abbrev Observation := p.vocabulary.Observation
+
+/-- Why an outstanding demand was abandoned. -/
+abbrev InterruptReason := p.vocabulary.InterruptReason
+
+/-- How this process itself can fail. -/
+abbrev LogicalFault := p.vocabulary.LogicalFault
+
+/-- How its environment can break a contract it assumed. -/
+abbrev EnvironmentViolation := p.vocabulary.EnvironmentViolation
+
 /-- The event family of this process. -/
-abbrev Event := ProcessEvent p.toProcessVocabulary
+abbrev Event := ProcessEvent p.vocabulary
 
 /-- The observation segment type of this process. -/
 abbrev Segment := ObservationSegment p.Observation
@@ -252,7 +316,7 @@ variable {v : ProcessVocabulary.{u}} (d : DeterministicProcess.{u, w} v)
 
 /-- The relational process this deterministic description denotes. -/
 def toProcessSpec : ProcessSpec.{u, w} where
-  toProcessVocabulary := v
+  vocabulary := v
   Request := d.Request
   State := d.State
   TerminalResult := d.TerminalResult
@@ -263,8 +327,8 @@ def toProcessSpec : ProcessSpec.{u, w} where
     d.update state event = (after, issued, emitted)
   view := d.view
 
-@[simp] theorem toProcessSpec_toProcessVocabulary :
-    d.toProcessSpec.toProcessVocabulary = v := rfl
+@[simp] theorem toProcessSpec_vocabulary :
+    d.toProcessSpec.vocabulary = v := rfl
 
 @[simp] theorem toProcessSpec_Initial (request : d.Request) (state : d.State)
     (issued : Bag v.Demand) (emitted : ObservationSegment v.Observation) :

@@ -54,7 +54,7 @@ afterwards — which is what `terminalNoStep` needs and what an unguarded law-5
 obligation made impossible.
 -/
 @[reducible] def oneShot : ProcessSpec.{0, 0} where
-  toProcessVocabulary := oneShotVocabulary
+  vocabulary := oneShotVocabulary
   Request := Unit
   State := Bool
   TerminalResult := Unit
