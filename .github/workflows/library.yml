@@ -50,5 +50,9 @@ jobs:
       - name: Audit axioms
         run: lake env lean Tools/AxiomAudit.lean
 
+      - name: Audit verified-program trust closure
+        shell: pwsh
+        run: ./audit-trust.ps1
+
       - name: Audit docstring claims
         run: python3 Tools/DocstringAudit.py

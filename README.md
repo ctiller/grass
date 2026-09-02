@@ -21,11 +21,14 @@ emitProgram : VerifiedProgram spec → ByteArray
 
 `emitProgram v` produces an executable artifact for `v`'s selected platform.
 The current minimal `VerifiedProgram` certificate composes exact adjacent
-behavior refinements, terminal-trace acceptance, execution progress, selected
-demand certificates, and the connection between the modeled loaded artifact
-and the bytes that were emitted. Concrete memory, concurrency, ABI, and other
-domain guarantees become part of that result only when a domain layer exposes
-them as explicit demands and supplies their certificates.
+behavior refinements, terminal-trace acceptance, a terminal-or-infinite
+continuation available from every finite frontier, selected demand
+certificates, and the connection between the
+modeled loaded artifact and the bytes that were emitted. This is a non-stuck
+may-completion property, not universal termination or liveness: a relational
+system may still admit other infinite executions. Concrete memory, concurrency,
+ABI, and other domain guarantees become part of the result only when a domain
+layer exposes them as explicit demands and supplies their certificates.
 
 The first end-to-end target is a Win32 x64 PE32+ Hello World using
 `GetStdHandle`, `WriteFile`, and `ExitProcess`, with ASLR, derived imports,
@@ -64,9 +67,10 @@ The trust script generates a temporary audit import over every library and test
 module. Its Lean command unfolds even irreducible result aliases to discover
 concrete `VerifiedProgram` producers and audits every declaration originating
 in those project modules, including declarations outside the `Grass` namespace.
-It then checks the configured public theorem roots as an additional explicit
-manifest. The build's warning-as-error setting independently rejects admission
-mechanisms.
+It also follows the transitive dependency closure of certificate-bearing and
+emission-consuming declarations across arbitrarily named imported modules, then
+checks configured public theorem roots as an explicit manifest. The build's
+warning-as-error setting independently rejects admission mechanisms.
 
 The corpus checks verify that annotated spike documents and their comment-free
 authored Lean views remain exact:

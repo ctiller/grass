@@ -61,6 +61,9 @@ $temporaryPath = [System.IO.Path]::Combine(
     [System.IO.Path]::GetTempPath(),
     "grass-axiom-audit-$([System.Guid]::NewGuid().ToString('N')).lean"
 )
+$externalProbeModule = "AuditExternalProbe$([System.Guid]::NewGuid().ToString('N'))"
+$externalProbePath = Join-Path (Get-Location).Path "$externalProbeModule.lean"
+$externalProbeOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$externalProbeModule.olean"
 
 try {
     $commands = @($moduleNames | ForEach-Object { "import $_" })
@@ -132,10 +135,57 @@ try {
         throw "Trust audit did not reject a VerifiedProgram hidden in a container."
     }
 
+    $flatCtorNegativeProbe = @(
+        "import Tests.Foundation",
+        "open Grass",
+        "axiom AuditProbe.Source._flat_ctor : Nonempty (VerifiedProgram Grass.Tests.Foundation.spec)",
+        "noncomputable def AuditProbe.Sink._flat_ctor : ByteArray := emitProgram (Classical.choice AuditProbe.Source._flat_ctor)",
+        "#audit_verified_programs"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $flatCtorNegativeProbe)
+    $flatCtorNegativeOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -eq 0 -or
+        -not ($flatCtorNegativeOutput -match "AuditProbe.Sink._flat_ctor.*AuditProbe.Source._flat_ctor")) {
+        $flatCtorNegativeOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit ignored a user declaration named _flat_ctor."
+    }
+
+    $externalProbe = @(
+        "import Tests.Foundation",
+        "open Grass",
+        "namespace ExternalAuditProbe",
+        "axiom boxedVerifiedProgram : Nonempty (VerifiedProgram Grass.Tests.Foundation.spec)",
+        "noncomputable def emittedBytes : ByteArray := emitProgram (Classical.choice boxedVerifiedProgram)",
+        "end ExternalAuditProbe"
+    )
+    [System.IO.File]::WriteAllLines($externalProbePath, $externalProbe)
+    $externalBuildOutput = @(& lake env lean $externalProbePath -o $externalProbeOlean 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        $externalBuildOutput | ForEach-Object { Write-Host $_ }
+        throw "Could not compile the imported external trust-audit probe."
+    }
+    $externalConsumerProbe = @(
+        "import $externalProbeModule",
+        "#audit_verified_programs"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $externalConsumerProbe)
+    $externalConsumerOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -eq 0 -or
+        -not ($externalConsumerOutput -match "ExternalAuditProbe.emittedBytes.*ExternalAuditProbe.boxedVerifiedProgram")) {
+        $externalConsumerOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit ignored a wrapped producer from an imported external module."
+    }
+
     Write-Host "Trust audit passed for $reported declaration(s)."
 }
 finally {
     if ([System.IO.File]::Exists($temporaryPath)) {
         [System.IO.File]::Delete($temporaryPath)
+    }
+    if ([System.IO.File]::Exists($externalProbePath)) {
+        [System.IO.File]::Delete($externalProbePath)
+    }
+    if ([System.IO.File]::Exists($externalProbeOlean)) {
+        [System.IO.File]::Delete($externalProbeOlean)
     }
 }
