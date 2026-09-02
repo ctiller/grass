@@ -118,6 +118,17 @@ operation, get-after-construction and get-after-update laws, order preservation
 for `append` and `map`, and `map` fusion. `abbrev ByteArray := Vec Byte`
 realizes the §1 name.
 
+Every operation in the module carries at least one law, and the rule that
+produced that property is worth stating because it is cheap to violate: an
+operation with no law is a name a consumer can call and cannot reason about, so
+it will be reasoned about through `Vec.toList` instead, which is precisely the
+leak §3.2 pays for the wrapper to prevent. `Vec.pop?` is the case that made the
+rule concrete — it was written with no law at all, and `Vec.pop?_push`,
+`Vec.length_of_pop?`, and `Vec.pop?_isSome_iff` are what it needed to be usable.
+`Vec.mem_iff_exists_get?` is the same rule applied to membership: reaching the
+representation is available through `Vec.mem_iff_mem_toList`, but a consumer
+should not have to.
+
 `Tests/Std/VecVocabulary.lean` is the fixture. Per `Tests.lean` it establishes
 expressibility rather than a theorem: that a `List Byte` and a host
 `_root_.ByteArray` are each rejected where a Grass `ByteArray` is required, that
