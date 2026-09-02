@@ -432,8 +432,8 @@ three; none is permitted to stand in for another.
 ### Independent theorem demands and invalidation facets
 
 Functional observation is one demand, not the container for every guarantee.
-Specifications carry a finite keyed family of independently stated theorem
-demands:
+The verification closure carries a finite keyed family of independently stated
+theorem demands:
 
 ```lean
 inductive RequirementKind
@@ -457,6 +457,16 @@ facets actually consumed by its proof. Composition may derive a new demand from
 several old ones, but it cannot conflate them into one opaque “program correct”
 field. This is the basis for surgical invalidation and for diagnostics which
 name the unmet guarantee.
+
+`spec.suite.theorems` is the precious specification-level subfamily: properties
+of the composed `BehaviorContract` that can be proved before choosing any
+process presentation, platform, or machine. `MeetsAllSpecificationTheorems`
+banks exactly those proofs. The end-to-end `RequirementFamily` retains their
+stable keys and origins, then adds realization, safety, memory, ABI,
+applicability, artifact, and other lower-layer demands. It consumes the banked
+specification proofs rather than restating or reproving them. Thus proving the
+specification correct and proving assembly equivalent to it remain distinct,
+composable steps.
 
 Grass deliberately does not freeze all future requirements into four permanent
 functional/resource/time/diagnostic buckets. Memory provenance, race freedom,
