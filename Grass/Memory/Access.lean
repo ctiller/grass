@@ -36,10 +36,14 @@ about the range it named.
 **Denial is not a fault.** §1 distinguishes an authority or audit check, which
 happens before the substep commits and leaves the prior state alone, from an
 architectural fault, which is modelled behavior with its own committed prefix.
-`AccessOutcome.denied` carries no `Committed`, so a denial reporting committed
-bytes is not expressible, and
-`Grass.Op.refused_preserves_everything_but_the_ledger` is the transition-level
-statement.
+`Grass.Memory.AccessOutcome` in `Grass/Memory/Event.lean` keeps them apart: its
+`denied` case carries no `Committed`, so a denial reporting committed bytes is not
+expressible, and `Grass.Op.refused_preserves_everything_but_the_ledger` is the
+transition-level statement.
+
+An earlier `AccessResult` in this module made the same point and was reached by
+nothing — the transition returned a `MachineState` instead — so its guarantee
+constrained nothing. It is gone rather than kept as decoration.
 
 This module is vocabulary. `applyAccess`, the state it runs over, and the framing
 lemmas are M2.
@@ -326,56 +330,5 @@ theorem committedRange_faulted (d : AccessDescriptor) (fault : FaultClassId)
   simp [committedRange, AccessStatus.committedBytes, ByteRange.take, Nat.min_eq_left h]
 
 end AccessDescriptor
-
-/--
-What happened when an access was attempted.
-
-`performed` covers every modelled architectural outcome, including a fault with a
-committed prefix. `denied` covers an authority or audit check that rejected the
-access before it committed anything.
-
-`docs/MEMORY_MODEL.md` §1 requires denial to preserve "the state immediately
-before the denied substep", so `denied` carries no committed count. There is no
-way to express a partially committed denial.
--/
-inductive AccessResult where
-  /-- The access was performed, with this architectural status. -/
-  | performed (status : AccessStatus)
-  /-- The access was denied before committing, and this violation was recorded. -/
-  | denied (violation : AuditViolation)
-deriving DecidableEq, Repr
-
-namespace AccessResult
-
-/-- `result.IsDenied` holds when an authority or audit check rejected the access. -/
-def IsDenied : AccessResult → Prop
-  | .denied _ => True
-  | .performed _ => False
-
-instance : (result : AccessResult) → Decidable result.IsDenied
-  | .denied _ => .isTrue trivial
-  | .performed _ => .isFalse (fun h => h)
-
-/--
-The bytes this result committed.
-
-A denial commits nothing, by construction rather than by convention.
--/
-def committedBytes : AccessResult → Nat → Nat
-  | .performed status, size => status.committedBytes size
-  | .denied _, _ => 0
-
-@[simp] theorem committedBytes_denied (violation : AuditViolation) (size : Nat) :
-    (AccessResult.denied violation).committedBytes size = 0 := rfl
-
-/-- A denial commits nothing whatever the access named. The transition-level
-form is `Grass.Op.refused_preserves_everything_but_the_ledger`. -/
-theorem committedBytes_eq_zero_of_isDenied {result : AccessResult}
-    (h : result.IsDenied) (size : Nat) : result.committedBytes size = 0 := by
-  cases result with
-  | denied _ => rfl
-  | performed _ => exact absurd h (fun h => h)
-
-end AccessResult
 
 end Grass.Memory
