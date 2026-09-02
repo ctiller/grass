@@ -128,11 +128,11 @@ theorem violation_source_empty_of_target_empty
   targetEmpty (delivery.violation violation)
 
 /--
-The event a delivery carries.
+The events a delivery carries.
 
-`.external` and `.result` are absent by construction: this function's domain is
-the three fault-class events, because those are the ones whose translation is a
-free function. A demand crossing a boundary needs a child binding, not this.
+`.external` and `.result` are absent by construction: this family is the three
+fault-class events, because those are the ones whose translation is a free
+function. A demand crossing a boundary needs a child binding, not this.
 -/
 inductive Deliverable (vocabulary : ProcessVocabulary.{u}) : Type u
   /-- An outstanding demand was abandoned. -/
@@ -142,20 +142,68 @@ inductive Deliverable (vocabulary : ProcessVocabulary.{u}) : Type u
   /-- The environment broke a contract. -/
   | environmentViolation (violation : vocabulary.EnvironmentViolation)
 
-/--
-Carry a deliverable event across the boundary, given the demand it settles on
-the receiving side.
+/-!
+### Carrying, one entry point per class
 
-The demand is supplied by the caller rather than translated here, because that
-translation is the child binding's job — see the module note. What this function
-guarantees is that the *reason* is classified, totally.
+A first version of this had a single `carry` returning
+`target.Demand → Deliverable target` for *every* source event. That was wrong,
+and `g-reviewer` caught it in the round it was written: a fault carries no
+demand, so making its delivery depend on one meant a target with
+`Demand := PEmpty` could not receive a fault *even when its fault class was
+inhabited and correctly classified*. The module claimed faults separate cleanly
+because they carry no dependent result, and then wrote code that did not.
+
+There are three entry points now. Two of them mention no demand at all.
 -/
-def carry (delivery : VocabularyDelivery source target) :
-    Deliverable source → (target.Demand → Deliverable target)
-  | .interrupted _ reason => fun demand => .interrupted demand (delivery.interrupt reason)
-  | .fault value => fun _ => .fault (delivery.fault value)
-  | .environmentViolation violation =>
-      fun _ => .environmentViolation (delivery.violation violation)
+
+/--
+Carry a fault. No demand is involved, and none is required.
+
+`carries_fault_without_demand` in the fixtures is the adversarial case: a target
+whose `Demand` is `PEmpty` and whose `LogicalFault` is inhabited still receives
+faults.
+-/
+def carryFault (delivery : VocabularyDelivery source target)
+    (value : source.LogicalFault) : Deliverable target :=
+  .fault (delivery.fault value)
+
+/-- Carry an environment violation. Also demand-free. -/
+def carryViolation (delivery : VocabularyDelivery source target)
+    (violation : source.EnvironmentViolation) : Deliverable target :=
+  .environmentViolation (delivery.violation violation)
+
+/--
+Carry an interruption, which *does* need the demand it settles on the receiving
+side.
+
+The translated demand is supplied by the caller rather than derived here,
+because that translation is a child binding: it correlates an occurrence and its
+dependent result, which is `Grass/Process/Network/Child.lean`'s job. What this
+function guarantees is that the *reason* is classified, totally.
+-/
+def carryInterrupted (delivery : VocabularyDelivery source target)
+    (demand : target.Demand) (reason : source.InterruptReason) :
+    Deliverable target :=
+  .interrupted demand (delivery.interrupt reason)
+
+/--
+Carry any deliverable, given a demand translation for the one case that needs
+one.
+
+Provided for a caller that has a child binding in hand and wants a single
+function. A caller that only has faults to carry uses `carryFault` and never
+mentions a demand.
+-/
+def carry (delivery : VocabularyDelivery source target)
+    (demandOf : source.Demand → target.Demand) :
+    Deliverable source → Deliverable target
+  | .interrupted demand reason => delivery.carryInterrupted (demandOf demand) reason
+  | .fault value => delivery.carryFault value
+  | .environmentViolation violation => delivery.carryViolation violation
+
+@[simp] theorem carry_fault (delivery : VocabularyDelivery source target)
+    (demandOf : source.Demand → target.Demand) (value : source.LogicalFault) :
+    delivery.carry demandOf (.fault value) = delivery.carryFault value := rfl
 
 /--
 Nothing is deliverable into a quiescent vocabulary except from one that can

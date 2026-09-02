@@ -61,27 +61,32 @@ structure ProcessVocabulary where
   Demand : Type
   Result : Demand -> Type
   Observation : Type
+  InterruptReason : Type
+  LogicalFault : Type
+  EnvironmentViolation : Type
 
 inductive ProcessEvent (v : ProcessVocabulary)
   | external (event : v.ExternalEvent)
   | result (demand : v.Demand) (result : v.Result demand)
-  | interrupted (demand : v.Demand) (reason : InterruptReason)
-  | fault (fault : LogicalFault)
-  | environmentViolation (violation : EnvironmentViolation)
+  | interrupted (demand : v.Demand) (reason : v.InterruptReason)
+  | fault (fault : v.LogicalFault)
+  | environmentViolation (violation : v.EnvironmentViolation)
 
 structure ViewFacet (State : Type) where
   View : Type
   render : State -> View
 
-structure ProcessSpec extends ProcessVocabulary where
+structure ProcessSpec where
+  vocabulary : ProcessVocabulary
   Request : Type
   State : Type
   TerminalResult : Type
-  Initial : Request -> State -> AbstractDemandBag Demand ->
-            List Observation -> Prop
+  Initial : Request -> State -> AbstractDemandBag vocabulary.Demand ->
+            List vocabulary.Observation -> Prop
   Terminal : Request -> State -> TerminalResult -> Prop
-  Step : State -> ProcessEvent toProcessVocabulary ->
-         State -> AbstractDemandBag Demand -> List Observation -> Prop
+  Step : State -> ProcessEvent vocabulary ->
+         State -> AbstractDemandBag vocabulary.Demand ->
+         List vocabulary.Observation -> Prop
   view : Option (ViewFacet State)
 
 structure DeterministicProcess (v : ProcessVocabulary) where
@@ -94,6 +99,26 @@ structure DeterministicProcess (v : ProcessVocabulary) where
            State × AbstractDemandBag v.Demand × List v.Observation
   view : Option (ViewFacet State)
 ```
+
+The interruption, fault, and environment-violation classes are fields of the
+vocabulary, not one global classification. `agent-bus` disposition `g-design:4`
+ratified that, because a single `LogicalFault` covering HTTP/2 error codes,
+Vulkan device loss, zlib corruption, and a Win32 handle violation is the closed
+whole-program sum [PROCESS_SHARDING.md](PROCESS_SHARDING.md) §10 names as a
+foundational failure, and [FOUNDATION.md](FOUNDATION.md) law 8 forbids the
+`other`-constructor escape.
+
+The obligation that creates is discharged rather than assumed. Cross-vocabulary
+delivery owes a *total* classifier from the sending side's classes into the
+receiving side's, so a process whose class is empty is one no such event can
+reach — the empty class is a theorem about what arrives, not a hole in what is
+handled.
+
+`vocabulary` is a field rather than an inherited parent for the other half of
+the same ruling: an ordinary author *selects* a reusable vocabulary in one line
+instead of writing seven interface fields. Simple processes pay no ceremony for
+a classification they do not use, and a process with no faults selects a
+vocabulary whose classes are empty.
 
 Grass uses explicit terminology:
 

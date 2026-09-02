@@ -77,14 +77,67 @@ theorem every_worker_fault_classified (value : WorkerFault) :
     workerToSupervisor.fault value = .childFailed value := rfl
 
 /-- And it carries: a worker fault arrives as the supervisor's own fault. -/
-theorem carries_fault (demand : Unit) :
-    workerToSupervisor.carry (.fault .outOfMemory) demand =
+theorem carries_fault :
+    workerToSupervisor.carryFault .outOfMemory =
       .fault (.childFailed .outOfMemory) := rfl
 
 /-- Deliveries compose, so a two-hop fault is classified once per hop. -/
 theorem composes (value : WorkerFault) :
     (workerToSupervisor.trans (VocabularyDelivery.refl supervisor)).fault value =
       .childFailed value := rfl
+
+/-! ## A fault reaches a target that has no demands at all
+
+The adversarial case `g-reviewer:18` asked for. `ledger` declares
+`Demand := PEmpty` — it asks the environment for nothing — and an inhabited
+fault class. An earlier version of `carry` returned
+`target.Demand → Deliverable target` for every event, so a fault could not be
+carried here at all, even though the classification was total and correct.
+-/
+
+inductive LedgerFault
+  | corrupted
+  deriving DecidableEq, Repr
+
+/-- A process that asks for nothing and can still fail. -/
+@[reducible] def ledger : ProcessVocabulary.{0} where
+  ExternalEvent := Unit
+  Demand := PEmpty
+  Result := fun demand => demand.elim
+  Observation := Unit
+  InterruptReason := WorkerInterrupt
+  LogicalFault := LedgerFault
+  EnvironmentViolation := PEmpty
+
+/--
+A delivery into it.
+
+The interrupt classes line up, so this is an ordinary total classifier. The
+interesting field is the one that is *not* here: nothing about demands.
+-/
+def workerToLedger : VocabularyDelivery worker ledger where
+  interrupt := id
+  fault := fun _ => LedgerFault.corrupted
+  violation := fun empty => empty.elim
+
+/--
+**A fault is carried with no demand in sight.**
+
+`ledger.Demand` is uninhabited, so nothing of that type can be supplied. The
+fault arrives anyway, which is what "faults carry no dependent result" has to
+mean if it means anything.
+-/
+theorem carries_fault_without_demand :
+    workerToLedger.carryFault .outOfMemory =
+      VocabularyDelivery.Deliverable.fault LedgerFault.corrupted := rfl
+
+/--
+And no demand *could* have been supplied: `ledger.Demand` is uninhabited.
+
+Stated so the previous theorem is not read as "a demand happened to be
+available". There is no such value, and the fault arrives regardless.
+-/
+theorem ledger_has_no_demand (demand : ledger.Demand) : False := demand.elim
 
 /-! ## Delivering into the auditor is impossible
 
