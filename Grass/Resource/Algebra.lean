@@ -1,0 +1,243 @@
+import Grass.Resource.Axis
+
+/-!
+# The generic resource algebra
+
+`docs/RESOURCES.md` §4: "Both tiers use the open resource algebra." This module
+is that algebra. It is imported by `Semantics`, which cannot state `SpecProcess`
+without it, and instantiated by `Process.Resource`, which builds network
+holdings and capacity credit on top.
+
+## Reconciling two sketches
+
+The corpus displays this idea twice with different shapes.
+`docs/SEMANTICS.md` shows `OrderedPartialCommutativeResourceLaws combine le`;
+`docs/PROCESS.md` shows `OrderedCommutativeResourceAlgebra (Value axis)
+(combine axis) (zero axis) (le axis)`, with a zero and a different name. They are
+sketches of one thing, and this module unifies them rather than shipping both.
+
+The unified bundle carries four operations, and the extra two are not decoration:
+
+- **`zero`** appears in `docs/PROCESS.md`'s `ResourceMetric` as `empty : forall
+  axis, valuation axis EmptyNetworkResourceState = zero axis`. Without an
+  identity there is no such thing as an empty holding, and a subsystem holding
+  nothing could not be composed with one that does.
+- **`compatible`** is the "partial" in *partial* commutative. This is the Iris
+  sense — validity, not undefinedness. Two holdings that cannot lawfully coexist
+  are incompatible, and the algebra's laws are conditioned on compatibility so
+  that combining them proves nothing rather than proving something false. An
+  exclusive holding of the same unique resource, held twice, is the case this
+  exists for.
+
+## Why the laws are conditioned
+
+`combineAssoc` and friends hold only for compatible operands. A total,
+unconditioned algebra would let a proof combine two exclusive claims to the same
+socket and derive a bound from the result. `docs/FOUNDATION.md` law 20 names that
+failure directly: affine transfers must not be double counted.
+-/
+
+namespace Grass.Resource
+
+universe u
+
+/--
+The laws an ordered partial commutative resource algebra satisfies.
+
+`compatible` says which pairs may lawfully coexist; every law about `combine` is
+conditioned on it. `le` is the substate order: `le a b` means `b` holds at least
+what `a` does.
+-/
+structure OrderedPartialCommutativeResourceLaws {Value : Type u}
+    (compatible : Value → Value → Prop)
+    (combine : Value → Value → Value)
+    (zero : Value)
+    (le : Value → Value → Prop) : Prop where
+  /-- Compatibility does not depend on the order of its operands. -/
+  compatibleComm : ∀ a b, compatible a b → compatible b a
+  /-- Nothing is incompatible with holding nothing. -/
+  compatibleZero : ∀ a, compatible a zero
+  /-- Combining compatible holdings does not depend on their order. -/
+  combineComm : ∀ a b, compatible a b → combine a b = combine b a
+  /-- Combining is associative where every pairing is compatible. -/
+  combineAssoc : ∀ a b c,
+    compatible a b → compatible (combine a b) c → compatible b c →
+    compatible a (combine b c) →
+    combine (combine a b) c = combine a (combine b c)
+  /-- Holding nothing changes nothing. -/
+  combineZero : ∀ a, combine a zero = a
+  /-- The order is reflexive. -/
+  leRefl : ∀ a, le a a
+  /-- The order is transitive. -/
+  leTrans : ∀ a b c, le a b → le b c → le a c
+  /-- The order is antisymmetric, so a holding is determined by what it contains. -/
+  leAntisymm : ∀ a b, le a b → le b a → a = b
+  /-- Holding nothing is the least holding. -/
+  zeroLe : ∀ a, le zero a
+  /-- Adding a compatible holding never loses what was already held. This is
+  what makes a bound on a composite bound each part. -/
+  leCombine : ∀ a b, compatible a b → le a (combine a b)
+  /-- Combining is monotone in each argument, where the results are defined. -/
+  combineMonotone : ∀ a b c,
+    le a b → compatible a c → compatible b c → le (combine a c) (combine b c)
+
+/--
+A resource algebra on `R`.
+
+`R` is the resource parameter itself — a budget, an envelope, or a holding — and
+this is how two of them compose. `docs/RESOURCES.md` §4: "A composed
+specification combines semantic demands axis by axis. A composed plan combines
+physical provisions, holdings, and flux proofs."
+-/
+structure ResourceAlgebra (R : Type u) where
+  /-- Which pairs of resource values may lawfully coexist. -/
+  compatible : R → R → Prop
+  /-- How two compatible resource values compose. -/
+  combine : R → R → R
+  /-- The resource value holding nothing. -/
+  zero : R
+  /-- The substate order. -/
+  le : R → R → Prop
+  /-- The algebra's laws. -/
+  laws : OrderedPartialCommutativeResourceLaws compatible combine zero le
+
+/--
+Marks `R` as a resource model, fixing how its values compose.
+
+`docs/SEMANTICS.md` makes this the class every resource-parameterized
+specification is stated against.
+-/
+class ResourceModel (R : Type u) where
+  /-- The algebra on `R`. -/
+  algebra : ResourceAlgebra R
+
+/--
+Declares that resources of type `R` measure `axis`, and fixes the algebra of that
+axis's values.
+
+The axis's value algebra is separate from `R`'s own because they are different
+things: `R` composes whole resource parameters, while an axis composes the
+quantities on one dimension. A specification bounded on `residentBytes` says
+nothing about `sockets`, which is what makes the framed realization theorem of
+`docs/RESOURCES.md` §4 possible.
+-/
+class HasResourceAxis (R : Type u) [ResourceModel R] (axis : ResourceAxisName) where
+  /-- The type of quantities on this axis. -/
+  Value : Type
+  /-- Which quantities may lawfully coexist. -/
+  compatible : Value → Value → Prop
+  /-- How two compatible quantities compose. -/
+  combine : Value → Value → Value
+  /-- The quantity holding nothing. -/
+  zero : Value
+  /-- The order in which a bound is stated. -/
+  le : Value → Value → Prop
+  /-- The axis's laws. -/
+  laws : OrderedPartialCommutativeResourceLaws compatible combine zero le
+
+/--
+Declares that resources of type `R` export a bound on `axis`, together with what
+happens at the bound and how holdings compose.
+
+`docs/RESOURCES.md` §1 requires a semantic budget to carry exhaustion outcomes
+visible at the product boundary; that is `exhaustion`. `lifecycle` carries the
+composition law that stops double counting.
+-/
+class HasResourceLimit (R : Type u) [ResourceModel R] (axis : ResourceAxisName)
+    extends HasResourceAxis R axis where
+  /-- The bound this resource value exports on the axis. -/
+  limit : R → Value
+  /-- What the product does when the bound is reached. -/
+  exhaustion : R → ResourceExhaustionPolicy axis
+  /-- How holdings on this axis compose. -/
+  lifecycle : R → ResourceLifecyclePolicy axis
+
+/-!
+## The counting algebra
+
+Most axes count things: sockets, handles, threads, streams, bytes. This section
+proves the laws are satisfiable at all, which matters because an uninhabited law
+bundle would make every theorem quantified over it vacuous.
+-/
+
+namespace Counting
+
+/-- Counted quantities always coexist. Exclusivity is a property of what is being
+counted, not of counting, and an axis that needs it supplies its own
+compatibility. -/
+def compatible (_a _b : Nat) : Prop := True
+
+/-- Counted quantities add. -/
+def combine (a b : Nat) : Nat := a + b
+
+/-- The counting algebra's laws hold. -/
+theorem laws : OrderedPartialCommutativeResourceLaws compatible combine 0 (· ≤ ·) where
+  compatibleComm := fun _ _ _ => trivial
+  compatibleZero := fun _ => trivial
+  combineComm := fun a b _ => Nat.add_comm a b
+  combineAssoc := fun a b c _ _ _ _ => Nat.add_assoc a b c
+  combineZero := fun a => Nat.add_zero a
+  leRefl := fun a => Nat.le_refl a
+  leTrans := fun _ _ _ hab hbc => Nat.le_trans hab hbc
+  leAntisymm := fun _ _ hab hba => Nat.le_antisymm hab hba
+  zeroLe := fun a => Nat.zero_le a
+  leCombine := fun a b _ => Nat.le_add_right a b
+  combineMonotone := fun _ _ c hab _ _ => Nat.add_le_add_right hab c
+
+/-- The counting algebra as a `ResourceAlgebra`, usable as the model for a
+resource parameter that is a single count. -/
+def algebra : ResourceAlgebra Nat where
+  compatible := compatible
+  combine := combine
+  zero := 0
+  le := (· ≤ ·)
+  laws := laws
+
+end Counting
+
+/-!
+## The exclusive algebra
+
+An exclusive quantity has at most one holder, so two nonzero holdings never
+coexist.
+
+This is the case `compatible` exists for, and it is proved here to show the
+conditioned laws are usable and not merely a hedge. A unique socket, a lock, or
+an exclusive loan composes this way, and the incompatibility is what stops a
+proof from combining two claims to the same one.
+-/
+
+namespace Exclusive
+
+/-- Two exclusive holdings coexist only if at most one of them is nonzero. -/
+def compatible (a b : Nat) : Prop := a = 0 ∨ b = 0
+
+/-- Combining exclusive holdings adds them, which is only meaningful where they
+are compatible. -/
+def combine (a b : Nat) : Nat := a + b
+
+/-- The exclusive algebra's laws hold. -/
+theorem laws : OrderedPartialCommutativeResourceLaws compatible combine 0 (· ≤ ·) where
+  compatibleComm := fun _ _ h => h.symm
+  compatibleZero := fun _ => .inr rfl
+  combineComm := fun a b _ => Nat.add_comm a b
+  combineAssoc := fun a b c _ _ _ _ => Nat.add_assoc a b c
+  combineZero := fun a => Nat.add_zero a
+  leRefl := fun a => Nat.le_refl a
+  leTrans := fun _ _ _ hab hbc => Nat.le_trans hab hbc
+  leAntisymm := fun _ _ hab hba => Nat.le_antisymm hab hba
+  zeroLe := fun a => Nat.zero_le a
+  leCombine := fun a b _ => Nat.le_add_right a b
+  combineMonotone := fun _ _ c hab _ _ => Nat.add_le_add_right hab c
+
+/-- Two held exclusive resources are incompatible. This is the fact that makes
+`h2.credit.double` fail rather than silently double count. -/
+theorem not_compatible_of_both_held {a b : Nat} (ha : a ≠ 0) (hb : b ≠ 0) :
+    ¬ compatible a b := by
+  rintro (h | h)
+  · exact ha h
+  · exact hb h
+
+end Exclusive
+
+end Grass.Resource
