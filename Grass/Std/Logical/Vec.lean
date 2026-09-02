@@ -1,0 +1,470 @@
+import Grass.Std.Logical.Byte
+
+/-!
+# Finite ordered sequences
+
+`docs/STDLIB.md` §1 names `Vec α` the fundamental finite ordered dynamic array
+and fixes the consequence that matters most for the rest of the repository:
+
+> Grass must not introduce a second unrelated byte-container primitive.
+
+`ByteArray := Vec Byte` is the early public name that rule protects, so `Vec`
+has to exist before the memory, artifact, decoder, and program layers reach for
+a byte container of their own. `Grass/Std/Logical/Byte.lean` records exactly
+that: `Byte` is defined there and `Vec` deliberately is not, because the design
+belongs to this module's owner.
+
+## What this type is, and what it is not
+
+`Vec α` here is the *logical* sequence of `docs/STDLIB.md` §1:
+
+> `Vec α` itself is a pure finite sequence. Its equality and high-level laws are
+> extensional over length and indexed elements, independent of capacity,
+> allocator choice, or address.
+
+There is no capacity, no allocator, no buffer identity, and no loan. Those
+belong to `OwnedVec profile α vecId bufferId` in `Grass.Std.Owned`, which
+`docs/MODULES.md` places *above* the memory and obligation layers precisely so
+that this module can sit below them. `Represents` is the connection, and it is
+`Std.Owned`'s to state; nothing here anticipates it.
+
+## Why a structure over `List` rather than an abbreviation
+
+`Vec α` wraps `List α` in a one-field structure. An `abbrev` would be shorter
+and is the wrong choice for three reasons.
+
+The first is the §1 rule quoted above. If `Vec α` reduced to `List α`, then
+`ByteArray` would reduce to `List Byte`, and Lean's `List` API — not the
+reviewed surface in `docs/STDLIB.md` §3 — would become the de facto byte-array
+interface for every consumer. A distinct type makes "this is a `ByteArray`" a
+statement the elaborator checks rather than a naming convention.
+
+The second is that `docs/STDLIB.md` §4 separates capacity growth policy from
+logical equality, and makes complexity a matter of separately named profile
+theorems rather than of functional correctness. A one-field structure keeps a seam at which the representation can be
+replaced without touching a consumer, since consumers write `Vec.get?` and not
+`List.get?`.
+
+The third is `docs/MODULES.md`'s prohibition on competing foundations. The
+narrower the door into the representation, the fewer places a lower layer can
+grow its own ordered buffer by accident.
+
+The cost is real and is paid deliberately: every law here is a wrapper over a
+`List` law, and `toList`/`fromList` are the only route between the two.
+
+## Equality is propositional here, unlike `FiniteMap`
+
+`Grass/Std/Logical/FiniteMap.lean` makes extensional agreement a separate
+`Equiv` relation because its association lists are not normalized: two lists can
+denote the same map. A reader arriving from that module should not expect the
+same shape here, and the difference is not a matter of taste.
+
+A `Vec` has exactly one representation per length-and-elements, so extensionality
+is provable *as an equality*: `Vec.ext_of_get?` concludes `v = w`, not
+`v.Equiv w`. There is therefore no `Vec.Equiv`, and `=` is the relation every
+law and every consumer should use.
+
+## What is deliberately absent
+
+`docs/STDLIB.md` §3 lists a wider pure interface than this module implements,
+and §6 says only structures demanded by a milestone are implemented. Absent, and
+why:
+
+- `mapM` and `traverse` need an effect vocabulary. `docs/STDLIB.md` §5 asks for
+  *order preservation* for traverse, which is a statement about the order of
+  effects and not just of results, so it needs the law-bearing monad interface
+  `docs/MODULES.md` assigns to `Grass.Effect`. Writing them over Lean's bare
+  `Monad` now would fix the wrong contract.
+- `foldMap` needs a monoid vocabulary that no consumer has demanded.
+- Lexicographic comparison needs an ordering vocabulary, likewise undemanded.
+- `insertAt` and `eraseAt` are present with their length laws, but their indexing
+  laws are not: no consumer indexes into a `Vec` across an insertion yet, and
+  those laws are large enough to be worth writing against a real use.
+
+Each is an open item in `docs/STDLIB_IMPLEMENTATION_PLAN.md` rather than a
+silent gap.
+-/
+
+namespace Grass.Std.Logical
+
+universe u v w
+
+/--
+A finite ordered sequence of `α` values.
+
+The logical container of `docs/STDLIB.md` §1: length and indexed elements are
+all there is to one. Capacity, allocation, and ownership belong to `OwnedVec`, in
+`Grass.Std.Owned`.
+
+`fromList` is the constructor and `toList` the field, so the two round-trip
+definitionally; see `Vec.toList_fromList` and `Vec.fromList_toList`.
+-/
+structure Vec (α : Type u) where
+  /-- Build a `Vec` from a list in the same order. -/
+  fromList ::
+  /-- The elements, in order. This is the representation, not an export: laws are
+  stated over `Vec.length` and `Vec.get?`. -/
+  toList : List α
+
+namespace Vec
+
+variable {α : Type u} {β : Type v} {γ : Type w}
+
+@[simp] theorem toList_fromList (l : List α) : (fromList l).toList = l := rfl
+
+@[simp] theorem fromList_toList (v : Vec α) : fromList v.toList = v := rfl
+
+theorem toList_injective {v w : Vec α} (h : v.toList = w.toList) : v = w :=
+  congrArg fromList h
+
+/-!
+## Construction
+-/
+
+/-- The sequence with no elements. -/
+def empty : Vec α := ⟨[]⟩
+
+instance : EmptyCollection (Vec α) := ⟨empty⟩
+
+instance : Inhabited (Vec α) := ⟨empty⟩
+
+/-- The one-element sequence. -/
+def singleton (a : α) : Vec α := ⟨[a]⟩
+
+/-- `n` copies of `a`, in order. -/
+def replicate (n : Nat) (a : α) : Vec α := ⟨List.replicate n a⟩
+
+/-!
+## Observation
+-/
+
+/-- The number of elements. -/
+def length (v : Vec α) : Nat := v.toList.length
+
+/-- Whether the sequence has no elements. See `Vec.isEmpty_iff_length_eq_zero`. -/
+def isEmpty (v : Vec α) : Bool := v.toList.isEmpty
+
+/-- The element at `i`, or `none` when `i` is out of range: the checked accessor of
+`docs/STDLIB.md` §3. -/
+def get? (v : Vec α) (i : Nat) : Option α := v.toList[i]?
+
+/--
+The element at `i`, given a proof that `i` is in range: the bounded accessor of
+`docs/STDLIB.md` §3.
+
+The proof argument is the mechanism. There is no default element and no
+`Inhabited α`, so an out-of-range bounded read is not expressible rather than
+being silently defaulted; `Vec.get?` is the accessor for a caller that does not
+have the bound.
+-/
+def get (v : Vec α) (i : Nat) (h : i < v.length) : α := v.toList[i]'h
+
+@[simp] theorem length_fromList (l : List α) : (fromList l).length = l.length := rfl
+
+@[simp] theorem get?_fromList (l : List α) (i : Nat) : (fromList l).get? i = l[i]? := rfl
+
+@[simp] theorem length_empty : (empty : Vec α).length = 0 := rfl
+
+@[simp] theorem get?_empty (i : Nat) : (empty : Vec α).get? i = none := rfl
+
+@[simp] theorem length_singleton (a : α) : (singleton a).length = 1 := rfl
+
+@[simp] theorem get?_singleton_zero (a : α) : (singleton a).get? 0 = some a := rfl
+
+@[simp] theorem length_replicate (n : Nat) (a : α) : (replicate n a).length = n := by
+  simp [length, replicate]
+
+theorem get?_replicate (n : Nat) (a : α) (i : Nat) :
+    (replicate n a).get? i = if i < n then some a else none := by
+  simp [get?, replicate, List.getElem?_replicate]
+
+theorem isEmpty_iff_length_eq_zero (v : Vec α) : v.isEmpty = true ↔ v.length = 0 := by
+  simp [isEmpty, length]
+
+/-- The checked and bounded accessors agree wherever both apply. -/
+theorem get?_eq_some_get (v : Vec α) (i : Nat) (h : i < v.length) :
+    v.get? i = some (v.get i h) :=
+  List.getElem?_eq_getElem h
+
+theorem get?_eq_none (v : Vec α) {i : Nat} (h : v.length ≤ i) : v.get? i = none := by
+  simp only [get?, List.getElem?_eq_none_iff]
+  exact h
+
+/-!
+## Extensionality
+
+`docs/STDLIB.md` §5 asks for "extensionality by length and indexed values". Both
+shapes conclude propositional equality, for the reason in the module comment.
+-/
+
+/-- Two sequences agreeing at every index are equal. -/
+@[ext] theorem ext_of_get? {v w : Vec α} (h : ∀ i, v.get? i = w.get? i) : v = w :=
+  toList_injective (List.ext_getElem? h)
+
+/-- The length-and-index shape of `Vec.ext_of_get?`. -/
+theorem ext_of_get {v w : Vec α} (hlen : v.length = w.length)
+    (h : ∀ i, (hv : i < v.length) → (hw : i < w.length) → v.get i hv = w.get i hw) :
+    v = w :=
+  toList_injective (List.ext_getElem hlen (fun i hv hw => h i hv hw))
+
+/-!
+## Update
+-/
+
+/-- Replace the element at `i`, or return the sequence unchanged when `i` is out of
+range. `Vec.length_set` records that the length never moves. -/
+def set (v : Vec α) (i : Nat) (a : α) : Vec α := ⟨v.toList.set i a⟩
+
+@[simp] theorem length_set (v : Vec α) (i : Nat) (a : α) : (v.set i a).length = v.length := by
+  simp [length, set]
+
+@[simp] theorem get?_set_self (v : Vec α) {i : Nat} (h : i < v.length) (a : α) :
+    (v.set i a).get? i = some a := by
+  simp only [get?, set, toList_fromList]
+  rw [List.getElem?_set_self]
+  exact h
+
+theorem get?_set_ne (v : Vec α) {i j : Nat} (h : j ≠ i) (a : α) :
+    (v.set i a).get? j = v.get? j := by
+  simp only [get?, set, toList_fromList]
+  exact List.getElem?_set_ne (Ne.symm h)
+
+/-- The combined framing law, in the shape a consumer applies it: an update is
+visible at its own index and nowhere else. -/
+theorem get?_set (v : Vec α) (i j : Nat) (a : α) :
+    (v.set i a).get? j =
+      if j = i then (if i < v.length then some a else none) else v.get? j := by
+  by_cases h : j = i
+  · subst h
+    by_cases hb : j < v.length
+    · simp [get?_set_self v hb a, hb]
+    · rw [get?_eq_none _ (by simpa [length_set] using Nat.le_of_not_lt hb)]
+      simp [hb]
+  · simp [get?_set_ne v h a, h]
+
+/-!
+## Structural results
+-/
+
+/-- Append one element at the end. -/
+def push (v : Vec α) (a : α) : Vec α := ⟨v.toList ++ [a]⟩
+
+/-- Remove and return the last element, or `none` when there is none. -/
+def pop? (v : Vec α) : Option (Vec α × α) :=
+  v.toList.reverse.casesOn none (fun a rest => some (⟨rest.reverse⟩, a))
+
+@[simp] theorem length_push (v : Vec α) (a : α) : (v.push a).length = v.length + 1 := by
+  simp [length, push]
+
+theorem get?_push_lt (v : Vec α) (a : α) {i : Nat} (h : i < v.length) :
+    (v.push a).get? i = v.get? i := by
+  simp only [get?, push, toList_fromList]
+  exact List.getElem?_append_left h
+
+@[simp] theorem get?_push_self (v : Vec α) (a : α) : (v.push a).get? v.length = some a := by
+  simp [get?, push, length]
+
+/-!
+## Composition
+-/
+
+/-- Concatenation, in order. -/
+def append (v w : Vec α) : Vec α := ⟨v.toList ++ w.toList⟩
+
+instance : Append (Vec α) := ⟨append⟩
+
+/-- The first `n` elements, or all of them when `n` is at least the length. -/
+def take (v : Vec α) (n : Nat) : Vec α := ⟨v.toList.take n⟩
+
+/-- All but the first `n` elements. -/
+def drop (v : Vec α) (n : Nat) : Vec α := ⟨v.toList.drop n⟩
+
+/-- The prefix/suffix pair at `n`. `Vec.append_splitAt` recovers the original. -/
+def splitAt (v : Vec α) (n : Nat) : Vec α × Vec α := (v.take n, v.drop n)
+
+/-- `docs/STDLIB.md` §3's name for keeping a prefix. It is `Vec.take` at this
+level; the `OwnedVec` operation of the same name is a different thing, since it
+must also account for the dropped elements' destruction obligations. -/
+abbrev truncate (v : Vec α) (n : Nat) : Vec α := v.take n
+
+/-- `docs/STDLIB.md` §3's name for the empty result. As with `Vec.truncate`, the
+`OwnedVec` operation is a different thing: it releases elements and may retain
+capacity. -/
+abbrev clear (_ : Vec α) : Vec α := empty
+
+@[simp] theorem toList_append (v w : Vec α) : (v ++ w).toList = v.toList ++ w.toList := rfl
+
+@[simp] theorem length_append (v w : Vec α) : (v ++ w).length = v.length + w.length := by
+  simp [length]
+
+theorem get?_append_left {v : Vec α} {i : Nat} (h : i < v.length) (w : Vec α) :
+    (v ++ w).get? i = v.get? i := by
+  simp only [get?, toList_append]
+  exact List.getElem?_append_left h
+
+theorem get?_append_right {v : Vec α} {i : Nat} (h : v.length ≤ i) (w : Vec α) :
+    (v ++ w).get? i = w.get? (i - v.length) := by
+  simp only [get?, toList_append]
+  exact List.getElem?_append_right h
+
+@[simp] theorem empty_append (v : Vec α) : (empty : Vec α) ++ v = v := by
+  apply toList_injective
+  simp [empty]
+
+@[simp] theorem append_empty (v : Vec α) : v ++ (empty : Vec α) = v := by
+  apply toList_injective
+  simp [empty]
+
+theorem append_assoc (u v w : Vec α) : (u ++ v) ++ w = u ++ (v ++ w) := by
+  apply toList_injective
+  simp
+
+@[simp] theorem length_take (v : Vec α) (n : Nat) : (v.take n).length = min n v.length := by
+  simp [length, take]
+
+@[simp] theorem length_drop (v : Vec α) (n : Nat) : (v.drop n).length = v.length - n := by
+  simp [length, drop]
+
+/-- Splitting loses nothing and reorders nothing. -/
+@[simp] theorem append_splitAt (v : Vec α) (n : Nat) : v.take n ++ v.drop n = v := by
+  apply toList_injective
+  simp [take, drop]
+
+theorem splitAt_eq (v : Vec α) (n : Nat) : v.splitAt n = (v.take n, v.drop n) := rfl
+
+theorem get?_take (v : Vec α) (n i : Nat) :
+    (v.take n).get? i = if i < n then v.get? i else none := by
+  by_cases h : i < n
+  · simp [get?, take, h]
+  · simp only [get?, take, toList_fromList, h, if_false, List.getElem?_eq_none_iff,
+      List.length_take]
+    omega
+
+theorem get?_drop (v : Vec α) (n i : Nat) : (v.drop n).get? i = v.get? (n + i) := by
+  simp [get?, drop]
+
+/-!
+## Algebra
+-/
+
+/-- Apply `f` to every element, preserving order: `Vec.get?_map`. -/
+def map (f : α → β) (v : Vec α) : Vec β := ⟨v.toList.map f⟩
+
+/-- Left fold, in index order. -/
+def foldl (f : β → α → β) (init : β) (v : Vec α) : β := v.toList.foldl f init
+
+/-- Right fold, in index order. -/
+def foldr (f : α → β → β) (init : β) (v : Vec α) : β := v.toList.foldr f init
+
+/-- Pointwise combination, truncated to the shorter sequence: `Vec.length_zipWith`. -/
+def zipWith (f : α → β → γ) (v : Vec α) (w : Vec β) : Vec γ :=
+  ⟨v.toList.zipWith f w.toList⟩
+
+@[simp] theorem length_map (f : α → β) (v : Vec α) : (v.map f).length = v.length := by
+  simp [length, map]
+
+/-- `map` preserves order and position, which is `docs/STDLIB.md` §5's
+"order preservation for append, map, traverse". -/
+@[simp] theorem get?_map (f : α → β) (v : Vec α) (i : Nat) :
+    (v.map f).get? i = (v.get? i).map f := by
+  simp [get?, map]
+
+@[simp] theorem map_empty (f : α → β) : (empty : Vec α).map f = empty := rfl
+
+/-- The composition half of `docs/STDLIB.md` §5's fusion laws. -/
+theorem map_map (g : β → γ) (f : α → β) (v : Vec α) :
+    (v.map f).map g = v.map (fun a => g (f a)) := by
+  apply toList_injective
+  simp [map]
+
+theorem map_append (f : α → β) (v w : Vec α) : (v ++ w).map f = v.map f ++ w.map f := by
+  apply toList_injective
+  simp [map]
+
+@[simp] theorem length_zipWith (f : α → β → γ) (v : Vec α) (w : Vec β) :
+    (zipWith f v w).length = min v.length w.length := by
+  simp [length, zipWith]
+
+@[simp] theorem foldl_empty (f : β → α → β) (init : β) :
+    foldl f init (empty : Vec α) = init := rfl
+
+@[simp] theorem foldr_empty (f : α → β → β) (init : β) :
+    foldr f init (empty : Vec α) = init := rfl
+
+/-!
+## Predicates and search
+-/
+
+/-- Whether every element satisfies `p`. -/
+def all (p : α → Bool) (v : Vec α) : Bool := v.toList.all p
+
+/-- Whether some element satisfies `p`. -/
+def any (p : α → Bool) (v : Vec α) : Bool := v.toList.any p
+
+/-- The first element satisfying `p`, in index order. -/
+def find? (p : α → Bool) (v : Vec α) : Option α := v.toList.find? p
+
+/-- Membership as a decidable test. `Vec.Mem` is the propositional form. -/
+def contains [BEq α] (v : Vec α) (a : α) : Bool := v.toList.contains a
+
+/-- `a` occurs in `v`. -/
+def Mem (a : α) (v : Vec α) : Prop := a ∈ v.toList
+
+instance : Membership α (Vec α) := ⟨fun v a => Mem a v⟩
+
+theorem mem_iff_mem_toList {a : α} {v : Vec α} : a ∈ v ↔ a ∈ v.toList := Iff.rfl
+
+/-!
+## Positional insertion and removal
+-/
+
+/-- Insert `a` so that it lands at index `i`, shifting later elements up. -/
+def insertAt (v : Vec α) (i : Nat) (a : α) : Vec α := ⟨v.toList.insertIdx i a⟩
+
+/-- Remove the element at `i`, shifting later elements down. -/
+def eraseAt (v : Vec α) (i : Nat) : Vec α := ⟨v.toList.eraseIdx i⟩
+
+theorem length_insertAt (v : Vec α) {i : Nat} (h : i ≤ v.length) (a : α) :
+    (v.insertAt i a).length = v.length + 1 := by
+  simp [length, insertAt, List.length_insertIdx_of_le_length h]
+
+theorem length_eraseAt (v : Vec α) {i : Nat} (h : i < v.length) :
+    (v.eraseAt i).length = v.length - 1 := by
+  simp only [length, eraseAt, toList_fromList]
+  exact List.length_eraseIdx_of_lt h
+
+end Vec
+
+/-!
+## Bytes
+
+`docs/STDLIB.md` §1 fixes `ByteArray := Vec Byte`. `Byte` itself is defined in
+`Grass/Std/Logical/Byte.lean`, and §1 groups the two; the name is sited here
+rather than there only because that module is still under `c-mem`'s declared
+temporary custody (`c-mem:1`), and this module's owner does not edit it before
+the handoff lands. Merging the two declarations is part of accepting that
+handoff and is tracked in `docs/STDLIB_IMPLEMENTATION_PLAN.md`.
+-/
+
+/--
+The canonical byte container of `docs/STDLIB.md` §1.
+
+**This name collides with Lean's `_root_.ByteArray`.** A module that opens
+`Grass.Std.Logical` and then writes a bare `ByteArray` gets an ambiguity error
+naming both candidates, so consumers must qualify. That is not a defect in the
+collision detection — §1 wants Grass's byte container and Lean's host one to stay
+distinct types related by a connection theorem, and an ambiguity error is a
+louder version of that than silent shadowing would be. It is a cost of §1's
+chosen name, it will be paid by every memory, artifact, and decoder module, and
+whether to pay it is the naming question this module's owner has put to the owner
+of `docs/STDLIB.md` rather than deciding unilaterally. `Tests/Std/VecVocabulary.lean`
+pins both halves: a `List Byte` is rejected here, and so is a host `_root_.ByteArray`.
+
+`ByteSeq` in `Grass/Std/Logical/Byte.lean` is the placeholder this retires. It is
+still the type the memory layer's fields use; migrating those uses is a change to
+`Grass/Memory/**`, which belongs to `c-mem`, so the two names coexist until that
+migration is agreed rather than one being deleted from under its consumers.
+-/
+abbrev ByteArray := Vec Byte
+
+end Grass.Std.Logical
