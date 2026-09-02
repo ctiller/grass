@@ -477,15 +477,38 @@ consumer anywhere, so the separating conjunction's formation gate gated nothing.
 `frame_of_disjoint_scope` and `sep_right_survives_left_step` are those.
 
 `Instance.lean` followed because `ProcessLifecycle` is named in
-[PROCESS.md](PROCESS.md) §3 and declared nowhere. Its states are derived rather
-than invented: each is entered by a transition §4 names, and the three
-transitions that reach none of them — `restart`, `detach`, `requestCancel` —
-are the design content. A cancelling process is *running*. The terminal states
-carry no payload; `LifecycleWitnessed` requires a terminated instance's state to
-be protocol-terminal, so the result is recoverable and there is exactly one
-record of it. `ChildDeathReason` was renamed `ProcessDeathReason` and moved here
-in the same change: none of its three reasons was about being a child, and §4
-gives `senderDeath`/`receiverDeath` to processes that may be roots.
+[PROCESS.md](PROCESS.md) §3 and declared nowhere. Its first draft derived the
+states from the `NetworkTransition` family and got it wrong four separate ways,
+which is worth recording because the mistake has a shape. "Which transitions
+enter this state" is the wrong question: `NetworkTransition` says how a network
+moves, not how a process can have ended. §3's `ChildLifecycleEvent` does
+enumerate the endings, and the states are now exactly its non-continuing cases.
+The draft's table omitted `childLifecycle` — the transition that actually
+terminates a *child*, which its own fixture's example was — attributed `died` to
+"supervisor shutdown", which is not a constructor at all, claimed `restart`
+reached no state when the restarted incarnation is plainly `running`, and gave
+no state to an acknowledged cancellation, which §3 lists as a terminal
+`ChildLifecycleEvent`. `cancelled` is now a state, and the claim it replaces is
+sharper than the one it replaces: a process under an unacknowledged *request* is
+running, and it is *acknowledgement* that ends it.
+
+The rule the tags follow is that a tag carries a payload exactly when the
+instance's other fields do not determine it. `died` carries its reason because
+nothing else records it. `terminated` carries no result because `localState` and
+`LifecycleWitnessed` recover one — with the caveat in §10.12, since
+`ProcessSpec.Terminal` is a relation and recovers *a* result rather than *the*
+result. `faulted`, `violated`, `interrupted` and `cancelled` carry nothing and
+do not satisfy the rule; that is §10.12 too.
+
+`IsRoot` is the kind facing the boundary *and* an absent parent, not the absent
+parent alone, because a detached child also has none.
+
+`ChildDeathReason` was renamed `ProcessDeathReason` in the same change — none of
+its three reasons is about being a child, and §3 gives `senderDeath` and
+`receiverDeath` to processes that may be roots — and lives in its own leaf
+module, `Network/Death.lean`. Putting it in `Instance.lean` would have made
+`Child.lean`, which mentions no topology at all, import the whole topology
+stack for a three-constructor enum.
 
 Two structures here are named for what they are rather than for what a reader
 might assume. `ProcessTopologyCore` carries graph, channels and spawn authority
@@ -506,8 +529,10 @@ Grass/Process/Network/Topology.lean    refs, generations, channel ids, epochs
 Grass/Process/Network/Structural.lean  the one canonical structural network
 Grass/Process/Network/Delivery.lean    total cross-vocabulary fault classification
 Grass/Process/Network/Assertion.lean   network assertions, separating conjunction
+Grass/Process/Network/Death.lean       ProcessDeathReason, a shared leaf
 Grass/Process/Network/Instance.lean    incarnations, ProcessLifecycle, witnessing
-Grass/Process/Network/Channel.lean     ChannelContract, escrow, session, resolution
+Grass/Process/Network/Escrow.lean      the escrow ledger and its prefix laws
+Grass/Process/Network/Channel.lean     ChannelContract, session, resolution
 Grass/Process/Network/Plan.lean        ProcessPlan, LogicalProcessNetwork
 Grass/Process/Network/Transition.lean  NetworkTransition, NetworkStep, freshness
 Grass/Process/Network/Child.lean       child requests, bindings, lifecycle events
@@ -534,6 +559,12 @@ dischargeable in this milestone:
 - a total classification from the delivering side's interrupt, fault, and
   violation classes into each receiving vocabulary's, so that the `PEmpty` case
   of §2.2 is discharged rather than assumed;
+- `LogicalProcessNetwork` requires `ProcessInstance.LifecycleWitnessed` of every
+  instance it holds, so a network cannot tag a running process `terminated`.
+  `Grass/Process/Network/Instance.lean` states the predicate and cannot enforce
+  it — there is no network there to enforce it over — and a docstring in one
+  module is not a place an obligation can safely live, so it is written here as
+  well;
 - an explicit re-proof obligation, recorded rather than discharged, for the two
   facts that genuinely need later milestones: `insufficient_credit_disables_send`
   and `EveryNetworkStepHasExactCapacityTransitionLaw` need M5's credit ledger,
@@ -1066,3 +1097,70 @@ world argument, because the opaque carrier buys nothing that
 `ChannelEscrowLedger plan` does not already provide at the arity where it is
 used — but not the authority. Blocks: the normative surface of `Channel.lean`,
 which cannot match a declaration that does not typecheck.
+
+### 10.12 A terminal `ProcessLifecycle` tag does not determine what ended the process
+
+[PROCESS.md](PROCESS.md) §3 declares `lifecycle : ProcessLifecycle` unindexed,
+and [DECISIONS.md](DECISIONS.md) decision 128 re-ratified the `ProcessInstance`
+record with that field unchanged. `Grass/Process/Network/Instance.lean` declares
+the type accordingly. The rule it follows is that a tag carries a payload
+exactly when the instance's other fields do not determine it, and by that rule
+two of the tags are wrong.
+
+`faulted` and `violated` do not determine their class. A faulted instance's
+`localState` says nothing about which `LogicalFault` it raised; a violated one's
+says nothing about which `EnvironmentViolation` its environment committed.
+`cancelled` does not determine its `CancelReason`, and `interrupted` does not
+determine its `InterruptReason`. §3's own `ChildLifecycleEvent` carries all four
+— `faulted (fault : ChildFault)`, `environmentViolation (violation : ...)`,
+`cancellationAcknowledged (reason : CancelReason)`, `interrupted (reason :
+InterruptReason)` — so the corpus already treats the class as part of the
+ending. The instance record does not, and there is nowhere else in network state
+for it to go.
+
+`terminated` is the same defect one step milder. `ProcessSpec.Terminal` is a
+*relation*, so a state may be terminal with several results, and
+`terminated_has_result` recovers *a* result rather than *the* result a parent's
+`ChildDemandBinding` routed. `Tests/Process/InstanceFixtures.lean` exhibits a
+protocol where both `true` and `false` are recovered from the same terminated
+instance. Only for a protocol whose terminal relation is functional — which
+`Grass/Process/Spec.lean`'s `DeterministicProcess.terminal_functional` supplies
+— do the two coincide. `TerminatedWith` names a specific result so the
+obligation is at least statable, and `terminated_result_unique` states when it
+is discharged.
+
+None of this is unsound, and none of it loses information *globally*: the class
+was delivered as an event and the parent recorded it. What is lost is that the
+network state alone cannot answer "what ended this process", so a join, a
+supervisor's restart-intensity accounting, or a later audit reading the network
+has to consult the parent's transition rather than the instance.
+
+The fix is to index the type — `lifecycle : ProcessLifecycle (topology.protocol
+kind)`, with `terminated` carrying its result and the three others carrying
+their class. That is a normative change to a record decision 128 has just
+re-ratified, so it is a ruling and not c-process's to make. Blocks: nothing
+today; `Plan.lean` proceeds against the unindexed form, and `Transition.lean`
+will inherit whichever shape is ruled.
+
+### 10.13 `detach` erases the fact that a process ever had a parent
+
+[PROCESS.md](PROCESS.md) §3 declares `parent : Option (Sigma fun parentKind =>
+ProcessRef topology parentKind)` and separately provides a `detach` transition.
+A detached child's parent therefore becomes `none`, which is exactly what a
+root's is, and the two are indistinguishable by that field.
+
+Two consequences. First, "the root is the instance with no parent" is false as a
+network law; `Grass/Process/Network/Instance.lean` defines `IsRoot` as the kind
+facing the boundary *and* an absent parent for this reason, and keeps
+`HasNoParent` as the weaker, honest reading of the field. Second, and less
+easily worked around, `Grass/Process/Network/Child.lean`'s
+`NonReturningReason.detached` becomes unjustifiable from state: a binding may
+say an outcome does not return because the child was detached, and nothing in
+the network records that it ever was.
+
+The fix is a three-way field — root, detached-from, child-of — rather than an
+`Option`, which keeps the fact of former parenthood while making the absence of
+a *current* parent equally explicit. Like §10.12 this changes a record decision
+128 has just re-ratified. Blocks: nothing today. c-process has implemented the
+weaker `IsRoot` and pinned the distinction in a fixture, so the erasure is
+visible rather than assumed away.

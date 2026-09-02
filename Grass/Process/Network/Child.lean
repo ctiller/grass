@@ -1,5 +1,5 @@
 import Grass.Process.Network.Delivery
-import Grass.Process.Network.Instance
+import Grass.Process.Network.Death
 import Grass.Process.Protocol.Registry
 
 /-!
@@ -80,10 +80,10 @@ inductive ChildLifecycleOutcome (child : ProcessSpec.{u, w}) (request : child.Re
   | environmentViolation (violation : child.EnvironmentViolation)
   /-- The child stopped existing without finishing.
 
-  The reason is `Grass/Process/Network/Instance.lean`'s `ProcessDeathReason`,
-  not a child-specific one. It used to be declared here as `ChildDeathReason`,
-  which was wrong twice over: none of its three reasons is about being a child,
-  and `docs/PROCESS.md` §4 gives `senderDeath` and `receiverDeath` transitions to
+  The reason is `Grass/Process/Network/Death.lean`'s `ProcessDeathReason`, not a
+  child-specific one. It used to be declared here as `ChildDeathReason`, which
+  was wrong twice over: none of its three reasons is about being a child, and
+  `docs/PROCESS.md` §3 gives `senderDeath` and `receiverDeath` transitions to
   processes that may be roots. -/
   | died (reason : ProcessDeathReason)
 
