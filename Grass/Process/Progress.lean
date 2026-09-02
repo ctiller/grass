@@ -57,7 +57,7 @@ it is why `MeetsProcessProgress` has two fields rather than one.
 
 namespace Grass.Process
 
-universe u
+universe u w
 
 /--
 A well-founded internal measure on process state.
@@ -66,9 +66,9 @@ A well-founded internal measure on process state.
 is normal for a state machine with phases, and forcing it through `Nat` costs an
 encoding proof for nothing.
 -/
-structure ProcessMeasure (p : ProcessSpec.{u}) : Type (u + 1) where
+structure ProcessMeasure (p : ProcessSpec.{u, w}) : Type (w + 1) where
   /-- The ordered carrier. -/
-  Rank : Type u
+  Rank : Type w
   /-- The strict order. -/
   lt : Rank → Rank → Prop
   /-- No infinite descent. -/
@@ -78,7 +78,7 @@ structure ProcessMeasure (p : ProcessSpec.{u}) : Type (u + 1) where
 
 namespace ProcessMeasure
 
-variable {p : ProcessSpec.{u}}
+variable {p : ProcessSpec.{u, w}}
 
 /-- The measure decreases across this state change. -/
 def Decreases (measure : ProcessMeasure p) (before after : p.State) : Prop :=
@@ -94,11 +94,11 @@ This is the precondition of `Responsive`. Without it, responsiveness would
 demand a successor for the completion of a demand the process never issued,
 which no correct process should have.
 -/
-def EventDeliverable {p : ProcessSpec.{u}} (outstanding : Bag p.Demand)
+def EventDeliverable {p : ProcessSpec.{u, w}} (outstanding : Bag p.Demand)
     (event : p.Event) : Prop :=
   ∀ demand, event.settles = some demand → demand ∈ outstanding
 
-theorem eventDeliverable_of_settles_none {p : ProcessSpec.{u}}
+theorem eventDeliverable_of_settles_none {p : ProcessSpec.{u, w}}
     {outstanding : Bag p.Demand} {event : p.Event}
     (settlesNothing : event.settles = none) :
     EventDeliverable outstanding event := by
@@ -111,7 +111,7 @@ The §7 three-way progress condition, for one transition.
 See the module note for why the first disjunct is `settles = none` rather than a
 separate frontier predicate.
 -/
-def StepProgresses {p : ProcessSpec.{u}} (accept : ProcessAcceptance p)
+def StepProgresses {p : ProcessSpec.{u, w}} (accept : ProcessAcceptance p)
     (measure : ProcessMeasure p) (before after : p.State) (event : p.Event)
     (emitted : p.Segment) : Prop :=
   event.settles = none ∨
@@ -125,8 +125,8 @@ Both fields are quantified over states satisfying an invariant supplied by the
 caller, because a progress claim about unreachable states is neither needed nor
 provable. `Grass/Process/Correct.lean` passes its own `Invariant`.
 -/
-structure MeetsProcessProgress (p : ProcessSpec.{u}) (accept : ProcessAcceptance p)
-    (Invariant : p.State → Prop) (request : p.Request) : Type (u + 1) where
+structure MeetsProcessProgress (p : ProcessSpec.{u, w}) (accept : ProcessAcceptance p)
+    (Invariant : p.State → Prop) (request : p.Request) : Type (max (u + 1) (w + 1)) where
   /-- The internal measure. -/
   measure : ProcessMeasure p
   /--
@@ -147,7 +147,7 @@ structure MeetsProcessProgress (p : ProcessSpec.{u}) (accept : ProcessAcceptance
 
 namespace MeetsProcessProgress
 
-variable {p : ProcessSpec.{u}} {accept : ProcessAcceptance p}
+variable {p : ProcessSpec.{u, w}} {accept : ProcessAcceptance p}
   {Invariant : p.State → Prop} {request : p.Request}
 
 /--

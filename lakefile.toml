@@ -6,7 +6,7 @@
 # dependency is added by a reviewed change, never as a convenience.
 
 name = "grass"
-defaultTargets = ["Grass"]
+defaultTargets = ["Grass", "Tests"]
 
 # `warningAsError` is the build gate, not a style preference. Without it a
 # declaration using `sorry` is a warning and `lake build` exits 0, which would
@@ -24,3 +24,11 @@ warningAsError = true
 [[lean_lib]]
 name = "Grass"
 globs = ["Grass.+"]
+
+# The fixture corpus. docs/MODULES.md places it at the repository root, and
+# docs/FOUNDATION.md law 3 is why its entries are theorems rather than `#eval`s:
+# an executed example is not a universal proof. It is a default target so that a
+# green build means the fixtures still hold.
+[[lean_lib]]
+name = "Tests"
+globs = ["Tests.+"]

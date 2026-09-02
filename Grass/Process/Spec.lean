@@ -21,6 +21,21 @@ handle. A specification that wants a later demand to depend on an earlier
 result expresses it as state: `docs/PROCESS.md` §2 says "a later demand is not
 enabled until the transition which accepts the prerequisite result".
 
+## Two universes, not one
+
+The interface types — external events, demands, results, observations, and the
+fault classes — live in `u`. The *private* types — request, state, terminal
+result, and the view — live in `w`.
+
+This is not generality for its own sake. `docs/PROCESS.md` §4 makes a flattened
+realization's private state the whole logical network of the plan it came from,
+so `flatten` produces a process whose `State` is strictly above the states it
+was built from. With one universe that shift would drag the demand and
+observation types up with it, and every demand-multiplicity and
+observation-projection theorem would need transporting through a lift. With the
+split, flattening moves `w` and leaves `u` alone, so those theorems transport by
+identity. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §2.2 records the decision.
+
 ## The one added field
 
 `TerminalDisposition` is not in the normative declaration. It is here because
@@ -41,7 +56,7 @@ can see that it did.
 
 namespace Grass.Process
 
-universe u
+universe u w
 
 /--
 The optional pure projection from process state to a desired view.
@@ -51,9 +66,9 @@ duplicated, coalesced, or discarded without changing platform resources or
 producing an observation." That is why `render` is a function into a plain type
 and not a relation into demands: a view that could emit is not a view.
 -/
-structure ViewFacet (State : Type u) : Type (u + 1) where
+structure ViewFacet (State : Type w) : Type (w + 1) where
   /-- The desired-state type this process projects. -/
-  View : Type u
+  View : Type w
   /-- The projection. Total and pure. -/
   render : State → View
 
@@ -78,19 +93,20 @@ inductive TerminalDemandDisposition
   | permittedPending
   deriving DecidableEq, Repr
 
+set_option linter.checkUnivs false in
 /--
 One process: its interface, its state, and its relational behavior.
 
 Extends `ProcessVocabulary`, so a `ProcessSpec` is a vocabulary plus a machine
 over it, and a child protocol registry can hold either.
 -/
-structure ProcessSpec : Type (u + 1) extends ProcessVocabulary.{u} where
+structure ProcessSpec : Type (max (u + 1) (w + 1)) extends ProcessVocabulary.{u} where
   /-- The parameter this process is started with. -/
-  Request : Type u
+  Request : Type w
   /-- Private local state. Not visible to a parent; see `docs/PROCESS.md` §3. -/
-  State : Type u
+  State : Type w
   /-- The typed value a terminal transition produces. -/
-  TerminalResult : Type u
+  TerminalResult : Type w
   /--
   The permitted initial configurations for a request: a state, the demands
   issued before any event arrives, and the observations emitted by starting.
@@ -124,7 +140,7 @@ structure ProcessSpec : Type (u + 1) extends ProcessVocabulary.{u} where
 
 namespace ProcessSpec
 
-variable (p : ProcessSpec.{u})
+variable (p : ProcessSpec.{u, w})
 
 /-- The event family of this process. -/
 abbrev Event := ProcessEvent p.toProcessVocabulary
@@ -137,6 +153,7 @@ abbrev Segment := ObservationSegment p.Observation
 
 end ProcessSpec
 
+set_option linter.checkUnivs false in
 /--
 The deterministic authoring convenience of `docs/PROCESS.md` §2.
 
@@ -145,13 +162,14 @@ relations. This is a constructor, not a second semantics: everything downstream
 consumes the derived `ProcessSpec`, and `deterministic_step_functional` below is
 the only extra fact it buys.
 -/
-structure DeterministicProcess (v : ProcessVocabulary.{u}) : Type (u + 1) where
+structure DeterministicProcess (v : ProcessVocabulary.{u}) :
+    Type (max (u + 1) (w + 1)) where
   /-- The parameter this process is started with. -/
-  Request : Type u
+  Request : Type w
   /-- Private local state. -/
-  State : Type u
+  State : Type w
   /-- The typed value produced on termination. -/
-  TerminalResult : Type u
+  TerminalResult : Type w
   /-- The unique initial configuration for a request. -/
   initial : Request → State × Bag v.Demand × ObservationSegment v.Observation
   /-- Whether this state is terminal for this request, and with what result. -/
@@ -167,10 +185,10 @@ structure DeterministicProcess (v : ProcessVocabulary.{u}) : Type (u + 1) where
 
 namespace DeterministicProcess
 
-variable {v : ProcessVocabulary.{u}} (d : DeterministicProcess v)
+variable {v : ProcessVocabulary.{u}} (d : DeterministicProcess.{u, w} v)
 
 /-- The relational process this deterministic description denotes. -/
-def toProcessSpec : ProcessSpec.{u} where
+def toProcessSpec : ProcessSpec.{u, w} where
   toProcessVocabulary := v
   Request := d.Request
   State := d.State

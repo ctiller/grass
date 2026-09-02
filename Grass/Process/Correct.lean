@@ -40,7 +40,7 @@ this layer must not construct one.
 
 namespace Grass.Process
 
-universe u
+universe u w
 
 /--
 The facts an application proves about one process.
@@ -51,8 +51,8 @@ and deterministic `update` simplification. A functional update proof normally
 reduces to initial invariant, invariant preservation, view correctness, and
 process progress."
 -/
-structure ProcessCorrect (p : ProcessSpec.{u}) (accept : ProcessAcceptance p) :
-    Type (u + 1) where
+structure ProcessCorrect (p : ProcessSpec.{u, w}) (accept : ProcessAcceptance p) :
+    Type (max (u + 1) (w + 1)) where
   /-- The application's own state invariant. Nothing lower-layer belongs here. -/
   Invariant : p.State → Prop
   /-- Every initial state satisfies it. -/
@@ -93,14 +93,14 @@ structure ProcessCorrect (p : ProcessSpec.{u}) (accept : ProcessAcceptance p) :
   Over prefixes, per `Grass/Process/Acceptance.lean`: this is the safety half.
   -/
   observationsAccept : ∀ (request : p.Request) (runState : ProcessRunState p request),
-    Reachable p request runState → accept.TraceAccepts runState.history.flat
+    Reachable p request runState → accept.TraceAccepts runState.history
   /-- The process meets its progress contract, for every request. -/
   progress : ∀ request : p.Request,
     MeetsProcessProgress p accept Invariant request
 
 namespace ProcessCorrect
 
-variable {p : ProcessSpec.{u}} {accept : ProcessAcceptance p}
+variable {p : ProcessSpec.{u, w}} {accept : ProcessAcceptance p}
   {request : p.Request}
 
 /--
@@ -135,7 +135,7 @@ and stating it here means the caller does not redo the induction.
 -/
 theorem terminalAccepts_of_reachable (correct : ProcessCorrect p accept)
     {state : p.State} {result : p.TerminalResult}
-    {observations : Segmented p.Observation}
+    {observations : Trace p.Observation}
     (reached : Reachable p request (.terminal state result observations))
     (isTerminal : p.Terminal request state result) :
     accept.TerminalAccepts request result :=

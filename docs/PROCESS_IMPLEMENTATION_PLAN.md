@@ -194,6 +194,18 @@ normative declaration. No `Finset` exists in Lean core, so the representation is
 a list under the same custody note as the bag; the *interface* is the normative
 one.
 
+**Decided — a run state carries the flat trace, not its segmentation.** An
+earlier draft put a `Segmented` history inside `ProcessRunState`. That was a law
+18 violation: `segments.length` is the number of transitions taken, so an
+acceptance relation handed a segmented history could distinguish one transition
+emitting two observations from two transitions emitting one each, which is
+provider batching and a replaceable realization fact. The segmentation and its
+origin theorems stay in `Grass/Process/Observation.lean` for the run-level
+causality bookkeeping that [PROCESS.md](PROCESS.md) §4 keeps out of the
+application proof, and the origin theorem is stated over an occurrence's
+*position* with a uniqueness half, because a statement about observation values
+would not identify a single emission.
+
 **Decided — `List` for step segments and for prefix histories; not for maximal
 runs.** [PROCESS.md](PROCESS.md) §2 writes `List Observation` for a step's
 segment, and that is genuinely finite. A `ProcessRunState` carries the history
@@ -205,17 +217,42 @@ proves no lemma by `List` induction over a maximal run, and leaves the maximal
 execution and its limit trace to `Grass.Semantics`. `ProcessAcceptance`'s trace
 field is stated over prefixes so it survives that arrival.
 
+**Decided — `ProcessSpec` has two universes and `ProtocolRegistry` three.**
+The interface types — external events, demands, results, observations, fault
+classes — live in one universe; the private types — request, state, terminal
+result, view — live in another; a registry's keys live in a third.
+
 **Decided — `ProtocolRegistry` is universe-polymorphic from M1.**
 [PROCESS.md](PROCESS.md) §4 makes a flattened realization's private state
 `LogicalProcessNetwork r.plan`, which ranges over every registered protocol's
 `State`, so `r.flatten` lives strictly above the registry that produced it, and
 `RegisteredProcess` demands an embedding of the old registry into the extended
 one across that shift. Freezing `protocol : Key -> ProcessSpec` at one universe
-in M1 would guarantee a rewrite of every registry value in M4. The registry's
-key type and its protocols therefore take independent universe parameters from
-the start, and M1 carries a fixture that registers a flattened process into an
-extended registry. This is risk 3 of the earlier draft, resolved rather than
-deferred.
+in M1 would guarantee a rewrite of every registry value in M4.
+
+The split has to reach inside `ProcessSpec` and not only the registry. With one
+universe parameter for all of a spec's types, moving a flattened process's
+private state up would drag its `Demand` and `Observation` up with it, and every
+demand-multiplicity and observation-projection theorem would then need
+transporting through a lift. With the split, flattening moves the private
+universe and leaves the interface universe alone, so those theorems transport by
+identity. M1 carries the fixture: two protocols sharing one interface universe,
+one of whose private state is built from the other's run states, registered
+together. This is risk 3 of the earlier draft, resolved rather than deferred.
+
+**Decided — a `PEmpty` fault or violation class is an assumption until M2
+discharges it.** Carrying `InterruptReason`, `LogicalFault`, and
+`EnvironmentViolation` per vocabulary (§10.6) moves an obligation rather than
+removing one. With a single global classification, "the network may deliver an
+environment violation to this process" is handled by every process by
+construction. With per-vocabulary classes, a process whose class is `PEmpty` has
+made the corresponding `NetworkTransition.environmentViolation` unconstructible
+rather than handled. That is sound only once the transition carries a total
+classification from the delivering side's classes into the receiving
+vocabulary's, exactly as `ChildDemandBinding.classify` does at a child boundary.
+That classification is an M2 exit item for `Network/Transition.lean`; until it
+exists, an empty class is an explicit assumption about the environment, and the
+source says so rather than implying the obligation is gone.
 
 ## 3. M1 — Author vocabulary freeze
 
@@ -238,11 +275,17 @@ Grass/Process/Nominal.lean      LogicalNominal, finite monotone history
 Grass/Process/Protocol/Registry.lean  ProtocolRegistry, open fragments, merge
 Grass/Process/Network/Boundary.lean   DriverBoundary, requirement sets
 Grass/Process/Sequential/Machine.lean SequentialMachine, SequentialDecision
-Grass/Process/Sequential/Direct.lean  DirectRelationalProgram
 ```
 
-`Sequential/Machine.lean` and `Sequential/Direct.lean` are in M1 by §1's test:
-they are what a serial author writes. Their *adapter* is M4.
+`Sequential/Machine.lean` is in M1 by §1's test: it is what a serial author
+writes, and its one theorem — that finitely many internal decisions reach a
+frontier — is provable from the author's own rank with nothing else in scope.
+
+`DirectRelationalProgram` is *not* in M1, despite an earlier draft placing it
+here. [PROCESS.md](PROCESS.md) §4 calls it the low-level escape hatch for
+genuinely relational sequential machines and says ordinary serial programs use
+`SequentialMachine`; its dependent effect-site inventory and child bindings need
+the occurrence machinery, so it moves to M4 with the adapter.
 
 ### 3.2 Why these and not more
 
@@ -272,13 +315,22 @@ M1 is not exited on a type-checking file. It is exited on a fixture corpus under
 - two equal-valued demands with distinct multiplicity, one resolved;
 - a result that consumes exactly one item and issues a new one;
 - an interruption consuming an item without a result;
-- a terminal state that classifies a nonempty remainder, and a terminal state
-  that provably cannot, because the specification permits no disposition;
+- a terminal state that classifies a nonempty remainder;
+- a terminal state that provably *cannot* be reached, because the specification
+  permits no disposition for a demand still outstanding — stated as the
+  non-existence of a classification, so the obstruction is unconstructibility
+  and not a missing proof;
+- a classification of a two-occurrence bag whose parts still count two, which is
+  what a value-indexed disposition function would have lost;
 - a zero-transition terminal run (the `ProcessRunInitial.terminal` case);
 - a deterministic `update` process and its relational image, with the theorem
   that the image's runs are exactly the function's;
-- a registry extended with a flattened protocol at a higher universe, with the
-  embedding of every prior key (the §2.2 stratification fixture).
+- two protocols sharing one interface universe, one of whose private state is
+  built from the other's run states, registered together with the embedding of
+  every prior key (the §2.2 stratification fixture).
+
+These are `Tests/Process/M1Fixtures.lean`, built by a `Tests` Lake library that
+is a default target, so a green build means they still hold.
 
 Each fixture states a theorem, not an `#eval`. [FOUNDATION.md](FOUNDATION.md)
 law 3 forbids an executed example standing in for a proof.
@@ -316,6 +368,9 @@ dischargeable in this milestone:
   constructor, over all twenty-three;
 - the escrow prefix laws — conservation, at-most-one resolution, and stability
   under unrelated steps — over that same full family;
+- a total classification from the delivering side's interrupt, fault, and
+  violation classes into each receiving vocabulary's, so that the `PEmpty` case
+  of §2.2 is discharged rather than assumed;
 - an explicit re-proof obligation, recorded rather than discharged, for the two
   facts that genuinely need later milestones: `insufficient_credit_disables_send`
   and `EveryNetworkStepHasExactCapacityTransitionLaw` need M5's credit ledger,
@@ -570,7 +625,25 @@ fault classes of unrelated subsystems — and [FOUNDATION.md](FOUNDATION.md) law
 forbids the `| other (name : String)` escape. Blocks: nothing; it is
 implemented, and needs ratification.
 
-### 10.7 A multiset is hand-rolled rather than taken from mathlib
+### 10.7 The spike sources must change with the deviations
+
+`Spikes/4_Web_Server/Process.lean` and `Spikes/5_Spinning_Cube/Process.lean`
+write `ProcessSpec` literals supplying ten fields. The deviations in §10.5 and
+§10.6 add four mandatory fields to every authored spec — `InterruptReason`,
+`LogicalFault`, `EnvironmentViolation`, and `TerminalDisposition` — so neither
+spike literal would elaborate against the declaration as implemented.
+[MODULES.md](MODULES.md) makes those files the golden author-surface test, and
+`check-spike-sources.ps1` compares them against the fenced blocks in
+[SPIKE_4.md](SPIKE_4.md) and [SPIKE_5.md](SPIKE_5.md) rather than against the
+library, so the existing gate will not catch it.
+
+The spike sources and their document blocks therefore move in lockstep with
+§10.5 and §10.6 when those are ratified. This plan does not change them
+unilaterally: they are shared review fixtures, and editing them before
+ratification would encode an unratified decision in the golden surface.
+Blocks: nothing yet; it is ratification's first consequence.
+
+### 10.8 A multiset is hand-rolled rather than taken from mathlib
 
 Recorded in §2.2. The decision is reversible and local: `Grass/Process/Bag.lean`
 is one module with a documented custody note, and adopting mathlib later is a

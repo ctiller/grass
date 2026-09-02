@@ -27,9 +27,9 @@ the other.
 `ConsumeExactlyOneMatching outstanding demand remainder` is *defined* as
 `outstanding = remainder.cons demand`. This is the whole content of "consumes
 exactly one live matching item". It is not an extra invariant checked alongside
-the transition: a `ProcessRunTransition.stepResult` cannot be formed at all
-without exhibiting the remainder, and `cons_injective_right` then says that
-remainder is unique. No proof obligation can be discharged by weakening it to
+the transition: the `ProcessRunTransition.settle` constructor cannot be applied
+at all without exhibiting the remainder, and `cons_injective_right` then says
+that remainder is unique. No proof obligation can be discharged by weakening it to
 membership, because membership is not what the constructor asks for.
 
 ## Custody note
@@ -37,15 +37,20 @@ membership, because membership is not what the constructor asks for.
 `Grass.Process` is not the owner of general collection types.
 `docs/MODULES.md` gives pure collections and their algebraic laws to
 `Grass.Std.Logical`, and `docs/PROCESS_IMPLEMENTATION_PLAN.md` §2.2 records this
-module as temporary custody: no multiset exists in Lean core or on any branch,
-and `ProcessSpec` cannot be stated without one.
+module as temporary custody, handed to `c-mem`: `ProcessSpec` cannot be stated
+without a multiset, and none exists in Lean core or on any current branch.
 
-The handover is designed to be a rename and a re-export. This module carries
-only the operations and laws the process layer consumes, and it carries no
+`Bag α := Quotient (List.isSetoid α)` is also mathlib's definition of
+`Multiset`, and `docs/MODULES.md` permits mathlib. Hand-rolling is therefore a
+choice, recorded in `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.7: `lakefile.toml`
+carries no dependencies, `docs/FOUNDATION.md` §3 puts every selected dependency
+into the TCB and build ledgers, and that is a repository-wide decision for a
+reviewed change rather than for this module.
+
+The handover is designed to be a rename and a re-export. This module carries no
 process vocabulary — nothing here mentions a demand, an occurrence, or a
-transition. The process-specific reading of these laws (that they are what
-forbids fabrication, duplication, joint consumption, and loss) lives at the use
-sites in `Grass/Process/Run.lean`, not here.
+transition — and the process-specific reading of these laws lives at the use
+sites in `Grass/Process/Run.lean`.
 -/
 
 namespace Grass.Process
@@ -67,8 +72,6 @@ variable {α : Type u} {β : Type v}
 
 /-- The multiset containing exactly the elements of `elements`, in any order. -/
 def ofList (elements : List α) : Bag α := Quotient.mk (List.isSetoid α) elements
-
-instance : Coe (List α) (Bag α) := ⟨ofList⟩
 
 /-- The empty multiset. Written `0`; it is the unit of `+`. -/
 protected def empty : Bag α := ofList []
@@ -92,8 +95,10 @@ protected def append (left right : Bag α) : Bag α :=
     (fun _ _ _ _ leftEquivalent rightEquivalent =>
       Quotient.sound (leftEquivalent.append rightEquivalent))
 
+-- `+` only. An `Append` instance would give the same function a second head,
+-- and every law below is stated with `+`, so a `++` goal would be unreachable
+-- for `simp`. `docs/PROCESS.md` §2 writes the run's bag composition with `+`.
 instance : Add (Bag α) := ⟨Bag.append⟩
-instance : Append (Bag α) := ⟨Bag.append⟩
 
 /--
 Membership. `element ∈ bag` says the multiplicity of `element` is at least one;
@@ -137,7 +142,9 @@ that fact is used; everything below goes through `Quotient.inductionOn` and then
 @[simp] theorem mem_ofList {element : α} {elements : List α} :
     element ∈ ofList elements ↔ element ∈ elements := Iff.rfl
 
-@[simp] theorem singleton_eq (element : α) :
+-- Deliberately not `@[simp]`. With `ofList_cons` and `ofList_nil` it would
+-- rewrite `{x}` to `cons x 0`, which `cons_eq_singleton_add` rewrites back.
+theorem singleton_eq (element : α) :
     ({element} : Bag α) = ofList [element] := rfl
 
 end Reduction
@@ -217,6 +224,8 @@ theorem add_cons (element : α) (a b : Bag α) :
 
 end Algebra
 
+
+
 section Consumption
 
 /--
@@ -284,7 +293,7 @@ An element can be consumed exactly when it is present. The forward direction is
 `ConsumeExactlyOneMatching.mem`; the reverse is what lets a specification say
 "there is an outstanding `d`" and obtain the transition.
 -/
-theorem consume_iff_mem [BEq α] [LawfulBEq α] {outstanding : Bag α} {element : α} :
+theorem consume_iff_mem {outstanding : Bag α} {element : α} :
     (∃ remainder, ConsumeExactlyOneMatching outstanding element remainder) ↔
       element ∈ outstanding := by
   constructor
@@ -292,10 +301,63 @@ theorem consume_iff_mem [BEq α] [LawfulBEq α] {outstanding : Bag α} {element 
   · induction outstanding using Quotient.inductionOn with
     | _ elements =>
       intro member
-      exact ⟨ofList (elements.erase element),
-        Quotient.sound (List.perm_cons_erase member)⟩
+      obtain ⟨before, after, split⟩ := List.append_of_mem member
+      subst split
+      exact ⟨ofList (before ++ after), Quotient.sound List.perm_middle⟩
 
 end Consumption
+
+section Map
+
+/-!
+`map` is used where one demand vocabulary is embedded in another: a child
+protocol's demands re-expressed in a parent's, and a boundary projection. These
+five laws are what such a transport needs; the sixth fact it needs — that an
+injective map reflects `ConsumeExactlyOneMatching` — is `map_consume` below.
+-/
+
+@[simp] theorem map_ofList (f : α → β) (elements : List α) :
+    map f (ofList elements) = ofList (elements.map f) := rfl
+
+@[simp] theorem map_zero (f : α → β) : map f (0 : Bag α) = 0 := rfl
+
+@[simp] theorem map_cons (f : α → β) (element : α) (rest : Bag α) :
+    map f (cons element rest) = cons (f element) (map f rest) := by
+  induction rest using Quotient.inductionOn with
+  | _ elements => rfl
+
+@[simp] theorem map_add (f : α → β) (left right : Bag α) :
+    map f (left + right) = map f left + map f right := by
+  induction left using Quotient.inductionOn with
+  | _ x =>
+    induction right using Quotient.inductionOn with
+    | _ y => exact congrArg ofList List.map_append
+
+@[simp] theorem card_map (f : α → β) (bag : Bag α) :
+    card (map f bag) = card bag := by
+  induction bag using Quotient.inductionOn with
+  | _ elements => exact List.length_map ..
+
+@[simp] theorem mem_map {f : α → β} {element : β} {bag : Bag α} :
+    element ∈ map f bag ↔ ∃ source ∈ bag, f source = element := by
+  induction bag using Quotient.inductionOn with
+  | _ elements => exact List.mem_map
+
+/--
+A transported consumption is a consumption.
+
+This is the direction a child-to-parent demand embedding needs: if the child
+consumed exactly one occurrence, so did its image in the parent's vocabulary.
+The converse needs `f` injective and is not stated until a use site needs it.
+-/
+theorem map_consume (f : α → β) {outstanding : Bag α} {element : α}
+    {remainder : Bag α}
+    (consume : ConsumeExactlyOneMatching outstanding element remainder) :
+    ConsumeExactlyOneMatching (map f outstanding) (f element) (map f remainder) := by
+  unfold ConsumeExactlyOneMatching at consume ⊢
+  rw [consume, map_cons]
+
+end Map
 
 end Bag
 
