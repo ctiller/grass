@@ -13,6 +13,26 @@ state a law about memory alone.
 `applyAccess` is that function. It is total, it is executable, and the laws below
 are equations over it rather than statements about a transition's branches.
 
+## How this relates to `step`, exactly
+
+`applyAccess` is **not** what the transition relation calls. `Grass/Op/Step.lean`
+has its own `performAccess`, which does event minting and ledger work `applyAccess`
+knows nothing about, and it is `step` that a program runs through.
+
+What ties them is `MemoryState.commit`: both write memory through it and through
+nothing else. So the framing results here are results about the transition, and
+`Op.performAccess_frames_untouched` and `Op.runAccesses_frames_untouched` are
+those results stated for `step` directly.
+
+This is spelled out because an earlier version of this comment claimed
+`applyAccess` had been *factored out of* `performAccess` when it had been written
+alongside it — two write paths, framing proved about one, prose implying it
+covered both. Review found it. `commit` is the repair.
+
+What is still true and worth saying plainly: a straight-line argument over
+`runBlock` is an argument about `applyAccess`, not about `step`. The two agree on
+memory, and nothing yet proves they agree on the trace.
+
 ## What it does not decide
 
 Authority beyond what an allocation record means. `denialOf` checks liveness,
@@ -105,6 +125,56 @@ def observedBytes (state : MemoryState) (d : AccessDescriptor)
     | Option.none => indeterminate i
 
 /--
+Commit an access's written bytes to memory.
+
+**The single write path.** `Grass/Op/Step.lean`'s `performAccess` and
+`applyAccess` below both go through this, so the framing laws stated here are
+laws about the transition and not about a parallel implementation that happens to
+agree. An earlier arrangement had the two writing memory separately, which is the
+same two-sources-of-truth defect this branch removed from `AllocationRecord`, and
+review found it.
+
+`none` means the access wrote nothing, which is not the same as writing zero
+bytes: a read commits no write at all.
+-/
+def MemoryState.commit (state : MemoryState) (d : AccessDescriptor)
+    (written : Option ByteSeq) : MemoryState :=
+  match written with
+  | Option.none => state
+  | some bytes => state.write d.provenance.root d.range.start bytes d.producesInitialized
+
+/-- `WrittenFits d written` bounds committed bytes by the range the access
+declared. `Committed.writtenFits` is where the transition gets it; `applyAccess`
+gets it by truncating. Without it a commit could write past the declared range
+and every framing argument stated over `d.range` would be false. -/
+def WrittenFits (d : AccessDescriptor) (written : Option ByteSeq) : Prop :=
+  ∀ bytes, written = some bytes → bytes.length ≤ d.range.size
+
+/--
+**A commit frames every cell the access did not declare.**
+
+The law both write paths inherit. Stated over the *declared* range, which is what
+a caller reads off a descriptor, and sound because `WrittenFits` bounds what was
+actually written by it.
+-/
+theorem cellAt?_commit_of_untouched (state : MemoryState) (d : AccessDescriptor)
+    {written : Option ByteSeq} (hfits : WrittenFits d written) {id : AllocId} {offset : Nat}
+    (h : ¬ (d.provenance.root = id ∧ d.range.Covers offset)) :
+    (state.commit d written).cellAt? id offset = state.cellAt? id offset := by
+  unfold MemoryState.commit
+  cases hw : written with
+  | none => rfl
+  | some bytes =>
+    refine MemoryState.cellAt?_write_of_not_covers state d.provenance.root ?_
+    by_cases hid : id = d.provenance.root
+    · subst hid
+      refine Or.inr fun hin => h ⟨rfl, ?_⟩
+      have hlen := hfits bytes hw
+      simp only [ByteRange.covers_def] at hin ⊢
+      omega
+    · exact Or.inl hid
+
+/--
 Apply one access to memory.
 
 Total: every descriptor and every state produce a result. Refusal returns the
@@ -119,10 +189,8 @@ def applyAccess (state : MemoryState) (d : AccessDescriptor) (writeData : ByteSe
             if d.intent.reads then some (observedBytes state d indeterminate)
             else Option.none
           refusal := Option.none }
-      , if d.intent.writes then
-          state.write d.provenance.root d.range.start (writeData.take d.range.size)
-            d.producesInitialized
-        else state )
+      , state.commit d (if d.intent.writes then some (writeData.take d.range.size)
+                        else Option.none) )
 
 /-! ## The laws
 
@@ -171,7 +239,7 @@ theorem applyAccess_state (state : MemoryState) (d : AccessDescriptor)
         state.write d.provenance.root d.range.start (writeData.take d.range.size)
           d.producesInitialized
       else state := by
-  unfold applyAccess
+  unfold applyAccess MemoryState.commit
   cases hden : denialOf state d with
   | some c => simp
   | none => by_cases hw : d.intent.writes = true <;> simp [hw]
@@ -295,10 +363,18 @@ through: the byte store is a journal, so the two orders leave `runs` in differen
 orders and no proof could make those states equal. Every argument downstream
 reads memory through `byteAt?`, which is exactly what agrees.
 
-Both halves are needed and neither is decorative. `denialOf_applyAccess_of_disjoint`
-says the *decision* is stable — without it one order could refuse what the other
-committed, and no fact about bytes would rescue that. `MemoryState.write_comm`
-says the bytes agree once both commit.
+Read the conclusion precisely: it is about the resulting *state*, not about the
+`AccessResult`s. Decision stability is a proof ingredient rather than part of what
+is concluded — `denialOf_applyAccess_of_disjoint` is needed because without it one
+order could refuse what the other committed and no fact about bytes would rescue
+that, but the theorem does not itself state that neither order refuses.
+`observedBytes_congr` is the piece a caller needs to carry an observation across;
+result-level commutation is not proved here and is recorded as owed in
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2.
+
+Both accesses must lie in one allocation, which `hroot` requires. Two accesses in
+*different* allocations also commute, and `denialOf_write_of_other_allocation` is
+the decision half of that, but the theorem is not stated.
 -/
 theorem applyAccess_comm (state : MemoryState) (dA dB : AccessDescriptor)
     (writeA writeB : ByteSeq) (indetA indetB : Nat → Byte)
@@ -328,6 +404,19 @@ theorem applyAccess_comm (state : MemoryState) (dA dB : AccessDescriptor)
       exact MemoryState.AgreesOn.refl _
     · simp only [if_neg hA, if_neg hB]
       exact MemoryState.AgreesOn.refl _
+
+/-- Two states agreeing over an access's range give it the same observation. The
+lemma a caller uses to carry a read across a write it has framed. -/
+theorem observedBytes_congr {a b : MemoryState} (d : AccessDescriptor)
+    (indeterminate : Nat → Byte)
+    (h : ∀ offset, offset < d.range.size →
+      a.byteAt? d.provenance.root (d.range.start + offset) =
+        b.byteAt? d.provenance.root (d.range.start + offset)) :
+    observedBytes a d indeterminate = observedBytes b d indeterminate := by
+  unfold observedBytes
+  refine List.map_congr_left fun i hi => ?_
+  rw [List.mem_range] at hi
+  rw [h i hi]
 
 /-! ## Straight-line blocks
 

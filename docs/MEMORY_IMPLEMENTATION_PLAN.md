@@ -466,9 +466,13 @@ connected to memory.
 
 Three of the four files above exist, under different names than the sketch.
 
-`Grass/Memory/Addressing.lean` is the bridge. `addressOf` places an offset in an
-allocation based at a `MachineAddress`, and `disjoint_ranges_do_not_alias` is the
-lemma the section above records as owed. It is conditioned on `FitsAllocation`:
+`Grass/Memory/Addressing.lean` proves the bridge arithmetic. `addressOf` places an
+offset in an allocation based at a `MachineAddress`, and
+`disjoint_ranges_do_not_alias` is the lemma the section above records as owed.
+**It is not wired up**, and the section above's debt is therefore not discharged:
+`AllocationRecord` carries no base address, so nothing below can be instantiated
+for a state the model can build. §4.2 records the wiring as owed and says why it
+is a design question rather than an oversight. It is conditioned on `FitsAllocation`:
 the allocation's own bytes do not wrap. That is not a convenience — an allocation
 whose last byte wraps past `2^64` has two offsets at one address, so no
 disjointness argument about it could be sound, and a profile admitting one has
@@ -509,10 +513,19 @@ plausible number.
 
 `Grass/Memory/Apply.lean` is `applyAccess`, total and executable, with the laws
 stated as equations over it rather than as claims about a transition's branches.
+It is not what `Grass/Op/Step.lean` calls — `performAccess` remains the
+transition's own path — but both write memory through `MemoryState.commit` and
+nothing else, so the framing results are results about the transition.
+`Op.performAccess_frames_untouched` and `Op.runAccesses_frames_untouched` state
+them for `step` directly. An earlier version of this section said `applyAccess`
+had been factored out of `performAccess`; it had been written alongside it, with
+two write paths and framing proved about one. Review found it and `commit` is the
+repair.
 `applyAccess_refused_preserves_state` is §4's first required law.
 `applyAccess_frames_other_allocation` and `applyAccess_frames_disjoint_range` are
 the framing half of "reads and writes to disjoint ranges commute and frame";
-`applyAccess_comm` is the commutation half.
+`applyAccess_comm` is the commutation half — for two accesses within one
+allocation, and about the resulting state rather than about the results.
 
 Commutation is stated as `MemoryState.AgreesOn` — agreement at every offset — and
 not as state equality. That is forced rather than chosen: a journal records two
@@ -546,8 +559,9 @@ launder an `uninitializedRead` that `denialOf` catches on the raw bytes.
 The converse half is proved too — `byteAt?_writeField` for
 [STDLIB.md](STDLIB.md)'s serialization law and `initializedAt_writeField` for the
 field's own bytes — so the two together partition the aggregate rather than making
-a one-sided claim. `Tests/Memory/Padding.lean` runs both over a struct that pads
-for a real reason: a one-byte field followed by a four-byte field its alignment
+a one-sided claim. `Tests/Memory/Padding.lean` applies both, and
+`cellAt?_writeField_of_other_field` besides, over a struct that pads for a real
+reason: a one-byte field followed by a four-byte field its alignment
 puts at offset four. Padding there holds no byte at all, not merely an
 uninitialized one, so a store that quietly zero-filled the gap would fail even if
 it kept the initialization flags right.
@@ -574,8 +588,10 @@ supposed to do. There the state is universally quantified, the data arbitrary,
 and every proof a single application of a named exported theorem. One local
 declaration exists and is a wrapper, not content.
 
-`Tests/Memory/Spike1Block.lean` runs that discharge on the actual instruction
-mix: `mov transferred, 0`, then the two accesses inside
+`Tests/Memory/Spike1Block.lean` runs that discharge on the Spike 1 descriptors.
+It runs `runBlock`, the memory-level executor, and not `Op.step`; the framing
+carries because both write through `MemoryState.commit`, but the sequence executed
+is not literally the one the machine executes. The instructions are: `mov transferred, 0`, then the two accesses inside
 `call [rip + __imp_WriteFile]`, then `mov eax, transferred`. The claim the
 spike's correctness argument turns on is that the reload observes what the store
 wrote, and the `call` in between reads a different allocation and writes a part of
@@ -602,6 +618,29 @@ in the observation and never reaches memory, so a profile choosing differently
 changes what a program sees and never what it leaves behind.
 
 ### 4.2 What M2 still owes
+
+Recorded rather than implied, and expanded after an adversarial review that found
+three of these stated as done.
+
+- **Wiring `Addressing.lean` to `MemoryState`.** `AllocationRecord` has no base
+  address, so `addressOf`, `FitsAllocation`, and `disjoint_ranges_do_not_alias`
+  cannot be instantiated for any state the model builds. This is a design
+  question, not a missing line: [MEMORY_MODEL.md](MEMORY_MODEL.md) §2 makes
+  provenance rather than address the authority, and a logical address space has
+  allocations with no machine address at all, so a base must be optional and
+  per-space. Until it is wired, the offset-to-address debt
+  [Range.lean](../Grass/Memory/Range.lean) records is *not* discharged.
+- **Result-level commutation.** `applyAccess_comm` concludes about the resulting
+  state only. That neither order refuses what the other commits, and that a read
+  observes the same bytes either way, are both true and neither is stated;
+  `observedBytes_congr` is the piece a caller would build them from.
+- **Cross-allocation commutation.** `applyAccess_comm` requires both accesses in
+  one allocation. `denialOf_write_of_other_allocation` is the decision half of the
+  cross-allocation case; the theorem is not stated.
+- **Trace agreement between `runBlock` and `step`.** They agree on memory, through
+  `MemoryState.commit`. Nothing proves they agree on the recorded trace, so a
+  straight-line argument over `runBlock` is an argument about memory and not about
+  what a program's event log says.
 
 - Compaction for the byte store, per §4.1.
 

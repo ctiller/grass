@@ -7,9 +7,18 @@ import Tests.Memory.Spike1Reference
 `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4's exit criterion names a straight-line
 Spike 1 block. `Tests/Memory/StraightLineBlock.lean` proves the discharge is
 general — universally quantified state, arbitrary data, every step a single
-application of an exported theorem. This file runs that discharge on the actual
-instruction mix, using the descriptors `Tests/Memory/Spike1Reference.lean`
-declares for `Spikes/1_Hello_World/Program.lean`.
+application of an exported theorem. This file runs that discharge on the
+descriptors `Tests/Memory/Spike1Reference.lean` declares for
+`Spikes/1_Hello_World/Program.lean`.
+
+**What this does not do.** It runs `Grass.Memory.runBlock`, which is a memory-level
+executor over `applyAccess`. It does not run `Grass.Op.step`, and
+`Spike1Reference.lean` wraps these same descriptors in `SubstepSequence`s for
+`step` rather than as the list used here. The two write memory through the same
+`MemoryState.commit`, so the framing carries — `Op.runAccesses_frames_untouched`
+is the same law stated for the transition — but the sequence executed below is
+not literally the one the machine executes. An earlier version of this comment
+said it was; review corrected it.
 
 The block is the one the spike's correctness argument turns on:
 

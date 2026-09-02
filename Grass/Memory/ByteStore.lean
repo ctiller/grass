@@ -24,11 +24,24 @@ split rather than an argument about maintained sortedness.
 
 The cost is that a read scans runs, so a long-running program's reads degrade.
 That is a real cost and it is **not** paid off here. What makes it acceptable is
-that every lemma below is stated over `byteAt?` rather than over `runs`: a
-compacting store that agrees pointwise satisfies all of them unchanged, and
-`docs/OLEAN_SHARDING.md` §1 asks for exactly that — facts crossing the boundary as
-exported theorems rather than as a representation consumers unfold. Compaction is
-owed, and is recorded as owed in `docs/MEMORY_IMPLEMENTATION_PLAN.md`.
+that the representation does not escape: `runs`, `Run`, and every lemma mentioning
+either are `private`, so the exported surface is `cellAt?`, `byteAt?`,
+`InitializedAt`, `Initialized`, `empty`, `write`, and theorems over those. A
+compacting store agreeing pointwise satisfies every exported theorem unchanged,
+and `docs/OLEAN_SHARDING.md` §1 asks for exactly that — facts crossing the
+boundary as exported theorems rather than as a representation consumers unfold.
+Compaction is owed, and is recorded as owed in
+`docs/MEMORY_IMPLEMENTATION_PLAN.md`.
+
+That is a claim about the *exported* lemmas, and it was not true when it was
+first written: `cellAt?_write` and three `Run` lemmas were public and stated over
+the representation, so a compacting store could not have satisfied them. Review
+found it. They are private now, which is what makes the sentence above hold by
+construction rather than by intention.
+
+The exported lemmas are stated over `cellAt?` rather than `byteAt?`, and that
+matters: framing over values alone would let a non-initializing write outside a
+range change whether a byte inside it counted as initialized.
 
 ## Initialization is a consequence, not a field
 
@@ -55,8 +68,13 @@ namespace Grass.Memory
 
 open Grass.Std.Logical
 
-/-- One contiguous run of bytes at an offset. -/
-structure Run where
+/-- One contiguous run of bytes at an offset.
+
+Representation. `ByteStore.runs` is private and every lemma about `Run` below is
+private, so nothing outside this module can mention a run — which is what makes
+the module comment's claim about a compacting store true by construction rather
+than by discipline. -/
+private structure Run where
   /-- The offset of the run's first byte. -/
   start : Nat
   /-- The bytes, in order. -/
@@ -70,17 +88,17 @@ deriving DecidableEq, Repr
 namespace Run
 
 /-- The byte this run holds at `offset`, if it covers it. -/
-def byteAt? (run : Run) (offset : Nat) : Option Byte :=
+private def byteAt? (run : Run) (offset : Nat) : Option Byte :=
   if run.start ≤ offset then run.bytes[offset - run.start]? else Option.none
 
 /-- The range this run covers. -/
-def range (run : Run) : ByteRange := ⟨run.start, run.bytes.length⟩
+private def range (run : Run) : ByteRange := ⟨run.start, run.bytes.length⟩
 
-@[simp] theorem byteAt?_of_lt {run : Run} {offset : Nat} (h : offset < run.start) :
+@[simp] private theorem byteAt?_of_lt {run : Run} {offset : Nat} (h : offset < run.start) :
     run.byteAt? offset = Option.none := by simp [byteAt?, Nat.not_le.mpr h]
 
 /-- A run holds nothing past its end. -/
-@[simp] theorem byteAt?_of_ge {run : Run} {offset : Nat}
+@[simp] private theorem byteAt?_of_ge {run : Run} {offset : Nat}
     (h : run.start + run.bytes.length ≤ offset) : run.byteAt? offset = Option.none := by
   simp only [byteAt?]
   split
@@ -88,7 +106,7 @@ def range (run : Run) : ByteRange := ⟨run.start, run.bytes.length⟩
   · rfl
 
 /-- A run holds a byte exactly where its range covers. -/
-theorem byteAt?_isSome_iff {run : Run} {offset : Nat} :
+private theorem byteAt?_isSome_iff {run : Run} {offset : Nat} :
     (run.byteAt? offset).isSome ↔ run.range.Covers offset := by
   simp only [byteAt?, range, ByteRange.covers_def]
   by_cases hlow : run.start ≤ offset
@@ -116,8 +134,9 @@ The runs are a journal, newest first; see the module comment. Consumers should
 reason through `byteAt?` and the lemmas below rather than through `runs`.
 -/
 structure ByteStore where
-  /-- Write runs, most recent first. -/
-  runs : List Run
+  private mk ::
+  /-- Write runs, most recent first. Private: see `Run`. -/
+  private runs : List Run
 deriving DecidableEq, Repr
 
 namespace ByteStore
@@ -227,7 +246,7 @@ theorem not_initialized_empty {range : ByteRange} (h : ¬ range.IsEmpty) :
   intro offset hcov
   exact absurd hcov (by simp)
 
-theorem cellAt?_write (store : ByteStore) (start : Nat) (bytes : ByteSeq)
+private theorem cellAt?_write (store : ByteStore) (start : Nat) (bytes : ByteSeq)
     (initializes : Bool) (offset : Nat) :
     (store.write start bytes initializes).cellAt? offset =
       (((Run.mk start bytes initializes).byteAt? offset).map (·, initializes)).or

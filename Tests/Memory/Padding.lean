@@ -37,7 +37,9 @@ def fieldB : FieldFootprint := ⟨⟨"b"⟩, ⟨4, 4⟩⟩
 /-- The aggregate: two fields, eight bytes, three of them padding. -/
 def layout : Footprint := ⟨[fieldA, fieldB], ⟨0, 8⟩⟩
 
-/-- The footprint is well formed, so the framing theorems apply to it. -/
+/-- The footprint is well formed. Used by `writing_a_returns_b_untouched`, which
+is the theorem that takes a `WellFormed` hypothesis; the padding theorems
+deliberately do not need one. -/
 theorem layout_wellFormed : layout.WellFormed where
   namesUnique := by decide
   fieldsDisjoint := by decide
@@ -59,10 +61,12 @@ def epoch : EpochId := (FreshSupply.initial (Tag := EpochTag)).fresh.1
 /-- An eight-byte allocation holding nothing. Every byte starts uninitialized,
 which is the state a fresh allocation is actually in — `docs/MEMORY_MODEL.md` §4
 does not hand out zeros. -/
-def state₀ : MemoryState :=
-  MemoryState.empty.allocate alloc
-    { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
-      permission := .readWrite, live := true, bytes := .empty }
+def stackRecord₀ : AllocationRecord :=
+  { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
+    permission := .readWrite, live := true, bytes := .empty }
+
+/-- The state before anything is written. -/
+def state₀ : MemoryState := MemoryState.empty.allocate alloc stackRecord₀
 
 /-- Writing both fields, with data of exactly each field's width. -/
 def writes : List (FieldFootprint × ByteSeq) :=
@@ -91,12 +95,38 @@ theorem padding_bytes_are_uninitialized :
     ¬ state₁.InitializedAt alloc 3 := by decide
 
 /-- The field bytes, by contrast, are initialized — so the theorem above is about
-padding rather than about nothing having been written. -/
-theorem field_bytes_are_initialized :
-    state₁.RangeInitialized alloc fieldA.range ∧
-    state₁.RangeInitialized alloc fieldB.range := by decide
+padding rather than about nothing having been written.
 
-/-- And they read back what was written. -/
+By `initializedAt_writeField` rather than by `decide`: an earlier version decided
+it, which would have proved the arithmetic and left the theorem unused. -/
+theorem field_a_is_initialized :
+    (state₀.writeField alloc 0 fieldA [0xAA]).InitializedAt alloc (0 + fieldA.range.start + 0) :=
+  MemoryState.initializedAt_writeField state₀ 0 (record := stackRecord₀) (by decide)
+    (by decide) (by decide)
+
+/-- And a field reads back what was written to it, by `byteAt?_writeField`. This
+is `docs/STDLIB.md`'s serialization law instantiated here. -/
+theorem field_a_reads_back :
+    (state₀.writeField alloc 0 fieldA [0xAA]).byteAt? alloc (0 + fieldA.range.start + 0)
+      = some 0xAA :=
+  MemoryState.byteAt?_writeField state₀ 0 (record := stackRecord₀) (by decide)
+    (by decide) (by decide)
+
+/--
+**Writing `a` leaves `b` untouched**, by `cellAt?_writeField_of_other_field`.
+
+The theorem that consumes `layout_wellFormed`: field disjointness comes from the
+footprint being well formed rather than from a hypothesis supplied here.
+-/
+theorem writing_a_returns_b_untouched (bytes : ByteSeq) (offset : Nat)
+    (hcov : fieldB.range.Covers offset) :
+    (state₀.writeField alloc 0 fieldA bytes).cellAt? alloc (0 + offset) =
+      state₀.cellAt? alloc (0 + offset) :=
+  MemoryState.cellAt?_writeField_of_other_field layout_wellFormed state₀ alloc 0
+    (by decide) (by decide) (by decide) hcov
+
+/-- Both fields still read back after both writes, which is the whole-struct
+version of the two field theorems above. -/
 theorem fields_read_back :
     state₁.byteAt? alloc 0 = some 0xAA ∧ state₁.byteAt? alloc 4 = some 0xBB ∧
     state₁.byteAt? alloc 7 = some 0xBB := by decide

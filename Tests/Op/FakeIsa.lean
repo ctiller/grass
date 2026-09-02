@@ -451,8 +451,10 @@ def storedBytes : MachineState → AccessDescriptor → ByteSeq :=
   fun _ d => List.replicate d.range.size 0xAB
 
 /-- What an indeterminate read would observe. No theorem below depends on its
-value: every allocation here starts fully initialized, so `denialOf` refuses an
-uninitialized read before the oracle is consulted. It is supplied because
+value, but not for the reason an earlier version of this comment gave: every
+allocation here starts fully initialized, so `byteAt?` never returns `none` and
+the oracle never reaches this function at all. Nothing about denial ordering is
+involved, and review corrected the claim. It is supplied because
 `Oracle.ofMemory` requires it rather than defaulting it. -/
 def indeterminateByte : MachineState → (d : AccessDescriptor) → Nat → Byte :=
   fun _ _ _ => 0xEE

@@ -12,9 +12,17 @@ creates —
 > `Nat` disjointness does not by itself imply non-aliasing of the corresponding
 > machine addresses.
 
-— and names `WithinBound` as the predicate that pays it. This module is the
-payment. Without it, every framing lemma in the memory layer proves something
-about offsets that nothing connects to memory.
+— and names `WithinBound` as the predicate that pays it.
+
+This module proves the arithmetic that debt needs. It does **not** yet discharge
+it, and review corrected an earlier comment here that said it did.
+`AllocationRecord` carries no base address, so there is no function from a
+`MemoryState` allocation to a `MachineAddress` and nothing below can be
+instantiated for a state the model can build. Wiring it is a design question
+rather than an oversight: `docs/MEMORY_MODEL.md` §2 makes provenance rather than
+address the authority, and a logical address space has allocations with no machine
+address at all, so a base would have to be optional and per-space.
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records it as owed.
 
 The condition is `FitsAllocation`: the allocation's own bytes do not wrap the
 address space. That is not a modelling convenience. An allocation whose last byte

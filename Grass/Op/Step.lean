@@ -548,21 +548,20 @@ def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescri
               { state with
                 eventSupply := state.eventSupply.fresh.2
                 events := state.events ++ [valid]
-                -- The bytes the write actually completed, not the bytes it
-                -- asked for. `Committed.writtenFits` bounds them by the range,
-                -- and `docs/MEMORY_MODEL.md` §4 credits initialization only to
-                -- the bytes a write completes. `producesInitialized` rides along
-                -- rather than gating the write, because a non-initializing write
-                -- still changes the values it wrote.
+                -- Through `MemoryState.commit`, which is also what
+                -- `Grass/Memory/Apply.lean`'s `applyAccess` writes through, so
+                -- the framing laws proved there are laws about this transition
+                -- rather than about a parallel implementation. An earlier
+                -- version wrote memory here directly and review found it.
+                --
+                -- The bytes are the ones the write actually completed, not the
+                -- ones it asked for: `Committed.writtenFits` bounds them by the
+                -- range, and `docs/MEMORY_MODEL.md` §4 credits initialization
+                -- only to the bytes a write completes. `producesInitialized`
+                -- rides along rather than gating the write, because a
+                -- non-initializing write still changes the values it wrote.
                 memory :=
-                  match outcome.committed? with
-                  | some c =>
-                      match c.written with
-                      | some bytes =>
-                          state.memory.write d.provenance.root d.range.start bytes
-                            d.producesInitialized
-                      | Option.none => state.memory
-                  | Option.none => state.memory
+                  state.memory.commit d (outcome.committed?.bind Committed.written)
                 obligations := applyLedgerEffect state.obligations d.ledgerEffect }
 
 /--
@@ -882,6 +881,72 @@ theorem runStep_extends_violations (policy : StepPolicy) (state : MachineState)
           (performAccess_extends_violations _ _ _ _ _ _)
       · exact runAccesses_extends_violations _ _ _ _ _
 
+/-! ## The memory framing laws apply to this transition
+
+`Grass/Memory/Apply.lean` proves framing over `MemoryState.commit`. Because
+`performAccess` writes through `commit` and nothing else, those laws are laws
+about `step`. These theorems are the statement of that, and they exist because
+review found the earlier arrangement — two write paths, framing proved about one
+of them, and prose claiming it covered both. -/
+
+/--
+**Performing an access frames every cell it did not declare.**
+
+`Committed.writtenFits` supplies the bound `Grass.Memory.WrittenFits` wants, so
+the transition satisfies the hypothesis by construction rather than by a caller
+promising it.
+-/
+theorem performAccess_frames_untouched (policy : StepPolicy) (state : MachineState)
+    (d : AccessDescriptor) (outcome : AccessOutcome d) (contextKind : ContextKind)
+    (cause : EventCause) {id : AllocId} {offset : Nat}
+    (h : ¬ (d.provenance.root = id ∧ d.range.Covers offset)) :
+    (performAccess policy state d outcome contextKind cause).memory.cellAt? id offset =
+      state.memory.cellAt? id offset := by
+  unfold performAccess
+  repeat' split
+  all_goals
+    first
+      | rfl
+      | exact Grass.Memory.cellAt?_commit_of_untouched state.memory d
+          (fun bytes hb => by
+            cases hc : outcome.committed? with
+            | none => rw [hc] at hb; exact absurd hb (by simp)
+            | some c =>
+              rw [hc] at hb
+              simp only [Option.bind_some] at hb
+              exact c.writtenFits bytes hb) h
+
+/--
+**A whole run of accesses frames every cell none of them declared.**
+
+The form a straight-line argument over `step` uses. `runAccesses` stops at the
+first refusal, and this holds whether it ran to the end or stopped early, because
+every branch either performs an access or returns the state.
+-/
+theorem runAccesses_frames_untouched (policy : StepPolicy) {id : AllocId} {offset : Nat} :
+    ∀ (accesses : List AccessDescriptor) (state : MachineState) (contextKind : ContextKind)
+      (cause : EventCause),
+      (∀ d ∈ accesses, ¬ (d.provenance.root = id ∧ d.range.Covers offset)) →
+      (runAccesses policy state accesses contextKind cause).memory.cellAt? id offset =
+        state.memory.cellAt? id offset
+  | [], _, _, _, _ => rfl
+  | d :: rest, state, contextKind, cause, hall => by
+    have hhead := performAccess_frames_untouched policy state d
+      (AccessOutcome.completed (policy.oracle.answer state d)) contextKind cause
+      (hall d List.mem_cons_self)
+    show (if (performAccess policy state d (.completed (policy.oracle.answer state d))
+              contextKind cause).violations.recordCount = state.violations.recordCount then
+            runAccesses policy (performAccess policy state d
+              (.completed (policy.oracle.answer state d)) contextKind cause) rest
+              contextKind cause
+          else performAccess policy state d (.completed (policy.oracle.answer state d))
+              contextKind cause).memory.cellAt? id offset = _
+    split
+    · rw [runAccesses_frames_untouched policy rest _ contextKind cause
+        (fun x hx => hall x (List.mem_cons_of_mem _ hx))]
+      exact hhead
+    · exact hhead
+
 /-- Performing an access does not touch the fault record: a fault is raised by a
 substep, and `performAccess` runs one access. -/
 theorem performAccess_preserves_faults (policy : StepPolicy) (state : MachineState)
@@ -889,13 +954,8 @@ theorem performAccess_preserves_faults (policy : StepPolicy) (state : MachineSta
     (cause : EventCause) :
     (performAccess policy state d outcome contextKind cause).faults = state.faults := by
   unfold performAccess
-  split
-  · rfl
-  · split
-    · split <;> rfl
-    · split
-      · rfl
-      · split <;> rfl
+  repeat' split
+  all_goals rfl
 
 /--
 **A recorded fault is never discarded.**
