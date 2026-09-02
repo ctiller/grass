@@ -326,20 +326,45 @@ Mechanism-shaped prose reads as verification and is not; this corpus produced fo
 rounds of evidence for that. Where a property genuinely cannot be enforced by the
 type, the docstring says so and names what does enforce it.
 
-### 3.11 Gaps that remain open
+### 3.11 Closure properties for the freeze
 
-- **Every event the transition mints is ill-formed by the project's own
-  definition.** `AccessDescriptor` carries no operand values, so `ofAccess?` is
-  called with `valueRead := none` and `valueWritten := none`, and
-  `MemoryEvent.WellFormed.readValuePresent` demands otherwise. That predicate is
-  referenced by nothing, and M8's consistency graph is specified to read this
-  trace. Either the descriptor carries values or the event predicate is wrong;
-  both readings are live, and the descriptor is the more likely.
+Nine properties are required before M1 is called frozen. Each names what enforces
+it, per §3.10; where a type makes the failure unrepresentable that is recorded
+instead of a theorem, because it is the stronger form.
+
+| Property | Enforced by |
+|---|---|
+| step extends the violation ledger | `Op.step_extends_violations` |
+| step emits only well-formed events | `Op.step_events_wellFormed`, and `ValidMemoryEvent` makes a malformed trace unrepresentable |
+| denial prevents undeclared later effects | `Op.runAccesses_stops_at_refusal` |
+| fault choices are structurally in range | `Op.FaultPlan` carries a `Fin`; the bad case is unrepresentable |
+| partial RMW retains its completed read | `Committed` counts reads and writes separately; `faulted_rmw_keeps_its_read` |
+| ledger mutation occurs iff the delta is applicable | `Op.obligations_unchanged_unless_committed` |
+| failed ledger mutation is recorded and non-mutating | `Op.ledger_refusal_is_recorded`, `Op.refused_preserves_everything_but_the_ledger` |
+| every emitted violation class is declared | `Op.StepPolicy.violationClassesDeclared` |
+| external operation families require no Grass edits | `Tests/Op/FakeIsa.lean`, and reproduced independently by a reviewer building three families outside the repo |
+
+The last is evidence rather than a theorem, and is labelled so. A fixture cannot
+prove that *no* family would require an edit; what it establishes is that the ones
+tried did not, which is what the seam claim rests on.
+
+**Still not a freeze.** The properties above are the closure conditions, not the
+whole bar. §3.12 lists what the seam has not met, and an interface freeze also
+wants at least one synthetic loan or frame authority provider carried through the
+seam — not the M3 and M4 models, but enough to show that authority evidence can
+be extended without redesigning operation packaging. Until then the seam is a
+clearly versioned **provisional** interface, and an ISA author starting against it
+should expect additive change.
+
+### 3.12 Gaps that remain open
+
 - `Address.symbolic` is an atom where §1 asks for an address *expression*. A
   SPIR-V `OpAccessChain` derives a pointer from a base and a runtime index, and
   nothing relates a symbolic address to its provenance.
-- The descriptor carries no operand values, so `lock cmpxchg16b` cannot declare
-  its compare and swap operands.
+- `lock cmpxchg16b` still cannot declare its compare and swap operands. The
+  *outcome* now carries values, which was the blocking half; the intent does not,
+  so an operation whose behaviour depends on a comparison against a supplied
+  operand has nowhere to put it.
 - The descriptor carries a `ContextId` but no `ContextKind`, though §7.1 requires
   identity *and* kind; the stepper supplies the kind out of band.
 - `address` is unconnected to `range`. Two writes declaring the same address with
@@ -349,15 +374,11 @@ type, the docstring says so and names what does enforce it.
 - Five open-name axes have no registry: the `profileSpecific` cases of ordering,
   scope, restartability, and fault visibility, plus `ObservationLabel`.
 - `xchg`'s implicit `LOCK` cannot be declared as a demand rather than a choice.
-- `AccessResult` is unreached by the transition. Its module comment makes "there
-  is no constructor that lets a denial report committed bytes" a centerpiece, and
-  `performAccess` returns a `MachineState` instead, so the guarantee constrains
-  nothing today.
 - An operation declaring `onFault := .profileSpecific` cannot be stepped by the
   generic relation at all. Refusing beats guessing, but it means a profile with
   split-store semantics owes a stepper extension before it can express one.
 
-### 3.12 What the seam does *not* yet demonstrate
+### 3.13 What the seam does *not* yet demonstrate
 
 Worth stating separately from the gaps, because it bears on when M1 can freeze.
 `Tests/Op/FakeIsa.lean` shows an externally authored family reaching memory

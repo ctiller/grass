@@ -566,6 +566,57 @@ theorem obligations_unchanged_unless_committed (policy : StepPolicy)
       | none => rw [hr] at this; simp at this
       | some class_ => rfl
 
+/--
+**A refusal prevents every later effect of the operation.**
+
+`runAccesses` returns the refused state itself, so no access after the refused one
+is attempted. This is the theorem behind "denial stops the ordinary instruction
+path": a platform operation that genuinely continues past a failure needs its own
+declared sequencing policy and its own theorem, and folding the rest anyway is
+not that.
+-/
+theorem runAccesses_stops_at_refusal (policy : StepPolicy) (state : MachineState)
+    (d : AccessDescriptor) (rest : List AccessDescriptor) (contextKind : ContextKind)
+    (cause : EventCause)
+    (hrefused :
+      (performAccess policy state d (.completed (policy.oracle.answer state d))
+        contextKind cause).violations.recordCount ≠ state.violations.recordCount) :
+    runAccesses policy state (d :: rest) contextKind cause =
+      performAccess policy state d (.completed (policy.oracle.answer state d))
+        contextKind cause := by
+  rw [runAccesses]
+  simp [hrefused]
+
+/--
+**A refused ledger mutation is recorded, not silent.**
+
+The companion to `obligations_unchanged_unless_committed`: an inapplicable delta
+does not merely fail to apply, it appends to the violation ledger. Together they
+are `docs/OBLIGATIONS.md` §2's requirement that a forbidden change be refused
+*and* visible — a fold that silently no-opped satisfied neither.
+-/
+theorem ledger_refusal_is_recorded (policy : StepPolicy) (state : MachineState)
+    (d : AccessDescriptor) (outcome : AccessOutcome d) (contextKind : ContextKind)
+    (cause : EventCause) (space : AddressSpace) (valid : ValidMemoryEvent)
+    (hspace : policy.profile.vocabulary.addressSpaces.find? d.space = some space)
+    (hevent : MemoryEvent.ofOutcome state.eventSupply.fresh.1 contextKind cause space d
+      outcome = some valid)
+    (hallowed : denialOf state.memory d = Option.none)
+    (hledger : ¬ LedgerEffectApplicable state.obligations d.ledgerEffect) :
+    (performAccess policy state d outcome contextKind cause).violations.recordCount =
+      state.violations.recordCount + 1 := by
+  unfold performAccess
+  rw [hspace]
+  simp only []
+  rw [hevent]
+  simp only []
+  have : refusalOf policy state d (some valid.event) = some .obligationNotAuthorized := by
+    unfold refusalOf
+    rw [hallowed]
+    simp [hledger]
+  rw [this]
+  simp
+
 /-- Performing an access extends the violation ledger; it never shortens it.
 This is the per-access form of the invariant `docs/MEMORY_MODEL.md` §8 names, and
 the one the ledger type deliberately does not try to enforce by construction. -/

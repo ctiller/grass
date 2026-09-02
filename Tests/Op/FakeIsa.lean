@@ -545,6 +545,37 @@ theorem divide_preserves_its_read :
   cases h
   rfl
 
+/-! ## A partial read-modify-write retains its completed read
+
+An `xadd` that observed its operand and then faulted before storing must record
+the read it performed. One shared committed count made that unstateable: the
+event had to claim it read as much as it wrote, so a faulted RMW with nothing
+written had to claim it read nothing, while `readValuePresent` still demanded a
+value. Reads and writes now count separately. -/
+
+theorem faulted_rmw_keeps_its_read :
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.atomicAdd) .thread
+        ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 8
+          else .none)).state? = some s →
+      ∃ e, s.events = [e] ∧ e.event.kind = .readModifyWrite ∧
+        e.event.readCommitted = 8 ∧ e.event.valueRead.isSome := by
+  intro s hs
+  cases hs
+  exact ⟨_, rfl, by decide, by decide, by decide⟩
+
+/-- Truncated to three bytes, the read is three bytes and still present. The
+count is the committed prefix, not the width the access named. -/
+theorem partially_faulted_rmw_records_its_prefix :
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.atomicAdd) .thread
+        ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 3
+          else .none)).state? = some s →
+      ∃ e, s.events = [e] ∧ e.event.readCommitted = 3 ∧ e.event.writeCommitted = 3 := by
+  intro s hs
+  cases hs
+  exact ⟨_, rfl, by decide, by decide⟩
+
 /-! ## 9: a second family coexists -/
 
 /-- The device family steps through the same relation, with no shared type. -/
