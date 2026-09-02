@@ -428,16 +428,18 @@ law 3 forbids an executed example standing in for a proof.
 
 ## 4. M2 — Network semantics
 
-**Status: nine of thirteen modules, written, unmerged, unratified.** Written with
-fixtures: `Network/Exposure.lean`, `Network/Graph.lean`, `Network/Topology.lean`,
-`Network/Structural.lean` (the canonical network, `coord1:4`), and
-`Network/Delivery.lean` (the total cross-vocabulary classifier that `g-design:4`
-made a condition of per-vocabulary fault classes), and `Network/Child.lean` (the
-binding that authorizes a spawn and routes every child outcome), and
-`Network/Mailbox.lean` (ordering profiles and selective receive), and
-`Network/Assertion.lean` (network assertions and separating conjunction), and
-`Network/Instance.lean` (incarnations and the lifecycle). Not started: channels,
-the plan, the transition family, and the commit law.
+**Status: eleven of fourteen modules, written, unmerged, unratified.** Written
+with fixtures: `Network/Exposure.lean`, `Network/Graph.lean`,
+`Network/Topology.lean`, `Network/Structural.lean` (the canonical network,
+`coord1:4`), `Network/Delivery.lean` (the total cross-vocabulary classifier that
+`g-design:4` made a condition of per-vocabulary fault classes),
+`Network/Child.lean` (the binding that authorizes a spawn and routes every child
+outcome), `Network/Mailbox.lean` (ordering profiles and selective receive),
+`Network/Assertion.lean` (network assertions and separating conjunction),
+`Network/Death.lean` and `Network/Instance.lean` (incarnations, parentage and the
+lifecycle), `Network/Escrow.lean` (the escrow ledger and its prefix laws), and
+`Network/World.lean` (`LogicalProcessNetworkCore` and the canonical agreement).
+Not started: channels, the plan, the transition family, and the commit law.
 
 An earlier revision of this line said "five of ten" while listing seven modules
 and a twelve-row module table. The count was stale in both directions and is
@@ -533,6 +535,7 @@ Grass/Process/Network/Death.lean       ProcessDeathReason, a shared leaf
 Grass/Process/Cancellation/Identity.lean  masks, point/call/region ids, CancelReason
 Grass/Process/Network/Instance.lean    incarnations, parentage, lifecycle, witnessing
 Grass/Process/Network/Escrow.lean      the escrow ledger and its prefix laws
+Grass/Process/Network/World.lean       LogicalProcessNetworkCore, the canonical agreement
 Grass/Process/Network/Channel.lean     ChannelContract, session, resolution
 Grass/Process/Network/Plan.lean        ProcessPlan, LogicalProcessNetwork
 Grass/Process/Network/Transition.lean  NetworkTransition, NetworkStep, freshness

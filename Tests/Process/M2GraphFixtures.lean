@@ -221,7 +221,7 @@ theorem allocated_is_not_fresh
 theorem occurrence_is_not_a_generation
     {channel : serverTopology.ChannelId ()}
     (occurrence :
-      serverTopology.MessageOccurrence channel (Message := ULift Unit) (.up ())) :
+      serverTopology.MessageOccurrence channel (Message := ULift.{1, 0} Unit) (.up ())) :
     occurrence.id ≠ (connectionSeven 0).generation :=
   ProcessTopologyCore.occurrence_kind_distinct occurrence (connectionSeven 0)
 

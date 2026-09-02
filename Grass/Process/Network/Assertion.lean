@@ -107,12 +107,26 @@ from that monotone history", and `Escrow` owns "the unique affine
 `ResolveToken occurrence.id`", so an assertion about at-most-one resolution
 depends on `usedNominals`. Without a fragment naming it, such an assertion is
 either unstatable or smuggled in through some other fragment's agreement.
+
+`instanceState` names a *slot* — a `ProcessKind` and an `InstanceId` — and not a
+`ProcessRef`. The world holds `instances : (kind) → InstanceId kind → Option
+(ProcessInstance topology)`, one live incarnation per slot, with the generation
+inside the stored instance rather than in the key. Keying the fragment by
+`ProcessRef` instead would put two refs that differ only in generation on two
+fragments reading one slot, and `agreesGlue` would then be unsatisfiable at the
+real world: no mixed network can agree with one and not the other about the same
+field. The cost is that framing over a slot is conservative — a restart replaces
+the incarnation, touches the slot, and any assertion naming it must be
+re-established — which is the correct reading of `docs/FOUNDATION.md` law 22
+anyway, since a stale reference is meant to fail its generation check rather
+than quietly frame past a replacement.
 -/
 inductive NetworkFragment {registry : ProtocolRegistry.{u, w, v}}
     {boundary : DriverBoundary.{u}}
     (topology : ProcessTopologyCore.{u, w, v, r} registry boundary) : Type r
-  /-- One incarnation's private state. -/
-  | instanceState (kind : topology.ProcessKind) (ref : topology.ProcessRef kind)
+  /-- One instance slot's contents: the incarnation living there, if any, and
+  its private state. -/
+  | instanceState (kind : topology.ProcessKind) (slot : topology.InstanceId kind)
   /-- One named region of shared logical state. -/
   | region (region : topology.SharedRegion)
   /-- One channel session's in-flight escrow. -/
