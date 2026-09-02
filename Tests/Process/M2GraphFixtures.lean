@@ -117,10 +117,25 @@ theorem no_conflict_over_acceptCount :
 /-- The listener conflicts with *itself* over the counter — which is exactly why
 its population is `exactlyOne`. -/
 theorem listener_self_conflict_over_acceptCount :
-    serverGraph.Conflicting .listener .listener .acceptCount := by
-  refine ⟨Or.inl rfl, Or.inl rfl, Or.inl rfl, ?_⟩
-  rintro ⟨isAtomic, _⟩
-  exact absurd isAtomic (by simp [LogicalAccess.readWrite])
+    serverGraph.Conflicting .listener .listener .acceptCount :=
+  ⟨Or.inl rfl, Or.inl rfl, Or.inl rfl⟩
+
+/--
+Two roles that only ever touch a region atomically still conflict.
+
+The counter is `readWrite` here, so this is stated on the access values
+directly. It is the case an atomic exemption would have discharged for free:
+two roles atomically incrementing a shared counter do not race, and they do
+still owe the invariant that bounds it.
+-/
+theorem atomic_pair_still_interferes :
+    LogicalAccess.atomicReadWrite.Interferes LogicalAccess.atomicReadWrite :=
+  LogicalAccess.atomic_interferes_atomic
+
+/-- And they provably do not race, which is the other half of the split. -/
+theorem atomic_pair_does_not_race :
+    ¬ LogicalAccess.atomicReadWrite.DataRaces LogicalAccess.atomicReadWrite :=
+  LogicalAccess.atomic_not_dataRaces_atomic
 
 /-- Every role can actually occur. -/
 theorem no_dead_roles : serverGraph.NoDeadRoles := by
@@ -159,7 +174,6 @@ theorem listener_bound_is_not_deferred :
     | .connection => Nat
   ChannelKind := Unit
   endpoints := fun _ => (.listener, .connection)
-  edgeRolesRelated := fun _ => Or.inl ⟨rfl, rfl⟩
   spawnAuthority := fun _ _ _ _ _ => True
 
 /-- Connection 7, first incarnation. -/

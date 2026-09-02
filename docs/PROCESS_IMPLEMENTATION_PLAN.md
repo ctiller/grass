@@ -262,6 +262,27 @@ and the terminal disjunct mentions `p.Terminal request`. A single un-indexed
 record would have to quantify internally over requests, which is the same
 obligation with a worse shape.
 
+**Decided — law 5 applies where the process is still working.**
+`MeetsProcessProgress.handlesEveryEvent` demands a `Step` for every deliverable
+event only at reachable states the specification does not call terminal. The
+guard is not a weakening: without it the field contradicts
+`ProcessCorrect.terminalNoStep`, because the running state a terminating run
+fires `terminate` from is reachable *and* terminal, so no terminating process
+had a `ProcessCorrect` at all. At a terminal state the obligation is to
+terminate, which is `notStuck`'s left disjunct.
+
+**Recorded — this layer cannot exclude a self-delivered livelock.**
+`StepProgresses`'s entropy disjunct asks whether the arriving event was
+`.external`, and `ExternalEvent` is chosen by the specification author. A
+process can therefore route its own internal work through a self-delivered tick,
+satisfy the disjunct forever, never terminate, never emit, and never decrease
+its measure — and it has a complete `ProcessCorrect`.
+
+Excluding it needs a declaration that a given external event is genuinely
+produced by the environment, which `ProcessAcceptance` does not carry and this
+layer cannot check. [PROCESS.md](PROCESS.md) §7 puts the burden on the network,
+and §6 below carries it as an M4 exit obligation rather than leaving it implied.
+
 **Decided — `ProtocolRegistry` is universe-polymorphic from M1.**
 [PROCESS.md](PROCESS.md) §4 makes a flattened realization's private state
 `LogicalProcessNetwork r.plan`, which ranges over every registered protocol's
@@ -299,9 +320,20 @@ source says so rather than implying the obligation is gone.
 **Status: landed.** The modules and fixtures below are in the tree and
 `lake build` is green with `warningAsError`. A transitive axiom audit over the
 new declarations reports only `propext`, `Quot.sound`, and `Classical.choice`,
-which is the [FOUNDATION.md](FOUNDATION.md) §3 allowlist. Two adversarial review
-rounds have been absorbed; the second found a linearity hole in the terminal
-disposition that is now closed.
+which is the [FOUNDATION.md](FOUNDATION.md) §3 allowlist.
+
+Four adversarial review rounds have been absorbed. Two of them found defects
+worth recording, because both are the kind an M1 freeze exists to catch:
+
+- the terminal disposition was multiplicity-blind, so one claim about a demand
+  *value* discharged any number of outstanding occurrences of it;
+- `MeetsProcessProgress.handlesEveryEvent` and `ProcessCorrect.terminalNoStep`
+  contradicted each other for every process that terminates other than
+  immediately, so `ProcessCorrect` was *uninhabited* and nothing noticed,
+  because no fixture built one.
+
+The second is why §3.3 now requires a positive correctness fixture and not only
+run-relation fixtures.
 
 Goal: a protocol author, a standard-library protocol, a serial author, and the
 sequential adapter can write final source. Exit criterion is expressiveness plus
@@ -375,10 +407,18 @@ M1 is not exited on a type-checking file. It is exited on a fixture corpus under
   that the image's runs are exactly the function's;
 - two protocols sharing one interface universe, one of whose private state is
   built from the other's run states, registered together with the embedding of
-  every prior key (the §2.2 stratification fixture).
+  every prior key (the §2.2 stratification fixture);
+- a terminating process with a complete `ProcessCorrect` and
+  `MeetsProcessProgress`, including the derived "no reachable state is stuck"
+  theorem. This one is not optional: the two records had contradictory fields
+  through three review rounds precisely because nothing inhabited them;
+- a terminal-remainder law that constrains only `pending`, with the proof that
+  it bounds nothing — the same occurrences can be relabelled `resolved`. The
+  trap is a theorem rather than a warning in a docstring.
 
-These are `Tests/Process/M1Fixtures.lean`, built by a `Tests` Lake library that
-is a default target, so a green build means they still hold.
+These are `Tests/Process/M1Fixtures.lean` and
+`Tests/Process/M1CorrectFixtures.lean`, built by a `Tests` Lake library that is
+a default target, so a green build means they still hold.
 
 Each fixture states a theorem, not an `#eval`. [FOUNDATION.md](FOUNDATION.md)
 law 3 forbids an executed example standing in for a proof.
@@ -386,7 +426,12 @@ law 3 forbids an executed example standing in for a proof.
 ## 4. M2 — Network semantics
 
 **Status: started.** `Network/Exposure.lean`, `Network/Graph.lean`, and
-`Network/Topology.lean` have landed with fixtures. The channel contracts, the
+`Network/Topology.lean` have landed with fixtures. `ProcessTopology` carries
+spawn authority only (§10.8); an earlier draft also gave it a channel
+well-formedness field requiring an edge's endpoints to be spawn-adjacent, which
+[PROCESS.md](PROCESS.md) §3 does not declare and which wrongly rejected every
+edge between the root and a role that is not its direct child. Channel
+connectivity is a plan-level obligation. The channel contracts, the
 plan, the transition family, the child bindings, the mailbox profiles, and the
 commit law have not. None of the exit criteria below is discharged yet.
 
@@ -506,7 +551,9 @@ Exit criteria:
   network execution produces a demanded observation, remains at a declared
   frontier, or decreases a global well-founded rank across process steps, spawn,
   retry, cancellation, death, join, and restart, with supervision carrying a
-  restart bound;
+  restart bound. This must in particular exclude the self-delivered livelock
+  §2.2 records, which per-process progress admits: the "declared frontier" has
+  to be a declaration about the environment, not about the event type;
 - the five canonical adapter fixtures [PROCESS.md](PROCESS.md) §4 mandates by
   name — zero-effect transition, duplicate equal-valued effects with distinct
   occurrences, initially pending effects, issue-then-cancel, and
@@ -680,13 +727,22 @@ they are a *facet* attached where a promise is exported:
 > obligation.
 
 A mandatory field on every `ProcessSpec` is exactly the obligation that sentence
-refuses, and the name `TerminalDisposition` was already bound by §3 to a
-different thing — a whole-edge custody transform — which
-[README.md](README.md)'s one-owner rule forbids reusing.
+refuses. The name collides too, though an earlier draft of this entry described
+the collision wrongly: §3 binds `TerminalDisposition p state` to the per-state
+disposition a termination contract produces, carrying `exactTransfer` over
+state, resources, loans, and obligations. That is a *related* concept, which is
+what makes reusing the name for a second thing a [README.md](README.md)
+one-owner violation rather than a coincidence.
 
 **Resolution, implemented.** The law is `TerminalRemainderLaw` in
-`Grass/Process/Spec.lean`, and it is supplied through `ProcessAcceptance`, which
-the owner of the specification provides and a leaf author never writes. It is
+`Grass/Process/Spec.lean`, and it is supplied through `ProcessAcceptance`.
+
+One caveat, because the relocation is weaker than it first looks. For an
+acceptance that is *derived* — built from a `BehaviorContract`, or composed by a
+weave — the obligation genuinely leaves the protocol author. For a standalone
+protocol whose author writes both records, the field moved one record over; what
+it buys there is that a reviewer can see a lifecycle claim being made, not that
+nobody makes it. It is
 indexed by the three sub-bags of the terminal partition rather than by a demand
 value, because the obligation law 7 and law 20 need is a *bound*: a law indexed
 by a value permits `tick` to be left pending and thereby permits any number of

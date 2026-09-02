@@ -84,41 +84,86 @@ def Touches (access : LogicalAccess) : Prop :=
   access.mayRead = true ∨ access.mayWrite = true
 
 /--
-Two roles' accesses to the same region race if both touch it, at least one
+Two roles' accesses to the same region *race*: both touch it, at least one
 writes, and they are not both atomic.
 
-This is the syntactic obligation, not the proof. A plan whose `sharedAccess`
-declares a conflicting pair owes an interference invariant or a proof that the
-two roles are never concurrently live; a plan with no conflicting pair owes
-neither. `docs/MEMORY_MODEL.md` owns what a *physical* race is, and the
-representation relation connects them; this is the logical-ownership graph
-`docs/PROCESS.md` §3 says the memory realization later maps.
+This is the memory-model-facing notion, and the atomic exemption is what makes
+it that. `docs/MEMORY_MODEL.md` owns what a physical race is; this is the
+logical-ownership graph `docs/PROCESS.md` §3 says the memory realization later
+maps onto provenance and race freedom.
 -/
-def Conflicts (left right : LogicalAccess) : Prop :=
+def DataRaces (left right : LogicalAccess) : Prop :=
   left.Touches ∧ right.Touches ∧
     (left.mayWrite = true ∨ right.mayWrite = true) ∧
     ¬ (left.atomic = true ∧ right.atomic = true)
 
+/--
+Two roles *interfere* over a region: both touch it and at least one writes.
+
+No atomic exemption, and that is the whole difference from `DataRaces`. Two
+roles atomically incrementing a shared counter do not race, and they still need
+the invariant that bounds the counter — the second role's increments are exactly
+what the first must tolerate. `docs/PROCESS.md` §3 names the two separately:
+shared state is "named separately with read/write/atomic capabilities **and**
+interference invariants".
+
+An earlier version of this module had one predicate with the atomic exemption
+and claimed a non-conflicting pair owed no interference invariant. That
+discharged the atomic-counter case for free.
+
+This is the syntactic obligation, not the proof. A plan whose `sharedAccess`
+declares an interfering pair owes an interference invariant or a proof that the
+two roles are never concurrently live; a plan with no interfering pair owes
+neither.
+-/
+def Interferes (left right : LogicalAccess) : Prop :=
+  left.Touches ∧ right.Touches ∧
+    (left.mayWrite = true ∨ right.mayWrite = true)
+
 @[simp] theorem not_touches_none : ¬ none.Touches := by
   simp [Touches, none]
 
-/-- A role with no access conflicts with nothing. -/
-@[simp] theorem not_conflicts_none_left (access : LogicalAccess) :
-    ¬ none.Conflicts access := by
-  simp [Conflicts, Touches, none]
+/-- A role with no access interferes with nothing. -/
+@[simp] theorem not_interferes_none_left (access : LogicalAccess) :
+    ¬ none.Interferes access := by
+  simp [Interferes, Touches, none]
 
-/-- Readers never conflict with readers. -/
-theorem readOnly_not_conflicts_readOnly : ¬ readOnly.Conflicts readOnly := by
-  simp [Conflicts, Touches, readOnly]
+/-- And nothing interferes with it. -/
+@[simp] theorem not_interferes_none_right (access : LogicalAccess) :
+    ¬ access.Interferes none := by
+  simp [Interferes, Touches, none]
 
-/-- A writer conflicts with a reader. -/
-theorem readWrite_conflicts_readOnly : readWrite.Conflicts readOnly := by
-  simp [Conflicts, Touches, readWrite, readOnly]
+/-- Interference is symmetric. -/
+theorem interferes_symm {left right : LogicalAccess}
+    (interferes : left.Interferes right) : right.Interferes left :=
+  ⟨interferes.2.1, interferes.1, interferes.2.2.symm⟩
 
-/-- Two atomic users do not conflict; their discipline is the mediation. -/
-theorem atomic_not_conflicts_atomic :
-    ¬ atomicReadWrite.Conflicts atomicReadWrite := by
-  simp [Conflicts, Touches, atomicReadWrite]
+/-- Readers never interfere with readers. -/
+theorem readOnly_not_interferes_readOnly : ¬ readOnly.Interferes readOnly := by
+  simp [Interferes, Touches, readOnly]
+
+/-- A writer interferes with a reader. -/
+theorem readWrite_interferes_readOnly : readWrite.Interferes readOnly := by
+  simp [Interferes, Touches, readWrite, readOnly]
+
+/--
+Two atomic users do not race — and they do still interfere.
+
+The pair of theorems that makes the split worth having: the atomic discipline is
+the mediation for the memory model, and not for the invariant.
+-/
+theorem atomic_not_dataRaces_atomic :
+    ¬ atomicReadWrite.DataRaces atomicReadWrite := by
+  simp [DataRaces, Touches, atomicReadWrite]
+
+theorem atomic_interferes_atomic :
+    atomicReadWrite.Interferes atomicReadWrite := by
+  simp [Interferes, Touches, atomicReadWrite]
+
+/-- Racing implies interfering; the converse is exactly the atomic case. -/
+theorem interferes_of_dataRaces {left right : LogicalAccess}
+    (races : left.DataRaces right) : left.Interferes right :=
+  ⟨races.1, races.2.1, races.2.2.1⟩
 
 end LogicalAccess
 
@@ -192,9 +237,6 @@ def ReplaceableRolesAreGenerational (law : PopulationLaw ProcessKind)
     (Replaceable : ProcessKind → Prop) : Prop :=
   ∀ kind, Replaceable kind → law.identity kind = .generational
 
-/-- A singleton static role. The root's normal declaration. -/
-def singletonStatic : PopulationBound × InstanceIdentity := (.exactlyOne, .static)
-
 end PopulationLaw
 
 /--
@@ -240,13 +282,15 @@ def protocol (kind : graph.ProcessKind) : ProcessSpec.{u, w} :=
   registry.protocol (graph.protocolKey kind)
 
 /--
-Two roles conflict over a region when their declared accesses race.
+Two roles conflict over a region when their declared accesses interfere.
 
 The pairs a plan owes an interference invariant or a mutual-exclusion proof for.
+Interference and not racing: see `LogicalAccess.Interferes` for why the atomic
+case is included.
 -/
 def Conflicting (left right : graph.ProcessKind)
     (region : graph.SharedRegion) : Prop :=
-  (graph.sharedAccess left region).Conflicts (graph.sharedAccess right region)
+  (graph.sharedAccess left region).Interferes (graph.sharedAccess right region)
 
 /--
 A region no role may write.
@@ -264,7 +308,7 @@ theorem immutable_no_conflict {region : graph.SharedRegion}
     (immutable : graph.Immutable region) (left right : graph.ProcessKind) :
     ¬ graph.Conflicting left right region := by
   intro conflict
-  rcases conflict.2.2.1 with writes | writes
+  rcases conflict.2.2 with writes | writes
   · exact absurd writes (by simp [immutable left])
   · exact absurd writes (by simp [immutable right])
 

@@ -34,6 +34,19 @@ realization-private: it exists so a stale completion addressed to the previous
 incarnation of connection 7 fails a check, and no precious specification may
 depend on it.
 
+## What is not here
+
+An earlier version of this module gave `ProcessTopology` an `edgeRolesRelated`
+field requiring every channel edge's endpoints to be spawn-adjacent or to share
+a spawner. `docs/PROCESS.md` §3 declares no such field, and it was wrong on its
+own terms: nothing spawns the root, so it rejected every edge between the root
+and a role that is not its direct child, and it rejected cousin edges outright.
+A shutdown channel from a listener to a stream is an ordinary topology.
+
+Channel connectivity is a plan-level obligation — an edge no execution can use
+is dead weight, and that is checked where the population and the channel
+contracts are, not as a well-formedness condition on the topology.
+
 ## Cancellation and supervision are facets, not fields
 
 `docs/PROCESS.md` §3 declares `ProcessTopology` with three law fields: spawn,
@@ -89,20 +102,6 @@ structure ProcessTopology (registry : ProtocolRegistry.{u, w, v})
   ChannelKind : Type r
   /-- The sending and receiving roles of each edge. -/
   endpoints : ChannelKind → ProcessKind × ProcessKind
-  /--
-  An edge may only exist between roles one of which may spawn the other, or
-  which share a spawner.
-
-  Not a completeness claim about the graph; it is the connectivity check that
-  stops a plan from declaring a channel between two roles that can never
-  co-exist. A plan whose edge fails it has either a missing spawn authority or a
-  channel that no execution can use.
-  -/
-  edgeRolesRelated : ∀ edge : ChannelKind,
-    maySpawn (endpoints edge).1 (endpoints edge).2 ∨
-    maySpawn (endpoints edge).2 (endpoints edge).1 ∨
-    ∃ common, maySpawn common (endpoints edge).1 ∧
-      maySpawn common (endpoints edge).2
   /--
   Which roles may create which *instances*, refining the graph's role-level
   authority.
