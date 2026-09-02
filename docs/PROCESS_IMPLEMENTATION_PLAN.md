@@ -428,15 +428,22 @@ law 3 forbids an executed example standing in for a proof.
 
 ## 4. M2 — Network semantics
 
-**Status: started, unmerged.** `Network/Exposure.lean`, `Network/Graph.lean`,
-and `Network/Topology.lean` are committed with fixtures. `ProcessTopology` carries
-spawn authority only (§10.8); an earlier draft also gave it a channel
-well-formedness field requiring an edge's endpoints to be spawn-adjacent, which
-[PROCESS.md](PROCESS.md) §3 does not declare and which wrongly rejected every
-edge between the root and a role that is not its direct child. Channel
-connectivity is a plan-level obligation. The channel contracts, the
-plan, the transition family, the child bindings, the mailbox profiles, and the
-commit law have not. None of the exit criteria below is discharged yet.
+**Status: five of ten modules, unmerged.** Committed with fixtures:
+`Network/Exposure.lean`, `Network/Graph.lean`, `Network/Topology.lean`,
+`Network/Structural.lean` (the canonical network, `coord1:4`), and
+`Network/Delivery.lean` (the total cross-vocabulary classifier that `g-design:4`
+made a condition of per-vocabulary fault classes). Not started: assertions,
+channels, the plan, the transition family, child bindings, mailbox profiles, and
+the commit law. **None of the exit criteria below is discharged.**
+
+Two structures here are named for what they are rather than for what a reader
+might assume. `ProcessTopologyCore` carries graph, channels and spawn authority
+only, with `ProcessTopology requirements` reserved for the aggregate carrying
+the demanded facets (§10.8, `g-design:5`). An earlier draft also gave the core a
+channel well-formedness field requiring an edge's endpoints to be spawn-adjacent,
+which [PROCESS.md](PROCESS.md) §3 does not declare and which wrongly rejected
+every edge between the root and a role that is not its direct child; channel
+connectivity is a plan-level obligation.
 
 Goal: the exhaustive transition family, with each constructor's exactness
 carried in its own index rather than in an ambient predicate.
@@ -445,6 +452,8 @@ carried in its own index rather than in an ambient predicate.
 Grass/Process/Network/Exposure.lean    ProtocolExposesBoundary, observation projection
 Grass/Process/Network/Graph.lean       ProcessGraph, population, logical access
 Grass/Process/Network/Topology.lean    refs, generations, channel ids, epochs
+Grass/Process/Network/Structural.lean  the one canonical structural network
+Grass/Process/Network/Delivery.lean    total cross-vocabulary fault classification
 Grass/Process/Network/Assertion.lean   network assertions, separating conjunction
 Grass/Process/Network/Channel.lean     ChannelContract, escrow, session, resolution
 Grass/Process/Network/Plan.lean        ProcessPlan, LogicalProcessNetwork
@@ -488,9 +497,15 @@ representation relation.
 
 ## 5. M3 — Cancellation and lifecycle
 
-**Status: not started.**
+**Status: one module landed early.** `coord1:6` ruled the canonical scoped
+cancellation form while M2 was in progress, so `Cancellation/Policy.lean` and its
+two invalidation fixtures were built out of order to discharge that disposition.
+The rest of M3 — masks, the `|>` algebra, termination contracts, facets, and all
+of byte flow — has not started, and the exit criterion below is undischarged.
 
 ```text
+Grass/Process/Cancellation/Policy.lean scoped policy and certificate (landed early
+                                       under coord1:6, ahead of the rest of M3)
 Grass/Process/Cancellation.lean        masks, summaries, the |> algebra
 Grass/Process/Termination.lean         modes, contracts, dispositions
 Grass/Process/Facet.lean               TerminationFacet and its constructors
