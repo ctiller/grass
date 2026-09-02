@@ -2031,6 +2031,21 @@ structure CancellationPolicy where
   blockingCalls : List BlockingCallId
   callDisposition : BlockingCallId -> BlockingCallDisposition
 
+def CancellationPolicy.Covers (policy : CancellationPolicy)
+    (summary : ProcessScopeSummary) : Prop :=
+  policy.points = summary.publicCancellationPoints ∧
+    policy.blockingCalls = summary.blockingCalls
+
+def CancellationPolicy.RegionsDeclared (policy : CancellationPolicy) : Prop :=
+  forall call, call ∈ policy.blockingCalls ->
+    forall region, policy.callDisposition call = .withinAtomicRegion region ->
+      exists bounded, bounded ∈ policy.atomicRegions ∧ bounded.id = region
+
+def CancellationPolicy.PointsDeclared (policy : CancellationPolicy) : Prop :=
+  forall call, call ∈ policy.blockingCalls ->
+    forall point, policy.callDisposition call = .cancellableAt point ->
+      point ∈ policy.points
+
 structure ScopedCancellationCertificate (summary : ProcessScopeSummary) where
   policy : CancellationPolicy
   exact : policy.Covers summary
@@ -2041,7 +2056,12 @@ structure ScopedCancellationCertificate (summary : ProcessScopeSummary) where
 ```
 
 `Covers` is list equality against *that scope's* points and calls, and the field
-is `blockingCalls` on both sides. This is the whole scalability claim: an added
+is `blockingCalls` on both sides. Equality in both directions and not
+containment: a policy classifying *more* calls than the scope discovered is
+describing code that is not there, and one classifying fewer leaves a blocking
+call unaccounted. `RegionsDeclared` and `PointsDeclared` close the two ways a
+disposition could name something that does not exist — an atomic region with no
+declared bound, or a cancellation point the policy does not govern. This is the whole scalability claim: an added
 `Sleep` changes one scope's discovered-call list and rejects that scope's
 certificate, instead of changing a global key set that every certificate in the
 program compares against.
