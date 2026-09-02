@@ -216,6 +216,13 @@ network carrying a `BehaviorContract` puts the process layer above this one and
 makes the dependency cyclic, which is what agent-bus dispositions coord1:4 and
 coord1:5 settled.
 
+The five accessors are the author surface, and they are the reason `roles` may
+be a wrapper at all. A specification writes `network.RoleSchema` and
+`network.protocol schema`, exactly as it did before this structure existed;
+requiring `network.roles.protocol` everywhere would leak the wrapper's
+representation into every consumer and add permanent ceremony for nothing.
+`docs/REFINEMENT.md` and Spike 5 both use the short spelling.
+
 The denotation is therefore *selected* rather than carried. A
 `NetworkTraceDenotation` is a chosen reading of one network's traces as a
 behavior contract; `ProcessPresentation.denotationExact` is the claim that the
@@ -228,6 +235,31 @@ structure ProcessPresentationNetwork {R : Type u} [ResourceModel R]
     (resources : R) where
   roles : StructuralProcessNetwork (SpecProcess resources) ProtocolInstance
   composition : AbstractNetworkCompositionLaw roles
+
+abbrev ProcessPresentationNetwork.RoleSchema
+    (network : ProcessPresentationNetwork resources) : Type :=
+  network.roles.RoleSchema
+
+abbrev ProcessPresentationNetwork.protocol
+    (network : ProcessPresentationNetwork resources) :
+    network.RoleSchema -> SpecProcess resources :=
+  network.roles.protocol
+
+abbrev ProcessPresentationNetwork.Instance
+    (network : ProcessPresentationNetwork resources) :
+    network.RoleSchema -> Type :=
+  network.roles.Instance
+
+abbrev ProcessPresentationNetwork.instanceOf
+    (network : ProcessPresentationNetwork resources) :
+    forall schema, network.Instance schema ->
+      ProtocolInstance (network.protocol schema) :=
+  network.roles.instanceOf
+
+abbrev ProcessPresentationNetwork.schemas
+    (network : ProcessPresentationNetwork resources) :
+    List network.RoleSchema :=
+  network.roles.schemas
 
 structure NetworkTraceDenotation {R : Type u} [ResourceModel R]
     {resources : R} (network : ProcessPresentationNetwork resources) where
