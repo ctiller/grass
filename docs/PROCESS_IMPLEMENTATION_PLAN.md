@@ -428,7 +428,7 @@ law 3 forbids an executed example standing in for a proof.
 
 ## 4. M2 — Network semantics
 
-**Status: eleven of fourteen modules, written, unmerged, unratified.** Written
+**Status: twelve of fourteen modules, written, unmerged, unratified.** Written
 with fixtures: `Network/Exposure.lean`, `Network/Graph.lean`,
 `Network/Topology.lean`, `Network/Structural.lean` (the canonical network,
 `coord1:4`), `Network/Delivery.lean` (the total cross-vocabulary classifier that
@@ -438,8 +438,31 @@ outcome), `Network/Mailbox.lean` (ordering profiles and selective receive),
 `Network/Assertion.lean` (network assertions and separating conjunction),
 `Network/Death.lean` and `Network/Instance.lean` (incarnations, parentage and the
 lifecycle), `Network/Escrow.lean` (the escrow ledger and its prefix laws), and
-`Network/World.lean` (`LogicalProcessNetworkCore` and the canonical agreement).
-Not started: channels, the plan, the transition family, and the commit law.
+`Network/World.lean` (`LogicalProcessNetworkCore` and the canonical agreement),
+and `Network/Channel.lean` (`ChannelContract`, its footprint discipline, and the
+laws that discipline derives). Not started: the plan, the transition family, and
+the commit law.
+
+`Channel.lean` is where standing risk 2 got smaller rather than larger.
+[PROCESS.md](PROCESS.md) §3 declares `ChannelContract` with fifteen fields, seven
+of them opaque law names, and an opaque field is a promise nothing checks. Four
+of the seven are replaced by a *footprint discipline*: `escrowLocal`,
+`receiverPreLocal` and `sessionLocal` bound what the author's own assertions may
+read, and from those bounds `escrow_survives_unrelated_steps`,
+`frame_unmentioned` and `receiverPre_separate_from_escrow` are theorems. The
+third of those is the one that matters most, because §3 requires
+`ReceiverPre * Escrow` to be *formable*, and it is formable only because
+`NetworkFragment` splits `escrow` from `session`.
+
+Three of the seven stayed opaque, for a reason stated in the module rather than
+left implicit. `prefixConservation` and `atMostOneResolution` are
+`Network/Escrow.lean`'s, proved there over the ledger, and a contract cannot
+restate them because it cannot see a ledger through an abstract agreement.
+`resolutions` and `transferExact` quantify over the transition family, so they
+are `Transition.lean`'s. `ChannelSteps` is the seam that lets the contract be
+written and checked first: the send and receive relations are parameters, and
+the family instantiates them. That divergence from the declared field list is
+§10.14.
 
 An earlier revision of this line said "five of ten" while listing seven modules
 and a twelve-row module table. The count was stale in both directions and is
@@ -536,7 +559,7 @@ Grass/Process/Cancellation/Identity.lean  masks, point/call/region ids, CancelRe
 Grass/Process/Network/Instance.lean    incarnations, parentage, lifecycle, witnessing
 Grass/Process/Network/Escrow.lean      the escrow ledger and its prefix laws
 Grass/Process/Network/World.lean       LogicalProcessNetworkCore, the canonical agreement
-Grass/Process/Network/Channel.lean     ChannelContract, session, resolution
+Grass/Process/Network/Channel.lean     ChannelContract and its footprint discipline
 Grass/Process/Network/Plan.lean        ProcessPlan, LogicalProcessNetwork
 Grass/Process/Network/Transition.lean  NetworkTransition, NetworkStep, freshness
 Grass/Process/Network/Child.lean       child requests, bindings, lifecycle events
@@ -1200,3 +1223,40 @@ a *current* parent equally explicit. Like §10.12 this changes a record decision
 128 has just re-ratified. Blocks: nothing today. c-process has implemented the
 weaker `IsRoot` and pinned the distinction in a fixture, so the erasure is
 visible rather than assumed away.
+
+### 10.14 `ChannelContract` has seven opaque law fields, four of which need not be
+
+[PROCESS.md](PROCESS.md) §3 declares `ChannelContract` with `escrowStable`,
+`prefixConservation`, `atMostOneResolution`, `resolutions`, `transferExact`,
+`session` and `frame`, each typed by a name — `StableUnderUnrelatedProcessSteps
+Escrow`, `NoFabricationDuplicationOrLoss Escrow`, and so on — that the corpus
+declares nowhere. This plan's standing risk 2 is the field count; the sharper
+problem is that an opaque field of an undeclared type is a promise no consumer
+can check, and a contract author discharges it by writing anything at all.
+
+Four of them do not need to be fields. `Grass/Process/Network/Channel.lean`
+carries a *footprint discipline* instead: `escrowLocal` bounds what the escrow
+assertion may read to its own session's escrow fragment, `receiverPreLocal`
+bounds the receiver's precondition to that session's cursor, and `sessionLocal`
+does the same for the session predicate. Those are checkable claims about values
+the author supplies, and they yield `escrowStable` and `frame` as theorems
+(`escrow_survives_unrelated_steps`, `frame_unmentioned`) plus the property §3
+needs and never states — that `ReceiverPre * Escrow` can be *formed*
+(`receiverPre_separate_from_escrow`).
+
+Three stay opaque and the module says why. `prefixConservation` and
+`atMostOneResolution` are already proved in `Network/Escrow.lean` over the
+ledger, and a contract quantifying over an abstract `WorldAgreement` cannot see
+a ledger to restate them. `resolutions` and `transferExact` quantify over the
+transition family, which is `Transition.lean`'s.
+
+The remaining divergence is `ChannelSteps`. §3's `send` and `receive` are
+`HoareTransition`s with no step relation named, because the transition family is
+declared later in the same section. This module takes the two relations as a
+parameter, which is the same seam decision 128 used for the world and lets the
+contract be written and checked before the family exists.
+
+Whether the normative declaration should shed the four fields is a ruling, not
+c-process's call. Blocks: nothing — the Lean is stricter than the declaration in
+the direction that matters, since every law the declaration names is either
+proved or explicitly deferred with a named owner.
