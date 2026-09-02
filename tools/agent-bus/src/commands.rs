@@ -2968,13 +2968,18 @@ mod tests {
             issue_open(&ctx, "alice", "coord1", &issue_path).unwrap();
         });
 
+        // A generous timeout: this test's point is proving the loop re-polls
+        // live state (the publisher only starts after a 100ms head start),
+        // not pinning down how fast that happens -- under a heavily loaded
+        // machine, real git subprocess calls in each poll can take far
+        // longer than the low-contention case.
         let items = wait_for_inbox_items(
             &ctx,
             &coord1,
-            std::time::Duration::from_secs(5),
-            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(30),
+            std::time::Duration::from_millis(50),
         )
-        .expect("must pick up the concurrently published item before the 5s timeout");
+        .expect("must pick up the concurrently published item before the 30s timeout");
         assert_eq!(items.len(), 1);
         publisher.join().unwrap();
     }
