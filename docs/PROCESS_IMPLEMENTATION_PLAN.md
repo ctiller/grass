@@ -428,7 +428,7 @@ law 3 forbids an executed example standing in for a proof.
 
 ## 4. M2 — Network semantics
 
-**Status: fourteen of fourteen modules begun, one of them partial; written, unmerged, unratified.** Written
+**Status: fourteen of fourteen modules written; unmerged, unratified.** Written
 with fixtures: `Network/Exposure.lean`, `Network/Graph.lean`,
 `Network/Topology.lean`, `Network/Structural.lean` (the canonical network,
 `coord1:4`), `Network/Delivery.lean` (the total cross-vocabulary classifier that
@@ -441,33 +441,35 @@ lifecycle), `Network/Escrow.lean` (the escrow ledger and its prefix laws), and
 `Network/World.lean` (`LogicalProcessNetworkCore` and the canonical agreement),
 `Network/Channel.lean` (`ChannelContract`, its footprint discipline, and the
 laws that discipline derives), and `Network/Plan.lean` (`ProcessPlan`,
-`LogicalProcessNetwork`, and the boundary projection), and `Network/Transition.lean`
-(**partial** — the step shapes and their scope discipline, not the twenty-three
-constructors). Not started: the commit law.
+`LogicalProcessNetwork`, and the boundary projection), and
+`Network/Transition.lean` (`NetworkTransition`'s twenty-three constructors, the
+scope discipline they respect, `allocatedNominals` and `NetworkStep`). Not
+started: the commit law.
 
-`Transition.lean` is where the milestone stops short and the plan should say so
-rather than round up. What it has is the organising idea the corpus does not
-state and which makes §3's declaration checkable: **every step carries the set
-of fragments it may change, and a proof that it changed nothing else**.
+`Transition.lean` carries the organising idea the corpus does not state and
+which makes §3's declaration checkable: **every step carries the set of
+fragments it may change, and a proof that it changed nothing else**.
 `TouchesOnly` is that, over the same `Agrees` relation the assertion layer frames
-with, so it is §8's `TransitionScope step` and it turns
-`Channel.lean`'s `escrow_survives_unrelated_steps` from a theorem with a caller-
-supplied hypothesis into a theorem about steps.
+with, so it *is* §8's `TransitionScope step` — and it turns
+`Channel.lean`'s `escrow_survives_unrelated_steps` from a theorem with a
+caller-supplied hypothesis into a theorem about steps.
 
-Three step shapes are built on it: `ResolvesEscrow`, which is what all ten of
-§3's competing endings do to the world; `SendsEscrow`, the only transition that
-adds to a ledger, tied to the plan by requiring the edge's own `ChannelSteps.Send`
-to admit it; and `EndsInstance`, which stores decision 129's exact ending.
+Eight step shapes carry the constructors' payloads. `ResolvesEscrow` is what all
+ten of §3's competing endings do to the world, shared rather than repeated; they
+stay ten constructors because routing coverage is a claim *about constructors*,
+and one `resolve` carrying a `ChannelResolution` would make it vacuous.
+`SendsEscrow` is the only transition that adds to a ledger, tied to the plan by
+requiring the edge's own `ChannelSteps.Send` to admit it. `EndsInstance` stores
+decision 129's exact ending, `Spawns` carries decision 130's parent
+authorization and the nominal allocation, `StepsLocally` is scoped to *two*
+fragments because a process step may emit, `RequestsCancel` records the request
+and states that the escrow is untouched, `Commits` appends to the trace, and
+`Detaches` is decision 130's transition at the network.
+
 `Tests/Process/TransitionFixtures.lean` builds the first `ProcessPlan` — nothing
 until now had shown a topology, a message family, the step relations and a
-contract per edge could be satisfied together — and takes a receive step of it.
-
-What is missing is the `NetworkTransition` inductive itself and therefore M2's
-first exit criterion: routing coverage over all twenty-three constructors. The
-shapes above cover the ten endings and the send; the twelve instance- and
-observation-side constructors have `ChangesOneInstance` and `EndsInstance` to
-build on and are not built. `allocatedNominals` and `NetworkStep` are also
-absent, and §10.18 records the specific gap they leave.
+contract per edge could be satisfied together — takes a receive step of it, and
+reads its scope back out.
 
 `Channel.lean` is where standing risk 2 got smaller rather than larger.
 [PROCESS.md](PROCESS.md) §3 declares `ChannelContract` with seventeen fields,
@@ -601,7 +603,7 @@ Grass/Process/Network/Escrow.lean      the escrow ledger and its prefix laws
 Grass/Process/Network/World.lean       LogicalProcessNetworkCore, the canonical agreement
 Grass/Process/Network/Channel.lean     ChannelContract and its footprint discipline
 Grass/Process/Network/Plan.lean        ProcessPlan, LogicalProcessNetwork, the projection
-Grass/Process/Network/Transition.lean  step scopes and shapes (partial)
+Grass/Process/Network/Transition.lean  NetworkTransition, scopes, NetworkStep
 Grass/Process/Network/Transition.lean  NetworkTransition, NetworkStep, freshness
 Grass/Process/Network/Child.lean       child requests, bindings, lifecycle events
 Grass/Process/Network/Mailbox.lean     ordering profiles, selective receive
@@ -621,7 +623,15 @@ Exit criterion, in three parts, because the earlier single criterion was not
 dischargeable in this milestone:
 
 - routing coverage: every endpoint input and output enters through exactly one
-  constructor, over all twenty-three;
+  constructor, over all twenty-three. **Discharged, in the form this layer can
+  state it.** `NetworkTransition` has the twenty-three constructors;
+  `NetworkTransition.scope` is total over them, so there is no transition whose
+  scope is undefined; and `NetworkTransition.touchesOnly` proves by cases over
+  the whole family that each one changed nothing outside the scope it declares.
+  What that gives is §3's "no bypass": a step cannot reach a fragment it did not
+  name. What it does not yet give is the *injective* half — that a given endpoint
+  input enters through exactly one constructor rather than at least one — which
+  needs the endpoint vocabulary the driver contract supplies and is M4's;
 - the escrow prefix laws — conservation, at-most-one resolution, and stability
   under unrelated steps — over that same full family;
 - a total classification from the delivering side's interrupt, fault, and
@@ -1389,7 +1399,17 @@ later and pointing the other way.
 Recorded so it is expected rather than discovered at merge. It closes when
 `g-design`'s branch lands, which the settled order puts first.
 
-### 10.18 A transition's allocation is not checked against what it allocates
+### 10.18 A transition's allocation is checked only where it is spawned
+
+**Partly closed.** `Spawns.allocatesTheGeneration` now requires a spawn's
+allocation to contain the generation the spawned incarnation carries, which is
+the correspondence this entry was filed for, at the two constructors that
+allocate. The general statement below still stands for the identities `spawn`
+and `restart` do *not* introduce — channel epochs, message occurrences, child
+demands — because the constructors that introduce those do not yet name them
+either. The account below is what was filed.
+
+### 10.18a A transition's allocation is not checked against what it allocates
 
 `Grass/Process/Nominal.lean` already carries `Allocation`, `NominalHistory`,
 `Fresh`, `Admissible` and `extend`, so `docs/PROCESS.md` §3's `NetworkStep` —
