@@ -567,3 +567,133 @@ pub mod mock {
         }
     }
 }
+
+#[cfg(test)]
+mod outer_tests {
+    use super::*;
+    use crate::gitrepo::mock::MockGit;
+    use std::path::PathBuf;
+
+    /// `--git-common-dir` returning an already-absolute path (the common case
+    /// from within a linked worktree, AGENT_BUS.md section 2) must be used
+    /// as-is, not re-joined onto `start`.
+    #[test]
+    fn common_dir_returns_an_absolute_result_unchanged() {
+        let abs = if cfg!(windows) { "C:\\repo\\.git" } else { "/repo/.git" };
+        let _guard = MockGit::new()
+            .on(&["rev-parse", "--git-common-dir"], GitOutput::ok(abs))
+            .install();
+        let got = common_dir(&PathBuf::from("/wherever")).unwrap();
+        assert_eq!(got, PathBuf::from(abs));
+    }
+
+    /// A relative `--git-common-dir` result (the common case from within the
+    /// main checkout, e.g. `.git`) must be resolved against `start`.
+    #[test]
+    fn common_dir_joins_a_relative_result_onto_start() {
+        let _guard = MockGit::new()
+            .on(&["rev-parse", "--git-common-dir"], GitOutput::ok(".git"))
+            .install();
+        let start = PathBuf::from("/repo/checkout");
+        let got = common_dir(&start).unwrap();
+        assert_eq!(got, start.join(".git"));
+    }
+
+    /// A failed (or empty-stdout) `--show-object-format` invocation must
+    /// default to `"sha1"` rather than propagating an error — old `git`
+    /// versions do not support the flag at all.
+    #[test]
+    fn object_format_defaults_to_sha1_when_the_command_fails() {
+        let _guard = MockGit::new()
+            .on(&["rev-parse", "--show-object-format"], GitOutput::err("unknown option"))
+            .install();
+        let got = object_format(&PathBuf::from(".")).unwrap();
+        assert_eq!(got, "sha1");
+    }
+
+    #[test]
+    fn object_format_returns_the_reported_format_on_success() {
+        let _guard = MockGit::new()
+            .on(&["rev-parse", "--show-object-format"], GitOutput::ok("sha256"))
+            .install();
+        let got = object_format(&PathBuf::from(".")).unwrap();
+        assert_eq!(got, "sha256");
+    }
+
+    /// An already-existing worktree path is a no-op success — `ensure_bus_worktree`
+    /// must not attempt to recreate (or shell out to git) at all.
+    #[test]
+    fn ensure_bus_worktree_is_a_noop_when_the_path_already_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        // No MockGit installed at all: if this reached a git call, the mock
+        // seam would panic with "no rule matched" since nothing is registered.
+        ensure_bus_worktree(&PathBuf::from("/unused"), dir.path(), "origin/agent-bus").unwrap();
+    }
+
+    /// When the worktree path's parent cannot be created (here, because a
+    /// path component is an ordinary file, not a directory), the IO error
+    /// must be surfaced as `AbError::Io`, not panic or silently proceed.
+    #[test]
+    fn ensure_bus_worktree_reports_io_error_when_parent_cannot_be_created() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocking_file = dir.path().join("not_a_dir");
+        std::fs::write(&blocking_file, "x").unwrap();
+        let worktree_path = blocking_file.join("nested").join("wt");
+        let err = ensure_bus_worktree(&PathBuf::from("/unused"), &worktree_path, "origin/agent-bus").unwrap_err();
+        assert!(matches!(err, AbError::Io { .. }), "{err:?}");
+    }
+
+    /// The ordinary path: the worktree does not yet exist, its parent can be
+    /// created, and `git worktree add --detach <path> <start>` succeeds.
+    #[test]
+    fn ensure_bus_worktree_creates_a_new_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        let worktree_path = dir.path().join("nested").join("wt");
+        let _guard = MockGit::new().on_prefix(&["worktree", "add", "--detach"], GitOutput::ok("")).install();
+        ensure_bus_worktree(&PathBuf::from("/unused"), &worktree_path, "origin/agent-bus").unwrap();
+    }
+
+    /// A failing `git interpret-trailers --parse` invocation must surface as
+    /// an error rather than an empty/garbage trailer list.
+    #[test]
+    fn commit_message_trailers_reports_interpret_trailers_failure() {
+        let _guard = MockGit::new()
+            .on_prefix(&["show", "-s", "--format=%B"], GitOutput::ok("subject\n\nAgent-Bus-Agent: alice"))
+            .on(&["interpret-trailers", "--parse"], GitOutput::err("bad format"))
+            .install();
+        let err = commit_message_trailers(&PathBuf::from("."), "HEAD").unwrap_err();
+        assert!(format!("{err}").contains("interpret-trailers failed"), "{err}");
+    }
+
+    /// A non-clean `merge-tree --write-tree` (conflicting merge) must be
+    /// reported as an `invalid` error naming both sides, not panic or return
+    /// a bogus tree id.
+    #[test]
+    fn merge_tree_write_tree_reports_a_conflicting_merge() {
+        let _guard = MockGit::new().on_prefix(&["-c"], GitOutput::err("CONFLICT (content): merge conflict")).install();
+        let err = merge_tree_write_tree(&PathBuf::from("."), "ours-sha", "theirs-sha").unwrap_err();
+        assert!(err.to_string().contains("could not cleanly merge"), "{err}");
+    }
+
+    /// A "successful" `merge-tree` call that nonetheless produces no tree id
+    /// on stdout must still be rejected rather than returning an empty tree.
+    #[test]
+    fn merge_tree_write_tree_reports_empty_output_as_an_error() {
+        let _guard = MockGit::new().on_prefix(&["-c"], GitOutput::ok("")).install();
+        let err = merge_tree_write_tree(&PathBuf::from("."), "ours-sha", "theirs-sha").unwrap_err();
+        assert!(err.to_string().contains("produced no tree id"), "{err}");
+    }
+
+    /// `commit_tree_deterministic` shells out via a raw `std::process::Command`
+    /// (not through the `gitrepo::run`/`MockGit` seam — see its own doc
+    /// comment for why: it needs custom env vars for deterministic
+    /// author/committer identity), so exercising its failure branch needs a
+    /// real repository and a real (invalid) tree object id.
+    #[test]
+    fn commit_tree_deterministic_reports_a_real_git_failure() {
+        let repo = crate::test_support::init_repo();
+        let err = commit_tree_deterministic(repo.path(), "0000000000000000000000000000000000000000", &[], "msg")
+            .unwrap_err();
+        assert!(format!("{err}").contains("commit-tree failed"), "{err}");
+    }
+}
