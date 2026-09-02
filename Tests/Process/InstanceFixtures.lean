@@ -2,32 +2,39 @@ import Grass.Process.Network.Instance
 import Tests.Process.M2GraphFixtures
 
 /-!
-# A lifecycle tag that a network cannot lie with — and the two things it cannot say
+# What an instance says about its own ending, and about its parent
 
-`Grass/Process/Network/Instance.lean` claims that `terminated` is a claim *about
-the state*, so nothing is lost by leaving the result off the tag. That claim has
-a precondition the module states and this fixture is here to make concrete.
+`Grass/Process/Network/Instance.lean` is the second revision of two types the
+corpus named and did not declare, and both revisions were forced by a defect
+this file now pins.
 
-* `LifecycleWitnessed` has teeth: an instance tagged `terminated` whose state is
-  not terminal fails it. `terminated_at_three_is_not_witnessed`.
-* It is satisfiable: a genuinely finished instance meets it and yields a result.
-  `terminated_at_zero_is_witnessed`.
-* **But `terminated_has_result` recovers *a* result, not *the* result.**
-  `ProcessSpec.Terminal` is a relation, so at a protocol whose terminal states
-  do not determine the answer, two different results are both recovered:
-  `blind_result_is_not_determined`. At a protocol whose terminal states do
-  determine it, they agree: `determined_result_is_unique`. That contrast is the
-  whole content of the module's payload-free argument, and neither half is
-  visible at `countdown`, whose `TerminalResult` is a singleton.
+## The lifecycle
 
-It also pins the parenthood distinction the module makes:
+`LifecycleWitnessed` must have teeth — an instance tagged `terminated` whose
+state is not terminal must fail it (`terminated_at_three_is_not_witnessed`) —
+and must be satisfiable (`terminated_at_zero_is_witnessed`).
 
-* `HasNoParent` is not `IsRoot`. A detached child has no parent and is not the
-  root, and `detached_child_is_not_root` is that.
+Its *job* is what changed. Under the payload-free predecessor it was the only
+way to learn what a process answered, and it could not do that: `Terminal` is a
+relation, so it produced *some* result rather than *the* one the parent
+recorded. `blind_result_is_not_determined` is that defect, still visible: at a
+protocol whose terminal states ignore the answer, the *state* is terminal for
+`true` and for `false` alike. Under decision 129 the tag stores the result, so
+the ending is exact regardless, and `blindRoot_ending_is_exact` is that — the
+same protocol, the same ambiguous state, and one unambiguous ending.
+
+## The parentage
+
+`root_and_detached_are_distinguishable` is decision 130's payoff. Under the
+`Option` this replaces, a detached child's `parent` was `none` exactly as a
+root's was: "the root is the instance with no parent" was false as a network
+law, and `Grass/Process/Network/Child.lean`'s `NonReturningReason.detached` was
+unjustifiable from state. Now `detach` keeps the former parent while dropping
+its authority, and `detached_keeps_its_history` is that.
 
 The `countdown` topology is `Tests/Process/M2GraphFixtures.lean`'s. The second
-topology exists only because `countdown` cannot show the result question at all:
-its `TerminalResult` is `ULift Unit`, so uniqueness holds for want of a second
+topology exists because `countdown` cannot show the result question at all: its
+`TerminalResult` is `ULift Unit`, so any uniqueness holds for want of a second
 value rather than because the protocol determines anything.
 -/
 
@@ -49,18 +56,18 @@ def listenerZero : serverTopology.ProcessRef .listener where
 def counting : ProcessInstance serverTopology where
   kind := .connection
   ref := connectionSeven 0
-  parent := some ⟨.listener, listenerZero⟩
+  parentage := .attached .listener listenerZero
   request := ⟨3⟩
   localState := ⟨3⟩
   lifecycle := .running
 
 /-- The same incarnation, finished. -/
 def finished : ProcessInstance serverTopology :=
-  { counting with localState := ⟨0⟩, lifecycle := .terminated }
+  { counting with localState := ⟨0⟩, lifecycle := .terminated ⟨()⟩ }
 
 /-- And the lie: tagged terminated while still counting. -/
 def lying : ProcessInstance serverTopology :=
-  { counting with lifecycle := .terminated }
+  { counting with lifecycle := .terminated ⟨()⟩ }
 
 /--
 **A running process cannot be tagged terminated.**
@@ -71,13 +78,13 @@ This is what shows the predicate is not universally true.
 -/
 theorem terminated_at_three_is_not_witnessed : ¬ lying.LifecycleWitnessed := by
   intro witnessed
-  obtain ⟨_, terminal⟩ := witnessed rfl
+  have terminal := witnessed ⟨()⟩ rfl
   have counted : ¬ ((3 : Nat) = 0) := by decide
   exact counted terminal
 
 /-- A genuinely finished process is witnessed, so the predicate is satisfiable. -/
 theorem terminated_at_zero_is_witnessed : finished.LifecycleWitnessed :=
-  fun _ => ⟨⟨()⟩, rfl⟩
+  fun _ _ => rfl
 
 /-- A running process is witnessed vacuously, and is not thereby terminal. -/
 theorem counting_is_witnessed : counting.LifecycleWitnessed :=
@@ -93,13 +100,13 @@ theorem finished_is_not_live : ¬ finished.Live := by
   intro live
   have running : finished.lifecycle = ProcessLifecycle.running :=
     ProcessLifecycle.live_iff_running.mp live
-  exact absurd running (by decide)
+  exact absurd running (by simp [finished, counting])
 
 /-! ### The enumeration is closed where it says it is
 
 `cancelled` is a state; "cancelling" is not, because a process under an
-unacknowledged request is still `running`. `detached` is not a state either,
-because `detach` changes `parent` rather than liveness. Both guards fail if
+unacknowledged request is still `running`. `detached` is not a state either —
+detachment is `ProcessParentage`'s, not the lifecycle's. Both guards fail if
 anyone adds the constructor.
 -/
 
@@ -107,19 +114,19 @@ anyone adds the constructor.
 error: Unknown constant `Grass.Process.ProcessLifecycle.cancelling`
 
 Note: Inferred this name from the expected resulting type of `.cancelling`:
-  ProcessLifecycle
+  ProcessLifecycle countdownLifted
 -/
 #guard_msgs in
-example : ProcessLifecycle := .cancelling
+example : ProcessLifecycle countdownLifted := .cancelling
 
 /--
 error: Unknown constant `Grass.Process.ProcessLifecycle.detached`
 
 Note: Inferred this name from the expected resulting type of `.detached`:
-  ProcessLifecycle
+  ProcessLifecycle countdownLifted
 -/
 #guard_msgs in
-example : ProcessLifecycle := .detached
+example : ProcessLifecycle countdownLifted := .detached
 
 /-! ## A topology where the result question is visible
 
@@ -215,94 +222,109 @@ inductive Answerer
 def blindRoot : ProcessInstance answerTopology where
   kind := .blind
   ref := answerRef .blind
-  parent := none
+  parentage := .root
   request := ⟨0⟩
   localState := ⟨0⟩
-  lifecycle := .terminated
+  lifecycle := .terminated ⟨true⟩
 
 /-- A child of it, finished, at the protocol that pins the answer. -/
 def determinedChild : ProcessInstance answerTopology where
   kind := .determined
   ref := answerRef .determined
-  parent := some ⟨.blind, answerRef .blind⟩
+  parentage := .attached .blind (answerRef .blind)
   request := ⟨0⟩
   localState := ⟨0⟩
-  lifecycle := .terminated
+  lifecycle := .terminated ⟨true⟩
 
-/-- The same child, detached: its parent is gone from the record. -/
-def detachedChild : ProcessInstance answerTopology :=
-  { determinedChild with parent := none }
+/-- The same child, detached. -/
+def detachedChild : ProcessInstance answerTopology := determinedChild.detach
 
-/-! ### The result is recovered, but not determined -/
+/-! ### The state is ambiguous; the ending is not -/
 
 /--
-**Both answers are recovered from the same terminated instance.**
+**The state alone does not determine the answer.**
 
 `ProcessSpec.Terminal` is a relation. At `blindSpec` a state is terminal for
-`true` and for `false` alike, so `terminated_has_result` returns whichever the
-proof happened to name — and a join reading it could hand back an answer the
-parent's own transition never received.
-
-This is the precondition the module's payload-free argument needs and does not
-have in general. An earlier revision of that module claimed there was "only one
-record" of the result with no such hypothesis; there is one record of *whether*
-it finished, and none of *what it answered*.
+`true` and for `false` alike, so a payload-free tag plus the state could only
+have produced *an* answer — possibly not the one the parent's transition
+received. This is the defect decision 129 closes, and it is still exhibitable
+because it is a fact about the protocol, not about the tag.
 -/
 theorem blind_result_is_not_determined :
-    blindRoot.TerminatedWith ⟨true⟩ ∧ blindRoot.TerminatedWith ⟨false⟩ :=
-  ⟨⟨rfl, rfl⟩, ⟨rfl, rfl⟩⟩
+    (answerTopology.protocol blindRoot.kind).Terminal
+      blindRoot.request blindRoot.localState ⟨true⟩ ∧
+    (answerTopology.protocol blindRoot.kind).Terminal
+      blindRoot.request blindRoot.localState ⟨false⟩ :=
+  ⟨rfl, rfl⟩
 
-/-- So the tag is witnessed twice over, by two disagreeing answers. -/
-theorem blind_is_witnessed : blindRoot.LifecycleWitnessed :=
-  ProcessInstance.terminatedWith_witnessed blind_result_is_not_determined.1
-
-/--
-**Where the terminal relation is functional, the recovered result is the
-result.**
-
-`determinedSpec` is terminal only with `true`, so any result the state is
-terminal for equals the one a parent recorded. This is
-`terminated_result_unique`'s hypothesis discharged concretely, and it is what
-`Grass/Process/Spec.lean`'s `DeterministicProcess.terminal_functional` supplies
-for the deterministic construction.
--/
-theorem determined_result_is_unique
-    (recovered : (answerTopology.protocol determinedChild.kind).TerminalResult)
-    (terminal : (answerTopology.protocol determinedChild.kind).Terminal
-      determinedChild.request determinedChild.localState recovered) :
-    recovered = ⟨true⟩ := by
-  obtain ⟨_, isTrue⟩ := terminal
-  cases recovered
-  simp_all
+/-- The instance is witnessed: the answer it stores is one the protocol reaches. -/
+theorem blindRoot_is_witnessed : blindRoot.LifecycleWitnessed := by
+  intro result stored
+  have isTrue : result = ⟨true⟩ := by
+    injection stored with stored
+    exact stored.symm
+  rw [isTrue]
   rfl
 
-/-- And the false answer is not available there, which is the contrast. -/
-theorem determined_rejects_false : ¬ determinedChild.TerminatedWith ⟨false⟩ := by
-  rintro ⟨_, _, isTrue⟩
-  exact absurd isTrue (by decide)
+/--
+**And the ending is exact anyway.**
 
-/-! ### A detached child is not the root -/
-
-/-- The root is the root: its kind faces the boundary and it has no parent. -/
-theorem blindRoot_is_root : blindRoot.IsRoot := ⟨rfl, rfl⟩
+The same ambiguous state, and one unambiguous ending, because the tag carries
+it. This is what decision 129 buys: an audit reading network state learns what
+the process answered without replaying the parent's transition.
+-/
+theorem blindRoot_ending_is_exact :
+    (answerTopology.protocol blindRoot.kind).Terminal
+      blindRoot.request blindRoot.localState ⟨true⟩ :=
+  blindRoot.terminated_result_is_exact blindRoot_is_witnessed rfl
 
 /--
-**A detached child has no parent and is not the root.**
+A network cannot store an answer the protocol never reaches from that state.
 
-`docs/PROCESS.md` §3 detaches children, and a detached child's `parent` is
-`none` exactly as a root's is. `HasNoParent` holds of both; `IsRoot` does not,
-because the kind is the load-bearing half. An earlier revision of the module
-defined `IsRoot` as the absent parent alone, which made this instance a root.
+The half a stored payload cannot check for itself, and what `LifecycleWitnessed`
+is now for: at `determinedSpec` only `true` is terminal, so an instance storing
+`false` fails it.
 -/
-theorem detached_child_is_not_root :
-    detachedChild.HasNoParent ∧ ¬ detachedChild.IsRoot := by
-  refine ⟨rfl, ?_⟩
-  rintro ⟨isRootKind, _⟩
-  exact absurd isRootKind (by decide)
+theorem determined_cannot_store_false :
+    ¬ ({ determinedChild with lifecycle := .terminated ⟨false⟩ } :
+        ProcessInstance answerTopology).LifecycleWitnessed := by
+  intro witnessed
+  have terminal := witnessed ⟨false⟩ rfl
+  exact absurd terminal.2 (by decide)
 
-/-- The child that is still attached has a parent, so neither holds of it. -/
-theorem determinedChild_has_a_parent : ¬ determinedChild.HasNoParent := by
-  intro noParent
-  exact absurd noParent (by simp [ProcessInstance.HasNoParent, determinedChild])
+/-! ### Root and detached are distinguishable -/
+
+/-- The root is the root, by construction of its parentage. -/
+theorem blindRoot_is_root : blindRoot.IsRoot := trivial
+
+/--
+**A root and a detached child are told apart.**
+
+The defect decision 130 closes. Under the `Option` both had `parent = none`.
+-/
+theorem root_and_detached_are_distinguishable :
+    blindRoot.IsRoot ∧ ¬ detachedChild.IsRoot ∧ detachedChild.IsDetached :=
+  ⟨trivial, fun isRoot => isRoot, trivial⟩
+
+/--
+**Detaching drops authority and keeps the history.**
+
+`docs/PROCESS.md` §3's "changes only `.attached parent` to `.detached parent`,
+proves the references identical". The former parent is still there, which is
+what makes `Child.lean`'s `NonReturningReason.detached` checkable against state.
+-/
+theorem detached_keeps_its_history :
+    detachedChild.parentage.currentParent = none ∧
+      detachedChild.parentage.knownParent = some ⟨.blind, answerRef .blind⟩ :=
+  ⟨rfl, rfl⟩
+
+/-- The attached child still has authority over it. -/
+theorem attached_child_has_a_parent :
+    determinedChild.parentage.currentParent = some ⟨.blind, answerRef .blind⟩ := rfl
+
+/-- Detaching changes nothing about the run. -/
+theorem detaching_preserves_the_run :
+    detachedChild.lifecycle = determinedChild.lifecycle :=
+  (determinedChild.detach_preserves_run).2
 
 end Grass.Process.Tests.Instances

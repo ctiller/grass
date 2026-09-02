@@ -1,5 +1,5 @@
+import Grass.Process.Cancellation.Identity
 import Grass.Process.Spec
-import Grass.Specification.Scope
 
 /-!
 # Scoped cancellation policy
@@ -39,6 +39,9 @@ leaves a sibling scope's certificate untouched.
 
 This module is the policy, the scope summary it is exact against, and the
 composition that makes whole-plan cancellation a fold rather than a monolith.
+The nominal identities it is written over — masks, point, call and region ids,
+and `CancelReason` — are `Grass/Process/Cancellation/Identity.lean`'s, so that
+a consumer needing only an identity does not import a policy.
 
 The *liveness* half of cancellation — that a requested cancellation actually
 reaches a disposition under declared premises, which `docs/PROCESS.md` §3 states
@@ -51,52 +54,6 @@ the exact set of points and calls it must range over.
 namespace Grass.Process
 
 open Grass.Specification (ScopeId)
-
-/--
-Where a process may be cancelled.
-
-`docs/PROCESS.md` §3's three-way mask. `cancellationPoint` is the only one at
-which a pending request may be acted on; `uncancellable` latches it; and
-`interruptible` admits delivery between any two steps.
--/
-inductive CancellationMask
-  /-- A pending request is latched, not acted on and not dropped. -/
-  | uncancellable
-  /-- A pending request is observed here and resolved into a disposition. -/
-  | cancellationPoint
-  /-- Delivery may occur between any two steps of this region. -/
-  | interruptible
-  deriving DecidableEq, Repr
-
-/-- The nominal identity of a declared cancellation point. -/
-structure CancellationPointId where
-  /-- The scope that declared it. -/
-  scope : ScopeId
-  /-- Its name within that scope. -/
-  name : String
-  deriving DecidableEq, Repr
-
-/--
-The nominal identity of a call that may block.
-
-`docs/PROCESS.md` §5 calls these *discovered*, not declared: they come from
-scanning a machine source, which is why adding a `Sleep` or a provider wait
-changes the family and must reject the old certificate.
--/
-structure BlockingCallId where
-  /-- The scope the call occurs in. -/
-  scope : ScopeId
-  /-- Its name within that scope. -/
-  name : String
-  deriving DecidableEq, Repr
-
-/-- The nominal identity of a bounded region in which cancellation is refused. -/
-structure AtomicRegionId where
-  /-- The scope that declared it. -/
-  scope : ScopeId
-  /-- Its name within that scope. -/
-  name : String
-  deriving DecidableEq, Repr
 
 /--
 A region that refuses cancellation, and the bound that makes the refusal

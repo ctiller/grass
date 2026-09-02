@@ -1,94 +1,73 @@
+import Grass.Process.Cancellation.Identity
 import Grass.Process.Network.Death
 import Grass.Process.Network.Topology
 
 /-!
-# Process instances and their lifecycle
+# Process instances, their parentage, and their lifecycle
 
-`docs/PROCESS.md` §3 gives the logical network's instance record, with `kind`,
-`ref`, `parent`, `request`, `local`, and `lifecycle`.
+`docs/PROCESS.md` §3's instance record, and the two types it is written over
+that the corpus named and did not declare.
 
-`ProcessLifecycle` is named there and declared nowhere in the corpus, so this
-module declares it. Three questions had to be answered to do that, and the
-answers are the content of this file.
+Both were declared here in a weaker form first, and both are now the form
+`docs/DECISIONS.md` decisions 129 and 130 ruled after c-process filed the
+weakness as a defect. The history is kept in the notes below because in each
+case the weaker form was *reasonable* and still wrong, and the reason it was
+wrong is the design content.
 
-## Which states exist
+## `ProcessLifecycle` stores the ending, not a tag for it
 
-Not a taxonomy invented here, and not derived from the transition family either
-— an earlier revision tried that and got it wrong in four separate ways, because
-"which transitions enter this state" is the wrong question. `NetworkTransition`
-says how a network moves; it does not enumerate the ways a process can have
-ended.
-
-§3 does enumerate them, in `ChildLifecycleEvent`, and the states below are
-exactly its non-continuing cases:
-
-| `ChildLifecycleEvent` | state |
-|---|---|
-| `pending`, `intermediate` | `running` |
-| `succeeded`, `failed` | `terminated` |
-| `cancellationAcknowledged` | `cancelled` |
-| `interrupted` | `interrupted` |
-| `faulted` | `faulted` |
-| `environmentViolation` | `violated` |
-| `died` | `died` |
-
-`succeeded` and `failed` collapse into one state because
+The states are exactly §3's `ChildLifecycleEvent` non-continuing cases —
+`succeeded` and `failed` collapse into `terminated` because
 `Grass/Process/Spec.lean` has a single `TerminalResult` rather than the corpus's
-`TerminalSuccess`/`TerminalFailure` split: at this layer both are "the protocol
-reached a terminal state", and *which* terminal state is the result, not the
-tag.
+success/failure split, so which terminal state was reached is the result, not
+the tag.
 
-§3 covers non-children too — "`processTermination` performs the corresponding
-operation for a non-child/root instance" — so this enumeration is the whole
-population's, not the child population's.
+An earlier revision made every tag payload-free and argued that nothing was lost
+because `localState` plus `LifecycleWitnessed` recovers the result. That is
+false twice. `ProcessSpec.Terminal` is a *relation*, so a state may be terminal
+with several results and the recovery returns *a* result rather than *the* one
+the parent's `ChildDemandBinding` routed — reintroducing exactly the hazard the
+argument cited against carrying it. And a faulted instance's state determines no
+`LogicalFault` at all, nor a violated one's `EnvironmentViolation`, nor a
+cancelled one's `CancelReason`, so for four of the endings the tag simply did
+not say what happened.
 
-Three transitions deliberately reach no state here. `restart` produces a *new*
-incarnation, so the fresh process is a different `ProcessRef` in `running` and
-the old one keeps whatever ending it already had — usually `faulted`, which is
-why it was restarted. `detach` changes `parent`, not liveness. And
-`requestCancel` reaches none, which is the case worth stating out loud: **a
-process with an outstanding cancellation request is still running**. It keeps
-stepping until acknowledgement. §3 agrees — "a mere request does not prove
-acknowledgement or recover its resources" — and it is *acknowledgement* that
-ends the process, which is why `cancelled` is a state and "cancelling" is not.
+Decision 129 rules the type indexed by the instance's protocol, storing the
+exact payload. §3 states the reason and the cost: "an ending must remain
+recoverable from network state without replaying the parent transition", and
+"carrying the payload does not duplicate an independent fact: the transition
+owns one value and records that same value in the child event, parent projection
+when applicable, and resulting instance state through equality proofs."
 
-## What a tag carries, and what it does not
+`LifecycleWitnessed` remains, and its job is now sharper. It does not recover
+the result — the tag has it. It ties the stored result to the protocol, so a
+network cannot store an answer the protocol never reaches from that state.
 
-The rule this module follows: **a tag carries a payload exactly when the
-instance's other fields do not determine it.**
+## `ProcessParentage` keeps the history detachment destroys
 
-`died` carries its reason because nothing else does. A dead process produced no
-protocol event; its state is whatever it was. If the tag is silent, the reason
-is unrecoverable.
+An earlier revision used §3's `parent : Option (Sigma ...)`, which is what the
+corpus declared. §3 also detaches children, and a detached child's `parent`
+becomes `none` — indistinguishable from a root's. Two things broke. "The root is
+the instance with no parent" was false as a network law, and
+`Grass/Process/Network/Child.lean`'s `NonReturningReason.detached` became
+unjustifiable from state: a binding could say an outcome does not return because
+the child was detached, with nothing in the network recording that it ever was.
 
-`terminated` carries no result because `localState` is still there and
-`LifecycleWitnessed` requires it to be a terminal state of the protocol, so
-`terminated_has_result` recovers one. Carrying it as well would mean two records
-of one fact, and a join could hand back a result the parent's own transition
-never received.
-
-`faulted`, `violated`, `interrupted` and `cancelled` carry nothing, and **they
-do not satisfy the rule**. A faulted instance's state does not determine its
-`LogicalFault`; a cancelled one's does not determine its `CancelReason`. They
-would have to, and the type would have to be indexed by the protocol to say so,
-which `docs/PROCESS.md`'s unindexed `lifecycle : ProcessLifecycle` forbids. The
-class is recorded where the event went — `ChildLifecycleOutcome.faulted` for a
-child, the boundary for a root — but it is not recoverable from instance state
-alone. That is a real gap and it is filed, not papered over.
-
-`terminated` is on the edge of the same gap for a different reason:
-`ProcessSpec.Terminal` is a *relation*, so a state may be terminal with more
-than one result and `terminated_has_result` recovers *some* result rather than
-*the* result. `TerminatedWith` below is the predicate that names a specific one,
-and `terminated_result_unique` shows the two coincide exactly when the protocol
-is deterministic. An earlier revision of this note claimed there was "only one
-record" of the result without that hypothesis; that was false.
+Decision 130 rules the three-way form. `root` is indexed at exactly the
+topology's root kind, so a root is a root by construction rather than by an
+absent field; `attached` names the current parent; `detached` records the exact
+incarnation the process was detached from while granting it no continuing
+authority. `detach` below is the whole transition: it maps `attached parent` to
+`detached parent` with the same reference, and `detach_preserves_reference` is
+§3's "proves the references identical".
 
 ## Where the witnessing obligation lives
 
 `LifecycleWitnessed` is stated here and will be required by
 `Grass/Process/Network/Plan.lean` of every instance in a well-formed
-`LogicalProcessNetwork`. That module does not exist yet, so the requirement is
+`LogicalProcessNetwork`, along with root uniqueness and the validity of attached
+parent relationships, which decision 130 also puts at the network rather than on
+each instance's author. That module does not exist yet, so the requirement is
 recorded in `docs/PROCESS_IMPLEMENTATION_PLAN.md` §4's exit criteria as well as
 here — a docstring in one module is not a place an obligation can safely live.
 -/
@@ -100,40 +79,49 @@ open Grass.Specification
 universe u w v r
 
 /--
-Where a process instance is in its life.
+Where a process instance is in its life, and what put it there.
 
-Closed, and its constructors are exactly the non-continuing cases of
-`docs/PROCESS.md` §3's `ChildLifecycleEvent`; see the module note for the table
-and for what each tag does and does not carry.
+Indexed by the protocol so that each ending carries its exact payload;
+`docs/DECISIONS.md` decision 129, and the module note for why the payload-free
+version was wrong.
 -/
-inductive ProcessLifecycle
+inductive ProcessLifecycle (protocol : ProcessSpec.{u, w}) : Type (max u w)
   /-- Stepping. Includes a process with an outstanding, unacknowledged cancel. -/
   | running
-  /-- Reached a terminal state of its protocol; see `LifecycleWitnessed`. -/
-  | terminated
-  /-- A cancellation was *acknowledged*. Requesting one does not reach here. -/
-  | cancelled
-  /-- An outstanding demand of its own was abandoned. -/
-  | interrupted
-  /-- Ended by a logical fault of its own. -/
-  | faulted
-  /-- Ended because its environment broke a contract. -/
-  | violated
-  /-- Stopped existing without finishing. -/
+  /-- Reached a terminal state of its protocol, with this answer. -/
+  | terminated (result : protocol.TerminalResult)
+  /-- A cancellation was *acknowledged*, at this point. Requesting one does not
+  reach here. -/
+  | cancelled (reason : CancelReason)
+  /-- An outstanding demand of its own was abandoned, for this reason. -/
+  | interrupted (reason : protocol.InterruptReason)
+  /-- Ended by this logical fault of its own. -/
+  | faulted (fault : protocol.LogicalFault)
+  /-- Ended because its environment broke a contract, this way. -/
+  | violated (violation : protocol.EnvironmentViolation)
+  /-- Stopped existing without finishing, for this reason. -/
   | died (reason : ProcessDeathReason)
-  deriving DecidableEq, Repr
 
 namespace ProcessLifecycle
 
+variable {protocol : ProcessSpec.{u, w}}
+
 /-- A process that may still take a transition. -/
-def Live : ProcessLifecycle → Prop
+def Live : ProcessLifecycle protocol → Prop
   | .running => True
   | _ => False
 
 /-- Exactly one state is live, which makes `Live` a decision and not a hint. -/
-theorem live_iff_running {lifecycle : ProcessLifecycle} :
+theorem live_iff_running {lifecycle : ProcessLifecycle protocol} :
     lifecycle.Live ↔ lifecycle = .running := by
-  cases lifecycle <;> simp [Live]
+  constructor
+  · intro live
+    cases lifecycle with
+    | running => rfl
+    | _ => exact absurd live (fun h => h)
+  · intro isRunning
+    rw [isRunning]
+    trivial
 
 /--
 **Requesting a cancellation and acknowledging one are different states.**
@@ -141,24 +129,140 @@ theorem live_iff_running {lifecycle : ProcessLifecycle} :
 The distinction this enumeration exists to make. `docs/PROCESS.md` §3: "a mere
 request does not prove acknowledgement or recover its resources", so a process
 under an unacknowledged request is `running` and still schedulable, while
-acknowledgement is a `ChildLifecycleEvent` terminal outcome and ends it.
+acknowledgement is a terminal `ChildLifecycleEvent` and ends it.
 
-An earlier revision of this module had a single claim covering both, and no
-`cancelled` state at all, so an acknowledged cancellation reached no state — a
-way for a process to end that the enumeration did not name.
+An earlier revision had no `cancelled` state at all, so an acknowledged
+cancellation reached no state — a way for a process to end that the enumeration
+did not name.
 -/
-theorem request_and_acknowledgement_differ :
-    ProcessLifecycle.running.Live ∧ ¬ ProcessLifecycle.cancelled.Live :=
+theorem request_and_acknowledgement_differ (reason : CancelReason) :
+    (ProcessLifecycle.running (protocol := protocol)).Live ∧
+      ¬ (ProcessLifecycle.cancelled (protocol := protocol) reason).Live :=
   ⟨trivial, fun live => live⟩
 
 end ProcessLifecycle
 
 /--
+Whether a process has a parent, had one, or never did.
+
+`docs/DECISIONS.md` decision 130. The `root` constructor is indexed at the
+topology's root kind, so the root is a root by construction; `detached` keeps
+the incarnation it was detached from without granting it authority. See the
+module note for what the `Option` this replaces could not say.
+-/
+inductive ProcessParentage {registry : ProtocolRegistry.{u, w, v}}
+    {boundary : DriverBoundary.{u}}
+    (topology : ProcessTopologyCore.{u, w, v, r} registry boundary) :
+    topology.ProcessKind → Type r
+  /-- The root. There is no parent because there was never one. -/
+  | root : ProcessParentage topology topology.root
+  /-- A child of this incarnation, which currently holds parent authority. -/
+  | attached {kind : topology.ProcessKind} (parentKind : topology.ProcessKind)
+      (parent : topology.ProcessRef parentKind) : ProcessParentage topology kind
+  /-- Detached from this incarnation, which no longer holds any authority. -/
+  | detached {kind : topology.ProcessKind}
+      (formerParentKind : topology.ProcessKind)
+      (formerParent : topology.ProcessRef formerParentKind) :
+      ProcessParentage topology kind
+
+namespace ProcessParentage
+
+variable {registry : ProtocolRegistry.{u, w, v}} {boundary : DriverBoundary.{u}}
+  {topology : ProcessTopologyCore.{u, w, v, r} registry boundary}
+  {kind : topology.ProcessKind}
+
+/-- The incarnation that currently holds parent authority, if any. -/
+def currentParent : ProcessParentage topology kind →
+    Option (Sigma fun parentKind => topology.ProcessRef parentKind)
+  | .root => none
+  | .attached parentKind parent => some ⟨parentKind, parent⟩
+  | .detached _ _ => none
+
+/--
+The incarnation this process was spawned by, whether or not it still holds
+authority.
+
+The half the `Option` could not express. `currentParent` and `knownParent`
+differ exactly on a detached child, which is what makes
+`Grass/Process/Network/Child.lean`'s `NonReturningReason.detached` checkable
+against state.
+-/
+def knownParent : ProcessParentage topology kind →
+    Option (Sigma fun parentKind => topology.ProcessRef parentKind)
+  | .root => none
+  | .attached parentKind parent => some ⟨parentKind, parent⟩
+  | .detached formerParentKind formerParent => some ⟨formerParentKind, formerParent⟩
+
+/-- This process is the root. -/
+def IsRoot : ProcessParentage topology kind → Prop
+  | .root => True
+  | _ => False
+
+/-- This process was spawned by a parent that has since let it go. -/
+def IsDetached : ProcessParentage topology kind → Prop
+  | .detached _ _ => True
+  | _ => False
+
+/--
+**Detachment.**
+
+`docs/PROCESS.md` §3: the transition "changes only `.attached parent` to
+`.detached parent`, proves the references identical, and establishes the
+corresponding non-returning child disposition." This is the first two thirds;
+the disposition is `Child.lean`'s.
+
+A root and an already-detached process are unchanged, because neither has parent
+authority to give up.
+-/
+def detach : ProcessParentage topology kind → ProcessParentage topology kind
+  | .attached parentKind parent => .detached parentKind parent
+  | other => other
+
+/-- Detaching gives up authority. -/
+theorem detach_drops_authority (parentKind : topology.ProcessKind)
+    (parent : topology.ProcessRef parentKind) :
+    (ProcessParentage.attached (kind := kind) parentKind parent).detach.currentParent
+      = none := rfl
+
+/-- **And keeps the reference.** §3's "proves the references identical". -/
+theorem detach_preserves_reference (parentKind : topology.ProcessKind)
+    (parent : topology.ProcessRef parentKind) :
+    (ProcessParentage.attached (kind := kind) parentKind parent).detach.knownParent
+      = some ⟨parentKind, parent⟩ := rfl
+
+/--
+**A root and a detached child are distinguishable.**
+
+The defect decision 130 closes, stated as the property it buys. Under the
+`Option` both had `parent = none` and nothing separated them.
+-/
+theorem root_is_not_detached (parentKind : topology.ProcessKind)
+    (parent : topology.ProcessRef parentKind) :
+    (ProcessParentage.root (topology := topology)).knownParent = none ∧
+      (ProcessParentage.detached (kind := kind) parentKind parent).knownParent
+        = some ⟨parentKind, parent⟩ :=
+  ⟨rfl, rfl⟩
+
+/-- A root's kind is the topology's root kind, by construction. -/
+theorem isRoot_kind {parentage : ProcessParentage topology kind}
+    (root : parentage.IsRoot) : kind = topology.root := by
+  cases parentage with
+  | root => rfl
+  | _ => exact absurd root (fun h => h)
+
+/-- Neither a detached nor an attached process is the root. -/
+theorem detached_not_root (parentKind : topology.ProcessKind)
+    (parent : topology.ProcessRef parentKind) :
+    ¬ (ProcessParentage.detached (kind := kind) parentKind parent).IsRoot :=
+  fun isRoot => isRoot
+
+end ProcessParentage
+
+/--
 One incarnation in the logical network.
 
 `docs/PROCESS.md` §3's record, with `local` spelled `localState` because `local`
-is a Lean keyword. `parent` is an `Option` of a dependent pair because a parent
-may be of a different kind.
+is a Lean keyword, and with `parent` replaced by `parentage` under decision 130.
 -/
 structure ProcessInstance {registry : ProtocolRegistry.{u, w, v}}
     {boundary : DriverBoundary.{u}}
@@ -168,19 +272,14 @@ structure ProcessInstance {registry : ProtocolRegistry.{u, w, v}}
   kind : topology.ProcessKind
   /-- Which incarnation of it. -/
   ref : topology.ProcessRef kind
-  /--
-  Its parent incarnation, if it has one.
-
-  `none` covers two different situations — a root, and a detached child — which
-  `IsRoot` below is careful not to conflate.
-  -/
-  parent : Option (Sigma fun parentKind => topology.ProcessRef parentKind)
+  /-- Whether it has a parent, had one, or never did. -/
+  parentage : ProcessParentage topology kind
   /-- The request it was spawned with. -/
   request : (topology.protocol kind).Request
   /-- Its private state. -/
   localState : (topology.protocol kind).State
-  /-- Where it is in its life. -/
-  lifecycle : ProcessLifecycle
+  /-- Where it is in its life, and what put it there. -/
+  lifecycle : ProcessLifecycle (topology.protocol kind)
 
 namespace ProcessInstance
 
@@ -191,126 +290,74 @@ variable {registry : ProtocolRegistry.{u, w, v}} {boundary : DriverBoundary.{u}}
 def Live (incarnation : ProcessInstance topology) : Prop :=
   incarnation.lifecycle.Live
 
-/-! ## Parenthood -/
-
-/--
-This instance has no parent recorded.
-
-Deliberately *not* called `IsRoot`. `docs/PROCESS.md` §3 detaches children, and
-a detached child has no parent either, so the two are indistinguishable by this
-field alone.
--/
-def HasNoParent (incarnation : ProcessInstance topology) : Prop :=
-  incarnation.parent = none
-
-/--
-The root: the one kind whose protocol faces the driver boundary, with no parent.
-
-`ProcessGraph.root` is what makes a root a root — it is the kind whose
-`rootBoundary` exposure exists — so the kind is the load-bearing half and the
-absent parent is the consistency check.
--/
+/-- This instance is the root. -/
 def IsRoot (incarnation : ProcessInstance topology) : Prop :=
-  incarnation.kind = topology.root ∧ incarnation.parent = none
+  incarnation.parentage.IsRoot
 
-theorem isRoot_hasNoParent {incarnation : ProcessInstance topology}
-    (root : incarnation.IsRoot) : incarnation.HasNoParent := root.2
-
-/-! ## The terminal tag as a claim about the state -/
+/-- This instance was spawned by a parent that has since let it go. -/
+def IsDetached (incarnation : ProcessInstance topology) : Prop :=
+  incarnation.parentage.IsDetached
 
 /--
-**The lifecycle tag is a claim about the state, not a label on it.**
+**The stored result is one the protocol actually reaches.**
 
-A terminated instance's state is a terminal state of its protocol. Required of
-every instance in a well-formed `LogicalProcessNetwork` rather than carried as a
-field, for the reason in the module note.
+Required of every instance in a well-formed `LogicalProcessNetwork` rather than
+carried as a field, for the reason in the module note. Since decision 129 the
+tag *has* the result, so this no longer recovers anything — it stops a network
+from storing an answer the protocol never reaches from that state, which is the
+half a stored payload cannot check for itself.
 
-Only `terminated` is constrained. `cancelled`, `interrupted`, `faulted`,
-`violated` and `died` are ends that `docs/PROCESS.md` §3 does not require to be
-protocol-terminal — a faulting process stops in whatever state it faulted from —
-and demanding a terminal state of them would make those transitions
-unconstructible.
+Only `terminated` is constrained. The other endings' payloads are their own
+witnesses: a `LogicalFault` is a fault, and there is no state relation to hold
+it against.
 -/
 def LifecycleWitnessed (incarnation : ProcessInstance topology) : Prop :=
-  incarnation.lifecycle = .terminated →
-    ∃ result, (topology.protocol incarnation.kind).Terminal
-      incarnation.request incarnation.localState result
-
-/--
-The same claim about a *named* result: this instance ended, with this answer.
-
-`LifecycleWitnessed` only says some result exists, because
-`ProcessSpec.Terminal` is a relation. When a consumer — a join, a parent's
-`ChildDemandBinding` — has a specific result in hand, this is the predicate that
-says the instance agrees with it.
--/
-def TerminatedWith (incarnation : ProcessInstance topology)
-    (result : (topology.protocol incarnation.kind).TerminalResult) : Prop :=
-  incarnation.lifecycle = .terminated ∧
+  ∀ result, incarnation.lifecycle = .terminated result →
     (topology.protocol incarnation.kind).Terminal
       incarnation.request incarnation.localState result
 
-theorem terminatedWith_witnessed {incarnation : ProcessInstance topology}
-    {result : (topology.protocol incarnation.kind).TerminalResult}
-    (agreed : incarnation.TerminatedWith result) : incarnation.LifecycleWitnessed :=
-  fun _ => ⟨result, agreed.2⟩
-
 /--
-A terminated instance yields *a* result — not necessarily the one a parent
-recorded.
+**The ending is exact.**
 
-`ProcessSpec.Terminal` is a relation, so a state may be terminal with several
-results and this recovers an arbitrary one. That is enough for the tag to be
-lossless about *whether* the process finished, and not enough for it to be
-lossless about *what it answered*; `terminated_result_unique` says when the two
-coincide.
+`docs/PROCESS.md` §3's requirement that "an ending must remain recoverable from
+network state without replaying the parent transition", at the terminal case:
+the result is the one stored, and it is a genuine terminal result of the
+protocol.
+
+Under the payload-free predecessor this theorem could only produce *some*
+result, which at a protocol whose terminal relation is not functional was not
+the parent's. That is why decision 129 exists.
 -/
-theorem terminated_has_result {incarnation : ProcessInstance topology}
+theorem terminated_result_is_exact {incarnation : ProcessInstance topology}
     (witnessed : incarnation.LifecycleWitnessed)
-    (ended : incarnation.lifecycle = .terminated) :
-    ∃ result, (topology.protocol incarnation.kind).Terminal
+    {result : (topology.protocol incarnation.kind).TerminalResult}
+    (ended : incarnation.lifecycle = .terminated result) :
+    (topology.protocol incarnation.kind).Terminal
       incarnation.request incarnation.localState result :=
-  witnessed ended
-
-/--
-**When the recovered result is the result.**
-
-If the protocol's terminal relation is functional at this instance — which
-`Grass/Process/Spec.lean`'s `DeterministicProcess.terminal_functional` supplies
-for the deterministic construction — then any two results the state is terminal
-for are equal, so `terminated_has_result` recovers the one a parent recorded.
-
-Stated with the hypothesis explicit rather than assumed, because a nondetermin-
-istic protocol is legal and at one the payload-free tag does *not* determine the
-answer. That is the gap the module note names.
--/
-theorem terminated_result_unique {incarnation : ProcessInstance topology}
-    (functional : ∀ left right : (topology.protocol incarnation.kind).TerminalResult,
-      (topology.protocol incarnation.kind).Terminal
-        incarnation.request incarnation.localState left →
-      (topology.protocol incarnation.kind).Terminal
-        incarnation.request incarnation.localState right → left = right)
-    {recorded : (topology.protocol incarnation.kind).TerminalResult}
-    (agreed : incarnation.TerminatedWith recorded)
-    {recovered : (topology.protocol incarnation.kind).TerminalResult}
-    (alsoTerminal : (topology.protocol incarnation.kind).Terminal
-      incarnation.request incarnation.localState recovered) :
-    recovered = recorded :=
-  functional recovered recorded alsoTerminal agreed.2
+  witnessed result ended
 
 /--
 A live instance is subject to no terminal obligation.
 
 `LifecycleWitnessed` is vacuous at `running`, which is what makes a running
-process representable at all: a running process must not be required to be in a
-terminal state. What shows the predicate is not *universally* vacuous is the
-fixture, which exhibits an instance that fails it.
+process representable at all. What shows the predicate is not *universally*
+vacuous is the fixture, which exhibits an instance that fails it.
 -/
 theorem live_witnessed_vacuously {incarnation : ProcessInstance topology}
     (live : incarnation.Live) : incarnation.LifecycleWitnessed := by
-  intro ended
+  intro result ended
   rw [ProcessLifecycle.live_iff_running.mp live] at ended
-  exact absurd ended (by decide)
+  exact absurd ended (by simp)
+
+/-- Detaching this instance: parentage only, and only where there is authority. -/
+def detach (incarnation : ProcessInstance topology) : ProcessInstance topology :=
+  { incarnation with parentage := incarnation.parentage.detach }
+
+/-- Detaching changes nothing else — not the state, not the lifecycle. -/
+theorem detach_preserves_run (incarnation : ProcessInstance topology) :
+    incarnation.detach.kind = incarnation.kind ∧
+      incarnation.detach.lifecycle = incarnation.lifecycle :=
+  ⟨rfl, rfl⟩
 
 end ProcessInstance
 

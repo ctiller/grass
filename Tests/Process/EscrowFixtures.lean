@@ -1,36 +1,49 @@
 import Grass.Process.Network.Escrow
 
 /-!
-# Escrow conservation, at a ledger you can count
+# Escrow accounting, at a ledger you can count
 
-`Grass/Process/Network/Escrow.lean` proves conservation, at-most-one resolution
-and no-loss over an abstract ledger. Abstract theorems can be true of nothing,
-so this file exhibits a ledger with both settled and outstanding entries, and
-counts them.
+`Grass/Process/Network/Escrow.lean` proves its laws over an abstract ledger, and
+abstract theorems can be true of nothing. This file exhibits a ledger with
+settled, outstanding, coalesced and rerouted occurrences, counts them, and
+follows one across an extension.
 
-It also pins the three claims the module makes that a reader would otherwise
-have to take on trust:
+What it pins that a reader would otherwise take on trust:
 
 * **Requesting cancellation does not reclaim escrow.**
   `cancelled_message_is_still_in_flight` builds an occurrence with a
-  cancellation requested that is nonetheless outstanding. If a future field ever
-  tied `cancelRequested` to `resolution`, this ledger would stop elaborating.
-* **A replacement must exist and must be a different occurrence.**
-  `coalesce_into_unescrowed_impossible` and `coalesce_into_self_impossible` are
-  the teeth of `replacementEscrowed`: without it, `coalesced` and `rerouted`
-  would be drops wearing a hat, which is `docs/FOUNDATION.md` law 5.
-* **No loss across an extension.** `second_slot_is_accounted_for` follows one
-  occurrence from in-flight to timed-out and shows it is still accounted for.
+  cancellation requested against it that is nonetheless outstanding. The module
+  says plainly that its own theorem is not the guard — the theorem is a
+  projection and would survive a field tying the two together, merely becoming
+  vacuous. This ledger is the guard: it stops elaborating the moment such a
+  field exists.
+* **Coalescing cannot go in circles.** `coalesce_cycle_impossible` is stated
+  over an arbitrary ledger, not this one: two occurrences merging into each
+  other is unconstructible. An earlier revision of the module forbade only
+  self-merging, under which a two-cycle elaborated, satisfied every field, and
+  reported itself accounted for while both payloads landed nowhere.
+* **Reroute is constructible.** `homeLedger` actually holds a `rerouted`
+  occurrence, to a session that is not this one. An earlier revision made
+  `rerouted` carry a carrier and demanded it be escrowed *here*, which no
+  genuine reroute can satisfy; the fixture that would have caught it did not
+  exist, and `Session := Unit` made it unwritable anyway. `Wire` has two values
+  for that reason.
+* **An acknowledgement acknowledges something.**
+  `acknowledgement_needs_a_request` is the teeth of `acknowledgedWasRequested`,
+  over an arbitrary ledger.
+* **A request does not evaporate.** `cancel_request_survives` follows the
+  outstanding request across the extension.
 
-`Slot` is a four-element occurrence type so that every law here is `decide`-able
-and the fixture argues by computation rather than by tactic.
+`Slot` and `Wire` are finite so that the counting arguments are `decide`-able
+and the fixture argues by computation.
 -/
 
 namespace Grass.Process.Tests.Escrow
 
 open Grass.Process
+open Grass.Specification
 
-/-- Four message occurrences, so the laws are decidable. -/
+/-- Four message occurrences on the channel under test. -/
 inductive Slot
   | first
   | second
@@ -38,154 +51,214 @@ inductive Slot
   | fourth
   deriving DecidableEq, Repr
 
-/-- One session; this fixture is about escrow, not routing. -/
-abbrev Session := Unit
+/-- Two sessions, so that a reroute has somewhere to go. -/
+inductive Wire
+  | home
+  | away
+  deriving DecidableEq, Repr
+
+/-- The scope this fixture's cancellation point belongs to. -/
+def escrowScope : ScopeId := ⟨["Tests", "Process", "Escrow"]⟩
+
+/-- The one declared cancellation point in this fixture. -/
+def shutdownPoint : CancelReason := ⟨⟨escrowScope, "shutdown"⟩⟩
+
+/-- Allocation order: exactly the order of `created`. -/
+def slotRank : Slot → Nat
+  | .first => 0
+  | .second => 1
+  | .third => 2
+  | .fourth => 3
 
 /--
-The ledger: `first` was received, `third` merged into `second`, and `second` is
-still in flight with a cancellation requested against it.
+The ledger on the `home` session: `first` was received, `third` merged forward
+into `fourth`, `fourth` was rerouted away, and `second` is still in flight with
+a cancellation requested against it.
 -/
-def sampleResolution : Slot → Option (ChannelResolution Slot Session)
+def homeResolution : Slot → Option (ChannelResolution Slot Wire)
   | .first => some .received
-  | .third => some (.coalesced .second)
+  | .third => some (.coalesced .fourth)
+  | .fourth => some (.rerouted .away)
   | _ => none
 
-def sample : EscrowLedger Slot Session where
-  created := [.first, .second, .third]
-  createdDistinct := by decide
-  resolution := sampleResolution
+def homeLedger : EscrowLedger Slot Wire where
+  created := [.first, .second, .third, .fourth]
+  rank := slotRank
+  rankOrdersCreated := by decide
+  resolution := homeResolution
   noFabrication := by
     intro occurrence resolved
-    cases occurrence <;> simp_all [sampleResolution]
+    cases occurrence <;> simp_all [homeResolution]
+  coalesceCarrierLater := by
+    intro occurrence carrier merged
+    cases occurrence <;> simp_all [homeResolution, slotRank] <;>
+      (subst merged; decide)
   cancelRequested := fun slot => slot == .second
-  replacementEscrowed := by
-    intro occurrence carrier carried
-    cases occurrence <;>
-      simp_all [sampleResolution, ChannelResolution.replacement] <;>
-      (subst carried; decide)
+  acknowledgedWasRequested := by
+    intro occurrence reason acknowledged
+    cases occurrence <;> simp_all [homeResolution]
 
-/-! ## Conservation, counted -/
+/-! ## Accounting, counted -/
 
-/-- Two occurrences have ended. -/
-theorem sample_settled : sample.settled = [.first, .third] := by decide
+/-- Three occurrences have ended. -/
+theorem home_settled : homeLedger.settled = [.first, .third, .fourth] := by decide
 
 /-- One is still in flight. -/
-theorem sample_outstanding : sample.outstanding = [.second] := by decide
+theorem home_outstanding : homeLedger.outstanding = [.second] := by decide
 
-/--
-And the two add up to what was escrowed.
+/-- And the two add up to what was escrowed. -/
+theorem home_accounts :
+    homeLedger.settled.length + homeLedger.outstanding.length =
+      homeLedger.created.length :=
+  homeLedger.accounting
 
-`EscrowLedger.conservation` proves this in general; this instance shows the
-general statement is not about the empty ledger.
--/
-theorem sample_conserves :
-    sample.settled.length + sample.outstanding.length = sample.created.length :=
-  sample.conservation
-
-/-- Which, at this ledger, is two and one making three. -/
-theorem sample_counts : sample.settled.length = 2 ∧ sample.outstanding.length = 1 := by
-  rw [sample_settled, sample_outstanding]
+/-- Which, at this ledger, is three and one making four. -/
+theorem home_counts :
+    homeLedger.settled.length = 3 ∧ homeLedger.outstanding.length = 1 := by
+  rw [home_settled, home_outstanding]
   exact ⟨rfl, rfl⟩
 
-/-! ## Requesting cancellation does not reclaim escrow -/
+/-! ## Reroute is a thing you can build -/
+
+/--
+**A rerouted occurrence, to a session that is not this one.**
+
+The positive witness the module's `rerouted` needs and an earlier revision could
+not have: with a carrier demanded to be escrowed in *this* ledger, no genuine
+reroute was constructible, and with `Session := Unit` no fixture could tell.
+-/
+theorem fourth_went_away :
+    homeLedger.resolution .fourth = some (.rerouted Wire.away) := rfl
+
+/-- It is not a terminal ending: the payload went somewhere. -/
+theorem reroute_is_not_terminal :
+    ¬ (ChannelResolution.rerouted (Occurrence := Slot) Wire.away).IsTerminal :=
+  ChannelResolution.rerouted_not_terminal Wire.away
+
+/-- And the obligation it creates is dischargeable — here, trivially. -/
+theorem home_reroutes_land : homeLedger.ReroutedElsewhere (fun _ _ => True) := by
+  intro _ _ _
+  exact ⟨.first, trivial⟩
+
+/-! ## Coalescing cannot go in circles -/
+
+/--
+**Two occurrences cannot merge into each other.**
+
+Stated over an arbitrary ledger, because it is a fact about the type. Under the
+module's earlier law, which forbade only self-merging, the cycle below
+elaborated: every field discharged, the accounting reported the ledger in order,
+and two payloads were each "passed on" to the other and landed nowhere.
+-/
+theorem coalesce_cycle_impossible (ledger : EscrowLedger Slot Wire)
+    (left right : Slot)
+    (leftMerges : ledger.resolution left = some (.coalesced right))
+    (rightMerges : ledger.resolution right = some (.coalesced left)) : False :=
+  CoalescesTo.no_cycle
+    (CoalescesTo.trans (CoalescesTo.step leftMerges) (CoalescesTo.step rightMerges))
+
+/-- Nor into themselves, which the same rank law gives. -/
+theorem coalesce_into_self_impossible (ledger : EscrowLedger Slot Wire)
+    (occurrence : Slot)
+    (merges : ledger.resolution occurrence = some (.coalesced occurrence)) : False :=
+  CoalescesTo.no_cycle (CoalescesTo.step merges)
+
+/-- Nor into an occurrence that was never escrowed. -/
+theorem coalesce_into_unescrowed_impossible (ledger : EscrowLedger Slot Wire)
+    (occurrence carrier : Slot) (absent : carrier ∉ ledger.created)
+    (merges : ledger.resolution occurrence = some (.coalesced carrier)) : False :=
+  absent (ledger.coalesceCarrierLater occurrence carrier merges).1
+
+/-! ## Cancellation -/
 
 /--
 **The message with a cancellation requested is still in flight.**
 
-`docs/PROCESS.md` §3: "Requesting cancellation does not reclaim escrow." The
+`docs/PROCESS.md` §3: "Requesting cancellation does not reclaim escrow." This
 ledger says both things about `second` at once, which is only possible because
 `cancelRequested` and `resolution` are unrelated fields.
 -/
 theorem cancelled_message_is_still_in_flight :
-    sample.cancelRequested .second = true ∧ sample.Outstanding .second := by
-  refine ⟨rfl, ⟨by decide, rfl⟩⟩
-
-/-- And the general theorem applies to it. -/
-theorem cancelled_second_escrow_intact : sample.resolution .second = none :=
-  sample.cancel_request_leaves_escrow .second cancelled_message_is_still_in_flight.2
-    cancelled_message_is_still_in_flight.1
-
-/-! ## A replacement is not an escape hatch -/
+    homeLedger.cancelRequested .second = true ∧ homeLedger.Outstanding .second :=
+  ⟨rfl, ⟨by decide, rfl⟩⟩
 
 /--
-**Coalescing into an occurrence that was never escrowed is impossible.**
+**An acknowledgement acknowledges something.**
 
-The teeth of `replacementEscrowed`. Without it a channel could report that a
-message had merged into something that does not exist, and the payload would be
-gone while the ledger claimed it had been passed on.
-
-Stated over an arbitrary ledger, not just `sample`, because the property is a
-fact about the type rather than about this fixture.
+The teeth of `acknowledgedWasRequested`, over an arbitrary ledger: an
+acknowledgement of a request that was never made is unconstructible.
 -/
-theorem coalesce_into_unescrowed_impossible (ledger : EscrowLedger Slot Session)
-    (occurrence carrier : Slot) (absent : carrier ∉ ledger.created)
-    (claim : ledger.resolution occurrence = some (.coalesced carrier)) : False :=
-  absent (ledger.replacementEscrowed occurrence carrier (by rw [claim]; rfl)).1
+theorem acknowledgement_needs_a_request (ledger : EscrowLedger Slot Wire)
+    (occurrence : Slot) (reason : CancelReason)
+    (never : ledger.cancelRequested occurrence = false)
+    (acknowledged : ledger.resolution occurrence = some (.cancelAcknowledged reason)) :
+    False := by
+  rw [ledger.acknowledgedWasRequested occurrence reason acknowledged] at never
+  exact absurd never (by simp)
 
-/-- And an occurrence cannot merge into itself, which would be a silent drop. -/
-theorem coalesce_into_self_impossible (ledger : EscrowLedger Slot Session)
-    (occurrence : Slot)
-    (claim : ledger.resolution occurrence = some (.coalesced occurrence)) : False :=
-  (ledger.replacementEscrowed occurrence occurrence (by rw [claim]; rfl)).2 rfl
+/-! ## Later in the same execution -/
 
-/-- The same for reroute, which carries a replacement for the same reason. -/
-theorem reroute_into_self_impossible (ledger : EscrowLedger Slot Session)
-    (occurrence : Slot) (destination : Session)
-    (claim : ledger.resolution occurrence = some (.rerouted destination occurrence)) :
-    False :=
-  (ledger.replacementEscrowed occurrence occurrence (by rw [claim]; rfl)).2 rfl
-
-/-! ## No loss across an extension -/
-
-/-- Later: `fourth` was escrowed, and `second` timed out. -/
-def laterResolution : Slot → Option (ChannelResolution Slot Session)
+/-- Later: the outstanding request was acknowledged. -/
+def laterResolution : Slot → Option (ChannelResolution Slot Wire)
   | .first => some .received
-  | .second => some .timedOut
-  | .third => some (.coalesced .second)
-  | .fourth => none
+  | .second => some (.cancelAcknowledged shutdownPoint)
+  | .third => some (.coalesced .fourth)
+  | .fourth => some (.rerouted .away)
 
-def later : EscrowLedger Slot Session where
+def laterLedger : EscrowLedger Slot Wire where
   created := [.first, .second, .third, .fourth]
-  createdDistinct := by decide
+  rank := slotRank
+  rankOrdersCreated := by decide
   resolution := laterResolution
   noFabrication := by
     intro occurrence resolved
     cases occurrence <;> simp_all [laterResolution]
+  coalesceCarrierLater := by
+    intro occurrence carrier merged
+    cases occurrence <;> simp_all [laterResolution, slotRank] <;>
+      (subst merged; decide)
   cancelRequested := fun slot => slot == .second
-  replacementEscrowed := by
-    intro occurrence carrier carried
-    cases occurrence <;>
-      simp_all [laterResolution, ChannelResolution.replacement] <;>
-      (subst carried; decide)
+  acknowledgedWasRequested := by
+    intro occurrence reason acknowledged
+    cases occurrence <;> simp_all [laterResolution]
 
 /-- It is the same execution, later. -/
-theorem sampleExtends : LedgerExtends sample later where
-  createdPrefix := ⟨[.fourth], rfl⟩
+theorem homeExtends : LedgerExtends homeLedger laterLedger where
+  createdPrefix := List.prefix_refl _
   resolutionPermanent := by
     intro occurrence resolution ended
-    cases occurrence <;> simp_all [sample, later, sampleResolution, laterResolution]
+    cases occurrence <;>
+      simp_all [homeLedger, laterLedger, homeResolution, laterResolution]
+  cancelRequestMonotone := by
+    intro occurrence requested
+    cases occurrence <;> simp_all [homeLedger, laterLedger]
 
 /--
 **The occurrence that was in flight is still accounted for.**
 
 `docs/FOUNDATION.md` law 5 for escrow: `second` did not vanish between the two
-ledgers. It ended, by a named resolution.
+ledgers. It ended, by a named resolution, at a named cancellation point.
 -/
 theorem second_slot_is_accounted_for :
-    later.Outstanding .second ∨ later.Resolved .second = true :=
-  sampleExtends.noLoss cancelled_message_is_still_in_flight.2
+    laterLedger.Outstanding .second ∨ laterLedger.Resolved .second = true :=
+  homeExtends.noLoss cancelled_message_is_still_in_flight.2
 
-/-- Specifically, it timed out — and the ending is the one the ledger records. -/
-theorem second_slot_timed_out : later.resolution .second = some .timedOut := rfl
+/-- Specifically, its cancellation was acknowledged at the point it was declared. -/
+theorem second_slot_acknowledged :
+    laterLedger.resolution .second = some (.cancelAcknowledged shutdownPoint) := rfl
+
+/-- The request did not evaporate on the way there. -/
+theorem cancel_request_survives : laterLedger.cancelRequested .second = true :=
+  homeExtends.cancelRequestMonotone .second rfl
 
 /-- What was already ended stays ended, with the same ending. -/
 theorem first_slot_ending_is_permanent :
-    later.resolution .first = some .received :=
-  sampleExtends.resolvedStaysResolved (resolution := .received) rfl
+    laterLedger.resolution .first = some .received :=
+  homeExtends.resolvedStaysResolved (resolution := .received) rfl
 
-/-- And the later ledger conserves too, with one more escrowed and one fewer live. -/
-theorem later_conserves : later.settled = [.first, .second, .third] ∧
-    later.outstanding = [.fourth] := by
-  refine ⟨by decide, by decide⟩
+/-- **And the prefix half of conservation: what was settled stays settled.** -/
+theorem settled_slots_stay_settled :
+    Slot.first ∈ laterLedger.settled ∧ Slot.third ∈ laterLedger.settled := by
+  refine ⟨homeExtends.settled_monotone ?_, homeExtends.settled_monotone ?_⟩ <;> decide
 
 end Grass.Process.Tests.Escrow

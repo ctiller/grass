@@ -530,7 +530,8 @@ Grass/Process/Network/Structural.lean  the one canonical structural network
 Grass/Process/Network/Delivery.lean    total cross-vocabulary fault classification
 Grass/Process/Network/Assertion.lean   network assertions, separating conjunction
 Grass/Process/Network/Death.lean       ProcessDeathReason, a shared leaf
-Grass/Process/Network/Instance.lean    incarnations, ProcessLifecycle, witnessing
+Grass/Process/Cancellation/Identity.lean  masks, point/call/region ids, CancelReason
+Grass/Process/Network/Instance.lean    incarnations, parentage, lifecycle, witnessing
 Grass/Process/Network/Escrow.lean      the escrow ledger and its prefix laws
 Grass/Process/Network/Channel.lean     ChannelContract, session, resolution
 Grass/Process/Network/Plan.lean        ProcessPlan, LogicalProcessNetwork
@@ -1100,6 +1101,19 @@ which cannot match a declaration that does not typecheck.
 
 ### 10.12 A terminal `ProcessLifecycle` tag does not determine what ended the process
 
+**Ruled and closed.** `agent-bus` issue `c-process:46`, ruled by `g-design:37`
+as [DECISIONS.md](DECISIONS.md) decision 129: `ProcessLifecycle` is indexed by
+the instance's `ProcessSpec` and stores the exact terminal result, cancellation
+reason, interruption reason, logical fault, environment violation, or death
+reason. `Grass/Process/Network/Instance.lean` implements it, and
+`Tests/Process/InstanceFixtures.lean` keeps the defect visible — the protocol
+whose terminal states ignore the answer is still there, and the ending is now
+exact anyway. §3 also states the cost the ruling accepts: the payload "does not
+duplicate an independent fact", because the transition owns one value and
+records it in the child event, the parent projection, and the instance through
+equality proofs. The account below is what was filed.
+
+
 [PROCESS.md](PROCESS.md) §3 declares `lifecycle : ProcessLifecycle` unindexed,
 and [DECISIONS.md](DECISIONS.md) decision 128 re-ratified the `ProcessInstance`
 record with that field unchanged. `Grass/Process/Network/Instance.lean` declares
@@ -1143,6 +1157,17 @@ today; `Plan.lean` proceeds against the unindexed form, and `Transition.lean`
 will inherit whichever shape is ruled.
 
 ### 10.13 `detach` erases the fact that a process ever had a parent
+
+**Ruled and closed.** `agent-bus` issue `c-process:47`, ruled by `g-design:38`
+as [DECISIONS.md](DECISIONS.md) decision 130: `ProcessInstance` carries a typed
+`ProcessParentage` with `root`, `attached` and `detached` cases, where `root` is
+indexed at exactly the topology's root kind and `detached` retains the exact
+former parent incarnation without granting it authority. Root uniqueness and the
+validity of attached relationships stay network well-formedness laws rather than
+fields each instance author pays. `Grass/Process/Network/Instance.lean`
+implements it, `detach` is the transition's parentage half, and
+`detached_keeps_its_history` is the fixture. The account below is what was filed.
+
 
 [PROCESS.md](PROCESS.md) §3 declares `parent : Option (Sigma fun parentKind =>
 ProcessRef topology parentKind)` and separately provides a `detach` transition.
