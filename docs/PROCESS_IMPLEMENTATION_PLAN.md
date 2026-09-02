@@ -428,7 +428,7 @@ law 3 forbids an executed example standing in for a proof.
 
 ## 4. M2 — Network semantics
 
-**Status: fourteen of fourteen modules written; unmerged, unratified.** Written
+**Status: fifteen of fifteen modules written; unmerged, unratified.** Written
 with fixtures: `Network/Exposure.lean`, `Network/Graph.lean`,
 `Network/Topology.lean`, `Network/Structural.lean` (the canonical network,
 `coord1:4`), `Network/Delivery.lean` (the total cross-vocabulary classifier that
@@ -443,8 +443,25 @@ lifecycle), `Network/Escrow.lean` (the escrow ledger and its prefix laws), and
 laws that discipline derives), and `Network/Plan.lean` (`ProcessPlan`,
 `LogicalProcessNetwork`, and the boundary projection), and
 `Network/Transition.lean` (`NetworkTransition`'s twenty-three constructors, the
-scope discipline they respect, `allocatedNominals` and `NetworkStep`). Not
-started: the commit law.
+scope discipline they respect, `allocatedNominals` and `NetworkStep`), and
+`Network/Commit.lean` (§6's coalescing law). Every module in the table is
+written.
+
+`Commit.lean` is small because most of what [PROCESS.md](PROCESS.md) §6 indexes
+a commit transition by belongs to layers this one cannot see — physical worlds
+and affected resource identities are the memory owner's, obligations are too.
+What is a *process* fact is the one sentence that carries the section: a
+reconciler may replace several pending renders by the latest "only when no
+skipped render has a demanded commit observation". `Coalescing` is that, with
+the condition stated over the *skipped* list rather than the survivor, because
+the claim is about what was dropped. `skipNothing` is the satisfiability half: a
+side condition that could make every commit impossible would be a bug rather
+than a law.
+
+The observation filter is a parameter, for the same reason
+`Network/World.lean` parameterizes the obligation ledger — it is
+`Grass.Semantics`'s, and reaching into another layer to state a process fact is
+the import edge `coord1:5`'s diamond exists to prevent.
 
 `Transition.lean` carries the organising idea the corpus does not state and
 which makes §3's declaration checkable: **every step carries the set of
@@ -604,6 +621,7 @@ Grass/Process/Network/World.lean       LogicalProcessNetworkCore, the canonical 
 Grass/Process/Network/Channel.lean     ChannelContract and its footprint discipline
 Grass/Process/Network/Plan.lean        ProcessPlan, LogicalProcessNetwork, the projection
 Grass/Process/Network/Transition.lean  NetworkTransition, scopes, NetworkStep
+Grass/Process/Network/Commit.lean      coalescing and the demanded-observation law
 Grass/Process/Network/Transition.lean  NetworkTransition, NetworkStep, freshness
 Grass/Process/Network/Child.lean       child requests, bindings, lifecycle events
 Grass/Process/Network/Mailbox.lean     ordering profiles, selective receive
