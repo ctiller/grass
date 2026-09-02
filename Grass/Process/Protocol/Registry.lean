@@ -34,7 +34,8 @@ aggregate path of `docs/OLEAN_SHARDING.md` §3 — and no sibling.
 
 ## Universes
 
-`Key` and the protocols live in independent universes. This is not generality
+`Key`, the protocols' interface types, and the protocols' private types live in
+three independent universes. This is not generality
 for its own sake: `docs/PROCESS.md` §4 makes a flattened realization's private
 state the whole logical network of the plan it came from, so `flatten` produces
 a `ProcessSpec` strictly above the protocols it was built from, and
@@ -45,7 +46,7 @@ frozen at one universe would have to be rewritten when flattening arrives;
 
 namespace Grass.Process
 
-universe u v w
+universe u w v
 
 /--
 A reviewed nominal scope: the identity of the module that owns a family of keys.
@@ -70,13 +71,13 @@ What one module owns: a scope and its own local key type.
 No module imports another's fragment. This is the unit
 `docs/PROCESS_SHARDING.md` §2 calls a `ProcessRegistryFragment`.
 -/
-structure RegistryFragment : Type (max (u + 1) (v + 1)) where
+structure RegistryFragment : Type (max (u + 1) (w + 1) (v + 1)) where
   /-- The nominal scope this fragment owns. -/
   scope : ScopeId
   /-- The fragment's own key type. -/
   Local : Type v
   /-- The protocol each local key names. -/
-  protocol : Local → ProcessSpec.{u}
+  protocol : Local → ProcessSpec.{u, w}
 
 set_option linter.checkUnivs false in
 /--
@@ -87,27 +88,27 @@ A registry: keys, their protocols, and the scope that owns each key.
 nominal identity of every unaffected entry", and an identity that were
 recomputed from position would not be preserved.
 -/
-structure ProtocolRegistry : Type (max (u + 1) (v + 1)) where
+structure ProtocolRegistry : Type (max (u + 1) (w + 1) (v + 1)) where
   /-- The key type. -/
   Key : Type v
   /-- The protocol each key names. -/
-  protocol : Key → ProcessSpec.{u}
+  protocol : Key → ProcessSpec.{u, w}
   /-- Which fragment owns each key. -/
   scope : Key → ScopeId
 
 namespace RegistryFragment
 
 /-- The single-fragment registry. -/
-def toRegistry (fragment : RegistryFragment.{u, v}) : ProtocolRegistry.{u, v} where
+def toRegistry (fragment : RegistryFragment.{u, w, v}) : ProtocolRegistry.{u, w, v} where
   Key := fragment.Local
   protocol := fragment.protocol
   scope := fun _ => fragment.scope
 
-@[simp] theorem toRegistry_protocol (fragment : RegistryFragment.{u, v})
+@[simp] theorem toRegistry_protocol (fragment : RegistryFragment.{u, w, v})
     (key : fragment.Local) :
     fragment.toRegistry.protocol key = fragment.protocol key := rfl
 
-@[simp] theorem toRegistry_scope (fragment : RegistryFragment.{u, v})
+@[simp] theorem toRegistry_scope (fragment : RegistryFragment.{u, w, v})
     (key : fragment.Local) :
     fragment.toRegistry.scope key = fragment.scope := rfl
 
@@ -123,7 +124,7 @@ here rather than a promise is that a registry extension which quietly changed
 what an existing key meant would invalidate every proof indexed by that key
 while type-checking.
 -/
-structure RegistryEmbedding (small large : ProtocolRegistry.{u, v}) where
+structure RegistryEmbedding (small large : ProtocolRegistry.{u, w, v}) where
   /-- Where each old key lands. -/
   embed : small.Key → large.Key
   /-- Distinct old keys stay distinct. -/
@@ -135,10 +136,10 @@ structure RegistryEmbedding (small large : ProtocolRegistry.{u, v}) where
 
 namespace RegistryEmbedding
 
-variable {small middle large : ProtocolRegistry.{u, v}}
+variable {small middle large : ProtocolRegistry.{u, w, v}}
 
 /-- The identity embedding. -/
-def refl (registry : ProtocolRegistry.{u, v}) : RegistryEmbedding registry registry where
+def refl (registry : ProtocolRegistry.{u, w, v}) : RegistryEmbedding registry registry where
   embed := id
   injective := fun _ _ equal => equal
   protocolExact := fun _ => rfl
@@ -166,7 +167,7 @@ The disjointness `docs/PROCESS_SHARDING.md` §2 requires of `merge`. It is state
 over scopes rather than over keys because scopes are the reviewed nominal
 identities; two fragments may perfectly well use the same local key type.
 -/
-def ScopesDisjoint (left right : ProtocolRegistry.{u, v}) : Prop :=
+def ScopesDisjoint (left right : ProtocolRegistry.{u, w, v}) : Prop :=
   ∀ (leftKey : left.Key) (rightKey : right.Key),
     left.scope leftKey ≠ right.scope rightKey
 
@@ -176,14 +177,14 @@ Merge two registries with disjoint scopes.
 The key type is a `Sum` formed *here*, at the aggregate, not declared once and
 imported. See the module note.
 -/
-def merge (left right : ProtocolRegistry.{u, v})
-    (_disjoint : ScopesDisjoint left right) : ProtocolRegistry.{u, v} where
+def merge (left right : ProtocolRegistry.{u, w, v})
+    (_disjoint : ScopesDisjoint left right) : ProtocolRegistry.{u, w, v} where
   Key := Sum left.Key right.Key
   protocol := fun key => key.elim left.protocol right.protocol
   scope := fun key => key.elim left.scope right.scope
 
 /-- The left registry embeds into the merge. -/
-def mergeLeft (left right : ProtocolRegistry.{u, v})
+def mergeLeft (left right : ProtocolRegistry.{u, w, v})
     (disjoint : ScopesDisjoint left right) :
     RegistryEmbedding left (merge left right disjoint) where
   embed := Sum.inl
@@ -192,7 +193,7 @@ def mergeLeft (left right : ProtocolRegistry.{u, v})
   scopeExact := fun _ => rfl
 
 /-- The right registry embeds into the merge. -/
-def mergeRight (left right : ProtocolRegistry.{u, v})
+def mergeRight (left right : ProtocolRegistry.{u, w, v})
     (disjoint : ScopesDisjoint left right) :
     RegistryEmbedding right (merge left right disjoint) where
   embed := Sum.inr
@@ -208,7 +209,7 @@ preserves the nominal identity of every unaffected entry": every old key is
 still there, still means the same protocol, and no two old keys from different
 fragments have collided.
 -/
-theorem merge_images_disjoint (left right : ProtocolRegistry.{u, v})
+theorem merge_images_disjoint (left right : ProtocolRegistry.{u, w, v})
     (disjoint : ScopesDisjoint left right)
     (leftKey : left.Key) (rightKey : right.Key) :
     (mergeLeft left right disjoint).embed leftKey ≠
@@ -225,11 +226,11 @@ A key's scope is preserved by merge on both sides.
 Stated separately because a scope check is what a provider-coherence fold at an
 aggregate actually performs, and it should not have to unfold `Sum.elim`.
 -/
-@[simp] theorem merge_scope_inl (left right : ProtocolRegistry.{u, v})
+@[simp] theorem merge_scope_inl (left right : ProtocolRegistry.{u, w, v})
     (disjoint : ScopesDisjoint left right) (key : left.Key) :
     (merge left right disjoint).scope (Sum.inl key) = left.scope key := rfl
 
-@[simp] theorem merge_scope_inr (left right : ProtocolRegistry.{u, v})
+@[simp] theorem merge_scope_inr (left right : ProtocolRegistry.{u, w, v})
     (disjoint : ScopesDisjoint left right) (key : right.Key) :
     (merge left right disjoint).scope (Sum.inr key) = right.scope key := rfl
 
@@ -243,7 +244,7 @@ arbitrary `ProcessSpec`". That is the whole reason this type exists — a field 
 type `ProcessSpec` here would make the child relation non-well-founded in the
 universe hierarchy and would put a whole protocol inside every parent's state.
 -/
-structure ChildRequest (registry : ProtocolRegistry.{u, v}) : Type (max u v) where
+structure ChildRequest (registry : ProtocolRegistry.{u, w, v}) : Type (max w v) where
   /-- Which protocol. -/
   key : registry.Key
   /-- Its request. -/

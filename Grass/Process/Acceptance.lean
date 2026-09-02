@@ -38,14 +38,14 @@ over that model. Conditional responsiveness is separate."
 
 namespace Grass.Process
 
-universe u
+universe u w
 
 /--
 The acceptance data a `ProcessCorrect` proof is stated against.
 
 Every field is supplied by the owner of the specification, never derived here.
 -/
-structure ProcessAcceptance (p : ProcessSpec.{u}) where
+structure ProcessAcceptance (p : ProcessSpec.{u, w}) where
   /-- Which terminal results this request may legitimately finish with. -/
   TerminalAccepts : p.Request → p.TerminalResult → Prop
   /--
@@ -78,7 +78,7 @@ structure ProcessAcceptance (p : ProcessSpec.{u}) where
 
 namespace ProcessAcceptance
 
-variable {p : ProcessSpec.{u}}
+variable {p : ProcessSpec.{u, w}}
 
 /--
 A segment counts toward progress when it contains an observation the
@@ -101,14 +101,14 @@ machine does what it does, not that what it does is wanted. `Demanded` is
 `fun _ => False` rather than `fun _ => True`, so this acceptance cannot be used
 to discharge progress by emitting anything at all.
 -/
-def trivial (p : ProcessSpec.{u}) : ProcessAcceptance p where
+def trivial (p : ProcessSpec.{u, w}) : ProcessAcceptance p where
   TerminalAccepts := fun _ _ => True
   TraceAccepts := fun _ => True
   DemandsWellFormed := fun _ => True
   ViewAccepts := fun _ _ => True
   Demanded := fun _ => False
 
-theorem trivial_demands_nothing (p : ProcessSpec.{u}) (segment : p.Segment) :
+theorem trivial_demands_nothing (p : ProcessSpec.{u, w}) (segment : p.Segment) :
     ¬ (trivial p).SegmentIsDemanded segment := by
   rintro ⟨_, _, demanded⟩
   exact demanded

@@ -39,9 +39,24 @@ child lifecycle outcome to a precise parent event. A translation between two
 reason types is that map, not a new burden.
 
 This is a deviation from the literal declaration in the normative document, and
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` records that it needs a
-`docs/DECISIONS.md` entry. It weakens no demand: any program that wanted the
-global classification can instantiate all vocabularies at one type.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.6 records that it needs a
+`docs/DECISIONS.md` entry.
+
+It does move an obligation rather than remove one, and the move has to be
+completed. With a single global classification, "the network may deliver an
+environment violation to this process" is an obligation every process handles by
+construction. With per-vocabulary classes, a process whose `EnvironmentViolation`
+is `PEmpty` has made the corresponding `NetworkTransition.environmentViolation`
+*unconstructible* rather than handled. That is sound only if the network
+transition carries a total classification from the delivering side's classes into
+the receiving vocabulary's, exactly as `ChildDemandBinding.classify` does at a
+child boundary: an empty class is then a proof that the transition is
+unreachable for this process, not a way to skip it.
+
+That classification is `Grass/Process/Network/Transition.lean` and is scheduled
+in M2. Until it exists, a `PEmpty` fault or violation class is an *assumption*
+about the environment, not a discharged obligation, and this module says so
+rather than implying otherwise.
 
 ## Why the event family is closed
 
@@ -94,14 +109,21 @@ structure ProcessVocabulary : Type (u + 1) where
 namespace ProcessVocabulary
 
 /--
-The vocabulary of a process that cannot be interrupted, cannot fault, and
-assumes nothing of its environment.
+The vocabulary of a process that claims it can never be interrupted, can never
+fault, and will never be told its environment broke a contract.
 
-`PEmpty` rather than `Unit`: a process with no fault class must make the `fault`
-event *unconstructible*, not constructible-and-ignored. With `Unit` an author
-could write a `Step` case for `.fault ()` and a reviewer would have to read the
-body to discover it was unreachable. `PEmpty` rather than `Empty` only because
-the vocabulary's fields live in a general `Type u`.
+Read the three `PEmpty` fields as assertions, not as omissions. They do not say
+"this process has nothing to say about faults"; they say *no fault can occur*,
+*no cancellation can arrive*, and *the environment never violates*. That is a
+strong claim about the setting the process runs in, and the network transition
+that would deliver such an event owes a proof that it cannot arise here. See the
+module note.
+
+`PEmpty` rather than `Unit` because the claim has to be enforced by
+constructibility. With `Unit` an author could write a `Step` case for
+`.fault ()` and a reviewer would have to read the body to find that it was
+unreachable. `PEmpty` rather than `Empty` only because the vocabulary's fields
+live in a general `Type u`.
 -/
 def quiescent (ExternalEvent Demand : Type u) (Result : Demand → Type u)
     (Observation : Type u) : ProcessVocabulary where
