@@ -54,25 +54,40 @@ private def isProjectDeclaration (environment : Environment) (name : Name) : Boo
 /-- Declarations whose type or implementation depends on certificate authority
 or verified emission, closed transitively over the whole imported environment.
 This is deliberately module-name agnostic so downstream wrappers are audited. -/
-private partial def sensitiveDeclarations
-    (declarations : Array (Name × ConstantInfo)) : NameSet :=
-  let initial := declarations.foldl (init := {}) fun sensitive declaration =>
-    let (name, info) := declaration
-    if name == ``Grass.emitProgram ||
-        info.type.getUsedConstantsAsSet.contains ``Grass.VerifiedProgram then
-      sensitive.insert name
-    else
-      sensitive
-  let rec close (sensitive : NameSet) : NameSet :=
-    let expanded := declarations.foldl (init := sensitive) fun found declaration =>
-      let (name, info) := declaration
-      if found.contains name ||
-          !info.getUsedConstantsAsSet.any (fun dependency => found.contains dependency) then
-        found
-      else
-        found.insert name
-    if expanded.size == sensitive.size then sensitive else close expanded
-  close initial
+private def sensitiveDeclarations
+    (environment : Environment)
+    (declarations : Array (Name × ConstantInfo)) : Std.HashSet Name :=
+  Id.run do
+    let verifiedModuleIndex := environment.getModuleIdxFor? ``Grass.VerifiedProgram
+    -- Imported modules are indexed in dependency order. A declaration from a
+    -- strictly earlier module cannot mention VerifiedProgram; current-module
+    -- declarations have no index yet and must always be included.
+    let candidates := declarations.filter fun declaration =>
+      match verifiedModuleIndex, environment.getModuleIdxFor? declaration.1 with
+      | some verifiedIndex, some declarationIndex =>
+          verifiedIndex.toNat ≤ declarationIndex.toNat
+      | _, _ => true
+    let mut seeds : Std.HashSet Name :=
+      Std.HashSet.emptyWithCapacity (capacity := candidates.size)
+    let mut reverseDependencies : Std.HashMap Name (Array Name) :=
+      Std.HashMap.emptyWithCapacity (capacity := candidates.size)
+    for (name, info) in candidates do
+      if name == ``Grass.emitProgram ||
+          info.type.getUsedConstantsAsSet.contains ``Grass.VerifiedProgram then
+        seeds := seeds.insert name
+      for dependency in info.getUsedConstantsAsSet do
+        let dependents := reverseDependencies.get? dependency |>.getD #[]
+        reverseDependencies := reverseDependencies.insert dependency (dependents.push name)
+    let mut sensitive : Std.HashSet Name := seeds
+    let mut pending : Array Name := seeds.toArray
+    while let some name := pending.back? do
+      pending := pending.pop
+      if let some dependents := reverseDependencies.get? name then
+        for dependent in dependents do
+          unless sensitive.contains dependent do
+            sensitive := sensitive.insert dependent
+            pending := pending.push dependent
+    return sensitive
 
 /-- Audit every project declaration and report direct `VerifiedProgram` roots. -/
 elab "#audit_verified_programs" : command => do
@@ -81,7 +96,8 @@ elab "#audit_verified_programs" : command => do
     found.push (name, info)
   let mut roots := #[]
   for (name, info) in declarations do
-    if isRootCandidate info && (← liftTermElabM <| producesVerifiedProgram info.type) then
+    if !name.isInternal && isRootCandidate info &&
+        (← liftTermElabM <| producesVerifiedProgram info.type) then
       roots := roots.push (name, info)
   if roots.isEmpty then
     throwError "trust audit found no concrete VerifiedProgram declarations"
@@ -94,7 +110,7 @@ elab "#audit_verified_programs" : command => do
     let rejected := axioms.filter fun axiomName => !allowedAxiom axiomName
     unless rejected.isEmpty do
       throwError "VerifiedProgram root '{name}' uses rejected axioms: {rejected.toList}"
-  let sensitive := sensitiveDeclarations declarations
+  let sensitive := sensitiveDeclarations environment declarations
   for (name, info) in declarations do
     unless sensitive.contains name do continue
     if info.isUnsafe then
