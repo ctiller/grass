@@ -101,11 +101,12 @@ One step of an operation.
 faults it may raise, because a compute step that cannot fail does nothing
 observable and has no reason to be in the sequence.
 -/
-inductive Substep : Type 1 where
+inductive Substep where
   /-- The step performs this memory access. -/
   | access (descriptor : AccessDescriptor)
   /-- The step touches no memory but may raise one of these faults. -/
   | compute (faults : List FaultClassId)
+deriving DecidableEq, Repr
 
 namespace Substep
 
@@ -127,8 +128,21 @@ Table-relative because `AccessDescriptor.WellFormedIn` is: a descriptor names it
 space and the profile decides what that space is.
 -/
 def WellFormedIn (table : AddressSpaceTable) : Substep → Prop
-  | .access d => ∃ space, table.find? d.space = some space ∧ d.WellFormedIn space
+  | .access d =>
+      match table.find? d.space with
+      | some space => d.WellFormedIn space
+      | Option.none => False
   | .compute faults => faults ≠ []
+
+instance (table : AddressSpaceTable) (step : Substep) :
+    Decidable (step.WellFormedIn table) := by
+  cases step with
+  | access d =>
+    show Decidable (match table.find? d.space with
+      | some space => d.WellFormedIn space
+      | Option.none => False)
+    cases table.find? d.space <;> simp <;> infer_instance
+  | compute faults => exact inferInstanceAs (Decidable (faults ≠ []))
 
 @[simp] theorem descriptor?_access (d : AccessDescriptor) :
     (Substep.access d).descriptor? = some d := rfl
@@ -144,8 +158,12 @@ theorem not_wellFormedIn_compute_nil (table : AddressSpaceTable) :
 else is true of it. -/
 theorem not_wellFormedIn_of_undeclared {table : AddressSpaceTable} {d : AccessDescriptor}
     (h : ¬ table.Declares d.space) : ¬ (Substep.access d).WellFormedIn table := by
-  rintro ⟨space, hfind, -⟩
-  exact h (by simp [AddressSpaceTable.Declares, hfind])
+  show ¬ (match table.find? d.space with
+    | some space => d.WellFormedIn space
+    | Option.none => False)
+  cases hfind : table.find? d.space with
+  | none => simp
+  | some space => exact absurd (by simp [AddressSpaceTable.Declares, hfind]) h
 
 end Substep
 
@@ -156,11 +174,12 @@ A single-access instruction has a one-element sequence; the sequence is not an
 optional elaboration for complex cases, because a uniform representation is what
 lets the event and consistency layers treat every operation the same way.
 -/
-structure SubstepSequence : Type 1 where
+structure SubstepSequence where
   /-- The steps, in the order the operation performs them. -/
   substeps : List Substep
   /-- What survives when one of them fails. No default: see the module comment. -/
   onFault : FaultVisibility
+deriving DecidableEq, Repr
 
 namespace SubstepSequence
 
@@ -252,7 +271,15 @@ theorem wellFormedIn_single {table : AddressSpaceTable} {d : AccessDescriptor}
     (h : d.WellFormedIn space) : (single d).WellFormedIn table := by
   simp only [WellFormedIn, single, List.mem_singleton]
   rintro step rfl
-  exact ⟨space, hfind, h⟩
+  show (match table.find? d.space with
+    | some space => d.WellFormedIn space
+    | Option.none => False)
+  rw [hfind]
+  exact h
+
+instance (seq : SubstepSequence) (table : AddressSpaceTable) :
+    Decidable (seq.WellFormedIn table) :=
+  inferInstanceAs (Decidable (∀ _ ∈ _, _))
 
 /--
 `seq.ClaimsAtomicity` holds when the sequence asserts more than one step happens

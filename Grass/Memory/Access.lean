@@ -92,7 +92,7 @@ intent, provenance and bounds, initialization required and produced, permission
 and alignment, atomicity and ordering, context identity, admitted faults and
 partial completion, and observation and obligation effects.
 -/
-structure AccessDescriptor : Type 1 where
+structure AccessDescriptor where
   /-- The context performing the access. -/
   context : ContextId
   /-- The computed address of the first byte. Numeric or symbolic according to
@@ -131,8 +131,42 @@ structure AccessDescriptor : Type 1 where
   observations : List ObservationLabel := []
   /-- How this access changes the obligation ledger. -/
   ledgerEffect : LedgerEffect := []
+deriving DecidableEq, Repr
 
 namespace AccessDescriptor
+
+/--
+`d.AlignmentSatisfied` holds when a numeric address meets the declared alignment.
+
+Written as a match rather than a guarded universal so that it is decidable. A
+symbolic address has no numeric value to align; SPIR-V alignment is a property of
+types, and a profile that needs it states it there.
+-/
+def AlignmentSatisfied (d : AccessDescriptor) : Prop :=
+  match d.address with
+  | .numeric value => IsAligned value.toNat d.alignment
+  | .symbolic _ => True
+
+instance (d : AccessDescriptor) : Decidable d.AlignmentSatisfied := by
+  unfold AlignmentSatisfied; split <;> infer_instance
+
+/--
+`d.RangeFitsSpace space` holds when a numerically addressed access does not name a
+range wider than its space.
+
+This is what rules out a `Nat` range whose machine addresses would wrap and alias
+a disjoint one; see the module comment in `Grass/Memory/Range.lean`. The tighter
+bound, the allocation's own size, is a state fact and is checked by the transition
+relation.
+-/
+def RangeFitsSpace (d : AccessDescriptor) (space : AddressSpace) : Prop :=
+  match space.repr with
+  | .numeric bits => d.range.WithinBound (2 ^ bits)
+  | .symbolic => True
+
+instance (d : AccessDescriptor) (space : AddressSpace) :
+    Decidable (d.RangeFitsSpace space) := by
+  unfold RangeFitsSpace; split <;> infer_instance
 
 /--
 The intrinsic well-formedness of a descriptor.
@@ -180,13 +214,12 @@ structure WellFormedIn (d : AccessDescriptor) (space : AddressSpace) : Prop wher
   /-- A numeric address satisfies the declared alignment. A symbolic address has
   no numeric value to align; SPIR-V alignment is a property of types, and a
   profile that needs it states it there rather than here. -/
-  aligned : ∀ value, d.address.value? = some value → IsAligned value.toNat d.alignment
+  aligned : d.AlignmentSatisfied
   /-- In a numerically addressed space the accessed range fits the space itself.
   This is what rules out a `Nat` range whose machine addresses would wrap and
   alias a disjoint one; see the module comment in `Grass/Memory/Range.lean`. The
   tighter bound, the allocation's own size, is a state fact and belongs to M2. -/
-  rangeFitsSpace :
-    ∀ bits, space.repr = .numeric bits → d.range.WithinBound (2 ^ bits)
+  rangeFitsSpace : d.RangeFitsSpace space
   /-- An atomic intent declares atomic ordering, and conversely. A `lock`-prefixed
   operation that declared `nonAtomic` would be checked by the wrong rules. -/
   atomicityAgrees : (d.intent.isAtomic = true) ↔ (d.ordering.atomicity = .atomic)
@@ -203,6 +236,32 @@ structure WellFormedIn (d : AccessDescriptor) (space : AddressSpace) : Prop wher
   /-- Only an access that writes can produce initialization. -/
   producesInitializedOnlyIfWrites :
     d.producesInitialized = true → d.intent.writes = true
+
+instance (d : AccessDescriptor) (space : AddressSpace) :
+    Decidable (d.WellFormedIn space) :=
+  if h : space.id = d.space ∧ ¬ d.intent.IsInert ∧ space.WellFormed ∧
+      space.Representable d.address ∧ d.provenance.space = d.space ∧
+      d.provenance.Nested ∧ d.provenance.extent.Contains d.range ∧
+      d.AlignmentSatisfied ∧ d.RangeFitsSpace space ∧
+      ((d.intent.isAtomic = true) ↔ (d.ordering.atomicity = .atomic)) ∧
+      d.requiredPermission.Permits d.intent ∧
+      ((d.intent.reads = true) ↔ (d.initialization ≠ .readsNothing)) ∧
+      (d.producesInitialized = true → d.intent.writes = true) then
+    .isTrue
+      { spaceResolved := h.1, notInert := h.2.1, spaceWellFormed := h.2.2.1
+        addressRepresentable := h.2.2.2.1, spaceAgrees := h.2.2.2.2.1
+        provenanceNested := h.2.2.2.2.2.1, rangeInProvenance := h.2.2.2.2.2.2.1
+        aligned := h.2.2.2.2.2.2.2.1, rangeFitsSpace := h.2.2.2.2.2.2.2.2.1
+        atomicityAgrees := h.2.2.2.2.2.2.2.2.2.1
+        permissionSufficient := h.2.2.2.2.2.2.2.2.2.2.1
+        initializationMatchesIntent := h.2.2.2.2.2.2.2.2.2.2.2.1
+        producesInitializedOnlyIfWrites := h.2.2.2.2.2.2.2.2.2.2.2.2 }
+  else
+    .isFalse fun w =>
+      h ⟨w.spaceResolved, w.notInert, w.spaceWellFormed, w.addressRepresentable,
+        w.spaceAgrees, w.provenanceNested, w.rangeInProvenance, w.aligned,
+        w.rangeFitsSpace, w.atomicityAgrees, w.permissionSufficient,
+        w.initializationMatchesIntent, w.producesInitializedOnlyIfWrites⟩
 
 /-- A descriptor for an ordinary aligned single-context load. -/
 def IsPlainRead (d : AccessDescriptor) : Prop :=

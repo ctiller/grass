@@ -9,16 +9,25 @@ import Grass.Core.Name
 its holder must perform a future action or transfer responsibility under a named
 protocol.
 
-Two demands from §1 shape this module. Identity is unique and generative, because
-an obligation is linear and two obligations of the same kind held by the same
-context are still two obligations. Payloads are existential, "so new instruction,
-API, ABI, allocator, lock, transaction, interrupt, and device protocols can extend
-the ledger" without this module learning about them.
+Identity is unique and generative, because an obligation is linear: two
+obligations of the same kind held by the same context are still two obligations.
 
-The consequence of an existential payload is that `Obligation` has no
-`DecidableEq`. That is correct rather than inconvenient: the ledger is keyed by
-`ObligationId`, which is decidable, and a proof that two obligations are the same
-obligation must go through identity, never through comparing payloads.
+§1 also says payloads are existential, "so new instruction, API, ABI, allocator,
+lock, transaction, interrupt, and device protocols can extend the ledger" without
+this module learning about them. That openness is real and is preserved, but the
+existential does **not** live here. An `Obligation` carries identity, kind,
+protocol, and owner; protocol-specific evidence is held by the protocol, keyed by
+`ObligationId`, and the operation that creates an obligation carries its own
+evidence in the existential package that already exists for operations
+(`Grass/Op/Facets.lean`).
+
+Putting the existential in the obligation itself cost more than it bought. A
+`Type 1` field propagated through `LedgerEffect` into `AccessDescriptor`, then
+into `SubstepSequence` and every facet, and took `DecidableEq`, `Repr`, and
+decidable well-formedness with it — so the sealed access descriptor became the
+one thing in the layer an author could neither check by computation nor print in
+a diagnostic. Keying evidence by identity gives the same extensibility at none of
+that cost.
 
 Scope note. This module is the M1 vocabulary of
 `docs/MEMORY_IMPLEMENTATION_PLAN.md`. The ledger law, the block-contract
@@ -97,19 +106,6 @@ structure ObligationProtocolId where
 deriving DecidableEq, Repr
 
 /--
-An obligation's payload.
-
-Existential: the payload's type is chosen by the protocol that created the
-obligation, and this module cannot inspect it. That is what lets a device or
-transaction protocol carry its own evidence in the same ledger as a lock.
--/
-structure ObligationPayload : Type 1 where
-  /-- The payload type, chosen by the creating protocol. -/
-  Data : Type
-  /-- The payload itself. -/
-  data : Data
-
-/--
 An obligation: a linear ghost resource with an owner and a governing protocol.
 
 The precondition, accepted discharge events, transfer rules, and cancellation
@@ -118,7 +114,7 @@ protocol rather than fields here, and are stated by the M5 protocol theorems.
 Carrying them as data would make every instruction model that creates an
 obligation restate its protocol's rules.
 -/
-structure Obligation : Type 1 where
+structure Obligation where
   /-- This obligation's generative identity. -/
   id : ObligationId
   /-- What kind of duty it is. -/
@@ -127,13 +123,13 @@ structure Obligation : Type 1 where
   protocol : ObligationProtocolId
   /-- The context currently responsible for it. -/
   owner : ContextId
-  /-- Protocol-owned evidence. -/
-  payload : ObligationPayload
+deriving DecidableEq, Repr
 
 namespace Obligation
 
 /-- Two obligations are the same obligation exactly when their identities agree.
-Payloads are existential and are never compared. -/
+Kind, protocol, and owner are properties of an obligation, not what makes it that
+obligation: a transfer changes the owner and the duty is unchanged. -/
 def Same (a b : Obligation) : Prop := a.id = b.id
 
 instance (a b : Obligation) : Decidable (a.Same b) :=

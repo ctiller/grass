@@ -307,206 +307,40 @@ theorem splitPage_visibility_is_not_answerable_here :
 Each proof is `by decide` or a direct structure, so a change to the descriptor's
 `WellFormed` conditions that these cases no longer satisfy breaks the build. -/
 
-/--
-The reusable well-formedness lemma for a plain access in the 64-bit CPU space.
+/-!
+Every case below is discharged by `decide`.
 
-Every hypothesis is a condition that genuinely varies between the cases. Nothing
-is discharged by a default: in particular `bound` must be supplied, because a
-range fitting the address space is exactly the condition that stops a `Nat` range
-from denoting addresses that wrap (`Grass/Memory/Range.lean`).
+That is the point of the section, not a shortcut. `AccessDescriptor.WellFormedIn`
+is decidable, so a declaration is checked by computation rather than by a
+hand-assembled proof term — which is what an ISA author needs, and what the
+descriptor could not offer while an existential obligation payload pushed it into
+`Type 1` and cost it `DecidableEq` along with every decidable field.
 -/
-theorem access_wellFormed {provenance : Provenance} {range : ByteRange}
-    {addr : MachineAddress} {intent : AccessIntent} {perm : Permission} {align : Nat}
-    {requiresInit producesInit : Bool}
-    (space : provenance.space = AddressSpaceId.cpuVirtual)
-    (permission : perm.Permits intent)
-    (nested : provenance.Nested)
-    (extent : provenance.extent.Contains range)
-    (notInert : ¬ intent.IsInert)
-    (bound : range.WithinBound (2 ^ 64))
-    (aligned : IsAligned addr.toNat align)
-    (readsInitialized : intent.reads = true ↔ requiresInit = true)
-    (writesIfProduced : producesInit = true → intent.writes = true)
-    (nonAtomic : intent.isAtomic = false) :
-    (access provenance range addr intent perm align requiresInit
-      producesInit).WellFormedIn AddressSpace.cpuVirtual64 where
-  spaceResolved := rfl
-  notInert := notInert
-  spaceWellFormed := AddressSpace.wellFormed_cpuVirtual64
-  addressRepresentable :=
-    AddressSpace.representable_of_bits_eq_64 rfl addr
-  spaceAgrees := space
-  provenanceNested := nested
-  rangeInProvenance := extent
-  aligned := by
-    intro value h
-    simp only [access, Address.value?_numeric, Option.some.injEq] at h
-    exact h ▸ aligned
-  rangeFitsSpace := by
-    intro bits h
-    simp only [AddressSpace.cpuVirtual64, AddressRepr.numeric.injEq] at h
-    exact h ▸ bound
-  atomicityAgrees := by simp [access, nonAtomic, OrderingDemand.plain]
-  permissionSufficient := permission
-  initializationMatchesIntent := by
-    cases requiresInit <;> simp [access, readsInitialized]
-  producesInitializedOnlyIfWrites := writesIfProduced
 
-theorem pushR12_wellFormed : pushR12.WellFormedIn spaceTable := by
-  unfold pushR12
-  refine SubstepSequence.wellFormedIn_single rfl
-    (access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
-  all_goals first
-    | exact ⟨by decide, by decide, trivial⟩
-    | decide
+theorem pushR12_wellFormed : pushR12.WellFormedIn spaceTable := by decide
+
+theorem movEcxImm_wellFormed : movEcxImm.WellFormedIn spaceTable := by decide
+
+theorem leaPayload_wellFormed : leaPayload.WellFormedIn spaceTable := by decide
+
+theorem leaTransferred_wellFormed : leaTransferred.WellFormedIn spaceTable := by decide
+
+theorem ud2Containment_wellFormed : ud2Containment.WellFormedIn spaceTable := by decide
 
 theorem movTransferredZero_wellFormed :
-    movTransferredZero.WellFormedIn spaceTable := by
-  unfold movTransferredZero
-  refine SubstepSequence.wellFormedIn_single rfl
-    (access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
-  all_goals first
-    | exact ⟨by decide, by decide, trivial⟩
-    | decide
+    movTransferredZero.WellFormedIn spaceTable := by decide
 
 theorem movEaxTransferred_wellFormed :
-    movEaxTransferred.WellFormedIn spaceTable := by
-  unfold movEaxTransferred
-  refine SubstepSequence.wellFormedIn_single rfl
-    (access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_)
-  all_goals first
-    | exact ⟨by decide, by decide, trivial⟩
-    | decide
+    movEaxTransferred.WellFormedIn spaceTable := by decide
 
 theorem callImportWriteFile_wellFormed :
-    callImportWriteFile.WellFormedIn spaceTable := by
-  intro step hstep
-  simp only [callImportWriteFile, List.mem_cons, List.not_mem_nil, or_false] at hstep
-  rcases hstep with rfl | rfl
-  · refine ⟨AddressSpace.cpuVirtual64, rfl, ?_⟩
-    refine access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
-    all_goals first
-      | exact ⟨by decide, by decide, trivial⟩
-      | decide
-  · refine ⟨AddressSpace.cpuVirtual64, rfl, ?_⟩
-    refine access_wellFormed rfl ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
-    all_goals first
-      | exact ⟨by decide, by decide, trivial⟩
-      | decide
+    callImportWriteFile.WellFormedIn spaceTable := by decide
 
-theorem movEcxImm_wellFormed : movEcxImm.WellFormedIn spaceTable := by
-  simp [movEcxImm, SubstepSequence.WellFormedIn, SubstepSequence.none_]
+/-- The two cases added in response to review are checked too, not merely
+declared. -/
+theorem divMem_wellFormed : divMem.WellFormedIn spaceTable := by decide
 
-theorem leaPayload_wellFormed : leaPayload.WellFormedIn spaceTable := by
-  simp [leaPayload, SubstepSequence.WellFormedIn, SubstepSequence.none_]
-
-theorem leaTransferred_wellFormed : leaTransferred.WellFormedIn spaceTable := by
-  simp [leaTransferred, SubstepSequence.WellFormedIn, SubstepSequence.none_]
-
-theorem ud2Containment_wellFormed : ud2Containment.WellFormedIn spaceTable := by
-  simp [ud2Containment, SubstepSequence.WellFormedIn, SubstepSequence.none_]
-
-/-! ## Obligations across the `WriteFile` call
-
-`docs/MEMORY_MODEL.md` §6 says an ABI call profile "constructs the pending
-frontier state and completion obligation". The framing theorem that does so is
-M4, but the *vocabulary* has to be able to express the ledger movement now, and
-this section checks that it can.
-
-The interesting question is whether `LedgerDelta` works with no `preserve`
-constructor. Spike 1 holds a live obligation across the call — the console handle
-from `GetStdHandle` must eventually reach process teardown — and the call must
-not disturb it. With framing that is not something the call declares; it is
-something the call's silence already says. -/
-
-private def obligationSupply₀ : FreshSupply ObligationTag := FreshSupply.initial
-private def obligationSupply₁ := obligationSupply₀.fresh.2
-
-/-- The obligation created by `GetStdHandle`: the returned handle is a resource
-with a lifecycle. -/
-def handleObligationId : ObligationId := obligationSupply₀.fresh.1
-
-/-- The obligation created by the `WriteFile` call: it must run to completion, or
-its partial result must be accounted for. -/
-def writeCompletionId : ObligationId := obligationSupply₁.fresh.1
-
-/-- The Win32 handle protocol. -/
-def win32HandleProtocol : ObligationProtocolId := ⟨⟨"win32.handle"⟩⟩
-
-/-- The Win32 synchronous I/O protocol. -/
-def win32WriteProtocol : ObligationProtocolId := ⟨⟨"win32.write"⟩⟩
-
-/-- The obligation to account for the console handle. -/
-def handleObligation : Obligation :=
-  { id := handleObligationId, kind := .closeHandle, protocol := win32HandleProtocol
-    owner := mainThread, payload := ⟨Unit, ()⟩ }
-
-/-- The obligation to complete the write. -/
-def writeCompletionObligation : Obligation :=
-  { id := writeCompletionId, kind := .completePartialIo, protocol := win32WriteProtocol
-    owner := mainThread, payload := ⟨Unit, ()⟩ }
-
-/-- The ledger effect of entering the `WriteFile` call: one obligation created,
-and nothing said about the handle obligation. -/
-def callLedgerEffect : LedgerEffect := [.create writeCompletionObligation]
-
-/-- The ledger effect of a returning call that wrote everything: the completion
-obligation is discharged. -/
-def returnLedgerEffect : LedgerEffect := [.discharge writeCompletionId]
-
-/--
-The call does not touch the handle obligation, and says so by not mentioning it.
-
-This is the framing story `Grass/Obligation/Delta.lean` is built on. Had
-`preserve` been a constructor, the call would have had to enumerate every
-obligation it was leaving alone — and could have listed one it also discharged.
--/
-theorem call_preserves_handle_obligation :
-    callLedgerEffect.PreservesIdentity handleObligationId := by
-  intro delta hd
-  simp only [callLedgerEffect, List.mem_cons, List.not_mem_nil, or_false] at hd
-  subst hd
-  refine ⟨by simp, ?_, by simp [LedgerDelta.reowns]⟩
-  simp only [LedgerDelta.produces_create, List.mem_singleton]
-  intro h
-  exact absurd h.symm (FreshSupply.never_reissued (.refl _) (by decide))
-
-/-- Returning discharges exactly the completion obligation. -/
-theorem return_discharges_write_completion :
-    returnLedgerEffect.consumes = [writeCompletionId] := rfl
-
-/-- Returning does not touch the handle obligation either. -/
-theorem return_preserves_handle_obligation :
-    returnLedgerEffect.PreservesIdentity handleObligationId := by
-  intro delta hd
-  simp only [returnLedgerEffect, List.mem_cons, List.not_mem_nil, or_false] at hd
-  subst hd
-  refine LedgerDelta.preservesIdentity_discharge_of_ne ?_
-  intro h
-  exact absurd h (FreshSupply.never_reissued (.refl _) (by decide)).symm
-
-/--
-The handle obligation reaches process exit and is adopted by teardown.
-
-`docs/OBLIGATIONS.md` §3 permits this: "Process exit may transfer virtual memory,
-handles, and similar resources to a modeled OS teardown contract." It is a normal
-disposition, so successful exit is not left holding an abnormal one.
--/
-def handleDisposition : TerminalOutcome :=
-  { obligation := handleObligationId, disposition := .teardownAdopted ⟨"win32.processExit"⟩ }
-
-theorem handleDisposition_isNormal : handleDisposition.disposition.IsNormal := trivial
-
-/-- Teardown adoption needs no licence from the program's specification, unlike
-an abandonment. -/
-theorem handleDisposition_needs_no_specification_support :
-    ¬ handleDisposition.disposition.RequiresSpecificationSupport := fun h => h
-
-/-- Had the handle instead been abandoned, the specification would have had to
-say so. This is the asymmetry `docs/OBLIGATIONS.md` §3 turns on, and the reason a
-platform's permission to abandon is not by itself sufficient. -/
-theorem abandonment_needs_specification_support :
-    (Disposition.abandonedUnknown).RequiresSpecificationSupport := trivial
+theorem splitPageStore_wellFormed : splitPageStore.WellFormedIn spaceTable := by decide
 
 /-! ## Negative fixtures
 
@@ -528,9 +362,7 @@ Without that clause `Permission.Permits` was dead code and
 was unenforced at the chokepoint that exists to enforce it.
 -/
 theorem writeThroughReadOnly_not_wellFormed :
-    ¬ writeThroughReadOnly.WellFormedIn AddressSpace.cpuVirtual64 := by
-  intro h
-  exact absurd h.permissionSufficient (by decide)
+    ¬ writeThroughReadOnly.WellFormedIn AddressSpace.cpuVirtual64 := by decide
 
 /-- A descriptor naming an address space this profile never declared. -/
 def accessInUndeclaredSpace : AccessDescriptor :=

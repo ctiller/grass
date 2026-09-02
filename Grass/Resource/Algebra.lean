@@ -16,7 +16,32 @@ The corpus displays this idea twice with different shapes.
 (combine axis) (zero axis) (le axis)`, with a zero and a different name. They are
 sketches of one thing, and this module unifies them rather than shipping both.
 
-The unified bundle carries four operations, and the extra two are not decoration:
+## Two compositions, not one
+
+The bundle carries **two** binary operations, and conflating them is the error
+this design exists to prevent.
+
+`combine` is **parallel** or spatial composition: two subsystems holding
+resources at the same time. Two sockets held simultaneously are two sockets, so
+`combine` is cancellative and not idempotent.
+
+`alternative` is **temporal** aggregation: peak demand across mutually exclusive
+branches or serial phases. Two branches each needing one socket, only one of
+which runs, peak at one socket -- so `alternative` is idempotent and is *not*
+cancellative.
+
+An earlier version had only `combine`, and cancellation was added to stop `max`
+being a lawful resource algebra. That was a real defect -- `max` as a *parallel*
+composition undercounts simultaneously held sockets -- but the fix alone made
+`max` unavailable for the case where it is the correct operator, which would have
+forced ordinary peak-bound proofs to be artificially additive. Both operations
+are present, with the laws that distinguish them, and `alternativeLeCombine`
+relates them.
+
+`ResourceLifecyclePolicy.phaseExclusive` is the axis-level declaration that
+holdings aggregate the second way.
+
+The bundle also carries two values beyond the operations:
 
 - **`zero`** appears in `docs/PROCESS.md`'s `ResourceMetric` as `empty : forall
   axis, valuation axis EmptyNetworkResourceState = zero axis`. Without an
@@ -51,6 +76,7 @@ what `a` does.
 structure OrderedPartialCommutativeResourceLaws {Value : Type u}
     (compatible : Value → Value → Prop)
     (combine : Value → Value → Value)
+    (alternative : Value → Value → Value)
     (zero : Value)
     (le : Value → Value → Prop) : Prop where
   /-- Compatibility does not depend on the order of its operands. -/
@@ -94,6 +120,25 @@ structure OrderedPartialCommutativeResourceLaws {Value : Type u}
   as the contrapositive of absorption, this is what makes an additive reading
   mandatory rather than merely permitted. -/
   combineEqLeft : ∀ a b, compatible a b → combine a b = a → b = zero
+  /-- Aggregating alternatives does not depend on their order. -/
+  alternativeComm : ∀ a b, alternative a b = alternative b a
+  /-- Aggregating alternatives is associative. -/
+  alternativeAssoc : ∀ a b c,
+    alternative (alternative a b) c = alternative a (alternative b c)
+  /-- An alternative holding nothing changes nothing. -/
+  alternativeZero : ∀ a, alternative a zero = a
+  /-- **Idempotent.** Two branches with the same demand peak at that demand, not
+  at twice it. This is precisely the law `combine` must not have, and the two
+  together are what separate the operations. -/
+  alternativeIdem : ∀ a, alternative a a = a
+  /-- The peak covers each branch. -/
+  leAlternative : ∀ a b, le a (alternative a b)
+  /-- Aggregating alternatives is monotone. -/
+  alternativeMonotone : ∀ a b c, le a b → le (alternative a c) (alternative b c)
+  /-- The peak of two alternatives never exceeds what running both at once costs.
+  This ties the operations together: an alternative bound is always a sound
+  relaxation of a parallel one, never the reverse. -/
+  alternativeLeCombine : ∀ a b, compatible a b → le (alternative a b) (combine a b)
 
 /--
 A resource algebra on `R`.
@@ -108,12 +153,14 @@ structure ResourceAlgebra (R : Type u) where
   compatible : R → R → Prop
   /-- How two compatible resource values compose. -/
   combine : R → R → R
+  /-- How two mutually exclusive demands aggregate. -/
+  alternative : R → R → R
   /-- The resource value holding nothing. -/
   zero : R
   /-- The substate order. -/
   le : R → R → Prop
   /-- The algebra's laws. -/
-  laws : OrderedPartialCommutativeResourceLaws compatible combine zero le
+  laws : OrderedPartialCommutativeResourceLaws compatible combine alternative zero le
 
 /--
 Marks `R` as a resource model, fixing how its values compose.
@@ -142,12 +189,14 @@ class HasResourceAxis (R : Type u) [ResourceModel R] (axis : ResourceAxisName) w
   compatible : Value → Value → Prop
   /-- How two compatible quantities compose. -/
   combine : Value → Value → Value
+  /-- How two mutually exclusive demands aggregate. -/
+  alternative : Value → Value → Value
   /-- The quantity holding nothing. -/
   zero : Value
   /-- The order in which a bound is stated. -/
   le : Value → Value → Prop
   /-- The axis's laws. -/
-  laws : OrderedPartialCommutativeResourceLaws compatible combine zero le
+  laws : OrderedPartialCommutativeResourceLaws compatible combine alternative zero le
 
 /--
 Declares that resources of type `R` export a bound on `axis`, together with what
@@ -197,12 +246,14 @@ structure ResourceLimit (R : Type u) (axis : ResourceAxisName) where
   compatible : Value → Value → Prop
   /-- How two compatible quantities compose. -/
   combine : Value → Value → Value
+  /-- How two mutually exclusive demands aggregate. -/
+  alternative : Value → Value → Value
   /-- The quantity holding nothing. -/
   zero : Value
   /-- The order in which the bound is stated. -/
   le : Value → Value → Prop
   /-- The axis's laws. -/
-  laws : OrderedPartialCommutativeResourceLaws compatible combine zero le
+  laws : OrderedPartialCommutativeResourceLaws compatible combine alternative zero le
   /-- The bound this resource value exports. -/
   limit : R → Value
   /-- What the product does when the bound is reached. -/
@@ -225,11 +276,14 @@ counted, not of counting, and an axis that needs it supplies its own
 compatibility. -/
 def compatible (_a _b : Nat) : Prop := True
 
-/-- Counted quantities add. -/
+/-- Counted quantities held at once add. -/
 def combine (a b : Nat) : Nat := a + b
 
+/-- Counted quantities across exclusive branches peak. -/
+def alternative (a b : Nat) : Nat := max a b
+
 /-- The counting algebra's laws hold. -/
-theorem laws : OrderedPartialCommutativeResourceLaws compatible combine 0 (· ≤ ·) where
+theorem laws : OrderedPartialCommutativeResourceLaws compatible combine alternative 0 (· ≤ ·) where
   compatibleComm := fun _ _ _ => trivial
   compatibleZero := fun _ => trivial
   combineComm := fun a b _ => Nat.add_comm a b
@@ -243,12 +297,20 @@ theorem laws : OrderedPartialCommutativeResourceLaws compatible combine 0 (· �
   combineMonotone := fun _ _ c hab _ _ => Nat.add_le_add_right hab c
   combineCancel := fun _ _ _ _ _ h => Nat.add_right_cancel h
   combineEqLeft := fun a b _ h => by simp only [combine] at h; omega
+  alternativeComm := fun a b => Nat.max_comm a b
+  alternativeAssoc := fun a b c => Nat.max_assoc a b c
+  alternativeZero := fun a => Nat.max_zero a
+  alternativeIdem := fun a => Nat.max_self a
+  leAlternative := fun a b => Nat.le_max_left a b
+  alternativeMonotone := fun a b c _ => by simp only [alternative]; omega
+  alternativeLeCombine := fun a b _ => by simp only [alternative, combine]; omega
 
 /-- The counting algebra as a `ResourceAlgebra`, usable as the model for a
 resource parameter that is a single count. -/
 def algebra : ResourceAlgebra Nat where
   compatible := compatible
   combine := combine
+  alternative := alternative
   zero := 0
   le := (· ≤ ·)
   laws := laws
@@ -276,8 +338,11 @@ def compatible (a b : Nat) : Prop := a = 0 ∨ b = 0
 are compatible. -/
 def combine (a b : Nat) : Nat := a + b
 
+/-- Exclusive branches peak rather than adding. -/
+def alternative (a b : Nat) : Nat := max a b
+
 /-- The exclusive algebra's laws hold. -/
-theorem laws : OrderedPartialCommutativeResourceLaws compatible combine 0 (· ≤ ·) where
+theorem laws : OrderedPartialCommutativeResourceLaws compatible combine alternative 0 (· ≤ ·) where
   compatibleComm := fun _ _ h => h.symm
   compatibleZero := fun _ => .inr rfl
   combineComm := fun a b _ => Nat.add_comm a b
@@ -291,6 +356,13 @@ theorem laws : OrderedPartialCommutativeResourceLaws compatible combine 0 (· �
   combineMonotone := fun _ _ c hab _ _ => Nat.add_le_add_right hab c
   combineCancel := fun _ _ _ _ _ h => Nat.add_right_cancel h
   combineEqLeft := fun a b _ h => by simp only [combine] at h; omega
+  alternativeComm := fun a b => Nat.max_comm a b
+  alternativeAssoc := fun a b c => Nat.max_assoc a b c
+  alternativeZero := fun a => Nat.max_zero a
+  alternativeIdem := fun a => Nat.max_self a
+  leAlternative := fun a b => Nat.le_max_left a b
+  alternativeMonotone := fun a b c _ => by simp only [alternative]; omega
+  alternativeLeCombine := fun a b _ => by simp only [alternative, combine]; omega
 
 /-- Two held exclusive resources are incompatible. This is the fact that makes
 `h2.credit.double` fail rather than silently double count. -/

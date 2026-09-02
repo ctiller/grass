@@ -32,7 +32,7 @@ One change a transition makes to the obligation ledger.
 
 An obligation not named by any delta of a transition is preserved unchanged.
 -/
-inductive LedgerDelta : Type 1 where
+inductive LedgerDelta where
   /-- A protocol created a new obligation. -/
   | create (obligation : Obligation)
   /-- The required action occurred and this obligation ends. -/
@@ -43,6 +43,7 @@ inductive LedgerDelta : Type 1 where
   | join (sources : List ObligationId) (into : Obligation)
   /-- Responsibility moves to another context; the duty itself is unchanged. -/
   | transfer (obligation : ObligationId) (newOwner : ContextId)
+deriving DecidableEq, Repr
 
 namespace LedgerDelta
 

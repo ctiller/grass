@@ -197,6 +197,16 @@ def Nested (p : Provenance) : Prop :=
   (∀ step, p.path.head? = some step → p.rootExtent.Contains step.extent) ∧
   NestedPath p.path
 
+instance decNestedPath : (steps : List ProvenanceStep) → Decidable (NestedPath steps)
+  | [] => .isTrue trivial
+  | [_] => .isTrue trivial
+  | _ :: b :: rest =>
+      have : Decidable (NestedPath (b :: rest)) := decNestedPath (b :: rest)
+      inferInstanceAs (Decidable (_ ∧ _))
+
+instance (p : Provenance) : Decidable p.Nested :=
+  inferInstanceAs (Decidable (_ ∧ _))
+
 /-- An empty path is nested, and designates the whole root allocation. -/
 @[simp] theorem nested_of_path_nil {p : Provenance} (h : p.path = []) : p.Nested := by
   refine ⟨?_, ?_⟩
