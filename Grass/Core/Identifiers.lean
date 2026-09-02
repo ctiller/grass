@@ -16,7 +16,10 @@ deriving Repr, DecidableEq, BEq, Hashable
 
 namespace StableId
 
-/-- Render an identifier for diagnostics and manifests. -/
+/-- Render an identifier for human diagnostics.
+
+This dotted form is not an injective serialization; manifests must retain the
+two structure fields or use a separately specified encoding. -/
 def render (id : StableId) : String :=
   if id.owner.isEmpty then id.localName
   else id.owner ++ "." ++ id.localName

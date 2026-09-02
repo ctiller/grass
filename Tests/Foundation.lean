@@ -50,10 +50,11 @@ def behavior : ProgramBehavior spec where
 
 def initialExecution (input : Bool) : system.ExecutionPrefix :=
   @RelationalSystem.ExecutionPrefix.initial spec.AuditEvent system input (0 : Nat)
-    rfl (.finite .refl trivial)
+    rfl
 
 theorem behaviorAdequate : behavior.Adequate where
   execution input _ := ⟨initialExecution input, rfl⟩
+  completion _ := ⟨.finite .refl trivial⟩
 
 def behaviorRefinesItself : BehaviorRefinement behavior behavior :=
   .refl behavior

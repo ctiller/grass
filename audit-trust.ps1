@@ -112,6 +112,23 @@ try {
         throw "Trust audit did not reject a producer behind an irreducible result alias."
     }
 
+    $wrappedNegativeProbe = @(
+        "import Tests.Foundation",
+        "open Grass",
+        "namespace AuditProbe",
+        "axiom boxedVerifiedProgram : Nonempty (VerifiedProgram Grass.Tests.Foundation.spec)",
+        "noncomputable def emittedBytes : ByteArray := emitProgram (Classical.choice boxedVerifiedProgram)",
+        "end AuditProbe",
+        "#audit_verified_programs"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $wrappedNegativeProbe)
+    $wrappedNegativeOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -eq 0 -or
+        -not ($wrappedNegativeOutput -match "emittedBytes.*boxedVerifiedProgram")) {
+        $wrappedNegativeOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit did not reject a VerifiedProgram hidden in a container."
+    }
+
     Write-Host "Trust audit passed for $reported declaration(s)."
 }
 finally {

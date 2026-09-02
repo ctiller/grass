@@ -95,7 +95,11 @@ theorem Runs.graphExtends
   | step prior transition inductionHypothesis =>
       exact system.extendsTrans inductionHypothesis (system.stepExtends transition)
 
-/-- A packaged finite prefix suitable for runners and prefix-safety theorems. -/
+/-- A packaged finite prefix suitable for runners and prefix-safety theorems.
+
+Every admitted finite run can be packaged, including a frontier that has no
+continuation. Progress is a separate property of the behavior rather than a
+precondition for observing a prefix. -/
 structure ExecutionPrefix {Event : Type u} (system : RelationalSystem Event) where
   initialState : system.State
   initialGraph : system.Graph
@@ -103,13 +107,11 @@ structure ExecutionPrefix {Event : Type u} (system : RelationalSystem Event) whe
   graph : system.Graph
   events : List Event
   runs : system.Runs initialState initialGraph state graph events
-  completion : system.Completion state graph
 
 /-- Every valid initial configuration supplies the empty execution prefix. -/
 def ExecutionPrefix.initial {Event : Type u} {system : RelationalSystem Event}
     {state : system.State} {graph : system.Graph}
-    (valid : system.Initial state graph)
-    (completion : system.Completion state graph) :
+    (valid : system.Initial state graph) :
     system.ExecutionPrefix where
   initialState := state
   initialGraph := graph
@@ -117,15 +119,13 @@ def ExecutionPrefix.initial {Event : Type u} {system : RelationalSystem Event}
   graph := graph
   events := []
   runs := .initial valid
-  completion := completion
 
 /-- Extend a prefix by one admitted relational step. -/
 def ExecutionPrefix.step {Event : Type u} {system : RelationalSystem Event}
     (prior : system.ExecutionPrefix)
     {choice : system.Choice} {event : Event}
     {nextState : system.State} {nextGraph : system.Graph}
-    (transition : system.Step prior.graph prior.state choice event nextState nextGraph)
-    (completion : system.Completion nextState nextGraph) :
+    (transition : system.Step prior.graph prior.state choice event nextState nextGraph) :
     system.ExecutionPrefix where
   initialState := prior.initialState
   initialGraph := prior.initialGraph
@@ -133,7 +133,6 @@ def ExecutionPrefix.step {Event : Type u} {system : RelationalSystem Event}
   graph := nextGraph
   events := prior.events ++ [event]
   runs := .step prior.runs transition
-  completion := completion
 
 end RelationalSystem
 
