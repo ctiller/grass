@@ -717,6 +717,20 @@ to imitate compiler-selected storage or CFG structure.
     `faultWithUndeclaredLedgerEffect` behavior as the fail-closed interim rule
     and resolves `c-mem:28`; a later outcome-indexed interface may admit the
     operation only with its complete protocol proof.
+128. A process-network assertion is indexed by both its topology and an explicit
+    world agreement; `NetworkAssertion topology` with no world is not a valid
+    interface. `ProcessPlan` breaks the apparent recursive dependency by
+    declaring its per-edge message family before its contracts. Topology plus
+    that family defines `LogicalProcessNetworkCore`; the plan's channel
+    contracts are then instantiated at the canonical agreement for that full
+    logical world, and the public `LogicalProcessNetwork plan` is an
+    abbreviation of the core. This is one network semantics, not a second
+    topology-level escrow model: the core is only a construction seam. Lower
+    reusable assertion and channel modules may remain polymorphic in an
+    arbitrary `WorldAgreement`, but a completed plan must bind them to its full
+    logical network. This avoids both a self-referential structure and an opaque
+    escrow carrier weaker than `ChannelEscrowLedger`. It resolves
+    `c-process:43` and replaces the unimplementable arity in `PROCESS.md`.
 
 ## Explicitly rejected shortcuts
 

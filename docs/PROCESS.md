@@ -444,21 +444,76 @@ endpoint—owns the exact occurrence and every resource, capability, provenance
 fact, and obligation transferred with it until receive or an explicitly modeled
 cancellation/disposition transition consumes it.
 
+The assertion must name the world it describes. That world cannot depend on a
+completed `ProcessPlan`, because channel contracts are themselves fields of the
+plan. Grass breaks the dependency at the smallest useful seam: the plan declares
+its per-edge message family before its contracts; topology plus that family is
+enough to define the whole logical-network carrier. Contracts are then stated
+over that carrier. There is no second topology-level escrow carrier and no
+self-referential structure.
+
 ```lean
+structure ProcessInstance (topology : ProcessTopology registry boundary) where
+  kind : topology.ProcessKind
+  ref : ProcessRef topology kind
+  parent : Option (Sigma fun parentKind => ProcessRef topology parentKind)
+  request : (registry.protocol (topology.protocolKey kind)).Request
+  local : (registry.protocol (topology.protocolKey kind)).State
+  lifecycle : ProcessLifecycle
+
+structure LogicalProcessNetworkCore
+    (topology : ProcessTopology registry boundary)
+    (Message : topology.ChannelKind -> Type) where
+  instances : (kind : topology.ProcessKind) ->
+    ProcessId kind -> Option (ProcessInstance topology)
+  shared : (region : topology.SharedRegion) -> topology.SharedState region
+  inFlight : ChannelEscrowLedger topology Message
+  sessions : ChannelSessionLedger topology Message
+  obligations : LogicalObligationLedger
+  observations : Trace boundary.Observation
+  usedNominals : MonotoneNominalHistory
+
+structure WorldAgreement (topology : ProcessTopology registry boundary)
+    (World : Type) where
+  Agrees : NetworkFragment topology -> World -> World -> Prop
+  agreesRefl : forall fragment world, Agrees fragment world world
+  agreesSymm : forall fragment left right,
+    Agrees fragment left right -> Agrees fragment right left
+  agreesTrans : forall fragment a b c,
+    Agrees fragment a b -> Agrees fragment b c -> Agrees fragment a c
+  agreesGlue : forall (inside : NetworkFragment topology -> Prop) (left right : World),
+    exists mixed,
+      (forall fragment, inside fragment -> Agrees fragment mixed left) /\
+      (forall fragment, not (inside fragment) -> Agrees fragment mixed right)
+
+structure NetworkAssertion {topology : ProcessTopology registry boundary}
+    {World : Type} (agreement : WorldAgreement topology World) where
+  holds : World -> Prop
+  footprint : NetworkFragment topology -> Prop
+  framed : forall left right,
+    (forall fragment, footprint fragment -> agreement.Agrees fragment left right) ->
+    (holds left <-> holds right)
+
+def logicalWorldAgreement
+    (topology : ProcessTopology registry boundary)
+    (Message : topology.ChannelKind -> Type) :
+    WorldAgreement topology (LogicalProcessNetworkCore topology Message) := ...
+
 structure ChannelContract (topology : ProcessTopology registry boundary)
+    (Message : Type) {World : Type}
+    (agreement : WorldAgreement topology World)
     (edge : topology.ChannelKind) where
-  Message : Type
   senderOutput : SenderDemandEmbedding topology (topology.endpoints edge).1 Message
   receiverInput : ReceiverEventEmbedding topology (topology.endpoints edge).2 Message
-  SendPre : Message -> NetworkAssertion topology
+  SendPre : Message -> NetworkAssertion agreement
   SenderPost : (message : Message) ->
-    ChannelOccurrence topology edge Message message -> NetworkAssertion topology
+    ChannelOccurrence topology edge Message message -> NetworkAssertion agreement
   Escrow : (message : Message) ->
-    ChannelOccurrence topology edge Message message -> NetworkAssertion topology
+    ChannelOccurrence topology edge Message message -> NetworkAssertion agreement
   ReceiverPre : (message : Message) ->
-    ChannelOccurrence topology edge Message message -> NetworkAssertion topology
+    ChannelOccurrence topology edge Message message -> NetworkAssertion agreement
   ReceiverPost : (message : Message) ->
-    ChannelOccurrence topology edge Message message -> NetworkAssertion topology
+    ChannelOccurrence topology edge Message message -> NetworkAssertion agreement
   send : forall message,
          HoareTransition
            (SendPre message)
@@ -478,35 +533,27 @@ structure ChannelContract (topology : ProcessTopology registry boundary)
 
 structure ProcessPlan (registry : ProtocolRegistry) (boundary : DriverBoundary)
     extends ProcessTopology registry boundary where
+  Message : ChannelKind -> Type
   channel : (edge : ChannelKind) ->
-    ChannelContract toProcessTopology edge
+    ChannelContract toProcessTopology (Message edge)
+      (logicalWorldAgreement toProcessTopology Message) edge
   boundaryProjection : RootLocalDemandProjection toProcessTopology boundary
+
+abbrev LogicalProcessNetwork (plan : ProcessPlan registry boundary) :=
+  LogicalProcessNetworkCore plan.toProcessTopology plan.Message
 ```
+
+`LogicalProcessNetworkCore` is a construction dependency, not a second public
+network semantics; authors and later theorems use `LogicalProcessNetwork plan`.
+The canonical `logicalWorldAgreement` decomposes exactly the named network
+fragments and proves the gluing law, so an assertion footprint is meaningful
+rather than a decoration. A reusable lower module may quantify over an arbitrary
+`WorldAgreement`; the completed plan always instantiates its channel contracts
+at the full logical network shown above.
 
 The definitions above make each occurrence nominally indexed by the exact
 channel edge, sender and receiver incarnations, session epoch, message, and
-pre-send world. The logical network then has this dependent shape:
-
-```lean
-structure ProcessInstance (topology : ProcessTopology registry boundary) where
-  kind : topology.ProcessKind
-  ref : ProcessRef topology kind
-  parent : Option (Sigma fun parentKind => ProcessRef topology parentKind)
-  request : (registry.protocol (topology.protocolKey kind)).Request
-  local : (registry.protocol (topology.protocolKey kind)).State
-  lifecycle : ProcessLifecycle
-
-structure LogicalProcessNetwork
-    (plan : ProcessPlan registry boundary) where
-  instances : (kind : plan.ProcessKind) ->
-    ProcessId kind -> Option (ProcessInstance plan.toProcessTopology)
-  shared : (region : plan.SharedRegion) -> plan.SharedState region
-  inFlight : ChannelEscrowLedger plan
-  sessions : ChannelSessionLedger plan
-  obligations : LogicalObligationLedger
-  observations : Trace boundary.Observation
-  usedNominals : MonotoneNominalHistory
-```
+pre-send world.
 
 `usedNominals` contains every process generation, channel epoch, child demand,
 message occurrence, and coalesced replacement ever allocated in the execution
