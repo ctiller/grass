@@ -738,6 +738,22 @@ to imitate compiler-selected storage or CFG structure.
     generic assertion/framing library remains parametric and does not choose
     worlds. Grass does not impose decidable or finite footprints solely to
     remove an already-reviewed foundation constant.
+129. `ProcessLifecycle` is indexed by the instance's `ProcessSpec` and every
+    ending constructor stores the exact outcome it records: terminal result,
+    cancellation reason, interruption reason, logical fault, environment
+    violation, or process-death reason. A payload-free terminal tag is
+    insufficient because `ProcessSpec.Terminal` is relational: one local state
+    may admit multiple terminal results, so network state could not determine
+    what a join returns or what the parent received. The same loss is immediate
+    for fault, violation, interruption, and cancellation classes, which local
+    state does not determine at all. Network well-formedness proves that the
+    stored terminal result satisfies `Terminal request local result`; exact
+    lifecycle transitions prove that the value stored in the child event,
+    parent projection, and resulting instance tag is the same value; a typed
+    death disposition likewise determines the exact stored death reason. This
+    is generated transition bookkeeping, not an additional process-author
+    proof field. It resolves `c-process:46` and supersedes the unindexed
+    lifecycle field reprinted in decision 128's `ProcessInstance` surface.
 
 ## Explicitly rejected shortcuts
 
