@@ -1,4 +1,4 @@
-import Grass.Core.Id
+import Grass.Core.Uid
 import Grass.Core.Name
 import Grass.Memory.AddressSpace
 import Grass.Memory.Range
@@ -39,7 +39,7 @@ The generative identity of an allocation.
 
 Independent of address by construction: nothing in this type mentions one.
 -/
-abbrev AllocId := Core.Id AllocTag
+abbrev AllocId := Core.Uid AllocTag
 
 /--
 The reuse generation of an allocation's storage.
@@ -47,7 +47,7 @@ The reuse generation of an allocation's storage.
 `docs/MEMORY_MODEL.md` §5 requires an arena to advance an epoch before reusing
 storage, so that same-address objects in a new epoch have new provenance.
 -/
-abbrev EpochId := Core.Id EpochTag
+abbrev EpochId := Core.Uid EpochTag
 
 /-- The identity of an allocation source, such as a specific OS or library allocator. -/
 structure AllocationSourceId where
@@ -261,8 +261,9 @@ The provenance component is ghost and is removed by erasure. Erasure preservatio
 is `docs/INSTRUCTIONS.md` §2 and is proved where erasure is defined, not here.
 -/
 structure PointerValue where
-  /-- The numerical address. -/
-  address : MachineAddress
+  /-- The address. Numeric in a numerically addressed space, symbolic in one
+  like SPIR-V's Logical model where a pointer has no numeric value at all. -/
+  address : Address
   /-- The ghost provenance authorizing use of that address. -/
   provenance : Provenance
 deriving DecidableEq, Repr

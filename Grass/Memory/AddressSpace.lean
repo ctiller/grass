@@ -1,18 +1,37 @@
+import Grass.Core.Context
 import Grass.Core.Name
+import Grass.Core.Uid
 
 /-!
-# Address spaces and machine addresses
+# Address spaces and addresses
 
-`docs/MEMORY_MODEL.md` §7.5 is explicit that CPU virtual memory, physical
-memory, device memory, Wasm memories, GPU storage classes, and externally owned
-buffers are not interchangeable merely because their offsets match. An address
-space identity is therefore part of provenance, and a numerically equal address
-in a different space is a different location.
+`docs/MEMORY_MODEL.md` §7.5 is explicit that CPU virtual memory, physical memory,
+device memory, Wasm memories, GPU storage classes, and externally owned buffers
+are not interchangeable merely because their offsets match. An address space
+identity is therefore part of provenance, and a numerically equal address in a
+different space is a different location.
 
-Address-space and memory-type identities are open nominal names rather than a
-closed enumeration, so a platform or device profile introduces its own without
-editing this module. The names defined here are the ones the corpus already
-mentions; they are definitions, not constructors, and carry no privilege.
+## Not every address is a number
+
+Spike 5 declares `OpMemoryModel Logical GLSL450` (`docs/SPIKE_5.md`), and in
+SPIR-V's Logical addressing model a pointer has **no numeric address at all**: it
+is an `%id` in a storage class, reached by `OpAccessChain`, and there is no width
+to bound because there is no number to bound. A fixed `BitVec 64` address would
+force a fabricated number for `%positionsVar`, which is semantic invention
+(`docs/FOUNDATION.md` law 1) dressed as a representation detail.
+
+`Address` therefore has two forms and the space says which one it uses.
+`Representable` rejects the mismatch rather than coercing: a numeric address in a
+symbolic space is not "close enough", it is rejected, per law 8.
+
+## What `Representable` is not
+
+`Representable` is a *necessary* condition — the address is well formed for its
+space's representation. It is not the profile's validity predicate. x86-64
+canonicality is sign-extension of bit 47, not an unsigned magnitude bound, so a
+width test both rejects canonical high-half addresses and admits non-canonical
+ones. That predicate belongs to the ISA profile, which owns its own address
+validity; §10's required proof package is where it is discharged.
 -/
 
 namespace Grass.Memory
@@ -39,9 +58,21 @@ def deviceLocal : AddressSpaceId := ⟨⟨"device.local"⟩⟩
 /-- Device memory mapped into the host's address space. -/
 def deviceHostVisible : AddressSpaceId := ⟨⟨"device.hostVisible"⟩⟩
 
+/-- A SPIR-V `Private` storage class under the Logical addressing model. -/
+def spirvPrivate : AddressSpaceId := ⟨⟨"spirv.private"⟩⟩
+
+/-- A SPIR-V `Input` storage class under the Logical addressing model. -/
+def spirvInput : AddressSpaceId := ⟨⟨"spirv.input"⟩⟩
+
+/-- A SPIR-V `Output` storage class under the Logical addressing model. -/
+def spirvOutput : AddressSpaceId := ⟨⟨"spirv.output"⟩⟩
+
+/-- A SPIR-V `PushConstant` storage class under the Logical addressing model. -/
+def spirvPushConstant : AddressSpaceId := ⟨⟨"spirv.pushConstant"⟩⟩
+
 end AddressSpaceId
 
-/-- The identity of a memory type, which fixes caching and coherence behavior. -/
+/-- The identity of a memory type, which fixes caching behavior. -/
 structure MemoryTypeId where
   /-- The memory type's nominal name. -/
   name : Name
@@ -59,54 +90,169 @@ def writeCombining : MemoryTypeId := ⟨⟨"writeCombining"⟩⟩
 /-- Uncacheable memory. -/
 def uncached : MemoryTypeId := ⟨⟨"uncached"⟩⟩
 
+/-- Storage with no host-side caching semantics, such as a SPIR-V storage class. -/
+def notHostCached : MemoryTypeId := ⟨⟨"notHostCached"⟩⟩
+
 end MemoryTypeId
 
 /--
-A machine address, as a 64-bit value.
+Whether storage in a space is coherent with the host without explicit action.
 
-The width is fixed here rather than made a parameter of every address-bearing
-type, because a dependent width would propagate through the access descriptor,
-the event vocabulary, and every instruction model for no present benefit. Spaces
-narrower than 64 bits are represented by an `AddressSpace.addressBits` bound and
-the `AddressSpace.FitsWidth` predicate, which is enough for Wasm memories, GPU
-storage classes, and 32-bit device apertures.
-
-A target *wider* than 64 bits is the case this does not cover. Per
-`docs/MEMORY_MODEL.md` §9 that is a versioned extension of a foundational
-vocabulary, requiring a migration theorem and renewed review, not a silent
-widening.
+`docs/MEMORY_MODEL.md` §7.5: "Noncoherent profiles require explicit
+visibility/cache operations." This is a field a profile can read rather than a
+string it must compare, because the obligation to issue a cache-maintenance or
+visibility operation depends on it.
 -/
+inductive Coherence where
+  /-- Writes become visible to the host without an explicit operation. -/
+  | hostCoherent
+  /-- Visibility requires an explicit cache-maintenance or barrier operation. -/
+  | requiresExplicitVisibility
+  /-- A coherence discipline owned by one profile. -/
+  | profileSpecific (name : Name)
+deriving DecidableEq, Repr
+
+/-- How addresses in a space are represented. -/
+inductive AddressRepr where
+  /-- Flat numeric addresses of `bits` significant bits, at most 64. -/
+  | numeric (bits : Nat)
+  /-- Opaque symbolic identifiers with no numeric address, as in SPIR-V's
+  Logical addressing model. -/
+  | symbolic
+deriving DecidableEq, Repr
+
+/-- Phantom tag for symbolic address identities. -/
+inductive SymbolicAddressTag : Type
+
+/-- The identity of a symbolic address, such as a SPIR-V `%id`. -/
+abbrev SymbolicAddressId := Uid SymbolicAddressTag
+
+/-- A machine address in a numerically addressed space. -/
 abbrev MachineAddress := BitVec 64
 
 /--
-An address space: its identity, its usable address width, and its memory type.
+An address.
+
+The two forms are not interchangeable and there is no coercion between them.
+Which one a space admits is fixed by its `repr`, and `AddressSpace.Representable`
+rejects a mismatch.
+-/
+inductive Address where
+  /-- A numeric address. -/
+  | numeric (value : MachineAddress)
+  /-- An opaque symbolic address with no numeric value. -/
+  | symbolic (id : SymbolicAddressId)
+deriving DecidableEq, Repr
+
+namespace Address
+
+/-- The numeric value of an address, when it has one. -/
+def value? : Address → Option MachineAddress
+  | .numeric value => some value
+  | .symbolic _ => none
+
+@[simp] theorem value?_numeric (value : MachineAddress) :
+    (Address.numeric value).value? = some value := rfl
+
+@[simp] theorem value?_symbolic (id : SymbolicAddressId) :
+    (Address.symbolic id).value? = none := rfl
+
+end Address
+
+/--
+An address space: its identity, how its addresses are represented, its memory
+type, its coherence, and, for externally owned storage, the agent that owns it.
 -/
 structure AddressSpace where
   /-- Which space this is. -/
   id : AddressSpaceId
-  /-- The number of significant address bits, at most 64. -/
-  addressBits : Nat
-  /-- The caching and coherence behavior of storage in this space. -/
+  /-- How addresses in this space are represented. -/
+  repr : AddressRepr
+  /-- The caching behavior of storage in this space. -/
   memoryType : MemoryTypeId
+  /-- Whether host visibility needs an explicit operation. -/
+  coherence : Coherence
+  /-- The agent that owns this storage, for externally owned buffers. `none`
+  means the program's own address space. `docs/MEMORY_MODEL.md` §7.5 treats
+  externally owned buffers as a distinct space, so the owner is part of the
+  space's identity rather than a property of individual allocations. -/
+  owner : Option ContextId := none
 deriving DecidableEq, Repr
 
 namespace AddressSpace
 
-/-- `space.FitsWidth addr` holds when `addr` is representable in `space`. -/
-def FitsWidth (space : AddressSpace) (addr : MachineAddress) : Prop :=
-  addr.toNat < 2 ^ space.addressBits
+/--
+`space.WellFormed` holds when the space's declared representation is realizable.
 
-instance (space : AddressSpace) (addr : MachineAddress) : Decidable (space.FitsWidth addr) :=
-  inferInstanceAs (Decidable (_ < _))
+A numeric space wider than the 64 bits `MachineAddress` provides is not a space
+this vocabulary version can express; per `docs/MEMORY_MODEL.md` §9 that is a
+versioned extension, and it must be rejected here rather than silently accepted
+by a bound nothing checks.
+-/
+def WellFormed (space : AddressSpace) : Prop :=
+  match space.repr with
+  | .numeric bits => bits ≤ 64
+  | .symbolic => True
+
+instance (space : AddressSpace) : Decidable space.WellFormed := by
+  unfold WellFormed
+  split <;> infer_instance
+
+/--
+`space.Representable addr` holds when `addr` is a well-formed address for
+`space`.
+
+Necessary, not sufficient. See the module comment: a profile's own validity
+predicate, such as x86-64 canonicality, is stronger and is owned by the profile.
+-/
+def Representable (space : AddressSpace) (addr : Address) : Prop :=
+  match space.repr, addr with
+  | .numeric bits, .numeric value => value.toNat < 2 ^ bits
+  | .symbolic, .symbolic _ => True
+  | _, _ => False
+
+instance (space : AddressSpace) (addr : Address) : Decidable (space.Representable addr) := by
+  unfold Representable
+  split <;> infer_instance
+
+/-- A numeric address is not representable in a symbolic space. There is no
+coercion, and no fabricated number. -/
+@[simp] theorem not_representable_numeric_in_symbolic
+    {space : AddressSpace} (h : space.repr = .symbolic) (value : MachineAddress) :
+    ¬ space.Representable (.numeric value) := by
+  simp [Representable, h]
+
+/-- A symbolic address is not representable in a numeric space. -/
+@[simp] theorem not_representable_symbolic_in_numeric
+    {space : AddressSpace} {bits : Nat} (h : space.repr = .numeric bits)
+    (id : SymbolicAddressId) : ¬ space.Representable (.symbolic id) := by
+  simp [Representable, h]
 
 /-- The ordinary 64-bit write-back CPU space used by the initial profile. -/
 def cpuVirtual64 : AddressSpace :=
-  { id := .cpuVirtual, addressBits := 64, memoryType := .writeBack }
+  { id := .cpuVirtual, repr := .numeric 64, memoryType := .writeBack
+    coherence := .hostCoherent }
 
-/-- Every 64-bit value fits a space declaring the full width. -/
-theorem fitsWidth_of_addressBits_eq_64 {space : AddressSpace}
-    (h : space.addressBits = 64) (addr : MachineAddress) : space.FitsWidth addr := by
-  simpa [FitsWidth, h] using addr.isLt
+/-- A SPIR-V `Private` storage class under the Logical addressing model. -/
+def spirvPrivate : AddressSpace :=
+  { id := .spirvPrivate, repr := .symbolic, memoryType := .notHostCached
+    coherence := .requiresExplicitVisibility }
+
+@[simp] theorem wellFormed_cpuVirtual64 : cpuVirtual64.WellFormed := by
+  simp [WellFormed, cpuVirtual64]
+
+@[simp] theorem wellFormed_spirvPrivate : spirvPrivate.WellFormed := trivial
+
+/-- Every 64-bit value is representable in a space declaring the full width. -/
+theorem representable_of_bits_eq_64 {space : AddressSpace} (h : space.repr = .numeric 64)
+    (value : MachineAddress) : space.Representable (.numeric value) := by
+  simpa [Representable, h] using value.isLt
+
+/-- Every symbolic address is representable in a symbolic space; there is no
+width to check. -/
+theorem representable_symbolic {space : AddressSpace} (h : space.repr = .symbolic)
+    (id : SymbolicAddressId) : space.Representable (.symbolic id) := by
+  simp [Representable, h]
 
 end AddressSpace
 

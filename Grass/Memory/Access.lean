@@ -70,8 +70,9 @@ partial completion, and observation and obligation effects.
 structure AccessDescriptor : Type 1 where
   /-- The context performing the access. -/
   context : ContextId
-  /-- The computed machine address of the first byte. -/
-  address : MachineAddress
+  /-- The computed address of the first byte. Numeric or symbolic according to
+  the space; see `Grass/Memory/AddressSpace.lean`. -/
+  address : Address
   /-- The address space the access is performed in. -/
   space : AddressSpace
   /-- The provenance the access must present to be authorized. -/
@@ -118,8 +119,11 @@ structure WellFormed (d : AccessDescriptor) : Prop where
   /-- An access that reads, writes, and executes nothing is not an access.
   `docs/FOUNDATION.md` law 8 forbids treating it as a harmless no-op. -/
   notInert : ¬ d.intent.IsInert
-  /-- The address is representable in the declared space. -/
-  addressFits : d.space.FitsWidth d.address
+  /-- The declared space is realizable by this vocabulary version. -/
+  spaceWellFormed : d.space.WellFormed
+  /-- The address has the form the space's representation requires. A numeric
+  address in a symbolic space, or the converse, is rejected rather than coerced. -/
+  addressRepresentable : d.space.Representable d.address
   /-- The provenance belongs to the space the access names. Without this, an
   offset match across two address spaces could authorize an access
   (`docs/MEMORY_MODEL.md` §7.5). -/
@@ -130,8 +134,16 @@ structure WellFormed (d : AccessDescriptor) : Prop where
   path designates the whole root allocation, whose size is a state fact. -/
   rangeInProvenance :
     ∀ extent, d.provenance.extent? = some extent → extent.Contains d.range
-  /-- The address satisfies the declared alignment. -/
-  aligned : ByteRange.IsAligned d.address.toNat d.alignment
+  /-- A numeric address satisfies the declared alignment. A symbolic address has
+  no numeric value to align; SPIR-V alignment is a property of types, and a
+  profile that needs it states it there rather than here. -/
+  aligned : ∀ value, d.address.value? = some value → IsAligned value.toNat d.alignment
+  /-- In a numerically addressed space the accessed range fits the space itself.
+  This is what rules out a `Nat` range whose machine addresses would wrap and
+  alias a disjoint one; see the module comment in `Grass/Memory/Range.lean`. The
+  tighter bound, the allocation's own size, is a state fact and belongs to M2. -/
+  rangeFitsSpace :
+    ∀ bits, d.space.repr = .numeric bits → d.range.WithinBound (2 ^ bits)
   /-- An atomic intent declares atomic ordering, and conversely. A `lock`-prefixed
   operation that declared `nonAtomic` would be checked by the wrong rules. -/
   atomicityAgrees : (d.intent.isAtomic = true) ↔ (d.ordering.atomicity = .atomic)
@@ -158,27 +170,37 @@ completes." The committed range is therefore a prefix of the named range, and
 this is the function every initialization and framing argument goes through.
 -/
 def committedRange (d : AccessDescriptor) (status : AccessStatus) : ByteRange :=
-  ⟨d.range.start, status.committedBytes d.range.size⟩
+  d.range.take (status.committedBytes d.range.size)
 
 @[simp] theorem committedRange_completed (d : AccessDescriptor) :
-    d.committedRange .completed = d.range := rfl
+    d.committedRange .completed = d.range := by
+  simp [committedRange]
 
-/-- The committed range never escapes the named range, provided the status is
-well formed for it. -/
-theorem committedRange_contained (d : AccessDescriptor) {status : AccessStatus}
+/--
+The committed range never escapes the named range.
+
+Unconditional, because `committedRange` saturates through `ByteRange.take`. Even
+a status claiming more committed bytes than the access covered cannot describe an
+effect outside the access's own range.
+-/
+theorem committedRange_contained (d : AccessDescriptor) (status : AccessStatus) :
+    d.range.Contains (d.committedRange status) :=
+  d.range.contains_take _
+
+/-- For a well-formed status the committed range is exactly the claimed prefix,
+with no saturation. -/
+theorem committedRange_size (d : AccessDescriptor) {status : AccessStatus}
     (h : status.WellFormed d.range.size) :
-    d.range.Contains (d.committedRange status) := by
-  intro offset hoff
-  rw [ByteRange.covers_def] at hoff ⊢
+    (d.committedRange status).size = status.committedBytes d.range.size := by
   rw [AccessStatus.WellFormed] at h
-  simp only [committedRange] at hoff
-  omega
+  simp [committedRange, Nat.min_eq_left h]
 
 /-- A faulting access commits its declared prefix, which may be nonempty. Nothing
 here permits a proof to assume a fault committed no bytes. -/
 theorem committedRange_faulted (d : AccessDescriptor) (fault : FaultClassId)
-    (committed : Nat) :
-    d.committedRange (.faulted fault committed) = ⟨d.range.start, committed⟩ := rfl
+    {committed : Nat} (h : committed ≤ d.range.size) :
+    d.committedRange (.faulted fault committed) = ⟨d.range.start, committed⟩ := by
+  simp [committedRange, AccessStatus.committedBytes, ByteRange.take, Nat.min_eq_left h]
 
 end AccessDescriptor
 

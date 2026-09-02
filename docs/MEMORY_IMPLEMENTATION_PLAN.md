@@ -86,9 +86,25 @@ Exact requirements this plan places on the lower layers:
 - `Grass.Std.Logical` finite sequences and `ByteArray := Vec Byte` per
   [STDLIB.md](STDLIB.md) §1, so no second byte container is invented here.
 
-`ByteRange` interval arithmetic over `BitVec 64` with decidable overlap is
-memory-specific and is owned by this plan (`Grass/Memory/Range.lean`), not by
-`Std.Logical`.
+`ByteRange` interval arithmetic with decidable overlap is memory-specific and is
+owned by this plan (`Grass/Memory/Range.lean`), not by `Std.Logical`.
+
+**Corrected.** An earlier draft of this plan said that arithmetic was over
+`BitVec 64`. That conflated two things. A *range* is offsets within one
+allocation, bounded by the allocation's size rather than the machine word, and
+`Nat` keeps every framing proof free of wraparound reasoning. An *address* is the
+machine-level quantity, and it is not always a number at all (§3.4). The two are
+connected by `ByteRange.WithinBound` and by a bridge lemma M2 owes: bounded `Nat`
+disjointness implies non-aliasing of the corresponding addresses. Without that
+bound `⟨2^64 - 1, 16⟩` and `⟨0, 16⟩` are disjoint as offsets while their
+addresses would alias, so the bound is not decoration.
+
+The build must also gate on what it claims to check. `warningAsError` is set in
+`lakefile.toml`, because without it a declaration using `sorry` is a warning and
+`lake build` exits zero; and `.github/workflows/library.yml` runs both the build
+and `Tools/AxiomAudit.lean`, which implements the transitive audit
+[FOUNDATION.md](FOUNDATION.md) §3 demands over every `Grass` declaration. Before
+these, a green build carried no information.
 
 **Decided.** If no agent has claimed Core, `Std.Logical`, or the lakefile when M1
 starts, this plan takes **temporary custody** of a minimal `Grass.Core.Id` and
@@ -162,13 +178,54 @@ memory effects for the exact Spike 1 instruction mix in
 These are the freeze evidence and the first regression fixtures. If any of them
 cannot be expressed, M1 has not exited.
 
-### 3.3 Exit criteria
+### 3.4 Addresses are not always numbers
+
+Spike 5 declares `OpMemoryModel Logical GLSL450`. Under SPIR-V's Logical
+addressing model a pointer has no numeric address at all: it is an `%id` in a
+storage class, reached by `OpAccessChain`. A fixed `BitVec 64` address would force
+a fabricated number for `%positionsVar`, which is semantic invention
+([FOUNDATION.md](FOUNDATION.md) law 1) wearing a representation's clothes, and the
+fixture that falsifies it is already in this corpus.
+
+`Address` therefore has two forms, numeric and symbolic, and the address space
+declares which it admits. `AddressSpace.Representable` rejects a mismatch rather
+than coercing, per law 8. This is an M1 decision precisely because discovering it
+at M9 would reopen the freeze.
+
+`Representable` is a necessary condition only. x86-64 canonicality is
+sign-extension of bit 47, not an unsigned magnitude bound — a width test both
+rejects canonical high-half addresses and admits non-canonical ones — so address
+*validity* belongs to the ISA profile and is discharged in its §10 package.
+
+### 3.5 Law 8 needs a mechanism, not a convention
+
+The open nominal names in this layer (address space, memory type, fault class,
+allocation source, provenance step kind, obligation kind, observation label) are
+what let a profile extend the vocabulary without editing it. They are also, on
+their own, a silent-acceptance path: a misspelled address-space name is a
+different, perfectly usable address space.
+
+[FOUNDATION.md](FOUNDATION.md) law 8 requires unknown names to be rejected. The
+mechanism is `MemoryProfile`, which carries the recognized-name sets for its own
+admitted operations, and lookup against it returns an option a consumer must
+handle. The profile is the right owner because
+[MEMORY_MODEL.md](MEMORY_MODEL.md) §9 already says "Unimplemented behavior is
+rejected by profile applicability, never modeled as harmless" — and because
+putting a registry in `Core` would be custody over-reach into another owner's
+design.
+
+This must land with `MemoryProfile` in M1, not later: retrofitting a registry
+changes every one of those name types.
+
+### 3.6 Exit criteria
 
 - All M1 modules elaborate under the pinned toolchain.
 - Every reference case above is expressible without an escape hatch.
 - A published `MEMORY_VOCABULARY.md` note lists, declaration by declaration,
   which shapes are frozen under the §7 anti-churn policy and which are
-  explicitly provisional.
+  explicitly provisional. Known provisional entries so far: `ByteSeq`, which
+  becomes `Vec Byte` when `Std.Logical` lands `Vec`; and `AddressSpace`, which
+  will gain fields as device and GPU profiles arrive at M9.
 - The ISA agent has reviewed the freeze against a worst-case candidate list
   (§9 risk 1) and confirmed the seam is sufficient.
 
@@ -207,9 +264,27 @@ Required laws, chosen because the symbolic verifier consumes them directly:
 The audit ledger closes here: append-only, non-erasable, with the emptiness
 predicate `VerifiedProgram` consumes (§8).
 
+Two constraints on M2 are already settled and should not be rediscovered.
+
+**The byte store is not an association list.** `Grass.Std.Logical.FiniteMap` has
+the right framing lemmas but the wrong cost model: `lookup` is a linear scan and
+`insert` rebuilds. A 4 KB frame would be quadratic list surgery, and
+`applyAccess` has to be total *and* executable to serve the bounded decidable
+forward fragment of [INSTRUCTIONS.md](INSTRUCTIONS.md) §5 without violating
+[FOUNDATION.md](FOUNDATION.md) law 12. M2 selects a run-based or sorted
+representation behind the same extensional API. `FiniteMap` remains right for the
+loan map, which is small.
+
+**The offset-to-address bridge is owed here.** `ByteRange` disjointness is `Nat`
+arithmetic; addresses are `BitVec 64` or symbolic. M2 must prove that for ranges
+satisfying `WithinBound`, offset disjointness implies address non-aliasing.
+Without it every framing lemma proves something about offsets that no one has
+connected to memory.
+
 Exit criteria: the M1 reference instruction set steps end to end over a
-hand-built `MemState`, and the framing lemma set is sufficient to discharge a
-straight-line Spike 1 block without a bespoke local lemma.
+hand-built `MemState`; the framing lemma set is sufficient to discharge a
+straight-line Spike 1 block without a bespoke local lemma; and the bridge lemma
+above is proved.
 
 Unblocks: the `verify_assembly` owner, and Spike 1 block certificates.
 

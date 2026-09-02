@@ -8,9 +8,13 @@
 name = "grass"
 defaultTargets = ["Grass"]
 
+# `warningAsError` is the build gate, not a style preference. Without it a
+# declaration using `sorry` is a warning and `lake build` exits 0, which would
+# make a green build carry no information about docs/FOUNDATION.md section 3.
 [leanOptions]
 autoImplicit = false
 relaxedAutoImplicit = false
+warningAsError = true
 
 # `Grass.+` builds the root module and every submodule, so a new file under
 # `Grass/` is checked without an umbrella module importing it. An umbrella that

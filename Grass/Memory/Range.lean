@@ -3,14 +3,40 @@
 
 A half-open range of byte offsets within one allocation, with decidable overlap.
 
-Ranges are allocation-relative rather than absolute, because `docs/MEMORY_MODEL.md`
-§2 makes provenance, not numerical address, the thing that authorizes an access.
-Two ranges in different allocations never overlap however their machine addresses
-compare, and that fact must not be expressible as an accident of arithmetic.
+Ranges are **offsets, not addresses**. `docs/MEMORY_MODEL.md` §2 makes provenance,
+not numerical address, the thing that authorizes an access, so a range is
+meaningful only relative to a root allocation.
+
+This module therefore cannot state that two ranges in different allocations never
+alias — it carries no allocation identity, and `⟨0,4⟩.Disjoint ⟨0,4⟩` is false
+whatever allocations they belong to. That fact lives in `Provenance.SameStorage`.
+What is delivered here is the arithmetic of offsets within one allocation.
+
+Offsets are `Nat`, not `BitVec 64`. An offset is bounded by its allocation's size,
+not by the machine word, and `Nat` keeps every framing proof free of wraparound
+reasoning. The cost is that `Nat` disjointness does not by itself imply
+non-aliasing of the corresponding machine addresses: `⟨2^64 - 1, 16⟩` and
+`⟨0, 16⟩` are `Disjoint` here while their base-plus-offset addresses would alias
+mod 2^64. `WithinBound` is the predicate that rules such ranges out, and M2 owes
+the bridge lemma from bounded `Nat` disjointness to `Address` non-aliasing.
 
 The framing lemmas here are the base case of every disjointness argument in the
 memory layer: `applyAccess` frames a write against a read exactly when their
 ranges are `Disjoint`.
+
+## Empty ranges have positions
+
+`Overlaps` and `Disjoint` are blind to where an empty range sits, because an
+empty range covers no offset. `Contains` is deliberately **not**: it compares
+extents, so `⟨0,4⟩.Contains (empty 999)` is false while `⟨0,4⟩.Contains (empty 4)`
+is true.
+
+That distinction is load-bearing rather than fussy. `docs/MEMORY_MODEL.md` §5.1
+requires one-past-the-end and invalidated offsets to remain non-dereferenceable
+but still meaningful as positions, which is exactly a zero-size range whose
+`start` is the whole point. Had `Contains` been defined as "covers every offset
+`s` covers", every empty range would be contained in every range, and
+`WithinBound.of_contains` below would be false.
 -/
 
 namespace Grass.Memory
@@ -57,15 +83,41 @@ disjuncts are exactly what makes that agreement hold.
 def Disjoint (r s : ByteRange) : Prop :=
   r.size = 0 ∨ s.size = 0 ∨ r.stop ≤ s.start ∨ s.stop ≤ r.start
 
-/-- `r.Contains s` holds when every offset of `s` lies in `r`. -/
-def Contains (r s : ByteRange) : Prop := ∀ offset, s.Covers offset → r.Covers offset
+/--
+`r.Contains s` holds when `s`'s extent lies within `r`'s.
+
+Extent containment, not offset containment: see the module comment. An empty
+range is contained only where it actually sits, one-past-the-end included.
+-/
+def Contains (r s : ByteRange) : Prop := r.start ≤ s.start ∧ s.stop ≤ r.stop
+
+/--
+`r.WithinBound limit` holds when `r` does not reach past `limit`.
+
+Every range used against a real allocation must satisfy this for that
+allocation's size, and every range in a numerically addressed space must satisfy
+it for that space's address width. Without it, `Nat` arithmetic admits ranges
+whose machine addresses would wrap and alias; see the module comment.
+-/
+def WithinBound (r : ByteRange) (limit : Nat) : Prop := r.stop ≤ limit
+
+/--
+The first `count` bytes of `r`, saturating at `r.size`.
+
+This is the shape of a committed prefix: `docs/MEMORY_MODEL.md` §4 says a write
+initializes only the bytes it actually completes, and §1 requires a profile to say
+which effects survive a faulting substep. Both are prefixes of a named range.
+-/
+def take (r : ByteRange) (count : Nat) : ByteRange := ⟨r.start, min count r.size⟩
 
 /-!
 ## Arithmetic characterizations
 
-These are definitional, and exist so that `omega` can see through the
-predicates. Consumers should reason through the named lemmas below rather than
-unfolding these in application proofs.
+These are definitional. They exist so that consumers reason through a stable
+theorem statement instead of unfolding a definition: `docs/OLEAN_SHARDING.md` §1
+requires facts to cross a module boundary as exported theorems, and these
+statements are what M2 and the ISA proofs are entitled to rely on even if a
+representation below them changes.
 -/
 
 theorem covers_def (r : ByteRange) (offset : Nat) :
@@ -76,7 +128,13 @@ theorem disjoint_def (r s : ByteRange) :
       r.size = 0 ∨ s.size = 0 ∨
         r.start + r.size ≤ s.start ∨ s.start + s.size ≤ r.start := Iff.rfl
 
+theorem contains_def (r s : ByteRange) :
+    r.Contains s ↔ r.start ≤ s.start ∧ s.start + s.size ≤ r.start + r.size := Iff.rfl
+
 theorem isEmpty_def (r : ByteRange) : r.IsEmpty ↔ r.size = 0 := Iff.rfl
+
+theorem withinBound_def (r : ByteRange) (limit : Nat) :
+    r.WithinBound limit ↔ r.start + r.size ≤ limit := Iff.rfl
 
 instance (r : ByteRange) (offset : Nat) : Decidable (r.Covers offset) :=
   decidable_of_iff _ (covers_def r offset).symm
@@ -84,8 +142,14 @@ instance (r : ByteRange) (offset : Nat) : Decidable (r.Covers offset) :=
 instance (r s : ByteRange) : Decidable (r.Disjoint s) :=
   decidable_of_iff _ (disjoint_def r s).symm
 
+instance (r s : ByteRange) : Decidable (r.Contains s) :=
+  decidable_of_iff _ (contains_def r s).symm
+
 instance (r : ByteRange) : Decidable r.IsEmpty :=
   decidable_of_iff _ (isEmpty_def r).symm
+
+instance (r : ByteRange) (limit : Nat) : Decidable (r.WithinBound limit) :=
+  decidable_of_iff _ (withinBound_def r limit).symm
 
 @[simp] theorem stop_mk (start size : Nat) :
     (ByteRange.mk start size).stop = start + size := rfl
@@ -93,6 +157,14 @@ instance (r : ByteRange) : Decidable r.IsEmpty :=
 @[simp] theorem start_empty (start : Nat) : (empty start).start = start := rfl
 
 @[simp] theorem size_empty (start : Nat) : (empty start).size = 0 := rfl
+
+@[simp] theorem take_start (r : ByteRange) (count : Nat) :
+    (r.take count).start = r.start := rfl
+
+@[simp] theorem take_size (r : ByteRange) (count : Nat) :
+    (r.take count).size = min count r.size := rfl
+
+@[simp] theorem take_self (r : ByteRange) : r.take r.size = r := by simp [take]
 
 /-- Build a `Covers` proof from the two bounds. -/
 theorem covers_of {r : ByteRange} {offset : Nat} (h₁ : r.start ≤ offset)
@@ -134,8 +206,8 @@ theorem Disjoint.symm {r s : ByteRange} (h : r.Disjoint s) : s.Disjoint r := by
   omega
 
 /--
-The framing law. An offset inside one of two disjoint ranges is outside the
-other, so an update confined to `s` leaves every byte of `r` alone.
+The framing law. An offset inside one of two disjoint ranges is outside the other,
+so an update confined to `s` leaves every byte of `r` alone.
 -/
 theorem Disjoint.not_covers {r s : ByteRange} (h : r.Disjoint s) {offset : Nat}
     (hr : r.Covers offset) : ¬ s.Covers offset := fun hs =>
@@ -147,34 +219,98 @@ theorem Disjoint.not_covers {r s : ByteRange} (h : r.Disjoint s) {offset : Nat}
 @[simp] theorem disjoint_empty_right (r : ByteRange) (start : Nat) :
     r.Disjoint (empty start) := .inr (.inl rfl)
 
-theorem Contains.refl (r : ByteRange) : r.Contains r := fun _ h => h
+theorem Contains.refl (r : ByteRange) : r.Contains r := ⟨Nat.le_refl _, Nat.le_refl _⟩
 
 theorem Contains.trans {r s t : ByteRange} (h₁ : r.Contains s) (h₂ : s.Contains t) :
-    r.Contains t := fun offset h => h₁ offset (h₂ offset h)
+    r.Contains t := by
+  rw [contains_def] at h₁ h₂ ⊢
+  omega
+
+/-- Extent containment implies offset containment, which is the form framing
+arguments consume. -/
+theorem Contains.covers {r s : ByteRange} (h : r.Contains s) {offset : Nat}
+    (ho : s.Covers offset) : r.Covers offset := by
+  rw [contains_def] at h
+  rw [covers_def] at ho ⊢
+  omega
 
 /--
-Containment transports disjointness inward, which is how a subobject inherits
-the framing already established for its parent.
+Containment transports disjointness inward, which is how a subobject inherits the
+framing already established for its parent.
 -/
 theorem Disjoint.of_contains {r s t : ByteRange} (h : r.Disjoint s) (hc : s.Contains t) :
     r.Disjoint t := by
-  rw [disjoint_iff_not_overlaps]
-  rintro ⟨offset, hr, ht⟩
-  exact h.not_covers hr (hc offset ht)
+  rw [disjoint_def] at h ⊢
+  rw [contains_def] at hc
+  omega
+
+/-- Containment transports a bound inward. -/
+theorem WithinBound.of_contains {r s : ByteRange} {limit : Nat}
+    (h : r.WithinBound limit) (hc : r.Contains s) : s.WithinBound limit := by
+  rw [withinBound_def] at h ⊢
+  rw [contains_def] at hc
+  omega
+
+/-- A prefix never escapes the range it came from. -/
+theorem contains_take (r : ByteRange) (count : Nat) : r.Contains (r.take count) := by
+  rw [contains_def]
+  simp only [take]
+  omega
+
+/-- Anything disjoint from a range is disjoint from each of its prefixes, which is
+how framing established for a whole access survives a partial one. -/
+theorem Disjoint.of_take {r s : ByteRange} (h : r.Disjoint s) (count : Nat) :
+    r.Disjoint (s.take count) := h.of_contains (contains_take s count)
+
+/-- An empty range is contained only where it sits. This is the fact the module
+comment turns on, and it is why `WithinBound.of_contains` is provable. -/
+theorem contains_empty_iff (r : ByteRange) (start : Nat) :
+    r.Contains (empty start) ↔ (r.start ≤ start ∧ start ≤ r.stop) := by
+  rw [contains_def]
+  simp only [empty, stop]
+  omega
+
+end ByteRange
 
 /--
 `IsAligned addr align` holds when `addr` is a multiple of `align`.
 
-An alignment of zero is unconstrained, matching a profile that declares no
-alignment demand for an access.
+`align = 1` is how "no alignment demand" is written, and `isAligned_one` proves it
+accepts everything. There is deliberately **no** disjunct making `align = 0`
+universally true: zero is what an unpopulated `Nat` field holds, and a predicate
+that accepted everything at its own default value would be exactly the permissive
+fallback `docs/FOUNDATION.md` law 8 forbids. As defined, `align = 0` is
+restrictive rather than permissive — `isAligned_zero_iff` shows it admits only
+address zero — so a forgotten field fails closed.
+
+This is not a `ByteRange` operation and does not live in its namespace: it
+constrains an address, not a range of offsets.
 -/
-def IsAligned (addr align : Nat) : Prop := align = 0 ∨ addr % align = 0
+def IsAligned (addr align : Nat) : Prop := addr % align = 0
 
 instance (addr align : Nat) : Decidable (IsAligned addr align) :=
-  inferInstanceAs (Decidable (_ ∨ _))
+  inferInstanceAs (Decidable (_ = _))
 
-@[simp] theorem isAligned_one (addr : Nat) : IsAligned addr 1 := .inr (Nat.mod_one addr)
+@[simp] theorem isAligned_one (addr : Nat) : IsAligned addr 1 := Nat.mod_one addr
 
-end ByteRange
+/-- A zero alignment fails closed: it admits only address zero, never everything. -/
+theorem isAligned_zero_iff (addr : Nat) : IsAligned addr 0 ↔ addr = 0 := by
+  simp [IsAligned]
+
+/--
+`IsPowerOfTwo align` holds when `align` is a power of two.
+
+Hardware alignment demands are powers of two, and a profile should require this of
+the alignments it admits. It is a separate predicate rather than a condition
+inside `IsAligned` because the two say different things, and because a device or
+descriptor profile may legitimately demand a non-power-of-two stride.
+-/
+def IsPowerOfTwo (align : Nat) : Prop := ∃ exponent : Nat, align = 2 ^ exponent
+
+theorem isPowerOfTwo_one : IsPowerOfTwo 1 := ⟨0, rfl⟩
+
+theorem isPowerOfTwo_eight : IsPowerOfTwo 8 := ⟨3, rfl⟩
+
+theorem isPowerOfTwo_sixteen : IsPowerOfTwo 16 := ⟨4, rfl⟩
 
 end Grass.Memory

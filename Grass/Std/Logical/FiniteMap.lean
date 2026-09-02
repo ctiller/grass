@@ -119,7 +119,16 @@ def insert (m : FiniteMap K V) (key : K) (value : V) : FiniteMap K V :=
 /-- Remove any binding for `key`. -/
 def erase (m : FiniteMap K V) (key : K) : FiniteMap K V := ⟨eraseKey m.entries key⟩
 
-/-- The keys this map binds. -/
+/--
+The keys this map binds, as they appear in the entry list.
+
+**`domain.length` is not a count of bindings.** The entry list may contain
+shadowed duplicates, and `domain` reports them: `⟨[(1,10),(1,20)]⟩` has domain
+`[1,1]`. `docs/MEMORY_MODEL.md` §3 says counts are derived caches of the
+authoritative map, so a derived count taken as `domain.length` would be wrong on
+such a map. Use `Binds`, or `domain` only up to membership, until the
+`Std.Logical` owner supplies a deduplicating count with its own law.
+-/
 def domain (m : FiniteMap K V) : List K := m.entries.map Prod.fst
 
 /-- `m.Binds key` holds when `m` has a binding for `key`. -/
@@ -204,6 +213,33 @@ theorem Equiv.erase {m n : FiniteMap K V} (h : m.Equiv n) (key : K) :
     (m.erase key).Equiv (n.erase key) := by
   intro other
   simp [lookup_erase, h other]
+
+/--
+`IsEmpty` transports along `Equiv`.
+
+This is the transport that matters most. `docs/MEMORY_MODEL.md` §3 restores
+exclusive authority only when the loan map is empty, so emptiness is the loan
+layer's central predicate and must not depend on which extensionally equal
+representation the map happens to have.
+-/
+theorem Equiv.isEmpty {m n : FiniteMap K V} (h : m.Equiv n) (hm : m.IsEmpty) :
+    n.IsEmpty := fun key => (h key).symm.trans (hm key)
+
+/-- `Binds` transports along `Equiv`. -/
+theorem Equiv.binds {m n : FiniteMap K V} (h : m.Equiv n) {key : K} (hb : m.Binds key) :
+    n.Binds key := by
+  rw [Binds, ← h key]; exact hb
+
+/-- Membership in the domain transports along `Equiv`, even though the domain
+list itself does not: see the caveat on `domain`. -/
+theorem Equiv.mem_domain {m n : FiniteMap K V} (h : m.Equiv n) {key : K}
+    (hd : key ∈ m.domain) : key ∈ n.domain :=
+  (mem_domain_iff_binds n key).mpr (h.binds ((mem_domain_iff_binds m key).mp hd))
+
+/-- A map with no entries binds nothing. The converse needs `K` to be searchable
+and is not available at this generality. -/
+theorem isEmpty_of_entries_eq_nil {m : FiniteMap K V} (h : m.entries = []) : m.IsEmpty :=
+  fun _ => by simp [lookup, h]
 
 end FiniteMap
 

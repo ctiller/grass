@@ -1,5 +1,5 @@
 import Grass.Core.Context
-import Grass.Core.Id
+import Grass.Core.Uid
 import Grass.Core.Name
 
 /-!
@@ -40,7 +40,7 @@ The generative identity of one obligation.
 Linearity is about this identity: discharging an obligation consumes exactly this
 one, and a second obligation of the same kind is untouched.
 -/
-abbrev ObligationId := Core.Id ObligationTag
+abbrev ObligationId := Core.Uid ObligationTag
 
 /--
 The identity of an obligation kind.

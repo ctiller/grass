@@ -1,4 +1,4 @@
-import Grass.Core.Id
+import Grass.Core.Uid
 import Grass.Core.Name
 
 /-!
@@ -29,7 +29,7 @@ namespace Grass.Core
 inductive ContextTag : Type
 
 /-- The generative identity of one execution context. -/
-abbrev ContextId := Id ContextTag
+abbrev ContextId := Uid ContextTag
 
 /--
 What kind of agent an execution context is.
