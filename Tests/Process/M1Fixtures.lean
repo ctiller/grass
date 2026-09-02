@@ -3,7 +3,7 @@ import Grass.Process.Protocol.Registry
 import Grass.Specification.Scope
 
 /-!
-# M1 fixtures for the process author vocabulary
+# M1 fixtures for the process author countdownVocabulary
 
 `docs/PROCESS_IMPLEMENTATION_PLAN.md` §3.3 lists the cases this milestone exits
 on. Each is a theorem: `docs/FOUNDATION.md` law 3 forbids an executed example
@@ -59,7 +59,7 @@ inductive Interrupt
 
 /-- The vocabulary. Faults and environment violations are excluded by
 construction; interruptions are not, because a fixture needs one. -/
-@[reducible] def vocabulary : ProcessVocabulary.{0} where
+@[reducible] def countdownVocabulary : ProcessVocabulary.{0} where
   ExternalEvent := ExternalEvent
   Demand := Demand
   Result := Result
@@ -70,7 +70,7 @@ construction; interruptions are not, because a fixture needs one. -/
 
 /-- The countdown process. -/
 @[reducible] def countdown : ProcessSpec.{0, 0} where
-  toProcessVocabulary := vocabulary
+  vocabulary := countdownVocabulary
   Request := Nat
   State := Nat
   TerminalResult := Unit
@@ -287,7 +287,7 @@ theorem zero_request_terminal_does_not_step
 /-! ## Fixture 7 — a deterministic process and its relational image -/
 
 /-- A deterministic echo: every event returns to the same state, silently. -/
-@[reducible] def echo : DeterministicProcess.{0, 0} vocabulary where
+@[reducible] def echo : DeterministicProcess.{0, 0} countdownVocabulary where
   Request := Unit
   State := Unit
   TerminalResult := Unit
@@ -296,7 +296,7 @@ theorem zero_request_terminal_does_not_step
   update := fun _ _ => ((), 0, [])
   view := none
 
-theorem echo_step_is_functional {state : Unit} {event : ProcessEvent vocabulary}
+theorem echo_step_is_functional {state : Unit} {event : ProcessEvent countdownVocabulary}
     {afterLeft afterRight : Unit} {issuedLeft issuedRight : Bag Demand}
     {emittedLeft emittedRight : ObservationSegment Observation}
     (left : echo.toProcessSpec.Step state event afterLeft issuedLeft emittedLeft)
@@ -319,7 +319,7 @@ that a protocol built *from* other protocols — which is what `flatten` produce
 — keeps their interface types where they were and moves only its own private
 state up. This fixture is the miniature of that: `observer`'s state is the run
 state of `countdown`, which lives one universe up, while both processes share a
-vocabulary at universe `0` and therefore fit in one registry.
+countdownVocabulary at universe `0` and therefore fit in one registry.
 
 Without the split, `observer` would sit above `countdown` entirely and could not
 be registered beside it.
@@ -327,7 +327,7 @@ be registered beside it.
 
 /-- A process whose private state is a `countdown` run state. -/
 @[reducible] def observer : ProcessSpec.{0, 1} where
-  toProcessVocabulary := vocabulary
+  vocabulary := countdownVocabulary
   Request := ULift Nat
   State := ULift (ProcessRunState countdown 2)
   TerminalResult := ULift Unit
@@ -341,9 +341,9 @@ be registered beside it.
   view := none
 
 /-- `countdown` lifted to the same universes as `observer`, so both can be
-registered. Only the private types move; the vocabulary is shared. -/
+registered. Only the private types move; the countdownVocabulary is shared. -/
 @[reducible] def countdownLifted : ProcessSpec.{0, 1} where
-  toProcessVocabulary := vocabulary
+  vocabulary := countdownVocabulary
   Request := ULift Nat
   State := ULift Nat
   TerminalResult := ULift Unit
