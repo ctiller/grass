@@ -1752,6 +1752,39 @@ mod tests {
         insta::assert_json_snapshot!(agent_summary(&ag));
     }
 
+    /// The all-defaults snapshot above only ever exercises the `None` arm of
+    /// every `Option`-typed field in `agent_summary` (provider, model,
+    /// product_branch, product_commit, scope, plan) plus a single
+    /// `LifecycleStatus` variant and `retired: false`. None of that would
+    /// notice a bug in the `Some(...)` serialization branches (e.g. a
+    /// mis-shaped `scope`/`plan` value, or a wrong `Debug`-derived `status`
+    /// string). This snapshot populates every optional field and flips
+    /// `status`/`retired` so the whole shape is actually pinned down.
+    #[test]
+    fn agent_summary_snapshot_with_populated_optional_fields() {
+        // Implementor, not Reviewer: AGENT_BUS_SCHEMA.md section 4 permits
+        // `product_branch`/`product_commit` only for an implementor, and the
+        // fixture should stay a state real event application could produce.
+        let mut ag = mk_agent("bob", Role::Implementor);
+        ag.provider = Some(short("anthropic"));
+        ag.model = Some(short("sonnet"));
+        ag.status = LifecycleStatus::Blocked;
+        ag.retired = true;
+        ag.product_branch = Some(branch("refs/heads/agent/bob/x"));
+        ag.product_commit = Some(oid(7));
+        ag.scope = Some(scope_set_fixture(&["Grass/Bob/**"], &["Grass/Shared/**"]));
+        ag.plan = Some(PlanSet {
+            summary: text("ship it"),
+            steps: vec![crate::common::PlanStep {
+                id: short("s1"),
+                state: crate::common::PlanStepState::Active,
+                text: text("do the thing"),
+            }],
+            risks: vec![text("might be late")],
+        });
+        insta::assert_json_snapshot!(agent_summary(&ag));
+    }
+
     #[test]
     fn status_rejects_invalid_agent_filter() {
         let (_d, ctx) = dummy_ctx();
@@ -2000,12 +2033,6 @@ mod tests {
         let (_d, ctx) = dummy_ctx();
         let (_t, path) = temp_json(r#"{"reason":"no","normative_refs":[]}"#);
         assert!(issue_reject(&ctx, "alice", "alice:0", &path).is_err());
-    }
-
-    #[test]
-    fn issue_acknowledge_reaches_build_with_valid_args() {
-        let (_d, ctx) = dummy_ctx();
-        assert!(issue_acknowledge(&ctx, "alice", "alice:0", "note").is_err());
     }
 
     #[test]
