@@ -1,0 +1,22 @@
+# Grass build configuration.
+#
+# The toolchain is pinned by `lean-toolchain` to the baseline in
+# docs/MODULES.md. Dependencies are deliberately empty: docs/FOUNDATION.md
+# requires every selected dependency to enter the TCB and build ledgers, so a
+# dependency is added by a reviewed change, never as a convenience.
+
+name = "grass"
+defaultTargets = ["Grass"]
+
+[leanOptions]
+autoImplicit = false
+relaxedAutoImplicit = false
+
+# The library currently has only its root module. The first commit that adds a
+# module under `Grass/` must change this to `globs = ["Grass.+"]`, which builds
+# the root and every submodule without an umbrella module importing them. An
+# umbrella that imported every leaf would violate the aggregate rules in
+# docs/OLEAN_SHARDING.md. The glob cannot be set before `Grass/` exists, because
+# Lake fails to resolve a glob over a missing directory in a fresh clone.
+[[lean_lib]]
+name = "Grass"
