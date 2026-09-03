@@ -17,10 +17,21 @@ namespace Grass.Memory
 /--
 What an access does to the bytes it names.
 
-`isAtomic` and `isDevice` are intent, not ordering: they say what kind of
-operation this is, while the ordering it requests is a separate declaration
+`isAtomic` is intent, not ordering: it says what kind of operation this is, while
+the ordering it requests is a separate declaration
 (`Grass/Memory/Ordering.lean`). An atomic access still declares `reads` and
 `writes`, so a compare-and-swap is visibly both.
+
+There is no `isDevice`. There was, reading "performed by, or targets, a device
+rather than the CPU", and it was a third source of truth for facts two consulted
+mechanisms already carry — conflating them, so neither was recoverable from it.
+Who performs an access is `ExecutionContext.kind`, which
+`docs/MEMORY_MODEL.md` §7.1 requires every event to carry and which `Grass/Op/Step.lean`
+checks against `MachineState.contexts`. What an access targets is its
+`AddressSpaceId`, which `denialOf` checks and `MemoryProfile.Admits` requires the
+profile to declare; §7.5 makes those spaces non-interchangeable precisely so the
+identity carries the fact. The `Bool` was read by nothing, which is how it was
+found.
 -/
 structure AccessIntent where
   /-- The access observes the bytes it names. -/
@@ -31,8 +42,6 @@ structure AccessIntent where
   executes : Bool := false
   /-- The access is atomic with respect to its declared scope. -/
   isAtomic : Bool := false
-  /-- The access is performed by, or targets, a device rather than the CPU. -/
-  isDevice : Bool := false
 deriving DecidableEq, Repr
 
 namespace AccessIntent

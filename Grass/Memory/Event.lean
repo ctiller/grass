@@ -547,17 +547,17 @@ def kindOf (intent : AccessIntent) : Option EventKind :=
 
 theorem reads_kindOf {intent : AccessIntent} {kind : EventKind}
     (h : kindOf intent = some kind) : kind.reads = intent.reads := by
-  obtain ⟨reads, writes, _, _, _⟩ := intent
+  obtain ⟨reads, writes, _, _⟩ := intent
   cases reads <;> cases writes <;> simp [kindOf] at h <;> subst h <;> rfl
 
 theorem writes_kindOf {intent : AccessIntent} {kind : EventKind}
     (h : kindOf intent = some kind) : kind.writes = intent.writes := by
-  obtain ⟨reads, writes, _, _, _⟩ := intent
+  obtain ⟨reads, writes, _, _⟩ := intent
   cases reads <;> cases writes <;> simp [kindOf] at h <;> subst h <;> rfl
 
 theorem touchesMemory_kindOf {intent : AccessIntent} {kind : EventKind}
     (h : kindOf intent = some kind) : kind.touchesMemory = true := by
-  obtain ⟨reads, writes, _, _, _⟩ := intent
+  obtain ⟨reads, writes, _, _⟩ := intent
   cases reads <;> cases writes <;> simp [kindOf] at h <;> subst h <;> rfl
 
 /--

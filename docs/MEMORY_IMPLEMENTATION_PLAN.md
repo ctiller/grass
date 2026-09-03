@@ -661,10 +661,23 @@ one outright defect that had already merged — see §3.11's denial row.
   vocabulary version it assumes and nothing compares that to what the transition
   implements. There is one version and no migration theorems, so there is nothing
   yet to compare against; this becomes real when a second version exists.
-- **`AccessIntent.isDevice` and `AccessDescriptor.observations` are never read.**
-  §7.5 makes device participation load-bearing and `isDevice` is the field that
-  would carry it. `ObservationLabel` was recorded in §3.13 as having no registry,
-  which understates it: the field has no reader at all.
+- **`AccessDescriptor.observations` is never read.** §3.13 recorded that
+  `ObservationLabel` has no registry, which understates it: the field has no reader
+  at all. §7.5's device completion and fence signals are what would consume it, and
+  those are causal edges in the event graph, so the consumer is plausibly M8 — but
+  no milestone in this plan claims it, which is why it stays here rather than being
+  reclassified.
+
+  `AccessIntent.isDevice` was in this list and is now **removed from the
+  vocabulary** rather than owed. Its docstring read "performed by, or targets, a
+  device rather than the CPU", which is two different facts in one `Bool` with
+  neither recoverable from it, and both are already carried by mechanisms that
+  *are* consulted: who performs an access is `ExecutionContext.kind`, which §7.1
+  requires every event to carry and which `step` checks against
+  `MachineState.contexts`; what it targets is its `AddressSpaceId`, which
+  `denialOf` checks and which §7.5 makes non-interchangeable precisely so the
+  identity carries the fact. A third, unconsulted source for a fact two consulted
+  ones already carry is the defect shape this branch has found eight times.
 - **`InitializationDemand.permitsUninitialized`'s justification names nothing**,
   like `FaultVisibility.transactional`'s, and unlike that one it was not recorded.
 - **The operation-level `faults` facet is consumed by nothing.**

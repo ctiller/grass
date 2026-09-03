@@ -89,7 +89,6 @@ ALLOWED = {
     # Genuine gaps: a corpus requirement, no consumer, and no milestone that owns
     # them. Recorded as owed in section 4.2.
     "observations",       # section 7.5 device observation labels; no reader at all
-    "isDevice",           # section 7.5 makes device participation load-bearing
     "restartability",     # section 7.4 retry rules have no mechanism
     "justification",      # transactional and permitsUninitialized name nothing
     "scope",              # ordering scope, with no registry to check it against

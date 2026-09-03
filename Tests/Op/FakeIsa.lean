@@ -388,14 +388,14 @@ instance : HasOperationFacets Beta where
         { memoryEffects := some (.single
             { acc viewProv ⟨0, 8⟩ 0x1000 .write .readWrite false true
                 (context := engine₀) with
-              intent := { reads := false, writes := true, isDevice := true } })
+              intent := { reads := false, writes := true } })
           faults := some [.deviceFault], restartability := some .notRestartable
           ordering := some .plain }
     | .dmaWriteChained =>
         { memoryEffects := some (.single
             { acc chainedProv ⟨0, 8⟩ 0x4000 .write .readWrite false true
                 (context := engine₀) with
-              intent := { reads := false, writes := true, isDevice := true } })
+              intent := { reads := false, writes := true } })
           faults := some [.deviceFault], restartability := some .notRestartable
           ordering := some .plain }
     | .dmaDischargesTheThreadsDuty =>
@@ -403,7 +403,7 @@ instance : HasOperationFacets Beta where
             { acc borrowedProv ⟨0, 8⟩ 0x5000 .write .readWrite false true
                 [.discharge bufferProtocol bufferAuthority releaseObligationId]
                 (context := engine₀) with
-              intent := { reads := false, writes := true, isDevice := true } })
+              intent := { reads := false, writes := true } })
           faults := some [.deviceFault], restartability := some .notRestartable
           ordering := some .plain }
     | .undeclared => {}
