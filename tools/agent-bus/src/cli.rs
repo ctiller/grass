@@ -882,8 +882,15 @@ fn prepare_merge(args: PrepareMergeArgs) -> AbResult<()> {
     if chain.current_nomination != nomination {
         return Err(invalid("nomination is no longer current"));
     }
-    if !chain.accepted() || chain.current_request.reviewer != reviewer {
-        return Err(invalid("only the accepting reviewer may prepare a merge"));
+    if chain.current_request.reviewer != reviewer {
+        return Err(invalid(
+            "only the nomination's reviewer may prepare a merge",
+        ));
+    }
+    if !chain.accepted() {
+        return Err(invalid(
+            "the reviewer must accept the nomination before preparing a merge",
+        ));
     }
 
     let previous_main = crate::gitrepo::rev_parse(&paths.repo, "refs/heads/main")?;

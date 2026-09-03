@@ -1465,11 +1465,14 @@ fn prepare_merge_constructs_and_pushes_the_candidate_tag() {
     );
 }
 
-/// A reviewer who never accepted (or was never nominated at all) must be
-/// refused outright -- `prepare-merge` must not construct or tag anything
-/// on their behalf.
+/// An agent who was never nominated as this review's reviewer at all must
+/// be refused outright -- `prepare-merge` must not construct or tag
+/// anything on their behalf. A distinct, named rejection from "the real
+/// reviewer just hasn't accepted yet" (below), not a shared, conflated
+/// message an autonomous caller can't tell apart (round-5 adversarial
+/// review).
 #[test]
-fn prepare_merge_rejects_a_reviewer_who_never_accepted_the_nomination() {
+fn prepare_merge_rejects_an_agent_who_is_not_the_nominations_reviewer() {
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, _previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -1489,7 +1492,7 @@ fn prepare_merge_rejects_a_reviewer_who_never_accepted_the_nomination() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "only the accepting reviewer may prepare a merge",
+            "only the nomination's reviewer may prepare a merge",
         ));
 }
 
@@ -1578,7 +1581,10 @@ fn prepare_merge_rejects_a_reviewed_commit_missing_the_author_trailer() {
 /// A nomination that exists and names the right reviewer, but was never
 /// accepted, must still be refused -- distinct from the "wrong reviewer
 /// entirely" case above (`chain.current_request.reviewer != reviewer`):
-/// this exercises `!chain.accepted()` specifically.
+/// this exercises `!chain.accepted()` specifically, and (round-5
+/// adversarial review) must surface a distinct, named message from that
+/// other case, not a shared, conflated one an autonomous caller can't tell
+/// apart.
 #[test]
 fn prepare_merge_rejects_before_the_nomination_is_accepted() {
     let (_origin, repo) = fresh_bus();
@@ -1625,7 +1631,7 @@ fn prepare_merge_rejects_before_the_nomination_is_accepted() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "only the accepting reviewer may prepare a merge",
+            "the reviewer must accept the nomination before preparing a merge",
         ));
 }
 
