@@ -399,4 +399,5 @@ owes a citation, raise owedBaseline in the same reviewed edit."
 {cited.size} carry a citation, {owed.length} owed, \
 {notBehaviour.length} reviewed as carrying no external behaviour. \
 {subjects.length} ledger subjects, all anchoring to real declarations. \
-{unfounded.length} rules await a confirmed basis. \n{l.unconfirmedAnchors.length} of {l.citations.length} anchors are unconfirmed."
+{unfounded.length} rules await a confirmed basis. \n{l.unconfirmedAnchors.length} of {l.citations.length} anchors are unconfirmed. \
+{(l.releaseBlockers.map (fun d => d.id.text)).eraseDups} is the release-blocker set (docs/VALIDATION.md section 1: a dead location under a referenceOnly policy blocks release)"
