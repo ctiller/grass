@@ -2251,6 +2251,7 @@ and a reader needs to know which of them are open.
 | `Network/Progress.lean` | §7's progress theorem, as a no-infinite-silent-run law, over what a run can reach |
 | `Network/Initial.lean` | §3's `ExactInitialNetwork`, and `initial_is_wellformed` |
 | `Progress.lean` | the per-process livelock theorem: no silent cycle, no infinite silent run |
+| `Network/WellFormedness.lean` | §3's capstone: a step of a well-formed network reaches a well-formed one, all six clauses |
 
 `Grass/Process/Network/Transition.lean` was reworked six times over the same
 period and is where most of the defects were: the scope discipline it exports is
@@ -2274,19 +2275,53 @@ milestone. Seven records were inhabited for the first time, and each was empty f
 | `NetworkProgressMeasure` | `Commits` had no provenance, so no network could be at a frontier under any measure | `Tests/Process/FrontierFixtures.lean` |
 | `ExactInitialNetwork` | nothing; it had never been built, and had absorbed two new fields with no proof breaking | `Tests/Process/FrontierFixtures.lean` |
 | `EndsInstance` | nothing; it had absorbed three | `Tests/Process/EndingFixtures.lean` |
-| `Spawns` | nothing | `Tests/Process/FrontierFixtures.lean` |
 | `Restarts` | nothing | `Tests/Process/RestartFixtures.lean` |
 | `WeaveInvariantFamily` | nothing | `Tests/Process/WeaveFixtures.lean` |
+| `SendsEscrow` | its plan's own `Send` pinned an after-world no receive fixture started from | `Tests/Process/TransitionFixtures.lean` |
+| `ClosesSession`, `KillsSession`, `RequestsCancel`, `ResolvesEscrow` | nothing | `Tests/Process/ChannelStepFixtures.lean` |
+| `Reroutes` | a deferral argued from a false premise, §10.79 | `Tests/Process/RerouteFixtures.lean` |
+| `Spawns`, `Joins` | nothing; between them they had absorbed five fields with no proof breaking | `Tests/Process/LifecycleStepFixtures.lean` |
+| `Mailbox` (non-empty), `MailboxEntry`, `SelectiveReceive` | the whole module was an island nothing imported | `Tests/Process/MailboxFixtures.lean` |
+| `ChildDemandBinding` | nothing | `Tests/Process/ChildBindingFixtures.lean` |
+| `LogicalProcessNetworkCore.WellFormed`, `ProcessPlan.Sound` | nothing; `terminated_result_is_exact` took a `Sound` nothing had supplied | `Tests/Process/FrontierFixtures.lean` |
 
-The pattern is worth stating because it held seven times out of seven: **a record
-that absorbs a new field without a single proof breaking is a record nothing
-inhabits.** That is a cheap check and it is now the first one to run after any
-structural change.
+**A correction to an earlier version of this table.** It listed `Spawns` as
+witnessed by `Tests/Process/FrontierFixtures.lean`. That file discusses `Spawns`
+at length and builds none: an emptiness sweep run in Lean over the whole corpus
+found the record uninhabited, and this table was wrong about the one thing it
+exists to record. A table of witnesses assembled by reading is not a table of
+witnesses. The sweep is the check; the table is its output.
+
+The pattern is worth stating because it has now held every time it was tested:
+**a record that absorbs a new field without a single proof breaking is a record
+nothing inhabits.** `Spawns` and `Joins` took five fields between them over three
+review rounds and nothing broke, because nothing was there. That is a cheap check
+and it is the first one to run after any structural change — but running it by
+reading is how the row above came to be wrong, so run it in Lean.
 
 And four processes were shown *not* to inhabit `ProcessCorrect` — or, worse, to
 inhabit it when they should not. `Tests/Process/SpinFixtures.lean`,
 `OscillateFixtures.lean` and `ChatterFixtures.lean` are livelocks that each had a
 full `ProcessCorrect`; the first two are now excluded and the third is §10.70.
+
+### The capstone, and what proving it cost
+
+`ProcessPlan.wellFormed_preserved` — a step of a well-formed network reaches a
+well-formed one — is proved, all six clauses, axioms clean. It is worth a
+paragraph here because of the ratio.
+
+§10.73 was a clause-by-clause *argument* for it, filed with a warning that it
+should be read as owed work. The warning was right four times over: the argument
+had the layer wrong (`NominalsAllocated` is a law of `NetworkStep`, not of
+`NetworkTransition`), the count wrong (four clauses reduce through
+`instanceProperty_preserved`, not five — `RootUnique` relates two slots), the
+evidence wrong for two clauses, and it did not know about §10.87 at all.
+
+§10.87 is the finding: **no escrow constructor bounded which occurrences other
+than its own it may resolve**, so a `drop` could append an unrelated occurrence,
+resolve it `.rerouted`, and point it at a session it never touched — breaking
+`ReroutesLand` with every field it had discharged. Six reworkings of
+`Transition.lean` had not found it. Trying to prove one theorem did.
 
 ### Still owed for M4 exit
 
@@ -2299,6 +2334,12 @@ full `ProcessCorrect`; the first two are now excluded and the third is §10.70.
 * **The proof-economics acceptance rule** — not started.
 * **`DirectProgramRealizes` transport** — §4 asks the adapter for it; the
   adapter delivers the syntax half only, and says so.
+* **A second plan-level witness** — §10.88. `Sound`, `ExactInitialNetwork`,
+  `NetworkProgressMeasure` and `WellFormed` have exactly one witness family
+  between them, at a plan whose observation, demand and channel types are all
+  empty. `wellFormed_preserved` holds of every plan; the clauses it preserves
+  have only ever been *established* at that one. This is the largest gap the
+  milestone leaves.
 
 ### Open findings by weight
 
@@ -3317,6 +3358,28 @@ before it was finished. But the plan is an *argument*, and this ledger has five
 entries recording defects that did not exist, every one filed from an argument
 rather than a construction. It should be read as owed work, not as a result.
 
+**Closed.** `ProcessPlan.wellFormed_preserved` is the theorem, all six clauses,
+`#print axioms` clean. Reading the entry back against what it took:
+
+* The plan had the **layer wrong**. It said "transition"; `NominalsAllocated` is
+  a law of `NetworkStep`, because `usedNominals` moves by `historyExact`, which
+  is a field of the step and not of the transition. A reviewer built the `restart`
+  transition that wipes the history and strands the root's own generation.
+* It had the **count wrong**. It said five of six clauses reduce through
+  `instanceProperty_preserved`. `RootUnique` quantifies over two slots and does
+  not have that shape; it is four, plus `root_was_there` used once per slot.
+* It had **two clauses' evidence wrong**. `declared_slot_outcome`'s first payload
+  reported the reference and the known parent, which settles neither
+  `LifecyclesWitnessed` nor `RootUnique`. Both gaps were found by construction,
+  by a reviewer, not by re-reading the plan.
+* And it did not know about §10.87 at all, which is the one real defect the proof
+  found.
+
+Four errors in six clauses of argument. The entry's own warning was right, and
+the record of it stays here rather than being tidied away: an argued plan is
+worth writing because working it finds things, and worth distrusting because
+what it finds is not what it says it found.
+
 ### 10.74 Three defects the trace split left behind in the weave layer
 
 The `pending`/`observations` split gave `Commits` provenance and left stale
@@ -3442,9 +3505,22 @@ not exercise them.
 cancellation request and a drop, together with
 `a_close_on_the_wrong_session_is_refused`, which is what `onItsSession` buys.
 
-`Reroutes` is the one left, and it is left for a reason worth stating: it needs
-two sessions on one edge and this topology names one, so building it is a change
-to the fixture *world* rather than an addition beside it.
+`Reroutes` was the one left, "for a reason worth stating: it needs two sessions
+on one edge and this topology names one, so building it is a change to the
+fixture *world* rather than an addition beside it".
+
+**That reason was false, and it was an argument rather than a construction.** A
+`ChannelId` is two endpoints *and an epoch*, and §3 put the epoch there precisely
+so one edge between one pair of incarnations can carry more than one session —
+"dropping the epoch and identifying a session by its endpoints would let a
+closed-and-reopened channel inherit the old session's in-flight messages". A
+second session is `wire` with a later epoch.
+`Tests/Process/RerouteFixtures.lean` is the witness, and it is an addition beside
+the fixture after all. **Eleven of eleven channel constructors now have one.**
+
+An independent emptiness sweep reached the same conclusion at the same time,
+which is worth recording: two readers who each *built* the thing agreed, and the
+argument that neither could was made by a reader who had not.
 
 Two consequences it found, both worth more than the count:
 
@@ -3539,3 +3615,140 @@ network-level clause would go. If none arrives it should be collapsed.
 Needs a ruling: is there a network-level soundness clause a plan can state that
 the world cannot? The two named have found a better home, and no third has been
 proposed.
+
+### 10.83 `Spawns` and `Joins` had never been inhabited
+
+The two constructors that create and reap a child, ten and four Prop fields
+between them, built nowhere in the corpus. Both had absorbed fields over several
+review rounds — `Joins` took `wasTerminated` and `wasChild`, `Spawns` took
+`slotAgrees`, `startsInitial` and `spawnsAChild` — with, by their own docstrings,
+no proof breaking. That is this milestone's seven-for-seven signal and it fired
+twice.
+
+**Closed** by `Tests/Process/LifecycleStepFixtures.lean`. `the_join` went through
+first try; `the_spawn` needed the existing `holding` world and one allocated
+generation. Neither was hard, which is the finding: they were empty for want of
+trying, and every field either structure gained had been checked by nothing.
+
+The negative halves are what make them worth more than a count.
+`a_spawn_may_not_install_an_orphan` shows `spawnsAChild` refusing a parentless
+incarnation, and `a_spawn_may_not_prestock` shows `startsInitial` refusing one
+already holding a demand it never issued.
+
+**One docstring correction owed.** `Spawns.spawnsAChild` says the field stops a
+spawn installing a *root*. At the fixture topology that is not what stops it:
+`ProcessParentage.root` is indexed at the graph's root kind, so `.root` does not
+typecheck for a `.connection` at all. The reachable attack is the *orphan*. The
+field is right; its stated justification is one case wider than the type permits.
+Recorded, not yet edited, because the general claim is true at a topology whose
+root kind has instances and the docstring should say which case it means.
+
+### 10.84 `StructuralProcessNetwork.CompositionLaw` asserted nothing
+
+One field, `holds : Prop`, and no proof fields — a `Prop` with a constructor.
+Holding one carried no information: `⟨False⟩` inhabits it, nothing anywhere
+required `holds`, and an emptiness sweep found the structure constructed nowhere
+in the corpus. The same shape as §10.76's `WeaveInvariantFamily.complete`, one
+module over.
+
+The docstring's justification — "a network with no law attached is honestly a
+network with no law attached" — is sound and the wrapper did not serve it: a
+network *with* a `CompositionLaw` was also a network with no law attached.
+
+**Closed** by deleting it. A composition law is a `Prop`, and callers state
+propositions. `EveryRolePopulated` stays and now says so. The `docs/SEMANTICS.md`
+argument for splitting laws out of the network structure is untouched and still
+right.
+
+### 10.85 `Grass/Process/Network/Mailbox.lean` was an unwitnessed island
+
+`MailboxEntry` constructed nowhere, `Mailbox` inhabited anywhere only by
+`Mailbox.empty`, and `SelectiveReceive` — nine fields, five of them Props —
+never built. So `Mailbox.distinct` had never been discharged at a non-empty list,
+`PerSenderPair` had never been evaluated at a mailbox with an entry, and all five
+selective-receive laws were claims about a relation with no inhabitants. Nothing
+else in `Grass/Process` imports the module.
+
+**Closed** by `Tests/Process/MailboxFixtures.lean`, deliberately not at the
+smallest inhabitant: a one-entry mailbox whose entry matches would discharge
+`skippedRejected` and `exhaustedIfNone` vacuously with `scanWork = 0`.
+`theReceive` scans past a rejected entry to take the second.
+
+### 10.86 `ChildDemandBinding` was never built, and one law still cannot fail
+
+Seven fields, five of them Props, constructed nowhere — so
+`successAnswersThisDemand`, `pendingDoesNotAnswer` and `reflectsEveryAnswer` were
+claims about an empty relation, and `Drops`, the predicate that stops a failure
+being silently discarded, had never been evaluated at an outcome.
+
+**Closed** by `Tests/Process/ChildBindingFixtures.lean` for the inhabitation.
+`theBinding` routes all six child outcomes and `death_is_named` evaluates `Drops`.
+
+**Not closed**, and the fixture says so: `reflectsEveryAnswer` asks that every
+answer the parent could receive is one some child outcome produces, and it is
+cheap whenever the demand's result type is a singleton. **Every demand in this
+corpus has a singleton result type**, so the law has never been asked a question
+it could fail. §10.60's `Tests/Process/RichAcceptanceFixtures.lean` answered the
+same objection about acceptance by building a richer vocabulary; the same is owed
+here. Same family as §10.56.
+
+### 10.87 A step could resolve an occurrence it never mentioned
+
+`LedgerExtends` says nothing was *erased*: a resolution once written is
+permanent, occurrences are only appended, a cancellation request does not
+evaporate. It says nothing about what was *added*. So a step that legally
+resolves one occurrence could, in the same move, append an unrelated occurrence
+and resolve it too, with no field of any constructor mentioning it.
+
+Found by construction while trying to prove `WellFormed`'s sixth clause.
+`Tests/Process/RerouteFixtures.lean` builds a `drop` that discharges every field
+`ResolvesEscrow` had — `onItsSession` and `nowResolved` are about its own
+occurrence, `ledgerExtends` permits the append, `scope` is one session's escrow —
+and appends a second occurrence resolved `.rerouted` to a session whose ledger
+the step never touches. It takes a network satisfying
+`LogicalProcessNetworkCore.ReroutesLand` to one that does not, so the sixth clause
+was **not preserved by the transition family**.
+
+**Closed** by `ResolvesNothingElse`, on all seven structures that write an escrow
+ledger, and by its stronger sibling `ResolvesNothing` for the three that end
+nothing at all — a send escrows, a cancellation request records, a reroute's
+destination receives. Eight witnesses had to be re-discharged, which is the
+signal the field is not vacuous. The stranding drop is now
+`the_stranding_drop_is_refused`, and `the_stranding_ledger_extends` and
+`the_stranding_scope` show the other fields really were satisfiable at those
+worlds, so the refusal is the field's doing rather than an accident of the
+fixture.
+
+Two general points this one is worth keeping for. First: **a prefix law is not a
+step law.** `LedgerExtends` is exactly right about what it says and says nothing
+about the step's own reach, and every escrow constructor was relying on it for
+both. Second: it was found by trying to prove a theorem, not by reading the
+structures — five review rounds over `Transition.lean` had not found it, and the
+proof found it in one.
+
+### 10.88 The whole progress and well-formedness layer rests on one emptied plan
+
+An emptiness sweep observed that `Sound`, `ExactInitialNetwork`,
+`NetworkProgressMeasure` and `LogicalProcessNetworkCore.WellFormed` have exactly
+one plan-level witness family between them:
+`Tests/Process/FrontierFixtures.lean`'s `waitingPlan`, which sets `Demand`,
+`Observation`, `InterruptReason`, `LogicalFault`, `EnvironmentViolation`,
+`TerminalResult`, `SharedRegion` and `ChannelKind` all to `PEmpty` and
+`ProcessKind`, `InstanceId` and `Carrier` all to `Unit`. So `rootUnique` holds by
+`rfl` because there is one slot, `lifecyclesWitnessed` and `reroutesLand` are
+`.elim`, and `NetworkProgressMeasure.demanded` is `observation.elim`, which means
+the "or produces a demanded observation" disjunct of `descendsOrProduces` can
+never fire.
+
+The fixture's own docstrings concede most of this. What none of them says is that
+it is the **only** instance, so `Network/Progress.lean` and `Network/Plan.lean`
+are known to hold of exactly one `Unit`-slotted, channel-less, observation-less
+world.
+
+`wellFormed_preserved` is not in that position — it is a theorem about every plan
+— but its *usefulness* is, since the clauses it preserves have only ever been
+established at that plan. What is owed is a second plan-level witness with a
+non-empty observation type and at least two slots. `serverPlan` has the channels
+and the slots; what it lacks is an `ExactInitialNetwork`.
+
+Needs the fixture, and it is the largest single gap this milestone leaves.
