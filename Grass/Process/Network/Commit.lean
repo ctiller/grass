@@ -208,8 +208,17 @@ structure CommitsRender (before after : plan.LogicalProcessNetwork)
     (coalescing : Coalescing demanded) : Prop where
   /-- The trace grew by exactly the committed render's observations. -/
   appended : after.observations = before.observations ++ coalescing.committed.observations
-  /-- And nothing outside the observation trace changed. -/
-  scope : plan.TouchesOnly before after (fun fragment => fragment = .observations)
+  /--
+  And nothing outside the observation trace changed — nothing at all if the
+  committed render was empty.
+
+  The `≠ []` guard matches `Grass/Process/Network/Transition.lean`'s `Commits`:
+  a commit that appends nothing has not touched the trace, and saying it did
+  would make it non-independent of every other emitting step for no reason.
+  -/
+  scope : plan.TouchesOnly before after
+    (fun fragment =>
+      coalescing.committed.observations ≠ [] ∧ fragment = .observations)
 
 namespace CommitsRender
 

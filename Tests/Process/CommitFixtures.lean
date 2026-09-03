@@ -114,7 +114,7 @@ theorem beep_is_committed :
   scope := by
     intro fragment outside
     cases fragment with
-    | observations => exact absurd rfl outside
+    | observations => exact absurd ⟨by simp [quietRunCoalesces, beeps], rfl⟩ outside
     | _ => rfl
 
 /-- And what was already observed stays observed. -/

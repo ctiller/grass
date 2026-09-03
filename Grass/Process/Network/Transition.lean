@@ -279,7 +279,8 @@ touches what.
 structure StepsLocally (before after : plan.LogicalProcessNetwork)
     (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
     (event : (plan.topology.protocol kind).Event)
-    (written : plan.topology.SharedRegion → Prop) : Prop where
+    (written : plan.topology.SharedRegion → Prop)
+    (emitted : Trace boundary.Observation) : Prop where
   /-- It was live, and this is the state it stepped from. -/
   from' : ∃ incarnation, before.instances kind slot = some incarnation ∧
     incarnation.Live ∧ incarnation.kind = kind
@@ -287,8 +288,8 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
   constructor. -/
   stillLive : ∃ incarnation, after.instances kind slot = some incarnation ∧
     incarnation.Live
-  /-- Observations only grow. -/
-  observationsExtend : ∃ emitted, after.observations = before.observations ++ emitted
+  /-- Observations grow by exactly this segment. -/
+  observationsExtend : after.observations = before.observations ++ emitted
   /--
   **And it writes only regions its role may write.**
 
@@ -298,9 +299,26 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
   -/
   writesPermitted : ∀ region, written region →
     (plan.topology.sharedAccess kind region).mayWrite = true
-  /-- Its slot, the observation trace, the regions it wrote, and nothing else. -/
+  /--
+  Its slot, the regions it wrote, the observation trace **if it actually
+  emitted**, and nothing else.
+
+  The `emitted ≠ []` guard is the third correction to this scope and the one a
+  consumer found. Declaring `.observations` unconditionally is *sound* — the
+  step really does touch nothing else — but it makes every process step
+  non-independent of every other, because
+  `Grass/Process/Trace/Independence.lean` reads independence off exactly these
+  predicates. Two steps on unrelated instances that emit nothing would then
+  never commute, and `docs/PROCESS.md` §7's Mazurkiewicz congruence would be the
+  identity.
+
+  A scope that is too *wide* costs nothing the producing module can see and
+  everything a scheduling argument needs, which is the mirror of the too-narrow
+  failure recorded above.
+  -/
   scope : plan.TouchesOnly before after
-    (fun fragment => fragment = .instanceState kind slot ∨ fragment = .observations ∨
+    (fun fragment => fragment = .instanceState kind slot ∨
+      (emitted ≠ [] ∧ fragment = .observations) ∨
       ∃ region, written region ∧ fragment = .region region)
 
 /--
@@ -360,8 +378,9 @@ structure Commits (before after : plan.LogicalProcessNetwork)
     (emitted : Trace boundary.Observation) : Prop where
   /-- The trace grew by exactly this much. -/
   appended : after.observations = before.observations ++ emitted
-  /-- The observation trace, and nothing else. -/
-  scope : plan.TouchesOnly before after (fun fragment => fragment = .observations)
+  /-- The observation trace **if it actually appended**, and nothing else. -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => emitted ≠ [] ∧ fragment = .observations)
 
 /--
 A parent lets a child go.
@@ -415,7 +434,8 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
       (slot : plan.topology.InstanceId kind)
       (event : (plan.topology.protocol kind).Event)
       (written : plan.topology.SharedRegion → Prop)
-      (step : plan.StepsLocally before after kind slot event written)
+      (emitted : Trace boundary.Observation)
+      (step : plan.StepsLocally before after kind slot event written emitted)
   /-- A new incarnation appears. -/
   | spawn (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
       (allocation : Allocation plan.topology.Carrier)
@@ -503,15 +523,16 @@ is exhaustive over the family, so there is no transition whose scope is
 undefined and none that can change a fragment without declaring it.
 -/
 def scope : plan.NetworkTransition before after → NetworkFragment plan.topology → Prop
-  | .processStep kind slot _ written _ =>
-      fun fragment => fragment = .instanceState kind slot ∨ fragment = .observations ∨
+  | .processStep kind slot _ written emitted _ =>
+      fun fragment => fragment = .instanceState kind slot ∨
+        (emitted ≠ [] ∧ fragment = .observations) ∨
         ∃ region, written region ∧ fragment = .region region
   | .spawn kind slot _ _ =>
       fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals
   | .restart kind slot _ _ =>
       fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals
   | .send edge _ occurrence _ => fun fragment => fragment = .escrow edge occurrence.1
-  | .commit _ _ => fun fragment => fragment = .observations
+  | .commit emitted _ => fun fragment => emitted ≠ [] ∧ fragment = .observations
   | .receive edge session _ _ => fun fragment => fragment = .escrow edge session
   | .requestCancel edge session _ _ => fun fragment => fragment = .escrow edge session
   | .acknowledgeCancel edge session _ _ _ => fun fragment => fragment = .escrow edge session
@@ -548,7 +569,7 @@ weave: `docs/PROCESS.md` §8's `Disjoint (TransitionScope step) Scope` now has a
 theorem touchesOnly (transition : plan.NetworkTransition before after) :
     plan.TouchesOnly before after transition.scope := by
   cases transition with
-  | processStep _ _ _ _ step => exact step.scope
+  | processStep _ _ _ _ _ step => exact step.scope
   | spawn _ _ _ step => exact step.scope
   | restart _ _ _ step => exact step.scope
   | send _ _ _ step => exact step.scope

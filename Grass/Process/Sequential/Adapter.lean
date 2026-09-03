@@ -96,7 +96,7 @@ consequences follow and both are real limits rather than conveniences:
 
 * it cannot reach a terminal state with anything outstanding
   (`terminal_holds_nothing`), so its terminal disposition is the empty partition
-  and §3's "resolve, transfer, or permit" has no work to do here;
+  and §2's "resolves, transfers, or permits pending" has no work to do here;
 * every step consumes the whole pending bag before refilling it
   (`elaborate_consumes_everything_outstanding`), which is why the pending
   equation has `remainder = 0` in both cases.
@@ -117,10 +117,21 @@ Three further limits, none of them consequences of the one-outstanding bound:
   reaches an elaborated program only as a *result value*, which works when the
   boundary's per-demand result type carries one and is not the same thing as §2's
   `InterruptReason` being a vocabulary field.
-* **`terminal` ignores its request.** A `SequentialMachine.State` does not
-  remember what started it, so the elaborated `terminal` holds at a point for
-  every request, including ones whose execution never reaches it. `Initial` does
-  tie the request, so the asymmetry is real.
+* **`terminal` ignores its request and its age.** A `SequentialMachine.State`
+  does not remember what started it or how it got there, so the elaborated
+  `terminal` holds at a point for every request and at every age — including
+  points no execution can occupy, such as a terminal state at age zero.
+  `Initial` does tie both, so the asymmetry is real.
+* **A result step emits nothing.** `Drives` forces `observations = []` on every
+  result event, so §4's "result-plus-new-effect in one transition" can never
+  carry an observation segment. Observations come only from internal decisions
+  here.
+* **A program with no executions satisfies everything.** `Initial` and `Step`
+  may both be `False`, and `Occurrence` may be uninhabited; every field of
+  `DirectRelationalProgram` is then discharged and both named obligations hold
+  vacuously. Nothing in the structure requires a program to do anything, which
+  is ordinary for a relational presentation but is not what a limits list
+  usually implies.
 * **The proof half is still owed.** §4 asks the adapter for a generic theorem
   transporting `SequentialMachineRealizes spec machine` to `DirectProgramRealizes
   spec (elaborateMachine machine)`. This module delivers the syntax half only:
@@ -222,7 +233,7 @@ end DirectEvent
 /--
 A terminal state's account of every occurrence it still holds.
 
-`docs/PROCESS.md` §3: "termination explicitly resolves, transfers, or permits
+`docs/PROCESS.md` §2: "termination explicitly resolves, transfers, or permits
 pending". The three-way partition `Grass/Process/Run.lean`'s
 `TerminalDemandClassification` uses, over occurrences rather than demand values.
 
@@ -316,14 +327,23 @@ structure DirectRelationalProgram (boundary : DriverBoundary.{u}) : Type (u + 1)
   Total on that exact occurrence's result type, which is `docs/FOUNDATION.md`
   law 5 — a binding that handled some results and left others to a later proof
   would not typecheck.
+
+  **It takes the state it is answered at.** An earlier version returned a state
+  computed from the occurrence alone, and that was a real expressivity defect
+  rather than a simplification: with two occurrences outstanding, the state
+  reached by answering the second could not depend on whether the first was
+  still outstanding, so `stepBinding` forced both orders into one state and the
+  bag equation then forced a step to re-issue an occurrence it had already used.
+  A program could hold two occurrences and could not answer them in either
+  order, which is exactly what §4's duplicate fixture asks for.
   -/
-  resumeOf : (occurrence : Occurrence) → EffectResult (demandOf occurrence) → State
+  resumeOf : (occurrence : Occurrence) → EffectResult (demandOf occurrence) → State → State
   /-- The occurrences a state is holding, with multiplicity. -/
   held : State → Bag Occurrence
   /-- Starting: the exact occurrences issued and observations emitted. -/
   Initial : Request → State → Bag Occurrence → ObservationSegment boundary.Observation → Prop
   /-- Stepping: likewise, for the execution this event drove. -/
-  Step : State → DirectEvent boundary Occurrence demandOf → State → Bag Occurrence ->
+  Step : State → DirectEvent boundary Occurrence demandOf → State → Bag Occurrence →
     ObservationSegment boundary.Observation → Prop
   /-- §4's `initialEquation`: a start's issued bag is what the start holds. -/
   initialEquation : ∀ request state issued observations,
@@ -336,7 +356,7 @@ structure DirectRelationalProgram (boundary : DriverBoundary.{u}) : Type (u + 1)
   duplicated or invented across a step.
   -/
   transitionEquation : ∀ before event after issued observations,
-    Step before event after issued observations ->
+    Step before event after issued observations →
     ∃ remainder, event.Consumes (held before) remainder ∧ held after = remainder + issued
   /--
   §4's `ExactSiteProtocolAndChildBinding`, as a law on steps rather than a
@@ -348,12 +368,12 @@ structure DirectRelationalProgram (boundary : DriverBoundary.{u}) : Type (u + 1)
   step somewhere else.
   -/
   stepBinding : ∀ before occurrence answer after issued observations,
-    Step before (.result occurrence answer) after issued observations ->
-    after = resumeOf occurrence answer
+    Step before (.result occurrence answer) after issued observations →
+    after = resumeOf occurrence answer before
   /-- Finishing. -/
   terminal : Request → State → TerminalResult → Prop
   /-- §4's `EveryTerminalStateClassifiesEveryPendingOccurrence`. -/
-  terminalDisposition : ∀ request state result, terminal request state result ->
+  terminalDisposition : ∀ request state result, terminal request state result →
     DemandDisposition (held state)
 
 namespace DirectRelationalProgram
@@ -402,6 +422,50 @@ def OccurrencesAreDistinct : Prop :=
     (remainder : Bag program.Occurrence),
     Bag.ConsumeExactlyOneMatching (program.held state) occurrence remainder →
     occurrence ∉ remainder
+
+/--
+**Every occurrence a state holds can actually be answered.**
+
+§4's `binding` is quantified over `DynamicOccurrences Initial Step` — every
+occurrence an execution issues — and `stepBinding` is quantified over the ones
+some step actually answers. That is a *widening*, not the narrowing the module
+note's departure list claims, and the gap is real: a program may hold an
+occurrence forever, bind it to nothing, terminate, and declare it resolved.
+`neverAnswers` is the shape — `Step := fun _ _ _ _ _ => False` satisfies
+`stepBinding` vacuously.
+
+This is the missing half, and it is quantified over *every* permitted answer,
+which is `docs/FOUNDATION.md` law 5: a program that could deliver the success
+result and not the failure one would fail it.
+-/
+def EveryHeldOccurrenceIsAnswerable : Prop :=
+  ∀ (state : program.State) (occurrence : program.Occurrence),
+    occurrence ∈ program.held state →
+    ∀ answer : EffectResult (program.demandOf occurrence),
+      ∃ after issued observations,
+        program.Step state (.result occurrence answer) after issued observations
+
+/--
+**And no step re-issues an occurrence that is already outstanding.**
+
+`transitionEquation` has a consumption side and no freshness side, so the
+structure alone permits a step to issue an occurrence identity it is already
+holding — `Grass/Process/Bag.lean`'s "replayed", among the four failure modes an
+exact consumption equation exists to forbid.
+
+Named alongside `OccurrencesAreDistinct` and `DispositionIsEarned` rather than
+left in prose, because a composition needs a handle to require it.
+`SequentialMachine.elaborate_issues_fresh_occurrences` discharges it.
+
+Note what it is not: "never previously issued". This layer has a step relation
+and no run relation, so "already outstanding" is as far as the statement
+reaches. The elaboration satisfies the stronger property — ages strictly
+increase along a chain of steps — and cannot state it here.
+-/
+def IssuesFreshOccurrences : Prop :=
+  ∀ before event after issued observations,
+    program.Step before event after issued observations →
+    ∀ occurrence, occurrence ∈ issued → occurrence ∉ program.held before
 
 /--
 **And the law `DemandDisposition` is missing.**
@@ -644,7 +708,7 @@ def elaborate : DirectRelationalProgram boundary where
   TerminalResult := machine.Terminal
   Occurrence := machine.Occurrence
   demandOf := machine.occurrenceDemand
-  resumeOf := fun occurrence answer => ⟨occurrence.point.age + 1, occurrence.resume answer⟩
+  resumeOf := fun occurrence answer point => ⟨point.age + 1, occurrence.resume answer⟩
   held := machine.held
   Initial := fun request point issued observations =>
     point = ⟨0, machine.initial request⟩ ∧ issued = machine.held point ∧ observations = []
@@ -666,14 +730,12 @@ def elaborate : DirectRelationalProgram boundary where
         rfl
       · rw [issuedEq, Bag.zero_add]
   stepBinding := by
-    rintro before occurrence answer after issued observations ⟨age, _, heldBefore, resumed, _⟩
-    have atBefore : occurrence.point = before :=
-      held_point (by rw [heldBefore]; simp)
+    rintro before occurrence answer after issued observations ⟨age, _, _, resumed, _⟩
     obtain ⟨afterAge, afterState⟩ := after
     simp only at age resumed
     subst age
     subst resumed
-    rw [atBefore]
+    rfl
   terminal := fun _ point result => machine.decide point.state = .terminal result
   terminalDisposition := by
     intro _ point result decision
@@ -695,8 +757,8 @@ theorem pending_of_effect {point : machine.Point} {demand : EffectDemand boundar
 /--
 **A sequential machine cannot finish holding anything.**
 
-Stated as a limit rather than presented as a convenience. `docs/PROCESS.md` §3
-requires termination to "explicitly resolve, transfer, or permit pending", and
+Stated as a limit rather than presented as a convenience. `docs/PROCESS.md` §2
+requires termination to "explicitly resolves, transfers, or permits pending", and
 here the requirement is discharged by there being nothing to dispose of — which
 is true of this authoring surface and false of the general network, so a reader
 must not carry it across.
@@ -720,7 +782,7 @@ unfolding. An earlier docstring here claimed the second on behalf of the first.
 theorem elaborate_step_iff {before after : machine.Point} {event : machine.Event}
     {issued : Bag machine.Occurrence}
     {observations : ObservationSegment boundary.Observation} :
-    (machine.elaborate).Step before event after issued observations <->
+    (machine.elaborate).Step before event after issued observations ↔
       machine.Drives before event after issued observations := Iff.rfl
 
 /--
@@ -755,14 +817,19 @@ theorem Drives.deterministic {before : machine.Point} {event : machine.Event}
   exact ⟨rfl, by rw [issuedEq, issuedEqAgain], observationsEq⟩
 
 /--
-**Every step consumes the whole outstanding bag.**
+**Every step leaves an empty remainder.**
 
 The `remainder = 0` the pending equation has in both cases, as a statement
-rather than as a witness buried in the proof of `transitionEquation`. It is the
-one-outstanding degeneracy showing through: a sequential machine is blocked on
-one thing or on none, so a step that resolves anything resolves everything.
+rather than as a witness buried in the proof of `transitionEquation`.
+
+The two halves are different facts and the name covers both loosely. For a
+result event it really is a consumption: the answered occurrence was the only
+one held. For an internal event `Consumes` is `remainder = outstanding`, so the
+conclusion says the machine was holding *nothing* — a fact about where internal
+steps can occur, not about consumption. Both are the one-outstanding degeneracy
+showing through, from opposite sides.
 -/
-theorem elaborate_consumes_everything_outstanding {before after : machine.Point}
+theorem elaborate_leaves_no_remainder {before after : machine.Point}
     {event : machine.Event} {issued : Bag machine.Occurrence}
     {observations : ObservationSegment boundary.Observation}
     (drives : machine.Drives before event after issued observations) :
@@ -842,9 +909,41 @@ theorem elaborate_occurrences_are_distinct :
 
 /-- The elaborated program's child binding is the occurrence's own continuation. -/
 theorem elaborate_resumeOf (occurrence : machine.Occurrence)
-    (answer : EffectResult occurrence.demand) :
-    (machine.elaborate).resumeOf occurrence answer =
-      ⟨occurrence.point.age + 1, occurrence.resume answer⟩ := rfl
+    (answer : EffectResult occurrence.demand) (point : machine.Point) :
+    (machine.elaborate).resumeOf occurrence answer point =
+      ⟨point.age + 1, occurrence.resume answer⟩ := rfl
+
+/-- A point holding an occurrence holds exactly it. -/
+theorem held_eq_singleton_of_mem {point : machine.Point} {occurrence : machine.Occurrence}
+    (present : occurrence ∈ machine.held point) : machine.held point = {occurrence} := by
+  have issues := held_issues present
+  have atPoint := held_point present
+  obtain ⟨occurrencePoint, demand, resume⟩ := occurrence
+  simp only at atPoint
+  subst atPoint
+  exact held_of_effect issues
+
+/--
+**Every occurrence the elaboration holds can be answered, whatever the result.**
+
+`DirectRelationalProgram.EveryHeldOccurrenceIsAnswerable` discharged — the half
+of §4's `binding` that `stepBinding` does not cover. Quantified over every
+permitted answer, so a machine that handled some results and not others would
+fail it; it cannot, because `SequentialDecision.effect`'s continuation is total
+on the demand's dependent result type.
+-/
+theorem elaborate_every_held_occurrence_is_answerable :
+    (machine.elaborate).EveryHeldOccurrenceIsAnswerable := by
+  intro point occurrence present answer
+  refine ⟨⟨point.age + 1, occurrence.resume answer⟩,
+    machine.held ⟨point.age + 1, occurrence.resume answer⟩, [], rfl, rfl, ?_, rfl, rfl⟩
+  exact held_eq_singleton_of_mem present
+
+/-- **And no step of it re-issues something already outstanding.** -/
+theorem elaborate_issues_fresh_occurrences :
+    (machine.elaborate).IssuesFreshOccurrences := by
+  intro before event after issued observations drives occurrence isIssued
+  exact issued_occurrences_are_fresh drives isIssued
 
 end SequentialMachine
 

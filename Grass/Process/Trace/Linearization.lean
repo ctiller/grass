@@ -106,7 +106,7 @@ theorem observations_extend {before after : plan.LogicalProcessNetwork}
     ∃ emitted, after.observations = before.observations ++ emitted := by
   by_cases emits : transition.Emits
   · cases transition with
-    | processStep _ _ _ _ step => exact step.observationsExtend
+    | processStep _ _ _ _ emitted step => exact ⟨emitted, step.observationsExtend⟩
     | commit emitted step => exact ⟨emitted, step.appended⟩
     | _ => exact absurd emits (by simp [NetworkTransition.Emits, NetworkTransition.scope])
   · exact ⟨[], by rw [← trace_unchanged_of_silent transition emits, List.append_nil]⟩
