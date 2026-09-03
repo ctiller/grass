@@ -17,16 +17,53 @@
 //! authorizes), and are real further work, not silently assumed away.
 
 use crate::envelope::Envelope;
-use crate::error::{invalid, AbResult};
+use crate::error::{invalid, AbError, AbResult};
 use crate::frontier::{FrontierEntry, ObservedFrontier};
 use crate::scalars::{Agent, EventId, Short};
 use std::path::Path;
 
+/// One candidate `drain_outbox` refused to publish, and why. The candidate
+/// itself is never silently discarded -- see `drain_outbox`'s doc comment.
+#[derive(Debug, Clone)]
+pub struct RejectedCandidate {
+    pub kind: String,
+    pub reason: String,
+}
+
+/// What one `drain_outbox` call actually did: which candidates became real
+/// stream events, and which were refused (with a durable local rejection
+/// receipt still on disk -- see `reject_candidate`).
+#[derive(Debug, Clone, Default)]
+pub struct DrainResult {
+    pub published: Vec<EventId>,
+    pub rejected: Vec<RejectedCandidate>,
+}
+
 /// Drains every pending candidate in `agent`'s local outbox, in submission
-/// order, and publishes them as one or two new stream commits (a root
-/// commit if this is the agent's first-ever event, then a follow-on commit
-/// for the rest). Returns the published `EventId`s. An empty outbox is a
-/// no-op returning `Ok(vec![])`.
+/// order, and publishes the ones that pass validation as one or two new
+/// stream commits (a root commit if this is the agent's first-ever event,
+/// then a follow-on commit for the rest). An empty outbox is a no-op
+/// returning `Ok(DrainResult::default())`.
+///
+/// Every candidate is validated with `apply::dry_run` against a local
+/// reduction of everything currently known (`sync::cached_snapshot`) before
+/// it is ever committed -- streams are append-only and force-pushes are
+/// prohibited, so an accepted-but-malformed event could never be retracted,
+/// and `apply::reduce`'s single `?` on the first error means one such event
+/// would break *every* future cached or synced read, on every host that
+/// ever pulls it, forever. A rejected candidate is instead removed from the
+/// active outbox and written to a `rejected/` receipt alongside it --
+/// durable local evidence, per section 2.3 ("A rejected candidate remains
+/// local evidence; its author submits a replacement"), not silently
+/// dropped and not left stuck in the outbox blocking every later candidate
+/// from that agent's contiguous sequence.
+///
+/// This validates only against what is already *locally* known, not a
+/// fresh remote probe -- a real, disclosed limitation: a candidate that is
+/// actually valid but looks invalid only because this host's local view is
+/// stale will be rejected and must be resubmitted, rather than the
+/// coordinator silently fetching first. `sync::synced_snapshot` composed in
+/// front of this call is how a caller avoids that.
 ///
 /// `host`/`coordinator_custody_epoch` identify the caller's own claimed
 /// custody, checked against the current registry epoch before anything is
@@ -38,16 +75,18 @@ pub fn drain_outbox(
     host: &Short,
     coordinator_custody_epoch: u64,
     worktrees_dir: &Path,
-) -> AbResult<Vec<EventId>> {
+) -> AbResult<DrainResult> {
     let pending = crate::outbox::list_pending(git_common_dir, agent)?;
     if pending.is_empty() {
-        return Ok(vec![]);
+        return Ok(DrainResult::default());
     }
 
     let registry_tip = crate::registry::read_registry_tip(repo)?
         .ok_or_else(|| invalid("no registry root exists yet"))?;
     let epoch = crate::registry::read_epoch(repo, &registry_tip, &worktrees_dir.join("_epoch"))?;
     crate::registry::authorize_stream_write(&epoch, agent, host, coordinator_custody_epoch)?;
+
+    let mut state = crate::sync::cached_snapshot(repo, &worktrees_dir.join("_validate"))?.state;
 
     let existing_tip = crate::stream::read_stream_tip(repo, agent)?;
     let mut next_seq = if existing_tip.is_some() {
@@ -69,26 +108,39 @@ pub fn drain_outbox(
     };
 
     let mut envelopes = Vec::with_capacity(pending.len());
+    let mut rejected = Vec::new();
     for (path, candidate) in &pending {
         let data = candidate.typed_data()?;
         let observed = build_frontier(repo, &epoch, &worktrees_dir.join("_frontier"), agent, &candidate.extra_refs)?;
         let env = Envelope::new(agent, next_seq, observed, &data, candidate.extra_refs.clone());
-        envelopes.push((path.clone(), env));
-        next_seq += 1;
+        match crate::apply::dry_run(&state, &env) {
+            Ok(()) => {
+                state = crate::apply::reduce_onto(state, std::slice::from_ref(&env))?;
+                envelopes.push((path.clone(), env));
+                next_seq += 1;
+            }
+            Err(e) => {
+                reject_candidate(git_common_dir, agent, path, candidate, &e.to_string())?;
+                rejected.push(RejectedCandidate {
+                    kind: candidate.kind.clone(),
+                    reason: e.to_string(),
+                });
+            }
+        }
     }
 
     let mut published = Vec::with_capacity(envelopes.len());
     let mut remaining: Vec<Envelope> = envelopes.iter().map(|(_, e)| e.clone()).collect();
     let mut new_tip = existing_tip;
 
-    if new_tip.is_none() {
+    if new_tip.is_none() && !remaining.is_empty() {
         let first = remaining.remove(0);
         let header = crate::stream::StreamHeader {
             agent: agent.clone(),
             activation_event: None,
             registration_authority: first.id.clone(),
             final_v1_seq: None,
-            object_format: "sha1".to_string(),
+            object_format: state.config.object_format.clone(),
             schema_fingerprint: crate::bootstrap::SCHEMA_FINGERPRINT.to_string(),
         };
         let commit = crate::stream::create_root_commit(
@@ -117,7 +169,38 @@ pub fn drain_outbox(
         crate::outbox::remove(path)?;
     }
 
-    Ok(published)
+    Ok(DrainResult { published, rejected })
+}
+
+/// Removes a rejected candidate from the active outbox and writes it,
+/// alongside the reason, to a `rejected/` receipt in the same outbox
+/// directory -- durable local evidence the author (or a human) can inspect,
+/// without it blocking any later candidate's contiguous sequence.
+fn reject_candidate(
+    git_common_dir: &Path,
+    agent: &Agent,
+    path: &Path,
+    candidate: &crate::outbox::Candidate,
+    reason: &str,
+) -> AbResult<()> {
+    let rejected_dir = crate::outbox::outbox_dir(git_common_dir, agent).join("rejected");
+    std::fs::create_dir_all(&rejected_dir).map_err(|e| AbError::Io {
+        path: rejected_dir.display().to_string(),
+        source: e,
+    })?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| invalid(format!("candidate path {} has no file name", path.display())))?;
+    let receipt = serde_json::json!({
+        "candidate": candidate,
+        "reason": reason,
+    });
+    crate::storage::atomic_write(
+        &rejected_dir.join(file_name),
+        &serde_json::to_vec_pretty(&receipt).expect("json always serializable"),
+    )?;
+    crate::outbox::remove(path)?;
+    Ok(())
 }
 
 /// Publishes `agent`'s current local stream tip to `remote` as a single ref
@@ -141,10 +224,12 @@ pub fn publish_stream(
 }
 
 /// Drains `agent`'s outbox (see [`drain_outbox`]) and then publishes its
-/// resulting stream tip to `remote`. Returns both the newly published
-/// `EventId`s and the remote publication receipt; a rejected or partial
+/// resulting stream tip to `remote`. Returns both the drain result (what
+/// was published, what was rejected and why) and the remote publication
+/// receipt; a rejected outbox candidate or a rejected/partial publish
 /// receipt is not itself an error (ordinary coordinator policy input, see
-/// `publish.rs`) -- inspect the receipt to learn what actually landed.
+/// `drain_outbox`/`publish.rs`) -- inspect the results to learn what
+/// actually landed.
 #[allow(clippy::too_many_arguments)]
 pub fn drain_and_publish(
     repo: &Path,
@@ -154,8 +239,8 @@ pub fn drain_and_publish(
     coordinator_custody_epoch: u64,
     worktrees_dir: &Path,
     remote: &str,
-) -> AbResult<(Vec<EventId>, crate::publish::PublicationReceipt)> {
-    let published = drain_outbox(
+) -> AbResult<(DrainResult, crate::publish::PublicationReceipt)> {
+    let drained = drain_outbox(
         repo,
         git_common_dir,
         agent,
@@ -164,7 +249,7 @@ pub fn drain_and_publish(
         worktrees_dir,
     )?;
     let receipt = publish_stream(repo, remote, agent)?;
-    Ok((published, receipt))
+    Ok((drained, receipt))
 }
 
 /// Builds a sparse frontier covering exactly the cross-agent identities
@@ -278,7 +363,7 @@ mod tests {
     fn drain_outbox_is_a_noop_when_empty() {
         let repo = init_repo();
         let alice = a("alice");
-        let published = drain_outbox(
+        let drained = drain_outbox(
             repo.path(),
             repo.path(),
             &alice,
@@ -287,7 +372,8 @@ mod tests {
             &repo.path().join("_wt"),
         )
         .unwrap();
-        assert!(published.is_empty());
+        assert!(drained.published.is_empty());
+        assert!(drained.rejected.is_empty());
     }
 
     #[test]
@@ -342,7 +428,7 @@ mod tests {
         );
         crate::outbox::submit(repo.path(), "client-1", &candidate).unwrap();
 
-        let published = drain_outbox(
+        let drained = drain_outbox(
             repo.path(),
             repo.path(),
             &alice,
@@ -351,12 +437,10 @@ mod tests {
             &repo.path().join("_wt"),
         )
         .unwrap();
-        assert_eq!(published.len(), 1);
-        assert_eq!(published[0], EventId::new(&alice, 0));
-        assert_eq!(
-            crate::stream::read_stream_tip(repo.path(), &alice).unwrap().is_some(),
-            true
-        );
+        assert_eq!(drained.published.len(), 1);
+        assert_eq!(drained.published[0], EventId::new(&alice, 0));
+        assert!(drained.rejected.is_empty());
+        assert!(crate::stream::read_stream_tip(repo.path(), &alice).unwrap().is_some());
         assert!(crate::outbox::list_pending(repo.path(), &alice).unwrap().is_empty());
     }
 
@@ -390,7 +474,7 @@ mod tests {
         )
         .unwrap();
 
-        let published = drain_outbox(
+        let drained = drain_outbox(
             repo.path(),
             repo.path(),
             &coord1,
@@ -399,11 +483,92 @@ mod tests {
             &repo.path().join("_wt"),
         )
         .unwrap();
-        assert_eq!(published, vec![EventId::new(&coord1, 1), EventId::new(&coord1, 2)]);
+        assert_eq!(drained.published, vec![EventId::new(&coord1, 1), EventId::new(&coord1, 2)]);
+        assert!(drained.rejected.is_empty());
 
         let reads_dir = repo.path().join("_reads");
         let (_header, log) = crate::stream::read_stream(repo.path(), &coord1, &reads_dir).unwrap();
         assert_eq!(log.len(), 3); // genesis registration + the two status events
+    }
+
+    /// Adversarial-review regression (Critical): before this fix, nothing
+    /// validated a candidate before committing it to the append-only
+    /// stream -- a semantically invalid one (e.g. acknowledging an issue
+    /// that doesn't exist) would be published unconditionally, and since
+    /// `apply::reduce` propagates the first error it hits, that one bad
+    /// event would break every future cached/synced read forever, on every
+    /// host. Now: an invalid candidate is refused, written to a durable
+    /// `rejected/` receipt, removed from the active outbox, and valid
+    /// candidates around it still publish normally with a contiguous
+    /// sequence (no gap left for the skipped one).
+    #[test]
+    fn drain_outbox_rejects_an_invalid_candidate_without_blocking_valid_ones() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+            &repo.path().join("_genesis_wt"),
+        )
+        .unwrap();
+
+        let bogus_ack = crate::outbox::Candidate::new(
+            &coord1,
+            &EventData::IssueAcknowledged(crate::events::IssueAcknowledged {
+                issue: EventId::new(&coord1, 99),
+                assignment: EventId::new(&coord1, 99),
+                note: text(""),
+            }),
+            vec![],
+        );
+        crate::outbox::submit(
+            repo.path(),
+            "client-1",
+            &status_candidate(&coord1, "first"),
+        )
+        .unwrap();
+        crate::outbox::submit(repo.path(), "client-2", &bogus_ack).unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "client-3",
+            &status_candidate(&coord1, "third"),
+        )
+        .unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            &repo.path().join("_wt"),
+        )
+        .unwrap();
+
+        // Both valid candidates publish with a contiguous sequence -- no
+        // gap left for the rejected one in between.
+        assert_eq!(drained.published, vec![EventId::new(&coord1, 1), EventId::new(&coord1, 2)]);
+        assert_eq!(drained.rejected.len(), 1);
+        assert_eq!(drained.rejected[0].kind, "issue.acknowledged");
+        assert!(drained.rejected[0].reason.contains("unknown issue"), "{}", drained.rejected[0].reason);
+
+        // Nothing left pending, and the rejected candidate's own outbox
+        // entry is gone (not stuck retrying forever) but durably recorded.
+        assert!(crate::outbox::list_pending(repo.path(), &coord1).unwrap().is_empty());
+        let rejected_dir = crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected");
+        let entries: Vec<_> = std::fs::read_dir(&rejected_dir).unwrap().collect();
+        assert_eq!(entries.len(), 1);
+
+        // The stream itself is clean: reduce() must not choke on anything
+        // that was never actually published.
+        let snap = crate::sync::cached_snapshot(repo.path(), &repo.path().join("_snap")).unwrap();
+        assert_eq!(snap.state.agents[&coord1].next_seq, 3);
     }
 
     #[test]
@@ -507,7 +672,7 @@ mod tests {
         .unwrap();
         crate::outbox::submit(repo.path(), "client-1", &status_candidate(&coord1, "hi")).unwrap();
 
-        let (published, receipt) = drain_and_publish(
+        let (drained, receipt) = drain_and_publish(
             repo.path(),
             repo.path(),
             &coord1,
@@ -517,7 +682,8 @@ mod tests {
             &origin.path().to_string_lossy(),
         )
         .unwrap();
-        assert_eq!(published, vec![EventId::new(&coord1, 1)]);
+        assert_eq!(drained.published, vec![EventId::new(&coord1, 1)]);
+        assert!(drained.rejected.is_empty());
 
         let local_tip = crate::stream::read_stream_tip(repo.path(), &coord1)
             .unwrap()
@@ -537,7 +703,7 @@ mod tests {
         let repo = init_repo();
         let origin = init_bare_origin();
         let alice = a("alice");
-        let (published, receipt) = drain_and_publish(
+        let (drained, receipt) = drain_and_publish(
             repo.path(),
             repo.path(),
             &alice,
@@ -547,7 +713,8 @@ mod tests {
             &origin.path().to_string_lossy(),
         )
         .unwrap();
-        assert!(published.is_empty());
+        assert!(drained.published.is_empty());
+        assert!(drained.rejected.is_empty());
         assert_eq!(receipt, crate::publish::PublicationReceipt::default());
     }
 }

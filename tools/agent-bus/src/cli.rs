@@ -322,7 +322,7 @@ fn register(args: RegisterArgs) -> AbResult<()> {
     let client_id = args.client_id.unwrap_or_else(default_client_id);
     crate::outbox::submit(&paths.common_dir, &client_id, &candidate)?;
 
-    let published_ids = crate::coordinator::drain_outbox(
+    let drained = crate::coordinator::drain_outbox(
         &paths.repo,
         &paths.common_dir,
         &new_agent,
@@ -348,7 +348,8 @@ fn register(args: RegisterArgs) -> AbResult<()> {
 
     print_json(&serde_json::json!({
         "registry_epoch": new_epoch.id.as_str(),
-        "published_events": published_ids.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
+        "published_events": drained.published.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
+        "outbox_rejected": drained.rejected.iter().map(|r| serde_json::json!({"kind": r.kind, "reason": r.reason})).collect::<Vec<_>>(),
         "published": receipt.published,
         "rejected": receipt.rejected,
     }));
@@ -379,7 +380,7 @@ fn coordinate(args: CoordinateArgs) -> AbResult<()> {
     let paths = resolve_paths()?;
     let agent = parse_agent(&args.agent)?;
     let host = parse_short(&args.host)?;
-    let (published, receipt) = crate::coordinator::drain_and_publish(
+    let (drained, receipt) = crate::coordinator::drain_and_publish(
         &paths.repo,
         &paths.common_dir,
         &agent,
@@ -389,7 +390,8 @@ fn coordinate(args: CoordinateArgs) -> AbResult<()> {
         &args.remote,
     )?;
     print_json(&serde_json::json!({
-        "published_events": published.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
+        "published_events": drained.published.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
+        "outbox_rejected": drained.rejected.iter().map(|r| serde_json::json!({"kind": r.kind, "reason": r.reason})).collect::<Vec<_>>(),
         "published": receipt.published,
         "rejected": receipt.rejected,
         "not_attempted": receipt.not_attempted,
@@ -504,7 +506,7 @@ fn succeed(args: SucceedArgs) -> AbResult<()> {
         "registry_epoch": new_epoch.id.as_str(),
         "new_custody_epoch": new_custody_epoch,
         "registry_published": registry_receipt.published,
-        "resumed_events": resumed.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
+        "resumed_events": resumed.published.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
         "stream_published": stream_receipt.published,
     }));
     Ok(())
