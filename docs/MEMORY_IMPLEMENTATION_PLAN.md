@@ -744,9 +744,13 @@ one outright defect that had already merged — see §3.11's denial row.
   a block that is not Spike 1's, and `movEaxTransferred`'s declared justification
   ("produced by `WriteFile`, not by this program") is discharged by the program's own
   store.
-- **`MEMORY_VOCABULARY.md` does not exist**, and M1's exit criteria require it:
-  "a published note lists, declaration by declaration, which shapes are frozen … and
-  which are explicitly provisional".
+- ~~**`MEMORY_VOCABULARY.md` does not exist**~~ It does now, and it says what M1's
+  exit criterion asks: declaration by declaration, which shapes are frozen and which
+  are provisional. It reads "frozen" narrowly — a shape a consumer may depend on, not
+  a claim that the declaration is correct — and its closing section says the freeze
+  is stable in practice and not yet frozen by the process §3 describes, because two
+  of §9 risk 1's mandatory fixtures are still absent and the ISA agent's review has
+  therefore not happened.
 - **Two of §9 risk 1's five mandatory pre-freeze fixtures are absent.** Present:
   the divide fault between two memory effects (`divMem`), the implicit-stack
   operation (`pushR12`), the misaligned crossing access (`splitPageStore`). Absent: a

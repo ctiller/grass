@@ -447,4 +447,35 @@ theorem a_gap_in_the_cover_is_refused :
   cases hs
   exact ⟨by decide, by decide⟩
 
+/-- A read grant and a write grant over the same bytes, both held by the thread.
+`issue?` accepts them: same holder, so §7.3's distinct-contexts clause does not
+fire. -/
+def readAndWriteGrants : MemoryState :=
+  ((state₀.memory.issue? bufferLoan
+      { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
+        range := ⟨0, 8⟩, rights := .readOnly }).getD state₀.memory).issue?
+      secondBufferLoan
+      { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
+        range := ⟨0, 8⟩, rights := { write := true } } |>.getD state₀.memory
+
+/--
+**Rights do not compose across grants.**
+
+`Granted` composes grants *positionally* — every byte must be covered — and at each
+byte one grant must permit the whole intent. So a read grant and a write grant over
+one range do not add up to a read-modify-write, and this is the direction that
+matters: composing rights would let two half-authorities be assembled into one nobody
+issued.
+
+Stated because the positional composition landed in the same commit and the
+distinction is easy to lose. Each grant alone authorizes what it says.
+-/
+theorem rights_do_not_compose :
+    (readAndWriteGrants.grantAt? bufferLoan).isSome ∧
+    (readAndWriteGrants.grantAt? secondBufferLoan).isSome ∧
+    readAndWriteGrants.Granted thread₀ bufferProv ⟨0, 8⟩ AccessIntent.read ∧
+    readAndWriteGrants.Granted thread₀ bufferProv ⟨0, 8⟩ AccessIntent.write ∧
+    ¬ readAndWriteGrants.Granted thread₀ bufferProv ⟨0, 8⟩ AccessIntent.readWrite := by
+  exact ⟨by decide, by decide, by decide, by decide, by decide⟩
+
 end Tests.Op.StandardLoan
