@@ -10,6 +10,7 @@ mod events;
 mod exclusive;
 mod frontier;
 mod gitrepo;
+mod merge_candidate;
 mod outbox;
 mod publish;
 mod registry;
