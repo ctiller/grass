@@ -119,7 +119,12 @@ pub fn genesis(
             coordinator_custody_epoch: 0,
         },
     );
-    let epoch = crate::registry::create_root(repo, members, &worktrees_dir.join("_registry_root"))?;
+    let epoch = crate::registry::create_root(
+        repo,
+        &config,
+        members,
+        &worktrees_dir.join("_registry_root"),
+    )?;
 
     let header = crate::stream::StreamHeader {
         agent: coordinator.clone(),
@@ -271,7 +276,16 @@ mod tests {
         assert!(epoch.is_active_member(&coord1));
         assert_eq!(
             crate::registry::read_registry_tip(repo.path()).unwrap(),
-            Some(epoch.id)
+            Some(epoch.id.clone())
+        );
+        assert_eq!(
+            crate::registry::read_bus_config(
+                repo.path(),
+                &epoch.id,
+                &repo.path().join("_config_read"),
+            )
+            .unwrap(),
+            config
         );
         assert_eq!(
             crate::stream::read_stream_tip(repo.path(), &coord1).unwrap(),

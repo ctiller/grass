@@ -12,6 +12,7 @@
 //! coordinator layer's job); this module owns the *shape* of an epoch and
 //! its validation, not the network round trip that publishes one.
 
+use crate::bootstrap::BusConfig;
 use crate::error::{invalid, AbError, AbResult};
 use crate::events::Role;
 use crate::scalars::{Agent, ObjectId, Short};
@@ -21,6 +22,13 @@ use std::path::Path;
 
 pub const REGISTRY_REF: &str = "refs/heads/agent-registry";
 const EPOCH_FILE: &str = "epoch.json";
+/// Written once, in the root epoch's own commit tree only. Every later
+/// epoch transition checks out its parent's full tree before adding its own
+/// changed `epoch.json`, so this file is carried forward unchanged rather
+/// than rewritten -- exactly the "established alongside the registry's root
+/// epoch," immutable-for-the-registry's-lifetime placement `bootstrap.rs`'s
+/// module doc describes in place of v1's standalone `_bus/BUS.json` commit.
+const CONFIG_FILE: &str = "bus_config.json";
 
 /// The registry commit's on-disk content: `RosterEpoch` minus `id`, since a
 /// commit can't name its own not-yet-computed sha inside itself. `parent` is
@@ -69,11 +77,28 @@ pub fn read_epoch(repo: &Path, epoch_id: &ObjectId, worktree: &Path) -> AbResult
     })
 }
 
+/// Reads the bus-wide `BusConfig` fixed at activation. Any known epoch id
+/// works, not only the root: `create_root` writes `bus_config.json` once,
+/// and every later epoch transition checks out its parent's full tree
+/// before layering its own change on top, so the file reaches every epoch
+/// unchanged without this function needing to walk `parent` back to the
+/// root itself.
+pub fn read_bus_config(repo: &Path, epoch_id: &ObjectId, worktree: &Path) -> AbResult<BusConfig> {
+    crate::gitrepo::ensure_bus_worktree(repo, worktree, epoch_id.as_str())?;
+    crate::gitrepo::checkout_detach(worktree, epoch_id.as_str())?;
+    let bytes = std::fs::read(worktree.join(CONFIG_FILE)).map_err(|e| AbError::Io {
+        path: worktree.join(CONFIG_FILE).display().to_string(),
+        source: e,
+    })?;
+    BusConfig::parse(&bytes)
+}
+
 /// Creates the registry's root epoch (migration/activation time, section
 /// 2.5). Fails if a registry already exists -- there is exactly one root,
 /// ever.
 pub fn create_root(
     repo: &Path,
+    config: &BusConfig,
     active_members: BTreeMap<Agent, MemberBinding>,
     worktree: &Path,
 ) -> AbResult<RosterEpoch> {
@@ -102,6 +127,7 @@ pub fn create_root(
         active_members: active_members.clone(),
     };
     crate::storage::atomic_write(&worktree.join(EPOCH_FILE), &file.canonical_bytes())?;
+    crate::storage::atomic_write(&worktree.join(CONFIG_FILE), &config.to_canonical_bytes())?;
     crate::gitrepo::add_all(worktree)?;
     let commit = crate::gitrepo::commit(worktree, "agent-registry: root epoch")?;
     crate::gitrepo::run_ok(repo, &["branch", "-f", REGISTRY_REF, &commit])?;
@@ -349,6 +375,11 @@ mod tests {
         dir
     }
 
+    fn test_config(repo: &Path) -> BusConfig {
+        let review_from = crate::gitrepo::rev_parse(repo, "HEAD").unwrap();
+        BusConfig::new("sha1".to_string(), ObjectId::parse(review_from).unwrap()).unwrap()
+    }
+
     #[test]
     fn read_registry_tip_is_none_before_creation() {
         let repo = init_repo();
@@ -358,10 +389,11 @@ mod tests {
     #[test]
     fn create_root_then_read_epoch_round_trips() {
         let repo = init_repo();
+        let config = test_config(repo.path());
         let mut members = BTreeMap::new();
         members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
         let wt = repo.path().join("_wt_root");
-        let epoch = create_root(repo.path(), members.clone(), &wt).unwrap();
+        let epoch = create_root(repo.path(), &config, members.clone(), &wt).unwrap();
         assert_eq!(epoch.parent, None);
         assert_eq!(epoch.active_members, members);
         assert_eq!(
@@ -377,20 +409,22 @@ mod tests {
     #[test]
     fn create_root_rejects_a_second_root() {
         let repo = init_repo();
+        let config = test_config(repo.path());
         let wt = repo.path().join("_wt_root");
-        create_root(repo.path(), BTreeMap::new(), &wt).unwrap();
+        create_root(repo.path(), &config, BTreeMap::new(), &wt).unwrap();
         let wt2 = repo.path().join("_wt_root2");
-        let err = create_root(repo.path(), BTreeMap::new(), &wt2).unwrap_err();
+        let err = create_root(repo.path(), &config, BTreeMap::new(), &wt2).unwrap_err();
         assert!(err.to_string().contains("already has a root epoch"), "{err}");
     }
 
     #[test]
     fn propose_transition_extends_with_exactly_one_new_commit() {
         let repo = init_repo();
+        let config = test_config(repo.path());
         let mut members = BTreeMap::new();
         members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
         let wt = repo.path().join("_wt_root");
-        let root = create_root(repo.path(), members.clone(), &wt).unwrap();
+        let root = create_root(repo.path(), &config, members.clone(), &wt).unwrap();
 
         members.insert(a("bob"), binding(Role::Reviewer, "host1", 0));
         let transition_wt = repo.path().join("_wt_transition");
@@ -407,14 +441,46 @@ mod tests {
         assert_eq!(read_back, child);
     }
 
+    /// `bus_config.json` is written once, in the root commit only -- this
+    /// confirms it is still readable through a *later* epoch's tree (proving
+    /// `propose_transition`'s "checkout parent, layer epoch.json on top"
+    /// actually carries it forward) and matches what was passed to
+    /// `create_root` byte-for-byte.
+    #[test]
+    fn read_bus_config_is_visible_through_a_later_epoch() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let mut members = BTreeMap::new();
+        members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
+        let wt = repo.path().join("_wt_root");
+        let root = create_root(repo.path(), &config, members.clone(), &wt).unwrap();
+
+        let root_read_wt = repo.path().join("_wt_config_root");
+        assert_eq!(
+            read_bus_config(repo.path(), &root.id, &root_read_wt).unwrap(),
+            config
+        );
+
+        members.insert(a("bob"), binding(Role::Reviewer, "host1", 0));
+        let transition_wt = repo.path().join("_wt_transition");
+        let child = propose_transition(repo.path(), &root, members, &transition_wt).unwrap();
+
+        let child_read_wt = repo.path().join("_wt_config_child");
+        assert_eq!(
+            read_bus_config(repo.path(), &child.id, &child_read_wt).unwrap(),
+            config
+        );
+    }
+
     /// The registry's own compare-and-swap guarantee: a proposal against a
     /// stale parent (the registry already moved) must be refused, not
     /// silently rebased through -- the loser re-reads and retries.
     #[test]
     fn propose_transition_rejects_a_stale_expected_parent() {
         let repo = init_repo();
+        let config = test_config(repo.path());
         let wt = repo.path().join("_wt_root");
-        let root = create_root(repo.path(), BTreeMap::new(), &wt).unwrap();
+        let root = create_root(repo.path(), &config, BTreeMap::new(), &wt).unwrap();
 
         let mut members = BTreeMap::new();
         members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
