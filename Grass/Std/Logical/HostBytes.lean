@@ -140,6 +140,21 @@ order" is exactly the claim that index `i` on one side is index `i` on the other
   apply Array.ext'
   simp [ofHostBytes, List.map_map, Function.comp_def]
 
+/--
+The crossing is additive in both directions.
+
+Missing until adversarial review proved it. Without it the crossing is a
+bijection and nothing more, and a consumer joining two byte runs — a response
+header block and a body, a frame and its payload — has to cross once at the end
+instead of composing.
+-/
+@[simp] theorem ofHostBytes_append (x y : _root_.ByteArray) :
+    ofHostBytes (x ++ y) = ofHostBytes x ++ ofHostBytes y := by
+  apply toList_injective
+  show (x ++ y).data.toList.map Byte.ofUInt8 = _
+  show _ = (x.data.toList.map Byte.ofUInt8) ++ (y.data.toList.map Byte.ofUInt8)
+  rw [← List.map_append, _root_.ByteArray.data_append, Array.toList_append]
+
 /-- `Vec.toHostBytes` loses nothing, so two Grass byte arrays that cross to the
 same host value were equal. -/
 theorem toHostBytes_injective {a b : Vec Byte}

@@ -131,12 +131,17 @@ def expandStore (destinations : Vec Nat) : Vec RawInstruction :=
 def expandBoth (destinations sources : Vec Nat) : Vec RawInstruction :=
   expandStore destinations ++ expandLoad destinations sources
 
+/-- Two elements per side, deliberately. A one-element example cannot tell
+concatenation from interleaving, and adversarial review exhibited an interleaving
+implementation that satisfied both the one-element case and the length law
+below. -/
 example :
-    (expandBoth (Vec.fromList [1]) (Vec.fromList [10])).toList
-      = [.mov 1 (.immediate 0), .load 1 10] := rfl
+    (expandBoth (Vec.fromList [1, 2]) (Vec.fromList [10, 20])).toList
+      = [.mov 1 (.immediate 0), .mov 2 (.immediate 0), .load 1 10, .load 2 20] := rfl
 
-/-- Appending concatenates rather than interleaving, which is what lets a macro
-expander build an instruction burst by concatenating fragments. -/
+/-- The lengths add. This does *not* by itself distinguish concatenation from
+interleaving — a length law is invariant under both — which is why the
+two-element example above carries that weight instead. -/
 theorem expandBoth_length (destinations sources : Vec Nat) :
     (expandBoth destinations sources).length
       = destinations.length + min destinations.length sources.length := by

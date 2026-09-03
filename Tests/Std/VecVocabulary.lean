@@ -11,10 +11,20 @@ than reading.
 The first is the one `docs/STDLIB.md` §1 actually cares about — "Grass must not
 introduce a second unrelated byte-container primitive". The module comment argues
 that a one-field structure, rather than an `abbrev` over `List`, is what gives
-that rule teeth. The `#guard_msgs` example below is that argument submitted to
-the elaborator: if `Vec` were an abbreviation it would compile, and the rule
-would be a naming convention. It also pins the name collision §1 creates with
-Lean's host `ByteArray`, which is why every mention here is qualified.
+that rule teeth. The `#guard_msgs` example below submits that argument to the
+elaborator.
+
+It establishes less than an earlier version of this comment claimed. That version
+said "if `Vec` were an abbreviation it would compile", which is true of
+`abbrev Vec := List` and false of `abbrev Vec := Array` — and `Array` is the
+abbreviation actually under consideration, since Lean's `Array` is the same
+one-field structure over `List`. Adversarial review reproduced both rejections
+under an `Array` abbreviation. So this fixture pins that a `List Byte` is not a
+byte array; it does not adjudicate between the two representations, and
+`docs/STDLIB_IMPLEMENTATION_PLAN.md` §3.2 carries that open question.
+
+It also pins the name collision §1 creates with Lean's host `ByteArray`, which is
+why every mention here is qualified.
 
 The second is that extensionality concludes propositional equality here, unlike
 `FiniteMap.Equiv`. `built_two_ways` uses it in the shape a consumer would.
@@ -92,7 +102,8 @@ theorem built_two_ways :
     | 2 => rfl
     | _ + 3 => rfl)
 
-/-- `replicate` and a fold agree, again by index rather than by construction. -/
+/-- `replicate` builds what its name says. By construction rather than by index —
+an earlier docstring here described a fold and an index, and there is neither. -/
 example : Vec.replicate 3 (0 : Nat) = Vec.fromList [0, 0, 0] := rfl
 
 /-! ## Framing an update

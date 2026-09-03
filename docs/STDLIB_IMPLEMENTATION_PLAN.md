@@ -96,6 +96,11 @@ was marked rather than smuggled.
 | `Grass/Std/Logical/FiniteMap.lean` | `c-mem` | `c-mem:1`, `coord1:25` | accept, then extend; §4.3 |
 | `Grass/Process/Bag.lean` | `c-process` | `c-process:28`, `coord1:24` | accept and move; §4.2 |
 
+The third row is not visible from this branch. `Grass/Process/Bag.lean` exists
+only on `agent/c-process/process-layer`; there is no `Grass/Process/` directory
+here. It is tabulated because the handoff is agreed and inbound, not because a
+reader can inspect it.
+
 `Grass/Std/Logical/Vec.lean` is new and is this plan's, not custody.
 
 The custody markers stay until each handoff is accepted. Replacing them is part
@@ -202,6 +207,34 @@ same force for `Array` as for `List` is a real question, and the fact that
 [MODULES.md](MODULES.md) names `Vec` as a distinct library type does not settle
 it, since a `def` with its own API would also satisfy that.
 
+**The criterion neither option was measured against.** Adversarial review raised
+a third consideration that this section, the probe branch, and the module comment
+all missed: the emitter has to *run*. [HELLO_WORLD.md](HELLO_WORLD.md)'s
+acceptance clause requires that `emitProgram helloVerified` yield bytes that
+"execute successfully on responsive validation hosts", and
+[FOUNDATION.md](FOUNDATION.md) §3 puts the runtime executing the byte writer in
+the TCB. `ByteArray` is `Vec Byte`, so the byte writer runs over this type.
+
+Both candidates are quadratic. `Vec.push` is `⟨v.toList ++ [a]⟩` and `Vec.get?`
+is `v.toList[i]?` — O(n) per push and O(i) per read, by inspection of the
+definitions rather than by benchmark. That is O(n²) to build an artifact and O(n)
+to read a byte of it.
+
+Worse, **the probe branch does not fix this and is slower than the status quo.**
+`agent/c-stdlib/vec-as-array-probe` changed the type and left every body
+List-shaped, so an Array-backed `Vec` round-trips array → list → array on every
+push. That is why it came in at a net −2 lines: it is a rename, not a
+representation change. This section's earlier claim that adopting `Array` "would
+delete the restatement cost and inherit core's proved laws" is therefore wrong as
+stated — the probe inherits none of `Array`'s API, because the operations are
+still `List` operations.
+
+So there is a third option that has been neither costed nor probed: a genuinely
+`Array`-backed `Vec` whose `push` is `Array.push` and whose `get?` is `Array`
+indexing, with every law re-proved against `Array` lemmas. It is the only one of
+the three that can emit a megabyte artifact, and it is the one this plan should
+have been comparing against all along.
+
 This plan is not changing the decision while the branch is under review. Flipping
 a foundational representation underneath a reviewer mid-review is worse than
 surfacing the evidence and letting the review weigh it, and the nomination
@@ -232,7 +265,10 @@ absence is a band-3 item under §1 with a named blocker, not an oversight:
 | `foldMap` | a monoid vocabulary, which no consumer has demanded. |
 | lexicographic comparison | an ordering vocabulary, likewise undemanded. |
 | indexing laws for `insertAt`/`eraseAt` | a consumer that indexes across an insertion. The operations and their length laws are present; the index-shifting laws are large and are better written against a real proof than guessed at. |
-| `Vec` iterators | a consumer. §3 lists iteration; `foldl`, `foldr`, `map`, and `mapIdx` cover every use in the spike corpus. |
+| ~~`Vec` iterators~~ | **Supplied.** §3 lists iteration among the observations and this library had none; adversarial review found that neither the absence list nor the instances fixture had caught it. `Vec` now has `ForIn`, so `for x in v do …` works. |
+| fold/map/traverse *fusion* laws beyond `map_map` | a consumer. §5 asks for fusion "where their premises hold"; only `map` fusion exists, and there is no `foldl_map`, `foldr_map`, `foldl_append`, or `foldr_append`. Found by adversarial review; this row is the correction. |
+| pure immutable views/subsequences | a consumer. §3 lists them; `take`/`drop` copy instead. Also found by review, also previously unlisted. |
+| the `ByteArray` writer/reader connection of §5 | the `Grammar` layer that would write and read one. `HostBytes.lean` supplies §1's *host* adapter, which is a different demand, and conflating the two was this plan's error. |
 
 The absences above are only honest if the corpus was read for demands rather
 than assumed to have none, so it was read. `Spikes/` holds the comment-free
@@ -662,9 +698,17 @@ reader will want a reason for:
 5. Stages are lettered `S`, not `M`, to avoid collision with
    [MEMORY_IMPLEMENTATION_PLAN.md](MEMORY_IMPLEMENTATION_PLAN.md). §1.
 
-6. Every operation carries at least one law. An operation without one does not
-   remove the need to reason about it, it relocates that reasoning to
-   `Vec.toList` in the consumer, which is the leak §3.2 pays for. §3.1.
+6. **Superseded.** The rule was "every operation carries at least one law", and
+   adversarial review broke it twice. It was asserted satisfied on the same page
+   where `Vec.truncate` and `Vec.clear` shipped with no law naming either — now
+   fixed — and, more importantly, counting laws cannot express what the rule was
+   reaching for. A deliberately wrong `insertAt` that ignores its index, and an
+   `eraseAt` that always removes the last element, both satisfy the sole length
+   law those operations carry; the reviewer compiled both. The rule is now: **the
+   laws must determine the operation up to extensional equality.** `set`, `push`,
+   `map`, `take`, `drop`, `flatten`, and `zipWith` meet it. `insertAt`, `eraseAt`,
+   and `splitAt` do not, and are open item 10 rather than being counted as
+   satisfying anything. §3.1.
 7. `Vec` carries the instances a Lean author expects — `DecidableEq`, lawful
    `BEq`, `Repr`, `GetElem`/`GetElem?` — derived through `toList`. An incomplete
    wrapper is worse than no wrapper: it has §3.2's cost without its benefit,
@@ -691,9 +735,10 @@ Open, with the owner each is with:
 
 1. **The `ByteArray` name collision**, with the owner of
    [STDLIB.md](STDLIB.md). §3.12. Twice sharper than when it was first raised.
-   The authored spike sources write bare `ByteArray` in four of the five spikes,
-   so "keep the name and qualify at the use site" is a change to the author
-   surface and not only to library-internal code. And it is no longer
+   The authored spike sources write bare `ByteArray` in **all five** spikes — an
+   earlier count of four was wrong and the correction strengthens the point — so
+   "keep the name and qualify at the use site" is a change to the author surface
+   and not only to library-internal code. And it is no longer
    hypothetical: `Tests/Std/HostBytes.lean` is the first module to mention both
    byte arrays at once, and a bare `ByteArray` in it is an ambiguity error.
 2. **Whether `Vec α` should be `Array α`**, with this branch's reviewer in the
@@ -709,9 +754,16 @@ Open, with the owner each is with:
    `ByteArray`, at three sites, for the same reason and with the same owner as
    the previous item: dot notation resolves to core's `String.toUTF8`, which
    returns the host type. `Text.utf8 "..."` is the available spelling. §3.9.
-5. **UTF-8 decoding has no round-trip law**, so it is unbuilt. Closing it means
-   proving UTF-8 correctness against a specification rather than writing a
-   function, and no consumer has asked. §3.9.
+5. **Resolved, and the reason given was false.** This item said UTF-8 decoding
+   was unbuilt because core supplies no round-trip law and closing it "means
+   proving UTF-8 correctness against a specification, which is a project rather
+   than a function". Adversarial review falsified that: in this toolchain
+   `String` is a structure over its own bytes carrying its own validity proof, so
+   `String.toUTF8` is a projection and `String.fromUTF8` is the constructor, and
+   both round-trip directions are a few lines. `Text.decode`, `Text.decode_utf8`,
+   `Text.utf8_decode`, and `Text.isValidUTF8_utf8` now exist. Recorded rather
+   than deleted, because a named blocker that was not real is the failure mode
+   this plan's band-3 discipline is most exposed to. §3.9.
 6. **`Spikes/2_Sort/Spec.lean`'s `stableSorted` does not typecheck**, in two
    further ways beyond the previous items, and both are about totality rather
    than naming. `input[i]` carries no proof that `i` is in range and its binder
@@ -720,13 +772,39 @@ Open, with the owner each is with:
    wrong sort would hit. `Tests/Std/StableSort.lean` shows the same statement
    written totally. Owner as for the other authored-surface items. §3.10.
 7. **The `Bag` representation**, inherited undecided from `c-process:28` and
-   genuinely blocked on the repository-wide mathlib dependency question rather
-   than on a container judgement. §4.2.
+      genuinely blocked on a dependency question rather than on a container
+   judgement — though less blocked than §4.2 says: [MODULES.md](MODULES.md)'s
+   final line already permits "mathlib and other reviewed Lean dependencies", so
+   what is open is a reviewed addition to `lakefile.toml` and the TCB ledger, not
+   a governance question. §4.2.
 8. **`Grass.Effect`, `Grass.Grammar`, and `Grass.CFG` have no owner**, which
    blocks `mapM`/`traverse`, the parser combinators, and the worklists
    respectively. Raised with the coordinator when one becomes a blocker. §3.4,
    §5.
-9. **The `ByteSeq` retirement**, which is an edit to `Grass/Memory/**` and
+9. **`Vec.insertAt`, `Vec.eraseAt`, and `Vec.splitAt` are not determined by
+   their laws**, under decision 6's replacement bar. `insertAt` and `eraseAt`
+   carry only length laws that a wrong implementation satisfies, and
+   `splitAt_eq` is its own definition restated. Either write the index-shifting
+   laws or delete the operations until a consumer forces them — which is what
+   §1 band 3 says to do anyway. §3.1.
+10. **The spike surface calls both `.size` and `.length`** on `Vec`- and
+   `ByteArray`-typed values — `.size` at six sites, `.length` at one — so it is
+   inconsistent with itself and with [STDLIB.md](STDLIB.md) §3, which fixes
+   `length`. `Vec.size` is supplied as an abbreviation so both elaborate, but the
+   inconsistency is the spike owner's to settle. §3.6.
+11. **[STDLIB.md](STDLIB.md) §3 lists `concat` among the composition
+   operations**, and in Lean `List.concat` appends one element while flattening
+   is `List.flatten`. This library ships `Vec.flatten` and leaves `concat`
+   undefined rather than shipping a name that means the opposite of what a Lean
+   author expects. The ambiguity is the [STDLIB.md](STDLIB.md) owner's. §3.7.
+12. **There is no TCB ledger.** [FOUNDATION.md](FOUNDATION.md) §3 requires
+   external-reality assumptions to be "recorded in the TCB ledger"; no such file
+   exists in the repository. This library's `@[extern]` dependencies — at least
+   `lean_string_to_utf8`, `lean_array_mk`, and `lean_array_to_list` — are
+   recorded in a module comment as a placeholder. `Tools/AxiomAudit.lean` cannot
+   see them, since an `@[extern]` is not an axiom, so a green audit is not
+   evidence about that boundary. Raised with the coordinator. §3.9.
+13. **The `ByteSeq` retirement**, which is an edit to `Grass/Memory/**` and
    therefore `c-mem`'s to make. §4.1.
 
 Items 1, 2, and 3 were all sharpened or found by reading the spike corpus for
