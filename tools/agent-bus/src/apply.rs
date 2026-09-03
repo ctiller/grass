@@ -467,7 +467,27 @@ fn apply_merge_engine_activated(
 ) -> AbResult<()> {
     require_bootstrap_coordinator(state, &env.agent)?;
     require_complete_frontier(state, env)?;
-    if !state.merge_engine_info.contains_key(&d.previous_epoch) {
+    // Bootstrap exception: `bootstrap::genesis` never itself emits a
+    // `merge_engine.activated` event (it only records `merge_engine`/
+    // `merge_engine_version` as static `BusConfig` metadata, a supported
+    // -version check, not a real prior activation) -- so a fresh bus has no
+    // production path that ever seeds a first `merge_engine_info` entry.
+    // Without this exception, the very first activation on any real bus can
+    // never name a previous_epoch that passes the "known prior activation"
+    // check below, current_merge_engine_epoch can never become `Some`, and
+    // review.merge_authorized (which requires its own merge_engine_epoch to
+    // equal the currently selected one) can therefore never be validly
+    // published at all: a bootstrap deadlock in the crate's own core
+    // feature, found by adversarial review while porting v1's merge
+    // -authorization checks. The one legitimate case with nothing real to
+    // reference is the genesis activation itself: `merge_engine_info` is
+    // still completely empty, and the caller names their own registration
+    // event as the synthetic anchor -- the same convention this file's own
+    // tests already assumed (`default_merge_engine_epoch`), just never
+    // wired to an actual production path until now.
+    let is_genesis_activation =
+        state.merge_engine_info.is_empty() && d.previous_epoch == EventId::new(&env.agent, 0);
+    if !is_genesis_activation && !state.merge_engine_info.contains_key(&d.previous_epoch) {
         return Err(invalid(format!(
             "{}: previous_epoch {} is not a known prior engine activation",
             env.id, d.previous_epoch
@@ -4625,11 +4645,18 @@ mod tests {
         let coord1 = a("coord1");
         apply_ok(&mut state, &register(&coord1, Role::Coordinator));
         let epoch = state.roster_epoch.as_ref().unwrap().clone();
+        // Not `coord1:0` (coord1's own registration): that is the
+        // legitimate genesis-activation anchor (see `apply_merge_engine_
+        // activated`'s bootstrap exception) and must succeed, not fail --
+        // covered separately by
+        // `merge_engine_activated_genesis_bootstraps_from_a_real_registration`.
+        // A bogus, entirely unrelated id is a genuinely unknown epoch.
+        let bogus = EventId::new(&a("nobody"), 5);
         let env = Envelope::new(
             &coord1,
             1,
             complete_frontier(&epoch),
-            &EventData::MergeEngineActivated(merge_engine_activated(&EventId::new(&coord1, 0))),
+            &EventData::MergeEngineActivated(merge_engine_activated(&bogus)),
             [],
         );
         let err = apply_event(&mut state, &env).unwrap_err();
@@ -4638,6 +4665,38 @@ mod tests {
                 .contains("is not a known prior engine activation"),
             "{err}"
         );
+    }
+
+    /// Round-4-follow-up Critical finding: `bootstrap::genesis` never
+    /// itself emits a `merge_engine.activated` event (it only records
+    /// `merge_engine`/`merge_engine_version` as static config metadata), so
+    /// a fresh bus had no production path that could ever seed a first
+    /// `merge_engine_info` entry -- every existing test reached one only
+    /// via a test-only seeding helper (`seed_merge_engine_genesis`) that
+    /// has no real-world equivalent. Without the bootstrap exception this
+    /// test proves, `current_merge_engine_epoch` could never become `Some`
+    /// on any real bus, and `review.merge_authorized` (which requires its
+    /// own `merge_engine_epoch` to match the currently selected one) could
+    /// therefore never be validly published at all: the crate's own core
+    /// feature was unreachable from a genuine cold start.
+    #[test]
+    fn merge_engine_activated_genesis_bootstraps_from_a_real_registration() {
+        let mut state = empty_state(&[("coord1", Role::Coordinator)]);
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
+        assert!(state.merge_engine_info.is_empty());
+
+        let env = Envelope::new(
+            &coord1,
+            1,
+            complete_frontier(&epoch),
+            &EventData::MergeEngineActivated(merge_engine_activated(&EventId::new(&coord1, 0))),
+            [],
+        );
+        apply_ok(&mut state, &env);
+        assert_eq!(state.current_merge_engine_epoch, Some(env.id.clone()));
+        assert!(state.merge_engine_info.contains_key(&env.id));
     }
 
     #[test]
