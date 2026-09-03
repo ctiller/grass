@@ -282,13 +282,52 @@ theorem afterFullClose_is_wellFormed : Close.afterFullClose.WellFormed :=
     (ProcessPlan.wellFormed_preserved theSecondSendStep
       (ProcessPlan.wellFormed_preserved theSendStep World.quiet_is_wellFormed))
 
+/--
+**And the coalesce is a step too.**
+
+§10.89's check, run against the transition §10.110 added. A reviewer pointed out
+that `the_coalesce` landed in the same commit as the section stating that check
+and was not put through it — a transition with no `NetworkStep` is the weaker
+witness §10.89 warns about. §10.112.
+-/
+def theCoalesceStep : serverPlan.NetworkStep Close.sent2 Close.afterCoalesce where
+  transition := .coalesce () wire escrowed Close.carrier Close.the_coalesce
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-- Two sends and a merge, carried from `quiet`. -/
+theorem afterCoalesce_is_wellFormed : Close.afterCoalesce.WellFormed :=
+  ProcessPlan.wellFormed_preserved theCoalesceStep
+    (ProcessPlan.wellFormed_preserved theSecondSendStep
+      (ProcessPlan.wellFormed_preserved theSendStep World.quiet_is_wellFormed))
+
+/-- And the carrier is on its own session, read out of the seventh clause. -/
+theorem the_carrier_is_on_the_wire :
+    Close.carrier.2.1 = wire :=
+  afterCoalesce_is_wellFormed.occurrencesOnTheirSession () wire Close.carrier
+    (by rw [Close.afterCoalesce_wire]
+        exact List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self))
+
 /-- Read back out of it: the rerouted payload lands. -/
 theorem the_rerouted_payload_lands :
     (Grass.Process.Tests.Reroute.afterReroute.inFlight () wire).ReroutedElsewhere
       (fun occurrence destination arrival =>
         arrival ∈ (Grass.Process.Tests.Reroute.afterReroute.inFlight () destination).created ∧
-          arrival.1 = occurrence.1 ∧ arrival.2.1 = destination) :=
+          arrival.1 = occurrence.1) :=
   afterReroute_is_wellFormed.reroutesLand () wire
+
+/--
+And the strong form, which the sixth clause no longer states and
+`WellFormed.rerouted_arrival_is_on_its_destination` recovers from the seventh:
+the arrival is on the session it was rerouted to. §10.112.
+-/
+theorem the_arrival_is_on_its_destination {occurrence destination}
+    (rerouted : (Grass.Process.Tests.Reroute.afterReroute.inFlight () wire).resolution occurrence
+      = some (.rerouted destination)) :
+    ∃ arrival,
+      arrival ∈ (Grass.Process.Tests.Reroute.afterReroute.inFlight () destination).created ∧
+        arrival.1 = occurrence.1 ∧ arrival.2.1 = destination :=
+  afterReroute_is_wellFormed.rerouted_arrival_is_on_its_destination () wire rerouted
 
 /-! ## And a start at a plan with something in it
 

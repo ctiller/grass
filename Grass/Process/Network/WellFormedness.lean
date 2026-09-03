@@ -703,7 +703,7 @@ theorem rerouting_stood_or_is_this_step (transition : plan.NetworkTransition bef
       = some (.rerouted destination)) :
     (before.inFlight edge session).resolution occurrence = some (.rerouted destination)
     ∨ ∃ arrival, arrival ∈ (after.inFlight edge destination).created ∧
-        arrival.1 = occurrence.1 ∧ arrival.2.1 = destination := by
+        arrival.1 = occurrence.1 := by
   by_cases declared : transition.scope (.escrow edge session)
   · cases transition with
     | reroute _ session' occurrence' destination' step =>
@@ -712,13 +712,13 @@ theorem rerouting_stood_or_is_this_step (transition : plan.NetworkTransition bef
         cases same; cases sameSession
         by_cases isIt : occurrence = occurrence'
         · subst isIt
-          obtain ⟨arrival, _, arrived, carries, onSession, _⟩ := step.arrives
+          obtain ⟨arrival, _, arrived, carries, _, _⟩ := step.arrives
           have sameDestination : destination' = destination := by
             rw [step.nowResolved] at resolved
             cases resolved
             rfl
           subst sameDestination
-          exact Or.inr ⟨arrival, arrived, carries, onSession⟩
+          exact Or.inr ⟨arrival, arrived, carries⟩
         · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
       · obtain ⟨same, sameSession⟩ := escrowFragment_inj h
         cases same; cases sameSession
@@ -836,10 +836,10 @@ theorem reroutesLand_preserved (transition : plan.NetworkTransition before after
     (lands : before.ReroutesLand) : after.ReroutesLand := by
   intro edge session occurrence destination resolved
   rcases rerouting_stood_or_is_this_step transition resolved with stood | ⟨arrival, landed⟩
-  · obtain ⟨arrival, arrived, carries, onSession⟩ :=
+  · obtain ⟨arrival, arrived, carries⟩ :=
       lands edge session occurrence destination stood
     exact ⟨arrival,
-      (ledgers_extend transition edge destination).created_preserved arrived, carries, onSession⟩
+      (ledgers_extend transition edge destination).created_preserved arrived, carries⟩
   · exact ⟨arrival, landed⟩
 
 /--

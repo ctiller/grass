@@ -460,6 +460,7 @@ theorem the_drop : serverPlan.ResolvesEscrow sent afterDropping () wire escrowed
     rw [sent_wire, afterDropping_wire]
     exact fun _ => rfl
   carrierOnItsSession := by intro carrier isCoalesce; cases isCoalesce
+  carrierIsFresh := by intro carrier isCoalesce; cases isCoalesce
   createsOnlyTheCarrier := by
     intro other held fresh
     exact absurd (by rw [sent_wire]; rw [afterDropping_wire] at held; exact held) fresh

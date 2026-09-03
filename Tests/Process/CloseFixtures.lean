@@ -662,6 +662,18 @@ theorem the_coalesce :
     intro carrier' isMerge
     cases isMerge
     rfl
+  carrierIsFresh := by
+    intro carrier' isMerge
+    cases isMerge
+    show carrier ∉ (sent2.inFlight () wire).created
+    rw [sent2_wire]
+    intro held
+    have inList : carrier ∈ [escrowed, stranded] := held
+    rcases List.mem_cons.mp inList with isFirst | rest
+    · exact carrier_ne_escrowed isFirst
+    · have isSecond := List.mem_singleton.mp rest
+      have ids := congrArg (fun occurrence => occurrence.2.2.id.carrier) isSecond
+      simp [carrier, stranded, Reroute.stranded] at ids
   scope := by
     intro fragment outside
     cases fragment with
@@ -683,5 +695,34 @@ theorem the_merge_happened :
   rw [afterCoalesce_wire]
   exact ⟨⟨List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self),
     merged_other carrier_ne_escrowed⟩, merged_first⟩
+
+/--
+**And a coalesce may not name a carrier that is already in the ledger.**
+
+`carrierIsFresh`. Without it a coalesce could merge into an occurrence that had
+already been *delivered*: a reviewer built the four-step program from `quiet` —
+send, send, deliver the second, coalesce the first into it — and afterwards the
+first payload is neither in flight nor delivered, with no constructor able to
+name it and the ledger reporting everything settled.
+§10.100 was a payload in flight forever; this is a payload silently lost.
+§10.111.
+-/
+theorem a_coalesce_may_not_name_a_carrier_already_here
+    {before after : ServerWorld}
+    {other : EdgeOccurrence serverTopology World.serverMessage ()}
+    (alreadyHere : other ∈ (before.inFlight () wire).created)
+    (merged : serverPlan.ResolvesEscrow before after () wire escrowed
+      (.coalesced other)) : False :=
+  merged.carrierIsFresh other rfl alreadyHere
+
+/-- So in particular it may not merge into a message the receiver already took. -/
+theorem a_coalesce_may_not_launder_into_a_delivered_message
+    {before after : ServerWorld}
+    {other : EdgeOccurrence serverTopology World.serverMessage ()}
+    (delivered : (before.inFlight () wire).resolution other = some .received)
+    (merged : serverPlan.ResolvesEscrow before after () wire escrowed
+      (.coalesced other)) : False :=
+  a_coalesce_may_not_name_a_carrier_already_here
+    ((before.inFlight () wire).noFabrication other (by rw [delivered]; rfl)) merged
 
 end Grass.Process.Tests.Close

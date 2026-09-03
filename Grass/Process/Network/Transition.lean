@@ -210,6 +210,32 @@ structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
   carrierOnItsSession : ∀ carrier, resolution = .coalesced carrier →
     carrier.2.1 = session
   /--
+  **And a coalesce's carrier is fresh.**
+
+  `ChannelResolution.coalesced`'s sibling docstring already said the carrier is
+  "a fresh occurrence, per `NominalKind.coalescedReplacement`", and
+  `createsOnlyTheCarrier` bounds what a step *creates* without ever saying the
+  carrier *is* created. `EscrowLedger.coalesceCarrierLater` asks for membership
+  and a later rank, and a **previously delivered** occurrence satisfies both.
+
+  A reviewer built the four-step program from `quiet`: send, send, deliver the
+  second, then coalesce the first into it. Every field discharged,
+  `carrierOnItsSession` included, and `wellFormed_preserved` waved the result
+  through. Afterwards the first payload is neither in flight nor delivered — no
+  close, death, drop or delivery can name it, `.coalesced` is not
+  `ChannelResolution.IsTerminal` because it "passes it on", and what it passed to
+  had been consumed a step earlier. The ledger's accounting says everything is
+  settled and a message is gone.
+
+  §10.100's twin from the other side: that was a payload in flight forever, this
+  is a payload silently lost. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.111.
+
+  Freshness is what makes the merge a merge: with it the carrier is necessarily
+  `Outstanding` after the step, so the sources' payload is somewhere.
+  -/
+  carrierIsFresh : ∀ carrier, resolution = .coalesced carrier →
+    carrier ∉ (before.inFlight edge session).created
+  /--
   **And the only occurrence it escrows is a coalesce's carrier.**
 
   `ledgerExtends` forbids erasing and `resolvesOnlyAs` bounds what is *ended*.

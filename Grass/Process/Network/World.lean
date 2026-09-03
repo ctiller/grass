@@ -391,13 +391,22 @@ carrying this one's message; the clause said only that the destination's ledger
 holds something. So the transition's strongest field was spent and discarded, and
 a network could satisfy this clause with a payload that went nowhere — a reviewer
 built the world. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.94.
+
+§10.94 also added "and the arrival is on the destination session", and §10.109's
+`OccurrencesOnTheirSession` then said that of *every* occurrence in *every*
+ledger — one hole, two mechanisms, which is §10.107's shape. The conjunct is gone
+from here and `WellFormed.rerouted_arrival_is_on_its_destination` recovers it, so
+a consumer still has the strong statement. The corresponding conjunct in
+`Reroutes.arrives` stays, and is load-bearing: the arrival is *fresh*, so the
+before-network's clause says nothing about it, and
+`occurrencesOnTheirSession_preserved`'s reroute case is what consumes it.
 -/
 def ReroutesLand : Prop :=
   ∀ (edge : topology.ChannelKind) (session : topology.ChannelId edge),
     (network.inFlight edge session).ReroutedElsewhere
       (fun occurrence destination arrival =>
         arrival ∈ (network.inFlight edge destination).created ∧
-          arrival.1 = occurrence.1 ∧ arrival.2.1 = destination)
+          arrival.1 = occurrence.1)
 
 /--
 **Every occurrence in flight belongs to the session whose ledger holds it.**
@@ -463,6 +472,27 @@ structure WellFormed
   reroutesLand : network.ReroutesLand
   /-- And every occurrence in flight is on the session holding it. -/
   occurrencesOnTheirSession : network.OccurrencesOnTheirSession
+
+/--
+**And in a well-formed network the arrival is on its destination.**
+
+`ReroutesLand` says the destination gained something carrying the payload;
+`OccurrencesOnTheirSession` says everything in a ledger belongs to that ledger's
+session. Together they are the statement §10.94 briefly made `ReroutesLand`
+carry on its own, recovered without the two clauses saying it twice.
+-/
+theorem WellFormed.rerouted_arrival_is_on_its_destination
+    {network : LogicalProcessNetworkCore topology Message Obligations}
+    (wellFormed : network.WellFormed) (edge : topology.ChannelKind)
+    (session : topology.ChannelId edge) {occurrence destination}
+    (rerouted : (network.inFlight edge session).resolution occurrence
+      = some (.rerouted destination)) :
+    ∃ arrival, arrival ∈ (network.inFlight edge destination).created ∧
+      arrival.1 = occurrence.1 ∧ arrival.2.1 = destination := by
+  obtain ⟨arrival, arrived, carries⟩ :=
+    wellFormed.reroutesLand edge session occurrence destination rerouted
+  exact ⟨arrival, arrived, carries,
+    wellFormed.occurrencesOnTheirSession edge destination arrival arrived⟩
 
 /-- A terminated instance in a well-formed network yields its exact result. -/
 theorem terminated_result_is_exact
