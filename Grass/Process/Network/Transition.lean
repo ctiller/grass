@@ -289,23 +289,51 @@ is what writes it.
 -/
 structure EndsInstance (before after : plan.LogicalProcessNetwork)
     (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
-    (ending : ProcessLifecycle (plan.topology.protocol kind)) : Prop where
+    (ending : ProcessLifecycle (plan.topology.protocol kind))
+    (custody : Obligations → Obligations → Prop) : Prop where
   /-- It was live. -/
   wasLive : ∃ incarnation, before.instances kind slot = some incarnation ∧
     incarnation.Live
   /-- It now carries exactly this ending. -/
   nowEnded : ∃ incarnation, after.instances kind slot = some incarnation ∧
     ∃ sameKind : incarnation.kind = kind, sameKind ▸ incarnation.lifecycle = ending
-  /-- Only that slot changed. -/
-  onlyThatSlot : plan.ChangesOneInstance before after kind slot
+  /--
+  **And the obligation ledger moves exactly as this ending declared.**
+
+  `docs/PROCESS.md` §2: "termination explicitly resolves, transfers, or permits
+  pending". `custody` is a parameter rather than a field, so it is the
+  *constructor* that names the transfer and a reader of the transition sees it —
+  the same trade as `written` on `StepsLocally` and `emitted` on `Commits`.
+
+  Before this existed, no constructor of `NetworkTransition` named
+  `.obligations` in its scope, so by `touchesOnly` the ledger
+  `Grass/Process/Network/World.lean` deliberately parameterises could never move
+  in any program at all. A weave mixin about obligations framed past every step
+  vacuously, and §7's `DisjointOrCommutingObligations` was satisfied by the
+  whole family for free.
+  -/
+  custodyDeclared : custody before.obligations after.obligations
+  /--
+  That slot, and the ledger if the ledger moved.
+
+  The guard is the *actual* change rather than a flag the author sets, which is
+  what keeps the scope exact: a step that transferred nothing does not declare
+  the ledger, so a mixin about obligations frames past it, correctly. The
+  observation-trace scope above learned this the hard way — a scope that is too
+  wide is invisible to every test the producing module can write and defeats
+  every scheduling argument downstream.
+  -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .instanceState kind slot ∨
+      (before.obligations ≠ after.obligations ∧ fragment = .obligations))
 
 namespace EndsInstance
 
 variable {plan}
 
 /-- An ended instance is not live afterwards, whatever the ending was. -/
-theorem not_live_after {before after kind slot ending}
-    (ended : plan.EndsInstance before after kind slot ending)
+theorem not_live_after {before after kind slot ending custody}
+    (ended : plan.EndsInstance before after kind slot ending custody)
     (notRunning : ending ≠ .running) :
     ∃ incarnation, after.instances kind slot = some incarnation ∧ ¬ incarnation.Live := by
   obtain ⟨incarnation, found, sameKind, carries⟩ := ended.nowEnded
@@ -524,22 +552,27 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
       (step : plan.ResolvesEscrow before after edge session occurrence .timedOut)
   /-- An instance's outstanding demand was abandoned. -/
   | interrupt (kind slot) (reason : (plan.topology.protocol kind).InterruptReason)
-      (step : plan.EndsInstance before after kind slot (.interrupted reason))
+      (custody : Obligations → Obligations → Prop)
+      (step : plan.EndsInstance before after kind slot (.interrupted reason) custody)
   /-- An instance faulted. -/
   | fault (kind slot) (fault : (plan.topology.protocol kind).LogicalFault)
-      (step : plan.EndsInstance before after kind slot (.faulted fault))
+      (custody : Obligations → Obligations → Prop)
+      (step : plan.EndsInstance before after kind slot (.faulted fault) custody)
   /-- Its environment broke a contract. -/
   | environmentViolation (kind slot)
       (violation : (plan.topology.protocol kind).EnvironmentViolation)
-      (step : plan.EndsInstance before after kind slot (.violated violation))
+      (custody : Obligations → Obligations → Prop)
+      (step : plan.EndsInstance before after kind slot (.violated violation) custody)
   /-- A child ended, with the exact result decision 129 stores. -/
   | childLifecycle (kind slot)
       (ending : ProcessLifecycle (plan.topology.protocol kind))
-      (step : plan.EndsInstance before after kind slot ending)
+      (custody : Obligations → Obligations → Prop)
+      (step : plan.EndsInstance before after kind slot ending custody)
   /-- A non-child instance terminated. -/
   | processTermination (kind slot)
       (result : (plan.topology.protocol kind).TerminalResult)
-      (step : plan.EndsInstance before after kind slot (.terminated result))
+      (custody : Obligations → Obligations → Prop)
+      (step : plan.EndsInstance before after kind slot (.terminated result) custody)
   /-- The session was closed in the ordinary way. -/
   | channelClose (edge session occurrence)
       (step : plan.ClosesSession before after edge session occurrence)
@@ -608,11 +641,21 @@ def scope : plan.NetworkTransition before after → NetworkFragment plan.topolog
   | .drop edge session _ _ => fun fragment => fragment = .escrow edge session
   | .reroute edge session _ _ _ => fun fragment => fragment = .escrow edge session
   | .coalesce edge session _ _ _ => fun fragment => fragment = .escrow edge session
-  | .interrupt kind slot _ _ => fun fragment => fragment = .instanceState kind slot
-  | .fault kind slot _ _ => fun fragment => fragment = .instanceState kind slot
-  | .environmentViolation kind slot _ _ => fun fragment => fragment = .instanceState kind slot
-  | .childLifecycle kind slot _ _ => fun fragment => fragment = .instanceState kind slot
-  | .processTermination kind slot _ _ => fun fragment => fragment = .instanceState kind slot
+  | .interrupt kind slot _ _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨
+        (before.obligations ≠ after.obligations ∧ fragment = .obligations)
+  | .fault kind slot _ _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨
+        (before.obligations ≠ after.obligations ∧ fragment = .obligations)
+  | .environmentViolation kind slot _ _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨
+        (before.obligations ≠ after.obligations ∧ fragment = .obligations)
+  | .childLifecycle kind slot _ _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨
+        (before.obligations ≠ after.obligations ∧ fragment = .obligations)
+  | .processTermination kind slot _ _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨
+        (before.obligations ≠ after.obligations ∧ fragment = .obligations)
   | .join kind slot _ => fun fragment => fragment = .instanceState kind slot
   | .detach kind slot _ => fun fragment => fragment = .instanceState kind slot
 
@@ -649,13 +692,70 @@ theorem touchesOnly (transition : plan.NetworkTransition before after) :
   | drop _ _ _ step => exact step.scope
   | reroute _ _ _ _ step => exact step.scope
   | coalesce _ _ _ _ step => exact step.scope
-  | interrupt _ _ _ step => exact step.onlyThatSlot.scope
-  | fault _ _ _ step => exact step.onlyThatSlot.scope
-  | environmentViolation _ _ _ step => exact step.onlyThatSlot.scope
-  | childLifecycle _ _ _ step => exact step.onlyThatSlot.scope
-  | processTermination _ _ _ step => exact step.onlyThatSlot.scope
+  | interrupt _ _ _ _ step => exact step.scope
+  | fault _ _ _ _ step => exact step.scope
+  | environmentViolation _ _ _ _ step => exact step.scope
+  | childLifecycle _ _ _ _ step => exact step.scope
+  | processTermination _ _ _ _ step => exact step.scope
   | join _ _ step => exact step.scope
   | detach _ _ step => exact step.onlyThatSlot.scope
+
+/--
+**The obligation ledger moves only where a process ends, and only as that
+ending declared.**
+
+`docs/PROCESS.md` §2: "termination explicitly resolves, transfers, or permits
+pending". This is that as a fact about every execution rather than about one
+transition: a step that changed the ledger *was* an ending, and the ending
+carries the custody relation the change satisfies.
+
+The proof is by cases over the whole family and the eighteen non-ending cases
+are all the same: `.obligations` is not in their scope, so `touchesOnly` gives
+equality and contradicts the hypothesis.
+
+Worth noting what this replaced. Until `EndsInstance` carried a custody
+parameter, *no* constructor named `.obligations` in its scope, so the ledger
+`Grass/Process/Network/World.lean` deliberately parameterises could never move
+at all — and this theorem would have been true for the wrong reason, with an
+unsatisfiable hypothesis. `docs/FOUNDATION.md` law 7 had nothing to bite on.
+-/
+theorem moving_the_ledger_ends_an_instance (transition : plan.NetworkTransition before after)
+    (moved : before.obligations ≠ after.obligations) :
+    ∃ (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
+      (ending : ProcessLifecycle (plan.topology.protocol kind))
+      (custody : Obligations → Obligations → Prop),
+      plan.EndsInstance before after kind slot ending custody ∧
+        custody before.obligations after.obligations := by
+  cases transition with
+  | interrupt kind slot _ custody step =>
+    exact ⟨kind, slot, _, custody, step, step.custodyDeclared⟩
+  | fault kind slot _ custody step =>
+    exact ⟨kind, slot, _, custody, step, step.custodyDeclared⟩
+  | environmentViolation kind slot _ custody step =>
+    exact ⟨kind, slot, _, custody, step, step.custodyDeclared⟩
+  | childLifecycle kind slot _ custody step =>
+    exact ⟨kind, slot, _, custody, step, step.custodyDeclared⟩
+  | processTermination kind slot _ custody step =>
+    exact ⟨kind, slot, _, custody, step, step.custodyDeclared⟩
+  | processStep _ _ _ _ _ step =>
+    exact absurd (step.scope .obligations (by simp)) moved
+  | spawn _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | restart _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | send _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | commit _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | receive _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | requestCancel _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | acknowledgeCancel _ _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | timeout _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | channelClose _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | senderDeath _ _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | receiverDeath _ _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | channelDeath _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | drop _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | reroute _ _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | coalesce _ _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | join _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | detach _ _ step => exact absurd (step.onlyThatSlot.scope .obligations (by simp)) moved
 
 /--
 The nominals a step allocates.
