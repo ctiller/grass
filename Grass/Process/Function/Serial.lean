@@ -16,7 +16,7 @@ and then says where the line is:
 > to another custodian, or interleave observably must expose the corresponding
 > demand/child/frontier.
 
-## `noFrontier` is structural, not a field
+## Where `noFrontier` went
 
 §3's `SerialFunctionContract` ends with `noFrontier :
 NoExternalPendingCancellationOrInterleavingFrontier`, and there is no such
@@ -24,41 +24,67 @@ field here. It would be an opaque promise: an author writes `noFrontier := ⟨�
 and nothing checks it, which is the shape `docs/DECISIONS.md` decision 131
 rejected for `ChannelContract`.
 
-Instead `SerialDecision` has two constructors where
-`Grass/Process/Sequential/Machine.lean`'s `SequentialDecision` has three. A
-sequential machine may decide `.effect demand resume` — ask the environment and
-wait. A serial function has no such constructor, so "waits for external entropy"
-is not a thing it can do; `no_waiting_decision` is that, by cases.
+What replaces it is **not** the shape of `SerialDecision` on its own. A first
+draft claimed exactly that — two constructors where `SequentialDecision` has
+three, so a serial function "cannot decide to wait" — and local adversarial
+review took it apart in two moves. The claim was true about
+`SerialFunctionSource` and irrelevant, because `CollapsesToOneTransition` was
+indexed by a *contract* and never mentioned a source; and a contract's `Post`
+admits external entropy directly, by relating a before-state to more than one
+after-state and letting the environment pick.
 
-The consequence is the one §3 wants and it is stronger than the sequential
-analogue. `SequentialMachine.reachesFrontier` proves finitely many internal
-steps reach an effect *or* a terminal. `reaches_an_exit` here proves they reach
-an **exit** — there is no other kind of stopping place — which is §3's
-`EveryMaximalInternalExecutionHasExactlyOneDeclaredExit`.
+So the frontier-freedom argument now runs through the collapse itself:
+
+* `CollapsesToOneTransition` requires a `SerialFunctionSource` **and** a
+  `SerialFunctionRealizes` relating it to the contract. There is no collapse
+  without a machine.
+* `SerialFunctionRealizes.converse` requires every state the contract's `Post`
+  permits to be one the machine actually reaches — §3's `converse` field, and
+  the load-bearing one.
+* `decide` is a function of the machine state, so from one entry the machine
+  reaches at most one exit (`exit_is_unique`). With `converse`, `Post` is
+  therefore **single-valued**: `post_is_determined`.
+
+`a_call_that_can_answer_two_ways_is_not_serial` is that as a refusal. A
+`blockingRead` whose post-state depends on how many bytes arrived has no
+realizing source, so it has no collapse, so it stays a frontier — which is §3's
+"a synchronous platform API is still modeled by a child protocol because its
+return is external entropy".
 
 ## What is still a field, and why
 
-`Post`, `obligations`, `resources`, and `faultCustody` stay fields: they are the
-content of the contract and nothing structural can supply them. `footprint` is
-carried as an agreement relation rather than as an opaque `LogicalFootprint`, so
-`postWithinFootprint` is a claim about a value the author supplied — the same
-trade as `NetworkAssertion.framed`.
+`Post`, `obligations`, `resources`, and `faultCustody` are the content of the
+contract and nothing structural can supply them. What review showed is that
+being a field is not enough on its own:
 
-`workBound` stays an `Option`, and `terminating_is_not_bounded` is why: §3 says
-"If a product responsiveness theorem needs a numeric amount of work between
-frontiers, `workBound` is present and proved; bare termination is not silently
-promoted to a latency bound." A contract with a well-founded rank and
-`workBound = none` terminates and bounds nothing, and `Responsive` is the
-predicate a consumer has to ask for rather than assume.
+* `footprintAgrees` is a relation the same author supplies as `Post`, so
+  `fun _ _ => True` discharged `postWithinFootprint` by `trivial`.
+  `footprintSeparates` forbids exactly that. It does not make the footprint
+  *right*, and see §10.31 for what would.
+* `workBound` was `present` without §3's `and proved`, so any contract could
+  claim a zero-work latency bound by writing one field.
+  `SerialFunctionRealizes.bounded` is the missing proof, and `Responsive` now
+  has `responsive_is_realized` behind it.
+* `faultCustody` quoted §3's "resource custody, obligation custody, and any
+  partial mutation" while its arity mentioned neither ledger. It now takes all
+  three.
 
-## What this module does not do
+## What this module still does not do
 
-It does not prove `FiniteStutteringCallSimulation`: relating a contract to a
-*machine* realization is `docs/MACHINE.md`'s layer, not this one, and
-`Grass.Process` has no machine. `SerialCallVisibility` is here because it is the
-condition under which a collapse is *permitted*, and §3 is explicit that "a
-footprint alone is insufficient" — so the visibility witness has to exist as a
-type before anything can require it.
+It does not prove §3's `FiniteStutteringCallSimulation` against a *machine* ABI
+— `bounded`'s step count is the source's, not an instruction count, and there is
+no ghost erasure or encoding here. Of that structure's nine fields, `entry`,
+`exit`, `converse`, `custody`, `rank` and `visibility` are stated here against
+`SerialFunctionSource`; `internal` and `bounded` are stated in the weaker
+source-relative form; `partialMutation` is `faultCustody`. The ABI half is
+`docs/MACHINE.md`'s.
+
+`SerialCallVisibility`'s `Exclusive`, `LinearizesAt` and `Noninterference` are
+parameters supplied by the surrounding plan, and nothing here ties `Exclusive`
+to `footprintAgrees`. §3 writes `CallerExclusivelyOwns contract.footprint`, so
+that tie is real and missing; it needs the surrounding network's ownership
+discipline, which is the memory layer's. Recorded as §10.32 rather than
+approximated.
 -/
 
 namespace Grass.Process
@@ -86,8 +112,9 @@ inductive SerialCallDisposition (Output Fault : Type w) : Type w
 What a serial function does at a state.
 
 **Two constructors, where `SequentialDecision` has three.** The missing one is
-`.effect demand resume`, and its absence is §3's `noFrontier` — not as a promise
-an author makes but as a decision they cannot express.
+`.effect demand resume`. That is a real difference and it is what makes
+`exit_is_unique` provable; it is not, on its own, the frontier-freedom argument
+— see the module note.
 -/
 inductive SerialDecision (State ExitState : Type w) : Type w
   /-- Keep going. -/
@@ -105,17 +132,10 @@ def IsExit : SerialDecision State ExitState → Prop
   | .exit _ => True
 
 /--
-**No decision waits.**
+No decision waits.
 
-`docs/PROCESS.md` §3's `NoExternalPendingCancellationOrInterleavingFrontier`, as
-a fact about the type rather than a field of the contract. Every decision either
-continues internally or exits, so "remain pending" is not something a serial
-function can decide to do.
-
-Compare `Grass/Process/Sequential/Machine.lean`'s `SequentialDecision.AtFrontier`,
-which is *true* of `.effect` — a sequential machine can wait, and a serial
-function cannot. That is the semantic boundary §3 draws, and it is drawn by the
-constructor list rather than by an obligation.
+True of the type, and worth exactly what the module note says it is worth: it
+gives `exit_is_unique`, and the frontier argument needs `converse` as well.
 -/
 theorem no_waiting_decision (decision : SerialDecision State ExitState) :
     (∃ next, decision = .internal next) ∨ ∃ state, decision = .exit state := by
@@ -129,11 +149,6 @@ end SerialDecision
 
 /--
 `docs/PROCESS.md` §3's `SerialFunctionContract`, over a process's logical state.
-
-Three deliberate departures from the declaration, all recorded in the module
-note: `noFrontier` is structural rather than a field, `footprint` is an
-agreement relation rather than an opaque `LogicalFootprint`, and
-`FiniteStutteringCallSimulation` is absent because this layer has no machine.
 -/
 structure SerialFunctionContract (State : Type w) : Type (w + 1) where
   /-- What the call is given. -/
@@ -144,44 +159,65 @@ structure SerialFunctionContract (State : Type w) : Type (w + 1) where
   Fault : Type w
   /-- The states it may stop at. -/
   ExitState : Type w
+  /-- The local obligation state it transforms. -/
+  Obligations : Type w
+  /-- The local resource state it transforms. -/
+  Resources : Type w
   /-- When it may be called. -/
   Pre : Input → State → Prop
   /-- What each exit means. -/
   disposition : ExitState → SerialCallDisposition Output Fault
   /-- The state transformation each exit performs. -/
   Post : Input → ExitState → State → State → Prop
+  /-- Its obligation transformation. -/
+  obligations : Input → ExitState → Obligations → Obligations → Prop
+  /-- Its resource transformation. -/
+  resources : Input → ExitState → Resources → Resources → Prop
   /--
   Two states agree outside what this call may touch.
 
   §3's `footprint : LogicalFootprint`, carried as the relation a footprint
-  *induces* rather than as an opaque handle. That is what makes
-  `postWithinFootprint` checkable: an author who declares a narrow footprint and
-  writes a `Post` that changes more cannot discharge it.
+  *induces* rather than as an opaque handle.
   -/
   footprintAgrees : State → State → Prop
   /-- **And the call really stays inside it.** -/
   postWithinFootprint : ∀ input exit before after,
     Post input exit before after → footprintAgrees before after
-  /-- What each exit does to local obligations. -/
-  Obligations : Type w
-  /-- Its obligation transformation. -/
-  obligations : Input → ExitState → Obligations → Obligations → Prop
-  /-- What each exit does to local resources. -/
-  Resources : Type w
-  /-- Its resource transformation. -/
-  resources : Input → ExitState → Resources → Resources → Prop
-  /-- The mutation and custody a raised fault leaves behind. -/
-  faultCustody : Fault → State → State → Prop
   /--
-  **A raised fault declares its exact partial mutation.**
+  **And the footprint separates something.**
 
-  §3: "Each exit fixes the logical post-state, resource custody, obligation
-  custody, and any partial mutation; there is no generic exceptional edge whose
-  state is left implicit."
+  Without this, `footprintAgrees := fun _ _ => True` discharges
+  `postWithinFootprint` by `trivial` and the footprint bounds nothing —
+  `Grass/Process/Network/Assertion.lean` records the same failure for
+  `NetworkAssertion.framed`, where the fix was `agreesGlue`.
+
+  This is weaker than `agreesGlue`: it forbids the degenerate footprint without
+  forcing the declared one to be the real one. Doing better needs the footprint
+  to range over *fragments* of the state rather than over the state as a whole,
+  which this layer cannot express — see
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.31.
   -/
-  faultsDeclared : ∀ input exit before after fault,
-    disposition exit = .raised fault → Post input exit before after →
-    faultCustody fault before after
+  footprintSeparates : ∃ left right, ¬ footprintAgrees left right
+  /--
+  The mutation and custody a raised fault leaves behind.
+
+  All three ledgers, because §3 asks for all three: "Each exit fixes the logical
+  post-state, resource custody, obligation custody, and any partial mutation;
+  there is no generic exceptional edge whose state is left implicit." An earlier
+  version took only the state and quoted that sentence anyway.
+  -/
+  faultCustody : Fault → State → Obligations → Resources →
+    State → Obligations → Resources → Prop
+  /-- **And a raised fault declares its exact partial mutation and custody.** -/
+  faultsDeclared : ∀ input exit fault
+      before beforeObligations beforeResources
+      after afterObligations afterResources,
+    disposition exit = .raised fault →
+    Post input exit before after →
+    obligations input exit beforeObligations afterObligations →
+    resources input exit beforeResources afterResources →
+    faultCustody fault before beforeObligations beforeResources
+      after afterObligations afterResources
   /-- The carrier of the internal measure. -/
   Rank : Type w
   /-- Its strict order. -/
@@ -192,7 +228,9 @@ structure SerialFunctionContract (State : Type w) : Type (w + 1) where
   A numeric work bound, when a product responsiveness theorem needs one.
 
   §3: "bare termination is not silently promoted to a latency bound." `none` is
-  the ordinary case and `Responsive` below is what a consumer must ask for.
+  the ordinary case, and a `some` is not self-certifying —
+  `SerialFunctionRealizes.bounded` is what makes it a claim about a machine
+  rather than a number an author wrote.
   -/
   workBound : Option (Input → State → Nat)
 
@@ -200,32 +238,21 @@ namespace SerialFunctionContract
 
 variable {State : Type w} (contract : SerialFunctionContract State)
 
-/--
-The contract claims a numeric work bound.
-
-Stated as a predicate rather than read off the `Option` at each use site,
-because §3's point is that a consumer has to *ask*: a contract that terminates
-is not thereby responsive.
--/
+/-- The contract claims a numeric work bound. -/
 def Responsive : Prop := ∃ bound, contract.workBound = some bound
 
 /--
-**Termination does not give a work bound.**
+Termination does not give a work bound.
 
-The `Option` is doing real work: a contract carries a well-founded rank
-unconditionally and a numeric bound only when someone proved one, so a
-responsiveness theorem cannot be assembled out of termination alone. Stated as
-the obvious fact that `none` is not `some`, because the alternative — a
-`workBound : Input → State → Nat` field — would have made every terminating
-contract claim a latency bound it had not proved.
+The `Option` is doing real work, and this is the trivial half of why: `none` is
+not `some`. The half with content is `responsive_is_realized`, which says a
+`some` has been proved against a machine.
 -/
 theorem terminating_is_not_bounded (noBound : contract.workBound = none) :
     ¬ contract.Responsive := by
   rintro ⟨bound, isSome⟩
   rw [noBound] at isSome
   exact absurd isSome (by simp)
-
-/-! ### Exits -/
 
 variable {contract}
 
@@ -250,31 +277,33 @@ theorem exit_returns_or_raises (exit : contract.ExitState) :
   | .returned value => exact Or.inl ⟨value, decision⟩
   | .raised value => exact Or.inr ⟨value, decision⟩
 
-/-- **And a raising exit's mutation is declared.** -/
-theorem raising_exit_declares_its_mutation {exit : contract.ExitState}
-    (raises : Raises exit) {input : contract.Input} {before after : State}
-    (post : contract.Post input exit before after) :
-    ∃ fault, contract.faultCustody fault before after := by
+/-- **And a raising exit's mutation and custody are declared.** -/
+theorem raising_exit_declares_its_custody {exit : contract.ExitState}
+    (raises : Raises exit) {input : contract.Input}
+    {before after : State}
+    {beforeObligations afterObligations : contract.Obligations}
+    {beforeResources afterResources : contract.Resources}
+    (post : contract.Post input exit before after)
+    (movedObligations : contract.obligations input exit beforeObligations afterObligations)
+    (movedResources : contract.resources input exit beforeResources afterResources) :
+    ∃ fault, contract.faultCustody fault before beforeObligations beforeResources
+      after afterObligations afterResources := by
   obtain ⟨fault, isRaised⟩ := raises
-  exact ⟨fault, contract.faultsDeclared input exit before after fault isRaised post⟩
-
-/-- **And every exit stays inside the footprint, raising or returning alike.** -/
-theorem every_exit_stays_inside_the_footprint {input : contract.Input}
-    {exit : contract.ExitState} {before after : State}
-    (post : contract.Post input exit before after) :
-    contract.footprintAgrees before after :=
-  contract.postWithinFootprint input exit before after post
+  exact ⟨fault, contract.faultsDeclared input exit fault before beforeObligations
+    beforeResources after afterObligations afterResources isRaised post
+    movedObligations movedResources⟩
 
 end SerialFunctionContract
 
-/-! ## A function as a machine, and the theorem that buys -/
+/-! ## A function as a machine -/
 
 /--
-A serial function's internal structure: states, a decision at each, and a rank
-its internal decisions decrease.
+A serial function's internal structure.
 
-Separate from the contract because the contract is what a *caller* sees and this
-is what an *author* writes. `reaches_an_exit` is what relates them.
+`read` is what makes this relatable to the contract at all: a machine state
+represents a logical state, and `enterReads` says entering represents the state
+the call was made at. Without it `enter` was a field nothing consumed, and
+`reaches_an_exit` reached an exit with no connection to the caller's `Post`.
 -/
 structure SerialFunctionSource {State : Type w}
     (contract : SerialFunctionContract State) : Type (w + 1) where
@@ -282,18 +311,15 @@ structure SerialFunctionSource {State : Type w}
   Machine : Type w
   /-- Where it starts. -/
   enter : contract.Input → State → Machine
+  /-- The logical state a machine state represents. -/
+  read : Machine → State
+  /-- Entering represents the state the call was made at. -/
+  enterReads : ∀ input before, read (enter input before) = before
   /-- What it does at a state. -/
   decide : Machine → SerialDecision Machine contract.ExitState
   /-- Its internal measure. -/
   rank : Machine → contract.Rank
-  /--
-  **Internal decisions strictly decrease it.**
-
-  The whole of an author's progress obligation, and `reaches_an_exit` is what it
-  buys. §3's `EveryInternalAndRecursiveSCCEdgeStrictlyDecreases` covers ordinary
-  CFG edges and recursive call edges alike, which is why the measure is on the
-  machine state rather than on a syntactic position.
-  -/
+  /-- **Internal decisions strictly decrease it.** -/
   internalDecreases : ∀ state next,
     decide state = .internal next → contract.rankLt (rank next) (rank state)
 
@@ -316,21 +342,31 @@ inductive InternalSteps (source : SerialFunctionSource contract) :
       (first : source.InternalStep start middle)
       (rest : InternalSteps source middle finish) : InternalSteps source start finish
 
+/-- Zero or more, within a step budget. -/
+inductive InternalStepsWithin (source : SerialFunctionSource contract) :
+    Nat → source.Machine → source.Machine → Prop
+  /-- None, with any budget left. -/
+  | refl (fuel : Nat) (state : source.Machine) : InternalStepsWithin source fuel state state
+  /-- One more, spending one unit. -/
+  | step {fuel : Nat} {start middle finish : source.Machine}
+      (first : source.InternalStep start middle)
+      (rest : InternalStepsWithin source fuel middle finish) :
+      InternalStepsWithin source (fuel + 1) start finish
+
+/-- A budgeted execution is an execution. -/
+theorem InternalStepsWithin.toSteps {fuel : Nat} {start finish : source.Machine}
+    (bounded : source.InternalStepsWithin fuel start finish) :
+    source.InternalSteps start finish := by
+  induction bounded with
+  | refl _ state => exact .refl state
+  | step first _ ih => exact .step first ih
+
 /--
 **Every maximal internal execution reaches an exit.**
 
 `docs/PROCESS.md` §3's `EveryMaximalInternalExecutionHasExactlyOneDeclaredExit`,
-and the theorem that licenses collapsing a call into one process transition.
-
-Compare `Grass/Process/Sequential/Machine.lean`'s `reachesFrontier`, which is
-the same induction over the same kind of rank and reaches a weaker conclusion —
-an effect *or* a terminal. The difference is entirely the constructor list: a
-serial function cannot decide `.effect`, so there is no frontier for it to stop
-at and "reaches a frontier" collapses into "exits".
-
-That is what §3 means by the boundary being semantic. A computation that can
-wait is not made serial by proving something about it; it fails to be
-expressible as a `SerialFunctionSource` at all.
+at the "reaches" half. `exit_is_unique` is the "exactly one" half, which an
+earlier version of this module claimed in prose and did not state.
 -/
 theorem reaches_an_exit (state : source.Machine) :
     ∃ finish, source.InternalSteps state finish ∧ (source.decide finish).IsExit := by
@@ -345,12 +381,40 @@ theorem reaches_an_exit (state : source.Machine) :
       exact ⟨finish, .step decision steps, isExit⟩
     | .exit exitState => exact ⟨state, .refl state, by rw [decision]; exact trivial⟩
 
-/--
-And the exit it reaches is the only kind of stopping place there is.
+variable {source}
 
-Stated because the sequential analogue needs the reader to check *which*
-frontier was reached; here there is nothing to check.
+/--
+**And it reaches exactly one.**
+
+`decide` is a function of the machine state and an exit has no successor, so the
+execution from a given entry is a chain with one endpoint. This is what makes
+`post_is_determined` work, and through it the whole frontier-freedom argument.
 -/
+theorem exit_is_unique {start finishLeft finishRight : source.Machine}
+    (left : source.InternalSteps start finishLeft)
+    (leftExit : (source.decide finishLeft).IsExit)
+    (right : source.InternalSteps start finishRight)
+    (rightExit : (source.decide finishRight).IsExit) : finishLeft = finishRight := by
+  induction left generalizing finishRight with
+  | refl state =>
+    cases right with
+    | refl _ => rfl
+    | step first _ =>
+      rw [show source.decide state = _ from first] at leftExit
+      exact absurd leftExit id
+  | step first _ ih =>
+    cases right with
+    | refl _ =>
+      rw [show source.decide _ = _ from first] at rightExit
+      exact absurd rightExit id
+    | step firstRight restRight =>
+      have same : SerialDecision.internal _ = SerialDecision.internal _ :=
+        Eq.trans (Eq.symm first) firstRight
+      injection same with sameMiddle
+      subst sameMiddle
+      exact ih leftExit restRight rightExit
+
+/-- A state whose decision is not internal is at an exit. -/
 theorem stopping_means_exiting {state : source.Machine}
     (stopped : ∀ next, source.decide state ≠ .internal next) :
     ∃ exitState, source.decide state = .exit exitState := by
@@ -359,6 +423,116 @@ theorem stopping_means_exiting {state : source.Machine}
   | .exit exitState => exact ⟨exitState, rfl⟩
 
 end SerialFunctionSource
+
+/-! ## Relating a source to its contract -/
+
+/--
+The conformance §3 calls `FiniteStutteringCallSimulation`, at the fields this
+layer can state.
+
+`converse` is the one that matters. Without it a contract may relate a
+before-state to many after-states and let the environment choose, which is
+exactly the external entropy §3 excludes from serial calls — and the shape of
+`SerialDecision` says nothing about it, because the contract is a separate
+object.
+-/
+structure SerialFunctionRealizes {State : Type w}
+    (contract : SerialFunctionContract State)
+    (source : SerialFunctionSource contract) : Prop where
+  /--
+  **§3's `exit`: every machine exit is a contract exit, at the state it reads.**
+  -/
+  exitsPost : ∀ input before finish exitState, contract.Pre input before →
+    source.InternalSteps (source.enter input before) finish →
+    source.decide finish = .exit exitState →
+    contract.Post input exitState before (source.read finish)
+  /--
+  **§3's `converse`: every exit the contract permits is one the machine
+  reaches.**
+
+  The load-bearing field. A `Post` that admits two after-states for one call
+  would need the machine to reach both, and `exit_is_unique` says it reaches
+  one — so `post_is_determined` follows, and a computation whose answer comes
+  from outside cannot be a serial call.
+  -/
+  converse : ∀ input before exitState after, contract.Pre input before →
+    contract.Post input exitState before after →
+    ∃ finish, source.InternalSteps (source.enter input before) finish ∧
+      source.decide finish = .exit exitState ∧ source.read finish = after
+  /--
+  **§3's `bounded`: a claimed work bound is met.**
+
+  What makes `Responsive` a proof rather than a number the author wrote. §3:
+  "If a product responsiveness theorem needs a numeric amount of work between
+  frontiers, `workBound` is present *and proved*".
+  -/
+  bounded : ∀ bound, contract.workBound = some bound →
+    ∀ input before, contract.Pre input before →
+      ∃ finish, source.InternalStepsWithin (bound input before)
+        (source.enter input before) finish ∧ (source.decide finish).IsExit
+
+namespace SerialFunctionRealizes
+
+variable {State : Type w} {contract : SerialFunctionContract State}
+  {source : SerialFunctionSource contract}
+
+/--
+**A serial call's answer is determined by its input.**
+
+The theorem the whole module is for. `converse` sends each permitted answer to a
+machine execution, `exit_is_unique` says there is only one, and `read` is a
+function — so two permitted answers to one call are the same answer.
+-/
+theorem post_is_determined (realizes : SerialFunctionRealizes contract source)
+    {input : contract.Input} {before left right : State}
+    {exitState : contract.ExitState} (pre : contract.Pre input before)
+    (leftPost : contract.Post input exitState before left)
+    (rightPost : contract.Post input exitState before right) : left = right := by
+  obtain ⟨finishLeft, stepsLeft, exitLeft, readsLeft⟩ :=
+    realizes.converse input before exitState left pre leftPost
+  obtain ⟨finishRight, stepsRight, exitRight, readsRight⟩ :=
+    realizes.converse input before exitState right pre rightPost
+  have same : finishLeft = finishRight :=
+    SerialFunctionSource.exit_is_unique stepsLeft (by rw [exitLeft]; trivial)
+      stepsRight (by rw [exitRight]; trivial)
+  rw [← readsLeft, ← readsRight, same]
+
+/--
+**So a call that can answer two ways is not a serial call.**
+
+§3's boundary, as a refusal rather than a promise. A `blockingRead` whose
+post-state depends on how many bytes arrived relates one before-state to many
+after-states; by `post_is_determined` it has no realizing source, so by
+`CollapsesToOneTransition` it has no collapse, so it stays a frontier and gets a
+child protocol.
+
+That is what §3 means by "a synchronous platform API is still modeled by a child
+protocol because its return is external entropy, even when its selected machine
+realization is one blocking ABI call". An earlier version of this module argued
+the same conclusion from the shape of `SerialDecision`, and local adversarial
+review built exactly this contract, gave it a source, and collapsed it.
+-/
+theorem a_call_that_can_answer_two_ways_is_not_serial
+    (realizes : SerialFunctionRealizes contract source) {input : contract.Input}
+    {before left right : State} {exitState : contract.ExitState}
+    (pre : contract.Pre input before)
+    (leftPost : contract.Post input exitState before left)
+    (rightPost : contract.Post input exitState before right)
+    (different : left ≠ right) : False :=
+  different (realizes.post_is_determined pre leftPost rightPost)
+
+/-- **And a claimed responsiveness bound is met by the machine.** -/
+theorem responsive_is_realized (realizes : SerialFunctionRealizes contract source)
+    (responsive : contract.Responsive)
+    {input : contract.Input} {before : State} (pre : contract.Pre input before) :
+    ∃ bound finish, contract.workBound = some bound ∧
+      source.InternalStepsWithin (bound input before)
+        (source.enter input before) finish ∧ (source.decide finish).IsExit := by
+  obtain ⟨bound, isSome⟩ := responsive
+  obtain ⟨finish, steps, isExit⟩ := realizes.bounded bound isSome input before pre
+  exact ⟨bound, finish, isSome, steps, isExit⟩
+
+end SerialFunctionRealizes
 
 /-! ## When a collapse is permitted -/
 
@@ -369,15 +543,15 @@ end SerialFunctionSource
 > shared state instead supplies a linearization point and a noninterference
 > proof; a footprint alone is insufficient.
 
-The last clause is why this is an inductive with two constructors rather than a
-side condition on the footprint. A contract's `footprintAgrees` says what the
-call changed; it says nothing about who else could observe the change while it
-was in progress, and there is no way to derive the second from the first.
+An inductive with two constructors rather than a side condition on the
+footprint, because what the call changed and who could observe it mid-flight are
+different questions and neither derives the other.
 
-`Interference` is a parameter rather than a field because what counts as
-interference is a fact about the surrounding network, not about the function:
-the same proved routine is exclusive in one plan and needs a linearization point
-in another.
+`Exclusive`, `LinearizesAt` and `Noninterference` are parameters supplied by the
+surrounding plan: the same proved routine is exclusive in one network and needs
+a linearization point in another. Nothing here ties `Exclusive` to
+`footprintAgrees`, which §3 does — see the module note and
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.32.
 -/
 inductive SerialCallVisibility {State : Type w} (contract : SerialFunctionContract State)
     (Exclusive : contract.Input → State → Prop)
@@ -399,15 +573,15 @@ inductive SerialCallVisibility {State : Type w} (contract : SerialFunctionContra
 occurrence, or scheduling point merely because the machine realization uses an
 ABI `call`."
 
-Written into the shape of the definition rather than proved about it: the issued
-bag is `0` and the observation segment is `[]`, so a step that *did* issue
-something is not a `CollapsesToOneTransition` at all. That is the same trade as
-`NetworkAssertion.footprint` — an author supplies a value the type constrains,
-instead of a promise a theorem restates.
+`sound` exhibits the zero-issuing step and `demandFree` bounds it. Both are
+needed: `ProcessSpec.Step` is a relation, so a witness with `issued = 0` says
+nothing about what else the same transition admits — an earlier version had only
+`sound` and a docstring claiming the bound.
 
-`visibility` is a field because §3 requires it and because a collapse without
-one would be `docs/FOUNDATION.md` law 8's permissive fallback: the ordinary case
-would silently become the exclusive case.
+`source` and `realizes` are fields, not context. Without them the collapse
+consults no frontier-freedom argument at all, which is what local adversarial
+review found: `noFrontier` had been deleted from the contract and replaced by a
+fact about a type no consumer had to inhabit.
 -/
 structure CollapsesToOneTransition {p : ProcessSpec.{u, w}}
     (contract : SerialFunctionContract p.State)
@@ -416,9 +590,17 @@ structure CollapsesToOneTransition {p : ProcessSpec.{u, w}}
     (LinearizesAt : LinearizationPoint → contract.Input → p.State → Prop)
     (Noninterference : LinearizationPoint → contract.Input → p.State → Prop)
     (event : ProcessEvent p.vocabulary) : Type (max u (w + 1)) where
+  /-- The machine that realizes the contract. -/
+  source : SerialFunctionSource contract
+  /-- And the proof that it does — including §3's `converse`. -/
+  realizes : SerialFunctionRealizes contract source
   /-- Every permitted call is a step of the process, issuing nothing and emitting nothing. -/
   sound : ∀ input exit before after, contract.Pre input before →
     contract.Post input exit before after → p.Step before event after 0 []
+  /-- **And no other bag or segment is admitted at that transition.** -/
+  demandFree : ∀ input exit before after issued emitted, contract.Pre input before →
+    contract.Post input exit before after →
+    p.Step before event after issued emitted → issued = 0 ∧ emitted = []
   /-- And every call at a permitted entry has a visibility witness. -/
   visibility : ∀ input before, contract.Pre input before →
     SerialCallVisibility contract Exclusive LinearizationPoint LinearizesAt
@@ -433,34 +615,55 @@ variable {p : ProcessSpec.{u, w}} {contract : SerialFunctionContract p.State}
   {event : ProcessEvent p.vocabulary}
 
 /--
-**So the process's outstanding demands are unchanged by the call.**
+**So the transition issues nothing, whatever witness one has of it.**
 
-The consequence a caller wants: a transition realized by a serial call
-contributes nothing to the run's outstanding bag, which is why the call needs no
-occurrence identity, no child, and no escrow.
+The bound rather than the witness: any `Step` at this transition has an empty
+bag and an empty segment, so a run's outstanding demands really are unchanged by
+the call.
 -/
 theorem issues_nothing
     (collapse : CollapsesToOneTransition contract Exclusive LinearizationPoint
       LinearizesAt Noninterference event)
-    {input : contract.Input} {exit : contract.ExitState} {before after : p.State}
-    (pre : contract.Pre input before) (post : contract.Post input exit before after) :
-    p.Step before event after 0 [] :=
-  collapse.sound input exit before after pre post
+    {input : contract.Input} {exit : contract.ExitState}
+    {before after : p.State} {issued : Bag p.Demand}
+    {emitted : ObservationSegment p.Observation}
+    (pre : contract.Pre input before) (post : contract.Post input exit before after)
+    (step : p.Step before event after issued emitted) : issued = 0 ∧ emitted = [] :=
+  collapse.demandFree input exit before after issued emitted pre post step
 
 /--
-**And a collapse cannot be had without saying why it is invisible.**
+**And the call's answer is determined**, because a collapse carries a realizing
+machine.
 
-`docs/FOUNDATION.md` law 8 at this seam: there is no default. A call that
-neither owns what it touches nor supplies a linearization point has no
-visibility witness, so it has no `CollapsesToOneTransition` and stays a frontier.
+The consequence of making `source` and `realizes` fields: a caller who has a
+collapse has the frontier-freedom argument, rather than having to trust that
+somebody checked one elsewhere.
 -/
-theorem collapse_names_its_visibility
+theorem answer_is_determined
     (collapse : CollapsesToOneTransition contract Exclusive LinearizationPoint
       LinearizesAt Noninterference event)
-    (input : contract.Input) (before : p.State) (pre : contract.Pre input before) :
-    Nonempty (SerialCallVisibility contract Exclusive LinearizationPoint LinearizesAt
-      Noninterference input before) :=
-  ⟨collapse.visibility input before pre⟩
+    {input : contract.Input} {exit : contract.ExitState}
+    {before left right : p.State} (pre : contract.Pre input before)
+    (leftPost : contract.Post input exit before left)
+    (rightPost : contract.Post input exit before right) : left = right :=
+  collapse.realizes.post_is_determined pre leftPost rightPost
+
+/--
+A collapse names its visibility.
+
+A projection, and stated because §3 requires the field: there is no collapse
+whose visibility went unstated. It does *not* say that some call has no
+visibility witness — `Exclusive` is the plan's to choose, and a plan that chose
+`fun _ _ => True` would satisfy it everywhere. That is §10.32.
+-/
+def collapse_names_its_visibility
+    (collapse : CollapsesToOneTransition contract Exclusive LinearizationPoint
+      LinearizesAt Noninterference event)
+    (input : contract.Input) (before : p.State)
+    (pre : contract.Pre input before) :
+    SerialCallVisibility contract Exclusive LinearizationPoint LinearizesAt
+      Noninterference input before :=
+  collapse.visibility input before pre
 
 end CollapsesToOneTransition
 
