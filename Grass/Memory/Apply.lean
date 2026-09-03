@@ -323,6 +323,52 @@ refused, two accesses would not commute however their bytes behaved.
 `denialOf_applyAccess_of_disjoint` are the lemmas that rule it out.
 -/
 
+/--
+**Agreeing states decide the same way.**
+
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 recorded that `MemoryState.AgreesOn` does
+not carry the refusal decision, and that a caller wanting decision stability had to
+assemble it. This is that assembly, and it makes plain why cells alone were never
+enough: `denialOf` reads five metadata fields as well as initialization, so two
+states can agree at every byte and refuse differently. Review built exactly that
+pair.
+
+With both halves it goes through. Metadata agreement covers liveness, epoch,
+space, bounds and permission directly, and with cell agreement it also gives
+initialization by `rangeInitialized_congr_of_agrees`.
+-/
+theorem denialOf_congr_of_agrees {a b : MemoryState} {d : AccessDescriptor}
+    (hmeta : a.MetadataAt d.provenance.root = b.MetadataAt d.provenance.root)
+    (hcells : a.AgreesOn b) : denialOf a d = denialOf b d := by
+  unfold denialOf
+  simp only [MemoryState.rangeInitialized_congr_of_agrees hmeta hcells]
+  unfold MemoryState.MetadataAt at hmeta
+  cases ha : a.allocations.lookup d.provenance.root with
+  | none =>
+    rw [ha] at hmeta
+    cases hb : b.allocations.lookup d.provenance.root with
+    | none => rfl
+    | some rb => rw [hb] at hmeta; simp at hmeta
+  | some ra =>
+    rw [ha] at hmeta
+    cases hb : b.allocations.lookup d.provenance.root with
+    | none => rw [hb] at hmeta; simp at hmeta
+    | some rb =>
+      rw [hb] at hmeta
+      simp only [Option.map_some, Option.some.injEq] at hmeta
+      have he : ra.extent = rb.extent :=
+        congrArg AllocationRecord.Metadata.extent hmeta
+      have hep : ra.epoch = rb.epoch :=
+        congrArg AllocationRecord.Metadata.epoch hmeta
+      have hsp : ra.space = rb.space :=
+        congrArg AllocationRecord.Metadata.space hmeta
+      have hpe : ra.permission = rb.permission :=
+        congrArg AllocationRecord.Metadata.permission hmeta
+      have hli : ra.live = rb.live :=
+        congrArg AllocationRecord.Metadata.live hmeta
+      simp only []
+      rw [he, hep, hsp, hpe, hli]
+
 /-- A write to another allocation does not change whether `d` is refused. -/
 theorem denialOf_write_of_other_allocation (state : MemoryState) (d : AccessDescriptor)
     {id : AllocId} (hne : d.provenance.root ≠ id) (start : Nat) (bytes : ByteSeq)

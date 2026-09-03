@@ -637,10 +637,6 @@ one outright defect that had already merged — see §3.11's denial row.
   allocations with no machine address at all, so a base must be optional and
   per-space. Until it is wired, the offset-to-address debt
   [Range.lean](../Grass/Memory/Range.lean) records is *not* discharged.
-- **Result-level commutation.** `applyAccess_comm` concludes about the resulting
-  state only. That neither order refuses what the other commits, and that a read
-  observes the same bytes either way, are both true and neither is stated;
-  `observedBytes_congr` is the piece a caller would build them from.
 - **Cross-allocation commutation.** `applyAccess_comm` requires both accesses in
   one allocation. `denialOf_write_of_other_allocation` is the decision half of the
   cross-allocation case; the theorem is not stated.
@@ -689,12 +685,11 @@ one outright defect that had already merged — see §3.11's denial row.
 - **`Restartability` is declared and never read.** A profile can require the facet
   and a descriptor carries a value, but nothing in the transition consults it, so
   [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.4's retry rules have no mechanism here.
-- **`AgreesOn` does not carry the refusal decision.** It compares cells, which is
-  bytes and initialization. `denialOf` also reads `extent`, `epoch`, `space`,
-  `permission` and `live`, so two states can agree and refuse differently — review
-  built that pair. `applyAccess_comm` is sound because `write_preserves_metadata`
-  holds separately, but there is no `AgreesOn → denialOf` lemma and a caller
-  wanting decision stability has to assemble it.
+- **Result-level commutation.** `applyAccess_comm` concludes about the resulting
+  state only. That neither order refuses what the other commits is now assemblable
+  from `denialOf_congr_of_agrees` and `MemoryState.metadataAt_write`, but the
+  theorem combining them is not stated; nor is the read-observes-the-same-bytes
+  half, for which `observedBytes_congr` is the piece.
 - **`runStep_records_the_fault`'s `hreached` has no abstract discharge.** A caller
   can close it by `decide` on a concrete fixture. There is no lemma taking "no
   survivor is refused" to it, because that has to thread state through the

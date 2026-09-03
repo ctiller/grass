@@ -58,6 +58,31 @@ structure AllocationRecord where
 deriving DecidableEq, Repr
 
 /--
+Everything about an allocation except its bytes.
+
+`denialOf` reads exactly these five fields plus initialization, so this is the
+view a decision depends on. Naming it lets a framing argument say "the metadata
+did not move" without asserting the bytes did not, which is the whole point of a
+write.
+-/
+structure AllocationRecord.Metadata where
+  /-- The allocation's extent. -/
+  extent : ByteRange
+  /-- Its reuse generation. -/
+  epoch : EpochId
+  /-- Its address space. -/
+  space : AddressSpaceId
+  /-- The permission its storage carries. -/
+  permission : Permission
+  /-- Whether it is live. -/
+  live : Bool
+deriving DecidableEq, Repr
+
+/-- The metadata view of a record. -/
+def AllocationRecord.metadata (record : AllocationRecord) : AllocationRecord.Metadata :=
+  ⟨record.extent, record.epoch, record.space, record.permission, record.live⟩
+
+/--
 The memory state.
 
 `aliases` is symmetric by convention and `SharesBytes` closes it, so a profile
@@ -495,6 +520,74 @@ theorem initializedAt_write_iff_of_not_covers (state : MemoryState) (id : AllocI
       state.InitializedAt other offset := by
   unfold InitializedAt
   rw [cellAt?_write_of_not_covers state id h]
+
+/-- `state.MetadataAt id` is what a decision about `id` reads besides its bytes. -/
+def MetadataAt (state : MemoryState) (id : AllocId) : Option AllocationRecord.Metadata :=
+  (state.allocations.lookup id).map AllocationRecord.metadata
+
+/-- A write moves no metadata, which is the half of a framing argument that says a
+later access is decided the same way. The bytes are exactly what it does move. -/
+@[simp] theorem metadataAt_write (state : MemoryState) (id : AllocId) (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) (other : AllocId) :
+    (state.write id start bytes initializes).MetadataAt other = state.MetadataAt other := by
+  unfold MetadataAt write
+  cases hfound : state.allocations.lookup id with
+  | none => rfl
+  | some record =>
+    by_cases hid : other = id
+    · subst hid
+      rw [FiniteMap.lookup_insert_self, hfound]
+      rfl
+    · rw [FiniteMap.lookup_insert_ne _ hid]
+
+/-- An allocation is present exactly when its metadata is. -/
+theorem isSome_metadataAt (state : MemoryState) (id : AllocId) :
+    (state.MetadataAt id).isSome = (state.allocations.lookup id).isSome := by
+  unfold MetadataAt
+  cases state.allocations.lookup id <;> rfl
+
+/--
+Cell agreement plus metadata agreement gives initialization agreement.
+
+`AgreesOn` alone does not: `RangeInitialized` is `False` for a missing allocation,
+so a state where `id` is absent and one where it is present with an empty store
+agree at every cell and disagree here. That was the gap
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 recorded, and the presence half is what
+closes it.
+-/
+theorem rangeInitialized_congr_of_agrees {a b : MemoryState} {id : AllocId}
+    {range : ByteRange} (hpresent : a.MetadataAt id = b.MetadataAt id)
+    (hcells : a.AgreesOn b) : a.RangeInitialized id range ↔ b.RangeInitialized id range := by
+  have hsome : (a.allocations.lookup id).isSome = (b.allocations.lookup id).isSome := by
+    rw [← isSome_metadataAt, ← isSome_metadataAt, hpresent]
+  unfold RangeInitialized
+  cases ha : a.allocations.lookup id with
+  | none =>
+    have : (b.allocations.lookup id).isSome = false := by rw [← hsome, ha]; rfl
+    cases hb : b.allocations.lookup id with
+    | none => exact Iff.rfl
+    | some _ => rw [hb] at this; simp at this
+  | some ra =>
+    cases hb : b.allocations.lookup id with
+    | none =>
+      have : (a.allocations.lookup id).isSome = false := by rw [hsome, hb]; rfl
+      rw [ha] at this; simp at this
+    | some rb =>
+      constructor <;> intro h offset hcov
+      · have := h offset hcov
+        have hc := hcells id offset
+        unfold cellAt? at hc
+        rw [ha, hb] at hc
+        simp only [Option.bind_some] at hc
+        unfold ByteStore.InitializedAt at this ⊢
+        rw [← hc]; exact this
+      · have := h offset hcov
+        have hc := hcells id offset
+        unfold cellAt? at hc
+        rw [ha, hb] at hc
+        simp only [Option.bind_some] at hc
+        unfold ByteStore.InitializedAt at this ⊢
+        rw [hc]; exact this
 
 /--
 **Writes to disjoint ranges commute.**
