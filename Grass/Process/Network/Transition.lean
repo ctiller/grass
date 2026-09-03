@@ -129,6 +129,27 @@ structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
     (resolution : ChannelResolution
       (EdgeOccurrence plan.topology plan.message edge)
       (plan.topology.ChannelId edge)) : Prop where
+  /--
+  **And it is this session's occurrence.**
+
+  `session` and `occurrence` are independent parameters, and an
+  `EdgeOccurrence` carries its own `ChannelId` — so without this a resolution
+  could be recorded against a session the message was never on.
+
+  That is not untidiness. `docs/PROCESS.md` §3 puts an affine resolve token
+  inside `Escrow`, and `EscrowLedger.atMostOneRecordedEnding` enforces it *per
+  ledger*: one occurrence can therefore be resolved once on each of two
+  sessions and neither ledger notices. Local adversarial review built the
+  two-step program — reroute an occurrence from `wire` to `away`, where
+  `Reroutes.arrives` lets the destination acquire the occurrence itself, then
+  drop it there — and read out two `ChannelResolution`s for one occurrence at
+  one world. `ResolvesEscrow.cannot_resolve_twice` and `resolution_is_exact` are
+  both about one ledger and were both evaded.
+
+  `Delivers` has carried this field since it was written; the reviewer's point
+  was that its five siblings did not.
+  -/
+  onItsSession : occurrence.2.1 = session
   /-- It was in flight. -/
   wasOutstanding : (before.inFlight edge session).Outstanding occurrence
   /-- It is now ended, by exactly this resolution. -/
@@ -228,6 +249,9 @@ before this nothing could ever produce one.
 structure ClosesSession (before after : plan.LogicalProcessNetwork)
     (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
     (occurrence : EdgeOccurrence plan.topology plan.message edge) : Prop where
+  /-- **And it is this session's occurrence**; see `ResolvesEscrow.onItsSession`
+  for the two-step program that field refuses. -/
+  onItsSession : occurrence.2.1 = session
   /-- It was in flight. -/
   wasOutstanding : (before.inFlight edge session).Outstanding occurrence
   /-- It is now resolved as closed. -/
@@ -883,6 +907,9 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
     (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
     (occurrence : EdgeOccurrence plan.topology plan.message edge)
     (destination : plan.topology.ChannelId edge) : Prop where
+  /-- **And it is this session's occurrence**; see `ResolvesEscrow.onItsSession`
+  for the two-step program that field refuses. -/
+  onItsSession : occurrence.2.1 = session
   /-- It was in flight here. -/
   wasOutstanding : (before.inFlight edge session).Outstanding occurrence
   /-- It is now resolved as rerouted, to exactly this destination. -/
@@ -892,8 +919,27 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
   ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
   /-- A reroute goes somewhere else. -/
   elsewhere : destination ≠ session
-  /-- **And the payload arrives at the destination.** -/
-  arrives : ∃ arrival, arrival ∈ (after.inFlight edge destination).created
+  /--
+  **And the payload arrives at the destination.**
+
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.34 asked for "a field putting the
+  arrival in the destination", and the first attempt at it was
+  `∃ arrival, arrival ∈ (after.inFlight edge destination).created` — which says
+  only that the destination's ledger is non-empty afterwards. A destination that
+  was already non-empty satisfied it with its ledger bit-for-bit unchanged, so a
+  reroute really was "a drop with a forwarding address": local adversarial
+  review built one that delivers nothing and showed the after-world still
+  satisfies `LogicalProcessNetworkCore.ReroutesLand`.
+
+  What it says now is that the destination *gained* something it did not have,
+  and that what it gained carries this occurrence's message. That is as close to
+  "the payload" as this layer can get without a notion of identity across
+  sessions: an occurrence's `ChannelOccurrence` is indexed by its session, so
+  the arrival is necessarily a *different* occurrence, and `onItsSession` above
+  is what stops the "different occurrence" being the same one.
+  -/
+  arrives : ∃ arrival, arrival ∉ (before.inFlight edge destination).created ∧
+    arrival ∈ (after.inFlight edge destination).created ∧ arrival.1 = occurrence.1
   /-- Whose ledger also only moved forward. -/
   destinationExtends :
     LedgerExtends (before.inFlight edge destination) (after.inFlight edge destination)
@@ -917,6 +963,9 @@ distinguishable by this field and not by that contract.
 structure KillsSession (before after : plan.LogicalProcessNetwork)
     (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
     (occurrence : EdgeOccurrence plan.topology plan.message edge) : Prop where
+  /-- **And it is this session's occurrence**; see `ResolvesEscrow.onItsSession`
+  for the two-step program that field refuses. -/
+  onItsSession : occurrence.2.1 = session
   /-- It was in flight. -/
   wasOutstanding : (before.inFlight edge session).Outstanding occurrence
   /-- It is now resolved by the channel's death. -/
@@ -944,6 +993,9 @@ It does *not* resolve the escrow, which is the whole point:
 structure RequestsCancel (before after : plan.LogicalProcessNetwork)
     (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
     (occurrence : EdgeOccurrence plan.topology plan.message edge) : Prop where
+  /-- **And it is this session's occurrence**; see `ResolvesEscrow.onItsSession`
+  for the two-step program that field refuses. -/
+  onItsSession : occurrence.2.1 = session
   /-- It was in flight. -/
   wasOutstanding : (before.inFlight edge session).Outstanding occurrence
   /--

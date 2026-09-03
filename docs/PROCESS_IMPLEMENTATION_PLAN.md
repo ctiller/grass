@@ -2173,48 +2173,46 @@ take a classification of the ended instance's bag, which wants the
 specification's `TerminalRemainderLaw` and therefore a plan-level link this
 module does not have. Needs a ruling on where that link lives.
 
-### 10.34 `reroute` cannot write the session it reroutes to
+### 10.34 ~~`reroute` cannot write the session it reroutes to~~ — **closed on the second attempt**
 
-`reroute` is a `ResolvesEscrow`, whose scope is `fragment = .escrow edge
-session` — the *source* session. `ChannelResolution.rerouted` names a
-destination and says the payload "is re-created as a fresh occurrence this
-ledger does not hold", and the destination's ledger is a different fragment the
-step may not touch.
+The entry said `reroute` was a `ResolvesEscrow` scoped to the *source* session,
+so it could not write the destination and `ReroutesLand` degenerated to
+"satisfiable only where the destination was already non-empty". The fix it named
+was "a dedicated structure whose scope names both sessions' escrows, with a field
+putting the arrival in the destination".
 
-So `WellFormed.ReroutesLand` degenerates: it can only be satisfied at a
-destination that was already non-empty before the step, and the reroute itself
-can never make one so. `reroute` is a drop with a forwarding address.
+`Reroutes` is that structure, and **the first version of the field was not that
+field**. `arrives` read "the destination's ledger is non-empty afterwards", which
+an already non-empty destination satisfies with its ledger bit-for-bit unchanged.
+A reviewer built a reroute that delivers nothing and showed the after-world still
+satisfies `ReroutesLand`, so the entry's own conclusion survived the repair meant
+to close it.
 
-The fix is the `Delivers` shape again — a dedicated structure whose scope names
-both sessions' escrows, with a field putting the arrival in the destination.
-Not done here because it wants the destination occurrence's identity, which is
-§10.36's question too.
+It now says the destination *gained* an occurrence it did not have, carrying this
+occurrence's message. That is as close to "the payload" as this layer reaches: a
+`ChannelOccurrence` is indexed by its session, so an arrival at another session is
+necessarily a different occurrence, and §10.36's identity question is what would
+say *which* different one.
 
-### 10.35 No channel step may touch either endpoint's instance slot
+### 10.35 ~~`Delivers` has no `contractual` field~~ — **closed, and what it cost**
 
-`Delivers`, `SendsEscrow` and every `ResolvesEscrow` scope the escrow (and now,
-for delivery and the two closings, the session cursor) and nothing else. So a
-delivery moves the ledger and the cursor and reaches no process:
+The entry said `ChannelContract.receive`, `receivePrecondition` and
+`ReceiverPost` were unreachable from the transition family because `Delivers`
+had no counterpart to `SendsEscrow.contractual`. It has one, and
+`Delivers.establishes_receiverPost` is the theorem it buys.
 
-```lean
-theorem delivery_never_reaches_the_receiver
-    (delivered : plan.Delivers a b edge session occurrence) (kind slot) :
-    a.instances kind slot = b.instances kind slot
-```
+**The first version of the tie was worth nothing**, which a reviewer proved.
+`liveSteps.Receive` was restated for the field as "the occurrence was in flight
+and the cursor advanced by one" — which is *literally* `Delivers.wasOutstanding`
+and `Delivers.cursorAdvances`, so `contractual` was derivable from the
+transition's own other fields and the reviewer rebuilt the fixture's `Delivers`
+without mentioning `plan.steps` at all. The relation now also carries §3's
+`ReceiverPre` — the receiver's cursor is at zero — which is a condition the
+contract imposes and the family does not.
 
-`Grass/Process/Network/Channel.lean`'s `receiverPreLocal` was deliberately
-widened to admit the receiver's own `instanceState`, and
-`ReceiverEventEmbedding.arrives` maps a message to the receiver's `Event` — but
-nothing applies that event to anything. `Delivers` also has no `contractual`
-field where `SendsEscrow` has one, so `ChannelContract.receive`,
-`receivePrecondition` and `ReceiverPost` are unreachable from the transition
-family.
-
-Whether a delivery should move the receiver in the same step, or whether the
-receiver's `processStep` consumes the arrival separately, is a ruling. The
-second reading is defensible and is probably intended — but then §3's receiver
-contract needs a law relating the two steps, and there is none.
-
+The original entry's other half stands: no channel step touches either
+endpoint's *instance* slot, so a receive still cannot be tied to the receiving
+process's own state.
 ### 10.36 `send`, `coalesce` and `reroute` are declared non-allocating
 
 The transition module quotes §3: `allocatedNominals` "contains every new process
@@ -3405,3 +3403,92 @@ deleted, which is §10.50's exact shape — and is the one to remove if any go.
 
 Needs a ruling per item on whether a named obligation with no consumer should
 stay named or go.
+
+### 10.78 One occurrence, two resolutions, in a two-step program
+
+`Delivers` carries `onItsSession` — the occurrence's own `ChannelId` is the
+session the step is about — because "session and occurrence were independent
+parameters". Its five siblings did not: `ResolvesEscrow`, `ClosesSession`,
+`KillsSession`, `Reroutes` and `RequestsCancel` took the same two independent
+parameters with no such field, and nothing in `WellFormed` tied them either.
+
+A reviewer built the consequence. `EscrowLedger.atMostOneRecordedEnding` is a
+fact about *one ledger*, and §3's affine resolve token is not — so one occurrence
+can be resolved once on each of two sessions and neither ledger notices. The
+program is two steps: reroute an occurrence from `wire` to `away`, where the old
+`Reroutes.arrives` let the destination acquire the occurrence itself, then drop
+it there. Both are legal transitions, and the world afterwards records
+`.rerouted away` on `wire` and `.dropped` on `away` for one occurrence.
+`ResolvesEscrow.cannot_resolve_twice` and `resolution_is_exact` are both about
+one ledger and were both evaded.
+
+Fixed: all five carry `onItsSession`, and `Reroutes.arrives` now requires the
+destination to gain a new occurrence rather than to be non-empty (§10.34).
+
+Not one proof broke when the five fields went in, which is the seven-for-seven
+signal: none of the five structures has a witness. §10.79.
+
+### 10.79 Ten of the eleven channel constructors have never been inhabited
+
+`SendsEscrow`, `ClosesSession`, `KillsSession`, `RequestsCancel` and `Reroutes`
+have no witness anywhere in the corpus, and of `NetworkTransition`'s channel
+constructors only `.receive` is ever built. A reviewer built witnesses for
+`send`, `channelClose`, `channelDeath`, `requestCancel`, `acknowledgeCancel`,
+`drop` and `reroute` in scratch, so none is uninhabitable — the corpus simply
+does not exercise them.
+
+Two consequences it found, both worth more than the count:
+
+* **No `SendsEscrow` can reach `beforeReceive`.** `liveSteps.Send` pins its
+  after-world, and that world's pending trace is empty where `beforeReceive`'s is
+  not. So the corpus's only delivery starts from a world its own plan's send
+  relation cannot produce, and the send/receive pair does not compose.
+* **`afterClose` is unreachable by `channelClose`**, and its docstring said it
+  was reachable. It keeps `beforeReceive`'s ledgers, in which nothing is
+  resolved, so `ClosesSession.nowResolved` can never hold there. The docstring is
+  corrected; `nothing_can_be_sent_on_the_shut_wire` is a real theorem stated at a
+  manufactured world.
+
+`ProcessPlan.Sound` and `LogicalProcessNetworkCore.WellFormed` are also inhabited
+nowhere — `terminated_result_is_exact` takes a `Sound` hypothesis nothing has
+ever supplied. A reviewer proved `Sound` inhabitable at `quiet`, where every
+clause is vacuous because the network holds no instances.
+
+Needs the fixtures, and the send/receive pair is the one to build first: it is
+the only one whose absence hides a *composition* failure rather than a coverage
+gap.
+
+### 10.80 A plan can send without sending
+
+`ChannelContract.SendPre := NetworkAssertion.pure False` makes
+`ChannelContract.send` vacuous while `steps.Send` relates every pair of worlds on
+an open session — including a send that puts nothing in flight. Every field of
+`ChannelContract`, the whole footprint discipline, and both of `ProcessPlan`'s tie
+fields are still discharged.
+
+`escrowImpliesOutstanding`'s docstring discloses a narrower escape — "a plan
+whose relations are empty satisfies every tie" — and this is wider: the relation
+is *total*, and it is the precondition that is empty. `send_puts_it_in_flight`
+and `send_establishes_escrow` are unreachable at such a plan, so it is degenerate
+rather than unsound, but a reader of that docstring would not expect it.
+
+Closing it means requiring a plan's `SendPre` to be satisfiable somewhere, which
+is a `ProcessPlan` field of the same shape as `NetworkProgressMeasure.Useful`
+before that became a definition. Needs a ruling.
+
+### 10.81 The cancellation policy layer governs nothing a network can do
+
+`ChannelResolution.cancelAcknowledged` carries a `CancelReason`, which is a
+`CancellationPointId` — and no file under `Grass/Process/Network/` mentions
+`CancellationPolicy`, `PointsDeclared`, `ScopedCancellationCertificate`,
+`CancellationSequence` or `CancellationRegion`. `EscrowLedger`'s
+`acknowledgedWasRequested` checks that a request was made and not that the point
+acknowledging it was ever declared.
+
+A reviewer built the acknowledgement at a point in a scope no policy names.
+`Grass/Process/Cancellation/` is a self-contained algebra with no consumer in the
+transition family, which is the same shape as §10.77's named obligations one
+layer up.
+
+Needs a ruling on whether a plan should carry a cancellation policy that
+`acknowledgeCancel` checks against.

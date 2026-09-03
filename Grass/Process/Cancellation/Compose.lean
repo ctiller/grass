@@ -218,11 +218,27 @@ def HasCancellationPoint (sequence : CancellationSequence) : Prop :=
   ∃ region ∈ sequence.regions, region.mask.MayAct
 
 /--
-**Eventual cancellation: a request is acted on, and the wait is bounded.**
+**Eventual cancellation: the composite has somewhere to act, and the wait is
+bounded.**
 
 Both halves, because either alone is worthless. A composite with a point but an
 unbounded region ahead of it may never reach the point; a composite that is
 bounded throughout but has no point never acts on a request at all.
+
+**Not "every request is acted on", which an earlier version of this docstring
+said.** `HasCancellationPoint` asks for *some* acting region, and a request
+arriving after the last one is latched to the terminal boundary and never acted
+on — which is not a defect but §3's own worked example: "A request arriving after
+that point is retained until the process's terminal boundary, where the ordinary
+terminal disposition must classify it." A reviewer built the composite
+(`Tests/Process/ComposeFixtures.lean`'s `cancellable_yet_latched`) and it is kept,
+because a reader who takes the name at face value will be wrong about exactly
+that case.
+
+`resolvedFrom` is what says which of the two happens to a given arrival, and
+`request_is_latched_or_acted_on` is the law 7 statement that there is no third
+answer. This predicate deliberately does not mention either: it is about the
+*composite*, not about an arrival.
 -/
 def EventuallyCancellable (sequence : CancellationSequence) : Prop :=
   sequence.HasCancellationPoint ∧ sequence.Bounded

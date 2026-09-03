@@ -210,9 +210,10 @@ constant.
 theorem receiving_resolves_the_escrow :
     serverPlan.Delivers beforeReceive afterReceive () wire escrowed where
   contractual := by
-    refine ⟨rfl, ?_, ?_⟩
+    refine ⟨rfl, ?_, ?_, ?_⟩
     · rw [beforeReceive_wire]
       exact ⟨List.mem_cons_self, rfl⟩
+    · simp [beforeReceive, cursorAt, Grass.Process.Tests.World.quiet]
     · simp [beforeReceive, afterReceive, cursorAt]
   onItsSession := rfl
   wasOutstanding := by
@@ -372,9 +373,18 @@ open Classical in
 /--
 The same world with the wire session closed.
 
-Reachable by `channelClose`, which `ClosesSession` now makes move the status;
-before that constructor existed, `SessionStatus.closed` was producible by
-nothing and this world was unreachable.
+**Not reachable by `channelClose` from any world**, and an earlier version of
+this docstring said it was. `ClosesSession.nowResolved` requires the occurrence
+to be resolved `.channelClosed` afterwards, and this world keeps
+`beforeReceive`'s ledgers, in which nothing is resolved at all — so no
+`ClosesSession` can produce it, on any session, from any before-world. A reviewer
+checked.
+
+It is a *manufactured* world, and what it is for is stated exactly:
+`nothing_can_be_sent_on_the_shut_wire` below is a fact about a world with a
+closed session, and this is the smallest such world. What the corpus does not
+have is a world with a closed session that a run reaches, which needs a
+`ClosesSession` witness — `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.79.
 -/
 noncomputable def afterClose : ServerWorld :=
   { beforeReceive with
@@ -396,6 +406,9 @@ recorded status, and `ClosesSession` is what can put a status there.
 
 Each of the three was added because the previous one was not enough on its own,
 and none of them was found by reading the module that owns it.
+
+The composition is real and the world it is stated at is not reachable; see
+`afterClose`.
 -/
 theorem nothing_can_be_sent_on_the_shut_wire
     {message : serverPlan.message ()}

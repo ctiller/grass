@@ -100,9 +100,18 @@ The world a send of one occurrence on the wire reaches.
 `Delivers` grew its `contractual` field. A step relation stated as "this exact
 world becomes that exact world" is not one a transition family can instantiate:
 `Grass/Process/Network/Transition.lean`'s receive fixture steps through worlds
-this file never names. It is now the two conditions §3 asks of a receive — the
-occurrence was in flight, and the receiver's own cursor advanced by one — which
-both the contract's world pair and the transition family's satisfy.
+this file never names. It is the conditions §3 asks of a receive, which both the
+contract's world pair and the transition family's satisfy.
+
+**Three conditions, not two, and the third is why the field is worth having.**
+The first version listed exactly the occurrence being in flight and the cursor
+advancing by one — which are *literally* `Delivers.wasOutstanding` and
+`Delivers.cursorAdvances`, so `contractual` was derivable from the transition's
+own other fields and the tie it exists to make was untested. A reviewer rebuilt
+the fixture's `Delivers` without ever mentioning `plan.steps`.
+`before.delivered = 0` is §3's `ReceiverPre` — "the receiver's independently
+evolving local/session cursor" — and it is a condition the *contract* imposes and
+the family does not.
 
 An earlier version of `liveSteps.Send` had `after = quiet` — a send that put
 nothing in flight. It went unnoticed because the contract's `Escrow` assertion
@@ -135,6 +144,7 @@ def liveSteps : ChannelSteps serverTopology () ServerMessage ServerWorld where
   Receive := fun message occurrence before after =>
     occurrence.1 = wire ∧
       (before.inFlight () wire).Outstanding ⟨message, occurrence⟩ ∧
+      (before.sessions () wire).delivered = 0 ∧
       (after.sessions () wire).delivered = (before.sessions () wire).delivered + 1
 
 /-! ## The assertions, each reading exactly the fragments it is allowed to -/
@@ -210,11 +220,9 @@ noncomputable def liveChannel :
     rw [isWire, afterSend_wire]
     exact ⟨List.mem_cons_self, rfl⟩
   receive := by
-    rintro _ occurrence before after ⟨isWire, _, advanced⟩ receiverPre _
+    rintro _ occurrence before after ⟨isWire, _, atZero, advanced⟩ _ _
     show (after.sessions () occurrence.1).delivered = 1
-    rw [isWire, advanced]
-    have counted : (before.sessions () wire).delivered = 0 := isWire ▸ receiverPre
-    rw [counted]
+    rw [isWire, advanced, atZero]
 
 /-! ## The triples do something -/
 
@@ -232,7 +240,7 @@ theorem receive_advances_the_cursor (message : ServerMessage)
       (afterSend ⟨message, occurrence⟩)) :
     (liveChannel.ReceiverPost message occurrence).holds afterDelivery :=
   liveChannel.receive_from_conjunction message occurrence
-    ⟨onWire, by rw [afterSend_wire]; exact ⟨List.mem_cons_self, rfl⟩, rfl⟩ held
+    ⟨onWire, by rw [afterSend_wire]; exact ⟨List.mem_cons_self, rfl⟩, rfl, rfl⟩ held
 
 /-- And the postcondition genuinely did not hold before the step. -/
 theorem cursor_had_not_advanced (message : ServerMessage)

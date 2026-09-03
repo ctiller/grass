@@ -155,4 +155,53 @@ theorem no_amount_of_later_work_repairs_it (more : CancellationSequence) :
     (Or.inl (by simp [blockingExample, seq, one]))
     ⟨rfl, rfl⟩
 
+/-! ## What "eventually cancellable" does not mean -/
+
+/--
+A point followed by a bounded uncancellable tail.
+
+`docs/PROCESS.md` §3's worked example, minus the leading region: a request
+arriving in the point is acted on, and a request arriving in the tail is
+retained to the terminal boundary.
+-/
+def pointThenTail : CancellationSequence :=
+  ⟨[⟨.cancellationPoint, some 1⟩, ⟨.uncancellable, some 1⟩]⟩
+
+/-- It is eventually cancellable: it has a point, and its uncancellable region
+promises to end. -/
+theorem the_tail_is_cancellable : pointThenTail.EventuallyCancellable := by
+  refine ⟨⟨⟨.cancellationPoint, some 1⟩, by simp [pointThenTail], rfl⟩, ?_⟩
+  intro region present uncancellable
+  simp only [pointThenTail, List.mem_cons, List.not_mem_nil, or_false] at present
+  rcases present with rfl | rfl
+  · exact absurd uncancellable (by decide)
+  · show (some 1 : Option Nat) ≠ none
+    intro equal
+    cases equal
+
+/--
+**And a request arriving after the point is never acted on.**
+
+`resolvedFrom 1 = none`: from the tail onward there is no region that may act, so
+the request is latched to the process's terminal boundary.
+-/
+theorem a_late_request_is_never_acted_on : pointThenTail.resolvedFrom 1 = none := rfl
+
+/--
+**So "eventually cancellable" does not mean every request is acted on.**
+
+The two together, and the reason `EventuallyCancellable`'s docstring was
+corrected: a reader who takes the name at face value will be wrong about exactly
+this composite. §3 is explicit that the late request is *retained*, and
+`request_is_latched_or_acted_on` is the law 7 statement that retention and action
+are the only two answers.
+
+Local adversarial review built this; the definition was right and the sentence
+above it was not.
+-/
+theorem cancellable_yet_latched :
+    pointThenTail.EventuallyCancellable ∧ pointThenTail.resolvedFrom 1 = none :=
+  ⟨the_tail_is_cancellable, a_late_request_is_never_acted_on⟩
+
+
 end Grass.Process.Tests.Compose
