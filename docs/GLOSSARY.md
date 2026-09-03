@@ -5,6 +5,11 @@
 processes behind one public transition/observation boundary, independently of
 one target realization.
 
+**Specification layer** — The neutral dependency layer imported independently
+by `Semantics` and `Process`. It owns typed junctions, demand/result boundaries,
+requirement keys, and other common contract vocabulary. It does not own the
+precious behavior of a `SpecProcess` or a selected process realization.
+
 **Behavior contract** — The portable part of a resource-parameterized specification which
 names domain values, admitted inputs, observations, outcomes, safety, progress,
 and functional relations without choosing a target representation.
@@ -54,6 +59,11 @@ projection; mandatory safety and ABI demands are never filtered away.
 **Requirement** — A separate theorem demand imposed downward by a specification,
 weave, provider, ABI, platform, or ISA.
 
+**Requirement kind** — An invalidation and diagnostic facet attached to a
+theorem demand. Its nominal extension key identifies a separately registered
+kind exactly; it is not fallback semantics. A consumer needing kind-specific
+laws must resolve the key through a typed registry or reject it.
+
 **Process protocol** — A portable logical state/event/demand/result relation
 for one process role. API and library operations are child process protocols.
 
@@ -65,6 +75,16 @@ decomposition are not.
 **Process realization** — A reviewed replaceable model/plan/driver which proves
 refinement to the root `SpecProcess`. Its population,
 state partition, channels, scheduling, and execution strategy are not precious.
+
+**Structural process network** — The Process-owned, protocol-family-generic
+role/instance/protocol shape. It contains no behavior contract, selected trace,
+denotation, or exactness theorem.
+
+**Process presentation network** — The Refinement-owned wrapper, at the join of
+the independent Process and Semantics dependency arms, that instantiates one
+structural process network at semantic protocols. A `ProcessPresentation`
+selects a trace of that wrapper and proves the trace and transported
+requirements exactly match the precious `SpecProcess`.
 
 **Partial process realization** — A graph indexed by an exact staged process
 presentation of the root in which some finite role schemas have subsystem
