@@ -1343,10 +1343,12 @@ fixture.
 **One function, not a predicate and an applier.** `Grass/Obligation/Delta.lean` and
 `Grass/Op/Step.lean` do the obligation ledger the other way: `LedgerDelta.Applicable`
 is a `Prop` saying a delta may be applied and `applyDelta` is a separate function
-that applies it, with nothing tying the two together — two sources of truth, and a
-clause added to one and forgotten in the other is a silent divergence. An
-`Option`-returning applier cannot diverge from itself. `docs/MEMORY_IMPLEMENTATION_PLAN.md`
-§4.4.1 records unifying the ledger the same way as owed.
+that applies it — two sources of truth, and a clause added to one and forgotten in the
+other is a silent divergence. An `Option`-returning applier cannot diverge from
+itself. The ledger cannot be brought all the way to this shape without rewriting every
+fixture that states `LedgerEffectApplicable`, so it is tied by two theorems instead:
+`Grass/Op/Step.lean`'s `ledgerEffectApplicable_iff_isSome` and
+`applyLedgerEffect?_eq_some_of_applicable`.
 -/
 
 /--

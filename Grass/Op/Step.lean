@@ -586,10 +586,106 @@ instance decLedgerEffectApplicable (obligations : FiniteMap ObligationId Obligat
         decLedgerEffectApplicable (applyDelta obligations delta) contexts actor rest
       inferInstanceAs (Decidable (_ ∧ _))
 
-/-- Apply a whole effect, one delta at a time. -/
+/--
+Apply one delta, or refuse.
+
+**One function, not a predicate and an applier.** `LedgerDelta.Applicable` says a
+delta may act and `applyDelta` makes it act, and nothing tied the two together: a
+clause added to one and forgotten in the other is a silent divergence, and this
+branch found `Applicable` missing a clause twice — the output `kind`, then the
+transfer destination — with `applyDelta` unaffected both times. Neither miss was
+caught by the shape; both were caught by a reviewer.
+
+`MemoryState.applyAuthorityDelta?` is the shape that cannot diverge from itself. The
+ledger cannot be brought all the way to it without rewriting every fixture that
+states `LedgerEffectApplicable`, so it is brought as far as two theorems:
+`ledgerEffectApplicable_iff_isSome` says the predicate is exactly the applier
+succeeding, and `applyLedgerEffect?_eq_some_of_applicable` says that on the path the
+transition takes, the applier is the fold the transition installs. Tied by proof
+rather than by shape, which is second best and is stated as such.
+-/
+def applyLedgerDelta? (obligations : FiniteMap ObligationId Obligation)
+    (contexts : List ContextId) (actor : ContextId) (delta : LedgerDelta) :
+    Option (FiniteMap ObligationId Obligation) :=
+  if LedgerDelta.Applicable obligations.domain
+      (fun id => (obligations.lookup id).map Obligation.protocol)
+      (fun id => (obligations.lookup id).map Obligation.owner)
+      (fun id => (obligations.lookup id).map Obligation.kind) contexts actor delta then
+    some (applyDelta obligations delta)
+  else Option.none
+
+/-- Apply a whole effect, one delta at a time, refusing if any delta is refused. -/
+def applyLedgerEffect? (obligations : FiniteMap ObligationId Obligation)
+    (contexts : List ContextId) (actor : ContextId) :
+    LedgerEffect → Option (FiniteMap ObligationId Obligation)
+  | [] => some obligations
+  | delta :: rest =>
+      (applyLedgerDelta? obligations contexts actor delta).bind
+        (applyLedgerEffect? · contexts actor rest)
+
+/-- **The predicate and the applier are the same rule.** Without this they are two
+descriptions of it, which is what the shape is for. -/
+theorem ledgerEffectApplicable_iff_isSome (obligations : FiniteMap ObligationId Obligation)
+    (contexts : List ContextId) (actor : ContextId) :
+    ∀ (effect : LedgerEffect),
+      LedgerEffectApplicable obligations contexts actor effect ↔
+        (applyLedgerEffect? obligations contexts actor effect).isSome := by
+  intro effect
+  induction effect generalizing obligations with
+  | nil => exact ⟨fun _ => rfl, fun _ => trivial⟩
+  | cons delta rest ih =>
+    constructor
+    · rintro ⟨happly, hrest⟩
+      show (Option.bind _ _).isSome = true
+      unfold applyLedgerDelta?
+      rw [if_pos happly, Option.bind_some]
+      exact (ih _).mp hrest
+    · intro h
+      have h' : (Option.bind (applyLedgerDelta? obligations contexts actor delta)
+        (applyLedgerEffect? · contexts actor rest)).isSome = true := h
+      by_cases happly : LedgerDelta.Applicable obligations.domain
+          (fun id => (obligations.lookup id).map Obligation.protocol)
+          (fun id => (obligations.lookup id).map Obligation.owner)
+          (fun id => (obligations.lookup id).map Obligation.kind) contexts actor delta
+      · refine ⟨happly, (ih _).mpr ?_⟩
+        unfold applyLedgerDelta? at h'
+        rw [if_pos happly, Option.bind_some] at h'
+        exact h'
+      · unfold applyLedgerDelta? at h'
+        rw [if_neg happly, Option.bind_none] at h'
+        exact absurd h' (by simp)
+
+/-- The applied ledger, for the transition to install. -/
 def applyLedgerEffect (obligations : FiniteMap ObligationId Obligation)
     (effect : LedgerEffect) : FiniteMap ObligationId Obligation :=
   effect.foldl applyDelta obligations
+
+/-- **And on the applicable path the applier is the fold the transition installs.**
+
+This is the theorem that makes the pair safe rather than merely parallel:
+`performAccess` installs `applyLedgerEffect`, `refusalOf` decides with
+`LedgerEffectApplicable`, and these two theorems together say the decision and the
+installation are about the same ledger. A clause added to `Applicable` and forgotten
+in `applyDelta` would now have to survive this proof.
+-/
+theorem applyLedgerEffect?_eq_some_of_applicable
+    (obligations : FiniteMap ObligationId Obligation) (contexts : List ContextId)
+    (actor : ContextId) :
+    ∀ (effect : LedgerEffect),
+      LedgerEffectApplicable obligations contexts actor effect →
+        applyLedgerEffect? obligations contexts actor effect =
+          some (applyLedgerEffect obligations effect) := by
+  intro effect
+  induction effect generalizing obligations with
+  | nil => intro _; rfl
+  | cons delta rest ih =>
+    rintro ⟨happly, hrest⟩
+    show (Option.bind _ _) = _
+    unfold applyLedgerDelta?
+    rw [if_pos happly, Option.bind_some, ih _ hrest]
+    unfold applyLedgerEffect
+    rw [List.foldl_cons]
+
 /--
 `ConflictsWithHistory` holds when an event contends with one already performed.
 
