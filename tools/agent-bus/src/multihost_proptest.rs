@@ -1308,6 +1308,13 @@ fn check_convergence(fleet: &Fleet, model: &mut Model) -> Result<(), TestCaseErr
     )
 }
 
+/// One generated scenario, end to end: plan it, lay it down, and check it.
+///
+/// Setting `AGENT_BUS_PROPTEST_TRACE` prints each operation with how long its
+/// materialization and its check took. That is a tuning aid rather than a
+/// debugging one -- the cost here is dominated by real `git` process spawning,
+/// and the trace is what showed which operations are worth their place in a
+/// schedule short enough to run routinely.
 fn run_world(world: &World) -> Result<(), TestCaseError> {
     let ops = plan(world);
     let origin = init_bare_origin();
