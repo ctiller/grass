@@ -5,8 +5,8 @@ import Tests.Process.InstanceFixtures
 # An assertion over the real world
 
 `Tests/Process/AssertionFixtures.lean` discharges `agreesGlue` at a world built
-for the purpose: nine fields, one per fragment family but two for `region`, chosen to make the law
-provable. That is the right fixture for the assertion language, and it proves
+for the purpose: nine fields — one per fragment family, and two for `region` —
+chosen to make the law provable. That is the right fixture for the assertion language, and it proves
 nothing about the world the plan actually uses.
 
 This file is the other half. `Grass/Process/Network/World.lean` claims that

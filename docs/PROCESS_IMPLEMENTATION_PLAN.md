@@ -2260,8 +2260,10 @@ tables as a reader's index and the files themselves as the record.
 
 `Grass/Process/Network/Transition.lean` was reworked six times over the same
 period and is where most of the defects were: the scope discipline it exports is
-consumed by four of the modules above, and every one of them found something
-wrong with it.
+consumed by five of the modules above — `Weave/Mixin.lean`, `Weave/Lens.lean`,
+`Trace/Independence.lean`, `Trace/Linearization.lean` and
+`Network/WellFormedness.lean` — and every one of them found something wrong with
+it.
 
 Each has a fixture file, and each fixture found at least one defect in the
 module it was written against. That is the pattern worth keeping: nothing here
@@ -2271,8 +2273,9 @@ was found by reading.
 
 The exit criterion §10.54 proposed — every named record has a positive witness
 before the layer is nominated — turned out to be the most productive rule in this
-milestone. Twenty records were inhabited for the first time, and the early ones
-were each empty for a *different* reason that reading had not found:
+milestone. The table below is every record this branch first inhabited; the early
+ones were each empty for a *different* reason that reading had not found. It
+carries no count, because the two counts it has carried were both wrong:
 
 | Record | Why it was empty | Witness |
 |---|---|---|
@@ -2359,8 +2362,9 @@ time, not once. Three further checks fell out of that round and are worth naming
 because each found something the others did not:
 
 * **Which field of the step bounds this field of the state?** An `EscrowLedger`
-  has three mutable fields. `created` was bounded by §10.91, `resolution` by
-  §10.87, and `cancelRequested` by nothing at all until §10.97.
+  has four data fields. `created` was bounded by §10.91, `resolution` by §10.87,
+  `cancelRequested` by nothing at all until §10.97, and `rank` by nothing to this
+  day — §10.103, where it is argued harmless and recorded anyway.
 * **What would this obligation have to *see* in order to fail?** Two rounds of
   fixture repair could not fix §10.99, because the clause did not receive the
   state it was supposed to be about. Each repair refused *something*, which is
@@ -2957,13 +2961,15 @@ view and every other field verbatim, which is itself the point — a view facet 
 pure, so acquiring one changes no behaviour, and the correctness record differs
 from `oneShotCorrect` in exactly one field.
 
-What took a moment's thought was making the *acceptance* non-vacuous, since
-`ViewAccepts` sees only the facet and the rendered value and cannot mention the
-process's state directly. The answer is the **image of the render**: an
-acceptable view is one some state renders to. It is stateable for any facet, it
-is exactly what `viewAccepts` can always discharge, and it refuses everything
-outside the range — `a_view_no_state_renders_is_refused` turns away a view value
-no state of `gauge` produces, which `fun _ _ => True` cannot.
+Making the *acceptance* mean something took two further rounds and a change to
+`ProcessAcceptance`, and §10.99 is that story: the first two attempts — the image
+of the render, then a bound — were both discharged for free, because
+`ViewAccepts` could not see the state it was supposed to be about. The clause
+takes the state now, and `Tests/Process/ViewFixtures.lean`'s
+`a_view_that_disagrees_with_the_state_is_refused` is the refusal.
+
+§10.102 is what remains: the clause's *shape* still admits a version that cannot
+fail, and no field can stop an author writing one.
 
 The related half of §10.86 is still open: a demand whose result type is not a
 singleton. That one is about vocabulary richness rather than about a facet
@@ -3555,7 +3561,7 @@ destination to gain a new occurrence rather than to be non-empty (§10.34).
 Not one proof broke when the five fields went in, which is the seven-for-seven
 signal: none of the five structures has a witness. §10.79.
 
-### 10.79 Ten of the eleven channel constructors have never been inhabited
+### 10.79 Eleven of the twelve channel constructors had never been inhabited
 
 `SendsEscrow`, `ClosesSession`, `KillsSession`, `RequestsCancel` and `Reroutes`
 had no witness anywhere in the corpus, and of `NetworkTransition`'s channel
@@ -4081,10 +4087,10 @@ occurrences, setting up later acknowledgements.
 made before the step.
 
 This is §10.87 and §10.91 a third time, at a third ledger field: `created` was
-bounded, then `resolution` was bounded, and `cancelRequested` — the third mutable
-field of an `EscrowLedger` — was bounded by nothing. The general form of the
-check is: **for each field of a state a step may write, which field of the step
-bounds it?**
+bounded, then `resolution`, and `cancelRequested` was bounded by nothing. The
+general form of the check is: **for each field of a state a step may write, which
+field of the step bounds it?** `EscrowLedger` has *four* data fields, and running
+that check found the fourth, `rank`, bounded by nothing either — §10.103.
 
 ### 10.98 A reroute could multiply the payload
 
@@ -4290,7 +4296,9 @@ indexed fragments that are four, two divergences from §3's record that are thre
 eleven channel constructors that are twelve, nine `ProcessCorrect` fields that
 are ten, eight fixture-world fields that are nine, "the other six" sharing
 `ResolvesEscrow` that is the other five, and a `ChannelContract` field count this
-document is cited as recording and does not.
+document is cited as recording, which it records wrongly — standing risk 2 says
+fifteen, §3's declaration has had seventeen fields in every revision of that
+document, and the structure itself has fourteen.
 
 **The rest were this document's own** — §12's tables and several §10 entries
 describing a corpus two rounds out of date. Those are corrected in place, and §12
@@ -4318,11 +4326,85 @@ The module's own prose had been claiming for two rounds that "the remaining two
 come from the root's own record", and one of the two was being handed in.
 
 **Closed** by `rootSlotAgrees`. `initial_is_wellformed` now takes no hypothesis,
-and exactness buys five of `WellFormed`'s six clauses rather than four.
+so exactness buys every clause rather than all-but-one. (A first version of this
+paragraph said "five rather than four"; a claims audit read the pre-fix signature
+and found it took exactly one hypothesis, so the numbers were six and five.)
 
 **The check**: a theorem about a structure that takes a hypothesis the structure
 *could* carry is either a deliberate parameterisation or a missing field, and the
 docstring should say which. Nothing in the build distinguishes them.
+
+### 10.107 `acknowledgesARequest` was derivable the round it was added
+
+§10.97 closed one hole with two mechanisms — `RequestsNothing` on every
+constructor that does not request, and `ResolvesEscrow.acknowledgesARequest`
+requiring the request to predate the step. `RequestsNothing` alone is enough: it
+carries the *after*-ledger's own `acknowledgedWasRequested` back across the step.
+A reviewer deleted the field and rebuilt it in three lines.
+
+**Closed**: it is a theorem. Worth its own entry because it is the fastest this
+defect has ever appeared — the field was derivable *in the commit that added it*,
+and the thing that would have caught it is the check §10.105 already names: after
+adding a field, try deleting the ones beside it. Including the one you just added.
+
+### 10.108 `CommitsRender` took its provenance as a hypothesis
+
+`CommitsRender.toCommits` required `earned : before.pending = committed ++
+after.pending` as an *argument*, defended on the grounds that `CommitsRender` is
+about a reconciler's split of pending renders while `Commits.earned` is about the
+world's pending observation trace, so "nothing in this module relates the two".
+
+That is the argument a field refutes: **a field is a demand on the constructor,
+not something the module supplies.** A reviewer read the signature — §10.106's
+tell — and compiled what the hypothesis permitted: a `CommitsRender` that
+publishes the pending observation *and invents two more pending observations
+nothing emitted*, because `scope` names `.pending` and no field said how
+`.pending` moved.
+
+**Closed**: `earned` is a field. §10.58's gap is narrower and still real — the
+trace is tied to what was published, and not to the *renders* the reconciler
+split.
+
+### 10.109 The transition family's guarantee stopped at its own edge
+
+§10.100 stopped a step *reaching* a network where an occurrence sits in a foreign
+ledger, and a reviewer proved that family-wide: with
+`ExactInitialNetwork.nothingInFlight` as the base case, no step-reachable network
+can strand.
+
+Then they pointed at the gap that argument leaves. `WellFormed` has no clause
+saying an occurrence belongs to the session holding it, so **every theorem stated
+over `before.WellFormed` still admitted the stranded configuration as an input** —
+and they compiled one: a `WellFormed` network with an occurrence outstanding in a
+foreign ledger, with `no_resolve`, `no_delivery`, `no_reroute`, `no_close` and
+`no_death` all discharged by `onItsSession`. Everything downstream of this module
+assumes `WellFormed`, not reachability.
+
+**Closed** by `OccurrencesOnTheirSession`, a seventh clause, and
+`occurrencesOnTheirSession_preserved`.
+
+**The check this one is worth remembering for**: a guarantee proved about the
+*steps* is not a guarantee available to a *consumer* unless the invariant says
+it. "No reachable network is bad" and "no well-formed network is bad" are
+different theorems, and only the second one is usable.
+
+### 10.110 A side condition with two refusals and no witness
+
+§10.100's `carrierOnItsSession` shipped with two negative theorems and no
+positive one, because **no `coalesce` had ever been constructed anywhere in this
+corpus** — a reviewer grepped and found none. `Tests/Process/CommitFixtures.lean`
+states the rule this breaks: "a side condition that could make every commit
+impossible would be a bug, not a law", and nothing distinguished the new field
+from one that forbids everything.
+
+**Closed** by `Tests/Process/CloseFixtures.lean`'s `the_coalesce`: a merge of one
+source into a fresh carrier on the same session, every field of `ResolvesEscrow`
+at `.coalesced` discharged.
+
+The general rule, which §12's witness discipline should have caught and did not:
+**a new field needs a witness in the same change, not only a refutation.** A
+refusal shows the field forbids something; only a witness shows it does not
+forbid everything.
 
 ### 10.89 A spawn can satisfy every field it has and not be a step
 
