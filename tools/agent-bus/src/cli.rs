@@ -391,7 +391,8 @@ fn register(args: RegisterArgs) -> AbResult<()> {
 fn submit(args: SubmitArgs) -> AbResult<()> {
     let paths = resolve_paths()?;
     let agent = parse_agent(&args.agent)?;
-    let data_value: serde_json::Value = serde_json::from_str(&args.data)?;
+    let data_value: serde_json::Value = serde_json::from_str(&args.data)
+        .map_err(|e| invalid(format!("--data is not valid JSON: {e}")))?;
     let data = EventData::from_kind_and_value(&args.kind, data_value)?;
     let extra_refs: Vec<EventId> = args
         .observes

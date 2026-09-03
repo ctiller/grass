@@ -292,6 +292,50 @@ fn genesis_reports_expected_fields_and_publishes_both_refs() {
     assert_eq!(registry_on_origin, registry_epoch);
 }
 
+/// `genesis --product-review-from <rev>` is never exercised by any other
+/// test -- every other genesis call relies on the default (`HEAD`). Here
+/// HEAD and the explicitly named rev deliberately differ, so the recorded
+/// `bus_config.json` on the registry root only matches the *named* rev if
+/// the flag actually took effect rather than silently defaulting to HEAD.
+#[test]
+fn genesis_product_review_from_names_an_explicit_rev_not_head() {
+    let (_origin, repo) = fresh_bus();
+    // `init_repo` already left one commit; add a second so HEAD and the
+    // explicitly-named first commit are distinct.
+    let first_commit = crate_rev_parse(repo.path(), "HEAD");
+    std::fs::write(repo.path().join("second.txt"), "more\n").unwrap();
+    git(repo.path(), &["add", "second.txt"]);
+    git(repo.path(), &["commit", "-q", "-m", "second"]);
+    let head_commit = crate_rev_parse(repo.path(), "HEAD");
+    assert_ne!(first_commit, head_commit);
+
+    let out = run_json(bin().current_dir(repo.path()).args([
+        "genesis",
+        "--agent",
+        "coord1",
+        "--display-name",
+        "Coordinator One",
+        "--purpose",
+        "bootstraps the bus",
+        "--host",
+        "host1",
+        "--product-review-from",
+        &first_commit,
+    ]));
+    let registry_epoch = out["registry_epoch"].as_str().unwrap();
+
+    let config_json = StdCommand::new("git")
+        .arg("-C")
+        .arg(repo.path())
+        .args(["show", &format!("{registry_epoch}:bus_config.json")])
+        .output()
+        .unwrap();
+    assert!(config_json.status.success());
+    let config: Value = serde_json::from_slice(&config_json.stdout).unwrap();
+    assert_eq!(config["product_review_from"], first_commit);
+    assert_ne!(config["product_review_from"], head_commit);
+}
+
 /// Small helper matching the pattern the crate's own tests use for
 /// `git rev-parse`, kept local to this test file so this suite never reaches
 /// into the crate's internals -- it only ever talks to the compiled binary
@@ -377,6 +421,43 @@ fn submit_and_coordinate_publish_an_event_and_tail_shows_it() {
     assert_eq!(events[1]["kind"], "agent.status");
     assert_eq!(events[1]["data"]["status"], "active");
     assert_eq!(events[1]["data"]["note"], "hi");
+}
+
+/// `tail --sync` fetches `--agent`'s stream from the remote first, rather
+/// than reading whatever happens to already be local. A brand-new checkout
+/// that has never fetched anything has no local ref for coord1's stream at
+/// all, so plain `tail` must fail there, while `tail --sync` must succeed
+/// and see everything already published to the origin.
+#[test]
+fn tail_sync_fetches_the_stream_a_fresh_checkout_has_never_seen() {
+    let (origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    submit(
+        repo.path(),
+        "coord1",
+        "agent.status",
+        r#"{"status":"active","note":"hi"}"#,
+        "c1",
+    );
+    coordinate(repo.path(), "coord1", "host1", 0);
+
+    let fresh = init_repo(origin.path());
+    bin()
+        .current_dir(fresh.path())
+        .args(["tail", "--agent", "coord1"])
+        .assert()
+        .failure();
+
+    let synced = run_json(
+        bin()
+            .current_dir(fresh.path())
+            .args(["tail", "--agent", "coord1", "--sync"]),
+    );
+    assert_eq!(synced["agent"], "coord1");
+    let events = synced["events"].as_array().unwrap();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["kind"], "agent.registered");
+    assert_eq!(events[1]["kind"], "agent.status");
 }
 
 /// `outbox` surfaces local outbox state with no network round trip at all
@@ -765,7 +846,7 @@ fn submit_rejects_malformed_json_in_data() {
         ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("json error"));
+        .stderr(predicate::str::contains("--data is not valid JSON"));
 }
 
 /// Adversarial/coordinate: a caller claiming the wrong custody epoch, or the

@@ -2724,6 +2724,168 @@ mod tests {
         assert!(!state.exclusive.is_contested(&resolve_env.id));
     }
 
+    /// Shared fixture for the `apply_conflict_resolved` input-validation
+    /// tests below: a real, currently-contested issue.resolved vs.
+    /// issue.reassigned race, with `coord1` registered and ready to author
+    /// a `lifecycle.conflict_resolved`. Returns `(state, resolve_env.id,
+    /// reassign_env.id, coord1)`.
+    fn contested_issue_race() -> (BusState, EventId, EventId, Agent) {
+        let mut state = empty_state(&[("coord1", Role::Coordinator)]);
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        apply_ok(&mut state, &register(&carol, Role::Implementor));
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+
+        let issue_data = EventData::IssueOpened(IssueOpened {
+            target: bob.clone(),
+            issue_kind: IssueKind::Bug,
+            severity: Priority::Normal,
+            summary: text("s"),
+            code_commit: None,
+            locations: vec![],
+            expected: None,
+            observed_behavior: None,
+            reproduction: vec![],
+            blocks: StringSet::default(),
+            evidence: StringSet::default(),
+        });
+        let issue_env = Envelope::new(&alice, 1, no_frontier(), &issue_data, []);
+        apply_ok(&mut state, &issue_env);
+
+        let resolve = EventData::IssueResolved(IssueResolved {
+            issue: issue_env.id.clone(),
+            assignment: issue_env.id.clone(),
+            summary: text("done"),
+            fix_commit: None,
+            verification: vec![],
+        });
+        let resolve_env = Envelope::new(&bob, 1, no_frontier(), &resolve, [issue_env.id.clone()]);
+        let reassign = EventData::IssueReassigned(IssueReassigned {
+            issue: issue_env.id.clone(),
+            previous_assignment: issue_env.id.clone(),
+            previous_target: bob.clone(),
+            new_target: carol.clone(),
+            reason: text("bob is unavailable"),
+        });
+        let reassign_env =
+            Envelope::new(&alice, 2, no_frontier(), &reassign, [issue_env.id.clone()]);
+        apply_ok(&mut state, &resolve_env);
+        apply_ok(&mut state, &reassign_env);
+        assert_eq!(
+            state.issues[&issue_env.id].status,
+            ItemStatus::LifecycleConflict
+        );
+        (state, resolve_env.id, reassign_env.id, coord1)
+    }
+
+    /// Round-3 adversarial review, Significant finding: `apply_conflict_
+    /// resolved`'s four input-validation guards had no negative tests at
+    /// all -- only the happy path was ever exercised. A wrong
+    /// implementation of any one of them (e.g. `key_with_exact_group`
+    /// matching on a subset instead of the exact set) would let a
+    /// coordinator "resolve" a conflict that doesn't structurally exist,
+    /// with zero test failures.
+    #[test]
+    fn conflict_resolved_rejects_a_competing_set_with_fewer_than_two_members() {
+        let (mut state, resolve_id, _reassign_id, coord1) = contested_issue_race();
+        let resolved_data = EventData::LifecycleConflictResolved(LifecycleConflictResolved {
+            root: resolve_id.clone(),
+            competing: StringSet::from_iter([resolve_id.clone()]),
+            selected: resolve_id.clone(),
+            reason: text("user said so"),
+            user_authority: text("the user"),
+        });
+        let env = Envelope::new(
+            &coord1,
+            1,
+            frontier_seeing(&[&resolve_id]),
+            &resolved_data,
+            [resolve_id],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("competing must have at least two members"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn conflict_resolved_rejects_a_selected_id_not_in_competing() {
+        let (mut state, resolve_id, reassign_id, coord1) = contested_issue_race();
+        let bogus = EventId::new(&a("nobody"), 99);
+        let resolved_data = EventData::LifecycleConflictResolved(LifecycleConflictResolved {
+            root: resolve_id.clone(),
+            competing: StringSet::from_iter([resolve_id.clone(), reassign_id.clone()]),
+            selected: bogus,
+            reason: text("user said so"),
+            user_authority: text("the user"),
+        });
+        let env = Envelope::new(
+            &coord1,
+            1,
+            frontier_seeing(&[&resolve_id, &reassign_id]),
+            &resolved_data,
+            [resolve_id, reassign_id],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("selected must be a member of competing"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn conflict_resolved_rejects_a_competing_set_that_matches_no_unresolved_conflict() {
+        let (mut state, resolve_id, _reassign_id, coord1) = contested_issue_race();
+        // A syntactically valid two-member competing set (satisfies the
+        // first two guards) that simply isn't any real conflict's exact
+        // group -- `resolve_id` paired with an unrelated, never-contested
+        // event id.
+        let unrelated = EventId::new(&a("nobody"), 0);
+        let resolved_data = EventData::LifecycleConflictResolved(LifecycleConflictResolved {
+            root: resolve_id.clone(),
+            competing: StringSet::from_iter([resolve_id.clone(), unrelated.clone()]),
+            selected: resolve_id.clone(),
+            reason: text("user said so"),
+            user_authority: text("the user"),
+        });
+        let env = Envelope::new(
+            &coord1,
+            1,
+            frontier_seeing(&[&resolve_id]),
+            &resolved_data,
+            [resolve_id, unrelated],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("no unresolved conflict has exactly this competing set"),
+            "{err}"
+        );
+    }
+
+    // Note: `apply_conflict_resolved`'s fourth guard --
+    // `state.events.get(&d.selected)` being `None` -- has no reachable test
+    // construction given the current invariants: `selected` must pass the
+    // "member of `competing`" guard, and `competing` must exactly match a
+    // real `state.exclusive` group (guard three) for reduction to reach
+    // this point at all. Every `exclusive.record(...)` call site in this
+    // file (grep `exclusive.record`) is immediately followed only by an
+    // infallible `winner()`/effect step before returning `Ok(())`, so any
+    // event id ever recorded into an exclusive group is unconditionally
+    // also inserted into `state.events` by the same `reduce()`/
+    // `reduce_onto()` iteration. `selected` therefore cannot simultaneously
+    // be a real group member and an unknown event under any input this
+    // guard could actually see; it is defensive-only, matching the
+    // `Some`/never-`None` pattern the round-3 test-attacking review judged
+    // acceptable to leave uncovered elsewhere in this file.
+
     #[test]
     fn review_nominate_accept_authorize_merge_round_trips() {
         let mut state = empty_state(&[]);
