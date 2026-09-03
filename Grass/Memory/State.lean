@@ -575,10 +575,79 @@ theorem not_granted_empty (context : ContextId) (provenance : Provenance)
   obtain ⟨entry, hmem, -⟩ := h 0 hpos
   simp [empty, grantEntries, FiniteMap.empty] at hmem
 
-/-- Record a new allocation. -/
-def allocate (state : MemoryState) (id : AllocId) (record : AllocationRecord) :
-    MemoryState :=
-  { state with allocations := state.allocations.insert id record }
+/--
+Record an allocation, or refuse.
+
+`Option`, and for the same reason `issue?` is. `FiniteMap.insert` replaces, so this
+is also the *re*-allocation operation, and `docs/MEMORY_MODEL.md` §5.1 makes
+reallocation conditional: "reallocation requires the return of all live use loans".
+Nothing checked that. A profile could bump an allocation's epoch under an outstanding
+grant, and the result is a grant that freezes the new storage — `grantsOver` has no
+epoch clause, deliberately — while authorizing nothing, since
+`MemoryState.AuthorizedBy` requires both provenances current. Review reached that
+state and found only the stale grant's holder or lender could clear it.
+
+Refused rather than reconciled: which of the two the profile meant is not this
+module's to guess (`docs/FOUNDATION.md` law 8), and §5.1 already says which comes
+first.
+
+A *fresh* identity is always accepted, and so is replacing a record without changing
+its epoch — a permission change, a liveness change, a placement. What is refused is
+an epoch bump with grants outstanding over the storage.
+-/
+def allocate? (state : MemoryState) (id : AllocId) (record : AllocationRecord) :
+    Option MemoryState :=
+  match state.allocations.lookup id with
+  | some existing =>
+      if existing.epoch ≠ record.epoch ∧
+          state.grantEntries.any (fun entry => entry.2.provenance.root = id) then
+        Option.none
+      else some { state with allocations := state.allocations.insert id record }
+  | Option.none => some { state with allocations := state.allocations.insert id record }
+
+/-- Allocate several records in order, refusing if any is refused.
+
+A fixture building a machine state allocates half a dozen things, and threading
+`Option` through that by hand buries the state it is trying to show. One
+`isSome` theorem beside the definition is the whole obligation. -/
+def allocateAll? (state : MemoryState) :
+    List (AllocId × AllocationRecord) → Option MemoryState
+  | [] => some state
+  | (id, record) :: rest => (state.allocate? id record).bind (·.allocateAll? rest)
+
+/-- **A fresh identity is always allocatable.** -/
+theorem allocate?_isSome_of_fresh (state : MemoryState) (id : AllocId)
+    (record : AllocationRecord) (h : state.allocations.lookup id = Option.none) :
+    (state.allocate? id record).isSome := by
+  unfold allocate?
+  rw [h]
+  rfl
+
+/-- **Reallocating under an outstanding grant is refused.** §5.1's precondition, as a
+refusal rather than as a sentence. -/
+theorem allocate?_eq_none_of_outstanding {state : MemoryState} {id : AllocId}
+    {record existing : AllocationRecord}
+    (hlook : state.allocations.lookup id = some existing)
+    (hepoch : existing.epoch ≠ record.epoch)
+    (hgrants : state.grantEntries.any (fun entry => entry.2.provenance.root = id) = true) :
+    state.allocate? id record = Option.none := by
+  unfold allocate?
+  rw [hlook]
+  simp only []
+  rw [if_pos (show existing.epoch ≠ record.epoch ∧ _ from ⟨hepoch, hgrants⟩)]
+
+/-- A record replaced without changing its epoch is accepted, grants or not: a
+permission, liveness or placement change is not a reallocation. -/
+theorem allocate?_isSome_of_same_epoch {state : MemoryState} {id : AllocId}
+    {record existing : AllocationRecord}
+    (hlook : state.allocations.lookup id = some existing)
+    (hepoch : existing.epoch = record.epoch) :
+    (state.allocate? id record).isSome := by
+  unfold allocate?
+  rw [hlook]
+  simp only []
+  rw [if_neg (fun h => h.1 hepoch)]
+  rfl
 
 /-- Declare that two allocations name the same storage. -/
 def alias (state : MemoryState) (a b : AllocId) : MemoryState :=

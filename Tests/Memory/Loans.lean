@@ -63,9 +63,17 @@ def frameGrant : AuthorityGrant :=
 
 /-- A state owning the buffer and lending nothing. -/
 def unlent : MemoryState :=
-  MemoryState.empty.allocate buffer
+  (MemoryState.empty.allocate? buffer
     { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
-      permission := .readWrite, live := true, bytes := .empty, base := some 0x1000 }
+      permission := .readWrite, live := true, bytes := .empty
+      base := some 0x1000 }).getD .empty
+
+/-- The allocation happened, so `getD` did not fall back to the empty state. -/
+theorem the_allocation_succeeds :
+    (MemoryState.empty.allocate? buffer
+      { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
+        permission := .readWrite, live := true, bytes := .empty
+        base := some 0x1000 }).isSome := by decide
 
 /-- A write loan of the first eight bytes to the borrower. -/
 def loanOfHead : AuthorityGrant :=
@@ -351,9 +359,10 @@ whatever provenance is presented. -/
 
 /-- The same buffer, freed. -/
 def freed : MemoryState :=
-  MemoryState.empty.allocate buffer
+  (MemoryState.empty.allocate? buffer
     { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
-      permission := .readWrite, live := false, bytes := .empty, base := some 0x1000 }
+      permission := .readWrite, live := false, bytes := .empty
+      base := some 0x1000 }).getD .empty
 
 /-- **A freed allocation is exclusive and unwritable.** Both halves matter: the
 loan map really is empty, and that really is not authority. -/
@@ -457,11 +466,11 @@ def reusedRecord : AllocationRecord :=
     permission := .readWrite, live := true, bytes := .empty, base := some 0x1000 }
 
 /-- A state holding it. `bufferProv` names the *old* epoch. -/
-def reused : MemoryState := MemoryState.empty.allocate buffer reusedRecord
+def reused : MemoryState := (MemoryState.empty.allocate? buffer reusedRecord).getD .empty
 
 /-- The buffer lent while live, then reallocated under it. -/
 def lentThenReused : MemoryState :=
-  lentHead.allocate buffer reusedRecord
+  (lentHead.allocate? buffer reusedRecord).getD lentHead
 
 /-- **A stale pointer into re-used storage holds no authority.**
 `docs/MEMORY_MODEL.md` §2: address reuse never revives old pointers. Before `Live`
@@ -471,34 +480,29 @@ theorem a_stale_provenance_is_unavailable :
     reused.authorityOf owner bufferProv ⟨0, 8⟩ = AuthorityState.unavailable := by
   exact ⟨by decide, by decide⟩
 
-/-- **A loan issued under a defunct epoch still freezes, and authorizes nothing.**
+/--
+**Reallocating under an outstanding loan is refused.**
 
-The refuse-both-ways answer, and it took two rounds to arrive at. `grantsOver` first
-had no epoch clause, so a stale loan froze the live epoch permanently and a stale
-pointer was reported exclusive. Adding a clause on the *grant's* provenance fixed
-the second and broke the first in the unsafe direction: review re-epoched one member
-of an alias set, watched the grant vanish from `grantsOver` while the other member
-stayed live, and committed an unauthorized store. So the clause is gone from
-`grantsOver` and lives in `Live` and `MemoryState.AuthorizedBy` instead — the two
-places that decide *permission*. A stale grant freezes; it does not authorize.
-`docs/MEMORY_MODEL.md` §5.1 requires live use loans to be returned before
-reallocation, so this state is a profile that skipped a step. -/
-theorem a_stale_loan_still_freezes :
-    lentThenReused.authorityOf owner currentProv ⟨0, 8⟩ = AuthorityState.frozen ∧
-    ¬ lentThenReused.GrantedOfKind .loan borrower currentProv ⟨0, 8⟩
-        AccessIntent.write ∧
-    ¬ lentThenReused.GrantedOfKind .loan borrower bufferProv ⟨0, 8⟩
-        AccessIntent.write := by
-  exact ⟨by decide, by decide, by decide⟩
+`docs/MEMORY_MODEL.md` §5.1: "reallocation requires the return of all live use
+loans". Nothing checked it, and the state that skipping it produced was a mess three
+rounds of review kept circling: a grant naming a defunct epoch still freezes the
+storage that replaced it — `grantsOver` has no epoch clause, deliberately, because
+the clause it had was worse — while `MemoryState.AuthorizedBy` refuses to let it
+authorize anything and `LoanConflicts` refuses a replacement grant. Only the stale
+grant's holder or lender could clear it.
 
-/-- A grant cannot be *issued* over stale storage in the first place: `issue?`
-requires the grant's own provenance to be live and current. The state above is
-reached by lending first and reallocating after, which §5.1 says a profile must not
-do without returning the loan. -/
-theorem a_stale_grant_cannot_be_issued :
-    reused.issue? firstLoan loanOfHead = Option.none ∧
-    ¬ reused.Live bufferProv := by
+Refusing the reallocation removes the state rather than accommodating it, which is
+`docs/FOUNDATION.md` law 8's direction and §5.1's own ordering.
+-/
+theorem reallocating_under_a_loan_is_refused :
+    lentHead.allocate? buffer reusedRecord = Option.none ∧
+    ¬ lentHead.Exclusive bufferProv ⟨0, 8⟩ := by
   exact ⟨by decide, by decide⟩
+
+/-- And the same reallocation is accepted once the loan is returned, so the refusal
+tracks the loan rather than being a ban on reallocation. -/
+theorem reallocating_after_the_return_is_accepted :
+    (returned.allocate? buffer reusedRecord).isSome := by decide
 
 /-- **A grant of another kind freezes too.** §7.3's conflict is about authority,
 not about one kind of it, and `grantsOver` filtered to `GrantKind.loan` — so a

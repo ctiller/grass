@@ -1330,14 +1330,17 @@ refuses everything.
   *rights*.** A context holding a read grant and a write grant over the same byte is
   authorized for a read-modify-write only if one grant permits both. That is the safe
   direction and it is not stated anywhere.
-- **A stale-epoch grant freezes the next epoch's storage and only its holder or
-  lender can clear it.** `grantsOver` has no epoch clause, deliberately — the clause
-  it had was worse — so a grant naming a defunct epoch still freezes the storage that
-  replaced it, while `AuthorizedBy` refuses to let it authorize anything and
-  `LoanConflicts` refuses a replacement grant. §5.1 requires live use loans to be
-  returned before reallocation, so this is a profile that skipped a step; but
-  `MemoryState.allocate` accepts the epoch bump silently rather than refusing it,
-  which is not law 8's direction.
+- ~~**A stale-epoch grant freezes the next epoch's storage and only its holder or
+  lender can clear it.**~~ Closed at the source. `MemoryState.allocate?` refuses a
+  reallocation — an epoch change on an existing identity — while any grant is
+  outstanding over that storage, which is §5.1's "reallocation requires the return of
+  all live use loans" as a refusal rather than a sentence. A fresh identity is always
+  accepted, and so is replacing a record without changing its epoch: a permission,
+  liveness or placement change is not a reallocation.
+
+  The state that skipping it produced was the one three rounds kept circling — a
+  grant that freezes the storage that replaced it, authorizes nothing, and blocks a
+  replacement grant — and removing the state is better than accommodating it.
 - ~~**Nothing enforces that every `AuthorityState` constructor stays reachable.**~~
   Closed by `Tools/ReachabilityAudit.py`, which reports any inductive constructor
   nothing outside its own declaration appears to build. It is lexical, like the other

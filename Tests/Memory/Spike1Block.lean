@@ -74,7 +74,13 @@ def imageRecord : AllocationRecord :=
 
 /-- The state at the top of the block. -/
 def state₀ : MemoryState :=
-  (MemoryState.empty.allocate stackAlloc stackRecord).allocate imageAlloc imageRecord
+  (MemoryState.empty.allocateAll?
+    [(stackAlloc, stackRecord), (imageAlloc, imageRecord)]).getD .empty
+
+/-- Both allocations happened, so `getD` did not fall back. -/
+theorem the_allocations_succeed :
+    (MemoryState.empty.allocateAll?
+      [(stackAlloc, stackRecord), (imageAlloc, imageRecord)]).isSome := by decide
 
 /-! ## The four accesses, as descriptors
 

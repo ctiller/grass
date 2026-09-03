@@ -44,7 +44,13 @@ def unplacedRecord : AllocationRecord :=
 
 /-- A state holding both. -/
 def state : MemoryState :=
-  (MemoryState.empty.allocate placed placedRecord).allocate unplaced unplacedRecord
+  (MemoryState.empty.allocateAll?
+    [(placed, placedRecord), (unplaced, unplacedRecord)]).getD .empty
+
+/-- Both allocations happened, so `getD` did not fall back. -/
+theorem the_allocations_succeed :
+    (MemoryState.empty.allocateAll?
+      [(placed, placedRecord), (unplaced, unplacedRecord)]).isSome := by decide
 
 /-- The placed allocation does not wrap, which is the hypothesis every bridge lemma
 takes. Proved rather than decided: `FitsAllocation` bounds by `2 ^ 64`, and asking

@@ -61,9 +61,17 @@ def counterProv : Provenance :=
 
 /-- A state owning the word. -/
 def owned : MemoryState :=
-  MemoryState.empty.allocate counter
+  (MemoryState.empty.allocate? counter
     { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
-      permission := .readWrite, live := true, bytes := .empty, base := some 0x2000 }
+      permission := .readWrite, live := true, bytes := .empty
+      base := some 0x2000 }).getD .empty
+
+/-- The allocation happened, so `getD` did not fall back to the empty state. -/
+theorem the_allocation_succeeds :
+    (MemoryState.empty.allocate? counter
+      { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
+        permission := .readWrite, live := true, bytes := .empty
+        base := some 0x2000 }).isSome := by decide
 
 /-- Read/write conveyed for **atomic** access only. §3's atomic shared access,
 expressed as a right rather than as an authority state. -/

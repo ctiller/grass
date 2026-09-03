@@ -679,17 +679,32 @@ def zeroed64 : ByteStore := ByteStore.empty.write 0 (List.replicate 64 0) true
 /-- The buffer, its aliasing view, and a read-only allocation. The alias is
 declared here, in the state, because whether two allocations name the same bytes
 is a fact about the machine and not about provenance. -/
+def allocations₀ : List (AllocId × AllocationRecord) :=
+  [ (bufferAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+                    permission := .readWrite, live := true
+                    bytes := zeroed64, base := some 0x1000 })
+  , (viewAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+                  permission := .readWrite, live := true
+                  bytes := zeroed64, base := some 0x1000 })
+  , (constAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+                   permission := .readOnly, live := true
+                   bytes := zeroed64, base := some 0x2000 })
+  , (stackAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+                   permission := .readWrite, live := true, bytes := zeroed64
+                   base := some 0x3000 })
+  , (borrowedAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+                      permission := .readWrite, live := true, bytes := zeroed64
+                      base := some 0x4000 })
+  , (chainedAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+                     permission := .readWrite, live := true, bytes := zeroed64
+                     base := some 0x1000 }) ]
+
 def memory₀ : MemoryState :=
-  (((MemoryState.empty.allocate bufferAlloc
-      { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-        permission := .readWrite, live := true
-        bytes := zeroed64, base := some 0x1000 }).allocate viewAlloc
-      { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-        permission := .readWrite, live := true
-        bytes := zeroed64, base := some 0x1000 }).allocate constAlloc
-      { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-        permission := .readOnly, live := true
-        bytes := zeroed64, base := some 0x2000 }).alias bufferAlloc viewAlloc
+  ((MemoryState.empty.allocateAll? allocations₀).getD .empty).alias bufferAlloc viewAlloc
+
+/-- Every allocation happened, so `getD` did not fall back to the empty state. -/
+theorem the_allocations_succeed :
+    (MemoryState.empty.allocateAll? allocations₀).isSome := by decide
 
 /-- The stack reservation the frame provider guards.
 
@@ -698,18 +713,7 @@ an alias: distinct allocation identities over the same storage. Placement does n
 decide aliasing — `MemoryState.aliases` does, and `docs/MEMORY_MODEL.md` §2 makes
 provenance rather than address the authority — so the two facts are declared
 separately and agreeing here is the fixture being realistic rather than a rule. -/
-def memory₁ : MemoryState :=
-  ((((memory₀.allocate stackAlloc
-      { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-        permission := .readWrite, live := true, bytes := zeroed64
-        base := some 0x3000 }).allocate borrowedAlloc
-      { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-        permission := .readWrite, live := true, bytes := zeroed64
-        base := some 0x4000 }).allocate chainedAlloc
-      { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-        permission := .readWrite, live := true, bytes := zeroed64
-        base := some 0x1000 }).alias viewAlloc
-    chainedAlloc)
+def memory₁ : MemoryState := memory₀.alias viewAlloc chainedAlloc
 
 /-- The starting machine state: allocations exist, but no authority is held. -/
 def state₀ : MachineState := .initial memory₁

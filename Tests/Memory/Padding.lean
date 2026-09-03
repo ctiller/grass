@@ -67,7 +67,11 @@ def stackRecord₀ : AllocationRecord :=
     base := some 0x1000 }
 
 /-- The state before anything is written. -/
-def state₀ : MemoryState := MemoryState.empty.allocate alloc stackRecord₀
+def state₀ : MemoryState := (MemoryState.empty.allocate? alloc stackRecord₀).getD .empty
+
+/-- The allocation happened. -/
+theorem the_allocation_succeeds :
+    (MemoryState.empty.allocate? alloc stackRecord₀).isSome := by decide
 
 /-- Writing both fields, with data of exactly each field's width. -/
 def writes : List (FieldFootprint × ByteSeq) :=
