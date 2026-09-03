@@ -141,9 +141,11 @@ def extendsBase (p : Rex) : Bool := p.b == 1
 /--
 A REX prefix with no bits set: `0x40`.
 
-Not a no-op. It is the only way to reach `SPL`, `BPL`, `SIL` and `DIL`, because
-without any REX prefix those encodings mean `AH`, `CH`, `DH` and `BH`. See
-`ByteReg`.
+Not a no-op. *Any* REX prefix makes register numbers 4-7 in an 8-bit operand
+denote `SPL`, `BPL`, `SIL` and `DIL` rather than `AH`, `CH`, `DH` and `BH`, and
+this is the prefix to use when no extension bit is otherwise needed. So an
+instruction on `SPL` carries a prefix byte that changes none of its fields and
+is still required. See `ByteReg`.
 -/
 def bare : Rex := ⟨0, 0, 0, 0⟩
 
