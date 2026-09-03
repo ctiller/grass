@@ -1009,6 +1009,42 @@ theorem length_eraseAt (v : Vec α) {i : Nat} (h : i < v.length) :
   simp only [length, eraseAt, toList_fromList]
   exact List.length_eraseIdx_of_lt h
 
+/-!
+### Where the elements go
+
+The index-shifting laws. `docs/STDLIB.md` §3 lists `insert` and `erase` among the
+pure structural results, so unlike an undemanded operation these cannot simply be
+withdrawn — but until now they carried only length laws, and adversarial review
+compiled an `insertAt` that ignores its index and an `eraseAt` that always drops
+the last element, both satisfying everything the module said about them. These
+are what say where the elements actually go.
+-/
+
+/-- Below the insertion point, nothing moves. -/
+theorem get?_insertAt_lt (v : Vec α) {i j : Nat} (h : j < i) (a : α) :
+    (v.insertAt i a).get? j = v.get? j :=
+  List.getElem?_insertIdx_of_lt h
+
+/-- At the insertion point, the new element, provided the position was reachable. -/
+theorem get?_insertAt_self (v : Vec α) (i : Nat) (a : α) :
+    (v.insertAt i a).get? i = if i ≤ v.length then some a else none :=
+  List.getElem?_insertIdx_self
+
+/-- Above it, everything shifts up by one. -/
+theorem get?_insertAt_gt (v : Vec α) {i j : Nat} (h : i < j) (a : α) :
+    (v.insertAt i a).get? j = v.get? (j - 1) :=
+  List.getElem?_insertIdx_of_gt h
+
+/-- Below the erased position, nothing moves. -/
+theorem get?_eraseAt_lt (v : Vec α) {i j : Nat} (h : j < i) :
+    (v.eraseAt i).get? j = v.get? j :=
+  List.getElem?_eraseIdx_of_lt h
+
+/-- At or above it, everything shifts down by one. -/
+theorem get?_eraseAt_ge (v : Vec α) {i j : Nat} (h : i ≤ j) :
+    (v.eraseAt i).get? j = v.get? (j + 1) :=
+  List.getElem?_eraseIdx_of_ge h
+
 end Vec
 
 /-!

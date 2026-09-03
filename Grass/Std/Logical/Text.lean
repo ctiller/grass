@@ -138,6 +138,21 @@ def decode (bytes : Vec Byte) (valid : bytes.toHostBytes.IsValidUTF8) : String :
 @[simp] theorem decode_utf8 (s : String) : decode (utf8 s) (isValidUTF8_utf8 s) = s := by
   simp only [decode, String.fromUTF8, toHostBytes_utf8, String.toUTF8_eq_toByteArray]
 
+/--
+Decode bytes that may or may not be valid UTF-8.
+
+`Text.decode` demands a validity proof and `Text.isValidUTF8_utf8` only supplies
+one for bytes this module encoded, which is useless for bytes off a socket — a
+consumer review reported writing this off first as impossible and then finding
+that core supplies the decidability instance. That it is reachable only by
+knowing core's internals is the reason to ship it here.
+-/
+def decode? (bytes : Vec Byte) : Option String :=
+  if h : bytes.toHostBytes.IsValidUTF8 then some (decode bytes h) else none
+
+@[simp] theorem decode?_utf8 (s : String) : decode? (utf8 s) = some s := by
+  rw [decode?, dif_pos (isValidUTF8_utf8 s), decode_utf8]
+
 /-- And encoding inverts decoding, so no bytes are lost or invented in either
 direction. -/
 @[simp] theorem utf8_decode (bytes : Vec Byte) (valid : bytes.toHostBytes.IsValidUTF8) :

@@ -173,11 +173,31 @@ provenance token, or loan appears in that fixture.
 argument is in the module comment; the part that belongs in a plan is the cost
 and who pays it. Every law in the module is a wrapper over a `List` law, and
 `toList`/`fromList` are the only route between the two, so the wrapper is
-perhaps two hundred lines of restatement that buys three things: `ByteArray`
-does not reduce to `List Byte`, so §1's prohibition is elaborator-checked rather
-than conventional; the representation stays replaceable without touching a
-consumer, which §4's separation of capacity policy from logical equality
-requires; and the door into the representation is narrow enough to see.
+perhaps two hundred lines of restatement that was claimed to buy three things.
+Adversarial review refuted two of them and bounded the third, and the retraction
+belongs here rather than three paragraphs below.
+
+**Survives, but only against `List`.** `ByteArray` does not reduce to `List Byte`,
+so §1's prohibition is elaborator-checked rather than conventional. It does not
+distinguish this design from `abbrev Vec := Array`, under which both rejections
+still fire — review reproduced them. It *does* distinguish it from that option in
+one way the original argument never made: a bare `Array Byte` is rejected here
+and accepted there, which §3.2's costing fixture pins.
+
+**Refuted.** "The door into the representation is narrow enough to see" is false.
+Lean namespaces are open; review compiled a `Grass.Std.Logical.Vec.unreviewedBackdoor`
+from outside `Grass/Std/Logical/` and it appears as dot notation on every
+`ByteArray`. `Grass/Std/Logical/HostBytes.lean` sets the precedent itself by
+reopening `namespace Vec` from another file. Nothing about the structure narrows
+anything.
+
+**Bounded.** "The representation stays replaceable without touching a consumer"
+is spent by §3.3: publishing propositional equality hardwires canonicity into the
+public contract, so the seam survives only for representations that are also
+canonical. The array-backed option is canonical and clears it; a capacity-carrying
+one would not, and §1 assigns capacity to `OwnedVec` anyway. The two decisions are
+load-bearing on each other in opposite directions and neither module comment said
+so.
 
 This is reversible in one direction only. Changing `Vec` from a structure to an
 abbreviation later is a small edit; changing it the other way after consumers
@@ -496,6 +516,19 @@ axiom — so a green audit is not evidence about this boundary, and §3.11's
 criterion 2 must not be read as if it were. Open item 12 raises the missing TCB
 ledger that [FOUNDATION.md](FOUNDATION.md) §3 actually asks for.
 
+**And none of those externs is the assumption the spikes actually rest on.** They
+run in compiled code. Every literal case — `Tests/Std/Text.lean`'s `rfl`
+examples, §6's "reduces during kernel elaboration", and
+`Spikes/4_Web_Server/Spec.lean`'s body equation against an encoded literal —
+never executes them; the kernel reduces the model. What those rest on is the
+*elaborator's construction of the string literal's bytes*: which bytes Lean's
+frontend puts into `String.ofByteArray` when it lexes `"Hello, World!"` from a
+source file, and the kernel's agreement with that. That is an assumption about
+the lexer and about the source file's own encoding. It is not an extern, not an
+axiom, and not covered by anything named above — and
+`Spikes/1_Hello_World/Spec.lean`'s `message` is the observable the whole first
+milestone is specified against.
+
 **Decoding is supplied, and the reason once given for its absence was false.**
 This section previously said core supplies no round-trip theorem and that
 providing one "means proving UTF-8 correctness against a specification, which is
@@ -742,8 +775,31 @@ reader will want a reason for:
 5. Stages are lettered `S`, not `M`, to avoid collision with
    [MEMORY_IMPLEMENTATION_PLAN.md](MEMORY_IMPLEMENTATION_PLAN.md). §1.
 
-6. **Superseded.** The rule was "every operation carries at least one law", and
-   adversarial review broke it twice. It was asserted satisfied on the same page
+6. **Superseded twice.** The first rule was "every operation carries at least
+   one law"; the second was "the laws determine the operation up to extensional
+   equality". Adversarial review broke both — the second by a one-line
+   `@[simp] theorem f_def : f v i a = … := rfl`, which pins a function to itself
+   and meets a determination bar in full while the function stays wrong. A
+   determination rule can only say "your laws pin your function"; it cannot say
+   "your function is the right function". The second rule was also internally
+   inconsistent, counting `truncate_eq_take` and `clear_eq_empty` as closing a
+   gap while listing `splitAt_eq`, which has exactly the same definitional-alias
+   shape, as failing.
+
+   **The rule is now observation coverage**, which is checkable and not gameable
+   by a `rfl`: for every operation `f`, this module states either (i) a law
+   computing `(f …).length` **and** a law computing `(f …).get? i`, each in terms
+   of the `length`/`get?` of `f`'s arguments; or (ii) a complete recursion — the
+   value of `f` at `empty` and at `push`. Neither may mention `Vec.toList`, and
+   neither may be `f`'s own definitional body unless its right-hand side is an
+   operation that itself satisfies the bar. Under it `set`, `push`, `take`,
+   `drop`, `map`, `mapIdx`, `zipWith`, `append`, `insertAt`, and `eraseAt` pass
+   on (i); `foldl`, `foldr`, and `flatten` pass on (ii); `truncate`, `clear`, and
+   `splitAt` pass on the alias clause. The bar is adversarial review's, not this
+   plan's, and it is adopted because it survives the attack that killed the
+   previous two.
+
+   The earlier record, kept because the failures are the argument for the rule: It was asserted satisfied on the same page
    where `Vec.truncate` and `Vec.clear` shipped with no law naming either — now
    fixed — and, more importantly, counting laws cannot express what the rule was
    reaching for. A deliberately wrong `insertAt` that ignores its index, and an
@@ -833,8 +889,14 @@ Open, with the owner each is with:
    blocks `mapM`/`traverse`, the parser combinators, and the worklists
    respectively. Raised with the coordinator when one becomes a blocker. §3.4,
    §5.
-9. **`Vec.insertAt`, `Vec.eraseAt`, and `Vec.splitAt` are not determined by
-   their laws**, under decision 6's replacement bar. `Vec.Permutation` and
+9. **Closed.** `Vec.insertAt` and `Vec.eraseAt` now carry their index-shifting
+   laws — `get?_insertAt_lt`/`_self`/`_gt` and `get?_eraseAt_lt`/`_ge` — so they
+   pass decision 6's observation-coverage bar, and the two bogus implementations
+   adversarial review compiled against them are now formally refuted rather than
+   merely disapproved of. `splitAt` passes on the alias clause. They were not
+   withdrawn under band 3 because [STDLIB.md](STDLIB.md) §3 lists `insert` and
+   `erase` among the pure structural results: an undemanded operation can be
+   dropped, a demanded one owes laws. The historical record: `Vec.Permutation` and
    `Vec.idxOf?` were in this list too until adversarial review found them:
    `Permutation` promised "the same multiplicities" and no law mentioned
    multiplicity, so a same-length-same-members relation satisfied all eight of its
