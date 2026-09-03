@@ -86,6 +86,22 @@ producing an identity that already is, or splitting into obligations governed by
 a different protocol. -/
 def obligationNotAuthorized : AuditViolationClass := ⟨⟨"obligationNotAuthorized"⟩⟩
 
+/-- Two accesses from distinct contexts touched the same bytes with at least one
+writer, unordered and not both compatible atomic accesses — `docs/MEMORY_MODEL.md`
+§7.3's race.
+
+Distinct from `authorityUnavailable`, and this class exists because it was not.
+`refusalOf` recorded three different rules under that one name: §3's authority-state
+clause, §3's holder clause, and this. Review demonstrated a race recorded as
+`authorityUnavailable` from a state where *nothing was held* — the ledger entry
+byte-identical in class to a genuine loan violation. The rule against collapsing
+distinguishable failures is stated three times in this layer (here for
+`wrongAddressSpace`, again for `authorityEffectRefused`, and again for
+`faultWithUndeclaredAuthorityEffect`) and was broken once, which is why §7.3's second
+paragraph — race-freedom as a claim separate from an authority claim — could not be
+stated by a profile. -/
+def conflictingAccess : AuditViolationClass := ⟨⟨"conflictingAccess"⟩⟩
+
 /-- An access declared a change to the authority map that the map refuses: lending
 under an identity already in use, lending bytes the named lender does not hold,
 returning a grant the acting context neither holds nor lent, splitting or joining
@@ -165,7 +181,7 @@ def emittedByTransition : List AuditViolationClass :=
   [outOfBounds, deadProvenance, permissionDenied, uninitializedRead, misaligned,
    authorityUnavailable, obligationNotAuthorized, wrongAddressSpace,
    machineAnswerIncomplete, provenanceExtentMismatch, addressDisagreesWithPlacement,
-   placementWraps, authorityEffectRefused]
+   placementWraps, authorityEffectRefused, conflictingAccess]
 
 end AuditViolationClass
 

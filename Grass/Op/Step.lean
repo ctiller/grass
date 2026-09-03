@@ -861,7 +861,7 @@ def refusalOf (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor
         | Option.none =>
             match prospective with
             | some event =>
-                if ConflictsWithHistory policy state event then some .authorityUnavailable
+                if ConflictsWithHistory policy state event then some .conflictingAccess
                 else Option.none
             | Option.none => Option.none
 
@@ -914,7 +914,7 @@ theorem refusalOf_allows_the_unheld {policy : StepPolicy} {state : MachineState}
           match prospective with
           | some event =>
               if ConflictsWithHistory policy state event then
-                some AuditViolationClass.authorityUnavailable
+                some AuditViolationClass.conflictingAccess
               else Option.none
           | Option.none => Option.none := by
   unfold refusalOf
@@ -1061,9 +1061,15 @@ Two of the three are settled here. The address-space and authority classes are t
 transition's own, so `StepPolicy.violationClassesDeclared` covers them by the same
 route `refusalOf_class_declared` takes.
 
-The third is not, and is stated rather than hidden: `AccessOutcome.violation?` is
-supplied by the profile's machine oracle, so nothing in this layer bounds its class.
-`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records it.
+The third is neither covered nor reachable, and the second half of that is a
+correction. This docstring used to say `AccessOutcome.violation?` "is supplied by the
+profile's machine oracle, so nothing in this layer bounds its class". The oracle
+cannot supply it: `Oracle.answer` returns a `CompleteCommitted`, never an
+`AccessOutcome`, and `performAccess`'s two call sites build `.completed` and
+`.faulted`. `AccessOutcome.denied` has no producer anywhere in `Grass/` or `Tests/`,
+so the branch that reads `outcome.violation?` is dead code and the open item recorded
+against it named a component with no way to reach it. What is owed is smaller than
+what was recorded: either a producer for `.denied` or its deletion.
 -/
 theorem transition_own_classes_declared (policy : StepPolicy) :
     policy.profile.vocabulary.auditViolationClasses.Recognizes

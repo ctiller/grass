@@ -2623,6 +2623,31 @@ theorem the_forged_lend_is_refused_on_the_map :
       (.issue lentSlot { declaredLoan with lender := engine₀ })).isSome := by
   exact ⟨by decide, by decide⟩
 
+/-! ## A race is recorded as a race
+
+`refusalOf` recorded three different rules under `authorityUnavailable`: §3's
+authority-state clause, §3's holder clause, and §7.3's conflict. Review demonstrated a
+race recorded that way from a state where *nothing was held*, with a ledger entry
+byte-identical in class to a genuine loan violation — so a profile could not state a
+race-freedom claim separately from an authority claim, which is what §7.3's second
+paragraph distinguishes. `conflictingAccess` is its own class now.
+-/
+
+/-- **The race is recorded as `conflictingAccess`, from a state where nothing is
+held.** The second conjunct is the part that matters: the class cannot be explained by
+any loan. -/
+theorem a_race_is_recorded_as_a_race :
+    ¬ state₀.memory.AnyGrantOver bufferProv ⟨0, 8⟩ ∧
+    ¬ state₀.memory.AnyGrantOver viewProv ⟨0, 8⟩ ∧
+    ∀ s, (stepAlpha state₀ .store).state? = some s →
+      ∀ t, (stepBeta s .dmaWrite).state? = some t →
+        t.violations.records?.any (fun r => r.class_ = .conflictingAccess) := by
+  refine ⟨by decide, by decide, ?_⟩
+  intro s hs t ht
+  cases hs
+  cases ht
+  decide
+
 /-! ## No compatibility relation can switch the race check off
 
 `StepPolicy.compatible` is the one field a profile writes that can *remove* a refusal

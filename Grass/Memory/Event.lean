@@ -303,14 +303,23 @@ theorem not_conflicts_of_different_space {sharesBytes : AllocId → AllocId → 
 
 /-- **An event that touches no bytes conflicts with nothing.**
 
-Stated over `touchesMemory` and not over `EventKind.fence`, which is the correction.
-It was `(h : a.kind = .fence)`, and nothing in the model can mint an event of that
-kind: `kindOf` yields only `read`, `write` and `readModifyWrite`, and `ofOutcome` is
-the only producer of a `ValidMemoryEvent`. So the theorem held of a term no state
-could reach — the shape `AuthorityState.atomicShared` and its theorem were deleted
-for, standing in a file no review round had read until the seventh. Over
-`touchesMemory` it is a real statement about a real hypothesis, and it is what the
-fence case would have used had there been one. -/
+Stated over `touchesMemory` and not over `EventKind.fence`. It was
+`(h : a.kind = .fence)`, and nothing in the model can mint an event of that kind, so
+the theorem held of a term no state could reach.
+
+**The correction moved the vacuity; it did not remove it, and an earlier version of
+this docstring claimed otherwise** ("a real statement about a real hypothesis").
+Review checked: `kindOf` yields only `read`, `write` and `readModifyWrite`, all three
+of which `touchesMemory_kindOf` sends to `true`; `ofOutcome` is the only producer of a
+`ValidMemoryEvent`; and `MachineState.events` holds `ValidMemoryEvent`. So no event in
+any trace satisfies this hypothesis either — `touchesMemory_ofOutcome` below is that
+fact, stated rather than left implicit.
+
+The theorem is kept, because it is a true statement about `Conflicts` over arbitrary
+`MemoryEvent`s and `Conflicts` is where a fence *would* enter if §7.1's fence kind
+became constructible. What it is not is coverage of anything the transition can
+produce, and this docstring says so now. The same applies to
+`WellFormed.noLocationWhenUntouched`. -/
 theorem not_conflicts_of_untouched {sharesBytes : AllocId → AllocId → Prop}
     {compatible : MemoryEvent → MemoryEvent → Prop}
     {a b : MemoryEvent} (h : a.kind.touchesMemory ≠ true) :
@@ -691,6 +700,36 @@ def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
                     | denied v =>
                       subst houtcome'
                       simp [AccessOutcome.committed?] at houtcome } }
+
+/--
+**Every event this module can mint touches memory.**
+
+The fact that makes `not_conflicts_of_untouched` and
+`WellFormed.noLocationWhenUntouched` vacuous over any trace, stated so that the
+vacuity is a theorem rather than something a reader has to reconstruct. It follows
+from `kindOf`'s three cases and is what `ofOutcome` itself relies on to discharge
+`kindTouchesMemory`.
+
+If §7.1's `fence` kind ever becomes constructible, this theorem is what breaks, which
+is the right place for the breakage to appear.
+-/
+theorem touchesMemory_ofOutcome {id : EventId} {contextKind : ContextKind}
+    {cause : EventCause} {space : AddressSpace} {d : AccessDescriptor}
+    {outcome : AccessOutcome d} {valid : ValidMemoryEvent}
+    (h : ofOutcome id contextKind cause space d outcome = some valid) :
+    valid.event.kind.touchesMemory = true := by
+  unfold ofOutcome at h
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  next c _ =>
+    split at h
+    · exact absurd h (by simp)
+    · next kind hkind =>
+      injection h with h
+      subst h
+      exact touchesMemory_kindOf hkind
 
 /-- The event an access produces records exactly the access's own range. -/
 @[simp] theorem range_of_ofOutcome {id : EventId} {contextKind : ContextKind}

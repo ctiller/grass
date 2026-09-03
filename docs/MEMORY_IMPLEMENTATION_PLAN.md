@@ -1802,6 +1802,57 @@ refuses everything.
   `conflicts_symm` is `compatibleSymm`'s consumer. `Tests/Op/FakeIsa.lean` builds a
   permissive profile that exempts every *atomic* pair, which §7.3 allows, and steps the
   race under it: still denied.
+- ~~**A §7.3 race was recorded as `authorityUnavailable`.**~~ `refusalOf` recorded
+  three different rules under one class — §3's authority-state clause, §3's holder
+  clause, and the conflict check — and review demonstrated a race recorded that way
+  from a state where nothing was held, byte-identical in class to a genuine loan
+  violation. The rule against collapsing distinguishable failures is stated three
+  times in this layer and was broken once. `conflictingAccess` is its own class, and
+  `a_race_is_recorded_as_a_race` pins it with the nothing-is-held conjunct beside it.
+- **`MemoryEvent.WellFormed` has no consumer.** Review replaced all thirteen clauses
+  with an empty structure and the whole build stayed green, including
+  `step_events_wellFormed`, which holds because it says nothing about what well-formed
+  means. No clause is projected outside its own module: `ofOutcome` supplies all
+  thirteen unconditionally from `Committed`'s proof fields, and nothing reads one
+  back. So `ValidMemoryEvent`'s proof-carrying shape does not gate anything a caller
+  could otherwise produce — the gating is entirely in `Committed`, and sealing `mk`
+  stops a bypass of a check that cannot fail.
+
+  The clauses are not wrong and M8 will read them; what is wrong is that nothing in
+  the tree would notice one becoming false, including the two clauses a previous round
+  added *because* two records of one fact had no clause tying them.
+- ~~**`not_conflicts_of_untouched` was still vacuous, and its docstring said it was
+  not.**~~ The correction from `EventKind.fence` to `touchesMemory` moved the vacuity
+  rather than removing it: `kindOf` yields three kinds, all of which touch memory, and
+  `ofOutcome` is the only producer — so no event in any trace satisfies the
+  hypothesis. `touchesMemory_ofOutcome` states that as a theorem, the docstring says
+  what is true, and the theorem is kept as a fact about `Conflicts` over arbitrary
+  events rather than as coverage of anything the transition can produce.
+- ~~**The unbounded-violation-class gap was attributed to a component that cannot
+  reach it.**~~ `transition_own_classes_declared` recorded that
+  `AccessOutcome.violation?` "is supplied by the profile's machine oracle, so nothing
+  in this layer bounds its class". `Oracle.answer` returns a `CompleteCommitted`,
+  never an `AccessOutcome`, and `.denied` has no producer anywhere — so the branch is
+  dead code. What is owed is smaller than what was recorded: a producer for `.denied`,
+  or its deletion.
+- **Ten declarations in `Grass/Memory/Event.lean` have no consumer**, including the
+  whole published theory of `Conflicts` — `symm`, `not_conflicts_of_both_read`,
+  `not_conflicts_of_unshared`, `not_conflicts_of_different_space`,
+  `not_conflicts_of_untouched`, `atomicsAreNever` and its instance, `range_of_ofOutcome`,
+  `ofOutcome_denied`, `committed?_denied`. Review deleted all ten and the build stayed
+  green. `conflicts_symm` gives `symm` a consumer now; the rest are laws without
+  callers, which is not the same defect as a mechanism without content but is worth
+  knowing before M8 builds on them. `atomicsAreNever` is a second encoding of
+  `StepPolicy.compatible`'s default and has never been used as one.
+- **Nothing relates `eventSupply` to `events`.** `performAccess` mints from the supply
+  and consults the trace for nothing, and no theorem says identities in a trace are
+  distinct or that the supply dominates it. Review rewound the supply on a stepped
+  state and got one identity twice in one trace, with an empty ledger. The state is
+  fixture-built — `step` never rewinds — but `MachineState.mk` and `eventSupply` are
+  public, M8 keys sequenced-before and reads-from on `EventId`, and the graph builder
+  will be handed states it did not construct. The violation ledger has four theorems
+  for exactly this reason and `events` has none, while §7.2 says steps monotonically
+  extend it.
 - **`MemoryState.SharesBytes` has no symmetry theorem.** `conflicts_symm` takes it as
   a hypothesis for that reason. `AliasHop` is symmetric by construction so the fact is
   true; the proof needs a back-peeling lemma for the bounded alias-hop closure that
