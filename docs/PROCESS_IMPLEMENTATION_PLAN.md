@@ -3472,10 +3472,13 @@ Two consequences it found, both worth more than the count:
   corrected; `nothing_can_be_sent_on_the_shut_wire` is a real theorem stated at a
   manufactured world.
 
-`ProcessPlan.Sound` and `LogicalProcessNetworkCore.WellFormed` are also inhabited
-nowhere — `terminated_result_is_exact` takes a `Sound` hypothesis nothing has
-ever supplied. A reviewer proved `Sound` inhabitable at `quiet`, where every
-clause is vacuous because the network holds no instances.
+`ProcessPlan.Sound` and `LogicalProcessNetworkCore.WellFormed` were also
+inhabited nowhere — `terminated_result_is_exact` took a `Sound` hypothesis
+nothing had ever supplied. `Tests/Process/FrontierFixtures.lean`'s
+`waiting_is_wellFormed` and `waiting_is_sound` are the witnesses, and the fixture
+says plainly that five of the six clauses cannot fail at that plan:
+`nominalsAllocated` is the one with content. Inhabited, not exercised — the same
+distinction §10.59 drew for `ExactInitialNetwork` at the same plan.
 
 Needs the fixtures, and the send/receive pair is the one to build first: it is
 the only one whose absence hides a *composition* failure rather than a coverage
@@ -3515,3 +3518,24 @@ layer up.
 
 Needs a ruling on whether a plan should carry a cancellation policy that
 `acknowledgeCancel` checks against.
+
+### 10.82 `ProcessPlan.Sound` adds nothing, and its docstring said it would
+
+`Sound` has one field, `core : WellFormed`, and its docstring said
+`Transition.lean` "will add the clauses a plan can state and a bare network
+cannot — that a step's channel transitions are the ones this plan's contracts
+govern, and that the escrow resolutions are the transition family's".
+
+`Transition.lean` landed and added neither. It made both clauses fields of the
+*transition* structures instead — `SendsEscrow.contractual` and
+`Delivers.contractual` — which is the better place: they are facts about a step
+and `Sound` is a predicate on a network. A reviewer pointed out that the forward
+reference was to a module that had already shipped without doing what it said.
+
+So `Sound` is `WellFormed` under another name. It is kept because
+`terminated_result_is_exact` is stated over it and a plan is where a future
+network-level clause would go. If none arrives it should be collapsed.
+
+Needs a ruling: is there a network-level soundness clause a plan can state that
+the world cannot? The two named have found a better home, and no third has been
+proposed.

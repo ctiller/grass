@@ -288,11 +288,23 @@ theorem demand_private_or_exported
 /--
 Everything a network under this plan must satisfy.
 
-For now this is exactly `LogicalProcessNetworkCore.WellFormed`, and it is a
-named wrapper rather than an alias because `Transition.lean` will add the
-clauses a plan can state and a bare network cannot — that a step's channel
-transitions are the ones this plan's contracts govern, and that the escrow
-resolutions are the transition family's.
+This is exactly `LogicalProcessNetworkCore.WellFormed` and nothing more, and an
+earlier version of this docstring said `Transition.lean` "will add the clauses a
+plan can state and a bare network cannot — that a step's channel transitions are
+the ones this plan's contracts govern, and that the escrow resolutions are the
+transition family's".
+
+**`Transition.lean` landed and added neither.** It made both clauses fields of
+the transition structures instead — `SendsEscrow.contractual` and
+`Delivers.contractual`, each saying that *this step* is one the plan's own
+relation admits — which is the better place for them: they are facts about a
+step and this is a predicate on a network. A reviewer pointed out the forward
+reference was to a module that had already shipped without doing what it said.
+
+So `Sound` adds nothing today. It is kept as a name rather than collapsed into
+`WellFormed` because `terminated_result_is_exact` is stated over it and a plan is
+where a future network-level clause would go; if none arrives, it should go.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.82.
 
 An earlier revision put the reroute-landing law here, on the argument that only
 a plan holds every session's ledger. That was wrong by one layer:
