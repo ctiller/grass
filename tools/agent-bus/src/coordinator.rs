@@ -9,10 +9,12 @@
 //! that: deterministic, and requiring no ongoing process.
 //!
 //! Deliberately scoped for now: drains and publishes one agent's own
-//! outbox in submission order, locally (no remote push/receipt yet, no
-//! cross-agent dependency-closure batching, no atomic multi-ref push). Each
-//! of those is real further work, not silently assumed to not matter --
-//! see the module doc on what's still ahead.
+//! outbox in submission order, then pushes that agent's stream ref alone
+//! (`publish_stream`/`drain_and_publish`, via `publish.rs`). No cross-agent
+//! dependency-closure batching or multi-ref atomic publication yet -- those
+//! matter once a single coordinator turn can affect more than one agent's
+//! ref at a time (e.g. a registry transition alongside the stream event it
+//! authorizes), and are real further work, not silently assumed away.
 
 use crate::envelope::Envelope;
 use crate::error::{invalid, AbResult};
@@ -118,6 +120,53 @@ pub fn drain_outbox(
     Ok(published)
 }
 
+/// Publishes `agent`'s current local stream tip to `remote` as a single ref
+/// update. Reads local state rather than taking a delta from the caller, so
+/// it is naturally idempotent and safe to retry: a crash between
+/// `drain_outbox` committing locally and the push landing leaves nothing to
+/// reconstruct, since the next call simply re-observes the same local tip
+/// and re-attempts the same push. A no-op (default/empty receipt) if
+/// `agent` has no stream locally yet.
+pub fn publish_stream(
+    repo: &Path,
+    remote: &str,
+    agent: &Agent,
+) -> AbResult<crate::publish::PublicationReceipt> {
+    let tip = match crate::stream::read_stream_tip(repo, agent)? {
+        Some(tip) => tip,
+        None => return Ok(crate::publish::PublicationReceipt::default()),
+    };
+    let update = crate::publish::RefUpdate::new(crate::stream::stream_ref(agent).into_string(), tip);
+    crate::publish::publish(repo, remote, &[update])
+}
+
+/// Drains `agent`'s outbox (see [`drain_outbox`]) and then publishes its
+/// resulting stream tip to `remote`. Returns both the newly published
+/// `EventId`s and the remote publication receipt; a rejected or partial
+/// receipt is not itself an error (ordinary coordinator policy input, see
+/// `publish.rs`) -- inspect the receipt to learn what actually landed.
+#[allow(clippy::too_many_arguments)]
+pub fn drain_and_publish(
+    repo: &Path,
+    git_common_dir: &Path,
+    agent: &Agent,
+    host: &Short,
+    coordinator_custody_epoch: u64,
+    worktrees_dir: &Path,
+    remote: &str,
+) -> AbResult<(Vec<EventId>, crate::publish::PublicationReceipt)> {
+    let published = drain_outbox(
+        repo,
+        git_common_dir,
+        agent,
+        host,
+        coordinator_custody_epoch,
+        worktrees_dir,
+    )?;
+    let receipt = publish_stream(repo, remote, agent)?;
+    Ok((published, receipt))
+}
+
 /// Builds a sparse frontier covering exactly the cross-agent identities
 /// `extra_refs` names, each pinned at that referenced event's own position
 /// against the referenced agent's *current* stream tip. Same-agent
@@ -200,6 +249,16 @@ mod tests {
             .arg("-C")
             .arg(path)
             .args(["commit", "-q", "-m", "initial"])
+            .status()
+            .unwrap();
+        dir
+    }
+
+    fn init_bare_origin() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::process::Command::new("git")
+            .args(["init", "--quiet", "--bare", "-b", "main"])
+            .arg(dir.path())
             .status()
             .unwrap();
         dir
@@ -375,5 +434,119 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("not an active member"), "{err}");
+    }
+
+    #[test]
+    fn publish_stream_is_a_noop_when_the_agent_has_no_local_stream() {
+        let repo = init_repo();
+        let origin = init_bare_origin();
+        let alice = a("alice");
+        let receipt = publish_stream(
+            repo.path(),
+            &origin.path().to_string_lossy(),
+            &alice,
+        )
+        .unwrap();
+        assert_eq!(receipt, crate::publish::PublicationReceipt::default());
+    }
+
+    #[test]
+    fn publish_stream_pushes_an_already_committed_local_tip() {
+        let repo = init_repo();
+        let origin = init_bare_origin();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+            &repo.path().join("_genesis_wt"),
+        )
+        .unwrap();
+
+        let local_tip = crate::stream::read_stream_tip(repo.path(), &coord1)
+            .unwrap()
+            .unwrap();
+        let receipt = publish_stream(
+            repo.path(),
+            &origin.path().to_string_lossy(),
+            &coord1,
+        )
+        .unwrap();
+        assert_eq!(
+            receipt.published.get("refs/heads/agent-events/coord1"),
+            Some(&local_tip)
+        );
+        assert_eq!(
+            crate::gitrepo::rev_parse(origin.path(), "refs/heads/agent-events/coord1").unwrap(),
+            local_tip.into_string()
+        );
+    }
+
+    #[test]
+    fn drain_and_publish_pushes_the_new_tip_to_the_remote() {
+        let repo = init_repo();
+        let origin = init_bare_origin();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+            &repo.path().join("_genesis_wt"),
+        )
+        .unwrap();
+        crate::outbox::submit(repo.path(), "client-1", &status_candidate(&coord1, "hi")).unwrap();
+
+        let (published, receipt) = drain_and_publish(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            &repo.path().join("_wt"),
+            &origin.path().to_string_lossy(),
+        )
+        .unwrap();
+        assert_eq!(published, vec![EventId::new(&coord1, 1)]);
+
+        let local_tip = crate::stream::read_stream_tip(repo.path(), &coord1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            receipt.published.get("refs/heads/agent-events/coord1"),
+            Some(&local_tip)
+        );
+        assert_eq!(
+            crate::gitrepo::rev_parse(origin.path(), "refs/heads/agent-events/coord1").unwrap(),
+            local_tip.into_string()
+        );
+    }
+
+    #[test]
+    fn drain_and_publish_is_a_noop_when_the_outbox_is_empty() {
+        let repo = init_repo();
+        let origin = init_bare_origin();
+        let alice = a("alice");
+        let (published, receipt) = drain_and_publish(
+            repo.path(),
+            repo.path(),
+            &alice,
+            &short("host1"),
+            0,
+            &repo.path().join("_wt"),
+            &origin.path().to_string_lossy(),
+        )
+        .unwrap();
+        assert!(published.is_empty());
+        assert_eq!(receipt, crate::publish::PublicationReceipt::default());
     }
 }
