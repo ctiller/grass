@@ -127,9 +127,14 @@ declaration listed here that no longer exists fails the citation audit.
 
 ## What this note does not certify
 
-M1's other exit criteria are separate and two are unmet, which §4.2 records: no
-`rep movs` fixture and no locked read-modify-write fixture exist, and §9's risk 1
-names both as mandatory before a freeze. The ISA agent's review of the freeze against
-that list has therefore not happened. So the shapes above are stable *in practice* —
-six adversarial review rounds moved mechanism and not fields — and are not yet frozen
-*by the process §3 describes*.
+M1's other exit criteria are separate. `Tests/Memory/RiskOneCases.lean` now has the
+two §9 risk 1 fixtures that were missing, and both are expressible — but writing them
+found two things the shapes above cannot say, recorded in §4.2: `rep movsb` is a
+*family* of descriptors rather than one, so proofs about it are inductions rather than
+`decide`s; and `lock cmpxchg16b` cannot declare that its write is conditional, so a
+failed compare-and-swap is described as a write.
+
+What remains is the ISA agent's review of the freeze against that list, which is that
+agent's and has not happened. So the shapes above are stable *in practice* — seven
+adversarial review rounds moved mechanism and not fields — and are not yet frozen *by
+the process §3 describes*.

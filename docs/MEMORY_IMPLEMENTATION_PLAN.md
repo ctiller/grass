@@ -751,12 +751,30 @@ one outright defect that had already merged — see §3.11's denial row.
   is stable in practice and not yet frozen by the process §3 describes, because two
   of §9 risk 1's mandatory fixtures are still absent and the ISA agent's review has
   therefore not happened.
-- **Two of §9 risk 1's five mandatory pre-freeze fixtures are absent.** Present:
-  the divide fault between two memory effects (`divMem`), the implicit-stack
-  operation (`pushR12`), the misaligned crossing access (`splitPageStore`). Absent: a
-  repeated string operation, and a locked read-modify-write — and `rep movsb` and
-  `rep stosw` are both in `Spikes/2_Sort` and `Spikes/3_Gzip`. §3.13 records that
-  `lock cmpxchg16b` "still cannot declare its compare and swap operands".
+- ~~**Two of §9 risk 1's five mandatory pre-freeze fixtures are absent.**~~ Written:
+  `Tests/Memory/RiskOneCases.lean` has `rep movsb` and `lock cmpxchg16b`. Both are
+  expressible, and writing them found two things the frozen shape cannot say, which is
+  what risk 1 asked for.
+
+  **`rep movsb` is a family, not a descriptor.** The count is a runtime register and
+  `AccessDescriptor.range` is fixed, so `substeps` is a function of the operation
+  value — which `HasOperationFacets` already allows. The cost is that a proof about
+  `rep movsb` for all counts is an induction over that family, so the `decide`-based
+  side-condition idiom in `Tests/Memory/Spike1Block.lean` does not carry to it. The
+  zero-count branch is separate: `rangeNonEmpty` refuses an empty access, so a
+  zero-count string operation has no memory effect at all and an ISA model must
+  case-split.
+
+  **`lock cmpxchg16b` cannot say its write is conditional.** §3.13 said it "cannot
+  declare its compare and swap operands", and that turns out to be about *values*,
+  which this layer does not model. What it genuinely cannot express is that a failed
+  comparison writes nothing: `intent.writes` is `true` either way, and `Committed` is
+  about a *faulting* access's prefix, not a write that lawfully did not happen. Safe
+  for authority — the access demands write authority it may not use — and wrong for
+  §7.3's conflict rule, where a non-writing access does not conflict.
+
+  What remains of the criterion is the ISA agent's review of the freeze against this
+  list, which is that agent's and has not happened.
 - **Aliased allocations have independent byte stores.** `MemoryState.SharesBytes`
   says two allocations name the same bytes, and the whole authority layer believes
   it: `grantsOver`, `AuthorizedBy` and `MemoryEvent.Conflicts` all key on it. But
