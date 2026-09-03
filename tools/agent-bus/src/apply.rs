@@ -339,10 +339,21 @@ fn apply_status(state: &mut BusState, env: &Envelope, d: &AgentStatusEvent) -> A
 fn apply_resumed(state: &mut BusState, env: &Envelope, d: &AgentResumed) -> AbResult<()> {
     let ag = require_agent(state, &env.agent)?;
     if ag.last_lifecycle_event != d.previous_lifecycle {
-        return Err(invalid(format!(
-            "{}: previous_lifecycle {} does not match {}'s latest lifecycle event {}",
-            env.id, d.previous_lifecycle, env.agent, ag.last_lifecycle_event
-        )));
+        // `previous_lifecycle` named a predecessor that is no longer this
+        // agent's latest lifecycle event -- ordinarily, or because a
+        // concurrent lifecycle event this event's author never observed
+        // (e.g. a coordinator's `agent.retired`, independently published
+        // from a different host -- AGENT_COORDINATION_EVOLUTION.md section
+        // 2.1: per-agent streams are single-writer and published without
+        // cross-observing each other) landed first. A no-op, not an `Err`:
+        // `reduce()`/`reduce_onto()` propagate any `Err` here via a bare
+        // `?` with no per-event isolation, so a hard failure would
+        // permanently break reduction of the *entire* bus for every host
+        // that has fetched both streams, not just this one agent's record
+        // (round-4 adversarial review, same bug class already fixed for
+        // review.* events -- see `apply_review_accept`'s identical
+        // reasoning).
+        return Ok(());
     }
     let ag = state.agents.get_mut(&env.agent).expect("just checked");
     ag.retired = false;
@@ -358,10 +369,14 @@ fn apply_retired(state: &mut BusState, env: &Envelope, d: &AgentRetired) -> AbRe
     }
     let target = require_agent(state, &d.target)?;
     if target.last_lifecycle_event != d.previous_lifecycle {
-        return Err(invalid(format!(
-            "{}: previous_lifecycle {} does not match {}'s latest lifecycle event {}",
-            env.id, d.previous_lifecycle, d.target, target.last_lifecycle_event
-        )));
+        // See the identical comment in `apply_resumed`: a no-op, not an
+        // `Err`. Two coordinators on different hosts can each validly
+        // retire the same silent target, each citing the same
+        // `previous_lifecycle`, without observing each other -- exactly
+        // the "silent death" scenario `agent.retired` exists for. Whichever
+        // reduces first must not poison reduction of the entire bus for
+        // the second.
+        return Ok(());
     }
     let target = state.agents.get_mut(&d.target).expect("just checked");
     target.retired = true;
@@ -1187,10 +1202,19 @@ fn apply_review_closing(
                 )));
             }
             if !chain.authorizations.is_empty() {
-                return Err(invalid(format!(
-                    "{}: cannot withdraw after merge authorization",
-                    env.id
-                )));
+                // A no-op, not an `Err`: an author's withdrawal built
+                // without observing a just-landed `review.merge_authorized`
+                // (the two are independently published and never
+                // cross-observe each other before publication --
+                // AGENT_COORDINATION_EVOLUTION.md section 2.1) must not
+                // poison reduction of the entire bus the way a hard `Err`
+                // here would (`reduce()`'s bare `?` has no per-event
+                // isolation). The policy outcome is unchanged -- withdrawal
+                // after authorization still never takes effect -- only the
+                // enforcement mechanism changes (round-4 adversarial
+                // review, same bug class already fixed for the sibling
+                // `chain.current_nomination` checks in this file).
+                return Ok(());
             }
         }
         _ => unreachable!(),
@@ -1382,15 +1406,19 @@ fn apply_review_reassigned(
     // product merge or reconciliation is a stronger, always-final fact
     // unrelated to that race and is still checked eagerly here -- it must
     // block reassignment unconditionally, not be treated as one more
-    // competing candidate.
+    // competing candidate. The policy is a hard block; the *mechanism* is
+    // a no-op rather than an `Err`, though -- a reassignment built without
+    // observing a just-landed `review.merged`/`review.merge_reconciled`
+    // (independently published, never cross-observed before publication --
+    // AGENT_COORDINATION_EVOLUTION.md section 2.1) must not poison
+    // reduction of the entire bus via `reduce()`'s bare `?` (round-4
+    // adversarial review, same bug class already fixed for the sibling
+    // `chain.current_nomination` checks in this file).
     let chain = state
         .review_chain(&d.replaces)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {}", env.id, d.replaces)))?;
     if !chain.merged.is_empty() || !chain.reconciled.is_empty() {
-        return Err(invalid(format!(
-            "{}: cannot reassign a review chain that has already merged or reconciled",
-            env.id
-        )));
+        return Ok(());
     }
     // Deliberately no upfront `current_nomination == d.replaces` check: a
     // second, genuinely concurrent reassignment (or a reassignment racing a
@@ -2214,6 +2242,95 @@ mod tests {
                 .contains("permitted only for an implementor"),
             "{err}"
         );
+    }
+
+    /// Round-4 adversarial review, Critical finding: two coordinators on
+    /// different hosts, neither observing the other, can each validly
+    /// retire the same silently-vanished target, each citing the same
+    /// `previous_lifecycle` -- exactly the "silent death" scenario
+    /// `agent.retired` exists for. The second one to reduce must be a
+    /// no-op, not a hard `Err` that (via `reduce()`'s bare `?`) would
+    /// permanently break reduction of the entire bus.
+    #[test]
+    fn ignores_a_second_retirement_racing_against_the_first() {
+        let coord_a = a("coord-a");
+        let coord_b = a("coord-b");
+        let worker = a("worker1");
+        let mut state = empty_state(&[
+            ("coord-a", Role::Coordinator),
+            ("coord-b", Role::Coordinator),
+        ]);
+        apply_ok(&mut state, &register(&coord_a, Role::Coordinator));
+        apply_ok(&mut state, &register(&coord_b, Role::Coordinator));
+        apply_ok(&mut state, &register(&worker, Role::Implementor));
+        let previous_lifecycle = EventId::new(&worker, 0);
+
+        let retire_data = |reason: &str| {
+            EventData::AgentRetired(AgentRetired {
+                target: worker.clone(),
+                previous_lifecycle: previous_lifecycle.clone(),
+                reason: text(reason),
+                user_authority: text("the user"),
+            })
+        };
+        let first_env = Envelope::new(&coord_a, 1, no_frontier(), &retire_data("silent"), []);
+        apply_ok(&mut state, &first_env);
+        assert!(state.agents[&worker].retired);
+        assert_eq!(state.agents[&worker].last_lifecycle_event, first_env.id);
+
+        let second_env = Envelope::new(&coord_b, 1, no_frontier(), &retire_data("silent"), []);
+        apply_ok(&mut state, &second_env);
+        // The second, stale retirement must not have overwritten the
+        // already-recorded lifecycle event.
+        assert_eq!(state.agents[&worker].last_lifecycle_event, first_env.id);
+    }
+
+    /// Companion to the above for `agent.resumed`: a returning agent's
+    /// self-published resumption, built against a `previous_lifecycle` that
+    /// a concurrent (unobserved) coordinator retirement has since moved
+    /// past, must be a no-op rather than fleet-wide-fatal.
+    #[test]
+    fn ignores_a_resumption_against_a_stale_previous_lifecycle() {
+        let coord1 = a("coord1");
+        let worker = a("worker1");
+        let mut state = empty_state(&[("coord1", Role::Coordinator)]);
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        apply_ok(&mut state, &register(&worker, Role::Implementor));
+
+        let retire_env = Envelope::new(
+            &coord1,
+            1,
+            no_frontier(),
+            &EventData::AgentRetired(AgentRetired {
+                target: worker.clone(),
+                previous_lifecycle: EventId::new(&worker, 0),
+                reason: text("silent"),
+                user_authority: text("the user"),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &retire_env);
+        assert!(state.agents[&worker].retired);
+
+        // worker never observed the retirement and resumes against its own
+        // stale last-known lifecycle event.
+        let resume_env = Envelope::new(
+            &worker,
+            1,
+            no_frontier(),
+            &EventData::AgentResumed(AgentResumed {
+                previous_lifecycle: EventId::new(&worker, 0),
+                reason: text("back online"),
+                user_authority: text("the user"),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &resume_env);
+        assert!(
+            state.agents[&worker].retired,
+            "the stale resumption must not have undone the real retirement"
+        );
+        assert_eq!(state.agents[&worker].last_lifecycle_event, retire_env.id);
     }
 
     /// A genuine exclusive-transition race needs two *different* agents:
@@ -5579,6 +5696,141 @@ mod tests {
             err.to_string()
                 .contains("only the authorizing reviewer may emit review.merged"),
             "{err}"
+        );
+    }
+
+    /// Round-4 adversarial review, Significant finding: `apply_review_
+    /// reassigned`'s eager "already merged" precheck was a hard `Err`, not
+    /// subject to the graceful winner/loser machinery the surrounding
+    /// decline/withdraw/reassign race already uses. A reassignment built
+    /// without observing a just-landed `review.merged` (independently
+    /// published, never cross-observed before publication) must not poison
+    /// reduction of the entire bus.
+    #[test]
+    fn ignores_a_reassignment_racing_against_an_already_merged_review() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        let mut state = empty_state(&[]);
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        apply_ok(&mut state, &register(&carol, Role::Reviewer));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
+        let authorize_env = Envelope::new(
+            &bob,
+            2,
+            complete_frontier(&epoch),
+            &EventData::ReviewMergeAuthorized(authorize.clone()),
+            [],
+        );
+        apply_ok(&mut state, &authorize_env);
+
+        let merged_env = Envelope::new(
+            &bob,
+            3,
+            frontier_seeing(&[&authorize_env.id]),
+            &EventData::ReviewMerged(ReviewMerged {
+                authorization: authorize_env.id.clone(),
+                previous_main: authorize.previous_main,
+                main_commit: authorize.candidate,
+                product_branch: authorize.product_branch.clone(),
+                reviewed_commit: authorize.reviewed_commit,
+                summary: text("merged"),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &merged_env);
+        assert!(!state
+            .review_chain(&nominate_env.id)
+            .unwrap()
+            .merged
+            .is_empty());
+
+        // alice, unaware the review already merged, tries to reassign it.
+        let request = review_request(&[&alice], &bob);
+        let reassign_env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewReassigned(ReviewReassigned {
+                authors: request.authors.clone(),
+                product_branch: request.product_branch.clone(),
+                reviewer: carol.clone(),
+                required_checks: request.required_checks.clone(),
+                review_scope: request.review_scope.clone(),
+                summary: request.summary.clone(),
+                target_branch: request.target_branch.clone(),
+                evidence: request.evidence.clone(),
+                replaces: nominate_env.id.clone(),
+                reason: text("bob went quiet"),
+                inherited_findings: vec![],
+            }),
+            [],
+        );
+        apply_ok(&mut state, &reassign_env);
+
+        let chain = state.review_chain(&nominate_env.id).unwrap();
+        assert_eq!(
+            chain.current_nomination, nominate_env.id,
+            "the stale reassignment must not have taken effect"
+        );
+    }
+
+    /// Round-4 adversarial review, Critical finding: `apply_review_closing`'s
+    /// "withdrawn" arm hard-`Err`ed on `!chain.authorizations.is_empty()`,
+    /// unconditionally and before the exclusive tracker is even consulted --
+    /// unlike every other check in the same function, which is subject to
+    /// the graceful winner/loser machinery. An author's withdrawal built
+    /// without observing a just-landed `review.merge_authorized`
+    /// (independently published, never cross-observed before publication)
+    /// must not poison reduction of the entire bus.
+    #[test]
+    fn ignores_a_withdrawal_racing_against_an_already_authorized_review() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let mut state = empty_state(&[]);
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let authorize_env = Envelope::new(
+            &bob,
+            2,
+            complete_frontier(&epoch),
+            &EventData::ReviewMergeAuthorized(merge_authorized(
+                &nominate_env.id,
+                StringSet::default(),
+                &[],
+            )),
+            [],
+        );
+        apply_ok(&mut state, &authorize_env);
+        assert!(!state
+            .review_chain(&nominate_env.id)
+            .unwrap()
+            .authorizations
+            .is_empty());
+
+        // alice, unaware of the authorization, withdraws the nomination.
+        let withdraw_env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewWithdrawn(ReviewWithdrawn {
+                nomination: nominate_env.id.clone(),
+                reason: text("changed plans"),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &withdraw_env);
+
+        let chain = state.review_chain(&nominate_env.id).unwrap();
+        assert_ne!(
+            chain.decline_or_withdraw_or_reassign_status,
+            ItemStatus::Terminal("withdrawn"),
+            "the stale withdrawal must not have taken effect"
         );
     }
 
