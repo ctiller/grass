@@ -87,10 +87,38 @@ nothing is lost on the way back out to whatever writes it.
 
 example : (Text.utf8 "Hi").toHostBytes.data.toList = [0x48, 0x69] := rfl
 
-/-- Concatenating encoded ASCII is encoding the concatenation. Stated for a
-concrete pair rather than in general, because the general statement is false for
-strings that share a code point across the boundary and this fixture is not the
-place to imply otherwise. -/
+/-! Encoding distributes over concatenation, in general.
+
+An earlier version of this fixture pinned only the concrete instance below and
+justified the omission by asserting that the general law is "false for strings
+that share a code point across the boundary". That was wrong, and adversarial
+review proved the general law. No code point can straddle an append: every
+`String` carries a proof that its own bytes are valid UTF-8, so there is no
+partial sequence at either end to join with. The law is `Text.utf8_append`.
+-/
+
+example (a b : String) : Text.utf8 (a ++ b) = Text.utf8 a ++ Text.utf8 b :=
+  Text.utf8_append a b
+
+/-- The concrete instance, kept because it reduces. -/
 example : Text.utf8 "Hi" ++ Text.utf8 "!" = Text.utf8 "Hi!" := rfl
+
+/-- And a multi-byte join, which is the case the false claim was about. -/
+example : Text.utf8 "€" ++ Text.utf8 "a" = Text.utf8 "€a" := rfl
+
+/-! ## Decoding
+
+Also absent until adversarial review showed the stated blocker was false. -/
+
+example (s : String) : Text.decode (Text.utf8 s) (Text.isValidUTF8_utf8 s) = s :=
+  Text.decode_utf8 s
+
+example : Text.decode (Text.utf8 "Hi!") (Text.isValidUTF8_utf8 "Hi!") = "Hi!" := by
+  simp
+
+/-- The bytes of an encoded string are valid UTF-8 — the one genuinely
+UTF-8-specific fact this module can offer, and free because `String` carries it
+as a field. -/
+example (s : String) : (Text.utf8 s).toHostBytes.IsValidUTF8 := Text.isValidUTF8_utf8 s
 
 end Grass.Tests.Std.Text

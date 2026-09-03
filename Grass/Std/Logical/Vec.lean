@@ -141,6 +141,22 @@ def replicate (n : Nat) (a : α) : Vec α := ⟨List.replicate n a⟩
 /-- The number of elements. -/
 def length (v : Vec α) : Nat := v.toList.length
 
+/--
+`docs/STDLIB.md` §3's name for the element count is `length`, and every law in
+this module is stated over it. `size` is the same number under the name the
+authored spike surface actually writes: `Spikes/5_Spinning_Cube/Layout.lean` and
+`Spikes/4_Web_Server/Macros.lean` call `.size` on `Vec`- and `ByteArray`-typed
+values at six sites, while `Spikes/4_Web_Server/Assembly.lean` writes `.length`
+on a `ByteArray` at one. The authored surface is inconsistent with itself, so
+this library supplies both names rather than choosing on its behalf, and
+`docs/STDLIB_IMPLEMENTATION_PLAN.md` raises the inconsistency with the owner of
+the spike sources.
+
+It is an abbreviation, not a second definition, so no law is stated twice and
+`Vec.length` remains the name proofs are written against.
+-/
+abbrev size (v : Vec α) : Nat := v.length
+
 /-- Whether the sequence has no elements. See `Vec.isEmpty_iff_length_eq_zero`. -/
 def isEmpty (v : Vec α) : Bool := v.toList.isEmpty
 
@@ -317,6 +333,20 @@ abbrev truncate (v : Vec α) (n : Nat) : Vec α := v.take n
 capacity. -/
 abbrev clear (_ : Vec α) : Vec α := empty
 
+/-! `Vec.truncate` and `Vec.clear` exist so that the pure names stay stable while
+the `OwnedVec` operations of those names differ. A name kept for stability still
+owes a law, or a consumer cannot tell which pure operation it was given. -/
+
+@[simp] theorem truncate_eq_take (v : Vec α) (n : Nat) : v.truncate n = v.take n := rfl
+
+@[simp] theorem length_truncate (v : Vec α) (n : Nat) :
+    (v.truncate n).length = min n v.length := by
+  simp [truncate, take, length]
+
+@[simp] theorem clear_eq_empty (v : Vec α) : v.clear = (empty : Vec α) := rfl
+
+@[simp] theorem length_clear (v : Vec α) : v.clear.length = 0 := rfl
+
 @[simp] theorem toList_append (v w : Vec α) : (v ++ w).toList = v.toList ++ w.toList := rfl
 
 @[simp] theorem length_append (v w : Vec α) : (v ++ w).length = v.length + w.length := by
@@ -372,15 +402,16 @@ theorem get?_drop (v : Vec α) (n i : Nat) : (v.drop n).get? i = v.get? (n + i) 
 /-!
 ## Prefixes and suffixes
 
-`docs/SPIKE_PROOF_BURDEN.md` classifies four burdens across three spikes as
-`library-instance`, and all four are the same shape:
-`write_all_loop(payload)` is "standard partial-write induction over the derived
-payload suffix", `buffered_stdout(..., committedPrefix)` and
+`docs/SPIKE_PROOF_BURDEN.md` carries six `library-instance` rows. Three of them,
+in three different spikes, are the same shape: `write_all_loop(payload)` is
+"standard partial-write induction over the derived payload suffix", and
+`buffered_stdout(..., committedPrefix)` and
 `SliceConsumerInvariant(output, consumed, outLen)` are each a "standard
-partial-write consumer", and `crc32_prefix(transferred - remaining)` is a
-"standard CRC prefix theorem". The word doing the work in each row is
-*standard*: the ledger expects one reusable library theorem, not four authored
-proofs.
+partial-write consumer". The word doing the work in each row is *standard*: the
+ledger expects one reusable library theorem, not three authored proofs. A fourth
+row, `crc32_prefix(transferred - remaining)`, indexes the same prefix but is a
+"standard CRC prefix theorem", so what it needs beyond this section is a CRC
+model rather than more sequence law.
 
 `docs/STDLIB.md` §6 draws the line for where those live. Machine-state templates
 such as `SliceConsumerInvariant` belong to the CFG proof library, because "the
@@ -676,17 +707,47 @@ instance : LawfulGetElem (Vec α) Nat α (fun v i => i < v.length) where
 
 @[simp] theorem getElem?_eq_get? (v : Vec α) (i : Nat) : v[i]? = v.get? i := rfl
 
-/-- Deciding equality agrees with extensional agreement, which is the connection
-`docs/STDLIB.md` §1 asks the instance to have rather than merely to exist. -/
-theorem decide_eq_iff_get?_eq [DecidableEq α] (v w : Vec α) :
-    v = w ↔ ∀ i, v.get? i = w.get? i :=
+/--
+`for x in v do …` works.
+
+`docs/STDLIB.md` §3 lists iteration among the observations and this library did
+not have it; adversarial review found the gap, which neither the absence list nor
+the instances fixture had caught. Iteration is in index order, since it delegates
+to the underlying list.
+-/
+instance {m : Type v → Type w} [Monad m] : ForIn m (Vec α) α where
+  forIn v init f := ForIn.forIn v.toList init f
+
+/--
+Equality is agreement at every index, as an iff.
+
+This is `Vec.ext_of_get?` in both directions and nothing more. An earlier version
+carried a `[DecidableEq α]` binder and a docstring claiming it connected the
+`DecidableEq` instance to extensional agreement; adversarial review pointed out
+that the statement mentions neither `decide` nor `==`, so the binder was dead and
+the claim was unsupported. `Tests/Std/VecInstances.lean` exercises the instances
+through `eq_of_beq` and `beq_self_eq_true`, which do reach them.
+-/
+theorem eq_iff_get?_eq (v w : Vec α) : v = w ↔ ∀ i, v.get? i = w.get? i :=
   ⟨fun h _ => by rw [h], ext_of_get?⟩
 
 /-!
 ## Flattening and chunking
 
-`docs/STDLIB.md` §3 lists `concat` among the composition operations. It is here
-for a second reason as well, which is what fixes its laws.
+`docs/STDLIB.md` §3 lists `concat` among the composition operations, and this
+module deliberately does not use that name.
+
+In Lean, `List.concat` appends *one element* — it is this library's `Vec.push` —
+and flattening is `List.flatten`. §3's word is therefore ambiguous, and taking it
+at face value would put a `Vec.concat` in front of consumers that means the
+opposite of what a Lean author expects, against this plan's own rule that names
+are the expensive thing to change and its own reason for shipping the instances a
+Lean author reaches for without thinking. The operation below is `flatten`; the
+ambiguity in §3 is raised with the owner of `docs/STDLIB.md` rather than resolved
+here by a choice of spelling.
+
+There is a second reason this operation is here at all, and it is what fixes its
+laws.
 
 §6 gives `Std.Process.ByteFlow` a contract with a sequence fact inside it:
 
@@ -697,7 +758,7 @@ The process half of that — readiness, EOF, cancellation, backpressure — belo
 to `Std.Process` and waits on the process vocabulary. The sequence half does not
 wait on anything, and it is the half that says what "independent of chunk
 boundaries" means: `Vec.chunk_extensional` below. A consumer that reads only
-`Vec.concat` of its input cannot distinguish two chunkings of the same bytes,
+`Vec.flatten` of its input cannot distinguish two chunkings of the same bytes,
 because it is a function of a value both chunkings equal.
 
 That statement is nearly trivial once written down, which is the point of writing
@@ -706,55 +767,68 @@ guarantee and is easy to assume without ever fixing what it quantifies over.
 -/
 
 /-- Flatten a sequence of sequences, in order. -/
-def concat (chunks : Vec (Vec α)) : Vec α :=
+def flatten (chunks : Vec (Vec α)) : Vec α :=
   fromList (chunks.toList.map toList).flatten
 
-@[simp] theorem concat_empty : concat (empty : Vec (Vec α)) = empty := rfl
+@[simp] theorem flatten_empty : flatten (empty : Vec (Vec α)) = empty := rfl
 
-@[simp] theorem concat_singleton (v : Vec α) : concat (singleton v) = v := by
+@[simp] theorem flatten_singleton (v : Vec α) : flatten (singleton v) = v := by
   apply toList_injective
-  simp [concat, singleton]
+  simp [flatten, singleton]
 
-@[simp] theorem length_concat (chunks : Vec (Vec α)) :
-    (concat chunks).length = ((chunks.map length).toList).sum := by
-  simp only [concat, length, map, toList_fromList, List.length_flatten, List.map_map]
+@[simp] theorem length_flatten (chunks : Vec (Vec α)) :
+    (flatten chunks).length = ((chunks.map length).toList).sum := by
+  simp only [flatten, length, map, toList_fromList, List.length_flatten, List.map_map]
   rfl
 
 /-- Flattening distributes over appending chunk sequences, which is what lets a
 reader accumulate chunks without recomputing the whole. -/
-@[simp] theorem concat_append (chunks rest : Vec (Vec α)) :
-    concat (chunks ++ rest) = concat chunks ++ concat rest := by
+@[simp] theorem flatten_append (chunks rest : Vec (Vec α)) :
+    flatten (chunks ++ rest) = flatten chunks ++ flatten rest := by
   apply toList_injective
-  simp [concat]
+  simp [flatten]
 
 /-- One more chunk appends its elements and nothing else. This is the read-side
 counterpart of `Vec.push` and the step law a chunk accumulator needs. -/
-@[simp] theorem concat_push (chunks : Vec (Vec α)) (chunk : Vec α) :
-    concat (chunks.push chunk) = concat chunks ++ chunk := by
+@[simp] theorem flatten_push (chunks : Vec (Vec α)) (chunk : Vec α) :
+    flatten (chunks.push chunk) = flatten chunks ++ chunk := by
   apply toList_injective
-  simp [concat, push]
+  simp [flatten, push]
 
 /-- `chunks` is a chunking of `v` when it flattens to it. Chunk boundaries are
 data about how `v` arrived, not about `v`. -/
-def IsChunking (chunks : Vec (Vec α)) (v : Vec α) : Prop := concat chunks = v
+def IsChunking (chunks : Vec (Vec α)) (v : Vec α) : Prop := flatten chunks = v
 
 theorem isChunking_singleton (v : Vec α) : IsChunking (singleton v) v := by
   simp [IsChunking]
 
 /--
-`Vec.chunk_extensional` is what stops a consumer of the concatenation from
-observing chunk boundaries.
+Two chunkings of the same sequence flatten to the same value, so anything applied
+to the flattening agrees on them.
 
-This is `docs/STDLIB.md` §6's "parsers consume their concatenation independent of
-chunk boundaries", stated for any consumer `f` at all. Its content is entirely in
-the hypothesis shape: `f` is applied to `Vec.concat`, so being chunk-extensional
-is a property of how a consumer is written rather than a property it can be
-granted. A parser that inspected the chunk sequence itself would not have this
-type.
+**This is weaker than it may look, and weaker than `docs/PROCESS.md`'s
+`ChunkExtensional`.** Adversarial review established the gap and it is recorded
+here rather than in a plan, because the docstring is what ships. The proof is two
+rewrites and a `refl`; `f` never participates, and the same statement holds with
+`Vec.flatten` replaced by any function at all, including ones that *do* see chunk
+boundaries such as `Vec.length`. So this does not *stop* a consumer from
+observing boundaries — it says that a consumer which has already been written as
+a function of the flattening cannot.
+
+`docs/PROCESS.md` §"parser_chunking_invariant" defines `ChunkExtensional` as a
+predicate on a `StreamingParser` and pairs it with a real theorem relating
+`SameFunctionalByteProjection` to `SameParseResultAndRemainder`, and says
+explicitly that "parsers which expose feed-call boundaries or per-feed
+diagnostics are not `ChunkExtensional`". An incrementally fed parser is not a
+function of `Vec.flatten` and this theorem says nothing about one. That property
+belongs to `Std.Process` and waits on the process vocabulary.
+
+What this does supply is the sequence-level obligation such a theorem discharges:
+that the flattening is well defined independent of how the chunks were cut.
 -/
 theorem chunk_extensional {δ : Type v} (f : Vec α → δ) {chunks other : Vec (Vec α)}
     {v : Vec α} (hc : IsChunking chunks v) (ho : IsChunking other v) :
-    f (concat chunks) = f (concat other) := by
+    f (flatten chunks) = f (flatten other) := by
   rw [hc, ho]
 
 /-- Every chunk carries at least one element, which is what `docs/STDLIB.md` §6
@@ -773,18 +847,18 @@ insists the chunks be nonempty. Without it a provider could return unboundedly
 many empty chunks while a reader waited for input that never arrived, and no
 length argument would detect it.
 -/
-theorem length_le_length_concat {chunks : Vec (Vec α)} (h : AllNonEmpty chunks) :
-    chunks.length ≤ (concat chunks).length := by
+theorem length_le_length_flatten {chunks : Vec (Vec α)} (h : AllNonEmpty chunks) :
+    chunks.length ≤ (flatten chunks).length := by
   obtain ⟨cs⟩ := chunks
   induction cs with
-  | nil => simp [concat]
+  | nil => simp [flatten]
   | cons c rest ih =>
     have hc : c.length ≠ 0 := h c (by simp [mem_iff_mem_toList])
     have hrest : AllNonEmpty (fromList rest) := by
       intro chunk hmem
       exact h chunk (by simp [mem_iff_mem_toList] at hmem ⊢; exact Or.inr hmem)
     have := ih hrest
-    simp only [concat, length, toList_fromList, List.map_cons, List.flatten_cons,
+    simp only [flatten, length, toList_fromList, List.map_cons, List.flatten_cons,
       List.length_cons, List.length_append] at *
     omega
 

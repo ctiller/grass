@@ -48,7 +48,7 @@ example : (Vec.empty : Vec Nat) ≠ digits := by decide
 /-- Deciding equality is deciding extensional agreement, which is the connection
 that makes the instance the right one rather than merely a working one. -/
 example (v w : Vec Nat) : v = w ↔ ∀ i, v.get? i = w.get? i :=
-  Vec.decide_eq_iff_get?_eq v w
+  Vec.eq_iff_get?_eq v w
 
 /-! ## Boolean equality, and that it is lawful
 
