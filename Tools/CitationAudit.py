@@ -261,10 +261,26 @@ def sections_of(path: Path) -> set[str]:
 
 
 def comment_text(source: str) -> str:
-    """Only the comments of a Lean source, so code is not scanned as prose."""
-    blocks = re.findall(r"/-.*?-/", source, re.DOTALL)
-    lines = re.findall(r"--.*?$", source, re.MULTILINE)
-    return "\n".join(blocks + lines)
+    """Only the comments of a Lean source, with every other character blanked.
+
+    **Blanked rather than concatenated, and it used to concatenate.** The old version
+    returned the block comments followed by the line comments, and every caller then
+    enumerated *that* string, so the number in every report about a `.lean` file was an
+    index into a reconstruction. Review appended one bad citation at real line 433 of a
+    431-line file and was sent to line 197 and line 231, two unrelated theorems -- and
+    twice, because the line-comment regex matched the `--` inside the `/--` opener, so
+    a docstring citation was scanned in both passes.
+
+    `Tools/DoorAudit.py` had this defect and fixed it; the note there says "every line
+    number from a real file was wrong". This is that fix, in the sibling that still had
+    it. The line-comment pattern now refuses a `--` preceded by a slash.
+    """
+    out = [" " if character != chr(10) else chr(10) for character in source]
+    for match in re.finditer(r"/-.*?-/", source, re.DOTALL):
+        out[match.start():match.end()] = list(match.group(0))
+    for match in re.finditer(r"(?<!/)--.*?$", source, re.MULTILINE):
+        out[match.start():match.end()] = list(match.group(0))
+    return "".join(out)
 
 
 def check_declarations(prose: dict[str, str], names: set[str]) -> list[str]:

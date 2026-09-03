@@ -361,9 +361,19 @@ exemption has to tell those two apart.
 
 **Not the deleted `LoanHeldBySelf`.** That predicate was an *authority* test -- it
 stood where "does this context have the right" was asked, and answering it by
-self-holding let a context holding nothing join an atomic protocol. This is not an
-authority test and nothing decides an access on it alone: it narrows an exemption,
-so being wrong here can only refuse more.
+self-holding let a context holding nothing join an atomic protocol. This one narrows an
+exemption rather than granting a right, and nothing decides an access on it alone.
+
+**It is not, however, safe in both directions**, which is what this paragraph claimed
+until review checked it. The exemption is `OwnedBy ∧ ¬ HeldBySelf`, so an answer that
+over-reports refuses more and an answer that under-reports makes an owner exempt from
+§3's loan clause and refuses *less*. `Grass/Op/Step.lean`'s own comment describes that
+failure mode -- a bare owner exemption let a self-loan holder's write commit -- a few
+lines from where this sentence said it could not happen. Review replaced the body with
+a predicate that always under-reports and watched `a_self_loan_bounds_its_holder` and
+`an_owner_may_join_its_own_atomic_protocol` both flip. Narrowing with this predicate
+refuses more than a bare owner exemption would; getting the predicate itself wrong
+loses the bound those two fixtures pin.
 -/
 def HeldBySelf (state : MemoryState) (context : ContextId) (provenance : Provenance)
     (range : ByteRange) : Prop :=

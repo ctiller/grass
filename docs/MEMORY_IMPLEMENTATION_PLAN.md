@@ -1816,6 +1816,71 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   help from the list. This is the second finding of that shape and `outOfBounds` was the
   first, so `emittedByTransition` is now what its docstring says it is.
 
+- ~~**Twelve of `Tools/ReachabilityAudit.py`'s thirty-seven allowlist entries suppressed
+  nothing, and two whole group reasons were false.**~~ This is the `ConsultedAudit`
+  finding verbatim, one tool over, in a file whose preamble records the same sweep being
+  run once already by hand and finding eight of twenty-one. Five of the twelve were
+  flatly contradicted by the tree — both `Restartability` constructors are a struct
+  field default plus a fixture, `Atomicity.nonAtomic` is a field default,
+  `Address.symbolic` and `AddressRepr.symbolic` are built — and the rest were silenced
+  by the tool's own same-name blindness. The twelve are gone, the two empty groups with
+  them, and `--inert` exists now so a hand sweep is not what stands between this and the
+  next regrowth.
+- ~~**Every line number `Tools/CitationAudit.py` reported for a `.lean` file was wrong,
+  and docstring citations were reported twice.**~~ Its comment extractor returned the block
+  comments concatenated with the line comments and every caller enumerated *that*
+  string, so the number was an index into a reconstruction: review appended one bad
+  citation at real line 433 of a 431-line file and was sent to lines 197 and 231, two
+  unrelated theorems. The double report came from the line-comment regex matching the
+  `--` inside a `/--` opener. `Tools/DoorAudit.py` had this defect and fixed it — its
+  note says "every line number from a real file was wrong" — and the sibling still had
+  it. Blanking rather than concatenating fixes both; the probe now reports 433 and 436,
+  once each.
+- ~~**`Tools/DocstringAudit.py`'s self-naming exemption pattern was still there**, one round
+  after the module docstring said it was deleted, with a comment above it describing an
+  exemption that was not in force.~~ The same shape as `MemoryProfile.Admits` and
+  `OperationFacets.Closes`, in `Tools/`, where no gate looks.
+- ~~**`Tools/AxiomAudit.lean`'s `generatedExact` exemption silenced nothing**, under a
+  comment describing what `generatedNumbered` does.~~ The two entries that comment names
+  are numbered equation lemmas; the ten-name list matched nothing in the environment
+  while widening the namespace-gap check to any authored declaration ending in one of
+  them — the generated-name prefix hole's shape, minus the exploit. Review bounded it: an
+  axiom whose last component was one of the ten escaped the namespace check but the axiom scan caught any
+  `Grass` declaration using it, so it was defence in depth. Deleted rather than kept
+  with a reason that describes a different rule; the probe is now reported.
+- ~~**`Tests/Memory/AtomicAuthority.lean`'s "stranger" was the allocation's sole
+  owner.**~~ `AllocationRecord.owners` arrived after that file, `counter`'s owner list
+  had to name somebody for `issue?` to accept the lend, and this context was the only
+  candidate — so the file's stranger became its owner while the prose went on calling it
+  a context that was never let in, and `Tests/Op/StandardLoan.lean` had by then moved
+  its own stranger fixtures to `engine₁` for exactly this reason. Two files, one word,
+  opposite sides of the distinction.
+
+  The theorems stayed true because they are about `authorityOf`, which is owner-blind.
+  What they could not say is who may *act*. The context is `lender` now, `outsider` is
+  the genuine stranger, and `the_outsider_reaches_the_same_state` pins the scope: the
+  authority state is the same for a context that owns the word and one that has never
+  touched it.
+
+  **This is the third fixture this branch has had to re-subject** — after the ownership
+  pair and the hostile address space — and the first one I caused: commit 34d75bb
+  patched this file to keep building while its sibling commit fixed the two fixtures
+  whose subjects the same change had invalidated. A fixture that needs a one-line patch
+  to survive a semantic change is a fixture whose subject the change may have moved.
+- ~~**`MemoryState.HeldBySelf`'s docstring claimed being wrong could only refuse
+  more.**~~ The exemption is `OwnedBy ∧ ¬ HeldBySelf`, so an answer that under-reports
+  makes an owner exempt from §3's loan clause and refuses *less* — which
+  `Grass/Op/Step.lean`'s own comment describes a few lines away. Review replaced the
+  body with a predicate that always under-reports and watched two fixtures flip. A
+  monotonicity claim of exactly the kind §4.4.1a's table is built out of, and the
+  sentence a future reviewer would have used to justify not testing the predicate.
+- ~~**`the_lender_may_lend_again`'s docstring named a fixture and a refusal that are not
+  there.**~~ It said `lentToThread`'s grant was refused on the conflict rule; the theorem
+  is over `readLentToThread`, whose grant is read-only, so `LoanConflicts` has no writer
+  and nothing is refused. The lend is accepted, which the theorem now says, and
+  `the_second_write_lend_is_refused_by_the_conflict_rule` is the case the sentence was
+  describing.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Four review rounds found the same shape and it is worth naming as a shape rather than

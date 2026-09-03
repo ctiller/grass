@@ -708,14 +708,36 @@ theorem a_borrower_may_not_sublend_more_than_it_holds :
         range := ⟨0, 4⟩, rights := .readWrite } := by
   exact ⟨by decide, by decide⟩
 
-/-- **A lender may lend again.** `lentToThread`'s grant was lent by the engine, so the
-engine's second lend over the same bytes is not a seizure — it is the third disjunct,
-and without it an owner that had lent a fragment out could never lend the rest, since
-an owner holds no grant of its own. Refused here on the *conflict* rule instead,
-which is the right rule: two write holders over one range. -/
+/-- **A lender may lend again.** `readLentToThread`'s grant was lent by the engine, so
+the engine's second lend over the same bytes is not a seizure — it is the third
+disjunct, and without it an owner that had lent a fragment out could never lend the
+rest, since an owner holds no grant of its own.
+
+The second lend is *accepted*, and the last sentence here used to say it was "refused
+on the conflict rule instead, which is the right rule: two write holders over one
+range". Both halves were wrong about this state: the fixture is `readLentToThread`,
+whose grant is `readOnly`, and `LoanConflicts` needs a writer, so nothing conflicts.
+Review evaluated `issue?` and got `true`. The write case is the theorem below, which is
+the one that sentence was describing. -/
 theorem the_lender_may_lend_again :
     readLentToThread.MayLend
       { kind := .loan, holder := engine₁, lender := engine₀, provenance := bufferProv
-        range := ⟨0, 4⟩, rights := .readOnly } := by decide
+        range := ⟨0, 4⟩, rights := .readOnly } ∧
+    (readLentToThread.issue? secondBufferLoan
+      { kind := .loan, holder := engine₁, lender := engine₀, provenance := bufferProv
+        range := ⟨0, 4⟩, rights := .readOnly }).isSome := by
+  exact ⟨by decide, by decide⟩
+
+/-- **And a second lend that would put two writers over one range is refused by the
+conflict rule**, not by `MayLend`. Both conjuncts matter: the lender may lend, and the
+door still refuses, so the refusal is §7.3's and not §3's. -/
+theorem the_second_write_lend_is_refused_by_the_conflict_rule :
+    lentToThread.MayLend
+      { kind := .loan, holder := engine₁, lender := engine₀, provenance := bufferProv
+        range := ⟨0, 4⟩, rights := .readWrite } ∧
+    lentToThread.issue? secondBufferLoan
+      { kind := .loan, holder := engine₁, lender := engine₀, provenance := bufferProv
+        range := ⟨0, 4⟩, rights := .readWrite } = Option.none := by
+  exact ⟨by decide, by decide⟩
 
 end Tests.Op.StandardLoan

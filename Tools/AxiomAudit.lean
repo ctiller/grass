@@ -149,14 +149,19 @@ run_cmd do
   -- `String.toUTF8` puts `String.toUTF8.eq_1` in a `Grass/` module under the `String`
   -- namespace. Nobody wrote it and its axioms are the core function's, so the gap
   -- this check is about -- an *authored* declaration escaping `isAudited` -- does not
-  -- arise. Generated suffixes are exempt by name.
-  -- Matched against the *last component* only. An earlier version matched these as
-  -- substrings of the whole name, so `.ind` would have exempted anything with a
-  -- component like `index` -- a filter wide enough to hide the declarations this
-  -- check exists to find.
-  let generatedExact : List String :=
-    ["eq_def", "induct", "sizeOf_spec", "brecOn", "below", "ind", "noConfusion",
-     "noConfusionType", "injEq", "ctorIdx"]
+  -- arise.
+  --
+  -- There was a second exemption here, a ten-name list matched against the last
+  -- component -- `eq_def`, `induct`, `brecOn` and so on -- carrying the paragraph
+  -- above as its reason. It silenced nothing: the two entries that paragraph names are
+  -- silenced by the numbered rule below, and the ten names match nothing in the
+  -- environment at all, while widening the check to any authored declaration ending in
+  -- one of them. That is the shape of the `eq_` prefix hole this file closed a round
+  -- earlier, minus the exploit, and review checked the limit: an axiom named
+  -- `ProbeStray.ind` does escape the namespace-gap check, but the axiom scan catches
+  -- any `Grass` declaration that uses it, so it was defence in depth and not a hole.
+  -- Deleted rather than kept with a reason that describes a different rule.
+  --
   -- Generated *numbered* suffixes are exempt by shape, not by prefix. The prefix
   -- form was a hole and the reason attached to it was false: it said "an authored
   -- declaration cannot have one, because the elaborator reserves them", and Lean
@@ -176,7 +181,6 @@ run_cmd do
     if name.isInternal then continue
     if (`Grass).isPrefixOf name then continue
     let component := name.getString!
-    if generatedExact.contains component then continue
     if generatedNumbered component then continue
     match env.getModuleIdxFor? name with
     | some idx =>

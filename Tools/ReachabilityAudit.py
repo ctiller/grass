@@ -86,26 +86,28 @@ STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
 # unreported because an unrelated type had a constructor of the same name, and found
 # eight of the twenty-one entries inert.
 ALLOWED = {
-    # Vocabulary an ISA or profile supplies, which this tree declares and does not
-    # itself instantiate. A memory model that only named the address widths it uses
-    # would be a memory model for one target.
-    "Address.symbolic",
-    "AddressRepr.symbolic",
-    "MemoryOrder.profileSpecific",
-    "MemoryScope.profileSpecific",
-    "FaultVisibility.profileSpecific",
     # Portable ordering and scope names section 7.1 fixes. A profile picks the ones
     # its target has; the model owes all of them.
-    "MemoryOrder.acquire",
-    "MemoryOrder.release",
-    "MemoryOrder.sequentiallyConsistent",
+    #
+    # Two groups stood here and are gone, along with five entries from this one:
+    # "vocabulary an ISA or profile supplies" (`Address.symbolic`,
+    # `AddressRepr.symbolic`, the three `profileSpecific`) and "terminal and
+    # lifecycle vocabulary whose consumers are later milestones" (both
+    # `Restartability` constructors). Every one of the twelve suppressed nothing,
+    # and five of them were flatly contradicted by the tree: `Restartability`'s two
+    # are a struct field default in `Grass/Memory/Access.lean` and a fixture,
+    # `Atomicity.nonAtomic` is a field default in `Grass/Memory/Ordering.lean`,
+    # `Address.symbolic` is built in `Tests/Memory/WellFormedClauses.lean` and
+    # `AddressRepr.symbolic` in `Grass/Memory/AddressSpace.lean`. The rest were
+    # silenced by this tool's own same-name blindness -- `MemoryScope.system` by an
+    # unrelated `system` component, two `profileSpecific` by the third.
+    #
+    # `--inert` exists now, so this cannot rot back the way it did. The preamble
+    # above records the same sweep being run once already, by hand, and finding
+    # eight of twenty-one; the entries that grew back are why a hand sweep is not
+    # enough.
     "MemoryScope.process",
     "MemoryScope.device",
-    "MemoryScope.system",
-    "Atomicity.nonAtomic",
-    # Terminal and lifecycle vocabulary whose consumers are later milestones.
-    "Restartability.notRestartable",
-    "Restartability.restartable",
     # --- Declared ahead of the milestone that builds them. Being listed here is not
     # --- "this is fine": it is the record that someone read the plan and decided,
     # --- and the reason differs per entry.
@@ -344,6 +346,30 @@ def self_test() -> int:
 def main() -> int:
     if "--self-test" in sys.argv:
         return self_test()
+    if "--inert" in sys.argv:
+        # Which entries suppress nothing. `ConsultedAudit.py` grew this after review
+        # found eight of its twenty-one entries inert; this tool had the same defect
+        # and no way to say so, and review then found twelve of thirty-seven here.
+        # A listing rather than an exit code: an inert entry is not a violation of the
+        # rule this tool enforces, it is a claim about the tree that has stopped being
+        # true, and the fix is to delete it.
+        global ALLOWED
+        declared = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
+                    for path in DECLARED_IN}
+        builders = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
+                    for path in BUILDERS_IN}
+        listed = sorted(ALLOWED)
+        saved = ALLOWED
+        ALLOWED = set()
+        reported = " ".join(analyse(declared, builders))
+        ALLOWED = saved
+        inert = [entry for entry in listed if entry not in reported]
+        if inert:
+            print("allowlist entries that suppress nothing: " + ", ".join(inert))
+            print("Delete them, or say why the entry is kept with no effect.")
+        else:
+            print("reachability audit: every allowlist entry suppresses a report")
+        return 0
     declared = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
                 for path in DECLARED_IN}
     builders = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")

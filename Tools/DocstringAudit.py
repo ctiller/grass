@@ -6,8 +6,9 @@ own docstring. An earlier version of this paragraph said a theorem's docstring w
 exempt "because the theorem beneath it *is* the enforcement", and a `SELF_NAMING`
 pattern was defined for it and never used -- so the tool examined those blocks
 anyway and the docstring described a scope it did not have. Review found it, in the
-tool whose entire job is that class of error. The pattern is deleted rather than
-implemented: a theorem's docstring is where the overclaims in this project have
+tool whose entire job is that class of error, and then found the pattern still here
+one round after this paragraph said it was gone, with a comment above it describing
+the exemption as if it were in force. It is deleted now: a theorem's docstring is where the overclaims in this project have
 actually lived, and exempting it would have passed several of them.
 
 docs/MEMORY_IMPLEMENTATION_PLAN.md section 3.10:
@@ -104,11 +105,6 @@ HEDGES = (
     "cannot enforce", "cannot answer", "cannot express", "cannot know",
     "cannot be erased or masked",
 )
-
-# A declaration whose docstring makes the claim *is* the enforcement, so a
-# theorem's own comment naming its own statement is not drift. Definitions,
-# structures, and module comments are where unbacked prose hides.
-SELF_NAMING = re.compile(r"^\s*(@\[[^\]]*\]\s*)?(private\s+)?(theorem|instance|example)")
 
 # A backticked identifier is the "names the enforcing type or theorem" part.
 IDENT = re.compile(r"`([A-Za-z_][A-Za-z0-9_.?!']*)`")

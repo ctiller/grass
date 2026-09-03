@@ -47,8 +47,27 @@ def counter : AllocId := allocs.fresh.1
 /-- The context holding atomic authority over it. -/
 def holder : ContextId := contexts.fresh.1
 
-/-- A second context, which holds nothing. -/
-def stranger : ContextId := contexts.fresh.2.fresh.1
+/-- The context that owns the word and lends atomic authority over it. It holds no
+grant of its own, which is what the theorems below are about.
+
+**Called `stranger` until review checked what it was.** `AllocationRecord.owners`
+arrived after this file did, `counter`'s owner list had to name somebody for `issue?`
+to accept the lend, and this context was the only candidate -- so the file's "stranger"
+became the allocation's sole owner while its prose went on calling it a context that
+was never let in. `Tests/Op/StandardLoan.lean` had by then moved its own stranger
+fixtures to `engine₁` for exactly this reason, so two files were using one word for
+opposite sides of the distinction.
+
+The theorems here are all about `authorityOf`, which is owner-blind: it reads the
+grant map and nothing else. That is why they stayed true. What they cannot say is who
+may *act*, which is `refusalOf`'s question and where ownership bites --
+`Tests/Op/StandardLoan.lean`'s `a_stranger_may_not_join_the_atomic_protocol` and
+`an_owner_may_join_its_own_atomic_protocol` are that pair, and `outsider` below is the
+context this file uses when it needs somebody genuinely unrelated. -/
+def lender : ContextId := contexts.fresh.2.fresh.1
+
+/-- A context that owns nothing here and holds nothing: a genuine stranger. -/
+def outsider : ContextId := contexts.fresh.2.fresh.2.fresh.1
 
 private def epoch : EpochId := epochs.fresh.1
 
@@ -64,7 +83,7 @@ def counterProv : Provenance :=
 def owned : MemoryState :=
   (MemoryState.empty.allocate? counter
     { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
-      source := .virtualAlloc, owners := [stranger]
+      source := .virtualAlloc, owners := [lender]
       permission := .readWrite, live := true, bytes := .empty
       base := some 0x2000 }).getD .empty
 
@@ -72,14 +91,14 @@ def owned : MemoryState :=
 theorem the_allocation_succeeds :
     (MemoryState.empty.allocate? counter
       { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
-        source := .virtualAlloc, owners := [stranger]
+        source := .virtualAlloc, owners := [lender]
         permission := .readWrite, live := true, bytes := .empty
         base := some 0x2000 }).isSome := by decide
 
 /-- Read/write conveyed for **atomic** access only. §3's atomic shared access,
 expressed as a right rather than as an authority state. -/
 def atomicGrant : AuthorityGrant :=
-  { kind := .loan, holder := holder, lender := stranger, provenance := counterProv
+  { kind := .loan, holder := holder, lender := lender, provenance := counterProv
     range := ⟨0, 8⟩, rights := .atomicReadWrite }
 
 /-- The same grant without the restriction, so every theorem below can be compared
@@ -175,35 +194,53 @@ ordinarily.
 That is not automatic, and getting it wrong took minutes. `WritableByAnother`
 probed `rights.Permits AccessIntent.write`, and an atomic-only grant does not
 *permit* an ordinary write — so the first version of this file reported the
-stranger `sharedImmutable` and the atomic writer froze nobody. The probe is
+lender `sharedImmutable` and the atomic writer froze nobody. The probe is
 `rights.write`, the capability, because §7.3's "at least one writer" asks who may
 change the bytes. -/
 
-/-- **The stranger holds `atomicShared` authority**, which is §3's third canonical
+/-- **The lender holds `atomicShared` authority**, which is §3's third canonical
 state derived rather than declared. It was a constructor nothing built for one
 round, and the theorem about it was deleted for holding of an unreachable case. -/
-theorem the_atomic_grant_gives_the_stranger_atomic_shared :
-    lentAtomically.authorityOf stranger counterProv ⟨0, 8⟩ = AuthorityState.atomicShared := by
+theorem the_atomic_grant_gives_the_lender_atomic_shared :
+    lentAtomically.authorityOf lender counterProv ⟨0, 8⟩ = AuthorityState.atomicShared := by
   decide
 
-/-- **And that state refuses the stranger an ordinary write**, which is §3's
+/-- **And that state refuses the lender an ordinary write**, which is §3's
 sentence reaching a state a real map produces. -/
-theorem the_stranger_may_not_write_ordinarily :
-    ¬ (lentAtomically.authorityOf stranger counterProv ⟨0, 8⟩).PermitsOrdinaryWrite ∧
-    ¬ (lentAtomically.authorityOf stranger counterProv ⟨0, 8⟩).PermitsIntent
+theorem the_lender_may_not_write_ordinarily :
+    ¬ (lentAtomically.authorityOf lender counterProv ⟨0, 8⟩).PermitsOrdinaryWrite ∧
+    ¬ (lentAtomically.authorityOf lender counterProv ⟨0, 8⟩).PermitsIntent
         AccessIntent.read := by
   exact ⟨by decide, by decide⟩
 
-/-- But it permits an atomic one, so the stranger may join the protocol. Without
-this the theorems above would be a freeze under another name. -/
-theorem the_stranger_may_act_atomically :
-    (lentAtomically.authorityOf stranger counterProv ⟨0, 8⟩).PermitsIntent
+/-- But it permits an atomic one, so the *authority state* is atomic sharing rather
+than a freeze under another name. Without this the theorems above would not
+distinguish the two.
+
+Not "so the lender may join the protocol", which is what this said: `authorityOf` is
+owner-blind and answers the same for a context that owns the word and one that has
+never touched it, as `the_outsider_reaches_the_same_state` records. Who may act is
+`refusalOf`'s question. -/
+theorem the_lender_may_act_atomically :
+    (lentAtomically.authorityOf lender counterProv ⟨0, 8⟩).PermitsIntent
       AccessIntent.atomicReadWrite := by decide
+
+/-- **A context that owns nothing reaches the same authority state**, which is the
+scope of every theorem in this section. `authorityOf` reads the grant map; ownership
+lives on the allocation and is read by `Grass/Op/Step.lean`'s owner exemption, one
+layer up. Stating it here is what stops these theorems being read as "the lender may
+join", which they cannot say. -/
+theorem the_outsider_reaches_the_same_state :
+    lentAtomically.authorityOf outsider counterProv ⟨0, 8⟩ =
+      lentAtomically.authorityOf lender counterProv ⟨0, 8⟩ ∧
+    lentAtomically.OwnedBy lender counterProv ∧
+    ¬ lentAtomically.OwnedBy outsider counterProv := by
+  exact ⟨by decide, by decide, by decide⟩
 
 /-- The **ordinary** grant freezes instead, so `atomicShared` above is
 `atomicOnly` biting and not the shape of the fixture. -/
 theorem the_ordinary_grant_freezes :
-    lentOrdinarily.authorityOf stranger counterProv ⟨0, 8⟩ = AuthorityState.frozen := by
+    lentOrdinarily.authorityOf lender counterProv ⟨0, 8⟩ = AuthorityState.frozen := by
   decide
 
 /-! ## Two contexts may share a word atomically, and only atomically
@@ -214,27 +251,27 @@ prevented *all* conflicting authority and two contexts could not share a word
 atomically at all — which is `atomicShared` being unreachable by construction as
 well as underived. -/
 
-/-- A second atomic grant over the same word, to the stranger. -/
-def strangersAtomicGrant : AuthorityGrant :=
-  { atomicGrant with holder := stranger }
+/-- A second atomic grant over the same word, to the lender. -/
+def lendersAtomicGrant : AuthorityGrant :=
+  { atomicGrant with holder := lender }
 
 /-- A second identity for it. -/
 def secondLoan : GrantId := grants.fresh.2.fresh.1
 
 /-- **Two atomic grants over one word coexist.** -/
 theorem two_atomic_grants_are_accepted :
-    (lentAtomically.issue? secondLoan strangersAtomicGrant).isSome := by decide
+    (lentAtomically.issue? secondLoan lendersAtomicGrant).isSome := by decide
 
 /-- An ordinary grant alongside the atomic one is still refused: one ordinary
 participant makes it an ordinary race. -/
 theorem an_ordinary_grant_alongside_an_atomic_one_is_refused :
-    lentAtomically.issue? secondLoan { ordinaryGrant with holder := stranger } =
+    lentAtomically.issue? secondLoan { ordinaryGrant with holder := lender } =
       Option.none := by decide
 
 /-- And once both atomic grants are outstanding, a third context sees
 `atomicShared` rather than a freeze. -/
 theorem both_holders_see_atomic_shared :
-    ((lentAtomically.issue? secondLoan strangersAtomicGrant).getD lentAtomically).authorityOf
+    ((lentAtomically.issue? secondLoan lendersAtomicGrant).getD lentAtomically).authorityOf
       holder counterProv ⟨0, 8⟩ = AuthorityState.atomicShared := by decide
 
 /-- And it still counts as an outstanding loan, so §3's exclusivity sees it. -/
@@ -280,7 +317,7 @@ def atomicPageProv : Provenance :=
 def pagedAtomically : MemoryState :=
   (owned.allocate? atomicPage
     { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
-      source := .virtualAlloc, owners := [stranger]
+      source := .virtualAlloc, owners := [lender]
       permission := .atomicReadWrite, live := true, bytes := .empty
       base := some 0x3000 }).getD owned
 
