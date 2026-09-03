@@ -1692,3 +1692,42 @@ vocabulary *below* both Semantics and Process, so a process author naming
 `Grass.lean` remains the Lake root, still imports nothing, and is a different
 object from the facade. If a definition ever appears in either facade module, it
 has stopped being one.
+
+### 10.19 Both byte-flow conservation theorems are projections of fields
+
+[PROCESS.md](PROCESS.md) §3 makes `conservation` a *field* of
+`ByteIngressState` and of `ByteEgressState`, and then states as theorems:
+
+```text
+theorem ingress_transition_preserves_conservation
+    (step : ByteIngressTransition before after) : after.conservation
+
+theorem egress_partial_conservation (s : ByteEgressState) :
+  s.offered = s.committed ++ InFlightRequestedBytes s.phase ++ s.queued
+```
+
+Neither has content. `after.conservation` is the field of `after`, so the first
+is discharged by projection and says nothing about `step`. The second restates
+the field's own type at a state that carries it, so it is discharged by
+projection too. Both sit where §5's exit criterion for this milestone points.
+
+Carrying the invariant as a field is a legitimate design — it makes an
+unconserved state unconstructible — but it moves the obligation onto whoever
+builds a state and leaves the *transition family* unchecked, which is precisely
+what the exit criterion asks about. The two readings are not equivalent: under
+the field reading, a transition function that could not preserve conservation
+would simply be unwritable, and nothing would say which constructor was at
+fault.
+
+`Grass/Process/ByteFlow/Ingress.lean` takes the other reading. `Conserves` is a
+predicate, `ByteIngressState` carries no proof, and `preserves_conservation`
+quantifies over every constructor. That turned out to matter twice over: writing
+the *companion* theorem `no_step_after_terminal` against the same family showed
+that an earlier draft's `enqueue`, `deliver`, `consume` and resolutions had no
+phase precondition at all, so a terminal flow could still move bytes. A
+buffer-moving step from a terminal state conserves perfectly well, so no
+conservation theorem — field or predicate — would ever have caught it.
+
+Which reading the corpus intends is a ruling. Blocks: nothing; the predicate
+form is strictly stronger, so a later move to the field form loses nothing but
+the theorem's name.
