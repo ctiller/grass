@@ -2411,3 +2411,36 @@ The fix is a sixth `ProcessEvent` constructor, or a separate silent-step
 relation beside `Step`. Which is a question about `ProcessVocabulary`, which is
 mine, and about `SEMANTICS.md`'s execution model, which is not. Needs a ruling.
 This is the largest open item on this layer, ahead of §10.33.
+
+### 10.43 `EndsInstance` and `Detaches` do not preserve the incarnation either
+
+Found by attempting `well_formedness_is_preserved` — the theorem that every
+network reachable from an `ExactInitialNetwork` satisfies `WellFormed` — and
+discovering `NominalsAllocated` is not preserved.
+
+`StepsLocally.protocolStep` was corrected in the third review round to preserve
+`ref`, `parentage` and `request`, because without it a tick could install a
+generation nothing allocated. `EndsInstance.nowEnded` has exactly the same shape
+and the same hole:
+
+```lean
+  nowEnded : ∃ incarnation, after.instances kind slot = some incarnation ∧
+    ∃ sameKind : incarnation.kind = kind, sameKind ▸ incarnation.lifecycle = ending
+```
+
+It constrains the lifecycle and nothing else, so an ending may swap the
+incarnation's generation, re-parent it, or change the request it was started
+with — and `allocatedNominals` reports that the step allocated nothing.
+`Detaches` needs checking for the same thing.
+
+The fix is the same field, and it is why the well-formedness theorem is worth
+attempting even before it can be proved: it is the consumer that finds these.
+Held until the fourth review pass on `Transition.lean` returns rather than
+rewriting the file under a reviewer for the third time.
+
+`well_formedness_is_preserved` is the next substantial piece of work on this
+layer once it lands. It would use nearly everything the last four rounds added —
+identity preservation, `Restarts.authorized`, `Spawns.startsInitial`,
+`allocatesTheGeneration`, `Reroutes.arrives` — which is the point of attempting
+it: a theorem that consumes every field is the test of whether the fields are
+the right ones.
