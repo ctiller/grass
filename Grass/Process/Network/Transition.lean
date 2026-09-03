@@ -393,6 +393,38 @@ structure EndsInstance (before after : plan.LogicalProcessNetwork)
     toKind ▸ toInstance.request = fromKind ▸ fromInstance.request ∧
     toKind ▸ toInstance.localState = fromKind ▸ fromInstance.localState
   /--
+  **And an ending the protocol can justify is justified.**
+
+  `nowEnded` stores a `ProcessLifecycle` and nothing checked that the value
+  stored corresponds to anything that happened, so a plan could record
+  `.terminated` for an instance whose protocol calls it nowhere near finished,
+  or `.interrupted` for one holding no outstanding demand to abandon.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.51 recorded it as needing a ruling
+  on whether the transition family carries enough history to check a stored
+  classification. For two of the six endings it does, and this is those two.
+
+  `.terminated result` is checkable against `ProcessSpec.Terminal`, which is the
+  specification's own word for finished. `.interrupted reason` is checkable
+  against the outstanding bag: `docs/PROCESS.md` §2 calls an interruption "an
+  outstanding demand of its own was abandoned", and a process holding none has
+  nothing to abandon.
+
+  The other four remain unchecked and are a different problem in each case.
+  `.cancelled` wants a prior cancellation request, and no instance records one —
+  `Grass/Process/Network/Escrow.lean`'s `cancelRequested` is per *occurrence* on
+  a channel, not per instance. `.faulted` and `.violated` carry a reason from
+  the protocol's own vocabulary, so an empty vocabulary already excludes them
+  and a non-empty one has nothing here to check against. `.died` is the
+  supervisor's word and §3 gives the supervisor that authority.
+  -/
+  endingIsEarned : ∃ (fromInstance : ProcessInstance plan.topology)
+      (fromKind : fromInstance.kind = kind),
+    before.instances kind slot = some fromInstance ∧
+    (∀ result, ending = .terminated result →
+      (plan.topology.protocol kind).Terminal (fromKind ▸ fromInstance.request)
+        (fromKind ▸ fromInstance.localState) result) ∧
+    (∀ reason, ending = .interrupted reason → (fromKind ▸ fromInstance.outstanding) ≠ 0)
+  /--
   **And the obligation ledger moves exactly as this ending declared.**
 
   `docs/PROCESS.md` §2: "termination explicitly resolves, transfers, or permits

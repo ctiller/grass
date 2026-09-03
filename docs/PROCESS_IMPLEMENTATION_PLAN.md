@@ -2662,7 +2662,7 @@ parallel composition. Both are now disclosed in the module note; whether §8's
 "disjoint nominal event namespaces" means to exclude broadcast is a document
 question.
 
-### 10.51 `EndsInstance` does not require the ending it stores to be witnessed
+### 10.51 ~~`EndsInstance` does not require the ending it stores to be witnessed~~ — **half closed**
 
 Found by attempting `well_formedness_is_preserved` — that every network reachable
 from an `ExactInitialNetwork` satisfies `WellFormed` — and getting stuck on
@@ -2698,6 +2698,28 @@ preservation on four structures, `slotAgrees`, `Restarts.authorized`,
 `Spawns.startsInitial`, `allocatesTheGeneration`, `Reroutes.arrives` — and each
 clause it fails is a field that is missing. Two have been found that way already
 (§10.43 and this one), before a line of the theorem was written.
+
+**Two of the six endings are now checked**, by `EndsInstance.endingIsEarned`.
+`.terminated result` must satisfy `ProcessSpec.Terminal` at the instance's own
+request and state; `.interrupted reason` must have something outstanding to
+abandon, which is `docs/PROCESS.md` §2's own words for it.
+`Tests/Process/EndingFixtures.lean` is the record's first witness — it had none,
+which is why it had absorbed three new fields across four review rounds without a
+proof breaking — and carries both attacks: a process still counting at three,
+tagged terminated, and a process holding nothing, said to abandon something.
+
+The other four stay open and each for a different reason. `.cancelled` wants a
+prior cancellation request and **no instance records one**:
+`Grass/Process/Network/Escrow.lean`'s `cancelRequested` is per occurrence on a
+channel, so checking it is a world change rather than a field. `.faulted` and
+`.violated` carry a reason from the protocol's own vocabulary, so there is
+nothing here to check them against. `.died` is the supervisor's word and §3
+grants the supervisor that authority.
+
+Needs a ruling on the cancellation half: whether a `ProcessInstance` should
+record an unacknowledged cancellation request, which `ProcessLifecycle.running`'s
+docstring already says it may be in ("includes a process with an outstanding,
+unacknowledged cancel") without anywhere to put it.
 
 ### 10.52 `ReachesSafePointObligation` is free in two directions and cannot be made otherwise here
 
