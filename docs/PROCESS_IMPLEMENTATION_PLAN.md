@@ -815,7 +815,34 @@ It is written last in this milestone, after that entry is ratified.
 
 ## 6. M4 — Composition, lowering, and the proof package
 
-**Status: not started.**
+**Status: one module written, unmerged, unratified.** `Weave/Mixin.lean` is
+taken first, out of the table's order, because it is where M2's two scope
+disciplines were supposed to pay off and the only way to find out was to try.
+
+They did. [PROCESS.md](PROCESS.md) §8 declares `WeaveInvariantMixin` with a
+`frame` field — an assertion survives a step whose scope is disjoint from its
+own — and that field is not needed here. `Network/Assertion.lean` makes an
+assertion carry a footprint it provably reads within; `Network/Transition.lean`
+makes a transition carry a scope it provably changes within; so framing is a
+theorem. The mixin keeps `withinScope`, a checkable claim that the footprint
+lies inside the mixin's declared scope, and `affected`, which is the author's
+real obligation and the one nothing structural can discharge.
+
+Neither ingredient was built for this. The footprint discipline was forced by an
+assertion language that would otherwise have bounded nothing (§10.11's
+neighbourhood), and the transition scope by a routing-coverage claim. That they
+compose into §8's framing rule is the strongest available argument that both
+were the right shape.
+
+Writing the module's fixture also found a defect in M2's transition family, and
+it is the kind only a *consumer* finds: no constructor could touch a shared
+region at all, because `processStep`'s scope named the instance slot and the
+observation trace and stopped. A weave mixin about shared state would have
+framed past every step in the program, vacuously and wrongly — and nothing in
+`Transition.lean` or its own fixture would have complained, because a family
+that touches *fewer* fragments satisfies its scope law more easily. `StepsLocally`
+now carries the regions a step wrote and requires write access for each, so
+`ProcessGraph.sharedAccess` decides who touches what.
 
 ```text
 Grass/Process/Trace/Independence.lean   Independent, diamonds, swap congruence

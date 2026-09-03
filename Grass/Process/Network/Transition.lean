@@ -260,14 +260,26 @@ end EndsInstance
 /--
 One instance takes a protocol step.
 
-Its private state moves by the protocol's own `Step` relation, and observations
-may be appended — which is why the scope is two fragments rather than one. An
-earlier draft scoped it to the instance slot alone, which would have been a
-false claim about any step that emits.
+Its private state moves by the protocol's own `Step` relation, observations may
+be appended, and it may write the shared regions its role has write access to —
+which is why the scope is three families of fragment rather than one.
+
+Two earlier drafts got this wrong in the same direction. The first scoped it to
+the instance slot alone, which is false of any step that emits. The second added
+observations and stopped, which is false of any step that writes shared state —
+and that one was invisible until `Grass/Process/Weave/Mixin.lean` tried to state
+an invariant about a shared region and found that *no constructor in this family
+could touch one*. A weave mixin about shared state would have framed past every
+step in the program, vacuously and wrongly.
+
+`writesPermitted` is what keeps the widening honest: a step may only name
+regions its own role may write, so `ProcessGraph.sharedAccess` still decides who
+touches what.
 -/
 structure StepsLocally (before after : plan.LogicalProcessNetwork)
     (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
-    (event : (plan.topology.protocol kind).Event) : Prop where
+    (event : (plan.topology.protocol kind).Event)
+    (written : plan.topology.SharedRegion → Prop) : Prop where
   /-- It was live, and this is the state it stepped from. -/
   from' : ∃ incarnation, before.instances kind slot = some incarnation ∧
     incarnation.Live ∧ incarnation.kind = kind
@@ -277,9 +289,19 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
     incarnation.Live
   /-- Observations only grow. -/
   observationsExtend : ∃ emitted, after.observations = before.observations ++ emitted
-  /-- Its slot and the observation trace, and nothing else. -/
+  /--
+  **And it writes only regions its role may write.**
+
+  `docs/PROCESS.md` §3: shared logical state is "named separately with
+  read/write/atomic capabilities", and this is where that capability is spent
+  rather than merely declared.
+  -/
+  writesPermitted : ∀ region, written region →
+    (plan.topology.sharedAccess kind region).mayWrite = true
+  /-- Its slot, the observation trace, the regions it wrote, and nothing else. -/
   scope : plan.TouchesOnly before after
-    (fun fragment => fragment = .instanceState kind slot ∨ fragment = .observations)
+    (fun fragment => fragment = .instanceState kind slot ∨ fragment = .observations ∨
+      ∃ region, written region ∧ fragment = .region region)
 
 /--
 A new incarnation appears in a slot that was empty.
@@ -392,7 +414,8 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
   | processStep (kind : plan.topology.ProcessKind)
       (slot : plan.topology.InstanceId kind)
       (event : (plan.topology.protocol kind).Event)
-      (step : plan.StepsLocally before after kind slot event)
+      (written : plan.topology.SharedRegion → Prop)
+      (step : plan.StepsLocally before after kind slot event written)
   /-- A new incarnation appears. -/
   | spawn (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
       (allocation : Allocation plan.topology.Carrier)
@@ -480,8 +503,9 @@ is exhaustive over the family, so there is no transition whose scope is
 undefined and none that can change a fragment without declaring it.
 -/
 def scope : plan.NetworkTransition before after → NetworkFragment plan.topology → Prop
-  | .processStep kind slot _ _ =>
-      fun fragment => fragment = .instanceState kind slot ∨ fragment = .observations
+  | .processStep kind slot _ written _ =>
+      fun fragment => fragment = .instanceState kind slot ∨ fragment = .observations ∨
+        ∃ region, written region ∧ fragment = .region region
   | .spawn kind slot _ _ =>
       fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals
   | .restart kind slot _ _ =>
@@ -524,7 +548,7 @@ weave: `docs/PROCESS.md` §8's `Disjoint (TransitionScope step) Scope` now has a
 theorem touchesOnly (transition : plan.NetworkTransition before after) :
     plan.TouchesOnly before after transition.scope := by
   cases transition with
-  | processStep _ _ _ step => exact step.scope
+  | processStep _ _ _ _ step => exact step.scope
   | spawn _ _ _ step => exact step.scope
   | restart _ _ _ step => exact step.scope
   | send _ _ _ step => exact step.scope
