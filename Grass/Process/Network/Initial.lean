@@ -135,6 +135,44 @@ is that predicate.
 def HoldsAtEveryStart (assertion : NetworkAssertion plan.agreement) : Prop :=
   ∀ request network, plan.ExactInitialNetwork request network → assertion.holds network
 
+/--
+**A network is a start for at most one request.**
+
+`onlyTheRoot` forces one live slot, `rootPresent` forces one incarnation in it,
+and `rootRequest` reads the request off that incarnation — so two starts of the
+same network agree.
+
+Worth stating because `Grass/Process/Network/Progress.lean`'s `startIsInitial`
+quantifies the request existentially, and a docstring there once called that a
+choice needing a ruling: "a plan started with two different requests has two
+different progress arguments, and nothing here says which one a measure is
+about". A reviewer proved the network says which. There is nothing to rule on.
+-/
+theorem request_is_determined {left right : (plan.topology.protocol plan.topology.root).Request}
+    {network : plan.LogicalProcessNetwork}
+    (first : plan.ExactInitialNetwork left network)
+    (second : plan.ExactInitialNetwork right network) : left = right := by
+  obtain ⟨sameKind, sameSlot⟩ :=
+    first.onlyTheRoot plan.topology.root second.rootSlot second.root second.rootPresent
+  have sameSlot' : second.rootSlot = first.rootSlot := by
+    cases sameKind
+    exact sameSlot
+  have sameRoot : first.root = second.root := by
+    have found := second.rootPresent
+    rw [sameSlot'] at found
+    exact Option.some.inj (first.rootPresent.symm.trans found)
+  have transportIsIrrelevant : ∀ (left' right' : ProcessInstance plan.topology)
+      (leftKind : left'.kind = plan.topology.root)
+      (rightKind : right'.kind = plan.topology.root), left' = right' →
+      (leftKind ▸ left'.request : (plan.topology.protocol plan.topology.root).Request)
+        = rightKind ▸ right'.request := by
+    intro left' right' _ _ same
+    subst same
+    rfl
+  exact (first.rootRequest.symm.trans
+    (transportIsIrrelevant first.root second.root first.rootKind second.rootKind
+      sameRoot)).trans second.rootRequest
+
 namespace ExactInitialNetwork
 
 variable {plan} {request : (plan.topology.protocol plan.topology.root).Request}

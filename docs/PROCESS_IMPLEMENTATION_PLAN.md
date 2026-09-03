@@ -3027,11 +3027,16 @@ to land in is the entry's content: a field demanding an uninhabited record makes
 the record demanding it uninhabited too, so §10.59 had to close first. It did,
 and this followed in four lines.
 
-**The question that is left** is the request. `startIsInitial` quantifies it
-existentially, so a measure is about *some* start of the plan rather than a named
-one — and a plan started with two different requests has two different progress
-arguments. Making it an index of the measure is the alternative and it is a
-signature change. Needs a ruling.
+**And the question I said was left is not one.** `startIsInitial` quantifies the
+request existentially, and I recorded that as "a measure is about *some* start of
+the plan rather than a named one — needs a ruling". A reviewer proved the network
+determines it: `onlyTheRoot` forces one live slot, `rootPresent` forces one
+incarnation in it, and `rootRequest` reads the request off that incarnation.
+`Grass/Process/Network/Initial.lean`'s `request_is_determined` is the theorem.
+
+That is the fourth entry in this ledger recording a defect that did not exist,
+and the fourth filed the same way — from a reading of a repair, without building
+what it described. §10.54 is the method note and this is another instance of it.
 
 ### 10.66 ~~Nothing says a world's pending trace is something a process produced~~ — **closed**
 
@@ -3092,3 +3097,50 @@ Needs a ruling on whether `ProgressFixtures` should be rebuilt at a start of
 `serverPlan` — which requires the population bound — or retired in favour of
 `Tests/Process/FrontierFixtures.lean`, which has a start, a measure, and a
 non-empty silent-run class.
+
+### 10.68 A frontier is not something a measure declares — three attempts
+
+Recorded as a method note rather than an open defect, because it is closed and
+the closing took three rounds on one field.
+
+`NetworkProgressMeasure.AtFrontier` was a predicate the measure supplied, with
+`frontierIsExternal` as the obligation attached to it.
+
+1. **"A frontier is left only by entropy."** A reviewer proved the predicate
+   empty for every measure: a commit was enabled at every network (no provenance)
+   and a spawn is enabled at almost every network, and neither is entropy-driven.
+   §7's escape was unreachable, so every theorem in the module was vacuous.
+2. **"…or by a step that descends the rank."** This made the predicate
+   inhabitable and admitted the opposite degeneracy: a measure could declare
+   *every* network paused and discharge the obligation from a case analysis it
+   needed anyway. `SilentRun` requires each step to start off-frontier, so the
+   class was empty and the theorems were vacuous again. A reviewer built that
+   measure at the corpus's only plan.
+3. **A narrower predicate in the fixture** — "the slot holds a live incarnation"
+   — was refuted the same round: a live *attached* child is a network the program
+   detaches on its own initiative, so calling it an external frontier says the
+   outside must act when the program need not wait.
+
+The mistake in all three is one thing. "Only the outside can move this network"
+is a fact about which steps are *enabled*; it is not a claim anyone gets to make.
+`ProcessPlan.AtFrontier` is now a definition, `Useful` is a property of the plan
+rather than of a measure, `descendsOrProduces` asks the per-step question — *was
+this step the outside acting?* — and `SilentRun` asks it of each step rather than
+asking a measure whether it paused the network.
+
+`Grass/Process/Progress.lean` has never had a frontier predicate and reached the
+same shape independently. The two layers agreeing is the check that the shape is
+right rather than merely smaller.
+
+### 10.69 The network measure's `demanded` is the process layer's `Demanded`, one layer up
+
+`NetworkProgressMeasure.demanded` is a free `boundary.Observation → Prop`, and
+`Tests/Process/FrontierFixtures.lean` — the only measure in the corpus — sets it
+to the elimination of an empty type. So `descendsOrProduces`'s emission disjunct
+is unreachable there and `SilentRun.produced` is vacuous.
+
+Exactly §10.49 at the network: a permissive `demanded` makes any emission
+progress, and a `False` one makes the disjunct dead. §10.49 was recorded for the
+process layer and the network analogue was not, which a reviewer pointed out.
+
+Needs the same ruling as §10.49, and probably the same answer.

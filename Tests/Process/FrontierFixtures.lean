@@ -8,21 +8,20 @@ import Grass.Process.Network.Progress
 declared external frontier". `Grass/Process/Network/Progress.lean` states that as
 `NetworkProgressMeasure`, and every theorem in that module is about measures.
 
-**Nothing in this corpus had ever built one.** Local adversarial review proved
-worse than that: at `serverPlan`, the M2 fixture plan, `AtFrontier` was *empty
-for every measure*, so the module's theorems were not merely unwitnessed but
-vacuous. Two defects composed — `Commits` had no provenance, so a commit of an
-arbitrary observation was a step of every network; and a spawn into an empty slot
-is enabled at almost every network. Neither is entropy-driven, and the old
-`frontierIsExternal` said a frontier is left *only* by entropy.
+**Nothing in this corpus had ever built one**, and three rounds of review went
+into finding out why. At `serverPlan`, the M2 fixture plan, `AtFrontier` was
+*empty for every measure*, because `Commits` had no provenance — a commit of an
+arbitrary observation was a step of every network, and a commit is not
+entropy-driven, while the field then said a frontier is left only by entropy.
+`NetworkFragment.pending` fixed the commit. The next two attempts at the field
+were each refuted by a fixture built against them, and the field is gone: a
+frontier is a fact about which steps are enabled, `ProcessPlan.AtFrontier` is a
+definition, and the per-step question is a disjunct of `descendsOrProduces`.
 
-Both are fixed — `NetworkFragment.pending` gives a commit provenance, and
-`frontierIsExternal` now reads "entropy **or** a step that descends the rank",
-which is what §7's own progress list says of cancellation, death, join and
-restart. A measure still does not exist at `serverPlan`, and
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.60 says why: its connection population
-is unbounded, so it can spawn forever with no external event, and a plan that can
-do that should have no progress measure.
+A measure still does not exist at `serverPlan`, and
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.67 says why: it can spawn into a fresh
+connection slot from a start, so an unbounded chain of non-entropy steps is
+available among *reachable* worlds, and no rank descends across it.
 
 ## What this plan is, and why it is this small
 
@@ -44,20 +43,20 @@ the root could be killed by a supervisor it does not have; they now carry
 
 ## The one thing this fixture is careful not to claim
 
-`descendsOrProduces` and `frontierIsExternal` are quantified over **every** world
-of the plan's world type, not over reachable ones — so a measure must account for
-worlds no execution can produce: an empty slot, a dead incarnation, an instance
-attached to a parent that was never spawned. `slack` is the rank that pays for
-those, and its whole content is that this plan's unreachable worlds admit only
-*finitely many* non-entropy steps before settling into a live root.
+`waitingMeasure` chooses `Reachable := fun _ => True`, so `descendsOrProduces` is
+demanded at **every** world of the plan's world type — including ones no
+execution produces: an empty slot, a dead incarnation, an instance attached to a
+parent that was never spawned. `slack` is the rank that pays for those, and its
+whole content is that this plan's unreachable worlds admit only *finitely many*
+non-entropy steps before settling into a live root.
 
-That is a real constraint, and it is not the constraint §7 is about. A plan whose
-unreachable worlds admit an infinite non-entropy chain has no measure however
-well its reachable executions behave, and every realistic plan is of that shape —
-`serverPlan` is, through spawn/die/restart on worlds no run reaches.
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.64 records it: the network measure needs
-the reachability index that `MeetsProcessProgress` was given for exactly this
-reason one layer down.
+That is a real constraint and it is not the one §7 is about. The measure could
+have taken `Reachable := plan.StepsTo waiting` and said much less; it does not,
+because at this plan the wider claim is affordable and the narrower one would
+hide what the fixture is for. What §7 is about — an infinite run producing
+nothing — this plan cannot exhibit at all, which
+`waiting_is_at_a_frontier` says: every step from the start is the outside
+acting.
 -/
 
 namespace Grass.Process.Tests.Frontier
@@ -361,10 +360,10 @@ theorem ends_a_child {before after : waitingPlan.LogicalProcessNetwork}
 /--
 **At any world of this plan, a step carries entropy or the rank descends.**
 
-`NetworkProgressMeasure.frontierIsExternal` for the strongest possible
-`AtFrontier`, and the list of what has to be true before a network is *waiting*
-rather than merely idle. Twenty of the twenty-four constructors are uninhabited
-here and the reasons are worth reading as a group:
+`NetworkProgressMeasure.descendsOrProduces` for this plan, and the list of what
+has to be true before a network is *waiting* rather than merely idle. Eighteen of
+the twenty-four constructors are uninhabited here and the reasons are worth
+reading as a group:
 
 * `interrupt`, `fault` and `environmentViolation` take a reason from the
   protocol's vocabulary, and all three classes are empty.
@@ -375,11 +374,13 @@ here and the reasons are worth reading as a group:
   `Commits.earned` would also need `pending` non-empty, which is a second,
   independent reason.)
 
-Of the four that remain, `processStep` is the frontier's exit — `waiter.Step`
+Of the six that remain, `processStep` is the frontier's exit — `waiter.Step`
 admits only `.external`, so the event carries entropy. `spawn`, `restart`,
 `detach` and the two child endings each spend slack, which is what §7's own
 progress list ("process steps, spawn, retry, cancellation, death, join, and
-restart") asks of them.
+restart") asks of them. Two of those six are inhabited at this plan and a
+reviewer built them; `timeout` is closed by being entropy rather than by its edge
+type being empty, which is a seventh reason and not one of the eighteen.
 
 `childCancelled` and `childDied` did not require the instance to be a child
 until this theorem was attempted. Without that, a root could be killed by a
@@ -468,6 +469,24 @@ theorem entropy_or_descends {before after : waitingPlan.LogicalProcessNetwork}
   | channelClose edge _ _ _ => exact edge.elim
   | channelDeath edge _ _ _ => exact edge.elim
 
+/--
+**And at `waiting` itself, only entropy moves it at all.**
+
+The strong statement `entropy_or_descends` had to weaken in order to cover every
+world of the plan, including the ones no run reaches. At `waiting` the slack is
+already zero, so no step can descend and the disjunction collapses.
+
+This is `ProcessPlan.AtFrontier waiting` — §7's "declared external frontier",
+which is a definition about which steps are enabled rather than anything a
+measure says.
+-/
+theorem only_entropy_moves_it {after : waitingPlan.LogicalProcessNetwork}
+    (transition : waitingPlan.NetworkTransition waiting after) :
+    transition.DrivenByEntropy :=
+  (entropy_or_descends transition).elim id
+    (fun descends => absurd descends (by rw [rankOf_waiting]; exact Nat.not_lt_zero _))
+
+
 /-! ## And it is where a run begins -/
 
 /--
@@ -478,12 +497,25 @@ witness, and §10.65 as being disconnected from the measure. This closes the fir
 and half of the second: `waitingMeasure` is indexed by `waiting`, and `waiting`
 is a network a run may begin at.
 
-Fifteen fields, and the two that took work are the two that were added by
-review rather than written down at the start. `nothingCommitted` is the trace
-split — a start produces nothing and publishes nothing, and while one trace
-served both roles a "start" could begin with a published history.
-`rootAllocated` is law 22 — the root's generation has to be in the history, so
-the history a run starts from is not the empty one.
+Sixteen fields, and **one** of them took work. `rootAllocated` is law 22: the
+root's generation has to be in the nominal history, so the history a run starts
+from is not `NominalHistory.initial` but that history extended once, which this
+fixture was quietly getting wrong.
+
+The rest are discharged by the shape of the plan rather than by anything about
+`waiting`, and a reviewer checked how many: `nothingCommitted` and
+`pendingProjected` cannot fail here at all, because `waitBoundary.Observation` is
+empty and so every world of this plan has both traces empty; `onlyTheRoot` is
+`fun _ _ _ _ => ⟨rfl, rfl⟩` because kind and slot are `Unit`; `nothingInFlight`
+and `sessionsFresh` are eliminations of the empty edge type. At most five of the
+sixteen carry content at this plan.
+
+That is worth saying rather than leaving for the next reader to find. The record
+is *inhabited* — which it was not, and which is what
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.59 asked for — and it is not
+*exercised*. A fixture that exercises it needs a plan with channels, several
+roles and an inhabited observation type, and that plan is the one §10.67 says has
+no measure.
 -/
 def waiting_is_a_start : waitingPlan.ExactInitialNetwork () waiting where
   rootSlot := ()
@@ -604,24 +636,23 @@ theorem in that module quantifies over measures, and until this definition
 existed none of them was known to be about anything — and at the M2 plan a
 reviewer proved they were about nothing at all.
 
-`AtFrontier` is "the slot holds a live incarnation", which is the honest reading
-for this plan: a live root waits for ticks, and a network with an empty slot is
-not waiting for anything — the outside cannot move it and the program leaves it
-by spawning. `entropy_needs_a_live_instance` is that sentence as a theorem, and
-it is what `descendsOrProduces` runs on.
+`descendsOrProduces` is discharged straight from `entropy_or_descends`, and that
+is the whole of the measure's content: every step of this plan is either the
+outside acting or spends a bounded amount of structural slack.
 
-An earlier version of this definition set `AtFrontier := fun _ => True` and
-argued that "at this plan every network *is* waiting". A reviewer refuted it with
-`emptyWorld`: no step out of it is entropy-driven, so calling it an external
-frontier says the outside must act when nothing outside can. The degenerate
-measure was constructible and was not correct, which is exactly the distinction
-`Useful` was introduced to name and could not make on its own.
+Two earlier versions of this definition had an `AtFrontier` field, and reviewers
+refuted both. The first set it to `fun _ => True` and argued that "at this plan
+every network *is* waiting"; `emptyWorld` refutes that, since no step out of it is
+entropy-driven and the program leaves it by spawning. The second set it to "the
+slot holds a live incarnation", and a live *attached* child refutes that, since
+the program detaches on its own initiative. The field is gone —
+`ProcessPlan.AtFrontier` is a definition about which steps are enabled, and a
+measure cannot get it wrong because a measure no longer says.
 
-`Reachable := fun _ => True` is the *widest* choice, and therefore again the
-hardest: both obligations are demanded at every world, including the ones no run
-reaches. `slack` is what pays for those, and
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.64 is why a plan that does interesting
-work cannot.
+`Reachable := fun _ => True` is the *widest* choice, and therefore the hardest:
+the obligation is demanded at every world, including the ones no run reaches.
+`slack` is what pays for those, and `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.64
+is why a plan that does interesting work cannot.
 -/
 def waitingMeasure : waitingPlan.NetworkProgressMeasure waiting where
   Rank := Nat
@@ -630,49 +661,41 @@ def waitingMeasure : waitingPlan.NetworkProgressMeasure waiting where
   rankTransitive := fun _ _ _ below above => Nat.lt_trans below above
   rank := rankOf
   demanded := fun observation => observation.elim
-  AtFrontier := fun network => ∃ incarnation,
-    network.instances () () = some incarnation ∧ incarnation.Live
   Reachable := fun _ => True
   startIsInitial := ⟨(), ⟨waiting_is_a_start⟩⟩
   reachableStart := trivial
   reachableClosed := fun _ _ => trivial
-  frontierIsExternal := fun _ _ step => entropy_or_descends step.transition
-  descendsOrProduces := by
-    intro before after _ step
-    by_cases live : ∃ incarnation,
-        before.instances () () = some incarnation ∧ incarnation.Live
-    · exact Or.inr (Or.inr live)
-    · exact (entropy_or_descends step.transition).elim
-        (fun entropy => absurd (entropy_needs_a_live_instance step.transition entropy) live)
-        Or.inl
+  descendsOrProduces := fun _ step =>
+    (entropy_or_descends step.transition).elim Or.inl (fun descends => Or.inr (Or.inl descends))
 
-/-- **And `waiting` is at a frontier under it**, which is the class that was
-empty for every measure at the M2 plan. -/
-theorem waiting_is_at_a_frontier : waitingMeasure.AtFrontier waiting :=
-  ⟨theRoot, rfl, trivial⟩
+/--
+**`emptyWorld` is not at a frontier**, so this plan is `Useful`: it has a network
+the program itself can move.
 
-/-- **And `emptyWorld` is not**, so the measure is `Useful` — it distinguishes a
-network that is waiting from one that is not. -/
-theorem the_measure_is_useful : waitingMeasure.Useful := by
-  refine ⟨emptyWorld, ?_⟩
-  rintro ⟨_, found, _⟩
-  exact absurd found (by simp)
+`AtFrontier` and `Useful` are facts about the plan now rather than declarations a
+measure makes, so this holds whatever measure anyone writes. That is the point of
+the change — two rounds were spent on measures declaring the wrong networks
+paused.
+-/
+theorem the_plan_is_useful : waitingPlan.Useful :=
+  ⟨emptyWorld, fun paused => the_spawn_is_not_entropy (paused spawnStep)⟩
 
 /--
 **The spawn is a silent run**, so this plan's `SilentRun` class is not empty.
 
-That matters more than it looks. `SilentRun` requires each step to start at a
-network the measure does *not* call paused, so under the degenerate all-paused
-measure the class was empty and every theorem in
-`Grass/Process/Network/Progress.lean` — including its headline
-`no_infinite_silent_run` — was discharged from its own hypothesis at the corpus's
-only measure. A reviewer proved that; this is the repair.
+That matters more than it looks. `SilentRun` used to require each step to start
+at a network the *measure* did not call paused, so under an all-paused measure the
+class was empty and every theorem in `Grass/Process/Network/Progress.lean` —
+including its headline `no_infinite_silent_run` — was discharged from its own
+hypothesis at the corpus's only measure. A reviewer proved that. It now requires
+the step itself not to be entropy-driven, which nothing can declare away, and a
+spawn is such a step.
 -/
 theorem the_spawn_is_a_silent_run :
     ProcessPlan.NetworkProgressMeasure.SilentRun waitingMeasure emptyWorld waiting :=
   .one spawnStep trivial
     (fun _ observation _ _ _ => observation.elim)
-    (by rintro ⟨_, found, _⟩; exact absurd found (by simp))
+    the_spawn_is_not_entropy
 
 /-- **So the measure pays for it**, which is `silent_run_descends` at a run that
 exists. -/
@@ -741,26 +764,20 @@ theorem the_measure_starts_where_a_run_starts :
 
 
 /--
-**And `waiting` is paused under *every* measure of this plan, not just this one.**
+**And `waiting` really is a frontier**: the outside is the only thing that can
+move it.
 
-`tickStep` returns `waiting` to itself and this plan observes nothing, so
-`descendsOrProduces`'s first two disjuncts are both refuted there — by
-irreflexivity and by the empty observation type. A measure's only remaining
-option is to call `waiting` a frontier.
+Not a claim any measure makes — `ProcessPlan.AtFrontier` is a definition, so this
+is a fact about the plan.
 
-The consequence is worth stating with it: no `SilentRun` of any measure of this
-plan begins at `waiting`, so the network a run *starts* at can never be the start
-of a silent run here. That is not a defect — it is what "this plan only waits"
-means — but it is why the silent-run class needed `emptyWorld` to be non-empty.
+The consequence worth stating with it: no `SilentRun` begins at `waiting`, under
+any measure, because a silent run's first step is not entropy-driven and every
+step from `waiting` is. That is not a defect — it is what "this network is
+waiting" means — and it is why the silent-run class needed `emptyWorld` to be
+non-empty.
 -/
-theorem waiting_is_paused_under_every_measure
-    (measure : waitingPlan.NetworkProgressMeasure waiting) :
-    measure.AtFrontier waiting := by
-  rcases measure.descendsOrProduces measure.reachableStart tickStep with
-    descends | ⟨_, observation, _, _, _⟩ | paused
-  · exact absurd descends (measure.rank_is_irreflexive _)
-  · exact observation.elim
-  · exact paused
+theorem waiting_is_at_a_frontier : waitingPlan.AtFrontier waiting :=
+  fun step => only_entropy_moves_it step.transition
 
 
 end Grass.Process.Tests.Frontier

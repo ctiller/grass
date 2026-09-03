@@ -67,12 +67,11 @@ progress the specification can see.
 ## What is supplied and what is derived
 
 `NetworkProgressMeasure` is supplied by whoever proves a plan adequate, and is
-indexed by the network a run of it begins at. Its two fields with content are
-`descendsOrProduces` and `frontierIsExternal`, and both are deliberately
-*disjunctions* rather than unconditional descents: §7 permits a step to make no
-progress on the rank provided it produced a demanded observation or was sitting
-at a frontier, and a measure that forbade those would be unsatisfiable for any
-long-lived process.
+indexed by the network a run of it begins at. Its one field with content is
+`descendsOrProduces`, and it is deliberately a *disjunction* rather than an
+unconditional descent: §7 permits a step to make no progress on the rank provided
+it produced a demanded observation or was the outside acting, and a measure that
+forbade those would be unsatisfiable for any long-lived process.
 
 Both are also quantified over the measure's own `Reachable`, and that index is
 why any plan that does interesting work can have a measure at all. The world is a
@@ -83,28 +82,33 @@ small enough to afford that, and it is the only one.
 
 `Reachable` is not free: `reachableStart` and `reachableClosed` force it to
 contain everything an execution from `start` can reach, so the least choice is
-exactly `plan.StepsTo start`. What is not yet required is that `start` be a
+exactly `plan.StepsTo start`. And `startIsInitial` requires `start` to be a
 network a run may begin at — `Grass/Process/Network/Initial.lean`'s
-`ExactInitialNetwork`, which nothing in the corpus inhabits.
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.65.
+`ExactInitialNetwork`, which `Tests/Process/FrontierFixtures.lean` inhabits.
 
 `rankTransitive` is a field because well-foundedness does not imply transitivity
 and the cycle argument needs it. `rank_is_irreflexive` is derived, not assumed.
 
 ## What a measure still owes, and one thing this found
 
-`frontierIsExternal` is what charges a measure for declaring everything paused:
-a network at a frontier may only be left by a step driven by entropy from outside
-the program, or by one that descends the rank, so `AtFrontier := fun _ => True`
-costs a proof that every reachable step of the plan is one or the other. That is
-also the distinction the earlier draft's defence of the idle `processStep` relied
-on and could not make — `Grass/Process/Progress.lean` separates waiting from
-spinning with `ProcessEvent.externalEntropy`, and this is that predicate lifted
-to a transition.
+A measure can no longer declare anything paused, and three rounds went into
+learning that it should not be able to. `AtFrontier` was a field with an
+obligation attached; the obligation was either unsatisfiable, which made the
+predicate empty for every measure, or satisfiable by declaring *everything*
+paused, which emptied the `SilentRun` class instead. Both versions made this
+module's theorems vacuous at the corpus's only plan, and a reviewer built the
+witness each time.
 
-`Tests/Process/FrontierFixtures.lean` pays that price and is worth reading beside
-this: it declares every network paused, and its `entropy_or_descends` is the
-twenty-four-case analysis that makes the declaration true.
+The predicate is now a definition about which steps are enabled, and the
+per-step question — *was this step the outside acting?* — is a disjunct of
+`descendsOrProduces`. `Grass/Process/Progress.lean` separates waiting from
+spinning with `ProcessEvent.externalEntropy` and has never had a frontier
+predicate; the two layers now agree.
+
+`Tests/Process/FrontierFixtures.lean` is worth reading beside this: its
+`entropy_or_descends` is the twenty-four-case analysis a measure at that plan
+needs, and `the_plan_is_useful` and `waiting_is_at_a_frontier` are now theorems
+about the plan rather than claims a measure makes.
 
 Trying to build a measure at the M2 fixture plan is what found two no-op
 transitions, each of which would have forced every measure to declare a network
@@ -164,8 +168,6 @@ structure NetworkProgressMeasure (plan : ProcessPlan.{u, w, v, r, m, o} registry
   rank : plan.LogicalProcessNetwork → Rank
   /-- Which observations the specification demands. -/
   demanded : boundary.Observation → Prop
-  /-- Which networks are sitting at a declared external frontier. -/
-  AtFrontier : plan.LogicalProcessNetwork → Prop
   /--
   **Which networks a run of this plan can be at.**
 
@@ -185,10 +187,7 @@ structure NetworkProgressMeasure (plan : ProcessPlan.{u, w, v, r, m, o} registry
   wider. In particular `fun _ => False` is not available, which is the escape
   hatch a freely-chosen predicate would have opened.
 
-  What is still owed is that `start` be a network a run may actually begin at —
-  `Grass/Process/Network/Initial.lean`'s `ExactInitialNetwork` — which nothing
-  here requires and nothing in the corpus inhabits.
-  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.65.
+`startIsInitial` below ties `start` to a network a run may actually begin at.
   -/
   Reachable : plan.LogicalProcessNetwork → Prop
   /--
@@ -205,10 +204,12 @@ structure NetworkProgressMeasure (plan : ProcessPlan.{u, w, v, r, m, o} registry
   `Tests/Process/FrontierFixtures.lean`'s `waiting_is_a_start` is that witness
   and `waitingMeasure` is the measure it unblocked.
 
-  The request is existentially quantified, and that is a choice worth naming: a
-  plan started with two different requests has two different progress arguments,
-  and nothing here says which one a measure is about.
-  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.65 records it.
+  The request is existentially quantified, and that costs nothing: a network is
+  a start for at most one request, because `onlyTheRoot` forces one live slot,
+  `rootPresent` forces one incarnation in it, and `rootRequest` reads the request
+  off that incarnation. An earlier version of this docstring called the
+  quantification a choice needing a ruling, and a reviewer proved it is
+  determined — `ExactInitialNetwork.request_is_determined` is the theorem.
   -/
   startIsInitial : ∃ request, Nonempty (plan.ExactInitialNetwork request start)
   /-- The start is reachable. -/
@@ -217,45 +218,33 @@ structure NetworkProgressMeasure (plan : ProcessPlan.{u, w, v, r, m, o} registry
   reachableClosed : ∀ {before after : plan.LogicalProcessNetwork},
     Reachable before → plan.NetworkStep before after → Reachable after
   /--
-  **And a network at a frontier is left only by external entropy, or by finite
-  work.**
-
-  Without this, `AtFrontier := fun _ => True` discharges `descendsOrProduces`
-  with no rank at all and every theorem below is about an empty class. `Useful`
-  named that degeneracy and did not exclude it — a measure can satisfy `Useful`
-  at one network and pause everything else. This field excludes it: a measure
-  that pauses everything must show every step of the plan is entropy-driven or
-  descends, which is *stronger* than `descendsOrProduces`, not weaker.
-
-  This is the distinction `Grass/Process/Progress.lean` makes per process with
-  `ProcessEvent.externalEntropy`: a process *waiting* on the environment is at a
-  frontier and a process *spinning* is not.
-
-  **The second disjunct is not a hedge, and an earlier version without it made
-  `AtFrontier` empty for every measure.** Local adversarial review proved that at
-  the M2 fixture plan, from two directions at once: `Commits` had no provenance,
-  so a commit was enabled at every network and is not entropy-driven; and even
-  with that fixed, a spawn into an empty slot is enabled at almost every network
-  and is not entropy-driven either. So no network could be declared at a frontier,
-  §7's "remain at a declared external frontier" escape was unreachable, and every
-  theorem in this module was vacuous.
-
-  §7 is explicit about what the second disjunct covers: its progress list is
-  "process steps, spawn, retry, cancellation, death, join, and restart", and a
-  rank is what those are meant to descend. A network waiting on the environment
-  may still be joined by its supervisor or lose a child; those are finite work,
-  not a reason the network is not waiting.
-  -/
-  frontierIsExternal : ∀ {before after : plan.LogicalProcessNetwork},
-    Reachable before → AtFrontier before → (step : plan.NetworkStep before after) →
-    step.transition.DrivenByEntropy ∨ rankLt (rank after) (rank before)
-  /--
-  **§7's disjunction: every step descends, produces, or was paused.**
+  **§7's disjunction: every reachable step descends, produces, or was the
+  outside acting.**
 
   A disjunction rather than an unconditional descent, because §7 permits a step
-  to make no progress on the rank provided it produced a
-  specification-demanded observation or was at a frontier — and a long-lived
-  process that never terminates has no unconditional descent to offer.
+  to make no progress on the rank provided it "produced an independently
+  specified observation" or "reached a law-bearing external/demand-result
+  frontier" — and a long-lived process that never terminates has no
+  unconditional descent to offer.
+
+  **The entropy disjunct is §7's frontier clause, and getting it wrong cost two
+  rounds.** The frontier was a declared *predicate on networks* with a field
+  saying such a network is left only by entropy or by a descending step. Two
+  reviewers took that apart. The first version, "left only by entropy", made the
+  predicate empty for every measure — a commit or a spawn is enabled almost
+  everywhere and neither is entropy — so §7's escape was unreachable and every
+  theorem here was vacuous. Adding the rank disjunct made the predicate
+  inhabitable and then admitted the opposite degeneracy: a measure could declare
+  *every* network paused and discharge the field from a case analysis it needed
+  anyway, so the whole class of `SilentRun`s was empty and the theorems were
+  vacuous again. A third reviewer built that measure.
+
+  The mistake both times was that a frontier is not a property a measure
+  declares. "Only the outside can move this network" is a fact about which steps
+  are *enabled*, so `AtFrontier` below is a definition rather than a field, and
+  the disjunct that belongs here is per-step: **this step was the outside
+  acting**. `Grass/Process/Progress.lean` reached the same shape one layer down
+  for the same reason.
 
   "Produced" is membership in the step's own *emitted segment*, not
   `observation ∈ after.observations ∧ observation ∉ before.observations`. The
@@ -267,31 +256,52 @@ structure NetworkProgressMeasure (plan : ProcessPlan.{u, w, v, r, m, o} registry
   the segment for any step, so this costs a consumer nothing.
   -/
   descendsOrProduces : ∀ {before after : plan.LogicalProcessNetwork},
-    Reachable before → plan.NetworkStep before after →
-    rankLt (rank after) (rank before) ∨
+    Reachable before → (step : plan.NetworkStep before after) →
+    step.transition.DrivenByEntropy ∨
+      rankLt (rank after) (rank before) ∨
       (∃ emitted observation, after.observations = before.observations ++ emitted ∧
-        demanded observation ∧ observation ∈ emitted) ∨
-      AtFrontier before
+        demanded observation ∧ observation ∈ emitted)
+
+/--
+**A network only the outside can move.**
+
+`docs/PROCESS.md` §7's "declared external frontier", and it is a *definition*
+rather than a declaration. Two rounds of review were spent on it as a field of
+the measure. As a field it was either empty for every measure — when it demanded
+that only entropy leave a frontier, which a commit or a spawn refutes almost
+everywhere — or satisfied by declaring every network paused, which emptied the
+`SilentRun` class instead. Neither version was about waiting.
+
+The fact "the outside must act" is about which steps are *enabled* at a network,
+and nothing about it is the measure's to choose. So it is stated here, once,
+about the plan; a measure has no `AtFrontier` field and cannot get it wrong.
+
+It does not appear in `descendsOrProduces` either. §7's frontier clause is
+per-step — "this step was the outside acting" — and a network at a frontier is
+one where every step is.
+-/
+def AtFrontier (network : plan.LogicalProcessNetwork) : Prop :=
+  ∀ {after : plan.LogicalProcessNetwork} (step : plan.NetworkStep network after),
+    step.transition.DrivenByEntropy
+
+/--
+**A plan with a network the outside is not needed to move.**
+
+Was a property of a *measure*, and is now a property of the plan — which is
+where it belonged: whether some network of a program can be moved by the program
+itself has nothing to do with anyone's choice of rank.
+
+Worth keeping because it is what a reader wants to know about a plan before
+reading a progress claim about it. A plan every one of whose networks is at a
+frontier is a program that only ever waits, and §7's theorem is true of it for an
+uninteresting reason.
+-/
+def Useful (plan : ProcessPlan.{u, w, v, r, m, o} registry boundary Obligations) : Prop :=
+  ∃ network, ¬ plan.AtFrontier network
 
 namespace NetworkProgressMeasure
 
 variable {start : plan.LogicalProcessNetwork} (measure : plan.NetworkProgressMeasure start)
-
-/--
-A measure that declares at least one network running.
-
-Weak, and it was once the module's whole answer to the degenerate measure —
-which local adversarial review showed it is not: a measure can satisfy this at
-one network and pause every other, and every theorem here is still about an
-empty class. `frontierIsExternal` is what actually excludes the degeneracy, by
-making a frontier a claim about which steps are enabled rather than a free
-choice.
-
-Kept because it is the property a consumer wants to *state*, and because
-`Tests/Process/ProgressFixtures.lean` now proves it holds of every measure at
-the M2 plan rather than asking a measure to supply it.
--/
-def Useful : Prop := ∃ network, ¬ measure.AtFrontier network
 
 /--
 A well-founded relation is irreflexive.
@@ -307,7 +317,19 @@ theorem rank_is_irreflexive (value : measure.Rank) : ¬ measure.rankLt value val
     exact ih current self self
 
 /--
-A non-empty execution, every step of which was silent and off-frontier.
+A non-empty execution, every step of which was the program acting on itself and
+produced nothing the specification asked for.
+
+"Silent" is now per-step and means two things: the step is not
+`DrivenByEntropy`, so the outside did not have to act for it, and it added no
+demanded observation. That is exactly the shape
+`Grass/Process/Progress.lean`'s `SilentStep` has one layer down, and the two
+agreeing is not a coincidence — the network reached it by removing a declared
+frontier predicate that the per-process layer never had.
+
+The earlier condition was "did not start at a network the measure calls paused",
+and it made the class empty at the corpus's only measure, because that measure
+called every network paused. A reviewer proved it.
 
 `.one` is the base rather than a reflexive `.still`, so a `SilentRun` has at
 least one step by construction — which is what makes `no_silent_cycle` a
@@ -322,14 +344,14 @@ inductive SilentRun {start : plan.LogicalProcessNetwork}
       (reached : measure.Reachable before)
       (produced : ∀ emitted observation, after.observations = before.observations ++ emitted →
         measure.demanded observation → observation ∉ emitted)
-      (running : ¬ measure.AtFrontier before) : SilentRun measure before after
+      (internal : ¬ step.transition.DrivenByEntropy) : SilentRun measure before after
   /-- And one more of the same. -/
   | more {first middle last : plan.LogicalProcessNetwork}
       (earlier : SilentRun measure first middle) (step : plan.NetworkStep middle last)
       (reached : measure.Reachable middle)
       (produced : ∀ emitted observation, last.observations = middle.observations ++ emitted →
         measure.demanded observation → observation ∉ emitted)
-      (running : ¬ measure.AtFrontier middle) : SilentRun measure first last
+      (internal : ¬ step.transition.DrivenByEntropy) : SilentRun measure first last
 
 /--
 **A well-founded relation has no infinite descending sequence.**
@@ -361,24 +383,24 @@ theorem silent_step_descends {before after : plan.LogicalProcessNetwork}
     (reached : measure.Reachable before)
     (produced : ∀ emitted observation, after.observations = before.observations ++ emitted →
       measure.demanded observation → observation ∉ emitted)
-    (running : ¬ measure.AtFrontier before) :
+    (internal : ¬ step.transition.DrivenByEntropy) :
     measure.rankLt (measure.rank after) (measure.rank before) := by
-  rcases measure.descendsOrProduces reached step with descends | ⟨emitted, observation, appended,
-    isDemanded, inSegment⟩ | paused
+  rcases measure.descendsOrProduces reached step with entropy | descends |
+    ⟨emitted, observation, appended, isDemanded, inSegment⟩
+  · exact absurd entropy internal
   · exact descends
   · exact absurd inSegment (produced emitted observation appended isDemanded)
-  · exact absurd paused running
 
 /-- **And so does a whole silent run.** -/
 theorem silent_run_descends {before after : plan.LogicalProcessNetwork}
     (run : SilentRun measure before after) :
     measure.rankLt (measure.rank after) (measure.rank before) := by
   induction run with
-  | one step reached produced running =>
-    exact measure.silent_step_descends step reached produced running
-  | more _ step reached produced running earlierDescends =>
+  | one step reached produced internal =>
+    exact measure.silent_step_descends step reached produced internal
+  | more _ step reached produced internal earlierDescends =>
     exact measure.rankTransitive _ _ _
-      (measure.silent_step_descends step reached produced running) earlierDescends
+      (measure.silent_step_descends step reached produced internal) earlierDescends
 
 /--
 **And no silent cycle**, which is the same rank argument at a run that returns.
@@ -426,15 +448,15 @@ theorem two_silent_steps_cannot_return {network middle : plan.LogicalProcessNetw
     (outProduced : ∀ emitted observation,
       middle.observations = network.observations ++ emitted →
       measure.demanded observation → observation ∉ emitted)
-    (outRunning : ¬ measure.AtFrontier network)
+    (outInternal : ¬ out.transition.DrivenByEntropy)
     (reached : measure.Reachable network)
     (backProduced : ∀ emitted observation,
       network.observations = middle.observations ++ emitted →
       measure.demanded observation → observation ∉ emitted)
-    (backRunning : ¬ measure.AtFrontier middle) : False :=
+    (backInternal : ¬ back.transition.DrivenByEntropy) : False :=
   measure.no_silent_cycle
-    (.more (.one out reached outProduced outRunning) back
-      (measure.reachableClosed reached out) backProduced backRunning)
+    (.more (.one out reached outProduced outInternal) back
+      (measure.reachableClosed reached out) backProduced backInternal)
 
 /--
 **And two silent runs cannot be composed into a cycle.**
