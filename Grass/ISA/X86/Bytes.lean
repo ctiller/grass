@@ -57,6 +57,17 @@ def le32 (v : BitVec 32) : ByteSeq :=
   [BitVec.extractLsb' 0 8 v, BitVec.extractLsb' 8 8 v,
    BitVec.extractLsb' 16 8 v, BitVec.extractLsb' 24 8 v]
 
+/-- A 64-bit value as eight little-endian bytes.
+
+Only `mov r64, imm64` needs this: it is the one form in this profile whose
+immediate is eight bytes, and it is reached only when `REX.W` is set on a
+`B8+rd` opcode. See `Grass.ISA.X86.OpcodeSpec.immSizeFor`. -/
+def le64 (v : BitVec 64) : ByteSeq :=
+  [BitVec.extractLsb' 0 8 v, BitVec.extractLsb' 8 8 v,
+   BitVec.extractLsb' 16 8 v, BitVec.extractLsb' 24 8 v,
+   BitVec.extractLsb' 32 8 v, BitVec.extractLsb' 40 8 v,
+   BitVec.extractLsb' 48 8 v, BitVec.extractLsb' 56 8 v]
+
 /-- A 16-bit value as two little-endian bytes. -/
 def le16 (v : BitVec 16) : ByteSeq :=
   [BitVec.extractLsb' 0 8 v, BitVec.extractLsb' 8 8 v]
@@ -73,6 +84,21 @@ theorem split32 (v : BitVec 32) :
       BitVec.extractLsb'_append_extractLsb'_eq_extractLsb' (by omega)]
   simp
 
+/-- Reassembling eight little-endian bytes recovers the value. -/
+theorem split64 (v : BitVec 64) :
+    BitVec.extractLsb' 56 8 v ++ BitVec.extractLsb' 48 8 v ++
+      BitVec.extractLsb' 40 8 v ++ BitVec.extractLsb' 32 8 v ++
+      BitVec.extractLsb' 24 8 v ++ BitVec.extractLsb' 16 8 v ++
+      BitVec.extractLsb' 8 8 v ++ BitVec.extractLsb' 0 8 v = v := by
+  rw [BitVec.extractLsb'_append_extractLsb'_eq_extractLsb' (by omega),
+      BitVec.extractLsb'_append_extractLsb'_eq_extractLsb' (by omega),
+      BitVec.extractLsb'_append_extractLsb'_eq_extractLsb' (by omega),
+      BitVec.extractLsb'_append_extractLsb'_eq_extractLsb' (by omega),
+      BitVec.extractLsb'_append_extractLsb'_eq_extractLsb' (by omega),
+      BitVec.extractLsb'_append_extractLsb'_eq_extractLsb' (by omega),
+      BitVec.extractLsb'_append_extractLsb'_eq_extractLsb' (by omega)]
+  simp
+
 /-- Reassembling two little-endian bytes recovers the value. -/
 theorem split16 (v : BitVec 16) :
     BitVec.extractLsb' 8 8 v ++ BitVec.extractLsb' 0 8 v = v := by
@@ -80,6 +106,7 @@ theorem split16 (v : BitVec 16) :
   simp
 
 @[simp] theorem length_le32 (v : BitVec 32) : (le32 v).length = 4 := rfl
+@[simp] theorem length_le64 (v : BitVec 64) : (le64 v).length = 8 := rfl
 @[simp] theorem length_le16 (v : BitVec 16) : (le16 v).length = 2 := rfl
 
 /-! ## Displacement and immediate bytes -/
@@ -104,6 +131,13 @@ inductive Immediate where
   /-- No immediate. -/ | none
   /-- One byte. -/ | i8 (v : BitVec 8)
   /-- Four bytes, little-endian. -/ | i32 (v : BitVec 32)
+  /-- Eight bytes, little-endian.
+
+  Reachable only as `REX.W` plus a `B8+rd` opcode -- `mov r64, imm64`, the one
+  x86-64 instruction with a full 64-bit immediate. It exists because a decoder
+  without it reads four bytes where eight follow and then resumes in the middle
+  of the immediate; see `Grass.ISA.X86.OpcodeSpec.immSizeFor`. -/
+  | i64 (v : BitVec 64)
 deriving DecidableEq, Repr, Inhabited
 
 namespace Immediate
@@ -113,10 +147,11 @@ def toBytes : Immediate → ByteSeq
   | .none => []
   | .i8 v => [v]
   | .i32 v => le32 v
+  | .i64 v => le64 v
 
 /-- The number of bytes emitted. -/
 def size : Immediate → Nat
-  | .none => 0 | .i8 _ => 1 | .i32 _ => 4
+  | .none => 0 | .i8 _ => 1 | .i32 _ => 4 | .i64 _ => 8
 
 @[simp] theorem length_toBytes (i : Immediate) : i.toBytes.length = i.size := by
   cases i <;> rfl
@@ -127,11 +162,12 @@ inductive Size where
   /-- No immediate operand. -/ | none
   /-- A one-byte immediate. -/ | i8
   /-- A four-byte immediate. -/ | i32
+  /-- An eight-byte immediate. -/ | i64
 deriving DecidableEq, Repr, Inhabited
 
 /-- The size of this immediate. -/
 def sizeOf : Immediate → Size
-  | .none => .none | .i8 _ => .i8 | .i32 _ => .i32
+  | .none => .none | .i8 _ => .i8 | .i32 _ => .i32 | .i64 _ => .i64
 
 end Immediate
 

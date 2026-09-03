@@ -62,12 +62,64 @@ structure OpcodeSpec where
   opcode : Byte
   /-- Whether a ModR/M byte follows. -/
   hasModrm : Bool
-  /-- How large an immediate follows the displacement. -/
+  /-- How large an immediate follows the displacement, absent `REX.W`. -/
   immSize : Immediate.Size
+  /-- Whether `REX.W` promotes this opcode's immediate to eight bytes.
+
+  True only for `B8+rd`. This field exists because `(escape, opcode)` does not
+  determine the immediate size in 64-bit mode, and a decoder that assumes it
+  does reads four bytes where eight follow. See `immSizeFor`. -/
+  immPromotedByRexW : Bool := false
   /-- What the opcode is, for diagnostics and review. Not consumed by the
   decoder. -/
   mnemonic : String
 deriving DecidableEq, Repr
+
+namespace OpcodeSpec
+
+/--
+The immediate size this opcode actually takes, given whether `REX.W` is set.
+
+`OpcodeSpec.immSize` alone was wrong, and the failure was a stream
+desynchronisation rather than a wrong field. `B8+rd` takes `imm32` normally and
+`imm64` under `REX.W` -- it is `mov r64, imm64`. With the size keyed on the
+opcode alone, `48 B8` followed by eight immediate bytes decoded as a six-byte
+instruction, and the next `decodeInsn` began four bytes inside the immediate and
+reported `unknownOpcode` on whatever it found. A reviewer produced
+`48 B8 EF CD AB 89 67 45 23 01 48 89 C3`, where `ndisasm` puts the second
+instruction at offset 10 and this decoder put it at 6.
+
+That contradicted this module's own contract twice over: the header promises
+`unknownOpcode` "rather than a guess", and warns that a decoder that guesses
+lengths "desynchronises". It guessed.
+-/
+def immSizeFor (s : OpcodeSpec) (rexW : Bool) : Immediate.Size :=
+  if s.immPromotedByRexW && rexW then .i64 else s.immSize
+
+/-- Without `REX.W` the promotion never fires, so the plain size stands. -/
+@[simp] theorem immSizeFor_false (s : OpcodeSpec) :
+    s.immSizeFor false = s.immSize := by
+  simp [immSizeFor]
+
+/-- An opcode that is not promoted has one immediate size whatever `REX.W`
+says. -/
+@[simp] theorem immSizeFor_not_promoted {s : OpcodeSpec} (h : s.immPromotedByRexW = false)
+    (w : Bool) : s.immSizeFor w = s.immSize := by
+  simp [immSizeFor, h]
+
+end OpcodeSpec
+
+/-- Whether `REX.W` is set, for a prefix that may be absent.
+
+Absent is not the same as present-and-clear anywhere else in this profile, but
+for operand size it is: no prefix means the default operand size, which is what
+a clear `REX.W` also means. -/
+def rexWSet (rex : Option Rex) : Bool :=
+  match rex with
+  | some r => r.w == 1
+  | Option.none => false
+
+@[simp] theorem rexWSet_none : rexWSet Option.none = false := rfl
 
 /-- Build the eight opcode-embedded-register rows a `+rd` opcode needs.
 
@@ -75,11 +127,12 @@ deriving DecidableEq, Repr
 register's low three bits, and the REX bit chooses between the two halves of the
 register file. Eight rows rather than a range because the table is a lookup, and
 a range would need the lookup to know which opcodes are ranges. -/
-def plusRegRows (base : Byte) (immSize : Immediate.Size) (mnemonic : String) :
-    List OpcodeSpec :=
+def plusRegRows (base : Byte) (immSize : Immediate.Size) (mnemonic : String)
+    (immPromotedByRexW : Bool := false) : List OpcodeSpec :=
   (List.range 8).map fun i =>
     { escape := false, opcode := base + BitVec.ofNat 8 i, hasModrm := false,
-      immSize := immSize, mnemonic := mnemonic ++ "+rd" }
+      immSize := immSize, immPromotedByRexW := immPromotedByRexW,
+      mnemonic := mnemonic ++ "+rd" }
 
 /--
 The opcodes this profile decodes.
@@ -133,7 +186,7 @@ def opcodeTable : List OpcodeSpec :=
     { escape := true, opcode := 0xBC, hasModrm := true, immSize := .none,
       mnemonic := "bsf r, r/m" } ]
   ++ plusRegRows 0x50 .none "push r64"
-  ++ plusRegRows 0xB8 .i32 "mov r32, imm32"
+  ++ plusRegRows 0xB8 .i32 "mov r32, imm32 / r64, imm64" (immPromotedByRexW := true)
 
 /-- The row for an opcode, if this profile has one. -/
 def findSpec (escape : Bool) (opcode : Byte) : Option OpcodeSpec :=
@@ -178,6 +231,13 @@ private def takeByte (what : String) :
   | [] => .error (.truncated what)
   | b :: rest => .ok (b, rest)
 
+/-- Take eight bytes as a little-endian 64-bit value. -/
+private def takeLe64 (what : String) :
+    ByteSeq → Except DecodeError (BitVec 64 × ByteSeq)
+  | a :: b :: c :: d :: e :: f :: g :: h :: rest =>
+      .ok (h ++ g ++ f ++ e ++ d ++ c ++ b ++ a, rest)
+  | _ => .error (.truncated what)
+
 /-- Take four bytes as a little-endian 32-bit value. -/
 private def takeLe32 (what : String) :
     ByteSeq → Except DecodeError (BitVec 32 × ByteSeq)
@@ -201,6 +261,7 @@ private def takeImm (size : Immediate.Size) :
     | .none => .ok (.none, bs)
     | .i8 => do let (b, rest) ← takeByte "imm8" bs; pure (.i8 b, rest)
     | .i32 => do let (v, rest) ← takeLe32 "imm32" bs; pure (.i32 v, rest)
+    | .i64 => do let (v, rest) ← takeLe64 "imm64" bs; pure (.i64 v, rest)
 
 /--
 Decode everything after the opcode: the ModR/M byte, its SIB, the displacement
@@ -224,12 +285,12 @@ def decodeOperands (rex : Option Rex) (escape : Bool) (opcode : Byte)
         pure (some (Sib.ofByte sibByte), rest)
       else pure (Option.none, afterModrm)
     let (disp, afterDisp) ← takeDisp (dispKindFor m.mod m.rm sib) afterSib
-    let (imm, afterImm) ← takeImm spec.immSize afterDisp
+    let (imm, afterImm) ← takeImm (spec.immSizeFor (rexWSet rex)) afterDisp
     pure ({ rex := rex, escape := escape, opcode := opcode,
             modrm := some m, sib := sib, disp := disp, imm := imm },
           afterImm)
   else
-    let (imm, afterImm) ← takeImm spec.immSize bs
+    let (imm, afterImm) ← takeImm (spec.immSizeFor (rexWSet rex)) bs
     pure ({ rex := rex, escape := escape, opcode := opcode,
             modrm := Option.none, sib := Option.none, disp := .none,
             imm := imm },
@@ -276,7 +337,7 @@ the opcode's declaration, which is where `OpcodeSpec` holds it.
 -/
 def MatchesSpec (i : InsnEncoding) (s : OpcodeSpec) : Prop :=
   s.escape = i.escape ∧ s.opcode = i.opcode ∧
-    s.hasModrm = i.modrm.isSome ∧ s.immSize = i.imm.sizeOf
+    s.hasModrm = i.modrm.isSome ∧ s.immSizeFor (rexWSet i.rex) = i.imm.sizeOf
 
 instance (i : InsnEncoding) (s : OpcodeSpec) : Decidable (MatchesSpec i s) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
@@ -287,6 +348,12 @@ private theorem takeLe32_le32 (what : String) (v : BitVec 32) (rest : ByteSeq) :
     takeLe32 what (le32 v ++ rest) = .ok (v, rest) := by
   simp only [le32, takeLe32, List.cons_append, List.nil_append]
   rw [split32]
+
+/-- Eight emitted bytes read back as the value that produced them. -/
+private theorem takeLe64_le64 (what : String) (v : BitVec 64) (rest : ByteSeq) :
+    takeLe64 what (le64 v ++ rest) = .ok (v, rest) := by
+  simp only [le64, takeLe64, List.cons_append, List.nil_append]
+  rw [split64]
 
 /-- A displacement round-trips through the bytes it emits. -/
 private theorem takeDisp_toBytes (d : Displacement) (rest : ByteSeq) :
@@ -309,6 +376,10 @@ private theorem takeImm_toBytes (i : Immediate) (rest : ByteSeq) :
       simp only [Immediate.sizeOf, Immediate.toBytes, takeImm]
       rw [takeLe32_le32]
       rfl
+  | i64 v =>
+      simp only [Immediate.sizeOf, Immediate.toBytes, takeImm]
+      rw [takeLe64_le64]
+      rfl
 
 
 /--
@@ -325,7 +396,7 @@ private theorem decodeOperands_bytes (rex : Option Rex) (escape : Bool)
     (hsib : sib.isSome =
       (m.rm == ModRm.rmSelectsSib && m.mod != ModRm.modRegisterDirect))
     (hdisp : disp.kind = dispKindFor m.mod m.rm sib)
-    (himm : spec.immSize = imm.sizeOf) :
+    (himm : spec.immSizeFor (rexWSet rex) = imm.sizeOf) :
     decodeOperands rex escape opcode spec
       (m.toByte :: (InsnEncoding.sibBytes sib ++
         (disp.toBytes ++ (imm.toBytes ++ rest))))
@@ -354,7 +425,7 @@ there is nothing for a displacement to belong to, so there must not be one. -/
 private theorem decodeOperands_bytes_noModrm (rex : Option Rex) (escape : Bool)
     (opcode : Byte) (spec : OpcodeSpec) (imm : Immediate) (rest : ByteSeq)
     (hmodrm : spec.hasModrm = false)
-    (himm : spec.immSize = imm.sizeOf) :
+    (himm : spec.immSizeFor (rexWSet rex) = imm.sizeOf) :
     decodeOperands rex escape opcode spec (imm.toBytes ++ rest)
       = .ok ({ rex := rex, escape := escape, opcode := opcode,
                modrm := Option.none, sib := Option.none, disp := .none,
