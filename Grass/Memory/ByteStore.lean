@@ -25,8 +25,8 @@ split rather than an argument about maintained sortedness.
 The cost is that a read scans runs, so a long-running program's reads degrade.
 What makes that acceptable is that the *named* surface is `cellAt?`, `byteAt?`,
 `InitializedAt`, `Initialized`, `empty`, `write`, `compact`, and theorems over
-those: `runs`, `Run`, and every lemma mentioning either are `private`, so a
-consumer cannot name a run. A store agreeing pointwise satisfies every exported
+those: `runs`, `Run`, and every lemma mentioning either are `private`, so a consumer
+cannot name a run **directly** — see the next section for what it can still do. A store agreeing pointwise satisfies every exported
 theorem unchanged, and `docs/OLEAN_SHARDING.md` §1 asks for exactly that — facts
 crossing the boundary as exported theorems rather than as a representation
 consumers unfold.

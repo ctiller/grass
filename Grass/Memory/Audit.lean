@@ -132,6 +132,19 @@ address, and a symbolic space has none either, so both skip. That is the `Option
 def addressDisagreesWithPlacement : AuditViolationClass :=
   ⟨⟨"addressDisagreesWithPlacement"⟩⟩
 
+/-- An allocation placed so that its own bytes wrap the address space.
+
+`Grass/Memory/Addressing.lean`'s `addressOf` is `base + offset` in `BitVec 64`,
+which reduces mod 2^64, and every bridge lemma in that module takes `FitsAllocation`
+as a hypothesis. Nothing checked it. Review placed a sixty-four-byte allocation at
+`2 ^ 64 - 16` and had its offset-16 store admitted at declared address **0**, which
+is the first byte of a second, unrelated live allocation — the exact non-aliasing
+debt `Grass/Memory/Range.lean` records and `Addressing.lean` claims to pay.
+
+Refused rather than approximated: an allocation whose addresses are not well defined
+is a placement the model has no account of. -/
+def placementWraps : AuditViolationClass := ⟨⟨"placementWraps"⟩⟩
+
 /--
 The classes the generic transition relation can emit.
 
@@ -142,7 +155,8 @@ field nothing reads. `StepPolicy` carries the proof.
 def emittedByTransition : List AuditViolationClass :=
   [outOfBounds, deadProvenance, permissionDenied, uninitializedRead, misaligned,
    authorityUnavailable, obligationNotAuthorized, wrongAddressSpace,
-   machineAnswerIncomplete, provenanceExtentMismatch, addressDisagreesWithPlacement]
+   machineAnswerIncomplete, provenanceExtentMismatch, addressDisagreesWithPlacement,
+   placementWraps]
 
 end AuditViolationClass
 

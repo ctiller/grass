@@ -199,6 +199,9 @@ inductive Alpha where
   /-- An access-free operation declaring an ordering mode the profile never
   registered, so the per-access check cannot see it. -/
   | computeWithUnregisteredOrdering
+  /-- A *load* of the read-only page declaring it needs write and execute
+  permission the page does not grant. -/
+  | overDeclaredPermission
   /-- A load reading uninitialized bytes under a rule this profile never
   registered. -/
   | unregisteredInitRule
@@ -421,6 +424,11 @@ instance : HasOperationFacets Alpha where
                 [ .access (acc bufferProv ⟨0, 4⟩ 0x1000 .write .readWrite false true)
                   , .access (acc bufferProv ⟨4, 4⟩ 0x1004 .write .readWrite false true) ]
               onFault := .transactional ⟨"fake.splitStore"⟩ }
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .overDeclaredPermission =>
+        { memoryEffects := some (.single (acc constProv ⟨0, 8⟩ 0x2000 .read
+            { read := true, write := true, execute := true } true false))
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .computeWithUnregisteredOrdering =>
@@ -1300,6 +1308,34 @@ theorem a_compute_substep_with_an_unrecognized_fault_is_refused :
     Grass.Op.step policy state₀ (SomeOperation.of Alpha.computeWithPhantomFault) thread₀
       .thread ⟨⟨"alpha"⟩⟩ =
       .rejected (.computeFaultNotRecognized ⟨⟨"fake.neverDeclaredFault"⟩⟩) := rfl
+
+/-! ## A declared permission the page does not grant
+
+`AccessDescriptor.requiredPermission` is "the page or section permission the access
+requires", and its only consumer was `WellFormedIn.permissionSufficient`, which
+checks it against the descriptor's own *intent*. `denialOf` checked the intent
+against the page and never the declaration — so a load could declare it needs read,
+write and execute on a read-only page and be admitted. A field whose only reader is
+the descriptor that wrote it is a declaration nothing enforces, which is what this
+layer deleted `AccessIntent.isDevice` and `AllocationRecord.initialized` for. -/
+
+/-- **A permission the page does not grant is a violation**, even where the access's
+intent alone would have been permitted. -/
+theorem an_over_declared_permission_is_refused :
+    ∀ s, (stepAlpha state₀ .overDeclaredPermission).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- And a load of the same page declaring only read commits, so the refusal is the
+declaration and not the page. -/
+theorem the_honest_permission_commits :
+    ∀ s, (stepAlpha state₀ .load).state? = some s →
+      s.events.length = 1 ∧ s.violations.IsEmpty := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
 
 /-! ## A provenance that lies about its root's extent
 

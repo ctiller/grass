@@ -85,7 +85,14 @@ the review that section demands, not an edit here.
 def allowedAxioms : List Name :=
   [``propext, ``Classical.choice, ``Quot.sound]
 
-/-- Whether a declaration belongs to the audited namespace. -/
+/-- Whether a declaration belongs to the audited namespace.
+
+**Namespace, not module**, and that is a gap rather than a design. A declaration
+written in a `Grass/` module but outside the `Grass` namespace is scanned by nothing:
+review appended a root-namespace `axiom` to `Grass/Core/Name.lean` and a theorem using
+it, and `lake build` and this audit both passed. `moduleNamespacesAgree` below closes
+it by refusing the module rather than by widening this predicate, because widening it
+would pull in every core declaration the environment carries. -/
 def isAudited (name : Name) : Bool :=
   (`Grass).isPrefixOf name && !name.isInternal
 
@@ -119,6 +126,25 @@ run_cmd do
   unless missing.isEmpty do
     throwError m!"axiom audit coverage gap: these modules exist under Grass/ but are not imported by Tools/AxiomAudit.lean, so their declarations were never scanned:
 {MessageData.joinSep (missing.toList.map (m!"  {·}")) "
+"}"
+  -- Every declaration a `Grass/` module introduces must be in the `Grass`
+  -- namespace, or `isAudited` skips it and the axiom audit is silent about it.
+  -- Review appended a root-namespace axiom to `Grass/Core/Name.lean` and both gates
+  -- passed. Checked by module rather than by widening `isAudited`, which would pull
+  -- in every core declaration the environment carries.
+  let mut strays : Array Name := #[]
+  for (name, _) in env.constants.toList do
+    if name.isInternal then continue
+    if (`Grass).isPrefixOf name then continue
+    match env.getModuleIdxFor? name with
+    | some idx =>
+        match env.header.moduleNames[idx.toNat]? with
+        | some m => if (`Grass).isPrefixOf m then strays := strays.push name
+        | none => pure ()
+    | none => pure ()
+  unless strays.isEmpty do
+    throwError m!"axiom audit namespace gap: these declarations live in a Grass/ module but outside the Grass namespace, so isAudited skips them:
+{MessageData.joinSep (strays.toList.map (m!"  {·}")) "
 "}"
   let mut audited : Nat := 0
   let mut unsafeFindings : Array Name := #[]

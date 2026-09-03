@@ -113,6 +113,7 @@ The memory state.
 declares each aliased pair once.
 -/
 structure MemoryState where
+  private mk ::
   /-- The live and dead allocations. -/
   allocations : FiniteMap AllocId AllocationRecord
   /-- Pairs of allocations whose bytes are the same storage. -/
@@ -156,6 +157,15 @@ So the field is private and the two operations that change it are here:
 `issueGrant?` and `returnGrant?`. `Grass/Memory/Loan.lean` states §3's laws over
 them and adds the loan-specific refusals; `grantEntries` and `grantAt?` are the
 read-only views everything else uses.
+
+**And `mk` is private too**, which is the third time this hole has been closed.
+Marking the *field* private privatises the projection and leaves the constructor
+alone, so `MemoryState.mk allocations aliases ⟨…⟩` still built any map at all —
+review rebuilt `Tests/Op/StandardLoan.lean`'s own lent state with the loan filtered
+out of `grantEntries`, and the thread's store committed. That is the same failure
+`Grass/Memory/ByteStore.lean`'s comment records for `ByteStore.rec`, and this module
+had it while claiming there was no second door. `MemoryState.rec` cannot construct,
+so with `mk` private the map is reachable only through the two mutators.
 -/
 
 /--
@@ -409,7 +419,7 @@ Six clauses: the holder is the context performing the access, the grant is over 
 same *bytes*, both provenances are current, the grant's range covers the access's,
 and the rights permit the intent.
 
-**On the state, and using `SharesBytes`.** This was `AuthorityGrant.Authorizes`, a
+**On the state, and using `SharesBytes`.** This was the deleted `Authorizes` function, a
 pure function on provenances using `Provenance.SameStorage` — equal `space`, `root`
 and `epoch`. That is the relation this layer has now moved off twice for being
 wrong in the unsafe direction, and leaving it here made it wrong in the *other*

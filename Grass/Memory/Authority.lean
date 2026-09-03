@@ -112,7 +112,7 @@ deriving DecidableEq, Repr
 
 /-! Whether a grant authorizes an access is **not** decided here.
 
-It was: `AuthorityGrant.Authorizes` lived in this namespace and matched provenances
+It was: the deleted `Authorizes` function lived in this namespace and matched provenances
 with `Provenance.SameStorage`. Whether two allocations name the same bytes is a fact
 about the machine state — `MemoryState.aliases` and its transitive closure — and a
 pure function on provenances cannot see it, so a holder reaching its own lent bytes

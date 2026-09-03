@@ -41,8 +41,13 @@ deleted, because a vacuous theorem reads as coverage.
 
 The reasoning offered for that deletion went one step too far, and review caught it:
 it said the rule had nothing to constrain. `Permission.Permits` is the sole rights
-gate on the chain `AuthorityGrant.Authorizes` → `MemoryState.GrantedOfKind` →
-`Grass/Op/LoanAuthority.lean` → `step`, and it had no clause about atomicity, so a
+gate on the chain `MemoryState.AuthorizedBy` → `MemoryState.Granted` →
+`Grass/Op/LoanAuthority.lean` → `step`, and it had no clause about atomicity, (The chain was named as the deleted `Authorizes` function and
+`MemoryState.GrantedOfKind` until review checked: the first was deleted, and the
+second has no caller under `Grass/` — the provider calls `Granted`, which is
+kind-blind on purpose, because `Grass/Op/Step.lean` composes providers conjunctively
+and a loan provider refusing an access another authority covers would make that
+authority unusable.) so a
 grant issued for atomic access authorized an ordinary one indistinguishably.
 `Permission.atomicOnly` is that rule at that gate, and it is what the state is now
 derived from. The constructor is back without its ordering payload, which was a

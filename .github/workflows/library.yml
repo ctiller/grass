@@ -25,6 +25,13 @@ name: Library build
 # found both. It is lexical too -- it matches short names and cannot tell a
 # still-resolving citation from an accurate one -- and its own docstring lists what
 # it does not see.
+#
+# All four now self-test, and `DocstringAudit.py` was the last to. It was also the
+# only one whose roots were relative to the working directory, so it printed its
+# success line and exited 0 from anywhere but the repo root, having read nothing —
+# the pure "check that cannot fail", in the tool that exists to catch that class.
+# Review found it. Every audit here anchors on `__file__` and fails when it finds no
+# sources.
 
 on:
   push:
@@ -60,6 +67,9 @@ jobs:
 
       - name: Audit axioms
         run: lake env lean Tools/AxiomAudit.lean
+
+      - name: Self-test the docstring audit
+        run: python3 Tools/DocstringAudit.py --self-test
 
       - name: Audit docstring claims
         run: python3 Tools/DocstringAudit.py

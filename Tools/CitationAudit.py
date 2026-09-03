@@ -37,8 +37,11 @@ advertised a stronger reading and review corrected it:
 - It matches short names, so `Foo.bar` and `Baz.bar` are indistinguishable. A
   citation naming the right leaf in the wrong namespace passes.
 - A citation that is *stale but still resolves* — the name exists, but the theorem
-  no longer says what the prose claims — is invisible here. That is
-  `DocstringAudit.py`'s territory and it is not closed by either tool.
+  no longer says what the prose claims — is invisible here. It is invisible to
+  `DocstringAudit.py` too, which only asks whether a claim-shaped sentence contains
+  *some* backticked identifier. An earlier version of this line said the class was
+  that tool's territory; review pointed out that it is nobody's, and that saying
+  "covered over there" is worse than saying "covered nowhere".
 - Backticked tokens with no `_` and no `.` are skipped, because ordinary prose is
   full of them (`Option`, `Nat`, `true`). So a bare renamed identifier like
   `compact` would not be caught.
@@ -132,7 +135,7 @@ ALLOWED = {
     # Recursors and eliminators Lean generates for this tree's own types. Cited in
     # `Grass/Core/Uid.lean` and `Grass/Memory/ByteStore.lean` precisely because they
     # are generated rather than written, which is the point those comments make.
-    "Uid.rec", "Uid.casesOn",
+    "Uid.rec", "Uid.casesOn", "MemoryState.rec",
     # Module paths in import comments, which have the shape of a namespace.
     "Grass.Op.Facets",
     # Names another owner declares, or has not yet: `Grass/Std` is the stdlib
@@ -140,17 +143,22 @@ ALLOWED = {
     "Std.Owned", "Grass.Core.Id",
     # Paths and file names, which happen to match the identifier shape.
     "lean-toolchain", "lakefile.toml",
-    # Prose about a name that was deleted, quoted so the reason survives. Each is
-    # named in a comment explaining why the thing no longer exists, so a reader
-    # finding nothing is the point.
+    # Prose about a name that was deleted, quoted so the reason survives. Each must
+    # sit in a comment explaining why the thing no longer exists -- a reader finding
+    # nothing is the point.
+    #
+    # **This is the weakest part of the tool and it has already been abused.**
+    # `AuthorityGrant.Authorizes` was listed here on that ground, and two of its
+    # three sites were describing the *present* enforcement chain, so the allowlist
+    # was keeping a false claim green. Nothing checks that an entry's sites are all
+    # historical, and nothing checks that an entry is still needed at all: review
+    # found two with zero remaining sites. Before adding one, read every site.
     "AccessIntent.isDevice",
     "AllocationRecord.initialized",
     "not_permitsOrdinaryWrite_of_not_exclusive",
     "loan_refuses_only_the_frozen",
-    "AuthorityGrant.Authorizes",
     "MemoryState.grant",
     "faultPointOutOfRange",
-    "atomicsAreNever_",
 }
 
 
@@ -320,12 +328,24 @@ def main() -> int:
     for path in LEAN_FILES:
         prose[path.relative_to(ROOT).as_posix()] = comment_text(
             path.read_text(encoding="utf-8"))
+    # Section citations are matched within a comment *block* rather than within a
+    # line, because a docstring wraps and "`docs/INSTRUCTIONS.md`\n§4" was invisible
+    # to a per-line scan -- twenty-eight such pairs, against the two hundred and
+    # forty it saw. Joining the whole file would reintroduce the false positive the
+    # tight pattern exists to avoid, where a document name and an unrelated "RFC
+    # 9113 §5.2" sit in different cells of one markdown table row, so the join is
+    # per block.
+    joined: dict[str, str] = {}
+    for path in LEAN_FILES:
+        blocks = re.findall(r"/-.*?-/", path.read_text(encoding="utf-8"), re.DOTALL)
+        joined[path.relative_to(ROOT).as_posix()] = "\n".join(
+            " ".join(line.strip() for line in block.splitlines()) for block in blocks)
     documents: dict[str, str] = {}
     for path in DOC_FILES:
         documents[path.relative_to(ROOT).as_posix()] = path.read_text(encoding="utf-8")
 
     problems = (check_declarations(prose, names)
-                + check_sections(prose, sections)
+                + check_sections(joined, sections)
                 + check_sections(documents, sections))
     if problems:
         print("\n".join(sorted(problems)))

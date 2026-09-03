@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Check that strong implementation-comment claims name their enforcement.
 
-Scope: module comments and the docstrings of definitions, structures, classes,
-and inductives. A theorem's own docstring is exempt, because the theorem beneath
-it *is* the enforcement -- restating a proved statement in English is not drift.
-Unbacked prose hides where there is no adjacent proof.
+Scope: **every** `/-- -/` and `/-! -/` block under `Grass/`, including a theorem's
+own docstring. An earlier version of this paragraph said a theorem's docstring was
+exempt "because the theorem beneath it *is* the enforcement", and a `SELF_NAMING`
+pattern was defined for it and never used -- so the tool examined those blocks
+anyway and the docstring described a scope it did not have. Review found it, in the
+tool whose entire job is that class of error. The pattern is deleted rather than
+implemented: a theorem's docstring is where the overclaims in this project have
+actually lived, and exempting it would have passed several of them.
 
 docs/MEMORY_IMPLEMENTATION_PLAN.md section 3.10:
 
@@ -17,12 +21,29 @@ code did not have -- including one naming a theorem that did not exist, in the
 file whose own comment states this rule. Mechanism-shaped prose reads as
 verification and is not, so the rule needs a checker rather than a convention.
 
-The check is deliberately shallow. It cannot tell whether a named theorem proves
-what the sentence claims; it can tell that the sentence names *something* the
-build knows about, which is the difference between a claim that can be chased and
-one that cannot. A sentence that hedges -- "intended", "not enforced", "owes",
-"open obligation", and the like -- is exempt, because saying a property is not yet
-mechanised is exactly the honest alternative the rule asks for.
+The check is deliberately shallow, and shallower than it reads. What it verifies is
+that a claim-shaped sentence contains *some* backticked identifier. It therefore
+misses, and each of these was found by mutation-testing it:
+
+- a sentence whose backticked identifier is not the enforcement -- including one that
+  is the claim's own *subject* ("`MemoryAccess` cannot be constructed out of
+  bounds");
+- a claim phrased without any word in `CLAIM_WORDS` ("an out-of-bounds access is
+  never admitted");
+- a claim next to any hedge word anywhere in the same sentence, since hedging is
+  matched on the sentence and not on the clause;
+- whether the named theorem says what the sentence claims. That is not covered by
+  any tool here. `Tools/CitationAudit.py` checks the name *exists*, which is a
+  different and weaker thing, and an earlier version of its docstring said this
+  class was "`DocstringAudit.py`'s territory". It is nobody's.
+
+So a clean run means no claim-shaped sentence is entirely without a name to chase.
+It is one cheap net over prose that reads as verification, and it under-reports by
+construction.
+
+`--self-test` seeds a claim the tool must report and the near-misses it must not,
+including the bypasses above, so the ones it cannot see are asserted rather than
+merely described. Run it after changing the vocabulary.
 
 Exit status is 1 if any claim is unbacked.
 """
@@ -31,11 +52,14 @@ import re
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent.parent
+
 # Deliberately narrow. The designer's rule names "ensures", "prevents", "cannot",
-# "only", and "preserves"; the last two occur constantly in ordinary descriptive
-# English ("the only fault position", "a value that is never live") and flagging
-# every one buries the signal. What is kept are the words that assert a mechanism
-# rather than describe a value, plus "only" in its guarantee-shaped phrasings.
+# "only", and "preserves"; "only" occurs constantly in ordinary descriptive English
+# ("the only fault position") and flagging every one buries the signal, so it is kept
+# in its guarantee-shaped phrasings only. "preserves" is kept whole -- an earlier
+# version of this comment said it was dropped for the same reason and it was not,
+# which review caught.
 #
 # The tool therefore under-reports by construction. It is a net for the specific
 # drift four review rounds found -- a definition or module comment asserting an
@@ -100,7 +124,10 @@ def doc_blocks(source: str):
 
 
 def check(path: Path) -> list[str]:
-    source = path.read_text(encoding="utf-8")
+    return check_source(path.read_text(encoding="utf-8"), path)
+
+
+def check_source(source: str, path: Path) -> list[str]:
     findings = []
     for line, block in doc_blocks(source):
         for sentence in sentences(block):
@@ -127,17 +154,67 @@ def check(path: Path) -> list[str]:
     return findings
 
 
+def self_test() -> int:
+    """Seed a claim the tool must report, and the near-misses it must not.
+
+    The second group is the point: those are the bypasses this file's docstring
+    lists, asserted here so they cannot quietly become coverage someone relies on.
+    """
+    must_report = [
+        ("bare claim", "/-- This ensures that every access is bounds-checked. -/"),
+        ("claim in a theorem docstring",
+         "/-- This ensures that every access is bounds-checked. -/\ntheorem t : True := trivial"),
+    ]
+    must_not_report = [
+        ("named enforcement",
+         "/-- This ensures that every access is bounds-checked, by `boundsOk`. -/"),
+        ("hedged", "/-- This is intended to ensure that every access is bounds-checked. -/"),
+        # Documented bypasses. Each is a sentence the rule is about and the tool
+        # does not see; asserting them keeps the docstring's list honest.
+        ("bypass: the subject counts as the enforcer",
+         "/-- `MemoryAccess` cannot be constructed out of bounds. -/"),
+        ("bypass: no claim word",
+         "/-- An out-of-bounds access is never admitted and no state produces one. -/"),
+        ("bypass: an unrelated backticked name",
+         "/-- This ensures that every access is bounds-checked, see `Nat`. -/"),
+    ]
+    failures = 0
+    for label, source in must_report:
+        if not check_source(source, Path("probe.lean")):
+            print(f"  SELF-TEST FAILED [{label}]: expected a finding")
+            failures += 1
+    for label, source in must_not_report:
+        if check_source(source, Path("probe.lean")):
+            print(f"  SELF-TEST FAILED [{label}]: expected no finding")
+            failures += 1
+    if failures:
+        print(f"docstring audit self-test: {failures} failure(s)")
+        return 1
+    print("docstring audit self-test: all cases discriminate as documented")
+    return 0
+
+
 def main() -> int:
-    # `Tests/` is excluded: fixture comments describe values ("an identity that
-    # is never live"), not mechanisms, and the fixtures are themselves the
-    # evidence a claim would point at.
-    roots = [Path("Grass")]
+    if "--self-test" in sys.argv:
+        return self_test()
+    # `Tests/` is excluded, and not for the reason this comment used to give.
+    # Fixture comments are not all value-shaped -- review found thirteen
+    # mechanism-shaped sentences there, all backed. They are excluded because a
+    # fixture's evidence is the fixture, and the rule in
+    # `docs/MEMORY_IMPLEMENTATION_PLAN.md` §3.10 is about implementation comments.
+    root = ROOT / "Grass"
+    paths = sorted(root.rglob("*.lean"))
+    # A tool that finds no files must fail, not pass. `roots = [Path("Grass")]` was
+    # relative to the working directory and the miss was swallowed by an
+    # `is_dir()` guard, so running from anywhere but the repo root printed the
+    # success line having read nothing. The other three audits anchor on
+    # `__file__`; this one, which has no self-test either, did not.
+    if not paths:
+        print(f"docstring audit: no sources found under {root}", file=sys.stderr)
+        return 1
     findings: list[str] = []
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for path in sorted(root.rglob("*.lean")):
-            findings.extend(check(path))
+    for path in paths:
+        findings.extend(check(path))
     if findings:
         print("docstring audit: claims that name nothing enforcing them\n")
         for finding in findings:

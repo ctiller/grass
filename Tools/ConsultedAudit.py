@@ -16,6 +16,14 @@ advertised the stronger reading and review corrected it:
 - It keys on the field name, not on the declaring structure. Two structures with a
   field of the same name are indistinguishable, so a projection of one satisfies
   the other. Lean would need to be elaborated to do better; a text scan cannot.
+
+  That also defeats the **allowlist**, which is not obvious and which review had to
+  point out. `AccessDescriptor.restartability` is listed below as a genuine gap with
+  no reader — and deleting the entry changes nothing, because
+  `OperationFacets.restartability` is projected elsewhere and satisfies the name.
+  So an allowlist entry can record a judgement the tool could never have needed, and
+  the gap it documents can be unreportable. Read an entry as a note to a human, not
+  as a suppression the tool relies on.
 - It cannot tell a projection from a suffix that merely looks like one.
 - Comments and string literals are stripped before scanning, so prose mentioning
   `.owner` no longer counts as a reader. That was a real false negative.
@@ -51,11 +59,22 @@ READERS_IN = DECLARED_IN + sorted((ROOT / "Tests").rglob("*.lean"))
 
 # Only `structure` declarations are scanned. `class` fields and inductive
 # constructor parameters are not, so an allowlist entry naming one of those records
-# a judgement about something this tool could never report -- three such entries
-# existed and are removed. Extending the scan to classes would be a real change,
-# not a regex tweak, because a class field is consumed through instance resolution
-# that a text scan cannot see.
-DECL = re.compile(r"^\s{2,}(?:private\s+)?([a-z][A-Za-z0-9_']*)\s*:\s*[^=]")
+# a judgement about something this tool could never report. Three such entries were
+# removed; that removal was **partial**, and review said so: eight entries below
+# (`combine`, `alternative`, `zero`, `le`, `laws`, `limit`, `exhaustion`,
+# `lifecycle`) name fields that appear on the `HasResourceAxis`/`HasResourceLimit`
+# *classes* as well as on the `ResourceLimit` structure, so each is doing work for
+# the structure and none for the class. `Grass/Resource/Algebra.lean`'s
+# `ResourceModel.algebra` is a live instance of this tool's own defect class that it
+# cannot see for the same reason.
+#
+# Extending the scan to classes would be a real change, not a regex tweak, because a
+# class field is consumed through instance resolution that a text scan cannot see.
+# `[A-Za-z]`, not `[a-z]`: a capital-initial field is a field. `ResourceLimit.Value`
+# and `HasResourceAxis.Value` were outside the scan entirely, and both are live
+# structure fields with no projection anywhere -- exactly what this tool reports,
+# missed by a character class. Review found it.
+DECL = re.compile(r"^\s{2,}(?:private\s+)?([A-Za-z][A-Za-z0-9_']*)\s*:\s*[^=]")
 STRUCTURE = re.compile(r"^\s*(?:private\s+)?structure\s+([A-Za-z_][A-Za-z0-9_.']*)")
 
 # Fields deliberately carried without a reader. Every entry states why, and the
@@ -113,6 +132,11 @@ ALLOWED = {
     "substep",
     # The resource layer is built ahead of its consumers, which arrive at M7 and
     # M9. Nothing outside Grass/Resource projects any of it yet.
+    # A field whose *type* is the point: every other field of `ResourceLimit` is
+    # typed by it, so it is consumed by the structure's own signature and cannot be
+    # "projected" in the sense this tool looks for. Found by widening the field
+    # pattern to accept a capital initial, which is what made it visible at all.
+    "Value",
     "combine",
     "alternative",
     "zero",

@@ -461,7 +461,7 @@ def reused : MemoryState := MemoryState.empty.allocate buffer reusedRecord
 
 /-- The buffer lent while live, then reallocated under it. -/
 def lentThenReused : MemoryState :=
-  { lentHead with allocations := lentHead.allocations.insert buffer reusedRecord }
+  lentHead.allocate buffer reusedRecord
 
 /-- **A stale pointer into re-used storage holds no authority.**
 `docs/MEMORY_MODEL.md` §2: address reuse never revives old pointers. Before `Live`

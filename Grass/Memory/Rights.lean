@@ -119,9 +119,14 @@ structure Permission where
   constructor and a theorem about it, and nothing built the constructor, so the
   theorem held of an unreachable case and was deleted — and the reasoning offered
   for the deletion, that the rule had nothing to constrain, was wrong. `Permits` is
-  the sole rights gate on the chain `AuthorityGrant.Authorizes` →
-  `MemoryState.GrantedOfKind` → `AuthorityProvider.loan.refuses` → `Grass/Op/Step.lean`,
-  and it had no clause about atomicity, so a grant a profile issued authorized an
+  the sole rights gate on the chain `MemoryState.AuthorizedBy` →
+  `MemoryState.Granted` → `AuthorityProvider.loan.refuses` → `Grass/Op/Step.lean`,
+  and it had no clause about atomicity, (The chain was named as the deleted `Authorizes` function and
+`MemoryState.GrantedOfKind` until review checked: the first was deleted, and the
+second has no caller under `Grass/` — the provider calls `Granted`, which is
+kind-blind on purpose, because `Grass/Op/Step.lean` composes providers conjunctively
+and a loan provider refusing an access another authority covers would make that
+authority unusable.) so a grant a profile issued authorized an
   atomic and a non-atomic access indistinguishably.
 
   A `Bool` and not an `OrderingDemand`. §3's rule is that atomic authority does not
@@ -169,6 +174,54 @@ def Permits (permission : Permission) (intent : AccessIntent) : Prop :=
 instance (permission : Permission) (intent : AccessIntent) :
     Decidable (permission.Permits intent) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
+
+/--
+`page.Grants required` holds when a page carrying `page` supplies every capability
+`required` demands.
+
+`AccessDescriptor.requiredPermission` is "the page or section permission the access
+requires", and nothing compared it to the page. Its only consumer was
+`WellFormedIn.permissionSufficient`, which checks it against the descriptor's own
+`intent` — so a load could declare it needs read, write and execute on a read-only
+page and be admitted, because `denialOf` checked the *intent* and never the
+declaration. A field whose only reader is the descriptor that wrote it is a
+declaration nothing enforces, which is the shape this layer deleted
+`AccessIntent.isDevice` and `AllocationRecord.initialized` for. Review found it one
+step short.
+
+Capability by capability, like `Permits`, so a capability added later produces a
+type error here rather than defaulting to granted. `atomicOnly` is not compared: it
+narrows what a *grant* conveys and a page has no such bit, so a page never demands
+it and never supplies it. `permits_of_grants_of_permits` therefore takes the page's
+`atomicOnly = false` as a hypothesis rather than assuming it — a page that set the
+bit would be outside what this relation describes, and saying so is cheaper than a
+clause pretending to handle it.
+-/
+def Grants (page required : Permission) : Prop :=
+  (required.read = true → page.read = true) ∧
+  (required.write = true → page.write = true) ∧
+  (required.execute = true → page.execute = true)
+
+instance (page required : Permission) : Decidable (page.Grants required) :=
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+
+/-- **A read-only page does not grant a read/write demand.** -/
+@[simp] theorem readOnly_not_grants_readWrite : ¬ readOnly.Grants readWrite := by
+  simp [Grants, readOnly, readWrite]
+
+/-- It grants a read-only demand, so the theorem above is a restriction rather than
+a page that grants nothing. -/
+@[simp] theorem readOnly_grants_readOnly : readOnly.Grants readOnly := by
+  simp [Grants, readOnly]
+
+/-- **A page granting the demand, and a demand permitting the intent, gives a page
+permitting the intent.** The chain `denialOf` relies on, stated so the two clauses
+are visibly one rule rather than two overlapping ones. -/
+theorem permits_of_grants_of_permits {page required : Permission} {intent : AccessIntent}
+    (hatomic : page.atomicOnly = false) (hg : page.Grants required)
+    (hp : required.Permits intent) : page.Permits intent :=
+  ⟨fun h => hg.1 (hp.1 h), fun h => hg.2.1 (hp.2.1 h), fun h => hg.2.2 (hp.2.2.1 h),
+   fun h => by rw [hatomic] at h; exact absurd h (by simp)⟩
 
 @[simp] theorem none_not_permits_read : ¬ none.Permits .read := by
   simp [Permits, none, AccessIntent.read]
