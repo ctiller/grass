@@ -1,4 +1,3 @@
-import Std.Tactic.BVDecide
 import Grass.Std.Logical.Byte
 import Grass.ISA.X86.Register
 
@@ -39,9 +38,13 @@ Each layout proves two theorems, and they say different things:
   unconditionally. REX is different — only sixteen bytes are prefixes — and it
   says so through a partial reader and a hypothesis.
 
-`docs/DECISIONS.md` 23 permits universally quantified `bv_decide`, which decides
-all 256 cases rather than sampling them. Its proofs were audited with
-`#print axioms` and use only `propext`, `Classical.choice` and `Quot.sound`.
+Both are settled by `decide` over the whole 256-byte domain — every case, not a
+sample. That is affordable here precisely because the fields are small, and it
+is preferred over `bv_decide` even though `docs/DECISIONS.md` 23 permits the
+latter: `bv_decide` admits its SAT certificate as a generated axiom when its
+normalizer does not close the goal alone, which `docs/DECISIONS.md` 31 rejects.
+`Grass/ISA/X86/Register.lean` records that finding in full. Audited, the proofs
+here depend on `propext` and `Quot.sound` only.
 
 ## Scope
 
@@ -62,8 +65,23 @@ open Grass.Core Grass.Cite Grass.Std.Logical
 namespace Gpr
 
 /-- The three bits of a register number that fit in a ModR/M, SIB or opcode
-register field. -/
-def encodingBits (r : Gpr) : BitVec 3 := BitVec.ofNat 3 r.index.val
+register field.
+
+Written out as a table rather than derived from `index`, for two reasons. It is
+the encoding table, and an encoding module should show one. And it reduces:
+`BitVec.ofNat 3 (Gpr.index r).val` requires unfolding a `Fin` coercion before
+anything can `decide` whether a field equals an escape value, which is the
+question every addressing rule asks. `encodingBits_eq_index` keeps the table
+honest against `index`. -/
+def encodingBits : Gpr → BitVec 3
+  | .rax => 0 | .rcx => 1 | .rdx => 2 | .rbx => 3
+  | .rsp => 4 | .rbp => 5 | .rsi => 6 | .rdi => 7
+  | .r8 => 0 | .r9 => 1 | .r10 => 2 | .r11 => 3
+  | .r12 => 4 | .r13 => 5 | .r14 => 6 | .r15 => 7
+
+/-- The table agrees with the architectural register number. -/
+theorem encodingBits_eq_index (r : Gpr) :
+    r.encodingBits = BitVec.ofNat 3 r.index.val := by cases r <;> rfl
 
 /-- The fourth bit of a register number, carried by a REX extension bit.
 
@@ -152,16 +170,11 @@ def ofByte? (v : Byte) : Option Rex :=
 
 /-- Every encoded prefix is recognised as one. -/
 @[simp] theorem isRexByte_toByte (p : Rex) : isRexByte p.toByte = true := by
-  cases p with | mk w r x b =>
-  simp only [isRexByte, toByte, beq_iff_eq]
-  bv_decide
+  cases p with | mk w r x b => revert w r x b; decide
 
 /-- The reader recovers exactly the prefix the writer wrote. -/
 @[simp] theorem ofByte?_toByte (p : Rex) : ofByte? p.toByte = some p := by
-  cases p with | mk w r x b =>
-  rw [ofByte?, if_pos (isRexByte_toByte ⟨w, r, x, b⟩)]
-  simp only [toByte, Option.some.injEq, Rex.mk.injEq]
-  refine ⟨?_, ?_, ?_, ?_⟩ <;> bv_decide
+  cases p with | mk w r x b => revert w r x b; decide
 
 /-- Distinct prefixes have distinct bytes. -/
 theorem toByte_injective {p q : Rex} (h : p.toByte = q.toByte) : p = q := by
@@ -174,15 +187,7 @@ With `ofByte?_toByte` this says the sixteen prefixes and the sixteen bytes
 `0x40`-`0x4F` correspond exactly, with nothing left over on either side. -/
 theorem toByte_ofByte? {v : Byte} {p : Rex} (h : ofByte? v = some p) :
     p.toByte = v := by
-  unfold ofByte? at h
-  split at h
-  · rename_i hrex
-    injection h with h
-    subst h
-    simp only [isRexByte, beq_iff_eq] at hrex
-    simp only [toByte]
-    bv_decide
-  · exact absurd h (by simp)
+  revert h; revert p; revert v; decide
 
 /-- A byte outside `0x40`-`0x4F` is not a REX prefix. -/
 theorem ofByte?_eq_none {v : Byte} (h : isRexByte v = false) :
@@ -241,14 +246,11 @@ def ofByte (v : Byte) : ModRm :=
 
 /-- The reader recovers exactly the fields the writer wrote. -/
 @[simp] theorem ofByte_toByte (m : ModRm) : ofByte m.toByte = m := by
-  cases m with | mk mod reg rm =>
-  simp only [ofByte, toByte, ModRm.mk.injEq]
-  refine ⟨?_, ?_, ?_⟩ <;> bv_decide
+  cases m with | mk mod reg rm => revert mod reg rm; decide
 
 /-- Every byte re-encodes to itself, so the reader loses nothing. -/
 @[simp] theorem toByte_ofByte (v : Byte) : (ofByte v).toByte = v := by
-  simp only [ofByte, toByte]
-  bv_decide
+  revert v; decide
 
 /-- Distinct field triples have distinct bytes. -/
 theorem toByte_injective {m n : ModRm} (h : m.toByte = n.toByte) : m = n := by
@@ -305,14 +307,11 @@ def ofByte (v : Byte) : Sib :=
 
 /-- The reader recovers exactly the fields the writer wrote. -/
 @[simp] theorem ofByte_toByte (s : Sib) : ofByte s.toByte = s := by
-  cases s with | mk scale index base =>
-  simp only [ofByte, toByte, Sib.mk.injEq]
-  refine ⟨?_, ?_, ?_⟩ <;> bv_decide
+  cases s with | mk scale index base => revert scale index base; decide
 
 /-- Every byte re-encodes to itself. -/
 @[simp] theorem toByte_ofByte (v : Byte) : (ofByte v).toByte = v := by
-  simp only [ofByte, toByte]
-  bv_decide
+  revert v; decide
 
 /-- Distinct field triples have distinct bytes. -/
 theorem toByte_injective {s t : Sib} (h : s.toByte = t.toByte) : s = t := by

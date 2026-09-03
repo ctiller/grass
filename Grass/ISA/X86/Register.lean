@@ -1,4 +1,3 @@
-import Std.Tactic.BVDecide
 import Grass.ISA.X86.Sources
 
 /-!
@@ -26,13 +25,47 @@ proved safe when it is not. Neither error is visible in the assembly text, so
 the rule is stated here once, dual-cited, with theorems that pin all three
 cases.
 
-## `bv_decide`
+## Why the rule is stated as a concatenation
 
-`docs/DECISIONS.md` 23 prohibits `native_decide` and permits universally
-quantified `bv_decide`. The width theorems below use it. Its proofs were
-audited with `#print axioms` and depend only on `propext`, `Classical.choice`
-and `Quot.sound` — the reviewed Lean logical-foundation constants
-`docs/DECISIONS.md` 31 allows — with no `sorryAx` and no reduction axiom.
+`writeBack` builds the new register value by joining the preserved high bits to
+the written low bits:
+
+```lean
+| .w16, old, v => BitVec.extractLsb' 16 48 old ++ v
+```
+
+That is what "preserves the upper bits" means, said once, in the type. The
+alternative — masking with `old &&& 0xFFFFFFFFFFFF0000` and OR-ing — encodes the
+same rule in a hexadecimal literal that has to be counted to be checked, and
+whose four variants differ only in how many `F`s they have.
+
+## Why not `bv_decide`
+
+`docs/DECISIONS.md` 23 permits universally quantified `bv_decide`, and these
+theorems were first proved with it. An axiom audit under
+`docs/DECISIONS.md` 31 rejected two of them:
+
+```text
+'writeBack.w16_preserves_high' depends on axioms:
+  [propext, Classical.choice, Quot.sound,
+   writeBack.w16_preserves_high._native.bv_decide.ax_1_5]
+```
+
+That generated constant is `verifyBVExpr expr cert = true` asserted as an axiom:
+`bv_decide` ran its LRAT checker natively and admitted the result rather than
+having the kernel reduce it. `docs/DECISIONS.md` 23 prohibits `native_decide`
+and says "execution is not a proof", and 31 requires "rejection of every
+dependency-defined axiom" — so the tactic's own permission does not survive its
+own audit in this case.
+
+The concatenation form removes the need. Every theorem below is closed by
+`simp`, `rw` or `decide`, and the module no longer imports the tactic at all.
+Audited, they depend on `propext` and `Quot.sound` only.
+
+This is not a claim that `bv_decide` is unusable here. It is kernel-checked when
+its normalizer closes the goal without calling the solver, and it was on four of
+the six theorems. The point is that which path it takes is not visible in the
+source, so the audit — not the tactic's documentation — decides.
 -/
 
 namespace Grass.ISA.X86
@@ -167,36 +200,38 @@ state it; see `Rules.registerWriteExtension`.
 -/
 def writeBack : (w : Width) → BitVec 64 → BitVec w.bits → BitVec 64
   | .w64, _, v => v
-  | .w32, _, v => BitVec.setWidth 64 v
-  | .w16, old, v => (old &&& 0xFFFFFFFFFFFF0000) ||| BitVec.setWidth 64 v
-  | .w8, old, v => (old &&& 0xFFFFFFFFFFFFFF00) ||| BitVec.setWidth 64 v
+  | .w32, _, v => 0#32 ++ v
+  | .w16, old, v => BitVec.extractLsb' 16 48 old ++ v
+  | .w8, old, v => BitVec.extractLsb' 8 56 old ++ v
 
 namespace writeBack
 
 /-! The `show` in each proof below spells out the reduced definition rather than
-letting `simp` find it. That is deliberate: `bv_decide` needs the goal in the
-bitvector fragment, and writing the masked form out makes the thing being proved
-visible next to the mask it depends on. -/
+letting `simp` find it, so the fact being proved sits next to the concatenation
+it depends on. -/
 
 theorem read_back_w8 (old : BitVec 64) (v : BitVec 8) :
     BitVec.setWidth 8 (writeBack .w8 old v) = v := by
-  show BitVec.setWidth 8 ((old &&& 0xFFFFFFFFFFFFFF00) ||| BitVec.setWidth 64 v) = v
-  bv_decide
+  show BitVec.setWidth 8 (BitVec.extractLsb' 8 56 old ++ v) = v
+  rw [BitVec.setWidth_append, dif_pos (by omega)]
+  simp
 
 theorem read_back_w16 (old : BitVec 64) (v : BitVec 16) :
     BitVec.setWidth 16 (writeBack .w16 old v) = v := by
-  show BitVec.setWidth 16 ((old &&& 0xFFFFFFFFFFFF0000) ||| BitVec.setWidth 64 v) = v
-  bv_decide
+  show BitVec.setWidth 16 (BitVec.extractLsb' 16 48 old ++ v) = v
+  rw [BitVec.setWidth_append, dif_pos (by omega)]
+  simp
 
 theorem read_back_w32 (old : BitVec 64) (v : BitVec 32) :
     BitVec.setWidth 32 (writeBack .w32 old v) = v := by
-  show BitVec.setWidth 32 (BitVec.setWidth 64 v) = v
-  bv_decide
+  show BitVec.setWidth 32 (0#32 ++ v) = v
+  rw [BitVec.setWidth_append, dif_pos (by omega)]
+  simp
 
 theorem read_back_w64 (old : BitVec 64) (v : BitVec 64) :
     BitVec.setWidth 64 (writeBack .w64 old v) = v := by
   show BitVec.setWidth 64 v = v
-  bv_decide
+  simp
 
 /-- A write of any width lands: reading back `w` bits returns what was written.
 
@@ -226,24 +261,25 @@ theorem w32_independent (a b : BitVec 64) (v : BitVec 32) :
 /-- A 32-bit write clears bits 63:32. -/
 theorem w32_clears_high (old : BitVec 64) (v : BitVec 32) :
     BitVec.extractLsb' 32 32 (writeBack .w32 old v) = 0 := by
-  show BitVec.extractLsb' 32 32 (BitVec.setWidth 64 v) = 0
-  bv_decide
+  show BitVec.extractLsb' 32 32 (0#32 ++ v) = 0
+  rw [BitVec.extractLsb'_append_eq_of_le (by omega)]
+  simp
 
 /-- A 16-bit write preserves bits 63:16. -/
 theorem w16_preserves_high (old : BitVec 64) (v : BitVec 16) :
     BitVec.extractLsb' 16 48 (writeBack .w16 old v) =
       BitVec.extractLsb' 16 48 old := by
-  show BitVec.extractLsb' 16 48
-    ((old &&& 0xFFFFFFFFFFFF0000) ||| BitVec.setWidth 64 v) = _
-  bv_decide
+  show BitVec.extractLsb' 16 48 (BitVec.extractLsb' 16 48 old ++ v) = _
+  rw [BitVec.extractLsb'_append_eq_of_le (by omega)]
+  simp
 
 /-- An 8-bit write preserves bits 63:8. -/
 theorem w8_preserves_high (old : BitVec 64) (v : BitVec 8) :
     BitVec.extractLsb' 8 56 (writeBack .w8 old v) =
       BitVec.extractLsb' 8 56 old := by
-  show BitVec.extractLsb' 8 56
-    ((old &&& 0xFFFFFFFFFFFFFF00) ||| BitVec.setWidth 64 v) = _
-  bv_decide
+  show BitVec.extractLsb' 8 56 (BitVec.extractLsb' 8 56 old ++ v) = _
+  rw [BitVec.extractLsb'_append_eq_of_le (by omega)]
+  simp
 
 /--
 A 16-bit write is genuinely not independent of the previous contents.
