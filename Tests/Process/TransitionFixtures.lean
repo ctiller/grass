@@ -491,10 +491,11 @@ theorem the_send : serverPlan.SendsEscrow quiet sent () payload occurrenceOf whe
   contractual :=
     ⟨rfl, rfl, by rw [quiet_holds_nothing]; exact List.not_mem_nil,
       by rw [sent_wire]; exact ⟨List.mem_cons_self, rfl⟩⟩
-  wasFresh := by
-    show escrowed ∉ (quiet.inFlight () wire).created
-    rw [quiet_holds_nothing]
-    exact List.not_mem_nil
+  identityIsFresh := by
+    intro other held
+    have inEmpty : other ∈ (quiet.inFlight () wire).created := held
+    rw [quiet_holds_nothing] at inEmpty
+    exact absurd inEmpty List.not_mem_nil
   nowEscrowed := by
     show (sent.inFlight () wire).Outstanding escrowed
     rw [sent_wire]

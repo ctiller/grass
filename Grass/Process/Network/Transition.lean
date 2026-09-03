@@ -508,8 +508,31 @@ structure SendsEscrow (before after : plan.LogicalProcessNetwork)
     (occurrence : plan.topology.ChannelOccurrence edge message) : Prop where
   /-- The edge's own send relation admits this step. -/
   contractual : (plan.steps edge).Send message occurrence before after
-  /-- It was not escrowed before. -/
-  wasFresh : ⟨message, occurrence⟩ ∉ (before.inFlight edge occurrence.1).created
+  /--
+  **Its occurrence identity was not escrowed before.**
+
+  Freshness of the *identity*, not of the pair. `EdgeOccurrence` is a message
+  together with a `MessageOccurrence`, and `docs/PROCESS.md` §3 says the
+  occurrence "carries only its nominal identity" — so two sends of *different*
+  messages under one nominal are two distinct pairs, and asking freshness of the
+  pair let both into one ledger.
+
+  `EscrowLedger.rankOrdersCreated`'s docstring claimed that could not happen —
+  "an occurrence escrowed twice would be a fabricated identity, and here it would
+  need a rank strictly below itself" — and it was false, because `rank` is
+  unconstrained between two entries that are not equal. A reviewer built it with
+  two ordinary sends and then dropped one, producing a nominal that is
+  simultaneously `.dropped` and `Outstanding` three steps from the initial
+  network. `EscrowLedger.atMostOneRecordedEnding` and `outstanding_xor_settled`
+  are keyed on the pair; §3's affine resolve token is keyed on the identity.
+
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.115, which records what is still owed:
+  this closes the *cause* at the one constructor that escrows a new occurrence
+  from outside, and there is no network-level clause saying identities are
+  distinct.
+  -/
+  identityIsFresh : ∀ other, other ∈ (before.inFlight edge occurrence.1).created →
+    other.2.2.id ≠ occurrence.2.id
   /-- It is escrowed now. -/
   nowEscrowed : (after.inFlight edge occurrence.1).Outstanding ⟨message, occurrence⟩
   /-- The ledger only moved forward. -/
@@ -536,6 +559,14 @@ structure SendsEscrow (before after : plan.LogicalProcessNetwork)
 namespace SendsEscrow
 
 variable {plan}
+
+/-- And so the occurrence itself was not escrowed before, which is what
+`identityIsFresh` replaced and what `LedgerExtends` reasoning wants. -/
+theorem wasFresh {before after edge message occurrence}
+    (sent : plan.SendsEscrow before after edge message occurrence) :
+    (⟨message, occurrence⟩ : EdgeOccurrence plan.topology plan.message edge)
+      ∉ (before.inFlight edge occurrence.1).created :=
+  fun held => sent.identityIsFresh _ held rfl
 
 /-- A send establishes the edge contract's escrow assertion. -/
 theorem establishes_escrow {before after edge message occurrence}

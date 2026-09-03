@@ -92,12 +92,14 @@ theorem the_second_send : serverPlan.SendsEscrow sent sent2 () payload strandedO
          have inList : stranded ∈ [escrowed] := held
          exact stranded_ne_escrowed (by simpa using inList),
       by rw [sent2_wire]; exact ⟨List.mem_cons_of_mem _ List.mem_cons_self, rfl⟩⟩
-  wasFresh := by
-    show stranded ∉ (sent.inFlight () wire).created
-    rw [sent_wire]
-    intro held
-    have inList : stranded ∈ [escrowed] := held
-    exact stranded_ne_escrowed (by simpa using inList)
+  identityIsFresh := by
+    intro other held
+    have onWire : other ∈ (sent.inFlight () wire).created := held
+    rw [sent_wire] at onWire
+    have inList : other ∈ [escrowed] := onWire
+    rw [List.mem_singleton.mp inList]
+    intro sameId
+    exact absurd sameId (by decide)
   nowEscrowed := by
     show (sent2.inFlight () wire).Outstanding stranded
     rw [sent2_wire]

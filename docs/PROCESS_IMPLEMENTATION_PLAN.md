@@ -4579,11 +4579,19 @@ steps from `quiet`.
 §10.100's shape — one occurrence, two independent resolutions — relocated from
 "two sessions" to "one ledger, two aliases".
 
-Closing it is a design change and needs a ruling on where. `EscrowLedger` is
-generic over `Occurrence` and cannot project an identity, so the law belongs
-either at `ProcessPlan` (a `WellFormed` clause over `EdgeOccurrence`) or in
-`SendsEscrow.wasFresh`, which currently asks freshness of the pair and should ask
-it of the identity. The second is smaller and closer to the cause.
+**The cause is closed.** `SendsEscrow.wasFresh` asked freshness of the *pair* and
+now asks it of the identity, as `identityIsFresh` — `send` is the one constructor
+that escrows a new occurrence from outside, so the two-ordinary-sends attack is
+refused at its source. `wasFresh` remains as a theorem.
+
+**The invariant is still owed**, and that is the ruling this entry is really
+about. There is no `WellFormed` clause saying the identities in a ledger are
+distinct, so nothing states the property in a form a consumer can use — which is
+§10.109's lesson exactly: "no reachable network is bad" and "no well-formed
+network is bad" are different theorems. The remaining routes into a ledger are a
+coalesce carrier and a reroute arrival, and neither is required to carry a fresh
+identity. `EscrowLedger` is generic over `Occurrence` and cannot project one, so
+the clause belongs at `ProcessPlan`, beside `OccurrencesOnTheirSession`.
 
 ### 10.116 Two more things declared and never spent
 
