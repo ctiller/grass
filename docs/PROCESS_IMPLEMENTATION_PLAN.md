@@ -2336,7 +2336,7 @@ resolve it `.rerouted`, and point it at a session it never touched — breaking
 ### What the review rounds actually converged on
 
 Six rounds of local adversarial review, each attacking the previous round's
-repairs. Code findings per round: 4, 5, 5, 3, 4, 3. That is not a sequence
+repairs. Code findings per round: 4, 5, 5, 3, 4, 3, 5. That is not a sequence
 heading to zero, and the shape of it matters more than the count.
 
 Rounds 2 and 3 found defects **in the repairs** — §10.90, §10.92, §10.93,
@@ -2344,6 +2344,10 @@ Rounds 2 and 3 found defects **in the repairs** — §10.90, §10.92, §10.93,
 held, and rounds 5 and 6 found things *elsewhere*: pre-existing holes the earlier
 rounds had not reached (§10.109, §10.111) and structural observations about the
 corpus (§10.102, §10.103, §10.110).
+
+Round 7 then found that round 6's repair was wrong in *both* directions at once
+(§10.113) and turned up a six-round-old hole beside it (§10.114), so "the repairs
+stopped being defective" was itself premature.
 
 So the loop converged on the thing it was pointed at, and kept finding other
 things. **A round with no findings is not evidence that none remain**; what these
@@ -4281,6 +4285,11 @@ requires atomicity here is a ruling. If it does, `coalesce` needs its own
 structure taking a list of sources, and §10.95's revert is right for the wrong
 reason.
 
+§10.111's first repair briefly made the decomposition *unconstructible*, and
+§10.113 is that being caught and undone — so this entry has been false once and is
+true again. Worth noting because it is the only place on this branch where a
+repair broke a recorded fact and the ledger was the thing that noticed.
+
 ### 10.105 Three more fields that had become theorems, and twenty false claims
 
 A claims-auditing reviewer swept every docstring on the branch. Thirty-one
@@ -4483,6 +4492,121 @@ The rule both of these are: **a check this document states is not run by stating
 it.** Nothing in the build applies §10.89, or the delete-the-field check, or the
 witness-not-only-a-refutation rule. They are review prompts, and they only fire
 when a round is asked to run them.
+
+### 10.113 The coalesce field was wrong in both directions at once
+
+§10.111's repair, `carrierIsFresh`, was too strong *and* insufficient, and a
+reviewer compiled both halves in one round.
+
+**Too strong.** After the first coalesce into a carrier,
+`EscrowLedger.coalesceCarrierLater` puts that carrier in `created` and
+`LedgerExtends.createdPrefix` keeps it there for the rest of the execution — so
+under a freshness requirement **no second source can ever name it**. `docs/PROCESS.md`
+§3's "Coalescing consumes every source token" is plural; `ChannelResolution.coalesced`
+says "along with its fellow sources"; §10.95's justification for narrowing
+`resolvesNothingElse` was that each source is consumed by its own step; and
+§10.104 records a reviewer confirming that decomposition is constructible. The
+repair falsified all four, and made `.coalesced` a one-to-one relabelling.
+
+**Insufficient.** Nothing related the carrier's *message* to the source's. A
+coalesce could merge `⟨7⟩` into a fresh carrier holding `⟨99⟩` — every field
+discharged, wrapped in a `NetworkStep`, all seven `WellFormed` clauses passing.
+The source's payload is gone and a message nobody sent is in flight, which is
+§10.91's defect reopened through the one exception `createsOnlyTheCarrier` grants.
+So the commit message's "freshness is what makes the merge a merge … so the
+sources' payload is somewhere" was wrong: the *carrier* was somewhere, the payload
+was not.
+
+**Closed** by `carrierIsOutstanding` and `carrierCarriesTheMessage`.
+Outstanding-afterwards permits the second source (the carrier stays unresolved) and
+refuses the laundering (a delivered carrier's resolution is permanent). The message
+conjunct is what `Reroutes.arrives` has carried since §10.98, so the two
+constructors that pass a payload on now say the same thing about it.
+
+**What this one adds to the method.** Every previous repair that failed was too
+*weak* — it did not forbid enough. This one also forbade something §3 requires,
+and nothing in the corpus noticed, because *no multi-source coalesce existed to
+break*. §10.110's rule was "a new field needs a witness"; this sharpens it to **a
+new field needs a witness of each thing the specification says it must permit.**
+
+### 10.114 An endpoint death that names no endpoint
+
+`senderDeath` and `receiverDeath` are bare `ResolvesEscrow`s whose scope is one
+session's escrow, and they mentioned **no process at all**. A reviewer ran two of
+them from `quiet` and read the result back: one session's ledger recording that
+its sender died *and* that its receiver died, in a world where neither incarnation
+has ever existed, with the session still `.open` to further sends.
+
+So `senderDeath`, `receiverDeath` and `drop` were the same relation up to the tag
+written into the ledger — and that tag is exactly what `docs/DECISIONS.md`
+decision 129 exists to make readable off network state. The stored classification
+was fiction.
+
+Every *instance*-ending constructor had been made to earn its ending:
+`Joins.wasTerminated`, `childCancelled`'s `wasChild`,
+`EndsInstance.endingIsEarned`. The two escrow constructors that name a process
+death had not, and the reference is right there in the `ChannelId`, so this was a
+missing field and not a layering boundary.
+
+**Closed** by `endpointDeathIsEarned`, with `the_sender_death` as the witness
+§10.110 requires and `a_death_needs_a_dead_endpoint` as the refusal.
+
+**The check**: §10.90 asked "what happens to the *other* messages when a session
+closes?" and found the answer was nothing. The same question one constructor over
+— "what happens to the *process* when its death is recorded?" — had the same
+answer for six rounds. **When a constructor names a thing, ask what it says about
+that thing.**
+
+### 10.115 One occurrence identity, two entries in one ledger
+
+Open, and the largest thing this branch leaves behind.
+
+`EscrowLedger.rankOrdersCreated`'s docstring claims duplicate-freedom: "an
+occurrence escrowed twice would be a fabricated identity, and here it would need a
+rank strictly below itself". That is false. `created` holds `EdgeOccurrence` —
+a *pair* of a message and a `MessageOccurrence` — and §3 says the occurrence
+"carries only its nominal identity". Two entries with the same nominal under
+*different messages* are distinct pairs, and `rank` is unconstrained between them.
+
+A reviewer built it with **two ordinary sends**, no coalesce involved, since
+`liveSteps.Send` is generic over the message: one nominal escrowed twice at a
+`wellFormed_preserved`-certified world, then a plain `drop` of one of them, giving
+a nominal that is simultaneously `.dropped` and `Outstanding` — three ordinary
+steps from `quiet`.
+
+`atMostOneRecordedEnding` and `outstanding_xor_settled` are keyed on the *pair*;
+§3's affine `ResolveToken occurrence.id` is keyed on the *identity*. This is
+§10.100's shape — one occurrence, two independent resolutions — relocated from
+"two sessions" to "one ledger, two aliases".
+
+Closing it is a design change and needs a ruling on where. `EscrowLedger` is
+generic over `Occurrence` and cannot project an identity, so the law belongs
+either at `ProcessPlan` (a `WellFormed` clause over `EdgeOccurrence`) or in
+`SendsEscrow.wasFresh`, which currently asks freshness of the pair and should ask
+it of the identity. The second is smaller and closer to the cause.
+
+### 10.116 Two more things declared and never spent
+
+`ChannelResolution.IsTerminal` has **no consumer**. It appears in its own
+definition, three lemmas about itself, one docstring line and one fixture. No
+field of any transition, no clause of `WellFormed`, no preservation theorem
+mentions it. The story it is supposed to support — `.rerouted` and `.coalesced`
+"pass the payload on", and the onward reference is accounted for — is prose. For
+`.rerouted` the accounting exists under another name (`ReroutesLand`); for
+`.coalesced` §10.113 has just supplied it, and `IsTerminal` is still not what
+states it.
+
+And **no clause of `WellFormed` mentions `sessions` or `ChannelId` at all**.
+Nothing requires a session's endpoint references or its `channelEpoch` to be in
+`usedNominals` — `NominalsAllocated` covers instances only — which is why
+§10.114's world could name endpoints that never existed. It is adjacent to
+§10.18, §10.36 and the already-recorded "nothing opens a session", and §10.114's
+compiled world is what it costs.
+
+Both are the shape §10.87, §10.91, §10.97 and §10.103 share: **a thing the corpus
+declares and no law spends.** That is now four closed instances and three open
+ones, which is enough of a pattern to state as a standing check rather than
+rediscovering it each round.
 
 ### 10.89 A spawn can satisfy every field it has and not be a step
 
