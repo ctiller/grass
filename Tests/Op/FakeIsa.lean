@@ -66,6 +66,10 @@ def thread₀ : ContextId := contexts₀.fresh.1
 makes its access to shared bytes a conflict rather than ordinary program order. -/
 def engine₀ : ContextId := contexts₀.fresh.2.fresh.1
 
+/-- A third context, which neither holds nor lends anything, so a fixture can ask
+what a stranger may do. -/
+def engine₁ : ContextId := contexts₀.fresh.2.fresh.2.fresh.1
+
 private def obligations₀ : FreshSupply ObligationTag := .initial
 /-- The obligation an allocation creates. -/
 def releaseObligationId : ObligationId := obligations₀.fresh.1
@@ -189,6 +193,9 @@ inductive Alpha where
   /-- An operation whose declared ordering is not the ordering its access
   requests. -/
   | orderingFacetDisagrees
+  /-- An operation whose provenance claims a root extent the allocation does not
+  have. -/
+  | lyingRootExtent
   /-- A load reading uninitialized bytes under a rule this profile never
   registered. -/
   | unregisteredInitRule
@@ -411,6 +418,12 @@ instance : HasOperationFacets Alpha where
                 [ .access (acc bufferProv ⟨0, 4⟩ 0x1000 .write .readWrite false true)
                   , .access (acc bufferProv ⟨4, 4⟩ 0x1004 .write .readWrite false true) ]
               onFault := .transactional ⟨"fake.splitStore"⟩ }
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .lyingRootExtent =>
+        { memoryEffects := some (.single (acc
+            { bufferProv with rootExtent := ⟨0, 4096⟩ } ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true))
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .orderingFacetDisagrees =>
@@ -700,21 +713,21 @@ def stateWithAuthority : MachineState :=
   { state₀ with
     memory :=
       (((state₀.memory.issue? bufferLoan
-        { kind := .loan, holder := thread₀, provenance := borrowedProv
+        { kind := .loan, holder := thread₀, lender := engine₀, provenance := borrowedProv
           range := ⟨0, 64⟩, rights := .readWrite }).getD state₀.memory).issue? liveFrame
-        { kind := .frame, holder := thread₀, provenance := frameProv
+        { kind := .frame, holder := thread₀, lender := engine₀, provenance := frameProv
           range := ⟨0, 64⟩, rights := .readWrite }).getD state₀.memory }
 
 /-- Both issues succeeded, so `getD` never fell back and the theorems below are
 about a state that holds both grants. -/
 theorem the_authority_issues_succeed :
     (state₀.memory.issue? bufferLoan
-      { kind := .loan, holder := thread₀, provenance := borrowedProv
+      { kind := .loan, holder := thread₀, lender := engine₀, provenance := borrowedProv
         range := ⟨0, 64⟩, rights := .readWrite }).isSome ∧
     (((state₀.memory.issue? bufferLoan
-        { kind := .loan, holder := thread₀, provenance := borrowedProv
+        { kind := .loan, holder := thread₀, lender := engine₀, provenance := borrowedProv
           range := ⟨0, 64⟩, rights := .readWrite }).getD state₀.memory).issue? liveFrame
-        { kind := .frame, holder := thread₀, provenance := frameProv
+        { kind := .frame, holder := thread₀, lender := engine₀, provenance := frameProv
           range := ⟨0, 64⟩, rights := .readWrite }).isSome := by
   exact ⟨by decide, by decide⟩
 
@@ -969,7 +982,7 @@ rather than one authority wearing two names.
 theorem a_loan_is_not_a_frame :
     ¬ (({ state₀.memory with
           grants := state₀.memory.grants.insert liveFrame
-            { kind := .loan, holder := thread₀, provenance := frameProv
+            { kind := .loan, holder := thread₀, lender := engine₀, provenance := frameProv
               range := ⟨0, 64⟩, rights := .readWrite } } : MemoryState).GrantedOfKind
         .frame thread₀ frameProv ⟨0, 8⟩ .write) := by decide
 
@@ -1044,7 +1057,7 @@ authorize the program thread. -/
 theorem authority_is_not_ambient :
     ¬ (({ state₀.memory with
           grants := state₀.memory.grants.insert bufferLoan
-            { kind := .loan, holder := engine₀, provenance := borrowedProv
+            { kind := .loan, holder := engine₀, lender := thread₀, provenance := borrowedProv
               range := ⟨0, 64⟩, rights := .readWrite } } : MemoryState).GrantedOfKind
         .loan thread₀ borrowedProv ⟨0, 8⟩ .write) := by decide
 
@@ -1269,6 +1282,34 @@ theorem a_compute_substep_with_an_unrecognized_fault_is_refused :
     Grass.Op.step policy state₀ (SomeOperation.of Alpha.computeWithPhantomFault) thread₀
       .thread ⟨⟨"alpha"⟩⟩ =
       .rejected (.computeFaultNotRecognized ⟨⟨"fake.neverDeclaredFault"⟩⟩) := rfl
+
+/-! ## A provenance that lies about its root's extent
+
+`AccessDescriptor.WellFormedIn.rangeInProvenance` bounds an access by
+`Provenance.rootExtent`, and nothing compared that to the allocation table — so a
+descriptor supplied the bound it was checked against, and a write far outside a
+64-byte allocation was well formed. `denialOf`'s own extent check caught the write
+incidentally as `outOfBounds`, which reports the wrong rule: the access was not
+outside the bounds it declared, it declared the wrong bounds. -/
+
+/-- **A lying root extent is a violation of its own.** The access here is inside
+the allocation, so nothing else would have caught it. -/
+theorem a_lying_root_extent_is_recorded :
+    ∀ s, (stepAlpha state₀ .lyingRootExtent).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 ∧
+      s.violations.records?.any (fun r => r.class_ = .provenanceExtentMismatch) := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- The same access with the honest extent commits, so the violation above is the
+`rootExtent` clause and not the range. -/
+theorem the_honest_extent_commits :
+    ∀ s, (stepAlpha state₀ .store).state? = some s →
+      s.events.length = 1 ∧ s.violations.IsEmpty := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
 
 /-! ## A justification the profile never registered is rejected
 

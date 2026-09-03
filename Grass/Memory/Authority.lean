@@ -73,15 +73,35 @@ end GrantKind
 /--
 One grant of authority.
 
-The field list is §3's: identity, holder, range, rights. Lifetime and conditions
-are not modelled — a grant is live while it is in the table, and M3 and M4 own
-the lifetime discipline that makes removal correspond to a real return.
+The field list is §3's — identity, holder, range, rights — plus the lender, which
+§6's return protocol needs and §3 does not name. Lifetime and conditions are not
+modelled: a grant is live while it is in the table, and M3 and M4 own the lifetime
+discipline that makes removal correspond to a real return.
 -/
 structure AuthorityGrant where
   /-- Which kind of authority this is. -/
   kind : GrantKind
   /-- The context that holds it. -/
   holder : ContextId
+  /-- The context that issued it, and may reclaim it.
+
+  `docs/MEMORY_MODEL.md` §6: an ABI call profile "lends the exact buffer/slot
+  authorities to the environment, retains only disjoint residual frame authority,
+  and **consumes the same loan identities to reconstruct local authority on a
+  conforming return**". The subject of "consumes" is the caller, and the holder is
+  the callee, so a return checked against the holder alone leaves §6's return to a
+  party that is not §6's — `MemoryState.returnLoan?_isSome_of_lender` is the
+  permission, and `Tests/Memory/Loans.lean`'s `the_lender_may_return_the_loan` is it
+  exercised. For an external API agent, which never executes a
+  Grass step, nothing in the model could perform the return at all, and
+  `Spikes/1_Hello_World` lends a frame slot to `WriteFile` and reads it back after
+  the call.
+
+  Not defaulted, and not derivable. A grant does not know who issued it unless it
+  is told, and there is no "nobody" context to default to. `MemoryState.returnLoan?`
+  accepts a return by the holder or by this context, and by nobody else. §5's arena
+  reset and §5.1's reallocation precondition have the same shape. -/
+  lender : ContextId
   /-- The storage it is over. -/
   provenance : Provenance
   /-- The bytes it covers, relative to that provenance's root allocation. -/

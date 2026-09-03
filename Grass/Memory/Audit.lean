@@ -101,6 +101,18 @@ the bytes a store declared is a machine description that does not match the
 access, and `docs/FOUNDATION.md` law 8 says refuse rather than approximate. -/
 def machineAnswerIncomplete : AuditViolationClass := ⟨⟨"machineAnswerIncomplete"⟩⟩
 
+/-- A provenance whose recorded root extent is not the extent of the allocation it
+names.
+
+`Provenance.rootExtent` is what `AccessDescriptor.WellFormedIn.rangeInProvenance`
+bounds an access against, and nothing compared it to the allocation table — so a
+descriptor supplied the bound it was checked against, and a 512-byte write into a
+64-byte allocation was well formed. `denialOf`'s extent check caught the write
+incidentally, as `outOfBounds`, which is the wrong report: the access was not out
+of the bounds it declared, it declared the wrong bounds. Review found the gap and
+found `rootExtent`'s docstring claiming M2 checked it. -/
+def provenanceExtentMismatch : AuditViolationClass := ⟨⟨"provenanceExtentMismatch"⟩⟩
+
 /--
 The classes the generic transition relation can emit.
 
@@ -111,7 +123,7 @@ field nothing reads. `StepPolicy` carries the proof.
 def emittedByTransition : List AuditViolationClass :=
   [outOfBounds, deadProvenance, permissionDenied, uninitializedRead, misaligned,
    authorityUnavailable, obligationNotAuthorized, wrongAddressSpace,
-   machineAnswerIncomplete]
+   machineAnswerIncomplete, provenanceExtentMismatch]
 
 end AuditViolationClass
 

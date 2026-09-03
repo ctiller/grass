@@ -63,7 +63,7 @@ def owned : MemoryState :=
 /-- Read/write conveyed for **atomic** access only. §3's atomic shared access,
 expressed as a right rather than as an authority state. -/
 def atomicGrant : AuthorityGrant :=
-  { kind := .loan, holder := holder, provenance := counterProv
+  { kind := .loan, holder := holder, lender := stranger, provenance := counterProv
     range := ⟨0, 8⟩, rights := .atomicReadWrite }
 
 /-- The same grant without the restriction, so every theorem below can be compared

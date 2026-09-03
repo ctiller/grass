@@ -837,18 +837,29 @@ is the one that was lent — a return cannot consume a different loan that happe
 describe the same bytes, rights, and holder. That is why the map is keyed by
 identity and not by shape.
 
-**The holder clause is not §3's and is here anyway.** §3 says which loan a return
-consumes and not who may return it, and the unchecked version let any context
-return any loan and then write the thawed bytes — an authority check defeated by
-calling the function that removes it. Refusing is law 8's direction and the safe
-one; a profile that genuinely wants third-party revocation owes a rule for it,
-which nothing here invents.
+**Who may return is not §3's question and is answered here anyway.** §3 says which
+loan a return consumes and not who may return it, and the unchecked version let any
+context return any loan and then write the thawed bytes — an authority check
+defeated by calling the function that removes it.
+
+**The holder is not the only party who may.** §6's ABI call profile "consumes the
+same loan identities to reconstruct local authority on a conforming return", and
+the party doing the consuming is the caller, not the callee. A holder-only check
+made that impossible, and for a loan to an external API agent — which never executes
+a Grass step — made the return impossible for anyone, so the slot stayed lent
+forever and the read after the call was refused. `Spikes/1_Hello_World` is that
+shape. So the lender may return too, and `AuthorityGrant.lender` is what records
+which context that is.
+
+Nobody else. A profile wanting third-party revocation owes a rule for it, which
+nothing here invents.
 -/
 def returnLoan? (state : MemoryState) (context : ContextId) (id : GrantId) :
     Option MemoryState :=
   match state.grants.lookup id with
   | some grant =>
-      if grant.holder = context then some { state with grants := state.grants.erase id }
+      if grant.holder = context ∨ grant.lender = context then
+        some { state with grants := state.grants.erase id }
       else Option.none
   | Option.none => Option.none
 
@@ -880,13 +891,25 @@ theorem lookup_returnLoan?_ne {state returned : MemoryState} {context : ContextI
     · exact absurd h (by simp)
   · exact absurd h (by simp)
 
-/-- **A context may not return a loan it does not hold.** -/
-theorem returnLoan?_eq_none_of_other_holder {state : MemoryState} {context : ContextId}
+/-- **A context that neither holds nor lent it may not return it.** -/
+theorem returnLoan?_eq_none_of_stranger {state : MemoryState} {context : ContextId}
     {id : GrantId} {grant : AuthorityGrant} (hlook : state.grants.lookup id = some grant)
-    (h : grant.holder ≠ context) : state.returnLoan? context id = Option.none := by
+    (hholder : grant.holder ≠ context) (hlender : grant.lender ≠ context) :
+    state.returnLoan? context id = Option.none := by
   unfold returnLoan?
   rw [hlook]
-  exact if_neg h
+  exact if_neg (fun h => h.elim hholder hlender)
+
+/-- **And the lender may return what it lent.** §6's conforming return, performed by
+the party §6 says performs it. -/
+theorem returnLoan?_isSome_of_lender {state : MemoryState} {context : ContextId}
+    {id : GrantId} {grant : AuthorityGrant} (hlook : state.grants.lookup id = some grant)
+    (h : grant.lender = context) : (state.returnLoan? context id).isSome := by
+  unfold returnLoan?
+  rw [hlook]
+  simp only []
+  rw [if_pos (Or.inr h)]
+  rfl
 
 /-- And a return naming no live loan is refused rather than treated as a no-op. -/
 theorem returnLoan?_eq_none_of_absent {state : MemoryState} {context : ContextId}

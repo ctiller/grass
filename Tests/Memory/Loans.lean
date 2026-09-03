@@ -30,6 +30,9 @@ def owner : ContextId := contexts.fresh.1
 /-- A second context, which borrows. -/
 def borrower : ContextId := contexts.fresh.2.fresh.1
 
+/-- A third context, which neither holds nor lent anything. -/
+def stranger : ContextId := contexts.fresh.2.fresh.2.fresh.1
+
 /-- Two loan identities. Distinct because a supply never reissues. -/
 def firstLoan : GrantId := grants.fresh.1
 
@@ -55,7 +58,7 @@ def currentProv : Provenance := { bufferProv with epoch := laterEpoch }
 /-- A live call frame's authority over the same bytes, held by the borrower. Not a
 loan, and §7.3 does not care. -/
 def frameGrant : AuthorityGrant :=
-  { kind := .frame, holder := borrower, provenance := bufferProv
+  { kind := .frame, holder := borrower, lender := owner, provenance := bufferProv
     range := ⟨0, 8⟩, rights := .readWrite }
 
 /-- A state owning the buffer and lending nothing. -/
@@ -66,7 +69,7 @@ def unlent : MemoryState :=
 
 /-- A write loan of the first eight bytes to the borrower. -/
 def loanOfHead : AuthorityGrant :=
-  { kind := .loan, holder := borrower, provenance := bufferProv
+  { kind := .loan, holder := borrower, lender := owner, provenance := bufferProv
     range := ⟨0, 8⟩, rights := .readWrite }
 
 /-- A *read* loan of the same bytes. Two of these may coexist, which is
@@ -143,12 +146,22 @@ theorem returning_restores_exclusivity :
     returned.Exclusive bufferProv ⟨0, 8⟩ := by
   exact ⟨by decide, by decide⟩
 
-/-- **A context may not return a loan it does not hold.** §3 says which loan a
-return consumes and not who may return it, and the unchecked version let any
+/-- **A context that neither holds nor lent it may not return it.** §3 says which
+loan a return consumes and not who may return it, and the unchecked version let any
 context return any loan and then write the thawed bytes — an authority check
 defeated by calling the function that removes it. -/
 theorem a_stranger_may_not_return_the_loan :
-    lentHead.returnLoan? owner firstLoan = Option.none := by decide
+    lentHead.returnLoan? stranger firstLoan = Option.none := by decide
+
+/-- **But the lender may.** `docs/MEMORY_MODEL.md` §6's ABI call profile "consumes
+the same loan identities to reconstruct local authority on a conforming return", and
+the party consuming is the caller — the lender — not the callee. A holder-only check
+made §6's return impossible, and for a loan to an external API agent, which never
+executes a Grass step, made it impossible for anyone. -/
+theorem the_lender_may_return_the_loan :
+    (lentHead.returnLoan? owner firstLoan).isSome ∧
+    loanOfHead.lender = owner ∧ loanOfHead.holder = borrower := by
+  exact ⟨by decide, by decide, by decide⟩
 
 /-- And a return naming no live loan is refused rather than treated as a no-op. -/
 theorem returning_an_unheld_identity_is_refused :

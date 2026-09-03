@@ -93,6 +93,7 @@ def denialOf (state : MemoryState) (d : AccessDescriptor) : Option AuditViolatio
       if record.live ≠ true then some .deadProvenance
       else if record.epoch ≠ d.provenance.epoch then some .deadProvenance
       else if record.space ≠ d.provenance.space then some .wrongAddressSpace
+      else if record.extent ≠ d.provenance.rootExtent then some .provenanceExtentMismatch
       else if ¬ record.extent.Contains d.range then some .outOfBounds
       else if ¬ record.permission.Permits d.intent then some .permissionDenied
       else if d.initialization = .allBytesInitialized ∧

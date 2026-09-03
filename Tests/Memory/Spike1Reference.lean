@@ -413,10 +413,10 @@ theorem call_import_read_survives_stack_fault :
       some [access importProvenance ⟨2048, 8⟩ 0x3000 .read .readOnly 8 true false] := rfl
 
 /-- The `call` claims no atomicity across its two accesses, so its profile owes
-no justification for one. -/
-theorem call_claims_no_atomicity : ¬ callImportWriteFile.ClaimsAtomicity := by
-  rintro ⟨h, _⟩
-  exact h
+no justification for one. It declares `priorEffectsVisible`, which is what makes it
+claimless — not its length, which `ClaimsAtomicity` used to consult and no longer
+does. -/
+theorem call_claims_no_atomicity : ¬ callImportWriteFile.ClaimsAtomicity := fun h => h
 
 /-- Reaching the containment tail discharges nothing. -/
 theorem ud2_discharges_nothing : ud2Containment.substeps = [] := rfl

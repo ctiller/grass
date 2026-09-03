@@ -45,13 +45,13 @@ theorem an_unlent_store_commits :
 def lentToEngine : MachineState :=
   { state₀ with
     memory := (state₀.memory.issue? bufferLoan
-      { kind := .loan, holder := engine₀, provenance := bufferProv
+      { kind := .loan, holder := engine₀, lender := thread₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readWrite }).getD state₀.memory }
 
 /-- The lend succeeded, so `getD` did not fall back to the unlent state. -/
 theorem the_engine_lend_succeeds :
     (state₀.memory.issue? bufferLoan
-      { kind := .loan, holder := engine₀, provenance := bufferProv
+      { kind := .loan, holder := engine₀, lender := thread₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readWrite }).isSome := by decide
 
 /-- The lend really did freeze those bytes, so the refusal below is about lending
@@ -117,11 +117,17 @@ theorem returning_restores_access :
   cases hs
   exact ⟨by decide, by decide⟩
 
-/-- **The thread cannot return the engine's loan and then write.** The return is an
+/-- **The thread lent it, so the thread may return it** — and that is §6's
+conforming return, where the caller consumes the identity it lent. The fixture above
+returns as the holder; this one as the lender. -/
+theorem the_lender_may_return_it :
+    (lentToEngine.memory.returnLoan? thread₀ bufferLoan).isSome := by decide
+
+/-- **And a context that neither holds nor lent it may not.** The return is an
 authority operation and an unchecked one let any context perform it, so the freeze
 was defeated by calling the function that removes it. -/
-theorem the_thread_cannot_return_the_engines_loan :
-    lentToEngine.memory.returnLoan? thread₀ bufferLoan = Option.none := by decide
+theorem a_stranger_cannot_return_the_loan :
+    lentToEngine.memory.returnLoan? engine₁ bufferLoan = Option.none := by decide
 
 /--
 **A read of lent bytes is refused too**, not only a write.
@@ -142,7 +148,7 @@ theorem a_read_of_lent_bytes_is_also_refused :
 def tailLentToEngine : MachineState :=
   { state₀ with
     memory := (state₀.memory.issue? bufferLoan
-      { kind := .loan, holder := engine₀, provenance := bufferProv
+      { kind := .loan, holder := engine₀, lender := thread₀, provenance := bufferProv
         range := ⟨8, 8⟩, rights := .readWrite }).getD state₀.memory }
 
 /--
@@ -174,17 +180,17 @@ handed. -/
 /-- The thread holds a write loan over the buffer's head. -/
 def lentToThread : MemoryState :=
   (state₀.memory.issue? bufferLoan
-    { kind := .loan, holder := thread₀, provenance := bufferProv
+    { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
       range := ⟨0, 8⟩, rights := .readWrite }).getD state₀.memory
 
 /-- **The conflicting pair cannot be issued.** §7.3's rule at the door, which is
 where a caller doing the right thing finds out. -/
 theorem the_conflicting_pair_cannot_be_issued :
     (state₀.memory.issue? bufferLoan
-      { kind := .loan, holder := thread₀, provenance := bufferProv
+      { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readWrite }).isSome ∧
     lentToThread.issue? secondBufferLoan
-      { kind := .loan, holder := engine₀, provenance := bufferProv
+      { kind := .loan, holder := engine₀, lender := thread₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readWrite } = Option.none := by
   exact ⟨by decide, by decide⟩
 
@@ -200,7 +206,7 @@ no violation. `grant` is gone; `issue?` refuses a reissued identity, which is §
 -/
 theorem the_identity_cannot_be_stolen :
     lentToThread.issue? bufferLoan
-      { kind := .loan, holder := engine₀, provenance := bufferProv
+      { kind := .loan, holder := engine₀, lender := thread₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readWrite } = Option.none ∧
     (lentToThread.grants.lookup bufferLoan).isSome := by
   exact ⟨by decide, by decide⟩
@@ -210,7 +216,7 @@ thread, `[0, 8)` of `borrowedAlloc` to the engine. Different allocations, so
 `issue?` is right to accept them. -/
 def separatelyLent : MemoryState :=
   (lentToThread.issue? secondBufferLoan
-      { kind := .loan, holder := engine₀, provenance := borrowedProv
+      { kind := .loan, holder := engine₀, lender := thread₀, provenance := borrowedProv
         range := ⟨0, 8⟩, rights := .readWrite }).getD lentToThread
 
 /-- Then the profile declares the mapping. `docs/MEMORY_MODEL.md` §7.5 makes that a
@@ -224,7 +230,7 @@ theorem the_conflict_appears_after_issue :
     (separatelyLent.grants.lookup bufferLoan).isSome ∧
     (separatelyLent.grants.lookup secondBufferLoan).isSome ∧
     ((state₀.memory.alias bufferAlloc borrowedAlloc).issue? bufferLoan
-        { kind := .loan, holder := thread₀, provenance := bufferProv
+        { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
           range := ⟨0, 8⟩, rights := .readWrite }).isSome := by
   exact ⟨by decide, by decide, by decide⟩
 
@@ -244,7 +250,7 @@ theorem an_alias_declared_after_issue_is_refused :
 def readLentToEngine : MachineState :=
   { state₀ with
     memory := (state₀.memory.issue? bufferLoan
-      { kind := .loan, holder := engine₀, provenance := bufferProv
+      { kind := .loan, holder := engine₀, lender := thread₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readOnly }).getD state₀.memory }
 
 /--
@@ -261,7 +267,7 @@ co-borrowers and never for anyone else.
 -/
 theorem a_read_against_shared_immutable_access_commits :
     (state₀.memory.issue? bufferLoan
-      { kind := .loan, holder := engine₀, provenance := bufferProv
+      { kind := .loan, holder := engine₀, lender := thread₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readOnly }).isSome ∧
     readLentToEngine.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ =
       AuthorityState.sharedImmutable ∧
@@ -286,7 +292,7 @@ loan to yourself" idiom for "the owner may still read". -/
 def selfReadLoan : MachineState :=
   { state₀ with
     memory := (state₀.memory.issue? bufferLoan
-      { kind := .loan, holder := thread₀, provenance := bufferProv
+      { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readOnly }).getD state₀.memory }
 
 /--
@@ -300,7 +306,7 @@ file used to give.
 -/
 theorem a_self_loan_bounds_its_holder :
     (state₀.memory.issue? bufferLoan
-      { kind := .loan, holder := thread₀, provenance := bufferProv
+      { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readOnly }).isSome ∧
     selfReadLoan.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ = AuthorityState.exclusive ∧
     ∀ s, (step selfReadLoan .store).state? = some s →

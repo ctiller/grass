@@ -356,22 +356,38 @@ instance (seq : SubstepSequence) (table : AddressSpaceTable) :
   inferInstanceAs (Decidable (∀ _ ∈ _, _))
 
 /--
-`seq.ClaimsAtomicity` holds when the sequence asserts more than one step happens
-indivisibly.
+`seq.ClaimsAtomicity` holds when the sequence's fault-visibility rule asserts
+something a profile must prove about the machine.
 
-A profile closing its §10 package must discharge every such claim. A sequence of
-length at most one claims nothing, because there is nothing for atomicity to
-relate.
+A profile closing its §10 package must discharge every such claim.
+
+**There was a `1 < substeps.length` conjunct and it was wrong.** A single-access
+sequence declaring `transactional` says its commit is all-or-nothing —
+`faultingEffectVisible` is false — which for a store crossing a page boundary is a
+substantive claim, and false by default on x86-64. Calling it claimless meant a §10
+package enumerating outstanding claims would not see it, while `Grass/Op/Step.lean`
+requires a registered justification for it regardless of length. Two mechanisms
+disagreeing about when a claim is made is the shape this layer keeps finding, and
+review found this one.
 -/
 def ClaimsAtomicity (seq : SubstepSequence) : Prop :=
-  seq.onFault.RequiresJustification ∧ 1 < seq.substeps.length
+  seq.onFault.RequiresJustification
 
 instance (seq : SubstepSequence) : Decidable seq.ClaimsAtomicity :=
-  inferInstanceAs (Decidable (_ ∧ _))
+  inferInstanceAs (Decidable seq.onFault.RequiresJustification)
 
+/-- A single access under the default visibility rule claims nothing, because
+`priorEffectsVisible` claims nothing. The length is not what makes it claimless. -/
 @[simp] theorem not_claimsAtomicity_single (d : AccessDescriptor) :
     ¬ (single d).ClaimsAtomicity := by
-  simp [ClaimsAtomicity, single]
+  simp [ClaimsAtomicity, single, FaultVisibility.RequiresJustification]
+
+/-- **A single access declared transactional does claim something.** The case the
+length conjunct used to call claimless. -/
+theorem claimsAtomicity_of_transactional_single (d : AccessDescriptor)
+    (justification : Name) :
+    ({ substeps := [.access d], onFault := .transactional justification } :
+      SubstepSequence).ClaimsAtomicity := trivial
 
 end SubstepSequence
 

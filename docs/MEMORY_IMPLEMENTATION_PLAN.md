@@ -728,14 +728,15 @@ one outright defect that had already merged — see §3.11's denial row.
   `grantsOver` compare `ByteRange`s across aliased allocations with `Contains` and
   `Meets`, which assumes aliased allocations agree offset for offset. A view mapped
   at a non-zero file offset — the ordinary `MapViewOfFile` case — does not.
-- **`AccessDescriptor.WellFormedIn.rangeInProvenance` is self-certifying.** It bounds
-  the access by `provenance.rootExtent`, and nothing compares `rootExtent` to the
-  allocation record's `extent`; `grep` finds no reader of the field outside
-  `Grass/Memory/Provenance.lean`. A descriptor supplies the bound it is checked
-  against. `denialOf` catches the oversized access with `outOfBounds`, so this is a
-  recorded violation rather than a rejection, and no authority escalates — but the
-  clause is not what stops it, and `Provenance.rootExtent`'s docstring claimed M2
-  checked it. Provenance `path` extents are unchecked in the same way.
+- ~~**`AccessDescriptor.WellFormedIn.rangeInProvenance` is self-certifying.**~~ Half
+  closed. `denialOf` compares `provenance.rootExtent` to the allocation record's
+  `extent` and records `provenanceExtentMismatch` when they differ, so a descriptor
+  no longer supplies the bound it is checked against. It remains a recorded violation
+  rather than a rejection, which is `denialOf`'s shape for every access-time failure.
+
+  Provenance `path` step extents are still unchecked: nothing requires a `field` step
+  at `⟨2048, 64⟩` to correspond to anything, and `Provenance.Nested` relates the
+  steps to each other and to `rootExtent` only.
 - **`ByteRange.Contains` and `ByteRange.Meets` disagree about one past the end.**
   `Contains` places `empty r.stop` inside `r`, which is what a bounds check wants;
   `Meets` places it outside, which is what an authority check wants. Both cite §5.1.
@@ -765,11 +766,12 @@ one outright defect that had already merged — see §3.11's denial row.
   `visibleEffects?` consult it, find a bare name, and fall back to
   `priorEffectsVisible`, which `Grass/Memory/Substep.lean`'s module comment calls the
   worst available behavior.
-- **`SubstepSequence.ClaimsAtomicity` requires more than one substep.** So a
-  single-access sequence declaring `transactional` "claims nothing", while
-  `step`'s registration check is unconditional on length. For a page-crossing store
-  `transactional` says the commit is all-or-nothing, which is a substantive claim at
-  length one. Either the conjunct goes or the reason it is there needs writing down.
+- ~~**`SubstepSequence.ClaimsAtomicity` requires more than one substep.**~~ Closed;
+  the conjunct is gone. A single-access sequence declaring `transactional` says its
+  commit is all-or-nothing, which for a page-crossing store is a substantive claim
+  and false by default on x86-64, and calling it claimless meant a §10 package
+  enumerating outstanding claims would not have seen it while `step` required a
+  registered justification for it regardless.
 - **`WritableByAnother` is the only rights-sensitive predicate in `authorityOf`.** A
   grant permitting `execute` but not `write` reads as read-only, and `AuthorityState`
   has no state for execute-only sharing. Nothing exploits it today.
@@ -1202,15 +1204,17 @@ refuses everything.
   operation §6 needs is a *split* that consumes and narrows the lender's grant so
   the residual conflicts with nothing. Recorded under M3 as owed; it is a
   prerequisite for `CallFrame.lean`.
-- **`MemoryState.returnLoan?` requires the holder, and §6 needs the lender.** §6
-  says the caller "consumes the same loan identities to reconstruct local authority
-  on a conforming return", and the returning party is the caller, not the callee.
-  For an external API agent — `Spikes/1_Hello_World`'s `WriteFile`, which never
-  executes a Grass step — nothing in the model can perform the return at all, so the
-  slot stays lent and the read after the call is refused. `AuthorityGrant` records no
-  lender; adding one and accepting a return by holder *or* lender is the smaller
-  change, and the alternative is every ABI profile bypassing the checked door. §5's
-  arena reset and §5.1's reallocation precondition have the same shape.
+- ~~**`MemoryState.returnLoan?` requires the holder, and §6 needs the lender.**~~
+  Closed. `AuthorityGrant` records a `lender`, and `returnLoan?` accepts a return by
+  the holder or by it. §6's caller can now consume the identity it lent, which is
+  what §6 says happens, and a loan to an external API agent — `Spikes/1_Hello_World`'s
+  `WriteFile`, which never executes a Grass step — can be returned by the thread that
+  made it rather than staying lent forever.
+
+  Still owed on the same protocol: §5's arena reset requires returning *all* live use
+  loans, and there is no bulk operation; and §5.1's reallocation precondition is not
+  checked anywhere, so a profile can reallocate under a live loan — which is the
+  state `a_stale_loan_still_freezes` describes.
 - **Transferred authority.** §3's fifth entry is "transferred or unavailable";
   `unavailable` derives from liveness and epoch and nothing represents a transfer.
   §7.4 makes transfer real ("acquire operations may transfer protected memory
