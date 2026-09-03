@@ -15,17 +15,26 @@ target.
 
 ## The rule, in two halves
 
-**A context holding a loan is bounded by it.** If this context holds a loan over
-the bytes an access names, the access is refused unless one of its loans covers it
-with sufficient rights. That is a *holder* test over the loan map.
+**Where anything is held, authority is held rather than assumed.** If any grant is
+outstanding over the bytes an access names, the access is refused unless the
+accessor holds one covering it with sufficient rights. Where nothing is held, an
+access proceeds: unlent bytes are not this rule's business, and a provider that
+refused there would make every allocation unreachable until someone lent it to
+itself.
 
-The test was `MemoryState.Exclusive` — the loan map empty of *everyone's* loans —
-and that is a different question with two wrong answers. A lender that had lent
-read-only could not read its own bytes, though `authorityOf` calls that state
-`sharedImmutable` and §7.3's conflict requires a writer; §3's sentence about the map
-being empty is about *exclusive authority*, not about read access. And a context
-following this file's own "declare a loan to yourself" idiom with a read-only
-self-loan could not write those bytes even after every other loan was returned.
+The test has been wrong twice and the record is worth keeping. It was
+`MemoryState.Exclusive`, the *loan* map empty of everyone's loans, which refused a
+lender the read of its own read-only-lent bytes and refused a read-only self-loan's
+holder its own write forever. It was then `LoanHeldBySelf`, which asked only what
+*this* context held — so with atomic-only grants outstanding and `authorityOf`
+reporting `atomicShared`, a context holding nothing at all could join the protocol
+atomically, and review demonstrated two contexts atomically writing the same live
+bytes with one holding no grant.
+
+The cost of the current test is an over-refusal: the lender's read of its own
+shared-immutably-lent bytes is refused along with a stranger's, because
+`AllocationRecord` records no owner and the two are indistinguishable here.
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records it.
 
 **And no access may proceed against authority another context holds.** The state
 `MemoryState.authorityOf` reports must permit the intent: `frozen` and
@@ -46,11 +55,15 @@ is not a rule about the map, so this one reads the map it finds.
 They are not the same test and neither implies the other, which is the correction
 this file has needed twice.
 
-- `authorityOf` calls a context holding the *only* loan over the bytes `exclusive`,
+- `authorityOf` calls a context holding the *only* grant over the bytes `exclusive`,
   because no *other* context holds one. The holder half is what refuses that context
-  an access its own loan's rights do not cover.
-- The state half refuses a context that holds no loan at all, which the holder half
-  says nothing about.
+  an access its own grant's rights do not cover.
+- The state half refuses on what *others* hold, and says nothing about the accessor's
+  own authority. It does not refuse a context that holds nothing: over an empty grant
+  map every context is `exclusive`, which is the unlent-bytes case above. An earlier
+  version of this comment claimed it refused there, and review showed two contexts
+  holding nothing both writing the same bytes unrefused — which is correct behaviour
+  and a false description of it.
 
 So refusal is strictly wider than `frozen`. `loan_refuses_the_frozen` and
 `loan_refuses_a_write_when_shared` state the direction that matters — a state that
@@ -63,10 +76,14 @@ agreed exactly and cited a theorem that mentioned neither `authorityOf` nor
 ## What it deliberately does not decide
 
 Who the owner is. `AllocationRecord` records no owner, and this rule does not need
-one: it says authority is held rather than assumed, which is a statement about the
-grant map and the accessor. A profile that wants "the owner may still read"
-declares a loan to itself — and `authorityOf` agrees, because a grant you hold does
-not freeze you.
+one to *refuse*: it says authority is held rather than assumed, which is a statement
+about the grant map and the accessor. A profile that wants "the owner may still
+read" declares a loan to itself — and `authorityOf` agrees, because a grant you hold
+does not freeze you.
+
+It does need one to be *precise*, which is the over-refusal above. Without an owner
+the lender of a read-only loan and a context that never held anything are the same
+context to this rule, so the lender's read is refused with the stranger's.
 -/
 
 namespace Grass.Op
@@ -87,8 +104,8 @@ def AuthorityProvider.loan : AuthorityProvider where
   refuses state d :=
     !decide ((state.memory.authorityOf d.context d.provenance d.range).PermitsIntent
         d.intent) ||
-      (decide (state.memory.LoanHeldBySelf d.context d.provenance d.range) &&
-        !decide (state.memory.GrantedOfKind .loan d.context d.provenance d.range d.intent))
+      (decide (state.memory.AnyGrantOver d.provenance d.range) &&
+        !decide (state.memory.Granted d.context d.provenance d.range d.intent))
 
 /-- **An access the held authority does not permit is refused.** The half that was
 missing: whoever installed the conflicting grant, and however it came to conflict,
@@ -125,15 +142,16 @@ theorem loan_refuses_the_unavailable (state : MachineState) (d : AccessDescripto
   exact fun hc => hc
 
 /--
-**A loan holder is bounded by its own loan.**
+**Where authority is outstanding, an accessor without it is refused.**
 
-The holder half. A context that holds a loan over these bytes and no loan covering
-*this* access is refused, whatever the summary state says — so a read-only loan does
-not become a write loan by the bytes being otherwise quiet.
+The holder half. A context with no grant covering *this* access is refused whenever
+anything at all is held over the bytes, whatever the summary state says — so a
+read-only loan does not become a write loan by the bytes being otherwise quiet, and
+an atomic protocol is not joinable by a context that was never let in.
 -/
 theorem loan_refuses_the_unauthorized_holder (state : MachineState) (d : AccessDescriptor)
-    (hheld : state.memory.LoanHeldBySelf d.context d.provenance d.range)
-    (hno : ¬ state.memory.GrantedOfKind .loan d.context d.provenance d.range d.intent) :
+    (hheld : state.memory.AnyGrantOver d.provenance d.range)
+    (hno : ¬ state.memory.Granted d.context d.provenance d.range d.intent) :
     AuthorityProvider.loan.refuses state d = true := by
   simp [AuthorityProvider.loan, hheld, hno]
 
@@ -143,22 +161,22 @@ a preference. -/
 theorem loan_does_not_refuse (state : MachineState) (d : AccessDescriptor)
     (hpermits :
       (state.memory.authorityOf d.context d.provenance d.range).PermitsIntent d.intent)
-    (hholder : ¬ state.memory.LoanHeldBySelf d.context d.provenance d.range ∨
-      state.memory.GrantedOfKind .loan d.context d.provenance d.range d.intent) :
+    (hholder : ¬ state.memory.AnyGrantOver d.provenance d.range ∨
+      state.memory.Granted d.context d.provenance d.range d.intent) :
     AuthorityProvider.loan.refuses state d = false := by
   unfold AuthorityProvider.loan
   cases hholder with
   | inl h => simp [hpermits, h]
   | inr h => simp [hpermits, h]
 
-/-- **Refusal means this context holds a loan, or the held authority does not permit
-the intent.** The exact converse of the definition, stated so a caller reasoning
+/-- **Refusal means something is held over the bytes, or the held authority does not
+permit the intent.** The exact converse of the definition, stated so a caller reasoning
 backwards from a refusal has something to reason with — and so that nothing here
 claims refusal is the same set as `frozen`, which it is not. -/
 theorem loan_refuses_only_for_a_reason (state : MachineState) (d : AccessDescriptor)
     (h : AuthorityProvider.loan.refuses state d = true) :
     ¬ (state.memory.authorityOf d.context d.provenance d.range).PermitsIntent d.intent ∨
-      state.memory.LoanHeldBySelf d.context d.provenance d.range := by
+      state.memory.AnyGrantOver d.provenance d.range := by
   unfold AuthorityProvider.loan at h
   simp only [Bool.or_eq_true, Bool.and_eq_true, Bool.not_eq_true',
     decide_eq_false_iff_not, decide_eq_true_eq] at h

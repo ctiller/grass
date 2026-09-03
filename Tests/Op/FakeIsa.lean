@@ -981,11 +981,15 @@ provider, so the two providers are genuinely distinct authorities over one table
 rather than one authority wearing two names.
 -/
 theorem a_loan_is_not_a_frame :
-    ¬ (({ state₀.memory with
-          grants := state₀.memory.grants.insert liveFrame
-            { kind := .loan, holder := thread₀, lender := engine₀, provenance := frameProv
-              range := ⟨0, 64⟩, rights := .readWrite } } : MemoryState).GrantedOfKind
-        .frame thread₀ frameProv ⟨0, 8⟩ .write) := by decide
+    ((state₀.memory.issue? liveFrame
+        { kind := .loan, holder := thread₀, lender := engine₀, provenance := frameProv
+          range := ⟨0, 64⟩, rights := .readWrite }).getD state₀.memory).GrantedOfKind
+        .loan thread₀ frameProv ⟨0, 8⟩ .write ∧
+    ¬ ((state₀.memory.issue? liveFrame
+        { kind := .loan, holder := thread₀, lender := engine₀, provenance := frameProv
+          range := ⟨0, 64⟩, rights := .readWrite }).getD state₀.memory).GrantedOfKind
+        .frame thread₀ frameProv ⟨0, 8⟩ .write := by
+  exact ⟨by decide, by decide⟩
 
 /-! ## An authority cannot smuggle in a violation class the profile never declared
 
@@ -1056,11 +1060,15 @@ theorem the_rogue_is_rejected_for_its_class_alone :
 /-- Authority is not ambient: a grant held by the device engine does not
 authorize the program thread. -/
 theorem authority_is_not_ambient :
-    ¬ (({ state₀.memory with
-          grants := state₀.memory.grants.insert bufferLoan
-            { kind := .loan, holder := engine₀, lender := thread₀, provenance := borrowedProv
-              range := ⟨0, 64⟩, rights := .readWrite } } : MemoryState).GrantedOfKind
-        .loan thread₀ borrowedProv ⟨0, 8⟩ .write) := by decide
+    ((state₀.memory.issue? bufferLoan
+        { kind := .loan, holder := engine₀, lender := thread₀, provenance := borrowedProv
+          range := ⟨0, 64⟩, rights := .readWrite }).getD state₀.memory).GrantedOfKind
+        .loan engine₀ borrowedProv ⟨0, 8⟩ .write ∧
+    ¬ ((state₀.memory.issue? bufferLoan
+        { kind := .loan, holder := engine₀, lender := thread₀, provenance := borrowedProv
+          range := ⟨0, 64⟩, rights := .readWrite }).getD state₀.memory).GrantedOfKind
+        .loan thread₀ borrowedProv ⟨0, 8⟩ .write := by
+  exact ⟨by decide, by decide⟩
 
 /-! ## One effect cannot create the same identity twice
 

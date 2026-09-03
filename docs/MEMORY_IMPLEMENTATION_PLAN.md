@@ -1262,6 +1262,23 @@ refuses everything.
   which any `Admits` failure satisfies. `step` argues the opposite standard for
   facets — "a rejection says *which* one is missing" — and follows it for the three
   fault checks. Closing this means a `whyNotAdmitted?` on the vocabulary.
+- **The lender of a read-only loan is refused the read of its own bytes.** The loan
+  provider's holder half asks whether *anything* is held over the bytes, and if so
+  requires the accessor to hold covering authority. `AllocationRecord` records no
+  owner, so the lender and a context that never held anything are the same context to
+  that rule. Permitting the lender permits the stranger, and permitting the stranger
+  is how a context that was never let in joined an atomic protocol — review
+  demonstrated two contexts atomically writing the same live bytes with one holding
+  no grant. The over-refusal is the safe half of that trade and is recorded rather
+  than argued away; closing it properly needs an owner, which §5's arena model owes.
+- **A stale-epoch grant freezes the next epoch's storage and only its holder or
+  lender can clear it.** `grantsOver` has no epoch clause, deliberately — the clause
+  it had was worse — so a grant naming a defunct epoch still freezes the storage that
+  replaced it, while `AuthorizedBy` refuses to let it authorize anything and
+  `LoanConflicts` refuses a replacement grant. §5.1 requires live use loans to be
+  returned before reallocation, so this is a profile that skipped a step; but
+  `MemoryState.allocate` accepts the epoch bump silently rather than refusing it,
+  which is not law 8's direction.
 - **Nothing enforces that every `AuthorityState` constructor stays reachable.** Four
   fixtures exhibit one each. A fifth constructor, or a change that made one
   unreachable, would be caught by a reader and not by a gate.

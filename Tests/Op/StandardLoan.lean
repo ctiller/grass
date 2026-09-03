@@ -232,7 +232,7 @@ theorem the_identity_cannot_be_stolen :
     lentToThread.issue? bufferLoan
       { kind := .loan, holder := engine₀, lender := thread₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readWrite } = Option.none ∧
-    (lentToThread.grants.lookup bufferLoan).isSome := by
+    (lentToThread.grantAt? bufferLoan).isSome := by
   exact ⟨by decide, by decide⟩
 
 /-- Two loans that do **not** conflict when issued: `[0, 8)` of the buffer to the
@@ -251,8 +251,8 @@ def aliasedAfterIssue : MachineState :=
 /-- Both lends succeeded, and they became conflicting only once the alias was
 declared: issued in the other order, `issue?` refuses the second. -/
 theorem the_conflict_appears_after_issue :
-    (separatelyLent.grants.lookup bufferLoan).isSome ∧
-    (separatelyLent.grants.lookup secondBufferLoan).isSome ∧
+    (separatelyLent.grantAt? bufferLoan).isSome ∧
+    (separatelyLent.grantAt? secondBufferLoan).isSome ∧
     ((state₀.memory.alias bufferAlloc borrowedAlloc).issue? bufferLoan
         { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
           range := ⟨0, 8⟩, rights := .readWrite }).isSome := by
@@ -278,25 +278,31 @@ def readLentToEngine : MachineState :=
         range := ⟨0, 8⟩, rights := .readOnly }).getD state₀.memory }
 
 /--
-**A read against shared immutable access commits.**
+**A read against shared immutable access is refused to a context holding nothing**,
+and this fixture has now asserted both answers.
 
-This fixture asserted the opposite for one round, and pinned it as a feature: the
-holder test was `MemoryState.Exclusive`, the loan map being empty of *everyone's*
-loans, so a context holding no loan at all was refused a read of bytes another
-context held only a read loan over. §3's sentence about the map being empty is about
-*exclusive authority*; §7.3's conflict needs a writer; and `authorityOf` calls this
-state `sharedImmutable` and permits reads. The transition contradicted its own
-summary, and `AuthorityState.sharedImmutable` was reachable at the transition for
-co-borrowers and never for anyone else.
+The holder test was `Exclusive` — the loan map empty of everyone's loans — and this
+was refused. It became `LoanHeldBySelf`, asking only what *this* context held, and
+this was permitted, on the argument that §7.3's conflict needs a writer and
+`authorityOf` calls the state `sharedImmutable`. Review then showed what asking only
+about oneself costs: with atomic-only grants outstanding, `authorityOf` reports
+`atomicShared`, and a context holding *nothing* could join the protocol atomically —
+two contexts atomically writing the same live bytes, one of them never let in.
+
+So the test asks whether anything is held at all, and this read is refused again. It
+is an over-refusal and it is stated as one: the lender of the read loan is refused
+alongside a stranger, because `AllocationRecord` records no owner and the two are the
+same context to this rule. Permitting one permits both, and permitting both is the
+hole. §4.4.1 records it.
 -/
-theorem a_read_against_shared_immutable_access_commits :
+theorem a_read_against_shared_immutable_access_is_refused :
     (state₀.memory.issue? bufferLoan
       { kind := .loan, holder := engine₀, lender := thread₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readOnly }).isSome ∧
     readLentToEngine.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ =
       AuthorityState.sharedImmutable ∧
     ∀ s, (step readLentToEngine .load).state? = some s →
-      s.events.length = 1 ∧ s.violations.IsEmpty := by
+      s.events = [] ∧ s.violations.recordCount = 1 := by
   refine ⟨by decide, by decide, ?_⟩
   intro s hs
   cases hs
@@ -347,6 +353,47 @@ theorem a_self_loan_permits_the_read_it_grants :
       s.events.length = 1 ∧ s.violations.IsEmpty := by
   intro s hs
   cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- The engine holds authority over the head for **atomic access only**. -/
+def atomicLentToEngine : MachineState :=
+  { state₀ with
+    memory := (state₀.memory.issue? bufferLoan
+      { kind := .loan, holder := engine₀, lender := thread₀, provenance := bufferProv
+        range := ⟨0, 8⟩, rights := .atomicReadWrite }).getD state₀.memory }
+
+/--
+**A context holding nothing may not join an atomic protocol.**
+
+The hole `Permission.atomicOnly` opened and review demonstrated. Marking a grant
+atomic-only drops the state every *other* context sees from `frozen` to
+`atomicShared`, and `atomicShared` permits any atomic intent — so with a holder test
+that asked only what *this* context held, a context holding no grant at all was
+un-refused, and two contexts could atomically write the same live bytes with one of
+them never let in. §7.3's conflict is overlapping live bytes, distinct contexts, a
+writer, and this was all three.
+-/
+theorem a_stranger_may_not_join_the_atomic_protocol :
+    (state₀.memory.issue? bufferLoan
+      { kind := .loan, holder := engine₀, lender := thread₀, provenance := bufferProv
+        range := ⟨0, 8⟩, rights := .atomicReadWrite }).isSome ∧
+    atomicLentToEngine.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ =
+      AuthorityState.atomicShared ∧
+    ∀ s, (step atomicLentToEngine .atomicAdd).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 := by
+  refine ⟨by decide, by decide, ?_⟩
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- And the state really is the permissive one: `atomicShared` permits the intent,
+so the refusal above comes from the holder half and not from the summary. Without
+this the theorem above would be consistent with `atomicShared` permitting nothing. -/
+theorem the_atomic_state_permits_the_intent :
+    (atomicLentToEngine.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩).PermitsIntent
+      AccessIntent.atomicReadWrite ∧
+    ¬ atomicLentToEngine.memory.Granted thread₀ bufferProv ⟨0, 8⟩
+        AccessIntent.atomicReadWrite := by
   exact ⟨by decide, by decide⟩
 
 end Tests.Op.StandardLoan

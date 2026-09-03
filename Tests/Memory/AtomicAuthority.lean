@@ -214,7 +214,7 @@ are what would. This theorem records that the two grants above are indistinguish
 on ordering, which is the gap stated rather than argued away. -/
 theorem no_ordering_is_carried :
     atomicGrant.rights.atomicOnly = true ∧
-    lentAtomically.grants.lookup atomicLoan = some atomicGrant := by
+    lentAtomically.grantAt? atomicLoan = some atomicGrant := by
   exact ⟨by decide, by decide⟩
 
 end Tests.Memory.AtomicAuthority

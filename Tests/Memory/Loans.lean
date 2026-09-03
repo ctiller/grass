@@ -199,8 +199,8 @@ nothing at all included, in which case both sides are `none`. Review pointed tha
 out too. This names the grant, so it fails if `issue?` stores anything but what it
 was handed. -/
 theorem the_two_loans_differ_only_in_identity :
-    lentTwice.grants.lookup firstLoan = some readLoanOfHead ∧
-    lentTwice.grants.lookup secondLoan = some readLoanOfHead ∧
+    lentTwice.grantAt? firstLoan = some readLoanOfHead ∧
+    lentTwice.grantAt? secondLoan = some readLoanOfHead ∧
     firstLoan ≠ secondLoan := by
   exact ⟨by decide, by decide, by decide⟩
 
@@ -234,6 +234,33 @@ hold two grants over its own bytes — which is the idiom
 was therefore mutually exclusive with any other grant on those bytes. -/
 theorem a_second_loan_to_the_same_holder_is_accepted :
     (lentHead.issue? secondLoan loanOfHead).isSome := by decide
+
+/-- A provenance claiming a root extent the allocation does not have. -/
+def fatProv : Provenance := { bufferProv with rootExtent := ⟨0, 4096⟩ }
+
+/-- **A grant whose provenance misdescribes its allocation is refused.**
+
+`issue?` bounds a grant by `grant.provenance.extent`, which the provenance itself
+supplies — so the clause was self-certifying, and review issued a write grant over
+four kilobytes of a sixty-four-byte allocation and watched it authorize accesses and
+freeze a context that legitimately owned the storage. `RootExtentAgrees` compares
+the claim to the allocation table. -/
+theorem a_grant_over_a_lying_provenance_is_refused :
+    unlent.issue? firstLoan { loanOfHead with provenance := fatProv, range := ⟨0, 4096⟩ } =
+      Option.none ∧
+    ¬ unlent.RootExtentAgrees fatProv ∧
+    unlent.RootExtentAgrees bufferProv := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **A grant whose provenance path is not nested is refused.** Every access already
+had to satisfy `AccessDescriptor.WellFormedIn.provenanceNested`, and no grant did, so
+a single unnested step was a second way to claim any extent at all. -/
+theorem a_grant_over_an_unnested_path_is_refused :
+    unlent.issue? firstLoan
+        { loanOfHead with
+          provenance := { bufferProv with
+            path := [{ kind := .field, label := ⟨"lie"⟩, extent := ⟨0, 4096⟩ }] }
+          range := ⟨0, 4096⟩ } = Option.none := by decide
 
 /-- Two *read* loans over the same bytes are not conflicting, so they are accepted.
 Without this the theorem above would be consistent with refusing every overlapping

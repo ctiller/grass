@@ -324,7 +324,7 @@ unauthorized.
 -/
 def grantsOver (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
     List (GrantId × AuthorityGrant) :=
-  state.grants.entries.filter fun entry =>
+  state.grantEntries.filter fun entry =>
     decide (state.SharesBytes entry.2.provenance.root provenance.root) &&
       decide (entry.2.range.Meets range)
 
@@ -385,24 +385,51 @@ instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
     (range : ByteRange) : Decidable (state.HeldByAnother context provenance range) :=
   inferInstanceAs (Decidable (_ = _))
 
-/-- `state.LoanHeldBySelf context provenance range` holds when this context holds a
-loan over those bytes.
+/-- `state.AnyGrantOver provenance range` holds when *some* context holds authority
+over those bytes, of any kind.
 
-What bounds a context by its own loan's rights. The transition's holder test used
-`Exclusive` — the loan map being empty of *everyone's* loans — and that is a
-different question with two wrong answers. A lender that had lent read-only could
-not read its own bytes, though `authorityOf` calls that state `sharedImmutable` and
-§7.3's conflict requires a writer. And a context following this layer's own
-"declare a loan to yourself" idiom with a read-only self-loan could not write those
-bytes even after every other loan was returned, which contradicts
-`permitsOrdinaryWrite_of_unheld` one module up. -/
-def LoanHeldBySelf (state : MemoryState) (context : ContextId) (provenance : Provenance)
-    (range : ByteRange) : Prop :=
-  (state.loansOver provenance range).any (fun entry => entry.2.holder = context) = true
+The question the transition's holder test should be asking, and it took three tries
+to arrive at.
 
-instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
-    (range : ByteRange) : Decidable (state.LoanHeldBySelf context provenance range) :=
-  inferInstanceAs (Decidable (_ = _))
+It was `Exclusive` — the *loan* map empty of everyone's loans — which is §3's
+sentence about exclusive authority and not a question about this access. A lender
+that had lent read-only could not read its own bytes, and a context following this
+layer's own "declare a loan to yourself" idiom with a read-only self-loan could not
+write those bytes even after every other loan was returned.
+
+Then it was `LoanHeldBySelf`, which fixed the self-loan case and opened a worse one:
+a context holding *nothing* was asked nothing, so when others held atomic-only
+grants and `authorityOf` reported `atomicShared`, any context at all could join the
+protocol atomically. Review demonstrated two contexts atomically writing the same
+live bytes with one of them holding no grant. It also keyed on `GrantKind.loan`
+while the state half did not, so two grants identical but for `kind` gave opposite
+answers about whether their holder may write.
+
+So: if anything is held over these bytes, an accessor needs authority of its own.
+The cost is that the lender's read of its own shared-immutably-lent bytes is refused
+along with a stranger's — `AllocationRecord` records no owner, so the two are
+indistinguishable here, and permitting one permits both.
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records that. -/
+def AnyGrantOver (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
+    Prop := state.grantsOver provenance range ≠ []
+
+instance (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
+    Decidable (state.AnyGrantOver provenance range) :=
+  inferInstanceAs (Decidable (_ ≠ _))
+
+/-- Nothing held means nothing outstanding for anybody. -/
+theorem not_heldByAnother_of_not_anyGrantOver {state : MemoryState} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange}
+    (h : ¬ state.AnyGrantOver provenance range) :
+    ¬ state.HeldByAnother context provenance range := by
+  unfold AnyGrantOver at h
+  unfold HeldByAnother
+  have he : state.grantsOver provenance range = [] := by
+    by_cases hc : state.grantsOver provenance range = []
+    · exact hc
+    · exact absurd hc h
+  rw [he]
+  simp
 
 /-- `state.WritableByAnother context provenance range` holds when some other
 context's grant covers those bytes **and may modify them**.
@@ -771,157 +798,165 @@ stated.
 -/
 def issue? (state : MemoryState) (id : GrantId) (grant : AuthorityGrant) :
     Option MemoryState :=
-  if (state.grants.lookup id).isSome then Option.none
-  else if grant.range.IsEmpty then Option.none
+  if grant.range.IsEmpty then Option.none
   else if ¬ state.Live grant.provenance then Option.none
+  else if ¬ grant.provenance.Nested then Option.none
+  else if ¬ state.RootExtentAgrees grant.provenance then Option.none
   else if ¬ grant.provenance.extent.Contains grant.range then Option.none
-  else if state.grants.entries.any
+  else if state.grantEntries.any
       (fun entry => decide (state.LoanConflicts entry.2 grant))
     then Option.none
-  else some { state with grants := state.grants.insert id grant }
+  else state.issueGrant? id grant
 
-/-- **A reissued identity is refused.** -/
+/-- **A reissued identity is refused**, by `MemoryState.issueGrant?`, which is the
+only thing that writes the map. -/
 theorem issue?_eq_none_of_reissued (state : MemoryState) {id : GrantId}
-    (grant : AuthorityGrant) (h : (state.grants.lookup id).isSome) :
+    (grant : AuthorityGrant) (h : (state.grantAt? id).isSome) :
     state.issue? id grant = Option.none := by
   unfold issue?
-  rw [if_pos h]
+  split
+  · rfl
+  split
+  · rfl
+  split
+  · rfl
+  split
+  · rfl
+  split
+  · rfl
+  split
+  · rfl
+  exact MemoryState.issueGrant?_eq_none_of_reissued state grant h
 
 /-- **A grant over no bytes is refused.** -/
 theorem issue?_eq_none_of_empty (state : MemoryState) (id : GrantId)
     (grant : AuthorityGrant) (h : grant.range.IsEmpty) :
     state.issue? id grant = Option.none := by
   unfold issue?
-  by_cases hfresh : (state.grants.lookup id).isSome = true
-  · rw [if_pos hfresh]
-  · rw [if_neg hfresh, if_pos h]
+  rw [if_pos h]
 
 /-- **A grant over dead, absent or stale-epoch storage is refused.** -/
 theorem issue?_eq_none_of_not_live (state : MemoryState) (id : GrantId)
     (grant : AuthorityGrant) (h : ¬ state.Live grant.provenance) :
     state.issue? id grant = Option.none := by
   unfold issue?
-  by_cases hfresh : (state.grants.lookup id).isSome = true
-  · rw [if_pos hfresh]
-  · rw [if_neg hfresh]
-    by_cases hempty : grant.range.IsEmpty
-    · rw [if_pos hempty]
-    · rw [if_neg hempty, if_pos (by simpa using h)]
+  by_cases hempty : grant.range.IsEmpty
+  · rw [if_pos hempty]
+  · rw [if_neg hempty, if_pos (by simpa using h)]
+
+/-- **A grant whose provenance path is not nested is refused**, which every access
+already had to satisfy through `AccessDescriptor.WellFormedIn.provenanceNested` and
+no grant did. -/
+theorem issue?_eq_none_of_not_nested (state : MemoryState) (id : GrantId)
+    (grant : AuthorityGrant) (h : ¬ grant.provenance.Nested) :
+    state.issue? id grant = Option.none := by
+  unfold issue?
+  by_cases hempty : grant.range.IsEmpty
+  · rw [if_pos hempty]
+  · rw [if_neg hempty]
+    by_cases hlive : state.Live grant.provenance
+    · rw [if_neg (by simpa using hlive), if_pos (by simpa using h)]
+    · rw [if_pos (by simpa using hlive)]
+
+/--
+**A grant whose provenance misdescribes its allocation is refused.**
+
+The clause that was self-certifying: `issue?` bounded the grant by
+`grant.provenance.extent`, which the provenance itself supplies, and nothing compared
+that to the allocation table. Review issued a write grant over four kilobytes of a
+sixteen-byte allocation, and it both authorized accesses and froze a context that
+legitimately owned the larger storage it was aliased to.
+-/
+theorem issue?_eq_none_of_wrong_extent (state : MemoryState) (id : GrantId)
+    (grant : AuthorityGrant) (h : ¬ state.RootExtentAgrees grant.provenance) :
+    state.issue? id grant = Option.none := by
+  unfold issue?
+  by_cases hempty : grant.range.IsEmpty
+  · rw [if_pos hempty]
+  · rw [if_neg hempty]
+    by_cases hlive : state.Live grant.provenance
+    · rw [if_neg (by simpa using hlive)]
+      by_cases hnest : grant.provenance.Nested
+      · rw [if_neg (by simpa using hnest), if_pos (by simpa using h)]
+      · rw [if_pos (by simpa using hnest)]
+    · rw [if_pos (by simpa using hlive)]
 
 /-- **Conflicting authority is refused at issue.** -/
 theorem issue?_eq_none_of_conflict (state : MemoryState) (id : GrantId)
     (grant : AuthorityGrant)
-    (h : state.grants.entries.any
+    (h : state.grantEntries.any
       (fun entry => decide (state.LoanConflicts entry.2 grant)) = true) :
     state.issue? id grant = Option.none := by
   unfold issue?
-  by_cases hfresh : (state.grants.lookup id).isSome = true
-  · rw [if_pos hfresh]
-  · rw [if_neg hfresh]
-    by_cases hempty : grant.range.IsEmpty
-    · rw [if_pos hempty]
-    · rw [if_neg hempty]
-      by_cases hlive : state.Live grant.provenance
-      · rw [if_neg (by simpa using hlive)]
-        by_cases hin : grant.provenance.extent.Contains grant.range
-        · rw [if_neg (by simpa using hin), if_pos h]
-        · rw [if_pos (by simpa using hin)]
-      · rw [if_pos (by simpa using hlive)]
+  by_cases hempty : grant.range.IsEmpty
+  · rw [if_pos hempty]
+  · rw [if_neg hempty]
+    by_cases hlive : state.Live grant.provenance
+    · rw [if_neg (by simpa using hlive)]
+      by_cases hnest : grant.provenance.Nested
+      · rw [if_neg (by simpa using hnest)]
+        by_cases hext : state.RootExtentAgrees grant.provenance
+        · rw [if_neg (by simpa using hext)]
+          by_cases hin : grant.provenance.extent.Contains grant.range
+          · rw [if_neg (by simpa using hin), if_pos h]
+          · rw [if_pos (by simpa using hin)]
+        · rw [if_pos (by simpa using hext)]
+      · rw [if_pos (by simpa using hnest)]
+    · rw [if_pos (by simpa using hlive)]
 
 /--
-Return the loan with **that exact identity**, if this context holds it.
+Return the loan with **that exact identity**, if this context may.
 
 `docs/MEMORY_MODEL.md` §3: "Returning one loan consumes that exact identity."
 `GrantId` is a `Uid`, which a supply never reissues, so the identity a return names
 is the one that was lent — a return cannot consume a different loan that happens to
-describe the same bytes, rights, and holder. That is why the map is keyed by
-identity and not by shape.
+describe the same bytes, rights, and holder. That is why the map is keyed by identity
+and not by shape.
 
-**Who may return is not §3's question and is answered here anyway.** §3 says which
-loan a return consumes and not who may return it, and the unchecked version let any
-context return any loan and then write the thawed bytes — an authority check
-defeated by calling the function that removes it.
-
-**The holder is not the only party who may.** §6's ABI call profile "consumes the
-same loan identities to reconstruct local authority on a conforming return", and
-the party doing the consuming is the caller, not the callee. A holder-only check
-made that impossible, and for a loan to an external API agent — which never executes
-a Grass step — made the return impossible for anyone, so the slot stayed lent
-forever and the read after the call was refused. `Spikes/1_Hello_World` is that
-shape. So the lender may return too, and `AuthorityGrant.lender` is what records
-which context that is.
-
-Nobody else. A profile wanting third-party revocation owes a rule for it, which
-nothing here invents.
+`MemoryState.returnGrant?` is the mechanism and carries the who-may-return rule,
+because the field it erases is sealed in that module. This is the name §3's laws are
+stated under.
 -/
 def returnLoan? (state : MemoryState) (context : ContextId) (id : GrantId) :
-    Option MemoryState :=
-  match state.grants.lookup id with
-  | some grant =>
-      if grant.holder = context ∨ grant.lender = context then
-        some { state with grants := state.grants.erase id }
-      else Option.none
-  | Option.none => Option.none
+    Option MemoryState := state.returnGrant? context id
 
 /-- **A return consumes the identity it names.** -/
 theorem lookup_returnLoan?_self {state returned : MemoryState} {context : ContextId}
     {id : GrantId} (h : state.returnLoan? context id = some returned) :
-    returned.grants.lookup id = Option.none := by
-  unfold returnLoan? at h
-  split at h
-  · split at h
-    · injection h with h
-      subst h
-      exact FiniteMap.lookup_erase_self _ _
-    · exact absurd h (by simp)
-  · exact absurd h (by simp)
+    returned.grantAt? id = Option.none :=
+  MemoryState.grantAt?_returnGrant?_self h
 
 /-- Returning one loan leaves every other identity alone. Two loans over the same
 bytes are two loans, and returning one does not return the other. -/
 theorem lookup_returnLoan?_ne {state returned : MemoryState} {context : ContextId}
     {id other : GrantId} (h : state.returnLoan? context id = some returned)
-    (hne : other ≠ id) :
-    returned.grants.lookup other = state.grants.lookup other := by
-  unfold returnLoan? at h
-  split at h
-  · split at h
-    · injection h with h
-      subst h
-      exact FiniteMap.lookup_erase_ne _ hne
-    · exact absurd h (by simp)
-  · exact absurd h (by simp)
+    (hne : other ≠ id) : returned.grantAt? other = state.grantAt? other :=
+  MemoryState.grantAt?_returnGrant?_ne h hne
 
 /-- **A context that neither holds nor lent it may not return it.** -/
 theorem returnLoan?_eq_none_of_stranger {state : MemoryState} {context : ContextId}
-    {id : GrantId} {grant : AuthorityGrant} (hlook : state.grants.lookup id = some grant)
+    {id : GrantId} {grant : AuthorityGrant} (hlook : state.grantAt? id = some grant)
     (hholder : grant.holder ≠ context) (hlender : grant.lender ≠ context) :
-    state.returnLoan? context id = Option.none := by
-  unfold returnLoan?
-  rw [hlook]
-  exact if_neg (fun h => h.elim hholder hlender)
+    state.returnLoan? context id = Option.none :=
+  MemoryState.returnGrant?_eq_none_of_stranger hlook hholder hlender
 
 /-- **And the lender may return what it lent.** §6's conforming return, performed by
 the party §6 says performs it. -/
 theorem returnLoan?_isSome_of_lender {state : MemoryState} {context : ContextId}
-    {id : GrantId} {grant : AuthorityGrant} (hlook : state.grants.lookup id = some grant)
-    (h : grant.lender = context) : (state.returnLoan? context id).isSome := by
-  unfold returnLoan?
-  rw [hlook]
-  simp only []
-  rw [if_pos (Or.inr h)]
-  rfl
+    {id : GrantId} {grant : AuthorityGrant} (hlook : state.grantAt? id = some grant)
+    (h : grant.lender = context) : (state.returnLoan? context id).isSome :=
+  MemoryState.returnGrant?_isSome_of_lender hlook h
 
 /-- And a return naming no live loan is refused rather than treated as a no-op. -/
 theorem returnLoan?_eq_none_of_absent {state : MemoryState} {context : ContextId}
-    {id : GrantId} (h : state.grants.lookup id = Option.none) :
-    state.returnLoan? context id = Option.none := by
-  unfold returnLoan?
-  rw [h]
+    {id : GrantId} (h : state.grantAt? id = Option.none) :
+    state.returnLoan? context id = Option.none :=
+  MemoryState.returnGrant?_eq_none_of_absent h
 
 /-- A successful issue records the grant under the identity it names. -/
 theorem lookup_issue?_self {state issued : MemoryState} {id : GrantId}
     {grant : AuthorityGrant} (h : state.issue? id grant = some issued) :
-    issued.grants.lookup id = some grant := by
+    issued.grantAt? id = some grant := by
   unfold issue? at h
   split at h
   · exact absurd h (by simp)
@@ -933,9 +968,9 @@ theorem lookup_issue?_self {state issued : MemoryState} {id : GrantId}
   · exact absurd h (by simp)
   split at h
   · exact absurd h (by simp)
-  injection h with h
-  subst h
-  exact FiniteMap.lookup_insert_self _ _ _
+  split at h
+  · exact absurd h (by simp)
+  exact MemoryState.grantAt?_issueGrant?_self h
 
 /-- A state with no grants is exclusive everywhere: nothing is lent, so nothing is
 outstanding.
@@ -955,15 +990,31 @@ Reading `Exclusive` as permission is the mistake `authorityOf` used to make. -/
 checks — kept on the argument that the access-time rule reads whatever map it finds.
 Review broke that in one move: `FiniteMap.insert` erases, so installing a grant
 under an identity another context held deleted that grant, and the map the
-access-time rule then found no longer contained it. `issue?` is the only way in, and
-this is the statement that its identity rule is the map's identity rule. -/
+access-time rule then found no longer contained it.
+
+Deleting `grant` was not enough either: `MemoryState.grants` was a public field, so
+`{ state with grants := state.grants.insert id g }` *is* the deleted function, and
+two of this project's own fixtures used it. Review wrote the same attack again
+through the field, with a comment saying "there is no second door" in the file at
+the time. The field is `private` now and `MemoryState.issueGrant?` is the only thing
+that writes it; this is the statement that its identity rule is the map's. -/
 theorem issued_identity_is_fresh {state issued : MemoryState} {id : GrantId}
     {grant : AuthorityGrant} (h : state.issue? id grant = some issued) :
-    state.grants.lookup id = Option.none := by
+    state.grantAt? id = Option.none := by
   unfold issue? at h
   split at h
   · exact absurd h (by simp)
-  · next hfresh => simpa using hfresh
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  exact MemoryState.grantAt?_eq_none_of_issueGrant? h
 
 end MemoryState
 

@@ -117,7 +117,8 @@ structure MemoryState where
   allocations : FiniteMap AllocId AllocationRecord
   /-- Pairs of allocations whose bytes are the same storage. -/
   aliases : List (AllocId × AllocId)
-  /-- The authority grants currently live.
+  /-- The authority grants currently live. **Private**: see below.
+
 
   `docs/MEMORY_MODEL.md` §3 makes this map the authoritative borrowing state.
   What is here is the map and nothing else: the split, join, freeze, and
@@ -125,27 +126,172 @@ structure MemoryState where
   M4's. It exists a milestone early so that `Grass/Op/Step.lean`'s
   `AuthorityProvider` has a real table to check against, which is what shows a
   new authority kind needs no change to operation packaging. -/
-  grants : FiniteMap GrantId AuthorityGrant
+  private grants : FiniteMap GrantId AuthorityGrant
 
 namespace MemoryState
 
 /-- The state with nothing allocated. -/
 def empty : MemoryState := { allocations := .empty, aliases := [], grants := .empty }
 
-/-! Grants are recorded by `MemoryState.issue?` in `Grass/Memory/Loan.lean`, and by
-nothing else.
+/-! ## The grant map is sealed
 
-There was a `grant` here — `grants.insert`, no checks — described as the door
-providers of kinds other than `loan` use, with a theorem arguing it was safe because
-the access-time rule reads whatever map it finds. Review broke that argument in one
-move: `FiniteMap.insert` *erases* any existing binding, so installing a grant under
-an identity another context already holds deletes that context's grant, and the map
-the access-time rule then finds no longer contains the victim. A write to bytes
-another context had lent committed with no violation, and the thief could then
-return the identity, since it now held it.
+`grants` is `private`, and the mutators live in this module, because deleting the
+unchecked door was not enough twice running.
 
-`issue?` refuses a reissued identity. One door, one identity rule.
+First there was `MemoryState.grant` — `grants.insert`, no checks — described as the
+door providers of kinds other than `loan` use, with a theorem arguing it was safe
+because the access-time rule reads whatever map it finds. `FiniteMap.insert`
+*erases* any existing binding, so installing a grant under an identity another
+context already holds deletes that context's grant, and the map the access-time rule
+then finds no longer contains the victim. Review wrote that attack and the write
+committed with no violation.
+
+Deleting `grant` and adding `issue?` did not close it: `grants` was a public field,
+so `{ state with grants := state.grants.insert id g }` *is* the deleted function,
+available to every caller — and two of this project's own fixtures used it. Review
+wrote the same attack again through the field. A comment saying "there is no second
+door" was in the file at the time.
+
+So the field is private and the two operations that change it are here:
+`issueGrant?` and `returnGrant?`. `Grass/Memory/Loan.lean` states §3's laws over
+them and adds the loan-specific refusals; `grantEntries` and `grantAt?` are the
+read-only views everything else uses.
 -/
+
+/--
+`state.RootExtentAgrees provenance` holds when the provenance's recorded root extent
+is the extent of the allocation it names.
+
+`Provenance.rootExtent` is what `AccessDescriptor.WellFormedIn.rangeInProvenance`
+bounds an access against and what `Provenance.extent` computes a grant's bound from,
+and nothing compared it to the allocation table -- so both were self-certifying, and
+review issued a grant over four kilobytes of a sixteen-byte allocation and watched it
+authorize and freeze. `denialOf` records `provenanceExtentMismatch` for an access;
+`MemoryState.issue?` refuses the grant.
+-/
+def RootExtentAgrees (state : MemoryState) (provenance : Provenance) : Prop :=
+  (state.allocations.lookup provenance.root).any
+    (fun record => decide (record.extent = provenance.rootExtent)) = true
+
+instance (state : MemoryState) (provenance : Provenance) :
+    Decidable (state.RootExtentAgrees provenance) :=
+  inferInstanceAs (Decidable (_ = _))
+
+/-- The grants outstanding, as a read-only view. -/
+def grantEntries (state : MemoryState) : List (GrantId × AuthorityGrant) :=
+  state.grants.entries
+
+/-- The grant an identity names, if it names one. -/
+def grantAt? (state : MemoryState) (id : GrantId) : Option AuthorityGrant :=
+  state.grants.lookup id
+
+/-- Record a grant under a fresh identity, or refuse.
+
+The identity rule only. `Grass/Memory/Loan.lean`'s `issue?` is the door a caller
+uses: it adds §7.3's conflict refusal and the checks that a grant is over live,
+current, in-extent bytes. This exists separately because those checks need
+definitions that live above this module, and the *field* has to be sealed here. -/
+def issueGrant? (state : MemoryState) (id : GrantId) (grant : AuthorityGrant) :
+    Option MemoryState :=
+  if (state.grants.lookup id).isSome then Option.none
+  else some { state with grants := state.grants.insert id grant }
+
+/-- Remove the grant an identity names, if this context may. -/
+def returnGrant? (state : MemoryState) (context : ContextId) (id : GrantId) :
+    Option MemoryState :=
+  match state.grants.lookup id with
+  | some grant =>
+      if grant.holder = context ∨ grant.lender = context then
+        some { state with grants := state.grants.erase id }
+      else Option.none
+  | Option.none => Option.none
+
+@[simp] theorem grantAt?_eq_lookup (state : MemoryState) (id : GrantId) :
+    state.grantAt? id = state.grants.lookup id := rfl
+
+@[simp] theorem grantEntries_eq (state : MemoryState) :
+    state.grantEntries = state.grants.entries := rfl
+
+/-- A successful issue records the grant under the identity it names. -/
+theorem grantAt?_issueGrant?_self {state issued : MemoryState} {id : GrantId}
+    {grant : AuthorityGrant} (h : state.issueGrant? id grant = some issued) :
+    issued.grantAt? id = some grant := by
+  unfold issueGrant? at h
+  split at h
+  · exact absurd h (by simp)
+  · injection h with h
+    subst h
+    exact FiniteMap.lookup_insert_self _ _ _
+
+/-- **A reissued identity is refused**, which is §3's "a return consumes that exact
+identity" read from the other side: an identity is consumed by a return and by
+nothing else. -/
+theorem issueGrant?_eq_none_of_reissued (state : MemoryState) {id : GrantId}
+    (grant : AuthorityGrant) (h : (state.grantAt? id).isSome) :
+    state.issueGrant? id grant = Option.none := by
+  unfold issueGrant?
+  rw [if_pos (show (state.grants.lookup id).isSome from h)]
+
+/-- An issue happens only into a free identity. -/
+theorem grantAt?_eq_none_of_issueGrant? {state issued : MemoryState} {id : GrantId}
+    {grant : AuthorityGrant} (h : state.issueGrant? id grant = some issued) :
+    state.grantAt? id = Option.none := by
+  unfold issueGrant? at h
+  split at h
+  · exact absurd h (by simp)
+  · next hfresh => simpa using hfresh
+
+/-- **A return consumes the identity it names.** -/
+theorem grantAt?_returnGrant?_self {state returned : MemoryState} {context : ContextId}
+    {id : GrantId} (h : state.returnGrant? context id = some returned) :
+    returned.grantAt? id = Option.none := by
+  unfold returnGrant? at h
+  split at h
+  · split at h
+    · injection h with h
+      subst h
+      exact FiniteMap.lookup_erase_self _ _
+    · exact absurd h (by simp)
+  · exact absurd h (by simp)
+
+/-- Returning one grant leaves every other identity alone. -/
+theorem grantAt?_returnGrant?_ne {state returned : MemoryState} {context : ContextId}
+    {id other : GrantId} (h : state.returnGrant? context id = some returned)
+    (hne : other ≠ id) : returned.grantAt? other = state.grantAt? other := by
+  unfold returnGrant? at h
+  split at h
+  · split at h
+    · injection h with h
+      subst h
+      exact FiniteMap.lookup_erase_ne _ hne
+    · exact absurd h (by simp)
+  · exact absurd h (by simp)
+
+/-- **A context that neither holds nor lent it may not return it.** -/
+theorem returnGrant?_eq_none_of_stranger {state : MemoryState} {context : ContextId}
+    {id : GrantId} {grant : AuthorityGrant} (hlook : state.grantAt? id = some grant)
+    (hholder : grant.holder ≠ context) (hlender : grant.lender ≠ context) :
+    state.returnGrant? context id = Option.none := by
+  unfold returnGrant?
+  rw [show state.grants.lookup id = some grant from hlook]
+  exact if_neg (fun h => h.elim hholder hlender)
+
+/-- **And the lender may return what it lent.** -/
+theorem returnGrant?_isSome_of_lender {state : MemoryState} {context : ContextId}
+    {id : GrantId} {grant : AuthorityGrant} (hlook : state.grantAt? id = some grant)
+    (h : grant.lender = context) : (state.returnGrant? context id).isSome := by
+  unfold returnGrant?
+  rw [show state.grants.lookup id = some grant from hlook]
+  simp only []
+  rw [if_pos (Or.inr h)]
+  rfl
+
+/-- And a return naming no live grant is refused rather than treated as a no-op. -/
+theorem returnGrant?_eq_none_of_absent {state : MemoryState} {context : ContextId}
+    {id : GrantId} (h : state.grantAt? id = Option.none) :
+    state.returnGrant? context id = Option.none := by
+  unfold returnGrant?
+  rw [show state.grants.lookup id = Option.none from h]
 
 /-- One declared aliasing hop, in either direction. Aliasing is symmetric by
 convention and this is where the convention is discharged. -/
@@ -336,7 +482,7 @@ is finite.
 -/
 def Granted (state : MemoryState) (context : ContextId) (provenance : Provenance)
     (range : ByteRange) (intent : AccessIntent) : Prop :=
-  ∃ entry ∈ state.grants.entries,
+  ∃ entry ∈ state.grantEntries,
     state.AuthorizedBy entry.2 context provenance range intent
 
 instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
@@ -349,7 +495,7 @@ particular kind, which is how one provider distinguishes itself from another ove
 the same table. -/
 def GrantedOfKind (state : MemoryState) (kind : GrantKind) (context : ContextId)
     (provenance : Provenance) (range : ByteRange) (intent : AccessIntent) : Prop :=
-  ∃ entry ∈ state.grants.entries,
+  ∃ entry ∈ state.grantEntries,
     entry.2.kind = kind ∧ state.AuthorizedBy entry.2 context provenance range intent
 
 instance (state : MemoryState) (kind : GrantKind) (context : ContextId)
