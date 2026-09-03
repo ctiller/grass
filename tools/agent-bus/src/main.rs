@@ -8,6 +8,7 @@ mod gitrepo;
 mod registry;
 mod scalars;
 mod storage;
+mod stream;
 
 fn main() {
     eprintln!("agent-bus v2: not yet wired up");

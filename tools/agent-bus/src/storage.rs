@@ -95,7 +95,11 @@ pub struct StreamSegmentFile {
 /// Discover and structurally read every segment in one stream's working
 /// tree, enforcing contiguous zero-based segment numbers, closed non-tail
 /// segments with exactly `SEGMENT_SIZE` events, and a non-empty,
-/// non-overflowing tail.
+/// non-overflowing tail. `stream_root` is a real checked-out worktree (see
+/// `stream.rs`), so `.git` (the worktree's admin link) and `.gitattributes`
+/// (the stream root's `-text` pin for its own segment files) are present
+/// alongside the header and segments and must be ignored rather than
+/// rejected.
 pub fn read_stream_segments(stream_root: &Path) -> AbResult<Vec<StreamSegmentFile>> {
     let mut segments: std::collections::BTreeMap<u64, PathBuf> = std::collections::BTreeMap::new();
     for entry in fs::read_dir(stream_root).map_err(|e| crate::error::AbError::Io {
@@ -109,7 +113,7 @@ pub fn read_stream_segments(stream_root: &Path) -> AbResult<Vec<StreamSegmentFil
         let path = entry.path();
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name == "header.json" {
+        if name == "header.json" || name == ".git" || name == ".gitattributes" {
             continue;
         }
         if !name.ends_with(".jsonl") {
@@ -406,6 +410,25 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_segment(dir.path(), 0, "{}\n");
         fs::write(dir.path().join("header.json"), "{}").unwrap();
+        assert!(read_stream_segments(dir.path()).is_ok());
+    }
+
+    /// `stream_root` is a real checked-out worktree in production (see
+    /// `stream.rs::read_stream`), so `.git` sits alongside the segments and
+    /// must be ignored, not rejected as an unexpected file.
+    #[test]
+    fn read_stream_segments_ignores_a_dot_git_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        write_segment(dir.path(), 0, "{}\n");
+        fs::write(dir.path().join(".git"), "gitdir: /elsewhere\n").unwrap();
+        assert!(read_stream_segments(dir.path()).is_ok());
+    }
+
+    #[test]
+    fn read_stream_segments_ignores_the_gitattributes_pin() {
+        let dir = tempfile::tempdir().unwrap();
+        write_segment(dir.path(), 0, "{}\n");
+        fs::write(dir.path().join(".gitattributes"), "*.jsonl -text\n").unwrap();
         assert!(read_stream_segments(dir.path()).is_ok());
     }
 
