@@ -129,15 +129,37 @@ rule concrete — it was written with no law at all, and `Vec.pop?_push`,
 representation is available through `Vec.mem_iff_mem_toList`, but a consumer
 should not have to.
 
-There are two fixtures. Per `Tests.lean` both establish expressibility rather
-than a theorem. `Tests/Std/VecVocabulary.lean` covers the type's own claims: that
-a `List Byte` and a host `_root_.ByteArray` are each rejected where a Grass
-`ByteArray` is required, that extensionality is usable in the shape a consumer
-would use it, and that the update framing law composes the way the memory layer
-applies it. `Tests/Std/SpikeSurface.lean` covers the demand side: every `Vec`
-operation the authored spike sources call, compiled in the shape they call it,
-so that §3.4's "no consumer has demanded it" rests on a reading of the corpus
-rather than on an assumption about it.
+The module also carries a prefix/suffix algebra — `IsPrefix`, `take_add`,
+`drop_drop`, `take_take`, `drop_eq_empty_iff`, `length_drop_lt_of_pos`, and the
+`take_isPrefix` pair. That is band-2 work under §1 with the most-named consumer
+in the corpus. [SPIKE_PROOF_BURDEN.md](SPIKE_PROOF_BURDEN.md) carries six
+`library-instance` rows, and three of them, spread across three different
+spikes, are one shape: `write_all_loop(payload)` in Spike 1,
+`buffered_stdout(output_buffer, outUsed, committedPrefix)` in Spike 2, and
+`SliceConsumerInvariant(output, consumed, outLen)` in Spike 3. The ledger
+describes each as a *standard* partial-write induction or consumer, and that word
+is the demand: it expects one reusable theorem, not three authored proofs.
+
+There are three fixtures. Per `Tests.lean` all three establish expressibility
+rather than a theorem. `Tests/Std/VecVocabulary.lean` covers the type's own
+claims: that a `List Byte` and a host `_root_.ByteArray` are each rejected where
+a Grass `ByteArray` is required, that extensionality is usable in the shape a
+consumer would use it, and that the update framing law composes the way the
+memory layer applies it. `Tests/Std/SpikeSurface.lean` covers the demand side:
+every `Vec` operation the authored spike sources call, compiled in the shape they
+call it, so that §3.4's "no consumer has demanded it" rests on a reading of the
+corpus rather than on an assumption about it.
+`Tests/Std/PartialWrite.lean` answers the narrow question the burden ledger
+raises — whether the pure half of that standard theorem holds with only this
+module — by building the loop state, its conservation, exact-prefix commitment,
+monotonicity, and termination laws, and a concrete trace. It does: every proof
+there is a `Vec` law applied plus `omega`, with no induction, because the
+induction is already discharged inside `Vec.take_add` and `Vec.drop_drop`. What
+it deliberately does not do is the other half. [STDLIB.md](STDLIB.md) §6 puts
+`SliceConsumerInvariant` in the CFG proof library, since "the pure library owns
+ordered-sequence and slice laws, while the CFG layer connects those laws to
+selected registers, pointers, provenance, and loans", and no register, handle,
+provenance token, or loan appears in that fixture.
 
 ### 3.2 The representation decision
 
@@ -232,6 +254,23 @@ Nothing else in the five spikes calls a `Vec` operation. `List` appears once, in
 `4_Web_Server/Process.lean`, and is left alone: [STDLIB.md](STDLIB.md) §6 lists
 persistent `List` and contiguous `Vec` as separate offerings, so that is a
 choice, not a `Vec` demand.
+
+The spike *sources* are only half the corpus's demand, though, and the weaker
+half: they say which operations get called, not which theorems get instantiated.
+[SPIKE_PROOF_BURDEN.md](SPIKE_PROOF_BURDEN.md) is the other half, and it is the
+more precise one, because its `library-instance` rows are by definition demands
+on a library rather than on an author. Six rows carry that classification, and
+they divide three ways. Three are the partial-write family answered in §3.1 and
+`Tests/Std/PartialWrite.lean`. One, `crc32_prefix(transferred - remaining)`,
+shares that prefix indexing but is described as a "standard CRC prefix theorem",
+so its residue is a CRC model this library has no reason to own; the sequence
+part it would sit on is already here. The last two are classified
+`authored-proof/library-instance` rather than `library-instance` outright, and
+neither is `Std.Logical`'s: `stable_merge_pass` instantiates a banked stable
+merge the ledger pairs with `stableSortModelCorrect`, an `authority-model` entry,
+and `bitAccRep` is a physical bit-accumulator representation. None of the three
+is scheduled, and each becomes a demand on `Std.Owned` or on an algorithm owner
+if it becomes one at all.
 
 ### 3.5 Open: `Vec` has no literal syntax, and the obvious fix is harmful
 
