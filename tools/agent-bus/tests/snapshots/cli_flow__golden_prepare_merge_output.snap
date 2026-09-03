@@ -1,10 +1,23 @@
 ---
 source: tests/cli_flow.rs
-assertion_line: 1405
+assertion_line: 2465
 expression: out
 ---
 {
   "candidate": "[hash]",
+  "causal_frontier": {
+    "aiden": "[hash]",
+    "coord1": "[hash]",
+    "zoe": "[hash]"
+  },
+  "freshness": "cached",
+  "last_synced": null,
   "merge_engine_epoch": null,
-  "previous_main": "[hash]"
+  "previous_main": "[hash]",
+  "roster_epoch": "[hash]",
+  "snapshot_receipt": {
+    "aiden": "[hash]",
+    "coord1": "[hash]",
+    "zoe": "[hash]"
+  }
 }

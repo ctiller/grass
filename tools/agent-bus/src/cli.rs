@@ -909,6 +909,7 @@ fn prepare_merge(args: PrepareMergeArgs) -> AbResult<()> {
     let reviewed_commit = ObjectId::parse(args.reviewed_commit)?;
 
     let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?;
+    let envelope = freshness_envelope(&snapshot);
     let state = snapshot.state;
     let chain = state
         .review_chain(&nomination)
@@ -962,11 +963,14 @@ fn prepare_merge(args: PrepareMergeArgs) -> AbResult<()> {
         )));
     }
 
-    print_json(&serde_json::json!({
-        "candidate": candidate,
-        "previous_main": previous_main,
-        "merge_engine_epoch": state.current_merge_engine_epoch.as_ref().map(|e| e.as_str().to_string()),
-    }));
+    print_json(&with_freshness(
+        serde_json::json!({
+            "candidate": candidate,
+            "previous_main": previous_main,
+            "merge_engine_epoch": state.current_merge_engine_epoch.as_ref().map(|e| e.as_str().to_string()),
+        }),
+        envelope,
+    ));
     Ok(())
 }
 

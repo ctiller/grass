@@ -2465,6 +2465,9 @@ fn golden_prepare_merge_output() {
     insta::assert_json_snapshot!(out, {
         ".candidate" => insta::dynamic_redaction(redact_noise),
         ".previous_main" => insta::dynamic_redaction(redact_noise),
+        ".roster_epoch" => insta::dynamic_redaction(redact_noise),
+        ".snapshot_receipt.*" => insta::dynamic_redaction(redact_noise),
+        ".causal_frontier.*" => insta::dynamic_redaction(redact_noise),
     });
 }
 
