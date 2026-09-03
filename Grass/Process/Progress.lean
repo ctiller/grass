@@ -105,11 +105,11 @@ each other, and no process with such a state had a `ProcessCorrect` at all.
 
 The class that suffers is narrower than an earlier version of this paragraph
 said. It is processes with a reachable running state terminal for *every*
-request — `oneShot` and `countdown`. A process whose `Terminal` depends on the
-request has no such state: `Tests/Process/PrefixFixtures.lean`'s `upto` inhabits
-the *unguarded* record perfectly well, which a reviewer checked by building it.
-So the guard is a genuine weakening for the request-dependent class and a
-necessity for the other, and no fixture separates those two facts; §10.45's
+request — `oneShot`, `countdown` and `hiccup`. A process whose `Terminal` depends
+on the request has no such state: `Tests/Process/PrefixFixtures.lean`'s `upto`
+inhabits the *unguarded* record perfectly well, which a reviewer checked by
+building it. So the guard is a genuine weakening for the request-dependent class
+and a necessity for the other, and no fixture separates those two facts; §10.45's
 proposal to index `p.Step` by the request is what would make the guard
 unnecessary for both.
 
@@ -132,6 +132,20 @@ discharged by the entropy disjunct. So the corpus contains a livelock presented
 as the witness and two presented as the excluded ones, and what separates them is
 exactly this: `countdown` calls its loop external and `spin` and `osc` have no
 external events to call it.
+
+**And the third disjunct has the same shape**, which a reviewer showed by
+building `Tests/Process/ChatterFixtures.lean`: a process with no external events
+at all, faulting forever and emitting one demanded observation each time, has a
+full `ProcessCorrect`. `ProcessAcceptance.Demanded`'s own docstring says the
+field exists so that "every process could satisfy progress by logging" is false,
+and that is what `chatter` does — with a logged value the specification demands.
+
+The pattern across all of them is worth naming. Every livelock this corpus knows
+about escapes through a predicate the *specification's author* supplies —
+`ExternalEvent` or `Demanded` — and none escapes through the measure. That the
+measure is now airtight took `Tests/Process/SpinFixtures.lean` and
+`Tests/Process/OscillateFixtures.lean` and two rounds; that the two predicates
+are not is `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.70.
 
 Excluding it needs a frontier declaration — a statement that a given external
 event is genuinely produced by the environment and not by the program — which
@@ -368,8 +382,8 @@ structure MeetsProcessProgress (p : ProcessSpec.{u, w})
   for others, and the module note says which. It is *not* true that the record
   is uninhabitable without it — `Tests/Process/PrefixFixtures.lean`'s `upto`
   terminates and satisfies the unguarded field, which a reviewer checked by
-  building it. What is true is that `oneShot` and `countdown` do not, because
-  each has a reachable running state terminal for every request, where
+  building it. What is true is that `oneShot`, `countdown` and `hiccup` do not,
+  because each has a reachable running state terminal for every request, where
   `ProcessCorrect.terminalNoStep` forbids the step this field would demand.
   -/
   handlesEveryEvent : ∀ (segmented : Segmented p.Observation) (state : p.State)
@@ -647,10 +661,14 @@ of `StepProgresses` fail loudly. `Tests/Process/SpinFixtures.lean` and
 shape, so a re-widening that admits any silent cycle at all goes red here
 instead of going unnoticed until someone builds the right counterexample.
 
-The three escapes it does not close are the three the module note discloses:
-environment entropy (an author's own choice of `ExternalEvent`), a permissive
-`Demanded`, and a specification with no initial state at all —
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §6, §10.49 and §10.55.
+The escapes it does not close are the ones the module note discloses, and there
+are four rather than three: environment entropy (an author's own choice of
+`ExternalEvent`), a permissive `Demanded`, a specification with no initial state
+at all, and — the one a reviewer added — a process that emits a *demanded*
+observation on every step while moving neither its state nor its bag.
+`Tests/Process/ChatterFixtures.lean` is that process, and it has a full
+`ProcessCorrect`. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §6, §10.49, §10.55 and
+§10.70.
 -/
 theorem no_infinite_silent_run (progress : MeetsProcessProgress p accept Invariant request)
     (states : Nat → p.State) (bags : Nat → Bag p.Demand)

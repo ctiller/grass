@@ -2947,15 +2947,35 @@ Separate from §10.49 and §10.56, which are about predicates that *cannot* be
 constrained. These are predicates nobody had yet chosen to constrain, which is a
 corpus gap and was cheaper to close.
 
-**Closed**, except for `viewAccepts`. `Tests/Process/RichAcceptanceFixtures.lean`
-is the fixture: `hiccup` has an inhabited `LogicalFault` and a silent fault step,
-a `TraceAccepts` that forbids an observation and needs a run invariant to
-discharge, a `TerminalAccepts` its terminal result supplies, a
-`DemandsWellFormed` that bounds an issued bag, a `Demanded` that its `.result`
-case satisfies — so `StepProgresses`'s emission disjunct fires for the first time
-in this corpus, which is half of §10.49's complaint — and a remainder law
-permitting *nothing* resolved and nothing pending, so the classification's
-`transferred` carries the whole outstanding bag.
+**Partly closed**, by `Tests/Process/RichAcceptanceFixtures.lean`, and the first
+version of this paragraph overstated it in three places that a reviewer took
+apart one at a time.
+
+Genuinely closed: `LogicalFault` and `EnvironmentViolation` are both inhabited
+for `hiccup` and both have steps, so `ProcessEvent.fault` and
+`ProcessEvent.environmentViolation` have instances and
+`MeetsProcessProgress.silent_fault_decreases` has an applicable process.
+`DemandsWellFormed` now bounds a bag a step actually issues — `hiccup`'s fault
+schedules a retry — which the first version did not: every step issued the empty
+bag and the field was discharged for it exactly as before.
+`TerminalDemandClassification.transferred` carries the outstanding bag at a
+*reachable* terminal run state, which the first version stated as law algebra
+and did not exhibit.
+
+**Not closed: `Demanded`.** The claim that `hiccup`'s `.result` case fires
+`StepProgresses`'s emission disjunct describes a proof style, not a property: a
+reviewer rebuilt `productive` discharging all three cases from the measure, and
+rebuilt `hiccupCorrect` against an acceptance with `Demanded := fun _ => False`.
+See §10.70 for why picking a better `hiccup` cannot fix it.
+
+**Not closed, and weaker than it looks: `TraceAccepts` and `TerminalAccepts`.**
+No `hiccup.Step` can emit a `blip` at all, so `no_blips` is an honest induction
+every case of which is settled by the shape of `emitted`; and
+`TerminalAccepts request result := result = true` *is* `hiccup.Terminal`'s second
+conjunct, so `ProcessCorrect.terminal` is discharged by `.2`. Both fields are
+non-vacuously *stated* and neither separates anything this process can do.
+`unwanted_results_are_refused` is what `TerminalAccepts` is actually for — a
+refutation about the class, not a fact about `hiccup`.
 
 `viewAccepts` stays open and is §10.56: `ProcessSpec.view` is `none` in every
 specification here and `ViewFacet` is constructed nowhere, which no choice of
@@ -3144,3 +3164,41 @@ progress, and a `False` one makes the disjunct dead. §10.49 was recorded for th
 process layer and the network analogue was not, which a reviewer pointed out.
 
 Needs the same ruling as §10.49, and probably the same answer.
+
+### 10.70 Every livelock this corpus knows about escapes through an author-supplied predicate
+
+`Tests/Process/ChatterFixtures.lean` is the fourth livelock with a full
+`ProcessCorrect`, and the first that a reviewer rather than a repair produced.
+`chatter` has no external events at all — so the entropy escape §6 records is
+unavailable to it — and no demands, and never terminates. It faults forever,
+emitting one observation, and its acceptance's `Demanded` picks out that
+observation. Every step satisfies `StepProgresses`'s emission disjunct.
+
+`ProcessAcceptance.Demanded`'s docstring says the field exists so that "every
+process could satisfy progress by logging" is false. This is a process satisfying
+progress by logging, with a logged value the specification demands.
+
+**It is not fixable at this layer, and the reason is worth stating precisely.**
+`Demanded` is a predicate on observation *values*, so re-emitting one demanded
+observation is indistinguishable from emitting a new one. Distinguishing them
+needs a claim about the trace — that the run is making progress a specification
+can see — which is a liveness property over executions, and this layer has no
+model for one.
+
+**And it explains why §10.62's `Demanded` claim cannot be repaired by a better
+fixture.** A step that *requires* the emission disjunct moves neither the state
+nor the outstanding bag and is not entropy; a process that can take such a step
+repeatedly is `chatter`. The disjunct can only be made load-bearing by something
+the layer should be excluding.
+
+The pattern across all four livelocks is the finding. Every one escapes through a
+predicate the *specification's author* supplies — `ProcessVocabulary.ExternalEvent`
+for the self-delivered tick, `ProcessAcceptance.Demanded` here — and none escapes
+through the measure. That the measure is airtight cost two rounds and two
+fixtures (`Tests/Process/SpinFixtures.lean`, `Tests/Process/OscillateFixtures.lean`);
+that the two predicates are not is what is left.
+
+Needs a ruling on whether §7's "independently specified observation" is meant to
+be a per-observation predicate at all, or a property of the trace — which would
+be a `ProcessAcceptance` change and would give §10.49, §10.69 and this entry one
+answer.

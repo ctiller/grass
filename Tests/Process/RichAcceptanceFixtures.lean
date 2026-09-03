@@ -18,25 +18,51 @@ construction sites, so §2's three-way partition had only ever been used two way
 is a list of the constraints that had never been constrained, made into one small
 machine:
 
-* **`TraceAccepts`** forbids a `blip`, and `hiccup` never emits one. That is not
-  free: `observationsAccept` is a claim about *every reachable prefix*, so it
-  needs a run invariant, and `no_blips` is it.
+* **`TraceAccepts`** forbids a `blip`, and `hiccup` never emits one, so
+  `observationsAccept` is a claim about every reachable prefix and `no_blips` is
+  the induction that discharges it. It is an honest induction and it is weaker
+  than it looks: no `hiccup.Step` can emit a `blip` at all, so every case is
+  settled by the literal shape of `emitted` rather than by anything about the
+  state. A reviewer checked. What it does show is that the field is not
+  discharged by `trivial`, which is what it was everywhere before.
 * **`Demanded`** is "the observation is a `beep`", and `hiccup`'s `.result` case
-  emits one. So `productive` discharges that case through `StepProgresses`'s
-  emission disjunct — the first time anything in this corpus has.
+  emits one. That is *not* the same as exercising it, and the first version of
+  this file said it was: a reviewer rebuilt `productive` discharging all three
+  cases from the measure alone, and rebuilt `hiccupCorrect` against an acceptance
+  with `Demanded := fun _ => False`. §10.49 is not closed and §10.62's claim
+  about it is withdrawn.
+
+  The reason is worth stating, because it is not a gap in this fixture. A step
+  that *requires* the emission disjunct is one that moves neither the state nor
+  the outstanding bag and is not entropy — and a process that can take such a step
+  repeatedly is a livelock. `Tests/Process/ChatterFixtures.lean` is that process,
+  and it has a full `ProcessCorrect`. The emission disjunct can only be made
+  load-bearing by something the layer should be excluding.
 * **`LogicalFault`** is inhabited, and `hiccup` can take a silent fault step. So
   `MeetsProcessProgress.silent_fault_decreases` has an applicable process, which
   §10.62 records it did not: every specification here had
   `LogicalFault := PEmpty`, and the module note's motivating case — "a process
   that faults in a loop, emits nothing, and decreases no measure" — had no
   fixture in either direction.
-* **`TerminalAccepts`** requires the result to be `true`, and `hiccup.Terminal`
-  is what supplies it.
+* **`TerminalAccepts`** requires the result to be `true`, and `hiccup.Terminal`'s
+  second conjunct is what supplies it — so `ProcessCorrect.terminal` is
+  discharged by `.2` and the acceptance separates nothing this process can do.
+  A reviewer said so plainly and is right. `TerminalAccepts` is a *refutation*
+  tool: its non-vacuity is shown by a process whose terminal result the
+  specification rejects, which is `unwanted_results_are_refused` below rather
+  than anything about `hiccup`.
 * **`DemandsWellFormed`** bounds an issued bag at one occurrence.
 * **`transferred`** is where `hiccup`'s outstanding handle goes at the end: its
   remainder law permits *nothing* resolved and *nothing* pending, so the
   classification `notStuck` builds has a non-empty middle part and could not have
-  a non-empty other one.
+  a non-empty other one. `a_run_finishes_holding_the_handle` is the reachable
+  instance, which the first version of this file left out — it stated the law
+  algebra and not the run.
+
+  This one is load-bearing in the strong sense: swap the remainder law for
+  `TerminalRemainderLaw.strict` and `hiccup` has no progress record at all, since
+  at state 0 holding the handle it can neither step nor terminate. A reviewer
+  checked that too.
 
 What it does not close is `ViewAccepts`. `ProcessSpec.view` is `none` in every
 specification in the repository and `ViewFacet` is constructed nowhere; that is
@@ -56,7 +82,17 @@ inductive Sound
   | blip
   deriving DecidableEq, Repr
 
-/-- One demand: a handle the process holds and does not have to give back. -/
+/--
+One demand: a handle the process holds and does not have to give back.
+
+`LogicalFault` and `EnvironmentViolation` are both inhabited, and both were
+`PEmpty` in every specification in this repository — so `ProcessEvent.fault` and
+`ProcessEvent.environmentViolation` had no instance anywhere,
+`ProcessRunTransition.stepFault` and `stepEnvironmentViolation` were dead
+introduction rules, and every `Step` case for them in every fixture was an
+elimination. A reviewer found the second of those after the first was closed;
+this closes both.
+-/
 @[reducible] def hiccupVocabulary : ProcessVocabulary.{0} where
   ExternalEvent := Unit
   Demand := Unit
@@ -64,15 +100,19 @@ inductive Sound
   Observation := Sound
   InterruptReason := PEmpty
   LogicalFault := Unit
-  EnvironmentViolation := PEmpty
+  EnvironmentViolation := Unit
 
 /--
 Count down, beeping; a glitch costs a count and says nothing.
 
-The `.fault` case is the point of the process. Every other specification in the
-corpus has `LogicalFault := PEmpty`, so the one thing
+The `.fault` case is the point of the process, twice over. Every other
+specification in the corpus has `LogicalFault := PEmpty`, so the one thing
 `Grass/Process/Progress.lean`'s module note says the measure is *for* — a silent
-fault loop — had never been written down.
+fault loop — had never been written down. And it is the only step that *issues*
+anything: a glitch schedules a retry. Without that, every step of every process
+in this corpus issued the empty bag and `ProcessCorrect.demandsWellFormed` was
+discharged for the zero bag exactly as it always had been, which a reviewer
+pointed out after the first version of this file claimed to have closed it.
 -/
 @[reducible] def hiccup : ProcessSpec.{0, 0} where
   vocabulary := hiccupVocabulary
@@ -87,9 +127,9 @@ fault loop — had never been written down.
     match event with
     | .external _ => after = state - 1 ∧ issued = 0 ∧ emitted = [Sound.beep]
     | .result _ _ => after = state - 1 ∧ issued = 0 ∧ emitted = [Sound.beep]
-    | .fault _ => after = state - 1 ∧ issued = 0 ∧ emitted = []
+    | .fault _ => after = state - 1 ∧ issued = Bag.ofList [()] ∧ emitted = []
+    | .environmentViolation _ => after = state - 1 ∧ issued = 0 ∧ emitted = []
     | .interrupted _ reason => reason.elim
-    | .environmentViolation violation => violation.elim
   view := none
 
 /-! ## The law, and the acceptance -/
@@ -161,7 +201,10 @@ theorem no_blips {request : Nat} {segmented : Segmented hiccup.Observation}
         subst isEmitted
         simp only [ProcessRunState.history] at ih ⊢
         simpa using ih
-      | .environmentViolation violation, _ => exact violation.elim
+      | .environmentViolation _, ⟨_, _, isEmitted⟩ =>
+        subst isEmitted
+        simp only [ProcessRunState.history] at ih ⊢
+        simpa using ih
     | @settle _ _ _ _ _ _ emitted event _ _ _ stepped =>
       obtain ⟨_, body⟩ := stepped
       match event, body with
@@ -202,9 +245,9 @@ def hiccupProgress (request : Nat) :
     match event with
     | .external _ => exact ⟨state - 1, 0, [Sound.beep], running, rfl, rfl, rfl⟩
     | .result _ _ => exact ⟨state - 1, 0, [Sound.beep], running, rfl, rfl, rfl⟩
-    | .fault _ => exact ⟨state - 1, 0, [], running, rfl, rfl, rfl⟩
+    | .fault _ => exact ⟨state - 1, Bag.ofList [()], [], running, rfl, rfl, rfl⟩
+    | .environmentViolation _ => exact ⟨state - 1, 0, [], running, rfl, rfl, rfl⟩
     | .interrupted _ reason => exact reason.elim
-    | .environmentViolation violation => exact violation.elim
   notStuck := by
     intro _ state outstanding _ _
     by_cases finished : state = 0
@@ -231,8 +274,12 @@ def hiccupProgress (request : Nat) :
       subst isAfter
       show state - 1 < state
       exact Nat.sub_lt (Nat.pos_of_ne_zero running) Nat.one_pos
+    | .environmentViolation _, ⟨isAfter, _, _⟩ =>
+      refine Or.inr (Or.inr ?_)
+      subst isAfter
+      show state - 1 < state
+      exact Nat.sub_lt (Nat.pos_of_ne_zero running) Nat.one_pos
     | .interrupted _ reason, _ => exact reason.elim
-    | .environmentViolation violation, _ => exact violation.elim
 
 /-! ## And it is correct -/
 
@@ -257,8 +304,8 @@ def hiccupCorrect : ProcessCorrect hiccup hiccupAcceptance where
     | .external _, ⟨_, isIssued, _⟩ => rw [isIssued]; simp
     | .result _ _, ⟨_, isIssued, _⟩ => rw [isIssued]; simp
     | .fault _, ⟨_, isIssued, _⟩ => rw [isIssued]; simp
+    | .environmentViolation _, ⟨_, isIssued, _⟩ => rw [isIssued]; simp
     | .interrupted _ reason, _ => exact reason.elim
-    | .environmentViolation violation, _ => exact violation.elim
   terminal := by
     rintro _ _ _ _ ⟨_, isTrue⟩
     exact isTrue
@@ -294,11 +341,62 @@ theorem a_glitch_costs_a_count {request : Nat}
       (.running state outstanding observations))
     (running : state ≠ 0) :
     (hiccupProgress request).measure.Decreases state outstanding (state - 1)
-      (outstanding + 0) :=
+      (outstanding + Bag.ofList [()]) :=
   (hiccupProgress request).silent_fault_decreases (fault := ()) reached trivial
     ⟨running, rfl, rfl, rfl⟩
     (fun demanded => by
       rcases demanded with ⟨_, member, _⟩
       exact absurd member (by simp))
+
+/-! ## And a run that finishes still holding the handle -/
+
+/--
+**A run of request zero starts finished, and starts holding the handle.**
+
+`hiccup.Initial` issues one occurrence whatever the request, and state 0 is
+terminal — so the shortest run of this process is one that has nothing to do and
+something outstanding, which is exactly the shape the remainder law is about.
+-/
+theorem a_run_starts_finished_holding_the_handle :
+    Reachable hiccupAcceptance.terminalRemainder 0 (Segmented.empty.emit [])
+      (.running 0 (Bag.ofList [()]) []) :=
+  .initial (.running ⟨rfl, rfl, rfl⟩)
+
+/--
+**And it finishes by transferring it.**
+
+The instance `the_handle_is_transferred` states as law algebra and did not
+exhibit. `hiccupRemainder` permits nothing resolved and nothing pending, so the
+only classification available at this run state puts the whole outstanding bag in
+`transferred` — and `ProcessRunTransition.terminate` is the step that uses it.
+
+Before this, `TerminalDemandClassification.transferred` was `0` at every
+construction site in the corpus and §2's three-way partition had only ever been
+used two ways.
+-/
+theorem a_run_finishes_holding_the_handle :
+    ProcessRunTransition hiccupAcceptance.terminalRemainder 0
+      (.running 0 (Bag.ofList [()]) []) (.terminal 0 true []) :=
+  .terminate ⟨rfl, rfl⟩
+    { resolved := 0
+      transferred := Bag.ofList [()]
+      pending := 0
+      partition := by simp
+      permitted := by exact ⟨rfl, rfl⟩ }
+
+/--
+**And an unwanted result is refused.**
+
+What `TerminalAccepts` is for, which `hiccup` itself cannot show: its `Terminal`
+supplies the acceptance's own condition, so the field separates nothing about
+*this* process. It separates something about the class — a process that finishes
+with `false` has no `ProcessCorrect` against this acceptance, because
+`ProcessCorrect.terminal` would have to derive `false = true`.
+-/
+theorem unwanted_results_are_refused
+    (correct : ProcessCorrect hiccup hiccupAcceptance)
+    (state : Nat) (invariant : correct.Invariant state)
+    (finished : hiccup.Terminal 0 state false) : False :=
+  Bool.noConfusion (correct.terminal 0 state false invariant finished)
 
 end Grass.Process.Tests.Rich
