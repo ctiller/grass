@@ -198,6 +198,10 @@ inductive Alpha where
   /-- An operation whose provenance claims a root extent the allocation does not
   have. -/
   | lyingRootExtent
+  /-- An operation whose provenance claims an allocator the allocation was not
+  produced by: the buffer came from `VirtualAlloc` and this names it an image
+  mapping. Everything else is `store`, which commits. -/
+  | lyingSource
   /-- An access-free operation declaring an ordering mode the profile never
   registered, so the per-access check cannot see it. -/
   | computeWithUnregisteredOrdering
@@ -579,6 +583,12 @@ instance : HasOperationFacets Alpha where
             false true))
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
+    | .lyingSource =>
+        { memoryEffects := some (.single (acc
+            { bufferProv with source := .imageMapping } ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true))
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
     | .orderingFacetDisagrees =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
             false true))
@@ -826,21 +836,27 @@ declared here, in the state, because whether two allocations name the same bytes
 is a fact about the machine and not about provenance. -/
 def allocations₀ : List (AllocId × AllocationRecord) :=
   [ (bufferAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+                    source := .virtualAlloc
                     permission := .readWrite, live := true
                     bytes := zeroed64, base := some 0x1000 })
   , (viewAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+                  source := .mappedFile
                   permission := .readWrite, live := true
                   bytes := zeroed64, base := some 0x1000 })
   , (constAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+                   source := .imageMapping
                    permission := .readOnly, live := true
                    bytes := zeroed64, base := some 0x2000 })
   , (stackAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+                   source := .stack
                    permission := .readWrite, live := true, bytes := zeroed64
                    base := some 0x3000 })
   , (borrowedAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+                      source := .virtualAlloc
                       permission := .readWrite, live := true, bytes := zeroed64
                       base := some 0x4000 })
   , (chainedAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
+                     source := .mappedFile
                      permission := .readWrite, live := true, bytes := zeroed64
                      base := some 0x1000 }) ]
 
@@ -1689,6 +1705,36 @@ theorem a_lying_root_extent_is_recorded :
   intro s hs
   cases hs
   exact ⟨by decide, by decide, by decide⟩
+
+/-! ## A provenance that lies about where its storage came from
+
+`docs/MEMORY_MODEL.md` §2 asks a profile to distinguish sources such as
+`VirtualAlloc`, process heap, `malloc`, page-table mapping, kernel heap, bump
+allocator, stack, mapped file and device memory. `Provenance.source` recorded which
+one a descriptor claimed and the state held no counterpart, so the claim was
+unfalsifiable: two provenances differing only in `source` were the same storage to
+every rule in the layer. `AllocationRecord.source` is the counterpart. -/
+
+/-- **A lying source is a violation of its own.** The access is in bounds, in the
+right space, at the declared address, with sufficient permission -- every other
+clause of `denialOf` passes, so nothing else would have caught it. -/
+theorem a_lying_source_is_recorded :
+    ∀ s, (stepAlpha state₀ .lyingSource).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 ∧
+      s.violations.records?.any (fun r => r.class_ = .provenanceSourceMismatch) := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **The lie is one field.** `lyingSource`'s provenance is `store`'s with the source
+replaced, and restoring it recovers `store`'s exactly -- so the refusal above cannot
+be blamed on any other part of the provenance. `the_honest_extent_commits` below is
+the positive control: it steps `.store`, which commits with no violation. -/
+theorem the_lie_is_only_the_source :
+    { ({ bufferProv with source := .imageMapping } : Provenance) with
+      source := .virtualAlloc } = bufferProv ∧
+    ({ bufferProv with source := .imageMapping } : Provenance) ≠ bufferProv := by
+  exact ⟨by decide, by decide⟩
 
 /-- The same access with the honest extent commits, so the violation above is the
 `rootExtent` clause and not the range. -/

@@ -138,6 +138,20 @@ of the bounds it declared, it declared the wrong bounds. Review found the gap an
 found `rootExtent`'s docstring claiming M2 checked it. -/
 def provenanceExtentMismatch : AuditViolationClass := ⟨⟨"provenanceExtentMismatch"⟩⟩
 
+/-- A provenance whose recorded allocation source is not the source of the allocation
+it names.
+
+`docs/MEMORY_MODEL.md` §2 requires a profile to distinguish sources such as
+`VirtualAlloc`, process heap, `malloc`, page-table mapping, kernel heap, bump
+allocator, stack, mapped file and device memory. `Provenance.source` recorded the
+claim and nothing in the layer held a counterpart, so the distinction was a name a
+descriptor supplied about itself: two provenances differing only in `source`
+designated the same storage to every rule here, and a descriptor claiming device
+memory over a heap allocation was denied nothing. That is the shape of the deleted
+`AccessIntent.isDevice` -- a fact carried and never read -- and review found it as
+one. `AllocationRecord.source` is the counterpart and `denialOf` compares them. -/
+def provenanceSourceMismatch : AuditViolationClass := ⟨⟨"provenanceSourceMismatch"⟩⟩
+
 /-- An access whose declared address is not the address its allocation's placement
 gives that offset.
 
@@ -185,8 +199,9 @@ field nothing reads. `StepPolicy` carries the proof.
 def emittedByTransition : List AuditViolationClass :=
   [outOfBounds, deadProvenance, permissionDenied, uninitializedRead, misaligned,
    authorityUnavailable, obligationNotAuthorized, wrongAddressSpace,
-   machineAnswerIncomplete, provenanceExtentMismatch, addressDisagreesWithPlacement,
-   placementWraps, authorityEffectRefused, conflictingAccess]
+   machineAnswerIncomplete, provenanceExtentMismatch, provenanceSourceMismatch,
+   addressDisagreesWithPlacement, placementWraps, authorityEffectRefused,
+   conflictingAccess]
 
 end AuditViolationClass
 

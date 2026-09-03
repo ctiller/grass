@@ -1425,15 +1425,26 @@ with what it used to say.
   This was the weakest coverage in the layer and it was in the declaration-time seal
   — the thing §1 asks for before any question of what the state permits.
 
-- **`Provenance.source` has no counterpart in the state.** `AllocationRecord` records
-  extent, epoch, space, permission, liveness, bytes and base — not where the storage
-  came from. The only consumer of `d.provenance.source` under `Grass/` is
-  `admissibilityFailures`, which checks the *name* against a registry. §2 requires a
-  profile to distinguish `VirtualAlloc`, heap, `malloc`, stack, mapped file and device
-  memory; nothing can compare a claim to the storage, so two provenances differing
-  only in `source` are the same storage to every rule in the layer and both are
-  admitted. The same shape as the deleted `AccessIntent.isDevice`, and as
-  `requiredPermission` before `Permission.Grants` existed.
+- ~~**`Provenance.source` has no counterpart in the state.**~~ `AllocationRecord`
+  recorded extent, epoch, space, permission, liveness, bytes and base — not where the
+  storage came from. The only consumer of `d.provenance.source` under `Grass/` was
+  `admissibilityFailures`, which checks the *name* against a registry, so the claim
+  was unfalsifiable: §2 requires a profile to distinguish `VirtualAlloc`, heap,
+  `malloc`, stack, mapped file and device memory, and two provenances differing only
+  in `source` were the same storage to every rule in the layer. The same shape as the
+  deleted `AccessIntent.isDevice`, and as `requiredPermission` before
+  `Permission.Grants` existed.
+
+  Closed by `AllocationRecord.source`, its entry in `AllocationRecord.Metadata` —
+  omitting it there would have made `denialOf_congr_of_agrees` false — and
+  `denialOf`'s clause, which reports the new `provenanceSourceMismatch` rather than
+  collapsing into `deadProvenance`. `Tests/Op/FakeIsa.lean`'s `.lyingSource` is the
+  negative, `the_lie_is_only_the_source` shows the descriptor differs from `.store`
+  in exactly that field, and `the_honest_extent_commits` is the positive control.
+  Mutation-verified: neutering the clause to `record.source ≠ record.source` flips
+  the fixture. The profile's `allocationSources` registry lists `.imageMapping`, so
+  the fixture is refused by the state and not by admissibility — the two checks are
+  different questions and this is the one that was missing.
 - ~~**`MemoryState.allocate?`, `allocateAll?` and `tearDown?` were outside the door
   audit.**~~ §1's chokepoint sentence names bytes before authority — "raw mutation of
   memory bytes, initialization, permissions, provenance, or race state outside that

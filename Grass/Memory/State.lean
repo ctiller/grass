@@ -45,6 +45,19 @@ structure AllocationRecord where
   epoch : EpochId
   /-- The address space it lives in. -/
   space : AddressSpaceId
+  /-- Which allocator or mapping produced it.
+
+  The counterpart to `Provenance.source`, and it exists because there was none.
+  `docs/MEMORY_MODEL.md` §2 asks a profile to distinguish `VirtualAlloc`, process
+  heap, `malloc`, page-table mapping, kernel heap, bump allocator, stack, mapped
+  file and device memory; a descriptor recorded which of those it claimed and
+  nothing could compare the claim to the storage, so two provenances differing only
+  in `source` were the same storage to every rule in the layer. `denialOf` compares
+  them now, as `provenanceSourceMismatch`.
+
+  No default, for the same reason `base` has none: a profile says where an
+  allocation came from. -/
+  source : AllocationSourceId
   /-- The permission its storage carries. -/
   permission : Permission
   /-- Whether it is live. A dead allocation authorizes nothing, whatever
@@ -79,7 +92,7 @@ deriving DecidableEq, Repr
 /--
 Everything about an allocation except its bytes.
 
-`denialOf` reads exactly these six fields plus initialization, so this is the
+`denialOf` reads exactly these seven fields plus initialization, so this is the
 view a decision depends on. Naming it lets a framing argument say "the metadata
 did not move" without asserting the bytes did not, which is the whole point of a
 write.
@@ -91,6 +104,10 @@ structure AllocationRecord.Metadata where
   epoch : EpochId
   /-- Its address space. -/
   space : AddressSpaceId
+  /-- Which allocator or mapping produced it. Here because `denialOf` reads it; a
+  metadata view missing a decision input would make `denialOf_congr_of_agrees`
+  false. -/
+  source : AllocationSourceId
   /-- The permission its storage carries. -/
   permission : Permission
   /-- Whether it is live. -/
@@ -108,7 +125,8 @@ deriving DecidableEq, Repr
 
 /-- The metadata view of a record. -/
 def AllocationRecord.metadata (record : AllocationRecord) : AllocationRecord.Metadata :=
-  ⟨record.extent, record.epoch, record.space, record.permission, record.live, record.base⟩
+  ⟨record.extent, record.epoch, record.space, record.source, record.permission,
+   record.live, record.base⟩
 
 /--
 The memory state.

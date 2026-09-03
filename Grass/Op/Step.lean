@@ -936,7 +936,13 @@ theorem refusalOf_allows_the_unheld {policy : StepPolicy} {state : MachineState}
     if_neg (by simpa [Option.isNone_iff_eq_none, Option.isSome_iff_ne_none] using hauth),
     if_neg (by simpa using hstate), if_neg (fun h => hunheld h.1)]
 
-/-- Every class `denialOf` can return is one the transition declares. -/
+set_option maxHeartbeats 1000000 in
+/-- Every class `denialOf` can return is one the transition declares.
+
+The heartbeat bump is not decoration: the proof splits on every clause of
+`denialOf` and closes each by deciding membership in a fifteen-element list of
+`Name`-carrying structures, so its cost grows with the product. It crossed the
+default the round `provenanceSourceMismatch` was added. -/
 theorem denialOf_mem_emittedByTransition {state : MemoryState} {d : AccessDescriptor}
     {class_ : AuditViolationClass} (h : denialOf state d = some class_) :
     class_ ∈ AuditViolationClass.emittedByTransition := by

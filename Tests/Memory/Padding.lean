@@ -62,7 +62,7 @@ def epoch : EpochId := (FreshSupply.initial (Tag := EpochTag)).fresh.1
 which is the state a fresh allocation is actually in — `docs/MEMORY_MODEL.md` §4
 does not hand out zeros. -/
 def stackRecord₀ : AllocationRecord :=
-  { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
+  { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual, source := .stack
     permission := .readWrite, live := true, bytes := .empty
     base := some 0x1000 }
 

@@ -41,6 +41,7 @@ private def epoch : EpochId := (FreshSupply.initial (Tag := EpochTag)).fresh.1
 /-- Four kilobytes based at `0x1000`. -/
 def placedRecord : AllocationRecord :=
   { extent := ⟨0, 4096⟩, epoch := epoch, space := .cpuVirtual
+    source := .virtualAlloc
     permission := .readWrite, live := true, bytes := .empty, base := some 0x1000 }
 
 /-- The same shape, with nowhere to be. -/
@@ -140,6 +141,7 @@ def offsetAlloc : AllocId := allocs.fresh.2.fresh.2.fresh.1
 which fits; its *stop* is 250, which does not. -/
 def offsetRecord : AllocationRecord :=
   { extent := ⟨200, 50⟩, epoch := epoch, space := .cpuVirtual
+    source := .virtualAlloc
     permission := .readWrite, live := true, bytes := .empty
     base := some (0 - 100) }
 

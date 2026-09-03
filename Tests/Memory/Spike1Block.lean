@@ -60,7 +60,7 @@ yet. A fresh frame is uninitialized; `docs/MEMORY_MODEL.md` §4 does not hand ou
 zeros, and starting from `ByteStore.empty` is what keeps `mov transferred, 0`
 being the thing that initializes the slot. -/
 def stackRecord : AllocationRecord :=
-  { extent := ⟨0, 4096⟩, epoch := epoch₀, space := .cpuVirtual
+  { extent := ⟨0, 4096⟩, epoch := epoch₀, space := .cpuVirtual, source := .stack
     permission := .readWrite, live := true, bytes := .empty
     base := some 0x1000 }
 
@@ -68,6 +68,7 @@ def stackRecord : AllocationRecord :=
 the only part of the image this block reads. -/
 def imageRecord : AllocationRecord :=
   { extent := ⟨0, 8192⟩, epoch := epoch₀, space := .cpuVirtual
+    source := .imageMapping
     permission := .readOnly, live := true
     bytes := ByteStore.empty.write 2048 (List.replicate 8 0x40) true
     base := some 0x2800 }
