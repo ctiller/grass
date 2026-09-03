@@ -678,29 +678,58 @@ representation relation.
 
 ## 5. M3 — Cancellation and lifecycle
 
-**Status: one module written early, unmerged, unratified.** `coord1:6` ruled the
+**Status: three modules written, unmerged, unratified.** `coord1:6` ruled the
 canonical scoped cancellation form while M2 was in progress, so
-`Cancellation/Policy.lean` and its two invalidation fixtures were built out of
-order to discharge that disposition.
-The rest of M3 — masks, the `|>` algebra, termination contracts, facets, and all
-of byte flow — has not started, and the exit criterion below is undischarged.
+`Cancellation/Identity.lean` and `Cancellation/Policy.lean` were built out of
+order to discharge that disposition. `Cancellation/Compose.lean` follows, and it
+discharges the first two thirds of the exit criterion below. Termination
+contracts, facets, and all of byte flow have not started.
 
 ```text
-Grass/Process/Cancellation/Policy.lean scoped policy and certificate (written
-                                       early under coord1:6, ahead of M3)
-Grass/Process/Cancellation.lean        masks, summaries, the |> algebra
-Grass/Process/Termination.lean         modes, contracts, dispositions
-Grass/Process/Facet.lean               TerminationFacet and its constructors
-Grass/Process/Policy.lean              CancellationPolicy, scoped certificates
-Grass/Process/ByteFlow/Ingress.lean    phases, resolutions, conservation
-Grass/Process/ByteFlow/Egress.lean     offered/committed/queued, suffix retention
-Grass/Process/ByteFlow/Rechunk.lean    functional and capacity-aware rechunking
+Grass/Process/Cancellation/Identity.lean masks, point/call/region ids, CancelReason
+Grass/Process/Cancellation/Policy.lean   scoped policy and certificate (written
+                                         early under coord1:6, ahead of M3)
+Grass/Process/Cancellation/Compose.lean  the |> algebra and bounded cancellation
+Grass/Process/Termination.lean           modes, contracts, dispositions
+Grass/Process/Facet.lean                 TerminationFacet and its constructors
+Grass/Process/ByteFlow/Ingress.lean      phases, resolutions, conservation
+Grass/Process/ByteFlow/Egress.lean       offered/committed/queued, suffix retention
+Grass/Process/ByteFlow/Rechunk.lean      functional and capacity-aware rechunking
 ```
 
-Exit criterion: the `uncancellable |> cancelpoint |> uncancellable` worked
-example from [PROCESS.md](PROCESS.md) §3 is a theorem, the sequential
-composition of summaries is associative up to the stated transport, and both
-byte-flow conservation theorems hold over their full transition families.
+Two rows an earlier revision of this table had are gone. `Grass/Process/Policy.lean`
+duplicated `Cancellation/Policy.lean` and was left over from before the
+directory split. `Grass/Process/Cancellation.lean` was listed as the masks and
+`|>` module, and that path is now the cancellation *facade* under decision 134
+(§11), so the algebra went to `Cancellation/Compose.lean` instead — a collision
+this plan created for itself and is recording rather than quietly re-pointing.
+
+Exit criterion, in three parts:
+
+- **Discharged.** The `uncancellable |> cancelpoint |> uncancellable` worked
+  example from [PROCESS.md](PROCESS.md) §3 is a theorem.
+  `Tests/Process/ComposeFixtures.lean` states each of §3's four assertions about
+  it separately, including the closing one that carries the weight: a
+  forever-blocking uncancellable region cannot acquire eventual cancellation
+  merely by being sequenced with a later point. `blockingExample` contains the
+  very same cancellation point and is provably not eventually cancellable, which
+  is the case an author gets by writing the shape and forgetting the bounds.
+- **Discharged.** Sequential composition is associative — by `List.append_assoc`,
+  because a composite is a list of regions rather than a tree, so the two
+  bracketings are not merely equivalent but the same object. No transport is
+  needed, which is why this reads more simply than the criterion anticipated.
+- **Not started.** Both byte-flow conservation theorems over their full
+  transition families.
+
+What `Compose.lean` deliberately does *not* model is §3's `CancellationSummary`
+itself, whose fields — `PendingCancellationCustody`,
+`CancellationDelayBoundOrEnvironmentPending`, `CancellationDispositionAt`,
+`ProcessTerminationContract` — are types the corpus names and does not declare.
+They belong with the termination contract, and inventing them to make the
+summary look complete would be worse than leaving the row unwritten. The algebra
+is what this milestone's exit criterion actually asks for, and it is stated over
+regions carrying a mask and a bound, which is enough for every claim §3 makes
+about the example.
 
 Byte flow is here rather than in M2 because its phases are a cancellation race
 in disguise: `cancelling` is a phase, and the resolution tables are the
