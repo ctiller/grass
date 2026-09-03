@@ -657,17 +657,10 @@ one outright defect that had already merged — see §3.11's denial row.
   only producer. Neither is true of the type as written: the structure can be
   assembled directly by anyone who can discharge its fields. What is true is that
   the fields must be discharged, which is a real barrier and not the same claim.
-- **`AddressSpace.memoryType` and `AddressSpace.coherence` are never read.**
-  [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.1 makes them load-bearing: write-back and
-  write-combining differ in what is visible and when. Nothing consults either.
-- **`MemoryProfile.vocabularyVersion` is never read**, so nothing checks that a
-  profile's vocabulary version is one the transition understands.
-- **`MemoryProfile.package` is never read.** The §10 required proof package is a
-  checklist of propositions that the transition never consults, so a profile
-  carrying an unproved package steps exactly like one carrying a proved package.
-- **`ProtocolAuthority.issuer` and `TerminalOutcome`'s obligation and disposition
-  are never read**, so [OBLIGATIONS.md](OBLIGATIONS.md) §3's terminal dispositions
-  are recorded rather than enforced.
+- **`MemoryProfile.vocabularyVersion` is never checked.** A profile states which
+  vocabulary version it assumes and nothing compares that to what the transition
+  implements. There is one version and no migration theorems, so there is nothing
+  yet to compare against; this becomes real when a second version exists.
 - **`AccessIntent.isDevice` and `AccessDescriptor.observations` are never read.**
   §7.5 makes device participation load-bearing and `isDevice` is the field that
   would carry it. `ObservationLabel` was recorded in §3.13 as having no registry,
@@ -847,15 +840,25 @@ of those classes and fails if the scanner stops discriminating; it also asserts
 the same-named-field blind spot is still a blind spot, so that cannot quietly
 become a silent pass mistaken for coverage.
 
-It found six things six review rounds had not, all now in §4.2's owed list:
-`AddressSpace.memoryType` and `coherence`, which [MEMORY_MODEL.md](MEMORY_MODEL.md)
-§7.1 makes load-bearing — write-back versus write-combining changes what is
-visible — and which nothing reads; `MemoryProfile.vocabularyVersion`, so nothing
-checks a profile's vocabulary version; `MemoryProfile.package`, so the §10 proof
-checklist is never consulted by the transition that depends on it;
-`ProtocolAuthority.issuer`; and `TerminalOutcome`'s obligation and disposition, so
-[OBLIGATIONS.md](OBLIGATIONS.md) §3's terminal dispositions are recorded and not
-enforced.
+It reported six fields six review rounds had not. **On inspection only two were
+gaps**, and the first version of this section called all six defects — the same
+overstatement the tool itself was corrected for, made in the paragraph announcing
+the tool. What the audit finds is a field nothing projects; deciding whether that
+is a defect still takes reading the corpus, and I skipped that step.
+
+Checked one at a time: `AddressSpace.memoryType` and `coherence` are **not** gaps,
+because §7.1 requires the *event* to carry address space and memory type and
+`MemoryEvent.space` does; the rules that would consume them are §7.2's
+`ConsistencyProfile`, which is M8's. `MemoryProfile.package` is not a gap either:
+§10 names `VerifiedProgram` as what the package gates, and that composition is
+outside this layer. `ProtocolAuthority.issuer` is already recorded in its own
+docstring as M10 profile-closure work. `TerminalOutcome`'s fields await the
+terminal-accounting mechanism, which is a later milestone.
+
+That leaves `vocabularyVersion`, above, and the three device and retry fields
+below — `AccessIntent.isDevice`, `AccessDescriptor.observations`, and
+`Restartability` — which have a corpus requirement, no consumer, and no milestone
+that owns them.
 
 Limits, stated rather than discovered later. It cannot see a field consumed by
 pattern matching rather than projection, so those are allowlisted structurally and

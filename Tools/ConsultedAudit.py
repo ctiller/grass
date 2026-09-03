@@ -80,20 +80,28 @@ ALLOWED = {
     "start",
     "aliases",
     "substeps",
-    # --- Carried without a reader, each recorded as owed in
-    # --- docs/MEMORY_IMPLEMENTATION_PLAN.md section 4.2. Listing them here is the
-    # --- record that the gap is known, not a claim that it is fine.
+    # --- Carried without a projection. Being listed here is not "this is fine":
+    # --- it is the record that someone read the corpus and decided. The reasons
+    # --- differ, and conflating them is how the first version of section 4.2 of
+    # --- docs/MEMORY_IMPLEMENTATION_PLAN.md called four milestone boundaries
+    # --- defects.
+    #
+    # Genuine gaps: a corpus requirement, no consumer, and no milestone that owns
+    # them. Recorded as owed in section 4.2.
     "observations",       # section 7.5 device observation labels; no reader at all
     "isDevice",           # section 7.5 makes device participation load-bearing
     "restartability",     # section 7.4 retry rules have no mechanism
     "justification",      # transactional and permitsUninitialized name nothing
-    "memoryType",         # section 7.1: write-back vs write-combining changes visibility
-    "coherence",          # section 7.1: coherence domain, likewise
     "scope",              # ordering scope, with no registry to check it against
-    "vocabularyVersion",  # nothing checks a profile's vocabulary version
-    "package",            # the section 10 proof checklist is never consulted
-    "issuer",             # ProtocolAuthority's issuer is carried, not checked
-    "obligation",         # TerminalOutcome: dispositions are recorded, not enforced
+    "vocabularyVersion",  # one version exists, so nothing to compare against yet
+    #
+    # Not gaps: the consumer is a later milestone or another layer, and the field
+    # is carried exactly as its own document requires.
+    "memoryType",         # section 7.1 requires the event to carry it, and it does
+    "coherence",          # likewise; the rules are section 7.2's, which is M8
+    "package",            # section 10 gates VerifiedProgram, not this transition
+    "issuer",             # its docstring records this as M10 profile closure
+    "obligation",         # TerminalOutcome awaits terminal accounting
     "disposition",
     # Proof obligations: their purpose is that a constructor had to discharge
     # them, so nothing projects them. The structure-suffix rule above misses these
