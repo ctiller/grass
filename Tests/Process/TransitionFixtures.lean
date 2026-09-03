@@ -49,6 +49,7 @@ noncomputable def serverPlan : ProcessPlan graphRegistry fixtureBoundary NoOblig
   message := World.serverMessage
   steps := fun _ => liveSteps
   channel := fun _ => liveChannel
+  sessionOpenIsRecorded := fun _ _ _ => Iff.rfl
 
 /-- The world a step of it moves through is the one the other fixtures use. -/
 theorem plan_world_is_the_fixture_world :
@@ -351,5 +352,44 @@ def receiveAsStep : serverPlan.NetworkStep beforeReceive afterReceive where
 theorem history_did_not_move :
     afterReceive.usedNominals = beforeReceive.usedNominals :=
   receiveAsStep.nonallocating_preserves_history rfl
+
+/-! ## And a session that has been shut -/
+
+open Classical in
+/--
+The same world with the wire session closed.
+
+Reachable by `channelClose`, which `ClosesSession` now makes move the status;
+before that constructor existed, `SessionStatus.closed` was producible by
+nothing and this world was unreachable.
+-/
+noncomputable def afterClose : ServerWorld :=
+  { beforeReceive with
+      sessions := fun _ session =>
+        if session = wire then { cursorAt false wire with status := .closed }
+        else cursorAt false session }
+
+/-- It really is shut. -/
+theorem the_wire_is_shut : (afterClose.sessions () wire).status ≠ .open := by
+  simp [afterClose]
+
+/--
+**And nothing can be sent on it.**
+
+`ProcessPlan.no_send_on_a_closed_session` at a concrete plan and a concrete
+world. Three fields compose to get here: `sendOnOpenSession` makes the session
+law a demand, `sessionOpenIsRecorded` says the demanded assertion *is* the
+recorded status, and `ClosesSession` is what can put a status there.
+
+Each of the three was added because the previous one was not enough on its own,
+and none of them was found by reading the module that owns it.
+-/
+theorem nothing_can_be_sent_on_the_shut_wire
+    {message : serverPlan.message ()}
+    {occurrence : serverTopology.ChannelOccurrence () message}
+    {after : serverPlan.LogicalProcessNetwork}
+    (onWire : occurrence.1 = wire)
+    (sent : (serverPlan.steps ()).Send message occurrence afterClose after) : False :=
+  serverPlan.no_send_on_a_closed_session sent (by rw [onWire]; exact the_wire_is_shut)
 
 end Grass.Process.Tests.Transition

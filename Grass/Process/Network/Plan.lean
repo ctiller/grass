@@ -115,6 +115,28 @@ structure ProcessPlan (registry : ProtocolRegistry.{u, w, v})
   channel : (edge : topology.ChannelKind) →
     ChannelContract edge (message edge)
       (logicalWorldAgreement topology message Obligations) (steps edge)
+  /--
+  **And a contract's "open session" is the session the network records as open.**
+
+  `ChannelContract.sendOnOpenSession` makes the session law a *demand* rather
+  than a promise, and `sessionLocal` bounds what the assertion may read — but
+  neither says what it *means*, and `ChannelContract`'s world is an abstract
+  `World` with no sessions to mean it against. So a contract could set
+  `SessionOpen` to an assertion holding everywhere, satisfy both, and admit
+  sends on a session `channelClose` or `channelDeath` had already shut.
+
+  A plan's world is `LogicalProcessNetworkCore`, which does have a status, so
+  the tie belongs here. It could not be made at all until
+  `Grass/Process/Network/Transition.lean`'s `ClosesSession` and `KillsSession`
+  existed: `SessionStatus.closed` and `.died` were producible by nothing, so
+  there was no status for the assertion to be tied to.
+
+  `no_send_on_a_closed_session` is what it buys.
+  -/
+  sessionOpenIsRecorded : ∀ (edge : topology.ChannelKind) (session : topology.ChannelId edge)
+    (network : LogicalProcessNetworkCore topology message Obligations),
+    ((channel edge).SessionOpen session).holds network ↔
+      (network.sessions edge session).status = .open
 
 namespace ProcessPlan
 
@@ -130,6 +152,28 @@ construction dependency underneath it and authors should not have to spell it.
 -/
 abbrev LogicalProcessNetwork : Type (max u w v r m o) :=
   LogicalProcessNetworkCore plan.topology plan.message Obligations
+
+/--
+**No send happens on a closed or dead session.**
+
+The theorem `sessionOpenIsRecorded` exists for, and the one
+`Grass/Process/Network/Transition.lean`'s `KillsSession` docstring said was
+still missing when it was written: producing `SessionStatus.died` is real
+progress and does not by itself close the channel to sends.
+
+Three fields compose. `ChannelContract.sendOnOpenSession` says a send implies
+the contract's `SessionOpen` held; `sessionOpenIsRecorded` says that assertion
+is the recorded status; and `SessionStatus` has exactly three constructors, so
+"not open" is "closed or died".
+-/
+theorem no_send_on_a_closed_session {edge : plan.topology.ChannelKind}
+    {message : plan.message edge}
+    {occurrence : plan.topology.ChannelOccurrence edge message}
+    {before after : plan.LogicalProcessNetwork}
+    (sent : (plan.steps edge).Send message occurrence before after)
+    (shut : (before.sessions edge occurrence.1).status ≠ .open) : False :=
+  shut ((plan.sessionOpenIsRecorded edge occurrence.1 before).mp
+    ((plan.channel edge).sendOnOpenSession message occurrence before after sent))
 
 /-- The canonical agreement this plan's contracts are stated over. -/
 noncomputable abbrev agreement :
