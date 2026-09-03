@@ -72,6 +72,8 @@ field transports unchanged.
 -/
 theorem receiving_after_the_beep :
     serverPlan.Delivers Grass.Process.Tests.Commit.afterBeep afterBoth () wire escrowed where
+  contractual := Transition.receiving_resolves_the_escrow.contractual
+  onItsSession := rfl
   wasOutstanding := Transition.receiving_resolves_the_escrow.wasOutstanding
   nowResolved := Transition.receiving_resolves_the_escrow.nowResolved
   ledgerExtends := Transition.receiving_resolves_the_escrow.ledgerExtends

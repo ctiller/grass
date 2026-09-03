@@ -156,10 +156,30 @@ is what surfaced it; the same defect for shared regions is recorded on
 `statusUnchanged` is what keeps the widening honest: a delivery advances the
 cursor and does not close a channel, so a caller reading the status still learns
 something from it.
+
+`contractual` was missing for four review passes, and its absence was the whole
+receive half of `Grass/Process/Network/Plan.lean`'s promised tie between a plan's
+contracts and its transitions. `SendsEscrow` had it; `ChannelSteps.Receive` was
+mentioned by no structure in this file, so `ChannelContract.receive` — §3's
+`ReceiverPre * Escrow ⊢ ReceiverPost` — was spent by nothing, and a `receive`
+transition could deliver an occurrence the plan's own relation forbids,
+including one whose `ReceiverPre` is false. Local adversarial review found it by
+grepping for the one place `plan.steps` was used and noticing there was only one.
 -/
 structure Delivers (before after : plan.LogicalProcessNetwork)
     (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
     (occurrence : EdgeOccurrence plan.topology plan.message edge) : Prop where
+  /-- The edge's own receive relation admits this step. -/
+  contractual : (plan.steps edge).Receive occurrence.1 occurrence.2 before after
+  /--
+  **And it is this session's occurrence.**
+
+  `session` and `occurrence` were independent parameters, so a delivery could
+  read one session's ledger and advance another's cursor. Every other field is
+  stated at `session` and the occurrence carries its own, which is exactly the
+  shape `Spawns.slotAgrees` was added to close for instances.
+  -/
+  onItsSession : occurrence.2.1 = session
   /-- It was in flight. -/
   wasOutstanding : (before.inFlight edge session).Outstanding occurrence
   /-- It is now received. -/
@@ -174,6 +194,29 @@ structure Delivers (before after : plan.LogicalProcessNetwork)
   /-- This session's escrow and this session's cursor, and nothing else. -/
   scope : plan.TouchesOnly before after
     (fun fragment => fragment = .escrow edge session ∨ fragment = .session edge session)
+
+namespace Delivers
+
+variable {plan}
+
+/--
+**A delivery establishes the receiver's postcondition.**
+
+`docs/PROCESS.md` §3: receive "consumes `ReceiverPre * Escrow` and establishes
+`ReceiverPost`; the sender never fabricates receiver state." The counterpart of
+`SendsEscrow.establishes_escrow`, and the theorem `contractual` exists for: until
+that field, `ChannelContract.receive` was a law about a relation no transition
+invoked.
+-/
+theorem establishes_receiverPost {before after edge session occurrence}
+    (delivered : plan.Delivers before after edge session occurrence)
+    (receiverPre : ((plan.channel edge).ReceiverPre occurrence.1 occurrence.2).holds before)
+    (escrowed : ((plan.channel edge).Escrow occurrence.1 occurrence.2).holds before) :
+    ((plan.channel edge).ReceiverPost occurrence.1 occurrence.2).holds after :=
+  (plan.channel edge).receive occurrence.1 occurrence.2 before after
+    delivered.contractual receiverPre escrowed
+
+end Delivers
 
 /--
 A channel is closed in the ordinary way.
@@ -1205,9 +1248,9 @@ A step driven by entropy from outside the program.
 environment from one *spinning*: a frontier is a place only the outside world
 can move you off.
 
-A `processStep` qualifies when its event either carries entropy *or* settles an
-outstanding demand, and a `timeout` qualifies outright. Both halves of the first
-clause are needed and a first draft had neither right.
+A `processStep` qualifies when its event *arrived from outside* — entropy, or a
+result to a demand the process is waiting on — and a `timeout` qualifies
+outright. Three drafts of that clause were wrong, in three different directions.
 
 **It was too narrow.** §7 asks a plan to "reach a law-bearing
 external/**demand-result** frontier", and the step that leaves a demand-result
@@ -1228,14 +1271,27 @@ at the network was inconsistent with that, and internally inconsistent too: a
 `environmentViolation` *constructor* was — the same occurrence classified two
 ways by which constructor a plan routed it through.
 
-Both were found by local adversarial review. What remains open: a `.result` may
-be answered by a child rather than by the driver, and this cannot tell them
-apart — `rootLocalDemandProjection` exists only for the root's protocol. That
-makes the predicate slightly wider than "the outside must act", and
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.44 records it.
+**And too wide again, in the repair.** The fix for the first was
+`event.settles ≠ none`, and `settles` is `some` for `.interrupted` as well as
+for `.result`. An interruption is a process abandoning *its own* outstanding
+demand, which §2 calls an internal decision — so the repair reintroduced exactly
+the defect the paragraph above removes, one constructor over: a `processStep`
+carrying `.interrupted` was entropy-driven while `NetworkTransition.interrupt`,
+which records the same abandonment as an ending, was not. At `countdown` it had
+teeth, because `Step` on `.interrupted` decrements the counter — a network could
+grind its own state down through steps a frontier excuses.
+
+`ProcessEvent.arrivesFromOutside` is the split that is actually wanted, and it is
+neither of the two the vocabulary already had. All three were found by local
+adversarial review, each after the previous repair landed.
+
+What remains open: a `.result` may be answered by a child rather than by the
+driver, and this cannot tell them apart — `rootLocalDemandProjection` exists only
+for the root's protocol. That makes the predicate slightly wider than "the
+outside must act", and `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.44 records it.
 -/
 def DrivenByEntropy : plan.NetworkTransition before after → Prop
-  | .processStep _ _ event _ _ _ _ => event.externalEntropy ≠ none ∨ event.settles ≠ none
+  | .processStep _ _ event _ _ _ _ => event.arrivesFromOutside
   | .timeout _ _ _ _ => True
   | _ => False
 

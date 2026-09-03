@@ -220,6 +220,59 @@ def externalEntropy : ProcessEvent v → Option v.ExternalEvent
   | .fault _ => none
   | .environmentViolation _ => none
 
+/--
+Whether this event arrived from outside the process rather than being something
+the process decided.
+
+A third split, and the one a *network* frontier needs.
+`Grass/Process/Network/Progress.lean` asks "can only the outside move this
+network off here", and §7 answers with an "external/**demand-result** frontier":
+a `.result` is not entropy, but waiting for one is still waiting for someone
+else.
+
+`.interrupted` is the case this exists to separate, and it is why neither
+`externalEntropy` nor `settles` will do. It settles a demand, so a
+`settles ≠ none` test calls it external; but §2 describes it as a process
+abandoning *its own* outstanding demand, which is a decision the process made.
+Local adversarial review found the network classifying it as entropy-driven
+while the `interrupt` *constructor*, which records the same abandonment as an
+ending, was not — the same occurrence classified two ways by which constructor a
+plan routed it through, which is verbatim the argument that had already removed
+`environmentViolation` from the same list.
+-/
+def arrivesFromOutside : ProcessEvent v → Prop
+  | .external _ => True
+  | .result _ _ => True
+  | .interrupted _ _ => False
+  | .fault _ => False
+  | .environmentViolation _ => False
+
+@[simp] theorem arrivesFromOutside_external (event : v.ExternalEvent) :
+    (ProcessEvent.external (v := v) event).arrivesFromOutside := trivial
+
+@[simp] theorem arrivesFromOutside_result (demand : v.Demand) (result : v.Result demand) :
+    (ProcessEvent.result demand result).arrivesFromOutside := trivial
+
+@[simp] theorem not_arrivesFromOutside_interrupted (demand : v.Demand)
+    (reason : v.InterruptReason) :
+    ¬ (ProcessEvent.interrupted demand reason).arrivesFromOutside := fun h => h
+
+@[simp] theorem not_arrivesFromOutside_fault (fault : v.LogicalFault) :
+    ¬ (ProcessEvent.fault fault).arrivesFromOutside := fun h => h
+
+@[simp] theorem not_arrivesFromOutside_environmentViolation (violation : v.EnvironmentViolation) :
+    ¬ (ProcessEvent.environmentViolation violation).arrivesFromOutside := fun h => h
+
+/-- Entropy arrives from outside, which is the containment the two splits owe. -/
+theorem arrivesFromOutside_of_externalEntropy {event : ProcessEvent v}
+    (isEntropy : event.externalEntropy ≠ none) : event.arrivesFromOutside := by
+  cases event with
+  | external _ => trivial
+  | result _ _ => trivial
+  | interrupted _ _ => exact absurd rfl isEntropy
+  | fault _ => exact absurd rfl isEntropy
+  | environmentViolation _ => exact absurd rfl isEntropy
+
 @[simp] theorem externalEntropy_external (event : v.ExternalEvent) :
     (ProcessEvent.external (v := v) event).externalEntropy = some event := rfl
 

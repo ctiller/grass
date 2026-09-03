@@ -49,7 +49,7 @@ noncomputable def serverPlan : ProcessPlan graphRegistry fixtureBoundary NoOblig
   message := World.serverMessage
   steps := fun _ => liveSteps
   channel := fun _ => liveChannel
-  sessionOpenIsRecorded := fun _ _ _ => Iff.rfl
+  sessionOpenIsRecorded := fun _ _ _ open' => open'
   escrowImpliesOutstanding := fun _ _ _ _ escrowed => escrowed
 
 /-- The world a step of it moves through is the one the other fixtures use. -/
@@ -203,6 +203,12 @@ constant.
 -/
 theorem receiving_resolves_the_escrow :
     serverPlan.Delivers beforeReceive afterReceive () wire escrowed where
+  contractual := by
+    refine ⟨rfl, ?_, ?_⟩
+    · rw [beforeReceive_wire]
+      exact ⟨List.mem_cons_self, rfl⟩
+    · simp [beforeReceive, afterReceive, cursorAt]
+  onItsSession := rfl
   wasOutstanding := by
     rw [beforeReceive_wire]
     exact ⟨List.mem_cons_self, rfl⟩

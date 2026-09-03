@@ -132,10 +132,18 @@ structure ProcessPlan (registry : ProtocolRegistry.{u, w, v})
   there was no status for the assertion to be tied to.
 
   `no_send_on_a_closed_session` is what it buys.
+
+  An implication rather than an equivalence, for the reason the next field gives
+  for itself. This was an `↔` and only `.mp` was ever used; the `←` direction
+  pins `SessionOpen` to *exactly* the status, so no contract could require
+  anything more of a session before a send — not a handshake, not a capability,
+  not a condition on the receiver's cursor, which `sessionLocal` explicitly
+  permits an author to read. Local adversarial review found the asymmetry with
+  the neighbouring field, whose docstring already made the argument.
   -/
   sessionOpenIsRecorded : ∀ (edge : topology.ChannelKind) (session : topology.ChannelId edge)
     (network : LogicalProcessNetworkCore topology message Obligations),
-    ((channel edge).SessionOpen session).holds network ↔
+    ((channel edge).SessionOpen session).holds network →
       (network.sessions edge session).status = .open
   /--
   **And a contract's escrow claim is escrow the ledger actually holds.**
@@ -151,6 +159,15 @@ structure ProcessPlan (registry : ProtocolRegistry.{u, w, v})
   is assumed noncopyable", so `Escrow` is *more* than outstandingness and an
   `↔` would forbid the token. What must not happen is the other direction: a
   claim with nothing behind it.
+
+  It does not exclude every degenerate contract, and the residual escape is
+  worth naming: an `Escrow` that holds *nowhere* satisfies this vacuously, and
+  then `ChannelContract.send` forces `steps.Send` to be empty wherever `SendPre`
+  and `SessionOpen` hold — with `sendOnOpenSession`, empty outright. Such a plan
+  is degenerate rather than unsound, and nothing in `ProcessPlan` requires
+  `steps.Send` to be inhabited. The same is true of the field above and of
+  `ChannelContract.sendOnOpenSession` before them: a plan whose relations are
+  empty satisfies every tie.
   -/
   escrowImpliesOutstanding : ∀ (edge : topology.ChannelKind) (carried : message edge)
     (occurrence : topology.ChannelOccurrence edge carried)
@@ -192,24 +209,35 @@ theorem no_send_on_a_closed_session {edge : plan.topology.ChannelKind}
     {before after : plan.LogicalProcessNetwork}
     (sent : (plan.steps edge).Send message occurrence before after)
     (shut : (before.sessions edge occurrence.1).status ≠ .open) : False :=
-  shut ((plan.sessionOpenIsRecorded edge occurrence.1 before).mp
+  shut (plan.sessionOpenIsRecorded edge occurrence.1 before
     ((plan.channel edge).sendOnOpenSession message occurrence before after sent))
 
 /--
 **A send really puts the message in flight.**
 
-`ChannelContract.send` hands the channel `Escrow message occurrence` as its
-postcondition; `escrowImpliesOutstanding` says that claim is the ledger's. So
-after a send the occurrence is created and unresolved — not merely asserted to
-be by a contract that chose what its own assertion means.
+Two fields compose. `ChannelContract.send` hands the channel
+`Escrow message occurrence` as its postcondition — on an open session, which
+`sendOnOpenSession` demands rather than assumes — and `escrowImpliesOutstanding`
+says that claim is the ledger's. So after a send the occurrence is created and
+unresolved, not merely asserted to be by a contract that chose what its own
+assertion means.
+
+An earlier version took the escrow claim as a hypothesis and had no `Send` in it
+at all: it was `escrowImpliesOutstanding` eta-expanded, named as though it were
+a theorem about sends, with a docstring describing a composition the statement
+did not perform. Local adversarial review found it. The composition is what
+makes the name true, and it is what a driver actually holds — a send it took,
+not an assertion it was handed.
 -/
 theorem send_puts_it_in_flight {edge : plan.topology.ChannelKind}
     {carried : plan.message edge}
     {occurrence : plan.topology.ChannelOccurrence edge carried}
-    {after : plan.LogicalProcessNetwork}
-    (escrowed : ((plan.channel edge).Escrow carried occurrence).holds after) :
+    {before after : plan.LogicalProcessNetwork}
+    (sent : (plan.steps edge).Send carried occurrence before after)
+    (sendPre : ((plan.channel edge).SendPre carried).holds before) :
     (after.inFlight edge occurrence.1).Outstanding ⟨carried, occurrence⟩ :=
-  plan.escrowImpliesOutstanding edge carried occurrence after escrowed
+  plan.escrowImpliesOutstanding edge carried occurrence after
+    ((plan.channel edge).send_needs_an_open_session carried occurrence sent sendPre).2
 
 /-- The canonical agreement this plan's contracts are stated over. -/
 noncomputable abbrev agreement :
