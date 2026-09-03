@@ -1557,17 +1557,8 @@ fn apply_review_merge_authorized(
             env.id, d.merge_engine_epoch
         )));
     }
-    for check in &d.checks {
-        if !chain
-            .current_request
-            .required_checks
-            .iter()
-            .any(|c| c.as_str() == check.command.as_str())
-        {
-            // Extra checks beyond required are fine; required checks must
-            // all be present, verified below.
-        }
-    }
+    // Extra checks beyond required are fine; required checks must all be
+    // present, verified below.
     for required in chain.current_request.required_checks.iter() {
         if !d
             .checks
@@ -2401,6 +2392,11 @@ mod tests {
         assert_eq!(state.issues[&issue_env.id].current_target, bob);
         assert!(state.exclusive.is_contested(&resolve_env.id));
         assert!(state.exclusive.is_contested(&reassign_env.id));
+        // Round-4 adversarial review: `reset_issue_to_conflict` clears
+        // `resolution_summary` alongside `status` -- the provisionally-
+        // applied resolve's summary must not linger once the race resets
+        // the issue back to neutral.
+        assert_eq!(state.issues[&issue_env.id].resolution_summary, None);
     }
 
     /// Gate 16, exercised at the full apply.rs level (not just exclusive.rs
@@ -6595,6 +6591,71 @@ mod tests {
         let err = apply_event(&mut state, &cleared_env).unwrap_err();
         assert!(
             err.to_string().contains("must accept the nomination"),
+            "{err}"
+        );
+    }
+
+    /// Round-4 adversarial review, Significant finding: `apply_review_
+    /// reassigned`'s inherited-findings check compares `inherited !=
+    /// still_open` as *sets*, so a naive implementation dropping the
+    /// accompanying `d.inherited_findings.len() != inherited.len()` length
+    /// check would silently accept a reassignment that cites the one open
+    /// finding twice (the duplicate collapses to the same set under the
+    /// `!=` comparison). This was previously entirely untested -- no test
+    /// exercised the "inherited_findings must equal every still-open
+    /// finding exactly once" rejection at all, duplicate or otherwise.
+    #[test]
+    fn rejects_a_reassignment_that_cites_the_same_open_finding_twice() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        let mut state = empty_state(&[]);
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        apply_ok(&mut state, &register(&carol, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let changes_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                nomination: nominate_env.id.clone(),
+                reviewed_commit: hash(3),
+                findings: vec![finding("f1")],
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &changes_env);
+
+        let request = review_request(&[&alice], &bob);
+        let duplicate_ref = crate::common::FindingRef {
+            changes_event: changes_env.id.clone(),
+            finding_id: short("f1"),
+        };
+        let reassign_env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&nominate_env.id, &changes_env.id]),
+            &EventData::ReviewReassigned(ReviewReassigned {
+                authors: request.authors.clone(),
+                product_branch: request.product_branch.clone(),
+                reviewer: carol.clone(),
+                required_checks: request.required_checks.clone(),
+                review_scope: request.review_scope.clone(),
+                summary: request.summary.clone(),
+                target_branch: request.target_branch.clone(),
+                evidence: request.evidence.clone(),
+                replaces: nominate_env.id.clone(),
+                reason: text("bob went quiet"),
+                inherited_findings: vec![duplicate_ref.clone(), duplicate_ref],
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &reassign_env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("inherited_findings must equal every still-open finding exactly once"),
             "{err}"
         );
     }

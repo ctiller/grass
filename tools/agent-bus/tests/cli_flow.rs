@@ -423,6 +423,52 @@ fn submit_and_coordinate_publish_an_event_and_tail_shows_it() {
     assert_eq!(events[1]["data"]["note"], "hi");
 }
 
+/// `submit --observes <id>` (a cross-agent causal reference) was never
+/// exercised by any test. `refs` must exactly equal the ids the event's own
+/// data references (`envelope.rs`'s `refs mismatch` check) -- `--observes`
+/// is how the CLI caller supplies those, since `submit` has no other way to
+/// populate `refs`. Confirms the flag actually reaches the published
+/// event's `refs`, not merely accepted and silently dropped.
+#[test]
+fn submit_observes_records_a_cross_agent_reference() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register(repo.path(), "bob", "implementor", "host2");
+
+    let issue = submit(
+        repo.path(),
+        "coord1",
+        "issue.opened",
+        r#"{"target":"bob","issue_kind":"bug","severity":"normal","summary":"s","locations":[],"reproduction":[],"blocks":[],"evidence":[]}"#,
+        "c1",
+    );
+    coordinate(repo.path(), "coord1", "host1", 0);
+    let issue_path = issue["outbox_path"].as_str().unwrap();
+    assert!(!issue_path.is_empty());
+    let issue_id = "coord1:1";
+
+    run_json(bin().current_dir(repo.path()).args([
+        "submit",
+        "--agent",
+        "bob",
+        "--kind",
+        "issue.acknowledged",
+        "--data",
+        &format!(r#"{{"issue":"{issue_id}","assignment":"{issue_id}","note":""}}"#),
+        "--client-id",
+        "c2",
+        "--observes",
+        issue_id,
+    ]));
+    coordinate(repo.path(), "bob", "host2", 0);
+
+    let tailed = tail(repo.path(), "bob");
+    let events = tailed["events"].as_array().unwrap();
+    assert_eq!(events[1]["kind"], "issue.acknowledged");
+    let refs = events[1]["refs"].as_array().unwrap();
+    assert_eq!(refs, &vec![serde_json::json!(issue_id)]);
+}
+
 /// `tail --sync` fetches `--agent`'s stream from the remote first, rather
 /// than reading whatever happens to already be local. A brand-new checkout
 /// that has never fetched anything has no local ref for coord1's stream at
@@ -684,6 +730,58 @@ fn register_standby_then_succeed_moves_custody_and_locks_out_the_old_custodian()
     // publishes exactly the preserved outbox entry.
     let out = coordinate(repo.path(), "alice", "host-b", 1);
     assert_eq!(out["published_events"], serde_json::json!(["alice:1"]));
+}
+
+/// Round-4 adversarial review, Critical finding: `succeed`'s JSON output
+/// used to surface only the `published` half of each of its three
+/// publications (registry, resumed outbox, stream), silently dropping any
+/// `rejected`/`not_attempted` entries -- unlike `register` and `coordinate`,
+/// which surface all of them. An autonomous agent calling `succeed` when
+/// something in the resumed outbox is rejected got exit 0 and no
+/// explanation. This proves the fields are actually wired, not merely
+/// present-and-always-empty: a bogus candidate left in the target's outbox
+/// before succession is drained under the new custody and must show up in
+/// `resumed_rejected`.
+#[test]
+fn succeed_surfaces_a_rejected_candidate_from_the_resumed_outbox() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register_with(
+        repo.path(),
+        "alice",
+        "implementor",
+        "host-a",
+        Some("alice-standby"),
+    );
+
+    // A structurally valid but semantically bogus candidate, preserved in
+    // alice's local outbox before succession -- the same "unknown issue"
+    // recipe `outbox_shows_a_rejected_candidates_durable_receipt` uses.
+    submit(
+        repo.path(),
+        "alice",
+        "issue.acknowledged",
+        r#"{"issue":"coord1:99","assignment":"coord1:99","note":""}"#,
+        "bogus",
+    );
+
+    let succeeded = succeed(repo.path(), "alice-standby", "alice", "host-b");
+    assert_eq!(succeeded["resumed_events"], serde_json::json!([]));
+    let resumed_rejected = succeeded["resumed_rejected"].as_array().unwrap();
+    assert_eq!(resumed_rejected.len(), 1);
+    assert_eq!(resumed_rejected[0]["kind"], "issue.acknowledged");
+    assert!(resumed_rejected[0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("unknown issue"));
+
+    // The registry and stream publications themselves succeeded cleanly --
+    // both `_rejected`/`_not_attempted` fields are present and empty, not
+    // merely absent.
+    assert_eq!(succeeded["registry_rejected"], serde_json::json!([]));
+    assert_eq!(succeeded["registry_not_attempted"], serde_json::json!([]));
+    assert_eq!(succeeded["stream_rejected"], serde_json::json!([]));
+    assert_eq!(succeeded["stream_not_attempted"], serde_json::json!([]));
 }
 
 // ---------------------------------------------------------- error-path tests

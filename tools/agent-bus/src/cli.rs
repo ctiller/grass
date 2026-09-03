@@ -546,8 +546,13 @@ fn succeed(args: SucceedArgs) -> AbResult<()> {
         "registry_epoch": new_epoch.id.as_str(),
         "new_custody_epoch": new_custody_epoch,
         "registry_published": registry_receipt.published,
+        "registry_rejected": registry_receipt.rejected,
+        "registry_not_attempted": registry_receipt.not_attempted,
         "resumed_events": resumed.published.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
+        "resumed_rejected": resumed.rejected.iter().map(|r| serde_json::json!({"kind": r.kind, "reason": r.reason})).collect::<Vec<_>>(),
         "stream_published": stream_receipt.published,
+        "stream_rejected": stream_receipt.rejected,
+        "stream_not_attempted": stream_receipt.not_attempted,
     }));
     Ok(())
 }

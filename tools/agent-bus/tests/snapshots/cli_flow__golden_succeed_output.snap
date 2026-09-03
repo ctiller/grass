@@ -5,11 +5,16 @@ expression: out
 {
   "new_custody_epoch": 1,
   "registry_epoch": "[hash]",
+  "registry_not_attempted": [],
   "registry_published": {
     "refs/heads/agent-registry": "[hash]"
   },
+  "registry_rejected": [],
   "resumed_events": [],
+  "resumed_rejected": [],
+  "stream_not_attempted": [],
   "stream_published": {
     "refs/heads/agent-events/alice": "[hash]"
-  }
+  },
+  "stream_rejected": []
 }
