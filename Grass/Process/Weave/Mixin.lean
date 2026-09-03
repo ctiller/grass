@@ -186,10 +186,17 @@ def ResourceOwnershipObligation
 /--
 And the obligation that it holds of an initial network.
 
-§8's `initial` field needs `ExactInitialNetwork`, and there is no
-initial-network relation yet — `Grass/Process/Network/Transition.lean` gives
-steps and not starts. Named rather than written as a field that could only be
-discharged vacuously.
+§8's `initial` field needs `ExactInitialNetwork`, and this definition predates
+it: it takes an arbitrary `Initial` predicate because there was nothing to state
+the obligation against.
+
+**There is now**, and this module's own note above says so.
+`Grass/Process/Network/Initial.lean` supplies `ExactInitialNetwork` and
+`HoldsAtEveryStart`, and `holds_along_every_execution_from_a_start` is the
+composition this could not reach. So this definition is superseded and has no
+consumer; it is kept only because deleting a named obligation is a decision about
+what §8 owes rather than a tidy-up, and
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.77 is where that is recorded.
 -/
 def HoldsInitially (Initial : plan.LogicalProcessNetwork → Prop) : Prop :=
   ∀ network, Initial network → mixin.assertion.holds network

@@ -184,14 +184,19 @@ different programs is not a selection.
 
 The keys are forced together by the *lookup's* own uniqueness field, and the
 entries by `keysDistinct`. `StandardRealizerRegistry.unique` — §4's stated law —
-is not used by this proof or by any other theorem here; its only consumer is
-`lookup_of_own_entry`, which is how a lookup is built in the first place.
+is not used by *this* proof; its consumers are `lookupUniquenessIsRedundant`,
+which derives the lookup's field from it, and `lookup_of_own_entry`, which is how
+a lookup is built in the first place.
 
-A first draft's docstring claimed both registry laws were used, and the module
-note claimed every `SpecEquivalence` law existed to make this provable. Local
-adversarial review reproved it over a registry carrying only `keysDistinct` and
-over a bare relation with no laws at all. The theorem is real; that account of
-its economics was not.
+Two earlier accounts of that were wrong and each was checked rather than read. A
+first draft claimed both registry laws were used here, and the module note
+claimed every `SpecEquivalence` law existed to make this provable; a reviewer
+reproved the theorem over a registry carrying only `keysDistinct` and over a bare
+relation with no laws at all. The correction then overshot — "not used by this
+proof **or by any other theorem here**" — and a second reviewer pointed at
+`lookupUniquenessIsRedundant`, twenty lines above, whose entire body is
+`registry.unique`. The theorem is real; the accounting has now been wrong twice
+in opposite directions.
 -/
 theorem selection_is_determined (left right : ExactStandardRealizerLookup registry spec) :
     left.entry = right.entry := by

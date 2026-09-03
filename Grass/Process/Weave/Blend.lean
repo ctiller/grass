@@ -37,6 +37,12 @@ two of a component's own demands could embed to one woven demand and a single
 result would answer both — the multiplicity failure
 `Grass/Process/Bag.lean` forbids inside one component, reappearing at the seam.
 
+The same is true of the observation and entropy embeddings, and for a round no
+theorem said so: a reviewer deleted `observationInjective` and
+`externalEventInjective` and every theorem in this module still held.
+`left_observation_source_is_unique` and `left_entropy_source_is_unique` are what
+spend them.
+
 **And `result` is a field no theorem here consumes.** Local adversarial review
 deleted it and every theorem below still held, and built a legal weave whose
 logger `result` fabricates a byte count for every `write` — `docs/PROCESS.md`
@@ -101,8 +107,10 @@ structure VocabularyEmbedding (part whole : ProcessVocabulary.{u}) : Type u wher
   /--
   **And no two of its demands land on one.**
 
-  What makes `Routes` a function rather than a relation, and the seam-level form
-  of the multiplicity law `Grass/Process/Bag.lean` enforces inside a component.
+  What makes the routing a function rather than a relation, and the seam-level
+  form of the multiplicity law `Grass/Process/Bag.lean` enforces inside a
+  component. (`Routes`, which an earlier version of this sentence named, exists
+  nowhere in the corpus.)
   -/
   demandInjective : ∀ left right, demand left = demand right → left = right
   /--
@@ -144,8 +152,8 @@ structure VocabularyEmbedding (part whole : ProcessVocabulary.{u}) : Type u wher
 /--
 `docs/PROCESS.md` §8's disjointness condition, as a structure.
 
-Only the demand and observation namespaces are required disjoint here, because
-those are the two the theorems below use. §8 also names events and results:
+The demand, observation and external-event namespaces are all required
+disjoint, and all three are used below. §8 also names events and results:
 events have `externalEventsDisjoint`. *Results* need no field of their own, and
 the reason is about indices rather than types: two components' result *types*
 collide freely — a logger's `write` and a timer's `sleep` may both answer with a
@@ -197,6 +205,41 @@ theorem left_source_is_unique {demand : whole.Demand} {own other : left.Demand}
     (fromOwn : weave.leftIn.demand own = demand)
     (fromOther : weave.leftIn.demand other = demand) : own = other :=
   weave.leftIn.demandInjective own other (fromOwn.trans fromOther.symm)
+
+/--
+**A woven observation comes from at most one observation of its component.**
+
+`observationInjective` spent. Without a theorem naming it the field was
+deletable — a reviewer removed it and every theorem here still held — and what it
+buys is the same thing `left_source_is_unique` buys for demands: a trace entry
+attributable to one thing the component said, rather than to a collision the
+weave introduced.
+
+`docs/FOUNDATION.md` law 18 is why it matters at the seam: a specification
+reasoning about the woven trace is reasoning about a sequence whose entries have
+origins, and two of a component's observations landing on one woven observation
+loses one of them.
+-/
+theorem left_observation_source_is_unique {observation : whole.Observation}
+    {own other : left.Observation}
+    (fromOwn : weave.leftIn.observation own = observation)
+    (fromOther : weave.leftIn.observation other = observation) : own = other :=
+  weave.leftIn.observationInjective own other (fromOwn.trans fromOther.symm)
+
+/--
+**And a woven entropy wakes at most one of its component's events.**
+
+`externalEventInjective` spent, and the same argument one vocabulary field over:
+two of a component's external events embedding to one woven event would make a
+single delivery ambiguous at the component, which is
+`docs/FOUNDATION.md` law 5's "every admitted external result is handled" losing
+the word *which*.
+-/
+theorem left_entropy_source_is_unique {entropy : whole.ExternalEvent}
+    {own other : left.ExternalEvent}
+    (fromOwn : weave.leftIn.externalEvent own = entropy)
+    (fromOther : weave.leftIn.externalEvent other = entropy) : own = other :=
+  weave.leftIn.externalEventInjective own other (fromOwn.trans fromOther.symm)
 
 /--
 **A woven demand comes from exactly one demand of exactly one component.**

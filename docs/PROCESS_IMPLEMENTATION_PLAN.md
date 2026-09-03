@@ -3373,3 +3373,35 @@ and `the_family_may_not_claim_more` is the refusal.
 
 What is still not required is that the claimed scopes be the ones the
 *application* needs, which is the half `Grass.Process` genuinely cannot know.
+
+### 10.77 Three named obligations in the weave and sequential layers that nothing discharges
+
+Found by a reviewer running deletion tests. None is unsound; all three are costs
+paid for no exported consequence, which is §10.48's shape one layer up.
+
+* `Grass/Process/Weave/Mixin.lean`'s `HoldsInitially` takes an arbitrary
+  `Initial` predicate because it predates
+  `Grass/Process/Network/Initial.lean`'s `ExactInitialNetwork`. It is superseded
+  by `HoldsAtEveryStart` and has no consumer. Deleting a named obligation is a
+  decision about what §8 owes rather than a tidy-up, so it is recorded here
+  instead.
+* `Grass/Process/Weave/Mixin.lean`'s `ResourceOwnershipObligation` applies the
+  caller's own predicate to the mixin's own fields, so `fun _ _ => True`
+  discharges it. That is the same freedom §10.52 records for
+  `ReachesSafePointObligation`, and the same answer applies: the predicate is
+  another layer's and this one cannot audit it.
+* `Grass/Process/Sequential/Adapter.lean`'s `DispositionIsEarned` occurs nowhere
+  outside its own declaration, and is *free* where it is stated: `elaborate`'s
+  terminal disposition is the all-zero partition at every terminal point, so the
+  obligation reduces to `Accepts 0 0 0`, which every remainder law in this corpus
+  grants. Both witnesses in the corpus make it vacuous.
+
+`ProcessRefinementLens.selectedStateInterior`, `refinedRequirements` and
+`refinementOnlyAdds` are in the same category and are *not* recorded as defects:
+each constrains what a lens author may supply even though no theorem reads it,
+which is a real thing for a coupling field to do. `refinedRequirements` is the
+weakest of the three — it is data with no consumer since `deltas_accumulate` was
+deleted, which is §10.50's exact shape — and is the one to remove if any go.
+
+Needs a ruling per item on whether a named obligation with no consumer should
+stay named or go.
