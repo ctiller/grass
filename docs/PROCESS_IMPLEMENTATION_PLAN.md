@@ -2922,9 +2922,22 @@ specification here has `LogicalFault := PEmpty` and
 process that faults in a loop") has no fixture in either direction.
 
 Separate from §10.49 and §10.56, which are about predicates that *cannot* be
-constrained. These are predicates nobody has yet chosen to constrain, which is a
-corpus gap and is cheaper to close: a fixture with a real trace acceptance, a
-real fault, and a transferred remainder would close all three.
+constrained. These are predicates nobody had yet chosen to constrain, which is a
+corpus gap and was cheaper to close.
+
+**Closed**, except for `viewAccepts`. `Tests/Process/RichAcceptanceFixtures.lean`
+is the fixture: `hiccup` has an inhabited `LogicalFault` and a silent fault step,
+a `TraceAccepts` that forbids an observation and needs a run invariant to
+discharge, a `TerminalAccepts` its terminal result supplies, a
+`DemandsWellFormed` that bounds an issued bag, a `Demanded` that its `.result`
+case satisfies — so `StepProgresses`'s emission disjunct fires for the first time
+in this corpus, which is half of §10.49's complaint — and a remainder law
+permitting *nothing* resolved and nothing pending, so the classification's
+`transferred` carries the whole outstanding bag.
+
+`viewAccepts` stays open and is §10.56: `ProcessSpec.view` is `none` in every
+specification here and `ViewFacet` is constructed nowhere, which no choice of
+acceptance can fix.
 
 ### 10.63 `transition_for_event` and `accessible` have no consumers
 
