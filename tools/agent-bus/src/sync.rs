@@ -96,6 +96,16 @@ fn reduce_local(repo: &Path, worktrees_dir: &Path, freshness: Freshness) -> AbRe
         .ok_or_else(|| invalid("no registry root exists locally"))?;
     let epoch =
         crate::registry::read_epoch(repo, &registry_tip, &worktrees_dir.join("_reduce_epoch"))?;
+    // Every epoch reachable from the tip, not just the current one -- a
+    // complete frontier authored against an older epoch must remain
+    // re-validatable forever (gate 5), and `apply::require_complete_
+    // frontier`/`apply_broadcast_published` look the *named* epoch up here
+    // rather than trusting whatever is current at reduction time.
+    let known_epochs = crate::registry::read_epoch_chain(
+        repo,
+        &registry_tip,
+        &worktrees_dir.join("_reduce_epoch_chain"),
+    )?;
     let config = crate::registry::read_bus_config(
         repo,
         &registry_tip,
@@ -119,7 +129,7 @@ fn reduce_local(repo: &Path, worktrees_dir: &Path, freshness: Freshness) -> AbRe
         stream_tips.insert(agent.clone(), tip);
     }
 
-    let state = crate::apply::reduce(config, Some(epoch.clone()), &streams)?;
+    let state = crate::apply::reduce(config, Some(epoch.clone()), known_epochs, &streams)?;
     Ok(Snapshot {
         state,
         roster_epoch: epoch,

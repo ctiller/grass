@@ -89,15 +89,11 @@ pub fn drain_outbox(
     let mut state = crate::sync::cached_snapshot(repo, &worktrees_dir.join("_validate"))?.state;
 
     let existing_tip = crate::stream::read_stream_tip(repo, agent)?;
-    let mut next_seq = if existing_tip.is_some() {
+    let mut next_seq = if let Some(tip) = &existing_tip {
         let reads_dir = worktrees_dir.join(format!("_read_{agent}"));
         crate::storage::read_stream_log(
             &{
-                crate::gitrepo::ensure_bus_worktree(
-                    repo,
-                    &reads_dir,
-                    existing_tip.as_ref().unwrap().as_str(),
-                )?;
+                crate::gitrepo::ensure_bus_worktree(repo, &reads_dir, tip.as_str())?;
                 reads_dir
             },
             agent,
@@ -318,6 +314,14 @@ fn requires_complete_frontier(data: &crate::events::EventData) -> bool {
         crate::events::EventData::BroadcastPublished(d) => {
             crate::apply::broadcast_requires_complete_frontier(d)
         }
+        // Section 2.2: "events that grant merge authority... activate
+        // schemas... or make another fleet-wide decision use a complete
+        // frontier" -- merge_engine.activated is exactly the latter, a
+        // fleet-wide pinned-engine change (see apply::require_complete_
+        // frontier, called by all three of these handlers).
+        crate::events::EventData::SchemaActivated(_)
+        | crate::events::EventData::MergeEngineActivated(_)
+        | crate::events::EventData::ReviewMergeAuthorized(_) => true,
         _ => false,
     }
 }

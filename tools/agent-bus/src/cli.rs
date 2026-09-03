@@ -53,10 +53,12 @@ pub enum Command {
     /// Prints `--agent`'s local outbox state: every candidate still
     /// pending (in urgent-first drain order) and every one a coordinator
     /// has rejected, with the durable reason. Purely local -- no network
-    /// round trip -- so this is what "the last local receipt and
-    /// coordinator health" (section 2.3) means concretely: whether an
-    /// urgent candidate is still waiting is always answerable here even
-    /// when no coordinator has run at all (gate 18).
+    /// round trip -- so whether an urgent candidate is still waiting is
+    /// always answerable here even when no coordinator has run at all
+    /// (gate 18). This is the "last local receipt" half of section 2.3's
+    /// "surface the last local receipt and coordinator health locally";
+    /// it does not surface coordinator liveness/heartbeat data, which
+    /// nothing in this crate tracks yet.
     Outbox(OutboxArgs),
 }
 

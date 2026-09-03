@@ -77,6 +77,27 @@ pub fn read_epoch(repo: &Path, epoch_id: &ObjectId, worktree: &Path) -> AbResult
     })
 }
 
+/// Reads `tip` and every epoch reachable by walking `parent` back to the
+/// root, keyed by each epoch's own id. Complete frontiers must remain
+/// re-validatable against the *exact* historical epoch they name, not
+/// merely the current tip (gate 5: "a later registration does not
+/// invalidate it") -- this is what lets a caller build that full lookup
+/// table once per reduction instead of re-walking history per event.
+pub fn read_epoch_chain(
+    repo: &Path,
+    tip: &ObjectId,
+    worktree: &Path,
+) -> AbResult<BTreeMap<ObjectId, RosterEpoch>> {
+    let mut chain = BTreeMap::new();
+    let mut next = Some(tip.clone());
+    while let Some(id) = next {
+        let epoch = read_epoch(repo, &id, worktree)?;
+        next = epoch.parent.clone();
+        chain.insert(id, epoch);
+    }
+    Ok(chain)
+}
+
 /// Reads the bus-wide `BusConfig` fixed at activation. Any known epoch id
 /// works, not only the root: `create_root` writes `bus_config.json` once,
 /// and every later epoch transition checks out its parent's full tree

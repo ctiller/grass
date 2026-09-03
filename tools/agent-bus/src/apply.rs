@@ -11,7 +11,7 @@ use crate::bootstrap::BusConfig;
 use crate::envelope::Envelope;
 use crate::error::{invalid, AbResult};
 use crate::events::*;
-use crate::scalars::{Agent, EventId};
+use crate::scalars::{Agent, EventId, ObjectId};
 use crate::state::*;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -27,10 +27,12 @@ use std::collections::{BTreeMap, BTreeSet};
 pub fn reduce(
     config: BusConfig,
     roster_epoch: Option<crate::registry::RosterEpoch>,
+    known_epochs: BTreeMap<ObjectId, crate::registry::RosterEpoch>,
     streams: &BTreeMap<Agent, Vec<Envelope>>,
 ) -> AbResult<BusState> {
     let mut state = BusState::new(config);
     state.roster_epoch = roster_epoch;
+    state.known_epochs = known_epochs;
     for env in topological_order(streams)? {
         apply_event(&mut state, env)?;
         state.kind_of_event_insert(env.id.clone(), &env.kind);
@@ -367,12 +369,44 @@ fn apply_retired(state: &mut BusState, env: &Envelope, d: &AgentRetired) -> AbRe
     Ok(())
 }
 
+/// Section 2.2's complete-frontier requirement for fleet-wide authority
+/// events ("events that grant merge authority... activate schemas... or
+/// make another fleet-wide decision use a complete frontier relative to
+/// one exact RosterEpoch", gate 5/12). Validates against the *exact* epoch
+/// `env.observed` itself names (`state.known_epochs`), never against
+/// whatever epoch happens to be current at reduction time: those are
+/// frequently different (any later registration/retirement/succession
+/// advances `state.roster_epoch` while an already-published authority
+/// event's frontier still names the older epoch it was actually authored
+/// against), and "a later registration can never retroactively invalidate
+/// an earlier authority event's already-complete frontier" is only true if
+/// validation looks the named epoch up rather than compares against "now."
+fn require_complete_frontier(state: &BusState, env: &Envelope) -> AbResult<()> {
+    if env.observed.kind != crate::frontier::FrontierKind::Complete {
+        return Err(invalid(format!(
+            "{}: this event requires a complete frontier, not a sparse one",
+            env.id
+        )));
+    }
+    let epoch = state
+        .known_epochs
+        .get(&env.observed.roster_epoch)
+        .ok_or_else(|| {
+            invalid(format!(
+                "{}: frontier names roster epoch {}, which is not a known epoch",
+                env.id, env.observed.roster_epoch
+            ))
+        })?;
+    env.observed.validate_complete(epoch)
+}
+
 fn apply_schema_activated(
     state: &mut BusState,
     env: &Envelope,
     d: &SchemaActivated,
 ) -> AbResult<()> {
     require_bootstrap_coordinator(state, &env.agent)?;
+    require_complete_frontier(state, env)?;
     if d.version <= state.activated_schema_version {
         return Err(invalid(format!(
             "{}: schema version {} is not greater than the currently activated {}",
@@ -389,6 +423,7 @@ fn apply_merge_engine_activated(
     d: &MergeEngineActivated,
 ) -> AbResult<()> {
     require_bootstrap_coordinator(state, &env.agent)?;
+    require_complete_frontier(state, env)?;
     if !state.merge_engine_info.contains_key(&d.previous_epoch) {
         return Err(invalid(format!(
             "{}: previous_epoch {} is not a known prior engine activation",
@@ -405,6 +440,12 @@ fn apply_merge_engine_activated(
         return Err(invalid(format!(
             "{}: unsupported merge_engine {}",
             env.id, d.merge_engine
+        )));
+    }
+    if d.merge_engine_version.as_str() != crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION {
+        return Err(invalid(format!(
+            "{}: unsupported merge_engine_version {}",
+            env.id, d.merge_engine_version
         )));
     }
     let key = format!("engine_epoch:{}", d.previous_epoch);
@@ -1402,6 +1443,7 @@ fn apply_review_merge_authorized(
     env: &Envelope,
     d: &ReviewMergeAuthorized,
 ) -> AbResult<()> {
+    require_complete_frontier(state, env)?;
     let chain = state
         .review_chain(&d.nomination)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {}", env.id, d.nomination)))?;
@@ -1844,16 +1886,12 @@ fn apply_broadcast_published(
             env.id
         )));
     }
-    let epoch = state
-        .roster_epoch
-        .as_ref()
-        .filter(|e| e.id == d.audience_epoch)
-        .ok_or_else(|| {
-            invalid(format!(
-                "{}: audience_epoch {} is not the current roster epoch",
-                env.id, d.audience_epoch
-            ))
-        })?;
+    let epoch = state.known_epochs.get(&d.audience_epoch).ok_or_else(|| {
+        invalid(format!(
+            "{}: audience_epoch {} is not a known roster epoch",
+            env.id, d.audience_epoch
+        ))
+    })?;
     if broadcast_requires_complete_frontier(d) {
         if env.observed.kind != crate::frontier::FrontierKind::Complete {
             return Err(invalid(format!(
@@ -2013,7 +2051,9 @@ mod tests {
 
     fn empty_state(members: &[(&str, Role)]) -> BusState {
         let mut state = BusState::new(config());
-        state.roster_epoch = Some(epoch_with(members));
+        let epoch = epoch_with(members);
+        state.known_epochs.insert(epoch.id.clone(), epoch.clone());
+        state.roster_epoch = Some(epoch);
         state
     }
 
@@ -2655,6 +2695,7 @@ mod tests {
             ),
         );
         state.current_merge_engine_epoch = Some(engine_epoch.clone());
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
 
         let authorize_data = EventData::ReviewMergeAuthorized(ReviewMergeAuthorized {
             nomination: nominate_env.id.clone(),
@@ -2677,7 +2718,7 @@ mod tests {
         let authorize_env = Envelope::new(
             &bob,
             2,
-            frontier_seeing(&[&nominate_env.id]),
+            complete_frontier(&epoch),
             &authorize_data,
             [nominate_env.id.clone(), EventId::new(&a("coord1"), 0)],
         );
@@ -2713,6 +2754,7 @@ mod tests {
         let bob = a("bob");
         apply_ok(&mut state, &register(&alice, Role::Implementor));
         apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let request = ReviewRequest {
             authors: StringSet::from_iter([alice.clone()]),
             product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
@@ -2774,7 +2816,7 @@ mod tests {
         let authorize_env = Envelope::new(
             &bob,
             2,
-            frontier_seeing(&[&nominate_env.id]),
+            complete_frontier(&epoch),
             &authorize_data,
             [nominate_env.id.clone(), EventId::new(&a("coord1"), 0)],
         );
@@ -3326,7 +3368,7 @@ mod tests {
     }
 
     #[test]
-    fn broadcast_rejects_a_stale_audience_epoch() {
+    fn broadcast_rejects_an_unknown_audience_epoch() {
         let mut state = empty_state(&[("alice", Role::Implementor)]);
         let alice = a("alice");
         apply_ok(&mut state, &register(&alice, Role::Implementor));
@@ -3336,7 +3378,7 @@ mod tests {
             1,
             no_frontier(),
             &EventData::BroadcastPublished(broadcast(
-                hash(12345), // not the current roster epoch id
+                hash(12345), // never a real epoch id in this state
                 crate::common::AudienceSelector::AllActive,
                 &[&alice],
                 crate::common::AckRequirement::None,
@@ -3345,7 +3387,7 @@ mod tests {
         );
         let err = apply_event(&mut state, &env).unwrap_err();
         assert!(
-            err.to_string().contains("is not the current roster epoch"),
+            err.to_string().contains("is not a known roster epoch"),
             "{err}"
         );
     }
@@ -3877,11 +3919,69 @@ mod tests {
 
     // ------------------------------------------------------- schema/merge engine
 
+    /// Regression test for a bug caught in adversarial review: an earlier
+    /// version of `require_complete_frontier` validated a complete frontier
+    /// against `state.roster_epoch` -- whatever epoch happens to be current
+    /// *right now* -- instead of looking up the frontier's own claimed epoch
+    /// in `state.known_epochs`. Since `sync::reduce_local` always re-reduces
+    /// every event against the latest registry tip, that meant a single
+    /// later registry transition (another agent registering, retiring, or a
+    /// coordinator succession) would permanently break reduction of every
+    /// earlier authority event still naming the older epoch -- a
+    /// fleet-wide, unrecoverable DoS, directly contradicting AGENT_BUS.md
+    /// gate 5's "a later registration does not invalidate it". This proves
+    /// the fixed behavior: an event whose frontier names an epoch that is
+    /// still present in `known_epochs` remains valid even after the roster
+    /// has since moved on to a strictly later epoch.
+    #[test]
+    fn require_complete_frontier_validates_against_the_frontiers_own_epoch_not_the_current_one() {
+        let mut state = empty_state(&[("coord1", Role::Coordinator)]);
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let old_epoch = state.roster_epoch.as_ref().unwrap().clone();
+
+        // Simulate a later registry transition that advances the current
+        // epoch without retiring coord1 -- e.g. a new agent registering.
+        let mut new_members = old_epoch.active_members.clone();
+        new_members.insert(
+            a("dave"),
+            MemberBinding {
+                role: Role::Implementor,
+                host: short("host1"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        let new_epoch = old_epoch.child(hash(1000), new_members);
+        state
+            .known_epochs
+            .insert(new_epoch.id.clone(), new_epoch.clone());
+        state.roster_epoch = Some(new_epoch);
+
+        // An event whose frontier still names the OLDER epoch must remain
+        // valid: it is checked against the epoch it actually names, not
+        // against whatever epoch is current at reduction time.
+        let env = Envelope::new(
+            &coord1,
+            1,
+            complete_frontier(&old_epoch),
+            &EventData::SchemaActivated(SchemaActivated {
+                version: 2,
+                design_commit: hash(1),
+                helper_commit: hash(2),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &env);
+        assert_eq!(state.activated_schema_version, 2);
+    }
+
     #[test]
     fn schema_activated_requires_a_strictly_increasing_version() {
         let mut state = empty_state(&[("coord1", Role::Coordinator)]);
         let coord1 = a("coord1");
         apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
 
         let activate = |version: u32| {
             EventData::SchemaActivated(SchemaActivated {
@@ -3890,15 +3990,17 @@ mod tests {
                 helper_commit: hash(2),
             })
         };
-        let first_env = Envelope::new(&coord1, 1, no_frontier(), &activate(2), []);
+        let first_env = Envelope::new(&coord1, 1, complete_frontier(&epoch), &activate(2), []);
         apply_ok(&mut state, &first_env);
         assert_eq!(state.activated_schema_version, 2);
 
-        let same_version_env = Envelope::new(&coord1, 2, no_frontier(), &activate(2), []);
+        let same_version_env =
+            Envelope::new(&coord1, 2, complete_frontier(&epoch), &activate(2), []);
         let err = apply_event(&mut state, &same_version_env).unwrap_err();
         assert!(err.to_string().contains("is not greater than"), "{err}");
 
-        let lower_version_env = Envelope::new(&coord1, 2, no_frontier(), &activate(1), []);
+        let lower_version_env =
+            Envelope::new(&coord1, 2, complete_frontier(&epoch), &activate(1), []);
         let err = apply_event(&mut state, &lower_version_env).unwrap_err();
         assert!(err.to_string().contains("is not greater than"), "{err}");
     }
@@ -3955,12 +4057,13 @@ mod tests {
         let mut state = empty_state(&[("coord1", Role::Coordinator)]);
         let coord1 = a("coord1");
         apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let genesis = seed_merge_engine_genesis(&mut state);
 
         let env = Envelope::new(
             &coord1,
             1,
-            no_frontier(),
+            complete_frontier(&epoch),
             &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
             [],
         );
@@ -3974,10 +4077,11 @@ mod tests {
         let mut state = empty_state(&[("coord1", Role::Coordinator)]);
         let coord1 = a("coord1");
         apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let env = Envelope::new(
             &coord1,
             1,
-            no_frontier(),
+            complete_frontier(&epoch),
             &EventData::MergeEngineActivated(merge_engine_activated(&EventId::new(&coord1, 0))),
             [],
         );
@@ -4011,19 +4115,46 @@ mod tests {
         let mut state = empty_state(&[("coord1", Role::Coordinator)]);
         let coord1 = a("coord1");
         apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let genesis = seed_merge_engine_genesis(&mut state);
         let mut data = merge_engine_activated(&genesis);
         data.merge_engine = short("some-other-engine");
         let env = Envelope::new(
             &coord1,
             1,
-            no_frontier(),
+            complete_frontier(&epoch),
             &EventData::MergeEngineActivated(data),
             [],
         );
         let err = apply_event(&mut state, &env).unwrap_err();
         assert!(
             err.to_string().contains("unsupported merge_engine"),
+            "{err}"
+        );
+    }
+
+    /// The version half of the pinned merge engine, checked independently
+    /// of the engine name (found by a design-fidelity review: only the
+    /// name was validated, never the version).
+    #[test]
+    fn rejects_merge_engine_activated_with_an_unsupported_version() {
+        let mut state = empty_state(&[("coord1", Role::Coordinator)]);
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
+        let genesis = seed_merge_engine_genesis(&mut state);
+        let mut data = merge_engine_activated(&genesis);
+        data.merge_engine_version = short("0.0.1");
+        let env = Envelope::new(
+            &coord1,
+            1,
+            complete_frontier(&epoch),
+            &EventData::MergeEngineActivated(data),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string().contains("unsupported merge_engine_version"),
             "{err}"
         );
     }
@@ -4036,6 +4167,7 @@ mod tests {
         let coord2 = a("coord2");
         apply_ok(&mut state, &register(&coord1, Role::Coordinator));
         apply_ok(&mut state, &register(&coord2, Role::Coordinator));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let genesis = seed_merge_engine_genesis(&mut state);
 
         // Two genuinely concurrent activations both built off `genesis`,
@@ -4043,14 +4175,14 @@ mod tests {
         let candidate_a = Envelope::new(
             &coord1,
             1,
-            no_frontier(),
+            complete_frontier(&epoch),
             &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
             [],
         );
         let candidate_b = Envelope::new(
             &coord2,
             1,
-            no_frontier(),
+            complete_frontier(&epoch),
             &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
             [],
         );
@@ -4061,7 +4193,7 @@ mod tests {
         let downstream = Envelope::new(
             &coord1,
             2,
-            no_frontier(),
+            complete_frontier(&epoch),
             &EventData::MergeEngineActivated(merge_engine_activated(&candidate_a.id)),
             [],
         );
@@ -4089,12 +4221,13 @@ mod tests {
         let coord2 = a("coord2");
         apply_ok(&mut state, &register(&coord1, Role::Coordinator));
         apply_ok(&mut state, &register(&coord2, Role::Coordinator));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let genesis = seed_merge_engine_genesis(&mut state);
 
         let candidate_a = Envelope::new(
             &coord1,
             1,
-            no_frontier(),
+            complete_frontier(&epoch),
             &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
             [],
         );
@@ -4107,7 +4240,7 @@ mod tests {
         let candidate_b = Envelope::new(
             &coord2,
             1,
-            no_frontier(),
+            complete_frontier(&epoch),
             &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
             [],
         );
@@ -4126,13 +4259,14 @@ mod tests {
                 empty_state(&[("coord1", Role::Coordinator), ("coord2", Role::Coordinator)]);
             apply_ok(&mut state, &register(&a("coord1"), Role::Coordinator));
             apply_ok(&mut state, &register(&a("coord2"), Role::Coordinator));
+            let epoch = state.roster_epoch.as_ref().unwrap().clone();
             let genesis = seed_merge_engine_genesis(&mut state);
             apply_ok(
                 &mut state,
                 &Envelope::new(
                     first,
                     1,
-                    no_frontier(),
+                    complete_frontier(&epoch),
                     &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
                     [],
                 ),
@@ -4142,7 +4276,7 @@ mod tests {
                 &Envelope::new(
                     second,
                     1,
-                    no_frontier(),
+                    complete_frontier(&epoch),
                     &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
                     [],
                 ),
@@ -4638,11 +4772,12 @@ mod tests {
         let mut state = empty_state(&[]);
         let bob = a("bob");
         apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let bogus = EventId::new(&a("alice"), 1);
         let env = Envelope::new(
             &bob,
             1,
-            no_frontier(),
+            complete_frontier(&epoch),
             &EventData::ReviewMergeAuthorized(merge_authorized(&bogus, StringSet::default(), &[])),
             [],
         );
@@ -4657,12 +4792,13 @@ mod tests {
         let bob = a("bob");
         apply_ok(&mut state, &register(&alice, Role::Implementor));
         apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
 
         let env = Envelope::new(
             &alice,
             2,
-            frontier_seeing(&[&nominate_env.id]),
+            complete_frontier(&epoch),
             &EventData::ReviewMergeAuthorized(merge_authorized(
                 &nominate_env.id,
                 StringSet::default(),
@@ -4685,6 +4821,7 @@ mod tests {
         let bob = a("bob");
         apply_ok(&mut state, &register(&alice, Role::Implementor));
         apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
 
         let claim = crate::scalars::PathClaim::parse("src/**".into()).unwrap();
@@ -4692,7 +4829,7 @@ mod tests {
         let env = Envelope::new(
             &bob,
             2,
-            frontier_seeing(&[&nominate_env.id]),
+            complete_frontier(&epoch),
             &EventData::ReviewMergeAuthorized(authorize),
             [],
         );
@@ -4713,6 +4850,7 @@ mod tests {
         apply_ok(&mut state, &register(&alice, Role::Implementor));
         apply_ok(&mut state, &register(&bob, Role::Reviewer));
         apply_ok(&mut state, &register(&carol, Role::Reviewer));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
 
         let request = review_request(&[&alice], &bob);
@@ -4740,7 +4878,7 @@ mod tests {
         let env = Envelope::new(
             &bob,
             2,
-            frontier_seeing(&[&nominate_env.id]),
+            complete_frontier(&epoch),
             &EventData::ReviewMergeAuthorized(merge_authorized(
                 &nominate_env.id,
                 StringSet::default(),
@@ -4773,6 +4911,7 @@ mod tests {
         let bob = a("bob");
         apply_ok(&mut state, &register(&alice, Role::Implementor));
         apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
 
         let changes_env = Envelope::new(
@@ -4792,7 +4931,7 @@ mod tests {
         let env = Envelope::new(
             &bob,
             3,
-            frontier_seeing(&[&nominate_env.id, &changes_env.id]),
+            complete_frontier(&epoch),
             &EventData::ReviewMergeAuthorized(merge_authorized(
                 &nominate_env.id,
                 StringSet::default(),
@@ -4817,6 +4956,7 @@ mod tests {
         let bob = a("bob");
         apply_ok(&mut state, &register(&alice, Role::Implementor));
         apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
 
         let issue_data = EventData::IssueOpened(IssueOpened {
@@ -4844,7 +4984,7 @@ mod tests {
         let env = Envelope::new(
             &bob,
             3,
-            frontier_seeing(&[&nominate_env.id]),
+            complete_frontier(&epoch),
             &EventData::ReviewMergeAuthorized(merge_authorized(
                 &nominate_env.id,
                 StringSet::default(),
@@ -4866,6 +5006,7 @@ mod tests {
         let bob = a("bob");
         apply_ok(&mut state, &register(&alice, Role::Implementor));
         apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
 
         let issue_data = EventData::IssueOpened(IssueOpened {
@@ -4908,7 +5049,7 @@ mod tests {
         let env = Envelope::new(
             &bob,
             3,
-            frontier_seeing(&[&nominate_env.id]),
+            complete_frontier(&epoch),
             &EventData::ReviewMergeAuthorized(merge_authorized(
                 &nominate_env.id,
                 StringSet::default(),
@@ -4935,6 +5076,7 @@ mod tests {
         let bob = a("bob");
         apply_ok(&mut state, &register(&alice, Role::Implementor));
         apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
 
         let mut authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
@@ -4944,7 +5086,7 @@ mod tests {
         let env = Envelope::new(
             &bob,
             2,
-            frontier_seeing(&[&nominate_env.id]),
+            complete_frontier(&epoch),
             &EventData::ReviewMergeAuthorized(authorize),
             [],
         );
@@ -4999,12 +5141,13 @@ mod tests {
         let bob = a("bob");
         apply_ok(&mut state, &register(&alice, Role::Implementor));
         apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
         let authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
         let authorize_env = Envelope::new(
             &bob,
             2,
-            frontier_seeing(&[&nominate_env.id]),
+            complete_frontier(&epoch),
             &EventData::ReviewMergeAuthorized(authorize.clone()),
             [],
         );
@@ -5040,12 +5183,13 @@ mod tests {
         let bob = a("bob");
         apply_ok(&mut state, &register(&alice, Role::Implementor));
         apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
         let authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
         let authorize_env = Envelope::new(
             &bob,
             2,
-            frontier_seeing(&[&nominate_env.id]),
+            complete_frontier(&epoch),
             &EventData::ReviewMergeAuthorized(authorize.clone()),
             [],
         );
@@ -5081,12 +5225,13 @@ mod tests {
         let bob = a("bob");
         apply_ok(&mut state, &register(&alice, Role::Implementor));
         apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
         let authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
         let authorize_env = Envelope::new(
             &bob,
             2,
-            frontier_seeing(&[&nominate_env.id]),
+            complete_frontier(&epoch),
             &EventData::ReviewMergeAuthorized(authorize.clone()),
             [],
         );
@@ -5185,12 +5330,13 @@ mod tests {
         apply_ok(&mut state, &register(&alice, Role::Implementor));
         apply_ok(&mut state, &register(&bob, Role::Reviewer));
         apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
         let authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
         let authorize_env = Envelope::new(
             &bob,
             2,
-            frontier_seeing(&[&nominate_env.id]),
+            complete_frontier(&epoch),
             &EventData::ReviewMergeAuthorized(authorize.clone()),
             [],
         );
@@ -5233,12 +5379,13 @@ mod tests {
         apply_ok(&mut state, &register(&alice, Role::Implementor));
         apply_ok(&mut state, &register(&bob, Role::Reviewer));
         apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
         let authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
         let authorize_env = Envelope::new(
             &bob,
             2,
-            frontier_seeing(&[&nominate_env.id]),
+            complete_frontier(&epoch),
             &EventData::ReviewMergeAuthorized(authorize.clone()),
             [],
         );

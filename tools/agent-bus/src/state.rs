@@ -181,10 +181,22 @@ impl AgentState {
 #[derive(Debug, Clone)]
 pub struct BusState {
     pub config: BusConfig,
-    /// The registry epoch this reduction's authority checks are relative to
-    /// (docs/AGENT_COORDINATION_EVOLUTION.md section 2.1) -- `None` only
+    /// The *current* registry epoch -- what ordinary membership/authority
+    /// checks (e.g. `is_bootstrap_coordinator`, `authorize_stream_write`)
+    /// use (docs/AGENT_COORDINATION_EVOLUTION.md section 2.1). `None` only
     /// before migration/activation has ever established one.
     pub roster_epoch: Option<crate::registry::RosterEpoch>,
+    /// Every epoch reachable from the current registry tip, keyed by its
+    /// own id -- what a complete frontier's completeness is actually
+    /// checked against (`apply::require_complete_frontier`,
+    /// `apply_broadcast_published`). Deliberately distinct from
+    /// `roster_epoch`: an authority event's complete frontier names the
+    /// exact epoch that was current *when it was authored*, which may be
+    /// an older one by the time this reduction runs, and "a later
+    /// registration does not invalidate it" (gate 5) is only true if
+    /// validation looks the named epoch up here rather than comparing
+    /// against whatever is current now.
+    pub known_epochs: BTreeMap<ObjectId, crate::registry::RosterEpoch>,
     pub agents: BTreeMap<Agent, AgentState>,
     pub issues: BTreeMap<EventId, IssueState>,
     pub dependencies: BTreeMap<EventId, DependencyState>,
@@ -234,6 +246,7 @@ impl BusState {
         BusState {
             config,
             roster_epoch: None,
+            known_epochs: BTreeMap::new(),
             agents: BTreeMap::new(),
             issues: BTreeMap::new(),
             dependencies: BTreeMap::new(),
