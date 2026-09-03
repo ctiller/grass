@@ -152,8 +152,16 @@ inductive NetworkFragment {registry : ProtocolRegistry.{u, w, v}}
   being at a frontier, and §7's whole progress module is vacuous.
 
   With two fragments, a step produces into `pending` and a commit moves a prefix
-  of `pending` into `observations`. A commit can only publish what a process
-  actually emitted, and it can publish it once.
+  of `pending` into `observations` — so it publishes what is pending, in the
+  order it became pending, once.
+
+  Read that as exactly what it says. `pending` is a plain field of this record,
+  so nothing stops a *world* from holding a pending trace no step produced, and a
+  commit is still enabled at every network whose `pending` is non-empty. A second
+  reviewer proved both. What would close it is an invariant that
+  `observations ++ pending` is what a run's steps emitted, which is a statement
+  about executions and cannot be a field here;
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.66.
   -/
   | pending
   /-- The monotone nominal history that freshness is absence from. -/

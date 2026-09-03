@@ -2992,6 +2992,11 @@ bookkeeping. Read as §7 content it says almost nothing; read as an inhabitance
 proof it is the first `NetworkProgressMeasure` in the corpus and the first
 non-empty `AtFrontier`.
 
+**One sentence of this entry was wrong and is corrected in §10.67.** The
+unbounded chain at `serverPlan` is not only among unreachable worlds: a spawn
+into a fresh connection slot is available from a *start* of that plan, so the
+chain is reachable and the reachability index does not help there.
+
 **Fixed.** `NetworkProgressMeasure` is now indexed by the network a run begins
 at and carries a `Reachable` predicate with `reachableStart` and
 `reachableClosed`, and both obligations are quantified over it — the same repair
@@ -3027,3 +3032,51 @@ existentially, so a measure is about *some* start of the plan rather than a name
 one — and a plan started with two different requests has two different progress
 arguments. Making it an index of the measure is the alternative and it is a
 signature change. Needs a ruling.
+
+### 10.66 Nothing says a world's pending trace is something a process produced
+
+`NetworkFragment.pending` gave `Commits` the provenance it had none of, and the
+provenance is exactly `before.pending = emitted ++ after.pending`: a commit
+publishes what is pending, in order, once. That killed the defect that made
+`AtFrontier` empty for every measure — the old `Commits` was enabled at *every*
+network.
+
+The residual, proved generically by a fifth review pass: `pending` is a plain
+field of `LogicalProcessNetworkCore`, so a commit is enabled at every network
+whose `pending` is non-empty, and nothing states that a non-empty `pending` is
+something a step produced. `{network with pending := [observation]}` is a legal
+world of any plan and a commit of that observation is a legal step of it.
+
+The statement that would close it — `observations ++ pending` is exactly what the
+run's steps emitted — is about an *execution*, not a world, so it cannot be a
+field of the world or of a transition. It belongs beside
+`Grass/Process/Trace/Linearization.lean`'s `execution_observations_extend`, as a
+second execution law. Needs a ruling on whether that module or
+`Grass/Process/Network/Progress.lean`'s reachability owns it.
+
+### 10.67 `serverPlan` has no start with a measure, and `ProgressFixtures` is about a hypothesis nothing satisfies
+
+Two facts a fifth review pass proved, which together say what
+`Tests/Process/ProgressFixtures.lean` is currently worth.
+
+**Its networks are not reachable.** All three of its theorems take
+`measure.Reachable beforeReceive` as a hypothesis, and `beforeReceive` holds no
+incarnation of any kind. A start has a live root, and no constructor empties the
+root slot — `Joins.wasChild` excludes it and `join` is the only constructor with
+`nowFree` — so `beforeReceive` is in no `plan.StepsTo start`. The hypothesis is
+satisfiable only by a measure whose `Reachable` is strictly wider than
+reachability, which the record permits and does not require.
+
+**And the plan has no measure anyway**, for a reason §10.64 attributed to
+unreachable worlds and which is sharper than that: a spawn into a fresh
+connection slot is available *from a start* of `serverPlan` — the slot type is
+`Nat`, `maySpawn .listener .connection` holds, and the connection protocol's
+`Initial` is satisfiable — so the unbounded non-entropy chain is among reachable
+worlds. The reachability index does not help. What would is a bound on the
+population, which `PopulationLaw.boundedByResourcePolicy` defers to a resource
+certificate this layer does not have.
+
+Needs a ruling on whether `ProgressFixtures` should be rebuilt at a start of
+`serverPlan` — which requires the population bound — or retired in favour of
+`Tests/Process/FrontierFixtures.lean`, which has a start, a measure, and a
+non-empty silent-run class.

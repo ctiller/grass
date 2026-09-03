@@ -308,20 +308,16 @@ theorem slack_detach {before after : ProcessInstance waitTopology}
 theorem slack_end {before after : ProcessInstance waitTopology}
     (live : before.Live) (dead : ¬ after.Live)
     (sameParentage : after.parentage = before.parentage)
-    (notRoot : ¬ before.parentage.IsRoot) :
+    (hasParent : before.parentage.currentParent ≠ none) :
     slack (some after) < slack (some before) := by
   have running : before.lifecycle = .running := ProcessLifecycle.live_iff_running.mp live
   have notRunning : after.lifecycle ≠ .running :=
     fun isRunning => dead (ProcessLifecycle.live_iff_running.mpr isRunning)
   cases parentage : before.parentage with
-  | root => exact absurd (parentage ▸ trivial : before.parentage.IsRoot) notRoot
-  | attached _ _ =>
-    cases lifecycle : after.lifecycle <;>
-      simp only [slack, running, parentage, sameParentage, lifecycle] <;>
-      first
-        | omega
-        | exact absurd lifecycle notRunning
+  | root => exact absurd (parentage ▸ rfl : before.parentage.currentParent = none) hasParent
   | detached _ _ =>
+    exact absurd (parentage ▸ rfl : before.parentage.currentParent = none) hasParent
+  | attached _ _ =>
     cases lifecycle : after.lifecycle <;>
       simp only [slack, running, parentage, sameParentage, lifecycle] <;>
       first
@@ -339,7 +335,7 @@ theorem ends_a_child {before after : waitingPlan.LogicalProcessNetwork}
     {ending : ProcessLifecycle (waitTopology.protocol ())}
     {custody : Bag (waitTopology.protocol ()).Demand → NoObligations → NoObligations → Prop}
     (wasChild : ∀ incarnation, before.instances () () = some incarnation →
-      ¬ incarnation.IsRoot)
+      incarnation.parentage.currentParent ≠ none)
     (step : waitingPlan.EndsInstance before after () () ending custody) :
     rankOf after < rankOf before := by
   obtain ⟨was, foundWas, live⟩ := step.wasLive
@@ -509,7 +505,96 @@ def waiting_is_a_start : waitingPlan.ExactInitialNetwork () waiting where
   historyFromEmpty := .extend (.refl _) theRootsGeneration theRootsGeneration_admissible
 
 
-/-! ## So a measure exists -/
+/-! ## An empty slot, and the spawn that fills it -/
+
+/--
+The same plan with nobody in the slot, and no history.
+
+Not a start — `ExactInitialNetwork.rootPresent` needs an incarnation — and not a
+frontier: nothing outside can move it, and the program leaves it by spawning.
+That combination is what makes it the interesting network of this plan.
+-/
+@[reducible] def emptyWorld : waitingPlan.LogicalProcessNetwork :=
+  { waiting with
+      instances := fun _ _ => none
+      usedNominals := NominalHistory.initial }
+
+/--
+**Spawning the root takes `emptyWorld` to `waiting`.**
+
+`Spawns` is another record this corpus had never inhabited, and the arithmetic
+lines up on its own: the generation this spawn allocates is the one
+`startingHistory` holds, so `NetworkStep.historyExact` is the extension equation
+rather than something arranged.
+
+`authorized` is discharged vacuously and that is the content, not a shortcut:
+`maySpawn` permits nothing at this graph, so the only incarnation a spawn may
+install is one recording no parent — which is `authorized_is_root`.
+-/
+theorem the_spawn : waitingPlan.Spawns emptyWorld waiting () () theRootsGeneration [] [] where
+  wasEmpty := rfl
+  nowLive := ⟨theRoot, rfl, trivial, rfl⟩
+  authorized := fun incarnation found _ _ known => by
+    rw [(rfl : waiting.instances () () = some theRoot)] at found
+    injection found with same
+    rw [← same] at known
+    exact absurd known (by simp [ProcessParentage.knownParent])
+  allocatesTheGeneration := fun incarnation found => by
+    rw [(rfl : waiting.instances () () = some theRoot)] at found
+    injection found with same
+    rw [← same]
+    simp [theRootsGeneration]
+  slotAgrees := fun incarnation found => by
+    rw [(rfl : waiting.instances () () = some theRoot)] at found
+    injection found with same
+    exact ⟨rfl, by rw [← same]⟩
+  startsInitial := fun incarnation found => by
+    rw [(rfl : waiting.instances () () = some theRoot)] at found
+    injection found with same
+    exact ⟨rfl, by rw [← same]; exact ⟨rfl, rfl, rfl⟩⟩
+  emittedIsProjected := rfl
+  producesPending := rfl
+  scope := by
+    intro fragment outside
+    cases fragment with
+    | instanceState _ _ => exact absurd (Or.inl rfl) outside
+    | nominals => exact absurd (Or.inr (Or.inl rfl)) outside
+    | region region => exact region.elim
+    | escrow edge _ => exact edge.elim
+    | session edge _ => exact edge.elim
+    | _ => rfl
+
+/-- As a step. The generation it allocates was never allocated before, because
+`emptyWorld`'s history is empty. -/
+def spawnStep : waitingPlan.NetworkStep emptyWorld waiting where
+  transition := .spawn () () theRootsGeneration [] [] the_spawn
+  admissible := theRootsGeneration_admissible
+  historyExact := rfl
+
+/-- **It is not entropy**: nothing outside had to happen for it. -/
+theorem the_spawn_is_not_entropy : ¬ spawnStep.transition.DrivenByEntropy := id
+
+/-! ## So a measure exists, and it is a useful one -/
+
+/--
+**Entropy needs somebody to deliver it to.**
+
+The half of the frontier argument that is about the world rather than about the
+vocabulary: only a `processStep` can be entropy-driven here — `timeout` takes a
+channel edge and there are none — and a `processStep` needs a live incarnation to
+step. So a network with an empty slot cannot be moved from outside at all.
+-/
+theorem entropy_needs_a_live_instance {before after : waitingPlan.LogicalProcessNetwork}
+    (transition : waitingPlan.NetworkTransition before after)
+    (entropy : transition.DrivenByEntropy) :
+    ∃ incarnation, before.instances () () = some incarnation ∧ incarnation.Live := by
+  cases transition with
+  | processStep kind slot _ _ _ _ step =>
+    cases kind; cases slot
+    obtain ⟨incarnation, found, live, _⟩ := step.from'
+    exact ⟨incarnation, found, live⟩
+  | timeout edge _ _ _ => exact edge.elim
+  | _ => exact absurd entropy (fun h => h)
 
 /--
 **A `NetworkProgressMeasure` for `waitingPlan`.**
@@ -519,23 +604,24 @@ theorem in that module quantifies over measures, and until this definition
 existed none of them was known to be about anything — and at the M2 plan a
 reviewer proved they were about nothing at all.
 
-`AtFrontier := fun _ => True` is the strongest possible claim and therefore the
-hardest to make: `frontierIsExternal` then demands that *every* step of the plan
-be entropy-driven or descend the rank, which is strictly more than
-`descendsOrProduces` asks. `entropy_or_descends` is what pays for it.
+`AtFrontier` is "the slot holds a live incarnation", which is the honest reading
+for this plan: a live root waits for ticks, and a network with an empty slot is
+not waiting for anything — the outside cannot move it and the program leaves it
+by spawning. `entropy_needs_a_live_instance` is that sentence as a theorem, and
+it is what `descendsOrProduces` runs on.
 
-The reading is the honest one for this plan: `waitingPlan` never does anything
-except wait for a tick and tidy up after worlds it cannot reach. §7 excuses an
-infinite run that remains at a frontier, and an infinite run of ticks is exactly
-that. A measure that had to descend on those steps would be claiming the network
-was doing something.
+An earlier version of this definition set `AtFrontier := fun _ => True` and
+argued that "at this plan every network *is* waiting". A reviewer refuted it with
+`emptyWorld`: no step out of it is entropy-driven, so calling it an external
+frontier says the outside must act when nothing outside can. The degenerate
+measure was constructible and was not correct, which is exactly the distinction
+`Useful` was introduced to name and could not make on its own.
 
-`Reachable := fun _ => True` — the *widest* choice, which is again the hardest,
-since the two obligations are then demanded at every world. This measure does not
-need the reachability index that
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.64 asked for, because `slack` already
-pays for the unreachable worlds; it is here so that a plan which cannot afford
-them has somewhere to say so.
+`Reachable := fun _ => True` is the *widest* choice, and therefore again the
+hardest: both obligations are demanded at every world, including the ones no run
+reaches. `slack` is what pays for those, and
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.64 is why a plan that does interesting
+work cannot.
 -/
 def waitingMeasure : waitingPlan.NetworkProgressMeasure waiting where
   Rank := Nat
@@ -544,35 +630,55 @@ def waitingMeasure : waitingPlan.NetworkProgressMeasure waiting where
   rankTransitive := fun _ _ _ below above => Nat.lt_trans below above
   rank := rankOf
   demanded := fun observation => observation.elim
-  AtFrontier := fun _ => True
+  AtFrontier := fun network => ∃ incarnation,
+    network.instances () () = some incarnation ∧ incarnation.Live
   Reachable := fun _ => True
   startIsInitial := ⟨(), ⟨waiting_is_a_start⟩⟩
   reachableStart := trivial
   reachableClosed := fun _ _ => trivial
   frontierIsExternal := fun _ _ step => entropy_or_descends step.transition
-  descendsOrProduces := fun _ _ => Or.inr (Or.inr trivial)
+  descendsOrProduces := by
+    intro before after _ step
+    by_cases live : ∃ incarnation,
+        before.instances () () = some incarnation ∧ incarnation.Live
+    · exact Or.inr (Or.inr live)
+    · exact (entropy_or_descends step.transition).elim
+        (fun entropy => absurd (entropy_needs_a_live_instance step.transition entropy) live)
+        Or.inl
 
 /-- **And `waiting` is at a frontier under it**, which is the class that was
 empty for every measure at the M2 plan. -/
-theorem waiting_is_at_a_frontier : waitingMeasure.AtFrontier waiting := trivial
+theorem waiting_is_at_a_frontier : waitingMeasure.AtFrontier waiting :=
+  ⟨theRoot, rfl, trivial⟩
+
+/-- **And `emptyWorld` is not**, so the measure is `Useful` — it distinguishes a
+network that is waiting from one that is not. -/
+theorem the_measure_is_useful : waitingMeasure.Useful := by
+  refine ⟨emptyWorld, ?_⟩
+  rintro ⟨_, found, _⟩
+  exact absurd found (by simp)
 
 /--
-**It is not `Useful`, and that is correct rather than a shortcut.**
+**The spawn is a silent run**, so this plan's `SilentRun` class is not empty.
 
-`Useful` asks for a network the measure declares running, and this measure
-declares every network paused — because at this plan every network *is* waiting.
-The degeneracy `Useful` was introduced to name is a measure that pauses
-everything *for free*; `frontierIsExternal` is what makes pausing everything
-expensive, and this measure paid.
-
-Stated so a reader does not take the fixture for more than it is: it shows the
-record is inhabitable and `AtFrontier` can be non-empty. It does not show that a
-plan which does interesting work has a measure, and §10.60 and §10.64 say why
-none of the corpus's other plans does.
+That matters more than it looks. `SilentRun` requires each step to start at a
+network the measure does *not* call paused, so under the degenerate all-paused
+measure the class was empty and every theorem in
+`Grass/Process/Network/Progress.lean` — including its headline
+`no_infinite_silent_run` — was discharged from its own hypothesis at the corpus's
+only measure. A reviewer proved that; this is the repair.
 -/
-theorem the_waiting_measure_is_not_useful : ¬ waitingMeasure.Useful := by
-  rintro ⟨_, notPaused⟩
-  exact notPaused trivial
+theorem the_spawn_is_a_silent_run :
+    ProcessPlan.NetworkProgressMeasure.SilentRun waitingMeasure emptyWorld waiting :=
+  .one spawnStep trivial
+    (fun _ observation _ _ _ => observation.elim)
+    (by rintro ⟨_, found, _⟩; exact absurd found (by simp))
+
+/-- **So the measure pays for it**, which is `silent_run_descends` at a run that
+exists. -/
+theorem the_spawn_costs_rank :
+    waitingMeasure.rankLt (waitingMeasure.rank waiting) (waitingMeasure.rank emptyWorld) :=
+  waitingMeasure.silent_run_descends the_spawn_is_a_silent_run
 
 
 /-! ## And the network really does run forever at it -/
@@ -631,6 +737,30 @@ to close before §10.65 could.
 theorem the_measure_starts_where_a_run_starts :
     Nonempty (waitingPlan.ExactInitialNetwork () waiting) ∧ waitingMeasure.Reachable waiting :=
   ⟨⟨waiting_is_a_start⟩, waitingMeasure.reachableStart⟩
+
+
+
+/--
+**And `waiting` is paused under *every* measure of this plan, not just this one.**
+
+`tickStep` returns `waiting` to itself and this plan observes nothing, so
+`descendsOrProduces`'s first two disjuncts are both refuted there — by
+irreflexivity and by the empty observation type. A measure's only remaining
+option is to call `waiting` a frontier.
+
+The consequence is worth stating with it: no `SilentRun` of any measure of this
+plan begins at `waiting`, so the network a run *starts* at can never be the start
+of a silent run here. That is not a defect — it is what "this plan only waits"
+means — but it is why the silent-run class needed `emptyWorld` to be non-empty.
+-/
+theorem waiting_is_paused_under_every_measure
+    (measure : waitingPlan.NetworkProgressMeasure waiting) :
+    measure.AtFrontier waiting := by
+  rcases measure.descendsOrProduces measure.reachableStart tickStep with
+    descends | ⟨_, observation, _, _, _⟩ | paused
+  · exact absurd descends (measure.rank_is_irreflexive _)
+  · exact observation.elim
+  · exact paused
 
 
 end Grass.Process.Tests.Frontier

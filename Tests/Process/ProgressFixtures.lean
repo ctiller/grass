@@ -9,16 +9,29 @@ off-frontier steps exists. That theorem is about the class of `SilentRun`s, and
 the obvious way to make the class empty is to declare every network at a
 frontier.
 
-`frontierIsExternal` is what charges for that, and this file is the check. A network a
-non-entropy step can leave is not at a frontier, so at the M2 fixture plan
-`beforeReceive` is provably running under *every* measure — the degenerate
-measure is not merely bad practice, it is unconstructible.
+`frontierIsExternal` is what charges for that, and this file is the check: a
+network a non-entropy step can leave is at a frontier only if the measure pays
+rank for that step. At the M2 fixture plan `beforeReceive` is such a network, and
+`pausing_beforeReceive_costs_rank` is the charge.
 
-An earlier version of this file exhibited the all-paused measure and showed it
-failed `Useful`. Local adversarial review pointed out that `Useful` separates
-that measure from nothing else: a measure can declare one network running and
-pause the rest, and every theorem is still about an empty class. The field
-replaced the predicate, and the fixture changed shape with it.
+Two claims this file used to make are gone, and both were checked by review
+rather than by reading. "The degenerate measure is unconstructible" was true
+while `frontierIsExternal` demanded entropy outright, and a reviewer then proved
+that version made `AtFrontier` empty for *every* measure — the theorem was true
+and about nothing. And "an earlier version exhibited the all-paused measure and
+showed it failed `Useful`" is still the right history, but `Useful` was never
+what excluded it: `Tests/Process/FrontierFixtures.lean` now carries an all-paused
+measure that a second reviewer refuted on the *meaning* of a frontier rather than
+on `Useful`, and a `Useful` measure at the same plan.
+
+**What every theorem here still owes.** All three take
+`reached : measure.Reachable beforeReceive` as a hypothesis, and `beforeReceive`
+holds no incarnation of any kind — so it is in no `plan.StepsTo start` for any
+start, and the hypothesis is satisfiable only by a measure whose `Reachable` is
+strictly wider than reachability. `Grass/Process/Network/Progress.lean`'s index
+permits that and does not require it; a reviewer proved the emptiness.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.67 records what this file is worth
+until `serverPlan` has a start and a measure.
 -/
 
 namespace Grass.Process.Tests.Progress

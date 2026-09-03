@@ -34,9 +34,13 @@ three cases shorter.
 **Two independent steps cannot both emit.** `independent_steps_do_not_both_emit`
 is a one-line consequence of every observation-touching constructor declaring
 `.pending` in its scope while `Independent` is scope disjointness. `Emits` is
-`.pending`-in-scope rather than `.observations`-in-scope, and the two agree on
-which steps they select because a commit declares both — `publishing_produces`
-is that containment. So of any two independent steps, at least one leaves both
+`.pending`-in-scope rather than `.observations`-in-scope, and it selects *more*
+steps: `publishing_produces` is one-way containment, and a `processStep` that
+produces without publishing is the gap. That is the right direction for law 18 —
+the predicate has to catch every step that could compete for a position in a
+trace — and an earlier version of this paragraph said the two "agree on which
+steps they select", which is false and was checked by a reviewer against this
+module's own `processStep` fixture. So of any two independent steps, at least one leaves both
 traces exactly as it found them, and swapping them cannot reorder two emissions
 because there are never two to reorder.
 

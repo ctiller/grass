@@ -805,9 +805,16 @@ structure Joins (before after : plan.LogicalProcessNetwork)
   a parent: local adversarial review joined the *root*, which is a program
   exiting by being collected by nobody. `Detaches` has carried `wasAttached`
   since it was written; this is the same field.
+
+  **And it is the same field, which it was not at first.** The first version said
+  `¬ IsRoot`, and a *detached* incarnation is not a root — so it passed while
+  having no parent at all, which is the same "collected by nobody" one parentage
+  constructor over. A second reviewer built the orphan. `currentParent ≠ none` is
+  what `Detaches.wasAttached` says and what §3's "the parent no longer holds any
+  authority" means: a detached child is not joined, it is gone.
   -/
   wasChild : ∀ incarnation, before.instances kind slot = some incarnation →
-    ¬ incarnation.IsRoot
+    incarnation.parentage.currentParent ≠ none
   /-- And the slot is now free, so a restart may take it. -/
   nowFree : after.instances kind slot = none
   /-- That slot, and nothing else. -/
@@ -955,13 +962,21 @@ legal step of **every** network of every plan with an inhabited
 frontier" escape is unreachable, and every theorem in
 `Grass/Process/Network/Progress.lean` is vacuous.
 
-The tie is the one `StepsLocally` already uses: the emitted trace is the
-boundary projection of a local segment, at a role with a live incarnation. That
-is weaker than "these observations were produced by that step" — which needs a
-pending-observation buffer in the world, recorded as
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.58 — and it is enough to stop a commit
-being enabled everywhere: a network with no live instance of a role whose
-protocol can project these observations cannot take one.
+The tie is `NetworkFragment.pending`: a step produces into it and a commit
+publishes a prefix of it, so a commit can only publish what is pending, in the
+order it became pending, once.
+
+**Read that as exactly what it says.** `earned` relates two fields of the world
+and says nothing about how `pending` came to hold what it holds. `pending` is a
+plain field of `LogicalProcessNetworkCore`, so a commit is still a legal step of
+*every* network whose `pending` is non-empty, and nothing anywhere states that a
+non-empty `pending` is something a process produced. A second reviewer proved
+both, generically. That is a much smaller residual than the old one — the old
+`Commits` was enabled at every network, full stop, which made
+`NetworkProgressMeasure.AtFrontier` empty — but it is a residual, and
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.66 is what would close it: an invariant
+that `observations ++ pending` is what the run's steps emitted, which is a
+statement about executions and not about a world.
 -/
 structure Commits (before after : plan.LogicalProcessNetwork)
     (emitted : Trace boundary.Observation) : Prop where
@@ -1208,22 +1223,33 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
   `wasChild` is the same field `Joins` carries and for the same reason. Without
   it the name is decoration: local adversarial review cancelled the *root*
   through this constructor while building a minimal plan, which is a program
-  being stopped by a supervisor it does not have. It also made the frontier
-  question unanswerable — any live network could be ended by a step that is not
-  entropy-driven, so nothing could be waiting on anything.
+  being stopped by a supervisor it does not have. Its first version said
+  `¬ IsRoot`, which a *detached* incarnation also satisfies while having no
+  parent; a second reviewer built that orphan, and the field now asks what
+  `Detaches.wasAttached` asks.
+
+  **What this does not close**, and an earlier version of this docstring claimed
+  it did: `interrupt`, `fault` and `environmentViolation` take the same
+  `EndsInstance` and carry no `wasChild`, because none of them is a supervisor's
+  act — a process interrupts, faults and is failed by its environment on its own
+  account, root or not. So "any live network can be ended by a step that is not
+  entropy-driven" remains true of any plan whose protocol has an inhabited
+  `InterruptReason`, `LogicalFault` or `EnvironmentViolation`, which is what
+  `Tests/Process/FrontierFixtures.lean` has to make empty before a network of it
+  is ever waiting.
   -/
   | childCancelled (kind slot) (reason : CancelReason)
       (custody : Bag (plan.topology.protocol kind).Demand →
         Obligations → Obligations → Prop)
       (wasChild : ∀ incarnation, before.instances kind slot = some incarnation →
-        ¬ incarnation.IsRoot)
+        incarnation.parentage.currentParent ≠ none)
       (step : plan.EndsInstance before after kind slot (.cancelled reason) custody)
   /-- A **child** stopped existing without finishing. `wasChild` as above. -/
   | childDied (kind slot) (reason : ProcessDeathReason)
       (custody : Bag (plan.topology.protocol kind).Demand →
         Obligations → Obligations → Prop)
       (wasChild : ∀ incarnation, before.instances kind slot = some incarnation →
-        ¬ incarnation.IsRoot)
+        incarnation.parentage.currentParent ≠ none)
       (step : plan.EndsInstance before after kind slot (.died reason) custody)
   /--
   An instance reached a terminal state of its protocol.
