@@ -125,12 +125,21 @@ structure NetworkProgressMeasure (plan : ProcessPlan.{u, w, v, r, m, o} registry
   to make no progress on the rank provided it produced a
   specification-demanded observation or was at a frontier — and a long-lived
   process that never terminates has no unconditional descent to offer.
+
+  "Produced" is membership in the step's own *emitted segment*, not
+  `observation ∈ after.observations ∧ observation ∉ before.observations`. The
+  second form is multiplicity-blind, so a server that emits the same demanded
+  observation on every request would satisfy it exactly once and never again —
+  which is the class of defect
+  `Grass/Process/Sequential/Adapter.lean` was rewritten to avoid at the pending
+  bag. `Grass/Process/Trace/Linearization.lean`'s `observations_extend` supplies
+  the segment for any step, so this costs a consumer nothing.
   -/
   descendsOrProduces : ∀ {before after : plan.LogicalProcessNetwork},
     plan.NetworkStep before after →
     rankLt (rank after) (rank before) ∨
-      (∃ observation, demanded observation ∧
-        observation ∈ after.observations ∧ observation ∉ before.observations) ∨
+      (∃ emitted observation, after.observations = before.observations ++ emitted ∧
+        demanded observation ∧ observation ∈ emitted) ∨
       AtFrontier before
 
 namespace NetworkProgressMeasure
@@ -176,14 +185,14 @@ inductive SilentRun (measure : plan.NetworkProgressMeasure) :
     plan.LogicalProcessNetwork → plan.LogicalProcessNetwork → Prop
   /-- One step, which produced nothing demanded and did not start paused. -/
   | one {before after : plan.LogicalProcessNetwork} (step : plan.NetworkStep before after)
-      (produced : ∀ observation, measure.demanded observation →
-        observation ∈ after.observations → observation ∈ before.observations)
+      (produced : ∀ emitted observation, after.observations = before.observations ++ emitted →
+        measure.demanded observation → observation ∉ emitted)
       (running : ¬ measure.AtFrontier before) : SilentRun measure before after
   /-- And one more of the same. -/
   | more {first middle last : plan.LogicalProcessNetwork}
       (earlier : SilentRun measure first middle) (step : plan.NetworkStep middle last)
-      (produced : ∀ observation, measure.demanded observation →
-        observation ∈ last.observations → observation ∈ middle.observations)
+      (produced : ∀ emitted observation, last.observations = middle.observations ++ emitted →
+        measure.demanded observation → observation ∉ emitted)
       (running : ¬ measure.AtFrontier middle) : SilentRun measure first last
 
 /--
@@ -194,14 +203,14 @@ The disjunction resolved: `descendsOrProduces` offers three ways out, and a
 -/
 theorem silent_step_descends {before after : plan.LogicalProcessNetwork}
     (step : plan.NetworkStep before after)
-    (produced : ∀ observation, measure.demanded observation →
-      observation ∈ after.observations → observation ∈ before.observations)
+    (produced : ∀ emitted observation, after.observations = before.observations ++ emitted →
+      measure.demanded observation → observation ∉ emitted)
     (running : ¬ measure.AtFrontier before) :
     measure.rankLt (measure.rank after) (measure.rank before) := by
-  rcases measure.descendsOrProduces step with descends | ⟨observation, isDemanded,
-    isAfter, notBefore⟩ | paused
+  rcases measure.descendsOrProduces step with descends | ⟨emitted, observation, appended,
+    isDemanded, inSegment⟩ | paused
   · exact descends
-  · exact absurd (produced observation isDemanded isAfter) notBefore
+  · exact absurd inSegment (produced emitted observation appended isDemanded)
   · exact absurd paused running
 
 /-- **And so does a whole silent run.** -/
@@ -241,11 +250,13 @@ loop, §7's other named evasion, is the same two steps.
 -/
 theorem two_silent_steps_cannot_return {network middle : plan.LogicalProcessNetwork}
     (out : plan.NetworkStep network middle) (back : plan.NetworkStep middle network)
-    (outProduced : ∀ observation, measure.demanded observation →
-      observation ∈ middle.observations → observation ∈ network.observations)
+    (outProduced : ∀ emitted observation,
+      middle.observations = network.observations ++ emitted →
+      measure.demanded observation → observation ∉ emitted)
     (outRunning : ¬ measure.AtFrontier network)
-    (backProduced : ∀ observation, measure.demanded observation →
-      observation ∈ network.observations → observation ∈ middle.observations)
+    (backProduced : ∀ emitted observation,
+      network.observations = middle.observations ++ emitted →
+      measure.demanded observation → observation ∉ emitted)
     (backRunning : ¬ measure.AtFrontier middle) : False :=
   measure.no_silent_cycle
     (.more (.one out outProduced outRunning) back backProduced backRunning)

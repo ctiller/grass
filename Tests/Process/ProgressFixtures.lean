@@ -14,7 +14,7 @@ fails `Useful`. The point is not that the degenerate measure is a mistake — it
 is a legal value of the type — but that a reader can see which side of the line
 any given measure is on, and that the line is drawn somewhere.
 
-`the_receive_adds_no_observation` is the other half: at a measure that declared
+`the_receive_emits_nothing` is the other half: at a measure that declared
 `beforeReceive` running, the receive step *is* a silent step, so the class is
 not empty for want of steps to put in it.
 -/
@@ -65,7 +65,7 @@ theorem everything_paused_is_not_useful : ¬ everythingPaused.Useful := by
 /-! ## And a step that would be silent under a measure that ran anything -/
 
 /--
-**The receive adds no observation at all**, so it is silent under every measure
+**The receive emits nothing at all**, so it is silent under every measure
 whatever any specification demands.
 
 Stated without a measure and without a demandedness hypothesis, which is
@@ -78,17 +78,19 @@ measure that declares `beforeReceive` running, and the receive goes straight
 into a `SilentRun`. What it cannot do is go into one *and* leave the rank alone,
 which is the whole content of `descendsOrProduces`.
 -/
-theorem the_receive_adds_no_observation
-    (observation : fixtureBoundary.Observation)
-    (present : observation ∈ afterReceive.observations) :
-    observation ∈ beforeReceive.observations := by
+theorem the_receive_emits_nothing
+    (emitted : List fixtureBoundary.Observation)
+    (appended : afterReceive.observations = beforeReceive.observations ++ emitted) :
+    emitted = [] := by
   have same : beforeReceive.observations = afterReceive.observations :=
     receiveAsStep.transition.touchesOnly .observations (by
       rintro (isEscrow | isSession)
       · exact absurd isEscrow (by simp)
       · exact absurd isSession (by simp))
-  rw [same]
-  exact present
+  rw [← same] at appended
+  have lengths := congrArg List.length appended
+  simp only [List.length_append] at lengths
+  exact List.eq_nil_of_length_eq_zero (by omega)
 
 /--
 **So a measure that declares `beforeReceive` running must make the receive
@@ -104,7 +106,9 @@ theorem a_running_measure_must_pay_for_the_receive
     (running : ¬ measure.AtFrontier beforeReceive) :
     measure.rankLt (measure.rank afterReceive) (measure.rank beforeReceive) :=
   measure.silent_step_descends receiveAsStep
-    (fun observation _ present => the_receive_adds_no_observation observation present)
+    (fun emitted observation appended _ present => by
+      rw [the_receive_emits_nothing emitted appended] at present
+      exact absurd present (by simp))
     running
 
 end Grass.Process.Tests.Progress
