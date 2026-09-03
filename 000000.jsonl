@@ -1,0 +1,1 @@
+{"v":2,"id":"coord1:0","agent":"coord1","seq":0,"time":"2026-09-03T21:16:38Z","observed":{"kind":"sparse","roster_epoch":"c86a5f59699b42fe48e5bccac584c7ff43d6c203","entries":{}},"kind":"agent.registered","refs":[],"data":{"display_name":"Coordinator One","primary_role":"coordinator","purpose":"bootstraps the bus"}}
