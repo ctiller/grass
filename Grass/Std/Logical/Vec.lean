@@ -196,6 +196,29 @@ the end. -/
 theorem get?_eq_none_iff (v : Vec α) (i : Nat) : v.get? i = none ↔ v.length ≤ i := by
   simp [get?, length]
 
+/--
+The `some` case, both ways.
+
+The module stated the `none` case as a biconditional and the `some` case only in
+the direction that builds one — so nothing gave `i < v.length` *from* a successful
+read. A cross-agent review found this is the one lemma in `c-mem`'s migration with
+no mechanical replacement, since `Grass/Memory/ByteStore.lean` derives exactly
+that. The asymmetry was real rather than stylistic.
+-/
+theorem get?_eq_some_iff {v : Vec α} {i : Nat} {a : α} :
+    v.get? i = some a ↔ ∃ h : i < v.length, v.get i h = a := by
+  constructor
+  · intro h
+    rcases Nat.lt_or_ge i v.length with hlt | hge
+    · exact ⟨hlt, by rw [get?_eq_some_get v i hlt] at h; exact (Option.some.inj h).symm ▸ rfl⟩
+    · rw [get?_eq_none v hge] at h; exact absurd h (by simp)
+  · rintro ⟨hlt, rfl⟩
+    exact get?_eq_some_get v i hlt
+
+/-- A successful read is in range. -/
+theorem lt_of_get?_eq_some {v : Vec α} {i : Nat} {a : α} (h : v.get? i = some a) :
+    i < v.length := (get?_eq_some_iff.mp h).1
+
 /-- An emptiness characterisation that reaches `= empty`.
 `Vec.isEmpty_iff_length_eq_zero` relates a `Bool` to a `Nat` and stops there. -/
 theorem eq_empty_iff_length_eq_zero (v : Vec α) : v = empty ↔ v.length = 0 := by
@@ -204,6 +227,41 @@ theorem eq_empty_iff_length_eq_zero (v : Vec α) : v = empty ↔ v.length = 0 :=
   · intro h
     apply toList_injective
     simpa [empty, length] using List.eq_nil_of_length_eq_zero h
+
+/--
+Build a sequence of length `n` from a function on indices.
+
+A cross-agent review ran the `ByteSeq → Vec Byte` migration against `c-mem`'s
+real branches and found this to be the one genuine gap. `Grass/Memory/Apply.lean`
+defines `observedBytes` as `(List.range n).map (fun i => …)` and thirty-two sites
+reason about it; without `ofFn` there is no `Vec` way to write it, and the idiom
+that works — `(replicate n default).mapIdx …` — is neither guessable nor free,
+since it drags in a spurious `Inhabited`.
+
+Defined through `List` deliberately: reaching for the representation is legitimate
+*inside* this module, and is exactly what spares every consumer from doing it.
+-/
+def ofFn (n : Nat) (f : Nat → α) : Vec α := fromList ((List.range n).map f)
+
+@[simp] theorem length_ofFn (n : Nat) (f : Nat → α) : (ofFn n f).length = n := by
+  simp [ofFn, length]
+
+@[simp] theorem get?_ofFn (n : Nat) (f : Nat → α) (i : Nat) :
+    (ofFn n f).get? i = if i < n then some (f i) else none := by
+  by_cases h : i < n
+  · simp [ofFn, get?, h]
+  · rw [get?_eq_none _ (by simp [length_ofFn]; omega), if_neg h]
+
+/-- The first `n` natural numbers, in order. -/
+def range (n : Nat) : Vec Nat := fromList (List.range n)
+
+@[simp] theorem length_range (n : Nat) : (range n).length = n := by
+  simp [range, length]
+
+@[simp] theorem get?_range (n i : Nat) : (range n).get? i = if i < n then some i else none := by
+  by_cases h : i < n
+  · simp [range, get?, h]
+  · rw [get?_eq_none _ (by simp [length_range]; omega), if_neg h]
 
 /-!
 ## Extensionality
@@ -221,6 +279,18 @@ theorem ext_of_get {v w : Vec α} (hlen : v.length = w.length)
     (h : ∀ i, (hv : i < v.length) → (hw : i < w.length) → v.get i hv = w.get i hw) :
     v = w :=
   toList_injective (List.ext_getElem hlen (fun i hv hw => h i hv hw))
+
+/-- Two index functions agreeing below `n` build the same sequence. This is what
+`Grass/Memory/Apply.lean`'s indeterminacy-irrelevance proof needs in place of
+`List.map_congr_left`. -/
+theorem ofFn_congr {n : Nat} {f g : Nat → α} (h : ∀ i, i < n → f i = g i) :
+    ofFn n f = ofFn n g := by
+  apply ext_of_get?
+  intro i
+  rw [get?_ofFn, get?_ofFn]
+  split
+  · rw [h i (by assumption)]
+  · rfl
 
 /-!
 ## Update
@@ -470,6 +540,25 @@ law: a length-prefixed payload is recovered by taking its own length. -/
   rw [get?_drop]
   exact get?_append_right (Nat.le_add_right _ _) w |>.trans (by simp)
 
+/--
+The form that actually fires.
+
+`Vec.take_append` is keyed on `u.length`, and a consumer review found it never
+matches a real goal: a frame parser writes `(header ++ payload).take 4`, and any
+`@[simp]` length lemma rewrites `header.length` back to the numeral, actively
+undoing the shape the law needs. This takes the length as a hypothesis instead.
+-/
+theorem take_append_of_length_eq {u : Vec α} {n : Nat} (h : u.length = n) (w : Vec α) :
+    (u ++ w).take n = u := by
+  subst h
+  exact take_append u w
+
+/-- The same, for the other half of the split. -/
+theorem drop_append_of_length_eq {u : Vec α} {n : Nat} (h : u.length = n) (w : Vec α) :
+    (u ++ w).drop n = w := by
+  subst h
+  exact drop_append u w
+
 /-- Taking the whole sequence is the identity. -/
 @[simp] theorem take_length (v : Vec α) : v.take v.length = v := by
   apply toList_injective
@@ -590,6 +679,29 @@ theorem take_isPrefix_take (v : Vec α) {n m : Nat} (h : n ≤ m) :
   congr 1
   omega
 
+/--
+Induct on a sequence as `empty` or `singleton a ++ w`.
+
+`Vec.recOnPush` was added because a consumer review found that every law about
+`push` was unusable without a recursor. Writing a real stream codec against it
+then exposed the asymmetry: `recOnPush` is a *snoc* recursor and every reader
+consumes from the *head*, so the induction hypothesis it hands you is about the
+wrong end of the byte stream. The reviewer had to hand-roll this one — the exact
+twin of the escape `recOnPush` was added to remove.
+
+There is no `cons` operation to go with it, deliberately: `singleton a ++ w` is
+the cons pattern and works, and the reviewer's own judgement was that what was
+needed was the induction principle rather than the accessors.
+-/
+@[elab_as_elim] theorem recOnCons {motive : Vec α → Prop} (v : Vec α)
+    (empty : motive empty)
+    (cons : ∀ (a : α) (w : Vec α), motive w → motive (singleton a ++ w)) : motive v := by
+  cases v with
+  | fromList l =>
+    induction l with
+    | nil => exact empty
+    | cons a t ih => exact cons a (fromList t) ih
+
 /-!
 ## Algebra
 -/
@@ -629,6 +741,17 @@ def zipWith (f : α → β → γ) (v : Vec α) (w : Vec β) : Vec γ :=
   simp [get?, map]
 
 @[simp] theorem map_empty (f : α → β) : (empty : Vec α).map f = empty := rfl
+
+@[simp] theorem map_singleton (f : α → β) (a : α) : (singleton a).map f = singleton (f a) := rfl
+
+@[simp] theorem map_push (f : α → β) (v : Vec α) (a : α) :
+    (v.push a).map f = (v.map f).push (f a) := by
+  apply toList_injective
+  simp [map, push]
+
+/-- `push` is `append` of a one-element sequence. Cheap, and it is what lets a
+proof move between the two vocabularies without unfolding either. -/
+theorem push_eq_append_singleton (v : Vec α) (a : α) : v.push a = v ++ singleton a := rfl
 
 @[simp] theorem length_mapIdx (f : Nat → α → β) (v : Vec α) :
     (v.mapIdx f).length = v.length := by
@@ -704,6 +827,19 @@ def Mem (a : α) (v : Vec α) : Prop := a ∈ v.toList
 instance : Membership α (Vec α) := ⟨fun v a => Mem a v⟩
 
 theorem mem_iff_mem_toList {a : α} {v : Vec α} : a ∈ v ↔ a ∈ v.toList := Iff.rfl
+
+/-! Membership through the constructors. A consumer review found that any
+recursive proof carrying a `∀ f ∈ frames, …` side condition hits these, and that
+without them `Vec.mem_iff_mem_toList` drops the proof straight into `List`. -/
+
+@[simp] theorem mem_singleton {a b : α} : a ∈ singleton b ↔ a = b := by
+  simp [mem_iff_mem_toList, singleton]
+
+@[simp] theorem mem_append {a : α} {v w : Vec α} : a ∈ v ++ w ↔ a ∈ v ∨ a ∈ w := by
+  simp [mem_iff_mem_toList]
+
+@[simp] theorem mem_push {a b : α} {v : Vec α} : a ∈ v.push b ↔ a ∈ v ∨ a = b := by
+  simp [mem_iff_mem_toList, push]
 
 /-- Membership is decidable, so `by decide` discharges it on concrete data.
 `Vec.contains` and `Vec.all_eq_true_iff` existed and a consumer review still had
