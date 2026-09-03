@@ -868,18 +868,78 @@ for whoever accepts.
 
 ## 9. Review
 
-**No work scheduled by this plan has been merged or reviewed in the sense
-[AGENT_REVIEW.md](AGENT_REVIEW.md) means.** That protocol requires the author to
-nominate a distinct reviewer on the agent bus, and that reviewer — not the
-author — to select a snapshot, authorize, and merge. It has not run, and the bus
-tool is not yet available.
+**No work scheduled by this plan has been merged.** The branch is nominated and
+under independent review; nothing on it has been authorized or merged.
 
-What has happened is local iteration: adversarial review agents spawned by the
-author, with fresh context each round, to find defects early. That found real
-ones — a multiplicity-blind terminal disposition, an uninhabitable
-`ProcessCorrect` — and it is not a substitute for the nomination. An author
-reviewing their own work through an agent they instructed is still an author
-reviewing their own work.
+[AGENT_REVIEW.md](AGENT_REVIEW.md) requires the author to nominate a distinct
+reviewer on the agent bus, and that reviewer — not the author — to select a
+snapshot, authorize, and merge.
+
+### 9.1 An open finding this plan cannot close by itself
+
+Twelve of the forty commits on this branch carry a broken trailer block, and the
+correction is not the author's to make.
+
+`AGENT_REVIEW.md` §2 requires every introduced product commit to carry
+`Agent-Bus-Agent: <name>`. Those twelve write it, but with a blank line between
+it and the `Co-Authored-By:` line that follows, so it is not in the final
+contiguous block and `git interpret-trailers --parse` reports only the
+`Co-Authored-By:`. To a human reading `git log` the trailer is plainly there; to
+any checker that parses rather than greps — and §5's "selected commit authors
+match trailers" implies parsing — it is absent. The affected commits are
+`d23eca2` through `4c41042`; the twenty-eight before them are contiguous and
+parse correctly.
+
+It cannot be fixed forward. A commit message is only changed by rewriting the
+commit, and `AGENT_REVIEW.md` §1 is unconditional: "No participant force-pushes
+any protocol branch: not `main`, a product branch, or `agent-bus`. Product
+branches advance through ordinary commits and merges. Mistakes are corrected by
+new commits." The stated reason is the one that applies here — rewriting would
+make the snapshot a reviewer has already accepted unreachable mid-review.
+
+So the options belong to the reviewer or the coordinator, not to this plan:
+
+- rule that the requirement is satisfied, on the ground that the line is present
+  and a checker should grep rather than parse — which is a decision about what
+  the check *is*, and should be written down either way;
+- authorize a single corrective rewrite as the explicit exception §1 contemplates
+  for a revert or administrator exception, accepting that the accepted snapshot
+  moves; or
+- accept the branch with the defect recorded, and require the trailer check only
+  of commits introduced after the ruling.
+
+This plan takes no position. What it does record is the convention that stops it
+recurring: **the trailer block is contiguous, with no blank line between
+trailers.** Every commit after `4c41042` on this branch follows it.
+
+### 9.2 What local iteration did and did not do
+
+Adversarial review agents spawned by the author, with fresh context each round,
+to find defects early. That found real ones and it is not a substitute for the
+nomination: an author reviewing their own work through an agent they instructed
+is still an author reviewing their own work.
+
+The defects it caught are worth listing, because each is a case where the code
+built, the fixtures passed, and the module's own docstring was wrong:
+
+- a multiplicity-blind terminal disposition, where one claim about a demand
+  *value* discharged any number of occurrences of it;
+- an uninhabitable `ProcessCorrect`, whose `handlesEveryEvent` field demanded a
+  step from a state `terminalNoStep` forbids one from;
+- an assertion footprint that bounded nothing, because `WorldAgreement` admitted
+  the equality relation (§10.11's neighbourhood, fixed by `agreesGlue`);
+- a lifecycle enumeration derived from the transition family rather than from
+  the endings, which gave no state to an acknowledged cancellation;
+- an escrow law that forbade self-merging but admitted coalescing *cycles*, in
+  which every payload was passed on and none landed;
+- an escrow law that forbade any real reroute, by demanding the carrier be
+  escrowed in the ledger the payload was leaving;
+- a `SlotsAgree` that checked an instance's kind and not its slot, with its own
+  docstring describing the defect the missing half left open; and
+- a `RootUnique` implied by `SlotsAgree` and therefore empty, with a fixture
+  whose hypotheses were jointly unsatisfiable.
+
+Each fix carries a negative fixture that would have caught it.
 
 Each milestone is offered for that nomination after local iteration stops
 finding defects, against [REVIEW.md](REVIEW.md) and the distinct-author rule.
