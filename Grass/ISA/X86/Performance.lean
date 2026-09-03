@@ -382,6 +382,87 @@ theorem traceCost_determined (m : CostModel Insn Vals) (t : List (Insn × Vals))
 
 end CostModel
 
+/-! ## Putting the citation on the proof path -/
+
+/--
+A cost model whose value-independence is *justified* rather than asserted.
+
+`CostModel.ValueIndependent` is a property of a function the author wrote. On
+its own it is worth exactly as much as writing `basis := .architectural` would
+be: a reviewer found that nothing in this module consumed `TimingFact.SoundFor`,
+so `admissibleForSecurity` gated a predicate the security theorem did not take
+as input, and the degenerate model
+
+```lean
+def zeroModel : CostModel Nat Nat := ⟨fun _ _ => 0⟩
+```
+
+satisfied every premise and proved every program timing-safe.
+
+`zeroModel` still satisfies `independent`. What it cannot produce is `fact`: a
+`TimingFact` carries a `DualCitation`, so justifying it needs an Intel anchor
+and an AMD anchor for the instruction, and `sound` additionally requires the
+basis to be `architectural` — which `TimingBasis.admissibleForSecurity` rejects
+for anything measured. The citation is now a premise of the security argument
+instead of a record beside it.
+-/
+structure JustifiedCostModel (Insn Vals : Type) where
+  /-- The cost function. -/
+  model : CostModel Insn Vals
+  /-- The cited timing fact for each instruction. -/
+  fact : Insn → TimingFact
+  /-- Each fact rests on an architectural guarantee and closes the
+  operand-value channel — the channel a cost function can speak to. -/
+  sound : ∀ i, (fact i).SoundFor [LeakageChannel.operandValue]
+  /-- And the cost function really has the property the fact claims. Both
+  halves are needed: a citation without this is a claim about the architecture
+  that the model does not implement, and this without a citation is the
+  assertion the structure exists to prevent. -/
+  independent : ∀ i, model.ValueIndependent i
+
+namespace JustifiedCostModel
+
+variable {Insn Vals : Type}
+
+/--
+**Timing safety, with the citation on the proof path.**
+
+Two executions of the same instruction sequence cost the same, whatever values
+they carried — and the premises now include a dual-cited architectural
+guarantee for every instruction involved, not merely the author's word that the
+cost function ignores its second argument.
+
+The `dataAddress` channel remains undischarged and cannot be discharged here:
+this model has no cache, so two traces with identical instructions and identical
+costs may still differ in the addresses they touched. `sound` closes only
+`operandValue` for exactly that reason.
+-/
+theorem traceCost_eq (j : JustifiedCostModel Insn Vals)
+    (t₁ t₂ : List (Insn × Vals))
+    (hsame : CostModel.instructions t₁ = CostModel.instructions t₂) :
+    j.model.traceCost t₁ = j.model.traceCost t₂ :=
+  j.model.traceCost_eq_of_valueIndependent t₁ t₂ hsame (fun i _ => j.independent i)
+
+/-- Every instruction's justification rests on an architectural guarantee.
+
+Extracted so a report can state it without reconstructing `SoundFor`. -/
+theorem basis_architectural (j : JustifiedCostModel Insn Vals) (i : Insn) :
+    (j.fact i).basis.admissibleForSecurity = true := (j.sound i).1
+
+/-- A measured timing fact cannot justify a `JustifiedCostModel`.
+
+The point of the whole `TimingBasis` split, stated as the thing that fails: an
+observation about one part on one day is not a premise a security argument may
+rest on, and this is where that is enforced rather than described. -/
+theorem no_justification_from_measured (j : JustifiedCostModel Insn Vals)
+    (i : Insn) (part : String) : (j.fact i).basis ≠ .measured part := by
+  intro h
+  have := j.basis_architectural i
+  rw [h] at this
+  exact absurd this (by simp)
+
+end JustifiedCostModel
+
 /-! ## Microarchitectural profile
 
 The quantitative half. Everything here is `measured` or `optimizationGuide` and
@@ -467,36 +548,60 @@ end MicroarchProfile
 Counting the uops with no alternative is the sound half of port pressure: a uop
 with a choice may be steered away, but one bound to a single port must wait for
 it, so this is a lower bound on that port's occupancy and never an
-overestimate. -/
+overestimate.
+
+Written as "every eligible port is this one" rather than as list equality with
+`[id]`, because a uop whose port list happens to repeat an entry is still bound
+to that port, and equality made it contribute zero. -/
 def portPressure (uops : List Uop) (id : PortId) : Nat :=
-  (uops.filter fun u => u.eligiblePorts == [id]).length
+  (uops.filter fun u =>
+    !u.eligiblePorts.isEmpty && u.eligiblePorts.all (· == id)).length
 
 /--
-A lower bound on the cycles a block of uops takes, in whole cycles.
+A lower bound on the **unfused issue slots** a block of uops occupies.
 
-The larger of two independent constraints: the issue width cannot retire more
-than `issueWidth` uops per cycle, and a port with `n` uops bound to it needs at
-least `n` cycles. Both are `Nat`, and the bound is a *lower* bound — the honest
-direction for a model that omits cache misses, branch mispredictions and
-contention, all of which only add time.
+Not a lower bound on cycles, and the difference matters enough to be in the
+name. The larger of two constraints: the issue width cannot dispatch more than
+`issueWidth` uops per cycle, and a port with `n` uops bound to it needs at least
+`n` slots.
+
+Both hold of the uop list as given. What breaks the step from slots to cycles is
+that real front ends do not execute the list as given: macro-fusion turns a
+compare and a branch into one uop, micro-fusion folds a load into its consumer,
+and zeroing idioms like `xor eax, eax` and register-to-register moves are
+resolved at rename and occupy no port at all. Every one of those makes the
+hardware faster than this number, so as a *cycle* bound it is unsound in the
+claimed direction — eight unfused uops that fuse to four, at `issueWidth = 4`,
+give 2 here and take 1.
+
+`docs/VALIDATION.md` §1 is the relevant discipline: an unguaranteed observation
+"may motivate a restriction or research item, never a portable guarantee". A
+fusion-aware cycle bound would need a fusion model that no vendor guarantees, so
+`unfusedSlotLowerBound` counts the quantity it can count and is named for it.
+`TimingBasis` keeps it out of any security argument regardless.
+
+`Routable` is an **open obligation** on the caller: a uop whose only eligible
+ports do not exist on `p` contributes nothing to `portPressure` and would make
+this an underestimate even of slots. `MicroarchProfile.unroutable` reports them
+and nothing calls it yet.
 -/
-def cycleLowerBound (p : MicroarchProfile) (uops : List Uop) : Nat :=
+def unfusedSlotLowerBound (p : MicroarchProfile) (uops : List Uop) : Nat :=
   let byIssue := if p.issueWidth = 0 then uops.length
                  else (uops.length + p.issueWidth - 1) / p.issueWidth
   let byPort := (List.range p.portCount).foldl
     (fun acc id => max acc (portPressure uops id)) 0
   max byIssue byPort
 
-/-- No uops, no cycles. -/
-@[simp] theorem cycleLowerBound_nil (p : MicroarchProfile) :
-    cycleLowerBound p [] = 0 := by
+/-- No uops, no slots. -/
+@[simp] theorem unfusedSlotLowerBound_nil (p : MicroarchProfile) :
+    unfusedSlotLowerBound p [] = 0 := by
   have hports : ∀ (l : List PortId) (acc : Nat),
       l.foldl (fun acc id => max acc (portPressure [] id)) acc = acc := by
     intro l
     induction l with
     | nil => intro acc; rfl
     | cons hd tl ih => intro acc; simpa [portPressure] using ih acc
-  simp only [cycleLowerBound, hports]
+  simp only [unfusedSlotLowerBound, hports]
   split
   · simp
   · rename_i hne
