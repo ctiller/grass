@@ -2905,6 +2905,24 @@ Needs a fixture with a real view, or a ruling that the facet is deferred to the
 layer that consumes it. Recorded rather than fixed because building one is a
 specification-layer question, not a process-layer one.
 
+**Closed**, and the deferral was another argument. `ProcessSpec` *is* this layer,
+and the fixture is `Tests/Process/ViewFixtures.lean`: `gauge` is `oneShot` with a
+view and every other field verbatim, which is itself the point — a view facet is
+pure, so acquiring one changes no behaviour, and the correctness record differs
+from `oneShotCorrect` in exactly one field.
+
+What took a moment's thought was making the *acceptance* non-vacuous, since
+`ViewAccepts` sees only the facet and the rendered value and cannot mention the
+process's state directly. The answer is the **image of the render**: an
+acceptable view is one some state renders to. It is stateable for any facet, it
+is exactly what `viewAccepts` can always discharge, and it refuses everything
+outside the range — `a_view_no_state_renders_is_refused` turns away a view value
+no state of `gauge` produces, which `fun _ _ => True` cannot.
+
+The related half of §10.86 is still open: a demand whose result type is not a
+singleton. That one is about vocabulary richness rather than about a facet
+nothing had built.
+
 ### 10.57 `MeetsProcessProgress.productive`'s `Invariant` is redundant inside `ProcessCorrect`
 
 `ProcessCorrect.invariant_of_reachable` already yields `Invariant state` at every
