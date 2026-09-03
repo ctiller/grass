@@ -723,9 +723,9 @@ here; those are M3 and M4. The claim is about the seam, not about borrowing. -/
 def loanProvider : AuthorityProvider where
   id := ⟨"fake.loan"⟩
   violationClass := .authorityUnavailable
-  refuses state d :=
+  refuses memory d :=
     decide (d.provenance.root = borrowedAlloc) &&
-    !decide (state.memory.GrantedOfKind .loan d.context d.provenance d.range d.intent)
+    !decide (memory.GrantedOfKind .loan d.context d.provenance d.range d.intent)
 
 /-- Stack storage must be covered by a live grant of kind `frame`. A distinct
 provider over the same grant table, distinguished only by the grant kind it
@@ -733,9 +733,9 @@ demands — which is the point: two authority kinds, one mechanism. -/
 def frameProvider : AuthorityProvider where
   id := ⟨"fake.frame"⟩
   violationClass := frameAuthorityUnavailable
-  refuses state d :=
+  refuses memory d :=
     decide (d.provenance.root = stackAlloc) &&
-    !decide (state.memory.GrantedOfKind .frame d.context d.provenance d.range d.intent)
+    !decide (memory.GrantedOfKind .frame d.context d.provenance d.range d.intent)
 
 /--
 A provider whose violation class this profile never declared.

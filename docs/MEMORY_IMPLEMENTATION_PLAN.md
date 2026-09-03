@@ -1752,12 +1752,18 @@ refuses everything.
   `true`; what replaced them is `refusalOf_refuses_the_unauthorized`, which is
   quantified over the policy and so says something the seven could not.
 
-  The deeper half of review's finding stands and is not closed: `AuthorityProvider` is
-  `refuses : MachineState → AccessDescriptor → Bool` with no locality, monotonicity or
-  soundness condition attached, and `StepPolicy` carries a proof obligation about a
-  provider's *class* and none about its behaviour. A provider keyed on
-  `state.events.length` is well formed. Making refusal monotone in the state, or
-  local to the access, is a design question this branch has not answered.
+  The deeper half of review's finding is half closed. `refuses` took a whole
+  `MachineState` — events, faults, the violation ledger, the obligation table — so a
+  provider keyed on `state.events.length` was well formed, and refusal that depends on
+  execution history is the ambient authority law 6 forbids. It takes a `MemoryState`
+  now, which makes that unrepresentable rather than merely unwise; all three providers
+  in the fixture read `state.memory` and nothing else, so nothing was lost.
+
+  What remains open is the rest of it: a provider may still refuse arbitrarily as a
+  function of the memory state — refuse everything, or key on an unrelated allocation
+  — and `StepPolicy` still proves things about a provider's class and nothing about
+  its behaviour. Monotonicity, and locality to the bytes the access names, are design
+  questions this branch has not answered.
 - ~~**A faulting substep applied its whole authority effect.**~~ The first real
   soundness defect an adversarial round found in the authority-effect work, and it
   was a gate that was not extended rather than a rule nobody wrote.

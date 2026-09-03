@@ -418,8 +418,23 @@ structure AuthorityProvider where
   Open nominal, so a profile names its own. `StepPolicy.violationClassesDeclared`
   requires the profile to declare it, via `AuthorityProvider.emittedClasses`. -/
   violationClass : AuditViolationClass
-  /-- Whether this provider refuses the access against the given state. -/
-  refuses : MachineState → AccessDescriptor → Bool
+  /-- Whether this provider refuses the access against the memory state.
+
+  **The memory state, not the machine state.** A provider used to see the whole
+  `MachineState` — events, faults, the violation ledger, the obligation table — and
+  review's point was that nothing constrained what it did with any of it: a provider
+  keyed on `state.events.length` was well formed, and refusal that depends on
+  execution history is the ambient authority `docs/FOUNDATION.md` law 6 forbids.
+  Narrowing the argument makes that unrepresentable rather than merely unwise, which
+  is this layer's preferred order. All three providers in `Tests/Op/FakeIsa.lean`
+  read `state.memory` and nothing else, so nothing was lost.
+
+  What this does *not* fix is the rest of review's finding: a provider may still
+  refuse arbitrarily as a function of the memory state — refuse everything, or key on
+  an unrelated allocation — and `StepPolicy` still proves things about a provider's
+  class and nothing about its behaviour. Monotonicity and locality-in-the-range are
+  open, and `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records them. -/
+  refuses : MemoryState → AccessDescriptor → Bool
 
 namespace AuthorityProvider
 
@@ -748,7 +763,7 @@ def refusalOf (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor
         -- device rule -- and they may only add refusals. They cannot remove this one.
         some .authorityUnavailable
       else
-        match policy.authorities.find? (fun provider => provider.refuses state d) with
+        match policy.authorities.find? (fun provider => provider.refuses state.memory d) with
         | some provider => some provider.violationClass
         | Option.none =>
             match prospective with
@@ -800,7 +815,7 @@ theorem refusalOf_allows_the_unheld {policy : StepPolicy} {state : MachineState}
       d.intent)
     (hunheld : ¬ state.memory.AnyGrantOver d.provenance d.range) :
     refusalOf policy state d prospective =
-      match policy.authorities.find? (fun provider => provider.refuses state d) with
+      match policy.authorities.find? (fun provider => provider.refuses state.memory d) with
       | some provider => some provider.violationClass
       | Option.none =>
           match prospective with
