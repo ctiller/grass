@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""Report inductive constructors nothing outside their own declaration builds.
+
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 asks for this in its own words:
+
+    Nothing enforces that every `AuthorityState` constructor stays reachable. Four
+    fixtures exhibit one each. A fifth constructor, or a change that made one
+    unreachable, would be caught by a reader and not by a gate.
+
+That gap is not hypothetical. `AuthorityState` carried `sharedImmutable`,
+`unavailable` and `atomicShared` with nothing building any of them, so every theorem
+about them held of a term no state could reach — which reads as coverage and is not.
+Two were made reachable and one was deleted; the same thing can happen again, and
+`Tools/ConsultedAudit.py` cannot see it, because it scans structure fields and this
+is about sum constructors.
+
+**What this checks, exactly.** For each `inductive T` under `Grass/`, it collects the
+constructor names on `| ctor` lines. It then searches the comment- and
+string-stripped sources of `Grass/` and `Tests/` for a construction site outside the
+declaration itself: either the qualified `T.ctor`, or a bare `.ctor` that is not in a
+match-arm position. A constructor with none is reported.
+
+**What it does not check**, stated because two tools in this directory have been
+corrected for advertising a stronger reading:
+
+- Dot notation is namespace-blind, exactly as in `ConsultedAudit.py`. Two inductives
+  with a constructor of the same name are indistinguishable, so building one
+  satisfies the other. Lean would have to be elaborated to do better.
+- It cannot tell a construction in live code from one in dead code, nor "built" from
+  "built only by a fixture that asserts nothing about it".
+- It cannot see a constructor produced by a generic function returning `T`, or by
+  `deriving`, or by a `default` field value spelled without the constructor's name.
+- Match arms are excluded by a heuristic: a `.ctor` is a *pattern* if it is followed
+  by `=>`, or preceded on the same line by a `|` with no `=>` between them. A
+  construction written to look like that is missed, and a pattern written across
+  lines may be counted as a construction — a false negative and a false positive
+  respectively. The `|`-with-no-`=>` refinement is not cosmetic: without it, a
+  constructor built on the value side of an arm was reported as unbuilt.
+
+So a clean run means every constructor's name appears somewhere that looks like a
+construction. It is one cheap net over a defect this layer has hit three times in one
+type, and it under-reports by design.
+
+The allowlist is where "declared deliberately without a builder" is recorded, with a
+reason per entry.
+
+`--self-test` seeds each class this file claims to catch and each near-miss it must
+stay quiet on. Run it after changing the scanner.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+DECLARED_IN = sorted((ROOT / "Grass").rglob("*.lean"))
+BUILDERS_IN = DECLARED_IN + sorted((ROOT / "Tests").rglob("*.lean"))
+
+INDUCTIVE = re.compile(r"^\s*(?:private\s+|protected\s+)?inductive\s+([A-Za-z_][A-Za-z0-9_.']*)")
+CONSTRUCTOR = re.compile(r"^\s*\|\s*([a-z][A-Za-z0-9_']*)")
+BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
+LINE = re.compile(r"--.*?$", re.MULTILINE)
+STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+
+# Constructors carried without a builder. Every entry says why.
+ALLOWED = {
+    # Vocabulary an ISA or profile supplies, which this tree declares and does not
+    # itself instantiate. A memory model that only named the address widths it uses
+    # would be a memory model for one target.
+    "symbolic",
+    "profileSpecific",
+    # Portable ordering and scope names section 7.1 fixes. A profile picks the ones
+    # its target has; the model owes all of them.
+    "acquire",
+    "release",
+    "sequentiallyConsistent",
+    "process",
+    "device",
+    "system",
+    "nonAtomic",
+    # Terminal and lifecycle vocabulary whose consumers are later milestones.
+    "notRestartable",
+    "restartable",
+    # --- Declared ahead of the milestone that builds them. Being listed here is not
+    # --- "this is fine": it is the record that someone read the plan and decided,
+    # --- and the reason differs per entry.
+    #
+    # `docs/MEMORY_MODEL.md` section 7.1 makes control events part of the event
+    # vocabulary; nothing in this layer mints one, because control flow is the ISA
+    # owner's and the causal graph is M8's.
+    "control",
+    # `docs/OBLIGATIONS.md` section 3 requires every obligation at a terminal edge to
+    # receive a disposition. M5 owns terminal accounting and does not exist, so these
+    # two are named and unbuilt; `Spikes/1_Hello_World` needs both.
+    "transferred",
+    "teardownAdopted",
+    # The resource layer is built ahead of its consumers, which arrive at M7 and M9.
+    # `Tools/ConsultedAudit.py` records the same thing about its fields.
+    "affineTransfer",
+    "sharedOnce",
+    "phaseExclusive",
+    "scopedRelease",
+    "reject",
+    "backpressure",
+    "fail",
+}
+
+
+def scannable(text: str) -> str:
+    """Strip comments and string literals, as `ConsultedAudit.py` does.
+
+    Prose naming a constructor is not a construction of it, and this file's own
+    docstring names several.
+    """
+    return STRING.sub('""', LINE.sub("", BLOCK.sub(" ", text)))
+
+
+def constructors_in(text: str) -> list[tuple[str, str, int]]:
+    """Yield (inductive, constructor, line) for every constructor in one source."""
+    out: list[tuple[str, str, int]] = []
+    current: str | None = None
+    in_doc = False
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if in_doc:
+            if "-/" in stripped:
+                in_doc = False
+            continue
+        if stripped.startswith("/-"):
+            if "-/" not in stripped:
+                in_doc = True
+            continue
+        match = INDUCTIVE.match(line)
+        if match:
+            current = match.group(1)
+            continue
+        if current is None:
+            continue
+        if stripped.startswith("deriving") or (stripped and not line.startswith(" ")):
+            current = None
+            continue
+        found = CONSTRUCTOR.match(line)
+        if found:
+            out.append((current, found.group(1), number))
+    return out
+
+
+def builds(body: str, inductive: str, constructor: str) -> bool:
+    """Whether `body` looks like it constructs `Inductive.constructor` somewhere.
+
+    A qualified mention always counts. A bare `.ctor` counts unless it is in a
+    match-arm *pattern* position: followed by `=>`, or preceded on the same line by a
+    `|` with no `=>` between them.
+    """
+    if re.search(r"\b%s\.%s\b" % (re.escape(inductive.split(".")[-1]),
+                                  re.escape(constructor)), body):
+        return True
+    for line in body.splitlines():
+        for match in re.finditer(r"\.%s\b" % re.escape(constructor), line):
+            before = line[: match.start()]
+            after = line[match.end() : match.end() + 6]
+            if "=>" in after:
+                continue
+            # A `|` earlier on the line makes this a pattern only if no `=>` has
+            # intervened. `| some space => if p then [] else [.ctor x]` builds on the
+            # value side of an arm, and a first version of this rule called it a
+            # pattern and reported the constructor as unbuilt.
+            bar = before.rfind("|")
+            if bar != -1 and "=>" not in before[bar:]:
+                continue
+            return True
+    return False
+
+
+def analyse(raw: dict[str, str], builders: dict[str, str] | None = None) -> list[str]:
+    """Report `path:line: Inductive.ctor` for every constructor nothing builds."""
+    corpus = {name: scannable(text) for name, text in (builders or raw).items()}
+    unbuilt: list[str] = []
+    for name, text in raw.items():
+        declaring = scannable(text)
+        for inductive, constructor, line in constructors_in(text):
+            if constructor in ALLOWED:
+                continue
+            found = False
+            for other, body in corpus.items():
+                # The declaration's own file counts only outside the `inductive`
+                # block, which `constructors_in` already located; a `| ctor` line is
+                # not a construction, and `builds` skips it for the leading `|`.
+                if builds(body if other != name else declaring, inductive, constructor):
+                    found = True
+                    break
+            if not found:
+                unbuilt.append(
+                    f"  {name}:{line}: {inductive}.{constructor} is declared and "
+                    "nothing appears to build it"
+                )
+    return unbuilt
+
+
+def self_test() -> int:
+    """Seed each class this file claims to catch, and the near-misses it must not."""
+    decl = "inductive Probe where\n  | quarry\n  | decoy\n"
+    cases: list[tuple[str, dict[str, str], bool]] = [
+        ("nothing builds it", {"a.lean": decl}, True),
+        ("qualified construction",
+         {"a.lean": decl, "b.lean": "def f : Probe := Probe.quarry\n"}, False),
+        ("bare construction",
+         {"a.lean": decl, "b.lean": "def f : Probe := .quarry\n"}, False),
+        # A match arm is not a construction. This is the case that makes the tool
+        # worth having: `AuthorityState.atomicShared` was matched on by
+        # `PermitsOrdinaryWrite` and built by nothing.
+        # Built on the *value* side of a match arm, which the pattern rule must not
+        # mistake for the pattern side. A first version of that rule did, and
+        # reported a constructor built inside an `if` in an arm body.
+        ("built on the value side of an arm",
+         {"a.lean": decl,
+          "b.lean": "def f : Nat -> Probe\n  | 0 => .quarry\n  | _ => .decoy\n"}, False),
+        ("matched but not built",
+         {"a.lean": decl,
+          "b.lean": "def f : Probe -> Nat\n  | .quarry => 0\n  | .decoy => 1\n"}, True),
+        ("prose mentioning it",
+         {"a.lean": decl, "b.lean": "/-- builds `Probe.quarry` one day -/\ndef f := 1\n"},
+         True),
+        ("string literal mentioning it",
+         {"a.lean": decl, "b.lean": 'def f := "Probe.quarry"\n'}, True),
+    ]
+    failures = 0
+    for label, sources, should_report in cases:
+        reported = any("Probe.quarry" in line for line in analyse(sources))
+        if reported != should_report:
+            want = "reported" if should_report else "not reported"
+            print(f"  SELF-TEST FAILED [{label}]: expected {want}")
+            failures += 1
+
+    # The builder corpus is a separate parameter, and no case above exercises it.
+    builder_only = {"a.lean": decl}
+    builders = {"a.lean": decl, "t.lean": "def f : Probe := .quarry\n"}
+    if any("Probe.quarry" in line for line in analyse(builder_only, builders)):
+        print("  SELF-TEST FAILED [builder corpus]: expected not reported")
+        failures += 1
+
+    # Documented blind spot: namespace-blind, so another inductive's constructor of
+    # the same name satisfies this one. Asserted so it cannot become silent coverage.
+    other = decl + "\ninductive Decoy where\n  | quarry\n"
+    if any("Probe.quarry" in line for line in
+               analyse({"a.lean": other, "b.lean": "def f : Decoy := Decoy.quarry\n"})):
+        print("  SELF-TEST FAILED [namespace blind spot]: this now discriminates; "
+              "update the module docstring, which documents it as unhandled")
+        failures += 1
+
+    if failures:
+        print(f"reachability audit self-test: {failures} failure(s)")
+        return 1
+    print("reachability audit self-test: all cases discriminate as documented")
+    return 0
+
+
+def main() -> int:
+    if "--self-test" in sys.argv:
+        return self_test()
+    declared = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
+                for path in DECLARED_IN}
+    builders = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
+                for path in BUILDERS_IN}
+    if not declared:
+        print(f"reachability audit: no sources found under {ROOT / 'Grass'}",
+              file=sys.stderr)
+        return 1
+    unbuilt = analyse(declared, builders)
+    if unbuilt:
+        print("\n".join(sorted(unbuilt)))
+        print("\nreachability audit: constructors nothing builds\n")
+        print(
+            f"{len(unbuilt)} unbuilt constructor(s). Build one, delete it, or add it "
+            "to ALLOWED with the reason it is declared."
+        )
+        return 1
+    print(
+        "reachability audit: every declared constructor appears to be built "
+        "(a lexical check; see the module docstring for what it does not cover)"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

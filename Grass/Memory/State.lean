@@ -453,6 +453,46 @@ instance (state : MemoryState) (grant : AuthorityGrant) (context : ContextId)
     Decidable (state.AuthorizedBy grant context provenance range intent) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
+/--
+The same test at one byte rather than over a range.
+
+`Granted` is stated over this, so a context's grants **compose**. With `AuthorizedBy`
+alone a single grant had to cover the whole access, and review issued one context
+write loans over `[0, 8)` and `[8, 16)` — which `issue?` accepts, since §7.3's
+conflict is between distinct holders — and then found its store to `[4, 12)` refused,
+while `denialOf` cleared it, `authorityOf` called it `exclusive` and the context was
+authorized on each half. Nothing in `docs/MEMORY_MODEL.md` §3 says authority must
+arrive in one piece; a byte is authorized or it is not.
+
+That also makes the fragments a future split produces usable before split itself
+lands, which §4.4.1 records as owed.
+-/
+def AuthorizedAt (state : MemoryState) (grant : AuthorityGrant) (context : ContextId)
+    (provenance : Provenance) (offset : Nat) (intent : AccessIntent) : Prop :=
+  grant.holder = context ∧
+  state.SharesBytes grant.provenance.root provenance.root ∧
+  state.CurrentEpoch grant.provenance ∧
+  state.CurrentEpoch provenance ∧
+  grant.range.Covers offset ∧
+  grant.rights.Permits intent
+
+instance (state : MemoryState) (grant : AuthorityGrant) (context : ContextId)
+    (provenance : Provenance) (offset : Nat) (intent : AccessIntent) :
+    Decidable (state.AuthorizedAt grant context provenance offset intent) :=
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+
+/-- A grant covering a range covers each of its bytes. -/
+theorem authorizedAt_of_authorizedBy {state : MemoryState} {grant : AuthorityGrant}
+    {context : ContextId} {provenance : Provenance} {range : ByteRange}
+    {intent : AccessIntent} {i : Nat} (hi : i < range.size)
+    (h : state.AuthorizedBy grant context provenance range intent) :
+    state.AuthorizedAt grant context provenance (range.start + i) intent := by
+  refine ⟨h.1, h.2.1, h.2.2.1, h.2.2.2.1, ?_, h.2.2.2.2.2⟩
+  have hc := h.2.2.2.2.1
+  rw [ByteRange.contains_def] at hc
+  rw [ByteRange.covers_def]
+  omega
+
 /-- A grant held by one context authorizes nothing for another. Authority is not
 ambient: `docs/FOUNDATION.md` law 6 forbids ambient provider choice, and the same
 reading applies to authority a context did not receive. -/
@@ -492,33 +532,48 @@ is finite.
 -/
 def Granted (state : MemoryState) (context : ContextId) (provenance : Provenance)
     (range : ByteRange) (intent : AccessIntent) : Prop :=
-  ∃ entry ∈ state.grantEntries,
-    state.AuthorizedBy entry.2 context provenance range intent
+  ∀ i, i < range.size →
+    ∃ entry ∈ state.grantEntries,
+      state.AuthorizedAt entry.2 context provenance (range.start + i) intent
 
 instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
     (range : ByteRange) (intent : AccessIntent) :
     Decidable (state.Granted context provenance range intent) :=
-  inferInstanceAs (Decidable (∃ _ ∈ _, _))
+  inferInstanceAs (Decidable (∀ _, _ → ∃ _ ∈ _, _))
+
+/-- One grant covering the whole range is enough, which is the ordinary case. -/
+theorem granted_of_authorizedBy {state : MemoryState} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    {entry : GrantId × AuthorityGrant} (hmem : entry ∈ state.grantEntries)
+    (h : state.AuthorizedBy entry.2 context provenance range intent) :
+    state.Granted context provenance range intent :=
+  fun _ hi => ⟨entry, hmem, authorizedAt_of_authorizedBy hi h⟩
 
 /-- `state.GrantedOfKind` additionally requires the authorizing grant to be of a
 particular kind, which is how one provider distinguishes itself from another over
 the same table. -/
 def GrantedOfKind (state : MemoryState) (kind : GrantKind) (context : ContextId)
     (provenance : Provenance) (range : ByteRange) (intent : AccessIntent) : Prop :=
-  ∃ entry ∈ state.grantEntries,
-    entry.2.kind = kind ∧ state.AuthorizedBy entry.2 context provenance range intent
+  ∀ i, i < range.size →
+    ∃ entry ∈ state.grantEntries,
+      entry.2.kind = kind ∧
+        state.AuthorizedAt entry.2 context provenance (range.start + i) intent
 
 instance (state : MemoryState) (kind : GrantKind) (context : ContextId)
     (provenance : Provenance) (range : ByteRange) (intent : AccessIntent) :
     Decidable (state.GrantedOfKind kind context provenance range intent) :=
-  inferInstanceAs (Decidable (∃ _ ∈ _, _))
+  inferInstanceAs (Decidable (∀ _, _ → ∃ _ ∈ _, _))
 
 /-- A state with no grants authorizes nothing. Authority is held, not assumed. -/
 theorem not_granted_empty (context : ContextId) (provenance : Provenance)
-    (range : ByteRange) (intent : AccessIntent) :
+    {range : ByteRange} (hne : ¬ range.IsEmpty) (intent : AccessIntent) :
     ¬ empty.Granted context provenance range intent := by
-  rintro ⟨entry, hmem, -⟩
-  simp [empty, FiniteMap.empty] at hmem
+  intro h
+  have hpos : 0 < range.size := by
+    rw [ByteRange.isEmpty_def] at hne
+    omega
+  obtain ⟨entry, hmem, -⟩ := h 0 hpos
+  simp [empty, grantEntries, FiniteMap.empty] at hmem
 
 /-- Record a new allocation. -/
 def allocate (state : MemoryState) (id : AllocId) (record : AllocationRecord) :

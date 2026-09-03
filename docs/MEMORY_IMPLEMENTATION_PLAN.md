@@ -1319,6 +1319,17 @@ refuses everything.
   demonstrated two contexts atomically writing the same live bytes with one holding
   no grant. The over-refusal is the safe half of that trade and is recorded rather
   than argued away; closing it properly needs an owner, which §5's arena model owes.
+- **An unplaced allocation opts out of the address check.** `denialOf` compares the
+  declared address to the placement only when the allocation has a base, which is
+  right for a logical address space — §7.5's SPIR-V `Private` storage class has no
+  machine addresses — and wrong for an allocation in a numerically addressed space
+  that simply forgot to say where it sits. `denialOf` reads the space's *identity*
+  and not its representation, so it cannot tell the two apart; the check belongs
+  where the `AddressSpace` is in hand.
+- **`MemoryState.Granted` composes grants byte by byte, and nothing composes their
+  *rights*.** A context holding a read grant and a write grant over the same byte is
+  authorized for a read-modify-write only if one grant permits both. That is the safe
+  direction and it is not stated anywhere.
 - **A stale-epoch grant freezes the next epoch's storage and only its holder or
   lender can clear it.** `grantsOver` has no epoch clause, deliberately — the clause
   it had was worse — so a grant naming a defunct epoch still freezes the storage that
@@ -1327,9 +1338,15 @@ refuses everything.
   returned before reallocation, so this is a profile that skipped a step; but
   `MemoryState.allocate` accepts the epoch bump silently rather than refusing it,
   which is not law 8's direction.
-- **Nothing enforces that every `AuthorityState` constructor stays reachable.** Four
-  fixtures exhibit one each. A fifth constructor, or a change that made one
-  unreachable, would be caught by a reader and not by a gate.
+- ~~**Nothing enforces that every `AuthorityState` constructor stays reachable.**~~
+  Closed by `Tools/ReachabilityAudit.py`, which reports any inductive constructor
+  nothing outside its own declaration appears to build. It is lexical, like the other
+  three, and its docstring says what it cannot see — namespace-blind dot notation, a
+  construction in dead code, a constructor produced by a generic function. On its
+  first run it named ten deliberate cases, each now in an allowlist with the
+  milestone that owes the builder: `EventKind.control`, the two terminal
+  `Disposition` constructors §5 needs, and the seven resource-policy constructors
+  built ahead of M7 and M9.
 
 ## 5. M3–M5 — The Spike 1 acceptance path
 

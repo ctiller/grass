@@ -396,4 +396,55 @@ theorem the_atomic_state_permits_the_intent :
         AccessIntent.atomicReadWrite := by
   exact ⟨by decide, by decide⟩
 
+/-- Two adjacent write loans, both held by the thread. `issue?` accepts them: §7.3's
+conflict is between distinct holders. -/
+def splitBetweenTwoLoans : MachineState :=
+  { state₀ with
+    memory := ((state₀.memory.issue? bufferLoan
+        { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
+          range := ⟨0, 4⟩, rights := .readWrite }).getD state₀.memory).issue?
+        secondBufferLoan
+        { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
+          range := ⟨4, 4⟩, rights := .readWrite } |>.getD state₀.memory }
+
+/--
+**A context's grants compose.**
+
+`Granted` required a *single* grant to cover the whole access, and review issued one
+context adjacent write loans over `[0, 4)` and `[4, 8)` and found its store to
+`[0, 8)` refused — while `denialOf` cleared it, `authorityOf` called the state
+`exclusive`, and the context was authorized on each half separately. Nothing in
+`docs/MEMORY_MODEL.md` §3 says authority must arrive in one piece. `Granted` is now
+stated per byte, so it does not, and the fragments a future split produces are usable
+before split itself lands.
+-/
+theorem adjacent_loans_compose :
+    (splitBetweenTwoLoans.memory.grantAt? bufferLoan).isSome ∧
+    (splitBetweenTwoLoans.memory.grantAt? secondBufferLoan).isSome ∧
+    splitBetweenTwoLoans.memory.Granted thread₀ bufferProv ⟨0, 8⟩ AccessIntent.write ∧
+    ∀ s, (step splitBetweenTwoLoans .store).state? = some s →
+      s.events.length = 1 ∧ s.violations.IsEmpty := by
+  refine ⟨by decide, by decide, by decide, ?_⟩
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- And a gap in the cover is still a refusal, so composition is per byte and not a
+weakening. The thread holds `[0, 4)` only; its store to `[0, 8)` is refused. -/
+theorem a_gap_in_the_cover_is_refused :
+    ¬ (((state₀.memory.issue? bufferLoan
+        { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
+          range := ⟨0, 4⟩, rights := .readWrite }).getD state₀.memory).Granted
+      thread₀ bufferProv ⟨0, 8⟩ AccessIntent.write) ∧
+    ∀ s, (step { state₀ with
+                 memory := (state₀.memory.issue? bufferLoan
+                   { kind := .loan, holder := thread₀, lender := engine₀
+                     provenance := bufferProv, range := ⟨0, 4⟩
+                     rights := .readWrite }).getD state₀.memory } .store).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 := by
+  refine ⟨by decide, ?_⟩
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
 end Tests.Op.StandardLoan
