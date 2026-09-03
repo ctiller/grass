@@ -29,6 +29,7 @@ import Grass.Resource.Axis
 import Grass.Semantics.Execution
 import Grass.Semantics.Observation
 import Grass.Semantics.SpecProcess
+import Grass.Std.Logical.Bag
 import Grass.Std.Logical.Byte
 import Grass.Std.Logical.FiniteMap
 import Grass.Std.Logical.HostBytes
