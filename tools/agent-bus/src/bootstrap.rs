@@ -97,6 +97,15 @@ impl BusConfig {
 /// `final_v1_seq`, creating every existing agent's stream root as a
 /// continuation) is a distinct, later concern with its own module once this
 /// rewrite is otherwise ready to cut over; nothing here depends on it.
+///
+/// Safely resumable across a crash between its two commits (section 2.5:
+/// "define recovery for a partially created registry or stream set"). If
+/// the registry root already exists, this checks it was created by this
+/// exact call (same config, same sole coordinator member) before treating
+/// it as a resume point -- a genuinely different prior activation, or one
+/// that has already moved past its root epoch, is refused rather than
+/// silently adopted. If the coordinator's own stream root is also already
+/// there, this is a pure idempotent no-op returning the existing commit.
 #[allow(clippy::too_many_arguments)]
 pub fn genesis(
     repo: &std::path::Path,
@@ -110,22 +119,55 @@ pub fn genesis(
 ) -> AbResult<(BusConfig, crate::registry::RosterEpoch, ObjectId)> {
     let config = BusConfig::new(object_format, product_review_from)?;
 
-    let mut members = std::collections::BTreeMap::new();
-    members.insert(
-        coordinator.clone(),
-        crate::registry::MemberBinding {
-            role: crate::events::Role::Coordinator,
-            host,
-            coordinator_custody_epoch: 0,
-            standby: None,
-        },
-    );
-    let epoch = crate::registry::create_root(
-        repo,
-        &config,
-        members,
-        &worktrees_dir.join("_registry_root"),
-    )?;
+    let epoch = match crate::registry::read_registry_tip(repo)? {
+        Some(tip) => {
+            let existing = crate::registry::read_epoch(
+                repo,
+                &tip,
+                &worktrees_dir.join("_registry_root_resume"),
+            )?;
+            let existing_config = crate::registry::read_bus_config(
+                repo,
+                &tip,
+                &worktrees_dir.join("_registry_config_resume"),
+            )?;
+            let sole_coordinator = existing.active_members.len() == 1
+                && existing
+                    .active_members
+                    .get(coordinator)
+                    .is_some_and(|b| b.role == crate::events::Role::Coordinator && b.host == host);
+            if existing.parent.is_some() || existing_config != config || !sole_coordinator {
+                return Err(invalid(
+                    "the agent-registry already has a root epoch that does not match this \
+                     genesis call -- this bus was already activated (possibly differently); \
+                     use `register` to add a further agent instead of `genesis`",
+                ));
+            }
+            existing
+        }
+        None => {
+            let mut members = std::collections::BTreeMap::new();
+            members.insert(
+                coordinator.clone(),
+                crate::registry::MemberBinding {
+                    role: crate::events::Role::Coordinator,
+                    host,
+                    coordinator_custody_epoch: 0,
+                    standby: None,
+                },
+            );
+            crate::registry::create_root(
+                repo,
+                &config,
+                members,
+                &worktrees_dir.join("_registry_root"),
+            )?
+        }
+    };
+
+    if let Some(existing_tip) = crate::stream::read_stream_tip(repo, coordinator)? {
+        return Ok((config, epoch, existing_tip));
+    }
 
     let header = crate::stream::StreamHeader {
         agent: coordinator.clone(),
@@ -308,5 +350,128 @@ mod tests {
         assert_eq!(header.activation_event, None);
         assert_eq!(log.len(), 1);
         assert_eq!(log[0].kind, "agent.registered");
+    }
+
+    /// Calling `genesis` again with identical parameters (the "the whole
+    /// call completed, but the caller doesn't know that and retries"
+    /// case, or simply an idempotent double-invocation) must be a pure
+    /// no-op returning the already-created state, not an error.
+    #[test]
+    fn genesis_is_idempotent_when_called_twice_with_identical_parameters() {
+        let repo = init_repo();
+        let coord1 = crate::scalars::Agent::parse("coord1".to_string()).unwrap();
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        let call = || {
+            genesis(
+                repo.path(),
+                &coord1,
+                crate::scalars::Short::parse("Coordinator One".to_string()).unwrap(),
+                crate::scalars::Text::parse("bootstraps the fleet".to_string()).unwrap(),
+                "sha1".to_string(),
+                ObjectId::parse(review_from.clone()).unwrap(),
+                crate::scalars::Short::parse("host1".to_string()).unwrap(),
+                &repo.path().join("_worktrees"),
+            )
+        };
+        let (_config1, epoch1, commit1) = call().unwrap();
+        let (_config2, epoch2, commit2) = call().unwrap();
+        assert_eq!(epoch1.id, epoch2.id);
+        assert_eq!(commit1, commit2);
+    }
+
+    /// The actual crash-recovery scenario (section 2.5: "define recovery
+    /// for a partially created registry or stream set"): the registry root
+    /// commit landed, but a crash happened before the coordinator's own
+    /// stream root did. A resumed `genesis` call with the same parameters
+    /// must complete the missing half rather than refusing outright with
+    /// "already has a root epoch."
+    #[test]
+    fn genesis_resumes_after_a_crash_between_its_two_commits() {
+        let repo = init_repo();
+        let coord1 = crate::scalars::Agent::parse("coord1".to_string()).unwrap();
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        let config = BusConfig::new(
+            "sha1".to_string(),
+            ObjectId::parse(review_from.clone()).unwrap(),
+        )
+        .unwrap();
+        let mut members = std::collections::BTreeMap::new();
+        members.insert(
+            coord1.clone(),
+            crate::registry::MemberBinding {
+                role: crate::events::Role::Coordinator,
+                host: crate::scalars::Short::parse("host1".to_string()).unwrap(),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        // Simulates the crash: only the registry half of genesis ran.
+        crate::registry::create_root(
+            repo.path(),
+            &config,
+            members,
+            &repo.path().join("_registry_root_manual"),
+        )
+        .unwrap();
+        assert_eq!(
+            crate::stream::read_stream_tip(repo.path(), &coord1).unwrap(),
+            None,
+            "the coordinator's stream must not exist yet -- that's the crash this test models"
+        );
+
+        let (_config, epoch, commit) = genesis(
+            repo.path(),
+            &coord1,
+            crate::scalars::Short::parse("Coordinator One".to_string()).unwrap(),
+            crate::scalars::Text::parse("bootstraps the fleet".to_string()).unwrap(),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            crate::scalars::Short::parse("host1".to_string()).unwrap(),
+            &repo.path().join("_worktrees"),
+        )
+        .unwrap();
+        assert!(epoch.is_active_member(&coord1));
+        assert_eq!(
+            crate::stream::read_stream_tip(repo.path(), &coord1).unwrap(),
+            Some(commit)
+        );
+    }
+
+    /// A resumed call with *different* parameters than the original must
+    /// be refused, not silently graft onto someone else's already-
+    /// activated bus.
+    #[test]
+    fn genesis_refuses_to_resume_with_mismatched_parameters() {
+        let repo = init_repo();
+        let coord1 = crate::scalars::Agent::parse("coord1".to_string()).unwrap();
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        genesis(
+            repo.path(),
+            &coord1,
+            crate::scalars::Short::parse("Coordinator One".to_string()).unwrap(),
+            crate::scalars::Text::parse("bootstraps the fleet".to_string()).unwrap(),
+            "sha1".to_string(),
+            ObjectId::parse(review_from.clone()).unwrap(),
+            crate::scalars::Short::parse("host1".to_string()).unwrap(),
+            &repo.path().join("_worktrees"),
+        )
+        .unwrap();
+
+        // A different coordinator name entirely.
+        let err = genesis(
+            repo.path(),
+            &crate::scalars::Agent::parse("coord2".to_string()).unwrap(),
+            crate::scalars::Short::parse("Coordinator Two".to_string()).unwrap(),
+            crate::scalars::Text::parse("bootstraps the fleet".to_string()).unwrap(),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            crate::scalars::Short::parse("host1".to_string()).unwrap(),
+            &repo.path().join("_worktrees2"),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("does not match this genesis call"),
+            "{err}"
+        );
     }
 }
