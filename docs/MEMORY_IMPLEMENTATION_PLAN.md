@@ -1184,7 +1184,8 @@ It reads the **epoch**. §2 says address reuse never revives old pointers, and
 free-and-reallocate was reported exclusive over the storage that replaced it, with
 an ordinary write permitted (`a_stale_provenance_is_unavailable`). The same
 blindness ran the other way: a grant issued under a defunct epoch froze the live one
-permanently (`a_stale_loan_does_not_freeze_the_live_epoch`).
+permanently. Both are now unreachable, because `MemoryState.allocate?` refuses the
+reallocation that would produce the state — `reallocating_under_a_loan_is_refused`.
 
 `Exclusive` is **not** authority, and `authorityOf` used to read it as though it
 were: over the empty state, which has an empty loan map and no allocations, it
@@ -1202,10 +1203,10 @@ with an ordinary write permitted. §5.1 makes one-past-the-end and invalidated
 offsets meaningful as positions, so a query about a position has to be answered
 about one. `Meets` is asymmetric on purpose: the grant's range is the extent, the
 query is the position, so a loan over no bytes still freezes nothing
-(`a_loan_of_no_bytes_freezes_nothing`) and one past the end of a loan is not frozen
+(`a_grant_of_no_bytes_is_refused` (a zero-byte grant is refused at issue now, rather than issued and freezing nothing)) and one past the end of a loan is not frozen
 (`one_past_the_end_of_a_loan_is_not_frozen`).
 
-`MemoryState.lend?` refuses to *issue* conflicting authority — a reissued identity,
+`MemoryState.issue?` refuses to *issue* conflicting authority — a reissued identity,
 or a grant conflicting with a live one — and `LoanConflicts` is §7.3's test at issue
 time. §7.3's rule is between *distinct* contexts, and a missing holder clause made a
 second grant to the same holder a conflict, which is exactly the "declare a loan to
@@ -1223,13 +1224,13 @@ than reinvents, and it has two halves. Lent bytes are reachable only through a l
 — a holder test over the loan map. **And** the state `authorityOf` reports must
 permit the intent, which is the half that reads the map it is handed rather than
 trusting how the map was built, and which is what refuses both states above
-(`a_grant_installed_conflict_is_refused`,
+(`the_conflicting_pair_cannot_be_issued`,
 `an_alias_declared_after_issue_is_refused`).
 
 The two halves are not the same test and neither implies the other. Refusal is
 strictly wider than `frozen`: a context holding no covering loan is refused a read
 of bytes another context holds only a read loan over, while `authorityOf` calls that
-`sharedImmutable` and permits reads (`loan_refusal_is_wider_than_frozen`). An
+`sharedImmutable` and permits reads (`a_self_loan_bounds_its_holder`). An
 earlier version of this section cited `loan_refuses_only_the_frozen` as the bridge
 between the two; that theorem's statement mentioned neither `authorityOf` nor
 `frozen`, its proof was a projection of the provider's own definition, and the
@@ -1240,7 +1241,7 @@ between the two; that theorem's statement mentioned neither `authorityOf` nor
 which loan a return consumes, not who may return it, and the unchecked version let
 any context return any loan and then write the thawed bytes — an authority check
 defeated by calling the function that removes it
-(`the_thread_cannot_return_the_engines_loan`).
+(`a_stranger_cannot_return_the_loan`).
 `Tests/Op/StandardLoan.lean` drives it through `step`, which is the part that
 matters — a rule proved about a map the transition does not consult is the defect
 this branch has found repeatedly, so the fixture checks refusal and restoration
@@ -1270,7 +1271,7 @@ refuses everything.
   of an unreachable case. Both were deleted — right, because a vacuous theorem reads
   as coverage. The reasoning given for the deletion was wrong: it said the rule had
   nothing to constrain, and `Permission.Permits` is the sole rights gate on the
-  chain `AuthorityGrant.Authorizes` → `MemoryState.GrantedOfKind` →
+  chain the deleted `Authorizes` function → `MemoryState.GrantedOfKind` →
   `AuthorityProvider.loan.refuses` → `step`, so the rule had a gate and no clause
   there. `Permission.atomicOnly` is that clause, and `authorityOf` derives
   `atomicShared` from it. The constructor carries no ordering: that was a second
@@ -1293,26 +1294,10 @@ refuses everything.
   ordering model". Nothing relates a grant to `AccessDescriptor.ordering`, and
   nothing here can — that needs §7.1's refinement theorem, which an ISA owner owes,
   and the strength relation M8's `ConsistencyProfile` induces.
-- **Loan splitting blocks M4, not merely M3.** §6's ABI call profile "lends the
-  exact buffer/slot authorities to the environment, retains only disjoint residual
-  frame authority". Once M4 represents that residual as a writable `.frame` grant
-  held by the caller, lending a slot inside it to the environment is a distinct
-  holder, an overlapping range and a writer — refused at issue — and installing it
-  anyway would leave the borrower frozen by the caller's own frame grant. The
-  operation §6 needs is a *split* that consumes and narrows the lender's grant so
-  the residual conflicts with nothing. Recorded under M3 as owed; it is a
-  prerequisite for `CallFrame.lean`.
-- ~~**`MemoryState.returnLoan?` requires the holder, and §6 needs the lender.**~~
-  Closed. `AuthorityGrant` records a `lender`, and `returnLoan?` accepts a return by
-  the holder or by it. §6's caller can now consume the identity it lent, which is
-  what §6 says happens, and a loan to an external API agent — `Spikes/1_Hello_World`'s
-  `WriteFile`, which never executes a Grass step — can be returned by the thread that
-  made it rather than staying lent forever.
-
-  Still owed on the same protocol: §5's arena reset requires returning *all* live use
-  loans, and there is no bulk operation; and §5.1's reallocation precondition is not
-  checked anywhere, so a profile can reallocate under a live loan — which is the
-  state `a_stale_loan_still_freezes` describes.
+- **§5's arena reset requires returning all live use loans, and there is no bulk
+  operation.** `MemoryState.allocate?` refuses one reallocation at a time; a profile
+  tearing an arena down has to walk its allocations itself, and nothing checks that it
+  walked all of them.
 - **Transferred authority.** §3's fifth entry is "transferred or unavailable";
   `unavailable` derives from liveness and epoch and nothing represents a transfer.
   §7.4 makes transfer real ("acquire operations may transfer protected memory
@@ -1334,12 +1319,12 @@ refuses everything.
   and nothing enumerates outstanding claims. `FaultVisibility.RequiresJustification`
   and `SubstepSequence.ClaimsAtomicity` exist for that enumeration and have no
   consumer under `Grass/`.
-- **Three admissibility failures report one rejection.** An unregistered ordering
-  mode, an unregistered scope and an unregistered initialization rule are all
-  `accessNotAdmitted`, and the three fixtures pinning them assert that constructor,
-  which any `Admits` failure satisfies. `step` argues the opposite standard for
-  facets — "a rejection says *which* one is missing" — and follows it for the three
-  fault checks. Closing this means a `whyNotAdmitted?` on the vocabulary.
+- ~~**Three admissibility failures report one rejection.**~~ Closed.
+  `StepRejection.accessNotAdmitted` carries an `AdmittedVocabulary.AdmissibilityFailure`
+  with ten distinct reasons, `Admits` is that failure list's emptiness so the two
+  cannot drift, and `the_three_refusals_are_distinguishable` is the fixture the old
+  shape could not have. This bullet stayed on the owed list for two commits after the
+  work landed, which is the same failure as an overclaim pointing the other way.
 - **The lender of a read-only loan is refused the read of its own bytes.** The loan
   provider's holder half asks whether *anything* is held over the bytes, and if so
   requires the accessor to hold covering authority. `AllocationRecord` records no

@@ -105,7 +105,7 @@ independently.
 
 The provider now refuses any access the state does not permit
 (`AuthorityState.PermitsIntent`), which is what closed two demonstrated holes: two
-write grants installed through `MemoryState.grant`, which checks nothing, and two
+write grants installed through a door that checked nothing, and two
 non-conflicting grants made to conflict by an alias declared afterwards. Both are
 facts about what *another* context holds, which is what `HeldByAnother` and
 `WritableByAnother` ask and a holder test does not;
@@ -468,8 +468,14 @@ conveys atomic access only, then an atomic accessor is participating in exactly 
 protocol they are — which is what atomics are for. One ordinary participant among
 them and the situation is an ordinary race, so the state is `frozen` and nothing
 proceeds. This is deliberately decided on the grants that are actually there rather
-than on `issue?` having refused the mixture, because `MemoryState.grant` installs
-grants `issue?` never saw. -/
+than on `issue?` having refused the mixture.
+
+Not because another door exists — `issue?` is the only one, and `MemoryState.mk` is
+private so there is no fourth way in. Because a rule that holds *only* by an argument
+about how the map was built is one alias declaration away from not holding: two grants
+that do not conflict when issued become conflicting when a profile declares them the
+same storage afterwards, and `docs/MEMORY_MODEL.md` §7.5 makes that a real transition.
+This predicate reads the grants that are there. -/
 def NonAtomicHeldByAnother (state : MemoryState) (context : ContextId)
     (provenance : Provenance) (range : ByteRange) : Prop :=
   (state.grantsOver provenance range).any
@@ -707,209 +713,6 @@ theorem permitsOrdinaryWrite_of_unheld {state : MemoryState} {context : ContextI
   exact ⟨hlive, h⟩
 
 /--
-Two grants issue conflicting authority.
-
-`docs/MEMORY_MODEL.md` §7.3 defines a conflict as overlapping live bytes with at
-least one writer *from distinct concurrent contexts*, and says "unique loans
-prevent ordinary conflicting authority from being issued". This is that test
-applied at issue time.
-
-**Distinct holders.** §7.3's rule is about distinct contexts, and without the
-clause a context could not hold two grants over its own bytes — which is the
-idiom `Grass/Op/LoanAuthority.lean` endorses for "the owner may still read", and
-which was therefore mutually exclusive with any other grant on those bytes.
-
-**`Meets` in both directions**, because `Meets` is asymmetric and neither grant is
-the query here. `loansOver` moved off `Disjoint` and this did not, which left one
-module with two answers to what "overlapping" means.
-
-Two read-only grants over one range do not conflict, which is `sharedImmutable`
-being a real state rather than a name. Nor do two **atomic-only** grants, which is
-`atomicShared` being one: §7.3's issuance sentence is "unique loans prevent
-*ordinary* conflicting authority from being issued", and this had no
-ordinary/atomic distinction, so `issue?` prevented all conflicting authority and two
-contexts could not share a word atomically at all.
-
-The write probe is `rights.write`, the capability, not `rights.Permits .write`.
-An atomic-only grant may modify the bytes and does not permit an ordinary write, and
-§7.3's "at least one writer" is the first question.
-
-**Refusing at issue is not the whole rule, and an earlier version of this comment
-said it was.** "The point of uniqueness is that the conflicting pair never exists"
-is false: `MemoryState.grant` installs a grant with no checks at all, and declaring
-an alias *after* two non-conflicting grants are issued makes them conflict with
-nothing re-examined. Review demonstrated both, end to end through `step`. The pair
-that must never *act* is stopped at access time by
-`Grass/Op/LoanAuthority.lean`, which is where the guarantee actually lives; this is
-the cheaper check that stops the honest caller earlier.
--/
-def LoanConflicts (state : MemoryState) (a b : AuthorityGrant) : Prop :=
-  a.holder ≠ b.holder ∧
-    state.SharesBytes a.provenance.root b.provenance.root ∧
-    (a.range.Meets b.range ∨ b.range.Meets a.range) ∧
-    (a.rights.write ∨ b.rights.write) ∧
-    ¬ (a.rights.atomicOnly ∧ b.rights.atomicOnly)
-
-instance (state : MemoryState) (a b : AuthorityGrant) :
-    Decidable (state.LoanConflicts a b) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
-
-/--
-Issue a grant, or refuse.
-
-`Option`, because every way of getting this wrong is silent otherwise, and review
-found four of them.
-
-**Reissue.** An earlier version was `grants.insert`, and `FiniteMap.insert` erases
-any existing binding — so issuing twice under one identity returned the first grant
-with no return, and exclusivity came back for bytes still borrowed. §3 says a return
-consumes that exact identity; a reissue is a return nobody asked for. Worse, there
-was a second, wholly unchecked door (`MemoryState.grant`) with the same erasing
-behaviour, so one context could delete another's grant and write the bytes. That
-door is gone: this is the only way a grant enters the map.
-
-**Conflict.** §7.3 says unique loans prevent conflicting authority from being
-issued. Nothing prevented issuing two overlapping write grants to different holders,
-and each satisfied the access rule, so both could write the same bytes. The scan
-covers **every kind of grant**: a `.frame` or profile-invented write grant is
-conflicting authority on §7.3's terms, and scanning only loans applied
-`LoanConflicts` — which has no kind clause of its own — to a strict subset of the
-pairs it describes.
-
-**A grant over nothing.** A grant whose range is empty conflicts at issue (both
-`Meets` directions are tried there) and freezes nobody once installed, because an
-empty extent meets no position. It is decoration with a refusal attached, so it is
-refused instead — the same rule `AccessDescriptor.WellFormedIn.rangeNonEmpty`
-applies to accesses.
-
-**A grant over storage that is not there.** Review lent a write loan over a
-provenance whose root the allocation table does not hold, aliased to a live one:
-`issue?` accepted it, `grantsOver` did not see it, and the store committed. A grant
-must be over live current-epoch storage, and its range must lie within the extent
-its own provenance claims.
-
-What this is **not** is the guarantee that no conflicting pair can act. Declaring an
-alias after two non-conflicting grants are issued makes them conflict with nothing
-re-examined, and §7.5 makes that a real transition. `Grass/Op/LoanAuthority.lean`
-reads the map it finds; this is the cheaper check that stops the honest caller
-earlier.
-
-Refusing rather than overwriting or ignoring is `docs/FOUNDATION.md` law 8's
-direction. Four of the five refusals are stated —  `issue?_eq_none_of_reissued`,
-`issue?_eq_none_of_empty`, `issue?_eq_none_of_not_live` and
-`issue?_eq_none_of_conflict` — so a caller that cannot issue finds out which rule
-stopped it. The extent clause has no theorem of its own; it is checked and not
-stated.
--/
-def issue? (state : MemoryState) (id : GrantId) (grant : AuthorityGrant) :
-    Option MemoryState :=
-  if grant.range.IsEmpty then Option.none
-  else if ¬ state.Live grant.provenance then Option.none
-  else if ¬ grant.provenance.Nested then Option.none
-  else if ¬ state.RootExtentAgrees grant.provenance then Option.none
-  else if ¬ grant.provenance.extent.Contains grant.range then Option.none
-  else if state.grantEntries.any
-      (fun entry => decide (state.LoanConflicts entry.2 grant))
-    then Option.none
-  else state.issueGrant? id grant
-
-/-- **A reissued identity is refused**, by `MemoryState.issueGrant?`, which is the
-only thing that writes the map. -/
-theorem issue?_eq_none_of_reissued (state : MemoryState) {id : GrantId}
-    (grant : AuthorityGrant) (h : (state.grantAt? id).isSome) :
-    state.issue? id grant = Option.none := by
-  unfold issue?
-  split
-  · rfl
-  split
-  · rfl
-  split
-  · rfl
-  split
-  · rfl
-  split
-  · rfl
-  split
-  · rfl
-  exact MemoryState.issueGrant?_eq_none_of_reissued state grant h
-
-/-- **A grant over no bytes is refused.** -/
-theorem issue?_eq_none_of_empty (state : MemoryState) (id : GrantId)
-    (grant : AuthorityGrant) (h : grant.range.IsEmpty) :
-    state.issue? id grant = Option.none := by
-  unfold issue?
-  rw [if_pos h]
-
-/-- **A grant over dead, absent or stale-epoch storage is refused.** -/
-theorem issue?_eq_none_of_not_live (state : MemoryState) (id : GrantId)
-    (grant : AuthorityGrant) (h : ¬ state.Live grant.provenance) :
-    state.issue? id grant = Option.none := by
-  unfold issue?
-  by_cases hempty : grant.range.IsEmpty
-  · rw [if_pos hempty]
-  · rw [if_neg hempty, if_pos (by simpa using h)]
-
-/-- **A grant whose provenance path is not nested is refused**, which every access
-already had to satisfy through `AccessDescriptor.WellFormedIn.provenanceNested` and
-no grant did. -/
-theorem issue?_eq_none_of_not_nested (state : MemoryState) (id : GrantId)
-    (grant : AuthorityGrant) (h : ¬ grant.provenance.Nested) :
-    state.issue? id grant = Option.none := by
-  unfold issue?
-  by_cases hempty : grant.range.IsEmpty
-  · rw [if_pos hempty]
-  · rw [if_neg hempty]
-    by_cases hlive : state.Live grant.provenance
-    · rw [if_neg (by simpa using hlive), if_pos (by simpa using h)]
-    · rw [if_pos (by simpa using hlive)]
-
-/--
-**A grant whose provenance misdescribes its allocation is refused.**
-
-The clause that was self-certifying: `issue?` bounded the grant by
-`grant.provenance.extent`, which the provenance itself supplies, and nothing compared
-that to the allocation table. Review issued a write grant over four kilobytes of a
-sixteen-byte allocation, and it both authorized accesses and froze a context that
-legitimately owned the larger storage it was aliased to.
--/
-theorem issue?_eq_none_of_wrong_extent (state : MemoryState) (id : GrantId)
-    (grant : AuthorityGrant) (h : ¬ state.RootExtentAgrees grant.provenance) :
-    state.issue? id grant = Option.none := by
-  unfold issue?
-  by_cases hempty : grant.range.IsEmpty
-  · rw [if_pos hempty]
-  · rw [if_neg hempty]
-    by_cases hlive : state.Live grant.provenance
-    · rw [if_neg (by simpa using hlive)]
-      by_cases hnest : grant.provenance.Nested
-      · rw [if_neg (by simpa using hnest), if_pos (by simpa using h)]
-      · rw [if_pos (by simpa using hnest)]
-    · rw [if_pos (by simpa using hlive)]
-
-/-- **Conflicting authority is refused at issue.** -/
-theorem issue?_eq_none_of_conflict (state : MemoryState) (id : GrantId)
-    (grant : AuthorityGrant)
-    (h : state.grantEntries.any
-      (fun entry => decide (state.LoanConflicts entry.2 grant)) = true) :
-    state.issue? id grant = Option.none := by
-  unfold issue?
-  by_cases hempty : grant.range.IsEmpty
-  · rw [if_pos hempty]
-  · rw [if_neg hempty]
-    by_cases hlive : state.Live grant.provenance
-    · rw [if_neg (by simpa using hlive)]
-      by_cases hnest : grant.provenance.Nested
-      · rw [if_neg (by simpa using hnest)]
-        by_cases hext : state.RootExtentAgrees grant.provenance
-        · rw [if_neg (by simpa using hext)]
-          by_cases hin : grant.provenance.extent.Contains grant.range
-          · rw [if_neg (by simpa using hin), if_pos h]
-          · rw [if_pos (by simpa using hin)]
-        · rw [if_pos (by simpa using hext)]
-      · rw [if_pos (by simpa using hnest)]
-    · rw [if_pos (by simpa using hlive)]
-
-/--
 Return the loan with **that exact identity**, if this context may.
 
 `docs/MEMORY_MODEL.md` §3: "Returning one loan consumes that exact identity."
@@ -961,21 +764,8 @@ theorem returnLoan?_eq_none_of_absent {state : MemoryState} {context : ContextId
 /-- A successful issue records the grant under the identity it names. -/
 theorem lookup_issue?_self {state issued : MemoryState} {id : GrantId}
     {grant : AuthorityGrant} (h : state.issue? id grant = some issued) :
-    issued.grantAt? id = some grant := by
-  unfold issue? at h
-  split at h
-  · exact absurd h (by simp)
-  split at h
-  · exact absurd h (by simp)
-  split at h
-  · exact absurd h (by simp)
-  split at h
-  · exact absurd h (by simp)
-  split at h
-  · exact absurd h (by simp)
-  split at h
-  · exact absurd h (by simp)
-  exact MemoryState.grantAt?_issueGrant?_self h
+    issued.grantAt? id = some grant :=
+  MemoryState.grantAt?_issue?_self h
 
 /-- A state with no grants is exclusive everywhere: nothing is lent, so nothing is
 outstanding.
@@ -991,35 +781,27 @@ Reading `Exclusive` as permission is the mistake `authorityOf` used to make. -/
 @[simp] theorem not_live_empty (provenance : Provenance) : ¬ empty.Live provenance := by
   simp [Live, empty, FiniteMap.empty, FiniteMap.lookup]
 
-/-- **There is no second door.** `MemoryState.grant` was one — `grants.insert`, no
-checks — kept on the argument that the access-time rule reads whatever map it finds.
-Review broke that in one move: `FiniteMap.insert` erases, so installing a grant
-under an identity another context held deleted that grant, and the map the
-access-time rule then found no longer contained it.
+/-- **There is no second door**, and it took four closures to be able to say so.
 
-Deleting `grant` was not enough either: `MemoryState.grants` was a public field, so
+`MemoryState.grant` was one — `grants.insert`, no checks — kept on the argument that
+the access-time rule reads whatever map it finds. `FiniteMap.insert` erases, so
+installing a grant under an identity another context held deleted that grant, and the
+map the access-time rule then found no longer contained it.
+
+Deleting it was not enough: `MemoryState.grants` was a public field, so
 `{ state with grants := state.grants.insert id g }` *is* the deleted function, and
-two of this project's own fixtures used it. Review wrote the same attack again
-through the field, with a comment saying "there is no second door" in the file at
-the time. The field is `private` now and `MemoryState.issueGrant?` is the only thing
-that writes it; this is the statement that its identity rule is the map's. -/
+two of this project's own fixtures used it. Sealing the field was not enough either,
+because that privatises the projection and leaves `MemoryState.mk`. And sealing `mk`
+was not enough, because a low-level `issueGrant?` sat public beside it running the
+identity check and none of the others — review installed a four-kilobyte grant over a
+sixty-four-byte allocation through it.
+
+`MemoryState.issue?` runs every check and is the only thing that writes the map; this
+is the statement that its identity rule is the map's. -/
 theorem issued_identity_is_fresh {state issued : MemoryState} {id : GrantId}
     {grant : AuthorityGrant} (h : state.issue? id grant = some issued) :
-    state.grantAt? id = Option.none := by
-  unfold issue? at h
-  split at h
-  · exact absurd h (by simp)
-  split at h
-  · exact absurd h (by simp)
-  split at h
-  · exact absurd h (by simp)
-  split at h
-  · exact absurd h (by simp)
-  split at h
-  · exact absurd h (by simp)
-  split at h
-  · exact absurd h (by simp)
-  exact MemoryState.grantAt?_eq_none_of_issueGrant? h
+    state.grantAt? id = Option.none :=
+  MemoryState.grantAt?_eq_none_of_issue? h
 
 end MemoryState
 

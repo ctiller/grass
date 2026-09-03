@@ -39,6 +39,12 @@ name: Library build
 # reach — `AuthorityState` carried three such, and section 4.4.1 of the plan asked
 # for this check in its own words. It is lexical too and reports ten deliberate
 # entries into an allowlist rather than none.
+#
+# Tools/SourceLocationAudit.py is the sixth, and it exists because of an accident
+# rather than a class: two scratch probe files were swept into commits by a
+# `git add -A`, one of them containing a `sorry`, and a repo-root `.lean` file is
+# outside every gate there is — `lake build` globs `Grass.+` and `Tests.+`, and every
+# audit above scans those two trees. Neither file ever failed anything.
 
 on:
   push:
@@ -86,6 +92,12 @@ jobs:
 
       - name: Audit declared field names never projected
         run: python3 Tools/ConsultedAudit.py
+
+      - name: Self-test the source location audit
+        run: python3 Tools/SourceLocationAudit.py --self-test
+
+      - name: Audit Lean sources outside every gate
+        run: python3 Tools/SourceLocationAudit.py
 
       - name: Self-test the reachability audit
         run: python3 Tools/ReachabilityAudit.py --self-test

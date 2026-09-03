@@ -22,11 +22,16 @@ because it reads as a pointer.
    up against the set of declaration names in the tree, matched on the final dotted
    component. If nothing declares it, it is reported.
 
-   Corpus documents are **not** scanned for these. They cite agent-bus event names
-   (`review.merge_authorized`), JSON fields (`issue_kind`), and file names in the
-   same backticks they cite theorems in, and no text scan separates those from Lean
-   names. Documents are scanned for section citations only, which is where the real
-   miss was anyway.
+   Most corpus documents are **not** scanned for these: they cite agent-bus event
+   names (`review.merge_authorized`), JSON fields (`issue_kind`), and file names in
+   the same backticks they cite theorems in, and no text scan separates those from
+   Lean names.
+
+   `LEAN_FACING_DOCS` is the exception, and it exists because the judgement above was
+   wrong for one document. `MEMORY_IMPLEMENTATION_PLAN.md` cites declarations as
+   *evidence* — "closed; `foo` is the theorem" — and review found eight dead ones in a
+   single section, each presented as proof of a closed claim. A document that argues
+   from Lean names is scanned like Lean.
 
 2. **Section citations.** Every `§N` or `§N.M` that follows a document name in the
    same sentence is checked against that document's headings.
@@ -65,6 +70,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LEAN_FILES = sorted((ROOT / "Grass").rglob("*.lean")) + sorted((ROOT / "Tests").rglob("*.lean"))
 DOC_FILES = sorted((ROOT / "docs").glob("*.md"))
+
+# Documents that argue from Lean declaration names, and are scanned for them. See the
+# module docstring: the plan cites theorems as evidence for closed claims, and eight
+# of those citations were dead.
+LEAN_FACING_DOCS = {"MEMORY_IMPLEMENTATION_PLAN.md", "MEMORY_VOCABULARY.md"}
 
 # A declaration this tree introduces. `instance` is deliberately absent: anonymous
 # instances have generated names nothing would cite.
@@ -138,6 +148,11 @@ ALLOWED = {
     "Uid.rec", "Uid.casesOn", "MemoryState.rec",
     # Module paths in import comments, which have the shape of a namespace.
     "Grass.Op.Facets",
+    # Components another owner will build, named in the plan's ownership and
+    # dependency sections. A plan that could not name what it depends on would be
+    # useless, and these are not this layer's to declare.
+    "Grass.ISA.X86", "Grass.Std.Owned", "Grass.ABI.Win64", "Grass.CFG",
+    "Grass.Semantics", "Platform.Win32", "verify_assembly",
     # Names another owner declares, or has not yet: `Grass/Std` is the stdlib
     # agent's, and `Grass.Core.Id` is prose about a name deliberately not used.
     "Std.Owned", "Grass.Core.Id",
@@ -344,7 +359,10 @@ def main() -> int:
     for path in DOC_FILES:
         documents[path.relative_to(ROOT).as_posix()] = path.read_text(encoding="utf-8")
 
+    lean_facing = {name: text for name, text in documents.items()
+                   if Path(name).name in LEAN_FACING_DOCS}
     problems = (check_declarations(prose, names)
+                + check_declarations(lean_facing, names)
                 + check_sections(joined, sections)
                 + check_sections(documents, sections))
     if problems:

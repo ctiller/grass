@@ -43,12 +43,15 @@ shared-immutably-lent bytes is refused along with a stranger's, because
 The second half was absent, and its absence was a hole rather than a nicety. The
 holder test alone asks only whether *this* context holds a covering loan, so two
 contexts each holding a write loan over the same bytes were both unrefused. The
-issue-time check in `MemoryState.issue?` is supposed to make that pair impossible
-and does not: `MemoryState.grant` installs a grant with no checks, and declaring an
-alias *after* two non-conflicting grants are issued makes them conflict with
-nothing re-examined. Review demonstrated both, end to end, with the write
-committing and no violation recorded. A rule that depends on how the map was built
-is not a rule about the map, so this one reads the map it finds.
+issue-time check in `MemoryState.issue?` is supposed to make that pair impossible and
+cannot, and review reached the state four ways: through an unchecked `grant`
+function, through the public field that function was deleted in favour of, through a
+low-level mutator left public beside the sealed one — and, the one no issue-time check
+can catch, by declaring an alias *after* two non-conflicting grants are issued, which
+makes them conflict with nothing re-examined. `docs/MEMORY_MODEL.md` §7.5 makes
+declaring one a real transition. The first three doors are shut; the fourth is why a
+rule that depends on how the map was built is not a rule about the map, and why this
+one reads the map it finds.
 
 ## What the two halves are, and are not
 
