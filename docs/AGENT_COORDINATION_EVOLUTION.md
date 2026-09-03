@@ -120,7 +120,64 @@ low-volume serialization point makes membership cuts decidable; it is not on
 the ordinary event publication path. Non-fast-forward update, deletion, and
 force-push are prohibited.
 
-### 2.2 Causal frontiers
+### 2.2 Auditor role
+
+Version two names the fleet-wide assurance role `auditor`. An auditor performs
+periodic or user-requested examination across the whole architecture, proof
+surface, implementation, validation evidence, and coordination history. It is
+not an `implementor` merely because its findings may cause product work, and it
+is not a nomination `reviewer` because it does not own selection or merge of a
+particular candidate.
+
+The four roles have deliberately different authority:
+
+| Role | Product authorship | Product scope | Candidate review/merge | Fleet-wide audit and issues |
+|---|---:|---:|---:|---:|
+| `implementor` | yes | yes | nominate only | may report |
+| `reviewer` | no | no | yes, when nominated | may report |
+| `auditor` | no | no | no | yes |
+| `coordinator` | no | no | no | route and escalate |
+
+An auditor may read every product and event stream without claiming those paths,
+run analyses and validation probes, publish an audit report, and open or reassign
+issues to the appropriate design steward or implementor. Its report should name
+the inspected revisions, scope, methods, evidence, blind spots, and concrete
+closure conditions. It may identify cross-cutting drift that no workstream-local
+review could reasonably see.
+
+Version two represents the summary as a non-authoritative `audit.reported`
+event. It pins the inspected product revisions and observed event frontier,
+names audit areas and methods, lists limitations, and references the separate
+`issue.opened` events for actionable findings. The report itself creates no work
+obligation and cannot carry an acceptance or merge verdict; issue lifecycle owns
+acknowledgement, reassignment, and disposition. This separation permits an audit
+to report a clean or partially examined surface without manufacturing empty
+issues or implying certification.
+
+Audit findings are evidence, not merge verdicts. The nominated `reviewer` for an
+affected candidate must independently assess relevant open findings and retains
+sole responsibility for authorization and merge. The auditor cannot clear a
+product finding by approving its own interpretation, cannot use an audit to
+bypass the ordinary review protocol, and cannot convert absence of a finding
+into assurance that unexamined behavior is correct.
+
+An auditor that wants to author a repair hands the issue to an `implementor` or
+uses a separate implementor identity. Primary roles remain immutable; changing
+the provider or model behind an auditor uses the ordinary identity handoff rules
+and does not silently change its authority. Recommended names expose provider
+and workload, such as `c-auditor`, `g-auditor`, and `e-auditor`, with purpose
+metadata distinguishing whole-architecture, proof-integrity, protocol, security,
+or other audit emphasis.
+
+Version one currently calls this least-authority identity `observer`. No such
+identity was registered when this decision was drafted. Version two renames the
+wire role to `auditor` rather than preserving two overlapping roles. During
+transition, a newly required global auditor may register with V1 role `observer`
+and purpose `auditor:<emphasis>`; it gains only observer authority and migrates
+to `auditor` in the activation roster. This compatibility spelling must not be
+presented to users as a distinct long-term role.
+
+### 2.3 Causal frontiers
 
 There is no global bus-head commit in version two. The version-one `observed`
 field is replaced by an observed frontier: a byte-sorted map from agent identity
@@ -166,7 +223,7 @@ The helper may keep an incremental local index of reduced events and fetched
 tips. That index is disposable. Authority comes only from stream contents,
 causal frontiers, activation state, and product Git objects.
 
-### 2.3 Local submission and host coordination
+### 2.4 Local submission and host coordination
 
 Agents do not fetch, push, or take a repository-wide lock during ordinary bus
 work. An agent submits an immutable candidate by atomically creating a uniquely
@@ -232,7 +289,7 @@ prerequisite refs first and dependent refs only after observing their receipts.
 It may not describe a non-atomic multi-ref push as one transaction. This can
 expose a safe prefix of a batch, never a dependent event without its causes.
 
-### 2.4 Publication policy and reading
+### 2.5 Publication policy and reading
 
 Product commits and bus events have deliberately different publication rules.
 A product branch need not be pushed after every commit. It is pushed when
@@ -274,7 +331,7 @@ The expected cost is:
 | cold validation | linear in all retained events, parallel by stream |
 | complete authority cut | one tip per identity in a named roster epoch plus affected state |
 
-### 2.5 Migration
+### 2.6 Migration
 
 Migration is an epoch change, not an in-place reinterpretation:
 
@@ -522,7 +579,18 @@ The successor is not ready for activation until checked fixtures demonstrate:
     publishes under a fair live coordinator, without claiming remote detection
     of the stopped host; and
 19. a pre-authorized successor resumes preserved outboxes exactly once after
-    winning the registry custody transition.
+    winning the registry custody transition;
+20. an auditor can publish `audit.reported` and open issues without product scope,
+    product authorship, nomination acceptance, or merge authority;
+21. an auditor is rejected when it attempts to claim product scope, nominate or
+    accept a candidate review, authorize or perform a merge, or attach product
+    commit state to its identity;
+22. an audit report cannot resolve its referenced issues or satisfy any merge
+    finding disposition merely by describing them as closed;
+23. a nominated reviewer can consume auditor evidence but must publish its own
+    finding dispositions and authorization judgment; and
+24. a V1 `observer` registered for audit migrates to exactly one V2 `auditor`
+    identity without acquiring implementor or reviewer authority.
 
 Performance fixtures should use enough concurrent submitters, host coordinators,
 and retained history to expose asymptotic mistakes, but need not manufacture a
