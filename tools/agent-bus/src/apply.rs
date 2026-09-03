@@ -1190,12 +1190,21 @@ fn apply_review_closing(
         env.observed.validate_reference(other).is_ok() || other.agent() == env.agent
     })?;
     if state.exclusive.winner(&key).as_ref() == Some(&env.id) {
-        let chain = state.review_chain_mut(nomination).expect("just checked");
-        chain.decline_or_withdraw_or_reassign_status = ItemStatus::Terminal(label);
+        confirm_review_closing(state, nomination, label);
     } else {
         reset_review_to_conflict(state, nomination);
     }
     Ok(())
+}
+
+/// The winner-confirmed effect of a decline/withdraw: shared between the
+/// normal reduction path above and `apply_conflict_resolved`, which applies
+/// this same effect once a coordinator has explicitly picked a winner out
+/// of an already-contested decline/withdraw/reassign group.
+fn confirm_review_closing(state: &mut BusState, nomination: &EventId, label: &'static str) {
+    if let Some(chain) = state.review_chain_mut(nomination) {
+        chain.decline_or_withdraw_or_reassign_status = ItemStatus::Terminal(label);
+    }
 }
 
 /// See `reset_issue_to_conflict`'s doc comment for the general rationale.
@@ -1421,21 +1430,35 @@ fn apply_review_reassigned(
         env.observed.validate_reference(other).is_ok() || other.agent() == env.agent
     })?;
     if state.exclusive.winner(&key).as_ref() == Some(&env.id) {
-        let chain_mut = state.reviews.get_mut(&root).expect("chain exists");
-        chain_mut.nomination_events.push(env.id.clone());
-        chain_mut.current_nomination = env.id.clone();
-        chain_mut.current_request = d.request();
-        chain_mut
-            .nomination_reviewer
-            .insert(env.id.clone(), d.reviewer.clone());
-        chain_mut.decline_or_withdraw_or_reassign_status = ItemStatus::Open;
-        state
-            .review_chain_by_nomination
-            .insert(env.id.clone(), root);
+        confirm_review_reassigned(state, &env.id, &root, d);
     } else {
         reset_review_to_conflict(state, &d.replaces);
     }
     Ok(())
+}
+
+/// The winner-confirmed effect of a reassignment: shared between the normal
+/// reduction path above and `apply_conflict_resolved` (see
+/// `confirm_review_closing`'s doc comment for the general rationale).
+fn confirm_review_reassigned(
+    state: &mut BusState,
+    winner_id: &EventId,
+    root: &EventId,
+    d: &ReviewReassigned,
+) {
+    let Some(chain_mut) = state.reviews.get_mut(root) else {
+        return;
+    };
+    chain_mut.nomination_events.push(winner_id.clone());
+    chain_mut.current_nomination = winner_id.clone();
+    chain_mut.current_request = d.request();
+    chain_mut
+        .nomination_reviewer
+        .insert(winner_id.clone(), d.reviewer.clone());
+    chain_mut.decline_or_withdraw_or_reassign_status = ItemStatus::Open;
+    state
+        .review_chain_by_nomination
+        .insert(winner_id.clone(), root.clone());
 }
 
 fn apply_review_merge_authorized(
@@ -1676,6 +1699,31 @@ fn apply_conflict_resolved(
         EventData::HandoffAccepted(hd) => handoff_terminal_effect(state, &hd.handoff, "accepted"),
         EventData::HandoffDeclined(hd) => handoff_terminal_effect(state, &hd.handoff, "declined"),
         EventData::HandoffWithdrawn(hd) => handoff_terminal_effect(state, &hd.handoff, "withdrawn"),
+        EventData::ReviewNominationDeclined(rd) => {
+            confirm_review_closing(state, &rd.nomination, "declined")
+        }
+        EventData::ReviewWithdrawn(rd) => {
+            confirm_review_closing(state, &rd.nomination, "withdrawn")
+        }
+        EventData::ReviewReassigned(rd) => {
+            let root = state
+                .review_chain(&rd.replaces)
+                .map(|c| c.root.clone())
+                .ok_or_else(|| {
+                    invalid(format!(
+                        "{}: reassignment replaces unknown nomination {}",
+                        env.id, rd.replaces
+                    ))
+                })?;
+            confirm_review_reassigned(state, &d.selected, &root, rd);
+        }
+        EventData::MergeEngineActivated(_) => {
+            // Mirrors `apply_merge_engine_activated`'s own winner branch: an
+            // explicitly confirmed winner becomes the current epoch outright,
+            // superseding the provisional reset-to-baseline every candidate
+            // in the contested group applied while the race was unresolved.
+            state.current_merge_engine_epoch = Some(d.selected.clone());
+        }
         other => {
             return Err(invalid(format!(
                 "{}: selected event kind {} is not an exclusive-transition winner this helper \
@@ -2923,6 +2971,171 @@ mod tests {
                 "{label} order: the retracted link's phantom mapping must not remain queryable"
             );
         }
+    }
+
+    /// Regression test for round-2 adversarial review's Significant finding:
+    /// `apply_conflict_resolved`'s match had no arm for the review
+    /// decline/withdraw/reassign exclusive set, so a chain stuck in
+    /// `LifecycleConflict` (see
+    /// `review_decline_and_reassign_race_produces_a_lifecycle_conflict`
+    /// above) could never actually be resolved -- a coordinator's
+    /// `lifecycle.conflict_resolved` naming a winner would hit the
+    /// catch-all "not an exclusive-transition winner this helper knows how
+    /// to confirm" error, a permanent dead end.
+    #[test]
+    fn lifecycle_conflict_resolved_confirms_a_review_reassign_winner() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        let coord1 = a("coord1");
+
+        let request = ReviewRequest {
+            authors: StringSet::from_iter([alice.clone()]),
+            product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            reviewer: bob.clone(),
+            required_checks: vec![],
+            review_scope: StringSet::default(),
+            summary: text("s"),
+            target_branch: Branch::parse("refs/heads/main".into()).unwrap(),
+            evidence: StringSet::default(),
+        };
+        let nominate_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::ReviewNominated(request.clone()),
+            [],
+        );
+        let decline_data = EventData::ReviewNominationDeclined(ReviewNominationDeclined {
+            nomination: nominate_env.id.clone(),
+            reason: text("too busy"),
+        });
+        let decline_env = Envelope::new(
+            &bob,
+            1,
+            no_frontier(),
+            &decline_data,
+            [nominate_env.id.clone()],
+        );
+        let reassign_data = EventData::ReviewReassigned(ReviewReassigned {
+            authors: request.authors.clone(),
+            product_branch: request.product_branch.clone(),
+            reviewer: carol.clone(),
+            required_checks: request.required_checks.clone(),
+            review_scope: request.review_scope.clone(),
+            summary: request.summary.clone(),
+            target_branch: request.target_branch.clone(),
+            evidence: request.evidence.clone(),
+            replaces: nominate_env.id.clone(),
+            reason: text("bob went quiet"),
+            inherited_findings: vec![],
+        });
+        let reassign_env = Envelope::new(
+            &alice,
+            2,
+            no_frontier(),
+            &reassign_data,
+            [nominate_env.id.clone()],
+        );
+
+        let mut state = empty_state(&[("coord1", Role::Coordinator)]);
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        apply_ok(&mut state, &register(&carol, Role::Reviewer));
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        apply_ok(&mut state, &nominate_env);
+        apply_ok(&mut state, &decline_env);
+        apply_ok(&mut state, &reassign_env);
+        assert_eq!(
+            state
+                .review_chain(&nominate_env.id)
+                .unwrap()
+                .decline_or_withdraw_or_reassign_status,
+            ItemStatus::LifecycleConflict
+        );
+
+        let resolved_data = EventData::LifecycleConflictResolved(LifecycleConflictResolved {
+            root: decline_env.id.clone(),
+            competing: StringSet::from_iter([decline_env.id.clone(), reassign_env.id.clone()]),
+            selected: reassign_env.id.clone(),
+            reason: text("user said so"),
+            user_authority: text("the user"),
+        });
+        let resolved_env = Envelope::new(
+            &coord1,
+            1,
+            frontier_seeing(&[&decline_env.id, &reassign_env.id]),
+            &resolved_data,
+            [decline_env.id.clone(), reassign_env.id.clone()],
+        );
+        apply_ok(&mut state, &resolved_env);
+
+        let chain = state.review_chain(&nominate_env.id).unwrap();
+        assert_eq!(
+            chain.decline_or_withdraw_or_reassign_status,
+            ItemStatus::Open
+        );
+        assert_eq!(chain.current_nomination, reassign_env.id);
+        assert_eq!(chain.nomination_reviewer[&reassign_env.id], carol);
+        assert!(!state.exclusive.is_contested(&reassign_env.id));
+    }
+
+    /// Companion to the above for the merge-engine-epoch exclusive group:
+    /// once a race has left `current_merge_engine_epoch` at the provisional
+    /// pre-race baseline (see
+    /// `merge_engine_race_resets_current_epoch_to_the_pre_race_baseline`),
+    /// an explicit `lifecycle.conflict_resolved` must be able to select a
+    /// definitive winner rather than hitting the same catch-all dead end.
+    #[test]
+    fn lifecycle_conflict_resolved_confirms_a_merge_engine_epoch_winner() {
+        let mut state =
+            empty_state(&[("coord1", Role::Coordinator), ("coord2", Role::Coordinator)]);
+        let coord1 = a("coord1");
+        let coord2 = a("coord2");
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        apply_ok(&mut state, &register(&coord2, Role::Coordinator));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
+        let genesis = seed_merge_engine_genesis(&mut state);
+
+        let candidate_a = Envelope::new(
+            &coord1,
+            1,
+            complete_frontier(&epoch),
+            &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
+            [],
+        );
+        apply_ok(&mut state, &candidate_a);
+        let candidate_b = Envelope::new(
+            &coord2,
+            1,
+            complete_frontier(&epoch),
+            &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
+            [],
+        );
+        apply_ok(&mut state, &candidate_b);
+        assert_eq!(state.current_merge_engine_epoch, Some(genesis.clone()));
+        assert!(state.exclusive.is_contested(&candidate_a.id));
+
+        let resolved_data = EventData::LifecycleConflictResolved(LifecycleConflictResolved {
+            root: candidate_a.id.clone(),
+            competing: StringSet::from_iter([candidate_a.id.clone(), candidate_b.id.clone()]),
+            selected: candidate_b.id.clone(),
+            reason: text("user said so"),
+            user_authority: text("the user"),
+        });
+        let resolved_env = Envelope::new(
+            &coord1,
+            2,
+            frontier_seeing(&[&candidate_a.id, &candidate_b.id]),
+            &resolved_data,
+            [candidate_a.id.clone(), candidate_b.id.clone()],
+        );
+        apply_ok(&mut state, &resolved_env);
+
+        assert_eq!(
+            state.current_merge_engine_epoch,
+            Some(candidate_b.id.clone())
+        );
     }
 
     #[test]
