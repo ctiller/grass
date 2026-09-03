@@ -727,14 +727,19 @@ one outright defect that had already merged — see §3.11's denial row.
   acceptance criteria cannot close without either M8's ordering or a profile-supplied
   `compatible` relation that says what an external API agent's write is ordered
   against. That is a design question and it is the largest one on this list.
-- **Nothing steps the M1 reference instruction set.** §3's exit criterion is that it
-  "steps end to end over a hand-built `MemState`". No Spike 1 descriptor is ever
-  passed to `Grass.Op.step`: `Tests/Memory/Spike1Block.lean` runs `runBlock`, the
-  `applyAccess`-level executor, and says so; there is no `StepPolicy`,
-  `MemoryProfile` or `AdmittedVocabulary` anywhere under `Tests/Memory/`. What steps
-  end to end is `Tests/Op/FakeIsa.lean`, which is explicitly a fake. Five of the
-  eight reference cases are executed by nothing. Review wrote the missing policy in
-  about forty lines, so this is an absent fixture rather than an inexpressible one.
+- ~~**Nothing steps the M1 reference instruction set.**~~ `Tests/Memory/Spike1Policy.lean`
+  does: a `MemoryProfile`, an `AdmittedVocabulary` populated from what the reference
+  descriptors actually name, and a `StepPolicy` adopting the standard loan rule. Every
+  program-thread reference case steps and records what it should — the store, the
+  implicit stack write, the `call`'s two events from one instruction, the three
+  effect-free operations, and the reload refused before the store and admitted after.
+
+  **The criterion is met for the program's instructions and not for Spike 1.** The
+  API agent's write to the slot the program lent it steps, records a violation, and
+  mints no event, because `ConflictsWithHistory` refuses every cross-context conflict
+  — `the_agent_write_is_refused` is that, stepped. So the M8 entry above is not a
+  worry about a future milestone; it is the reason this criterion cannot fully close,
+  stated as a theorem rather than as a claim in this document.
 - ~~**`Tests/Memory/Spike1Block.lean` proves the wrong data flow.**~~ Fixed. The
   block now applies the API agent's write to the slot it was lent, between the `call`
   and the reload, and `the_reload_observes_the_agents_count` is Spike 1's actual data
