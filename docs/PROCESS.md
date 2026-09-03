@@ -61,27 +61,32 @@ structure ProcessVocabulary where
   Demand : Type
   Result : Demand -> Type
   Observation : Type
+  InterruptReason : Demand -> Type
+  LogicalFault : Type
+  EnvironmentViolation : Type
 
 inductive ProcessEvent (v : ProcessVocabulary)
   | external (event : v.ExternalEvent)
   | result (demand : v.Demand) (result : v.Result demand)
-  | interrupted (demand : v.Demand) (reason : InterruptReason)
-  | fault (fault : LogicalFault)
-  | environmentViolation (violation : EnvironmentViolation)
+  | interrupted (demand : v.Demand) (reason : v.InterruptReason demand)
+  | fault (fault : v.LogicalFault)
+  | environmentViolation (violation : v.EnvironmentViolation)
 
 structure ViewFacet (State : Type) where
   View : Type
   render : State -> View
 
-structure ProcessSpec extends ProcessVocabulary where
+structure ProcessSpec where
+  vocabulary : ProcessVocabulary
   Request : Type
   State : Type
   TerminalResult : Type
-  Initial : Request -> State -> AbstractDemandBag Demand ->
-            List Observation -> Prop
+  Initial : Request -> State -> AbstractDemandBag vocabulary.Demand ->
+            List vocabulary.Observation -> Prop
   Terminal : Request -> State -> TerminalResult -> Prop
-  Step : State -> ProcessEvent toProcessVocabulary ->
-         State -> AbstractDemandBag Demand -> List Observation -> Prop
+  Step : State -> ProcessEvent vocabulary ->
+         State -> AbstractDemandBag vocabulary.Demand ->
+         List vocabulary.Observation -> Prop
   view : Option (ViewFacet State)
 
 structure DeterministicProcess (v : ProcessVocabulary) where
@@ -95,23 +100,35 @@ structure DeterministicProcess (v : ProcessVocabulary) where
   view : Option (ViewFacet State)
 ```
 
+Reusable protocol or network constructors select all seven associated families
+once and pass one `ProcessVocabulary` to their process clients. Convenience
+constructors such as `ProcessVocabulary.quiescent` fill the three exceptional
+families with empty types when the route is proved unreachable. An ordinary
+`ProcessSpec` literal therefore names one `vocabulary`; it never restates the
+families and cannot discard an unclassified exceptional event.
+
 Grass uses explicit terminology:
 
 ```lean
-structure AbstractSpecificationProcessNetwork
-    {R : Type u} [ResourceModel R] (resources : R) where
-  registry : ProtocolRegistry
-  root : registry.Key
-  channels : AbstractTypedChannelFamily registry
-  linearState : AbstractLinearCustodyFamily registry
-  sharedState : AbstractSharedLogicalStateFamily registry
+structure StructuralProcessNetwork (Protocol : Type u) where
+  RoleSchema : Type
+  finiteSchemas : Fintype RoleSchema
+  Instance : RoleSchema -> Type
+  protocol : RoleSchema -> Protocol
+  instances : forall schema,
+    Instance schema -> ProtocolInstance (protocol schema)
+  composition : AbstractNetworkCompositionLaw protocol instances
   abstraction : UsesNoPlatformThreadSchedulerBufferHandleLayoutOrISAIdentity
-  denotation : BehaviorContract resources
-  traceDenotation : ProcessTraceDenotation registry root channels
-  exact : denotation = traceDenotation
 ```
 
-A `ProcessSpec` contained in this network is a **spec process**. A
+`ProtocolInstance` and `AbstractNetworkCompositionLaw` are neutral typed
+junctions parameterized by the supplied `Protocol`; they do not interpret a
+semantic contract. `StructuralProcessNetwork` consequently contains no
+`SpecProcess`, `BehaviorContract`, selected trace, denotation, transported
+requirements, or exactness proof. `Semantics` instantiates `Protocol` with its
+own semantic process type and selects meaning separately.
+
+A `ProcessSpec` selected by a network is a **spec process**. A
 `ProcessPlan`, `ProcessRealization`, or driver network is a **process
 realization**. Only the former may be part of precious specification source;
 the latter and its proof are reviewed, bankable, and disposable. Different
@@ -374,13 +391,26 @@ structure ProcessGraph (registry : ProtocolRegistry)
   sharedAccess : ProcessKind -> SharedRegion -> LogicalAccess
   population : PopulationLaw ProcessKind
 
-structure ProcessTopology (registry : ProtocolRegistry)
+structure ProcessTopologyCore (registry : ProtocolRegistry)
     (boundary : DriverBoundary) extends ProcessGraph registry boundary where
   ChannelKind : Type
   endpoints : ChannelKind -> ProcessKind × ProcessKind
   spawn : SpawnAuthorityAndParenthood toProcessGraph
-  cancellation : CancellationAuthorityAndRaceLaw toProcessGraph
-  supervision : JoinDetachRestartAndDeathLaw toProcessGraph
+
+structure ProcessTopology (registry : ProtocolRegistry)
+    (boundary : DriverBoundary) extends ProcessTopologyCore registry boundary where
+  facets : SelectedTopologyFacetFamily toProcessTopologyCore
+    (requiredTopologyFacets boundary)
+  facetsExact : FacetsMeetExactlyDemandedCancellationAndSupervisionContracts
+    toProcessTopologyCore (requiredTopologyFacets boundary) facets
+
+theorem ProcessTopology.allCancellationContracts
+    (topology : ProcessTopology registry boundary) :
+    EveryDemandedCancellationContractHolds topology := ...
+
+theorem ProcessTopology.allSupervisionContracts
+    (topology : ProcessTopology registry boundary) :
+    EveryDemandedSupervisionContractHolds topology := ...
 
 structure ProcessRef (topology : ProcessTopology registry boundary)
     (kind : topology.ProcessKind) where
@@ -562,6 +592,16 @@ structure ProcessPlan (registry : ProtocolRegistry) (boundary : DriverBoundary)
 abbrev LogicalProcessNetwork (plan : ProcessPlan registry boundary) :=
   LogicalProcessNetworkCore plan.toProcessTopology plan.Message
 ```
+
+`ProcessTopologyCore` is the graph, population, channel-endpoint, and spawn
+object every plan needs. `requiredTopologyFacets` derives its result from the
+already selected `boundary.requirements`; an author cannot choose a convenient
+second demand set. `ProcessTopology` adds only that derived cancellation and
+supervision facet family, and the two aggregate theorems recover all and only
+its selected contracts. When the derived family is empty, the library supplies
+the unique empty selection automatically, so a simple plan authors no
+cancellation or supervision field. The unqualified topology never silently
+assumes a facet absent from `requiredTopologyFacets boundary`.
 
 `LogicalProcessNetworkCore` is a construction dependency, not a second public
 network semantics; authors and later theorems use `LogicalProcessNetwork plan`.

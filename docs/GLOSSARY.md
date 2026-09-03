@@ -80,11 +80,11 @@ state partition, channels, scheduling, and execution strategy are not precious.
 role/instance/protocol shape. It contains no behavior contract, selected trace,
 denotation, or exactness theorem.
 
-**Process presentation network** — The Semantics-owned wrapper that instantiates
-one structural process network at semantic protocols and supplies its abstract
-composition law. A separate `ProcessPresentation` selects a trace of that
-wrapper and proves the trace and transported requirements exactly match the
-precious `SpecProcess`.
+**Process presentation network** — The Refinement-owned wrapper, at the join of
+the independent Process and Semantics dependency arms, that instantiates one
+structural process network at semantic protocols. A `ProcessPresentation`
+selects a trace of that wrapper and proves the trace and transported
+requirements exactly match the precious `SpecProcess`.
 
 **Partial process realization** — A graph indexed by an exact staged process
 presentation of the root in which some finite role schemas have subsystem

@@ -616,11 +616,14 @@ to imitate compiler-selected storage or CFG structure.
     by `Process`, is generic over its protocol family, preserves the role-schema,
     instance, protocol, and composition shape used by the spikes, and contains
     no `BehaviorContract`, denotation, trace-denotation, or exactness field.
-    `Semantics` may instantiate that structure inside the wrapper
-    `ProcessPresentationNetwork`; this is not a second structural declaration.
-    `ProcessPresentation` then selects an explicit trace for that wrapper and
-    proves exact behavior and requirement correspondence. Neither the selected
-    trace nor its exactness theorem is a field of `StructuralProcessNetwork`.
+    `Refinement`, which imports both independent dependency arms, instantiates
+    that structure inside the wrapper `ProcessPresentationNetwork`; this is not
+    a second structural declaration. `ProcessPresentation` there selects an
+    explicit trace for that wrapper and proves exact behavior and requirement
+    correspondence. Neither the selected trace nor its exactness theorem is a
+    field of `StructuralProcessNetwork`; `Semantics` does not import `Process`
+    to construct the wrapper. This corrects the original owner wording to obey
+    decision 116's dependency diamond without changing the selected interface.
     This records `coord1:4`, originating at `c-process:3`, and names the wrapper
     consumed by the synchronized Spike 4/5 surface under dependency
     `g-design:23`.
@@ -654,12 +657,13 @@ to imitate compiler-selected storage or CFG structure.
     under acknowledgements `g-design:3` and `g-design:4`.
 122. Cancellation and supervision are separately imported topology facets, not
     mandatory fields paid by every process. The weaker graph/population/spawn
-    object is named `ProcessTopologyCore`. `ProcessTopology requirements`
-    contains that core plus exactly the facet family demanded by the selected
-    specification, with named aggregate theorems recovering every required
-    cancellation and supervision contract. The unqualified `ProcessTopology`
-    name may not denote a weaker value while prose assumes absent lifecycle
-    authority. This resolves `c-process:10` under acknowledgement `g-design:5`.
+    object is named `ProcessTopologyCore`. `ProcessTopology boundary` contains
+    that core plus exactly the facet family derived from the boundary's selected
+    requirements, with named aggregate theorems recovering every required
+    cancellation and supervision contract. The empty family is supplied
+    automatically. The unqualified `ProcessTopology` name may not denote a
+    weaker value while prose assumes absent lifecycle authority. This resolves
+    `c-process:10` under acknowledgement `g-design:5`.
 123. Normative ratifications are durable product content, not bus-only state.
     `DECISIONS.md` records each accepted decision using stable numbering and
     cites the originating and ruling agent-bus event identifiers when applicable.
