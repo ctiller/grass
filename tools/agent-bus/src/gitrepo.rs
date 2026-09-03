@@ -129,7 +129,13 @@ pub fn rev_parse(dir: &Path, rev: &str) -> AbResult<String> {
 }
 
 pub fn rev_parse_opt(dir: &Path, rev: &str) -> AbResult<Option<String>> {
-    let out = run(dir, &["rev-parse", "--verify", "--quiet", rev])?;
+    // `rev-parse --verify` alone only checks that `rev` is *syntactically*
+    // resolvable: for a full-length hex string it echoes the input back and
+    // exits 0 even when no such object exists in the odb. Appending
+    // `^{object}` forces git to actually dereference to an object, which
+    // fails for both a nonexistent hash and a nonexistent ref.
+    let target = format!("{rev}^{{object}}");
+    let out = run(dir, &["rev-parse", "--verify", "--quiet", &target])?;
     if out.success && !out.stdout.is_empty() {
         Ok(Some(out.stdout))
     } else {
