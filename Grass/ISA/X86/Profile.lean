@@ -139,11 +139,19 @@ def registerWriteExtension : CommonRule :=
     citation := dual writeExtension
       (cite .intel Volume.intelBasic "3.4.1.1"
         "General-Purpose Registers in 64-Bit Mode" [writeExtension]
-        ("Find the subsection under 'General-Purpose Registers' that discusses " ++
-         "64-bit mode operand sizes. The passage states the three cases " ++
-         "together: 64-bit operands, 32-bit operands zero-extending, and 8/16-bit " ++
-         "operands preserving upper bits. Check that all three appear; a source " ++
-         "that states only the 32-bit case does not settle the other two."))
+        ("Confirmed, and it states all three cases together as this rule needs. " ++
+         "Under \"When in 64-bit mode, operand size determines the number of " ++
+         "valid bits in the destination general-purpose register\": \"64-bit " ++
+         "operands generate a 64-bit result in the destination general-purpose " ++
+         "register\"; \"32-bit operands generate a 32-bit result, zero-extended " ++
+         "to a 64-bit result in the destination general-purpose register\"; and " ++
+         "\"8-bit and 16-bit operands generate an 8-bit or 16-bit result. The " ++
+         "upper 56 bits or 48 bits (respectively) of the destination " ++
+         "general-purpose register are not modified by the operation.\" That is " ++
+         "exactly `writeBack` and its four preservation theorems. The section " ++
+         "states none of the three carve-outs in this rule's statement, which " ++
+         "is why the basis stays `weakerCommon` on hardware evidence.")
+        (confirmed := some intelAnchorCheckDate))
       (cite .amd Volume.amdApplication "3.1"
         "Registers" [writeExtension]
         ("In the general-purpose register discussion of Volume 1, find the text " ++
@@ -197,13 +205,23 @@ def byteRegisterRexInteraction : CommonRule :=
       "DIL instead, and AH, CH, DH and BH are not encodable."
     basis := .assertedPendingConfirmation
     citation := dual rexByteRegisters
-      (cite .intel Volume.intelInstructionFormat "2.2.1.2"
-        "More on REX Prefix Fields" [rexByteRegisters]
-        ("Confirmed as the right section: it is the one that discusses the REX " ++
-         "prefix fields in detail, including byte-register addressing. The " ++
-         "specific claim this rule makes -- that any REX prefix, including an " ++
-         "all-zero one, selects SPL/BPL/SIL/DIL over AH/CH/DH/BH -- is checked " ++
-         "against the byte-register discussion here and against Table 2-4.")
+      (cite .intel Volume.intelBasic "3.4.1.1"
+        "General-Purpose Registers in 64-Bit Mode" [rexByteRegisters]
+        ("Confirmed, after correcting the anchor. This rule previously pointed " ++
+         "at Vol. 2A §2.2.1.2, which only says REX prefixes \"provide an " ++
+         "additional addressing capability for byte-registers that makes the " ++
+         "least-significant byte of GPRs available for byte operations\" -- " ++
+         "corroborating, but strictly weaker than the substitution this rule " ++
+         "states. Vol. 1 §3.4.1.1 states it: \"The architecture enforces " ++
+         "this limitation by changing high-byte references (AH, BH, CH, DH) to " ++
+         "low byte references (BPL, SPL, DIL, SIL: the low 8 bits for RBP, RSP, " ++
+         "RDI, and RSI) for instructions using a REX prefix.\" The qualifier is " ++
+         "\"instructions using a REX prefix\" with no condition on which REX " ++
+         "bits are set, which is what licenses this rule's claim about an " ++
+         "all-zero REX. The section supplies the substitution as a set; the " ++
+         "register numbering that pairs 4/5/6/7 with AH/CH/DH/BH is Table 2-2's " ++
+         "reg column in Vol. 2A §2.1.5, which lists AH at 4, CH at 5, DH " ++
+         "at 6 and BH at 7.")
         (confirmed := some intelAnchorCheckDate))
       (cite .amd Volume.amdInstructions "1.2.7"
         "REX Prefix" [rexByteRegisters]
@@ -300,9 +318,14 @@ def sibEscapeForm : CommonRule :=
     citation := dual sibEscape
       (cite .intel Volume.intelInstructionFormat "2.1.5"
         "Addressing-Mode Encoding of ModR/M and SIB Bytes" [sibEscape]
-        ("In the ModR/M addressing-forms table, find the rm=100 rows and the " ++
-         "note marking them as selecting a SIB byte. Confirm that the note " ++
-         "applies for every mod value other than 11."))
+        ("Confirmed. Table 2-2 carries [--][--] in the rm=100 column for each " ++
+         "of mod=00, mod=01 and mod=10 (as [--][--], [--][--]+disp8 and " ++
+         "[--][--]+disp32), with mod=11 giving registers instead, and note 1 " ++
+         "reads \"The [--][--] nomenclature means a SIB follows the ModR/M " ++
+         "byte.\" The R12 half is Table 2-5 in §2.2.1.2, which pairs " ++
+         "\"SIB byte required for ESP-based addressing\" with \"SIB byte also " ++
+         "required for R12-based addressing.\"")
+        (confirmed := some intelAnchorCheckDate))
       (cite .amd Volume.amdInstructions "1.4"
         "ModRM and SIB Bytes" [sibEscape]
         ("In the ModRM and SIB section of Volume 3, find the text stating when " ++
@@ -320,9 +343,15 @@ def noIndexForm : CommonRule :=
     citation := dual noIndex
       (cite .intel Volume.intelInstructionFormat "2.1.5"
         "Addressing-Mode Encoding of ModR/M and SIB Bytes" [noIndex]
-        ("In the SIB addressing-forms table, find the index=100 column and its " ++
-         "'none' entry. Then confirm in the REX material that REX.X extends this " ++
-         "field, which is what makes R12 reachable here while RSP is not."))
+        ("Confirmed. Table 2-3's scaled-index row labels read [EAX] [ECX] " ++
+         "[EDX] [EBX] none [EBP] [ESI] [EDI], so index=100 is \"none\", and " ++
+         "the same \"none\" appears in the *2, *4 and *8 blocks -- which is " ++
+         "the scale-has-no-effect half. Table 2-5 in §2.2.1.2 supplies " ++
+         "the 64-bit half in full: \"ESP cannot be used as an index register\", " ++
+         "REX.X \"is decoded\" for this field unlike the other two special " ++
+         "cases, and \"The expanded index field allows distinguishing RSP from " ++
+         "R12, therefore R12 can be used as an index.\"")
+        (confirmed := some intelAnchorCheckDate))
       (cite .amd Volume.amdInstructions "1.4"
         "ModRM and SIB Bytes" [noIndex]
         ("In the SIB field table of Volume 3, find the index encoding that " ++
@@ -348,9 +377,16 @@ def noBaseForm : CommonRule :=
     citation := dual noBase
       (cite .intel Volume.intelInstructionFormat "2.1.5"
         "Addressing-Mode Encoding of ModR/M and SIB Bytes" [noBase]
-        ("In the SIB addressing-forms table, find the base=101 rows and the " ++
-         "footnote distinguishing mod=00 from mod=01 and mod=10. Confirm that " ++
-         "the displacement is 32 bits in the mod=00 case."))
+        ("Confirmed. Table 2-3 gives base=101 as [*], and note 1 reads \"The " ++
+         "[*] nomenclature means a disp32 with no base if the MOD is 00B. " ++
+         "Otherwise, [*] means disp8 or disp32 + [EBP]\", tabulating mod=00 as " ++
+         "[scaled index] + disp32, mod=01 as [scaled index] + disp8 + [EBP] and " ++
+         "mod=10 as [scaled index] + disp32 + [EBP]. R13 follows from REX.B " ++
+         "extending the base field (Table 2-4). The sign-extension claim is " ++
+         "§2.2.1.3: displacements \"remain 8 bits or 32 bits and are " ++
+         "sign-extended to 64bits\". The RIP-relative contrast is §2.2.1.6 " ++
+         "and the direct-memory-offset carve-out is §2.2.1.4.")
+        (confirmed := some intelAnchorCheckDate))
       (cite .amd Volume.amdInstructions "1.4"
         "ModRM and SIB Bytes" [noBase]
         ("In the SIB field table of Volume 3, find the base encoding that " ++

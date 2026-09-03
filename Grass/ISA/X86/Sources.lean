@@ -71,6 +71,29 @@ The `url` is the collection page, which `docs/REFERENCES.md` correctly calls a
 discovery root rather than an anchor. Every citation into this document supplies
 its own `Anchor`; the combined PDF itself is reached from that page through
 Intel's content ID 671200, which the locators name.
+
+## How the confirmed anchors were confirmed
+
+Anchors carrying `confirmed := some intelAnchorCheckDate` were followed inside
+the per-volume PDFs from the same version-092 posting, not the combined set:
+content ID 671199 for Vol. 2A and 671436 for Vol. 1, both fetched from
+`cdrdv2.intel.com/v1/dl/getContent/`. Neither PDF is in the repository, by
+instruction.
+
+The reading was done by decompressing the PDFs' FlateDecode streams and
+concatenating the parenthesised strings out of the text operators -- enough to
+locate a heading and read the prose under it, which is what an anchor
+confirmation needs. It is not a typesetting-faithful renderer, and two of its
+limits bear on how much a quoted locator is worth. Parenthesised spans are
+sometimes dropped where they nest, leaving a stray backslash; and stream order
+is file order, not page order, so a section can arrive split -- Vol. 1
+§3.4.1.1 did, which is why a first pass wrongly read it as not stating the
+operand-size rule. Quotes in locators are therefore reconstructions of the
+running prose, faithful in substance and close in wording, and a locator that
+turns on exact punctuation should be re-checked in a real reader. Claims read
+off table *layout* rather than prose (Tables 2-2, 2-3 and 2-5) are the ones to
+treat most carefully; each is cross-checked against a prose statement or a
+footnote in the locator that cites it.
 -/
 def intelSdm092 : SourceDocument :=
   { id := ⟨"intel-sdm-092"⟩
