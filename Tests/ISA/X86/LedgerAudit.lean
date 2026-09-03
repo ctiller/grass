@@ -272,4 +272,4 @@ review."
 {cited.size} carry a citation, {owed.length} owed, \
 {notBehaviour.length} reviewed as carrying no external behaviour. \
 {subjects.length} ledger subjects, all anchoring to real declarations. \
-{unfounded.length} rules await a confirmed basis."
+{unfounded.length} rules await a confirmed basis. \n{l.unconfirmedAnchors.length} of {l.citations.length} anchors are unconfirmed."

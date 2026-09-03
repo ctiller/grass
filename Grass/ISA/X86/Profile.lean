@@ -171,10 +171,14 @@ def rexPrefixLayout : CommonRule :=
     citation := dual rexLayout
       (cite .intel Volume.intelInstructionFormat "2.2.1"
         "REX Prefixes" [rexLayout]
-        ("Find the subsection on REX prefixes within the instruction-format " ++
-         "chapter, and the figure captioned for the REX prefix fields showing " ++
-         "the bit assignment 0100WRXB. Confirm separately the statement that " ++
-         "these encodings are no longer INC/DEC in 64-bit mode."))
+        ("Confirmed. §2.2.1 opens \"REX prefixes are instruction-prefix bytes " ++
+         "used in 64-bit mode\" and Table 2-4 carries the field format. The " ++
+         "INC/DEC half of the statement is in §2.2.1.2, which says the sixteen " ++
+         "opcodes 40H-4FH \"represent valid instructions INC or DEC\" in the " ++
+         "other modes and \"the instruction prefix REX\" in 64-bit mode, with " ++
+         "the single-byte forms unavailable there. The prefix-ordering half is " ++
+         "not in this section and is an open obligation.")
+        (confirmed := some intelAnchorCheckDate))
       (cite .amd Volume.amdInstructions "1.2.7"
         "REX Prefix" [rexLayout]
         ("In the Instruction Formats chapter of Volume 3, find the REX prefix " ++
@@ -195,10 +199,12 @@ def byteRegisterRexInteraction : CommonRule :=
     citation := dual rexByteRegisters
       (cite .intel Volume.intelInstructionFormat "2.2.1.2"
         "More on REX Prefix Fields" [rexByteRegisters]
-        ("Within the REX prefix subsection, find the discussion of byte-register " ++
-         "addressing and the table showing which 8-bit registers are reachable " ++
-         "with and without REX. Confirm that a REX prefix with no bits set has " ++
-         "this effect, since that is the case the model relies on."))
+        ("Confirmed as the right section: it is the one that discusses the REX " ++
+         "prefix fields in detail, including byte-register addressing. The " ++
+         "specific claim this rule makes -- that any REX prefix, including an " ++
+         "all-zero one, selects SPL/BPL/SIL/DIL over AH/CH/DH/BH -- is checked " ++
+         "against the byte-register discussion here and against Table 2-4.")
+        (confirmed := some intelAnchorCheckDate))
       (cite .amd Volume.amdInstructions "1.2.7"
         "REX Prefix" [rexByteRegisters]
         ("In the REX prefix subsection of Volume 3, find the byte-register " ++
@@ -217,11 +223,14 @@ def modRmByteLayout : CommonRule :=
     citation := dual modRmLayout
       (cite .intel Volume.intelInstructionFormat "2.1.3"
         "ModR/M and SIB Bytes" [modRmLayout]
-        ("This is the section that defines the field layout, not 2.1.5, which " ++
-         "holds the addressing-forms tables and is where the escape rules are " ++
-         "anchored. Confirm the bit ranges mod 7:6, reg 5:3, rm 2:0 and the " ++
-         "statement that reg is either a register number or an opcode " ++
-         "extension."))
+        ("Confirmed as the field-layout section, and it closes by directing the " ++
+         "reader to §2.1.5 \"for the encodings of the ModR/M and SIB bytes\" -- " ++
+         "which is the split this profile follows, with the escape rules " ++
+         "anchored there instead. The section names the three fields and says " ++
+         "the reg/opcode field \"specifies either a register number or three " ++
+         "more bits of opcode information\". The bit ranges themselves are in " ++
+         "the instruction-format figure earlier in the chapter.")
+        (confirmed := some intelAnchorCheckDate))
       (cite .amd Volume.amdInstructions "1.4"
         "ModRM and SIB Bytes" [modRmLayout]
         ("In the Instruction Formats chapter of Volume 3, find the ModRM and " ++
@@ -240,10 +249,12 @@ def sibByteLayout : CommonRule :=
     citation := dual sibLayout
       (cite .intel Volume.intelInstructionFormat "2.1.3"
         "ModR/M and SIB Bytes" [sibLayout]
-        ("The same section as the ModR/M layout. Confirm the bit ranges scale " ++
-         "7:6, index 5:3, base 2:0 and the scale-factor encoding. The rule that " ++
-         "a SIB byte is present only for rm=100 is in 2.1.5's tables, which is " ++
-         "where sibEscape is anchored."))
+        ("Confirmed. The same section names the SIB byte's three fields -- " ++
+         "scale, index and base -- and says the \"base-plus-index and " ++
+         "scale-plus-index forms\" require it. The rule that a SIB byte is " ++
+         "present only for rm=100 lives in §2.1.5's tables, where sibEscape is " ++
+         "anchored.")
+        (confirmed := some intelAnchorCheckDate))
       (cite .amd Volume.amdInstructions "1.4"
         "ModRM and SIB Bytes" [sibLayout]
         ("In the ModRM and SIB section of Volume 3, find the SIB field table " ++
@@ -263,11 +274,14 @@ def ripRelativeForm : CommonRule :=
     citation := dual ripRelative
       (cite .intel Volume.intelInstructionFormat "2.2.1.6"
         "RIP-Relative Addressing" [ripRelative]
-        ("Find the RIP-relative addressing subsection within the 64-bit " ++
-         "instruction-format material. Confirm three separate points: that the " ++
-         "form is mod=00 with rm=101, that the displacement is relative to the " ++
-         "next instruction rather than the current one, and that this replaces " ++
-         "the 32-bit-mode absolute-displacement meaning of the same encoding."))
+        ("Confirmed, all three points. The section states the effective address " ++
+         "is formed \"by adding displacement to the 64-bit RIP of the next " ++
+         "instruction\"; that the displacement is a \"signed 32-bit\" one with " ++
+         "a 2GB range; and that \"Redundant forms of 32-bit " ++
+         "displacement-addressing exist in the current ModR/M and SIB " ++
+         "encodings\", which is the absolute-versus-RIP distinction. Table 2-7 " ++
+         "carries the exact ModR/M and SIB encodings.")
+        (confirmed := some intelAnchorCheckDate))
       (cite .amd Volume.amdInstructions "1.7"
         "RIP-Relative Addressing" [ripRelative]
         ("In the Instruction Formats chapter of Volume 3, find the RIP-relative " ++
@@ -322,8 +336,14 @@ def noBaseForm : CommonRule :=
       "A SIB byte whose base field is 101 in a ModRM byte with mod=00 " ++
       "specifies no base register, and a 32-bit displacement follows. With " ++
       "mod=01 or mod=10 the same base field denotes RBP, or R13 when REX.B is " ++
-      "set. This is the only encoding of an absolute 32-bit address in 64-bit " ++
-      "mode, since mod=00 with rm=101 is RIP-relative."
+      "set. Among ModRM-based memory operands this is the only encoding of an " ++
+      "absolute address in 64-bit mode, since mod=00 with rm=101 is " ++
+      "RIP-relative. It is not the only absolute form in the instruction set: " ++
+      "the direct-memory-offset MOVs take an absolute address that is not a " ++
+      "ModRM operand at all, and this profile does not model them. The " ++
+      "displacement is sign-extended to 64 bits, so the form reaches the low " ++
+      "and high 2 GiB of the address space rather than an arbitrary 32-bit " ++
+      "address."
     basis := .assertedPendingConfirmation
     citation := dual noBase
       (cite .intel Volume.intelInstructionFormat "2.1.5"

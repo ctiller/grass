@@ -188,11 +188,27 @@ def bits : Width → Nat
 /-- Every operand width. -/
 def all : List Width := [.w8, .w16, .w32, .w64]
 
-/-- The default operand size when no size prefix or REX.W is present.
+/--
+The default operand size for the instructions that have one, when no size
+prefix or `REX.W` is present.
 
 64-bit mode defaults to 32-bit operands, which is why `mov ecx, 3` is the short
 encoding and `mov rcx, 3` needs `REX.W`. Address size defaults to 64 bits, which
-is a separate axis and belongs to the addressing rules. -/
+is a separate axis and belongs to the addressing rules.
+
+**Two groups of instructions do not follow this**, and for them a 32-bit form is
+not encodable at all. Intel SDM Vol. 2A §2.2.1.7 "Default 64-Bit Operand Size"
+names them exactly: near branches, and "all instructions, except far branches,
+that implicitly reference the RSP". Those need no `REX.W` for a 64-bit operand,
+and `66` gives them 16 bits rather than 32.
+
+That is not a detail. `Grass/ISA/X86/Bytes.lean`'s `callMem64` sets `w := false`
+because `FF /2` is a near branch, and `Spikes/1_Hello_World/Program.lean` opens
+with three `push` instructions, which reference RSP implicitly. Both are in the
+second group, and neither fact is derivable from this constant — which is why
+this is a `Width` and not a function of the opcode. Making it opcode-indexed is
+an **open obligation**; the anchor above is confirmed, the model is not yet
+built. -/
 def default64BitMode : Width := .w32
 
 end Width

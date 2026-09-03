@@ -91,7 +91,7 @@ def opcodeTable : List OpcodeSpec :=
   [ { escape := false, opcode := 0x8D, hasModrm := true, immSize := .none,
       mnemonic := "lea" },
     { escape := false, opcode := 0xFF, hasModrm := true, immSize := .none,
-      mnemonic := "group5 (call/jmp/push r/m)" },
+      mnemonic := "group5 (inc/dec/call/jmp/push r/m)" },
     { escape := false, opcode := 0xC7, hasModrm := true, immSize := .i32,
       mnemonic := "mov r/m, imm32" },
     { escape := false, opcode := 0x89, hasModrm := true, immSize := .none,

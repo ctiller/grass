@@ -50,6 +50,14 @@ open Grass.Core Grass.Cite
 /-- The date the sources below were checked. -/
 def sourceCheckDate : Date := ⟨2026, 9, 2⟩
 
+/-- The date the Intel anchors were followed inside the manual.
+
+Distinct from `sourceCheckDate`, because the two facts are independent: the
+first says the URL served the document, the second says a section number
+resolved to the passage a rule is modeled from. `Grass.Cite.Citation.confirmed`
+carries this one. -/
+def intelAnchorCheckDate : Date := ⟨2026, 9, 3⟩
+
 /--
 Intel 64 and IA-32 Architectures Software Developer's Manual, combined volume
 set, version 092.
