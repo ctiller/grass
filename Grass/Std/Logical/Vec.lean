@@ -884,6 +884,23 @@ Adversarial review found it. `sum` costs a line because `foldl` already exists.
 -/
 def sum (v : Vec Nat) : Nat := v.foldl (· + ·) 0
 
+@[simp] theorem sum_empty : sum empty = 0 := rfl
+
+/-- The recursion. `Vec.sum` shipped with no law at all in the same commit that
+adopted the coverage rule, and on the right-hand side of `Vec.length_flatten` —
+so every consumer of that law received a number it could say nothing about, which
+is the leak the rule exists to catch. Adversarial review found it. -/
+@[simp] theorem sum_push (v : Vec Nat) (a : Nat) : sum (v.push a) = sum v + a := by
+  simp [sum, foldl, push]
+
+theorem sum_append (v w : Vec Nat) : sum (v ++ w) = sum v + sum w := by
+  induction w using recOnPush with
+  | empty => simp [sum, foldl, empty]
+  | push u a ih =>
+    have : v ++ u.push a = (v ++ u).push a := by
+      apply toList_injective; simp [push]
+    rw [this, sum_push, ih, sum_push, Nat.add_assoc]
+
 @[simp] theorem length_flatten (chunks : Vec (Vec α)) :
     (flatten chunks).length = (chunks.map length).sum := by
   simp only [flatten, length, map, toList_fromList, List.length_flatten, List.map_map,
