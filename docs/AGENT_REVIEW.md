@@ -220,11 +220,13 @@ questions. Closely related routine lemmas may be assessed as one family.
    invariant discovery or admission.
 4. **Non-vacuity and adversarial resistance.** Premises are jointly inhabitable,
    conclusions discriminate good from bad behavior, and representation or
-   refinement relations actually connect the two intended objects. Reviewers
-   use small negative constructions or mutation fixtures where they materially
-   test vacuity, missing constructors, weakened hypotheses, ignored fields, or
-   disconnected twins. Such fixtures challenge the proof statement; they do not
-   replace its universal proof.
+   refinement relations actually connect the two intended objects. For each
+   material theorem family the reviewer attempts a proportionate refutation:
+   construct a negative instance, weaken a hypothesis, remove a guard, mutate a
+   relation, or otherwise try to preserve acceptance while violating the claimed
+   property. The report states the attempted refutation and what rejected it, or
+   explains concretely why a meaningful refutation was impractical. Such attacks
+   challenge the statement and connection; they do not replace universal proof.
 5. **Proof economy and generality.** Prefer a small reusable lemma over repeated
    case splits, and a structural theorem over pointwise enumeration. Concision
    means that domain structure and reusable library laws carry the argument; it
@@ -235,7 +237,8 @@ questions. Closely related routine lemmas may be assessed as one family.
 
 The authorization evidence for a Lean-bearing nomination summarizes why the
 important theorem families are adequate, how universal coverage was checked,
-which proof/trust audits ran, and any meaningful insufficiency that remains.
+which refutations were attempted and survived, which proof/trust audits ran,
+and any meaningful insufficiency that remains.
 It need not reproduce proofs line by line, but it must be specific enough that a
 later reviewer can distinguish a proved contract from a fixture, convention, or
 aspirational comment.
@@ -257,6 +260,15 @@ aspirational comment.
 - API, ISA, and protocol claims retain citations and boundary probes.
 - The reviewer independently runs risk-proportionate checks and records them.
 - Claimed build and `.olean` locality has the required evidence.
+
+Every test, audit, probe, mutation, or negative fixture offered as assurance must
+be shown to discriminate the defect class it claims to exclude. Normally this
+means running a negative control: reintroduce the defect, remove the intended
+guard, or supply a known-invalid specimen and observe the check fail for the
+claimed reason. If a safe negative control is impractical, the review records
+why and what weaker evidence was obtained. A guard that cannot be made to fail
+is not evidence for that exclusion claim, even when it remains a useful positive
+regression test.
 
 ### 5.5 Repository hygiene
 
@@ -365,7 +377,9 @@ provides the same guarantee without adding application-author ceremony.
   implementation has the desired point value.
 - If an executable test, negative fixture, mutation, fuzzer, parser corpus, or
   boundary probe could have exposed the defect economically, add that check and
-  demonstrate that it fails against the defective form when practical.
+  demonstrate that it fails against the defective form for the claimed reason.
+  If a safe demonstration is impractical, record that limitation and do not cite
+  the check as evidence that the defect class is excluded.
 - If a static audit, generated manifest check, elaborator restriction, type
   interface, or bus/tooling invariant can reject the entire class earlier and
   more reliably, prefer that mechanized gate over permanent human vigilance.
