@@ -159,8 +159,41 @@ def issuedKinds (effect : AuthorityEffect) : List GrantKind :=
     | .issue _ grant => some grant.kind
     | _ => Option.none
 
+/--
+The provenances an effect's issued grants name.
+
+`issuedKinds` above exists because `AccessDescriptor.authorityEffect` lets an operation
+mint a `GrantKind`, and law 8 wants an unregistered one refused. An issue carries a
+whole `AuthorityGrant`, and a grant carries a whole `Provenance` -- its own address
+space, its own allocation source, its own path -- and none of those was looked at:
+`issuedKinds` was the only projection of `authorityEffect` in `admissibilityFailures`.
+So the registry gate stood on the kind and not on the three names beside it, while the
+identical names on the access's *own* provenance were all checked.
+
+Review minted a grant whose provenance named `vendor.ghostSpace`,
+`vendor.ghostAllocator` and a `vendor.ghostStep`, none declared by the profile, and the
+step ran with no violation and installed the grant -- and the grant was load-bearing:
+the program thread's next ordinary store to those bytes was refused
+`authorityUnavailable`, byte-identical to the ledger after an honest lend. This is the
+projection those clauses need.
+-/
+def issuedProvenances (effect : AuthorityEffect) : List Provenance :=
+  effect.filterMap fun delta =>
+    match delta with
+    | .issue _ grant => some grant.provenance
+    | _ => Option.none
+
+/-- An issue's provenance is one of them. -/
+theorem mem_issuedProvenances_of_issue {effect : AuthorityEffect} {id : GrantId}
+    {grant : AuthorityGrant} (h : AuthorityDelta.issue id grant ∈ effect) :
+    grant.provenance ∈ issuedProvenances effect :=
+  List.mem_filterMap.mpr ⟨.issue id grant, h, rfl⟩
+
 /-- Nothing declared mints nothing. -/
 @[simp] theorem issuedKinds_nil : issuedKinds [] = [] := rfl
+
+/-- And names no provenance. -/
+@[simp] theorem issuedProvenances_nil : issuedProvenances [] = [] := rfl
 
 /-- An issue's kind is one of them, which is the fact the admissibility check needs
 and the one a `filterMap` makes easy to get wrong. -/

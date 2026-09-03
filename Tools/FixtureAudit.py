@@ -65,10 +65,15 @@ STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
 # `Tests/Memory/Loans.lean` -- were deleted rather than listed.
 ALLOWED: set[str] = {
     # Consumed by an environment-walking audit rather than by name.
-    # `Tools/AxiomAudit.lean` and `audit-trust.ps1` discover `VerifiedProgram`
-    # producers from their *types* and report on them -- both of these appear in the
-    # audit's own output -- so no source mentions them and this tool cannot see the
-    # consumer. They belong to another owner's module and the shape is deliberate:
+    # `#audit_verified_programs`, which `Tests/Foundation.lean` runs at the end of the
+    # file the fixtures live in and which `audit-trust.ps1` re-runs, discovers
+    # `VerifiedProgram` producers from their *types* and names both of these in its
+    # output -- so no source mentions them and this tool cannot see the consumer.
+    #
+    # This comment said `Tools/AxiomAudit.lean` did that, and review checked: it
+    # imports `Grass.*` only, walks `Grass/` on disk, and prints one summary line
+    # naming no declaration. It cannot see either fixture. The exemptions are right
+    # and the pointer a reviewer would follow to verify them was not. They belong to another owner's module and the shape is deliberate:
     # `aliasedVerified` exists to be found through an alias and `inferredVerified`
     # through an inferred type.
     "aliasedVerified",

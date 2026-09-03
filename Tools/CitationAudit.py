@@ -147,9 +147,15 @@ HEADING = re.compile(r"^#{1,6}\s+(\d+(?:\.\d+)*)")
 # once rather than rediscovered.
 ALLOWED = {
     # Lean core and standard library names this project cites but does not declare.
-    "List.findSome?", "List.getElem?", "List.eq_nil_of_length_eq_zero",
-    "List.getElem?_take", "List.getElem?_drop", "Option.any", "Nat.pow_le_pow_right",
-    "ByteStore.rec", "Decidable.decide",
+    #
+    # Eight names stood here that `--inert` reports as suppressing nothing, because
+    # `worth_checking` already drops anything rooted in `CORE_ROOTS` -- `List`,
+    # `Option`, `Nat`, `Decidable` -- so the tool never adjudicated them. An entry for
+    # a citation the scanner is structurally blind to reads as a judgement somebody
+    # made and is not one. `ByteStore.rec` is different and stays: `ByteStore` is this
+    # tree's own type, so the root is not core and the generated recursor really is
+    # unresolvable here.
+    "ByteStore.rec",
     # Recursors and eliminators Lean generates for this tree's own types. Cited in
     # `Grass/Core/Uid.lean` and `Grass/Memory/ByteStore.lean` precisely because they
     # are generated rather than written, which is the point those comments make.
@@ -189,8 +195,10 @@ ALLOWED = {
     # decided here; delete these entries when they answer.
     "built_two_ways", "Vec.concat", "stable_merge_pass",
     "ByteStringOrder.lexicographicUnsigned", "write_all_loop", "exit_no_progress",
-    # Paths and file names, which happen to match the identifier shape.
-    "lean-toolchain", "lakefile.toml",
+    # Two path entries stood here -- `lean-toolchain` and `lakefile.toml` -- and
+    # `worth_checking` drops a `.toml` suffix and a hyphenated token before the
+    # allowlist is consulted, so neither did anything. Deleted for the same reason as
+    # the core names above.
     # Prose about a name that was deleted, quoted so the reason survives. Each must
     # sit in a comment explaining why the thing no longer exists -- a reader finding
     # nothing is the point.
@@ -200,16 +208,21 @@ ALLOWED = {
     # three sites were describing the *present* enforcement chain, so the allowlist
     # was keeping a false claim green. Nothing checks that an entry's sites are all
     # historical, and nothing checks that an entry is still needed at all: review
-    # found two with zero remaining sites. Before adding one, read every site.
+    # found two with zero remaining sites. `--inert` checks the second half now, and
+    # found two more -- `not_permitsOrdinaryWrite_of_not_exclusive`, whose only two
+    # occurrences in the tree were this file's own docstring and its entry, and
+    # `faultPointOutOfRange`, which has no `_` and no `.` so `worth_checking` rejects
+    # it and the tool has never adjudicated the name at either of its live sites. An
+    # entry for a citation the scanner is structurally blind to reads as "this dead
+    # citation is deliberate" and is not even that. Both deleted. Before adding one,
+    # read every site.
     "AccessIntent.isDevice",
     "AllocationRecord.initialized",
-    "not_permitsOrdinaryWrite_of_not_exclusive",
     "loan_refuses_only_the_frozen",
     # Deleted with `AuthorityProvider.loan` itself, when §3's rule moved into the
     # transition. Cited only as history, in a sentence that says it is gone.
     "loan_refuses_the_frozen",
     "MemoryState.grant",
-    "faultPointOutOfRange",
 }
 
 
@@ -439,6 +452,33 @@ def self_test() -> int:
 def main() -> int:
     if "--self-test" in sys.argv:
         return self_test()
+
+    if "--inert" in sys.argv:
+        # Which allowlist entries suppress nothing. `ConsultedAudit.py` grew this
+        # first and `ReachabilityAudit.py` second, after each was found carrying
+        # entries that had stopped doing anything; this file was the third, and its
+        # ALLOWED comment says in so many words that "nothing checks that an entry
+        # is still needed at all". Now something does.
+        global ALLOWED
+        names = declared_names()
+        prose = {}
+        for path in LEAN_FILES:
+            prose[path.relative_to(ROOT).as_posix()] = comment_text(
+                path.read_text(encoding="utf-8"))
+        for path in DOC_FILES:
+            prose[path.relative_to(ROOT).as_posix()] = path.read_text(encoding="utf-8")
+        listed = sorted(ALLOWED)
+        saved = ALLOWED
+        ALLOWED = set()
+        reported = " ".join(check_declarations(prose, names))
+        ALLOWED = saved
+        inert = [entry for entry in listed if entry not in reported]
+        if inert:
+            print("allowlist entries that suppress nothing: " + ", ".join(inert))
+            print("Delete them, or say why the entry is kept with no effect.")
+        else:
+            print("citation audit: every allowlist entry suppresses a report")
+        return 0
 
     names = declared_names()
     sections = {path.name: sections_of(path) for path in DOC_FILES}

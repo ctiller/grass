@@ -1900,6 +1900,94 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   `the_second_write_lend_is_refused_by_the_conflict_rule` is the case the sentence was
   describing.
 
+- ~~**`allocate?` let any caller rewrite an allocation's owners, or its bytes, under an
+  outstanding grant.**~~ The guard was `existing.metadata ≠ record.metadata`, and
+  `AllocationRecord.Metadata` deliberately omits `owners` and `bytes` — `denialOf` reads
+  neither, and leaving them out is what makes `denialOf_congr_of_agrees` the stronger
+  statement. So the guard refused a change to extent, epoch, space, source, permission,
+  liveness and placement, and accepted a change to who owns the allocation or to what
+  its bytes say.
+
+  Both are authority. Review wrote a stranger into an owner list under somebody else's
+  outstanding loan and watched `a_stranger_may_not_join_the_atomic_protocol` and
+  `the_stranger_may_not_seize_unheld_bytes` both flip — the two fixtures that close the
+  ownership gap this document records above, defeated by one accepted call that changed
+  no metadata — and separately rewrote the first byte of a range frozen under a write
+  loan. The guard is the whole record now.
+
+  Two claims of the old `allocate?` docstring were false in opposite directions: a
+  permission or placement change under an outstanding grant was *refused*, not
+  accepted, and `owners` and `bytes` were accepted, not refused. The lesson is narrower
+  than "check the guard": a guard stated over a *view* of a record is only as wide as
+  the view, and this view was built for a different question.
+- ~~**`MayLend`'s owner disjunct bounded the lent rights by nothing.**~~ The second
+  disjunct bounds a sublet by `entry.2.rights.Grants grant.rights`; the first — the one
+  that issues every *first* grant — had no rights term, so the boldfaced "you cannot
+  lend what you do not have" was false of the path it is stated about. Review had an
+  owner lend `readWrite` over a read-only page it owns: `issue?` accepted it, and
+  `authorityOf` then reported the owner `frozen` over its own data and refused it even a
+  read, from a write authority the model had just certified nobody has. Over-refusal
+  rather than unsoundness, because `denialOf`'s permission clause still refuses the
+  holder's write — but three of `AuthorityState`'s five constructors were being derived
+  from rights that do not exist.
+- ~~**An issued grant's provenance escaped every check the same provenance gets on an
+  access.**~~ `AccessDescriptor.authorityEffect` lets an operation mint a grant, and a
+  grant carries a whole `Provenance`. `admissibilityFailures` projected `issuedKinds`
+  and nothing else, so law 8's registry gate stood on the grant's *kind* while the
+  address space, allocator and path steps beside it went unasked — and `issue?` compared
+  the root extent and neither the space nor the source, which are two of the comparisons
+  `denialOf` makes for an access.
+
+  Review minted a grant naming three undeclared names: the step ran, no violation, the
+  grant installed, and it was load-bearing — the program thread's next ordinary store to
+  those bytes was refused `authorityUnavailable`, byte-identical to the ledger after an
+  honest lend. `AuthorityEffect.issuedProvenances` and `MemoryState.RootIdentityAgrees`
+  are the two halves. This is the second finding of the same shape: `grantKinds` was
+  added *because* an operation can mint a grant, and the `Provenance` beside the kind
+  was left.
+- ~~**Two of law 8's twelve registry gates had neither a theorem nor a fixture.**~~
+  The allocator gate and the provenance-step-kind gate. Review replaced both with `True`
+  and the tree stayed green, and so did the realistic version — an empty registry
+  admitting everything, which is the permissive fallback `Grass/Memory/Profile.lean`'s
+  own comment quotes law 8 as forbidding, and which keeps the field projected so
+  `Tools/ConsultedAudit.py` does not see it either.
+- ~~**`PreservationLaws` claimed six conjuncts and had five.**~~ The disjoint-range
+  framing law follows from the uncovered-offset one by arithmetic alone; review proved
+  the implication rather than replacing the conjunct with `True`, which would have
+  proved nothing. It inflated the apparent content of the §10 item that landed most
+  recently, in a record whose whole argument is that a stated proposition has content a
+  bare `Prop` does not.
+- ~~**`Tools/CitationAudit.py` carried twelve inert allowlist entries and was the only
+  allowlist-bearing tool without `--inert`.**~~ Ten were structurally unreachable —
+  the tool drops anything rooted in Lean core, and any .toml suffix, before the
+  allowlist is consulted — and two sat in the group whose comment requires each entry to
+  have live sites. One of those two, `faultPointOutOfRange`, has no `_` and no `.`, so
+  the scanner has never adjudicated it at either of its live sites: an entry reading
+  "this dead citation is deliberate" for a citation the tool is structurally blind to.
+  All twelve deleted; `--inert` added. That makes three tools that grew this check after
+  being found with dead entries, which is an argument for it being the default shape.
+- ~~**`Tools/FixtureAudit.py`'s exemption named a consumer that cannot see the
+  fixtures**, and this document repeated it.~~ It said `Tools/AxiomAudit.lean` discovers
+  `VerifiedProgram` producers and names them in its output; that tool imports `Grass.*`
+  only, walks `Grass/` on disk, and prints one summary line naming no declaration. The
+  real consumer is `#audit_verified_programs`, which `Tests/Foundation.lean` runs at the
+  end of the file the fixtures live in. The exemptions were right and the pointer a
+  reviewer would follow to check them was not.
+- **A grant may be held by a context the machine has never seen, where a duty may not.**
+  `LedgerDelta.Applicable`'s transfer clause requires `newOwner ∈ contexts`, on the
+  argument its own module comment gives — "a duty could be handed to an identity no
+  context ever had … a way to strand a duty permanently" — and `issue?` and
+  `transferGrant?` have no counterpart. Review issued a grant to a context outside
+  `MachineState.contexts` and the map took it.
+
+  Weaker than the ledger case and recorded rather than repaired: `returnGrant?` accepts
+  the *lender* as well as the holder and `transferGrant?` preserves the lender, so the
+  bytes are recoverable rather than stranded, and review could not construct a state
+  from which they are not. What is owed is either the contexts condition on
+  `applyAuthorityDelta?`'s issue and transfer cases — which would have to be threaded
+  from `refusalOf`, since neither receives it — or a row in §4.4.1a saying why the ledger
+  needs it and authority does not. The asymmetry is the finding.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Four review rounds found the same shape and it is worth naming as a shape rather than

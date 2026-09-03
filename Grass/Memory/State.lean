@@ -240,6 +240,31 @@ instance (state : MemoryState) (provenance : Provenance) :
     Decidable (state.RootExtentAgrees provenance) :=
   inferInstanceAs (Decidable (_ = _))
 
+/--
+`state.RootIdentityAgrees provenance` holds when the allocation the provenance names
+is in the address space and from the allocator the provenance claims.
+
+The other two comparisons `denialOf` makes for an *access* -- `wrongAddressSpace` and
+`provenanceSourceMismatch` -- asked at the authority layer, where `issue?` asks
+`RootExtentAgrees` and asked nothing else about the root. A grant is a claim about
+storage in the same way a descriptor is, and it reached the map without either
+question: review issued a grant whose provenance put `bufferAlloc` in
+`device.hostVisible`, and the map held it and froze the thread's own bytes with it.
+
+Deliberately *not* about the grant versus the access. `MemoryState.AuthorizedAt` drops
+its space conjunct on purpose, because a device engine's grant over a host-visible
+buffer is the case §7.5 exists to describe; this compares the grant's provenance with
+the allocation that provenance names, which in that case agree.
+-/
+def RootIdentityAgrees (state : MemoryState) (provenance : Provenance) : Prop :=
+  (state.allocations.lookup provenance.root).any
+    (fun record => decide (record.space = provenance.space) &&
+      decide (record.source = provenance.source)) = true
+
+instance (state : MemoryState) (provenance : Provenance) :
+    Decidable (state.RootIdentityAgrees provenance) :=
+  inferInstanceAs (Decidable (_ = _))
+
 /-- The grants outstanding, as a read-only view. -/
 def grantEntries (state : MemoryState) : List (GrantId × AuthorityGrant) :=
   state.grants.entries
@@ -732,12 +757,35 @@ def issue? (state : MemoryState) (id : GrantId) (grant : AuthorityGrant) :
   else if ¬ state.Live grant.provenance then Option.none
   else if ¬ grant.provenance.Nested then Option.none
   else if ¬ state.RootExtentAgrees grant.provenance then Option.none
+  else if ¬ state.RootIdentityAgrees grant.provenance then Option.none
   else if ¬ grant.provenance.extent.Contains grant.range then Option.none
   else if ¬ state.MayLend grant then Option.none
   else if state.grantEntries.any
       (fun entry => decide (state.LoanConflicts entry.2 grant))
     then Option.none
   else some { state with grants := state.grants.insert id grant }
+
+/-- **A grant whose provenance misdescribes its storage is refused.** The two
+comparisons `denialOf` makes for an access, at the door a grant comes through. -/
+theorem issue?_eq_none_of_wrong_identity (state : MemoryState) (id : GrantId)
+    (grant : AuthorityGrant) (h : ¬ state.RootIdentityAgrees grant.provenance) :
+    state.issue? id grant = Option.none := by
+  unfold issue?
+  by_cases hfresh : (state.grants.lookup id).isSome = true
+  · rw [if_pos hfresh]
+  · rw [if_neg hfresh]
+    by_cases hempty : grant.range.IsEmpty
+    · rw [if_pos hempty]
+    · rw [if_neg hempty]
+      by_cases hlive : state.Live grant.provenance
+      · rw [if_neg (by simpa using hlive)]
+        by_cases hnest : grant.provenance.Nested
+        · rw [if_neg (by simpa using hnest)]
+          by_cases hext : state.RootExtentAgrees grant.provenance
+          · rw [if_neg (by simpa using hext), if_pos (by simpa using h)]
+          · rw [if_pos (by simpa using hext)]
+        · rw [if_pos (by simpa using hnest)]
+      · rw [if_pos (by simpa using hlive)]
 
 /-- **A lender with nothing may not lend over held bytes.** -/
 theorem issue?_eq_none_of_nothing_to_lend (state : MemoryState) (id : GrantId)
@@ -756,9 +804,12 @@ theorem issue?_eq_none_of_nothing_to_lend (state : MemoryState) (id : GrantId)
         · rw [if_neg (by simpa using hnest)]
           by_cases hext : state.RootExtentAgrees grant.provenance
           · rw [if_neg (by simpa using hext)]
-            by_cases hin : grant.provenance.extent.Contains grant.range
-            · rw [if_neg (by simpa using hin), if_pos (by simpa using h)]
-            · rw [if_pos (by simpa using hin)]
+            by_cases hid : state.RootIdentityAgrees grant.provenance
+            · rw [if_neg (by simpa using hid)]
+              by_cases hin : grant.provenance.extent.Contains grant.range
+              · rw [if_neg (by simpa using hin), if_pos (by simpa using h)]
+              · rw [if_pos (by simpa using hin)]
+            · rw [if_pos (by simpa using hid)]
           · rw [if_pos (by simpa using hext)]
         · rw [if_pos (by simpa using hnest)]
       · rw [if_pos (by simpa using hlive)]
@@ -883,12 +934,15 @@ theorem issue?_eq_none_of_conflict (state : MemoryState) (id : GrantId)
         · rw [if_neg (by simpa using hnest)]
           by_cases hext : state.RootExtentAgrees grant.provenance
           · rw [if_neg (by simpa using hext)]
-            by_cases hin : grant.provenance.extent.Contains grant.range
-            · rw [if_neg (by simpa using hin)]
-              by_cases hlend : state.MayLend grant
-              · rw [if_neg (by simpa using hlend), if_pos h]
-              · rw [if_pos (by simpa using hlend)]
-            · rw [if_pos (by simpa using hin)]
+            by_cases hid : state.RootIdentityAgrees grant.provenance
+            · rw [if_neg (by simpa using hid)]
+              by_cases hin : grant.provenance.extent.Contains grant.range
+              · rw [if_neg (by simpa using hin)]
+                by_cases hlend : state.MayLend grant
+                · rw [if_neg (by simpa using hlend), if_pos h]
+                · rw [if_pos (by simpa using hlend)]
+              · rw [if_pos (by simpa using hin)]
+            · rw [if_pos (by simpa using hid)]
           · rw [if_pos (by simpa using hext)]
         · rw [if_pos (by simpa using hnest)]
       · rw [if_pos (by simpa using hlive)]
@@ -1790,6 +1844,8 @@ theorem grantAt?_issue?_self {state issued : MemoryState} {id : GrantId}
     {grant : AuthorityGrant} (h : state.issue? id grant = some issued) :
     issued.grantAt? id = some grant := by
   unfold issue? at h
+  split at h
+  · exact absurd h (by simp)
   split at h
   · exact absurd h (by simp)
   split at h

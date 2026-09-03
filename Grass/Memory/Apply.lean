@@ -706,8 +706,17 @@ content, and a profile cannot choose it.
 The conjuncts, in order: a refused access changes nothing and observes nothing; a
 non-writing access changes nothing; a write moves no allocation's metadata, so no
 allocation's extent, epoch, space, source, permission or liveness moves under any
-access; and the three framing laws — another allocation, an uncovered offset in this
-one, a disjoint range — which are "range preserved" pointwise. Initialization is not a
+access; and the two framing laws — another allocation, and an uncovered offset in this
+one — which are "range preserved" pointwise.
+
+**Two, and this said three.** `applyAccess_frames_disjoint_range` was a sixth conjunct
+and it follows from the fifth by arithmetic alone: the written prefix is a subrange of
+`d.range`, so an offset covered by a range disjoint from `d.range` is not covered by
+it. Nothing about `applyAccess` is used. Review proved the implication against these
+definitions rather than replacing the conjunct with `True`, which would have proved
+nothing. It inflated the apparent content of the item, in a record whose whole argument
+is that a stated proposition has content a bare `Prop` does not.
+`applyAccess_frames_disjoint_range` stays as a caller-facing corollary. Initialization is not a
 separate conjunct because it is read off the bytes: `RangeInitialized` cannot drift
 from what was written, which is why `AllocationRecord.initialized` was deleted.
 -/
@@ -733,18 +742,13 @@ def PreservationLaws : Prop :=
       (indeterminate : Nat → Byte) (offset : Nat),
       ¬ (ByteRange.mk d.range.start (writeData.take d.range.size).length).Covers offset →
         (applyAccess state d writeData indeterminate).2.byteAt? d.provenance.root offset =
-          state.byteAt? d.provenance.root offset) ∧
-  (∀ (state : MemoryState) (d : AccessDescriptor) (writeData : ByteSeq)
-      (indeterminate : Nat → Byte) (other : ByteRange),
-      d.range.Disjoint other → ∀ (offset : Nat), other.Covers offset →
-        (applyAccess state d writeData indeterminate).2.byteAt? d.provenance.root offset =
           state.byteAt? d.provenance.root offset)
 
 /-- **The preservation laws hold**, which is the proof every `MemoryProfile` supplies
 for §10's preservation item. Its conjuncts are, in order,
 `applyAccess_refused_preserves_state`, `applyAccess_read_preserves_state`,
-`applyAccess_preserves_metadata`, `applyAccess_frames_other_allocation`,
-`applyAccess_frames_uncovered_offset` and `applyAccess_frames_disjoint_range`. -/
+`applyAccess_preserves_metadata`, `applyAccess_frames_other_allocation` and
+`applyAccess_frames_uncovered_offset`. -/
 theorem preservationLaws : PreservationLaws :=
   ⟨fun state d writeData ind _ h =>
      applyAccess_refused_preserves_state state d writeData ind h,
@@ -754,9 +758,7 @@ theorem preservationLaws : PreservationLaws :=
    fun state d writeData ind _ hne offset =>
      applyAccess_frames_other_allocation state d writeData ind hne offset,
    fun state d writeData ind _ hout =>
-     applyAccess_frames_uncovered_offset state d writeData ind hout,
-   fun state d writeData ind _ hd _ hcov =>
-     applyAccess_frames_disjoint_range state d writeData ind hd hcov⟩
+     applyAccess_frames_uncovered_offset state d writeData ind hout⟩
 
 /-- Run a block of accesses in order, threading the state. -/
 def runBlock (state : MemoryState) (indeterminate : Nat → Byte) :

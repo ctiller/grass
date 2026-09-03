@@ -213,6 +213,12 @@ inductive Alpha where
   produced by: the buffer came from `VirtualAlloc` and this names it an image
   mapping. Everything else is `store`, which commits. -/
   | lyingSource
+  /-- An operation whose provenance names an allocator the *profile* never declared,
+  which is the admissibility question rather than the state one. -/
+  | lyingAllocator
+  /-- An operation whose provenance path takes a step of a kind the profile never
+  declared. -/
+  | lyingStepKind
   /-- An access-free operation declaring an ordering mode the profile never
   registered, so the per-access check cannot see it. -/
   | computeWithUnregisteredOrdering
@@ -598,6 +604,19 @@ instance : HasOperationFacets Alpha where
         { memoryEffects := some (.single (acc
             { bufferProv with source := .imageMapping } ⟨0, 8⟩ 0x1000 .write .readWrite
             false true))
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .lyingAllocator =>
+        { memoryEffects := some (.single (acc
+            { bufferProv with source := ⟨⟨"vendor.ghostAllocator"⟩⟩ } ⟨0, 8⟩ 0x1000
+            .write .readWrite false true))
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .lyingStepKind =>
+        { memoryEffects := some (.single (acc
+            { bufferProv with
+              path := [{ kind := .field, label := ⟨"f"⟩, extent := ⟨0, 8⟩ }] }
+            ⟨0, 8⟩ 0x1000 .write .readWrite false true))
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .orderingFacetDisagrees =>
@@ -2996,6 +3015,113 @@ theorem the_registry_is_asked_before_the_state :
   intro s hs
   cases hs
   rfl
+
+/-! ## An issued grant's provenance is checked like an access's
+
+`AccessDescriptor.authorityEffect` lets an operation mint a grant, and a grant carries
+a whole `Provenance` -- its own address space, its own allocator, its own path.
+`admissibilityFailures` projected `issuedKinds` and nothing else, so the registry gate
+stood on the grant's *kind* while the three names beside it went unasked, and `issue?`
+compared the grant's root extent with the allocation and neither its space nor its
+source.
+
+Review minted a grant naming an undeclared space, allocator and step kind: the step
+ran, no violation, the grant installed -- and it was load-bearing, because the program
+thread's next ordinary store to those bytes was then refused `authorityUnavailable`,
+byte-identical to the ledger after an honest lend. `issuedProvenances` and
+`MemoryState.RootIdentityAgrees` are the two halves of the repair. -/
+
+/-- A provenance over the buffer naming an allocator this profile never declared. -/
+def ghostSourceProv : Provenance :=
+  { bufferProv with source := ⟨⟨"vendor.ghostAllocator"⟩⟩ }
+
+/-- And one naming a declared space that is not the buffer's. -/
+def wrongSpaceProv : Provenance :=
+  { bufferProv with space := .deviceHostVisible }
+
+/-- The names are not declared, and the buffer really is where its provenance says --
+so the refusals below are the grant's provenance and not the fixture. -/
+theorem the_ghost_names_are_undeclared :
+    ¬ vocabulary.allocationSources.Recognizes ⟨⟨"vendor.ghostAllocator"⟩⟩ ∧
+    state₀.memory.RootIdentityAgrees bufferProv ∧
+    ¬ state₀.memory.RootIdentityAgrees ghostSourceProv ∧
+    ¬ state₀.memory.RootIdentityAgrees wrongSpaceProv := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-- **A grant whose provenance names an undeclared allocator is not admitted**, before
+any question of whether it could be issued. -/
+theorem a_grant_naming_an_undeclared_allocator_is_not_admitted :
+    ¬ vocabulary.Admits
+      { acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite false true with
+        authorityEffect := [.issue lentSlot
+          { declaredLoan with provenance := ghostSourceProv }] } := by
+  decide
+
+/-- **And one naming an undeclared address space is not admitted either**, which is
+the sibling clause and the one a sweep found unexercised: my first fixture used an
+undeclared allocator and a *declared* wrong space, so the space clause could have been
+deleted with the tree green. -/
+theorem a_grant_naming_an_undeclared_space_is_not_admitted :
+    ¬ vocabulary.Admits
+      { acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite false true with
+        authorityEffect := [.issue lentSlot
+          { declaredLoan with provenance :=
+            { bufferProv with space := ⟨⟨"vendor.ghostSpace"⟩⟩ } }] } := by
+  decide
+
+/-- **And one whose path takes an undeclared step kind.** The third of the three, for
+the same reason. -/
+theorem a_grant_with_an_undeclared_step_kind_is_not_admitted :
+    ¬ vocabulary.Admits
+      { acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite false true with
+        authorityEffect := [.issue lentSlot
+          { declaredLoan with provenance :=
+            { bufferProv with
+              path := [{ kind := .field, label := ⟨"f"⟩, extent := ⟨0, 8⟩ }] } }] } := by
+  decide
+
+/-- And the same access issuing over its own honest provenance is admitted, so the
+refusal is the grant's provenance and not the effect. -/
+theorem the_same_issue_over_honest_provenance_is_admitted :
+    vocabulary.Admits
+      { acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite false true with
+        authorityEffect := [.issue lentSlot declaredLoan] } := by
+  decide
+
+/-- **And a grant whose provenance misdescribes its storage is refused at the door**,
+which is the half admissibility cannot reach: `device.hostVisible` is a space this
+profile declares, so the grant is admissible and still names storage that is not
+there. These are the two comparisons `denialOf` makes for an access. -/
+theorem a_grant_misdescribing_its_storage_is_refused :
+    state₀.memory.issue? lentSlot
+      { declaredLoan with provenance := wrongSpaceProv } = Option.none ∧
+    state₀.memory.issue? lentSlot
+      { declaredLoan with provenance := ghostSourceProv } = Option.none ∧
+    (state₀.memory.issue? lentSlot declaredLoan).isSome := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-! ## Two registry gates that had neither a theorem nor a fixture
+
+Review replaced `sourceNotRecognized` and `stepKindNotRecognized` with `True` and the
+whole tree stayed green -- and so did the realistic version, an empty registry
+admitting everything, which is the permissive fallback `docs/FOUNDATION.md` law 8
+forbids and `Grass/Memory/Profile.lean`'s own comment quotes it forbidding. Every other
+clause of `admissibilityFailures` had a theorem, a fixture, or both. -/
+
+/-- **An access whose provenance names an undeclared allocator is refused.** -/
+theorem an_undeclared_allocation_source_is_refused :
+    (stepAlpha state₀ .lyingAllocator).rejection? =
+      some (.accessNotAdmitted (.sourceNotRecognized ⟨⟨"vendor.ghostAllocator"⟩⟩)) := by
+  decide
+
+/-- **And one whose path takes a step of an undeclared kind is refused.** This
+profile's `provenanceStepKinds` registry is empty, so any path step at all is
+undeclared -- which is the safe direction and is why the fixture's honest descriptors
+have empty paths. -/
+theorem an_undeclared_provenance_step_kind_is_refused :
+    (stepAlpha state₀ .lyingStepKind).rejection? =
+      some (.accessNotAdmitted (.stepKindNotRecognized .field)) := by
+  decide
 
 /-! ## A race is recorded as a race
 

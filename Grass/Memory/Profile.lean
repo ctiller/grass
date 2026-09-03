@@ -450,7 +450,23 @@ def admissibilityFailures (vocabulary : AdmittedVocabulary) (d : AccessDescripto
     else some (.grantKindNotRecognized kind)) ++
   (d.ledgerEffect.claimedProtocols.filterMap fun protocol =>
     if vocabulary.protocols.Recognizes protocol then Option.none
-    else some (.protocolNotRecognized protocol))
+    else some (.protocolNotRecognized protocol)) ++
+  -- An issued grant's provenance gets the three checks the access's own provenance
+  -- gets. `issuedKinds` above was the only projection of `authorityEffect` here, so
+  -- the gate stood on the grant's kind and not on the address space, allocator and
+  -- path steps beside it -- and review minted a grant naming three undeclared names,
+  -- stepped it with no violation, and then had the honest thread refused
+  -- `authorityUnavailable` over its own bytes by it.
+  (d.authorityEffect.issuedProvenances.filterMap fun provenance =>
+    if (vocabulary.addressSpaces.find? provenance.space).isSome then Option.none
+    else some (.spaceNotDeclared provenance.space)) ++
+  (d.authorityEffect.issuedProvenances.filterMap fun provenance =>
+    if vocabulary.allocationSources.Recognizes provenance.source then Option.none
+    else some (.sourceNotRecognized provenance.source)) ++
+  (d.authorityEffect.issuedProvenances.flatMap fun provenance =>
+    provenance.path.filterMap fun step =>
+      if vocabulary.provenanceStepKinds.Recognizes step.kind then Option.none
+      else some (.stepKindNotRecognized step.kind))
 
 /--
 `vocabulary.Admits d` holds when every open name the access descriptor uses is one
@@ -532,7 +548,42 @@ theorem not_admits_of_unrecognized_fault {vocabulary : AdmittedVocabulary}
   refine not_admits_of_failure (failure := .faultClassNotRecognized fault) ?_
   unfold admissibilityFailures
   simp only [List.mem_append, List.mem_filterMap]
-  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr ⟨fault, hmem, by simp [h]⟩)))))))
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr ⟨fault, hmem, by simp [h]⟩))))))))))
+
+/-- **An access whose provenance names an unrecognized allocator is not admitted.**
+
+`docs/MEMORY_MODEL.md` §2 asks a profile to distinguish `VirtualAlloc`, process heap,
+`malloc`, page-table mapping, kernel heap, bump allocator, stack, mapped file and
+device memory, and `AllocationRecord.source` is the counterpart that lets a claim be
+wrong. This is the gate that keeps a claim from naming an allocator the profile never
+heard of.
+
+One of two clauses review found with neither a theorem nor a fixture: replacing both
+with `True` left the whole tree green, and so did the realistic version -- an empty
+registry admitting everything, which is the permissive fallback this module's own
+comment quotes law 8 as forbidding. `Tools/ConsultedAudit.py` caught the first form
+and not the second. -/
+theorem not_admits_of_unrecognized_source {vocabulary : AdmittedVocabulary}
+    {d : AccessDescriptor}
+    (h : ¬ vocabulary.allocationSources.Recognizes d.provenance.source) :
+    ¬ vocabulary.Admits d := by
+  refine not_admits_of_failure (failure := .sourceNotRecognized d.provenance.source) ?_
+  unfold admissibilityFailures
+  simp only [List.mem_append]
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl
+    (Or.inl (Or.inl (Or.inl (Or.inr (by simp [h])))))))))))))
+
+/-- **And one whose provenance path takes a step of an unrecognized kind is not
+admitted.** The sibling clause, and the second of the two review found unguarded. -/
+theorem not_admits_of_unrecognized_step_kind {vocabulary : AdmittedVocabulary}
+    {d : AccessDescriptor} {step : ProvenanceStep} (hmem : step ∈ d.provenance.path)
+    (h : ¬ vocabulary.provenanceStepKinds.Recognizes step.kind) :
+    ¬ vocabulary.Admits d := by
+  refine not_admits_of_failure (failure := .stepKindNotRecognized step.kind) ?_
+  unfold admissibilityFailures
+  simp only [List.mem_append, List.mem_filterMap]
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl
+    (Or.inl (Or.inl (Or.inr ⟨step, hmem, by simp [h]⟩)))))))))))
 
 /--
 An access whose ledger effect would drop or fabricate a duty is not admitted.
@@ -546,7 +597,7 @@ theorem not_admits_of_ill_formed_ledger_effect {vocabulary : AdmittedVocabulary}
   refine not_admits_of_failure (failure := .ledgerEffectIllFormed) ?_
   unfold admissibilityFailures
   simp only [List.mem_append]
-  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr (by simp [h])))))))
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr (by simp [h]))))))))))
 
 /-- **An access claiming a protocol the profile never declared is not admitted.**
 
@@ -563,7 +614,7 @@ theorem not_admits_of_undeclared_protocol {vocabulary : AdmittedVocabulary}
   refine not_admits_of_failure (failure := .protocolNotRecognized protocol) ?_
   unfold admissibilityFailures
   simp only [List.mem_append, List.mem_filterMap]
-  exact Or.inr ⟨protocol, hmem, by simp [h]⟩
+  exact Or.inl (Or.inl (Or.inl (Or.inr ⟨protocol, hmem, by simp [h]⟩)))
 
 /-- **An access issuing a grant of a kind the profile never declared is not
 admitted.**
@@ -581,7 +632,7 @@ theorem not_admits_of_undeclared_grant_kind {vocabulary : AdmittedVocabulary}
   refine not_admits_of_failure (failure := .grantKindNotRecognized kind) ?_
   unfold admissibilityFailures
   simp only [List.mem_append, List.mem_filterMap]
-  exact Or.inl (Or.inr ⟨kind, hmem, by simp [h]⟩)
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inr ⟨kind, hmem, by simp [h]⟩))))
 
 /-- An access creating an obligation of a kind the profile never declared is not
 admitted. -/
@@ -592,7 +643,7 @@ theorem not_admits_of_undeclared_obligation_kind {vocabulary : AdmittedVocabular
   refine not_admits_of_failure (failure := .obligationKindNotRecognized kind) ?_
   unfold admissibilityFailures
   simp only [List.mem_append, List.mem_filterMap]
-  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr ⟨kind, hmem, by simp [h]⟩)))))
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr ⟨kind, hmem, by simp [h]⟩))))))))
 
 /-- **An access citing an initialization rule the profile never declared is not
 admitted.** A name no profile claimed is not a rule. This does not rest on
@@ -606,7 +657,7 @@ theorem not_admits_of_unregistered_justification {vocabulary : AdmittedVocabular
   refine not_admits_of_failure (failure := .initializationRuleNotRegistered justification) ?_
   unfold admissibilityFailures
   simp only [List.mem_append]
-  exact Or.inl (Or.inl (Or.inr (by rw [hmem]; simp [h])))
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr (by rw [hmem]; simp [h]))))))
 
 /-- **An access requesting an ordering mode the profile never declared is not
 admitted.** `docs/MEMORY_MODEL.md` §7.1: an unsupported mapping is rejected. -/
@@ -617,7 +668,7 @@ theorem not_admits_of_unregistered_order {vocabulary : AdmittedVocabulary}
   refine not_admits_of_failure (failure := .orderNotRegistered name) ?_
   unfold admissibilityFailures
   simp only [List.mem_append]
-  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inr (by rw [hname]; simp [h])))))
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr (by rw [hname]; simp [h]))))))))
 
 /-- And one claiming a scope the profile never declared is not admitted. A device
 fence claiming a scope nobody defined is not a weaker fence; it is an undefined
@@ -629,7 +680,7 @@ theorem not_admits_of_unregistered_scope {vocabulary : AdmittedVocabulary}
   refine not_admits_of_failure (failure := .scopeNotRegistered name) ?_
   unfold admissibilityFailures
   simp only [List.mem_append]
-  exact Or.inl (Or.inl (Or.inl (Or.inr (by rw [hname]; simp [h]))))
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr (by rw [hname]; simp [h])))))))
 
 end AdmittedVocabulary
 
