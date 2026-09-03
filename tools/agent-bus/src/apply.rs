@@ -1879,6 +1879,7 @@ mod tests {
                     role: *role,
                     host: short("host1"),
                     coordinator_custody_epoch: 0,
+                    standby: None,
                 },
             );
         }

@@ -179,6 +179,66 @@ pub fn propose_transition(
     Ok(expected_parent.child(ObjectId::parse(commit)?, new_active_members))
 }
 
+/// Proposes coordinator succession for `target`'s stream custody (section
+/// 2.3, gate 19): rebinds it to `proposer`'s own host (`new_host`),
+/// incrementing `coordinator_custody_epoch` by exactly one. `proposer` --
+/// who becomes the new custodian -- must be either `target`'s own
+/// pre-authorized `standby`, or any agent already holding `Role::Coordinator`
+/// in `expected_parent`: "the standby or an authorized coordinator on
+/// another host." Anyone else is refused before a transition is even
+/// attempted, unlike `propose_transition` (used for ordinary registration/
+/// retirement/reassignment), which trusts its caller entirely -- custody
+/// theft is exactly what this check exists to prevent.
+///
+/// This alone is what makes gate 19's "exactly once" true: once this
+/// transition lands, the *old* `(host, coordinator_custody_epoch)` pair no
+/// longer matches `target`'s binding, so `authorize_stream_write` -- called
+/// by every future `drain_outbox`/`publish_stream` -- fails closed for the
+/// superseded custodian even if it comes back and tries to keep publishing.
+/// "Resuming the preserved outbox" needs no separate mechanism: `proposer`'s
+/// very next `drain_outbox` call for `target` simply reads whatever is
+/// already sitting in `target`'s local outbox directory, unconditionally.
+pub fn propose_custody_succession(
+    repo: &Path,
+    expected_parent: &RosterEpoch,
+    proposer: &Agent,
+    target: &Agent,
+    new_host: Short,
+    worktree: &Path,
+) -> AbResult<RosterEpoch> {
+    let binding = expected_parent
+        .active_members
+        .get(target)
+        .ok_or_else(|| {
+            invalid(format!(
+                "{target} is not an active member of roster epoch {}",
+                expected_parent.id
+            ))
+        })?;
+    let proposer_is_standby = binding.standby.as_ref() == Some(proposer);
+    let proposer_is_a_coordinator = expected_parent
+        .active_members
+        .get(proposer)
+        .is_some_and(|b| b.role == Role::Coordinator);
+    if !proposer_is_standby && !proposer_is_a_coordinator {
+        return Err(invalid(format!(
+            "{proposer} is not authorized to propose succession for {target}: not its \
+             pre-authorized standby and not a coordinator in the current epoch"
+        )));
+    }
+    let mut members = expected_parent.active_members.clone();
+    members.insert(
+        target.clone(),
+        MemberBinding {
+            role: binding.role,
+            host: new_host,
+            coordinator_custody_epoch: binding.coordinator_custody_epoch + 1,
+            standby: binding.standby.clone(),
+        },
+    );
+    propose_transition(repo, expected_parent, members, worktree)
+}
+
 /// One active identity's binding within a `RosterEpoch`: which host its
 /// executor runs on, and which of that host's coordinator custody epochs is
 /// authoritative for advancing this identity's stream. Two coordinators can
@@ -190,6 +250,14 @@ pub struct MemberBinding {
     pub role: Role,
     pub host: Short,
     pub coordinator_custody_epoch: u64,
+    /// A pre-authorized standby for this binding's stream custody (section
+    /// 2.3: "Each host may name a pre-authorized standby in that epoch. If
+    /// the active coordinator becomes unavailable, the standby or an
+    /// authorized coordinator on another host proposes the registry
+    /// succession"). `None` means only an existing `Role::Coordinator`
+    /// member of the epoch may propose succession for this binding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub standby: Option<Agent>,
 }
 
 /// A single, immutable roster epoch: `id` is the git commit ID of the
@@ -278,6 +346,14 @@ mod tests {
             role,
             host: short(host),
             coordinator_custody_epoch: epoch,
+            standby: None,
+        }
+    }
+
+    fn binding_with_standby(role: Role, host: &str, epoch: u64, standby: &Agent) -> MemberBinding {
+        MemberBinding {
+            standby: Some(standby.clone()),
+            ..binding(role, host, epoch)
         }
     }
 
@@ -500,5 +576,152 @@ mod tests {
         let wt = repo.path().join("_wt_transition");
         let err = propose_transition(repo.path(), &phantom_root, BTreeMap::new(), &wt).unwrap_err();
         assert!(err.to_string().contains("no root epoch yet"), "{err}");
+    }
+
+    // --------------------------------------------------- custody succession
+
+    fn root_with(repo: &Path, config: &BusConfig, members: BTreeMap<Agent, MemberBinding>) -> RosterEpoch {
+        create_root(repo, config, members, &repo.join("_wt_succession_root")).unwrap()
+    }
+
+    /// Gate 19's authorization precondition: the pre-authorized standby may
+    /// take over, and doing so bumps custody_epoch by exactly one and moves
+    /// `host` to the proposer's own.
+    #[test]
+    fn standby_may_succeed_its_bound_agent() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let alice = a("alice");
+        let alice_standby = a("alice-standby");
+        let mut members = BTreeMap::new();
+        members.insert(
+            alice.clone(),
+            binding_with_standby(Role::Implementor, "host1", 3, &alice_standby),
+        );
+        let root = root_with(repo.path(), &config, members);
+
+        let new_epoch = propose_custody_succession(
+            repo.path(),
+            &root,
+            &alice_standby,
+            &alice,
+            short("host2"),
+            &repo.path().join("_wt_succeed"),
+        )
+        .unwrap();
+        let new_binding = &new_epoch.active_members[&alice];
+        assert_eq!(new_binding.host, short("host2"));
+        assert_eq!(new_binding.coordinator_custody_epoch, 4);
+        // The standby carries forward unchanged -- succession doesn't clear
+        // pre-authorization for a *future* succession.
+        assert_eq!(new_binding.standby, Some(alice_standby));
+    }
+
+    /// "...or an authorized coordinator on another host" -- a coordinator
+    /// with no standby relationship to the target may still succeed it.
+    #[test]
+    fn an_existing_coordinator_may_succeed_any_agent() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let alice = a("alice");
+        let coord2 = a("coord2");
+        let mut members = BTreeMap::new();
+        members.insert(alice.clone(), binding(Role::Implementor, "host1", 0));
+        members.insert(coord2.clone(), binding(Role::Coordinator, "host2", 0));
+        let root = root_with(repo.path(), &config, members);
+
+        let new_epoch = propose_custody_succession(
+            repo.path(),
+            &root,
+            &coord2,
+            &alice,
+            short("host2"),
+            &repo.path().join("_wt_succeed"),
+        )
+        .unwrap();
+        assert_eq!(new_epoch.active_members[&alice].host, short("host2"));
+    }
+
+    /// Neither the target's standby nor a coordinator -- an ordinary
+    /// implementor cannot unilaterally steal another agent's custody.
+    #[test]
+    fn an_unauthorized_agent_cannot_propose_succession() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let alice = a("alice");
+        let mallory = a("mallory");
+        let mut members = BTreeMap::new();
+        members.insert(alice.clone(), binding(Role::Implementor, "host1", 0));
+        members.insert(mallory.clone(), binding(Role::Implementor, "host3", 0));
+        let root = root_with(repo.path(), &config, members);
+
+        let err = propose_custody_succession(
+            repo.path(),
+            &root,
+            &mallory,
+            &alice,
+            short("host3"),
+            &repo.path().join("_wt_succeed"),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("is not authorized"), "{err}");
+    }
+
+    #[test]
+    fn succession_fails_for_a_target_outside_the_epoch() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let coord1 = a("coord1");
+        let ghost = a("ghost");
+        let mut members = BTreeMap::new();
+        members.insert(coord1.clone(), binding(Role::Coordinator, "host1", 0));
+        let root = root_with(repo.path(), &config, members);
+
+        let err = propose_custody_succession(
+            repo.path(),
+            &root,
+            &coord1,
+            &ghost,
+            short("host2"),
+            &repo.path().join("_wt_succeed"),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("not an active member"), "{err}");
+    }
+
+    /// The core of gate 19: once succession lands, the *old* custodian's
+    /// claimed `(host, coordinator_custody_epoch)` no longer authorizes
+    /// writes for the target -- `authorize_stream_write` fails it closed
+    /// even though nothing about the old custodian's own belief changed.
+    #[test]
+    fn the_superseded_custodian_can_no_longer_authorize_writes() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let alice = a("alice");
+        let alice_standby = a("alice-standby");
+        let mut members = BTreeMap::new();
+        members.insert(
+            alice.clone(),
+            binding_with_standby(Role::Implementor, "host1", 0, &alice_standby),
+        );
+        let root = root_with(repo.path(), &config, members);
+
+        let new_epoch = propose_custody_succession(
+            repo.path(),
+            &root,
+            &alice_standby,
+            &alice,
+            short("host2"),
+            &repo.path().join("_wt_succeed"),
+        )
+        .unwrap();
+
+        // The old custodian (host1, custody epoch 0) still believes it can
+        // write -- authorize_stream_write must refuse it against the new
+        // epoch.
+        let err = authorize_stream_write(&new_epoch, &alice, &short("host1"), 0).unwrap_err();
+        assert!(err.to_string().contains("belongs to host"), "{err}");
+        // The new custodian succeeds.
+        authorize_stream_write(&new_epoch, &alice, &short("host2"), 1).unwrap();
     }
 }

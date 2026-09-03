@@ -321,6 +321,7 @@ mod tests {
                 role: Role::Implementor,
                 host: short("host1"),
                 coordinator_custody_epoch: 0,
+                standby: None,
             },
         );
         crate::registry::propose_transition(repo.path(), &epoch, members, &repo.path().join("_transition_wt"))

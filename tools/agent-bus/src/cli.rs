@@ -42,6 +42,10 @@ pub enum Command {
     Tail(TailArgs),
     /// Prints the current roster and every member's reduced lifecycle state.
     Status(StatusArgs),
+    /// Takes over `--target`'s stream custody, moving it to this caller's
+    /// own host (section 2.3, gate 19). Refused unless the caller is
+    /// `--target`'s pre-authorized standby or an existing coordinator.
+    Succeed(SucceedArgs),
 }
 
 #[derive(clap::Args)]
@@ -78,6 +82,10 @@ pub struct RegisterArgs {
     host: String,
     #[arg(long, default_value_t = 0)]
     custody_epoch: u64,
+    /// A pre-authorized standby for this agent's stream custody (section
+    /// 2.3): the only non-coordinator who may later `succeed` it.
+    #[arg(long)]
+    standby: Option<String>,
     #[arg(long)]
     provider: Option<String>,
     #[arg(long)]
@@ -139,6 +147,23 @@ pub struct StatusArgs {
     /// section 2.4).
     #[arg(long)]
     sync: bool,
+}
+
+#[derive(clap::Args)]
+pub struct SucceedArgs {
+    /// The proposer taking over custody -- must be the target's
+    /// pre-authorized standby, or an existing coordinator.
+    #[arg(long)]
+    proposer: String,
+    /// The agent whose stream custody is being taken over.
+    #[arg(long)]
+    target: String,
+    /// The host the proposer runs on -- what the target's stream custody
+    /// moves to.
+    #[arg(long)]
+    host: String,
+    #[arg(long, default_value = "origin")]
+    remote: String,
 }
 
 struct RepoPaths {
@@ -203,6 +228,7 @@ pub fn run(cli: Cli) -> AbResult<()> {
         Command::Coordinate(args) => coordinate(args),
         Command::Tail(args) => tail(args),
         Command::Status(args) => status(args),
+        Command::Succeed(args) => succeed(args),
     }
 }
 
@@ -270,6 +296,7 @@ fn register(args: RegisterArgs) -> AbResult<()> {
             role,
             host: host.clone(),
             coordinator_custody_epoch: args.custody_epoch,
+            standby: args.standby.map(|s| parse_agent(&s)).transpose()?,
         },
     );
     let new_epoch = crate::registry::propose_transition(
@@ -426,6 +453,59 @@ fn status(args: StatusArgs) -> AbResult<()> {
             crate::sync::Freshness::CurrentAsOfRemoteProbe => "current-as-of-remote-probe",
         },
         "agents": agents,
+    }));
+    Ok(())
+}
+
+fn succeed(args: SucceedArgs) -> AbResult<()> {
+    let paths = resolve_paths()?;
+    let proposer = parse_agent(&args.proposer)?;
+    let target = parse_agent(&args.target)?;
+    let new_host = parse_short(&args.host)?;
+
+    let registry_tip = crate::registry::read_registry_tip(&paths.repo)?
+        .ok_or_else(|| invalid("no registry root exists yet -- run `genesis` first"))?;
+    let epoch = crate::registry::read_epoch(
+        &paths.repo,
+        &registry_tip,
+        &paths.worktrees.join("_succeed_epoch"),
+    )?;
+
+    let new_epoch = crate::registry::propose_custody_succession(
+        &paths.repo,
+        &epoch,
+        &proposer,
+        &target,
+        new_host.clone(),
+        &paths.worktrees.join("_succeed_transition"),
+    )?;
+    let new_custody_epoch = new_epoch.active_members[&target].coordinator_custody_epoch;
+
+    let registry_receipt = crate::publish::publish(
+        &paths.repo,
+        &args.remote,
+        &[RefUpdate::new(crate::registry::REGISTRY_REF, new_epoch.id.clone())],
+    )?;
+
+    // Resume whatever was left in `target`'s preserved outbox, now under
+    // the new custody -- demonstrating gate 19's "resumes preserved
+    // outboxes exactly once" rather than merely asserting it structurally.
+    let (resumed, stream_receipt) = crate::coordinator::drain_and_publish(
+        &paths.repo,
+        &paths.common_dir,
+        &target,
+        &new_host,
+        new_custody_epoch,
+        &paths.worktrees,
+        &args.remote,
+    )?;
+
+    print_json(&serde_json::json!({
+        "registry_epoch": new_epoch.id.as_str(),
+        "new_custody_epoch": new_custody_epoch,
+        "registry_published": registry_receipt.published,
+        "resumed_events": resumed.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
+        "stream_published": stream_receipt.published,
     }));
     Ok(())
 }

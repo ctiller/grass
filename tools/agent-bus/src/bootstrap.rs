@@ -117,6 +117,7 @@ pub fn genesis(
             role: crate::events::Role::Coordinator,
             host,
             coordinator_custody_epoch: 0,
+            standby: None,
         },
     );
     let epoch = crate::registry::create_root(

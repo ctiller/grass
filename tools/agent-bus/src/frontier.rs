@@ -165,6 +165,7 @@ mod tests {
                     role: Role::Implementor,
                     host: Short::parse("host1".to_string()).unwrap(),
                     coordinator_custody_epoch: 0,
+                    standby: None,
                 },
             );
         }
@@ -256,6 +257,7 @@ mod tests {
                 role: Role::Reviewer,
                 host: Short::parse("host1".to_string()).unwrap(),
                 coordinator_custody_epoch: 0,
+                standby: None,
             },
         );
         let _later_epoch = epoch.child(hash(1000), grown);
