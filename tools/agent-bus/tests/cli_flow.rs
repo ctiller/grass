@@ -1806,6 +1806,11 @@ fn merge_ready_reports_ready_for_a_genuinely_valid_authorization() {
         &["feature.txt"],
     );
 
+    // `merge-ready` fetches `main` from `origin` (round-7 review); `main`
+    // itself is never otherwise pushed anywhere in this flow, so it must be
+    // pushed explicitly for the fetch to find it at all.
+    git(repo.path(), &["push", "origin", "refs/heads/main"]);
+
     let out = merge_ready(repo.path(), "aiden", &authorization_id);
     assert_eq!(out["ready"], true, "{out}");
     assert_eq!(out["candidate"], candidate, "{out}");
@@ -1895,10 +1900,13 @@ fn merge_ready_rejects_main_advanced() {
 
     // Advance `main` past `previous_main` out from under the authorization,
     // as a hand push (or a different, concurrently-merged reviewer) would.
+    // Must actually reach `origin` (round-7 review): `merge-ready` fetches
+    // `main` fresh, not this checkout's own local ref.
     git(
         repo.path(),
         &["update-ref", "refs/heads/main", &feature_commit],
     );
+    git(repo.path(), &["push", "origin", "refs/heads/main"]);
 
     bin()
         .current_dir(repo.path())
@@ -1996,6 +2004,10 @@ fn merge_ready_rejects_a_changed_path_outside_reviewed_scope() {
         &merge_engine_epoch,
         &["feature.txt"],
     );
+
+    // `merge-ready` fetches `main` from `origin` (round-7 review); `main`
+    // itself is never otherwise pushed anywhere in this flow.
+    git(repo.path(), &["push", "origin", "refs/heads/main"]);
 
     bin()
         .current_dir(repo.path())
@@ -2506,6 +2518,9 @@ fn golden_merge_ready_output() {
         &merge_engine_epoch,
         &["feature.txt"],
     );
+    // `merge-ready` fetches `main` from `origin` (round-7 review); `main`
+    // itself is never otherwise pushed anywhere in this flow.
+    git(repo.path(), &["push", "origin", "refs/heads/main"]);
     let out = merge_ready(repo.path(), "aiden", &authorization_id);
     insta::assert_json_snapshot!(out, {
         ".candidate" => insta::dynamic_redaction(redact_noise),

@@ -50,12 +50,23 @@ pub(crate) fn path_in_claim(path: &str, claim: &PathClaim) -> bool {
 /// this check -- exactly the kind of concurrent change this gate exists to
 /// catch (round-6 adversarial review: a cached snapshot let an unsynced
 /// checkout report `ready: true` past a blocking issue another host had
-/// already published). `repo` is read directly and uncached for the
-/// live-Git half below too, for the identical reason -- that is exactly the
-/// part that can genuinely change *after* publication, like `main` moving.
-/// Returns the exact candidate object id to push on success.
+/// already published). The live-Git half below fetches `refs/heads/main`
+/// from `remote` for the identical reason, rather than trusting whatever
+/// this checkout's own local `main` happens to be -- `main` moving is
+/// exactly the kind of concurrent change this gate exists to catch, and a
+/// checkout that hasn't independently fetched `main` itself would otherwise
+/// silently pass a stale check (round-7 adversarial review: `check_merge_
+/// ready` claimed this guarantee here without actually fetching -- the same
+/// checkout-dependence bug already found and fixed twice elsewhere in this
+/// module's siblings, `coordinator::verify_review_merge_authorized`/`verify_
+/// review_merge_reconciled`). `auth.candidate` itself is still read as
+/// whatever this checkout already has locally, like `prepare-merge` -- the
+/// reviewer is expected to have already fetched or constructed it themselves
+/// (per AGENT_REVIEW.md section 7 step 1). Returns the exact candidate
+/// object id to push on success.
 pub(crate) fn check_merge_ready(
     repo: &Path,
+    remote: &str,
     state: &BusState,
     reviewer: &Agent,
     authorization: &EventId,
@@ -125,7 +136,29 @@ pub(crate) fn check_merge_ready(
     // gate exists as a distinct, later check from `coordinator::verify_
     // review_merge_authorized` (which validates the same payload once, at
     // publication time).
-    let current_main = crate::gitrepo::rev_parse(repo, "refs/heads/main")?;
+    // `refs/heads/main` is a product ref entirely outside `sync::synced_
+    // snapshot`'s fetch (registry/agent-event refs only) -- reading it
+    // locally without first fetching would make this check checkout
+    // -dependent, exactly the bug round 5/6 already found and fixed for
+    // `verify_review_merge_authorized`/`verify_review_merge_reconciled`
+    // (round-7 review: this gate's own doc above claims "repo is read
+    // directly and uncached for the live-Git half... like main moving",
+    // which is only true once this fetch actually happens). Fetched into a
+    // scratch ref rather than the local `refs/heads/main` itself, so this
+    // never touches whatever the caller's own working tree has checked out.
+    const MAIN_PROBE_REF: &str = "refs/agent-bus/merge-ready-main-probe";
+    let fetch = crate::gitrepo::fetch_refspecs(
+        repo,
+        remote,
+        &[format!("refs/heads/main:{MAIN_PROBE_REF}")],
+    )?;
+    if !fetch.success {
+        return Err(invalid(format!(
+            "could not fetch refs/heads/main from {remote} to verify this merge is still ready: {}",
+            fetch.stderr
+        )));
+    }
+    let current_main = crate::gitrepo::rev_parse(repo, MAIN_PROBE_REF)?;
     if current_main != auth.previous_main.as_str() {
         return Err(invalid(format!(
             "current main {current_main} has advanced past authorized previous_main {}",
@@ -373,7 +406,8 @@ mod tests {
             vec![],
         );
         let bogus = EventId::new(&a("aiden"), 99);
-        let err = check_merge_ready(&PathBuf::from("."), &state, &a("aiden"), &bogus).unwrap_err();
+        let err = check_merge_ready(&PathBuf::from("."), "origin", &state, &a("aiden"), &bogus)
+            .unwrap_err();
         assert!(err.to_string().contains("unknown authorization"), "{err}");
     }
 
@@ -393,7 +427,8 @@ mod tests {
         let env = Envelope::new(&agent, 0, no_frontier(), &data, []);
         let id = env.id.clone();
         state.events.insert(id.clone(), env);
-        let err = check_merge_ready(&PathBuf::from("."), &state, &agent, &id).unwrap_err();
+        let err =
+            check_merge_ready(&PathBuf::from("."), "origin", &state, &agent, &id).unwrap_err();
         assert!(
             err.to_string()
                 .contains("is not a review.merge_authorized event"),
@@ -413,8 +448,8 @@ mod tests {
             vec![],
             vec![],
         );
-        let err =
-            check_merge_ready(&PathBuf::from("."), &state, &a("carol"), &auth_id).unwrap_err();
+        let err = check_merge_ready(&PathBuf::from("."), "origin", &state, &a("carol"), &auth_id)
+            .unwrap_err();
         assert!(
             err.to_string()
                 .contains("was published by aiden, not the given reviewer carol"),
@@ -434,8 +469,8 @@ mod tests {
             vec![],
             vec![],
         );
-        let err =
-            check_merge_ready(&PathBuf::from("."), &state, &a("aiden"), &auth_id).unwrap_err();
+        let err = check_merge_ready(&PathBuf::from("."), "origin", &state, &a("aiden"), &auth_id)
+            .unwrap_err();
         assert!(
             err.to_string()
                 .contains("not the accepted eligible reviewer"),
@@ -468,7 +503,8 @@ mod tests {
             vec![],
         );
         let _ = nomination;
-        let err = check_merge_ready(&PathBuf::from("."), &state, &reviewer, &auth_id).unwrap_err();
+        let err = check_merge_ready(&PathBuf::from("."), "origin", &state, &reviewer, &auth_id)
+            .unwrap_err();
         assert!(
             err.to_string().contains("has no terminal disposition"),
             "{err}"
@@ -492,7 +528,8 @@ mod tests {
             vec![],
             vec![issue],
         );
-        let err = check_merge_ready(&PathBuf::from("."), &state, &reviewer, &auth_id).unwrap_err();
+        let err = check_merge_ready(&PathBuf::from("."), "origin", &state, &reviewer, &auth_id)
+            .unwrap_err();
         assert!(
             err.to_string()
                 .contains("explicitly blocks this nomination chain"),
@@ -528,7 +565,8 @@ mod tests {
         // bus-state layer; the only way to reach the (repo-dependent) parent
         // check below with a bogus `Path` is for every state-only check,
         // including the resolved-issue non-block, to have passed first.
-        let err = check_merge_ready(&PathBuf::from("."), &state, &reviewer, &auth_id).unwrap_err();
+        let err = check_merge_ready(&PathBuf::from("."), "origin", &state, &reviewer, &auth_id)
+            .unwrap_err();
         assert!(
             !err.to_string().contains("blocks this nomination chain"),
             "a Terminal issue must not block: {err}"
@@ -554,8 +592,8 @@ mod tests {
             vec![],
             vec![],
         );
-        let err =
-            check_merge_ready(&PathBuf::from("."), &state, &a("aiden"), &auth_id).unwrap_err();
+        let err = check_merge_ready(&PathBuf::from("."), "origin", &state, &a("aiden"), &auth_id)
+            .unwrap_err();
         assert!(
             err.to_string()
                 .contains("does not exactly equal the nomination's review_scope"),
@@ -587,21 +625,48 @@ mod tests {
         dir
     }
 
+    /// A real bare repository, standing in for a remote -- `check_merge_
+    /// ready` fetches `refs/heads/main` from a real `remote` rather than
+    /// trusting the caller's own local ref (round-7 review), so every
+    /// live-Git test below needs one.
+    fn init_bare_origin() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        git(dir.path(), &["init", "--quiet", "--bare", "-b", "main"]);
+        dir
+    }
+
+    fn push_main(dir: &Path, remote: &str) {
+        let push = crate::gitrepo::run(dir, &["push", remote, "refs/heads/main"]).unwrap();
+        assert!(push.success, "{push:?}");
+    }
+
     fn rev_parse(dir: &Path, rev: &str) -> String {
         crate::gitrepo::rev_parse(dir, rev).unwrap()
     }
 
-    /// A real repo with `main` at one commit, a `feature` commit on top
-    /// (carrying `Agent-Bus-Agent: <author>`) touching `feature.txt`, and the
-    /// genuine merge-tree-write-tree candidate for `(main, feature, reviewer)`
-    /// -- everything `check_merge_ready`'s live-Git half needs. Returns
-    /// `(dir, previous_main, feature_commit, candidate)`.
+    /// A real repo with `main` at one commit (already pushed to a real bare
+    /// `origin`), a `feature` commit on top (carrying `Agent-Bus-Agent:
+    /// <author>`) touching `feature.txt`, and the genuine
+    /// merge-tree-write-tree candidate for `(main, feature, reviewer)` --
+    /// everything `check_merge_ready`'s live-Git half needs. Returns `(dir,
+    /// origin, remote, previous_main, feature_commit, candidate)`; `origin`
+    /// must be kept alive by the caller for as long as `remote` is used.
     fn git_fixture(
         author: &Agent,
         reviewer: &Agent,
-    ) -> (tempfile::TempDir, String, String, String) {
+    ) -> (
+        tempfile::TempDir,
+        tempfile::TempDir,
+        String,
+        String,
+        String,
+        String,
+    ) {
         let dir = init_repo();
         let path = dir.path();
+        let origin = init_bare_origin();
+        let remote = origin.path().to_string_lossy().to_string();
+        push_main(path, &remote);
         let previous_main = rev_parse(path, "main");
         // Commit the feature detached from `main`, so `main` itself stays at
         // `previous_main` -- exactly like the reviewer's real workflow
@@ -629,7 +694,14 @@ mod tests {
         )
         .unwrap();
         git(path, &["checkout", "--quiet", "main"]);
-        (dir, previous_main, feature_commit, candidate)
+        (
+            dir,
+            origin,
+            remote,
+            previous_main,
+            feature_commit,
+            candidate,
+        )
     }
 
     /// Builds a state whose single review chain/authorization names exactly
@@ -729,7 +801,8 @@ mod tests {
     fn accepts_a_genuinely_valid_authorization_and_returns_the_candidate() {
         let author = a("zoe");
         let reviewer = a("aiden");
-        let (dir, previous_main, feature_commit, candidate) = git_fixture(&author, &reviewer);
+        let (dir, _origin, remote, previous_main, feature_commit, candidate) =
+            git_fixture(&author, &reviewer);
         let (state, auth_id) = state_with_authorization(
             &author,
             &reviewer,
@@ -738,7 +811,7 @@ mod tests {
             &candidate,
             &["feature.txt"],
         );
-        let got = check_merge_ready(dir.path(), &state, &reviewer, &auth_id).unwrap();
+        let got = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id).unwrap();
         assert_eq!(got.as_str(), candidate);
     }
 
@@ -746,7 +819,8 @@ mod tests {
     fn rejects_main_having_advanced_past_previous_main() {
         let author = a("zoe");
         let reviewer = a("aiden");
-        let (dir, previous_main, feature_commit, candidate) = git_fixture(&author, &reviewer);
+        let (dir, _origin, remote, previous_main, feature_commit, candidate) =
+            git_fixture(&author, &reviewer);
         let (state, auth_id) = state_with_authorization(
             &author,
             &reviewer,
@@ -756,12 +830,64 @@ mod tests {
             &["feature.txt"],
         );
         // Advance `main` past the authorized `previous_main` out from under
-        // it -- exactly the scenario this whole gate exists to catch.
+        // it -- exactly the scenario this whole gate exists to catch. Must
+        // reach `remote`, not just this checkout's own local ref (round-7
+        // review): `check_merge_ready` now fetches `main` fresh.
         git(
             dir.path(),
             &["update-ref", "refs/heads/main", &feature_commit],
         );
-        let err = check_merge_ready(dir.path(), &state, &reviewer, &auth_id).unwrap_err();
+        push_main(dir.path(), &remote);
+        let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("has advanced past authorized previous_main"),
+            "{err}"
+        );
+    }
+
+    /// The exact scenario `check_merge_ready`'s own doc comment describes:
+    /// `main` genuinely advances on the shared remote, but *this* checkout
+    /// (the one running `merge-ready`) never locally touches `refs/heads/
+    /// main` itself -- a completely independent second checkout does the
+    /// pushing. Before round 7's fix this passed `ready: true` regardless,
+    /// since the local `main` this checkout started with was never fetched
+    /// again; a genuine, unrelated fetch is what must catch it.
+    #[test]
+    fn rejects_main_advanced_only_on_the_remote_never_touched_by_this_checkout() {
+        let author = a("zoe");
+        let reviewer = a("aiden");
+        let (dir, _origin, remote, previous_main, feature_commit, candidate) =
+            git_fixture(&author, &reviewer);
+        let (state, auth_id) = state_with_authorization(
+            &author,
+            &reviewer,
+            &previous_main,
+            &feature_commit,
+            &candidate,
+            &["feature.txt"],
+        );
+
+        // A second, fully independent checkout pushes the advance -- `dir`
+        // never runs a single git command against it. Its own new commit,
+        // not `feature_commit` (which only exists in `dir`'s object
+        // database, never pushed anywhere on its own).
+        let second_checkout = tempfile::tempdir().unwrap();
+        git(second_checkout.path(), &["clone", "--quiet", &remote, "."]);
+        git(
+            second_checkout.path(),
+            &["config", "user.email", "other@example.com"],
+        );
+        git(second_checkout.path(), &["config", "user.name", "Other"]);
+        std::fs::write(second_checkout.path().join("elsewhere.txt"), "x\n").unwrap();
+        git(second_checkout.path(), &["add", "elsewhere.txt"]);
+        git(
+            second_checkout.path(),
+            &["commit", "-q", "-m", "advance main from elsewhere"],
+        );
+        push_main(second_checkout.path(), &remote);
+
+        let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id).unwrap_err();
         assert!(
             err.to_string()
                 .contains("has advanced past authorized previous_main"),
@@ -773,7 +899,8 @@ mod tests {
     fn rejects_a_hand_pushed_candidate_with_wrong_parents() {
         let author = a("zoe");
         let reviewer = a("aiden");
-        let (dir, previous_main, feature_commit, _candidate) = git_fixture(&author, &reviewer);
+        let (dir, _origin, remote, previous_main, feature_commit, _candidate) =
+            git_fixture(&author, &reviewer);
         // Single-parent "candidate": parents = [feature], not
         // [previous_main, feature].
         let bad = commit_tree_with(
@@ -790,7 +917,7 @@ mod tests {
             &bad,
             &["feature.txt"],
         );
-        let err = check_merge_ready(dir.path(), &state, &reviewer, &auth_id).unwrap_err();
+        let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id).unwrap_err();
         assert!(
             err.to_string().contains("candidate parents do not match"),
             "{err}"
@@ -801,7 +928,8 @@ mod tests {
     fn rejects_a_hand_pushed_candidate_missing_the_trailer() {
         let author = a("zoe");
         let reviewer = a("aiden");
-        let (dir, previous_main, feature_commit, _candidate) = git_fixture(&author, &reviewer);
+        let (dir, _origin, remote, previous_main, feature_commit, _candidate) =
+            git_fixture(&author, &reviewer);
         let bad = commit_tree_with(
             dir.path(),
             &feature_commit,
@@ -816,7 +944,7 @@ mod tests {
             &bad,
             &["feature.txt"],
         );
-        let err = check_merge_ready(dir.path(), &state, &reviewer, &auth_id).unwrap_err();
+        let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id).unwrap_err();
         assert!(
             err.to_string()
                 .contains("exactly one matching Agent-Bus-Reviewer trailer"),
@@ -828,7 +956,8 @@ mod tests {
     fn rejects_a_hand_pushed_candidate_with_the_wrong_reviewer_trailer_name() {
         let author = a("zoe");
         let reviewer = a("aiden");
-        let (dir, previous_main, feature_commit, _candidate) = git_fixture(&author, &reviewer);
+        let (dir, _origin, remote, previous_main, feature_commit, _candidate) =
+            git_fixture(&author, &reviewer);
         // Right parents, exactly one Agent-Bus-Reviewer trailer -- but it
         // names a different agent than the reviewer running the check.
         let bad = commit_tree_with(
@@ -845,7 +974,7 @@ mod tests {
             &bad,
             &["feature.txt"],
         );
-        let err = check_merge_ready(dir.path(), &state, &reviewer, &auth_id).unwrap_err();
+        let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id).unwrap_err();
         assert!(
             err.to_string()
                 .contains("exactly one matching Agent-Bus-Reviewer trailer"),
@@ -859,6 +988,9 @@ mod tests {
         let reviewer = a("aiden");
         let dir = init_repo();
         let path = dir.path();
+        let origin = init_bare_origin();
+        let remote = origin.path().to_string_lossy().to_string();
+        push_main(path, &remote);
         let previous_main = rev_parse(path, "main");
         // Detached, like `git_fixture` -- `main` must stay at `previous_main`.
         git(path, &["checkout", "--quiet", "--detach", &previous_main]);
@@ -897,7 +1029,7 @@ mod tests {
             &["feature.txt"],
         );
 
-        let err = check_merge_ready(dir.path(), &state, &reviewer, &auth_id).unwrap_err();
+        let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id).unwrap_err();
         assert!(
             err.to_string().contains("is outside reviewed_scope"),
             "{err}"

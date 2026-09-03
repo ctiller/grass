@@ -1006,6 +1006,7 @@ fn merge_ready(args: MergeReadyArgs) -> AbResult<()> {
     )?;
     let candidate = crate::merge_ready::check_merge_ready(
         &paths.repo,
+        &args.remote,
         &snapshot.state,
         &reviewer,
         &authorization,
