@@ -431,20 +431,34 @@ satisfied every premise and proved every program timing-safe.
 `TimingBasis.admissibleForSecurity` rejects for anything measured, and
 `citationsChecked` requires both of its anchors to be `Citation.FullyChecked`.
 
-The second of those was added after a reviewer showed the first was not enough.
-Requiring a `DualCitation` puts a citation *record* on the proof path, and a
-record is data the author writes: the reviewer built a `JustifiedCostModel` from
-facts with an `architectural` basis over two documents recorded as dead and
-proved every trace equicost with it. `FullyChecked` carries
-`SourceDocument.retrieval.isVerified`, which this corpus sets by probing the
-location rather than by an author asserting it, so that construction no longer
-typechecks.
+The second of those was added after a reviewer showed the first was not enough,
+and a later reviewer showed the addition is weaker than the sentence that
+described it. Both corrections are recorded here because the shape recurs.
 
-The honest consequence is that **no `JustifiedCostModel` can be built today**,
-because the AMD manual is unretrievable (`Grass/ISA/X86/Sources.lean`). A
-structure nobody can instantiate is the correct state for a security premise
-whose evidence is missing; the alternative is one that can be instantiated
-without evidence, which is what this was.
+Requiring a `DualCitation` puts a citation *record* on the proof path, and a
+record is data the author writes: the first reviewer built a
+`JustifiedCostModel` from facts with an `architectural` basis over two documents
+recorded as dead, and proved every trace equicost with it. `citationsChecked`
+adds `SourceDocument.retrieval.isVerified`.
+
+An earlier version of this paragraph said that status is "set by probing the
+location rather than by an author asserting it". **That is false.** No probe
+exists anywhere in this repository: `SourceDocument.livenessProbe` has no
+consumer outside its own declaration, and no tool or CI job reads it. The
+retrieval status of the two registered documents was established by hand and
+recorded, which is evidence a reader can re-check but is not a mechanical
+check. And `SourceDocument` is an ordinary public structure, so an author can
+invent a document with `retrieval := .verified` as easily as a confirmation
+date -- the second reviewer built exactly that and refuted the claim below that
+no `JustifiedCostModel` can be built today.
+
+What `citationsChecked` therefore buys is narrower and still worth having: a
+justification cannot cite one of *this corpus's* registered documents unless
+that document's recorded status is verified, and the AMD document's is not. It
+does not stop an author inventing a document. `Grass.ISA.X86.Rules.all_registered`
+is the corresponding check one level up, pinning every rule in the common
+profile to the registered documents; there is no such pin here, and adding one
+is an open obligation.
 -/
 structure JustifiedCostModel (Insn Vals : Type) where
   /-- The cost function. -/
@@ -465,13 +479,18 @@ structure JustifiedCostModel (Insn Vals : Type) where
   Without this, the citation on the proof path is a record the author fills in,
   and `sound` is satisfied by an `architectural` claim over documents this
   corpus has recorded as dead -- a reviewer demonstrated exactly that.
-  `Citation.FullyChecked` carries `SourceDocument.retrieval.isVerified`, which
-  is set by probing rather than by assertion, so the premise costs something a
-  determined author cannot simply type.
 
-  It does not establish that anyone read the passage; `Citation.confirmed` is
-  still a claim. See `Grass.ISA.X86.CommonBasis.agreed` for the same limit
-  stated where it also applies.
+  What it does not do is make the premise unforgeable. `SourceDocument` is a
+  public structure, so an invented document with `retrieval := .verified` is as
+  easy to write as a confirmation date, and a second reviewer built a
+  `JustifiedCostModel` that way. Against the documents this corpus actually
+  registers the field bites, because the AMD one is recorded dead; against an
+  invented one it does not. Pinning the fact's citation to
+  `Grass.ISA.X86.Vendor.document`, as `Grass.ISA.X86.Rules.all_registered` does
+  for the common profile, is the missing half and is an open obligation.
+
+  It also does not establish that anyone read the passage; `Citation.confirmed`
+  is still a claim. See `Grass.ISA.X86.CommonBasis.agreed`.
   -/
   citationsChecked : ∀ i,
     (fact i).citation.intel.FullyChecked ∧ (fact i).citation.amd.FullyChecked

@@ -266,9 +266,16 @@ inductive CommonBasis where
   What the type enforces, precisely. `CommonRule.agreedIsConfirmed` requires the
   dates to match both citations' `Citation.confirmed`, requires both citations
   to be `Citation.FullyChecked`, and requires both dates to be
-  `Date.WellFormed`. `FullyChecked` is the conjunct with teeth, because it
-  carries `SourceDocument.retrieval.isVerified` -- a status this corpus sets by
-  probing the location, not by an author typing a date.
+  `Date.WellFormed`. `FullyChecked` adds `SourceDocument.retrieval.isVerified`.
+
+  That is weaker than an earlier version of this paragraph claimed. It said the
+  status is one "this corpus sets by probing the location, not by an author
+  typing a date"; no probe exists in this repository, and `SourceDocument` is a
+  public structure, so an invented document with `retrieval := .verified` is as
+  easy to write. A reviewer built one. The conjunct bites against the documents
+  this corpus registers -- the AMD one is recorded dead -- and not against an
+  invented one; `Grass.ISA.X86.Rules.all_registered` is what pins the common
+  profile's rules to the registered documents.
 
   What it does **not** enforce is that anyone read the manual. An earlier
   version of this docstring said the constructor "cannot be written for a
@@ -341,11 +348,13 @@ structure CommonRule where
   the basis and the confirmation dates are fields the same author writes, so the
   obligation was self-consistency rather than evidence.
 
-  The `FullyChecked` conjuncts are what a determined author cannot simply type:
-  they carry `SourceDocument.retrieval.isVerified`, which this corpus sets by
-  probing the recorded location. `Date.WellFormed` rules out the placeholder
-  date the same reviewer used. What remains unenforceable is whether anyone
-  followed the anchor; see `CommonBasis.agreed`.
+  The `FullyChecked` conjuncts add `SourceDocument.retrieval.isVerified`, and
+  `Date.WellFormed` rules out the placeholder date the same reviewer used.
+  Neither is unforgeable: a later reviewer invented a document carrying
+  `.verified` and rebuilt the attack, so the conjuncts bind only against the
+  registered documents. `Grass.ISA.X86.Rules.all_registered` supplies that
+  pinning for the profile. What remains unenforceable either way is whether
+  anyone followed the anchor; see `CommonBasis.agreed`.
 
   The default proof discharges the obligation for every other basis, where the
   hypothesis is contradictory, so only an actual `agreed` rule pays anything.

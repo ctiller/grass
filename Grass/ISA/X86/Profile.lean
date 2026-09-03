@@ -404,11 +404,46 @@ def noBaseForm : CommonRule :=
          "specifies no base register and its dependence on the ModRM mod " ++
          "field.")) }
 
+/--
+The citation names the document this corpus registered for its vendor.
+
+`Citation.document` accepts any `SourceDocument`, so `Citation.FullyChecked`
+binds an author only if the document is one whose retrieval status this corpus
+actually established. A reviewer invented a document carrying
+`retrieval := .verified` and rebuilt an attack that `FullyChecked` was added to
+stop. This is the missing pin: it ties a rule's two citations to
+`Vendor.document`, which is `intelSdm092` and `amd64Apm409` and nothing else.
+-/
+def Registered (r : CommonRule) : Prop :=
+  r.citation.intel.document = Vendor.intel.document ∧
+    r.citation.amd.document = Vendor.amd.document
+
+instance (r : CommonRule) : Decidable (Registered r) :=
+  inferInstanceAs (Decidable (_ ∧ _))
+
 /-- Every rule stated above. -/
 def all : List CommonRule :=
   [registerWriteExtension, rexPrefixLayout, byteRegisterRexInteraction,
    modRmByteLayout, sibByteLayout, ripRelativeForm, sibEscapeForm,
    noIndexForm, noBaseForm]
+
+/--
+**Every rule cites a registered document.**
+
+The check that makes `Citation.FullyChecked` mean something for this profile: no
+rule here cites a document this corpus has not registered and established a
+retrieval status for. Without it, `FullyChecked` is satisfiable by inventing a
+`SourceDocument` with `retrieval := .verified`, which a reviewer did.
+
+It is a check rather than a construction: `CommonRule` does not carry
+`Registered` as a field, so an unregistered rule is writable and merely fails
+this theorem. Making it a field is the stronger form and is an open obligation.
+-/
+theorem all_registered : ∀ r ∈ all, Registered r := by
+  intro r hr
+  simp only [all, List.mem_cons, List.not_mem_nil, or_false] at hr
+  rcases hr with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
+    exact ⟨rfl, rfl⟩
 
 end Rules
 

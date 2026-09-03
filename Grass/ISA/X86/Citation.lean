@@ -150,11 +150,20 @@ type records the outcome so the ledger can report it rather than leaving a
 reader to assume an unchecked URL works.
 -/
 inductive RetrievalStatus where
+  /-- Recorded from a secondary source and never fetched by this corpus. Not a
+  failure, but not evidence either: a profile may require better.
+
+  Deliberately **first**, so it is what `Inhabited` produces. This type is
+  load-bearing -- `Citation.FullyChecked` reads it, and that in turn gates
+  `CommonBasis.agreed` and `JustifiedCostModel.citationsChecked` -- so a
+  defaulted `SourceDocument` claiming a verified retrieval would be a claim
+  nobody made. This codebase had already reached the same conclusion twice, for
+  `TimingBasis.measured` and `CommonBasis.assertedPendingConfirmation`, and then
+  made this type the one the others depend on without applying it. A reviewer
+  pointed that out. -/
+  | unverified
   /-- Fetched on this date, and the document's liveness probe matched. -/
   | verified (on : Date)
-  /-- Recorded from a secondary source and never fetched by this corpus. Not a
-  failure, but not evidence either: a profile may require better. -/
-  | unverified
   /-- Fetched on this date and the location did not serve the document. Under a
   `referenceOnly` policy this is a release blocker, because there is no lawful
   cached copy to fall back to. -/
