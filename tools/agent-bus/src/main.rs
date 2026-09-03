@@ -5,6 +5,7 @@ mod error;
 mod events;
 mod frontier;
 mod gitrepo;
+mod outbox;
 mod registry;
 mod scalars;
 mod storage;
