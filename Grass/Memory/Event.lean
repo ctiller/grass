@@ -524,6 +524,7 @@ construction rather than by a check something might forget to run — and M8's
 consistency model consumes a type that cannot contain a malformed event.
 -/
 structure ValidMemoryEvent where
+  private mk ::
   /-- The event. -/
   event : MemoryEvent
   /-- Its well-formedness. -/
@@ -571,13 +572,21 @@ The well-formedness proof is discharged here, from the `Committed` fields, so a
 caller going through this function never assembles one and never has an
 opportunity to skip it.
 
-**Not "the only producer".** `ValidMemoryEvent` is a public structure and its
-constructor is not private, so a caller can assemble one directly — review did, to
-show that the fields as they stood admitted an event whose status disagreed with
-its own counts. What the type gives is that the fields must be *discharged*, which
-is a real barrier and a weaker claim than unrepresentability. The fields are the
-thing to keep honest; `statusAgreesWithReads` and `statusAgreesWithWrites` were
-added because two of them were not being compared.
+**The only producer, now by construction.** `ValidMemoryEvent.mk` is private, so
+no caller outside `Grass/Memory/Event.lean` can assemble one, and this is the only
+declaration inside it that returns one. A probe confirms the direct assembly is a
+compile error rather than a discouraged habit.
+
+That claim was withdrawn once and is restored deliberately. The constructor was
+public, review assembled an event whose status disagreed with its own counts, and
+the honest response at the time was to weaken the claim rather than defend it.
+Sealing is the fix that makes the strong version true.
+
+Sealing is not sufficient on its own and should not be read as if it were. It
+stops an event bypassing the fields; it says nothing about whether the fields are
+strong enough. Two of them were not being compared at all until that same review,
+which is what `statusAgreesWithReads` and `statusAgreesWithWrites` fixed. The
+fields remain the thing to keep honest.
 -/
 def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
     (space : AddressSpace) (d : AccessDescriptor) (outcome : AccessOutcome d) :

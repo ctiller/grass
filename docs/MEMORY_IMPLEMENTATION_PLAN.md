@@ -335,7 +335,7 @@ instead of a theorem, because it is the stronger form.
 | Property | Enforced by |
 |---|---|
 | step extends the violation ledger | `Op.step_extends_violations` |
-| step emits only well-formed events | `Op.step_events_wellFormed`, and every event in the trace carries its own well-formedness proof — not unrepresentability, since the structure is public; see §4.2 |
+| step emits only well-formed events | `Op.step_events_wellFormed`, and `ValidMemoryEvent` makes a malformed trace unrepresentable: `mk` is private and `MemoryEvent.ofOutcome` is the only producer. As strong as its fields and no stronger — two went uncompared until review found an event whose status contradicted its own counts |
 | denial prevents undeclared later effects | `Op.runAccesses_stops_at_refusal` for the access list, `Op.runStep_stops_at_refusal` for the faulting branch. The second was missing and the branch was wrong: `runStep` performed the faulting substep's access whether or not a survivor had been refused, so a denial was followed by a committed write. Found by local adversarial review after the property had already been declared closed and merged; `Tests/Op/FakeIsa.lean`'s `denial_stops_the_operation_on_the_fault_path` is the regression. |
 | fault choices are structurally in range | `Op.FaultPlan` carries a `Fin`; the bad case is unrepresentable |
 | partial RMW retains its completed read | `Committed` counts reads and writes separately; `faulted_rmw_keeps_its_read` |
@@ -652,11 +652,6 @@ one outright defect that had already merged — see §3.11's denial row.
   theorem is derivable rather than false. Until it exists, a consumer following the
   prose to `runAccesses_frames_untouched` over the survivors would have an unsound
   framing argument, which is how review found it.
-- **`ValidMemoryEvent`'s constructor is public.** §3.11 says it "makes a malformed
-  trace unrepresentable", and `Grass/Memory/Event.lean` says `ofOutcome` is the
-  only producer. Neither is true of the type as written: the structure can be
-  assembled directly by anyone who can discharge its fields. What is true is that
-  the fields must be discharged, which is a real barrier and not the same claim.
 - **`MemoryProfile.vocabularyVersion` is never checked.** A profile states which
   vocabulary version it assumes and nothing compares that to what the transition
   implements. There is one version and no migration theorems, so there is nothing

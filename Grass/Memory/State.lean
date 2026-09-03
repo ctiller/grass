@@ -588,11 +588,14 @@ structure MachineState where
   check something could forget. An earlier trace held bare events beside a
   predicate nothing consulted, and every event the transition minted violated it.
 
-  It does not make a malformed trace *unrepresentable*, which §3.11 of the plan
-  used to claim: the structure is public, so a caller can assemble one by
-  discharging the fields. The barrier is that the fields must be discharged, and
-  keeping them strong enough is the real work — two of them went uncompared until
-  review built an event whose status contradicted its own counts. -/
+  A malformed trace is unrepresentable outside the event module:
+  `ValidMemoryEvent.mk` is private and `MemoryEvent.ofOutcome` is the only
+  producer. That claim was withdrawn when the constructor was public and review
+  assembled a contradictory event; sealing is what makes it true rather than
+  aspirational.
+
+  It is still only as strong as the fields. Two of them went uncompared until that
+  review, so sealing stops a bypass and does not stop a weak clause. -/
   events : List ValidMemoryEvent
   /-- The supply that mints event identities. -/
   eventSupply : FreshSupply EventTag
