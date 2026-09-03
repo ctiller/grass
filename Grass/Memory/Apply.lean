@@ -523,6 +523,62 @@ theorem applyAccess_result_comm (state : MemoryState) (dA dB : AccessDescriptor)
   rw [applyAccess_result, applyAccess_result,
     denialOf_applyAccess_of_disjoint state dB dA writeB indetB hroot.symm hd.symm, hobs]
 
+/-! ### Accesses in different allocations
+
+`applyAccess_comm` and `applyAccess_result_comm` need disjoint ranges because they
+are about one allocation. Across allocations disjointness is free:
+`docs/MEMORY_MODEL.md` §2 makes distinct `AllocId`s distinct storage by
+construction, so offsets that happen to coincide are not the same bytes. §4.2
+recorded these as unstated with `denialOf_write_of_other_allocation` as the
+decision half; here they are. -/
+
+/-- An access to another allocation does not change whether `d` is refused. -/
+theorem denialOf_applyAccess_of_other_allocation (state : MemoryState)
+    (dA dB : AccessDescriptor) (writeData : ByteSeq) (indeterminate : Nat → Byte)
+    (hne : dB.provenance.root ≠ dA.provenance.root) :
+    denialOf (applyAccess state dA writeData indeterminate).2 dB = denialOf state dB := by
+  rw [applyAccess_state]
+  split
+  · exact denialOf_write_of_other_allocation state dB hne _ _ _
+  · rfl
+
+/-- **Accesses in different allocations commute**, in the resulting state. -/
+theorem applyAccess_comm_of_other_allocation (state : MemoryState) (dA dB : AccessDescriptor)
+    (writeA writeB : ByteSeq) (indetA indetB : Nat → Byte)
+    (hne : dA.provenance.root ≠ dB.provenance.root) :
+    (applyAccess (applyAccess state dA writeA indetA).2 dB writeB indetB).2.AgreesOn
+      (applyAccess (applyAccess state dB writeB indetB).2 dA writeA indetA).2 := by
+  rw [applyAccess_state (applyAccess state dA writeA indetA).2 dB writeB indetB,
+    applyAccess_state (applyAccess state dB writeB indetB).2 dA writeA indetA,
+    denialOf_applyAccess_of_other_allocation state dA dB writeA indetA (Ne.symm hne),
+    denialOf_applyAccess_of_other_allocation state dB dA writeB indetB hne,
+    applyAccess_state state dA writeA indetA, applyAccess_state state dB writeB indetB]
+  by_cases hA : denialOf state dA = Option.none ∧ dA.intent.writes = true
+  · by_cases hB : denialOf state dB = Option.none ∧ dB.intent.writes = true
+    · simp only [if_pos hA, if_pos hB]
+      exact MemoryState.write_comm_of_ne state hne _ _ _ _ _ _
+    · simp only [if_pos hA, if_neg hB]
+      exact MemoryState.AgreesOn.refl _
+  · by_cases hB : denialOf state dB = Option.none ∧ dB.intent.writes = true
+    · simp only [if_neg hA, if_pos hB]
+      exact MemoryState.AgreesOn.refl _
+    · simp only [if_neg hA, if_neg hB]
+      exact MemoryState.AgreesOn.refl _
+
+/-- **And in their results.** The same access gets the same decision and observes
+the same bytes on either side of an access to a different allocation. -/
+theorem applyAccess_result_comm_of_other_allocation (state : MemoryState)
+    (dA dB : AccessDescriptor) (writeA writeB : ByteSeq) (indetA indetB : Nat → Byte)
+    (hne : dA.provenance.root ≠ dB.provenance.root) :
+    (applyAccess (applyAccess state dB writeB indetB).2 dA writeA indetA).1 =
+      (applyAccess state dA writeA indetA).1 := by
+  have hobs : observedBytes (applyAccess state dB writeB indetB).2 dA indetA =
+      observedBytes state dA indetA := by
+    refine observedBytes_congr dA indetA (fun offset _ => ?_)
+    exact applyAccess_frames_other_allocation state dB writeB indetB hne _
+  rw [applyAccess_result, applyAccess_result,
+    denialOf_applyAccess_of_other_allocation state dB dA writeB indetB hne, hobs]
+
 /-! ## Straight-line blocks
 
 `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4's exit criterion is that the framing set

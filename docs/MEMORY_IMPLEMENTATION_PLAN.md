@@ -530,8 +530,10 @@ the framing half of "reads and writes to disjoint ranges commute and frame";
 `applyAccess_comm` is the state half of commutation and `applyAccess_result_comm`
 the result half — the same access gets the same refusal decision and observes the
 same bytes on either side of a disjoint one. Both are for two accesses within one
-allocation; the cross-allocation theorem is still unstated, though
-`denialOf_write_of_other_allocation` is its decision half.
+allocation. `applyAccess_comm_of_other_allocation` and
+`applyAccess_result_comm_of_other_allocation` are the cross-allocation pair, where
+disjointness is free: §2 makes distinct `AllocId`s distinct storage by
+construction, so coinciding offsets are not the same bytes.
 
 Commutation is stated as `MemoryState.AgreesOn` — agreement at every offset, in
 byte and in initialization — and not as state equality. That is forced rather than
@@ -640,9 +642,6 @@ one outright defect that had already merged — see §3.11's denial row.
   allocations with no machine address at all, so a base must be optional and
   per-space. Until it is wired, the offset-to-address debt
   [Range.lean](../Grass/Memory/Range.lean) records is *not* discharged.
-- **Cross-allocation commutation.** `applyAccess_comm` requires both accesses in
-  one allocation. `denialOf_write_of_other_allocation` is the decision half of the
-  cross-allocation case; the theorem is not stated.
 - **Trace agreement between `runBlock` and `step`.** They agree on memory, through
   `MemoryState.commit`. Nothing proves they agree on the recorded trace, so a
   straight-line argument over `runBlock` is an argument about memory and not about

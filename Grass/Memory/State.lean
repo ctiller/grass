@@ -589,6 +589,49 @@ theorem rangeInitialized_congr_of_agrees {a b : MemoryState} {id : AllocId}
         unfold ByteStore.InitializedAt at this ⊢
         rw [hc]; exact this
 
+/-- A write depends on its allocation and nothing else, so two states agreeing
+about that allocation write it identically. -/
+theorem cellAt?_write_congr {a b : MemoryState} {id : AllocId}
+    (h : a.allocations.lookup id = b.allocations.lookup id) (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) (offset : Nat) :
+    (a.write id start bytes initializes).cellAt? id offset =
+      (b.write id start bytes initializes).cellAt? id offset := by
+  unfold write cellAt?
+  cases hl : b.allocations.lookup id with
+  | none =>
+    have ha : a.allocations.lookup id = Option.none := by rw [h, hl]
+    simp only [ha, hl]
+  | some r =>
+    have ha : a.allocations.lookup id = some r := by rw [h, hl]
+    simp only [ha, FiniteMap.lookup_insert_self]
+
+/--
+**Writes to different allocations commute**, whatever ranges they name.
+
+The companion to `write_comm`, which needs disjoint ranges because it is about one
+allocation. Here disjointness is free: `docs/MEMORY_MODEL.md` §2 makes distinct
+`AllocId`s distinct storage by construction, so two writes to different
+allocations cannot interfere however their offsets compare.
+-/
+theorem write_comm_of_ne (state : MemoryState) {a b : AllocId} (hne : a ≠ b)
+    (sa : Nat) (ba : ByteSeq) (ia : Bool) (sb : Nat) (bb : ByteSeq) (ib : Bool) :
+    ((state.write a sa ba ia).write b sb bb ib).AgreesOn
+      ((state.write b sb bb ib).write a sa ba ia) := by
+  intro other offset
+  by_cases hoa : other = a
+  · subst hoa
+    rw [cellAt?_write_of_not_covers _ b (Or.inl hne),
+      cellAt?_write_congr (write_preserves_other_allocation state hne sb bb ib) sa ba ia]
+  · by_cases hob : other = b
+    · subst hob
+      rw [cellAt?_write_of_not_covers _ a (Or.inl (Ne.symm hne)),
+        cellAt?_write_congr (write_preserves_other_allocation state (Ne.symm hne) sa ba ia)
+          sb bb ib]
+    · rw [cellAt?_write_of_not_covers _ b (Or.inl hob),
+        cellAt?_write_of_not_covers _ a (Or.inl hoa),
+        cellAt?_write_of_not_covers _ a (Or.inl hoa),
+        cellAt?_write_of_not_covers _ b (Or.inl hob)]
+
 /--
 **Writes to disjoint ranges commute.**
 
