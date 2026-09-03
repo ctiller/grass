@@ -187,6 +187,23 @@ structure AdmittedVocabulary where
   /-- Scopes this profile owns, beyond thread, process, device, and system. §7.1
   allows these on the same terms as the modes above. -/
   orderingScopes : NameRegistry Name
+  /-- The execution context kinds this profile's target has.
+
+  `docs/MEMORY_MODEL.md` §7.1 lists them — "thread, interrupt/exception handler,
+  signal/callback, device queue, shader invocation, DMA engine, loader, and external
+  API agent" — and lets a profile add its own, which is why `ContextKind` is open
+  nominal. It was the last open name reaching an operation with no registry: `step`
+  takes the kind as an argument, `MachineState.noteContext` records it as that
+  context's kind for the rest of the execution, and every event the context mints
+  carries it, with nothing anywhere asking whether the profile had ever heard of it.
+
+  Two reviewers raised it and both judged it short of a finding, on the grounds that
+  the corpus asks only that the event *carry* the kind, which it does. That is why
+  the registry is here rather than in a rejection somewhere deeper: it is the same
+  bargain `orderingScopes` above strikes for §7.1's scope list, which is the same
+  sentence one line further on, and the argument for one is the argument for the
+  other. -/
+  contextKinds : NameRegistry ContextKind
   /-- Rules under which this profile permits an access to read uninitialized
   bytes.
 

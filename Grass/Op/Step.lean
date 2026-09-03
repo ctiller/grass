@@ -114,6 +114,17 @@ inductive StepRejection where
   the kind half still open a round later. `MachineState.contexts` is the single
   source of truth now. -/
   | contextKindMismatch (context : ContextId) (declared recorded : ContextKind)
+  /-- A step declares an execution context kind the profile's vocabulary does not
+  recognize.
+
+  `ContextKind` is open nominal, `step` takes it as an argument, and
+  `MachineState.noteContext` makes the first one it sees that context's kind for the
+  rest of the execution — so an unregistered kind was not merely carried into an
+  event, it became the state's own answer about what that context is. Every other
+  open name reaching an operation had acquired a registry; this one was the last
+  without, and `AdmittedVocabulary.orderingScopes` had already struck the same
+  bargain for the scope list in the same sentence of §7.1. -/
+  | contextKindNotRegistered (kind : ContextKind)
   /-- An access declares an executing context other than the one running the step.
 
   `MemoryEvent.ofOutcome` takes the event's context *identity* from
@@ -1402,7 +1413,9 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
           match sequence.accesses.find? (fun d => d.context != context) with
           | some d => .rejected (.contextMismatch d.context context)
           | Option.none =>
-          if ! decide (state.KindAgrees context contextKind) then
+          if ! decide (policy.profile.vocabulary.contextKinds.Recognizes contextKind) then
+            .rejected (.contextKindNotRegistered contextKind)
+          else if ! decide (state.KindAgrees context contextKind) then
             .rejected (.contextKindMismatch context contextKind
               ((state.contexts.lookup context).getD contextKind))
           else

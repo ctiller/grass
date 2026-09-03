@@ -1695,14 +1695,33 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   actually open. That is the third fixture this round whose subject was chosen when the
   distinction did not exist.
 
+- ~~**`ContextKind` is an open nominal with no registry.**~~ Two reviewers raised it,
+  one round apart, and both judged it short of a finding on the grounds that the corpus
+  asks only that the event *carry* the kind, which it does. That reading was too narrow:
+  `step` takes the kind as an argument and `MachineState.noteContext` makes the first
+  one it sees that context's kind for the whole execution, so an invented kind was not
+  merely carried into an event — it became the state's own answer about what the
+  context is, and `contextKindMismatch` then enforced it against every later step.
+
+  `AdmittedVocabulary.contextKinds` closes it, on the same terms
+  `AdmittedVocabulary.orderingScopes` already struck for §7.1's scope list, which is the
+  same sentence one line further on. The registry is asked *before* the kind is compared
+  with the state's record, so an unseen context and an unregistered kind give the
+  registry's answer rather than a mismatch against a defaulted one; that ordering has
+  its own fixture.
 - **`EventCause.origin` is an open nominal with no registry**, and it reaches every
-  minted event as one of §7.1's required fields. Every other open nominal in this layer
-  that reaches an operation acquired a registry when review asked why it had none;
-  this one has an allowlist entry in `Tools/ConsultedAudit.py` instead, and nothing
-  relates it to the `SomeOperation` being stepped. Recorded rather than repaired,
-  because the corpus asks only that the event carry the cause, which it does. Review
-  raised it and judged it short of a finding; it is written down here so the next
-  reviewer does not have to rediscover the judgement.
+  minted event as one of §7.1's required fields. It is now the only one: every other
+  open name in this layer that reaches an operation has a registry. It has an allowlist
+  entry in `Tools/ConsultedAudit.py` instead, and nothing relates it to the
+  `SomeOperation` being stepped.
+
+  The `ContextKind` case above is the argument for closing it and the argument against
+  doing so the same way. A cause names the *operation*, so a registry would oblige a
+  profile to enumerate its instruction set by name in a second place — `ContextKind`'s
+  eight kinds are a closed-enough list that a profile can write them down, and an ISA's
+  opcodes are not. What would close it is relating the cause to the `SomeOperation`
+  being stepped, which needs an ISA owner. Recorded, with the reason the obvious repair
+  is wrong here.
 
 - **§10's proof package: three of eleven items stated, and the pattern for the rest.**
   `RequiredProofPackage`'s fields were bare `Prop`s, so a profile chose the *sentence*
@@ -1908,8 +1927,8 @@ its entries one at a time.
 | `StepPolicy.compatible` | can remove a §7.3 refusal | `compatibleIsAtomic` and `compatibleSymm` are proof fields; `conflicts_of_not_atomic` is quantified over the policy |
 | `AddressSpace.repr` | **could remove two refusals, then a third** | `AccessDescriptor.WellFormedIn`'s `aligned` and `rangeFitsSpace` are both vacuous for a symbolic representation, and `Addressing.lean`'s placement bridge ran in 64-bit arithmetic for any numeric width. `AddressSpace.RepresentationMatchesIdentity` fixes the kind for every identity this layer names, and `WellFormed` fixes the width at exactly 64 for this vocabulary version. Nothing about a space is a profile's choice now except which identity it declares |
 | `AddressSpace.memoryType`, `coherence`, `owner` | — | nothing reads them; §4.2 lists them among the facts the model carries and nothing consults |
-| `AdmittedVocabulary`'s twelve registries | admit more names | a larger registry admits more, which is the profile's own claim about its target; a *smaller* one refuses more, which is the safe direction |
-| `AdmittedVocabulary.WellFormed` | — | the address-space table is checked and the three justification registries are pairwise disjoint; the other nine have no coherence condition and need none |
+| `AdmittedVocabulary`'s thirteen registries | admit more names | a larger registry admits more, which is the profile's own claim about its target; a *smaller* one refuses more, which is the safe direction |
+| `AdmittedVocabulary.WellFormed` | — | the address-space table is checked and the three justification registries are pairwise disjoint; the other ten have no coherence condition and need none |
 | `StepPolicy.oracle` | can only fail *about commits* | `Oracle.answer` returns a proof-carrying `CompleteCommitted` or `none`, and `none` records `machineAnswerIncomplete`; it cannot claim a commit it cannot witness. "Can only fail" was an overclaim and review said so: it also supplies the bytes that land in memory and the values that reach the trace, and it takes a whole `MachineState` where `AuthorityProvider.refuses` was deliberately narrowed to a `MemoryState`. No repair is proposed because `writeData` has nowhere else to come from today |
 | `StepPolicy.requiredFacets` | demands more | a facet a profile requires and an operation does not supply is a rejection, and `closes_iff_no_missing` says the gate deciding that is `OperationFacets.Closes`. A profile requiring *nothing* still cannot step an operation with no memory-effect facet, because the branch after the gate refuses it |
 | `MemoryProfile.package` | **eight of eleven items still name their own sentence** | `loanMapLaws`, `allocatorFreshnessTeardownEpoch` and `rangeProvenanceInitializationPreservation` have types this layer states, so those items are proofs the profile supplies and cannot weaken — the third partially, covering `applyAccess` and not `step`. The other eight are bare `Prop`s and `True` closes each; `RequiredProofPackage.Holds` conjoins exactly those eight, so the conjunction shrinks as items are stated. Still the weakest input here, and the last gate before `VerifiedProgram` |

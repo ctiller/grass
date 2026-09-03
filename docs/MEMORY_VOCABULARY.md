@@ -96,7 +96,7 @@ declaration listed here that no longer exists fails the citation audit.
 
 | Declaration | Shape | Note |
 |---|---|---|
-| `AdmittedVocabulary` | twelve registries plus the address-space table | See *provisional*: registries have been added five times and will be again. |
+| `AdmittedVocabulary` | thirteen registries plus the address-space table | See *provisional*: registries have been added five times and will be again. |
 | `AdmissibilityFailure` | ten constructors | Tracks `admissibilityFailures` exactly; a clause can only be added in one place, because `Admits` is that list's emptiness. |
 | `MemoryProfile`, `RequiredProofPackage` | as declared | §10's eleven items, as fields. The package is a checklist of propositions, not evidence for them. |
 

@@ -62,6 +62,7 @@ def vocabulary : AdmittedVocabulary :=
     obligationKinds := ⟨[]⟩
     orderingModes := ⟨[]⟩
     orderingScopes := ⟨[]⟩
+    contextKinds := ⟨[.thread, .externalAgent]⟩
     initializationJustifications := ⟨[]⟩
     atomicityJustifications := ⟨[]⟩
     faultVisibilityRules := ⟨[⟨"x86.splitPageStore"⟩]⟩

@@ -756,6 +756,7 @@ def vocabulary : AdmittedVocabulary :=
     obligationKinds := ⟨[.releaseAllocation, .closeHandle]⟩
     orderingModes := ⟨[⟨"fake.deviceRelease"⟩]⟩
     orderingScopes := ⟨[⟨"fake.queue"⟩]⟩
+    contextKinds := ⟨[.thread, .dmaEngine]⟩
     initializationJustifications := ⟨[⟨"fake.zeroedByLoader"⟩]⟩
     atomicityJustifications := ⟨[⟨"fake.atomicSplitStore"⟩]⟩
     faultVisibilityRules := ⟨[⟨"fake.splitStore"⟩]⟩
@@ -2961,6 +2962,40 @@ theorem the_forged_lend_is_refused_on_the_map :
     (state₀.memory.applyAuthorityDelta? engine₀
       (.issue lentSlot { declaredLoan with lender := engine₀ })).isSome := by
   exact ⟨by decide, by decide⟩
+
+/-- **A step under an unregistered context kind is rejected.**
+
+`ContextKind` is open nominal and `step` takes it as an argument, so before
+`AdmittedVocabulary.contextKinds` existed a caller could step under any name it liked
+-- and `MachineState.noteContext` would then make that name the context's kind for the
+rest of the execution, so the invented kind became the state's own answer about what
+the context is. Every other open name reaching an operation had a registry; this was
+the last without one. -/
+theorem an_unregistered_context_kind_is_rejected :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀
+      ⟨⟨"fake.neverRegisteredKind"⟩⟩ ⟨⟨"alpha"⟩⟩ =
+      .rejected (.contextKindNotRegistered ⟨⟨"fake.neverRegisteredKind"⟩⟩) := rfl
+
+/-- And the registered kind steps, so the rejection is the registry and not the
+operation. Both kinds this profile uses are registered and a third is not. -/
+theorem the_registered_context_kinds_step :
+    (stepAlpha state₀ .store).Ran ∧ (stepBeta state₀ .dmaWrite).Ran ∧
+    vocabulary.contextKinds.Recognizes .thread ∧
+    vocabulary.contextKinds.Recognizes .dmaEngine ∧
+    ¬ vocabulary.contextKinds.Recognizes .shaderInvocation := by
+  exact ⟨by decide, by decide, by decide, by decide, by decide⟩
+
+/-- The registry is asked *before* the kind is compared with the state's record, so a
+context that has never been seen and a kind that was never registered give the
+registry's answer rather than a mismatch against a defaulted kind. -/
+theorem the_registry_is_asked_before_the_state :
+    ∀ s, (stepAlpha state₀ .store).state? = some s →
+      Grass.Op.step policy s (SomeOperation.of Alpha.store) thread₀
+        ⟨⟨"fake.neverRegisteredKind"⟩⟩ ⟨⟨"alpha"⟩⟩ =
+        .rejected (.contextKindNotRegistered ⟨⟨"fake.neverRegisteredKind"⟩⟩) := by
+  intro s hs
+  cases hs
+  rfl
 
 /-! ## A race is recorded as a race
 
