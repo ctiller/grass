@@ -98,12 +98,21 @@ end Byte
 
 /-! ## Byte arrays
 
-Two naming decisions, both forced rather than chosen.
+Two naming decisions. Neither is forced by anything outside this library: both
+follow from `docs/STDLIB_IMPLEMENTATION_PLAN.md` §3.2's choice to make `Vec` a
+structure and `ByteArray` an `abbrev` over it, and a `ByteArray` that were its own
+type would take `ByteArray.toHost` cleanly. They are forced *given that choice*,
+which is a weaker claim and the accurate one. An earlier version of this comment
+said "forced rather than chosen", which describes a downstream consequence of the
+author's own earlier decision as an external constraint.
 
-The crossing is named for its direction rather than overloaded on `coe`, because
-`docs/STDLIB.md` §1 wants it visible at the use site. A coercion would make it
-invisible, which is the property the rejection in `Tests/Std/VecVocabulary.lean`
-exists to prevent.
+The crossing is a named function rather than a `Coe` because a coercion cannot be
+scoped to a considered boundary — it fires on any `Array` value, which is the
+defect `docs/STDLIB_IMPLEMENTATION_PLAN.md` §3.5 measured for `CoeTail`. The
+usual second argument, that a named function stays visible at the use site, has
+not survived contact with either consumer: `Text.utf8` buries the crossing inside
+a function, and the authored spike surface writes `"...".toUTF8` and wants it
+invisible. Scope is the reason; visibility is not.
 
 It lives in the `Vec` namespace, not a `ByteArray` one, and carries `Bytes` in
 its name to say what it converts. The reason is mechanical: `ByteArray` is an
