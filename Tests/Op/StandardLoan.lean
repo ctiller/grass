@@ -107,12 +107,21 @@ theorem the_view_aliases_the_buffer :
 /-- Returning the loan restores the thread's access, so the refusal tracks the
 loan rather than being permanent. -/
 theorem returning_restores_access :
+    (lentToEngine.memory.returnLoan? engine₀ bufferLoan).isSome ∧
     ∀ s, (step { lentToEngine with
-                 memory := lentToEngine.memory.returnLoan bufferLoan } .store).state? = some s →
+                 memory := (lentToEngine.memory.returnLoan? engine₀ bufferLoan).getD
+                   lentToEngine.memory } .store).state? = some s →
       s.events.length = 1 ∧ s.violations.IsEmpty := by
+  refine ⟨by decide, ?_⟩
   intro s hs
   cases hs
   exact ⟨by decide, by decide⟩
+
+/-- **The thread cannot return the engine's loan and then write.** The return is an
+authority operation and an unchecked one let any context perform it, so the freeze
+was defeated by calling the function that removes it. -/
+theorem the_thread_cannot_return_the_engines_loan :
+    lentToEngine.memory.returnLoan? thread₀ bufferLoan = Option.none := by decide
 
 /--
 **A read of lent bytes is refused too**, not only a write.
@@ -147,6 +156,113 @@ would make lending one field of a struct lock the whole struct.
 theorem lending_the_tail_leaves_the_head_reachable :
     ∀ s, (step tailLentToEngine .store).state? = some s →
       s.events.length = 1 ∧ s.violations.IsEmpty := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-! ## The rule does not depend on how the map was built
+
+`MemoryState.lend?` refuses to *issue* conflicting authority, and for a while the
+provider was a pure holder test that relied on it: if the accessor holds a covering
+loan, proceed. Review found two ways to reach a state `lend?` would have refused,
+and in both the write committed with no violation recorded.
+
+A rule that holds only because of how a state was constructed is not a rule about
+the state. The provider now reads `MemoryState.authorityOf` on the map it is
+handed. -/
+
+/-- Two write loans over the same bytes, to two contexts, installed through
+`MemoryState.grant` — which inserts with no checks at all. -/
+def doublyGranted : MachineState :=
+  { state₀ with
+    memory := (state₀.memory.grant bufferLoan
+        { kind := .loan, holder := thread₀, provenance := bufferProv
+          range := ⟨0, 8⟩, rights := .readWrite }).grant secondBufferLoan
+        { kind := .loan, holder := engine₀, provenance := bufferProv
+          range := ⟨0, 8⟩, rights := .readWrite } }
+
+/-- `lend?` really would have refused this pair, so the state below is the one
+§7.3 says cannot be issued rather than an ordinary one. -/
+theorem lend_would_have_refused_the_pair :
+    ((state₀.memory.grant bufferLoan
+        { kind := .loan, holder := thread₀, provenance := bufferProv
+          range := ⟨0, 8⟩, rights := .readWrite }).lend? secondBufferLoan
+        { kind := .loan, holder := engine₀, provenance := bufferProv
+          range := ⟨0, 8⟩, rights := .readWrite }) = Option.none := by decide
+
+/-- **And the thread's store is refused even though the thread holds a covering
+write loan.** Under the holder test it committed: `GrantedOfKind` succeeded, and
+nothing asked what anyone else held. -/
+theorem a_grant_installed_conflict_is_refused :
+    ∀ s, (step doublyGranted .store).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- The state really is the frozen one, so the refusal above is the rule biting
+rather than something else in the fixture. -/
+theorem the_granted_pair_freezes_both :
+    doublyGranted.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ = AuthorityState.frozen ∧
+    doublyGranted.memory.authorityOf engine₀ bufferProv ⟨0, 8⟩ = AuthorityState.frozen := by
+  exact ⟨by decide, by decide⟩
+
+/-- Two loans that do **not** conflict when issued: `[0, 8)` of the buffer to the
+thread, `[0, 8)` of `borrowedAlloc` to the engine. Different allocations, so
+`lend?` is right to accept them. -/
+def separatelyLent : MemoryState :=
+  ((state₀.memory.lend? bufferLoan
+      { kind := .loan, holder := thread₀, provenance := bufferProv
+        range := ⟨0, 8⟩, rights := .readWrite }).getD state₀.memory).lend? secondBufferLoan
+      { kind := .loan, holder := engine₀, provenance := borrowedProv
+        range := ⟨0, 8⟩, rights := .readWrite } |>.getD state₀.memory
+
+/-- Then the profile declares the mapping. `docs/MEMORY_MODEL.md` §7.5 makes that a
+real transition, and nothing re-examines the grants already issued. -/
+def aliasedAfterIssue : MachineState :=
+  { state₀ with memory := separatelyLent.alias bufferAlloc borrowedAlloc }
+
+/-- Both lends succeeded, and they became conflicting only once the alias was
+declared: issued in the other order, `lend?` refuses the second. -/
+theorem the_conflict_appears_after_issue :
+    (separatelyLent.grants.lookup bufferLoan).isSome ∧
+    (separatelyLent.grants.lookup secondBufferLoan).isSome ∧
+    ((state₀.memory.alias bufferAlloc borrowedAlloc).lend? bufferLoan
+        { kind := .loan, holder := thread₀, provenance := bufferProv
+          range := ⟨0, 8⟩, rights := .readWrite }).isSome := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **And the thread's store is refused**, though it holds a covering write loan
+and `lend?` was never given the chance to refuse anything. This is the case no
+issue-time check can catch. -/
+theorem an_alias_declared_after_issue_is_refused :
+    aliasedAfterIssue.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ = AuthorityState.frozen ∧
+    ∀ s, (step aliasedAfterIssue .store).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 := by
+  refine ⟨by decide, ?_⟩
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- **Refusal is wider than `frozen`.** The engine holds a *read* loan; the thread
+holds none, so its read is refused by the holder half while `authorityOf` calls the
+state `sharedImmutable` and permits reads. Pinned because three reviewers found
+prose claiming the provider refuses exactly the frozen accesses. -/
+def readLentToEngine : MachineState :=
+  { state₀ with
+    memory := (state₀.memory.lend? bufferLoan
+      { kind := .loan, holder := engine₀, provenance := bufferProv
+        range := ⟨0, 8⟩, rights := .readOnly }).getD state₀.memory }
+
+theorem loan_refusal_is_wider_than_frozen :
+    (state₀.memory.lend? bufferLoan
+      { kind := .loan, holder := engine₀, provenance := bufferProv
+        range := ⟨0, 8⟩, rights := .readOnly }).isSome ∧
+    readLentToEngine.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ =
+      AuthorityState.sharedImmutable ∧
+    ∀ s, (step readLentToEngine .load).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 := by
+  refine ⟨by decide, by decide, ?_⟩
   intro s hs
   cases hs
   exact ⟨by decide, by decide⟩

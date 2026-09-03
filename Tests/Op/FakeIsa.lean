@@ -669,6 +669,9 @@ def bufferLoan : GrantId := grants₀.fresh.1
 /-- A live call frame over the stack reservation. -/
 def liveFrame : GrantId := grants₀.fresh.2.fresh.1
 
+/-- A third identity, so a fixture can install two grants over one range. -/
+def secondBufferLoan : GrantId := grants₀.fresh.2.fresh.2.fresh.1
+
 /-- The same state with both grants live. -/
 def stateWithAuthority : MachineState :=
   { state₀ with

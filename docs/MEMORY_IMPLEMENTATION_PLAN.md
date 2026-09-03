@@ -945,32 +945,49 @@ Unblocks: the `verify_assembly` owner, and Spike 1 block certificates.
 §3 that every later authority law rests on, and `Tests/Memory/Loans.lean` checks
 it.
 
-`AuthorityState` names four of the five canonical states §3 lists. Closing it as a
-sum is this module's decision and **not** §3's requirement: §3 says the canonical
-states "include" these, which is an open enumeration, and an earlier version of the
-code and of this paragraph claimed otherwise. Review caught the misreading. The
-closure is kept because its consequence is the safe one — a profile needing a sixth
-state cannot express it, so it cannot be silently treated as one of these four, and
-[FOUNDATION.md](FOUNDATION.md) law 8 forbids the permissive fallback rather than the
-extension. A new *kind* of authority remains a `GrantKind`, which is open nominal so
-that is the usual road.
+`AuthorityState` names **three and a half** of the five canonical states §3 lists.
+Closing it as a sum is this module's decision and **not** §3's requirement: §3 says
+the canonical states "include" these, which is an open enumeration, and an earlier
+version of the code and of this paragraph claimed otherwise.
 
-The fifth entry, atomic shared access under an ordering profile, is **not** named.
+The closure is also **not** the safe direction, which the next sentence here used to
+claim while citing [FOUNDATION.md](FOUNDATION.md) law 8 for it. `authorityOf` is a
+total function into these four: a situation they do not describe is not rejected, it
+is classified as the nearest one, and law 8 demands rejection. The closure is kept
+because an open sum with a permissive default is worse and because extending means
+editing the module in the open with the laws re-proved — not because it fails
+loudly, which it does not. A new *kind* of authority remains a `GrantKind`, which is
+open nominal so that is the usual road, and `grantsOver` sees every kind so that
+road does not lead past the freeze.
+
+The half is §3's fifth entry, "transferred **or** unavailable authority":
+`unavailable` derives from liveness and epoch and covers the second half only.
+Nothing represents a transfer, and §4.4.1 records it. The count was "four of five"
+for one round, which read as coverage of a bullet half-delivered.
+
+§3's third entry, atomic shared access under an ordering profile, is **not** named.
 There was an `atomicShared` constructor and a theorem putting §3's "atomics do not
 grant ordinary non-atomic access" beyond it, and nothing built the constructor:
 `AuthorityGrant` carries `kind`, `holder`, `provenance`, `range` and `rights`, and
 no ordering. The theorem held of an unreachable case, which reads as coverage
-without being any. Both are deleted and §4.4.1 records the law as owed.
+without being any. Both are deleted and §4.4.1 records the law as owed, with where
+it could bite today — the earlier claim that "the rule has nothing to constrain" was
+false, since `AccessIntent.isAtomic` and `OrderingDemand.atomicity` exist and
+`WellFormedIn.atomicityAgrees` ties them.
 
-Every remaining constructor is built by `authorityOf`, which is what stops the same
-thing happening again: `sharedImmutable` and `unavailable` were also built by
-nothing, so every theorem about them was vacuous. `authorityOf` now derives all four
-from state that already exists — `unavailable` from allocation liveness,
-`exclusive` and `frozen` from the loan map, and `sharedImmutable` from the rights on
-the outstanding loans, since §7.3 makes a conflict require a writer and §3 lists
-shared immutable access separately. `PermitsOrdinaryWrite` holds only of
-`exclusive`, stated as `permitsOrdinaryWrite_iff_exclusive` so a fifth constructor
-breaks the theorem rather than falling through a wildcard.
+Every remaining constructor is built by `authorityOf`: `sharedImmutable` and
+`unavailable` were built by nothing, so every theorem about them was vacuous.
+`authorityOf` derives all four from state that already exists — `unavailable` from
+liveness and epoch, `exclusive` and `frozen` from the grant map, and
+`sharedImmutable` from the rights on the outstanding grants, since §7.3 makes a
+conflict require a writer and §3 lists shared immutable access separately. Nothing
+*enforces* that every constructor stays reachable; four fixtures exhibit it and a
+future author must extend them, which §4.4.1 records.
+
+`PermitsIntent` is written out per constructor with no wildcard, so a fifth
+constructor fails to compile there. `permitsOrdinaryWrite_iff_exclusive` does
+**not** break under one — a wildcard would send the new case to `False` and the
+equivalence would still hold — and this paragraph claimed it did.
 
 Three laws are proved. A return consumes that exact identity, which
 `returning_one_of_two_leaves_the_other` earns by returning one of two loans
@@ -981,10 +998,11 @@ counts are derived: `outstandingLoans` computes from the map and no field record
 one, which is the discipline that removed `AllocationRecord.initialized` and
 `AccessIntent.isDevice` after each turned out to be a second source of truth.
 
-`authorityOf` is the freeze: while another context's write loan is outstanding the
-lender holds `AuthorityState.frozen`, and `not_permitsOrdinaryWrite_of_lentForWriting`
-is the borrow discipline that follows. It too is a function of the state, so lending
-freezes, returning thaws and freeing revokes without a field to keep in step, and
+`authorityOf` is the freeze: while another context's write grant is outstanding the
+lender holds `AuthorityState.frozen`, and
+`not_permitsOrdinaryWrite_of_writableByAnother` is the borrow discipline that
+follows. It too is a function of the state, so lending freezes, returning thaws,
+freeing revokes and an epoch bump revokes, without a field to keep in step, and
 `lending_the_head_leaves_the_tail_writable` shows the freeze is per-fragment rather
 than per-allocation.
 
@@ -992,12 +1010,28 @@ It takes the context, and an earlier version did not — a context that had lent
 itself was reported frozen while `Grass/Op/LoanAuthority.lean` let its write
 through, which is the two halves of the model contradicting each other.
 
+It reads **every kind of grant**, not only loans. §7.3's conflict is about
+authority, and filtering to `GrantKind.loan` meant a `.frame` grant — or one of a
+kind a profile invented, which `GrantKind` is open nominal to allow — carried write
+authority that froze nobody and conflicted with nothing (`a_frame_grant_freezes`).
+`loansOver` is that list narrowed to loans, for §3's laws, which really are about
+loans; `a_frame_grant_is_not_a_loan` is the two questions kept apart.
+
+It reads the **epoch**. §2 says address reuse never revives old pointers, and
+`Live` compared only the `live` flag, so a provenance minted before a
+free-and-reallocate was reported exclusive over the storage that replaced it, with
+an ordinary write permitted (`a_stale_provenance_is_unavailable`). The same
+blindness ran the other way: a grant issued under a defunct epoch froze the live one
+permanently (`a_stale_loan_does_not_freeze_the_live_epoch`).
+
 `Exclusive` is **not** authority, and `authorityOf` used to read it as though it
 were: over the empty state, which has an empty loan map and no allocations, it
 reported exclusive ownership to whoever asked. `AllocationRecord.live`'s own
 docstring says a dead allocation authorizes nothing whatever provenance is
 presented, so `Live` is now a conjunct of the exclusive case and
 `a_freed_allocation_is_exclusive_and_unavailable` holds both halves side by side.
+`permitsOrdinaryWrite_of_unheld` takes `¬ HeldByAnother` and not `Exclusive`, for
+the same reason.
 
 `loansOver` matches on `ByteRange.Meets`, not on `¬ Disjoint`. An empty range covers
 no offset, so every range is `Disjoint` from one — and asking what authority the
@@ -1009,8 +1043,42 @@ query is the position, so a loan over no bytes still freezes nothing
 (`a_loan_of_no_bytes_freezes_nothing`) and one past the end of a loan is not frozen
 (`one_past_the_end_of_a_loan_is_not_frozen`).
 
+`MemoryState.lend?` refuses to *issue* conflicting authority — a reissued identity,
+or a grant conflicting with a live one — and `LoanConflicts` is §7.3's test at issue
+time. §7.3's rule is between *distinct* contexts, and a missing holder clause made a
+second grant to the same holder a conflict, which is exactly the "declare a loan to
+yourself" idiom `Grass/Op/LoanAuthority.lean` endorses; the clause is there now
+(`a_second_loan_to_the_same_holder_is_accepted`).
+
+Issuing is not the guarantee, and a comment here said it was. `MemoryState.grant`
+installs a grant with no checks at all, and two grants that do not conflict when
+issued become conflicting when an alias is declared afterwards — §7.5 makes that a
+real transition and nothing re-examines what was already issued. Review reached both
+states and watched the write commit with no violation recorded.
+
 `Grass/Op/LoanAuthority.lean` is the rule as a provider a profile adopts rather
-than reinvents: lent bytes are reachable only through a loan.
+than reinvents, and it has two halves. Lent bytes are reachable only through a loan
+— a holder test over the loan map. **And** the state `authorityOf` reports must
+permit the intent, which is the half that reads the map it is handed rather than
+trusting how the map was built, and which is what refuses both states above
+(`a_grant_installed_conflict_is_refused`,
+`an_alias_declared_after_issue_is_refused`).
+
+The two halves are not the same test and neither implies the other. Refusal is
+strictly wider than `frozen`: a context holding no covering loan is refused a read
+of bytes another context holds only a read loan over, while `authorityOf` calls that
+`sharedImmutable` and permits reads (`loan_refusal_is_wider_than_frozen`). An
+earlier version of this section cited `loan_refuses_only_the_frozen` as the bridge
+between the two; that theorem's statement mentioned neither `authorityOf` nor
+`frozen`, its proof was a projection of the provider's own definition, and the
+"exactly" was false in both directions. Three independent reviewers found it.
+`loan_refuses_the_frozen` is the direction that carries the guarantee, stated.
+
+`returnLoan?` refuses a return by a context that does not hold the loan. §3 says
+which loan a return consumes, not who may return it, and the unchecked version let
+any context return any loan and then write the thawed bytes — an authority check
+defeated by calling the function that removes it
+(`the_thread_cannot_return_the_engines_loan`).
 `Tests/Op/StandardLoan.lean` drives it through `step`, which is the part that
 matters — a rule proved about a map the transition does not consult is the defect
 this branch has found repeatedly, so the fixture checks refusal and restoration
@@ -1034,18 +1102,40 @@ refuses everything.
   lifetime has something to mean.
 - **Atomic shared authority, and §3's rule that atomics do not grant ordinary
   non-atomic access.** Neither is stated. `AuthorityGrant` carries no ordering, so
-  there is nothing an atomic authority state could be derived from and the rule has
-  nothing to constrain. This is owed against M8, where `ConsistencyProfile` gives an
-  ordering something to mean; it is recorded here because an `AuthorityState`
-  constructor and a theorem about it existed, were built by nothing, and were
-  deleted rather than carried.
-- **`AuthorityState` has no runtime consumer.** The operational decision is
-  `Grass/Op/LoanAuthority.lean`'s provider, which tests the loan map directly;
-  `loan_refuses_only_the_frozen` bridges the two. That is a defensible split — the
-  type is a specification summary whose purpose is to give §3's laws a statement —
-  but it is recorded rather than assumed, because "a fact nothing consults" is the
-  defect this layer has found repeatedly and the difference is worth a reader
-  checking rather than taking.
+  `authorityOf` — which reads only the grant map — has nothing to derive an atomic
+  state from.
+
+  The rule itself is a different question, and the earlier wording here ("the rule
+  has nothing to constrain") was wrong. `AccessIntent.isAtomic` and
+  `OrderingDemand.atomicity` exist, `WellFormedIn.atomicityAgrees` ties them, and
+  `Permission.Permits` is the sole rights gate on the chain
+  `AuthorityGrant.Authorizes` → `MemoryState.GrantedOfKind` →
+  `AuthorityProvider.loan.refuses` → `step`. `Permission` has no way to express
+  "atomic only", so the rule is not merely unstated at that gate — it is unstatable
+  there, and any grant a profile issues today authorizes an atomic and a non-atomic
+  access indistinguishably. Closing it means a field on `Permission` and a clause in
+  `Permits`, which is a change to a type three layers depend on and is therefore
+  raised rather than taken unilaterally.
+
+  §7.3's issuance sentence is "unique loans prevent **ordinary** conflicting
+  authority from being issued", and `LoanConflicts` has no ordinary/atomic
+  distinction, so `lend?` prevents all conflicting authority. Conservative, and
+  unrecorded until now.
+- **Transferred authority.** §3's fifth entry is "transferred or unavailable";
+  `unavailable` derives from liveness and epoch and nothing represents a transfer.
+  §7.4 makes transfer real ("acquire operations may transfer protected memory
+  authority") and M3's own scope table in §5 lists `transfer` as a loan-map
+  operation.
+- **`LoanConflicts` is a second encoding of §7.3.** `MemoryEvent.Conflicts` is §7.3's
+  sentence with the atomic clause as a `compatible` parameter, and `step` consumes it
+  through `ConflictsWithHistory`. Two Lean encodings of one corpus sentence in one
+  layer is what [FOUNDATION.md](FOUNDATION.md) law 11 forbids. Stating `LoanConflicts`
+  through `MemoryEvent.Conflicts` would fix this and give the atomic clause above a
+  home in M3; it is not done, because the two currently differ in what they range
+  over (grants versus events) and reconciling that is a design question.
+- **Nothing enforces that every `AuthorityState` constructor stays reachable.** Four
+  fixtures exhibit one each. A fifth constructor, or a change that made one
+  unreachable, would be caught by a reader and not by a gate.
 
 ## 5. M3–M5 — The Spike 1 acceptance path
 

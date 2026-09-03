@@ -235,6 +235,19 @@ structure WellFormedIn (d : AccessDescriptor) (space : AddressSpace) : Prop wher
   /-- An access that reads, writes, and executes nothing is not an access.
   `docs/FOUNDATION.md` law 8 forbids treating it as a harmless no-op. -/
   notInert : ¬ d.intent.IsInert
+  /-- An access that names no bytes is not an access either.
+
+  `notInert` above is about *intent* and this is about *extent*, and only the first
+  existed. A read of zero bytes at the offset one past an allocation's end was
+  therefore well formed and admitted: `denialOf` bounds-checks with
+  `ByteRange.Contains`, which places an empty range at `stop` inside the extent,
+  while `ByteRange.Meets` — what the loan map asks — places it outside every range.
+  So the access was undenied, unrefused by the loan rule even over bytes lent for
+  writing, and minted an event. It committed nothing, but law 8's answer to an
+  operation the model has no account of is to reject it, and the two range
+  predicates disagreeing about a position it is the only way to reach is exactly
+  such a case. -/
+  rangeNonEmpty : ¬ d.range.IsEmpty
   /-- The declared space is realizable by this vocabulary version. -/
   spaceWellFormed : space.WellFormed
   /-- The address has the form the space's representation requires. A numeric
@@ -281,7 +294,7 @@ structure WellFormedIn (d : AccessDescriptor) (space : AddressSpace) : Prop wher
 
 instance (d : AccessDescriptor) (space : AddressSpace) :
     Decidable (d.WellFormedIn space) :=
-  if h : space.id = d.space ∧ ¬ d.intent.IsInert ∧ space.WellFormed ∧
+  if h : space.id = d.space ∧ ¬ d.intent.IsInert ∧ ¬ d.range.IsEmpty ∧ space.WellFormed ∧
       space.Representable d.address ∧ d.provenance.space = d.space ∧
       d.provenance.Nested ∧ d.provenance.extent.Contains d.range ∧
       d.AlignmentSatisfied ∧ d.RangeFitsSpace space ∧
@@ -290,17 +303,19 @@ instance (d : AccessDescriptor) (space : AddressSpace) :
       ((d.intent.reads = true) ↔ (d.initialization ≠ .readsNothing)) ∧
       (d.producesInitialized = true → d.intent.writes = true) then
     .isTrue
-      { spaceResolved := h.1, notInert := h.2.1, spaceWellFormed := h.2.2.1
-        addressRepresentable := h.2.2.2.1, spaceAgrees := h.2.2.2.2.1
-        provenanceNested := h.2.2.2.2.2.1, rangeInProvenance := h.2.2.2.2.2.2.1
-        aligned := h.2.2.2.2.2.2.2.1, rangeFitsSpace := h.2.2.2.2.2.2.2.2.1
-        atomicityAgrees := h.2.2.2.2.2.2.2.2.2.1
-        permissionSufficient := h.2.2.2.2.2.2.2.2.2.2.1
-        initializationMatchesIntent := h.2.2.2.2.2.2.2.2.2.2.2.1
-        producesInitializedOnlyIfWrites := h.2.2.2.2.2.2.2.2.2.2.2.2 }
+      { spaceResolved := h.1, notInert := h.2.1, rangeNonEmpty := h.2.2.1
+        spaceWellFormed := h.2.2.2.1
+        addressRepresentable := h.2.2.2.2.1, spaceAgrees := h.2.2.2.2.2.1
+        provenanceNested := h.2.2.2.2.2.2.1, rangeInProvenance := h.2.2.2.2.2.2.2.1
+        aligned := h.2.2.2.2.2.2.2.2.1, rangeFitsSpace := h.2.2.2.2.2.2.2.2.2.1
+        atomicityAgrees := h.2.2.2.2.2.2.2.2.2.2.1
+        permissionSufficient := h.2.2.2.2.2.2.2.2.2.2.2.1
+        initializationMatchesIntent := h.2.2.2.2.2.2.2.2.2.2.2.2.1
+        producesInitializedOnlyIfWrites := h.2.2.2.2.2.2.2.2.2.2.2.2.2 }
   else
     .isFalse fun w =>
-      h ⟨w.spaceResolved, w.notInert, w.spaceWellFormed, w.addressRepresentable,
+      h ⟨w.spaceResolved, w.notInert, w.rangeNonEmpty, w.spaceWellFormed,
+        w.addressRepresentable,
         w.spaceAgrees, w.provenanceNested, w.rangeInProvenance, w.aligned,
         w.rangeFitsSpace, w.atomicityAgrees, w.permissionSufficient,
         w.initializationMatchesIntent, w.producesInitializedOnlyIfWrites⟩

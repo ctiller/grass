@@ -74,12 +74,17 @@ inductive FaultVisibility where
   /-- No step is visible unless all are, the faulting step's own prefix included;
   `faultingEffectVisible` is the second half and `visibleEffects?` the first.
 
-  `justification` names the target theorem `docs/INSTRUCTIONS.md` §4 requires. **It
-  is a name and nothing checks it.** `RequiresJustification` and
-  `SubstepSequence.ClaimsAtomicity` exist so a §10 profile package can enumerate
-  outstanding claims, and no registry holds justification names, so a sequence
-  gets all-or-nothing fault semantics by declaring a string. Recorded as owed in
-  `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 rather than implied to be enforced. -/
+  `justification` names the target theorem `docs/INSTRUCTIONS.md` §4 requires. The
+  name must be one the profile registered in
+  `AdmittedVocabulary.atomicityJustifications`, which `Grass/Op/Step.lean` checks
+  before running anything (`onFaultRuleNotRegistered`); until that registry existed
+  a sequence got all-or-nothing fault semantics by declaring a string.
+
+  **Registration is not discharge.** A registered name says the profile owns the
+  claim, not that it proved it; §10's package is where a claim is discharged, and
+  `RequiresJustification` and `SubstepSequence.ClaimsAtomicity` exist so such a
+  package can enumerate the outstanding ones. Nothing under `Grass/` enumerates
+  them yet, which `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records. -/
   | transactional (justification : Name)
   /-- A visibility rule owned by one profile. This module cannot answer questions
   about it, and `visibleEffects?` says so rather than guessing. -/
