@@ -36,8 +36,22 @@ alongside it — two write paths, framing proved about one, prose implying it
 covered both. Review found it. `commit` is the repair.
 
 What is still true and worth saying plainly: a straight-line argument over
-`runBlock` is an argument about `applyAccess`, not about `step`. The two agree on
-memory, and nothing yet proves they agree on the trace.
+`runBlock` is an argument about `applyAccess`, not about `step`.
+
+**They do not agree, and an earlier version of this paragraph said "the two agree on
+memory".** No theorem stated it and it is false three ways, which review demonstrated.
+`applyAccess` consults `denialOf`; `performAccess` consults `refusalOf`, which is
+`denialOf` plus the ledger, authority-effect, authority-state, loan and race clauses —
+so a store another context holds an exclusive write loan over is committed by one and
+refused by the other. `performAccess` writes the bytes the outcome says committed,
+`applyAccess` writes the data truncated to the range. And `performAccess` commits into
+the map the declared authority effect left, while `applyAccess` cannot change the
+grant map at all, so for any non-empty effect the two leave different states by
+construction.
+
+What the two *do* share is `MemoryState.commit`, which is what the framing laws below
+are about and what the repair above was for. Anything stronger than that is unproved,
+and this paragraph is where it was claimed.
 
 ## What it does not decide
 

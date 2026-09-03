@@ -23,9 +23,11 @@ The base is an `Option`, which was the design question that kept this unwired fo
 several rounds. `docs/MEMORY_MODEL.md` §7.5 makes address spaces
 non-interchangeable and a logical space has allocations with no machine address at
 all, so a mandatory base would force every profile to invent one. And placement is
-not authority: §2 makes provenance decide what an access may touch, `denialOf`
-reads none of this, and two allocations sharing a base are still distinct storage
-unless `MemoryState.aliases` says otherwise.
+not authority in §2's sense: provenance decides what an access may touch, and two
+allocations sharing a base are still distinct storage unless `MemoryState.aliases`
+says otherwise. It is *read* by `denialOf`, in `placementWraps` and
+`addressDisagreesWithPlacement` — this sentence said "reads none of this" for two
+milestones after those clauses landed.
 
 The condition is `FitsAllocation`: the allocation's own bytes do not wrap the
 address space. That is not a modelling convenience. An allocation whose last byte

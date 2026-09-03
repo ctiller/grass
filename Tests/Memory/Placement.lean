@@ -18,8 +18,9 @@ allocations may share a base and remain distinct storage until `MemoryState.alia
 says otherwise; and it is not *authority*, in the narrow sense
 `placement_is_not_authority` states — an unplaced allocation is live, readable and
 writable exactly as a placed one is. What it is not any more is invisible to
-`denialOf`, which reads `base` in two clauses; three docstrings in this tree still
-said otherwise a round after the plan recorded the correction, and this was one.
+`denialOf`, which reads `base` in two clauses; four docstrings in this tree still
+said otherwise a round after the plan recorded the correction, one of them
+thirty-two lines from its own retraction.
 -/
 
 namespace Tests.Memory.Placement

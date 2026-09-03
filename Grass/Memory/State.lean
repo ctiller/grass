@@ -62,8 +62,12 @@ structure AllocationRecord where
   §7.5 makes address spaces non-interchangeable and a logical space — a SPIR-V
   `Private` storage class, say — has allocations with no machine address at all, so
   a mandatory base would force every profile to invent one. Placement is also not
-  authority: §2 makes provenance decide what an access may touch, and nothing in
-  `denialOf` reads this. It is here so `Grass/Memory/Addressing.lean`'s bridge can
+  authority in §2's sense: provenance decides what an access may touch, and two
+  allocations at one base are distinct storage unless `aliases` says otherwise. It is
+  *not* invisible to `denialOf`, which reads this field in `placementWraps` and
+  `addressDisagreesWithPlacement`; this docstring said "nothing in `denialOf` reads
+  this" for two milestones after those clauses landed, thirty-two lines above its own
+  retraction below, and review found it with three copies elsewhere. It is here so `Grass/Memory/Addressing.lean`'s bridge can
   be instantiated, which §4.2 recorded as owed for as long as no allocation carried
   an address.
 
@@ -3027,11 +3031,12 @@ base there was nothing to instantiate it with, and
 `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 recorded the offset-to-address debt as
 undischarged for exactly that reason. These connect the two.
 
-Placement is not authority. `denialOf` reads none of this: `docs/MEMORY_MODEL.md`
-§2 makes provenance decide what an access may touch, and two allocations at one
-base are still distinct storage unless `aliases` says otherwise. What placement
-answers is the different question of whether two offsets name the same machine
-byte. -/
+Placement is not authority in `docs/MEMORY_MODEL.md` §2's sense: provenance decides
+what an access may touch, and two allocations at one base are still distinct storage
+unless `aliases` says otherwise. It is not *unread* by `denialOf`, which is a
+different claim and was made here — `placementWraps` and
+`addressDisagreesWithPlacement` both read the base. What placement answers is the
+further question of whether two offsets name the same machine byte. -/
 
 /-- The machine address of an offset in `id`, if `id` is placed at all. -/
 def addressAt? (state : MemoryState) (id : AllocId) (offset : Nat) :
