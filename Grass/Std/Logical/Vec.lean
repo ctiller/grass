@@ -368,6 +368,115 @@ theorem get?_take (v : Vec α) (n i : Nat) :
 theorem get?_drop (v : Vec α) (n i : Nat) : (v.drop n).get? i = v.get? (n + i) := by
   simp [get?, drop]
 
+
+/-!
+## Prefixes and suffixes
+
+`docs/SPIKE_PROOF_BURDEN.md` classifies four burdens across three spikes as
+`library-instance`, and all four are the same shape:
+`write_all_loop(payload)` is "standard partial-write induction over the derived
+payload suffix", `buffered_stdout(..., committedPrefix)` and
+`SliceConsumerInvariant(output, consumed, outLen)` are each a "standard
+partial-write consumer", and `crc32_prefix(transferred - remaining)` is a
+"standard CRC prefix theorem". The word doing the work in each row is
+*standard*: the ledger expects one reusable library theorem, not four authored
+proofs.
+
+`docs/STDLIB.md` §6 draws the line for where those live. Machine-state templates
+such as `SliceConsumerInvariant` belong to the CFG proof library, because "the
+pure library owns ordered-sequence and slice laws, while the CFG layer connects
+those laws to selected registers, pointers, provenance, and loans." This section
+is the pure half: what a committed prefix and an unwritten suffix are, and how
+they behave when a write commits more. Nothing here mentions a register, a
+handle, or a byte.
+
+The loop those four share maintains a written count `n` against a payload `v`.
+The unwritten suffix is `v.drop n`; the committed prefix is `v.take n`;
+`Vec.append_splitAt` says they reconstruct `v` at every step;
+`Vec.take_add` says a step of `k` commits exactly the next `k` elements and no
+others; and `Vec.length_drop_lt_of_pos` is why the loop terminates.
+-/
+
+/-- `v.IsPrefix w` holds when `w` begins with `v`. -/
+def IsPrefix (v w : Vec α) : Prop := ∃ rest : Vec α, v ++ rest = w
+
+@[simp] theorem take_zero (v : Vec α) : v.take 0 = empty := by
+  apply toList_injective
+  simp [take, empty]
+
+@[simp] theorem drop_zero (v : Vec α) : v.drop 0 = v := by
+  apply toList_injective
+  simp [drop]
+
+@[simp] theorem drop_drop (v : Vec α) (n m : Nat) : (v.drop n).drop m = v.drop (n + m) := by
+  apply toList_injective
+  simp [drop]
+
+theorem take_take (v : Vec α) (n m : Nat) : (v.take n).take m = v.take (min m n) := by
+  apply toList_injective
+  simp [take, List.take_take]
+
+/-- The unwritten suffix is empty exactly when everything has been written. This is
+the loop's exit test, stated over the sequence rather than over a counter. -/
+theorem drop_eq_empty_iff (v : Vec α) (n : Nat) : v.drop n = empty ↔ v.length ≤ n := by
+  constructor
+  · intro h
+    have : v.toList.drop n = [] := congrArg toList h
+    exact List.drop_eq_nil_iff.mp this
+  · intro h
+    apply toList_injective
+    simpa [drop, empty] using List.drop_eq_nil_of_le h
+
+/--
+A step of `k` commits exactly the next `k` elements.
+
+This is `docs/STDLIB.md` §6's "positive partial writes commit exact prefixes and
+retain the unique unwritten suffix", at the sequence level: after `n` written,
+writing `k` more extends the committed prefix by `(v.drop n).take k` and by
+nothing else.
+-/
+theorem take_add (v : Vec α) (n k : Nat) :
+    v.take (n + k) = v.take n ++ (v.drop n).take k := by
+  apply toList_injective
+  simp [take, drop, List.take_add]
+
+/-- A positive step strictly shortens the unwritten suffix while any of it remains.
+This is the loop variant: without it a provider reporting zero progress would be
+indistinguishable from one making progress, which is the `noProgress` outcome
+`Spikes/1_Hello_World` gives its own terminal. -/
+theorem length_drop_lt_of_pos (v : Vec α) {n k : Nat} (hk : 0 < k) (hn : n < v.length) :
+    (v.drop (n + k)).length < (v.drop n).length := by
+  simp only [length_drop]
+  omega
+
+@[simp] theorem isPrefix_refl (v : Vec α) : v.IsPrefix v := ⟨empty, append_empty v⟩
+
+theorem IsPrefix.trans {u v w : Vec α} (h₁ : u.IsPrefix v) (h₂ : v.IsPrefix w) :
+    u.IsPrefix w := by
+  obtain ⟨r₁, hr₁⟩ := h₁
+  obtain ⟨r₂, hr₂⟩ := h₂
+  exact ⟨r₁ ++ r₂, by rw [← append_assoc, hr₁, hr₂]⟩
+
+theorem IsPrefix.length_le {v w : Vec α} (h : v.IsPrefix w) : v.length ≤ w.length := by
+  obtain ⟨rest, hrest⟩ := h
+  have := congrArg length hrest
+  simp only [length_append] at this
+  omega
+
+/-- Every committed prefix is a prefix of the whole. -/
+theorem take_isPrefix (v : Vec α) (n : Nat) : (v.take n).IsPrefix v :=
+  ⟨v.drop n, append_splitAt v n⟩
+
+/-- The committed prefix only grows. This is the conservation property a
+partial-write consumer needs: no step can retract what an earlier step
+committed. -/
+theorem take_isPrefix_take (v : Vec α) {n m : Nat} (h : n ≤ m) :
+    (v.take n).IsPrefix (v.take m) := by
+  refine ⟨(v.drop n).take (m - n), ?_⟩
+  rw [← take_add]
+  congr 1
+  omega
+
 /-!
 ## Algebra
 -/
