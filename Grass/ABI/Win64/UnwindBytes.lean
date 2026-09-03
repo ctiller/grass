@@ -703,17 +703,74 @@ deriving DecidableEq, Repr, Inhabited
 namespace PdataSection
 
 /--
+Whether consecutive entries are disjoint: each ends no later than the next
+begins.
+
+Ascending start addresses are *necessary* for the binary search but not
+sufficient, and the gap is a real failure rather than a technicality. Entries
+`[0x00, 0x100)` and `[0x10, 0x20)` have ascending starts. A search for `0x50`
+lands on the second, finds `0x50` outside it, and reports nothing -- so the
+function covering `0x00..0x100` unwinds as a leaf everywhere above `0x20`.
+Requiring `end_ ≤ begin_` between neighbours rules that out, and together with
+`RuntimeFunction.Nonempty` it implies the ascending order rather than needing it
+separately; `WellFormed.ascends` derives that.
+
+An earlier version of this definition asked only for ascending starts, and
+`enclosing_not_wellFormed` is the table it wrongly accepted.
+-/
+def separated : List RuntimeFunction → Bool
+  | [] => true
+  | [_] => true
+  | f :: g :: rest => f.end_.ule g.begin_ && separated (g :: rest)
+
+/-- Consecutive entries are disjoint. -/
+def Separated (l : List RuntimeFunction) : Prop := separated l = true
+
+instance (l : List RuntimeFunction) : Decidable (Separated l) :=
+  inferInstanceAs (Decidable (_ = true))
+
+/--
 The table is searchable and its entries are sane.
 
-Ascending start addresses is the condition the binary search needs; nonempty
-ranges rule out the degenerate entry that matches no address at all.
+Disjoint consecutive ranges are what the binary search needs; nonempty ranges
+rule out the degenerate entry that matches no address at all. Ascending starts
+follow rather than being assumed -- see `WellFormed.ascends`.
 -/
 def WellFormed (s : PdataSection) : Prop :=
-  Ascends (s.functions.map RuntimeFunction.begin_) ∧
-    ∀ f ∈ s.functions, f.Nonempty
+  Separated s.functions ∧ ∀ f ∈ s.functions, f.Nonempty
 
 instance (s : PdataSection) : Decidable s.WellFormed :=
   inferInstanceAs (Decidable (_ ∧ _))
+
+private theorem ascends_of_separated :
+    ∀ l : List RuntimeFunction, Separated l → (∀ f ∈ l, f.Nonempty) →
+      Ascends (l.map RuntimeFunction.begin_)
+  | [], _, _ => ascends_nil
+  | [_], _, _ => ascends_singleton _
+  | f :: g :: rest, hsep, hne => by
+      simp only [Separated, separated, Bool.and_eq_true] at hsep
+      have hfne : f.Nonempty := hne f (by simp)
+      have htail := ascends_of_separated (g :: rest) hsep.2
+        (fun x hx => hne x (List.mem_cons_of_mem _ hx))
+      simp only [List.map_cons, Ascends, ascends, Bool.and_eq_true]
+      refine ⟨?_, ?_⟩
+      · have hfg := hsep.1
+        simp only [RuntimeFunction.Nonempty, BitVec.ult, BitVec.ule,
+          decide_eq_true_eq] at hfne hfg ⊢
+        omega
+      · simpa [Ascends, List.map_cons] using htail
+
+/--
+**Start addresses ascend.**
+
+The property `RtlLookupFunctionEntry`'s binary search is usually stated in terms
+of, here derived from disjointness rather than assumed alongside it. That is the
+point: assuming it alone is exactly what let an enclosing entry hide a later
+one.
+-/
+theorem WellFormed.ascends {s : PdataSection} (h : s.WellFormed) :
+    Ascends (s.functions.map RuntimeFunction.begin_) :=
+  ascends_of_separated s.functions h.1 h.2
 
 /-- The section bytes. -/
 def toBytes (s : PdataSection) : ByteSeq :=
@@ -735,11 +792,96 @@ invariant survives the recursion the search performs. -/
 theorem WellFormed.tail {f : RuntimeFunction} {rest : List RuntimeFunction}
     (h : (PdataSection.mk (f :: rest)).WellFormed) :
     (PdataSection.mk rest).WellFormed := by
-  obtain ⟨hasc, hne⟩ := h
+  obtain ⟨hsep, hne⟩ := h
   refine ⟨?_, fun g hg => hne g (List.mem_cons_of_mem _ hg)⟩
-  simpa using (Ascends.tail (by simpa using hasc))
+  match rest with
+  | [] => exact rfl
+  | g :: more =>
+      simp only [Separated, separated, Bool.and_eq_true] at hsep
+      exact hsep.2
+
+/--
+An entry enclosing a later one is rejected.
+
+Kept as a theorem rather than a comment because it is the table the previous
+definition accepted. Both entries begin in ascending order; the second lies
+entirely inside the first, and every address in `0x20..0x100` is unreachable for
+a search that has already passed the second entry's start.
+-/
+theorem enclosing_not_wellFormed :
+    ¬ (PdataSection.mk
+        [ { begin_ := 0x00, end_ := 0x100, unwindInfo := 0x1000 }
+        , { begin_ := 0x10, end_ := 0x020, unwindInfo := 0x1010 } ]).WellFormed := by
+  decide
+
+/-- The same two functions laid out without overlap are accepted, so the
+rejection above is about the enclosure and not about the addresses. -/
+theorem adjacent_wellFormed :
+    (PdataSection.mk
+      [ { begin_ := 0x00, end_ := 0x100, unwindInfo := 0x1000 }
+      , { begin_ := 0x100, end_ := 0x120, unwindInfo := 0x1010 } ]).WellFormed := by
+  decide
+
+/-- A descending table is rejected, which is the weaker condition the previous
+definition did check. -/
+theorem descending_not_wellFormed :
+    ¬ (PdataSection.mk
+        [ { begin_ := 0x100, end_ := 0x120, unwindInfo := 0x1000 }
+        , { begin_ := 0x000, end_ := 0x010, unwindInfo := 0x1010 } ]).WellFormed := by
+  decide
 
 end PdataSection
+
+/--
+A `.pdata` section carrying the proof that the runtime can search it.
+
+`PdataSection.WellFormed` was a predicate nobody had to satisfy:
+`PdataSection.toBytes` serialises any list of entries, so a table that is
+descending, overlapping or degenerate produces bytes exactly as readily as a
+good one. A reviewer made the point that a condition stated where the bytes are
+*not* produced constrains nothing.
+
+This is the same shape as `UnwindInfo`: the obligation is a field, so the value
+cannot exist without it, and `mk?` discharges it for a caller who has a concrete
+list. `toBytes` here delegates to the section's, so the only way to reach it
+through this type is with the proof in hand.
+-/
+structure SearchablePdata where
+  /-- The section. -/
+  table : PdataSection
+  /-- `RtlLookupFunctionEntry` can find every entry in it. -/
+  searchable : table.WellFormed
+
+namespace SearchablePdata
+
+/-- Build a searchable section from entries, or refuse. -/
+def mk? (functions : List RuntimeFunction) : Option SearchablePdata :=
+  if h : (PdataSection.mk functions).WellFormed then some ⟨_, h⟩ else none
+
+/-- `mk?` succeeds exactly on the tables the runtime can search. -/
+theorem mk?_isSome_iff (functions : List RuntimeFunction) :
+    (mk? functions).isSome ↔ (PdataSection.mk functions).WellFormed := by
+  unfold mk?
+  by_cases h : (PdataSection.mk functions).WellFormed
+  case pos => rw [dif_pos h]; simp [h]
+  case neg => rw [dif_neg h]; simp [h]
+
+/-- The bytes of the underlying section. -/
+def toBytes (s : SearchablePdata) : ByteSeq := s.table.toBytes
+
+/-- Twelve bytes per entry, as for the section itself. -/
+@[simp] theorem length_toBytes (s : SearchablePdata) :
+    s.toBytes.length = 12 * s.table.functions.length :=
+  s.table.length_toBytes
+
+/-- The enclosing table has no `SearchablePdata`, so no bytes can be produced
+for it through this type. -/
+theorem enclosing_refused :
+    mk? [ { begin_ := 0x00, end_ := 0x100, unwindInfo := 0x1000 }
+        , { begin_ := 0x10, end_ := 0x020, unwindInfo := 0x1010 } ] = none := by
+  decide
+
+end SearchablePdata
 
 /-! ## Spike 1
 
