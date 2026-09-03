@@ -1445,6 +1445,27 @@ fn apply_review_merge_authorized(
             )));
         }
     }
+    // AGENT_BUS_SCHEMA.md section 10: "Only unresolved issues whose `blocks`
+    // set names an event in the active nomination chain block
+    // authorization." A resolved/rejected (Terminal) issue never blocks,
+    // even if its `blocks` set still names a chain event -- disposition is
+    // permanent, so there is nothing left to re-check once it fires.
+    for issue in state.issues.values() {
+        if matches!(issue.status, ItemStatus::Terminal(_)) {
+            continue;
+        }
+        if let Some(blocked) = issue
+            .data
+            .blocks
+            .iter()
+            .find(|b| chain.nomination_events.contains(b))
+        {
+            return Err(invalid(format!(
+                "{}: unresolved issue {} blocks authorization via nomination-chain event {blocked}",
+                env.id, issue.id
+            )));
+        }
+    }
     let chain_mut = state
         .review_chain_mut(&d.nomination)
         .expect("checked above");
@@ -3432,5 +3453,2007 @@ mod tests {
         );
         apply_ok(&mut state, &env);
         assert!(state.broadcast_seen_by[&broadcast_env.id].contains(&alice));
+    }
+
+    // ------------------------------------------------------------ handoffs
+
+    fn handoff_offer(receiver: &Agent) -> HandoffOffered {
+        HandoffOffered {
+            receiver: receiver.clone(),
+            scope: StringSet::default(),
+            product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            product_commit: hash(5),
+            verification: vec![],
+            known_issues: StringSet::default(),
+            evidence: StringSet::default(),
+            summary: text("done"),
+        }
+    }
+
+    #[test]
+    fn handoff_offer_then_accept_round_trips() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+
+        let offer_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::HandoffOffered(handoff_offer(&bob)),
+            [],
+        );
+        apply_ok(&mut state, &offer_env);
+        assert_eq!(state.handoffs[&offer_env.id].status, ItemStatus::Open);
+
+        let accept_env = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&offer_env.id]),
+            &EventData::HandoffAccepted(HandoffAccepted {
+                handoff: offer_env.id.clone(),
+                note: text(""),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &accept_env);
+        assert_eq!(
+            state.handoffs[&offer_env.id].status,
+            ItemStatus::Terminal("accepted")
+        );
+    }
+
+    #[test]
+    fn handoff_decline_by_the_receiver_succeeds() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        let offer_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::HandoffOffered(handoff_offer(&bob)),
+            [],
+        );
+        apply_ok(&mut state, &offer_env);
+
+        let decline_env = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&offer_env.id]),
+            &EventData::HandoffDeclined(HandoffDeclined {
+                handoff: offer_env.id.clone(),
+                reason: text("not my area"),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &decline_env);
+        assert_eq!(
+            state.handoffs[&offer_env.id].status,
+            ItemStatus::Terminal("declined")
+        );
+    }
+
+    #[test]
+    fn handoff_withdraw_by_the_offerer_succeeds() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        let offer_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::HandoffOffered(handoff_offer(&bob)),
+            [],
+        );
+        apply_ok(&mut state, &offer_env);
+
+        let withdraw_env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&offer_env.id]),
+            &EventData::HandoffWithdrawn(HandoffWithdrawn {
+                handoff: offer_env.id.clone(),
+                reason: text("plans changed"),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &withdraw_env);
+        assert_eq!(
+            state.handoffs[&offer_env.id].status,
+            ItemStatus::Terminal("withdrawn")
+        );
+    }
+
+    #[test]
+    fn rejects_a_handoff_offer_from_a_non_implementor() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Reviewer));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        let offer_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::HandoffOffered(handoff_offer(&bob)),
+            [],
+        );
+        let err = apply_event(&mut state, &offer_env).unwrap_err();
+        assert!(err.to_string().contains("does not have role"), "{err}");
+    }
+
+    #[test]
+    fn rejects_a_handoff_offer_to_an_unregistered_receiver() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        let offer_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::HandoffOffered(handoff_offer(&a("bob"))),
+            [],
+        );
+        let err = apply_event(&mut state, &offer_env).unwrap_err();
+        assert!(err.to_string().contains("unregistered agent"), "{err}");
+    }
+
+    #[test]
+    fn rejects_handoff_accept_by_a_non_receiver() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        apply_ok(&mut state, &register(&carol, Role::Implementor));
+        let offer_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::HandoffOffered(handoff_offer(&bob)),
+            [],
+        );
+        apply_ok(&mut state, &offer_env);
+
+        let accept_env = Envelope::new(
+            &carol,
+            1,
+            frontier_seeing(&[&offer_env.id]),
+            &EventData::HandoffAccepted(HandoffAccepted {
+                handoff: offer_env.id.clone(),
+                note: text(""),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &accept_env).unwrap_err();
+        assert!(
+            err.to_string().contains("only the receiver may dispose"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_handoff_decline_by_a_non_receiver() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        apply_ok(&mut state, &register(&carol, Role::Implementor));
+        let offer_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::HandoffOffered(handoff_offer(&bob)),
+            [],
+        );
+        apply_ok(&mut state, &offer_env);
+
+        let decline_env = Envelope::new(
+            &carol,
+            1,
+            frontier_seeing(&[&offer_env.id]),
+            &EventData::HandoffDeclined(HandoffDeclined {
+                handoff: offer_env.id.clone(),
+                reason: text("not my problem"),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &decline_env).unwrap_err();
+        assert!(
+            err.to_string().contains("only the receiver may dispose"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_handoff_withdraw_by_a_non_offerer() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        let offer_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::HandoffOffered(handoff_offer(&bob)),
+            [],
+        );
+        apply_ok(&mut state, &offer_env);
+
+        // bob is the receiver, not the offerer.
+        let withdraw_env = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&offer_env.id]),
+            &EventData::HandoffWithdrawn(HandoffWithdrawn {
+                handoff: offer_env.id.clone(),
+                reason: text("r"),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &withdraw_env).unwrap_err();
+        assert!(
+            err.to_string().contains("only the offerer may withdraw"),
+            "{err}"
+        );
+    }
+
+    /// Pins down the actual (non-`LifecycleConflict`) behavior for a second
+    /// disposal attempt that causally observed the first: `apply_handoff_
+    /// terminal` routes every disposal through the same `ExclusiveTracker`
+    /// used for issue/dependency/review terminal transitions, and a
+    /// candidate that observed an existing group member is hard-rejected
+    /// outright by `ExclusiveTracker::record` -- it never gets the chance to
+    /// become a second, genuinely concurrent candidate the way an
+    /// unaware-of-each-other race would.
+    #[test]
+    fn rejects_disposing_of_an_already_terminal_handoff() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        let offer_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::HandoffOffered(handoff_offer(&bob)),
+            [],
+        );
+        apply_ok(&mut state, &offer_env);
+
+        let accept_env = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&offer_env.id]),
+            &EventData::HandoffAccepted(HandoffAccepted {
+                handoff: offer_env.id.clone(),
+                note: text(""),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &accept_env);
+
+        let decline_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&offer_env.id, &accept_env.id]),
+            &EventData::HandoffDeclined(HandoffDeclined {
+                handoff: offer_env.id.clone(),
+                reason: text("changed my mind"),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &decline_env).unwrap_err();
+        assert!(
+            err.to_string().contains("already causally observed"),
+            "{err}"
+        );
+        assert_eq!(
+            state.handoffs[&offer_env.id].status,
+            ItemStatus::Terminal("accepted"),
+            "the rejected second attempt must not disturb the confirmed disposition"
+        );
+    }
+
+    /// Mirrors `review_decline_and_reassign_race_produces_a_lifecycle_
+    /// conflict` for handoffs. Accept/decline are both only ever authored by
+    /// the receiver, so those two can never race (one stream is always
+    /// ordered relative to itself); withdraw (offerer) vs accept (receiver)
+    /// is the one combination that can, since the two are different agents'
+    /// mutually-unaware streams.
+    #[test]
+    fn handoff_accept_and_withdraw_race_produces_a_lifecycle_conflict() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let offer_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::HandoffOffered(handoff_offer(&bob)),
+            [],
+        );
+        let accept_env = Envelope::new(
+            &bob,
+            1,
+            no_frontier(),
+            &EventData::HandoffAccepted(HandoffAccepted {
+                handoff: offer_env.id.clone(),
+                note: text(""),
+            }),
+            [],
+        );
+        let withdraw_env = Envelope::new(
+            &alice,
+            2,
+            no_frontier(),
+            &EventData::HandoffWithdrawn(HandoffWithdrawn {
+                handoff: offer_env.id.clone(),
+                reason: text("changed plans"),
+            }),
+            [],
+        );
+
+        let mut forward = empty_state(&[]);
+        apply_ok(&mut forward, &register(&alice, Role::Implementor));
+        apply_ok(&mut forward, &register(&bob, Role::Implementor));
+        apply_ok(&mut forward, &offer_env);
+        apply_ok(&mut forward, &accept_env);
+        apply_ok(&mut forward, &withdraw_env);
+
+        let mut reverse = empty_state(&[]);
+        apply_ok(&mut reverse, &register(&alice, Role::Implementor));
+        apply_ok(&mut reverse, &register(&bob, Role::Implementor));
+        apply_ok(&mut reverse, &offer_env);
+        apply_ok(&mut reverse, &withdraw_env);
+        apply_ok(&mut reverse, &accept_env);
+
+        for (label, state) in [("forward", &forward), ("reverse", &reverse)] {
+            assert_eq!(
+                state.handoffs[&offer_env.id].status,
+                ItemStatus::LifecycleConflict,
+                "{label} order"
+            );
+            assert!(
+                state.exclusive.is_contested(&accept_env.id),
+                "{label} order"
+            );
+            assert!(
+                state.exclusive.is_contested(&withdraw_env.id),
+                "{label} order"
+            );
+        }
+    }
+
+    // ------------------------------------------------------- schema/merge engine
+
+    #[test]
+    fn schema_activated_requires_a_strictly_increasing_version() {
+        let mut state = empty_state(&[("coord1", Role::Coordinator)]);
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+
+        let activate = |version: u32| {
+            EventData::SchemaActivated(SchemaActivated {
+                version,
+                design_commit: hash(1),
+                helper_commit: hash(2),
+            })
+        };
+        let first_env = Envelope::new(&coord1, 1, no_frontier(), &activate(2), []);
+        apply_ok(&mut state, &first_env);
+        assert_eq!(state.activated_schema_version, 2);
+
+        let same_version_env = Envelope::new(&coord1, 2, no_frontier(), &activate(2), []);
+        let err = apply_event(&mut state, &same_version_env).unwrap_err();
+        assert!(err.to_string().contains("is not greater than"), "{err}");
+
+        let lower_version_env = Envelope::new(&coord1, 2, no_frontier(), &activate(1), []);
+        let err = apply_event(&mut state, &lower_version_env).unwrap_err();
+        assert!(err.to_string().contains("is not greater than"), "{err}");
+    }
+
+    #[test]
+    fn rejects_schema_activated_by_a_non_coordinator() {
+        let mut state = empty_state(&[("alice", Role::Implementor)]);
+        let alice = a("alice");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        let env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::SchemaActivated(SchemaActivated {
+                version: 2,
+                design_commit: hash(1),
+                helper_commit: hash(2),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(err.to_string().contains("is not a coordinator"), "{err}");
+    }
+
+    /// `apply_merge_engine_activated` requires `previous_epoch` to already
+    /// be a known prior activation -- there is no implicit genesis, so tests
+    /// that need one seed `state.merge_engine_info` directly, standing in
+    /// for whatever earlier migration/bootstrap event would have recorded
+    /// the real genesis epoch.
+    fn seed_merge_engine_genesis(state: &mut BusState) -> EventId {
+        let genesis = EventId::new(&a("coord1"), 0);
+        state.merge_engine_info.insert(
+            genesis.clone(),
+            (
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+            ),
+        );
+        genesis
+    }
+
+    fn merge_engine_activated(previous_epoch: &EventId) -> MergeEngineActivated {
+        MergeEngineActivated {
+            previous_epoch: previous_epoch.clone(),
+            merge_engine: short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+            merge_engine_version: short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+            design_commit: hash(1),
+            helper_commit: hash(2),
+        }
+    }
+
+    #[test]
+    fn merge_engine_activated_happy_path_advances_the_current_epoch() {
+        let mut state = empty_state(&[("coord1", Role::Coordinator)]);
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let genesis = seed_merge_engine_genesis(&mut state);
+
+        let env = Envelope::new(
+            &coord1,
+            1,
+            no_frontier(),
+            &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
+            [],
+        );
+        apply_ok(&mut state, &env);
+        assert_eq!(state.current_merge_engine_epoch, Some(env.id.clone()));
+        assert!(state.merge_engine_info.contains_key(&env.id));
+    }
+
+    #[test]
+    fn rejects_merge_engine_activated_with_an_unknown_previous_epoch() {
+        let mut state = empty_state(&[("coord1", Role::Coordinator)]);
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let env = Envelope::new(
+            &coord1,
+            1,
+            no_frontier(),
+            &EventData::MergeEngineActivated(merge_engine_activated(&EventId::new(&coord1, 0))),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("is not a known prior engine activation"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_merge_engine_activated_by_a_non_coordinator() {
+        let mut state = empty_state(&[("alice", Role::Implementor)]);
+        let alice = a("alice");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        let genesis = seed_merge_engine_genesis(&mut state);
+        let env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(err.to_string().contains("is not a coordinator"), "{err}");
+    }
+
+    #[test]
+    fn rejects_merge_engine_activated_with_an_unsupported_engine() {
+        let mut state = empty_state(&[("coord1", Role::Coordinator)]);
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let genesis = seed_merge_engine_genesis(&mut state);
+        let mut data = merge_engine_activated(&genesis);
+        data.merge_engine = short("some-other-engine");
+        let env = Envelope::new(
+            &coord1,
+            1,
+            no_frontier(),
+            &EventData::MergeEngineActivated(data),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string().contains("unsupported merge_engine"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_merge_engine_activated_when_previous_epoch_is_itself_contested() {
+        let mut state =
+            empty_state(&[("coord1", Role::Coordinator), ("coord2", Role::Coordinator)]);
+        let coord1 = a("coord1");
+        let coord2 = a("coord2");
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        apply_ok(&mut state, &register(&coord2, Role::Coordinator));
+        let genesis = seed_merge_engine_genesis(&mut state);
+
+        // Two genuinely concurrent activations both built off `genesis`,
+        // from different coordinators, neither observing the other.
+        let candidate_a = Envelope::new(
+            &coord1,
+            1,
+            no_frontier(),
+            &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
+            [],
+        );
+        let candidate_b = Envelope::new(
+            &coord2,
+            1,
+            no_frontier(),
+            &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
+            [],
+        );
+        apply_ok(&mut state, &candidate_a);
+        apply_ok(&mut state, &candidate_b);
+        assert!(state.exclusive.is_contested(&candidate_a.id));
+
+        let downstream = Envelope::new(
+            &coord1,
+            2,
+            no_frontier(),
+            &EventData::MergeEngineActivated(merge_engine_activated(&candidate_a.id)),
+            [],
+        );
+        let err = apply_event(&mut state, &downstream).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("is itself part of an unresolved lifecycle conflict"),
+            "{err}"
+        );
+    }
+
+    /// Adversarial-review note: unlike the issue/dependency/handoff/review
+    /// terminal handlers, `apply_merge_engine_activated` has no `reset_*_
+    /// to_conflict` counterpart for `current_merge_engine_epoch` -- a
+    /// candidate that already won provisionally (as the sole member so far)
+    /// is never unwound back to a neutral value once a second, genuinely
+    /// concurrent candidate arrives and turns its group contested. This
+    /// pins down that actual asymmetry as a baseline; it is not a statement
+    /// that the current behavior is correct.
+    #[test]
+    fn merge_engine_race_leaves_current_epoch_stuck_at_the_first_provisional_winner() {
+        let mut state =
+            empty_state(&[("coord1", Role::Coordinator), ("coord2", Role::Coordinator)]);
+        let coord1 = a("coord1");
+        let coord2 = a("coord2");
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        apply_ok(&mut state, &register(&coord2, Role::Coordinator));
+        let genesis = seed_merge_engine_genesis(&mut state);
+
+        let candidate_a = Envelope::new(
+            &coord1,
+            1,
+            no_frontier(),
+            &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
+            [],
+        );
+        apply_ok(&mut state, &candidate_a);
+        assert_eq!(
+            state.current_merge_engine_epoch,
+            Some(candidate_a.id.clone())
+        );
+
+        let candidate_b = Envelope::new(
+            &coord2,
+            1,
+            no_frontier(),
+            &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
+            [],
+        );
+        apply_ok(&mut state, &candidate_b);
+        assert!(state.exclusive.is_contested(&candidate_a.id));
+        assert!(state.exclusive.is_contested(&candidate_b.id));
+        assert_eq!(state.current_merge_engine_epoch, Some(candidate_a.id));
+    }
+
+    // ------------------------------------------------ dependency lifecycle
+
+    fn dependency_request(target: &Agent) -> DependencyRequested {
+        DependencyRequested {
+            target: target.clone(),
+            interface: short("x"),
+            needed_by: text("soon"),
+            blocking: false,
+            summary: text("s"),
+            evidence: StringSet::default(),
+        }
+    }
+
+    #[test]
+    fn rejects_a_dependency_request_naming_an_unregistered_target() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        let env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::DependencyRequested(dependency_request(&a("bob"))),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(err.to_string().contains("unregistered agent"), "{err}");
+    }
+
+    #[test]
+    fn dependency_ack_then_resolve_round_trips() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+
+        let dep_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::DependencyRequested(dependency_request(&bob)),
+            [],
+        );
+        apply_ok(&mut state, &dep_env);
+
+        let ack_env = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&dep_env.id]),
+            &EventData::DependencyAcknowledged(DependencyAcknowledged {
+                dependency: dep_env.id.clone(),
+                assignment: dep_env.id.clone(),
+                note: text(""),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &ack_env);
+        assert!(state.dependencies[&dep_env.id].acknowledged());
+
+        let resolve_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&dep_env.id]),
+            &EventData::DependencyResolved(DependencyResolved {
+                dependency: dep_env.id.clone(),
+                assignment: dep_env.id.clone(),
+                summary: text("done"),
+                product_commit: None,
+                verification: vec![],
+            }),
+            [],
+        );
+        apply_ok(&mut state, &resolve_env);
+        assert_eq!(
+            state.dependencies[&dep_env.id].status,
+            ItemStatus::Terminal("resolved")
+        );
+    }
+
+    #[test]
+    fn dependency_reject_marks_it_terminal() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        let dep_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::DependencyRequested(dependency_request(&bob)),
+            [],
+        );
+        apply_ok(&mut state, &dep_env);
+
+        let reject_env = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&dep_env.id]),
+            &EventData::DependencyRejected(DependencyRejected {
+                dependency: dep_env.id.clone(),
+                assignment: dep_env.id.clone(),
+                reason: text("not needed"),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &reject_env);
+        assert_eq!(
+            state.dependencies[&dep_env.id].status,
+            ItemStatus::Terminal("rejected")
+        );
+    }
+
+    #[test]
+    fn rejects_dependency_ack_by_a_non_target() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        apply_ok(&mut state, &register(&carol, Role::Implementor));
+        let dep_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::DependencyRequested(dependency_request(&bob)),
+            [],
+        );
+        apply_ok(&mut state, &dep_env);
+
+        let ack_env = Envelope::new(
+            &carol,
+            1,
+            frontier_seeing(&[&dep_env.id]),
+            &EventData::DependencyAcknowledged(DependencyAcknowledged {
+                dependency: dep_env.id.clone(),
+                assignment: dep_env.id.clone(),
+                note: text(""),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &ack_env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("only that assignment's target may acknowledge this dependency"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_dependency_ack_referencing_an_unknown_assignment() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        let dep_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::DependencyRequested(dependency_request(&bob)),
+            [],
+        );
+        apply_ok(&mut state, &dep_env);
+
+        let bogus_assignment = EventId::new(&alice, 99);
+        let ack_env = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&dep_env.id]),
+            &EventData::DependencyAcknowledged(DependencyAcknowledged {
+                dependency: dep_env.id.clone(),
+                assignment: bogus_assignment,
+                note: text(""),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &ack_env).unwrap_err();
+        assert!(err.to_string().contains("unknown assignment"), "{err}");
+    }
+
+    #[test]
+    fn rejects_a_double_dependency_acknowledgement() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        let dep_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::DependencyRequested(dependency_request(&bob)),
+            [],
+        );
+        apply_ok(&mut state, &dep_env);
+
+        let ack_data = || {
+            EventData::DependencyAcknowledged(DependencyAcknowledged {
+                dependency: dep_env.id.clone(),
+                assignment: dep_env.id.clone(),
+                note: text(""),
+            })
+        };
+        let ack_env = Envelope::new(&bob, 1, frontier_seeing(&[&dep_env.id]), &ack_data(), []);
+        apply_ok(&mut state, &ack_env);
+
+        let second_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&dep_env.id, &ack_env.id]),
+            &ack_data(),
+            [],
+        );
+        let err = apply_event(&mut state, &second_env).unwrap_err();
+        assert!(
+            err.to_string().contains("dependency already acknowledged"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_dependency_ack_against_a_superseded_assignment() {
+        let mut state = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Implementor),
+            ("carol", Role::Implementor),
+        ]);
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        apply_ok(&mut state, &register(&carol, Role::Implementor));
+        let dep_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::DependencyRequested(dependency_request(&bob)),
+            [],
+        );
+        apply_ok(&mut state, &dep_env);
+
+        let reassign_env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&dep_env.id]),
+            &EventData::DependencyReassigned(DependencyReassigned {
+                dependency: dep_env.id.clone(),
+                previous_assignment: dep_env.id.clone(),
+                previous_target: bob.clone(),
+                new_target: carol.clone(),
+                reason: text("bob is busy"),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &reassign_env);
+
+        // bob still tries to acknowledge the now-superseded original
+        // assignment rather than the reassignment's new one.
+        let ack_env = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&dep_env.id]),
+            &EventData::DependencyAcknowledged(DependencyAcknowledged {
+                dependency: dep_env.id.clone(),
+                assignment: dep_env.id.clone(),
+                note: text(""),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &ack_env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("is not the dependency's current assignment"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_dependency_reassignment_with_a_mismatched_previous_target() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        apply_ok(&mut state, &register(&carol, Role::Implementor));
+        let dep_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::DependencyRequested(dependency_request(&bob)),
+            [],
+        );
+        apply_ok(&mut state, &dep_env);
+
+        let reassign_env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&dep_env.id]),
+            &EventData::DependencyReassigned(DependencyReassigned {
+                dependency: dep_env.id.clone(),
+                previous_assignment: dep_env.id.clone(),
+                previous_target: carol.clone(), // actual target is bob
+                new_target: carol.clone(),
+                reason: text("r"),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &reassign_env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("does not match assignment's actual target"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_dependency_reassignment_by_neither_requester_nor_coordinator() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        apply_ok(&mut state, &register(&carol, Role::Implementor));
+        let dep_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::DependencyRequested(dependency_request(&bob)),
+            [],
+        );
+        apply_ok(&mut state, &dep_env);
+
+        // carol is neither the requester (alice) nor a coordinator.
+        let reassign_env = Envelope::new(
+            &carol,
+            1,
+            frontier_seeing(&[&dep_env.id]),
+            &EventData::DependencyReassigned(DependencyReassigned {
+                dependency: dep_env.id.clone(),
+                previous_assignment: dep_env.id.clone(),
+                previous_target: bob.clone(),
+                new_target: carol.clone(),
+                reason: text("r"),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &reassign_env).unwrap_err();
+        assert!(err.to_string().contains("is not a coordinator"), "{err}");
+    }
+
+    #[test]
+    fn rejects_dependency_reassignment_of_an_unknown_dependency() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        let bogus = EventId::new(&alice, 99);
+        let reassign_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::DependencyReassigned(DependencyReassigned {
+                dependency: bogus.clone(),
+                previous_assignment: bogus,
+                previous_target: alice.clone(),
+                new_target: alice.clone(),
+                reason: text("r"),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &reassign_env).unwrap_err();
+        assert!(err.to_string().contains("unknown dependency"), "{err}");
+    }
+
+    // ------------------------------------------------- review merge authorization
+
+    fn review_request(authors: &[&Agent], reviewer: &Agent) -> ReviewRequest {
+        ReviewRequest {
+            authors: StringSet::from_iter(authors.iter().map(|a| (*a).clone())),
+            product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            reviewer: reviewer.clone(),
+            required_checks: vec![],
+            review_scope: StringSet::default(),
+            summary: text("s"),
+            target_branch: Branch::parse("refs/heads/main".into()).unwrap(),
+            evidence: StringSet::default(),
+        }
+    }
+
+    /// Nominates (from `author` at `author_seq`) and accepts (from
+    /// `reviewer` at `reviewer_seq`), returning both envelopes. Shared setup
+    /// for the merge-authorization/merged/reconciled/finding-disposition
+    /// tests below, all of which need an accepted chain before they can
+    /// exercise their own specific rejection branch.
+    fn nominate_and_accept(
+        state: &mut BusState,
+        author: &Agent,
+        author_seq: u64,
+        reviewer: &Agent,
+        reviewer_seq: u64,
+    ) -> (Envelope, Envelope) {
+        let request = review_request(&[author], reviewer);
+        let nominate_env = Envelope::new(
+            author,
+            author_seq,
+            no_frontier(),
+            &EventData::ReviewNominated(request),
+            [],
+        );
+        apply_ok(state, &nominate_env);
+        let accept_env = Envelope::new(
+            reviewer,
+            reviewer_seq,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewNominationAccepted(ReviewNominationAccepted {
+                nomination: nominate_env.id.clone(),
+                note: text(""),
+            }),
+            [],
+        );
+        apply_ok(state, &accept_env);
+        (nominate_env, accept_env)
+    }
+
+    fn merge_authorized(
+        nomination: &EventId,
+        reviewed_scope: StringSet<crate::scalars::PathClaim>,
+        required_checks: &[Text],
+    ) -> ReviewMergeAuthorized {
+        ReviewMergeAuthorized {
+            nomination: nomination.clone(),
+            product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            previous_main: hash(2),
+            reviewed_commit: hash(3),
+            candidate: hash(4),
+            merge_engine_epoch: EventId::new(&a("coord1"), 0),
+            checks: required_checks
+                .iter()
+                .map(|c| crate::common::CheckResult {
+                    command: c.clone(),
+                    result: crate::common::CheckOutcome::Passed,
+                    evidence: None,
+                })
+                .collect(),
+            finding_dispositions: vec![],
+            evidence: StringSet::default(),
+            reviewed_scope,
+            limitations: vec![],
+            summary: text("s"),
+        }
+    }
+
+    #[test]
+    fn review_merge_authorized_rejects_an_unknown_nomination() {
+        let mut state = empty_state(&[]);
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let bogus = EventId::new(&a("alice"), 1);
+        let env = Envelope::new(
+            &bob,
+            1,
+            no_frontier(),
+            &EventData::ReviewMergeAuthorized(merge_authorized(&bogus, StringSet::default(), &[])),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(err.to_string().contains("unknown nomination"), "{err}");
+    }
+
+    #[test]
+    fn review_merge_authorized_rejects_authorization_by_a_non_reviewer() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+
+        let env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewMergeAuthorized(merge_authorized(
+                &nominate_env.id,
+                StringSet::default(),
+                &[],
+            )),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("only the accepting reviewer may authorize a merge"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn review_merge_authorized_rejects_a_reviewed_scope_mismatch() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+
+        let claim = crate::scalars::PathClaim::parse("src/**".into()).unwrap();
+        let authorize = merge_authorized(&nominate_env.id, StringSet::from_iter([claim]), &[]);
+        let env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewMergeAuthorized(authorize),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("reviewed_scope must equal the nomination's review_scope exactly"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn review_merge_authorized_rejects_a_stale_nomination_after_reassignment() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        apply_ok(&mut state, &register(&carol, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+
+        let request = review_request(&[&alice], &bob);
+        let reassign_env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewReassigned(ReviewReassigned {
+                authors: request.authors.clone(),
+                product_branch: request.product_branch.clone(),
+                reviewer: carol.clone(),
+                required_checks: request.required_checks.clone(),
+                review_scope: request.review_scope.clone(),
+                summary: request.summary.clone(),
+                target_branch: request.target_branch.clone(),
+                evidence: request.evidence.clone(),
+                replaces: nominate_env.id.clone(),
+                reason: text("bob is out"),
+                inherited_findings: vec![],
+            }),
+            [],
+        );
+        apply_ok(&mut state, &reassign_env);
+
+        let env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewMergeAuthorized(merge_authorized(
+                &nominate_env.id,
+                StringSet::default(),
+                &[],
+            )),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("is not the current nomination in its chain"),
+            "{err}"
+        );
+    }
+
+    fn finding(id: &str) -> crate::common::Finding {
+        crate::common::Finding {
+            id: short(id),
+            priority: Priority::Normal,
+            locations: vec![],
+            rationale: text("r"),
+            closure_conditions: text("c"),
+        }
+    }
+
+    #[test]
+    fn review_merge_authorized_rejects_an_open_finding() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+
+        let changes_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                nomination: nominate_env.id.clone(),
+                reviewed_commit: hash(3),
+                findings: vec![finding("f1")],
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &changes_env);
+
+        let env = Envelope::new(
+            &bob,
+            3,
+            frontier_seeing(&[&nominate_env.id, &changes_env.id]),
+            &EventData::ReviewMergeAuthorized(merge_authorized(
+                &nominate_env.id,
+                StringSet::default(),
+                &[],
+            )),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string().contains("lacks a terminal disposition"),
+            "{err}"
+        );
+    }
+
+    /// AGENT_BUS_SCHEMA.md section 10: "Only unresolved issues whose
+    /// `blocks` set names an event in the active nomination chain block
+    /// authorization."
+    #[test]
+    fn review_merge_authorized_rejects_when_an_open_issue_blocks_the_nomination_chain() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+
+        let issue_data = EventData::IssueOpened(IssueOpened {
+            target: alice.clone(),
+            issue_kind: IssueKind::Bug,
+            severity: Priority::Critical,
+            summary: text("blocking bug"),
+            code_commit: None,
+            locations: vec![],
+            expected: None,
+            observed_behavior: None,
+            reproduction: vec![],
+            blocks: StringSet::from_iter([nominate_env.id.clone()]),
+            evidence: StringSet::default(),
+        });
+        let issue_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &issue_data,
+            [nominate_env.id.clone()],
+        );
+        apply_ok(&mut state, &issue_env);
+
+        let env = Envelope::new(
+            &bob,
+            3,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewMergeAuthorized(merge_authorized(
+                &nominate_env.id,
+                StringSet::default(),
+                &[],
+            )),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(err.to_string().contains("blocks authorization"), "{err}");
+    }
+
+    /// The companion positive case: once the blocking issue is resolved
+    /// (Terminal), authorization proceeds normally -- disposition is what
+    /// matters, not the mere existence of a `blocks` reference.
+    #[test]
+    fn review_merge_authorized_succeeds_once_the_blocking_issue_is_resolved() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+
+        let issue_data = EventData::IssueOpened(IssueOpened {
+            target: alice.clone(),
+            issue_kind: IssueKind::Bug,
+            severity: Priority::Critical,
+            summary: text("blocking bug"),
+            code_commit: None,
+            locations: vec![],
+            expected: None,
+            observed_behavior: None,
+            reproduction: vec![],
+            blocks: StringSet::from_iter([nominate_env.id.clone()]),
+            evidence: StringSet::default(),
+        });
+        let issue_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &issue_data,
+            [nominate_env.id.clone()],
+        );
+        apply_ok(&mut state, &issue_env);
+
+        let resolve_env = Envelope::new(
+            &alice,
+            2,
+            no_frontier(),
+            &EventData::IssueResolved(IssueResolved {
+                issue: issue_env.id.clone(),
+                assignment: issue_env.id.clone(),
+                summary: text("fixed"),
+                fix_commit: None,
+                verification: vec![],
+            }),
+            [],
+        );
+        apply_ok(&mut state, &resolve_env);
+
+        let env = Envelope::new(
+            &bob,
+            3,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewMergeAuthorized(merge_authorized(
+                &nominate_env.id,
+                StringSet::default(),
+                &[],
+            )),
+            [],
+        );
+        apply_ok(&mut state, &env);
+        assert_eq!(
+            state.review_chain(&nominate_env.id).unwrap().authorizations,
+            vec![env.id]
+        );
+    }
+
+    /// Adversarial-review note: `ReviewMergeAuthorized.merge_engine_epoch`
+    /// is carried and referenced, but `apply_review_merge_authorized` never
+    /// checks it against `state.current_merge_engine_epoch` (or even that it
+    /// names a known `merge_engine.activated`-equivalent event) -- a stale
+    /// or never-activated epoch id is accepted just as readily as the real
+    /// current one. This pins down that current (likely unintended) gap as
+    /// a baseline; it is not a statement that the current behavior is
+    /// correct.
+    #[test]
+    fn review_merge_authorized_does_not_validate_merge_engine_epoch() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+
+        let mut authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
+        // Never seeded into `state.merge_engine_info` /
+        // `state.current_merge_engine_epoch`.
+        authorize.merge_engine_epoch = EventId::new(&a("nobody"), 7);
+        let env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewMergeAuthorized(authorize),
+            [],
+        );
+        apply_ok(&mut state, &env);
+        assert_eq!(
+            state.review_chain(&nominate_env.id).unwrap().authorizations,
+            vec![env.id]
+        );
+    }
+
+    // ------------------------------------------------- review merged / reconciled
+
+    #[test]
+    fn review_merged_rejects_an_authorization_of_the_wrong_kind() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+
+        // Points at the nomination event itself -- a real, known event, but
+        // of kind review.nominated, not review.merge_authorized.
+        let merged_data = EventData::ReviewMerged(ReviewMerged {
+            authorization: nominate_env.id.clone(),
+            previous_main: hash(2),
+            main_commit: hash(4),
+            product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            reviewed_commit: hash(3),
+            summary: text("merged"),
+        });
+        let env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &merged_data,
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("is not a review.merge_authorized event"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn review_merged_rejects_emission_by_a_non_authorizing_reviewer() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
+        let authorize_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewMergeAuthorized(authorize.clone()),
+            [],
+        );
+        apply_ok(&mut state, &authorize_env);
+
+        let merged_data = EventData::ReviewMerged(ReviewMerged {
+            authorization: authorize_env.id.clone(),
+            previous_main: authorize.previous_main,
+            main_commit: authorize.candidate,
+            product_branch: authorize.product_branch.clone(),
+            reviewed_commit: authorize.reviewed_commit,
+            summary: text("merged"),
+        });
+        let env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&authorize_env.id]),
+            &merged_data,
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("only the authorizing reviewer may emit review.merged"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn review_merged_rejects_a_main_commit_that_does_not_match_the_candidate() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
+        let authorize_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewMergeAuthorized(authorize.clone()),
+            [],
+        );
+        apply_ok(&mut state, &authorize_env);
+
+        let merged_data = EventData::ReviewMerged(ReviewMerged {
+            authorization: authorize_env.id.clone(),
+            previous_main: authorize.previous_main,
+            main_commit: hash(999), // does not match authorize.candidate
+            product_branch: authorize.product_branch.clone(),
+            reviewed_commit: authorize.reviewed_commit,
+            summary: text("merged"),
+        });
+        let env = Envelope::new(
+            &bob,
+            3,
+            frontier_seeing(&[&authorize_env.id]),
+            &merged_data,
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("main_commit must equal the candidate"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn review_merge_reconciled_rejects_a_non_coordinator() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
+        let authorize_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewMergeAuthorized(authorize.clone()),
+            [],
+        );
+        apply_ok(&mut state, &authorize_env);
+
+        let reconciled_data = EventData::ReviewMergeReconciled(ReviewMergeReconciled {
+            authorization: authorize_env.id.clone(),
+            previous_main: authorize.previous_main,
+            main_commit: authorize.candidate,
+            product_branch: authorize.product_branch.clone(),
+            reviewed_commit: authorize.reviewed_commit,
+            reason: text("r"),
+            user_authority: text("coord1"),
+        });
+        // alice is an author, not a coordinator.
+        let env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&authorize_env.id]),
+            &reconciled_data,
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(err.to_string().contains("is not a coordinator"), "{err}");
+    }
+
+    #[test]
+    fn review_merge_reconciled_rejects_an_unknown_authorization() {
+        let mut state = empty_state(&[("coord1", Role::Coordinator)]);
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let bogus = EventId::new(&a("bob"), 1);
+        let reconciled_data = EventData::ReviewMergeReconciled(ReviewMergeReconciled {
+            authorization: bogus,
+            previous_main: hash(2),
+            main_commit: hash(4),
+            product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            reviewed_commit: hash(3),
+            reason: text("r"),
+            user_authority: text("coord1"),
+        });
+        let env = Envelope::new(&coord1, 1, no_frontier(), &reconciled_data, []);
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(err.to_string().contains("unknown authorization"), "{err}");
+    }
+
+    #[test]
+    fn review_merge_reconciled_rejects_an_authorization_of_the_wrong_kind() {
+        let mut state = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Reviewer),
+            ("coord1", Role::Coordinator),
+        ]);
+        let alice = a("alice");
+        let bob = a("bob");
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+
+        let reconciled_data = EventData::ReviewMergeReconciled(ReviewMergeReconciled {
+            authorization: nominate_env.id.clone(),
+            previous_main: hash(2),
+            main_commit: hash(4),
+            product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            reviewed_commit: hash(3),
+            reason: text("r"),
+            user_authority: text("coord1"),
+        });
+        let env = Envelope::new(
+            &coord1,
+            1,
+            frontier_seeing(&[&nominate_env.id]),
+            &reconciled_data,
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("is not a review.merge_authorized event"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn review_merge_reconciled_rejects_a_value_mismatch() {
+        let mut state = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Reviewer),
+            ("coord1", Role::Coordinator),
+        ]);
+        let alice = a("alice");
+        let bob = a("bob");
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
+        let authorize_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewMergeAuthorized(authorize.clone()),
+            [],
+        );
+        apply_ok(&mut state, &authorize_env);
+
+        let reconciled_data = EventData::ReviewMergeReconciled(ReviewMergeReconciled {
+            authorization: authorize_env.id.clone(),
+            previous_main: hash(999), // mismatch
+            main_commit: authorize.candidate,
+            product_branch: authorize.product_branch.clone(),
+            reviewed_commit: authorize.reviewed_commit,
+            reason: text("r"),
+            user_authority: text("coord1"),
+        });
+        let env = Envelope::new(
+            &coord1,
+            1,
+            frontier_seeing(&[&authorize_env.id]),
+            &reconciled_data,
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("main_commit must equal the candidate"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn review_merge_reconciled_rejects_a_second_receipt() {
+        let mut state = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Reviewer),
+            ("coord1", Role::Coordinator),
+        ]);
+        let alice = a("alice");
+        let bob = a("bob");
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
+        let authorize_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewMergeAuthorized(authorize.clone()),
+            [],
+        );
+        apply_ok(&mut state, &authorize_env);
+
+        let reconciled_data = || {
+            EventData::ReviewMergeReconciled(ReviewMergeReconciled {
+                authorization: authorize_env.id.clone(),
+                previous_main: authorize.previous_main.clone(),
+                main_commit: authorize.candidate.clone(),
+                product_branch: authorize.product_branch.clone(),
+                reviewed_commit: authorize.reviewed_commit.clone(),
+                reason: text("r"),
+                user_authority: text("coord1"),
+            })
+        };
+        let first_env = Envelope::new(
+            &coord1,
+            1,
+            frontier_seeing(&[&authorize_env.id]),
+            &reconciled_data(),
+            [],
+        );
+        apply_ok(&mut state, &first_env);
+
+        let second_env = Envelope::new(
+            &coord1,
+            2,
+            frontier_seeing(&[&authorize_env.id, &first_env.id]),
+            &reconciled_data(),
+            [],
+        );
+        let err = apply_event(&mut state, &second_env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("a merged or reconciled receipt already exists"),
+            "{err}"
+        );
+    }
+
+    // ------------------------------------------------------ finding disposition
+
+    #[test]
+    fn finding_superseded_records_the_rationale() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let changes_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                nomination: nominate_env.id.clone(),
+                reviewed_commit: hash(3),
+                findings: vec![finding("f1")],
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &changes_env);
+
+        let superseded_env = Envelope::new(
+            &bob,
+            3,
+            frontier_seeing(&[&nominate_env.id, &changes_env.id]),
+            &EventData::ReviewFindingsSuperseded(ReviewFindingsSuperseded {
+                nomination: nominate_env.id.clone(),
+                changes_event: changes_env.id.clone(),
+                finding_id: short("f1"),
+                rationale: text("no longer applicable"),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &superseded_env);
+
+        let chain = state.review_chain(&nominate_env.id).unwrap();
+        let key = (changes_env.id.clone(), "f1".to_string());
+        match &chain.findings[&key].disposition {
+            FindingDisposition::Superseded {
+                by_event,
+                rationale,
+            } => {
+                assert_eq!(by_event, &superseded_env.id);
+                assert_eq!(rationale.as_str(), "no longer applicable");
+            }
+            other => panic!("expected Superseded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_finding_disposal_by_a_non_reviewer() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let changes_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                nomination: nominate_env.id.clone(),
+                reviewed_commit: hash(3),
+                findings: vec![finding("f1")],
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &changes_env);
+
+        let cleared_env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&nominate_env.id, &changes_env.id]),
+            &EventData::ReviewFindingsCleared(ReviewFindingsCleared {
+                nomination: nominate_env.id.clone(),
+                changes_event: changes_env.id.clone(),
+                finding_id: short("f1"),
+                resolved_commit: hash(4),
+                summary: text("fixed"),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &cleared_env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("only the accepting reviewer for the current nomination may dispose"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_disposal_of_an_unknown_finding() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let changes_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                nomination: nominate_env.id.clone(),
+                reviewed_commit: hash(3),
+                findings: vec![finding("f1")],
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &changes_env);
+
+        let cleared_env = Envelope::new(
+            &bob,
+            3,
+            frontier_seeing(&[&nominate_env.id, &changes_env.id]),
+            &EventData::ReviewFindingsCleared(ReviewFindingsCleared {
+                nomination: nominate_env.id.clone(),
+                changes_event: changes_env.id.clone(),
+                finding_id: short("does-not-exist"),
+                resolved_commit: hash(4),
+                summary: text("fixed"),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &cleared_env).unwrap_err();
+        assert!(err.to_string().contains("unknown finding"), "{err}");
+    }
+
+    #[test]
+    fn rejects_finding_disposal_against_a_stale_nomination() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        apply_ok(&mut state, &register(&carol, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let changes_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                nomination: nominate_env.id.clone(),
+                reviewed_commit: hash(3),
+                findings: vec![finding("f1")],
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &changes_env);
+
+        let request = review_request(&[&alice], &bob);
+        let reassign_env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&nominate_env.id, &changes_env.id]),
+            &EventData::ReviewReassigned(ReviewReassigned {
+                authors: request.authors.clone(),
+                product_branch: request.product_branch.clone(),
+                reviewer: carol.clone(),
+                required_checks: request.required_checks.clone(),
+                review_scope: request.review_scope.clone(),
+                summary: request.summary.clone(),
+                target_branch: request.target_branch.clone(),
+                evidence: request.evidence.clone(),
+                replaces: nominate_env.id.clone(),
+                reason: text("bob went quiet"),
+                inherited_findings: vec![crate::common::FindingRef {
+                    changes_event: changes_env.id.clone(),
+                    finding_id: short("f1"),
+                }],
+            }),
+            [],
+        );
+        apply_ok(&mut state, &reassign_env);
+
+        // bob (the superseded reviewer) still tries to clear the finding
+        // under the now-stale nomination id.
+        let cleared_env = Envelope::new(
+            &bob,
+            3,
+            frontier_seeing(&[&nominate_env.id, &changes_env.id]),
+            &EventData::ReviewFindingsCleared(ReviewFindingsCleared {
+                nomination: nominate_env.id.clone(),
+                changes_event: changes_env.id.clone(),
+                finding_id: short("f1"),
+                resolved_commit: hash(4),
+                summary: text("fixed"),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &cleared_env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("is not the current nomination in its chain"),
+            "{err}"
+        );
+    }
+
+    /// Design-fidelity note: unlike issue/dependency/handoff/review terminal
+    /// dispositions, `apply_finding_disposition` never touches `state.
+    /// exclusive` at all -- a second disposal attempt of an
+    /// already-dispositioned finding is hard-rejected outright ("finding is
+    /// not open"), never routed through a `LifecycleConflict` the way a
+    /// genuinely concurrent race on any other exclusive-transition set in
+    /// this file would be. (True concurrency isn't even structurally
+    /// possible here today, since disposal authority is pinned to a single
+    /// agent -- the current nomination's accepting reviewer -- so this test
+    /// exercises the simpler, always-reachable case: a second, already
+    /// causally-ordered attempt by that same reviewer.) This pins down that
+    /// actual behavior as a baseline for any future fix to diff against; it
+    /// is not a statement that the current behavior is correct.
+    #[test]
+    fn a_second_disposal_of_an_already_cleared_finding_is_hard_rejected_not_a_lifecycle_conflict() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let changes_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                nomination: nominate_env.id.clone(),
+                reviewed_commit: hash(3),
+                findings: vec![finding("f1")],
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &changes_env);
+
+        let cleared_data = || {
+            EventData::ReviewFindingsCleared(ReviewFindingsCleared {
+                nomination: nominate_env.id.clone(),
+                changes_event: changes_env.id.clone(),
+                finding_id: short("f1"),
+                resolved_commit: hash(4),
+                summary: text("fixed"),
+            })
+        };
+        let first_env = Envelope::new(
+            &bob,
+            3,
+            frontier_seeing(&[&nominate_env.id, &changes_env.id]),
+            &cleared_data(),
+            [],
+        );
+        apply_ok(&mut state, &first_env);
+
+        let second_env = Envelope::new(
+            &bob,
+            4,
+            frontier_seeing(&[&nominate_env.id, &changes_env.id, &first_env.id]),
+            &cleared_data(),
+            [],
+        );
+        let err = apply_event(&mut state, &second_env).unwrap_err();
+        assert!(err.to_string().contains("finding is not open"), "{err}");
+        assert!(
+            !state.exclusive.is_contested(&first_env.id),
+            "no exclusive-tracker bookkeeping is created for findings at all"
+        );
     }
 }
