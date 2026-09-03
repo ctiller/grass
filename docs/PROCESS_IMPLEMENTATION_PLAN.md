@@ -2263,23 +2263,30 @@ Each has a fixture file, and each fixture found at least one defect in the
 module it was written against. That is the pattern worth keeping: nothing here
 was found by reading.
 
-### The three records that had no witness, and now do
+### The records that had no witness, and now do
 
 The exit criterion §10.54 proposed — every named record has a positive witness
 before the layer is nominated — turned out to be the most productive rule in this
-milestone. Three records were inhabited for the first time, and each was empty
-for a *different* reason that reading had not found:
+milestone. Five records were inhabited for the first time, and each was empty for
+a *different* reason that reading had not found:
 
 | Record | Why it was empty | Witness |
 |---|---|---|
 | `ProcessCorrect` | `handlesEveryEvent` and `terminalNoStep` contradicted each other | `Tests/Process/M1CorrectFixtures.lean`, then `CountdownCorrectFixtures` and `PrefixFixtures` |
-| `NetworkProgressMeasure` | `Commits` had no provenance, so no network could be at a frontier | `Tests/Process/FrontierFixtures.lean` |
-| `ExactInitialNetwork` | nothing; it had simply never been built, and had absorbed two new fields with no proof breaking | `Tests/Process/FrontierFixtures.lean` |
+| `NetworkProgressMeasure` | `Commits` had no provenance, so no network could be at a frontier under any measure | `Tests/Process/FrontierFixtures.lean` |
+| `ExactInitialNetwork` | nothing; it had never been built, and had absorbed two new fields with no proof breaking | `Tests/Process/FrontierFixtures.lean` |
+| `EndsInstance` | nothing; it had absorbed three | `Tests/Process/EndingFixtures.lean` |
+| `Spawns` | nothing | `Tests/Process/FrontierFixtures.lean` |
 
-And two records were shown *not* to be inhabited by things that should not
-inhabit them, which is the other half of the same discipline:
-`Tests/Process/SpinFixtures.lean` and `Tests/Process/OscillateFixtures.lean` are
-livelocks that each had a full `ProcessCorrect` for one commit.
+The pattern is worth stating because it held five times out of five: **a record
+that absorbs a new field without a single proof breaking is a record nothing
+inhabits.** That is a cheap check and it is now the first one to run after any
+structural change.
+
+And four processes were shown *not* to inhabit `ProcessCorrect` — or, worse, to
+inhabit it when they should not. `Tests/Process/SpinFixtures.lean`,
+`OscillateFixtures.lean` and `ChatterFixtures.lean` are livelocks that each had a
+full `ProcessCorrect`; the first two are now excluded and the third is §10.70.
 
 ### Still owed for M4 exit
 
@@ -2313,6 +2320,31 @@ mistake: §10.46, §10.53 and part of §10.60 each recorded a defect that a late
 reviewer refuted by *building* the thing the entry described. All three were filed
 from a reading of a repair, describing what the repair did not yet cover, without
 constructing it. §10.54 is the method note.
+
+### What a reviewer found that reading did not
+
+Nineteen rounds of local adversarial review, and the count is worth keeping
+because it settles a question about method. **Every serious defect this milestone
+was found by constructing something** — a witness, a counterexample, or an
+alternative proof with a hypothesis deleted. Reading found stale prose and
+nothing else, in either direction: reviewers reading found no defects, and five
+ledger entries *I* filed from reading were later refuted by a reviewer who built
+what the entry described (§10.46, §10.53, §10.65's second half, part of §10.60,
+and §10.62's `Demanded` claim).
+
+The three most expensive findings all came from one move — trying to inhabit a
+record:
+
+* `ProcessCorrect` was uninhabitable for every terminating process, after five
+  review rounds had read the file.
+* `NetworkProgressMeasure`'s `AtFrontier` was empty for every measure, which made
+  the whole network progress module vacuous. Three attempts to repair the field
+  were each refuted by a fixture built against them, and the answer was that a
+  frontier is not something a measure declares at all (§10.68).
+* Two of the four known livelocks were admitted by the *repair* for the previous
+  one. `StepProgresses` went from three disjuncts to four and back to three, and
+  what settled it was folding the outstanding bag into the measure so there is
+  one well-founded order instead of two in a disjunction.
 
 ### Integrity
 
@@ -2989,7 +3021,16 @@ own; `accessible` had none until `no_infinite_silent_run` was stated. Both are
 
 Not a defect — a driver is the consumer and no driver exists at this milestone —
 but worth the entry, because §10.48 was closed by adding a one-link chain and a
-one-link chain is what a reviewer will find next time.
+one-link chain is what a reviewer will find next time. One did: the conclusion's
+third conjunct, the `ProcessRunTransition`, is derivable from the first two plus
+deliverability, so the theorem is `handlesEveryEvent`'s conclusion repackaged with
+the successor bag computed. That is a real convenience for a driver and it is not
+a *consumption* of the field in the sense §10.48 was about.
+
+What the same reviewer also proved is that the field is genuinely load-bearing:
+a record with `handlesEveryEvent` deleted, every other hypothesis supplied, and
+the conclusion false is constructible. The previous version of the theorem could
+be reproved without the field; this one cannot.
 
 ### 10.64 `NetworkProgressMeasure` is quantified over every world, not over reachable ones
 
