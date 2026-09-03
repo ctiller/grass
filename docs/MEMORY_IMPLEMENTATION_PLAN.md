@@ -721,9 +721,29 @@ one outright defect that had already merged — see §3.11's denial row.
   `a_loan_cannot_be_bypassed_through_an_alias` guards a relation the memory
   semantics does not implement.
 
-  This is the largest thing on this list. Closing it means `write` propagating to
-  the alias set and every framing lemma re-proved against that, and it needs the
-  offset question below answered first.
+  This is the largest thing on this list, and it is now visible in the test suite
+  as well as here: `Tests/Op/StandardLoan.lean`'s
+  `the_alias_is_not_yet_a_byte_level_fact` stores through the view and reads the old
+  value from the buffer.
+
+  Two shapes close it, and the choice is a design decision rather than a repair:
+
+  1. **`MemoryState.write` propagates across the alias set.** Smallest diff to the
+     data, largest to the proofs — every framing lemma keyed on `id ≠ other` becomes
+     keyed on `¬ SharesBytes id other`, in `Grass/Memory/State.lean`,
+     `Grass/Memory/Apply.lean` and `Grass/Op/Step.lean`. It also needs the offset
+     question below answered, because propagation has to know where to write.
+  2. **Allocations share one byte store by identity.** `AllocationRecord` carries a
+     storage identity rather than a `ByteStore`, and the stores live in a map beside
+     the allocations. Writes are shared because there is one store, `SharesBytes`
+     becomes equality of storage identity — decidable in one comparison instead of a
+     bounded transitive closure — and `SharesAfter`, `AliasHop` and the fuel bound
+     disappear. Larger diff to the data, and it makes the offset question explicit
+     rather than assumed, because a view onto a store at a non-zero offset has to say
+     so somewhere.
+
+  The second is the better shape. Neither should be taken without the design owner,
+  because both change `MemoryState`.
 - **`MemoryState.aliases` records no offset mapping.** `AuthorizedBy` and
   `grantsOver` compare `ByteRange`s across aliased allocations with `Contains` and
   `Meets`, which assumes aliased allocations agree offset for offset. A view mapped

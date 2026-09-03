@@ -96,6 +96,30 @@ theorem a_loan_cannot_be_bypassed_through_an_alias :
   cases hs
   exact ⟨by decide, by decide⟩
 
+/-- **And what "the same bytes" does not yet mean.**
+
+`MemoryState.SharesBytes` is what the whole authority layer keys on — `grantsOver`,
+`AuthorizedBy`, `MemoryEvent.Conflicts` — and `MemoryState.write` writes the bytes of
+the *named* allocation only. So a store through the view leaves the buffer's bytes
+unchanged, and a read of the buffer afterwards sees the old value. "Same storage" is
+an authority-level fiction with no byte-level counterpart, which means the theorem
+above guards a relation the memory semantics does not implement.
+
+Stated here rather than only in `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2, because a
+reader meeting the theorem above should meet this in the same file. Closing it is
+either write-propagation across the alias set, which needs the offset mapping
+`MemoryState.aliases` does not record, or allocations sharing one byte store by
+identity — the second removes `SharesAfter` and `AliasHop` entirely and is the
+better shape, and both change `MemoryState`. -/
+theorem the_alias_is_not_yet_a_byte_level_fact :
+    ∀ s, (step state₀ .storeThroughView).state? = some s →
+      s.memory.byteAt? viewAlloc 0 = some 0xab ∧
+      s.memory.byteAt? bufferAlloc 0 = some 0x00 ∧
+      state₀.memory.SharesBytes viewAlloc bufferAlloc := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide⟩
+
 /-- The alias really is one: the two provenances name different storage by
 `SameStorage` and the same bytes by `SharesBytes`, which is what made the bypass
 possible and what closes it. -/
