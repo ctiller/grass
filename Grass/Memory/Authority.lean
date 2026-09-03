@@ -117,7 +117,7 @@ with `Provenance.SameStorage`. Whether two allocations name the same bytes is a 
 about the machine state — `MemoryState.aliases` and its transitive closure — and a
 pure function on provenances cannot see it, so a holder reaching its own lent bytes
 through a declared alias was authorized by nothing while being frozen by its own
-loan. `MemoryState.AuthorizedBy` is the test, and it takes the state.
+loan. `MemoryState.AuthorizedAt` is the test, and it takes the state.
 -/
 
 end Grass.Memory

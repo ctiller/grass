@@ -15,7 +15,7 @@ coverage without being any, so both were deleted.
 
 The reasoning offered for the deletion went one step too far. It said the rule had
 nothing to constrain, and review pointed out that this is false: `Permission.Permits`
-is the sole rights gate on the chain `MemoryState.AuthorizedBy` →
+is the sole rights gate on the chain `MemoryState.AuthorizedAt` →
 `MemoryState.Granted` → `AuthorityProvider.loan.refuses` → `Grass/Op/Step.lean`,
 and it had no clause about atomicity. (The chain was named as the deleted `Authorizes` function and
 `MemoryState.GrantedOfKind` until review checked: the first was deleted, and the

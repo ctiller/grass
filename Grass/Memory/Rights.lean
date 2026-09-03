@@ -119,7 +119,7 @@ structure Permission where
   constructor and a theorem about it, and nothing built the constructor, so the
   theorem held of an unreachable case and was deleted — and the reasoning offered
   for the deletion, that the rule had nothing to constrain, was wrong. `Permits` is
-  the sole rights gate on the chain `MemoryState.AuthorizedBy` →
+  the sole rights gate on the chain `MemoryState.AuthorizedAt` →
   `MemoryState.Granted` → `AuthorityProvider.loan.refuses` → `Grass/Op/Step.lean`,
   and it had no clause about atomicity, (The chain was named as the deleted `Authorizes` function and
 `MemoryState.GrantedOfKind` until review checked: the first was deleted, and the

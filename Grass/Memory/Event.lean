@@ -188,6 +188,17 @@ structure WellFormed (e : MemoryEvent) : Prop where
   statusAgreesWithReads : e.status.committedReads = e.readCommitted
   /-- The write half of `statusAgreesWithReads`. -/
   statusAgreesWithWrites : e.status.committedWrites = e.writeCommitted
+  /-- The event's address space is the one its provenance names.
+
+  Two records of one fact, and nothing tied them. `Conflicts` keys on
+  `provenance.space` and `not_conflicts_of_different_space` is stated over it, while
+  `space` is what the event reports; the two agreed only because
+  `Grass/Op/Step.lean`'s `performAccess` resolves the space through the profile's
+  table before calling `ofOutcome`. That is the argument this structure exists to
+  make unnecessary — it was rejected for the context identity in
+  `StepRejection.contextMismatch` and for the status and count pair in the clause
+  above — and review found it standing here, in a file no round had read. -/
+  spaceAgreesWithProvenance : e.space.id = e.provenance.space
 
 /--
 `Conflicts a b` holds when two events contend for the same bytes.
@@ -591,6 +602,7 @@ fields remain the thing to keep honest.
 def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
     (space : AddressSpace) (d : AccessDescriptor) (outcome : AccessOutcome d) :
     Option ValidMemoryEvent :=
+  if hspace : space.id ≠ d.provenance.space then Option.none else
   match houtcome : outcome.committed? with
   | Option.none => Option.none
   | some c =>
@@ -613,7 +625,8 @@ def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
                   readCommitted := c.readCount
                   writeCommitted := c.writeCount }
               wellFormed :=
-                { readValuePresent := fun h =>
+                { spaceAgreesWithProvenance := by simpa using hspace
+                  readValuePresent := fun h =>
                     c.observedPresent (by rw [← reads_kindOf hkind]; exact h)
                   readValueAbsent := fun h =>
                     c.observedAbsent (by rw [← reads_kindOf hkind]; exact h)
@@ -682,9 +695,12 @@ def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
   unfold ofOutcome at h
   split at h
   · exact absurd h (by simp)
-  · split at h
-    · exact absurd h (by simp)
-    · cases h; rfl
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  cases h
+  rfl
 
 /-- A denied outcome produces no event. Nothing was touched, so nothing is
 recorded in the trace; the violation ledger is where a denial appears. -/

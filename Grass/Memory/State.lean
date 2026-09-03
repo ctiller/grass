@@ -635,22 +635,22 @@ theorem returnGrant?_eq_none_of_absent {state : MemoryState} {context : ContextI
   rw [show state.grants.lookup id = Option.none from h]
 
 /--
-`state.AuthorizedBy grant context provenance range intent` holds when this grant
-lets `context` perform that access, in this state.
+`state.AuthorizedAt grant context provenance offset intent` holds when this grant
+lets `context` touch that byte, in this state.
 
 Six clauses: the holder is the context performing the access, the grant is over the
-same *bytes*, both provenances are current, the grant's range covers the access's,
-and the rights permit the intent.
+same *bytes*, both provenances are current, the grant's range covers the byte, and
+the rights permit the intent.
 
-**On the state, and using `SharesBytes`.** This was the deleted `Authorizes` function, a
-pure function on provenances using `Provenance.SameStorage` — equal `space`, `root`
-and `epoch`. That is the relation this layer has now moved off twice for being
-wrong in the unsafe direction, and leaving it here made it wrong in the *other*
-direction: `MemoryState.grantsOver` sees aliases and this did not, so a holder
-reaching its own lent bytes through a declared alias was frozen by its own loan and
-authorized by nothing. §7.5's mapped file and host-visible device buffer are exactly
-that shape. Whether two allocations name the same bytes is a fact about the state,
-so this takes the state.
+**On the state, and using `SharesBytes`.** This was a pure function on provenances in
+`Grass/Memory/Authority.lean`, using `Provenance.SameStorage` — equal `space`, `root`
+and `epoch`. That is the relation this layer has now moved off twice for being wrong
+in the unsafe direction, and leaving it there made it wrong in the *other* direction:
+`MemoryState.grantsOver` sees aliases and it did not, so a holder reaching its own
+lent bytes through a declared alias was frozen by its own loan and authorized by
+nothing. §7.5's mapped file and host-visible device buffer are exactly that shape.
+Whether two allocations name the same bytes is a fact about the state, so this takes
+the state.
 
 The `space` conjunct is gone with `SameStorage` and is not replaced. An access is
 checked against its own allocation's space by `AccessDescriptor.WellFormedIn` and by
@@ -658,37 +658,15 @@ checked against its own allocation's space by `AccessDescriptor.WellFormedIn` an
 device engine's grant over a host-visible buffer, which is the case §7.5 exists to
 describe.
 
+**At one byte, not over a range**, and that is deliberate. A range-shaped version
+existed beside this one, `Granted` moved off it, and it kept its four safety theorems
+— so the theorems a reader cites to believe the gate is safe stopped bearing on the
+gate. Review found it. There is one predicate now and the negatives below are stated
+over it.
+
 `Contains` compares offsets relative to a root, and aliased allocations are assumed
 to agree offset for offset — `MemoryState.aliases` records no offset mapping.
 `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records that.
--/
-def AuthorizedBy (state : MemoryState) (grant : AuthorityGrant) (context : ContextId)
-    (provenance : Provenance) (range : ByteRange) (intent : AccessIntent) : Prop :=
-  grant.holder = context ∧
-  state.SharesBytes grant.provenance.root provenance.root ∧
-  state.CurrentEpoch grant.provenance ∧
-  state.CurrentEpoch provenance ∧
-  grant.range.Contains range ∧
-  grant.rights.Permits intent
-
-instance (state : MemoryState) (grant : AuthorityGrant) (context : ContextId)
-    (provenance : Provenance) (range : ByteRange) (intent : AccessIntent) :
-    Decidable (state.AuthorizedBy grant context provenance range intent) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
-
-/--
-The same test at one byte rather than over a range.
-
-`Granted` is stated over this, so a context's grants **compose**. With `AuthorizedBy`
-alone a single grant had to cover the whole access, and review issued one context
-write loans over `[0, 8)` and `[8, 16)` — which `issue?` accepts, since §7.3's
-conflict is between distinct holders — and then found its store to `[4, 12)` refused,
-while `denialOf` cleared it, `authorityOf` called it `exclusive` and the context was
-authorized on each half. Nothing in `docs/MEMORY_MODEL.md` §3 says authority must
-arrive in one piece; a byte is authorized or it is not.
-
-That also makes the fragments a future split produces usable before split itself
-lands, which §4.4.1 records as owed.
 -/
 def AuthorizedAt (state : MemoryState) (grant : AuthorityGrant) (context : ContextId)
     (provenance : Provenance) (offset : Nat) (intent : AccessIntent) : Prop :=
@@ -704,46 +682,52 @@ instance (state : MemoryState) (grant : AuthorityGrant) (context : ContextId)
     Decidable (state.AuthorizedAt grant context provenance offset intent) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
-/-- A grant covering a range covers each of its bytes. -/
-theorem authorizedAt_of_authorizedBy {state : MemoryState} {grant : AuthorityGrant}
-    {context : ContextId} {provenance : Provenance} {range : ByteRange}
-    {intent : AccessIntent} {i : Nat} (hi : i < range.size)
-    (h : state.AuthorizedBy grant context provenance range intent) :
-    state.AuthorizedAt grant context provenance (range.start + i) intent := by
-  refine ⟨h.1, h.2.1, h.2.2.1, h.2.2.2.1, ?_, h.2.2.2.2.2⟩
-  have hc := h.2.2.2.2.1
-  rw [ByteRange.contains_def] at hc
-  rw [ByteRange.covers_def]
-  omega
-
 /-- A grant held by one context authorizes nothing for another. Authority is not
 ambient: `docs/FOUNDATION.md` law 6 forbids ambient provider choice, and the same
 reading applies to authority a context did not receive. -/
-theorem not_authorizedBy_of_other_holder {state : MemoryState} {grant : AuthorityGrant}
-    {context : ContextId} {provenance : Provenance} {range : ByteRange}
+theorem not_authorizedAt_of_other_holder {state : MemoryState} {grant : AuthorityGrant}
+    {context : ContextId} {provenance : Provenance} {offset : Nat}
     {intent : AccessIntent} (h : grant.holder ≠ context) :
-    ¬ state.AuthorizedBy grant context provenance range intent := fun ha => h ha.1
+    ¬ state.AuthorizedAt grant context provenance offset intent := fun ha => h ha.1
 
 /-- A grant over storage that does not share bytes with the access authorizes
 nothing, however their offsets compare (`docs/MEMORY_MODEL.md` §7.5). -/
-theorem not_authorizedBy_of_other_storage {state : MemoryState} {grant : AuthorityGrant}
-    {context : ContextId} {provenance : Provenance} {range : ByteRange}
+theorem not_authorizedAt_of_other_storage {state : MemoryState} {grant : AuthorityGrant}
+    {context : ContextId} {provenance : Provenance} {offset : Nat}
     {intent : AccessIntent}
     (h : ¬ state.SharesBytes grant.provenance.root provenance.root) :
-    ¬ state.AuthorizedBy grant context provenance range intent := fun ha => h ha.2.1
+    ¬ state.AuthorizedAt grant context provenance offset intent := fun ha => h ha.2.1
 
 /-- A read-only grant does not authorize a write. -/
-theorem not_authorizedBy_of_insufficient_rights {state : MemoryState}
+theorem not_authorizedAt_of_insufficient_rights {state : MemoryState}
     {grant : AuthorityGrant} {context : ContextId} {provenance : Provenance}
-    {range : ByteRange} {intent : AccessIntent} (h : ¬ grant.rights.Permits intent) :
-    ¬ state.AuthorizedBy grant context provenance range intent := fun ha => h ha.2.2.2.2.2
+    {offset : Nat} {intent : AccessIntent} (h : ¬ grant.rights.Permits intent) :
+    ¬ state.AuthorizedAt grant context provenance offset intent :=
+  fun ha => h ha.2.2.2.2.2
 
 /-- A grant over a defunct epoch authorizes nothing, and neither does any grant to a
 stale pointer. §2's reuse rule, at the authority gate. -/
-theorem not_authorizedBy_of_stale_epoch {state : MemoryState} {grant : AuthorityGrant}
-    {context : ContextId} {provenance : Provenance} {range : ByteRange}
+theorem not_authorizedAt_of_stale_epoch {state : MemoryState} {grant : AuthorityGrant}
+    {context : ContextId} {provenance : Provenance} {offset : Nat}
     {intent : AccessIntent} (h : ¬ state.CurrentEpoch provenance) :
-    ¬ state.AuthorizedBy grant context provenance range intent := fun ha => h ha.2.2.2.1
+    ¬ state.AuthorizedAt grant context provenance offset intent := fun ha => h ha.2.2.2.1
+
+/-- A grant whose range covers a whole access covers each of its bytes. The bridge a
+caller with one covering grant uses to reach `Granted`. -/
+theorem authorizedAt_of_covering {state : MemoryState} {grant : AuthorityGrant}
+    {context : ContextId} {provenance : Provenance} {range : ByteRange}
+    {intent : AccessIntent} {i : Nat} (hi : i < range.size)
+    (hcover : grant.range.Contains range)
+    (hholder : grant.holder = context)
+    (hshares : state.SharesBytes grant.provenance.root provenance.root)
+    (hgrant : state.CurrentEpoch grant.provenance)
+    (haccess : state.CurrentEpoch provenance)
+    (hrights : grant.rights.Permits intent) :
+    state.AuthorizedAt grant context provenance (range.start + i) intent := by
+  refine ⟨hholder, hshares, hgrant, haccess, ?_, hrights⟩
+  rw [ByteRange.contains_def] at hcover
+  rw [ByteRange.covers_def]
+  omega
 
 /--
 `state.Granted context provenance range intent` holds when some live grant
@@ -765,12 +749,18 @@ instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
   inferInstanceAs (Decidable (∀ _, _ → ∃ _ ∈ _, _))
 
 /-- One grant covering the whole range is enough, which is the ordinary case. -/
-theorem granted_of_authorizedBy {state : MemoryState} {context : ContextId}
+theorem granted_of_covering {state : MemoryState} {context : ContextId}
     {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
     {entry : GrantId × AuthorityGrant} (hmem : entry ∈ state.grantEntries)
-    (h : state.AuthorizedBy entry.2 context provenance range intent) :
+    (hcover : entry.2.range.Contains range)
+    (hholder : entry.2.holder = context)
+    (hshares : state.SharesBytes entry.2.provenance.root provenance.root)
+    (hgrant : state.CurrentEpoch entry.2.provenance)
+    (haccess : state.CurrentEpoch provenance)
+    (hrights : entry.2.rights.Permits intent) :
     state.Granted context provenance range intent :=
-  fun _ hi => ⟨entry, hmem, authorizedAt_of_authorizedBy hi h⟩
+  fun _ hi => ⟨entry, hmem,
+    authorizedAt_of_covering hi hcover hholder hshares hgrant haccess hrights⟩
 
 /-- `state.GrantedOfKind` additionally requires the authorizing grant to be of a
 particular kind, which is how one provider distinguishes itself from another over
@@ -807,23 +797,37 @@ reallocation conditional: "reallocation requires the return of all live use loan
 Nothing checked that. A profile could bump an allocation's epoch under an outstanding
 grant, and the result is a grant that freezes the new storage — `grantsOver` has no
 epoch clause, deliberately — while authorizing nothing, since
-`MemoryState.AuthorizedBy` requires both provenances current. Review reached that
+`MemoryState.AuthorizedAt` requires both provenances current. Review reached that
 state and found only the stale grant's holder or lender could clear it.
 
 Refused rather than reconciled: which of the two the profile meant is not this
 module's to guess (`docs/FOUNDATION.md` law 8), and §5.1 already says which comes
 first.
 
+**Teardown counts as well as reuse**, and an earlier version accepted it: it refused
+only an epoch change, and its own docstring listed "a liveness change" among the
+things always allowed. So `live := true → false` under an outstanding grant was
+admitted, and the consequence was silent rather than loud — `authorityOf` reports
+`unavailable` for a dead allocation, so every outstanding loan over it evaporated
+with no return and no violation, and a later record with the same epoch and
+`live := true` resurrected them. §5 requires arena teardown to take "the return of all
+live use loans" in the same breath as §5.1 requires it of reallocation.
+
+**And the scan is alias-aware.** It matched `entry.2.provenance.root = id`, so a
+grant held over a mapped view did not block a reallocation of the file it maps, even
+though `SharesBytes` says they are the same bytes — the asymmetry this layer has now
+fixed three times in three places.
+
 A *fresh* identity is always accepted, and so is replacing a record without changing
-its epoch — a permission change, a liveness change, a placement. What is refused is
-an epoch bump with grants outstanding over the storage.
+its epoch or killing it: a permission change, a placement, a byte write.
 -/
 def allocate? (state : MemoryState) (id : AllocId) (record : AllocationRecord) :
     Option MemoryState :=
   match state.allocations.lookup id with
   | some existing =>
-      if existing.epoch ≠ record.epoch ∧
-          state.grantEntries.any (fun entry => entry.2.provenance.root = id) then
+      if (existing.epoch ≠ record.epoch ∨ (existing.live ∧ ¬ record.live)) ∧
+          state.grantEntries.any
+            (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) then
         Option.none
       else some { state with allocations := state.allocations.insert id record }
   | Option.none => some { state with allocations := state.allocations.insert id record }
@@ -851,25 +855,26 @@ refusal rather than as a sentence. -/
 theorem allocate?_eq_none_of_outstanding {state : MemoryState} {id : AllocId}
     {record existing : AllocationRecord}
     (hlook : state.allocations.lookup id = some existing)
-    (hepoch : existing.epoch ≠ record.epoch)
-    (hgrants : state.grantEntries.any (fun entry => entry.2.provenance.root = id) = true) :
+    (hchange : existing.epoch ≠ record.epoch ∨ (existing.live ∧ ¬ record.live))
+    (hgrants : state.grantEntries.any
+      (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) = true) :
     state.allocate? id record = Option.none := by
   unfold allocate?
   rw [hlook]
   simp only []
-  rw [if_pos (show existing.epoch ≠ record.epoch ∧ _ from ⟨hepoch, hgrants⟩)]
+  rw [if_pos (show (existing.epoch ≠ record.epoch ∨ _) ∧ _ from ⟨hchange, hgrants⟩)]
 
 /-- A record replaced without changing its epoch is accepted, grants or not: a
 permission, liveness or placement change is not a reallocation. -/
 theorem allocate?_isSome_of_same_epoch {state : MemoryState} {id : AllocId}
     {record existing : AllocationRecord}
     (hlook : state.allocations.lookup id = some existing)
-    (hepoch : existing.epoch = record.epoch) :
+    (hepoch : existing.epoch = record.epoch) (hlive : record.live) :
     (state.allocate? id record).isSome := by
   unfold allocate?
   rw [hlook]
   simp only []
-  rw [if_neg (fun h => h.1 hepoch)]
+  rw [if_neg (fun h => h.1.elim (fun he => he hepoch) (fun hk => hk.2 hlive))]
   rfl
 
 /-- Declare that two allocations name the same storage. -/

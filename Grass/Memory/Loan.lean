@@ -41,7 +41,7 @@ deleted, because a vacuous theorem reads as coverage.
 
 The reasoning offered for that deletion went one step too far, and review caught it:
 it said the rule had nothing to constrain. `Permission.Permits` is the sole rights
-gate on the chain `MemoryState.AuthorizedBy` → `MemoryState.Granted` →
+gate on the chain `MemoryState.AuthorizedAt` → `MemoryState.Granted` →
 `Grass/Op/LoanAuthority.lean` → `step`, and it had no clause about atomicity, (The chain was named as the deleted `Authorizes` function and
 `MemoryState.GrantedOfKind` until review checked: the first was deleted, and the
 second has no caller under `Grass/` — the provider calls `Granted`, which is
@@ -314,7 +314,7 @@ really are about loans.
 wrong in the unsafe direction: review re-epoched one member of an alias set and the
 grant over it vanished from this list while the other member stayed live, so the
 freeze lifted and an unauthorized store committed. A grant that names a defunct
-epoch is also unable to *authorize* anything — `MemoryState.AuthorizedBy` checks
+epoch is also unable to *authorize* anything — `MemoryState.AuthorizedAt` checks
 both provenances — so dropping it here means a stale grant freezes without
 authorizing, which is the refuse-both-ways answer `docs/FOUNDATION.md` law 8 asks
 for. §5.1 requires live use loans to be returned before reallocation, so a stale

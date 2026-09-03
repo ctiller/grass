@@ -460,6 +460,27 @@ theorem only_shared_immutable_distinguishes_reads :
 
 /-! ## Authority ends with the epoch, and is not only about loans -/
 
+/-- The buffer, freed: same epoch, no longer live. -/
+def freedRecord : AllocationRecord :=
+  { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
+    permission := .readWrite, live := false, bytes := .empty, base := some 0x1000 }
+
+/-- A second allocation over the same storage, declared an alias of the buffer. -/
+def view : AllocId := allocs.fresh.2.fresh.1
+
+/-- Provenance of the view. -/
+def viewProv : Provenance := { bufferProv with root := view }
+
+/-- A state holding both, aliased. -/
+def aliasedPair : MemoryState :=
+  ((unlent.allocate? view
+      { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
+        permission := .readWrite, live := true, bytes := .empty
+        base := some 0x1000 }).getD unlent).alias buffer view
+
+/-- A loan over the *view*, not over the buffer. -/
+def viewLoan : AuthorityGrant := { loanOfHead with provenance := viewProv }
+
 /-- The buffer, freed and re-allocated at the same identity in a new epoch. -/
 def reusedRecord : AllocationRecord :=
   { extent := ⟨0, 64⟩, epoch := laterEpoch, space := .cpuVirtual
@@ -487,7 +508,7 @@ theorem a_stale_provenance_is_unavailable :
 loans". Nothing checked it, and the state that skipping it produced was a mess three
 rounds of review kept circling: a grant naming a defunct epoch still freezes the
 storage that replaced it — `grantsOver` has no epoch clause, deliberately, because
-the clause it had was worse — while `MemoryState.AuthorizedBy` refuses to let it
+the clause it had was worse — while `MemoryState.AuthorizedAt` refuses to let it
 authorize anything and `LoanConflicts` refuses a replacement grant. Only the stale
 grant's holder or lender could clear it.
 
@@ -503,6 +524,28 @@ theorem reallocating_under_a_loan_is_refused :
 tracks the loan rather than being a ban on reallocation. -/
 theorem reallocating_after_the_return_is_accepted :
     (returned.allocate? buffer reusedRecord).isSome := by decide
+
+/-- **Freeing under a live loan is refused too.** An earlier version refused only an
+epoch change, and its own docstring listed "a liveness change" among the things
+always allowed — so `live := true → false` with a loan outstanding was admitted, and
+the consequence was silent: `authorityOf` reports `unavailable` for a dead
+allocation, so the loan evaporated with no return and no violation, and a record with
+the same epoch and `live := true` resurrected it. §5 asks for the return of all live
+use loans at teardown in the same breath as §5.1 asks it of reuse. -/
+theorem freeing_under_a_loan_is_refused :
+    lentHead.allocate? buffer freedRecord = Option.none ∧
+    (returned.allocate? buffer freedRecord).isSome := by
+  exact ⟨by decide, by decide⟩
+
+/-- **And a grant held over an aliased view blocks it.** The scan matched
+`provenance.root = id`, so a loan over a mapped view did not block a reallocation of
+the file it maps, though `SharesBytes` says they are the same bytes — the asymmetry
+this layer has now fixed in three places. -/
+theorem an_aliased_grant_blocks_the_reallocation :
+    ((aliasedPair.issue? firstLoan viewLoan).getD aliasedPair).allocate? buffer
+      reusedRecord = Option.none ∧
+    (aliasedPair.issue? firstLoan viewLoan).isSome := by
+  exact ⟨by decide, by decide⟩
 
 /-- **A grant of another kind freezes too.** §7.3's conflict is about authority,
 not about one kind of it, and `grantsOver` filtered to `GrantKind.loan` — so a

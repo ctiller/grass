@@ -70,9 +70,17 @@ open Grass.Std.Logical
 Why the state refuses one access, or `none` if it authorizes it.
 
 Checked before anything commits, so a denial leaves the state exactly as it was
-(`docs/MEMORY_MODEL.md` §1). The order is deliberate: liveness before space before
-bounds before permission before initialization, so the recorded class names the
-first thing that was wrong rather than an incidental consequence.
+(`docs/MEMORY_MODEL.md` §1). The order is deliberate: liveness, then space, then the provenance's declared
+extent, then bounds, then placement, then permission, then initialization — so the
+recorded class names the first thing that was wrong rather than an incidental
+consequence.
+
+The placement clauses sit *after* bounds, and were inserted before it when they
+landed. `addressOf base d.range.start` is only meaningful once the range is known to
+be inside the allocation, so an out-of-bounds access whose declared address was
+anything but the value that arithmetic happens to give was reported as a placement
+disagreement — the audit naming a class downstream of the actual defect. Review found
+it by reading this sentence against the code below it.
 
 Alignment is deliberately absent. `AccessDescriptor.WellFormedIn.aligned` already
 checks it and `step` requires well-formedness before any access is attempted, so a
@@ -94,12 +102,12 @@ def denialOf (state : MemoryState) (d : AccessDescriptor) : Option AuditViolatio
       else if record.epoch ≠ d.provenance.epoch then some .deadProvenance
       else if record.space ≠ d.provenance.space then some .wrongAddressSpace
       else if record.extent ≠ d.provenance.rootExtent then some .provenanceExtentMismatch
+      else if ¬ record.extent.Contains d.range then some .outOfBounds
       else if record.base.any (fun b => !decide (FitsAllocation b record.extent.size)) then
         some .placementWraps
       else if record.base.any
                 (fun b => d.address != Address.numeric (addressOf b d.range.start)) then
         some .addressDisagreesWithPlacement
-      else if ¬ record.extent.Contains d.range then some .outOfBounds
       else if ¬ record.permission.Grants d.requiredPermission then some .permissionDenied
       else if ¬ record.permission.Permits d.intent then some .permissionDenied
       else if d.initialization = .allBytesInitialized ∧
