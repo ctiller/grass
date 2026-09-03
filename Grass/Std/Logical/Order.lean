@@ -103,6 +103,15 @@ another.
 -/
 def count [BEq α] (v : Vec α) (a : α) : Nat := v.toList.count a
 
+@[simp] theorem count_empty [BEq α] (a : α) : count (empty : Vec α) a = 0 := rfl
+
+/-- The recursion. `Vec.count` shipped with no characterisation: `Permutation.count_eq`
+says two counts agree without saying what either one is. Adversarial review
+found it in the same sweep as `Vec.sum`. -/
+@[simp] theorem count_push [BEq α] (v : Vec α) (a b : α) :
+    count (v.push b) a = count v a + (if b == a then 1 else 0) := by
+  simp [count, push, List.count_append, List.count_singleton]
+
 /--
 `Vec.Permutation.count_eq`: rearrangement preserves multiplicity.
 

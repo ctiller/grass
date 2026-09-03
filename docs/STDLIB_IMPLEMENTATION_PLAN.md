@@ -556,8 +556,11 @@ plan can close alone.
 ### 3.10 Permutation, order, and search by position
 
 `Grass/Std/Logical/Order.lean` supplies `Vec.Permutation`, `Vec.Pairwise`,
-`Vec.findIdx?`, and `Vec.idxOf?`, with the laws a sort's caller uses and
-`Decidable` instances for both predicates.
+`Vec.count`, and `Vec.idxOf?`, with the laws a sort's caller uses and `Decidable`
+instances for both predicates. An earlier version of this sentence also listed
+`Vec.findIdx?`, which does not exist — the module withdrew it under band 3, since
+the spike passes an element rather than a predicate, and the module comment
+argues that at length. The plan asserted the opposite of what the module said.
 
 `Spikes/2_Sort/Spec.lean` is the reason, and it is a stronger reason than the
 other spike evidence in §3.4. It is the only place in the corpus where a
@@ -799,7 +802,29 @@ reader will want a reason for:
    plan's, and it is adopted because it survives the attack that killed the
    previous two.
 
-   The earlier record, kept because the failures are the argument for the rule: It was asserted satisfied on the same page
+   **And it is now checked by a program.** `Tools/CoverageAudit.lean` walks the
+   environment for every `def` in `Grass.Std.Logical.Vec` returning a `Vec` and
+   reports any without both laws; it runs in CI beside the axiom and docstring
+   audits. That is the response to the deepest point review made about the rule:
+   it had been rewritten three times, and each version was violated in the very
+   commit that stated it — the coverage rule itself shipped alongside `Vec.sum`
+   and `Vec.count`, both lawless, with `sum` on the right-hand side of
+   `Vec.length_flatten` where every consumer of that law would meet it. Three
+   times is not carelessness; it is what an unenforced rule does at this rate of
+   change. Both operations now carry recursions, and the checker is
+   negative-tested: a lawless `Vec`-returning operation compiles under
+   `lake build` and fails the audit, as does one with a length law and no `get?`
+   law.
+
+   Review also found five holes in the prose version, of which the checker closes
+   the ones that matter by construction: it does not accept an alias cycle
+   (exemptions are a written list, not an inference), it does not infer clause
+   (ii) at all, and it reports the count of declarations outside the bar's reach
+   rather than silently passing them — currently 12 covered, 9 exempt, 43 outside.
+   That last number is the honest measure of how much of the module the rule
+   reaches, and it was invisible while the rule was prose.
+
+   The earlier record, kept as history, not as current rules: It was asserted satisfied on the same page
    where `Vec.truncate` and `Vec.clear` shipped with no law naming either — now
    fixed — and, more importantly, counting laws cannot express what the rule was
    reaching for. A deliberately wrong `insertAt` that ignores its index, and an

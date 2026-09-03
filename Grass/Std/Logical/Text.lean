@@ -58,6 +58,21 @@ asks for such a correspondence to be "recorded in the TCB ledger"; this reposito
 has no ledger file yet, and this module comment is a placeholder for one rather
 than a substitute.
 
+**And none of those externs is the assumption this module's own fixtures rest
+on.** They run in compiled code. Every literal case — `Tests/Std/Text.lean`'s
+`rfl` examples, `docs/STDLIB.md` §6's "reduces during kernel elaboration", and
+`Spikes/4_Web_Server/Spec.lean`'s body equation against an encoded literal —
+never executes them; the kernel reduces the model instead. What those rest on is
+the *elaborator's construction of the string literal's bytes*: which bytes Lean's
+frontend puts into `String.ofByteArray` when it lexes `"Hello, World!"` from a
+source file, and the kernel's agreement with that. That is an assumption about
+the lexer and about the source file's own encoding. It is not an extern, not an
+axiom, and not covered by anything named above — and
+`Spikes/1_Hello_World/Spec.lean`'s message is the observable the whole first
+milestone is specified against. This paragraph was written into the plan first
+and belongs here too, since a heading promising the boundary "stated exactly"
+should not omit the case that carries the fixtures.
+
 ## What is absent
 
 Encoding-indexed text *views* — `docs/STDLIB.md` §6's phrase. A `Text enc` type
