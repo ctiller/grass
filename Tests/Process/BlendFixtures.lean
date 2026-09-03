@@ -13,7 +13,7 @@ condition is a condition.
 the obvious sum vocabulary, and `weave` embeds each side by its injection. The
 routing theorems then read off with no routing table anywhere.
 
-`overlapping_names_have_two_routings` is the negative: two components that both
+`the_overlap_is_not_a_weave` is the negative: two components that both
 claim one woven demand fail `demandsDisjoint`, and a result for that demand
 answers a demand of each. §8 puts disjointness in the *premise* of `weave` for
 exactly this reason.

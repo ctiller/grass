@@ -3,10 +3,11 @@ import Grass.Process.Correct
 /-!
 # An acceptance that actually accepts something
 
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.62: of `ProcessCorrect`'s nine fields,
-five had no non-vacuous instance anywhere in this repository. Every
-`ProcessAcceptance` in the corpus set `TraceAccepts`, `DemandsWellFormed`,
-`TerminalAccepts` and `ViewAccepts` to `fun _ => True`, so `initialDemands`,
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.62: of `ProcessCorrect`'s ten fields —
+`Invariant` and nine laws — five had no non-vacuous instance anywhere in this
+repository. Every `ProcessAcceptance` in the corpus set `TraceAccepts`,
+`DemandsWellFormed`, `TerminalAccepts` and `ViewAccepts` to the constantly-true
+predicate, so `initialDemands`,
 `demandsWellFormed`, `terminal`, `observationsAccept` and `viewAccepts` were
 discharged by `trivial` or `absurd` in all five correctness fixtures. §10.49 adds
 a sixth: `Demanded` was `fun _ => False` everywhere, so `StepProgresses`'s
@@ -64,10 +65,11 @@ machine:
   at state 0 holding the handle it can neither step nor terminate. A reviewer
   checked that too.
 
-What it does not close is `ViewAccepts`. `ProcessSpec.view` is `none` in every
-specification in the repository and `ViewFacet` is constructed nowhere; that is
-§10.56, and it is a specification-layer question rather than one this file can
-answer by picking a harder acceptance.
+What it does not close is `ViewAccepts`, and that is no longer because nothing
+has a view: `Tests/Process/ViewFixtures.lean` builds one, and §10.56 is closed.
+It is because `hiccup` has no view, so this file's acceptance still sets the
+clause to the constantly-true predicate. The remaining question about the clause
+itself is §10.102 — its *shape* still admits a version that cannot fail.
 -/
 
 namespace Grass.Process.Tests.Rich
@@ -284,7 +286,7 @@ def hiccupProgress (request : Nat) :
 /-! ## And it is correct -/
 
 /--
-**`hiccup` is correct, and five of the nine fields do work.**
+**`hiccup` is correct, and five of the nine laws do work.**
 
 `initialDemands` and `demandsWellFormed` check a bound; `terminal` checks the
 result; `observationsAccept` runs on `no_blips`; `progress` runs on

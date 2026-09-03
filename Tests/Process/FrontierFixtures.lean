@@ -521,6 +521,7 @@ def waiting_is_a_start : waitingPlan.ExactInitialNetwork () waiting where
   root := theRoot
   rootPresent := rfl
   rootKind := rfl
+  rootSlotAgrees := rfl
   rootEmitted := []
   rootInitial := ⟨rfl, rfl, rfl⟩
   pendingProjected := rfl

@@ -3,7 +3,7 @@ import Tests.Process.TransitionFixtures
 /-!
 # The channel constructors nothing had ever built
 
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.79: of `NetworkTransition`'s eleven
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.79: of `NetworkTransition`'s twelve
 channel constructors, only `.receive` was ever built in this corpus.
 `SendsEscrow` was the first repair — `Tests/Process/TransitionFixtures.lean`'s
 `the_send` — and this file is the rest of the sweep: a close, a channel death, a
@@ -336,7 +336,6 @@ below is what it now refuses.
 theorem the_close : serverPlan.ClosesSession sent afterClosing () wire escrowed where
   onItsSession := rfl
   wasOutstanding := by rw [sent_wire]; exact ⟨List.mem_cons_self, rfl⟩
-  nowResolved := by rw [afterClosing_wire]; exact closedLedger_resolution
   closesEverything := by
     intro other _ outstanding
     rw [only_the_one_is_outstanding outstanding, afterClosing_wire]
@@ -380,7 +379,6 @@ status it produces is not a closure, which is why `KillsSession` exists. -/
 theorem the_death : serverPlan.KillsSession sent afterDying () wire escrowed where
   onItsSession := rfl
   wasOutstanding := by rw [sent_wire]; exact ⟨List.mem_cons_self, rfl⟩
-  nowResolved := by rw [afterDying_wire]; exact diedLedger_resolution
   killsEverything := by
     intro other _ outstanding
     rw [only_the_one_is_outstanding outstanding, afterDying_wire]
@@ -425,9 +423,6 @@ theorem the_request : serverPlan.RequestsCancel sent afterRequesting () wire esc
   wasOutstanding := by rw [sent_wire]; exact ⟨List.mem_cons_self, rfl⟩
   wasNotRequested := by rw [sent_wire]; simp [pendingLedger]
   nowRequested := by rw [afterRequesting_wire]; exact requestedLedger_requested
-  stillOutstanding := by
-    rw [afterRequesting_wire]
-    exact ⟨List.mem_cons_self, rfl⟩
   resolvesNothing := by
     rw [sent_wire, afterRequesting_wire]
     exact requestedLedger_resolves_nothing
@@ -452,7 +447,7 @@ theorem the_request : serverPlan.RequestsCancel sent afterRequesting () wire esc
       exact off_wire_ledgers notWire afterRequesting (afterRequesting_off notWire)
     | _ => rfl
 
-/-- **And a drop**, which is the plain `ResolvesEscrow` the other six share. -/
+/-- **And a drop**, which is the plain `ResolvesEscrow` the other five share. -/
 theorem the_drop : serverPlan.ResolvesEscrow sent afterDropping () wire escrowed .dropped where
   onItsSession := rfl
   wasOutstanding := by rw [sent_wire]; exact ⟨List.mem_cons_self, rfl⟩
@@ -465,6 +460,7 @@ theorem the_drop : serverPlan.ResolvesEscrow sent afterDropping () wire escrowed
     rw [sent_wire, afterDropping_wire]
     exact fun _ => rfl
   acknowledgesARequest := by intro reason isAck; cases isAck
+  carrierOnItsSession := by intro carrier isCoalesce; cases isCoalesce
   createsOnlyTheCarrier := by
     intro other held fresh
     exact absurd (by rw [sent_wire]; rw [afterDropping_wire] at held; exact held) fresh

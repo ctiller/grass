@@ -320,6 +320,7 @@ def withRoot_is_a_start :
   root := World.rootListener
   rootPresent := rfl
   rootKind := rfl
+  rootSlotAgrees := rfl
   rootEmitted := []
   rootInitial := ⟨rfl, rfl, rfl⟩
   pendingProjected := rfl
@@ -342,14 +343,7 @@ def withRoot_is_a_start :
 /-- And a start is well formed, which at this plan says something about a real
 instance rather than about an empty world. -/
 theorem withRoot_is_wellFormed : World.withRoot.WellFormed :=
-  withRoot_is_a_start.initial_is_wellformed (by
-    intro kind slot incarnation found
-    cases kind with
-    | listener =>
-      have same : some incarnation = some World.rootListener := found.symm
-      cases same
-      exact ⟨rfl, rfl⟩
-    | connection => exact absurd found (by intro equal; cases equal))
+  withRoot_is_a_start.initial_is_wellformed
 
 /--
 And sound, which at this plan is the same claim under another name — §10.82.

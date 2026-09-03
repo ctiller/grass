@@ -38,8 +38,9 @@ decomposition of the world.
 makes that possible rather than a coincidence. There is **exactly one component
 per fragment**: the four indexed fields are functions of the index their
 fragment names — `instances` of a slot, `shared` of a region, `inFlight` and
-`sessions` of an edge-and-session pair — and the other three are single values
-matching the three unindexed fragments. The mixed world takes each component
+`sessions` of an edge-and-session pair — and the other four are single values
+matching the four unindexed fragments: `obligations`, `observations`, `pending`
+and `usedNominals`. The mixed world takes each component
 from one side or the other according to whether its fragment is inside the
 split, which is writable exactly because no two fragments read one component.
 
@@ -48,7 +49,13 @@ The construction decides an arbitrary predicate, so it is classical.
 hypothesis there — and this is the right place for the cost to land: the world
 supplier pays, not the assertion language.
 
-## Two divergences from the declared record, and why
+## Three divergences from the declared record, and why
+
+The third is `pending`, and it is the largest: §3 declares *one* observation
+trace and this record has two, because a commit needs something to be about.
+`Grass/Process/Trace/Linearization.lean` is where that is spent and
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.27 is the entry. The two below are the
+small ones.
 
 `docs/PROCESS.md` §3 writes `instances : ... -> ProcessId kind -> Option
 (ProcessInstance topology)`. `ProcessId` is declared nowhere in the corpus;

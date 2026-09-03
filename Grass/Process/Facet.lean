@@ -69,7 +69,7 @@ than any law the author cares to name. §3 writes `ProcessTerminationContract p`
 with the law left open, which would let a facet promise cancellation whose
 dispositions the specification does not accept. Tying it to the acceptance is
 free — a `ProcessCorrect` already carries one — and it is what makes
-`retained_contract_forbids_arbitrary_death` a fact about *this* process rather
+`cancellable_facet_forbids_arbitrary_death` a fact about *this* process rather
 than about some other law's contract.
 -/
 

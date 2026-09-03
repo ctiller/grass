@@ -1,7 +1,7 @@
 import Tests.Process.ChannelStepFixtures
 
 /-!
-# The reroute: the last of the eleven channel constructors
+# The reroute: the last channel constructor without a witness
 
 `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.79 held `Reroutes` back on the grounds
 that it "needs two sessions on one edge and this topology names one", so building
@@ -207,6 +207,7 @@ theorem the_reroute : serverPlan.Reroutes sent afterReroute () wire escrowed sid
     show ResolvesNothing (ledgerAt false sidewire) (reroutedAt sidewire)
     rw [ledgerAt_off_wire_empty sidewire_ne_wire, reroutedAt_sidewire]
     exact fun _ => rfl
+  destinationWasOpen := rfl
   destinationRequestsNothing := by
     show RequestsNothing (ledgerAt false sidewire) (reroutedAt sidewire)
     rw [ledgerAt_off_wire_empty sidewire_ne_wire, reroutedAt_sidewire]
@@ -388,6 +389,47 @@ theorem a_reroute_cannot_move_the_occurrence_itself
     (arrived : escrowed ∈ (after.inFlight () sidewire).created)
     (rerouted : serverPlan.Reroutes before after () wire escrowed sidewire) : False :=
   sidewire_ne_wire (an_arrival_belongs_to_its_destination rerouted fresh arrived).symm
+
+/--
+**And a coalesce's carrier belongs to the session whose ledger holds it.**
+
+`ResolvesEscrow.carrierOnItsSession`. Without it a coalesce could install a
+carrier belonging to another session, which `ClosesSession.closesEverything`'s
+on-session guard then cannot see: the payload strands with no transition of the
+family able to end it, and the session becomes unclosable because a close must
+end everything outstanding. A reviewer compiled both halves. §10.100.
+-/
+theorem a_coalesce_carrier_belongs_to_its_session
+    {before after : ServerWorld}
+    {carrier : EdgeOccurrence serverTopology World.serverMessage ()}
+    (merged : serverPlan.ResolvesEscrow before after () wire escrowed (.coalesced carrier)) :
+    carrier.2.1 = wire :=
+  merged.carrierOnItsSession carrier rfl
+
+/-- So the wire cannot coalesce into an occurrence of the side session. -/
+theorem a_coalesce_may_not_import_a_carrier
+    {before after : ServerWorld}
+    (merged : serverPlan.ResolvesEscrow before after () wire escrowed
+      (.coalesced arrival)) : False :=
+  sidewire_ne_wire
+    (arrival_is_on_the_destination ▸ a_coalesce_carrier_belongs_to_its_session merged)
+
+/--
+**And a reroute into a closed session is refused.**
+
+`Reroutes.destinationWasOpen`. A reroute puts a live payload into a session,
+which is what a send does, and `SendsEscrow.sendOnOpenSession` has guarded a send
+since the channel contract acquired the law — `Reroutes` had no such guard, and a
+reviewer compiled a complete reroute delivering into a `.closed` session, after
+which no close or death of it is possible either. §10.101.
+-/
+theorem a_reroute_into_a_closed_session_is_refused
+    {before after : ServerWorld} {destination : serverTopology.ChannelId ()}
+    (closed : (before.sessions () destination).status = .closed)
+    (rerouted : serverPlan.Reroutes before after () wire escrowed destination) : False := by
+  have wasOpen := rerouted.destinationWasOpen
+  rw [closed] at wasOpen
+  cases wasOpen
 
 /-! ## And the step that strands one -/
 

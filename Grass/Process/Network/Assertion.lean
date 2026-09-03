@@ -86,10 +86,14 @@ universe u w v r x
 /--
 A named part of the logical network that an assertion may read.
 
-These are the seven fields of `docs/PROCESS.md` §3's `LogicalProcessNetwork`,
-with the three index-carrying ones refined to a single index: one instance
-rather than the whole instance map, one region rather than all shared state, one
-session's escrow rather than the whole ledger. The list is closed: an assertion
+These are `docs/PROCESS.md` §3's seven `LogicalProcessNetwork` fields plus
+`pending`, which §3 does not have — the trace split of §10.27 gave the network
+two observation traces where §3 declares one — with the four index-carrying ones
+refined to a single index: one instance rather than the whole instance map, one
+region rather than all shared state, one session's escrow rather than the whole
+ledger, one session's cursor rather than every session's. (An earlier version of
+this paragraph said seven and three, and predates both the split and the
+`session` fragment the next paragraph argues for.) The list is closed: an assertion
 cannot depend on something with no name here, which is what keeps the language
 from growing.
 
@@ -147,9 +151,12 @@ inductive NetworkFragment {registry : ProtocolRegistry.{u, w, v}}
   the commit had nothing to be about, and `Commits` constrained the trace and
   nothing else — so a commit of an arbitrary observation was a legal step of
   *every* network. Local adversarial review proved that generically and drew the
-  consequence: `.commit` is not `DrivenByEntropy`, so
-  `NetworkProgressMeasure.frontierIsExternal` then forbids *any* network from
-  being at a frontier, and §7's whole progress module is vacuous.
+  consequence: `.commit` is not `DrivenByEntropy`, and at the time
+  `NetworkProgressMeasure` carried a `frontierIsExternal` *field*, which therefore
+  forbade any network from being at a frontier and made §7's whole progress module
+  vacuous. That field is gone — §10.68 replaced it with the `AtFrontier`
+  definition in `Grass/Process/Network/Progress.lean` — so this paragraph records
+  the argument that was made, not one a reader can still follow to a live field.
 
   With two fragments, a step produces into `pending` and a commit moves a prefix
   of `pending` into `observations` — so it publishes what is pending, in the

@@ -22,8 +22,14 @@ file instantiates it.
   what the missing field cost. Before `protocolStep` existed this was provable
   in the wrong direction — a "process step" could leave the countdown where it
   was, or move it anywhere at all.
-* `an_unprojected_observation_is_unconstructible` is the same for the trace: a
-  step cannot append an observation the role did not make.
+* `answering_an_unissued_demand_is_unconstructible` is the same for the
+  outstanding bag: a step cannot settle a demand the process never issued.
+
+  A reviewer found this bullet naming an `an_unprojected_observation_is_unconstructible`
+  the file does not contain and describing a claim it does not make. The trace
+  half — that a step cannot append an observation the role did not make — is
+  `StepsLocally.emittedIsProjected`, and it is checked by
+  `Grass/Process/Trace/Linearization.lean` rather than refuted here.
 -/
 
 namespace Grass.Process.Tests.ProcessStep

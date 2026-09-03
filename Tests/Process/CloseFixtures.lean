@@ -252,7 +252,6 @@ one-message fixture gives.
 theorem the_full_close : serverPlan.ClosesSession sent2 afterFullClose () wire escrowed where
   onItsSession := rfl
   wasOutstanding := both_are_outstanding.1
-  nowResolved := by rw [afterFullClose_wire]; exact bothClosed_first
   closesEverything := by
     intro other _ outstanding
     rw [sent2_wire] at outstanding

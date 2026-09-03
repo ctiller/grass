@@ -29,8 +29,10 @@ program never starts in.
 `initial_is_wellformed` is why the exactness is worth the fields. Four of
 `WellFormed`'s six clauses are discharged *because* nothing else exists yet:
 there is no second instance to violate root uniqueness, no recorded parent to
-be invalid, and no escrow to hold a reroute that never lands. The remaining two
-come from the root's own record.
+be invalid, and no escrow to hold a reroute that never lands. The remaining two come from
+the root's own record: `nominalsAllocated` from `rootAllocated`, and `slotsAgree`
+from `rootSlotAgrees`, which §10.106 added after a reviewer noticed the theorem
+was taking that clause as a hypothesis instead.
 
 That makes the initial network a place a weave argument can start:
 `WeaveInvariantMixin.preserved_by_every_step` carries an invariant along any
@@ -67,6 +69,22 @@ structure ExactInitialNetwork
   rootPresent : network.instances plan.topology.root rootSlot = some root
   /-- Of the root kind. -/
   rootKind : root.kind = plan.topology.root
+  /--
+  **And it is stored where its own reference says it is.**
+
+  `ProcessRef` has an `instanceId` as well as a generation, and `rootKind`
+  constrains only the kind — so a "start" could place the root in one slot while
+  its reference names another, and `LogicalProcessNetworkCore.SlotsAgree` would
+  fail at the very first network of the run.
+
+  `ProcessPlan.Spawns.slotAgrees` is this field at a spawn, and it was added
+  because local adversarial review built exactly that step. A reviewer noticed
+  that `initial_is_wellformed` took `SlotsAgree` as a *hypothesis* rather than
+  discharging it, which is what a missing field looks like from the caller's
+  side. With this, the hypothesis is gone.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.106.
+  -/
+  rootSlotAgrees : rootKind ▸ root.ref.instanceId = rootSlot
   /--
   **At a state, demand bag and observation segment its own protocol calls
   initial.**
@@ -239,13 +257,27 @@ not have been enough.
 * `lifecyclesWitnessed` — the only instance is `running`, and the clause
   constrains `terminated` endings.
 
-The other two come from the root's own record: `slotsAgree` from `SlotsAgree`
-being about the slot the root is stored under, and `nominalsAllocated` from
-`rootAllocated`.
+The other two come from the root's own record: `nominalsAllocated` from
+`rootAllocated`, and `slotsAgree` from `rootSlotAgrees` together with
+`the_root_is_alone`.
+
+`slotsAgree` was a *hypothesis* of this theorem until §10.106, because
+`ExactInitialNetwork` had no field tying the root's own `ref.instanceId` to
+`rootSlot` — the field `ProcessPlan.Spawns.slotAgrees` is at a spawn. A reviewer
+found it by reading the signature: a clause passed in rather than discharged is
+what a missing field looks like from the caller's side.
 -/
-theorem initial_is_wellformed
-    (slotsAgree : network.SlotsAgree) : network.WellFormed where
-  slotsAgree := slotsAgree
+theorem initial_is_wellformed : network.WellFormed where
+  slotsAgree := by
+    intro kind slot incarnation found
+    obtain ⟨sameKind, sameSlot⟩ := start.the_root_is_alone found
+    subst sameKind
+    simp only at sameSlot
+    subst sameSlot
+    rw [start.rootPresent] at found
+    injection found with isRoot
+    subst isRoot
+    exact ⟨start.rootKind, start.rootSlotAgrees⟩
   lifecyclesWitnessed := by
     intro kind slot incarnation found result terminated
     obtain ⟨sameKind, sameSlot⟩ := start.the_root_is_alone found

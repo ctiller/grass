@@ -120,7 +120,8 @@ def intendedView : Bool → Nat := fun finished => cond finished 0 1
 /--
 An acceptance whose view clause pins the rendered value at each state.
 
-`fun _ _ _ => True` is what the five view-less fixtures use and it asks nothing.
+The constantly-true predicate is what the five view-less fixtures use, and it
+asks nothing.
 This asks that a view of `gauge` reports exactly `intendedView` of the state it
 was rendered from — a claim about `remaining.render`, which
 `ProcessCorrect.viewAccepts` therefore has to establish and can fail to.

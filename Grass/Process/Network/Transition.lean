@@ -195,6 +195,33 @@ structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
   acknowledgesARequest : ∀ reason, resolution = .cancelAcknowledged reason →
     (before.inFlight edge session).cancelRequested occurrence = true
   /--
+  **And a coalesce's carrier belongs to this session.**
+
+  `ChannelResolution.coalesced`'s docstring says the carrier is "this occurrence
+  of the same session", and until this field nothing enforced it: `onItsSession`
+  constrains the *source*, `EscrowLedger.coalesceCarrierLater` asks only that the
+  carrier be in this `created` with a later rank, and `createsOnlyTheCarrier`
+  asks only that a created occurrence *be* the carrier.
+
+  What that left open is the worst thing found on this branch, and a reviewer
+  compiled all of it. A coalesce may install a carrier whose own `ChannelId` is a
+  *different* session. That carrier is then outstanding on this ledger and
+  `ClosesSession.closesEverything`'s on-session guard — §10.96 — cannot see it, so
+  it strands: no close, no death, no disposition and no delivery can name it,
+  because every one of those carries `onItsSession`. **A payload in flight that no
+  transition of the family can ever end**, which is exactly the disjunction
+  `channelClosed` exists to break. And from the other side the session becomes
+  *unclosable*, because a close must end everything outstanding and the guard
+  excludes the only thing that is.
+
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.100. It is the twin of the
+  `arrival.2.1 = destination` conjunct §10.98 gave `Reroutes.arrives`, one
+  constructor over, and it went unnoticed for the same reason: the field that
+  *would* have caught it was weakened in the same round that created the hole.
+  -/
+  carrierOnItsSession : ∀ carrier, resolution = .coalesced carrier →
+    carrier.2.1 = session
+  /--
   **And the only occurrence it escrows is a coalesce's carrier.**
 
   `ledgerExtends` forbids erasing and `resolvesOnlyAs` bounds what is *ended*.
@@ -326,8 +353,6 @@ structure ClosesSession (before after : plan.LogicalProcessNetwork)
   onItsSession : occurrence.2.1 = session
   /-- It was in flight. -/
   wasOutstanding : (before.inFlight edge session).Outstanding occurrence
-  /-- It is now resolved as closed. -/
-  nowResolved : (after.inFlight edge session).resolution occurrence = some .channelClosed
   /-- The ledger only moved forward. -/
   ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
   /--
@@ -1089,9 +1114,44 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
   /-- **And it requests no cancellation at the destination.** -/
   destinationRequestsNothing : RequestsNothing
     (before.inFlight edge destination) (after.inFlight edge destination)
+  /--
+  **And the destination is open.**
+
+  A reroute puts a live payload into a session, which is what a send does, and
+  `SendsEscrow.sendOnOpenSession` has guarded a send since `ChannelContract`
+  acquired the law. `Reroutes` had no such guard: its scope names two escrow
+  fragments and no field of it mentioned `sessions` at all, so a reviewer
+  compiled a complete reroute delivering into a session already `.closed` — after
+  which no close or death of that session is possible either, since both demand
+  `wasOpen`. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.101.
+
+  Reading the *status* is not writing it, so this needs nothing from `scope`.
+  -/
+  destinationWasOpen : (before.sessions edge destination).status = .open
   /-- Both sessions' escrow, and nothing else. -/
   scope : plan.TouchesOnly before after
     (fun fragment => fragment = .escrow edge session ∨ fragment = .escrow edge destination)
+
+namespace ClosesSession
+
+variable {plan}
+
+/--
+**And the occurrence it names is closed.**
+
+**A field until §10.105, when a reviewer deleted it and nothing broke.**
+
+`closesEverything` — §10.90's addition — plus §10.96's on-session guard already
+says this, at `onItsSession` and `wasOutstanding`. The same shape as
+`Reroutes.elsewhere` in §10.92, and found by the same check: after adding a
+field, try deleting the ones beside it.
+-/
+theorem nowResolved {before after edge session occurrence}
+    (closed : plan.ClosesSession before after edge session occurrence) :
+    (after.inFlight edge session).resolution occurrence = some .channelClosed :=
+  closed.closesEverything occurrence closed.onItsSession closed.wasOutstanding
+
+end ClosesSession
 
 namespace Reroutes
 
@@ -1146,8 +1206,6 @@ structure KillsSession (before after : plan.LogicalProcessNetwork)
   onItsSession : occurrence.2.1 = session
   /-- It was in flight. -/
   wasOutstanding : (before.inFlight edge session).Outstanding occurrence
-  /-- It is now resolved by the channel's death. -/
-  nowResolved : (after.inFlight edge session).resolution occurrence = some .channelDied
   /-- The ledger only moved forward. -/
   ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
   /--
@@ -1209,8 +1267,6 @@ structure RequestsCancel (before after : plan.LogicalProcessNetwork)
   wasNotRequested : (before.inFlight edge session).cancelRequested occurrence = false
   /-- The request is recorded. -/
   nowRequested : (after.inFlight edge session).cancelRequested occurrence = true
-  /-- **And it is still in flight.** -/
-  stillOutstanding : (after.inFlight edge session).Outstanding occurrence
   /--
   **And the ledger only moved forward.**
 
@@ -1248,6 +1304,47 @@ structure RequestsCancel (before after : plan.LogicalProcessNetwork)
   /-- That session's escrow, and nothing else. -/
   scope : plan.TouchesOnly before after (fun fragment => fragment = .escrow edge session)
 
+namespace KillsSession
+
+variable {plan}
+
+/--
+**And the occurrence it names is resolved by the death.**
+
+A field until §10.105, when a reviewer deleted it and nothing broke:
+`killsEverything` plus the on-session guard already says it, at `onItsSession`
+and `wasOutstanding`. `ClosesSession.nowResolved` is the same story.
+-/
+theorem nowResolved {before after edge session occurrence}
+    (killed : plan.KillsSession before after edge session occurrence) :
+    (after.inFlight edge session).resolution occurrence = some .channelDied :=
+  killed.killsEverything occurrence killed.onItsSession killed.wasOutstanding
+
+end KillsSession
+
+namespace RequestsCancel
+
+variable {plan}
+
+/--
+**And the occurrence is still in flight.**
+
+`docs/PROCESS.md` §3 is explicit that requesting a cancellation is not resolving
+one: the payload stays escrowed until an acknowledgement, a timeout or a death
+ends it.
+
+This was a field, and stopped needing to be one when `ledgerExtends` and
+`resolvesNothing` went in beside it — §10.87's round and §10.97's. A reviewer
+deleted it and rebuilt it in one line. §10.105.
+-/
+theorem stillOutstanding {before after edge session occurrence}
+    (requested : plan.RequestsCancel before after edge session occurrence) :
+    (after.inFlight edge session).Outstanding occurrence :=
+  ⟨requested.ledgerExtends.createdPrefix.subset requested.wasOutstanding.1,
+    (requested.resolvesNothing occurrence).trans requested.wasOutstanding.2⟩
+
+end RequestsCancel
+
 /--
 A commit appends to the observation trace, and may only append what a live
 process could have produced.
@@ -1261,11 +1358,14 @@ a reconciler drop an observation a specification demanded.
 anything a process observed — and a commit of an arbitrary observation was a
 legal step of **every** network of every plan with an inhabited
 `boundary.Observation`. Local adversarial review proved it generically
-(`commits_anywhere`) and drew the consequence: since `.commit` is not
-`DrivenByEntropy`, `NetworkProgressMeasure.frontierIsExternal` then forbids
-*any* network from being at a frontier, §7's "remain at a declared external
-frontier" escape is unreachable, and every theorem in
-`Grass/Process/Network/Progress.lean` is vacuous.
+— the step was constructible at every network — and drew the consequence: since
+`.commit` is not
+`DrivenByEntropy`, the `frontierIsExternal` *field* `NetworkProgressMeasure`
+carried at the time then forbade any network from being at a frontier, §7's
+"remain at a declared external frontier" escape was unreachable, and every
+theorem in `Grass/Process/Network/Progress.lean` was vacuous. That field is gone
+— §10.68 replaced it with the `AtFrontier` definition — so this records the
+argument as it was made, not a chain a reader can still follow to a live field.
 
 The tie is `NetworkFragment.pending`: a step produces into it and a commit
 publishes a prefix of it, so a commit can only publish what is pending, in the
