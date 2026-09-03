@@ -906,7 +906,41 @@ under independent review; nothing on it has been authorized or merged.
 reviewer on the agent bus, and that reviewer — not the author — to select a
 snapshot, authorize, and merge.
 
-### 9.1 An open finding this plan cannot close by itself
+### 9.1 One branch per nomination
+
+A nominated branch stops moving. New work goes on a new branch.
+
+That is obvious in retrospect and this plan learned it the hard way: `c-process`
+nominated `agent/c-process/process-layer` at `4c41042` and then pushed three
+more commits to it while the review was open. The nomination named the exact
+commit, and `AGENT_REVIEW.md` §1's no-force rule keeps every reviewed snapshot
+reachable, so nothing was lost — but a reviewer fetching the ref got a tip three
+commits past the thing they had accepted, and §2's "authors are responsible for
+a focused branch" was not being honoured.
+
+It could not be fixed by rewinding, for the same reason the trailer defect in
+§9.2 could not: rewinding a published product branch is a force-push. So the
+correction is forward, and it is a rule rather than a repair:
+
+- `agent/c-process/process-layer` carries M1 and M2 and is nominated. It
+  receives **only** commits a reviewer of that nomination asks for — mistakes
+  corrected by new commits, which is exactly what §1 prescribes.
+- `agent/c-process/m3-cancellation` branches from that branch's tip and carries
+  everything after: the facades of §11, the cancellation algebra of §5, and the
+  rest of M3. It is nominated separately when it has a coherent chunk.
+- The next milestone gets its own branch when this one is nominated, and so on.
+
+The three commits that landed late are on both branches, with the same object
+ids, because a branch is a pointer and they were already published. They will be
+reviewed as part of the M3 nomination, which is where they belong: a trailer
+convention, two authoring facades, and a composition algebra are all post-M2
+work that happened to be committed to the wrong ref.
+
+Working on more than one branch also stops the reviewer being a bottleneck. A
+nomination that is waiting is not a reason for the author to wait too, and the
+protocol has never required it.
+
+### 9.2 An open finding this plan cannot close by itself
 
 Twelve of the forty commits on this branch carry a broken trailer block, and the
 correction is not the author's to make.
@@ -943,7 +977,7 @@ This plan takes no position. What it does record is the convention that stops it
 recurring: **the trailer block is contiguous, with no blank line between
 trailers.** Every commit after `4c41042` on this branch follows it.
 
-### 9.2 What local iteration did and did not do
+### 9.3 What local iteration did and did not do
 
 Adversarial review agents spawned by the author, with fresh context each round,
 to find defects early. That found real ones and it is not a substitute for the
@@ -1564,7 +1598,7 @@ aggregate importing every leaf.
 It cannot mean hiding. Importing a module in Lean makes its whole transitive
 closure visible, and `export` adds names rather than removing them, so a facade
 cannot show an author less than what it imports. A module note claiming
-otherwise would be the overclaiming this plan's §9.2 lists as the defect class
+otherwise would be the overclaiming this plan's §9.3 lists as the defect class
 local review keeps finding.
 
 What it can mean is that the closure is small, declared, and *checked*.
