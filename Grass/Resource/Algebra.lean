@@ -14,6 +14,26 @@ reason every law here is conditioned, and its only nontrivial instance is consum
 nothing, so no proof in this tree has discharged a nontrivial compatibility side
 condition.
 
+**The full extent, since a later review measured it and the paragraph above concedes
+only the importer question.** Of the twenty laws `OrderedPartialCommutativeResourceLaws`
+declares, three are ever projected — `combineCancel`, `alternativeIdem` and
+`alternativeLeCombine` — and all three uses are inside that one fixture; the other
+seventeen are discharged by `Counting.laws` and `Exclusive.laws` and read by nothing.
+`ResourceModel`, `HasResourceAxis`, `HasResourceLimit` and `ResourceLimit` have no
+values or instances anywhere under `Grass/` or `Tests/`. `Counting.algebra` is built
+and used by nothing, and `Exclusive` — the namespace that exists to show `compatible`
+is not a hedge — is used by nothing either.
+
+So this is a facility whose only safety property is that nothing calls it, which is
+the defect class this branch has spent eleven rounds finding elsewhere in the layer.
+It is kept rather than deleted because M7 and M9 are the stated consumers and
+rewriting a twenty-law bundle later is worse than carrying it; what is not acceptable
+is carrying it while a reader assumes it is load-bearing. Two audit blind spots hide
+the extent from the gates: `ResourceAlgebra.compatible` is invisible to
+`Tools/ConsultedAudit.py` because `StepPolicy.compatible` satisfies the same name,
+and every lifecycle and exhaustion constructor is on `Tools/ReachabilityAudit.py`'s
+allowlist as declared-ahead-of-its-milestone.
+
 ## Reconciling two sketches
 
 The corpus displays this idea twice with different shapes.
