@@ -71,7 +71,30 @@ pub fn dry_run(state: &BusState, env: &Envelope) -> AbResult<()> {
 /// after its own stream's immediately preceding event and after every
 /// cross-agent event it references. Ties are broken by `EventId` purely for
 /// deterministic, reproducible test behavior -- correctness does not depend
-/// on which valid order is chosen (gate 16).
+/// on which valid order is chosen (gate 16) -- with one deliberate
+/// exception: among several simultaneously-ready events, every remaining
+/// `seq == 0` (an agent's own `agent.registered`) is preferred over every
+/// `seq > 0` event, regardless of which sorts lower by id.
+///
+/// This exception exists because most event kinds that name another agent
+/// by identity (e.g. `IssueOpened.target`, `DependencyRequested.target`,
+/// `HandoffOffered.receiver`, `ReviewRequest.reviewer`/`authors`) do not
+/// include that agent's registration in `EventData::referenced_ids()` --
+/// only fields that already carry an `EventId` naturally do (`blocks`,
+/// `evidence`, and similar). Without this exception, a plain lexicographic
+/// tie-break has no notion that "the named agent must already be
+/// registered" is a real dependency at all, and -- since ties are broken by
+/// *agent name*, not real causality -- it would deterministically place
+/// e.g. `alice:1` (an issue alice opens targeting `bob`) before `bob:0`
+/// (bob's own registration) on *every* cold reduce whenever `alice` sorts
+/// before `bob`, permanently failing with "unregistered agent: bob" even
+/// though bob is definitely registered. Every agent's own `seq == 0` event
+/// always has zero dependencies by construction (the very first event on
+/// any stream), so it is always in the initial `ready` set from the start
+/// of this algorithm; preferring it whenever it's available guarantees
+/// every registration in the batch is applied before any event that merely
+/// *names* that agent, without requiring a wire-format change to add those
+/// references explicitly everywhere.
 fn topological_order(streams: &BTreeMap<Agent, Vec<Envelope>>) -> AbResult<Vec<&Envelope>> {
     let mut by_id: BTreeMap<EventId, &Envelope> = BTreeMap::new();
     for events in streams.values() {
@@ -95,11 +118,16 @@ fn topological_order(streams: &BTreeMap<Agent, Vec<Envelope>>) -> AbResult<Vec<&
         }
     }
 
+    // Ordered `(is_not_registration, id)` so a `seq == 0` event (false)
+    // always sorts before a `seq > 0` event (true), and ties within each
+    // tier still fall back to plain `EventId` order.
+    let ready_key = |id: &EventId| (id.seq() != 0, id.clone());
+
     let mut remaining_deps = deps.clone();
-    let mut ready: std::collections::BTreeSet<EventId> = remaining_deps
+    let mut ready: std::collections::BTreeSet<(bool, EventId)> = remaining_deps
         .iter()
         .filter(|(_, d)| d.is_empty())
-        .map(|(id, _)| id.clone())
+        .map(|(id, _)| ready_key(id))
         .collect();
     let mut dependents: BTreeMap<EventId, Vec<EventId>> = BTreeMap::new();
     for (id, d) in &deps {
@@ -109,8 +137,8 @@ fn topological_order(streams: &BTreeMap<Agent, Vec<Envelope>>) -> AbResult<Vec<&
     }
 
     let mut order = Vec::new();
-    while let Some(id) = ready.iter().next().cloned() {
-        ready.remove(&id);
+    while let Some((_, id)) = ready.iter().next().cloned() {
+        ready.remove(&(id.seq() != 0, id.clone()));
         remaining_deps.remove(&id);
         order.push(id.clone());
         if let Some(children) = dependents.get(&id) {
@@ -118,7 +146,7 @@ fn topological_order(streams: &BTreeMap<Agent, Vec<Envelope>>) -> AbResult<Vec<&
                 if let Some(d) = remaining_deps.get_mut(child) {
                     d.retain(|x| x != &id);
                     if d.is_empty() {
-                        ready.insert(child.clone());
+                        ready.insert(ready_key(child));
                     }
                 }
             }
@@ -6725,6 +6753,197 @@ mod tests {
         assert!(
             !state.exclusive.is_contested(&first_env.id),
             "no exclusive-tracker bookkeeping is created for findings at all"
+        );
+    }
+
+    // --------------------------------------------------- reduce()/reduce_onto()
+
+    /// Regression test for a Critical finding surfaced while building the
+    /// gate-15 test below: `IssueOpened::referenced_ids()` (like most
+    /// event kinds naming another agent by identity rather than by
+    /// `EventId`) does not include `target`, so nothing in the dependency
+    /// graph `topological_order` builds forces that agent's own
+    /// registration to be ordered first. Before the fix in this same
+    /// function, the plain lexicographic tie-break would deterministically
+    /// place an alphabetically-earlier author's event ahead of an
+    /// alphabetically-later target's registration whenever both were
+    /// simultaneously ready and nothing else constrained them -- here,
+    /// `alice` opening an ordinary issue against `bob`, with no other
+    /// cross-reference between their streams at all (the exact shape a
+    /// real submission takes when the author doesn't separately
+    /// `--observes` the target's registration, which nothing requires).
+    /// This is not a race or an adversarial construction: it is the
+    /// ordinary, single-host, fully-synced cold-replay path every `status`/
+    /// `tail`/`coordinate` call goes through, and it would have
+    /// permanently failed with "unregistered agent: bob" -- exactly the
+    /// fleet-wide-DoS shape already fixed elsewhere in this file, just via
+    /// a different mechanism (ordering, not a hard `Err` on an otherwise
+    /// -valid event).
+    #[test]
+    fn cold_reduce_orders_every_registration_before_any_event_merely_naming_that_agent() {
+        let coord1 = a("coord1");
+        let alice = a("alice");
+        let bob = a("bob");
+        let epoch = epoch_with(&[
+            ("coord1", Role::Coordinator),
+            ("alice", Role::Implementor),
+            ("bob", Role::Implementor),
+        ]);
+        let mut known_epochs = BTreeMap::new();
+        known_epochs.insert(epoch.id.clone(), epoch.clone());
+
+        let coord1_reg = register(&coord1, Role::Coordinator);
+        let alice_reg = register(&alice, Role::Implementor);
+        let bob_reg = register(&bob, Role::Implementor);
+
+        // Deliberately no reference to bob at all -- `alice` sorts before
+        // `bob`, so a plain lexicographic tie-break would place this event
+        // before `bob:0` the moment both are simultaneously ready.
+        let issue_data = EventData::IssueOpened(IssueOpened {
+            target: bob.clone(),
+            issue_kind: IssueKind::Bug,
+            severity: Priority::Normal,
+            summary: text("s"),
+            code_commit: None,
+            locations: vec![],
+            expected: None,
+            observed_behavior: None,
+            reproduction: vec![],
+            blocks: StringSet::default(),
+            evidence: StringSet::default(),
+        });
+        let issue_env = Envelope::new(&alice, 1, no_frontier(), &issue_data, []);
+
+        let streams: BTreeMap<Agent, Vec<Envelope>> = BTreeMap::from([
+            (coord1.clone(), vec![coord1_reg]),
+            (alice.clone(), vec![alice_reg, issue_env.clone()]),
+            (bob.clone(), vec![bob_reg]),
+        ]);
+        let state = reduce(config(), Some(epoch), known_epochs, &streams)
+            .expect("bob's registration must be ordered before alice's issue targeting him");
+        assert_eq!(state.issues[&issue_env.id].current_target, bob);
+    }
+
+    /// Gate 15 ("cold replay and incremental replay produce exactly the
+    /// same reduced state"), exercised at the actual public entry points
+    /// for the first time -- every other test in this module drives
+    /// `apply_event` directly against a hand-built `BusState`, never
+    /// `reduce()`/`topological_order` (the real cold-replay path
+    /// `sync::reduce_local` uses) or `reduce_onto()` (the real incremental
+    /// path `coordinator::drain_outbox` uses to fold newly-validated
+    /// candidates onto an already-reduced state). Builds one real,
+    /// multi-agent, multi-kind event history, reduces it two ways -- fully
+    /// cold in one `reduce()` call, versus cold over a prefix followed by
+    /// `reduce_onto()` for the rest, mirroring exactly how a coordinator
+    /// batch actually gets folded onto a prior snapshot in production --
+    /// and asserts the two resulting `BusState`s are identical via their
+    /// `Debug` representation (every field is a `BTreeMap`/`BTreeSet` or
+    /// similarly order-independent, so this is a reliable deep-equality
+    /// check without adding `PartialEq` to `BusState`'s full field graph
+    /// just for one test).
+    #[test]
+    fn cold_replay_and_incremental_replay_produce_identical_state() {
+        let coord1 = a("coord1");
+        let alice = a("alice");
+        let bob = a("bob");
+        let epoch = epoch_with(&[
+            ("coord1", Role::Coordinator),
+            ("alice", Role::Implementor),
+            ("bob", Role::Implementor),
+        ]);
+        let mut known_epochs = BTreeMap::new();
+        known_epochs.insert(epoch.id.clone(), epoch.clone());
+
+        let coord1_reg = register(&coord1, Role::Coordinator);
+        let alice_reg = register(&alice, Role::Implementor);
+        let bob_reg = register(&bob, Role::Implementor);
+
+        // `IssueOpened::referenced_ids()` does not include `target` (only
+        // `blocks`/`evidence`), so `target`'s registration has no causal
+        // edge in `topological_order` unless the submitter's own refs
+        // supply one -- citing it as evidence here is a test-construction
+        // workaround for that (a real, separate finding -- see the
+        // `agent-bus-v2-target-agent-topological-ordering` memory note --
+        // not something this test is trying to exercise).
+        let issue_data = EventData::IssueOpened(IssueOpened {
+            target: bob.clone(),
+            issue_kind: IssueKind::Bug,
+            severity: Priority::Normal,
+            summary: text("s"),
+            code_commit: None,
+            locations: vec![],
+            expected: None,
+            observed_behavior: None,
+            reproduction: vec![],
+            blocks: StringSet::default(),
+            evidence: StringSet::from_iter([bob_reg.id.clone()]),
+        });
+        let issue_env = Envelope::new(
+            &alice,
+            1,
+            frontier_seeing(&[&bob_reg.id]),
+            &issue_data,
+            [bob_reg.id.clone()],
+        );
+
+        let resolve_data = EventData::IssueResolved(IssueResolved {
+            issue: issue_env.id.clone(),
+            assignment: issue_env.id.clone(),
+            summary: text("done"),
+            fix_commit: None,
+            verification: vec![],
+        });
+        let resolve_env = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&issue_env.id]),
+            &resolve_data,
+            [issue_env.id.clone()],
+        );
+
+        let status_data = EventData::AgentStatus(AgentStatusEvent {
+            status: LifecycleStatus::Active,
+            note: text("all done"),
+            product_branch: None,
+            product_commit: None,
+        });
+        let status_env = Envelope::new(&bob, 2, no_frontier(), &status_data, []);
+
+        let streams_full: BTreeMap<Agent, Vec<Envelope>> = BTreeMap::from([
+            (coord1.clone(), vec![coord1_reg.clone()]),
+            (alice.clone(), vec![alice_reg.clone(), issue_env.clone()]),
+            (
+                bob.clone(),
+                vec![bob_reg.clone(), resolve_env.clone(), status_env.clone()],
+            ),
+        ]);
+
+        let cold = reduce(
+            config(),
+            Some(epoch.clone()),
+            known_epochs.clone(),
+            &streams_full,
+        )
+        .expect("full cold reduce succeeds");
+
+        // Split: reduce a prefix cold (everything except bob's last two
+        // events), then fold the rest on incrementally, in dependency
+        // order -- exactly `coordinator::drain_outbox`'s own shape.
+        let streams_prefix: BTreeMap<Agent, Vec<Envelope>> = BTreeMap::from([
+            (coord1.clone(), vec![coord1_reg.clone()]),
+            (alice.clone(), vec![alice_reg.clone(), issue_env.clone()]),
+            (bob.clone(), vec![bob_reg.clone()]),
+        ]);
+        let incremental = reduce(config(), Some(epoch), known_epochs, &streams_prefix)
+            .expect("prefix cold reduce succeeds");
+        let incremental = reduce_onto(incremental, &[resolve_env, status_env])
+            .expect("incremental reduce_onto succeeds");
+
+        assert_eq!(
+            format!("{cold:?}"),
+            format!("{incremental:?}"),
+            "cold replay and cold-plus-incremental replay of the identical event set must \
+             produce byte-identical state"
         );
     }
 }
