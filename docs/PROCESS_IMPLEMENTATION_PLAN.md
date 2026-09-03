@@ -2882,3 +2882,42 @@ own; `accessible` had none until `no_infinite_silent_run` was stated. Both are
 Not a defect — a driver is the consumer and no driver exists at this milestone —
 but worth the entry, because §10.48 was closed by adding a one-link chain and a
 one-link chain is what a reviewer will find next time.
+
+### 10.64 `NetworkProgressMeasure` is quantified over every world, not over reachable ones
+
+`descendsOrProduces` and `frontierIsExternal` both quantify over an arbitrary
+`before : plan.LogicalProcessNetwork`. The world is a record type, so that
+includes worlds no execution can produce — an empty slot, a dead incarnation, an
+instance attached to a parent that was never spawned — and a measure must account
+for a step from each of them.
+
+That is what stops a measure existing for any plan that does interesting work.
+`serverPlan`'s unreachable worlds admit an unbounded spawn/die/restart chain with
+no external event, so no rank descends across it, whatever its reachable
+executions do. §10.60 attributed that to the plan's unbounded connection
+population; the sharper statement is that it is about the plan's *world type*.
+
+`Tests/Process/FrontierFixtures.lean` exists in spite of this rather than because
+of it: `waitingPlan` was built so that its unreachable worlds admit only finitely
+many non-entropy steps, and its rank `slack` is a measure of exactly that
+bookkeeping. Read as §7 content it says almost nothing; read as an inhabitance
+proof it is the first `NetworkProgressMeasure` in the corpus and the first
+non-empty `AtFrontier`.
+
+The fix is the one `MeetsProcessProgress` already had for the same reason one
+layer down: index the measure by a starting network and quantify both fields over
+`plan.StepsTo start before`. It touches `SilentRun` and every theorem in
+`Grass/Process/Network/Progress.lean`, so it needs a ruling before it is done, not
+after.
+
+### 10.65 `ExactInitialNetwork` and the network measure are not connected
+
+Following from §10.59 and §10.64: `Grass/Process/Network/Initial.lean` says what a
+start is and `Grass/Process/Network/Progress.lean` says what progress is, and
+nothing relates them. Whichever way §10.64 is ruled, the reachability the measure
+needs is reachability *from an `ExactInitialNetwork`*, which is the definition
+that has no witness.
+
+Both are wanted by the same fixture: `Tests/Process/FrontierFixtures.lean` builds
+a plan and a measure, and cannot say that `waiting` is where a run of that plan
+begins.
