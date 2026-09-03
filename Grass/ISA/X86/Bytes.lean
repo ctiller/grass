@@ -184,6 +184,46 @@ def toBytes (i : InsnEncoding) : ByteSeq :=
   (match i.sib with | some s => [s.toByte] | Option.none => []) ++
   i.disp.toBytes ++ i.imm.toBytes
 
+/--
+This record denotes an instruction a decoder could read back.
+
+`InsnEncoding` is a product of independent fields and most of that product is
+unreachable, in the same way `RmEncoding` was before it gained a well-formedness
+predicate. The failure is worse one layer up, because `toBytes` emits the fields
+positionally: a record with a SIB byte and no ModR/M byte serialises the SIB
+into the ModR/M position, so `8D 00 44 33 22 11` reads as `lea rax,[rax]`
+followed by three stray bytes that the processor decodes as whatever they
+happen to be.
+
+`WellFormed` states two conditions, and neither is about what address is named:
+
+- a SIB byte exists only as part of a ModR/M byte's r/m operand, so `WellFormed`
+  requires a ModR/M byte that is actually selecting it;
+- a displacement belongs to a ModR/M operand, so `WellFormed` requires one.
+
+The immediate is deliberately *not* constrained here. Which immediate an opcode
+takes is a fact about the opcode, and this module has no opcode table; putting a
+guess here would be inventing a constraint rather than modeling one. It is an
+**open obligation** for the instruction layer.
+-/
+def WellFormed (i : InsnEncoding) : Prop :=
+  (i.sib.isSome → ∃ m, i.modrm = some m ∧ m.rm = ModRm.rmSelectsSib ∧
+      m.mod ≠ ModRm.modRegisterDirect) ∧
+    (i.disp ≠ .none → i.modrm.isSome)
+
+instance (i : InsnEncoding) : Decidable i.WellFormed := by
+  unfold WellFormed
+  exact inferInstanceAs (Decidable (_ ∧ _))
+
+/-- A SIB byte with no ModR/M byte is rejected, rather than being serialised
+into the ModR/M position. -/
+theorem not_wellFormed_sib_without_modrm {i : InsnEncoding}
+    (hs : i.sib.isSome = true) (hm : i.modrm = Option.none) : ¬ i.WellFormed := by
+  intro h
+  obtain ⟨m, hm', _, _⟩ := h.1 hs
+  rw [hm] at hm'
+  exact absurd hm' (by simp)
+
 /-- The encoded length in bytes. -/
 def size (i : InsnEncoding) : Nat :=
   (if i.rex.isSome then 1 else 0) + (if i.escape then 1 else 0) + 1 +
@@ -193,6 +233,16 @@ def size (i : InsnEncoding) : Nat :=
 /-- Every instruction is at least one byte, so a parser always makes progress. -/
 theorem size_pos (i : InsnEncoding) : 0 < i.size := by
   simp only [size]; omega
+
+/-- `size` counts the bytes `toBytes` emits.
+
+Every other size function here has this theorem; without it for `InsnEncoding`
+the two could drift, and the field most likely to cause that is the one easiest
+to add later — a legacy-prefix field counted in one and emitted in the other. -/
+@[simp] theorem length_toBytes (i : InsnEncoding) : i.toBytes.length = i.size := by
+  cases i with | mk rex escape opcode modrm sib disp imm =>
+  cases rex <;> cases escape <;> cases modrm <;> cases sib <;>
+    simp [toBytes, size] <;> omega
 
 end InsnEncoding
 

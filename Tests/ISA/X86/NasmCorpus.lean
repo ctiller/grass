@@ -1,4 +1,4 @@
-import Grass.ISA.X86.Bytes
+import Tests.ISA.X86.CorpusCommon
 
 /-!
 # NASM differential corpus
@@ -39,52 +39,24 @@ over. `Tools/x86-nasm-differential.py` documents the same choice.
 - `call qword ptr` and `mov dword ptr` to exercise a `/digit` opcode extension
   and an instruction carrying an immediate after the displacement.
 
-RIP-relative forms are absent here and checked by the disassembly differential
-instead: NASM computes a RIP displacement from a target address and an
-instruction length, so a source line asserting a literal displacement would be
-testing NASM's arithmetic rather than Grass's encoding.
+RIP-relative forms are absent here, and are checked instead by
+`Tests/ISA/X86/RipCorpus.lean` against NDISASM. NASM computes a RIP
+displacement from a target address and an instruction length, so a source line
+asserting a literal displacement would test NASM's arithmetic rather than
+Grass's encoding; a disassembler prints the target it computed, which is the
+number the RIP contract is actually about.
 -/
 
 namespace Grass.Tests.ISA.X86.Nasm
 
-open Grass.Std.Logical Grass.ISA.X86
-
-/-- The displacement used throughout. See the module comment. -/
-def disp : BitVec 32 := 0x11223344
-
-/-- The immediate used by the `mov` cases. -/
-def immValue : BitVec 32 := 0x55667788
-
-/-- NASM's 64-bit name for a register. -/
-def nasmName : Gpr → String
-  | .rax => "rax" | .rcx => "rcx" | .rdx => "rdx" | .rbx => "rbx"
-  | .rsp => "rsp" | .rbp => "rbp" | .rsi => "rsi" | .rdi => "rdi"
-  | .r8 => "r8" | .r9 => "r9" | .r10 => "r10" | .r11 => "r11"
-  | .r12 => "r12" | .r13 => "r13" | .r14 => "r14" | .r15 => "r15"
-
-/-- NASM's spelling of a scale factor. -/
-def scaleText : Scale → String
-  | .s1 => "1" | .s2 => "2" | .s4 => "4" | .s8 => "8"
-
-/-- Lowercase hex for one byte, zero-padded to two digits. -/
-def hexByte (b : Byte) : String :=
-  let digits : List Char :=
-    ['0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f']
-  let n := b.toNat
-  String.ofList [digits.getD (n / 16) '?', digits.getD (n % 16) '?']
-
-/-- Lowercase hex for a byte string, no separators. -/
-def hexBytes (bs : ByteSeq) : String := String.join (bs.map hexByte)
-
-/-- A 32-bit value as a NASM hex literal. -/
-def hex32 (v : BitVec 32) : String :=
-  "0x" ++ hexBytes [BitVec.extractLsb' 24 8 v, BitVec.extractLsb' 16 8 v,
-                    BitVec.extractLsb' 8 8 v, BitVec.extractLsb' 0 8 v]
+open Grass.Std.Logical Grass.ISA.X86 Grass.Tests.ISA.X86.Corpus
 
 /-- The NASM address expression for a memory operand.
 
-`ripRelative` has no faithful literal spelling in NASM source, so it is rendered
-as a marker that the runner skips rather than silently emitting something else. -/
+`ripRelative` has no faithful literal spelling in NASM source. No corpus row
+below builds one, so this case is unreachable; it renders as a marker that would
+fail loudly at NASM rather than silently assembling to something else. The
+RIP-relative forms are covered by `Tests/ISA/X86/RipCorpus.lean`. -/
 def nasmAddr : MemOperand → String
   | .base b d => "[" ++ nasmName b ++ "+" ++ hex32 d ++ "]"
   | .baseIndex b i s d =>

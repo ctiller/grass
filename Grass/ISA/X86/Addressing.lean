@@ -45,10 +45,11 @@ them against NASM.
 
 ## Why the encoder always uses a 32-bit displacement
 
-`encode` below is deliberately not a size optimizer. It emits `mod=10` with a
-full displacement wherever a displacement is possible, so the encoding of an
-operand depends only on its shape and never on the numeric value of its
-displacement.
+`encode` below is deliberately not a size optimizer. It always emits a 32-bit
+displacement, so the encoding of an operand depends only on its shape and never
+on the numeric value of its displacement. For the base forms that means
+`mod=10`; the index-only and absolute forms use `mod=00`, because the SIB
+no-base encoding exists only there and carries its `disp32` regardless.
 
 That is a real cost — three extra bytes on `[rsp + 8]` — paid for a specific
 reason. A size-optimizing encoder chooses between `mod=00`, `mod=01` and
@@ -157,8 +158,12 @@ inductive MemOperand where
   /-- `[index*scale + disp]`, with no base register. Not encodable when `index`
   is `rsp`. -/
   | indexOnly (index : Gpr) (scale : Scale) (disp : BitVec 32)
-  /-- `[disp]`, an absolute 32-bit address with no base and no index. Reached
-  through a SIB byte, never through `mod=00, rm=101`, which is RIP-relative. -/
+  /-- `[disp]`, a displacement-only address with no base and no index. Reached
+  through a SIB byte, never through `mod=00, rm=101`, which is RIP-relative.
+
+  Not an arbitrary 32-bit address: the displacement is sign-extended to 64 bits
+  (see `Displacement.value`), so this form reaches the low 2 GiB and the high
+  2 GiB and nothing between them. -/
   | absolute (disp : BitVec 32)
 deriving DecidableEq, Repr, Inhabited
 
@@ -436,8 +441,14 @@ Decode the r/m half of an instruction into the address it denotes.
 `none` for a malformed or non-memory encoding: `mod=11` is a register operand,
 and `rm=100` without a SIB byte is not a complete encoding.
 
-This decoder accepts every legal 64-bit-mode memory form, including the short
-displacement forms `encodeMem` never emits.
+Within its scope it accepts every legal ModR/M memory form, including the short
+displacement forms `encodeMem` never emits. That scope is the default 64-bit
+address size with no segment override, which is what `RmEncoding` can represent:
+it has no field for a legacy prefix, so `67h` 32-bit addressing — under which
+`mod=00, rm=101` becomes *EIP*-relative and the address truncates to 32 bits —
+and `FS`/`GS` segment overrides are outside it, as are the `MOV moffs` forms,
+which are not ModR/M operands at all. Those are gaps, not rejections: an
+importer meeting one of them needs this model extended, not a `none`.
 -/
 def decodeMem (e : RmEncoding) : Option MemOperand :=
   if !decide e.WellFormed then Option.none

@@ -14,6 +14,15 @@ name: Library build
 # docstring asserting a property the code did not have, including one naming a
 # theorem that did not exist. Tools/DocstringAudit.py requires a strong claim in
 # a definition or module comment to name the type or theorem enforcing it.
+#
+# The last two are the x86 differentials, and they check something no Lean
+# theorem can. Every theorem in Grass/ISA/X86/** relates Grass's own definitions
+# to each other, so an encoder and decoder that are wrong in the same way
+# satisfy all of them while emitting instructions no processor executes -- a
+# reviewer demonstrated exactly that with a consistent RIP-relative/absolute
+# swap that closed every proof unchanged. NASM and NDISASM are the only things
+# in the repository that can notice. They ran by hand until now, which meant the
+# claim they support could rot with nothing to say so.
 
 on:
   push:
@@ -52,3 +61,16 @@ jobs:
 
       - name: Audit docstring claims
         run: python3 Tools/DocstringAudit.py
+
+      - name: Install NASM
+        run: sudo apt-get update && sudo apt-get install -y nasm
+
+      - name: Differential against NASM
+        run: |
+          lake env lean --run Tests/ISA/X86/NasmCorpus.lean > "$RUNNER_TEMP/corpus.txt"
+          python3 Tools/x86-nasm-differential.py "$RUNNER_TEMP/corpus.txt"
+
+      - name: Differential against NDISASM
+        run: |
+          lake env lean --run Tests/ISA/X86/RipCorpus.lean > "$RUNNER_TEMP/rip.txt"
+          python3 Tools/x86-ndisasm-differential.py "$RUNNER_TEMP/rip.txt"

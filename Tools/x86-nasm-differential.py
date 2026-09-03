@@ -61,6 +61,9 @@ LISTING = re.compile(r"^\s*(\d+)\s+[0-9A-F]{8}\s+([0-9A-F]+-?)\s*(.*)$")
 
 PROLOGUE = ["BITS 64", "DEFAULT ABS"]
 
+# How many rows Tests/ISA/X86/NasmCorpus.lean generates. See the check in main.
+EXPECTED_ROWS = 1085
+
 # Disagreements that were investigated and found to be NASM canonicalising an
 # address rather than Grass encoding it wrongly. `docs/VALIDATION.md` section 2
 # requires disagreement to be "preserved as a finding", so these are listed with
@@ -132,6 +135,17 @@ def main() -> int:
 
     if not rows:
         sys.exit("corpus is empty; did the Lean generator run?")
+
+    # A count the generator also knows. Without it this tool reports success on
+    # a corpus that is one row, or on 1084 of 1085 with the one telling row
+    # removed -- both demonstrated during review. Nothing else binds the file
+    # it is handed to the repository's generator, so the count is the binding.
+    if len(rows) != EXPECTED_ROWS:
+        sys.exit(
+            f"corpus has {len(rows)} rows, expected {EXPECTED_ROWS}. "
+            "Regenerate it from the Lean corpus, or update EXPECTED_ROWS here "
+            "and in the corpus module if the corpus genuinely changed."
+        )
 
     assembled = assemble(nasm, [source for _, source in rows])
     if assembled is None:
