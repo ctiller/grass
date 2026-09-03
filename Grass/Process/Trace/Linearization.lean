@@ -22,8 +22,12 @@ constructors of `NetworkTransition`, and it is the reason a
 specification stated over observations is stable under execution: no step
 rewrites or truncates the trace, so an observation a specification demanded
 cannot be dropped by a later step. Twenty-one constructors get it from
-`touchesOnly` — they do not scope the trace at all — and the two that do,
-`processStep` and `commit`, carry an append equation as a field.
+`touchesOnly` — they do not scope the trace at all — and the four that do,
+`processStep`, `commit`, `spawn` and `restart`, carry an append equation as a
+field. `spawn` and `restart` joined that list when they were tied to
+`ProcessSpec.Initial`, which returns "the observations emitted by starting";
+before that a spawn could not emit and the theorem covered one fewer case for
+the wrong reason.
 
 **Two independent steps cannot both emit.** `independent_steps_do_not_both_emit`
 is a one-line consequence of both emitting constructors declaring
@@ -118,9 +122,9 @@ stable under execution — an observation it demanded cannot be dropped by a lat
 step, whatever that step was.
 
 The proof is a case split on whether the step declared the trace at all. If it
-did not, `touchesOnly` gives equality. If it did, it is one of exactly two
-constructors, and each carries the append equation as a field: `processStep`'s
-`observationsExtend` and `commit`'s `appended`.
+did not, `touchesOnly` gives equality. If it did, it is one of exactly four
+constructors, and each carries the append equation as a field: `processStep`'s,
+`spawn`'s and `restart`'s `observationsExtend`, and `commit`'s `appended`.
 
 Worth noting what would have gone wrong without the scope discipline. There is
 nothing in `LogicalProcessNetworkCore` that stops a transition from setting
@@ -135,6 +139,8 @@ theorem observations_extend {before after : plan.LogicalProcessNetwork}
   · cases transition with
     | processStep _ _ _ emitted _ _ step => exact ⟨emitted, step.observationsExtend⟩
     | commit emitted step => exact ⟨emitted, step.appended⟩
+    | spawn _ _ _ emitted _ step => exact ⟨emitted, step.observationsExtend⟩
+    | restart _ _ _ emitted _ step => exact ⟨emitted, step.observationsExtend⟩
     | _ => exact absurd emits (by simp [NetworkTransition.Emits, NetworkTransition.scope])
   · exact ⟨[], by rw [← trace_unchanged_of_silent transition emits, List.append_nil]⟩
 
@@ -173,6 +179,22 @@ theorem emits_iff_the_trace_moved {before after : plan.LogicalProcessNetwork}
       rw [← same, List.length_append] at lengths
       have : emitted.length = 0 := by omega
       exact nonempty (List.eq_nil_of_length_eq_zero this)
+    | spawn _ _ _ emitted _ step =>
+      rcases emits with isSlot | isNominals | ⟨nonempty, _⟩
+      · exact absurd isSlot (by simp)
+      · exact absurd isNominals (by simp)
+      · intro same
+        have lengths := congrArg List.length step.observationsExtend
+        rw [← same, List.length_append] at lengths
+        exact nonempty (List.eq_nil_of_length_eq_zero (by omega))
+    | restart _ _ _ emitted _ step =>
+      rcases emits with isSlot | isNominals | ⟨nonempty, _⟩
+      · exact absurd isSlot (by simp)
+      · exact absurd isNominals (by simp)
+      · intro same
+        have lengths := congrArg List.length step.observationsExtend
+        rw [← same, List.length_append] at lengths
+        exact nonempty (List.eq_nil_of_length_eq_zero (by omega))
     | _ => exact absurd emits (by simp [NetworkTransition.Emits, NetworkTransition.scope])
   · intro moved
     exact Classical.byContradiction

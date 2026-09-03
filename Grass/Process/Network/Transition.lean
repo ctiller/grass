@@ -542,7 +542,10 @@ one this step allocated, so the history cannot omit it.
 -/
 structure Spawns (before after : plan.LogicalProcessNetwork)
     (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
-    (allocation : Allocation plan.topology.Carrier) : Prop where
+    (allocation : Allocation plan.topology.Carrier)
+    (emitted : Trace boundary.Observation)
+    (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation) :
+    Prop where
   /-- The slot was empty. -/
   wasEmpty : before.instances kind slot = none
   /-- It now holds a live incarnation of the right kind. -/
@@ -555,9 +558,30 @@ structure Spawns (before after : plan.LogicalProcessNetwork)
   /-- And whose generation this step allocated. -/
   allocatesTheGeneration : ∀ incarnation, after.instances kind slot = some incarnation →
     incarnation.ref.generation ∈ allocation.entries
-  /-- That slot and the nominal history, and nothing else. -/
+  /--
+  **And it starts where its own protocol says a start is.**
+
+  The field that was missing, and the hole it left was the one `SettlesDemands`
+  closes at every *step*: with no tie to `ProcessSpec.Initial`, an instance could
+  be spawned already holding demands it never issued, and answer them later
+  perfectly legally. Local adversarial review spawned one holding three.
+
+  All four of `Initial`'s arguments at once, for the same reason `Initial`
+  relates all four: a spawn that placed a permitted state while inventing the
+  request or the outstanding bag would satisfy a weaker clause and be wrong.
+  -/
+  startsInitial : ∀ incarnation, after.instances kind slot = some incarnation →
+    ∃ sameKind : incarnation.kind = kind,
+      (plan.topology.protocol kind).Initial (sameKind ▸ incarnation.request)
+        (sameKind ▸ incarnation.localState) (sameKind ▸ incarnation.outstanding) localEmitted
+  /-- And what reaches the network trace is the projection of what it observed. -/
+  emittedIsProjected : emitted = localEmitted.filterMap (plan.topology.observeAt kind)
+  /-- Observations grow by exactly that. -/
+  observationsExtend : after.observations = before.observations ++ emitted
+  /-- That slot, the nominal history, the trace if it emitted, and nothing else. -/
   scope : plan.TouchesOnly before after
-    (fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals)
+    (fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals ∨
+      (emitted ≠ [] ∧ fragment = .observations))
 
 /--
 A supervisor restarts a slot whose incarnation ended.
@@ -574,7 +598,10 @@ learns that a previous incarnation ended here.
 -/
 structure Restarts (before after : plan.LogicalProcessNetwork)
     (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
-    (allocation : Allocation plan.topology.Carrier) : Prop where
+    (allocation : Allocation plan.topology.Carrier)
+    (emitted : Trace boundary.Observation)
+    (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation) :
+    Prop where
   /-- **The slot held an incarnation that had ended.** -/
   wasEnded : ∃ incarnation, before.instances kind slot = some incarnation ∧
     ¬ incarnation.Live
@@ -594,9 +621,30 @@ structure Restarts (before after : plan.LogicalProcessNetwork)
   /-- Whose generation this step allocated — a restart is a new incarnation. -/
   allocatesTheGeneration : ∀ incarnation, after.instances kind slot = some incarnation →
     incarnation.ref.generation ∈ allocation.entries
-  /-- That slot and the nominal history, and nothing else. -/
+  /--
+  **And it starts where its own protocol says a start is.**
+
+  The field that was missing, and the hole it left was the one `SettlesDemands`
+  closes at every *step*: with no tie to `ProcessSpec.Initial`, an instance could
+  be spawned already holding demands it never issued, and answer them later
+  perfectly legally. Local adversarial review spawned one holding three.
+
+  All four of `Initial`'s arguments at once, for the same reason `Initial`
+  relates all four: a spawn that placed a permitted state while inventing the
+  request or the outstanding bag would satisfy a weaker clause and be wrong.
+  -/
+  startsInitial : ∀ incarnation, after.instances kind slot = some incarnation →
+    ∃ sameKind : incarnation.kind = kind,
+      (plan.topology.protocol kind).Initial (sameKind ▸ incarnation.request)
+        (sameKind ▸ incarnation.localState) (sameKind ▸ incarnation.outstanding) localEmitted
+  /-- And what reaches the network trace is the projection of what it observed. -/
+  emittedIsProjected : emitted = localEmitted.filterMap (plan.topology.observeAt kind)
+  /-- Observations grow by exactly that. -/
+  observationsExtend : after.observations = before.observations ++ emitted
+  /-- That slot, the nominal history, the trace if it emitted, and nothing else. -/
   scope : plan.TouchesOnly before after
-    (fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals)
+    (fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals ∨
+      (emitted ≠ [] ∧ fragment = .observations))
 
 /--
 A parent collects a terminated child and frees its slot.
@@ -817,7 +865,9 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
   /-- A new incarnation appears. -/
   | spawn (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
       (allocation : Allocation plan.topology.Carrier)
-      (step : plan.Spawns before after kind slot allocation)
+      (emitted : Trace boundary.Observation)
+      (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation)
+      (step : plan.Spawns before after kind slot allocation emitted localEmitted)
   /-- A message enters escrow. -/
   | send (edge : plan.topology.ChannelKind) (message : plan.message edge)
       (occurrence : plan.topology.ChannelOccurrence edge message)
@@ -902,7 +952,9 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
   /-- A supervisor started a fresh incarnation. -/
   | restart (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
       (allocation : Allocation plan.topology.Carrier)
-      (step : plan.Restarts before after kind slot allocation)
+      (emitted : Trace boundary.Observation)
+      (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation)
+      (step : plan.Restarts before after kind slot allocation emitted localEmitted)
 
 namespace NetworkTransition
 
@@ -920,10 +972,12 @@ def scope : plan.NetworkTransition before after → NetworkFragment plan.topolog
       fun fragment => fragment = .instanceState kind slot ∨
         (emitted ≠ [] ∧ fragment = .observations) ∨
         ∃ region, before.shared region ≠ after.shared region ∧ fragment = .region region
-  | .spawn kind slot _ _ =>
-      fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals
-  | .restart kind slot _ _ =>
-      fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals
+  | .spawn kind slot _ emitted _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals ∨
+        (emitted ≠ [] ∧ fragment = .observations)
+  | .restart kind slot _ emitted _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals ∨
+        (emitted ≠ [] ∧ fragment = .observations)
   | .send edge _ occurrence _ => fun fragment => fragment = .escrow edge occurrence.1
   | .commit emitted _ => fun fragment => emitted ≠ [] ∧ fragment = .observations
   | .receive edge session _ _ =>
@@ -980,8 +1034,8 @@ theorem touchesOnly (transition : plan.NetworkTransition before after) :
     plan.TouchesOnly before after transition.scope := by
   cases transition with
   | processStep _ _ _ _ _ _ step => exact step.scope
-  | spawn _ _ _ step => exact step.scope
-  | restart _ _ _ step => exact step.scope
+  | spawn _ _ _ _ _ step => exact step.scope
+  | restart _ _ _ _ _ step => exact step.scope
   | send _ _ _ step => exact step.scope
   | commit _ step => exact step.scope
   | receive _ _ _ step => exact step.scope
@@ -1055,8 +1109,8 @@ theorem moving_the_ledger_ends_an_instance (transition : plan.NetworkTransition 
     exact ⟨kind, slot, _, custody, step, step.notRunning⟩
   | processStep _ _ _ _ _ _ step =>
     exact absurd (step.scope .obligations (by simp)) moved
-  | spawn _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
-  | restart _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | spawn _ _ _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | restart _ _ _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
   | send _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
   | commit _ step => exact absurd (step.scope .obligations (by simp)) moved
   | receive _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
@@ -1084,8 +1138,8 @@ not by a proof.
 -/
 def allocatedNominals :
     plan.NetworkTransition before after → Allocation plan.topology.Carrier
-  | .spawn _ _ allocation _ => allocation
-  | .restart _ _ allocation _ => allocation
+  | .spawn _ _ allocation _ _ _ => allocation
+  | .restart _ _ allocation _ _ _ => allocation
   | _ => Allocation.empty
 
 @[simp] theorem allocatedNominals_receive {edge session occurrence step} :
