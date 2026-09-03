@@ -441,4 +441,177 @@ theorem an_uninvited_occurrence_is_never_held (age : Nat) (point : worker.Point)
   have issues := SequentialMachine.held_issues present
   simp [SequentialMachine.Occurrence.Issues, worker, jobDecide] at issues
 
+/-! ## Fixture 2, the other reading — two equal-valued effects outstanding at once -/
+
+/-!
+`docs/PROCESS.md` §4's gloss is "equal-valued demands retain multiplicity
+through distinct occurrences", which reads most naturally as *two outstanding at
+the same time*. The fixtures above cannot exhibit that, and not by oversight: a
+`SequentialMachine` is blocked on one effect or on none, so
+`SequentialMachine.elaborate_pending_card_le_one` proves the elaborated pending
+bag never holds two things.
+
+That is a limit of the authoring surface, not of the structure. The program
+below is written directly against `DirectRelationalProgram` — the lower-level
+route §4 calls "the multi-effect relational escape hatch" — and holds two
+occurrences of `log "hi"` at once. It is what makes
+`DirectRelationalProgram.card_pending` an inhabited claim rather than a true
+statement about an empty case.
+
+It also shows what the occurrence indexing is worth. `Pending 0` is two copies
+of one demand value; answering one of them changes `Pending` from cardinality
+two to cardinality one, and *which* one was answered is visible only in the
+occurrence bag.
+-/
+
+/-- Two occurrences, distinguished by nothing but their identity. -/
+abbrev LogSlot : Type := Bool
+
+/--
+A program holding both at once.
+
+Deliberately minimal: no internal steps, and the only events are the two
+answers. Everything interesting is in `held`.
+-/
+@[reducible] def twoLogs : DirectRelationalProgram job where
+  State := Nat
+  Request := Unit
+  TerminalResult := Unit
+  Occurrence := LogSlot
+  demandOf := fun _ => .log "hi"
+  resumeOf := fun slot _ => if slot then 1 else 2
+  held := fun state =>
+    match state with
+    | 0 => Bag.ofList [true, false]
+    | 1 => {false}
+    | _ => 0
+  Initial := fun _ state issued observations =>
+    state = 0 ∧ issued = Bag.ofList [true, false] ∧ observations = []
+  Step := fun before event after issued observations =>
+    match event with
+    | .internal => False
+    | .result slot _ =>
+        issued = 0 ∧ observations = [] ∧
+          ((before = 0 ∧ slot = true ∧ after = 1) ∨ (before = 1 ∧ slot = false ∧ after = 2))
+  initialEquation := by
+    rintro _ state issued observations ⟨isStart, issuedEq, _⟩
+    subst isStart
+    exact issuedEq.symm
+  transitionEquation := by
+    rintro before event after issued observations step
+    cases event with
+    | internal => exact absurd step id
+    | result slot answer =>
+      obtain ⟨issuedEq, _, first | second⟩ := step
+      · obtain ⟨isStart, isTrue, isNext⟩ := first
+        subst isStart; subst isTrue; subst isNext; subst issuedEq
+        exact ⟨{false}, rfl, by simp⟩
+      · obtain ⟨isOne, isFalse, isNext⟩ := second
+        subst isOne; subst isFalse; subst isNext; subst issuedEq
+        exact ⟨0, rfl, by simp⟩
+  stepBinding := by
+    rintro before slot answer after issued observations ⟨_, _, first | second⟩
+    · obtain ⟨_, isTrue, isNext⟩ := first
+      subst isTrue; subst isNext; rfl
+    · obtain ⟨_, isFalse, isNext⟩ := second
+      subst isFalse; subst isNext; rfl
+  terminal := fun _ state _ => state = 2
+  terminalDisposition := by
+    intro _ state _ isTerminal
+    subst isTerminal
+    exact ⟨0, 0, 0, by simp⟩
+
+/-- **Both outstanding occurrences carry the same demand value.** -/
+theorem both_slots_demand_the_same : twoLogs.demandOf true = twoLogs.demandOf false := rfl
+
+/-- **And they are distinct occurrences.** -/
+theorem the_slots_are_distinct : (true : LogSlot) ≠ false := by decide
+
+/--
+**So the pending bag holds two things, both of them `log "hi"`.**
+
+§4's "duplicate equal-valued effects with distinct occurrences", and the
+instance that makes `DirectRelationalProgram.card_pending` say something. A
+`Pending` that were a *set* of demands, or checked by membership, would report
+one.
+-/
+theorem pending_holds_two_equal_demands :
+    twoLogs.Pending 0 = Bag.ofList [JobDemand.log "hi", JobDemand.log "hi"] := rfl
+
+/-- Counted, which is the form the multiplicity claim takes. -/
+theorem pending_has_cardinality_two : (twoLogs.Pending 0).card = 2 := rfl
+
+/-- **Forward: answering the first consumes exactly it.** -/
+theorem answering_the_first :
+    twoLogs.Step 0 (.result true ()) 1 0 [] := ⟨rfl, rfl, Or.inl ⟨rfl, rfl, rfl⟩⟩
+
+/-- **Backward: no other step is admitted on that event from that state.** -/
+theorem answering_the_first_only {after : twoLogs.State} {issued : Bag LogSlot}
+    {observations : ObservationSegment String}
+    (step : twoLogs.Step 0 (.result true ()) after issued observations) :
+    after = 1 ∧ issued = 0 ∧ observations = [] := by
+  obtain ⟨issuedEq, observationsEq, first | second⟩ := step
+  · exact ⟨first.2.2, issuedEq, observationsEq⟩
+  · exact absurd second.1 (by decide)
+
+/--
+**And the exact equation: one occurrence consumed, the other left outstanding.**
+
+`remainder` is `{false}` rather than `0`, which is the case the sequential route
+never reaches — there, a step always empties the bag.
+-/
+theorem answering_the_first_pending_equation :
+    Bag.ConsumeExactlyOneMatching (twoLogs.held 0) true {false} ∧
+      twoLogs.held 1 = ({false} : Bag LogSlot) + 0 := ⟨rfl, by simp⟩
+
+/--
+**The demand bag drops to one, and only the occurrence bag says which one went.**
+
+The multiplicity is visible at the demand level — two became one — but the
+identity is not. That is the division of labour the occurrence indexing exists
+for: `Pending` counts, `held` identifies.
+-/
+theorem after_answering_one : (twoLogs.Pending 1).card = 1 := rfl
+
+/-- The answered occurrence is gone. -/
+theorem the_first_is_no_longer_held : (true : LogSlot) ∉ twoLogs.held 1 := by
+  intro present
+  exact absurd (Bag.mem_singleton.mp present) (by decide)
+
+/-- The other is still there. -/
+theorem the_second_is_still_held : (false : LogSlot) ∈ twoLogs.held 1 :=
+  Bag.mem_singleton.mpr rfl
+
+/--
+**And this program does distinguish its outstanding occurrences.**
+
+`DirectRelationalProgram.OccurrencesAreDistinct` discharged by hand, which is
+the point of naming it: the sequential elaboration gets it from holding at most
+one thing, and an explicitly authored program owes it. A program with
+`Occurrence := Unit` holding two would fail exactly here.
+-/
+theorem twoLogs_distinguishes_its_occurrences : twoLogs.OccurrencesAreDistinct := by
+  intro state slot remainder consumes present
+  match state, slot with
+  | 0, true =>
+    have same : remainder = Bag.ofList [false] :=
+      Bag.ConsumeExactlyOneMatching.remainder_unique consumes rfl
+    rw [same] at present
+    exact absurd (Bag.mem_ofList.mp present) (by decide)
+  | 0, false =>
+    have witness : Bag.ConsumeExactlyOneMatching (twoLogs.held (0 : Nat)) false
+        (Bag.ofList [true]) := Quotient.sound (List.Perm.swap false true [])
+    have same : remainder = Bag.ofList [true] :=
+      Bag.ConsumeExactlyOneMatching.remainder_unique consumes witness
+    rw [same] at present
+    exact absurd (Bag.mem_ofList.mp present) (by decide)
+  | 1, true =>
+    exact absurd (Bag.mem_singleton.mp consumes.mem) (by decide)
+  | 1, false =>
+    have same : remainder = 0 :=
+      Bag.ConsumeExactlyOneMatching.remainder_unique consumes rfl
+    rw [same] at present
+    exact absurd present (by simp)
+  | (_ + 2), _ => exact absurd consumes Bag.not_consume_zero
+
 end Grass.Process.Tests.Adapter

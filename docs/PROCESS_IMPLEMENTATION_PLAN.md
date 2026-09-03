@@ -1910,3 +1910,61 @@ are small.
 
 No ruling needed; this is a note against a later reader concluding that
 termination never has custody work to do.
+
+### 10.25 What deriving `Pending` from occurrences does not close
+
+`Grass/Process/Sequential/Adapter.lean` derives `Pending` from a bag of
+occurrences rather than accepting a demand bag, and §10.21 records why. Local
+adversarial review found the boundary of that move, and it is narrower than the
+module's first draft claimed.
+
+**A producer still chooses the occurrence type.** A `DirectRelationalProgram`
+whose `Occurrence` is `Unit` holds a bag of indistinguishable elements;
+`DirectEvent.result` then names "the exact occurrence" while there is still no
+fact of the matter about which of several was answered. The structure has no way
+to check this, so `OccurrencesAreDistinct` names it as an obligation and
+`elaborate_occurrences_are_distinct` discharges it for the elaboration — where it
+is trivial, because a sequential machine holds at most one thing.
+`Tests/Process/AdapterFixtures.lean` discharges it by hand for the
+explicitly-authored two-occurrence program, which is what an author of one owes.
+
+**`transitionEquation` has a consumption side and no freshness side.** Nothing
+in the structure stops a step re-issuing an occurrence already outstanding —
+`Grass/Process/Bag.lean`'s "replayed" among the four failure modes.
+`issued_occurrences_are_fresh` closes it for the elaboration and is the only
+thing `Point.age` is for; an age-free elaboration discharges every field of
+`DirectRelationalProgram` and loses exactly that.
+
+**`DemandDisposition` is an accounting, not a discharge.**
+`Grass/Process/Run.lean`'s `TerminalDemandClassification` carries a `permitted`
+field and this one carries no analogue, so a program may declare its whole
+outstanding bag `resolved` with nothing having resolved anything.
+`DispositionIsEarned` names the missing law as an obligation on whoever composes
+a program with a specification. It cannot be a field: acceptance is a
+specification's word, and §4 routes explicitly authored programs through the
+same type.
+
+Needs a ruling on whether the corpus intends these three as program-level fields
+or as composition obligations. Blocks: nothing today; the elaboration discharges
+all three.
+
+### 10.26 §4 names a canonical fixture the sequential route cannot exhibit
+
+"Duplicate equal-valued effects with distinct occurrences", read the way §4's
+own gloss suggests — "equal-valued demands retain multiplicity through distinct
+occurrences", i.e. two outstanding at once — is provably unexhibitable by
+`SequentialAdapter.elaborateMachine`. `elaborate_pending_card_le_one` is the
+proof, and it follows from the one-outstanding bound in §10.24.
+
+`Tests/Process/AdapterFixtures.lean` therefore exhibits both readings: the
+temporal one at the elaboration (a retry loop issuing the same demand from the
+same state on successive passes) and the simultaneous one at an explicitly
+authored `DirectRelationalProgram`, which is §4's "lower-level multi-effect
+relational escape hatch". Only the second makes
+`DirectRelationalProgram.card_pending` an inhabited claim.
+
+Recorded because the fixture family is an M4 exit criterion and a reader
+checking it off against §4's sentence should know which reading landed where.
+Needs no ruling if the intended reading was temporal; needs one if §4 meant the
+fixture family to be discharged entirely by the sequential adapter, because then
+it cannot be.

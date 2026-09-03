@@ -25,8 +25,10 @@ its only producer.
 > adapter proof may weaken them to set membership or site possibility.
 
 A prohibition on proofs is worth very little — an author can always write a
-weaker theorem and give it a strong name. So it is discharged here by making the
-weakened forms **unstateable** rather than merely unproved, in two moves.
+weaker theorem and give it a strong name. So it is met here by moving the seam
+so that the weakened statement is not a statement about the same objects, in two
+moves. That is narrower than "unstateable", and the boundary of it is recorded
+under *What is not closed by this* below.
 
 **`Pending` is derived, not supplied.** §4 lists `Pending : State ->
 AbstractDemandBag (EffectDemand boundary)` as a field alongside a
@@ -45,6 +47,23 @@ forbids fabrication, duplication, joint consumption and loss. "Set membership"
 is not a weaker proof of the same statement here — it is not a statement about
 the same objects.
 
+## What is not closed by this
+
+Neither move constrains a producer's *choice* of occurrence type. A
+`DirectRelationalProgram` whose `Occurrence` is `Unit` holds a bag of
+indistinguishable elements, and `DirectEvent.result` then names "the exact
+occurrence" while there is still no fact of the matter about which of several
+was answered. `OccurrencesAreDistinct` names that obligation rather than
+assuming it, and `elaborate_occurrences_are_distinct` discharges it for the
+elaboration — trivially, since a sequential machine holds at most one thing.
+An explicitly authored program owes it, and nothing in the structure collects
+it, which is recorded in `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.25.
+
+`transitionEquation` likewise has a consumption side and no freshness side, so
+the structure alone permits re-issuing an occurrence that is already
+outstanding. For the elaboration that is closed by
+`issued_occurrences_are_fresh`, which is what `Point.age` is actually for.
+
 ## What a sequential machine's occurrences are
 
 The identity has to distinguish two issues of the same demand from the same
@@ -53,12 +72,21 @@ ordinary machine and issues `d` at `s` unboundedly often. Identifying an
 occurrence by its state would collapse those, and identifying it by its demand
 would collapse more.
 
-So the elaborated state is a `SequentialPoint`: the machine's state and how many
-steps the execution has taken. An occurrence is a point together with the demand
-and continuation the machine decides there, and `occurrence_determined_by_point`
-proves the last two are redundant — the point alone fixes them. That is §4's
-"generated structurally": the author supplied no identity and the adapter
+So the elaborated state is a `Point`: the machine's state and how many steps the
+execution has taken. An occurrence is a point together with the demand and
+continuation the machine decides there, and
+`issuing_occurrence_determined_by_point` proves the last two are redundant *for
+an occurrence the machine really issues* — the point alone fixes them. That is
+§4's "generated structurally": the author supplied no identity and the adapter
 invented no choice.
+
+What `age` buys is not multiplicity in the pending bag — there is never more
+than one thing in it here — but **freshness**: `issued_occurrences_are_fresh`
+says a step's issued occurrence is not one that was already outstanding, which
+is `Grass/Process/Bag.lean`'s "cannot be replayed" and is what
+`docs/PROOF_FEASIBILITY.md` §2 means by "`.effect demand resume` allocates
+exactly one fresh occurrence". An age-free elaboration discharges every field of
+`DirectRelationalProgram` more easily and loses exactly that.
 
 ## What this elaboration cannot express, stated rather than hidden
 
@@ -69,11 +97,37 @@ consequences follow and both are real limits rather than conveniences:
 * it cannot reach a terminal state with anything outstanding
   (`terminal_holds_nothing`), so its terminal disposition is the empty partition
   and §3's "resolve, transfer, or permit" has no work to do here;
-* every step empties the pending bag before refilling it
-  (`remainder_is_empty`), which is why the pending equation below has
-  `remainder = 0` in both cases.
+* every step consumes the whole pending bag before refilling it
+  (`elaborate_consumes_everything_outstanding`), which is why the pending
+  equation has `remainder = 0` in both cases.
 
-`docs/FOUNDATION.md` law 17 permits exactly this: "serial authoring may
+A third consequence is worth stating because §4 names a fixture that runs into
+it. "Duplicate equal-valued effects with distinct occurrences", read as *two
+outstanding at once*, is provably unexhibitable here:
+`elaborate_pending_card_le_one`. `Tests/Process/AdapterFixtures.lean` exhibits
+the temporal reading at the elaboration and the simultaneous reading at an
+explicitly authored `DirectRelationalProgram`, because it is the general
+structure that has to support it and only the general structure can.
+
+Three further limits, none of them consequences of the one-outstanding bound:
+
+* **No external events, interruptions, faults, or environment violations.**
+  `DirectEvent` has two constructors where §2's `ProcessEvent` has five, and
+  `boundary.ExternalEvent` is not mentioned in this module at all. Cancellation
+  reaches an elaborated program only as a *result value*, which works when the
+  boundary's per-demand result type carries one and is not the same thing as §2's
+  `InterruptReason` being a vocabulary field.
+* **`terminal` ignores its request.** A `SequentialMachine.State` does not
+  remember what started it, so the elaborated `terminal` holds at a point for
+  every request, including ones whose execution never reaches it. `Initial` does
+  tie the request, so the asymmetry is real.
+* **The proof half is still owed.** §4 asks the adapter for a generic theorem
+  transporting `SequentialMachineRealizes spec machine` to `DirectProgramRealizes
+  spec (elaborateMachine machine)`. This module delivers the syntax half only:
+  `elaborate` never mentions `invariant`, `rank`, or `reachesFrontier`, and
+  nothing here relates a machine's own obligations to a specification.
+
+`docs/FOUNDATION.md` law 17 permits the degeneracy: "serial authoring may
 synthesize a degenerate process realization, but it may not introduce an
 alternate semantics or theorem route." The degeneracy is the one-outstanding
 bound. What is *not* degenerate is the equation it satisfies, which is the
@@ -169,11 +223,23 @@ end DirectEvent
 A terminal state's account of every occurrence it still holds.
 
 `docs/PROCESS.md` §3: "termination explicitly resolves, transfers, or permits
-pending". The same three-way partition `Grass/Process/Run.lean`'s
-`TerminalDemandClassification` uses, over occurrences rather than demand values
-and without the specification's acceptance law — a program is not a
-specification, so it can account for what it holds but cannot say whether that
-account is permitted.
+pending". The three-way partition `Grass/Process/Run.lean`'s
+`TerminalDemandClassification` uses, over occurrences rather than demand values.
+
+**This is an accounting, not a discharge, and the difference matters.**
+Run.lean's version carries a fifth field, `permitted : law.Accepts ...`, and
+that field is what makes its `strict_forces_empty` possible. There is no
+acceptance law available here — a program is not a specification — so nothing
+below relates `resolved` to any step that answered anything. A program may
+partition its whole outstanding bag into `resolved` and satisfy every field
+while no step ever resolved one.
+
+Naming that here rather than letting the field imply otherwise is the point:
+`DispositionIsEarned` states the missing law as an obligation on whoever
+composes a program with a specification, so it is deferred rather than dropped
+(`docs/FOUNDATION.md` law 7). `card_partition` is the one thing the structure
+does buy on its own, and Run.lean is explicit that it is what makes the
+partition more than a relabelling.
 -/
 structure DemandDisposition {Occurrence : Type u} (outstanding : Bag Occurrence) : Type u where
   /-- The occurrences claimed answered. -/
@@ -184,6 +250,37 @@ structure DemandDisposition {Occurrence : Type u} (outstanding : Bag Occurrence)
   pending : Bag Occurrence
   /-- Every held occurrence is in exactly one part, and none is invented. -/
   partition : outstanding = resolved + transferred + pending
+
+namespace DemandDisposition
+
+variable {Occurrence : Type u} {outstanding : Bag Occurrence}
+
+/--
+**Multiplicity is conserved: the three parts account for every occurrence,
+counted.**
+
+The one thing the structure buys without an acceptance law, and
+`Grass/Process/Run.lean` is explicit that it is what makes the partition more
+than a relabelling — without it a disposition could claim to dispose of a bag
+while its parts held fewer occurrences than the bag did.
+-/
+theorem card_partition (disposition : DemandDisposition outstanding) :
+    outstanding.card =
+      disposition.resolved.card + disposition.transferred.card +
+        disposition.pending.card := by
+  obtain ⟨resolved, transferred, pending, partition⟩ := disposition
+  subst partition
+  simp
+
+/-- And every outstanding occurrence appears in some part. -/
+theorem mem_some_part (disposition : DemandDisposition outstanding)
+    {occurrence : Occurrence} (live : occurrence ∈ outstanding) :
+    occurrence ∈ disposition.resolved ∨ occurrence ∈ disposition.transferred ∨
+      occurrence ∈ disposition.pending := by
+  rw [disposition.partition] at live
+  simpa [or_assoc] using live
+
+end DemandDisposition
 
 /--
 `docs/PROCESS.md` §4's `DirectRelationalProgram`: the relational representation
@@ -287,6 +384,44 @@ and a set-valued `Pending` is what would make it false.
 variable {program}
 
 /--
+**The obligation a producer's choice of occurrence type still owes.**
+
+Deriving `Pending` from `held` stops a program presenting a demand bag that
+disagrees with its occurrences. It does not stop a program choosing an
+`Occurrence` type that cannot tell two outstanding occurrences apart — with
+`Occurrence := Unit`, `DirectEvent.result` names "the exact occurrence" and
+there is still no fact of the matter about which of several was answered.
+
+Stated as a named obligation rather than a field, because it is a property of a
+program that a later composition can require and this structure has no way to
+check. `SequentialMachine.elaborate_occurrences_are_distinct` discharges it for
+the elaboration.
+-/
+def OccurrencesAreDistinct : Prop :=
+  ∀ (state : program.State) (occurrence : program.Occurrence)
+    (remainder : Bag program.Occurrence),
+    Bag.ConsumeExactlyOneMatching (program.held state) occurrence remainder →
+    occurrence ∉ remainder
+
+/--
+**And the law `DemandDisposition` is missing.**
+
+`Grass/Process/Run.lean`'s `TerminalDemandClassification` carries a `permitted`
+field; this one carries no analogue, so a program may declare its whole
+outstanding bag `resolved` with nothing having resolved anything. That is not
+fixable inside a program — acceptance is a specification's word — so it is named
+here as what a composition owes rather than silently absent
+(`docs/FOUNDATION.md` law 7).
+-/
+def DispositionIsEarned
+    (Accepts : Bag program.Occurrence → Bag program.Occurrence →
+      Bag program.Occurrence → Prop) : Prop :=
+  ∀ request state result (isTerminal : program.terminal request state result),
+    Accepts (program.terminalDisposition request state result isTerminal).resolved
+      (program.terminalDisposition request state result isTerminal).transferred
+      (program.terminalDisposition request state result isTerminal).pending
+
+/--
 The demand-level pending equation for a delivered result.
 
 A corollary of the occurrence-level one, and deliberately *derived* rather than
@@ -340,6 +475,16 @@ structure Point : Type u where
   age : Nat
   /-- Where it is. -/
   state : machine.State
+
+/-- Points with the same age and state are the same point. -/
+theorem Point.eq_of {machine : SequentialMachine boundary} {left right : machine.Point}
+    (age : left.age = right.age) (state : left.state = right.state) : left = right := by
+  obtain ⟨leftAge, leftState⟩ := left
+  obtain ⟨rightAge, rightState⟩ := right
+  simp only at age state
+  subst age
+  subst state
+  rfl
 
 /--
 An effect occurrence: an execution point, with the demand issued there and the
@@ -564,18 +709,136 @@ theorem terminal_holds_nothing {point : machine.Point} {result : machine.Termina
   rfl
 
 /--
-**The step relation is exactly `Drives`, in both directions.**
+The elaborated `Step` is `Drives`, by definition.
 
-The direction a fixture usually checks is that the machine's decision produces
-an elaborated step. The direction that has teeth is the other one: the
-elaboration admits *no other* steps, so a fixture that pins the after-state and
-the issued bag has pinned the whole relation rather than one witness of it.
+`Iff.rfl`, and worth exactly what that is worth: it renames, and establishes
+nothing about what else the relation admits. The property that would have — the
+elaboration admits no *other* step from a state on an event — is
+`Drives.deterministic` below, which is a theorem rather than a definitional
+unfolding. An earlier docstring here claimed the second on behalf of the first.
 -/
 theorem elaborate_step_iff {before after : machine.Point} {event : machine.Event}
     {issued : Bag machine.Occurrence}
     {observations : ObservationSegment boundary.Observation} :
     (machine.elaborate).Step before event after issued observations <->
       machine.Drives before event after issued observations := Iff.rfl
+
+/--
+**The elaboration admits at most one step from a state on an event.**
+
+What `elaborate_step_iff` does not say. A fixture that pins the after-state and
+the issued bag has then pinned the whole relation rather than one witness of it,
+and this is the general fact those fixtures are instances of.
+-/
+theorem Drives.deterministic {before : machine.Point} {event : machine.Event}
+    {after other : machine.Point} {issued issuedAgain : Bag machine.Occurrence}
+    {observations observationsAgain : ObservationSegment boundary.Observation}
+    (first : machine.Drives before event after issued observations)
+    (second : machine.Drives before event other issuedAgain observationsAgain) :
+    after = other ∧ issued = issuedAgain ∧ observations = observationsAgain := by
+  obtain ⟨age, issuedEq, drives⟩ := first
+  obtain ⟨ageAgain, issuedEqAgain, drivesAgain⟩ := second
+  have sameAge : after.age = other.age := by rw [age, ageAgain]
+  have rest : after.state = other.state ∧ observations = observationsAgain := by
+    cases event with
+    | internal =>
+      rw [drives] at drivesAgain
+      injection drivesAgain with stateEq observationsEq
+      exact ⟨stateEq, observationsEq⟩
+    | result occurrence answer =>
+      obtain ⟨_, resumed, noObservations⟩ := drives
+      obtain ⟨_, resumedAgain, noObservationsAgain⟩ := drivesAgain
+      exact ⟨by rw [resumed, resumedAgain], by rw [noObservations, noObservationsAgain]⟩
+  obtain ⟨stateEq, observationsEq⟩ := rest
+  have same : after = other := Point.eq_of sameAge stateEq
+  subst same
+  exact ⟨rfl, by rw [issuedEq, issuedEqAgain], observationsEq⟩
+
+/--
+**Every step consumes the whole outstanding bag.**
+
+The `remainder = 0` the pending equation has in both cases, as a statement
+rather than as a witness buried in the proof of `transitionEquation`. It is the
+one-outstanding degeneracy showing through: a sequential machine is blocked on
+one thing or on none, so a step that resolves anything resolves everything.
+-/
+theorem elaborate_consumes_everything_outstanding {before after : machine.Point}
+    {event : machine.Event} {issued : Bag machine.Occurrence}
+    {observations : ObservationSegment boundary.Observation}
+    (drives : machine.Drives before event after issued observations) :
+    event.Consumes (machine.held before) 0 := by
+  obtain ⟨_, _, drivesEvent⟩ := drives
+  cases event with
+  | internal => exact (held_of_internal drivesEvent).symm
+  | result occurrence answer =>
+    obtain ⟨heldBefore, _, _⟩ := drivesEvent
+    show machine.held before = Bag.cons occurrence 0
+    rw [heldBefore, Bag.singleton_eq]
+    rfl
+
+/--
+**A step's issued occurrence was not already outstanding.**
+
+This is what `Point.age` is for, and the only thing it is for. An age-free
+elaboration — occurrences identified by state and demand alone — discharges
+every field of `DirectRelationalProgram` and loses exactly this: a retry loop
+would re-issue the literally identical occurrence value on every pass, which is
+`Grass/Process/Bag.lean`'s "replayed" among the four failure modes an exact
+consumption equation is meant to forbid.
+
+`transitionEquation` has a consumption side and no freshness side, so nothing in
+the structure would have caught it.
+-/
+theorem issued_occurrences_are_fresh {before after : machine.Point}
+    {event : machine.Event} {issued : Bag machine.Occurrence}
+    {observations : ObservationSegment boundary.Observation}
+    (drives : machine.Drives before event after issued observations)
+    {occurrence : machine.Occurrence} (isIssued : occurrence ∈ issued) :
+    occurrence ∉ machine.held before := by
+  obtain ⟨age, issuedEq, _⟩ := drives
+  rw [issuedEq] at isIssued
+  have atAfter := held_point isIssued
+  intro alsoBefore
+  have atBefore := held_point alsoBefore
+  have samePoint : after = before := atAfter ▸ atBefore
+  have sameAge : after.age = before.age := congrArg Point.age samePoint
+  omega
+
+/--
+**The pending bag of an elaborated machine never holds two things.**
+
+So §4's "duplicate equal-valued effects with distinct occurrences", read as two
+*simultaneously* outstanding, is not exhibitable at this route — and
+`DirectRelationalProgram.card_pending`'s advertised instance is unreachable
+here. `Tests/Process/AdapterFixtures.lean` exhibits the temporal reading at the
+elaboration and the simultaneous reading at an explicitly authored program,
+because it is the general structure that has to support the second.
+-/
+theorem elaborate_pending_card_le_one (point : machine.Point) :
+    ((machine.elaborate).Pending point).card ≤ 1 := by
+  have equation : ((machine.elaborate).Pending point).card
+      = ((machine.elaborate).held point).card :=
+    DirectRelationalProgram.card_pending (machine.elaborate)
+      (show (machine.elaborate).State from point)
+  rw [equation]
+  exact held_card_le_one point
+
+/--
+**And it distinguishes what it holds** — trivially, because it holds at most one
+thing.
+
+`DirectRelationalProgram.OccurrencesAreDistinct` discharged for the elaboration.
+The proof is the one-outstanding bound, which is why an explicitly authored
+program owes this obligation rather than inheriting it.
+-/
+theorem elaborate_occurrences_are_distinct :
+    (machine.elaborate).OccurrencesAreDistinct := by
+  intro point occurrence remainder consumes present
+  have counted := Bag.ConsumeExactlyOneMatching.card consumes
+  have bound : ((machine.elaborate).held point).card ≤ 1 := held_card_le_one point
+  obtain ⟨rest, consumesAgain⟩ := Bag.consume_iff_mem.mpr present
+  have countedAgain := Bag.ConsumeExactlyOneMatching.card consumesAgain
+  omega
 
 /-- The elaborated program's child binding is the occurrence's own continuation. -/
 theorem elaborate_resumeOf (occurrence : machine.Occurrence)
