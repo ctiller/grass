@@ -32,6 +32,7 @@ import Grass.Obligation.Core
 import Grass.Obligation.Delta
 import Grass.Obligation.Disposition
 import Grass.Op.Facets
+import Grass.Platform.Win32.Console
 import Grass.Op.Step
 import Grass.Resource.Algebra
 import Grass.Resource.Axis
