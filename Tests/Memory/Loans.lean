@@ -52,9 +52,6 @@ def bufferProv : Provenance :=
   { space := .cpuVirtual, root := buffer, epoch := epoch, source := .virtualAlloc
     rootExtent := ⟨0, 64⟩, path := [] }
 
-/-- Provenance of the same buffer in the epoch that replaced it. -/
-def currentProv : Provenance := { bufferProv with epoch := laterEpoch }
-
 /-- A live call frame's authority over the same bytes, held by the borrower. Not a
 loan, and §7.3 does not care. -/
 def frameGrant : AuthorityGrant :=
@@ -488,10 +485,6 @@ def reusedRecord : AllocationRecord :=
 
 /-- A state holding it. `bufferProv` names the *old* epoch. -/
 def reused : MemoryState := (MemoryState.empty.allocate? buffer reusedRecord).getD .empty
-
-/-- The buffer lent while live, then reallocated under it. -/
-def lentThenReused : MemoryState :=
-  (lentHead.allocate? buffer reusedRecord).getD lentHead
 
 /-- **A stale pointer into re-used storage holds no authority.**
 `docs/MEMORY_MODEL.md` §2: address reuse never revives old pointers. Before `Live`

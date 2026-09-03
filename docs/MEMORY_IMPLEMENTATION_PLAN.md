@@ -1665,6 +1665,35 @@ refuses everything.
   a call whose arguments wrap were both missed. And the first repair for the third
   introduced a fifth — matching a naming tactic anywhere on the line let an argument
   named `delta` silence a real call — caught by the self-test the same minute.
+- ~~**Nothing said the authority map changes only by declaration.**~~
+  `performAccess_preserves_authority_of_no_effect` and
+  `runAccesses_preserves_authority_of_no_effects` say it, over an arbitrary policy,
+  state, descriptor and outcome. [FOUNDATION.md](FOUNDATION.md) law 6 forbids ambient
+  provider choice and this is the same reading applied to authority: a grant may not
+  appear or disappear because an access happened, only because an access said it
+  would. Every other fact about the authority effect was a point check through a
+  fixture's `step`, which is exactly what `e-reviewer:18` asks reviewers not to accept
+  as domain coverage.
+
+  It needed `MemoryState.grantEntries_write` and `grantEntries_commit` — the other
+  half of "authority is not data", since the committing branch applies the effect and
+  then writes bytes on top.
+
+  `runStep` is *not* covered, and the reason is a missing lemma rather than a missing
+  law: its faulting branches run `SubstepSequence.visibleEffects?`, and nothing
+  relates a survivor list to the sequence's own accesses, so the hypothesis cannot be
+  discharged for the surviving prefix. That lemma is owed.
+- ~~**A fixture could outlive the claim it was built for.**~~ `Tools/FixtureAudit.py`
+  is the eighth gate, over the one place `ConsultedAudit.py` and
+  `ReachabilityAudit.py` do not look: a `def` under `Tests/` that nothing uses. Two
+  existed — `lentThenReused`, a state built by reallocating under an outstanding loan
+  from before that reallocation was refused, whose `.getD` silently returned the
+  *unreallocated* state; and `currentProv` from the same commit. Both are deleted.
+
+  Its `ALLOWED` list has two entries and they are the interesting part:
+  `Tests/Foundation.lean`'s `aliasedVerified` and `inferredVerified` are consumed by
+  an environment-walking audit rather than by name, so no lexical scan can see their
+  consumer.
 - **`denialOf`'s `Permits` clause is unreachable for every page this layer can
   describe.** The clause rejects an access whose intent the *page's* permission does
   not permit, and it sits behind the `Grants` clause, which rejects an access whose

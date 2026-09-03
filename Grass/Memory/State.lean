@@ -2495,6 +2495,16 @@ def write (state : MemoryState) (id : AllocId) (start : Nat) (bytes : ByteSeq)
         allocations := state.allocations.insert id
           { record with bytes := record.bytes.write start bytes initializes } }
 
+/-- **Writing bytes changes no authority.** Half of "authority is not data", from
+the other side: `cellAt?_applyAuthorityEffect?` says a declared authority change
+moves no bytes, and this says a write grants nothing. Both are needed by
+`Grass/Op/Step.lean`, which does one and then the other in a single transition. -/
+@[simp] theorem grantEntries_write (state : MemoryState) (id : AllocId) (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) :
+    (state.write id start bytes initializes).grantEntries = state.grantEntries := by
+  unfold write
+  split <;> rfl
+
 /-- The byte allocation `id` holds at `offset`, if it holds one. -/
 def byteAt? (state : MemoryState) (id : AllocId) (offset : Nat) : Option Byte :=
   (state.allocations.lookup id).bind (·.bytes.byteAt? offset)

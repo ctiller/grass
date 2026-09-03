@@ -1406,6 +1406,79 @@ theorem ledger_refusal_is_recorded (policy : StepPolicy) (state : MachineState)
   rw [this]
   simp
 
+/--
+**An access that declares no authority change makes none.**
+
+`docs/FOUNDATION.md` law 6 forbids ambient provider choice, and this is the same
+reading applied to authority: a grant may not appear or disappear because an access
+happened, only because an access said it would. Every other fact about the authority
+effect is a point check through a fixture's `step`; this one is over an arbitrary
+policy, state, descriptor and outcome, which is what makes it a law about the
+transition rather than about six operations someone wrote.
+
+The proof is the whole reason `MemoryState.grantEntries_write` and
+`Grass.Memory.grantEntries_commit` exist: the committing branch applies the declared
+effect and then writes bytes on top, so "no declaration" has to survive the write as
+well as the empty effect.
+-/
+theorem performAccess_preserves_authority_of_no_effect (policy : StepPolicy)
+    (state : MachineState) (d : AccessDescriptor) (outcome : AccessOutcome d)
+    (contextKind : ContextKind) (cause : EventCause) (h : d.authorityEffect = []) :
+    (performAccess policy state d outcome contextKind cause).memory.grantEntries =
+      state.memory.grantEntries := by
+  unfold performAccess
+  split
+  · rfl
+  · split
+    · split <;> rfl
+    · split
+      · rfl
+      · rw [h, MemoryState.applyAuthorityEffect?_nil]
+        exact Grass.Memory.grantEntries_commit _ _ _
+
+/--
+**And a whole run of such accesses makes none.**
+
+The form a straight-line argument uses: an operation whose descriptors all declare
+nothing leaves the authority map exactly as it found it, however many substeps it has
+and wherever it stops — at the end, at a denial, or at an oracle that could not
+answer.
+
+`runStep` is not covered, because its faulting branches run
+`SubstepSequence.visibleEffects?`, and nothing in this layer relates a survivor list
+to the sequence's own accesses; without that the hypothesis cannot be discharged for
+the surviving prefix. That is a missing lemma rather than a missing law, and
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records it.
+-/
+theorem runAccesses_preserves_authority_of_no_effects (policy : StepPolicy)
+    (contextKind : ContextKind) (cause : EventCause) :
+    ∀ (accesses : List AccessDescriptor) (state : MachineState),
+      (∀ d ∈ accesses, d.authorityEffect = []) →
+        (runAccesses policy state accesses contextKind cause).memory.grantEntries =
+          state.memory.grantEntries := by
+  intro accesses
+  induction accesses with
+  | nil => intro state _; rfl
+  | cons d rest ih =>
+    intro state hall
+    have hhead : d.authorityEffect = [] := hall d List.mem_cons_self
+    have htail : ∀ x ∈ rest, x.authorityEffect = [] :=
+      fun x hx => hall x (List.mem_cons_of_mem _ hx)
+    unfold runAccesses
+    cases hanswer : policy.oracle.answer state d with
+    | none => rfl
+    | some complete =>
+      simp only []
+      by_cases hstop : (performAccess policy state d (.completed complete) contextKind
+          cause).violations.recordCount = state.violations.recordCount
+      · rw [if_pos hstop]
+        exact (ih _ htail).trans
+          (performAccess_preserves_authority_of_no_effect policy state d _ contextKind
+            cause hhead)
+      · rw [if_neg hstop]
+        exact performAccess_preserves_authority_of_no_effect policy state d _ contextKind
+          cause hhead
+
 /-- Performing an access extends the violation ledger; it never shortens it.
 This is the per-access form of the invariant `docs/MEMORY_MODEL.md` §8 names, and
 the one the ledger type deliberately does not try to enforce by construction. -/

@@ -171,6 +171,15 @@ def MemoryState.commit (state : MemoryState) (d : AccessDescriptor)
   | Option.none => state
   | some bytes => state.write d.provenance.root d.range.start bytes d.producesInitialized
 
+/-- A commit changes no authority, whatever it writes. -/
+@[simp] theorem grantEntries_commit (state : MemoryState) (d : AccessDescriptor)
+    (written : Option ByteSeq) :
+    (state.commit d written).grantEntries = state.grantEntries := by
+  unfold MemoryState.commit
+  split
+  · rfl
+  · exact MemoryState.grantEntries_write _ _ _ _ _
+
 /-- `WrittenFits d written` bounds committed bytes by the range the access
 declared. `Committed.writtenFits` is where the transition gets it; `applyAccess`
 gets it by truncating. Without it a commit could write past the declared range

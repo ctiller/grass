@@ -51,6 +51,13 @@ name: Library build
 # `applyAuthorityDelta?` -- and this audit is what keeps every `Grass/` path going
 # through there. `Tests/` is deliberately not scanned.
 #
+# Tools/FixtureAudit.py is the eighth, over the one place the field and constructor
+# audits do not look: a `def` under Tests/ that nothing uses. `Tests/Memory/Loans.lean`
+# carried a state built by reallocating under an outstanding loan from before that
+# reallocation was refused -- after the refusal landed the definition still
+# elaborated, its `.getD` silently returned the unreallocated state, and nothing used
+# it, so nothing failed.
+#
 # Tools/SourceLocationAudit.py is the sixth, and it exists because of an accident
 # rather than a class: two scratch probe files were swept into commits by a
 # `git add -A`, one of them containing a `sorry`, and a repo-root `.lean` file is
@@ -119,6 +126,12 @@ jobs:
 
       - name: Audit constructors nothing builds
         run: python3 Tools/ReachabilityAudit.py
+
+      - name: Self-test the fixture audit
+        run: python3 Tools/FixtureAudit.py --self-test
+
+      - name: Audit fixtures nothing uses
+        run: python3 Tools/FixtureAudit.py
 
       - name: Self-test the door audit
         run: python3 Tools/DoorAudit.py --self-test
