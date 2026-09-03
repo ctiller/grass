@@ -2145,14 +2145,26 @@ obligation *into* it — so §2's "termination explicitly resolves, transfers, o
 permits pending" quantifies over pending obligations that nothing in the family
 can create. The ledger can shrink and never grow.
 
-This is the same shape as the four scope defects already fixed, one level in:
-`.obligations` is reachable, but only by the constructor that consumes it.
-Fixing it means either a `NetworkFragment.outstanding kind slot` with a per-
-instance demand bag, or an `Obligations`-side law relating a protocol step's
-issued bag to the ledger. The first is a change to
-`Grass/Process/Network/Assertion.lean`'s fragment family and to
-`LogicalProcessNetworkCore`; the second needs the ledger to stop being opaque.
-Needs a ruling on which. This is the largest open item on this layer.
+**The demand half is now fixed.** `ProcessInstance` carries `outstanding : Bag
+(protocol kind).Demand` beside `localState` — §2's `ProcessRunState.running`
+carries the same pair — and `StepsLocally.protocolStep` requires
+`SettlesDemands`, which is §2's linear equation: an answering event removes
+exactly one `cons` before the issued bag is added, a non-answering one adds
+without removing. The field lives inside `NetworkFragment.instanceState`, so no
+new fragment was needed and no scope widened.
+
+`Tests/Process/ProcessStepFixtures.lean`'s
+`answering_an_unissued_demand_is_unconstructible` is the check: a listener
+holding nothing cannot be told its `tick` came back.
+
+**What remains is the ending's disposition.** `EndsInstance` does not relate the
+ending instance's `outstanding` bag to its `custody`, so §2's "termination
+explicitly resolves, transfers, or permits pending" is still unstated at the
+network — `Grass/Process/Run.lean`'s `TerminalDemandClassification` is the
+per-process half and nothing carries it across. That needs `EndsInstance` to
+take a classification of the ended instance's bag, which wants the
+specification's `TerminalRemainderLaw` and therefore a plan-level link this
+module does not have. Needs a ruling on where that link lives.
 
 ### 10.34 `reroute` cannot write the session it reroutes to
 

@@ -364,6 +364,28 @@ end EndsInstance
 
 
 /--
+How one instance's outstanding demand bag moves across one event.
+
+`docs/PROCESS.md` §2's run relation, at the network. `ProcessEvent.settles`
+splits the five events into the two that answer an outstanding demand and the
+three that do not, and this is the same split: an answering event removes
+exactly one `cons` before the issued bag is added, and a non-answering one adds
+without removing.
+
+Stated once here rather than inline in `StepsLocally`, because it is the same
+equation `Grass/Process/Run.lean` proves the four linearity clauses about — no
+fabrication, no replay, no joint consumption, no silent loss — and a second
+spelling would be a second thing to keep in step.
+-/
+def SettlesDemands {kind : plan.topology.ProcessKind}
+    (event : (plan.topology.protocol kind).Event)
+    (issued before after : Bag (plan.topology.protocol kind).Demand) : Prop :=
+  match event.settles with
+  | none => after = before + issued
+  | some demand => ∃ remainder,
+      Bag.ConsumeExactlyOneMatching before demand remainder ∧ after = remainder + issued
+
+/--
 One instance takes a protocol step.
 
 Its private state moves by the protocol's own `Step` relation, observations may
@@ -406,16 +428,20 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
   `processStep` was not a protocol step at all, and no fixture in the corpus ever
   constructed one to notice.
 
-  With it, the three things §3 requires of a local step are here: the protocol
-  admits the transition, the demands it issues are the protocol's own, and the
-  observation segment is the one the protocol emitted.
+  With it, the four things §3 requires of a local step are here: the protocol
+  admits the transition, the demands it issues are the protocol's own, the
+  observation segment is the one the protocol emitted, and the issued bag
+  reaches the instance's outstanding demands by §2's linear equation
+  (`SettlesDemands`) rather than being discarded.
   -/
-  protocolStep : ∃ fromState toState : (plan.topology.protocol kind).State,
-    (∃ incarnation, before.instances kind slot = some incarnation ∧
-      ∃ same : incarnation.kind = kind, same ▸ incarnation.localState = fromState) ∧
-    (∃ incarnation, after.instances kind slot = some incarnation ∧
-      ∃ same : incarnation.kind = kind, same ▸ incarnation.localState = toState) ∧
-    (plan.topology.protocol kind).Step fromState event toState issued localEmitted
+  protocolStep : ∃ (fromInstance toInstance : ProcessInstance plan.topology)
+      (fromKind : fromInstance.kind = kind) (toKind : toInstance.kind = kind),
+    before.instances kind slot = some fromInstance ∧
+    after.instances kind slot = some toInstance ∧
+    (plan.topology.protocol kind).Step (fromKind ▸ fromInstance.localState) event
+      (toKind ▸ toInstance.localState) issued localEmitted ∧
+    plan.SettlesDemands event issued (fromKind ▸ fromInstance.outstanding)
+      (toKind ▸ toInstance.outstanding)
   /--
   **And what reaches the network trace is the projection of what it observed.**
 

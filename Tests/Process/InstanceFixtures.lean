@@ -59,6 +59,7 @@ def counting : ProcessInstance serverTopology where
   parentage := .attached .listener listenerZero
   request := ⟨3⟩
   localState := ⟨3⟩
+  outstanding := 0
   lifecycle := .running
 
 /-- The same incarnation, finished. -/
@@ -230,6 +231,7 @@ def blindRoot : ProcessInstance answerTopology where
   parentage := .root
   request := ⟨0⟩
   localState := ⟨0⟩
+  outstanding := 0
   lifecycle := .terminated ⟨true⟩
 
 /-- A child of it, finished, at the protocol that pins the answer. -/
@@ -239,6 +241,7 @@ def determinedChild : ProcessInstance answerTopology where
   parentage := .attached .blind (answerRef .blind)
   request := ⟨0⟩
   localState := ⟨0⟩
+  outstanding := 0
   lifecycle := .terminated ⟨true⟩
 
 /-- The same child, detached. -/

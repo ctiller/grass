@@ -35,31 +35,58 @@ open Grass.Process.Tests.Transition (serverPlan)
 
 /-! ## A live listener -/
 
-/-- The listener, partway through its countdown. -/
-def counting (remaining : Nat) : ProcessInstance serverTopology where
+/--
+The listener, partway through its countdown, waiting on one `tick`.
+
+The outstanding bag is the point of the pair below. §2's run relation is linear
+in demand multiplicity, and `StepsLocally.protocolStep` now carries that
+equation at the network — so a listener that answers a `tick` must have had one
+outstanding, and after answering it does not.
+-/
+def awaiting (remaining : Nat) : ProcessInstance serverTopology where
   kind := .listener
   ref := Instances.listenerZero
   parentage := .root
   request := ⟨3⟩
   localState := ⟨remaining⟩
+  outstanding := Bag.ofList [Demand.tick]
   lifecycle := .running
 
-/-- The network with it live and nothing else going on. -/
+/-- The same listener after the tick was answered: one lower, and holding nothing. -/
+def settled (remaining : Nat) : ProcessInstance serverTopology where
+  kind := .listener
+  ref := Instances.listenerZero
+  parentage := .root
+  request := ⟨3⟩
+  localState := ⟨remaining - 1⟩
+  outstanding := 0
+  lifecycle := .running
+
+/-- The network with the waiting listener live and nothing else going on. -/
 def busy (remaining : Nat) : ServerWorld :=
   { quiet with
       instances := fun kind _ =>
         match kind with
-        | .listener => some (counting remaining)
+        | .listener => some (awaiting remaining)
         | .connection => none }
 
-/-- And after one tick: one lower, with a `beep` in the trace. -/
+/-- And after one tick: one lower, holding nothing, with a `beep` in the trace. -/
 def busyAfter (remaining : Nat) : ServerWorld :=
-  { busy (remaining - 1) with observations := [Observation.beep] }
+  { quiet with
+      instances := fun kind _ =>
+        match kind with
+        | .listener => some (settled remaining)
+        | .connection => none
+      observations := [Observation.beep] }
 
 theorem busy_holds_the_listener (remaining : Nat) :
-    (busy remaining).instances .listener () = some (counting remaining) := rfl
+    (busy remaining).instances .listener () = some (awaiting remaining) := rfl
 
 theorem busy_starts_quiet (remaining : Nat) : (busy remaining).observations = [] := rfl
+
+/-- **And it really is holding one outstanding demand.** -/
+theorem the_listener_is_waiting (remaining : Nat) :
+    (awaiting remaining).outstanding = Bag.ofList [Demand.tick] := rfl
 
 /-! ## The step -/
 
@@ -76,13 +103,11 @@ theorem the_listener_ticks (remaining : Nat)
     serverPlan.StepsLocally (busy remaining) (busyAfter remaining) .listener ()
       (.result .tick answer) (fun _ => False) [Observation.beep] 0
       [Observation.beep] where
-  from' := ⟨counting remaining, rfl, trivial, rfl⟩
-  stillLive := ⟨counting (remaining - 1), rfl, trivial⟩
+  from' := ⟨awaiting remaining, rfl, trivial, rfl⟩
+  stillLive := ⟨settled remaining, rfl, trivial⟩
   protocolStep :=
-    ⟨⟨remaining⟩, ⟨remaining - 1⟩,
-      ⟨counting remaining, rfl, rfl, rfl⟩,
-      ⟨counting (remaining - 1), rfl, rfl, rfl⟩,
-      ⟨rfl, rfl, rfl⟩⟩
+    ⟨awaiting remaining, settled remaining, rfl, rfl, rfl, rfl,
+      ⟨rfl, rfl, rfl⟩, ⟨0, rfl, rfl⟩⟩
   emittedIsProjected := rfl
   observationsExtend := rfl
   writesPermitted := by
@@ -137,17 +162,42 @@ theorem a_step_that_does_not_tick_is_unconstructible (remaining : Nat)
     (positive : 0 < remaining) (answer : countdownVocabulary.Result .tick)
     (step : serverPlan.StepsLocally (busy remaining) (busy remaining) .listener ()
       (.result .tick answer) (fun _ => False) [] 0 []) : False := by
-  obtain ⟨fromState, toState, ⟨fromInstance, foundFrom, fromKind, isFrom⟩,
-    ⟨toInstance, foundTo, toKind, isTo⟩, moved⟩ := step.protocolStep
+  obtain ⟨fromInstance, toInstance, _, _, foundFrom, foundTo, moved, _⟩ := step.protocolStep
   rw [busy_holds_the_listener] at foundFrom foundTo
   injection foundFrom with sameFrom
   injection foundTo with sameTo
   subst sameFrom
   subst sameTo
   obtain ⟨lowered, _, _⟩ := moved
-  rw [← isFrom, ← isTo] at lowered
-  simp only [counting] at lowered
+  simp only [awaiting] at lowered
   omega
+
+/--
+**And a step answering a demand the listener never issued is unconstructible.**
+
+§2's linearity at the network, and the reason `ProcessInstance.outstanding`
+exists. `SettlesDemands` requires an answering event to remove exactly one
+`cons` from the instance's bag, so a listener holding nothing cannot be told its
+`tick` came back — `Bag.not_consume_zero` is the whole proof.
+
+Before the field existed, `StepsLocally` required the protocol's `Step`
+relation, obtained an issued bag from it, and discarded the bag. Nothing could
+be outstanding at a network instance, so nothing could be answered wrongly
+either.
+-/
+theorem answering_an_unissued_demand_is_unconstructible (remaining : Nat)
+    (answer : countdownVocabulary.Result .tick) (after : ServerWorld)
+    (step : serverPlan.StepsLocally (busyAfter remaining) after .listener ()
+      (.result .tick answer) (fun _ => False) [] 0 []) : False := by
+  obtain ⟨fromInstance, toInstance, _, _, foundFrom, _, _, settles⟩ := step.protocolStep
+  have isSettled : fromInstance = settled remaining := by
+    have found : (busyAfter remaining).instances .listener () = some (settled remaining) := rfl
+    rw [found] at foundFrom
+    injection foundFrom with same
+    exact same.symm
+  subst isSettled
+  obtain ⟨remainder, consumes, _⟩ := settles
+  exact Bag.not_consume_zero consumes
 
 /--
 **And a step cannot append an observation the role did not make.**

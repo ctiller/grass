@@ -192,6 +192,7 @@ def rootListener : ProcessInstance serverTopology where
   parentage := .root
   request := ⟨0⟩
   localState := ⟨0⟩
+  outstanding := 0
   lifecycle := .running
 
 /-- A network holding it, with its generation actually allocated. -/

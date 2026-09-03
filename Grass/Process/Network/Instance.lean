@@ -278,6 +278,20 @@ structure ProcessInstance {registry : ProtocolRegistry.{u, w, v}}
   request : (topology.protocol kind).Request
   /-- Its private state. -/
   localState : (topology.protocol kind).State
+  /--
+  The demands it has issued and not yet had answered.
+
+  `docs/PROCESS.md` §2's `ProcessRunState.running` carries `outstanding` beside
+  the local state, and until this field existed the network had nowhere to put
+  it: `StepsLocally` required the protocol's `Step` relation, which produces an
+  issued bag, and then discarded the bag. Demands could be issued and never
+  recorded, so nothing could ever be outstanding at a network instance and §2's
+  linear multiplicity had no image here.
+
+  Private, like `localState`: it lives inside `NetworkFragment.instanceState`,
+  so a parent cannot read it and a weave mixin about it is scoped to the slot.
+  -/
+  outstanding : Bag (topology.protocol kind).Demand
   /-- Where it is in its life, and what put it there. -/
   lifecycle : ProcessLifecycle (topology.protocol kind)
 
