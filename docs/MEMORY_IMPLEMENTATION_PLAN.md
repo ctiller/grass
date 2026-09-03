@@ -473,9 +473,15 @@ It is wired now, and the section above's debt is discharged.
 `AllocationRecord.base` places an allocation, `MemoryState.addressAt?` reads the
 address of an offset, and `MemoryState.addressAt?_ne_of_disjoint` connects `Nat`
 disjointness to distinct machine addresses for a state the model builds. The base
-is optional because §7.5's logical spaces have allocations with no machine address,
-and it is not authority: `denialOf` reads none of it, and two allocations sharing a
-base are still distinct storage unless `aliases` says otherwise. It is conditioned on `FitsAllocation`:
+is optional because §7.5's logical spaces have allocations with no machine address.
+An earlier version of this sentence added "and it is not authority: `denialOf` reads
+none of it", which stopped being true when `denialOf` gained the `placementWraps` and
+`addressDisagreesWithPlacement` clauses — both read `record.base`. The half that is
+still true is narrower and is the half the model relies on: two allocations sharing a
+base are distinct storage unless `aliases` says otherwise, which is §2's
+provenance-not-address direction. The *converse* — same space, same address, therefore
+same bytes — has no counterpart anywhere in `Grass/Memory/`, and §4.4.1 records what
+review demonstrated with it. It is conditioned on `FitsAllocation`:
 the allocation's own bytes do not wrap. That is not a convenience — an allocation
 whose last byte wraps past `2^64` has two offsets at one address, so no
 disjointness argument about it could be sound, and a profile admitting one has
@@ -1625,6 +1631,27 @@ refuses everything.
   bytes *nothing* is held over is indistinguishable from a legitimate owner's first
   loan, and stays so until `AllocationRecord` records an owner, which is the same gap
   the bullet below records from the other side.
+- **Two live allocations may occupy the same machine address without being aliases.**
+  `allocate?` refuses a metadata change under an outstanding grant and checks nothing
+  about placement, and `AuthorizedAt` keys on `SharesBytes`, which is the declared
+  alias relation and has no placement input. Review added a seventh allocation to the
+  fixture state — same space, same extent, same `base := some 0x1000` as the buffer,
+  no alias declared — gave the engine an exclusive write loan over the buffer, and
+  proved all four of: the allocation is accepted; `addressAt?` agrees at offset 0 and
+  at offset 63; `SharesBytes` is false; and the thread's write through the other
+  identity is admitted, undenied, unrefused by the loan rule, with `authorityOf`
+  reporting `exclusive`.
+
+  Latent today, because only a fixture places allocations and M6 owns the allocator.
+  Latent is how the grant doors were before `authorityEffect` gave an operation a way
+  to reach them.
+
+  The fix is not a check in `allocate?`: two live allocations at one base is exactly
+  what an alias *is*, and the fixture state declares its alias after `allocateAll?`
+  runs, so an allocation-time refusal would reject the model's own legitimate states.
+  What is owed is a state-level coherence property — overlapping placement in one
+  space implies a declared alias — asserted where a profile builds its allocation
+  table, which is M6's shape rather than this milestone's.
 - ~~**`MemoryState.alias` was an unchecked mutator outside every gate.**~~ It changes
   which allocations name the same bytes, which is an authority question — every rule
   in the layer keys on `SharesBytes` — and `Tools/DoorAudit.py`'s first version left
