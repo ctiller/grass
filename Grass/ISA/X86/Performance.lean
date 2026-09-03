@@ -452,13 +452,12 @@ invent a document with `retrieval := .verified` as easily as a confirmation
 date -- the second reviewer built exactly that and refuted the claim below that
 no `JustifiedCostModel` can be built today.
 
-What `citationsChecked` therefore buys is narrower and still worth having: a
-justification cannot cite one of *this corpus's* registered documents unless
-that document's recorded status is verified, and the AMD document's is not. It
-does not stop an author inventing a document. `Grass.ISA.X86.Rules.all_registered`
-is the corresponding check one level up, pinning every rule in the common
-profile to the registered documents; there is no such pin here, and adding one
-is an open obligation.
+That gap is now closed by `citationsRegistered`, which pins each fact's anchors
+to `Vendor.document` -- `intelSdm092` and `amd64Apm409` and nothing else. An
+invented document no longer satisfies the premises, so the claim above is a
+theorem: `no_justification_while_amd_unretrievable`. The two fields together buy
+what one could not, and `Tools/source-liveness.py` now reads the retrieval
+status that the second of them depends on.
 -/
 structure JustifiedCostModel (Insn Vals : Type) where
   /-- The cost function. -/
@@ -480,20 +479,36 @@ structure JustifiedCostModel (Insn Vals : Type) where
   and `sound` is satisfied by an `architectural` claim over documents this
   corpus has recorded as dead -- a reviewer demonstrated exactly that.
 
-  What it does not do is make the premise unforgeable. `SourceDocument` is a
+  On its own this does not make the premise unforgeable. `SourceDocument` is a
   public structure, so an invented document with `retrieval := .verified` is as
-  easy to write as a confirmation date, and a second reviewer built a
-  `JustifiedCostModel` that way. Against the documents this corpus actually
-  registers the field bites, because the AMD one is recorded dead; against an
-  invented one it does not. Pinning the fact's citation to
-  `Grass.ISA.X86.Vendor.document`, as `Grass.ISA.X86.Rules.all_registered` does
-  for the common profile, is the missing half and is an open obligation.
+  easy to write as a confirmation date, and a reviewer built a
+  `JustifiedCostModel` that way. `citationsRegistered` is the other half: with
+  the documents pinned to `Vendor.document`, the invented one is no longer a
+  candidate and this field bites against the two that are.
 
   It also does not establish that anyone read the passage; `Citation.confirmed`
   is still a claim. See `Grass.ISA.X86.CommonBasis.agreed`.
   -/
   citationsChecked : ∀ i,
     (fact i).citation.intel.FullyChecked ∧ (fact i).citation.amd.FullyChecked
+  /--
+  Each fact's anchors name the documents this corpus registered.
+
+  The other half of `citationsChecked`, and the reason that field is worth
+  anything. `Citation.document` accepts any `SourceDocument`, so
+  `FullyChecked` binds an author only if the document is one whose retrieval
+  status this corpus established -- a reviewer invented one carrying
+  `retrieval := .verified` and rebuilt the attack `citationsChecked` was added
+  to stop. `Grass.ISA.X86.Rules.all_registered` is the same pin for the common
+  profile; the commit that added it recorded this one as owed, and this is it.
+
+  `Vendor.document` is `intelSdm092` and `amd64Apm409` and nothing else, so
+  with `Tools/source-liveness.py` reading `livenessProbe`, the premise now
+  reaches a status something other than the author can check.
+  -/
+  citationsRegistered : ∀ i,
+    (fact i).citation.intel.document = Vendor.intel.document ∧
+      (fact i).citation.amd.document = Vendor.amd.document
 
 namespace JustifiedCostModel
 
@@ -535,6 +550,31 @@ theorem citations_retrievable (j : JustifiedCostModel Insn Vals) (i : Insn) :
     (j.fact i).citation.intel.document.retrieval.isVerified = true ∧
       (j.fact i).citation.amd.document.retrieval.isVerified = true :=
   ⟨(j.citationsChecked i).1.1, (j.citationsChecked i).2.1⟩
+
+/--
+**No cost model can be justified while the AMD manual is unretrievable.**
+
+An earlier commit claimed this in prose and a reviewer refuted it by inventing a
+`SourceDocument` carrying `retrieval := .verified`. With `citationsRegistered`
+pinning each fact's anchors to `Vendor.document`, the claim is now a theorem
+rather than a hope: the AMD document is `amd64Apm409`, its recorded retrieval is
+`.dead`, and `citationsChecked` demands `isVerified`.
+
+Note the hypothesis `(i : Insn)`. Over an empty instruction type the structure
+is vacuously inhabitable, which is not a loophole -- a cost model with no
+instructions justifies nothing -- but it is the reason this is stated for a
+given instruction rather than as non-inhabitation.
+
+This is the correct state for a security premise whose evidence is missing. It
+becomes constructible when the AMD manual is retrievable again, and
+`Tools/source-liveness.py` is what will notice.
+-/
+theorem no_justification_while_amd_unretrievable
+    (j : JustifiedCostModel Insn Vals) (i : Insn) : False := by
+  have hreg := (j.citationsRegistered i).2
+  have hchk := (j.citationsChecked i).2.1
+  rw [hreg] at hchk
+  exact absurd hchk (by decide)
 
 /-- A measured timing fact cannot justify a `JustifiedCostModel`.
 
