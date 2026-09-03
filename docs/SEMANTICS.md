@@ -203,17 +203,6 @@ def SpecProcess.driverBoundary (spec : SpecProcess resources) :
 def SpecProcess.progress (spec : SpecProcess resources) :
     AbstractProgressContract := spec.contract.progress
 
-structure AbstractSpecificationProcessNetwork
-    {R : Type u} [ResourceModel R] (resources : R) where
-  RoleSchema : Type
-  finiteSchemas : Fintype RoleSchema
-  Instance : RoleSchema -> Type
-  protocol : forall schema,
-    SpecProcess resources
-  instances : forall schema,
-    Instance schema -> ProtocolInstance (protocol schema)
-  composition : AbstractNetworkCompositionLaw protocol instances
-
 def SpecProcess.capture
     (suite : SpecificationSuite resources) : SpecProcess resources :=
   { suite := suite
@@ -230,12 +219,6 @@ def SpecProcess.ofRelational
     (contract : BehaviorContract resources) :
     SpecProcess resources :=
   SpecProcess.capture (SpecificationSuite.singletonRelational contract)
-
-structure ProcessPresentation (spec : SpecProcess resources) where
-  network : AbstractSpecificationProcessNetwork resources
-  denotationExact : network.traceDenotation = spec.contract
-  requirementsExact : TransportedProcessRequirements network denotationExact =
-    spec.requirements
 
 structure RequirementSubstitution
     (spec : SpecProcess resources) where
@@ -384,12 +367,15 @@ about the captured operations, never to identify competing semantic operations.
 The one root `SpecProcess` stores the precious suite of DSL components and
 semantic junctions, its captured transition/observation semantics, selected
 resource-semantics snapshot, and theorem demands. `VerifiedProgram` is indexed
-by that exact process. A `ProcessPresentation` is a
-replaceable proof lens over that value. It may name abstract logical roles,
+by that exact process. A `ProcessPresentation`, owned by `Refinement` where the
+independent `Semantics` and `Process` dependency arms meet, is a replaceable
+proof lens over that value. It may name abstract logical roles,
 typed channels, linear custody, shared logical state, and causal ordering, but
-its `denotationExact` theorem must recover the already selected contract. It is
-not stored inside the specification and changing its topology cannot change the
-precious value. OS threads, worker counts, polling/completion mechanisms,
+its explicit `trace` and `denotationExact` theorem must recover the already
+selected contract. The network contains neither that trace nor a second
+denotation. The presentation is not stored inside the specification and
+changing its topology or selected proof trace cannot change the precious value.
+OS threads, worker counts, polling/completion mechanisms,
 concrete queues/buffers/handles, layouts, registers, and schedulers remain still
 lower realization choices.
 

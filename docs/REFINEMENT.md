@@ -155,35 +155,56 @@ presentation of the precious specification. No role projection is fabricated
 from an arbitrary behavior contract:
 
 ```lean
+abbrev ProcessPresentationNetwork
+    {R : Type u} [ResourceModel R] (resources : R) :=
+  StructuralProcessNetwork (SpecProcess resources)
+
+structure SelectedProcessTrace
+    (network : ProcessPresentationNetwork resources) where
+  contract : BehaviorContract resources
+  realizesComposition : AbstractNetworkTraceRealizes network contract
+
+structure ProcessPresentation (spec : SpecProcess resources) where
+  network : ProcessPresentationNetwork resources
+  trace : SelectedProcessTrace network
+  denotationExact : trace.contract = spec.contract
+  requirementsExact :
+    TransportedProcessRequirements network trace denotationExact =
+      spec.requirements
+
 structure StagedProcessPresentation
     {R : Type u} [ResourceModel R] {resources : R}
     (spec : SpecProcess resources) where
-  network : AbstractSpecificationProcessNetwork resources
+  network : ProcessPresentationNetwork resources
+  trace : SelectedProcessTrace network
   resourceView : network.RoleSchema -> RequiredResourceView resources
   resourceRestrictionExact : forall schema,
     (network.protocol schema).resourceSemantics.restrict (resourceView schema) =
       spec.resourceSemantics.restrict (resourceView schema)
   resourceViewsCoverRoot : ExactUnionOfRequiredResourceViews
     resourceView spec.resourceSemantics.requiredAxes
-  denotationExact : network.traceDenotation = spec.contract
-  requirementsExact : TransportedProcessRequirements network denotationExact =
-    spec.requirements
+  denotationExact : trace.contract = spec.contract
+  requirementsExact :
+    TransportedProcessRequirements network trace denotationExact =
+      spec.requirements
 
 def StagedProcessPresentation.ofNetwork
     (spec : SpecProcess resources)
-    (network : AbstractSpecificationProcessNetwork resources)
+    (network : ProcessPresentationNetwork resources)
     (resourceView : network.RoleSchema -> RequiredResourceView resources)
     (resourceRestrictionExact : forall schema,
       (network.protocol schema).resourceSemantics.restrict (resourceView schema) =
         spec.resourceSemantics.restrict (resourceView schema))
     (resourceViewsCoverRoot : ExactUnionOfRequiredResourceViews
       resourceView spec.resourceSemantics.requiredAxes)
-    (denotationExact : network.traceDenotation = spec.contract)
+    {trace : SelectedProcessTrace network}
+    (denotationExact : trace.contract = spec.contract)
     (requirementsExact :
-      TransportedProcessRequirements network denotationExact = spec.requirements) :
+      TransportedProcessRequirements network trace denotationExact =
+        spec.requirements) :
     StagedProcessPresentation spec :=
   { network, resourceView, resourceRestrictionExact, resourceViewsCoverRoot,
-    denotationExact, requirementsExact }
+    trace, denotationExact, requirementsExact }
 
 def StagedProcessPresentation.ofProtocol
     (spec : SpecProcess resources)
