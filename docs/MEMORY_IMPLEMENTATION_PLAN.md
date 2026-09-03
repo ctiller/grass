@@ -1999,6 +1999,76 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   the lender is a context that has already halted, and review did not construct such a
   state either.
 
+- ~~**`MayLend`'s other two disjuncts bounded the lent rights by nothing either**, and
+  both were reachable through `step`.~~ Round seventeen gave the first disjunct a rights
+  bound and left the other two, which is the shape this document keeps recording: a
+  repair applied to the instance found rather than to the class.
+
+  The third disjunct — "every grant outstanding was lent by this lender, so whoever put
+  them out may put more out" — was written for an owner that has lent a fragment and
+  holds no grant of its own, and said neither. So an owner of a *read-only* page lent it
+  read-only and then lent itself `readWrite`, because by then every grant outstanding was
+  its own; and a read-only *borrower* sublet to itself, returned the original as holder,
+  and lent itself write authority, all three deltas in one access's declared effect.
+  Review stepped both. The disjunct now says what it was always about: ownership, and
+  the storage's own permission.
+
+  The rights bound there is the *storage's* and not the outstanding grants', on purpose.
+  An owner that lent read still holds write and may lend it, and §3 says an owner
+  retains what it did not lend; bounding by what is already out would refuse that, and
+  `the_owner_may_lend_write_before_the_sublet` is the case.
+- ~~**Atomic-only authority sublet as ordinary authority**, because `Permission.Grants`
+  does not compare `atomicOnly`.~~ Its own docstring says the field "is not compared: it
+  narrows what a *grant* conveys and a page has no such bit", and
+  `permits_of_grants_of_permits` takes the page's `atomicOnly = false` as a hypothesis
+  for that reason — so the relation is about a page and a demand. `MayLend`'s second
+  disjunct applied it with a grant's rights on the left, which is the case that
+  docstring excludes, and on that path there is no `Permits` companion the way there is
+  at `denialOf`.
+
+  Review lent a borrower `atomicReadWrite`, had it sublet itself `readWrite` in the same
+  access's authority effect, and stepped the ordinary write: `refusalOf` went from
+  `authorityUnavailable` to `none` and the page's owner went from `sharedImmutable` to
+  `frozen`. `LoanConflicts` does not see it — a sublet to oneself has no distinct holder
+  — and `denialOf` does not, because the page carries write. §3's "atomics do not grant
+  ordinary non-atomic access" was enforced at the access and not at the lend.
+
+  `Permission.GrantsAsGrant` is `Grants` with the comparison, for the one case where
+  both sides are grants, and all three disjuncts use it now. A grant may narrow into
+  atomic-only and may not widen out of it.
+- ~~**§4.4.1a's `AddressSpace.repr` row was an overclaim**: "nothing about a space is a
+  profile's choice now except which identity it declares" was true of the eight
+  identities `requiredRepresentation` names and of no others.~~ Review declared a CPU
+  space under `win32.processHeap` — an allocator name Spike 1's own profile uses — with
+  `repr := .symbolic`, and walked the round-fifteen attack straight through: a store of
+  `2 ^ 70` bytes at a symbolic address demanding 4096-byte alignment passed the
+  descriptor seal and `Substep.WellFormedIn`, both numeric clauses vacuous, with
+  `base := none` skipping the two placement clauses as well.
+
+  The default is `numericallyAddressed` now and `RepresentationDemand` has two
+  constructors rather than three. A genuinely symbolic new space is added to
+  `requiredRepresentation` in the open, which is what law 8 asks of an unknown. The cost
+  is a vendor with a symbolic address model editing this layer, and that is the right
+  cost: every numeric guard in the seal is off for such a space.
+
+  The general lesson, third time it has been paid for: **a default arm is a profile
+  input.** `.anyRepresentation` read as "this module has nothing to say", and what it
+  said was "admit".
+- **§10's preservation item is stated over the metadata view, so it says nothing about
+  `owners`.** `PreservationLaws`' third conjunct quantifies `MemoryState.MetadataAt`,
+  and `AllocationRecord.Metadata` omits `owners` — which is the same view whose narrowness
+  was `allocate?`'s defect one round earlier, now load-bearing in the §10 item that
+  landed most recently. Review exhibited two states differing only in `owners`:
+  indistinguishable to everything that conjunct quantifies, and `MayLend` answers
+  oppositely.
+
+  Latent rather than live, because nothing on the `applyAccess` path can move `owners`
+  today; it stops being latent the moment §7.4's ownership transfer or M6's allocator
+  gives an operation a way to. Recorded rather than repaired because the right shape is
+  probably a single "everything but bytes" view used by both this conjunct and
+  `allocate?`'s guard, and introducing a second view beside `Metadata` without deciding
+  which one `denialOf_congr_of_agrees` should be stated over would leave three.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Four review rounds found the same shape and it is worth naming as a shape rather than
@@ -2024,7 +2094,7 @@ its entries one at a time.
 | `StepPolicy.authorities` | adds refusals only | `AuthorityProvider.refuses` is consulted *after* the transition's own clauses and cannot remove one; `refusalOf_refuses_the_unauthorized` is quantified over the policy |
 | `AuthorityProvider.refuses` | adds refusals only | takes a `MemoryState`, not a `MachineState`, so refusal cannot depend on execution history — monotonicity and locality in the range are still open |
 | `StepPolicy.compatible` | can remove a §7.3 refusal | `compatibleIsAtomic` and `compatibleSymm` are proof fields; `conflicts_of_not_atomic` is quantified over the policy |
-| `AddressSpace.repr` | **could remove two refusals, then a third** | `AccessDescriptor.WellFormedIn`'s `aligned` and `rangeFitsSpace` are both vacuous for a symbolic representation, and `Addressing.lean`'s placement bridge ran in 64-bit arithmetic for any numeric width. `AddressSpace.RepresentationMatchesIdentity` fixes the kind for every identity this layer names, and `WellFormed` fixes the width at exactly 64 for this vocabulary version. Nothing about a space is a profile's choice now except which identity it declares |
+| `AddressSpace.repr` | **could remove two refusals, then a third, then the same two again under a fresh identity** | `AccessDescriptor.WellFormedIn`'s `aligned` and `rangeFitsSpace` are both vacuous for a symbolic representation, and `Addressing.lean`'s placement bridge ran in 64-bit arithmetic for any numeric width. `RepresentationMatchesIdentity` fixes the kind, `WellFormed` fixes the width at exactly 64, and `requiredRepresentation`'s default arm is `numericallyAddressed` rather than "no opinion" — which is what let the first repair be walked around under an identity this layer does not name. A profile chooses the identity and nothing else |
 | `AddressSpace.memoryType`, `coherence`, `owner` | — | nothing reads them; §4.2 lists them among the facts the model carries and nothing consults |
 | `AdmittedVocabulary`'s thirteen registries | admit more names | a larger registry admits more, which is the profile's own claim about its target; a *smaller* one refuses more, which is the safe direction |
 | `AdmittedVocabulary.WellFormed` | — | the address-space table is checked and the three justification registries are pairwise disjoint; the other ten have no coherence condition and need none |

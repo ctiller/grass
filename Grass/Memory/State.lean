@@ -663,10 +663,24 @@ certified nobody has. `Permission.Grants` is the same relation `denialOf` uses f
 descriptor's declared permission, asked here at the authority layer. Or the lender holds a grant covering the
 range with rights that supply what is being lent, which is `Permission.Grants` at the
 authority layer. Or every grant outstanding over the bytes was lent *by this lender* —
-whoever put them out may put more out — and there must *be* some, because `List.all`
-on the empty list is `true` and without that conjunct this disjunct readmitted every
-stranger the first one had just refused. The ownership conjunct below is only worth
-having if this one is here too.
+whoever put them out may put more out — *if it owns the storage and the storage carries
+the rights* — and there must *be* some, because `List.all` on the empty list is `true`
+and without that conjunct this disjunct readmitted every stranger the first one had just
+refused.
+
+**The ownership and rights conjuncts arrived a round after the first disjunct got
+its.** This disjunct was written for an owner that has lent a fragment out and holds no
+grant of its own, and never said so, so it admitted two things review stepped. An owner
+of a *read-only* page lent it read-only and then, because every grant outstanding was
+its own, lent itself `readWrite` — which the allocation-permission conjunct now refuses,
+exactly as it does on the first disjunct. And a read-only *borrower* sublet to itself,
+returned the original as holder, and lent itself write authority, all three deltas in
+one access's declared effect: having become the only lender of record it satisfied this
+disjunct outright, which the ownership conjunct now refuses.
+
+The rights bound is the *storage's* and not the outstanding grants', deliberately. An
+owner that lent read still holds write and may lend it; bounding by what is already out
+would refuse that, and §3 says an owner retains what it did not lend.
 
 Without the third, an owner who lends once can never lend again, because it holds
 nothing itself: ownership is recorded on the allocation, not as a grant, so a lender's
@@ -689,19 +703,22 @@ def MayLend (state : MemoryState) (grant : AuthorityGrant) : Prop :=
   (¬ state.AnyGrantOver grant.provenance grant.range ∧
       state.OwnedBy grant.lender grant.provenance ∧
       (state.allocations.lookup grant.provenance.root).any
-        (fun record => decide (record.permission.Grants grant.rights)) = true) ∨
+        (fun record => decide (record.permission.GrantsAsGrant grant.rights)) = true) ∨
     state.grantEntries.any (fun entry =>
       entry.2.holder = grant.lender &&
         decide (state.SharesBytes entry.2.provenance.root grant.provenance.root) &&
         decide (state.CurrentEpoch entry.2.provenance) &&
         decide (entry.2.range.Contains grant.range) &&
-        decide (entry.2.rights.Grants grant.rights)) = true ∨
+        decide (entry.2.rights.GrantsAsGrant grant.rights)) = true ∨
     (state.AnyGrantOver grant.provenance grant.range ∧
+      state.OwnedBy grant.lender grant.provenance ∧
+      (state.allocations.lookup grant.provenance.root).any
+        (fun record => decide (record.permission.GrantsAsGrant grant.rights)) = true ∧
       (state.grantsOver grant.provenance grant.range).all
         (fun entry => entry.2.lender = grant.lender) = true)
 
 instance (state : MemoryState) (grant : AuthorityGrant) : Decidable (state.MayLend grant) :=
-  inferInstanceAs (Decidable ((¬ _ ∧ _ ∧ _ = _) ∨ _ = _ ∨ (_ ∧ _ = _)))
+  inferInstanceAs (Decidable ((¬ _ ∧ _ ∧ _ = _) ∨ _ = _ ∨ (_ ∧ _ ∧ _ = _ ∧ _ = _)))
 
 /--
 Issue a grant, or refuse.
@@ -822,7 +839,7 @@ theorem mayLend_of_unheld_of_owned {state : MemoryState} {grant : AuthorityGrant
     (h : ¬ state.AnyGrantOver grant.provenance grant.range)
     (howns : state.OwnedBy grant.lender grant.provenance)
     (hrights : (state.allocations.lookup grant.provenance.root).any
-      (fun record => decide (record.permission.Grants grant.rights)) = true) :
+      (fun record => decide (record.permission.GrantsAsGrant grant.rights)) = true) :
     state.MayLend grant :=
   Or.inl ⟨h, howns, hrights⟩
 
@@ -834,7 +851,7 @@ theorem not_mayLend_of_unheld_of_unowned {state : MemoryState} {grant : Authorit
     (h : ¬ state.AnyGrantOver grant.provenance grant.range)
     (howns : ¬ state.OwnedBy grant.lender grant.provenance)
     (hne : ¬ grant.range.IsEmpty) : ¬ state.MayLend grant := by
-  rintro (⟨_, howned, _⟩ | hheld | ⟨hany, _⟩)
+  rintro (⟨_, howned, _⟩ | hheld | ⟨hany, _, _, _⟩)
   · exact howns howned
   · -- The lender holding a covering grant *is* a grant over the bytes, so the
     -- second disjunct implies the first is false. `Contains` needs the range to be

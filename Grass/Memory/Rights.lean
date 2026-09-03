@@ -205,6 +205,31 @@ def Grants (page required : Permission) : Prop :=
 instance (page required : Permission) : Decidable (page.Grants required) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 
+/--
+`held.GrantsAsGrant lent` holds when authority `held` may be lent on as `lent`.
+
+`Grants` with the `atomicOnly` comparison the paragraph above says it deliberately
+omits, for the one case where both sides are grants rather than a page and a demand.
+`docs/MEMORY_MODEL.md` §3: "Atomics do not grant ordinary non-atomic access."
+
+**`MemoryState.MayLend` was applying `Grants` with a grant's rights on the left**,
+which is exactly the case that paragraph excludes, and on that path there is no
+`Permits` companion the way there is at `denialOf`. Review lent a borrower
+`atomicReadWrite`, had it sublet itself `readWrite` in the same access's authority
+effect, and stepped the ordinary write: `refusalOf` went from `authorityUnavailable` to
+`none` and the page's owner went from `sharedImmutable` to `frozen`. `LoanConflicts`
+does not see it, because a sublet to oneself has no distinct holder, and `denialOf`
+does not, because the page carries write permission.
+
+A grant may narrow *into* atomic-only and may not widen out of it, which is the
+direction §3's sentence runs.
+-/
+def GrantsAsGrant (held lent : Permission) : Prop :=
+  held.Grants lent ∧ (held.atomicOnly = true → lent.atomicOnly = true)
+
+instance (held lent : Permission) : Decidable (held.GrantsAsGrant lent) :=
+  inferInstanceAs (Decidable (_ ∧ _))
+
 /-- **A read-only page does not grant a read/write demand.** -/
 @[simp] theorem readOnly_not_grants_readWrite : ¬ readOnly.Grants readWrite := by
   simp [Grants, readOnly, readWrite]
@@ -245,6 +270,23 @@ section's least-privilege claim rests on. -/
 §3's atomic shared access expressed as a right rather than as a state. -/
 def atomicReadWrite : Permission :=
   { read := true, write := true, atomicOnly := true }
+
+/-- **Atomic-only authority does not lend on as ordinary authority.** -/
+@[simp] theorem not_atomicReadWrite_grantsAsGrant_readWrite :
+    ¬ atomicReadWrite.GrantsAsGrant readWrite := by
+  simp [GrantsAsGrant, Grants, atomicReadWrite, readWrite]
+
+/-- It lends on as atomic-only authority, so the theorem above is a restriction and
+not a grant that conveys nothing. -/
+@[simp] theorem atomicReadWrite_grantsAsGrant_atomicReadWrite :
+    atomicReadWrite.GrantsAsGrant atomicReadWrite := by
+  simp [GrantsAsGrant, Grants, atomicReadWrite]
+
+/-- And ordinary authority lends on as atomic-only, which is the narrowing direction:
+a lender may hand out less than it holds. -/
+@[simp] theorem readWrite_grantsAsGrant_atomicReadWrite :
+    readWrite.GrantsAsGrant atomicReadWrite := by
+  simp [GrantsAsGrant, Grants, readWrite, atomicReadWrite]
 
 /-- **Atomic authority does not convey ordinary non-atomic access.**
 `docs/MEMORY_MODEL.md` §3, at the gate every access passes. -/

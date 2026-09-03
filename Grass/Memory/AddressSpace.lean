@@ -73,13 +73,27 @@ def spirvPushConstant : AddressSpaceId := ⟨⟨"spirv.pushConstant"⟩⟩
 /--
 What representation an identity this module names requires.
 
-Three answers rather than two, because most identities are a profile's own and this
-module has nothing to say about them. `anyRepresentation` is that silence and is the
-default for every name not listed below.
+Two answers, and there were three: `anyRepresentation` was the default for every
+identity this module does not name, on the reasoning that most identities are a
+profile's own and this module has nothing to say about them.
+
+**That default was the round-fifteen attack, still live under a fresh name.** Review
+declared a CPU space under the identity `win32.processHeap` with `repr := .symbolic`,
+and it was well formed, its table was well formed, and a store of `2 ^ 70` bytes at a
+symbolic address demanding 4096-byte alignment passed both the descriptor seal and
+`Substep.WellFormedIn` -- because `AccessDescriptor.WellFormedIn`'s `aligned` and
+`rangeFitsSpace` are both vacuous for a symbolic representation. §4.4.1a's table said
+"nothing about a space is a profile's choice now except which identity it declares",
+and that was true of the eight identities named below and of no others.
+
+So the default is numeric. A genuinely symbolic new space is added to
+`requiredRepresentation` here, in the open, which is what `docs/FOUNDATION.md` law 8
+asks of an unknown: reject it rather than approximate it as the permissive case. The
+cost is that a vendor with a symbolic address model edits this module, and that is the
+right cost -- every numeric guard in the seal is off for such a space, so admitting one
+sight unseen is admitting a descriptor nothing bounds.
 -/
 inductive RepresentationDemand where
-  /-- The identity is not one this module names; a profile chooses. -/
-  | anyRepresentation
   /-- Addresses in this space are machine addresses. -/
   | numericallyAddressed
   /-- The space has no machine addresses at all. -/
@@ -100,14 +114,11 @@ addresses to represent; `docs/MEMORY_MODEL.md` §7.5 lists GPU storage classes a
 the spaces that are not interchangeable with the rest.
 -/
 def requiredRepresentation (id : AddressSpaceId) : RepresentationDemand :=
-  if id = cpuVirtual || id = cpuPhysical || id = deviceLocal ||
-      id = deviceHostVisible then
-    .numericallyAddressed
-  else if id = spirvPrivate || id = spirvInput || id = spirvOutput ||
+  if id = spirvPrivate || id = spirvInput || id = spirvOutput ||
       id = spirvPushConstant then
     .symbolicallyAddressed
   else
-    .anyRepresentation
+    .numericallyAddressed
 
 end AddressSpaceId
 
@@ -252,16 +263,15 @@ was resolution through the profile's table plus the ambiguity check. Those close
 hand-made space and the duplicate; neither closes a table that declares the pairing
 once. The tree's own fixture wrote the value down and refused it as a duplicate.
 
-Only the identities *this module names* are constrained, and only in kind: whether the
-space is numerically or symbolically addressed, never how wide it is, which stays a
-profile's choice under the `WellFormed` bound. A profile with a genuinely new space
-uses a new identity and this says nothing about it -- the same shape as
-`AllocationSourceId`, which describes storage without deciding what a profile may
-declare.
+Every identity is constrained, and only in kind. It used to be only the eight this
+module names, on the reasoning that a profile with a genuinely new space uses a new
+identity and this should say nothing about it -- and review then declared a hostile
+space under a new identity and walked the same attack through. `AllocationSourceId` is
+not the right analogy: a source is a fact about storage that no rule reads twice,
+whereas a representation switches two clauses of the declaration-time seal off.
 -/
 def RepresentationMatchesIdentity (space : AddressSpace) : Prop :=
   match space.id.requiredRepresentation with
-  | .anyRepresentation => True
   | .numericallyAddressed => space.repr ≠ .symbolic
   | .symbolicallyAddressed => space.repr = .symbolic
 
@@ -361,12 +371,15 @@ space that has none. -/
 theorem not_wellFormed_numeric_spirvPrivate :
     ¬ ({ spirvPrivate with repr := .numeric 64 } : AddressSpace).WellFormed := by decide
 
-/-- An identity this module does not name is unconstrained in representation, so a
-profile with a genuinely new space is not forced into either kind. -/
-theorem an_unnamed_identity_takes_either_representation :
-    ({ cpuVirtual64 with id := ⟨⟨"vendor.scratchpad"⟩⟩, repr := .symbolic } :
+/-- **An identity this module does not name is numerically addressed**, which is the
+default a profile cannot argue with. It used to be unconstrained, and review declared a
+symbolic space under `win32.processHeap` -- an allocator name Spike 1's own profile uses
+-- and put a store of `2 ^ 70` bytes at a symbolic address through the seal with a
+4096-byte alignment demand, both numeric clauses vacuous. -/
+theorem an_unnamed_identity_is_numerically_addressed :
+    ¬ ({ cpuVirtual64 with id := ⟨⟨"win32.processHeap"⟩⟩, repr := .symbolic } :
       AddressSpace).WellFormed ∧
-    ({ cpuVirtual64 with id := ⟨⟨"vendor.scratchpad"⟩⟩ } : AddressSpace).WellFormed := by
+    ({ cpuVirtual64 with id := ⟨⟨"win32.processHeap"⟩⟩ } : AddressSpace).WellFormed := by
   exact ⟨by decide, by decide⟩
 
 /-- **A narrow numeric space is not well formed**, and this theorem asserted the
