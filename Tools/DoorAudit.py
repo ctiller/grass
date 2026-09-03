@@ -9,11 +9,18 @@ branch a *second* way in was found instead of the first being reused, and the la
 was reachable through `step`.
 
 **What this checks, exactly.** For every `.lean` source under `Grass/`, with block
-comments, line comments and string literals stripped, it reports any application of a
-door name that is not in `ALLOWED_CALLERS`. A door name counts as applied when it
-appears as `.door` or `MemoryState.door` followed by something other than a closing
-delimiter — so `state.issue? id grant` is a call and `MemoryState.issue?` named in a
-`simp` set or an `unfold` is not.
+comments, line comments and string literals blanked out, it reports any application of
+a door name from a module that door's entry in `DOORS` does not allow. A door name
+counts as applied when it appears as `.door` or `MemoryState.door` followed by an
+argument or by the end of the line — so `state.issue? id grant` is a call, so is
+`id grant |> state.issue?`, so is a call whose arguments wrap to the next line, and
+`MemoryState.issue?` named in a `simp` set or after an `unfold` is not.
+
+The doors are the five that change the map plus the two effect appliers, and the
+allowed callers differ: only the two modules that own the field may reach the map's
+doors, while the transition may reach `applyAuthorityDelta?` and
+`applyAuthorityEffect?`, because that is the one place the acting context is not the
+caller's to choose.
 
 The rule it enforces is narrow and worth stating precisely, because the obvious
 stronger rule is wrong. `MemoryState.issue?` takes no acting context: it reads the
@@ -38,6 +45,12 @@ corrected for advertising a stronger reading:
 - It says nothing about `Tests/`, which is not scanned. Fixtures build states by
   calling the doors directly, and that is what a fixture is for; `issue?`'s
   unverified `lender` is a claim a fixture makes while setting up.
+- A line that both names a door in a tactic *and* applies one is missed, because the
+  naming tactic is detected positionally: a tactic word before the door on the line
+  silences it. That is the price of not reporting every proof about a door. The
+  positional rule is not cosmetic — matching the tactic anywhere on the line meant an
+  argument named `delta` silenced a real call to `applyAuthorityDelta?`, which the
+  self-test caught.
 - A clean run means no `Grass/` module outside the allowlist *mentions* a door in
   applied position. It is not evidence that the doors are otherwise sealed — the
   private field and private constructor are what do that, and no audit here can see
@@ -56,25 +69,32 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SOURCES_IN = sorted((ROOT / "Grass").rglob("*.lean"))
 
-# The doors. `returnLoan?` is `Grass/Memory/Loan.lean`'s §3-named wrapper and
-# delegates to `returnGrant?`; it is a door by the same argument.
-DOORS = (
-    "issue?",
-    "returnGrant?",
-    "returnLoan?",
-    "splitGrant?",
-    "joinGrants?",
-    "transferGrant?",
-)
-
-# Where a door may be called from, with the reason.
-ALLOWED_CALLERS = {
-    # Declares all five and composes them into `applyAuthorityDelta?`, which is the
-    # one place an acting context exists to check a delta against.
-    "Grass/Memory/State.lean",
-    # `returnLoan?` is declared here and delegates; §3's laws are stated here over
-    # the door they no longer define.
-    "Grass/Memory/Loan.lean",
+# The doors, and the modules each may be called from. `returnLoan?` is
+# `Grass/Memory/Loan.lean`'s §3-named wrapper and delegates to `returnGrant?`; it is a
+# door by the same argument.
+#
+# `applyAuthorityDelta?` and `applyAuthorityEffect?` are doors too, and the first
+# version of this file left them out. Review made the omission concrete: the argument
+# that an `actor` parameter on `issue?` would be worthless — a caller free to pass
+# anything passes `grant.lender` — applies verbatim to `applyAuthorityDelta?`'s
+# `actor`, which is caller-chosen everywhere except the one `performAccess` site where
+# it is `d.context`. Three real map-changing definitions were added to
+# `Grass/Op/LoanAuthority.lean`, one routed through `applyAuthorityDelta?` with
+# `grant.lender` as its actor, and this tool printed its green line.
+#
+# So the effect appliers are guarded too, and their allowed callers are the module
+# that owns them and the transition — which is the only place the actor is not the
+# caller's to choose.
+MAP_OWNERS = {"Grass/Memory/State.lean", "Grass/Memory/Loan.lean"}
+DOORS = {
+    "issue?": MAP_OWNERS,
+    "returnGrant?": MAP_OWNERS,
+    "returnLoan?": MAP_OWNERS,
+    "splitGrant?": MAP_OWNERS,
+    "joinGrants?": MAP_OWNERS,
+    "transferGrant?": MAP_OWNERS,
+    "applyAuthorityDelta?": {"Grass/Memory/State.lean", "Grass/Op/Step.lean"},
+    "applyAuthorityEffect?": {"Grass/Memory/State.lean", "Grass/Op/Step.lean"},
 }
 
 BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
@@ -82,22 +102,52 @@ LINE = re.compile(r"--.*?$", re.MULTILINE)
 STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
 
 
+# A tactic that names a declaration without applying it. `unfold f at h` was reported
+# as a call by the first version, which its own docstring said it would not be.
+NAMING_TACTIC = re.compile(r"\b(?:unfold|simp|simp_all|rw|delta|fold|exact|apply)\b")
+
+
+def blank(match: "re.Match[str]") -> str:
+    """Replace a match with as many newlines as it spanned, keeping line numbers."""
+    return "\n" * match.group(0).count("\n")
+
+
 def strip(source: str) -> str:
-    """Remove block comments, line comments and string literals."""
-    return LINE.sub("", STRING.sub('""', BLOCK.sub("", source)))
+    """Blank out block comments, line comments and string literals, keeping the line
+    structure.
+
+    The first version deleted them, so every report pointed at the wrong line of a
+    real file: a control call on line 219 of `Grass/Op/LoanAuthority.lean` was
+    reported as line 106. The self-test never noticed, because seeded sources have no
+    block comments — so this function now preserves newlines and the self-test seeds
+    one.
+    """
+    return LINE.sub("", STRING.sub('""', BLOCK.sub(blank, source)))
 
 
 def applications(source: str, door: str) -> list[int]:
     """The 1-based line numbers where `door` appears in applied position."""
-    # `.door` or `Namespace.door`, then something that is not a delimiter, a comma,
-    # or the end of a line: an argument.
+    # `.door` or `Namespace.door`, then an argument: anything that is not a closing
+    # delimiter, a comma, or the end of the line. Accepting end-of-line catches the
+    # `|>` form and a call whose arguments wrap, both of which the first version
+    # missed.
     pattern = re.compile(
-        r"(?:\.|\b[A-Za-z_][A-Za-z0-9_.']*\.)" + re.escape(door) + r"[ \t]+(?![,)\]}])"
+        r"(?:\.|\b[A-Za-z_][A-Za-z0-9_.']*\.)" + re.escape(door)
+        + r"(?:[ \t]+(?![,)\]}])|[ \t]*$)"
     )
     found = []
     for number, line in enumerate(strip(source).splitlines(), start=1):
-        if pattern.search(line):
-            found.append(number)
+        match = pattern.search(line)
+        if not match:
+            continue
+        # `unfold MemoryState.issue?`, `simp [MemoryState.issue?]`, `exact
+        # MemoryState.issue?_eq_none_of_absent h`: named inside a proof, not applied
+        # in a definition. The tactic has to come *before* the door on the line, or
+        # an argument named `delta` or `fold` would silence a real call — which it
+        # did, and the self-test caught it.
+        if any(tactic.end() <= match.start() for tactic in NAMING_TACTIC.finditer(line)):
+            continue
+        found.append(number)
     return found
 
 
@@ -105,9 +155,9 @@ def analyse(sources: dict[str, str]) -> list[str]:
     """Report door applications from modules not allowed to make them."""
     reported = []
     for name in sorted(sources):
-        if name in ALLOWED_CALLERS:
-            continue
-        for door in DOORS:
+        for door, allowed in DOORS.items():
+            if name in allowed:
+                continue
             for number in applications(sources[name], door):
                 reported.append(
                     f"  {name}:{number}: calls `{door}` from outside the modules that "
@@ -118,9 +168,11 @@ def analyse(sources: dict[str, str]) -> list[str]:
 
 def self_test() -> int:
     failures = 0
+    # A module allowed for no door, so one seeded case works for all of them.
+    OUTSIDE = "Grass/Op/LoanAuthority.lean"
     call = "def f (s : MemoryState) := s.issue? id grant\n"
 
-    if not analyse({"Grass/Op/Step.lean": call}):
+    if not analyse({OUTSIDE: call}):
         print("  SELF-TEST FAILED: a door call from a disallowed module is not reported")
         failures += 1
 
@@ -129,29 +181,67 @@ def self_test() -> int:
         failures += 1
 
     commented = "/-- `s.issue? id grant` is what a caller writes. -/\ndef f := 1\n"
-    if analyse({"Grass/Op/Step.lean": commented}):
+    if analyse({OUTSIDE: commented}):
         print("  SELF-TEST FAILED: a door named in a docstring is reported")
         failures += 1
 
     mentioned = "theorem t : True := by simp [MemoryState.issue?]\n"
-    if analyse({"Grass/Op/Step.lean": mentioned}):
+    if analyse({OUTSIDE: mentioned}):
         print("  SELF-TEST FAILED: a door named in a simp set is reported")
         failures += 1
 
     unfolded = "theorem t : True := by\n  unfold MemoryState.issue?\n"
-    if analyse({"Grass/Op/Step.lean": unfolded}):
+    if analyse({OUTSIDE: unfolded}):
         print("  SELF-TEST FAILED: a door named by `unfold` is reported")
         failures += 1
 
+    # Review found this one: the docstring said a door named by `unfold` is not
+    # reported, and the `at h` form was, because the pattern only needed a following
+    # space.
+    unfolded_at = "theorem t : True := by\n  unfold MemoryState.issue? at h\n"
+    if analyse({OUTSIDE: unfolded_at}):
+        print("  SELF-TEST FAILED: `unfold X at h` is reported as a call")
+        failures += 1
+
+    # And this one: reports numbered the stripped source, so every line number from a
+    # real file was wrong.
+    offset = "/-\na block comment\nspanning three lines\n-/\n" + call
+    reports = analyse({OUTSIDE: offset})
+    if not reports or ":5:" not in reports[0]:
+        print("  SELF-TEST FAILED: the reported line number does not survive a block "
+              f"comment above the call: {reports}")
+        failures += 1
+
+    # And these two: a call written backwards, and one whose arguments wrap.
+    piped = "def f (s : MemoryState) := id grant |> s.issue?\n"
+    if not analyse({OUTSIDE: piped}):
+        print("  SELF-TEST FAILED: a `|>` call is not reported")
+        failures += 1
+
+    wrapped = "def f (s : MemoryState) :=\n  s.issue?\n    id grant\n"
+    if not analyse({OUTSIDE: wrapped}):
+        print("  SELF-TEST FAILED: a call whose arguments wrap is not reported")
+        failures += 1
+
     for door in DOORS:
-        if not analyse({"Grass/Op/Step.lean": f"def f (s : MemoryState) := s.{door} a b\n"}):
+        if not analyse({OUTSIDE: f"def f (s : MemoryState) := s.{door} a b\n"}):
             print(f"  SELF-TEST FAILED: `{door}` is not scanned for")
             failures += 1
+
+    # The appliers are doors with a wider allowlist: the transition may call them,
+    # because that is the one place the actor is not the caller's to choose.
+    applier = "def f (s : MemoryState) := s.applyAuthorityDelta? actor delta\n"
+    if analyse({"Grass/Op/Step.lean": applier}):
+        print("  SELF-TEST FAILED: the transition may call an applier and is reported")
+        failures += 1
+    if not analyse({OUTSIDE: applier}):
+        print("  SELF-TEST FAILED: an applier called from elsewhere is not reported")
+        failures += 1
 
     # Documented blind spot: lexical, so a door reached through a binding is invisible.
     # Asserted so it cannot quietly become coverage.
     indirect = "def door := MemoryState.issue?\ndef f (s : MemoryState) := door s a b\n"
-    if len(analyse({"Grass/Op/Step.lean": indirect})) > 1:
+    if len(analyse({OUTSIDE: indirect})) > 1:
         print("  SELF-TEST FAILED [indirection blind spot]: this now discriminates; "
               "update the module docstring, which documents it as unhandled")
         failures += 1

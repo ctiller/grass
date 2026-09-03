@@ -86,6 +86,22 @@ inductive StepRejection where
   nobody wrote: the profile owes a fault rule before such an operation can fault.
   See `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.3. -/
   | faultWithUndeclaredLedgerEffect
+  /-- The machine reported a fault at a substep whose access carries an *authority*
+  effect, and the corpus does not say what becomes of that effect either.
+
+  The exact defect above, in the field that arrived a milestone later. `performAccess`
+  applies `AccessDescriptor.authorityEffect` in full on the committing branch however
+  little the access committed, so a `priorEffectsVisible` sequence whose faulting
+  substep declared a lend ran it after writing zero bytes: review drove a store that
+  wrote nothing to lend the buffer's head to the device engine, a faulting return to
+  consume its identity, and a faulting transfer to move a grant. The gate beside this
+  one was written for `ledgerEffect` and was not extended when `authorityEffect`
+  landed.
+
+  A separate constructor rather than a rename, because which effect was undeclared is
+  the useful half of the report, and collapsing two distinguishable failures into one
+  is a defect this layer has already closed once in `AdmissibilityFailure`. -/
+  | faultWithUndeclaredAuthorityEffect
   /-- An execution context is stepped under a kind other than the one the state
   records for it.
 
@@ -729,6 +745,35 @@ theorem refusalOf_class_declared {policy : StepPolicy} {state : MachineState}
   policy.violationClassesDeclared class_ (refusalOf_mem_emittedClasses h)
 
 /--
+**The classes `performAccess` records outside `refusalOf` are declared too.**
+
+`refusalOf_class_declared` covers the class `refusalOf` returns. `performAccess`
+appends violations at three further points — an undeclared address space, the
+outcome's own violation, and the branch where the declared authority effect does not
+apply — and review pointed out that the last of those is outside that theorem's
+reach, which matters because that branch is the one actually doing the refusing: with
+`refusalOf`'s authority clause deleted the whole build stays green, because the
+fallback still records and still commits nothing.
+
+Two of the three are settled here. The address-space and authority classes are the
+transition's own, so `StepPolicy.violationClassesDeclared` covers them by the same
+route `refusalOf_class_declared` takes.
+
+The third is not, and is stated rather than hidden: `AccessOutcome.violation?` is
+supplied by the profile's machine oracle, so nothing in this layer bounds its class.
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records it.
+-/
+theorem transition_own_classes_declared (policy : StepPolicy) :
+    policy.profile.vocabulary.auditViolationClasses.Recognizes
+      AuditViolationClass.wrongAddressSpace ∧
+    policy.profile.vocabulary.auditViolationClasses.Recognizes
+      AuditViolationClass.authorityEffectRefused :=
+  ⟨policy.violationClassesDeclared _
+    (AuthorityProvider.mem_emittedClasses_of_transition (by decide)),
+   policy.violationClassesDeclared _
+    (AuthorityProvider.mem_emittedClasses_of_transition (by decide))⟩
+
+/--
 Perform one access, recording a certified event or a violation.
 
 The shape is the one `docs/MEMORY_MODEL.md` §1 demands: every authority check runs
@@ -1069,6 +1114,10 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
                   ! (sequence.substeps[index].descriptor?.elim true
                     (fun d => d.ledgerEffect.isEmpty)) then
                 .rejected .faultWithUndeclaredLedgerEffect
+              else if sequence.faultingEffectVisible &&
+                  ! (sequence.substeps[index].descriptor?.elim true
+                    (fun d => d.authorityEffect.isEmpty)) then
+                .rejected .faultWithUndeclaredAuthorityEffect
               else
                 match sequence.visibleEffects? index.val with
                 | Option.none => .rejected .visibilityRuleUnknown

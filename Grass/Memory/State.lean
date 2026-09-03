@@ -1285,6 +1285,22 @@ theorem transferGrant?_yields_the_transfer {state next : MemoryState} {actor : C
   rw [FiniteMap.lookup_insert_self]
 
 /--
+**A transfer that happened was the holder's own, and went somewhere else.**
+
+The guards read back out. Review found `transferGrant?_eq` extracting these two facts
+with every one of its five callers discarding them as `_` — a carried fact with no
+reader, in a private lemma, which is the same class this layer's `ConsultedAudit.py`
+exists for and which no audit can see inside a proof.
+-/
+theorem transferGrant?_was_by_the_holder {state next : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId} {grant : AuthorityGrant}
+    (h : state.transferGrant? actor id recipient = some next)
+    (hat : state.grantAt? id = some grant) :
+    grant.holder = actor ∧ recipient ≠ actor := by
+  obtain ⟨_, hholder, hself, _⟩ := transferGrant?_eq h hat
+  exact ⟨hholder, hself⟩
+
+/--
 **A transfer leaves no conflicting pair.**
 
 §7.3's issuance rule holding across a transfer as well as an issue, and the reason

@@ -1599,6 +1599,60 @@ refuses everything.
   bytes *nothing* is held over is indistinguishable from a legitimate owner's first
   loan, and stays so until `AllocationRecord` records an owner, which is the same gap
   the bullet below records from the other side.
+- ~~**A faulting substep applied its whole authority effect.**~~ The first real
+  soundness defect an adversarial round found in the authority-effect work, and it
+  was a gate that was not extended rather than a rule nobody wrote.
+  `StepRejection.faultWithUndeclaredLedgerEffect` refuses a fault on a substep
+  carrying an obligation effect, because the corpus does not say what becomes of that
+  effect; `AccessDescriptor.authorityEffect` arrived a milestone later and the gate
+  beside it was not extended. `performAccess` applies the authority effect in full on
+  the committing branch however little the access committed, so review drove a store
+  that wrote *zero bytes* to lend the buffer's head to the device engine, a faulting
+  return to consume its identity, and a faulting transfer to move a grant.
+  `faultWithUndeclaredAuthorityEffect` is the second gate, a separate constructor
+  rather than a rename because which effect was undeclared is the useful half of the
+  report, and three fixtures step the lend, the return and the transfer.
+- **The `refusalOf` clause for the authority effect is not what refuses.** Review
+  deleted it and the whole build stayed green. Both paths refuse — `performAccess`'s
+  "unreachable" branch records `authorityEffectRefused` and commits nothing — so this
+  is not a hole, but the commit that introduced it framed the branch as the
+  unreachable one and the clause as the gate, and that is backwards. What the clause
+  buys is *ordering*: the class is recorded ahead of an `AuthorityProvider`'s and
+  ahead of `ConflictsWithHistory`, which `refusalOf`'s own docstring promises
+  ("the recorded class names the first thing that was wrong"). No fixture pins that
+  ordering, and constructing one needs an access that fails two rules at once.
+
+  What review's deletion did expose is real and is closed: the fallback branch sits
+  outside `refusalOf_class_declared`'s reach, so nothing said the class it records is
+  one the profile declared. `transition_own_classes_declared` says it for that class
+  and for `wrongAddressSpace`. It does *not* say it for the third append site —
+  `AccessOutcome.violation?` carries a class the profile's machine oracle chose, and
+  nothing in this layer bounds it. That is an open gap and it is stated in the
+  theorem's own docstring.
+- ~~**The `.join` actor rule had no fixture.**~~ Removing "only the holder may join"
+  from `applyAuthorityDelta?` left the whole build green, while its `.split` twin is
+  caught immediately. `a_non_holder_may_not_join` is the fixture, and it is stated on
+  the map rather than through `step` for a reason worth recording: the actor of an
+  authority effect is the descriptor's context, and a descriptor whose context is not
+  the stepping context is rejected by `contextMismatch` before the actor rule is
+  reached. A fixture on this branch was once written that way and proved the wrong
+  thing. The discriminating shape is a triple — the door accepts, the actor rule
+  refuses, the holder succeeds — and `a_non_holder_may_not_split` and
+  `the_forged_lend_is_refused_on_the_map` now have it too.
+- ~~**`Tools/DoorAudit.py` did not guard the function its own failure message names.**~~
+  The argument that an `actor` parameter on `issue?` is worthless applies verbatim to
+  `applyAuthorityDelta?`'s `actor`, which is caller-chosen everywhere except the one
+  `performAccess` site. Review added three real map-changing definitions to
+  `Grass/Op/LoanAuthority.lean`, one routed through the applier, and the audit printed
+  its green line. Both appliers are doors now, with the transition as an allowed
+  caller.
+
+  Four scanner defects came with it, each now covered by a seeded case: reports
+  numbered the *stripped* source, so every line number from a real file was wrong;
+  `unfold X at h` was reported as a call, which the docstring denied; a `|>` call and
+  a call whose arguments wrap were both missed. And the first repair for the third
+  introduced a fifth — matching a naming tactic anywhere on the line let an argument
+  named `delta` silence a real call — caught by the self-test the same minute.
 - **`denialOf`'s `Permits` clause is unreachable for every page this layer can
   describe.** The clause rejects an access whose intent the *page's* permission does
   not permit, and it sits behind the `Grants` clause, which rejects an access whose

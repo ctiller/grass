@@ -1848,6 +1848,41 @@ theorem a_fault_on_a_ledger_bearing_substep_is_refused :
         else .none) =
       .rejected .faultWithUndeclaredLedgerEffect := rfl
 
+/-- **And a fault on a substep carrying an *authority* effect is refused too.**
+
+The same defect in the field that arrived a milestone later, found by review after
+the authority effect landed: the gate above was written for `ledgerEffect` and was
+not extended, so `performAccess` applied a declared lend in full on the faulting
+path. Review drove exactly this store — which writes nothing, since `writes = 0` —
+to lend the buffer's head to the device engine, and drove a faulting return to
+consume its identity and a faulting transfer to move a grant. -/
+theorem a_fault_on_an_authority_bearing_substep_is_refused :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.lendSlot) thread₀ .thread
+      ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 0
+        else .none) =
+      .rejected .faultWithUndeclaredAuthorityEffect := rfl
+
+/-- The same for a return and a transfer, which are the two that *lose* authority on
+a path that wrote nothing. -/
+theorem a_fault_on_a_returning_substep_is_refused :
+    Grass.Op.step policy stateWithAuthority (SomeOperation.of Alpha.returnLoanSlot)
+      thread₀ .thread ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 0
+        else .none) =
+      .rejected .faultWithUndeclaredAuthorityEffect ∧
+    Grass.Op.step policy stateWithAuthority (SomeOperation.of Alpha.handOn)
+      thread₀ .thread ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 0
+        else .none) =
+      .rejected .faultWithUndeclaredAuthorityEffect := by
+  exact ⟨rfl, rfl⟩
+
+/-- And the same operation without a fault still runs, so the rejection is the fault
+path and not the effect. -/
+theorem the_unfaulted_lend_still_runs :
+    (stepAlpha state₀ .lendSlot).state?.isSome := by decide
+
 /-! ## A machine that cannot fill an access is refused, not padded
 
 `Oracle.answer` used to return a bare `Committed`, whose length obligations are
@@ -2447,6 +2482,48 @@ theorem the_non_holder_transfer_is_refused :
   intro s hs
   cases hs
   exact ⟨by decide, by decide, by decide⟩
+
+/-- **A context that does not hold the sources may not join them.**
+
+Stated on the map rather than through `step`, deliberately: the actor of an authority
+effect is the descriptor's context, and a descriptor whose context is not the stepping
+context is rejected by `contextMismatch` before the actor rule is reached — a fixture
+on this branch was once written that way and proved the wrong thing. The triple below
+is what discriminates: the door accepts the join, the actor rule refuses it, and the
+holder's own join is accepted.
+
+Review found this rule had no fixture at all. Removing it from
+`applyAuthorityDelta?` left the whole build green, while its `.split` twin is caught
+immediately by `the_non_holder_split_is_refused`. -/
+theorem a_non_holder_may_not_join :
+    stateWithHalves.memory.applyAuthorityDelta? engine₀
+      (.join bufferLoan secondBufferLoan lentSlot) = Option.none ∧
+    (stateWithHalves.memory.joinGrants? bufferLoan secondBufferLoan lentSlot).isSome ∧
+    (stateWithHalves.memory.applyAuthorityDelta? thread₀
+      (.join bufferLoan secondBufferLoan lentSlot)).isSome := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- The same shape for `.split`, so both actor rules are pinned on the map as well as
+through `step`. -/
+theorem a_non_holder_may_not_split :
+    stateWithAuthority.memory.applyAuthorityDelta? engine₀
+      (.split bufferLoan lowSlot highSlot 32) = Option.none ∧
+    (stateWithAuthority.memory.splitGrant? bufferLoan lowSlot highSlot 32).isSome ∧
+    (stateWithAuthority.memory.applyAuthorityDelta? thread₀
+      (.split bufferLoan lowSlot highSlot 32)).isSome := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **And the forged lender is refused on the map for the same reason**, which is the
+half `the_forged_lend_is_refused` cannot show: through `step` the actor is fixed by
+the descriptor, so only a map-level fixture can vary it. Review pointed out that the
+audit guarding the doors does not guard this function, and that a caller free to
+choose the actor defeats the rule — `Tools/DoorAudit.py` now covers it. -/
+theorem the_forged_lend_is_refused_on_the_map :
+    state₀.memory.applyAuthorityDelta? thread₀
+      (.issue lentSlot { declaredLoan with lender := engine₀ }) = Option.none ∧
+    (state₀.memory.applyAuthorityDelta? engine₀
+      (.issue lentSlot { declaredLoan with lender := engine₀ })).isSome := by
+  exact ⟨by decide, by decide⟩
 
 /-- **A grant kind the profile never declared is not admitted.**
 
