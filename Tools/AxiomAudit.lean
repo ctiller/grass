@@ -31,6 +31,10 @@ import Grass.Semantics.Observation
 import Grass.Semantics.SpecProcess
 import Grass.Std.Logical.Byte
 import Grass.Std.Logical.FiniteMap
+import Grass.Std.Logical.HostBytes
+import Grass.Std.Logical.Order
+import Grass.Std.Logical.Text
+import Grass.Std.Logical.Vec
 import Grass.Trust.Audit
 import Grass.Verify.VerifiedProgram
 
