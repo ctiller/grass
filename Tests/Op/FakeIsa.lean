@@ -2623,6 +2623,33 @@ theorem the_forged_lend_is_refused_on_the_map :
       (.issue lentSlot { declaredLoan with lender := engine₀ })).isSome := by
   exact ⟨by decide, by decide⟩
 
+/-! ## An obligation identity is reused after its duty ends
+
+`LedgerDelta.Applicable`'s create clause is `o.id ∉ live` — "not currently live",
+not "never issued" — and there is no obligation supply on `MachineState` to make the
+stronger reading available. An earlier version of `Grass/Obligation/Delta.lean` said
+outputs are fresh because "identities come from a supply that never reissues"; review
+stepped the three operations below and got the same identity carrying a second duty.
+
+Latent, because `TerminalOutcome` is keyed by identity and terminal accounting is
+M5's. It is here so that the gap is visible in compiled code, and so that adding a
+supply breaks this theorem rather than passing unnoticed.
+-/
+
+/-- **reserve, release, reserve gives one identity two duties.** -/
+theorem an_obligation_identity_is_reissued :
+    ∀ s, (stepAlpha state₀ .reserve).state? = some s →
+      ∀ t, (stepAlpha s .release).state? = some t →
+        ∀ u, (stepAlpha t .reserve).state? = some u →
+          s.obligations.lookup releaseObligationId = some releaseObligation ∧
+          t.obligations.lookup releaseObligationId = Option.none ∧
+          u.obligations.lookup releaseObligationId = some releaseObligation := by
+  intro s hs t ht u hu
+  cases hs
+  cases ht
+  cases hu
+  exact ⟨by decide, by decide, by decide⟩
+
 /-! ## A duty may not be handed to a context that does not exist
 
 `LedgerDelta.Applicable`'s transfer clause checked liveness, protocol and the actor's

@@ -35,8 +35,19 @@ to drop one. The destination must be a context the machine knows, which is why
 **The second of those was false of deltas `Applicable` accepted**, and review found
 it. `split`'s clause was `∀ o ∈ into, o.id ∉ live ∨ o.id = source` and `join`'s was
 `into.id ∉ live ∨ into.id ∈ sources`, so an output could reuse an input's identity.
-Outputs must be fresh now: §3 does not ask for identity reuse, identities come from a
-supply that never reissues, and the law above is a law again.
+Outputs must be fresh now, and the law above is a law again — where "fresh" means
+`∉ live`, which is weaker than it sounds and than an earlier version of this
+paragraph claimed. That version said "identities come from a supply that never
+reissues". **There is no obligation supply.** `MachineState` carries one for events
+and none for duties, so `∉ live` means "not currently live", and review stepped
+reserve, release, reserve to get the same `ObligationId` carrying a second, distinct
+duty.
+
+That is latent rather than harmful today, because `TerminalOutcome` is keyed by
+identity and terminal accounting is M5's; it stops being latent the moment anything
+accounts across a duty's whole life. Closing it means a `FreshSupply ObligationTag`
+on `MachineState` that a `create` consumes, which is a transition-level change and is
+recorded in `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 rather than done here.
 
 **And the `kind` was unpinned, which is the defect that mattered and which the
 freshness rule did not close.** `Applicable` pinned each output's protocol and owner

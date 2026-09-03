@@ -1731,14 +1731,20 @@ refuses everything.
   "dropping", silently, no violation. Its twin for split *was* fixtured.
   `a_join_onto_a_live_identity_is_refused` and its positive control close it, and the
   mutation is caught now.
-- **Obligation identities are recycled.** `Grass/Obligation/Delta.lean` says outputs
+- **Obligation identities are recycled.** `Grass/Obligation/Delta.lean` said outputs
   must be fresh because "identities come from a supply that never reissues". There is
   no obligation supply: `MachineState` carries an event supply and nothing else, and
   `Applicable`'s create clause is `o.id ∉ live`, which is "not currently live" rather
   than "never issued". Review stepped reserve, release, reserve and got the same
-  `ObligationId` carrying a second distinct duty. Latent, because `TerminalOutcome` is
-  keyed by identity and terminal accounting is M5's, but the sentence is a claim about
-  a mechanism this layer does not have.
+  `ObligationId` carrying a second distinct duty. The sentence is corrected, and
+  `an_obligation_identity_is_reissued` keeps the demonstration so that adding a supply
+  breaks a theorem rather than passing unnoticed.
+
+  Latent, because `TerminalOutcome` is keyed by identity and terminal accounting is
+  M5's; it stops being latent the moment anything accounts across a duty's whole life.
+  Closing it means a `FreshSupply ObligationTag` on `MachineState` that a `create`
+  consumes — a transition-level change, and one that has to decide what a multi-create
+  effect consumes, which is why it is recorded rather than done.
 - **§3's terminal disposition has no theorem, and its vocabulary is unconstructed.**
   `Disposition` and `TerminalOutcome` appear nowhere outside their declaring module
   except one import. Two constructors are on `Tools/ReachabilityAudit.py`'s allowlist
