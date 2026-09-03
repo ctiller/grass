@@ -162,6 +162,29 @@ pub fn drain_outbox(
                 continue;
             }
         }
+        // AGENT_REVIEW.md section 7/`apply.rs`'s own module doc: `apply::
+        // dry_run` (below) never touches git, so it cannot confirm a
+        // `review.merge_authorized` candidate's `candidate` is the real
+        // deterministic reconstruction of `previous_main`/`reviewed_commit`/
+        // reviewer, that every introduced commit actually carries the right
+        // `Agent-Bus-Agent` trailers, or that the candidate tag proving a
+        // conflict-free merge was ever published anywhere another agent
+        // could see. Nothing stops a hand-crafted `submit --kind review.
+        // merge_authorized` from skipping `cli::prepare_merge` entirely and
+        // asserting all of that -- so re-run it here, at the actual
+        // publication gate, exactly like gate 17 (reject via a durable
+        // receipt, never `?`-propagate past this one candidate).
+        if let crate::events::EventData::ReviewMergeAuthorized(d) = &data {
+            if let Err(e) = verify_review_merge_authorized(repo, remote, &state, agent, d) {
+                let reason = e.to_string();
+                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+                rejected.push(RejectedCandidate {
+                    kind: candidate.kind.clone(),
+                    reason,
+                });
+                continue;
+            }
+        }
         let observed = build_frontier(
             repo,
             &epoch,
@@ -363,6 +386,78 @@ fn build_frontier(
         });
     }
     Ok(ObservedFrontier::sparse(epoch.id.clone(), entries))
+}
+
+/// The git-linked half of `review.merge_authorized` validation
+/// (AGENT_REVIEW.md section 7) that `apply.rs` deliberately leaves out of
+/// its pure, git-repo-free reduction. Re-runs `merge_candidate::verify_
+/// authorship`/`reconstruct_candidate` against the *submitted* payload
+/// (`d`) -- not merely trusting that `cli::prepare_merge` was ever run, or
+/// run honestly -- and confirms the candidate tag `prepare-merge` would
+/// have published is both locally present and independently fetchable from
+/// `remote` (`gitrepo::tag_exists_at`/`remote_tag_matches`; the latter is a
+/// real `ls-remote`, since local presence alone cannot distinguish a tag
+/// that genuinely reached `remote` from one that only ever existed in this
+/// reviewer's own clone).
+///
+/// `Ok(())` when `d.nomination` does not resolve in `state` at all: that is
+/// an ordinary, unrelated validation failure `apply::dry_run` reports
+/// moments later with a clearer, nomination-specific message, so it is not
+/// duplicated here. Likewise `Ok(())` when `d.nomination` names a nomination
+/// link the chain has since moved past (`chain.current_nomination !=
+/// d.nomination`) -- `apply::apply_review_merge_authorized`'s own identical
+/// branch treats that as a harmless, already-inapplicable no-op rather than
+/// a hard failure, and this gate defers to that same semantics rather than
+/// rejecting a stale-but-otherwise-harmless authorization on a technicality.
+fn verify_review_merge_authorized(
+    repo: &Path,
+    remote: &str,
+    state: &crate::state::BusState,
+    reviewer: &Agent,
+    d: &crate::events::ReviewMergeAuthorized,
+) -> AbResult<()> {
+    let chain = match state.review_chain(&d.nomination) {
+        Some(c) => c,
+        None => return Ok(()),
+    };
+    if chain.current_nomination != d.nomination {
+        return Ok(());
+    }
+    let expected_authors: std::collections::BTreeSet<Agent> =
+        chain.current_request.authors.iter().cloned().collect();
+    crate::merge_candidate::verify_authorship(
+        repo,
+        reviewer,
+        &expected_authors,
+        d.previous_main.as_str(),
+        d.reviewed_commit.as_str(),
+    )?;
+    let reconstructed = crate::merge_candidate::reconstruct_candidate(
+        repo,
+        d.previous_main.as_str(),
+        d.reviewed_commit.as_str(),
+        reviewer,
+    )?;
+    if reconstructed != d.candidate.as_str() {
+        return Err(invalid(format!(
+            "candidate {} does not match the deterministic reconstruction {reconstructed} from \
+             previous_main/reviewed_commit/reviewer",
+            d.candidate
+        )));
+    }
+    let tag = crate::merge_candidate::candidate_tag_name(reviewer, d.candidate.as_str());
+    if !crate::gitrepo::tag_exists_at(repo, &tag, d.candidate.as_str())? {
+        return Err(invalid(
+            "candidate tag is not fetchable before authorization",
+        ));
+    }
+    if !crate::gitrepo::remote_tag_matches(repo, remote, &tag, d.candidate.as_str())? {
+        return Err(invalid(format!(
+            "candidate tag refs/tags/{tag} is not fetchable from {remote}; other agents could \
+             not verify this merge"
+        )));
+    }
+    Ok(())
 }
 
 fn requires_complete_frontier(data: &crate::events::EventData) -> bool {
@@ -1141,5 +1236,618 @@ mod tests {
             drained.rejected
         );
         assert_eq!(drained.published.len(), 1);
+    }
+
+    // ---------------------------------------------------------------
+    // `review.merge_authorized`'s git-linked gate (AGENT_REVIEW.md section
+    // 7; see `verify_review_merge_authorized`'s own doc comment). Mirrors
+    // the shipped version-one helper's `review_cmds.rs` falsifying test
+    // list (`authorize_rejects_*`, `prepare_merge_fails_when_candidate_tag_
+    // push_to_origin_fails`, `authorize_rejects_candidate_tag_that_never_
+    // reached_origin`) against v2's real coordinator path instead of a v1
+    // `BusCtx`.
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// A real repo with `coord1` (coordinator), `zoe` (implementor/author),
+    /// and `aiden` (reviewer) all registered and already pushed to a real
+    /// bare `origin` -- required because `review.merge_authorized` always
+    /// needs gate 17's complete-frontier fetch to succeed (`requires_
+    /// complete_frontier` names it unconditionally) before `verify_review_
+    /// merge_authorized` is ever reached, so every test below needs a
+    /// reachable, up-to-date remote regardless of what it is separately
+    /// testing. Also builds one real `feature.txt` commit on top of `main`,
+    /// authored by `trailer_agent` via an `Agent-Bus-Agent` trailer (`None`
+    /// omits the trailer entirely, for the "missing trailer" fixture), plus
+    /// an accepted `review.nominated`/`review.nomination_accepted` pair
+    /// naming `aiden` as reviewer and `zoe` as the nomination's sole author
+    /// -- mirrors v1's `review_cmds::build_fixture`.
+    ///
+    /// The reviewer's name ("aiden") is deliberately chosen to sort before
+    /// the author's ("zoe") -- not cosmetic. `apply.rs`'s `topological_
+    /// order` only orders events by their *declared* `refs` (cross-agent
+    /// EventId references), and `review.nominated`'s `reviewer` field is a
+    /// bare `Agent` identity, not an `EventId`, so it is invisible to that
+    /// ordering; ties among otherwise-ready events break purely on `EventId`
+    /// string order. A cold full reduction (exactly what every `drain_
+    /// outbox` call's `cached_snapshot` does) can therefore legally visit
+    /// the author's `review.nominated` event before the reviewer's own
+    /// `agent.registered` root, if the reviewer's name sorts later -- this
+    /// is a real, separate, pre-existing gap in `apply.rs` this task does
+    /// not fix (confirmed while building this fixture: naming the reviewer
+    /// "bob" against an author "alice" made every test below fail with
+    /// `Invalid("unregistered agent: bob")`, even though bob's registration
+    /// had already been drained and committed earlier in the very same
+    /// fixture). Picking a reviewer name that sorts first sidesteps it here
+    /// without touching `apply.rs`; see this task's final report for the
+    /// finding itself.
+    struct ReviewFixture {
+        repo: tempfile::TempDir,
+        #[allow(dead_code)]
+        origin: tempfile::TempDir,
+        remote: String,
+        coord1: Agent,
+        author: Agent,
+        reviewer: Agent,
+        nomination: EventId,
+        feature_commit: String,
+        previous_main: String,
+    }
+
+    fn build_review_fixture(trailer_agent: Option<&str>) -> ReviewFixture {
+        use crate::events::{
+            AgentRegistered, EventData, ReviewNominated, ReviewNominationAccepted,
+        };
+        use crate::registry::MemberBinding;
+        use crate::scalars::{Branch, PathClaim, StringSet};
+
+        let repo = init_repo();
+        let origin = init_bare_origin();
+        let remote = origin.path().to_string_lossy().to_string();
+        let coord1 = a("coord1");
+        let author = a("zoe");
+        let reviewer = a("aiden");
+
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        let (_config, epoch, _commit) = crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+            &repo.path().join("_genesis_wt"),
+        )
+        .unwrap();
+
+        let mut members = epoch.active_members.clone();
+        members.insert(
+            author.clone(),
+            MemberBinding {
+                role: Role::Implementor,
+                host: short("host1"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        members.insert(
+            reviewer.clone(),
+            MemberBinding {
+                role: Role::Reviewer,
+                host: short("host1"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        let new_epoch = crate::registry::propose_transition(
+            repo.path(),
+            &epoch,
+            members,
+            &repo.path().join("_transition_wt"),
+        )
+        .unwrap();
+
+        for (ag, role) in [(&author, Role::Implementor), (&reviewer, Role::Reviewer)] {
+            crate::outbox::submit(
+                repo.path(),
+                &format!("{ag}-reg"),
+                &Candidate::new(
+                    ag,
+                    &EventData::AgentRegistered(AgentRegistered {
+                        display_name: short(ag.as_str()),
+                        primary_role: role,
+                        purpose: text("x"),
+                        product_base: None,
+                        product_branch: None,
+                        provider: None,
+                        model: None,
+                    }),
+                    vec![],
+                ),
+            )
+            .unwrap();
+            drain_outbox(
+                repo.path(),
+                repo.path(),
+                ag,
+                &short("host1"),
+                0,
+                &repo.path().join(format!("_wt_{ag}_reg")),
+                &remote,
+            )
+            .unwrap();
+        }
+
+        let coord1_tip = crate::stream::read_stream_tip(repo.path(), &coord1)
+            .unwrap()
+            .unwrap();
+        let author_tip = crate::stream::read_stream_tip(repo.path(), &author)
+            .unwrap()
+            .unwrap();
+        let reviewer_tip = crate::stream::read_stream_tip(repo.path(), &reviewer)
+            .unwrap()
+            .unwrap();
+        crate::publish::publish(
+            repo.path(),
+            &remote,
+            &[
+                crate::publish::RefUpdate::new(crate::registry::REGISTRY_REF, new_epoch.id.clone()),
+                crate::publish::RefUpdate::new(
+                    crate::stream::stream_ref(&coord1).into_string(),
+                    coord1_tip,
+                ),
+                crate::publish::RefUpdate::new(
+                    crate::stream::stream_ref(&author).into_string(),
+                    author_tip,
+                ),
+                crate::publish::RefUpdate::new(
+                    crate::stream::stream_ref(&reviewer).into_string(),
+                    reviewer_tip,
+                ),
+            ],
+        )
+        .unwrap();
+
+        let previous_main = crate::gitrepo::rev_parse(repo.path(), "main").unwrap();
+        git(
+            repo.path(),
+            &["checkout", "--quiet", "--detach", &previous_main],
+        );
+        std::fs::write(repo.path().join("feature.txt"), "feature content\n").unwrap();
+        git(repo.path(), &["add", "."]);
+        let message = match trailer_agent {
+            Some(a) => format!("add feature\n\nAgent-Bus-Agent: {a}"),
+            None => "add feature".to_string(),
+        };
+        git(repo.path(), &["commit", "-q", "-m", &message]);
+        let feature_commit = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        git(repo.path(), &["checkout", "--quiet", "main"]);
+
+        let review_scope =
+            StringSet::from_iter(vec![PathClaim::parse("feature.txt".into()).unwrap()]);
+        let nominate_data = EventData::ReviewNominated(ReviewNominated {
+            authors: StringSet::from_iter(vec![author.clone()]),
+            product_branch: Branch::parse("refs/heads/agent/zoe/feature".into()).unwrap(),
+            reviewer: reviewer.clone(),
+            required_checks: vec![text("build")],
+            review_scope,
+            summary: text("add feature"),
+            target_branch: Branch::parse("refs/heads/main".into()).unwrap(),
+            evidence: StringSet::default(),
+        });
+        crate::outbox::submit(
+            repo.path(),
+            "nominate",
+            &Candidate::new(&author, &nominate_data, vec![]),
+        )
+        .unwrap();
+        let nominate_drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &author,
+            &short("host1"),
+            0,
+            &repo.path().join("_wt_nominate"),
+            &remote,
+        )
+        .unwrap();
+        assert!(
+            nominate_drained.rejected.is_empty(),
+            "{:?}",
+            nominate_drained.rejected
+        );
+        let nomination = nominate_drained.published[0].clone();
+
+        crate::outbox::submit(
+            repo.path(),
+            "accept",
+            &Candidate::new(
+                &reviewer,
+                &EventData::ReviewNominationAccepted(ReviewNominationAccepted {
+                    nomination: nomination.clone(),
+                    note: text("ok"),
+                }),
+                vec![nomination.clone()],
+            ),
+        )
+        .unwrap();
+        let accept_drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &reviewer,
+            &short("host1"),
+            0,
+            &repo.path().join("_wt_accept"),
+            &remote,
+        )
+        .unwrap();
+        assert!(
+            accept_drained.rejected.is_empty(),
+            "{:?}",
+            accept_drained.rejected
+        );
+
+        // Push the author's and reviewer's advanced streams (with the
+        // nomination/acceptance) too, so the eventual `review.merge_
+        // authorized` candidate's own gate-17 fetch sees a chain that
+        // actually resolves.
+        let author_tip2 = crate::stream::read_stream_tip(repo.path(), &author)
+            .unwrap()
+            .unwrap();
+        let reviewer_tip2 = crate::stream::read_stream_tip(repo.path(), &reviewer)
+            .unwrap()
+            .unwrap();
+        crate::publish::publish(
+            repo.path(),
+            &remote,
+            &[
+                crate::publish::RefUpdate::new(
+                    crate::stream::stream_ref(&author).into_string(),
+                    author_tip2,
+                ),
+                crate::publish::RefUpdate::new(
+                    crate::stream::stream_ref(&reviewer).into_string(),
+                    reviewer_tip2,
+                ),
+            ],
+        )
+        .unwrap();
+
+        ReviewFixture {
+            repo,
+            origin,
+            remote,
+            coord1,
+            author,
+            reviewer,
+            nomination,
+            feature_commit,
+            previous_main,
+        }
+    }
+
+    fn merge_authorized_candidate(f: &ReviewFixture, candidate: &str) -> Candidate {
+        use crate::common::{CheckOutcome, CheckResult};
+        use crate::events::{EventData, ReviewMergeAuthorized};
+        use crate::scalars::{Branch, PathClaim, StringSet};
+
+        let data = ReviewMergeAuthorized {
+            nomination: f.nomination.clone(),
+            product_branch: Branch::parse("refs/heads/agent/zoe/feature".into()).unwrap(),
+            previous_main: ObjectId::parse(f.previous_main.clone()).unwrap(),
+            reviewed_commit: ObjectId::parse(f.feature_commit.clone()).unwrap(),
+            candidate: ObjectId::parse(candidate.to_string()).unwrap(),
+            // No `merge_engine.activated` event exists in this fixture (a
+            // real, separate, pre-existing gap in this bus: as of this
+            // writing there is no production path that can ever populate
+            // `current_merge_engine_epoch` at all -- see this task's final
+            // report), so `apply_review_merge_authorized`'s own downstream
+            // `merge_engine_epoch` check always fails regardless of this
+            // value. That is fine here: every test below either expects
+            // rejection *from this gate* before that point is ever reached,
+            // or (the one "everything this gate checks is valid" positive
+            // test) explicitly asserts the rejection it still sees is that
+            // known, unrelated downstream one -- proof this gate itself let
+            // the candidate through.
+            merge_engine_epoch: EventId::new(&f.coord1, 999),
+            checks: vec![CheckResult {
+                command: text("build"),
+                result: CheckOutcome::Passed,
+                evidence: None,
+            }],
+            finding_dispositions: vec![],
+            evidence: StringSet::default(),
+            reviewed_scope: StringSet::from_iter(vec![
+                PathClaim::parse("feature.txt".into()).unwrap()
+            ]),
+            limitations: vec![],
+            summary: text("looks good"),
+        };
+        Candidate::new(&f.reviewer, &EventData::ReviewMergeAuthorized(data), vec![])
+    }
+
+    fn drain_reviewer(f: &ReviewFixture) -> DrainResult {
+        drain_outbox(
+            f.repo.path(),
+            f.repo.path(),
+            &f.reviewer,
+            &short("host1"),
+            0,
+            &f.repo.path().join("_wt_authorize"),
+            &f.remote,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn drain_outbox_rejects_review_merge_authorized_with_a_commit_missing_the_author_trailer() {
+        let f = build_review_fixture(None);
+        let candidate = crate::merge_candidate::reconstruct_candidate(
+            f.repo.path(),
+            &f.previous_main,
+            &f.feature_commit,
+            &f.reviewer,
+        )
+        .unwrap();
+        crate::outbox::submit(
+            f.repo.path(),
+            "auth",
+            &merge_authorized_candidate(&f, &candidate),
+        )
+        .unwrap();
+
+        let drained = drain_reviewer(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0]
+                .reason
+                .contains("has no Agent-Bus-Agent trailer"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    #[test]
+    fn drain_outbox_rejects_review_merge_authorized_when_the_reviewer_authored_a_commit() {
+        let f = build_review_fixture(Some("aiden"));
+        let candidate = crate::merge_candidate::reconstruct_candidate(
+            f.repo.path(),
+            &f.previous_main,
+            &f.feature_commit,
+            &f.reviewer,
+        )
+        .unwrap();
+        crate::outbox::submit(
+            f.repo.path(),
+            "auth",
+            &merge_authorized_candidate(&f, &candidate),
+        )
+        .unwrap();
+
+        let drained = drain_reviewer(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0].reason.contains("ineligible to merge"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    #[test]
+    fn drain_outbox_rejects_review_merge_authorized_when_authors_dont_match_the_nomination() {
+        // "carol" is neither the reviewer ("aiden") nor the nomination's
+        // declared author ("zoe") -- a distinct failure mode from the
+        // reviewer-authored case above.
+        let f = build_review_fixture(Some("carol"));
+        let candidate = crate::merge_candidate::reconstruct_candidate(
+            f.repo.path(),
+            &f.previous_main,
+            &f.feature_commit,
+            &f.reviewer,
+        )
+        .unwrap();
+        crate::outbox::submit(
+            f.repo.path(),
+            "auth",
+            &merge_authorized_candidate(&f, &candidate),
+        )
+        .unwrap();
+
+        let drained = drain_reviewer(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0]
+                .reason
+                .contains("do not match nomination authors"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    #[test]
+    fn drain_outbox_rejects_review_merge_authorized_with_a_candidate_that_does_not_reconstruct() {
+        let f = build_review_fixture(Some("zoe"));
+        // A syntactically valid but *wrong* candidate id -- never actually
+        // built by `merge_candidate::reconstruct_candidate`.
+        let bogus_candidate = "f".repeat(40);
+        crate::outbox::submit(
+            f.repo.path(),
+            "auth",
+            &merge_authorized_candidate(&f, &bogus_candidate),
+        )
+        .unwrap();
+
+        let drained = drain_reviewer(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0]
+                .reason
+                .contains("does not match the deterministic reconstruction"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    #[test]
+    fn drain_outbox_rejects_review_merge_authorized_with_no_candidate_tag_at_all() {
+        let f = build_review_fixture(Some("zoe"));
+        let candidate = crate::merge_candidate::reconstruct_candidate(
+            f.repo.path(),
+            &f.previous_main,
+            &f.feature_commit,
+            &f.reviewer,
+        )
+        .unwrap();
+        // Deliberately never tagged, locally or otherwise.
+        crate::outbox::submit(
+            f.repo.path(),
+            "auth",
+            &merge_authorized_candidate(&f, &candidate),
+        )
+        .unwrap();
+
+        let drained = drain_reviewer(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0]
+                .reason
+                .contains("candidate tag is not fetchable before authorization"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    /// The tag exists in the reviewer's own local clone (so `tag_exists_at`
+    /// alone would pass) but was deliberately never pushed to `remote` --
+    /// `remote_tag_matches`'s own real `ls-remote` is what must catch this,
+    /// exactly the g-reviewer:4-class gap v1's identical fix closed.
+    #[test]
+    fn drain_outbox_rejects_review_merge_authorized_with_a_candidate_tag_that_never_reached_origin()
+    {
+        let f = build_review_fixture(Some("zoe"));
+        let candidate = crate::merge_candidate::reconstruct_candidate(
+            f.repo.path(),
+            &f.previous_main,
+            &f.feature_commit,
+            &f.reviewer,
+        )
+        .unwrap();
+        let tag = crate::merge_candidate::candidate_tag_name(&f.reviewer, &candidate);
+        crate::gitrepo::tag_lightweight(f.repo.path(), &tag, &candidate).unwrap();
+        crate::outbox::submit(
+            f.repo.path(),
+            "auth",
+            &merge_authorized_candidate(&f, &candidate),
+        )
+        .unwrap();
+
+        let drained = drain_reviewer(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0].reason.contains("is not fetchable from"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    /// Everything this gate itself checks is genuinely valid: real
+    /// authorship, a candidate that matches the deterministic
+    /// reconstruction exactly, and a tag both local and pushed to `remote`.
+    /// This crate has no production path yet that can populate
+    /// `current_merge_engine_epoch` (see `merge_authorized_candidate`'s own
+    /// comment) -- a real, separate, pre-existing gap this task does not
+    /// fix -- so full end-to-end acceptance is not yet reachable. What this
+    /// test instead proves is that this gate specifically did *not* reject
+    /// the candidate: the rejection reason that does surface names the
+    /// known unrelated downstream cause, not any of this gate's own error
+    /// text.
+    #[test]
+    fn drain_outbox_review_merge_authorized_gate_passes_a_genuinely_valid_candidate() {
+        let f = build_review_fixture(Some("zoe"));
+        let candidate = crate::merge_candidate::reconstruct_candidate(
+            f.repo.path(),
+            &f.previous_main,
+            &f.feature_commit,
+            &f.reviewer,
+        )
+        .unwrap();
+        let tag = crate::merge_candidate::candidate_tag_name(&f.reviewer, &candidate);
+        crate::gitrepo::tag_lightweight(f.repo.path(), &tag, &candidate).unwrap();
+        let push = crate::gitrepo::run(
+            f.repo.path(),
+            &["push", &f.remote, &format!("refs/tags/{tag}")],
+        )
+        .unwrap();
+        assert!(push.success, "{push:?}");
+        crate::outbox::submit(
+            f.repo.path(),
+            "auth",
+            &merge_authorized_candidate(&f, &candidate),
+        )
+        .unwrap();
+
+        let drained = drain_reviewer(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        let reason = &drained.rejected[0].reason;
+        assert!(
+            reason.contains("is not the currently selected merge engine epoch"),
+            "expected the known downstream merge_engine_epoch rejection, got: {reason}"
+        );
+        for this_gates_own_text in [
+            "has no Agent-Bus-Agent trailer",
+            "ineligible to merge",
+            "do not match nomination authors",
+            "does not match the deterministic reconstruction",
+            "candidate tag is not fetchable",
+            "is not fetchable from",
+        ] {
+            assert!(
+                !reason.contains(this_gates_own_text),
+                "rejection should not come from verify_review_merge_authorized, got: {reason}"
+            );
+        }
+    }
+
+    /// A `review.merge_authorized` naming an unknown nomination must not be
+    /// rejected by this gate's own text -- `apply::dry_run` reports that
+    /// moments later with a clearer, nomination-specific message (see
+    /// `verify_review_merge_authorized`'s doc comment).
+    #[test]
+    fn drain_outbox_defers_unknown_nomination_in_review_merge_authorized_to_dry_run() {
+        let f = build_review_fixture(Some("zoe"));
+        let bogus_nomination = EventId::new(&f.author, 999);
+        let mut candidate = merge_authorized_candidate(&f, &"a".repeat(40));
+        candidate.data["nomination"] = serde_json::json!(bogus_nomination.as_str());
+        crate::outbox::submit(f.repo.path(), "auth", &candidate).unwrap();
+
+        let drained = drain_reviewer(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0].reason.contains("unknown nomination"),
+            "{}",
+            drained.rejected[0].reason
+        );
     }
 }
