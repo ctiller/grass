@@ -2584,3 +2584,40 @@ out broadcast — a clock tick delivered to two components at once is ordinary
 parallel composition. Both are now disclosed in the module note; whether §8's
 "disjoint nominal event namespaces" means to exclude broadcast is a document
 question.
+
+### 10.51 `EndsInstance` does not require the ending it stores to be witnessed
+
+Found by attempting `well_formedness_is_preserved` — that every network reachable
+from an `ExactInitialNetwork` satisfies `WellFormed` — and getting stuck on
+`LifecyclesWitnessed`.
+
+```lean
+def LifecycleWitnessed (incarnation : ProcessInstance topology) : Prop :=
+  ∀ result, incarnation.lifecycle = .terminated result →
+    (topology.protocol incarnation.kind).Terminal
+      incarnation.request incarnation.localState result
+```
+
+`EndsInstance.nowEnded` requires the after-instance to carry exactly the ending
+the constructor names, and nothing requires that ending to be one the protocol
+reaches. So `processTermination` can store `.terminated result` for a result the
+protocol's `Terminal` does not admit at that state, and the network after it
+fails `WellFormed`.
+
+This is `docs/DECISIONS.md` decision 129's own requirement — "network
+well-formedness ties a stored terminal result to the relational `Terminal`
+witness" — and `WellFormed.lifecyclesWitnessed` states it of a *network* while
+nothing makes a *step* preserve it. A law that only well-formed networks satisfy,
+and that no transition maintains, is a law about the initial network alone.
+
+The fix is a field on `EndsInstance` requiring `LifecycleWitnessed` of the
+after-instance, which is checkable because `identityPreserved` now pins the
+request and local state. Held until the fifth review pass on `Transition.lean`
+returns rather than rewriting the file under a reviewer again.
+
+**`well_formedness_is_preserved` is the capstone this layer should reach.** It
+would consume nearly every field the five review rounds added — identity
+preservation on four structures, `slotAgrees`, `Restarts.authorized`,
+`Spawns.startsInitial`, `allocatesTheGeneration`, `Reroutes.arrives` — and each
+clause it fails is a field that is missing. Two have been found that way already
+(§10.43 and this one), before a line of the theorem was written.

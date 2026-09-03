@@ -95,7 +95,11 @@ only the first two and local adversarial review walked straight through the gap.
   state* — and nothing else. On its own it permitted a lens that owned the
   shared region only an unselected role was declared against, the global nominal
   history, the observation trace, and every channel's escrow including channels
-  between two roles it did not select.
+  between two roles it did not select. Two of those four are now closed by the
+  fields below; **the nominal history and the observation trace are not**, so a
+  lens may still claim either, and `unselected_state_is_untouched` is
+  correspondingly narrow — it guarantees an unselected role its private slot and
+  nothing else.
 * `interiorChannelsTouchTheSelection` closes the escrow half: a channel is
   interior only if the lens selected one of its endpoints. Without it a lens
   with `Selected := fun _ => False` could still select real channel steps, which
