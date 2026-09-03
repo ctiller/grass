@@ -99,12 +99,14 @@ all there is to one. Capacity, allocation, and ownership belong to `OwnedVec`, i
 `fromList` is the constructor and `toList` the field, so the two round-trip
 definitionally; see `Vec.toList_fromList` and `Vec.fromList_toList`.
 -/
-structure Vec (α : Type u) where
-  /-- Build a `Vec` from a list in the same order. -/
-  fromList ::
-  /-- The elements, in order. This is the representation, not an export: laws are
-  stated over `Vec.length` and `Vec.get?`. -/
-  toList : List α
+abbrev Vec := Array
+
+namespace Vec
+
+/-- Build a `Vec` from a list in the same order. -/
+def fromList {α : Type u} (l : List α) : Vec α := ⟨l⟩
+
+end Vec
 
 namespace Vec
 
@@ -220,13 +222,13 @@ def set (v : Vec α) (i : Nat) (a : α) : Vec α := ⟨v.toList.set i a⟩
 
 @[simp] theorem get?_set_self (v : Vec α) {i : Nat} (h : i < v.length) (a : α) :
     (v.set i a).get? i = some a := by
-  simp only [get?, set, toList_fromList]
+  simp only [get?, set]
   rw [List.getElem?_set_self]
   exact h
 
 theorem get?_set_ne (v : Vec α) {i j : Nat} (h : j ≠ i) (a : α) :
     (v.set i a).get? j = v.get? j := by
-  simp only [get?, set, toList_fromList]
+  simp only [get?, set]
   exact List.getElem?_set_ne (Ne.symm h)
 
 /-- The combined framing law, in the shape a consumer applies it: an update is
@@ -261,7 +263,7 @@ def pop? (v : Vec α) : Option (Vec α × α) :=
 
 theorem get?_push_lt (v : Vec α) (a : α) {i : Nat} (h : i < v.length) :
     (v.push a).get? i = v.get? i := by
-  simp only [get?, push, toList_fromList]
+  simp only [get?, push]
   exact List.getElem?_append_left h
 
 @[simp] theorem get?_push_self (v : Vec α) (a : α) : (v.push a).get? v.length = some a := by
@@ -280,14 +282,14 @@ theorem length_of_pop? {v w : Vec α} {a : α} (h : v.pop? = some (w, a)) :
   simp only [pop?, Option.map_eq_some_iff] at h
   obtain ⟨b, hb, heq⟩ := h
   have hne : v.toList ≠ [] := fun hnil => by simp [hnil] at hb
-  have hw : v.toList.dropLast = w.toList := congrArg toList (congrArg Prod.fst heq)
+  have hw : v.toList.dropLast = w.toList := congrArg Array.toList (congrArg Prod.fst heq)
   have hpos : v.toList.length ≠ 0 := by simpa using hne
   simp only [length, ← hw, List.length_dropLast]
   omega
 
 /-- A pop succeeds exactly when there is an element to remove. -/
 theorem pop?_isSome_iff (v : Vec α) : v.pop?.isSome = true ↔ v.length ≠ 0 := by
-  simp [pop?, length, List.getLast?_isSome]
+  simp [pop?, length]
 
 /-!
 ## Composition
@@ -361,7 +363,7 @@ theorem get?_take (v : Vec α) (n i : Nat) :
     (v.take n).get? i = if i < n then v.get? i else none := by
   by_cases h : i < n
   · simp [get?, take, h]
-  · simp only [get?, take, toList_fromList, h, if_false, List.getElem?_eq_none_iff,
+  · simp only [get?, take, h, if_false, List.getElem?_eq_none_iff,
       List.length_take]
     omega
 
@@ -421,7 +423,7 @@ the loop's exit test, stated over the sequence rather than over a counter. -/
 theorem drop_eq_empty_iff (v : Vec α) (n : Nat) : v.drop n = empty ↔ v.length ≤ n := by
   constructor
   · intro h
-    have : v.toList.drop n = [] := congrArg toList h
+    have : v.toList.drop n = [] := congrArg Array.toList h
     exact List.drop_eq_nil_iff.mp this
   · intro h
     apply toList_injective
@@ -550,7 +552,7 @@ theorem map_append (f : α → β) (v w : Vec α) : (v ++ w).map f = v.map f ++ 
 the shorter sequence stated as a law rather than as a length. -/
 theorem get?_zipWith (f : α → β → γ) (v : Vec α) (w : Vec β) (i : Nat) :
     (zipWith f v w).get? i = (v.get? i).bind (fun a => (w.get? i).map (f a)) := by
-  simp only [get?, zipWith, toList_fromList, List.getElem?_zipWith']
+  simp only [get?, zipWith, List.getElem?_zipWith']
   cases v.toList[i]? <;> rfl
 
 @[simp] theorem foldl_empty (f : β → α → β) (init : β) :
@@ -585,12 +587,8 @@ def find? (p : α → Bool) (v : Vec α) : Option α := v.toList.find? p
 /-- Membership as a decidable test. `Vec.Mem` is the propositional form. -/
 def contains [BEq α] (v : Vec α) (a : α) : Bool := v.toList.contains a
 
-/-- `a` occurs in `v`. -/
-def Mem (a : α) (v : Vec α) : Prop := a ∈ v.toList
-
-instance : Membership α (Vec α) := ⟨fun v a => Mem a v⟩
-
-theorem mem_iff_mem_toList {a : α} {v : Vec α} : a ∈ v ↔ a ∈ v.toList := Iff.rfl
+theorem mem_iff_mem_toList {a : α} {v : Vec α} : a ∈ v ↔ a ∈ v.toList :=
+  Array.mem_toList_iff.symm
 
 /--
 Membership is occurrence at some index.
@@ -600,27 +598,27 @@ is true but reaches the representation, and the module comment's whole argument
 for wrapping `List` is that consumers should not have to.
 -/
 theorem mem_iff_exists_get? {a : α} {v : Vec α} : a ∈ v ↔ ∃ i, v.get? i = some a :=
-  List.mem_iff_getElem?
+  Iff.trans mem_iff_mem_toList List.mem_iff_getElem?
 
 @[simp] theorem not_mem_empty (a : α) : a ∉ (empty : Vec α) := by
-  simp [mem_iff_mem_toList, empty]
+  simp [← Array.mem_toList_iff, empty]
 
 theorem all_eq_true_iff (p : α → Bool) (v : Vec α) : v.all p = true ↔ ∀ a ∈ v, p a := by
-  simp [all, mem_iff_mem_toList]
+  simp only [all, List.all_eq_true, mem_iff_mem_toList]
 
 theorem any_eq_true_iff (p : α → Bool) (v : Vec α) : v.any p = true ↔ ∃ a ∈ v, p a := by
-  simp [any, mem_iff_mem_toList]
+  simp only [any, List.any_eq_true, mem_iff_mem_toList]
 
 theorem contains_iff_mem [BEq α] [LawfulBEq α] (v : Vec α) (a : α) :
     v.contains a = true ↔ a ∈ v := by
-  simp [contains, mem_iff_mem_toList]
+  simp [contains, ← Array.mem_toList_iff]
 
 /-- A found element is present and satisfies the predicate. The converse direction,
 that `find?` returns the *first* such element, needs an index and is left until a
 consumer needs it. -/
 theorem find?_eq_some {p : α → Bool} {v : Vec α} {a : α} (h : v.find? p = some a) :
     a ∈ v ∧ p a = true :=
-  ⟨List.mem_of_find?_eq_some h, List.find?_some h⟩
+  ⟨mem_iff_mem_toList.mpr (List.mem_of_find?_eq_some h), List.find?_some h⟩
 
 /-!
 ## Positional insertion and removal
@@ -638,7 +636,7 @@ theorem length_insertAt (v : Vec α) {i : Nat} (h : i ≤ v.length) (a : α) :
 
 theorem length_eraseAt (v : Vec α) {i : Nat} (h : i < v.length) :
     (v.eraseAt i).length = v.length - 1 := by
-  simp only [length, eraseAt, toList_fromList]
+  simp only [length, eraseAt]
   exact List.length_eraseIdx_of_lt h
 
 end Vec
