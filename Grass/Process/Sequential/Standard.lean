@@ -18,8 +18,7 @@ choosing a program rather than naming one, and §4's "the final certificate
 cannot silently use a different graph" would be false at the selection rather
 than at the elaboration.
 
-`selection_is_determined` is that theorem, and everything else here exists to
-make it provable.
+`selection_is_determined` is that theorem.
 
 ## What is abstract, and why
 
@@ -43,9 +42,16 @@ laws.
 
 That matters because `DefinitionalOrCanonicalSpecEquality` is named for a
 disjunction — "definitional *or* canonical" — and a disjunction of two
-equivalences need not be transitive. If it is not, the two fields are
-independent and §4 is right to state both; if it is, one of them is noise.
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.40 records the question.
+equivalences need not be transitive.
+
+Two things about that argument are worth stating plainly, because a first draft
+got both wrong. **This module cannot express the non-transitive case at all**:
+every registry is parameterised by a `SpecEquivalence`, so the hedge "if it is
+not, §4 is right to state both" describes a situation the types forbid — the
+open question is foreclosed here rather than recorded. And **the redundancy is
+mutual**: given `refl` and a lookup at each entry's own spec, the registry law
+follows from the lookup field, under a *weaker* hypothesis than the other
+direction needs. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.40 states both.
 -/
 
 namespace Grass.Process
@@ -58,10 +64,12 @@ universe u
 §4's `DefinitionalOrCanonicalSpecEquality`, as the relation the registry laws
 need it to be.
 
-An equivalence, and each law is used below: `symm` and `trans` by
-`lookupUniquenessIsRedundant`, `refl` by `lookup_of_own_entry`. Supplying it as
-a structure rather than assuming `Eq` is what makes the abstraction honest —
-"definitional or canonical" is explicitly not syntactic equality.
+An equivalence. `symm` and `trans` are used by `lookupUniquenessIsRedundant`
+and `refl` by `lookup_of_own_entry`; `selection_is_determined`, the module's
+headline, uses none of them. Supplying it as a structure rather than assuming
+`Eq` is what makes the abstraction honest — "definitional or canonical" is
+explicitly not syntactic equality — but see the module note for what requiring
+an equivalence forecloses.
 -/
 structure SpecEquivalence (Spec : Type u) : Type u where
   /-- When two specifications are the same specification. -/
@@ -150,9 +158,12 @@ give `other.spec ≈ entry.spec`, and the registry law does the rest.
 
 Both equivalence laws are load-bearing, which is the point of stating this: a
 "definitional or canonical" equality is a disjunction of two relations, and a
-disjunction of two equivalences need not be transitive. If it is not, §4 is
-right to state both fields and this theorem does not apply; if it is, one of
-them is noise. §10.40 records the question rather than answering it.
+disjunction of two equivalences need not be transitive.
+
+The redundancy runs the other way too, under a weaker hypothesis: given `refl`
+and a lookup at each entry's own spec, `registry.unique` follows from the
+lookup's field. §10.40 states both directions; a first draft of this docstring
+claimed only this one.
 -/
 theorem lookupUniquenessIsRedundant
     (entry : StandardRealizerEntry Spec Key Realization)
@@ -171,9 +182,16 @@ selecting a registered standard realizer "must require one expression at the
 application process boundary" — and an expression that could denote two
 different programs is not a selection.
 
-Both registry laws are used: `unique` to force the keys together and
-`keysDistinct` to force the entries together. With only §4's stated `unique`
-this would conclude that the two selections share a *name*.
+The keys are forced together by the *lookup's* own uniqueness field, and the
+entries by `keysDistinct`. `StandardRealizerRegistry.unique` — §4's stated law —
+is not used by this proof or by any other theorem here; its only consumer is
+`lookup_of_own_entry`, which is how a lookup is built in the first place.
+
+A first draft's docstring claimed both registry laws were used, and the module
+note claimed every `SpecEquivalence` law existed to make this provable. Local
+adversarial review reproved it over a registry carrying only `keysDistinct` and
+over a bare relation with no laws at all. The theorem is real; that account of
+its economics was not.
 -/
 theorem selection_is_determined (left right : ExactStandardRealizerLookup registry spec) :
     left.entry = right.entry := by
@@ -202,9 +220,12 @@ end ExactStandardRealizerLookup
 /--
 **A registered entry looks itself up.**
 
-The inhabitance check, and the one place `SpecEquivalence.refl` is used. Without
-it every theorem above is about an empty class: a registry could satisfy both
-laws with no entry ever matching anything.
+How a lookup is built, and the one place `SpecEquivalence.refl` and
+`StandardRealizerRegistry.unique` are used.
+
+Not an inhabitance proof for the theorems above: a registry with `entries := []`
+satisfies both laws and is looked up by nothing, so the class really is empty
+there. `Tests/Process/StandardFixtures.lean` is where a non-empty one exists.
 -/
 def lookup_of_own_entry {Spec Key Realization : Type u} {equivalence : SpecEquivalence Spec}
     (registry : StandardRealizerRegistry Spec Key Realization equivalence)

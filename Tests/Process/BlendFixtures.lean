@@ -83,11 +83,17 @@ def loggerIn : VocabularyEmbedding logger combined where
   demandInjective := by
     rintro left right same
     injection same
+  externalEventInjective := by
+    rintro left right same
+    injection same
   result := fun _ answer => answer
   observation := .inl
   observationInjective := by
     rintro left right same
     injection same
+  interruptReason := fun reason => reason.elim
+  logicalFault := fun fault => fault.elim
+  environmentViolation := fun violation => violation.elim
 
 /-- The timer's. -/
 def timerIn : VocabularyEmbedding timer combined where
@@ -96,11 +102,17 @@ def timerIn : VocabularyEmbedding timer combined where
   demandInjective := by
     rintro left right same
     injection same
+  externalEventInjective := by
+    rintro left right same
+    injection same
   result := fun _ answer => answer
   observation := .inr
   observationInjective := by
     rintro left right same
     injection same
+  interruptReason := fun reason => reason.elim
+  logicalFault := fun fault => fault.elim
+  environmentViolation := fun violation => violation.elim
 
 /--
 The weave.
@@ -153,24 +165,100 @@ theorem the_timer_stutters_on_it :
 
 /-! ## And what overlapping namespaces would cost -/
 
+/-- A component with exactly one demand. -/
+inductive AlphaDemand | only
+  deriving DecidableEq, Repr
+
+/-- And another. -/
+inductive BetaDemand | only
+  deriving DecidableEq, Repr
+
+@[reducible] def alpha : ProcessVocabulary.{0} where
+  ExternalEvent := Unit
+  Demand := AlphaDemand
+  Result := fun _ => Nat
+  Observation := Unit
+  InterruptReason := Empty
+  LogicalFault := Empty
+  EnvironmentViolation := Empty
+
+@[reducible] def beta : ProcessVocabulary.{0} where
+  ExternalEvent := Unit
+  Demand := BetaDemand
+  Result := fun _ => Nat
+  Observation := Unit
+  InterruptReason := Empty
+  LogicalFault := Empty
+  EnvironmentViolation := Empty
+
+/-- A woven vocabulary with one demand, which both components will claim. -/
+@[reducible] def shared : ProcessVocabulary.{0} where
+  ExternalEvent := Unit
+  Demand := Unit
+  Result := fun _ => Nat
+  Observation := Unit
+  InterruptReason := Empty
+  LogicalFault := Empty
+  EnvironmentViolation := Empty
+
 /--
-**Two components claiming one woven demand fail the disjointness condition.**
+A fully legal embedding of the first component.
 
-The counterexample §8 puts disjointness in the premise to exclude: if both
-embeddings sent their demand to the same woven demand, a single result would
-answer one demand of each component, and there would be no fact about which
-component the answer belonged to. `not_from_both` would be false, so the
-condition is not decoration on the way to the theorem — it *is* the theorem's
-content.
-
-Stated as the failure of the field rather than by building an illegal weave,
-because an illegal weave is precisely what the structure will not let you build.
+Every field of `VocabularyEmbedding` including both injectivity laws — the
+demand map is injective because `AlphaDemand` has one constructor. Nothing about
+an embedding on its own is wrong here.
 -/
-theorem overlapping_names_have_two_routings
-    (collide : LogDemand → BothDemands) (collideRight : TimerDemand → BothDemands)
-    (bothClaimTheSame :
-      collide (.write "hello") = collideRight (.sleep 0)) :
-    ¬ (∀ own other, collide own ≠ collideRight other) :=
-  fun disjoint => disjoint (.write "hello") (.sleep 0) bothClaimTheSame
+def alphaIn : VocabularyEmbedding alpha shared where
+  externalEvent := fun _ => ()
+  demand := fun _ => ()
+  demandInjective := by rintro ⟨⟩ ⟨⟩ _; rfl
+  externalEventInjective := by rintro ⟨⟩ ⟨⟩ _; rfl
+  result := fun _ answer => answer
+  observation := fun _ => ()
+  observationInjective := by rintro ⟨⟩ ⟨⟩ _; rfl
+  interruptReason := fun reason => reason.elim
+  logicalFault := fun fault => fault.elim
+  environmentViolation := fun violation => violation.elim
+
+/-- And of the second, into the same woven demand. -/
+def betaIn : VocabularyEmbedding beta shared where
+  externalEvent := fun _ => ()
+  demand := fun _ => ()
+  demandInjective := by rintro ⟨⟩ ⟨⟩ _; rfl
+  externalEventInjective := by rintro ⟨⟩ ⟨⟩ _; rfl
+  result := fun _ answer => answer
+  observation := fun _ => ()
+  observationInjective := by rintro ⟨⟩ ⟨⟩ _; rfl
+  interruptReason := fun reason => reason.elim
+  logicalFault := fun fault => fault.elim
+  environmentViolation := fun violation => violation.elim
+
+/-- **They claim the same woven demand.** -/
+theorem the_real_overlap : alphaIn.demand .only = betaIn.demand .only := rfl
+
+/--
+**So one result answers a demand of each component, and there is no fact about
+which.**
+
+The counterexample §8 puts disjointness in the *premise* to exclude, built out
+of two legal embeddings rather than out of two arbitrary functions. A first
+version of this theorem took two unrelated functions and a hypothesis that was
+the negated instance of its own conclusion — a tautology at any three types,
+with the interesting content entirely in the docstring. Local adversarial review
+gave the identical proof term at `{A B C : Type}`.
+
+`alphaIn.result` and `betaIn.result` both accept the *same* `shared.Result ()`
+and hand it to different components. That is what `demandsDisjoint` exists to
+forbid.
+-/
+theorem one_result_answers_both (answer : shared.Result (alphaIn.demand .only)) :
+    alphaIn.result .only answer = answer ∧ betaIn.result .only answer = answer :=
+  ⟨rfl, rfl⟩
+
+/-- **And no `DisjointWeave` can hold them**, which is the exclusion. -/
+theorem the_overlap_is_not_a_weave (weave : DisjointWeave alpha beta shared)
+    (isAlpha : weave.leftIn = alphaIn) (isBeta : weave.rightIn = betaIn) : False := by
+  refine weave.demandsDisjoint .only .only ?_
+  rw [isAlpha, isBeta]
 
 end Grass.Process.Tests.Blend

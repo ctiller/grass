@@ -100,27 +100,77 @@ theorem selecting_gzip_gives_one_program
 def twin (program : String) : StandardRealizerEntry SpecName Nat String := ⟨0, 0, program⟩
 
 /--
-**§4's `unique` is satisfied by a list that carries two realizations for one
-specification.**
+A registry with §4's stated law and nothing else.
+
+Declared here rather than reused from the module, because
+`StandardRealizerRegistry` requires `keysDistinct` and the point is what happens
+without it. Every clause §4 states holds of `entries`.
+-/
+structure SectionFourRegistry where
+  /-- What is registered. -/
+  entries : List (StandardRealizerEntry SpecName Nat String)
+  /-- §4's law, in full: one specification, one key. -/
+  unique : ∀ left ∈ entries, ∀ right ∈ entries,
+    left.spec = right.spec → left.key = right.key
+
+/-- A lookup against it, with every field §4 gives one. -/
+structure SectionFourLookup (registry : SectionFourRegistry) (spec : SpecName) where
+  /-- The entry selected. -/
+  entry : StandardRealizerEntry SpecName Nat String
+  /-- It is registered. -/
+  member : entry ∈ registry.entries
+  /-- And it realizes this specification. -/
+  exactSpec : entry.spec = spec
+  /-- And every matching entry selects the same key. -/
+  unique : ∀ other ∈ registry.entries, other.spec = spec → other.key = entry.key
+
+/-- The twins, registered. -/
+def sectionFourStdlib : SectionFourRegistry where
+  entries := [twin "alpha", twin "beta"]
+  unique := by
+    rintro left leftMember right rightMember _
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at leftMember rightMember
+    rcases leftMember with rfl | rfl <;> rcases rightMember with rfl | rfl <;> rfl
+
+/-- One legal lookup of specification `0`. -/
+def alphaLookup : SectionFourLookup sectionFourStdlib 0 where
+  entry := twin "alpha"
+  member := by simp [sectionFourStdlib]
+  exactSpec := rfl
+  unique := by
+    rintro other otherMember _
+    simp only [sectionFourStdlib, List.mem_cons, List.not_mem_nil, or_false] at otherMember
+    rcases otherMember with rfl | rfl <;> rfl
+
+/-- And another, equally legal. -/
+def betaLookup : SectionFourLookup sectionFourStdlib 0 where
+  entry := twin "beta"
+  member := by simp [sectionFourStdlib]
+  exactSpec := rfl
+  unique := by
+    rintro other otherMember _
+    simp only [sectionFourStdlib, List.mem_cons, List.not_mem_nil, or_false] at otherMember
+    rcases otherMember with rfl | rfl <;> rfl
+
+/--
+**Two legal lookups of one specification, selecting different programs.**
 
 The reason `keysDistinct` is a field. §4's law says one specification implies
 one *key*; two entries can share a key, share a specification, and differ in the
-program they register — and every clause §4 states holds.
+program they register, and every clause §4 states — including the lookup's own
+uniqueness — holds of both selections.
 
-Under such a registry `selection_is_determined` is false: both entries are
-members, both match the specification, and each yields a legal
-`ExactStandardRealizerLookup`. The application's "one expression" would denote
-whichever the lookup happened to return.
+So `ProcessRealization.standard (lookupExact spec)` would be one expression
+denoting whichever of two programs the lookup happened to return, which is
+exactly what §4 introduces the registry to prevent.
+
+A first version of this fixture stated a predicate over a bare `List`, with no
+registry, no lookup and no selection in it — the billed teeth were entirely in
+the docstring. Local adversarial review pointed that out and showed the real
+version was constructible; this is it.
 -/
 theorem section_four_uniqueness_alone_permits_two_realizations :
-    (∀ left ∈ [twin "alpha", twin "beta"], ∀ right ∈ [twin "alpha", twin "beta"],
-      left.spec = right.spec → left.key = right.key) ∧
-      (twin "alpha").realization ≠ (twin "beta").realization := by
-  constructor
-  · rintro left leftMember right rightMember _
-    simp only [List.mem_cons, List.not_mem_nil, or_false] at leftMember rightMember
-    rcases leftMember with rfl | rfl <;> rcases rightMember with rfl | rfl <;> rfl
-  · decide
+    alphaLookup.entry.realization ≠ betaLookup.entry.realization := by decide
 
 /-- And that list does fail `keysDistinct`, which is what rules it out. -/
 theorem the_twins_fail_the_added_law :

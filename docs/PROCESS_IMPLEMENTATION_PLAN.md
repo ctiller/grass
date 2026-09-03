@@ -2357,6 +2357,19 @@ one way and `b` to `c` the other with nothing relating `a` to `c`. If that is
 the intended reading the two fields are independent and §4 is right to state
 both. Needs a ruling on which.
 
+Two corrections from a later review pass. **The redundancy is mutual**: given
+`refl` and a lookup at each entry's own spec, `registry.unique` follows from the
+lookup's field — under a *weaker* hypothesis than the other direction needs, so
+if either is noise it is more likely the registry's. And **this module cannot
+express the non-transitive case**, because every registry is parameterised by a
+`SpecEquivalence`; the hedge in `lookupUniquenessIsRedundant` describes a
+situation the types forbid. The question is foreclosed in the implementation and
+open in the document, which is the wrong way round.
+
+Also from that pass: `selection_is_determined`, the module's headline, uses
+neither `registry.unique` nor any `SpecEquivalence` law. Its docstring said it
+used both registry laws.
+
 ### 10.41 §4's registry law is about keys, not about programs
 
 The same registry's `unique` says two entries for one specification share a
@@ -2548,3 +2561,26 @@ it, because a standalone protocol supplies its own acceptance: one author on
 both sides of the implication. Needs a ruling on what constrains `Demanded` —
 the network's answer was to tie the analogous predicate to something the
 transition family already decides, and there may be no such thing here.
+
+### 10.50 A weave's result renaming is unconstrained and unconsumed
+
+`VocabularyEmbedding.result` maps a woven result back to the component's own,
+and no theorem in `Grass/Process/Weave/Blend.lean` consumes it: local
+adversarial review deleted the field and every theorem still held. It also built
+a legal weave whose logger `result` fabricates a byte count for every `write`,
+which is `docs/PROCESS.md` §5's "may not fabricate a result", unenforced at the
+seam.
+
+The field is kept because a weave must supply the renaming to be usable at all.
+Constraining it needs the two components' *plans* — what the result means is a
+fact about their step relations, not about their vocabularies — so the
+obligation belongs wherever the woven `ProcessPlan` is constructed, and there is
+no such place yet. Needs a ruling on where.
+
+Same pass, smaller: `DisjointWeave` requires no joint surjectivity, so a woven
+demand may belong to neither component and every theorem is silent about it; and
+`externalEventsDisjoint` forbids one entropy waking both components, which rules
+out broadcast — a clock tick delivered to two components at once is ordinary
+parallel composition. Both are now disclosed in the module note; whether §8's
+"disjoint nominal event namespaces" means to exclude broadcast is a document
+question.

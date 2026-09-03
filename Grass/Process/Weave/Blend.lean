@@ -12,12 +12,16 @@ import Grass.Process.Weave.Mixin
 and then lists six things the weave proves, the first of which is "how events
 are routed and whether irrelevant events stutter".
 
-This module is the argument that the first two of those six are *consequences*
-of the condition rather than obligations a weave discharges. With disjoint
-namespaces, a woven demand belongs to exactly one component, so the routing of
-its result is forced and the other component's stuttering is forced with it. A
-weave that had to prove routing would be a weave whose namespaces were not
-disjoint.
+This module is the argument that **bullet 1** — "how events are routed and
+whether irrelevant events stutter" — is a *consequence* of the condition rather
+than an obligation a weave discharges. Both of its clauses, at the level of
+names: with disjoint namespaces a woven demand belongs to exactly one component,
+so where its result must go is settled before any result exists, and so is the
+question of whether the other component has anything to answer with.
+
+A first draft said "the first two of those six", counting bullet 1's two clauses
+as two bullets. §8's actual bullet 2 — "realized-demand dependency/concurrency
+compatibility" — is not addressed here at all.
 
 ## What a `VocabularyEmbedding` has to carry
 
@@ -25,13 +29,21 @@ The demand map has to be injective and the result map has to go *backwards* —
 from the whole's result for an embedded demand to the part's result for the
 original. That direction is not a convenience: `ProcessVocabulary.Result` is
 dependent, so a forward map would have to produce a result for a demand it was
-not given, which is `docs/FOUNDATION.md` law 5's "attach one result to another
+not given, which is `docs/PROCESS.md` §5's "attach one result to another
 occurrence" one level up.
 
-Injectivity is what makes `Routes` a function rather than a relation. Without it
+Injectivity is what makes routing a function rather than a relation. Without it
 two of a component's own demands could embed to one woven demand and a single
 result would answer both — the multiplicity failure
 `Grass/Process/Bag.lean` forbids inside one component, reappearing at the seam.
+
+**And `result` is a field no theorem here consumes.** Local adversarial review
+deleted it and every theorem below still held, and built a legal weave whose
+logger `result` fabricates a byte count for every `write` — `docs/PROCESS.md`
+§5's "may not fabricate a result", unenforced at the seam. It is kept because a
+weave must supply the renaming to be usable at all, and constraining it needs
+the two components' *plans*, not their vocabularies. Recorded as
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.50.
 
 ## What is not here
 
@@ -42,6 +54,23 @@ modules: `Grass/Process/Weave/Lens.lean` proves noninteraction for disjoint
 refinement scopes, and `Grass/Process/Network/Progress.lean` states what a
 progress measure owes. Observation ordering across components, and cancellation
 and obligation propagation, have neither.
+
+§8's bullet 2, "realized-demand dependency/concurrency compatibility", is also
+absent and is about the plans rather than the vocabularies.
+
+## Two things this structure does not require
+
+**Coverage.** Nothing makes the two components' images *exhaust* the woven
+vocabulary, so a woven demand may belong to neither. Every theorem below takes
+`FromLeft` as a hypothesis and is therefore silent about such a demand. §8's
+bullet is "how events are routed", unrestricted, so a plan that wants every
+woven name owned owes a surjectivity argument this structure does not collect.
+
+**Broadcast.** `externalEventsDisjoint` forbids one entropy waking both
+components — one clock tick delivered to a logger and a timer at once, which is
+ordinary parallel composition. Whether §8's "disjoint nominal event namespaces"
+means to exclude that is a question about the document; the choice is made here
+and is worth a reader knowing it was made.
 
 A first draft named those four as a structure of four `Prop` fields. That is the
 opaque-promise shape this layer keeps rejecting — `True` four times discharges
@@ -84,10 +113,31 @@ structure VocabularyEmbedding (part whole : ProcessVocabulary.{u}) : Type u wher
   a result for a demand it was not handed.
   -/
   result : ∀ own, whole.Result (demand own) → part.Result own
+  /-- And no two of its entropies land on one either. -/
+  externalEventInjective : ∀ left right,
+    externalEvent left = externalEvent right → left = right
   /-- Where its observations appear. -/
   observation : part.Observation → whole.Observation
   /-- And no two of its observations land on one. -/
   observationInjective : ∀ left right, observation left = observation right → left = right
+  /--
+  Where its interruption reasons, faults and environment violations appear.
+
+  `ProcessVocabulary` has seven fields and a first draft of this structure mapped
+  four. `Grass/Process/Network/Delivery.lean` records `agent-bus` disposition
+  `g-design:4` — "cross-vocabulary delivery owes a total classifier; an empty
+  target class proves unreachability" — and a weave is exactly such a boundary.
+
+  Without these three, local adversarial review built a legal weave whose part
+  had `LogicalFault := Bool` and whose whole had `Empty`: a component that can
+  fail, woven into a program that has declared no fault can occur. Totality is
+  what makes the empty target *prove* unreachability rather than hide it.
+  -/
+  interruptReason : part.InterruptReason → whole.InterruptReason
+  /-- Its faults. -/
+  logicalFault : part.LogicalFault → whole.LogicalFault
+  /-- And its environment violations. -/
+  environmentViolation : part.EnvironmentViolation → whole.EnvironmentViolation
 
 /-! ## Two components, woven -/
 
@@ -96,9 +146,12 @@ structure VocabularyEmbedding (part whole : ProcessVocabulary.{u}) : Type u wher
 
 Only the demand and observation namespaces are required disjoint here, because
 those are the two the theorems below use. §8 also names events and results:
-events follow from `externalEventsDisjoint`, and *results* are already disjoint
-for free — `Result` is indexed by the demand, so two components' result types
-cannot collide unless their demands do.
+events have `externalEventsDisjoint`. *Results* need no field of their own, and
+the reason is about indices rather than types: two components' result *types*
+collide freely — a logger's `write` and a timer's `sleep` may both answer with a
+`Nat` — but `Result` is indexed by the demand, so a woven result is attached to
+one demand and the demand namespaces are disjoint. A first draft said the types
+could not collide, which is false.
 -/
 structure DisjointWeave (left right whole : ProcessVocabulary.{u}) : Type u where
   /-- The left component's names. -/
@@ -146,11 +199,16 @@ theorem left_source_is_unique {demand : whole.Demand} {own other : left.Demand}
   weave.leftIn.demandInjective own other (fromOwn.trans fromOther.symm)
 
 /--
-**So a result for a left demand routes to the left component and nowhere else.**
+**A woven demand comes from exactly one demand of exactly one component.**
 
-The theorem §8's routing bullet is asking for. The routing is not chosen: given
-the disjointness, there is exactly one component that can accept the result and
-exactly one of its demands the result answers.
+The vocabulary-level half of §8's routing bullet. It is about *names*, not about
+a result and not about an execution — there is no `ProcessPlan` and no step
+relation in this module, so "the result routes" is not expressible here. What is
+expressible, and what a routing argument consumes, is that the destination is
+determined before any result exists.
+
+A first draft's docstring said "a result for a left demand routes to the left
+component and nowhere else", and no result appears in the statement.
 -/
 theorem routing_is_forced {demand : whole.Demand} (fromLeft : weave.FromLeft demand) :
     (∃ own : left.Demand, weave.leftIn.demand own = demand ∧
@@ -161,11 +219,15 @@ theorem routing_is_forced {demand : whole.Demand} (fromLeft : weave.FromLeft dem
   exact fun fromRight => weave.not_from_both ⟨own, isOwn⟩ fromRight
 
 /--
-**And the other component stutters on it**, because it has no demand to answer.
+**And the other component has no demand that could have been meant.**
 
-§8's "whether irrelevant events stutter" — determined rather than declared. A
-weave that had to *choose* whether the right component stutters on a left
-demand's result would be a weave whose namespaces overlapped.
+The vocabulary-level half of §8's "whether irrelevant events stutter". Stuttering
+itself is a fact about executions and is not expressible here; what this says is
+that the question has one answer before any execution is considered, which is
+the part a weave would otherwise have to *choose*.
+
+Equivalent to `demandsDisjoint` — local adversarial review derived the field back
+from it — so it is a restatement in the form a consumer wants, not a new fact.
 -/
 theorem the_other_side_stutters {own : left.Demand} :
     ¬ ∃ other : right.Demand, weave.rightIn.demand other = weave.leftIn.demand own :=
