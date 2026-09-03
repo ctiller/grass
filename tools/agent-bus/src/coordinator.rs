@@ -1550,24 +1550,20 @@ mod tests {
     /// naming `aiden` as reviewer and `zoe` as the nomination's sole author
     /// -- mirrors v1's `review_cmds::build_fixture`.
     ///
-    /// The reviewer's name ("aiden") is deliberately chosen to sort before
-    /// the author's ("zoe") -- not cosmetic. `apply.rs`'s `topological_
-    /// order` only orders events by their *declared* `refs` (cross-agent
-    /// EventId references), and `review.nominated`'s `reviewer` field is a
-    /// bare `Agent` identity, not an `EventId`, so it is invisible to that
-    /// ordering; ties among otherwise-ready events break purely on `EventId`
-    /// string order. A cold full reduction (exactly what every `drain_
-    /// outbox` call's `cached_snapshot` does) can therefore legally visit
-    /// the author's `review.nominated` event before the reviewer's own
-    /// `agent.registered` root, if the reviewer's name sorts later -- this
-    /// is a real, separate, pre-existing gap in `apply.rs` this task does
-    /// not fix (confirmed while building this fixture: naming the reviewer
-    /// "bob" against an author "alice" made every test below fail with
-    /// `Invalid("unregistered agent: bob")`, even though bob's registration
-    /// had already been drained and committed earlier in the very same
-    /// fixture). Picking a reviewer name that sorts first sidesteps it here
-    /// without touching `apply.rs`; see this task's final report for the
-    /// finding itself.
+    /// The reviewer's name ("aiden") happening to sort before the author's
+    /// ("zoe") is cosmetic, not load-bearing: `topological_order`'s ready-set
+    /// tie-break always prefers *any* remaining `seq == 0` event (an agent's
+    /// own registration, which has zero dependencies and so is ready from
+    /// the very start of a cold reduce) over *any* `seq > 0` event,
+    /// regardless of which agent it belongs to or how names compare --
+    /// see its own doc comment. A registration can therefore never be
+    /// starved out by an event that merely *names* that agent (e.g.
+    /// `review.nominated`'s `reviewer` field, a bare `Agent` identity, not
+    /// an `EventId`, so invisible to the dependency graph itself). Verified
+    /// directly: swapping this fixture's names so the reviewer sorts *after*
+    /// the author (e.g. "bob"/"alice") reproduces no failure, through the
+    /// full nominate/accept/prepare-merge sequence, both via this fixture
+    /// and via the real CLI end to end.
     struct ReviewFixture {
         repo: tempfile::TempDir,
         #[allow(dead_code)]
