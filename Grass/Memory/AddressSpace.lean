@@ -273,14 +273,31 @@ instance (space : AddressSpace) : Decidable space.RepresentationMatchesIdentity 
 `space.WellFormed` holds when the space's declared representation is realizable and is
 the one its identity requires.
 
-A numeric space wider than the 64 bits `MachineAddress` provides is not a space
-this vocabulary version can express; per `docs/MEMORY_MODEL.md` §9 that is a
-versioned extension, and it must be rejected here rather than silently accepted
-by a bound nothing checks.
+A numeric space of any width but 64 is not a space this vocabulary version can
+express; per `docs/MEMORY_MODEL.md` §9 that is a versioned extension, and it must be
+rejected here rather than silently accepted by a bound nothing checks.
+
+**The bound was `bits ≤ 64` and a narrower space was admissible**, which review found
+was admissible in the wrong way. `MachineAddress` is 64 bits and
+`Grass/Memory/Addressing.lean`'s `FitsAllocation` compares against `2 ^ 64`, so for a
+32-bit space the wrap check ran in the wrong modulus: an allocation based at
+`2 ^ 32 - 16` with a 64-byte extent satisfied `FitsAllocation`, `placementWraps` did not
+fire, and `distinct_allocations_do_not_alias` then yielded distinct machine addresses
+for two offsets that are *the same byte* in the space the profile declared. The bridge a
+profile is meant to cite was being discharged in 64-bit arithmetic for a space that is
+not 64 bits.
+
+Not reachable through `step` today, because an access at that offset must declare an
+address `addressRepresentable` rejects in a 32-bit space -- so it was latent, and
+latent in exactly the way `Addressing.lean` exists to worry about. The alternative
+repair is to make `FitsAllocation` and the placement checks take the space, which
+`denialOf` cannot do without the resolved `AddressSpace` in hand;
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records that as what a future vocabulary
+version does instead of this.
 -/
 def WellFormed (space : AddressSpace) : Prop :=
   (match space.repr with
-   | .numeric bits => bits ≤ 64
+   | .numeric bits => bits = 64
    | .symbolic => True) ∧ space.RepresentationMatchesIdentity
 
 instance (space : AddressSpace) : Decidable space.WellFormed := by
@@ -352,9 +369,30 @@ theorem an_unnamed_identity_takes_either_representation :
     ({ cpuVirtual64 with id := ⟨⟨"vendor.scratchpad"⟩⟩ } : AddressSpace).WellFormed := by
   exact ⟨by decide, by decide⟩
 
-/-- The width is still the profile's choice: a narrow CPU space is well formed. -/
-theorem a_narrow_numeric_cpu_space_is_well_formed :
-    ({ cpuVirtual64 with repr := .numeric 32 } : AddressSpace).WellFormed := by decide
+/-- **A narrow numeric space is not well formed**, and this theorem asserted the
+opposite for a day. `MachineAddress` and `FitsAllocation` are fixed at 64 bits, so a
+32-bit space had its wrap check run in the wrong modulus; see `WellFormed` above. -/
+theorem a_narrow_numeric_cpu_space_is_not_well_formed :
+    ¬ ({ cpuVirtual64 with repr := .numeric 32 } : AddressSpace).WellFormed := by decide
+
+/-- **Every identity this module names is constrained**, not only the two the theorems
+above happen to exercise. Review mutated `requiredRepresentation` down to `cpuVirtual`
+and `spirvPrivate` alone and the whole tree stayed green, so six of the eight -- the
+two device spaces §7.5 needs among them -- could have regressed invisibly. -/
+theorem every_named_identity_constrains_its_representation :
+    [AddressSpaceId.cpuVirtual, .cpuPhysical, .deviceLocal, .deviceHostVisible].all
+      (fun id => !decide (({ cpuVirtual64 with id := id, repr := .symbolic } :
+        AddressSpace).WellFormed)) = true ∧
+    [AddressSpaceId.spirvPrivate, .spirvInput, .spirvOutput, .spirvPushConstant].all
+      (fun id => !decide (({ spirvPrivate with id := id, repr := .numeric 64 } :
+        AddressSpace).WellFormed)) = true ∧
+    [AddressSpaceId.cpuVirtual, .cpuPhysical, .deviceLocal, .deviceHostVisible].all
+      (fun id => decide (({ cpuVirtual64 with id := id } : AddressSpace).WellFormed))
+        = true ∧
+    [AddressSpaceId.spirvPrivate, .spirvInput, .spirvOutput, .spirvPushConstant].all
+      (fun id => decide (({ spirvPrivate with id := id } : AddressSpace).WellFormed))
+        = true := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
 
 /-- Every 64-bit value is representable in a space declaring the full width. -/
 theorem representable_of_bits_eq_64 {space : AddressSpace} (h : space.repr = .numeric 64)

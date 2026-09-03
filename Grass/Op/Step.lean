@@ -758,13 +758,12 @@ Review did exactly that on the fixture's own profile.
 theorem conflicts_of_not_atomic {policy : StepPolicy}
     {sharesBytes : AllocId → AllocId → Prop} {a b : MemoryEvent}
     (hatouch : a.kind.touchesMemory = true) (hbtouch : b.kind.touchesMemory = true)
-    (hspace : a.provenance.space = b.provenance.space)
     (hshares : sharesBytes a.provenance.root b.provenance.root)
     (hoverlap : a.committedRange.Overlaps b.committedRange)
     (hwrites : a.kind.writes = true ∨ b.kind.writes = true)
     (hatomic : a.ordering.atomicity ≠ .atomic) :
     MemoryEvent.Conflicts sharesBytes (fun x y => policy.compatible x y = true) a b := by
-  refine ⟨hatouch, hbtouch, hspace, hshares, hoverlap, hwrites, ?_⟩
+  refine ⟨hatouch, hbtouch, hshares, hoverlap, hwrites, ?_⟩
   intro hcompatible
   exact hatomic (policy.compatibleIsAtomic a b hcompatible).1
 
@@ -811,7 +810,6 @@ theorem conflictsWithHistory_of_not_atomic {policy : StepPolicy} {state : Machin
     (hcontext : earlier.event.context.id ≠ event.context.id)
     (hatouch : earlier.event.kind.touchesMemory = true)
     (hbtouch : event.kind.touchesMemory = true)
-    (hspace : earlier.event.provenance.space = event.provenance.space)
     (hshares : state.memory.SharesBytes earlier.event.provenance.root
       event.provenance.root)
     (hoverlap : earlier.event.committedRange.Overlaps event.committedRange)
@@ -819,7 +817,7 @@ theorem conflictsWithHistory_of_not_atomic {policy : StepPolicy} {state : Machin
     (hatomic : earlier.event.ordering.atomicity ≠ .atomic) :
     ConflictsWithHistory policy state event :=
   ⟨earlier, hmem, hcontext,
-    conflicts_of_not_atomic hatouch hbtouch hspace hshares hoverlap hwrites hatomic⟩
+    conflicts_of_not_atomic hatouch hbtouch hshares hoverlap hwrites hatomic⟩
 
 /--
 Why this access is refused, or `none` if nothing refuses it.

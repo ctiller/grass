@@ -110,6 +110,17 @@ def chainedAlloc : AllocId := allocs₂.fresh.2.fresh.2.fresh.2.fresh.1
 /-- Provenance of the far end of the alias chain. -/
 def chainedProv : Provenance := { bufferProv with root := chainedAlloc, source := .mappedFile }
 
+/-- A host-visible *device* view of the buffer's storage. `docs/MEMORY_MODEL.md` §7.5
+names exactly this pair -- a host-visible device buffer and the allocation behind it --
+among the storage that is shared without being the same allocation. -/
+def deviceViewAlloc : AllocId := allocs₂.fresh.2.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- Its provenance: a different address space and a different allocator from the
+buffer's, over storage the state declares shared. -/
+def deviceProv : Provenance :=
+  { bufferProv with
+    root := deviceViewAlloc, space := .deviceHostVisible, source := .deviceMemory }
+
 /-- Provenance of the borrowed storage. -/
 def borrowedProv : Provenance := { bufferProv with root := borrowedAlloc }
 
@@ -657,6 +668,9 @@ inductive Beta where
   | dmaWriteChained
   /-- A device engine discharges a duty the program thread holds. -/
   | dmaDischargesTheThreadsDuty
+  /-- The engine writes the buffer's storage through a host-visible *device* view:
+  the same declared storage, a different address space. -/
+  | dmaWriteDeviceView
   /-- An operation that declares no memory effects at all. -/
   | undeclared
   /-- An operation that declares memory effects and faults but not restartability.
@@ -692,6 +706,14 @@ instance : HasOperationFacets Beta where
               intent := { reads := false, writes := true } })
           faults := some [.pageFault, .deviceFault], restartability := some .notRestartable
           ordering := some .plain }
+    | .dmaWriteDeviceView =>
+        { memoryEffects := some (.single
+            { acc deviceProv ⟨0, 8⟩ 0x1000 .write .readWrite false true
+                (context := engine₀) with
+              space := .deviceHostVisible
+              intent := { reads := false, writes := true } })
+          faults := some [.pageFault, .deviceFault], restartability := some .notRestartable
+          ordering := some .plain }
     | .undeclared => {}
     | .unrestartable =>
         { memoryEffects := some (.single
@@ -702,6 +724,13 @@ instance : HasOperationFacets Beta where
           ordering := some .plain }
 
 /-! ## The profile and the starting state -/
+
+/-- The device's host-visible space. Numerically addressed, because
+`AddressSpaceId.requiredRepresentation` says a device identity is, and not host
+coherent, because §7.2 makes visibility explicit for device memory. -/
+def deviceHostVisible64 : AddressSpace :=
+  { id := .deviceHostVisible, repr := .numeric 64, memoryType := .notHostCached
+    coherence := .requiresExplicitVisibility }
 
 /--
 A violation class this profile names for itself.
@@ -717,9 +746,10 @@ def frameAuthorityUnavailable : AuditViolationClass := ⟨⟨"fake.frameAuthorit
 
 /-- The profile's address spaces, obligation kinds, and fault classes. -/
 def vocabulary : AdmittedVocabulary :=
-  { addressSpaces := .cpuOnly
+  { addressSpaces := ⟨[AddressSpace.cpuVirtual64, deviceHostVisible64]⟩
     faultClasses := ⟨[.pageFault, .deviceFault, divideError]⟩
-    allocationSources := ⟨[.virtualAlloc, .mappedFile, .imageMapping, .stack]⟩
+    allocationSources :=
+      ⟨[.virtualAlloc, .mappedFile, .imageMapping, .stack, .deviceMemory]⟩
     provenanceStepKinds := ⟨[]⟩
     auditViolationClasses :=
       ⟨AuditViolationClass.emittedByTransition ++ [frameAuthorityUnavailable]⟩
@@ -834,24 +864,26 @@ def policy : StepPolicy :=
 so no `StepPolicy` can be built from it. `find?` returns the first match, so without
 this check which version an access was validated against would depend on list order.
 
-**The two entries differ in width and not in representation**, and they used to differ
-in representation: the second was `repr := .symbolic`, which is now ill formed on its
-own by `AddressSpace.RepresentationMatchesIdentity`, so the fixture would have been
-refused for a reason that has nothing to do with duplication. Review found the same
-value written down here and refused as a duplicate while the real defect — one such
-entry, declared alone — went through. Both entries here are well formed apart. -/
+**The two entries differ in memory type**, and they have differed in two other things
+since: first in representation, which `AddressSpace.RepresentationMatchesIdentity` made
+ill formed on its own, then in width, which `AddressSpace.WellFormed` did the same to.
+Each time the fixture would have been refused for a reason that has nothing to do with
+duplication. The memory type is a field nothing here constrains, which is what a
+duplication fixture needs. Review found the original value — `repr := .symbolic` —
+written down here and refused as a duplicate while the real defect, one such entry
+declared alone, went through. -/
 theorem duplicate_space_vocabulary_is_rejected :
     ¬ ({ vocabulary with
-          addressSpaces := ⟨[ { id := .cpuVirtual, repr := .numeric 32
-                                memoryType := .writeBack, coherence := .hostCoherent }
+          addressSpaces := ⟨[ { id := .cpuVirtual, repr := .numeric 64
+                                memoryType := .uncached, coherence := .hostCoherent }
                             , AddressSpace.cpuVirtual64 ]⟩ } :
         AdmittedVocabulary).WellFormed := by decide
 
 /-- And each of those entries is well formed on its own, so the refusal above is the
 duplication. -/
 theorem each_duplicate_entry_is_well_formed_apart :
-    ({ id := .cpuVirtual, repr := .numeric 32
-       memoryType := .writeBack, coherence := .hostCoherent } :
+    ({ id := .cpuVirtual, repr := .numeric 64
+       memoryType := .uncached, coherence := .hostCoherent } :
       AddressSpace).WellFormed ∧
     AddressSpace.cpuVirtual64.WellFormed := by
   exact ⟨by decide, by decide⟩
@@ -901,10 +933,16 @@ def allocations₀ : List (AllocId × AllocationRecord) :=
   , (chainedAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
                      source := .mappedFile, owners := [thread₀]
                      permission := .readWrite, live := true, bytes := zeroed64
-                     base := some 0x1000 }) ]
+                     base := some 0x1000 })
+  , (deviceViewAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀
+                        space := .deviceHostVisible
+                        source := .deviceMemory, owners := [engine₀, thread₀]
+                        permission := .readWrite, live := true, bytes := zeroed64
+                        base := some 0x1000 }) ]
 
 def memory₀ : MemoryState :=
-  ((MemoryState.empty.allocateAll? allocations₀).getD .empty).alias bufferAlloc viewAlloc
+  (((MemoryState.empty.allocateAll? allocations₀).getD .empty).alias bufferAlloc viewAlloc).alias
+    bufferAlloc deviceViewAlloc
 
 /-- Every allocation happened, so `getD` did not fall back to the empty state. -/
 theorem the_allocations_succeed :
@@ -2948,6 +2986,42 @@ theorem a_race_is_recorded_as_a_race :
   cases hs
   cases ht
   decide
+
+/-- **And a race across two address spaces is a race.**
+
+`MemoryEvent.Conflicts` carried `a.provenance.space = b.provenance.space` and a theorem
+asserting the narrowing as a law of §7.5. §7.3's sentence has no address-space clause,
+and §7.5's is about offset coincidence, which `SharesBytes` already implements. What
+the conjunct actually did was cancel a *declared* sharing whenever the spaces differed
+-- which is two of the three pairs the `SameStorage` repair was made for, a
+host-visible device buffer and the allocation behind it among them.
+
+Review stepped it: the thread wrote the buffer, the engine wrote the same declared
+storage through this view, and the step committed with an empty violation ledger while
+the identical store through a *cpu*-space view was refused. The authority rule had
+already dropped its own space conjunct for this reason and said so, so the two rules
+were answering differently about one pair of allocations. -/
+theorem a_cross_space_race_is_recorded_as_a_race :
+    state₀.memory.SharesBytes bufferAlloc deviceViewAlloc ∧
+    deviceProv.space ≠ bufferProv.space ∧
+    ¬ state₀.memory.AnyGrantOver deviceProv ⟨0, 8⟩ ∧
+    ∀ s, (stepAlpha state₀ .store).state? = some s →
+      ∀ t, (stepBeta s .dmaWriteDeviceView).state? = some t →
+        t.violations.records?.any (fun r => r.class_ = .conflictingAccess) := by
+  refine ⟨by decide, by decide, by decide, ?_⟩
+  intro s hs t ht
+  cases hs
+  cases ht
+  decide
+
+/-- And the same store with nothing written before it commits, so the refusal above is
+the earlier write and not the device view. -/
+theorem the_device_view_store_alone_commits :
+    ∀ t, (stepBeta state₀ .dmaWriteDeviceView).state? = some t →
+      t.events.length = 1 ∧ t.violations.IsEmpty := by
+  intro t ht
+  cases ht
+  exact ⟨by decide, by decide⟩
 
 /-! ## No compatibility relation can switch the race check off
 

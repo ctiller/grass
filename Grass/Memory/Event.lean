@@ -190,11 +190,13 @@ structure WellFormed (e : MemoryEvent) : Prop where
   statusAgreesWithWrites : e.status.committedWrites = e.writeCommitted
   /-- The event's address space is the one its provenance names.
 
-  Two records of one fact, and nothing tied them. `Conflicts` keys on
-  `provenance.space` and `not_conflicts_of_different_space` is stated over it, while
-  `space` is what the event reports; the two agreed only because
+  Two records of one fact, and nothing tied them. `space` is what the event reports
+  while `provenance.space` is what the descriptor declared; the two agreed only because
   `Grass/Op/Step.lean`'s `performAccess` resolves the space through the profile's
-  table before calling `ofOutcome`. That is the argument this structure exists to
+  table before calling `ofOutcome`. `Conflicts` keyed on `provenance.space` when this
+  clause was written and no longer does, which removes a consumer but not the
+  objection: a structure carrying one fact twice with no clause tying them is the
+  defect this layer keeps finding. That is the argument this structure exists to
   make unnecessary — it was rejected for the context identity in
   `StepRejection.contextMismatch` and for the status and count pair in the clause
   above — and review found it standing here, in a file no round had read. -/
@@ -238,7 +240,6 @@ are bytes it did not touch.
 def Conflicts (sharesBytes : AllocId → AllocId → Prop)
     (compatible : MemoryEvent → MemoryEvent → Prop) (a b : MemoryEvent) : Prop :=
   a.kind.touchesMemory = true ∧ b.kind.touchesMemory = true ∧
-  a.provenance.space = b.provenance.space ∧
   sharesBytes a.provenance.root b.provenance.root ∧
   a.committedRange.Overlaps b.committedRange ∧
   (a.kind.writes = true ∨ b.kind.writes = true) ∧
@@ -261,7 +262,7 @@ instance {sharesBytes : AllocId → AllocId → Prop}
     {compatible : MemoryEvent → MemoryEvent → Prop}
     [∀ x y, Decidable (compatible x y)] (a b : MemoryEvent) :
     Decidable (Conflicts sharesBytes compatible a b) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 theorem Conflicts.symm {sharesBytes : AllocId → AllocId → Prop}
     {compatible : MemoryEvent → MemoryEvent → Prop}
@@ -269,8 +270,8 @@ theorem Conflicts.symm {sharesBytes : AllocId → AllocId → Prop}
     (symmetric : ∀ x y, compatible x y → compatible y x) {a b : MemoryEvent}
     (h : Conflicts sharesBytes compatible a b) :
     Conflicts sharesBytes compatible b a := by
-  obtain ⟨ha, hb, hspace, hshare, ho, hw, hat⟩ := h
-  refine ⟨hb, ha, hspace.symm, shareSymm _ _ hshare, ?_, hw.symm,
+  obtain ⟨ha, hb, hshare, ho, hw, hat⟩ := h
+  refine ⟨hb, ha, shareSymm _ _ hshare, ?_, hw.symm,
     fun hc => hat (symmetric b a hc)⟩
   obtain ⟨offset, h₁, h₂⟩ := ho
   exact ⟨offset, h₂, h₁⟩
@@ -280,7 +281,7 @@ theorem not_conflicts_of_both_read {sharesBytes : AllocId → AllocId → Prop}
     {compatible : MemoryEvent → MemoryEvent → Prop}
     {a b : MemoryEvent} (ha : a.kind = .read) (hb : b.kind = .read) :
     ¬ Conflicts sharesBytes compatible a b := by
-  rintro ⟨_, _, _, _, _, hw, _⟩
+  rintro ⟨_, _, _, _, hw, _⟩
   rw [ha, hb] at hw
   simp [EventKind.writes] at hw
 
@@ -290,16 +291,32 @@ theorem not_conflicts_of_unshared {sharesBytes : AllocId → AllocId → Prop}
     {compatible : MemoryEvent → MemoryEvent → Prop} {a b : MemoryEvent}
     (h : ¬ sharesBytes a.provenance.root b.provenance.root) :
     ¬ Conflicts sharesBytes compatible a b :=
-  fun hc => h hc.2.2.2.1
-
-/-- Events in different address spaces never conflict, however their offsets
-compare. This is `docs/MEMORY_MODEL.md` §7.5 at the event layer, and unlike the
-allocation test it really is a provenance fact. -/
-theorem not_conflicts_of_different_space {sharesBytes : AllocId → AllocId → Prop}
-    {compatible : MemoryEvent → MemoryEvent → Prop} {a b : MemoryEvent}
-    (h : a.provenance.space ≠ b.provenance.space) :
-    ¬ Conflicts sharesBytes compatible a b :=
   fun hc => h hc.2.2.1
+
+/-!
+**There is no theorem here saying different spaces never conflict, and there was.**
+
+`Conflicts` carried `a.provenance.space = b.provenance.space` and that theorem
+asserted the narrowing as a law of §7.5. §7.3's sentence has no address-space clause,
+and §7.5's is about offset coincidence -- "not interchangeable *merely because their
+offsets match*" -- which `sharesBytes` already implements: unrelated allocations do
+not share bytes whatever their spaces, and related ones share them only where the
+state says so.
+
+The conjunct did not narrow the rule to offset coincidence. It cancelled a
+*declared* sharing whenever the two provenances named different spaces, which is
+exactly the configuration the `SameStorage` repair above was made for: two of the
+three pairs that repair names -- a host-visible device buffer and the device
+allocation behind it, a physical/virtual pair -- live in different spaces. Review
+stepped it: with the buffer aliased to a host-visible device view, the program thread
+wrote the buffer and the device engine then wrote the same declared storage through
+the view, and the step committed with an empty violation ledger. The same store
+through a *cpu*-space view of the same storage was refused as `conflictingAccess`.
+
+`MemoryState.AuthorizedAt` had dropped its own space conjunct for the same reason and
+said so, so the authority rule and the race rule were answering differently about one
+pair of allocations.
+-/
 
 /-- **An event that touches no bytes conflicts with nothing.**
 

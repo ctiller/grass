@@ -102,7 +102,9 @@ misaligned access is *rejected at the declaration*, never denied at the state. A
 alignment branch here would be unreachable, and an unreachable branch that looks
 like a check is worse than no branch: it suggests the transition tests something
 it does not. `AuditViolationClass.misaligned` remains for a profile whose own
-alignment rule is stricter than the declared demand.
+alignment rule is stricter than the declared demand -- reached through that profile's
+`AuthorityProvider`, not through this function, which is why review removed it from
+`AuditViolationClass.emittedByTransition` and why deleting it there changed nothing.
 
 Authority beyond what an allocation record means is not here: loans, frames,
 pins, and lock tokens are `Grass/Op/Step.lean`'s `AuthorityProvider` and need a

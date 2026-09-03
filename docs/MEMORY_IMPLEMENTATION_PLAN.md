@@ -1677,9 +1677,15 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   Closed by `AddressSpaceId.requiredRepresentation` and
   `AddressSpace.RepresentationMatchesIdentity`, which constrain the representations of
   the identities this layer *names* — `cpu.virtual`, `cpu.physical`, the two device
-  identities and the four SPIR-V ones — and say nothing about any other. Kind only,
-  never width: how wide a CPU space is stays a profile's answer under the existing
-  64-bit bound, and `a_narrow_numeric_cpu_space_is_well_formed` pins that.
+  identities and the four SPIR-V ones — and say nothing about any other.
+  `every_named_identity_constrains_its_representation` covers all eight, after review
+  mutated the rule down to two and found the tree still green: the repair had been
+  evidenced by a two-point check sold as universal, with the two device spaces §7.5
+  needs among the six unexercised.
+
+  The claim that came with it — "kind only, never width; how wide a CPU space is stays
+  a profile's answer" — was wrong within the day, and review found that too. See the
+  width entry below.
 
   The fixture that stood in front of this had to change too.
   `duplicate_space_vocabulary_is_rejected` wrote the hostile value down and refused it
@@ -1770,6 +1776,46 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   `Grass/Op/Step.lean` imports `Profile.lean` directly instead of inheriting it. The
   unused import had been there since M1.
 
+- ~~**A numeric address space narrower than 64 bits was well formed, and every
+  placement check ran in the wrong modulus for it.**~~ `MachineAddress` is 64 bits and
+  `Grass/Memory/Addressing.lean`'s `FitsAllocation` compares against `2 ^ 64`, so for a
+  32-bit space an allocation based at `2 ^ 32 - 16` with a 64-byte extent satisfied
+  `FitsAllocation`, `placementWraps` did not fire, and `distinct_allocations_do_not_alias`
+  yielded distinct machine addresses for two offsets that are the same byte in the space
+  the profile declared. The bridge a profile is meant to cite was discharged in 64-bit
+  arithmetic for a space that is not 64 bits.
+
+  Latent rather than live: an access at that offset must declare an address
+  `addressRepresentable` rejects in a 32-bit space. Latent in the way `Addressing.lean`
+  exists to worry about, and introduced the same day —
+  the theorem asserting a narrow space well formed was written to show that constraining
+  representation did not constrain width, which was true and was the defect.
+
+  `AddressSpace.WellFormed` requires exactly 64 bits now, which §9's versioned-extension
+  route licenses and which the module's own paragraph already argued in the other
+  direction. The alternative — making `FitsAllocation` and the placement checks take
+  the space — is what a future vocabulary version does, and it needs the resolved
+  `AddressSpace` in `denialOf`'s hand, which it does not have.
+
+  Two fixtures had to move off a narrow space, and both had become
+  two-clauses-away neighbours because of it:
+  `Tests/Memory/WellFormedClauses.lean`'s `rangeFitsSpace` pair now reaches past
+  `2 ^ 64` in the ordinary space, and `duplicate_space_vocabulary_is_rejected`'s two
+  entries differ in memory type — a field nothing here constrains, which is what a
+  duplication fixture needs. That fixture has now been rewritten twice for this reason,
+  which is itself worth noticing: a fixture that keeps needing a field nobody checks is
+  telling you the checks are catching up with it.
+- ~~**`AuditViolationClass.misaligned` was mandatory for every profile and nothing could
+  emit it.**~~ `denialOf` deliberately has no alignment branch, `refusalOf` returns
+  `denialOf`'s classes plus four fixed ones plus the providers', and `performAccess` and
+  `runStep` emit four more; none is this one. Review deleted the entry from
+  `emittedByTransition` and the tree stayed green. Under §8 an empty ledger is supposed
+  to mean something, and it meant nothing about alignment either way. The class stays for
+  a profile whose alignment rule is stricter than the declared demand, reached through
+  that profile's `AuthorityProvider`, which puts its class in the declared set without
+  help from the list. This is the second finding of that shape and `outOfBounds` was the
+  first, so `emittedByTransition` is now what its docstring says it is.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Four review rounds found the same shape and it is worth naming as a shape rather than
@@ -1795,7 +1841,7 @@ its entries one at a time.
 | `StepPolicy.authorities` | adds refusals only | `AuthorityProvider.refuses` is consulted *after* the transition's own clauses and cannot remove one; `refusalOf_refuses_the_unauthorized` is quantified over the policy |
 | `AuthorityProvider.refuses` | adds refusals only | takes a `MemoryState`, not a `MachineState`, so refusal cannot depend on execution history — monotonicity and locality in the range are still open |
 | `StepPolicy.compatible` | can remove a §7.3 refusal | `compatibleIsAtomic` and `compatibleSymm` are proof fields; `conflicts_of_not_atomic` is quantified over the policy |
-| `AddressSpace.repr` | **could remove two refusals** | `AccessDescriptor.WellFormedIn`'s `aligned` and `rangeFitsSpace` are both vacuous for a symbolic representation. `AddressSpace.RepresentationMatchesIdentity` now fixes the *kind* for every identity this layer names, so a table cannot call `cpu.virtual` symbolically addressed; width stays the profile's, bounded at 64 bits |
+| `AddressSpace.repr` | **could remove two refusals, then a third** | `AccessDescriptor.WellFormedIn`'s `aligned` and `rangeFitsSpace` are both vacuous for a symbolic representation, and `Addressing.lean`'s placement bridge ran in 64-bit arithmetic for any numeric width. `AddressSpace.RepresentationMatchesIdentity` fixes the kind for every identity this layer names, and `WellFormed` fixes the width at exactly 64 for this vocabulary version. Nothing about a space is a profile's choice now except which identity it declares |
 | `AddressSpace.memoryType`, `coherence`, `owner` | — | nothing reads them; §4.2 lists them among the facts the model carries and nothing consults |
 | `AdmittedVocabulary`'s twelve registries | admit more names | a larger registry admits more, which is the profile's own claim about its target; a *smaller* one refuses more, which is the safe direction |
 | `AdmittedVocabulary.WellFormed` | — | the address-space table is checked and the three justification registries are pairwise disjoint; the other nine have no coherence condition and need none |
@@ -2301,7 +2347,7 @@ the field belongs beside it as something that can only add.
   or its deletion.
 - **Ten declarations in `Grass/Memory/Event.lean` have no consumer**, including the
   whole published theory of `Conflicts` — `symm`, `not_conflicts_of_both_read`,
-  `not_conflicts_of_unshared`, `not_conflicts_of_different_space`,
+  `not_conflicts_of_unshared`, the since-deleted space one,
   `not_conflicts_of_untouched`, `atomicsAreNever` and its instance, `range_of_ofOutcome`,
   `ofOutcome_denied`, `committed?_denied`. Review deleted all ten and the build stayed
   green. `conflicts_symm` gives `symm` a consumer now; the rest are laws without

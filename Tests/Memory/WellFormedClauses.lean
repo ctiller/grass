@@ -151,22 +151,31 @@ theorem a_misaligned_address_is_refused :
     ¬ ({ store with address := .numeric 0x1004 } :
       AccessDescriptor).WellFormedIn space := by decide
 
+/-- A provenance designating more bytes than a 64-bit space has, rooted directly in
+the allocation so that `Provenance.extent` is the root extent. -/
+def hugeProvenance : Provenance :=
+  { prov with rootExtent := ⟨0, 2 ^ 64 + 8⟩, path := [] }
+
+/-- A store of every byte a 64-bit space could hold, and one more. -/
+def hugeStore : AccessDescriptor :=
+  { store with provenance := hugeProvenance, range := ⟨0, 2 ^ 64 + 1⟩ }
+
 /-- `rangeFitsSpace`: the range must fit the space's own width.
 
-The address is `0` rather than the baseline's `0x1000`, because `0x1000` is not
-representable in two bits either — the neighbour failed `addressRepresentable` as well,
-and the theorem held with `rangeFitsSpace` deleted. Review found it. `0` is
-representable and still satisfies the declared alignment of eight, so the width of the
-range is the only thing wrong with it. -/
+**Stated in the ordinary 64-bit space**, because a narrow one is no longer well formed:
+`AddressSpace.WellFormed` requires exactly 64 bits now, since `MachineAddress` and
+`FitsAllocation` are fixed at that width and a narrower space had its wrap check run in
+the wrong modulus. The neighbour used a two-bit space and would now fail
+`spaceWellFormed` as well, which is the two-clauses-away defect this file exists to not
+have. It reaches past `2 ^ 64` instead. -/
 theorem a_range_past_the_space_is_refused :
-    ¬ ({ store with address := .numeric 0, range := ⟨0, 8⟩ } :
-      AccessDescriptor).WellFormedIn { space with repr := .numeric 2 } := by decide
+    ¬ hugeStore.WellFormedIn space := by decide
 
-/-- The control for it: the same descriptor in the same two-bit space with a range
-that fits is well formed, so the refusal above is the width and not the space. -/
+/-- The control for it: the same descriptor with a range that fits is well formed, so
+the refusal above is the width of the range and not the provenance under it. -/
 theorem a_range_inside_the_space_is_admitted :
-    ({ store with address := .numeric 0, range := ⟨0, 2⟩ } :
-      AccessDescriptor).WellFormedIn { space with repr := .numeric 2 } := by decide
+    ({ hugeStore with range := ⟨0, 8⟩ } : AccessDescriptor).WellFormedIn space := by
+  decide
 
 /-- `atomicityAgrees`: the intent's atomicity and the requested ordering's are two
 records of one fact, and this is the clause tying them. §7.3's conflict rule reads

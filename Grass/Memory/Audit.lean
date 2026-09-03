@@ -195,9 +195,24 @@ The classes the generic transition relation can emit.
 A profile must declare all of these, which is what makes
 `AdmittedVocabulary.auditViolationClasses` a consulted registry rather than a
 field nothing reads. `StepPolicy` carries the proof.
+
+**`misaligned` was on this list and is not, because nothing emits it.** `denialOf`
+deliberately has no alignment branch -- `AccessDescriptor.WellFormedIn.aligned` rejects
+a misaligned access at the declaration, and `Grass/Memory/Apply.lean` argues that an
+unreachable branch looking like a check is worse than no branch. `refusalOf` returns
+`denialOf`'s classes, four fixed ones and the providers'; `performAccess` and `runStep`
+emit four more. None is this one. Review deleted the entry and the whole tree stayed
+green, which is what a mandatory declaration of an unemittable class is worth: under
+`docs/MEMORY_MODEL.md` §8 an empty ledger is supposed to mean something, and it said
+nothing about alignment either way.
+
+The class itself stays, for a profile whose own alignment rule is stricter than the
+declared demand. Such a profile supplies an `AuthorityProvider`, and
+`AuthorityProvider.emittedClasses` puts its class in the declared set without help from
+this list.
 -/
 def emittedByTransition : List AuditViolationClass :=
-  [outOfBounds, deadProvenance, permissionDenied, uninitializedRead, misaligned,
+  [outOfBounds, deadProvenance, permissionDenied, uninitializedRead,
    authorityUnavailable, obligationNotAuthorized, wrongAddressSpace,
    machineAnswerIncomplete, provenanceExtentMismatch, provenanceSourceMismatch,
    addressDisagreesWithPlacement, placementWraps, authorityEffectRefused,
