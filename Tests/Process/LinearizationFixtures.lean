@@ -114,6 +114,13 @@ theorem two_emitting_steps_are_never_independent
 
 /-! ## A step that does emit -/
 
+/-- The `Commits` the transition below is built from, named so the produced-trace
+laws can be stated at it. -/
+theorem beep_is_committed_here :
+    serverPlan.Commits beforeReceive afterBeep quietRunCoalesces.committed.observations :=
+  beep_is_committed.toCommits
+    (by simp [quietRunCoalesces, Grass.Process.Tests.Commit.beeps]) rfl
+
 /--
 A commit of a `beep`, as a transition.
 
@@ -130,9 +137,7 @@ existed there was nothing to supply, and a commit of an arbitrary observation wa
 a step of every network.
 -/
 def beepCommit : serverPlan.NetworkTransition beforeReceive afterBeep :=
-  .commit quietRunCoalesces.committed.observations
-    (beep_is_committed.toCommits
-      (by simp [quietRunCoalesces, Grass.Process.Tests.Commit.beeps]) rfl)
+  .commit quietRunCoalesces.committed.observations beep_is_committed_here
 
 /-- **And it emits** — the `Emits` predicate is inhabited at this plan. -/
 theorem the_commit_emits : beepCommit.Emits :=
@@ -192,5 +197,25 @@ theorem anything_independent_of_the_commit_is_silent
 theorem the_receive_is_silent_because_the_commit_emits :
     beforeReceive.observations = afterReceive.observations :=
   anything_independent_of_the_commit_is_silent the_commit_and_the_receive_are_independent
+
+/-! ## What the run produced, published and not -/
+
+/--
+**The commit publishes and produces nothing.**
+
+`ProcessPlan.commit_preserves_produced` at a concrete step: the `beep` was
+already produced — `beforeReceive` was holding it as pending — and committing it
+moves it across the boundary between the two traces without adding to their
+total. That is the sense in which a commit has provenance now and had none
+before `NetworkFragment.pending` existed.
+-/
+theorem the_commit_produces_nothing : afterBeep.produced = beforeReceive.produced :=
+  ProcessPlan.commit_preserves_produced beep_is_committed_here
+
+/-- And what it published was the whole of what had been produced. -/
+theorem the_beep_was_produced_before_it_was_published :
+    beforeReceive.produced = [Observation.beep] ∧ afterBeep.observations = [Observation.beep] :=
+  ⟨rfl, rfl⟩
+
 
 end Grass.Process.Tests.Linearization

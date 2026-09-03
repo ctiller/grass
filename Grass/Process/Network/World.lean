@@ -184,6 +184,31 @@ def Agrees (fragment : NetworkFragment topology)
   | .pending => left.pending = right.pending
   | .nominals => left.usedNominals = right.usedNominals
 
+/--
+Everything this network has produced: published and not yet published.
+
+The two trace fragments read as one. `observations` is what a driver has
+committed and `pending` is what processes have emitted and no driver has
+published, so their concatenation is the whole of what the program has said —
+and a commit moves the boundary between them without changing it.
+
+`Grass/Process/Trace/Linearization.lean`'s `produced_extends` is why this is
+worth a name: it grows by exactly what each step emits and by nothing else, so
+a commit publishes only what the run produced. Nothing about a single *world*
+says that — a world is a record and its `pending` can be anything — which is
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.66, and the answer is that the claim
+is about executions.
+-/
+def produced (network : LogicalProcessNetworkCore topology Message Obligations) :
+    Trace boundary.Observation :=
+  network.observations ++ network.pending
+
+/-- What has been committed is a prefix of what has been produced, always. -/
+theorem observations_prefix_produced
+    (network : LogicalProcessNetworkCore topology Message Obligations) :
+    network.observations <+: network.produced :=
+  ⟨network.pending, rfl⟩
+
 theorem agrees_refl (fragment : NetworkFragment topology)
     (network : LogicalProcessNetworkCore topology Message Obligations) :
     Agrees fragment network network := by

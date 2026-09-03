@@ -3033,7 +3033,7 @@ one — and a plan started with two different requests has two different progres
 arguments. Making it an index of the measure is the alternative and it is a
 signature change. Needs a ruling.
 
-### 10.66 Nothing says a world's pending trace is something a process produced
+### 10.66 ~~Nothing says a world's pending trace is something a process produced~~ — **closed**
 
 `NetworkFragment.pending` gave `Commits` the provenance it had none of, and the
 provenance is exactly `before.pending = emitted ++ after.pending`: a commit
@@ -3047,12 +3047,24 @@ whose `pending` is non-empty, and nothing states that a non-empty `pending` is
 something a step produced. `{network with pending := [observation]}` is a legal
 world of any plan and a commit of that observation is a legal step of it.
 
-The statement that would close it — `observations ++ pending` is exactly what the
-run's steps emitted — is about an *execution*, not a world, so it cannot be a
-field of the world or of a transition. It belongs beside
-`Grass/Process/Trace/Linearization.lean`'s `execution_observations_extend`, as a
-second execution law. Needs a ruling on whether that module or
-`Grass/Process/Network/Progress.lean`'s reachability owns it.
+The statement that closes it is about an *execution*, not a world, so it could
+not be a field of the world or of a transition — which is why the entry existed
+at all.
+
+`LogicalProcessNetworkCore.produced` is `observations ++ pending`, and
+`Grass/Process/Trace/Linearization.lean` carries the laws:
+`produced_extends` (every step grows it by exactly what it emitted, and by
+nothing else), `commit_preserves_produced` (publishing moves the boundary
+between the two traces and does not change their total),
+`execution_produced_extends`, and `commit_publishes_only_what_the_run_produced`.
+
+The claim is relative to whatever the execution started from, which is the right
+shape: a run begun at an `ExactInitialNetwork` starts with nothing committed and
+the root's projected start emission pending, so there the produced trace is
+exactly what the run emitted.
+`NetworkProgressMeasure.startIsInitial` is what ties a progress claim to that
+case, and `Tests/Process/LinearizationFixtures.lean` is the witness at a concrete
+commit.
 
 ### 10.67 `serverPlan` has no start with a measure, and `ProgressFixtures` is about a hypothesis nothing satisfies
 

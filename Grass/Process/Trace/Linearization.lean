@@ -280,6 +280,107 @@ theorem execution_observations_prefix {before after : plan.LogicalProcessNetwork
   obtain ⟨emitted, appended⟩ := execution_observations_extend execution
   exact ⟨emitted, appended.symm⟩
 
+/-! ## What a run has produced -/
+
+/--
+**The produced trace only ever grows, and a commit does not change it.**
+
+`LogicalProcessNetworkCore.produced` is `observations ++ pending`: everything the
+program has said, published or not. Every constructor either produces into
+`pending` — `processStep`, `spawn`, `restart` — or moves a prefix from `pending`
+to `observations`, which is `commit` and leaves the concatenation alone, or
+touches neither.
+
+This is the law `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.66 asks for, and the
+reason it could not be a field: nothing about a single *world* says its `pending`
+was produced by anything, because a world is a record and its `pending` can be
+any list. What is true is about *executions*, and this is the one-step form of
+it.
+
+Its payoff is `commit_publishes_only_what_the_run_produced` below: a commit
+appends to `observations` from `pending`, `produced` never shrinks, and so
+everything a run has committed at any point is part of what it produced starting
+from wherever it started.
+-/
+theorem produced_extends {before after : plan.LogicalProcessNetwork}
+    (transition : plan.NetworkTransition before after) :
+    ∃ emitted, after.produced = before.produced ++ emitted := by
+  by_cases emits : transition.Emits
+  · cases transition with
+    | processStep _ _ _ emitted _ _ step =>
+      refine ⟨emitted, ?_⟩
+      show after.observations ++ after.pending = before.observations ++ before.pending ++ emitted
+      rw [step.producesPending, ← step.scope .observations (by simp), List.append_assoc]
+    | spawn _ _ _ emitted _ step =>
+      refine ⟨emitted, ?_⟩
+      show after.observations ++ after.pending = before.observations ++ before.pending ++ emitted
+      rw [step.producesPending, ← step.scope .observations (by simp), List.append_assoc]
+    | restart _ _ _ emitted _ step =>
+      refine ⟨emitted, ?_⟩
+      show after.observations ++ after.pending = before.observations ++ before.pending ++ emitted
+      rw [step.producesPending, ← step.scope .observations (by simp), List.append_assoc]
+    | commit emitted step =>
+      refine ⟨[], ?_⟩
+      show after.observations ++ after.pending = before.observations ++ before.pending ++ []
+      rw [step.appended, step.earned, List.append_nil, List.append_assoc]
+    | _ => exact absurd emits (by simp [NetworkTransition.Emits, NetworkTransition.scope])
+  · refine ⟨[], ?_⟩
+    have samePending := transition.touchesOnly .pending emits
+    have sameObservations := trace_unchanged_of_silent transition emits
+    show after.observations ++ after.pending = before.observations ++ before.pending ++ []
+    rw [← samePending, ← sameObservations, List.append_nil]
+
+/--
+**A commit changes nothing about what has been produced.**
+
+The half of `produced_extends` worth naming on its own: publishing is a move
+across the boundary between the two traces, not an addition to either side's
+total. It is what makes `produced` the right thing to state a growth law about —
+a law about `observations` alone would be satisfied by a plan that never
+commits, and a law about `pending` alone is false, because a commit shrinks it.
+-/
+theorem commit_preserves_produced {before after : plan.LogicalProcessNetwork}
+    {emitted : Trace boundary.Observation} (step : plan.Commits before after emitted) :
+    after.produced = before.produced := by
+  show after.observations ++ after.pending = before.observations ++ before.pending
+  rw [step.appended, step.earned, List.append_assoc]
+
+/-- **And across a whole execution**, by the same argument. -/
+theorem execution_produced_extends {before after : plan.LogicalProcessNetwork}
+    (execution : plan.StepsTo before after) :
+    ∃ emitted, after.produced = before.produced ++ emitted := by
+  induction execution with
+  | still => exact ⟨[], (List.append_nil _).symm⟩
+  | more _ step ih =>
+    obtain ⟨earlier, upToHere⟩ := ih
+    obtain ⟨segment, lastStep⟩ := produced_extends step.transition
+    exact ⟨earlier ++ segment, by rw [lastStep, upToHere, List.append_assoc]⟩
+
+/--
+**So a run publishes nothing it did not produce.**
+
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.66's claim, at the layer it belongs to.
+`Commits.earned` says a commit publishes what is *pending*; this says what is
+pending was produced by the run rather than being a value in a record. Together
+they are the provenance the commit transition had none of before
+`NetworkFragment.pending` existed — when a commit of an arbitrary observation was
+a legal step of every network, which made
+`Grass/Process/Network/Progress.lean`'s `AtFrontier` empty for every measure.
+
+Note what it is relative to: whatever the execution started from. A run begun at
+an `ExactInitialNetwork` starts with `observations = []` and `pending` the root's
+projected start emission, so there the produced trace is exactly what the run
+emitted; a run begun anywhere else inherits whatever that world claimed.
+`Grass/Process/Network/Progress.lean`'s `startIsInitial` is what ties a progress
+claim to the first case.
+-/
+theorem commit_publishes_only_what_the_run_produced
+    {start network : plan.LogicalProcessNetwork} (execution : plan.StepsTo start network) :
+    ∃ emitted, network.produced = start.produced ++ emitted ∧
+      network.observations <+: start.produced ++ emitted := by
+  obtain ⟨emitted, grew⟩ := execution_produced_extends execution
+  exact ⟨emitted, grew, grew ▸ network.observations_prefix_produced⟩
+
 /-! ## What independence buys at the trace -/
 
 /--
