@@ -248,6 +248,10 @@ inductive Alpha where
   | handOn
   /-- A store lending under a grant kind this profile never declared. -/
   | lendInventedKind
+  /-- A store handing the release duty to a context the machine has never seen. -/
+  | handDutyToAStranger
+  /-- The same, to the device engine, which the machine has seen. -/
+  | handDutyToTheEngine
 deriving DecidableEq, Repr
 
 /-- The divide-error fault this family can raise. Named so the fixtures can
@@ -462,6 +466,18 @@ instance : HasOperationFacets Alpha where
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
             false true [] false thread₀
             [.issue lentSlot { declaredLoan with kind := inventedKind }]))
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .handDutyToAStranger =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true
+            [.transfer bufferProtocol bufferAuthority releaseObligationId engine₁]))
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .handDutyToTheEngine =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true
+            [.transfer bufferProtocol bufferAuthority releaseObligationId engine₀]))
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .dischargeWithWrongAuthority =>
@@ -1239,7 +1255,7 @@ theorem both_creates_are_individually_applicable :
       (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
         Obligation.owner)
       (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
-        Obligation.kind) thread₀
+        Obligation.kind) [thread₀, engine₀] thread₀
       (.create bufferProtocol bufferAuthority collidingFirst) ∧
     LedgerDelta.Applicable ((FiniteMap.empty : FiniteMap ObligationId Obligation).domain)
       (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
@@ -1247,13 +1263,14 @@ theorem both_creates_are_individually_applicable :
       (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
         Obligation.owner)
       (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
-        Obligation.kind) thread₀
+        Obligation.kind) [thread₀, engine₀] thread₀
       (.create bufferProtocol bufferAuthority collidingSecond) := by decide
 
 /-- Together in one effect they are not applicable, because the second is checked
 against the ledger the first left. -/
 theorem the_pair_is_not_applicable :
-    ¬ LedgerEffectApplicable (FiniteMap.empty : FiniteMap ObligationId Obligation) thread₀
+    ¬ LedgerEffectApplicable (FiniteMap.empty : FiniteMap ObligationId Obligation)
+      [thread₀, engine₀] thread₀
       [ .create bufferProtocol bufferAuthority collidingFirst
       , .create bufferProtocol bufferAuthority collidingSecond ] := by decide
 
@@ -1537,7 +1554,7 @@ theorem the_split_source_is_live :
 
 /-- **A split onto the source's own identity is refused** — the freshness half. -/
 theorem a_relabelling_split_is_refused :
-    ¬ Grass.Op.LedgerEffectApplicable ledger₁ thread₀
+    ¬ Grass.Op.LedgerEffectApplicable ledger₁ [thread₀, engine₀] thread₀
       [.split bufferProtocol bufferAuthority releaseObligationId
         [{ id := releaseObligationId, kind := .closeHandle
            protocol := bufferProtocol, owner := thread₀ }]] := by decide
@@ -1545,7 +1562,7 @@ theorem a_relabelling_split_is_refused :
 /-- **A split onto a fresh identity with a different kind is refused too** — the half
 freshness does not catch, and the one that mattered. -/
 theorem a_relabelling_split_under_a_fresh_id_is_refused :
-    ¬ Grass.Op.LedgerEffectApplicable ledger₁ thread₀
+    ¬ Grass.Op.LedgerEffectApplicable ledger₁ [thread₀, engine₀] thread₀
       [.split bufferProtocol bufferAuthority releaseObligationId
         [{ id := ghostObligationId, kind := .closeHandle
            protocol := bufferProtocol, owner := thread₀ }]] := by decide
@@ -1553,7 +1570,7 @@ theorem a_relabelling_split_under_a_fresh_id_is_refused :
 /-- The same split keeping the source's kind is applicable, so the two refusals above
 are the identity and the kind and not some other clause. -/
 theorem a_faithful_split_is_applicable :
-    Grass.Op.LedgerEffectApplicable ledger₁ thread₀
+    Grass.Op.LedgerEffectApplicable ledger₁ [thread₀, engine₀] thread₀
       [.split bufferProtocol bufferAuthority releaseObligationId
         [{ id := ghostObligationId, kind := .releaseAllocation
            protocol := bufferProtocol, owner := thread₀ }]] := by decide
@@ -1562,13 +1579,13 @@ theorem a_faithful_split_is_applicable :
 other direction: joining a `releaseAllocation` duty into a `closeHandle` one is
 refused, and into a duty of its own kind is not. -/
 theorem a_relabelling_join_is_refused :
-    ¬ Grass.Op.LedgerEffectApplicable ledger₁ thread₀
+    ¬ Grass.Op.LedgerEffectApplicable ledger₁ [thread₀, engine₀] thread₀
       [.join bufferProtocol bufferAuthority [releaseObligationId]
         { id := ghostObligationId, kind := .closeHandle
           protocol := bufferProtocol, owner := thread₀ }] := by decide
 
 theorem a_faithful_join_is_applicable :
-    Grass.Op.LedgerEffectApplicable ledger₁ thread₀
+    Grass.Op.LedgerEffectApplicable ledger₁ [thread₀, engine₀] thread₀
       [.join bufferProtocol bufferAuthority [releaseObligationId]
         { id := ghostObligationId, kind := .releaseAllocation
           protocol := bufferProtocol, owner := thread₀ }] := by decide
@@ -2523,6 +2540,49 @@ theorem the_forged_lend_is_refused_on_the_map :
       (.issue lentSlot { declaredLoan with lender := engine₀ }) = Option.none ∧
     (state₀.memory.applyAuthorityDelta? engine₀
       (.issue lentSlot { declaredLoan with lender := engine₀ })).isSome := by
+  exact ⟨by decide, by decide⟩
+
+/-! ## A duty may not be handed to a context that does not exist
+
+`LedgerDelta.Applicable`'s transfer clause checked liveness, protocol and the actor's
+ownership, and said nothing about `newOwner` — so a duty could be handed to an
+identity no context ever had, after which nothing could ever discharge it, because
+discharge requires the actor to own it. `docs/OBLIGATIONS.md` §3's terminal
+disposition is then false of that ledger under every execution: a way to strand a
+duty permanently rather than a way to drop one. §4.4.1 recorded the gap and named
+`MachineState.contexts` as the set to check against.
+
+**What the machine knows is what has executed.** `contexts` is populated by
+`noteContext`, so a context that has never stepped is not a destination. That is the
+conservative reading and it has a cost: handing a duty to a thread before it runs is
+refused. `docs/FOUNDATION.md` law 8 prefers the refusal to a permissive default, and
+a profile that needs the other behaviour has to say so.
+-/
+
+/-- The thread reserves, then hands its duty to a context the machine has never
+seen. **Refused**, and the duty survives. -/
+theorem a_duty_may_not_be_handed_to_a_stranger :
+    ∀ s, (stepAlpha state₀ .reserve).state? = some s →
+      ∀ t, (stepAlpha s .handDutyToAStranger).state? = some t →
+        (t.obligations.lookup releaseObligationId).map Obligation.owner = some thread₀ ∧
+        ¬ t.violations.IsEmpty := by
+  intro s hs t ht
+  cases hs
+  cases ht
+  exact ⟨by decide, by decide⟩
+
+/-- **And to a context it has seen, it goes through**, so the refusal is the
+destination rule and not a ban on transfer. The engine has stepped by then. -/
+theorem a_duty_may_be_handed_to_a_known_context :
+    ∀ s, (stepAlpha state₀ .reserve).state? = some s →
+      ∀ t, (stepBeta s .dmaWrite).state? = some t →
+        ∀ u, (stepAlpha t .handDutyToTheEngine).state? = some u →
+          (u.obligations.lookup releaseObligationId).map Obligation.owner = some engine₀ ∧
+          u.violations.recordCount = t.violations.recordCount := by
+  intro s hs t ht u hu
+  cases hs
+  cases ht
+  cases hu
   exact ⟨by decide, by decide⟩
 
 /-- **A grant kind the profile never declared is not admitted.**

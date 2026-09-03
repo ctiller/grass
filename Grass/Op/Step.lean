@@ -566,22 +566,24 @@ and loses a duty. Threading `applyDelta` through both makes applicability and
 application walk one evolution, so checking the first tells you about the second.
 -/
 def LedgerEffectApplicable (obligations : FiniteMap ObligationId Obligation)
-    (actor : ContextId) : LedgerEffect → Prop
+    (contexts : List ContextId) (actor : ContextId) : LedgerEffect → Prop
   | [] => True
   | delta :: rest =>
       LedgerDelta.Applicable obligations.domain
         (fun id => (obligations.lookup id).map Obligation.protocol)
         (fun id => (obligations.lookup id).map Obligation.owner)
-        (fun id => (obligations.lookup id).map Obligation.kind) actor delta ∧
-      LedgerEffectApplicable (applyDelta obligations delta) actor rest
+        (fun id => (obligations.lookup id).map Obligation.kind) contexts actor delta ∧
+      LedgerEffectApplicable (applyDelta obligations delta) contexts actor rest
 
 instance decLedgerEffectApplicable (obligations : FiniteMap ObligationId Obligation)
-    (actor : ContextId) :
-    (effect : LedgerEffect) → Decidable (LedgerEffectApplicable obligations actor effect)
+    (contexts : List ContextId) (actor : ContextId) :
+    (effect : LedgerEffect) →
+      Decidable (LedgerEffectApplicable obligations contexts actor effect)
   | [] => .isTrue trivial
   | delta :: rest =>
-      have : Decidable (LedgerEffectApplicable (applyDelta obligations delta) actor rest) :=
-        decLedgerEffectApplicable (applyDelta obligations delta) actor rest
+      have : Decidable
+          (LedgerEffectApplicable (applyDelta obligations delta) contexts actor rest) :=
+        decLedgerEffectApplicable (applyDelta obligations delta) contexts actor rest
       inferInstanceAs (Decidable (_ ∧ _))
 
 /-- Apply a whole effect, one delta at a time. -/
@@ -637,7 +639,8 @@ def refusalOf (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor
   match denialOf state.memory d with
   | some class_ => some class_
   | Option.none =>
-      if ¬ LedgerEffectApplicable state.obligations d.context d.ledgerEffect then
+      if ¬ LedgerEffectApplicable state.obligations state.contexts.domain d.context
+          d.ledgerEffect then
         some .obligationNotAuthorized
       else if (state.memory.applyAuthorityEffect? d.context d.authorityEffect).isNone then
         some .authorityEffectRefused
@@ -1387,7 +1390,8 @@ theorem ledger_refusal_is_recorded (policy : StepPolicy) (state : MachineState)
     (hevent : MemoryEvent.ofOutcome state.eventSupply.fresh.1 contextKind cause space d
       outcome = some valid)
     (hallowed : denialOf state.memory d = Option.none)
-    (hledger : ¬ LedgerEffectApplicable state.obligations d.context d.ledgerEffect) :
+    (hledger : ¬ LedgerEffectApplicable state.obligations state.contexts.domain d.context
+      d.ledgerEffect) :
     (performAccess policy state d outcome contextKind cause).violations.recordCount =
       state.violations.recordCount + 1 := by
   unfold performAccess

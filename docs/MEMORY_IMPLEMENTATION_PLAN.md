@@ -760,10 +760,22 @@ one outright defect that had already merged — see §3.11's denial row.
   by `insert` and `erase`. That is an invariant holding because no code exercises the
   case, protected by an unrelated privacy decision in another module with no theorem
   linking the two.
-- **A duty can be transferred to a context that names no live context**, after which
+- ~~**A duty can be transferred to a context that names no live context**, after which
   it can never be discharged, since discharge requires the actor to own it.
   `LedgerDelta.Applicable`'s transfer clause ignores `newOwner` entirely.
-  `Grass/Op/Step.lean` has `MachineState.contexts` and could check it there.
+  `Grass/Op/Step.lean` has `MachineState.contexts` and could check it there.~~ Closed
+  the way this entry said to: `Applicable` takes the context set and the transfer
+  clause requires `newOwner ∈ contexts`, which `Grass/Op/Step.lean` supplies from
+  `MachineState.contexts.domain`.
+
+  **What the machine knows is what has executed.** `contexts` is populated by
+  `noteContext`, so a context that has never stepped is not a destination, and handing
+  a duty to a thread before it runs is refused. That is the conservative reading and
+  the cost is real; [FOUNDATION.md](FOUNDATION.md) law 8 prefers it to a permissive
+  default, and a profile needing the other behaviour has to say so. The two fixtures
+  are the pair: a transfer to a context the machine has never seen is refused and the
+  duty survives with its owner unchanged, and the same transfer to the device engine
+  goes through once the engine has stepped.
 - **`Grass/Memory/Shape.lean`'s `writeField` is unbounded by the allocation.** It
   truncates to the field's size and checks nothing about `base + field.range.start`
   against the extent, and `MemoryState.write` writes into an unbounded journal. Not
