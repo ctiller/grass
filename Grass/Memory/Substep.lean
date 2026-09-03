@@ -229,6 +229,47 @@ def visibleEffects? (seq : SubstepSequence) (failedAt : Nat) :
   | .profileSpecific _ => Option.none
 
 /--
+**Every surviving access is one of the sequence's own.**
+
+Obvious, and it was missing, which cost a law: `Grass/Op/Step.lean` could not state
+that a whole `runStep` leaves the authority map alone when no descriptor declares a
+change, because the faulting branches run this function and nothing related its
+answer to `accesses`. A hypothesis quantified over `seq.accesses` could not be
+discharged for the survivors.
+
+Both branches are `⊆`: `priorEffectsVisible` takes a prefix and `transactional`
+takes nothing. `profileSpecific` has no answer at all, and a caller reaching that
+case has already been rejected.
+-/
+theorem mem_accesses_of_mem_visibleEffects? {seq : SubstepSequence} {failedAt : Nat}
+    {survivors : List AccessDescriptor} (h : seq.visibleEffects? failedAt = some survivors)
+    {d : AccessDescriptor} (hmem : d ∈ survivors) : d ∈ seq.accesses := by
+  unfold visibleEffects? at h
+  split at h
+  · injection h with h
+    subst h
+    obtain ⟨substep, hsub, hd⟩ := List.mem_filterMap.mp hmem
+    exact List.mem_filterMap.mpr ⟨substep, List.mem_of_mem_take hsub, hd⟩
+  · injection h with h
+    subst h
+    exact absurd hmem (by simp)
+  · exact absurd h (by simp)
+
+/-- And the faulting substep's own descriptor is one of them, which the faulting
+branch of `Grass/Op/Step.lean`'s `runStep` needs for the same reason. -/
+theorem mem_accesses_of_substep {seq : SubstepSequence} {index : Nat}
+    {d : AccessDescriptor} (h : seq.substeps[index]? = some (.access d)) :
+    d ∈ seq.accesses :=
+  List.mem_filterMap.mpr ⟨.access d, List.mem_of_getElem? h, rfl⟩
+
+/-- The form a caller with a hypothesis over the whole sequence wants. -/
+theorem forall_visibleEffects?_of_forall_accesses {seq : SubstepSequence} {failedAt : Nat}
+    {survivors : List AccessDescriptor} (h : seq.visibleEffects? failedAt = some survivors)
+    {motive : AccessDescriptor → Prop} (hall : ∀ d ∈ seq.accesses, motive d) :
+    ∀ d ∈ survivors, motive d :=
+  fun d hmem => hall d (mem_accesses_of_mem_visibleEffects? h hmem)
+
+/--
 Whether the faulting substep's *own* committed prefix survives.
 
 `visibleEffects?` answers for the substeps before the failure. This answers for

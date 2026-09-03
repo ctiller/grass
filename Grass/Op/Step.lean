@@ -1575,6 +1575,55 @@ theorem runAccesses_preserves_authority_of_no_effects (policy : StepPolicy)
         exact performAccess_preserves_authority_of_no_effect policy state d _ contextKind
           cause hhead
 
+/--
+**And a whole step makes none**, however it faults.
+
+The law `runAccesses_preserves_authority_of_no_effects` could not reach when it was
+written: the faulting branches run `SubstepSequence.visibleEffects?`, and nothing
+related its answer to the sequence's own accesses, so a hypothesis quantified over
+`sequence.accesses` could not be discharged for the survivors.
+`SubstepSequence.mem_accesses_of_mem_visibleEffects?` and `mem_accesses_of_substep`
+are the two lemmas that were missing — the survivors are a prefix of the sequence's
+accesses, and the faulting substep's own descriptor is one of them.
+
+With them, this holds for every fault plan: no plan, a fault whose visibility rule
+belongs to a profile (where the step does nothing at all), a fault whose survivors
+stop at a denial, and a fault whose own substep commits a partial write.
+-/
+theorem runStep_preserves_authority_of_no_effects (policy : StepPolicy)
+    (state : MachineState) (sequence : SubstepSequence) (context : ContextId)
+    (contextKind : ContextKind) (cause : EventCause) (plan : FaultPlan sequence)
+    (h : ∀ d ∈ sequence.accesses, d.authorityEffect = []) :
+    (runStep policy state sequence context contextKind cause plan).memory.grantEntries =
+      state.memory.grantEntries := by
+  unfold runStep
+  split
+  · exact runAccesses_preserves_authority_of_no_effects policy contextKind cause _ state h
+  · next index fault reads writes =>
+    split
+    · rfl
+    · next survivors hvisible =>
+      have hsurvivors : ∀ d ∈ survivors, d.authorityEffect = [] :=
+        SubstepSequence.forall_visibleEffects?_of_forall_accesses hvisible h
+      have hrun : (runAccesses policy state survivors contextKind cause).memory.grantEntries
+          = state.memory.grantEntries :=
+        runAccesses_preserves_authority_of_no_effects policy contextKind cause _ state
+          hsurvivors
+      dsimp only
+      split
+      · exact hrun
+      · split
+        · next d hsubstep =>
+          have hd : d.authorityEffect = [] :=
+            h d (SubstepSequence.mem_accesses_of_substep hsubstep)
+          split
+          · split
+            · exact hrun
+            · exact (performAccess_preserves_authority_of_no_effect policy _ d _ contextKind
+                cause hd).trans hrun
+          · exact hrun
+        · exact hrun
+
 /-- Performing an access extends the violation ledger; it never shortens it.
 This is the per-access form of the invariant `docs/MEMORY_MODEL.md` §8 names, and
 the one the ledger type deliberately does not try to enforce by construction. -/

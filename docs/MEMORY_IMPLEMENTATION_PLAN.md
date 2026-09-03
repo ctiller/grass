@@ -1689,10 +1689,16 @@ refuses everything.
   half of "authority is not data", since the committing branch applies the effect and
   then writes bytes on top.
 
-  `runStep` is *not* covered, and the reason is a missing lemma rather than a missing
-  law: its faulting branches run `SubstepSequence.visibleEffects?`, and nothing
-  relates a survivor list to the sequence's own accesses, so the hypothesis cannot be
-  discharged for the surviving prefix. That lemma is owed.
+  `runStep` is covered too, once the missing lemma was written. Its faulting branches
+  run `SubstepSequence.visibleEffects?`, and nothing related a survivor list to the
+  sequence's own accesses, so the hypothesis could not be discharged for the surviving
+  prefix. `mem_accesses_of_mem_visibleEffects?` is that relation — both branches are
+  `⊆`, since `priorEffectsVisible` takes a prefix and `transactional` takes nothing —
+  and `mem_accesses_of_substep` is its companion for the faulting substep's own
+  descriptor, which the branch that commits a partial write needs.
+  `runStep_preserves_authority_of_no_effects` holds for every fault plan: no plan, a
+  profile-owned visibility rule where the step does nothing, survivors that stop at a
+  denial, and a faulting substep that commits.
 - ~~**A fixture could outlive the claim it was built for.**~~ `Tools/FixtureAudit.py`
   is the eighth gate, over the one place `ConsultedAudit.py` and
   `ReachabilityAudit.py` do not look: a `def` under `Tests/` that nothing uses. Two
