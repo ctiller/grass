@@ -1,20 +1,19 @@
-//! Scalar and collection types from AGENT_BUS_SCHEMA.md section 1.
-//!
-//! Several accessors here (`into_string`, `StringSet::{as_slice,len,is_empty}`,
-//! `ObjectId::expected_len`, ...) exist to mirror the schema's type vocabulary
-//! completely, but are not yet all called from the current CLI surface.
+//! Validated scalar and collection types shared across the schema: agent
+//! identities, event ids, git object ids, timestamps, refs, and the bounded
+//! text fields event payloads are built from. Every type here is a thin,
+//! validated wrapper over `String` (or a `Vec` for sets), transparently
+//! (de)serialized as its underlying JSON representation, so a malformed
+//! value can never silently enter a typed struct -- it fails to parse.
+
 #![allow(dead_code)]
 
-use crate::error::{invalid, AbError, AbResult};
+use crate::error::{invalid, AbResult};
 use serde::de::Error as DeError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
-fn byte_len(s: &str) -> usize {
-    s.len()
-}
-
-/// A newtype over `String` with a validated grammar, transparently (de)serialized as JSON strings.
+/// A newtype over `String` with a validated grammar, transparently
+/// (de)serialized as a JSON string.
 macro_rules! validated_string {
     ($name:ident, $doc:expr) => {
         #[doc = $doc]
@@ -57,7 +56,7 @@ macro_rules! validated_string {
     };
 }
 
-validated_string!(Agent, "Agent name: `[a-z][a-z0-9-]{0,47}`");
+validated_string!(Agent, "Agent identity name: `[a-z][a-z0-9-]{0,47}`.");
 
 impl Agent {
     pub fn parse(s: String) -> AbResult<Self> {
@@ -68,12 +67,19 @@ impl Agent {
         Ok(Agent(s))
     }
 
+    /// Names beginning with `_` are reserved for the helper's own use
+    /// (operational state, not a real identity) -- the grammar above already
+    /// excludes them, but a caller assembling a name from untrusted parts
+    /// before validating benefits from a direct check too.
     pub fn is_reserved(s: &str) -> bool {
         s.starts_with('_')
     }
 }
 
-validated_string!(EventId, "`<Agent>:<canonical u64>`");
+validated_string!(
+    EventId,
+    "`<Agent>:<seq>`, where `seq` is a canonical (no leading zero) `u64`."
+);
 
 impl EventId {
     pub fn parse(s: String) -> AbResult<Self> {
@@ -97,19 +103,19 @@ impl EventId {
     }
 
     pub fn agent(&self) -> Agent {
-        let (a, _) = self.0.split_once(':').unwrap();
+        let (a, _) = self.0.split_once(':').expect("grammar guarantees a colon");
         Agent(a.to_string())
     }
 
     pub fn seq(&self) -> u64 {
-        let (_, s) = self.0.split_once(':').unwrap();
-        s.parse().unwrap()
+        let (_, s) = self.0.split_once(':').expect("grammar guarantees a colon");
+        s.parse().expect("grammar guarantees a valid u64")
     }
 }
 
 validated_string!(
     ObjectId,
-    "lowercase hexadecimal full Git object ID (sha1: 40 hex, sha256: 64 hex)"
+    "Lowercase hexadecimal full git object id (sha1: 40 hex, sha256: 64 hex)."
 );
 
 impl ObjectId {
@@ -136,7 +142,7 @@ impl ObjectId {
 
 validated_string!(
     Timestamp,
-    "UTC `YYYY-MM-DDTHH:MM:SSZ`, no fractional seconds"
+    "UTC `YYYY-MM-DDTHH:MM:SSZ`, no fractional seconds."
 );
 
 impl Timestamp {
@@ -145,7 +151,6 @@ impl Timestamp {
         if !re.is_match(&s) {
             return Err(invalid(format!("invalid timestamp: {s:?}")));
         }
-        // Reject impossible calendar values by round-tripping through `time`.
         let fmt = time::format_description::well_known::Rfc3339;
         time::OffsetDateTime::parse(&s, &fmt)
             .map_err(|e| invalid(format!("invalid timestamp {s:?}: {e}")))?;
@@ -154,7 +159,7 @@ impl Timestamp {
 
     pub fn now_utc() -> Self {
         let now = time::OffsetDateTime::now_utc();
-        let s = format!(
+        Timestamp(format!(
             "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
             now.year(),
             u8::from(now.month()),
@@ -162,18 +167,17 @@ impl Timestamp {
             now.hour(),
             now.minute(),
             now.second()
-        );
-        Timestamp(s)
+        ))
     }
 }
 
-validated_string!(Branch, "full ref accepted by `git check-ref-format`");
+validated_string!(Branch, "A full ref accepted by `git check-ref-format`.");
 
 impl Branch {
     /// Syntactic validation approximating `git check-ref-format --normalize`,
-    /// then confirmed against the real `git check-ref-format` (every
+    /// then confirmed against the real `git check-ref-format` -- every
     /// deployment of this tool already hard-depends on a `git` binary, so
-    /// this adds no new external dependency).
+    /// this adds no new external dependency.
     pub fn parse(s: String) -> AbResult<Self> {
         if !s.starts_with("refs/") {
             return Err(invalid(format!("branch must start with refs/: {s:?}")));
@@ -220,7 +224,7 @@ impl Branch {
 
 validated_string!(
     Topic,
-    "lowercase alphanumeric/hyphen, begins/ends alphanumeric, length 1..64"
+    "Lowercase alphanumeric/hyphen, begins/ends alphanumeric, length 1..64."
 );
 
 impl Topic {
@@ -235,12 +239,17 @@ impl Topic {
 
 validated_string!(
     PathClaim,
-    "repo-relative exact path or directory prefix ending `/**`"
+    "Repo-relative exact path, or a directory prefix ending `/**`."
 );
 
 impl PathClaim {
+    /// Only one glob-like construct is permitted at all: one literal
+    /// trailing `/**`. Any other glob character (`*`, `?`, `[`, `]`) --
+    /// including inside that trailing component itself, e.g. `a/**/b` -- is
+    /// rejected, since `overlaps` below treats the string as a plain
+    /// prefix/exact match and a real glob would silently match nothing.
     pub fn parse(s: String) -> AbResult<Self> {
-        if s.is_empty() || s.starts_with('/') || s.ends_with('/') && !s.ends_with("/**") {
+        if s.is_empty() || s.starts_with('/') || (s.ends_with('/') && !s.ends_with("/**")) {
             return Err(invalid(format!("invalid path claim: {s:?}")));
         }
         let stripped = s.strip_suffix("/**").unwrap_or(&s);
@@ -252,20 +261,9 @@ impl PathClaim {
                 return Err(invalid(format!("invalid path claim component in {s:?}")));
             }
         }
-        if s.contains('\\') {
-            return Err(invalid(format!("invalid path claim: {s:?}")));
-        }
-        // AGENT_BUS.md section 6.2: "exact file paths or directory prefixes
-        // ending in /**; arbitrary globs ... are forbidden. This makes
-        // overlap deterministic." The only glob-like construct permitted at
-        // all is that one literal trailing "/**"; a "*", "?", or "[" anywhere
-        // (including inside the trailing "/**" component itself, e.g.
-        // "a/**/b") is a different, unsupported glob and must be rejected —
-        // `overlaps()` below treats the string as a plain prefix/exact match,
-        // and a real glob character would silently make it match nothing.
-        if stripped.contains(['*', '?', '[', ']']) {
+        if s.contains('\\') || stripped.contains(['*', '?', '[', ']']) {
             return Err(invalid(format!(
-                "path claim contains an unsupported glob character: {s:?}"
+                "path claim contains an unsupported character or glob: {s:?}"
             )));
         }
         Ok(PathClaim(s))
@@ -286,11 +284,11 @@ impl PathClaim {
     }
 }
 
-validated_string!(Short, "UTF-8 string of 1..256 bytes after JSON decoding");
+validated_string!(Short, "UTF-8 string of 1..256 bytes after JSON decoding.");
 
 impl Short {
     pub fn parse(s: String) -> AbResult<Self> {
-        let n = byte_len(&s);
+        let n = s.len();
         if !(1..=256).contains(&n) {
             return Err(invalid(format!("Short out of bounds ({n} bytes): {s:?}")));
         }
@@ -298,11 +296,11 @@ impl Short {
     }
 }
 
-validated_string!(Text, "UTF-8 string of 0..4096 bytes after JSON decoding");
+validated_string!(Text, "UTF-8 string of 0..4096 bytes after JSON decoding.");
 
 impl Text {
     pub fn parse(s: String) -> AbResult<Self> {
-        let n = byte_len(&s);
+        let n = s.len();
         if n > 4096 {
             return Err(invalid(format!("Text out of bounds ({n} bytes)")));
         }
@@ -310,9 +308,14 @@ impl Text {
     }
 }
 
-/// JSON array of unique `T`, byte-lexicographically sorted by `T::as_ref::<str>()`.
+/// JSON array of unique `T`, byte-lexicographically sorted by
+/// `T::as_ref::<str>()`. Rejects an unsorted or duplicate-containing array
+/// at deserialize time rather than silently normalizing it, so a
+/// hand-crafted payload can never disagree with its own canonical encoding.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StringSet<T>(Vec<T>);
+
+pub const MAX_ARRAY_LEN: usize = 256;
 
 impl<T> StringSet<T> {
     pub fn iter(&self) -> impl Iterator<Item = &T> {
@@ -333,17 +336,6 @@ impl<T> StringSet<T> {
 }
 
 impl<T: AsRef<str> + Ord> StringSet<T> {
-    pub fn from_sorted_unique(mut v: Vec<T>) -> AbResult<Self> {
-        v.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
-        for w in v.windows(2) {
-            if w[0].as_ref() == w[1].as_ref() {
-                return Err(invalid(format!("duplicate set member: {}", w[0].as_ref())));
-            }
-        }
-        Ok(StringSet(v))
-    }
-
-    /// Build a canonical StringSet from arbitrary input, sorting and de-duplicating.
     pub fn build(mut v: Vec<T>) -> Self {
         v.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
         v.dedup_by(|a, b| a.as_ref() == b.as_ref());
@@ -378,10 +370,6 @@ impl<T: Serialize> Serialize for StringSet<T> {
     }
 }
 
-/// AGENT_BUS_SCHEMA.md section 1: "Array length is at most 256 unless a
-/// narrower bound is stated."
-pub const MAX_ARRAY_LEN: usize = 256;
-
 impl<'de, T: Deserialize<'de> + AsRef<str> + Ord> Deserialize<'de> for StringSet<T> {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let v: Vec<T> = Vec::deserialize(d)?;
@@ -405,10 +393,6 @@ where
     }
 }
 
-pub fn err_from<E: Into<AbError>>(e: E) -> AbError {
-    e.into()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -419,9 +403,6 @@ mod tests {
         assert!(Agent::parse("alice-2".into()).is_ok());
         assert!(Agent::parse("Alice".into()).is_err());
         assert!(Agent::parse("2alice".into()).is_err());
-        // The grammar's leading `[a-z]` already excludes `_`-prefixed names;
-        // `is_reserved` is a defense-in-depth check for callers that build a
-        // name from untrusted parts before validating against the grammar.
         assert!(Agent::parse("_reserved".into()).is_err());
         assert!(Agent::is_reserved("_reserved"));
     }
@@ -441,6 +422,26 @@ mod tests {
     }
 
     #[test]
+    fn object_id_grammar() {
+        assert!(ObjectId::parse("a".repeat(40)).is_ok());
+        assert!(ObjectId::parse("a".repeat(64)).is_ok());
+        assert!(ObjectId::parse("a".repeat(41)).is_err());
+        assert!(ObjectId::parse("A".repeat(40)).is_err());
+        assert_eq!(ObjectId::expected_len("sha1"), Some(40));
+        assert_eq!(ObjectId::expected_len("sha256"), Some(64));
+        assert_eq!(ObjectId::expected_len("nonsense"), None);
+    }
+
+    #[test]
+    fn timestamp_grammar() {
+        assert!(Timestamp::parse("2026-09-02T12:00:00Z".into()).is_ok());
+        assert!(Timestamp::parse("2026-02-30T12:00:00Z".into()).is_err());
+        assert!(Timestamp::parse("2026-09-02T12:00:00".into()).is_err());
+        let now = Timestamp::now_utc();
+        assert!(Timestamp::parse(now.into_string()).is_ok());
+    }
+
+    #[test]
     fn path_claim_overlap() {
         let a = PathClaim::parse("Grass/Instruction/X86/**".into()).unwrap();
         let b = PathClaim::parse("Grass/Instruction/X86/Encoder.lean".into()).unwrap();
@@ -451,6 +452,12 @@ mod tests {
     }
 
     #[test]
+    fn path_claim_rejects_a_glob_character() {
+        assert!(PathClaim::parse("a/*/b".into()).is_err());
+        assert!(PathClaim::parse("a/**/b".into()).is_err());
+    }
+
+    #[test]
     fn string_set_rejects_unsorted_or_duplicate() {
         let v: Result<StringSet<Agent>, _> = serde_json::from_str(r#"["bob","alice"]"#);
         assert!(v.is_err());
@@ -458,5 +465,29 @@ mod tests {
         assert!(v.is_err());
         let v: Result<StringSet<Agent>, _> = serde_json::from_str(r#"["alice","bob"]"#);
         assert!(v.is_ok());
+    }
+
+    #[test]
+    fn string_set_from_iter_sorts_and_dedupes() {
+        let a = Agent::parse("alice".into()).unwrap();
+        let b = Agent::parse("bob".into()).unwrap();
+        let set = StringSet::from_iter([b.clone(), a.clone(), a.clone()]);
+        assert_eq!(set.as_slice(), &[a, b]);
+    }
+
+    #[test]
+    fn branch_requires_refs_prefix_and_valid_syntax() {
+        assert!(Branch::parse("main".into()).is_err());
+        assert!(Branch::parse("refs/heads/main".into()).is_ok());
+        assert!(Branch::parse("refs/heads/../etc".into()).is_err());
+    }
+
+    #[test]
+    fn branch_is_product_branch_for_matches_topic_under_agent_prefix() {
+        let alice = Agent::parse("alice".into()).unwrap();
+        let b = Branch::parse("refs/heads/agent/alice/feature".into()).unwrap();
+        assert!(b.is_product_branch_for(&alice));
+        let bob = Agent::parse("bob".into()).unwrap();
+        assert!(!b.is_product_branch_for(&bob));
     }
 }

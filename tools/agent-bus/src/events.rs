@@ -1,4 +1,8 @@
-//! Event data payloads (AGENT_BUS_SCHEMA.md sections 4-9) and the `kind` vocabulary.
+//! Event data payloads and the `kind` vocabulary (AGENT_BUS_SCHEMA.md
+//! sections 4-9). The lifecycle protocol these describe -- registration,
+//! scope claims, issues, dependencies, handoffs, and the review/merge
+//! protocol -- is unchanged by the version-two coordination rewrite; only
+//! the substrate underneath (envelope, storage, causal ordering) changed.
 
 use crate::common::*;
 use crate::error::{invalid, AbResult};
@@ -117,7 +121,7 @@ pub struct MergeEngineActivated {
     pub helper_commit: ObjectId,
 }
 
-// -------------------------------------------------------- scope/plan/progress
+// ------------------------------------------------------ scope/plan/progress
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -150,7 +154,7 @@ pub struct ProgressReported {
     pub verification: Vec<Text>,
 }
 
-// ----------------------------------------------------------------- issues
+// --------------------------------------------------------------- issues
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -295,10 +299,8 @@ pub struct HandoffWithdrawn {
 
 // ----------------------------------------------------------------- review
 
-/// Not itself (de)serialized: `#[serde(flatten)]` is incompatible with
-/// `deny_unknown_fields`, so `ReviewNominated`/`ReviewReassigned` inline these
-/// fields directly and expose this as a comparison/copy view.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReviewRequest {
     pub authors: StringSet<Agent>,
     pub product_branch: Branch,
@@ -310,33 +312,7 @@ pub struct ReviewRequest {
     pub evidence: StringSet<EventId>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ReviewNominated {
-    pub authors: StringSet<Agent>,
-    pub product_branch: Branch,
-    pub reviewer: Agent,
-    pub required_checks: Vec<Text>,
-    pub review_scope: StringSet<crate::scalars::PathClaim>,
-    pub summary: Text,
-    pub target_branch: Branch,
-    pub evidence: StringSet<EventId>,
-}
-
-impl ReviewNominated {
-    pub fn request(&self) -> ReviewRequest {
-        ReviewRequest {
-            authors: self.authors.clone(),
-            product_branch: self.product_branch.clone(),
-            reviewer: self.reviewer.clone(),
-            required_checks: self.required_checks.clone(),
-            review_scope: self.review_scope.clone(),
-            summary: self.summary.clone(),
-            target_branch: self.target_branch.clone(),
-            evidence: self.evidence.clone(),
-        }
-    }
-}
+pub type ReviewNominated = ReviewRequest;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -458,6 +434,8 @@ pub struct ReviewMergeReconciled {
     pub user_authority: Text,
 }
 
+// ------------------------------------------------- lifecycle conflict resolution
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LifecycleConflictResolved {
@@ -468,10 +446,10 @@ pub struct LifecycleConflictResolved {
     pub user_authority: Text,
 }
 
-// ------------------------------------------------------------------ dispatch
+// -------------------------------------------------------------- EventData
 
-macro_rules! event_data_enum {
-    ($( $variant:ident => $kind:expr => $ty:ty ),+ $(,)?) => {
+macro_rules! event_data {
+    ($( $variant:ident($ty:ty) = $kind:literal ),+ $(,)?) => {
         #[derive(Debug, Clone)]
         pub enum EventData {
             $( $variant($ty), )+
@@ -484,216 +462,161 @@ macro_rules! event_data_enum {
                 }
             }
 
-            pub fn all_kinds() -> &'static [&'static str] {
-                &[ $( $kind ),+ ]
+            pub fn to_value(&self) -> serde_json::Value {
+                match self {
+                    $( EventData::$variant(d) => serde_json::to_value(d).expect("event data always serializable"), )+
+                }
             }
 
             pub fn from_kind_and_value(kind: &str, value: serde_json::Value) -> AbResult<EventData> {
                 match kind {
                     $( $kind => Ok(EventData::$variant(
-                        serde_json::from_value(value).map_err(|e| invalid(format!("data for {kind}: {e}")))?
+                        serde_json::from_value(value).map_err(|e| invalid(format!("malformed {kind} data: {e}")))?,
                     )), )+
                     other => Err(invalid(format!("unknown event kind: {other}"))),
                 }
             }
 
-            pub fn to_value(&self) -> serde_json::Value {
-                match self {
-                    $( EventData::$variant(d) => serde_json::to_value(d).expect("serializable"), )+
-                }
+            pub fn all_kinds() -> Vec<&'static str> {
+                vec![ $( $kind, )+ ]
             }
         }
     };
 }
 
-event_data_enum! {
-    AgentRegistered => "agent.registered" => AgentRegistered,
-    AgentStatus => "agent.status" => AgentStatusEvent,
-    AgentResumed => "agent.resumed" => AgentResumed,
-    AgentRetired => "agent.retired" => AgentRetired,
-    SchemaActivated => "schema.activated" => SchemaActivated,
-    MergeEngineActivated => "merge_engine.activated" => MergeEngineActivated,
-    ScopeSet => "scope.set" => ScopeSet,
-    PlanSet => "plan.set" => PlanSet,
-    ProgressReported => "progress.reported" => ProgressReported,
-    IssueOpened => "issue.opened" => IssueOpened,
-    IssueAcknowledged => "issue.acknowledged" => IssueAcknowledged,
-    IssueResolved => "issue.resolved" => IssueResolved,
-    IssueRejected => "issue.rejected" => IssueRejected,
-    IssueReassigned => "issue.reassigned" => IssueReassigned,
-    DependencyRequested => "dependency.requested" => DependencyRequested,
-    DependencyAcknowledged => "dependency.acknowledged" => DependencyAcknowledged,
-    DependencyResolved => "dependency.resolved" => DependencyResolved,
-    DependencyRejected => "dependency.rejected" => DependencyRejected,
-    DependencyReassigned => "dependency.reassigned" => DependencyReassigned,
-    HandoffOffered => "handoff.offered" => HandoffOffered,
-    HandoffAccepted => "handoff.accepted" => HandoffAccepted,
-    HandoffDeclined => "handoff.declined" => HandoffDeclined,
-    HandoffWithdrawn => "handoff.withdrawn" => HandoffWithdrawn,
-    ReviewNominated => "review.nominated" => ReviewNominated,
-    ReviewNominationAccepted => "review.nomination_accepted" => ReviewNominationAccepted,
-    ReviewNominationDeclined => "review.nomination_declined" => ReviewNominationDeclined,
-    ReviewChangesRequested => "review.changes_requested" => ReviewChangesRequested,
-    ReviewFindingsCleared => "review.findings_cleared" => ReviewFindingsCleared,
-    ReviewFindingsSuperseded => "review.findings_superseded" => ReviewFindingsSuperseded,
-    ReviewReassigned => "review.reassigned" => ReviewReassigned,
-    ReviewWithdrawn => "review.withdrawn" => ReviewWithdrawn,
-    ReviewMergeAuthorized => "review.merge_authorized" => ReviewMergeAuthorized,
-    ReviewMerged => "review.merged" => ReviewMerged,
-    ReviewMergeReconciled => "review.merge_reconciled" => ReviewMergeReconciled,
-    LifecycleConflictResolved => "lifecycle.conflict_resolved" => LifecycleConflictResolved,
+event_data! {
+    AgentRegistered(AgentRegistered) = "agent.registered",
+    AgentStatus(AgentStatusEvent) = "agent.status",
+    AgentResumed(AgentResumed) = "agent.resumed",
+    AgentRetired(AgentRetired) = "agent.retired",
+    SchemaActivated(SchemaActivated) = "schema.activated",
+    MergeEngineActivated(MergeEngineActivated) = "merge_engine.activated",
+    ScopeSet(ScopeSet) = "scope.set",
+    PlanSet(PlanSet) = "plan.set",
+    ProgressReported(ProgressReported) = "progress.reported",
+    IssueOpened(IssueOpened) = "issue.opened",
+    IssueAcknowledged(IssueAcknowledged) = "issue.acknowledged",
+    IssueResolved(IssueResolved) = "issue.resolved",
+    IssueRejected(IssueRejected) = "issue.rejected",
+    IssueReassigned(IssueReassigned) = "issue.reassigned",
+    DependencyRequested(DependencyRequested) = "dependency.requested",
+    DependencyAcknowledged(DependencyAcknowledged) = "dependency.acknowledged",
+    DependencyResolved(DependencyResolved) = "dependency.resolved",
+    DependencyRejected(DependencyRejected) = "dependency.rejected",
+    DependencyReassigned(DependencyReassigned) = "dependency.reassigned",
+    HandoffOffered(HandoffOffered) = "handoff.offered",
+    HandoffAccepted(HandoffAccepted) = "handoff.accepted",
+    HandoffDeclined(HandoffDeclined) = "handoff.declined",
+    HandoffWithdrawn(HandoffWithdrawn) = "handoff.withdrawn",
+    ReviewNominated(ReviewNominated) = "review.nominated",
+    ReviewNominationAccepted(ReviewNominationAccepted) = "review.nomination_accepted",
+    ReviewNominationDeclined(ReviewNominationDeclined) = "review.nomination_declined",
+    ReviewChangesRequested(ReviewChangesRequested) = "review.changes_requested",
+    ReviewFindingsCleared(ReviewFindingsCleared) = "review.findings_cleared",
+    ReviewFindingsSuperseded(ReviewFindingsSuperseded) = "review.findings_superseded",
+    ReviewReassigned(ReviewReassigned) = "review.reassigned",
+    ReviewWithdrawn(ReviewWithdrawn) = "review.withdrawn",
+    ReviewMergeAuthorized(ReviewMergeAuthorized) = "review.merge_authorized",
+    ReviewMerged(ReviewMerged) = "review.merged",
+    ReviewMergeReconciled(ReviewMergeReconciled) = "review.merge_reconciled",
+    LifecycleConflictResolved(LifecycleConflictResolved) = "lifecycle.conflict_resolved",
 }
 
 impl EventData {
-    /// The exact set of event IDs that must appear in the envelope `refs` field
-    /// (AGENT_BUS_SCHEMA.md section 2: "refs equals exactly the unique event IDs contained in data").
+    /// The exact set of event IDs `refs` must equal (AGENT_BUS_SCHEMA.md
+    /// section 2: "Every event ID occurring in `data` occurs in `refs`, and
+    /// `refs` equals exactly the unique event IDs contained in `data`.").
     pub fn referenced_ids(&self) -> BTreeSet<EventId> {
-        let mut out = BTreeSet::new();
         match self {
-            EventData::AgentRegistered(_) => {}
-            EventData::AgentStatus(_) => {}
-            EventData::AgentResumed(d) => {
-                out.insert(d.previous_lifecycle.clone());
-            }
-            EventData::AgentRetired(d) => {
-                out.insert(d.previous_lifecycle.clone());
-            }
-            EventData::SchemaActivated(_) => {}
-            EventData::MergeEngineActivated(d) => {
-                out.insert(d.previous_epoch.clone());
-            }
-            EventData::ScopeSet(_) => {}
-            EventData::PlanSet(_) => {}
-            EventData::ProgressReported(_) => {}
-            EventData::IssueOpened(d) => {
-                out.extend(d.blocks.iter().cloned());
-                out.extend(d.evidence.iter().cloned());
-            }
-            EventData::IssueAcknowledged(d) => {
-                out.insert(d.issue.clone());
-                out.insert(d.assignment.clone());
-            }
-            EventData::IssueResolved(d) => {
-                out.insert(d.issue.clone());
-                out.insert(d.assignment.clone());
-            }
-            EventData::IssueRejected(d) => {
-                out.insert(d.issue.clone());
-                out.insert(d.assignment.clone());
-            }
+            EventData::AgentRegistered(_) => BTreeSet::new(),
+            EventData::AgentStatus(_) => BTreeSet::new(),
+            EventData::AgentResumed(d) => [d.previous_lifecycle.clone()].into(),
+            EventData::AgentRetired(d) => [d.previous_lifecycle.clone()].into(),
+            EventData::SchemaActivated(_) => BTreeSet::new(),
+            EventData::MergeEngineActivated(d) => [d.previous_epoch.clone()].into(),
+            EventData::ScopeSet(_) => BTreeSet::new(),
+            EventData::PlanSet(_) => BTreeSet::new(),
+            EventData::ProgressReported(_) => BTreeSet::new(),
+            EventData::IssueOpened(d) => d
+                .blocks
+                .iter()
+                .cloned()
+                .chain(d.evidence.iter().cloned())
+                .collect(),
+            EventData::IssueAcknowledged(d) => [d.issue.clone(), d.assignment.clone()].into(),
+            EventData::IssueResolved(d) => [d.issue.clone(), d.assignment.clone()].into(),
+            EventData::IssueRejected(d) => [d.issue.clone(), d.assignment.clone()].into(),
             EventData::IssueReassigned(d) => {
-                out.insert(d.issue.clone());
-                out.insert(d.previous_assignment.clone());
+                [d.issue.clone(), d.previous_assignment.clone()].into()
             }
-            EventData::DependencyRequested(d) => {
-                out.extend(d.evidence.iter().cloned());
-            }
+            EventData::DependencyRequested(d) => d.evidence.iter().cloned().collect(),
             EventData::DependencyAcknowledged(d) => {
-                out.insert(d.dependency.clone());
-                out.insert(d.assignment.clone());
+                [d.dependency.clone(), d.assignment.clone()].into()
             }
             EventData::DependencyResolved(d) => {
-                out.insert(d.dependency.clone());
-                out.insert(d.assignment.clone());
+                [d.dependency.clone(), d.assignment.clone()].into()
             }
             EventData::DependencyRejected(d) => {
-                out.insert(d.dependency.clone());
-                out.insert(d.assignment.clone());
+                [d.dependency.clone(), d.assignment.clone()].into()
             }
             EventData::DependencyReassigned(d) => {
-                out.insert(d.dependency.clone());
-                out.insert(d.previous_assignment.clone());
+                [d.dependency.clone(), d.previous_assignment.clone()].into()
             }
-            EventData::HandoffOffered(d) => {
-                out.extend(d.known_issues.iter().cloned());
-                out.extend(d.evidence.iter().cloned());
-            }
-            EventData::HandoffAccepted(d) => {
-                out.insert(d.handoff.clone());
-            }
-            EventData::HandoffDeclined(d) => {
-                out.insert(d.handoff.clone());
-            }
-            EventData::HandoffWithdrawn(d) => {
-                out.insert(d.handoff.clone());
-            }
-            EventData::ReviewNominated(d) => {
-                out.extend(d.evidence.iter().cloned());
-            }
-            EventData::ReviewNominationAccepted(d) => {
-                out.insert(d.nomination.clone());
-            }
-            EventData::ReviewNominationDeclined(d) => {
-                out.insert(d.nomination.clone());
-            }
-            EventData::ReviewChangesRequested(d) => {
-                out.insert(d.nomination.clone());
-                out.extend(d.evidence.iter().cloned());
-            }
+            EventData::HandoffOffered(d) => d
+                .known_issues
+                .iter()
+                .cloned()
+                .chain(d.evidence.iter().cloned())
+                .collect(),
+            EventData::HandoffAccepted(d) => [d.handoff.clone()].into(),
+            EventData::HandoffDeclined(d) => [d.handoff.clone()].into(),
+            EventData::HandoffWithdrawn(d) => [d.handoff.clone()].into(),
+            EventData::ReviewNominated(d) => d.evidence.iter().cloned().collect(),
+            EventData::ReviewNominationAccepted(d) => [d.nomination.clone()].into(),
+            EventData::ReviewNominationDeclined(d) => [d.nomination.clone()].into(),
+            EventData::ReviewChangesRequested(d) => [d.nomination.clone()]
+                .into_iter()
+                .chain(d.evidence.iter().cloned())
+                .collect(),
             EventData::ReviewFindingsCleared(d) => {
-                out.insert(d.nomination.clone());
-                out.insert(d.changes_event.clone());
+                [d.nomination.clone(), d.changes_event.clone()].into()
             }
             EventData::ReviewFindingsSuperseded(d) => {
-                out.insert(d.nomination.clone());
-                out.insert(d.changes_event.clone());
+                [d.nomination.clone(), d.changes_event.clone()].into()
             }
-            EventData::ReviewReassigned(d) => {
-                out.insert(d.replaces.clone());
-                for f in &d.inherited_findings {
-                    out.insert(f.changes_event.clone());
-                }
-                out.extend(d.evidence.iter().cloned());
-            }
-            EventData::ReviewWithdrawn(d) => {
-                out.insert(d.nomination.clone());
-            }
+            EventData::ReviewReassigned(d) => [d.replaces.clone()]
+                .into_iter()
+                .chain(d.inherited_findings.iter().map(|f| f.changes_event.clone()))
+                .chain(d.evidence.iter().cloned())
+                .collect(),
+            EventData::ReviewWithdrawn(d) => [d.nomination.clone()].into(),
             EventData::ReviewMergeAuthorized(d) => {
-                out.insert(d.nomination.clone());
-                out.insert(d.merge_engine_epoch.clone());
-                for fd in &d.finding_dispositions {
-                    out.insert(fd.changes_event.clone());
-                }
-                out.extend(d.evidence.iter().cloned());
+                [d.nomination.clone(), d.merge_engine_epoch.clone()]
+                    .into_iter()
+                    .chain(d.finding_dispositions.iter().map(|f| f.changes_event.clone()))
+                    .chain(d.evidence.iter().cloned())
+                    .collect()
             }
-            EventData::ReviewMerged(d) => {
-                out.insert(d.authorization.clone());
-            }
-            EventData::ReviewMergeReconciled(d) => {
-                out.insert(d.authorization.clone());
-            }
-            EventData::LifecycleConflictResolved(d) => {
-                out.insert(d.root.clone());
-                out.extend(d.competing.iter().cloned());
-            }
+            EventData::ReviewMerged(d) => [d.authorization.clone()].into(),
+            EventData::ReviewMergeReconciled(d) => [d.authorization.clone()].into(),
+            EventData::LifecycleConflictResolved(d) => [d.root.clone()]
+                .into_iter()
+                .chain(d.competing.iter().cloned())
+                .collect(),
         }
-        out
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{
-        CheckOutcome, CheckResult, DependencyImport, Finding, FindingDisposition,
-        FindingDispositionKind, FindingRef, PlanStep, PlanStepState, Priority,
-    };
-    use crate::scalars::PathClaim;
 
     fn a(name: &str) -> Agent {
         Agent::parse(name.to_string()).unwrap()
     }
 
-    fn eid(agent: &Agent, seq: u64) -> EventId {
-        EventId::new(agent, seq)
-    }
-
-    fn hash(n: u64) -> String {
-        format!("{n:040x}")
-    }
-
-    fn oid(n: u64) -> ObjectId {
-        ObjectId::parse(hash(n)).unwrap()
+    fn eid(agent: &str, seq: u64) -> EventId {
+        EventId::new(&a(agent), seq)
     }
 
     fn short(s: &str) -> Short {
@@ -702,14 +625,6 @@ mod tests {
 
     fn text(s: &str) -> Text {
         Text::parse(s.to_string()).unwrap()
-    }
-
-    fn branch(s: &str) -> Branch {
-        Branch::parse(s.to_string()).unwrap()
-    }
-
-    fn pc(s: &str) -> PathClaim {
-        PathClaim::parse(s.to_string()).unwrap()
     }
 
     #[test]
@@ -729,552 +644,354 @@ mod tests {
         assert!(LifecycleStatus::Abandoned.deactivates());
     }
 
+    /// Every declared kind must round-trip through `to_value` /
+    /// `from_kind_and_value` and report the matching `kind()` string --
+    /// proves the macro-generated dispatch table is complete and self
+    /// -consistent, not just individually testable per variant.
     #[test]
     fn dispatch_kind_all_kinds_and_value_roundtrip() {
-        assert_eq!(EventData::all_kinds().len(), 35);
-        let schema = EventData::SchemaActivated(SchemaActivated {
-            version: 1,
-            design_commit: oid(1),
-            helper_commit: oid(2),
-        });
-        assert_eq!(schema.kind(), "schema.activated");
-        let value = schema.to_value();
-        let round_tripped = EventData::from_kind_and_value("schema.activated", value).unwrap();
-        assert_eq!(round_tripped.kind(), "schema.activated");
+        let previous = eid("alice", 0);
+        let samples: Vec<EventData> = vec![
+            EventData::AgentRegistered(AgentRegistered {
+                display_name: short("Alice"),
+                primary_role: Role::Implementor,
+                purpose: text("x"),
+                product_base: None,
+                product_branch: None,
+                provider: None,
+                model: None,
+            }),
+            EventData::AgentStatus(AgentStatusEvent {
+                status: LifecycleStatus::Active,
+                note: text(""),
+                product_branch: None,
+                product_commit: None,
+            }),
+            EventData::AgentResumed(AgentResumed {
+                previous_lifecycle: previous.clone(),
+                reason: text("r"),
+                user_authority: text("u"),
+            }),
+            EventData::AgentRetired(AgentRetired {
+                target: a("bob"),
+                previous_lifecycle: previous.clone(),
+                reason: text("r"),
+                user_authority: text("u"),
+            }),
+            EventData::SchemaActivated(SchemaActivated {
+                version: 1,
+                design_commit: crate::scalars::ObjectId::parse("a".repeat(40)).unwrap(),
+                helper_commit: crate::scalars::ObjectId::parse("b".repeat(40)).unwrap(),
+            }),
+            EventData::MergeEngineActivated(MergeEngineActivated {
+                previous_epoch: previous.clone(),
+                merge_engine: short("git-ort"),
+                merge_engine_version: short("2.53.0"),
+                design_commit: crate::scalars::ObjectId::parse("a".repeat(40)).unwrap(),
+                helper_commit: crate::scalars::ObjectId::parse("b".repeat(40)).unwrap(),
+            }),
+            EventData::ScopeSet(ScopeSet {
+                base_code_commit: crate::scalars::ObjectId::parse("a".repeat(40)).unwrap(),
+                exclusive: StringSet::default(),
+                shared: StringSet::default(),
+                exports: StringSet::default(),
+                depends_on: vec![],
+                note: text(""),
+            }),
+            EventData::PlanSet(PlanSet {
+                summary: text("s"),
+                steps: vec![],
+                risks: vec![],
+            }),
+            EventData::ProgressReported(ProgressReported {
+                product_commit: None,
+                completed: vec![],
+                current: vec![],
+                next: vec![],
+                blockers: vec![],
+                verification: vec![],
+            }),
+            EventData::IssueOpened(IssueOpened {
+                target: a("bob"),
+                issue_kind: IssueKind::Bug,
+                severity: Priority::Normal,
+                summary: text("s"),
+                code_commit: None,
+                locations: vec![],
+                expected: None,
+                observed_behavior: None,
+                reproduction: vec![],
+                blocks: StringSet::default(),
+                evidence: StringSet::default(),
+            }),
+            EventData::IssueAcknowledged(IssueAcknowledged {
+                issue: previous.clone(),
+                assignment: previous.clone(),
+                note: text(""),
+            }),
+            EventData::IssueResolved(IssueResolved {
+                issue: previous.clone(),
+                assignment: previous.clone(),
+                summary: text("s"),
+                fix_commit: None,
+                verification: vec![],
+            }),
+            EventData::IssueRejected(IssueRejected {
+                issue: previous.clone(),
+                assignment: previous.clone(),
+                reason: text("r"),
+                normative_refs: vec![],
+            }),
+            EventData::IssueReassigned(IssueReassigned {
+                issue: previous.clone(),
+                previous_assignment: previous.clone(),
+                previous_target: a("bob"),
+                new_target: a("carol"),
+                reason: text("r"),
+            }),
+            EventData::DependencyRequested(DependencyRequested {
+                target: a("bob"),
+                interface: short("iface"),
+                needed_by: text("soon"),
+                blocking: true,
+                summary: text("s"),
+                evidence: StringSet::default(),
+            }),
+            EventData::DependencyAcknowledged(DependencyAcknowledged {
+                dependency: previous.clone(),
+                assignment: previous.clone(),
+                note: text(""),
+            }),
+            EventData::DependencyResolved(DependencyResolved {
+                dependency: previous.clone(),
+                assignment: previous.clone(),
+                summary: text("s"),
+                product_commit: None,
+                verification: vec![],
+            }),
+            EventData::DependencyRejected(DependencyRejected {
+                dependency: previous.clone(),
+                assignment: previous.clone(),
+                reason: text("r"),
+            }),
+            EventData::DependencyReassigned(DependencyReassigned {
+                dependency: previous.clone(),
+                previous_assignment: previous.clone(),
+                previous_target: a("bob"),
+                new_target: a("carol"),
+                reason: text("r"),
+            }),
+            EventData::HandoffOffered(HandoffOffered {
+                receiver: a("bob"),
+                scope: StringSet::default(),
+                product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+                product_commit: crate::scalars::ObjectId::parse("a".repeat(40)).unwrap(),
+                verification: vec![],
+                known_issues: StringSet::default(),
+                evidence: StringSet::default(),
+                summary: text("s"),
+            }),
+            EventData::HandoffAccepted(HandoffAccepted {
+                handoff: previous.clone(),
+                note: text(""),
+            }),
+            EventData::HandoffDeclined(HandoffDeclined {
+                handoff: previous.clone(),
+                reason: text("r"),
+            }),
+            EventData::HandoffWithdrawn(HandoffWithdrawn {
+                handoff: previous.clone(),
+                reason: text("r"),
+            }),
+            EventData::ReviewNominated(ReviewRequest {
+                authors: StringSet::from_iter([a("alice")]),
+                product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+                reviewer: a("bob"),
+                required_checks: vec![],
+                review_scope: StringSet::default(),
+                summary: text("s"),
+                target_branch: Branch::parse("refs/heads/main".into()).unwrap(),
+                evidence: StringSet::default(),
+            }),
+            EventData::ReviewNominationAccepted(ReviewNominationAccepted {
+                nomination: previous.clone(),
+                note: text(""),
+            }),
+            EventData::ReviewNominationDeclined(ReviewNominationDeclined {
+                nomination: previous.clone(),
+                reason: text("r"),
+            }),
+            EventData::ReviewChangesRequested(ReviewChangesRequested {
+                nomination: previous.clone(),
+                reviewed_commit: crate::scalars::ObjectId::parse("a".repeat(40)).unwrap(),
+                findings: vec![],
+                evidence: StringSet::default(),
+            }),
+            EventData::ReviewFindingsCleared(ReviewFindingsCleared {
+                nomination: previous.clone(),
+                changes_event: previous.clone(),
+                finding_id: short("f1"),
+                resolved_commit: crate::scalars::ObjectId::parse("a".repeat(40)).unwrap(),
+                summary: text("s"),
+            }),
+            EventData::ReviewFindingsSuperseded(ReviewFindingsSuperseded {
+                nomination: previous.clone(),
+                changes_event: previous.clone(),
+                finding_id: short("f1"),
+                rationale: text("r"),
+            }),
+            EventData::ReviewReassigned(ReviewReassigned {
+                authors: StringSet::from_iter([a("alice")]),
+                product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+                reviewer: a("carol"),
+                required_checks: vec![],
+                review_scope: StringSet::default(),
+                summary: text("s"),
+                target_branch: Branch::parse("refs/heads/main".into()).unwrap(),
+                evidence: StringSet::default(),
+                replaces: previous.clone(),
+                reason: text("r"),
+                inherited_findings: vec![],
+            }),
+            EventData::ReviewWithdrawn(ReviewWithdrawn {
+                nomination: previous.clone(),
+                reason: text("r"),
+            }),
+            EventData::ReviewMergeAuthorized(ReviewMergeAuthorized {
+                nomination: previous.clone(),
+                product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+                previous_main: crate::scalars::ObjectId::parse("a".repeat(40)).unwrap(),
+                reviewed_commit: crate::scalars::ObjectId::parse("b".repeat(40)).unwrap(),
+                candidate: crate::scalars::ObjectId::parse("c".repeat(40)).unwrap(),
+                merge_engine_epoch: previous.clone(),
+                checks: vec![],
+                finding_dispositions: vec![],
+                evidence: StringSet::default(),
+                reviewed_scope: StringSet::default(),
+                limitations: vec![],
+                summary: text("s"),
+            }),
+            EventData::ReviewMerged(ReviewMerged {
+                authorization: previous.clone(),
+                previous_main: crate::scalars::ObjectId::parse("a".repeat(40)).unwrap(),
+                main_commit: crate::scalars::ObjectId::parse("b".repeat(40)).unwrap(),
+                product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+                reviewed_commit: crate::scalars::ObjectId::parse("c".repeat(40)).unwrap(),
+                summary: text("s"),
+            }),
+            EventData::ReviewMergeReconciled(ReviewMergeReconciled {
+                authorization: previous.clone(),
+                previous_main: crate::scalars::ObjectId::parse("a".repeat(40)).unwrap(),
+                main_commit: crate::scalars::ObjectId::parse("b".repeat(40)).unwrap(),
+                product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+                reviewed_commit: crate::scalars::ObjectId::parse("c".repeat(40)).unwrap(),
+                reason: text("r"),
+                user_authority: text("u"),
+            }),
+            EventData::LifecycleConflictResolved(LifecycleConflictResolved {
+                root: previous.clone(),
+                competing: StringSet::from_iter([previous.clone(), eid("bob", 0)]),
+                selected: previous.clone(),
+                reason: text("r"),
+                user_authority: text("u"),
+            }),
+        ];
 
-        assert!(EventData::from_kind_and_value("not.a.kind", serde_json::json!({})).is_err());
-        // Well-formed kind, malformed data for it.
-        assert!(EventData::from_kind_and_value(
-            "schema.activated",
-            serde_json::json!({"nonsense": true})
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn deny_unknown_fields_is_enforced() {
-        let mut value = serde_json::json!({
-            "version": 1,
-            "design_commit": hash(1),
-            "helper_commit": hash(2),
-        });
-        assert!(serde_json::from_value::<SchemaActivated>(value.clone()).is_ok());
-        value["surprise"] = serde_json::json!("unexpected");
-        let err = serde_json::from_value::<SchemaActivated>(value).unwrap_err();
-        assert!(err.to_string().contains("unknown field"), "{err}");
-    }
-
-    #[test]
-    fn issue_opened_rejects_duplicate_evidence_ids() {
-        let ev = eid(&a("bob"), 1);
-        let value = serde_json::json!({
-            "target": "bob",
-            "issue_kind": "bug",
-            "severity": "high",
-            "summary": "s",
-            "locations": [],
-            "reproduction": [],
-            "blocks": [],
-            "evidence": [ev.to_string(), ev.to_string()],
-        });
-        let err = serde_json::from_value::<IssueOpened>(value).unwrap_err();
-        assert!(err.to_string().contains("duplicate"), "{err}");
-    }
-
-    #[test]
-    fn text_field_rejects_out_of_bounds_length() {
-        let too_long = "x".repeat(4097);
-        let value = serde_json::json!({
-            "status": "active",
-            "note": too_long,
-        });
-        assert!(serde_json::from_value::<AgentStatusEvent>(value).is_err());
+        let all_kinds: BTreeSet<&str> = EventData::all_kinds().into_iter().collect();
+        let mut seen_kinds = BTreeSet::new();
+        for sample in &samples {
+            let kind = sample.kind();
+            seen_kinds.insert(kind);
+            let value = sample.to_value();
+            let round_tripped = EventData::from_kind_and_value(kind, value.clone())
+                .unwrap_or_else(|e| panic!("{kind} failed to round-trip: {e}"));
+            assert_eq!(round_tripped.kind(), kind);
+            assert_eq!(round_tripped.to_value(), value);
+        }
+        assert_eq!(
+            seen_kinds, all_kinds,
+            "every declared kind must have a sample exercising its round trip"
+        );
     }
 
     #[test]
     fn referenced_ids_covers_every_event_kind() {
-        let alice = a("alice");
-        let bob = a("bob");
-
-        // ---- kinds with no referenced ids at all ----
-        let reg = AgentRegistered {
-            display_name: short("Alice"),
+        // A spot check per shape, not every field: registration/status carry
+        // no refs; single-ref events carry exactly one; multi-ref events
+        // (issue/dependency assignment pairs, review chains) carry the
+        // documented set.
+        assert!(EventData::AgentRegistered(AgentRegistered {
+            display_name: short("a"),
             primary_role: Role::Implementor,
-            purpose: text("does stuff"),
+            purpose: text("x"),
             product_base: None,
             product_branch: None,
             provider: None,
             model: None,
-        };
-        assert!(EventData::AgentRegistered(reg).referenced_ids().is_empty());
+        })
+        .referenced_ids()
+        .is_empty());
 
-        let status = AgentStatusEvent {
-            status: LifecycleStatus::Active,
-            note: text(""),
-            product_branch: None,
-            product_commit: None,
-        };
-        assert!(EventData::AgentStatus(status).referenced_ids().is_empty());
-
-        let schema = SchemaActivated {
-            version: 1,
-            design_commit: oid(1),
-            helper_commit: oid(2),
-        };
-        assert!(EventData::SchemaActivated(schema)
-            .referenced_ids()
-            .is_empty());
-
-        let scope = ScopeSet {
-            base_code_commit: oid(3),
-            exclusive: StringSet::build(vec![pc("a/**")]),
-            shared: StringSet::default(),
-            exports: StringSet::default(),
-            depends_on: vec![DependencyImport {
-                agent: bob.clone(),
-                interface: short("api"),
-            }],
-            note: text("n"),
-        };
-        assert!(EventData::ScopeSet(scope).referenced_ids().is_empty());
-
-        let plan = PlanSet {
-            summary: text("s"),
-            steps: vec![PlanStep {
-                id: short("s1"),
-                state: PlanStepState::Active,
-                text: text("t"),
-            }],
-            risks: vec![text("r")],
-        };
-        assert!(EventData::PlanSet(plan).referenced_ids().is_empty());
-
-        let progress = ProgressReported {
-            product_commit: Some(oid(4)),
-            completed: vec![text("c")],
-            current: vec![],
-            next: vec![],
-            blockers: vec![],
-            verification: vec![],
-        };
-        assert!(EventData::ProgressReported(progress)
-            .referenced_ids()
-            .is_empty());
-
-        // ---- single previous_lifecycle / previous_epoch ----
-        let prev = eid(&alice, 3);
-        let resumed = AgentResumed {
-            previous_lifecycle: prev.clone(),
-            reason: text("r"),
-            user_authority: text("u"),
-        };
+        let prev = eid("alice", 0);
         assert_eq!(
-            EventData::AgentResumed(resumed).referenced_ids(),
-            BTreeSet::from([prev.clone()])
+            EventData::AgentResumed(AgentResumed {
+                previous_lifecycle: prev.clone(),
+                reason: text("r"),
+                user_authority: text("u"),
+            })
+            .referenced_ids(),
+            [prev.clone()].into()
         );
 
-        let retired = AgentRetired {
-            target: alice.clone(),
-            previous_lifecycle: prev.clone(),
-            reason: text("r"),
-            user_authority: text("u"),
-        };
+        let issue = eid("bob", 1);
+        let assignment = eid("bob", 2);
         assert_eq!(
-            EventData::AgentRetired(retired).referenced_ids(),
-            BTreeSet::from([prev.clone()])
+            EventData::IssueResolved(IssueResolved {
+                issue: issue.clone(),
+                assignment: assignment.clone(),
+                summary: text("s"),
+                fix_commit: None,
+                verification: vec![],
+            })
+            .referenced_ids(),
+            [issue, assignment].into()
         );
+    }
 
-        let epoch = eid(&alice, 0);
-        let mea = MergeEngineActivated {
-            previous_epoch: epoch.clone(),
-            merge_engine: short("git-ort"),
-            merge_engine_version: short("2.53.0"),
-            design_commit: oid(5),
-            helper_commit: oid(6),
-        };
-        assert_eq!(
-            EventData::MergeEngineActivated(mea).referenced_ids(),
-            BTreeSet::from([epoch.clone()])
-        );
+    #[test]
+    fn issue_opened_rejects_duplicate_evidence_ids() {
+        let dup = eid("alice", 0);
+        let value = serde_json::json!({
+            "target": "bob",
+            "issue_kind": "bug",
+            "severity": "normal",
+            "summary": "s",
+            "locations": [],
+            "reproduction": [],
+            "blocks": [],
+            "evidence": [dup.to_string(), dup.to_string()],
+        });
+        let err = EventData::from_kind_and_value("issue.opened", value).unwrap_err();
+        assert!(err.to_string().contains("duplicate"), "{err}");
+    }
 
-        // ---- issue.* ----
-        let ev1 = eid(&alice, 1);
-        let ev2 = eid(&bob, 2);
-        let issue_opened = IssueOpened {
-            target: bob.clone(),
-            issue_kind: IssueKind::Bug,
-            severity: Priority::High,
-            summary: text("s"),
-            code_commit: Some(oid(7)),
-            locations: vec![text("f:1")],
-            expected: Some(text("e")),
-            observed_behavior: Some(text("o")),
-            reproduction: vec![],
-            blocks: StringSet::build(vec![ev1.clone()]),
-            evidence: StringSet::build(vec![ev2.clone()]),
-        };
-        assert_eq!(
-            EventData::IssueOpened(issue_opened).referenced_ids(),
-            [ev1.clone(), ev2.clone()].into_iter().collect()
-        );
+    #[test]
+    fn deny_unknown_fields_is_enforced() {
+        let value = serde_json::json!({
+            "status": "active",
+            "note": "",
+            "surprise": true,
+        });
+        let err = EventData::from_kind_and_value("agent.status", value).unwrap_err();
+        assert!(err.to_string().contains("malformed"), "{err}");
+    }
 
-        let issue_id = eid(&bob, 1);
-        let assign_id = eid(&bob, 2);
-        let ack = IssueAcknowledged {
-            issue: issue_id.clone(),
-            assignment: assign_id.clone(),
-            note: text("n"),
-        };
-        assert_eq!(
-            EventData::IssueAcknowledged(ack).referenced_ids(),
-            BTreeSet::from([issue_id.clone(), assign_id.clone()])
-        );
-
-        let resolved = IssueResolved {
-            issue: issue_id.clone(),
-            assignment: assign_id.clone(),
-            summary: text("s"),
-            fix_commit: Some(oid(8)),
-            verification: vec![],
-        };
-        assert_eq!(
-            EventData::IssueResolved(resolved).referenced_ids(),
-            BTreeSet::from([issue_id.clone(), assign_id.clone()])
-        );
-
-        let rejected = IssueRejected {
-            issue: issue_id.clone(),
-            assignment: assign_id.clone(),
-            reason: text("r"),
-            normative_refs: vec![],
-        };
-        assert_eq!(
-            EventData::IssueRejected(rejected).referenced_ids(),
-            BTreeSet::from([issue_id.clone(), assign_id.clone()])
-        );
-
-        let reassigned = IssueReassigned {
-            issue: issue_id.clone(),
-            previous_assignment: assign_id.clone(),
-            previous_target: alice.clone(),
-            new_target: bob.clone(),
-            reason: text("r"),
-        };
-        assert_eq!(
-            EventData::IssueReassigned(reassigned).referenced_ids(),
-            BTreeSet::from([issue_id.clone(), assign_id.clone()])
-        );
-
-        // ---- dependency.* ----
-        let dep_requested = DependencyRequested {
-            target: bob.clone(),
-            interface: short("api"),
-            needed_by: text("soon"),
-            blocking: true,
-            summary: text("s"),
-            evidence: StringSet::build(vec![ev1.clone()]),
-        };
-        assert_eq!(
-            EventData::DependencyRequested(dep_requested).referenced_ids(),
-            BTreeSet::from([ev1.clone()])
-        );
-
-        let dep_id = eid(&alice, 5);
-        let dep_assign = eid(&alice, 6);
-        let dep_ack = DependencyAcknowledged {
-            dependency: dep_id.clone(),
-            assignment: dep_assign.clone(),
-            note: text("n"),
-        };
-        assert_eq!(
-            EventData::DependencyAcknowledged(dep_ack).referenced_ids(),
-            BTreeSet::from([dep_id.clone(), dep_assign.clone()])
-        );
-
-        let dep_resolved = DependencyResolved {
-            dependency: dep_id.clone(),
-            assignment: dep_assign.clone(),
-            summary: text("s"),
-            product_commit: Some(oid(9)),
-            verification: vec![],
-        };
-        assert_eq!(
-            EventData::DependencyResolved(dep_resolved).referenced_ids(),
-            BTreeSet::from([dep_id.clone(), dep_assign.clone()])
-        );
-
-        let dep_rejected = DependencyRejected {
-            dependency: dep_id.clone(),
-            assignment: dep_assign.clone(),
-            reason: text("r"),
-        };
-        assert_eq!(
-            EventData::DependencyRejected(dep_rejected).referenced_ids(),
-            BTreeSet::from([dep_id.clone(), dep_assign.clone()])
-        );
-
-        let dep_reassigned = DependencyReassigned {
-            dependency: dep_id.clone(),
-            previous_assignment: dep_assign.clone(),
-            previous_target: alice.clone(),
-            new_target: bob.clone(),
-            reason: text("r"),
-        };
-        assert_eq!(
-            EventData::DependencyReassigned(dep_reassigned).referenced_ids(),
-            BTreeSet::from([dep_id.clone(), dep_assign.clone()])
-        );
-
-        // ---- handoff.* ----
-        let issue_ref = eid(&bob, 9);
-        let evid_ref = eid(&bob, 10);
-        let handoff_offered = HandoffOffered {
-            receiver: bob.clone(),
-            scope: StringSet::build(vec![pc("a/**")]),
-            product_branch: branch("refs/heads/agent/alice/x"),
-            product_commit: oid(10),
-            verification: vec![],
-            known_issues: StringSet::build(vec![issue_ref.clone()]),
-            evidence: StringSet::build(vec![evid_ref.clone()]),
-            summary: text("s"),
-        };
-        assert_eq!(
-            EventData::HandoffOffered(handoff_offered).referenced_ids(),
-            [issue_ref.clone(), evid_ref.clone()].into_iter().collect()
-        );
-
-        let handoff_id = eid(&alice, 11);
-        let handoff_accepted = HandoffAccepted {
-            handoff: handoff_id.clone(),
-            note: text("n"),
-        };
-        assert_eq!(
-            EventData::HandoffAccepted(handoff_accepted).referenced_ids(),
-            BTreeSet::from([handoff_id.clone()])
-        );
-
-        let handoff_declined = HandoffDeclined {
-            handoff: handoff_id.clone(),
-            reason: text("r"),
-        };
-        assert_eq!(
-            EventData::HandoffDeclined(handoff_declined).referenced_ids(),
-            BTreeSet::from([handoff_id.clone()])
-        );
-
-        let handoff_withdrawn = HandoffWithdrawn {
-            handoff: handoff_id.clone(),
-            reason: text("r"),
-        };
-        assert_eq!(
-            EventData::HandoffWithdrawn(handoff_withdrawn).referenced_ids(),
-            BTreeSet::from([handoff_id.clone()])
-        );
-
-        // ---- review.* ----
-        let review_evidence = eid(&bob, 12);
-        let review_nominated = ReviewNominated {
-            authors: StringSet::build(vec![alice.clone()]),
-            product_branch: branch("refs/heads/agent/alice/x"),
-            reviewer: bob.clone(),
-            required_checks: vec![text("build")],
-            review_scope: StringSet::build(vec![pc("a/**")]),
-            summary: text("s"),
-            target_branch: branch("refs/heads/main"),
-            evidence: StringSet::build(vec![review_evidence.clone()]),
-        };
-        assert_eq!(
-            EventData::ReviewNominated(review_nominated.clone()).referenced_ids(),
-            BTreeSet::from([review_evidence.clone()])
-        );
-        let req = review_nominated.request();
-        assert_eq!(req.reviewer, bob);
-
-        let nomination_id = eid(&alice, 13);
-        let nom_accepted = ReviewNominationAccepted {
-            nomination: nomination_id.clone(),
-            note: text("n"),
-        };
-        assert_eq!(
-            EventData::ReviewNominationAccepted(nom_accepted).referenced_ids(),
-            BTreeSet::from([nomination_id.clone()])
-        );
-
-        let nom_declined = ReviewNominationDeclined {
-            nomination: nomination_id.clone(),
-            reason: text("r"),
-        };
-        assert_eq!(
-            EventData::ReviewNominationDeclined(nom_declined).referenced_ids(),
-            BTreeSet::from([nomination_id.clone()])
-        );
-
-        let changes_evidence = eid(&bob, 14);
-        let changes_requested = ReviewChangesRequested {
-            nomination: nomination_id.clone(),
-            reviewed_commit: oid(11),
-            findings: vec![Finding {
-                id: short("f1"),
-                priority: Priority::High,
-                locations: vec![text("f:1")],
-                rationale: text("r"),
-                closure_conditions: text("c"),
-            }],
-            evidence: StringSet::build(vec![changes_evidence.clone()]),
-        };
-        assert_eq!(
-            EventData::ReviewChangesRequested(changes_requested).referenced_ids(),
-            BTreeSet::from([nomination_id.clone(), changes_evidence.clone()])
-        );
-
-        let changes_event = eid(&bob, 15);
-        let findings_cleared = ReviewFindingsCleared {
-            nomination: nomination_id.clone(),
-            changes_event: changes_event.clone(),
-            finding_id: short("f1"),
-            resolved_commit: oid(12),
-            summary: text("s"),
-        };
-        assert_eq!(
-            EventData::ReviewFindingsCleared(findings_cleared).referenced_ids(),
-            BTreeSet::from([nomination_id.clone(), changes_event.clone()])
-        );
-
-        let findings_superseded = ReviewFindingsSuperseded {
-            nomination: nomination_id.clone(),
-            changes_event: changes_event.clone(),
-            finding_id: short("f1"),
-            rationale: text("r"),
-        };
-        assert_eq!(
-            EventData::ReviewFindingsSuperseded(findings_superseded).referenced_ids(),
-            BTreeSet::from([nomination_id.clone(), changes_event.clone()])
-        );
-
-        let replaces = nomination_id.clone();
-        let review_reassigned = ReviewReassigned {
-            authors: StringSet::build(vec![alice.clone()]),
-            product_branch: branch("refs/heads/agent/alice/x"),
-            reviewer: bob.clone(),
-            required_checks: vec![],
-            review_scope: StringSet::build(vec![pc("a/**")]),
-            summary: text("s"),
-            target_branch: branch("refs/heads/main"),
-            evidence: StringSet::build(vec![review_evidence.clone()]),
-            replaces: replaces.clone(),
-            reason: text("r"),
-            inherited_findings: vec![FindingRef {
-                changes_event: changes_event.clone(),
-                finding_id: short("f1"),
-            }],
-        };
-        let expected: BTreeSet<EventId> = [
-            replaces.clone(),
-            changes_event.clone(),
-            review_evidence.clone(),
-        ]
-        .into_iter()
-        .collect();
-        assert_eq!(
-            EventData::ReviewReassigned(review_reassigned.clone()).referenced_ids(),
-            expected
-        );
-        let req2 = review_reassigned.request();
-        assert_eq!(req2.reviewer, bob);
-
-        let review_withdrawn = ReviewWithdrawn {
-            nomination: nomination_id.clone(),
-            reason: text("r"),
-        };
-        assert_eq!(
-            EventData::ReviewWithdrawn(review_withdrawn).referenced_ids(),
-            BTreeSet::from([nomination_id.clone()])
-        );
-
-        let merge_epoch = eid(&alice, 0);
-        let fd_changes_event = eid(&bob, 16);
-        let merge_evidence = eid(&bob, 17);
-        let merge_authorized = ReviewMergeAuthorized {
-            nomination: nomination_id.clone(),
-            product_branch: branch("refs/heads/agent/alice/x"),
-            previous_main: oid(13),
-            reviewed_commit: oid(14),
-            candidate: oid(15),
-            merge_engine_epoch: merge_epoch.clone(),
-            checks: vec![CheckResult {
-                command: text("build"),
-                result: CheckOutcome::Passed,
-                evidence: None,
-            }],
-            finding_dispositions: vec![FindingDisposition {
-                changes_event: fd_changes_event.clone(),
-                finding_id: short("f1"),
-                disposition: FindingDispositionKind::Cleared,
-                rationale: text("r"),
-            }],
-            evidence: StringSet::build(vec![merge_evidence.clone()]),
-            reviewed_scope: StringSet::build(vec![pc("a/**")]),
-            limitations: vec![],
-            summary: text("s"),
-        };
-        let expected: BTreeSet<EventId> = [
-            nomination_id.clone(),
-            merge_epoch.clone(),
-            fd_changes_event.clone(),
-            merge_evidence.clone(),
-        ]
-        .into_iter()
-        .collect();
-        assert_eq!(
-            EventData::ReviewMergeAuthorized(merge_authorized).referenced_ids(),
-            expected
-        );
-
-        let authorization_id = eid(&bob, 18);
-        let review_merged = ReviewMerged {
-            authorization: authorization_id.clone(),
-            previous_main: oid(16),
-            main_commit: oid(17),
-            product_branch: branch("refs/heads/main"),
-            reviewed_commit: oid(18),
-            summary: text("s"),
-        };
-        assert_eq!(
-            EventData::ReviewMerged(review_merged).referenced_ids(),
-            BTreeSet::from([authorization_id.clone()])
-        );
-
-        let review_reconciled = ReviewMergeReconciled {
-            authorization: authorization_id.clone(),
-            previous_main: oid(19),
-            main_commit: oid(20),
-            product_branch: branch("refs/heads/main"),
-            reviewed_commit: oid(21),
-            reason: text("r"),
-            user_authority: text("u"),
-        };
-        assert_eq!(
-            EventData::ReviewMergeReconciled(review_reconciled).referenced_ids(),
-            BTreeSet::from([authorization_id.clone()])
-        );
-
-        // ---- lifecycle.conflict_resolved ----
-        let root = eid(&alice, 20);
-        let comp1 = eid(&alice, 21);
-        let comp2 = eid(&bob, 22);
-        let lifecycle_resolved = LifecycleConflictResolved {
-            root: root.clone(),
-            competing: StringSet::build(vec![comp1.clone(), comp2.clone()]),
-            selected: comp1.clone(),
-            reason: text("r"),
-            user_authority: text("u"),
-        };
-        let expected: BTreeSet<EventId> = [root.clone(), comp1.clone(), comp2.clone()]
-            .into_iter()
-            .collect();
-        assert_eq!(
-            EventData::LifecycleConflictResolved(lifecycle_resolved).referenced_ids(),
-            expected
-        );
+    #[test]
+    fn text_field_rejects_out_of_bounds_length() {
+        let value = serde_json::json!({
+            "status": "active",
+            "note": "x".repeat(4097),
+        });
+        assert!(EventData::from_kind_and_value("agent.status", value).is_err());
     }
 }

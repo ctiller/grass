@@ -46,7 +46,9 @@ pub struct Finding {
     pub closure_conditions: Text,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A finding's global identity is `(changes_event, finding_id)` -- the id
+/// alone is only unique within one `review.changes_requested`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(deny_unknown_fields)]
 pub struct FindingRef {
     pub changes_event: EventId,
@@ -69,6 +71,9 @@ pub struct FindingDisposition {
     pub rationale: Text,
 }
 
+/// Occurs only inside `review.merge_authorized`, so `Passed` is its sole
+/// variant: a failed check is reported through `progress.reported` (and
+/// normally produces `review.changes_requested`) rather than appearing here.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckOutcome {

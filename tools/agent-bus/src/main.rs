@@ -1,4 +1,3 @@
-mod bootstrap;
 mod canon;
 mod common;
 mod envelope;
@@ -10,7 +9,6 @@ mod gitrepo;
 mod outbox;
 mod registry;
 mod scalars;
-mod state;
 mod storage;
 mod stream;
 
