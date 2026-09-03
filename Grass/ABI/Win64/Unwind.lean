@@ -50,6 +50,15 @@ open Grass.Core Grass.Std.Logical Grass.ISA.X86
 /-! ## Unwind operations -/
 
 /--
+A register's four-bit number: the `REX` bit is the *high* bit and
+`encodingBits` the low three, so `r12` is 12 and not 4.
+
+Shared by `UnwindOp.opInfo` and `UNWIND_INFO.FrameRegister`, which is what lets
+`Grass.ABI.Win64.UnwindInfo` require the two to agree.
+-/
+def regNibble (r : Gpr) : BitVec 4 := BitVec.ofBool r.rexBit ++ r.encodingBits
+
+/--
 An unwind operation code, as stored in the high nibble's `UnwindOp` field.
 
 Only the operations this profile emits or recognises are constructors. The
@@ -65,8 +74,16 @@ inductive UnwindOp where
   /-- `UWOP_ALLOC_LARGE` (1) with `OpInfo = 0`: `sub rsp, n` for `n` a multiple
   of 8 below 512K, stored scaled in one extra slot. -/
   | allocLarge (bytes : Nat)
-  /-- `UWOP_SET_FPREG` (3): establish the frame pointer from `RSP`. -/
-  | setFramePointer
+  /-- `UWOP_SET_FPREG` (3): establish the frame pointer from `RSP`.
+
+  Carries the register, even though the unwinder reads `FrameRegister` from the
+  `UNWIND_INFO` header rather than from this code's `OpInfo`. Two reasons.
+  Microsoft's assembler writes the register number into `OpInfo` here -- see
+  `opInfo` -- so a model storing 0 could not reproduce `ml64`'s bytes. And
+  holding the register in the operation is what lets
+  `Grass.ABI.Win64.UnwindInfo.framePointerAgrees` demand that the header field
+  and every establishing instruction name the same register. -/
+  | setFramePointer (r : Gpr)
 deriving DecidableEq, Repr, Inhabited
 
 namespace UnwindOp
@@ -76,7 +93,7 @@ def opcode : UnwindOp → BitVec 4
   | .pushNonvolatile _ => 0
   | .allocLarge _ => 1
   | .allocSmall _ => 2
-  | .setFramePointer => 3
+  | .setFramePointer _ => 3
 
 /--
 How many two-byte slots this operation occupies in the `UNWIND_CODE` array.
@@ -90,7 +107,7 @@ def slots : UnwindOp → Nat
   | .pushNonvolatile _ => 1
   | .allocSmall _ => 1
   | .allocLarge _ => 2
-  | .setFramePointer => 1
+  | .setFramePointer _ => 1
 
 /-- Every operation occupies at least one slot. -/
 theorem slots_pos (op : UnwindOp) : 0 < op.slots := by
@@ -101,18 +118,30 @@ def stackDelta : UnwindOp → Nat
   | .pushNonvolatile _ => 8
   | .allocSmall n => n
   | .allocLarge n => n
-  | .setFramePointer => 0
+  | .setFramePointer _ => 0
 
 /-- The `OpInfo` nibble.
 
-For a push it is the four-bit register number: the REX bit is the *high* bit and
-`encodingBits` the low three, so `r12` is 12 and not 4. For an allocation it is
-a size encoding and not a register at all. -/
+For a push it is the four-bit register number. For an allocation it is a size
+encoding and not a register at all: `allocSmall` stores `n/8 - 1`, and
+`allocLarge` stores 0 because its size goes in a following slot.
+
+For `setFramePointer` it is the frame register's number, and that is a recorded
+disagreement rather than a derivation. Microsoft's description of
+`UWOP_SET_FPREG` says the operation info field is reserved and should not be
+used, which reads as licence to write anything, including zero. `ml64` writes
+the register: `.setframe r13, 16` produces the code byte `D3`, not `03`, as
+`Tools/win64-unwind-differential.py` measured on this machine. Grass follows the
+vendor's generator over the vendor's prose, because matching it byte-for-byte
+makes the differential exact -- and `docs/VALIDATION.md` section 2 asks for such
+a conflict to be preserved rather than smoothed over, which is what this
+paragraph is. Nothing rests on the choice: the unwinder takes the register from
+`FrameRegister`. -/
 def opInfo : UnwindOp → BitVec 4
-  | .pushNonvolatile r => BitVec.ofBool r.rexBit ++ r.encodingBits
+  | .pushNonvolatile r => regNibble r
   | .allocSmall n => BitVec.ofNat 4 (n / 8 - 1)
   | .allocLarge _ => 0
-  | .setFramePointer => 0
+  | .setFramePointer r => regNibble r
 
 /--
 The allocation sizes `allocSmall` can encode: multiples of 8 from 8 to 128.
@@ -138,7 +167,7 @@ def Encodable : UnwindOp → Prop
   | .pushNonvolatile r => volatility r = .nonvolatile
   | .allocSmall n => SmallAllocEncodable n
   | .allocLarge n => LargeAllocEncodable n
-  | .setFramePointer => True
+  | .setFramePointer r => volatility r = .nonvolatile ∧ r ≠ .rsp
 
 instance (op : UnwindOp) : Decidable op.Encodable := by
   cases op <;> unfold Encodable <;> infer_instance
@@ -229,22 +258,83 @@ theorem codes_stackDelta (p : Prologue) :
   simp [codes, stackDelta, List.map_reverse, List.sum_reverse]
 
 /--
-`CountOfCodes` as stored in `UNWIND_INFO`.
+`CountOfCodes` as stored in `UNWIND_INFO`: the slots the operations occupy,
+*without* the padding slot.
 
-The array is padded to an even number of slots so the structure that follows it
-stays 4-byte aligned. The padding slot is part of the count, so a generator that
-reported the unpadded count would describe an array one slot shorter than the
-one it wrote.
+This definition was wrong, and `ml64` is what said so. The array is padded to an
+even number of slots so that whatever follows stays 4-byte aligned, and the
+previous definition folded that padding into the count. Microsoft's assembler
+reports the unpadded count: for a prologue of a single `push`, `.xdata` is eight
+bytes and ends in a zero padding slot, but `CountOfCodes` is 1. So the array is
+one slot longer than the count exactly when the count is odd, and `arraySlots`
+is that physical length.
+
+The error was invisible on every prologue with an even slot count -- including
+Spike 1's, whose four slots need no padding, so nothing already in this file
+would have caught it. That is why `Tests/ABI/Win64/UnwindCorpus.lean`
+deliberately includes single-operation prologues, and why those were the rows
+that failed.
 -/
-def countOfCodes (p : Prologue) : Nat := p.slots + p.slots % 2
+def countOfCodes (p : Prologue) : Nat := p.slots
 
-theorem countOfCodes_even (p : Prologue) : p.countOfCodes % 2 = 0 := by
-  simp only [countOfCodes]
+/-- The physical length of the `UNWIND_CODE` array in slots, padding included.
+-/
+def arraySlots (p : Prologue) : Nat := p.slots + p.slots % 2
+
+theorem arraySlots_even (p : Prologue) : p.arraySlots % 2 = 0 := by
+  simp only [arraySlots]
   omega
 
-theorem countOfCodes_ge_slots (p : Prologue) : p.slots ≤ p.countOfCodes := by
-  simp only [countOfCodes]
+theorem arraySlots_ge_countOfCodes (p : Prologue) :
+    p.countOfCodes ≤ p.arraySlots := by
+  simp only [arraySlots, countOfCodes]
   omega
+
+/-- The array exceeds the reported count by at most one slot, so a reader that
+trusts `CountOfCodes` never runs past the array. -/
+theorem arraySlots_le_countOfCodes_succ (p : Prologue) :
+    p.arraySlots ≤ p.countOfCodes + 1 := by
+  simp only [arraySlots, countOfCodes]
+  omega
+
+/-- Whether the prologue establishes a frame pointer at all. -/
+def establishesFramePointer (p : Prologue) : Bool :=
+  p.ops.any fun op => match op with
+    | .setFramePointer _ => true
+    | _ => false
+
+/--
+Whether every `setFramePointer` in the prologue names `reg`.
+
+Quantified over the operations rather than looking up the first one. A lookup
+would accept a prologue holding two `setFramePointer` operations that name
+different registers -- agreeing with the header on the first and silently
+disagreeing on the second. Quantifying rules that out, and as a side effect
+forces any two establishing operations to name the same register as each other.
+-/
+def framePointerIs (p : Prologue) (reg : BitVec 4) : Bool :=
+  p.ops.all fun op => match op with
+    | .setFramePointer r => reg == regNibble r
+    | _ => true
+
+/-- `framePointerIs` is the membership-quantified statement it is meant to be.
+
+Stated so that the invariant is legible where it is used as a hypothesis rather
+than merely computable, and so a reader can see that it really is a `forall`
+over every establishing operation. -/
+theorem framePointerIs_iff (p : Prologue) (reg : BitVec 4) :
+    p.framePointerIs reg = true <->
+      forall r, UnwindOp.setFramePointer r ∈ p.ops → reg = regNibble r := by
+  simp only [framePointerIs, List.all_eq_true]
+  constructor
+  · intro h r hmem
+    simpa using h _ hmem
+  · intro h op hmem
+    match op with
+    | .setFramePointer r => simpa using h r hmem
+    | .pushNonvolatile _ => rfl
+    | .allocSmall _ => rfl
+    | .allocLarge _ => rfl
 
 end Prologue
 
@@ -267,9 +357,13 @@ theorem spike1Prologue_encodable : spike1Prologue.Encodable := by decide
 /-- It moves `RSP` down 56 bytes: three pushes and 32 bytes of shadow space. -/
 theorem spike1Prologue_stackDelta : spike1Prologue.stackDelta = 56 := by decide
 
-/-- Four operations, four slots, and the count pads to four because four is
-already even. -/
+/-- Four operations, four slots, so a reported count of four and no padding
+slot. `ml64` agrees byte-for-byte; see `Tests/ABI/Win64/UnwindCorpus.lean`. -/
 theorem spike1Prologue_countOfCodes : spike1Prologue.countOfCodes = 4 := by decide
+
+/-- It establishes no frame pointer, so `FrameRegister` must be zero. -/
+theorem spike1Prologue_no_framePointer :
+    spike1Prologue.establishesFramePointer = false := by decide
 
 /--
 The stack it leaves is aligned for a call, agreeing with `Convention.lean`.
