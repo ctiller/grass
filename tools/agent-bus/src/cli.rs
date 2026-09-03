@@ -71,6 +71,31 @@ pub enum Command {
     /// reviewer-side helper, not itself a publication, so it reads whatever
     /// is already local rather than requiring a fresh remote probe.
     PrepareMerge(PrepareMergeArgs),
+    /// AGENT_REVIEW.md section 8, the pre-merge gate: run immediately after
+    /// publishing `review.merge_authorized` and immediately before pushing
+    /// the candidate to `main`. Confirms the authorization is genuinely
+    /// usable *right now* -- the reviewer is still eligible and accepted, no
+    /// finding or blocking issue remains open, `reviewed_scope` still equals
+    /// the nomination's `review_scope` -- and, crucially, re-checks live Git
+    /// state that could only have changed *after* `review.merge_authorized`
+    /// was published: `refs/heads/main` still equals exactly the authorized
+    /// `previous_main` (a fast-forward past it, not just a divergence, still
+    /// requires a fresh authorization), the candidate's actual parents are
+    /// exactly `[previous_main, reviewed_commit]`, it carries exactly one
+    /// matching `Agent-Bus-Reviewer` trailer, every path it changes falls
+    /// within `reviewed_scope`, and every recorded check passed. This is a
+    /// distinct, later check from `coordinator::verify_review_merge_
+    /// authorized` (which gates the event at publication time, against
+    /// whatever the payload itself claims) and from `apply::apply_review_
+    /// merge_authorized` (the event's own internal bus-state consistency):
+    /// neither can catch `main` having moved, or the candidate having been
+    /// hand-tampered with, in the real time that elapses between publishing
+    /// the authorization and actually pushing it. Reads local Git/bus state
+    /// as-is rather than fetching first -- like `prepare-merge`, the
+    /// reviewer is expected to have already fetched `main` themselves (per
+    /// AGENT_REVIEW.md section 7 step 1); prints the exact candidate object
+    /// id to push on success.
+    MergeReady(MergeReadyArgs),
 }
 
 #[derive(clap::Args)]
@@ -223,6 +248,16 @@ pub struct PrepareMergeArgs {
     reviewed_commit: String,
     #[arg(long, default_value = "origin")]
     remote: String,
+}
+
+#[derive(clap::Args)]
+pub struct MergeReadyArgs {
+    /// The authorizing reviewer.
+    #[arg(long)]
+    agent: String,
+    /// The `review.merge_authorized` event id to check.
+    #[arg(long)]
+    authorization: String,
 }
 
 struct RepoPaths {
@@ -383,6 +418,7 @@ pub fn run(cli: Cli) -> AbResult<()> {
         Command::Succeed(args) => succeed(args),
         Command::Outbox(args) => outbox(args),
         Command::PrepareMerge(args) => prepare_merge(args),
+        Command::MergeReady(args) => merge_ready(args),
     }
 }
 
@@ -889,6 +925,37 @@ fn prepare_merge(args: PrepareMergeArgs) -> AbResult<()> {
         "candidate": candidate,
         "previous_main": previous_main,
         "merge_engine_epoch": state.current_merge_engine_epoch.as_ref().map(|e| e.as_str().to_string()),
+    }));
+    Ok(())
+}
+
+/// AGENT_REVIEW.md section 8, the pre-merge gate (see `Command::MergeReady`'s
+/// own doc for the full rationale). A thin CLI wrapper -- arg parsing,
+/// snapshot load, JSON output -- around `merge_ready::check_merge_ready`,
+/// which holds the actual gate logic (and its own extensive test suite,
+/// including the git-linked checks that need a real repo) so it stays
+/// testable without going through `resolve_paths`/process cwd. Reads local
+/// bus/git state as-is (like `prepare_merge`, this is a convenience read,
+/// not a publication) -- re-verifies everything the authorization claims
+/// against what is actually true *right now*, rather than trusting that it
+/// was true when `review.merge_authorized` was published moments (or
+/// longer) earlier.
+fn merge_ready(args: MergeReadyArgs) -> AbResult<()> {
+    let paths = resolve_paths()?;
+    let reviewer = parse_agent(&args.agent)?;
+    let authorization = EventId::parse(args.authorization)?;
+
+    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?;
+    let candidate = crate::merge_ready::check_merge_ready(
+        &paths.repo,
+        &snapshot.state,
+        &reviewer,
+        &authorization,
+    )?;
+
+    print_json(&serde_json::json!({
+        "ready": true,
+        "candidate": candidate.as_str(),
     }));
     Ok(())
 }

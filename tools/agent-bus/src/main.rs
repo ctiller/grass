@@ -11,6 +11,7 @@ mod exclusive;
 mod frontier;
 mod gitrepo;
 mod merge_candidate;
+mod merge_ready;
 mod outbox;
 mod publish;
 mod registry;
