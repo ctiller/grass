@@ -298,4 +298,18 @@ theorem withRoot_is_wellFormed : World.withRoot.WellFormed :=
       exact ⟨rfl, rfl⟩
     | connection => exact absurd found (by intro equal; cases equal))
 
+/--
+And sound, which at this plan is the same claim under another name — §10.82.
+
+Worth stating anyway: `terminated_result_is_exact` takes a `Sound`, and until
+`waiting_is_sound` nothing had ever supplied one. This is the second, at a plan
+whose terminal-result type is not empty.
+-/
+theorem withRoot_is_sound : serverPlan.Sound World.withRoot :=
+  ⟨withRoot_is_wellFormed⟩
+
+/-- And so is the world one spawn later, by the capstone rather than by hand. -/
+theorem spawned_is_sound : serverPlan.Sound spawned :=
+  ⟨spawned_is_wellFormed⟩
+
 end Grass.Process.Tests.Preservation
