@@ -10,7 +10,7 @@ This file spends both at the M2 fixture plan, where there is an actual step to
 apply them to.
 
 The instantiation is the point rather than a formality. `observations_extend` is
-proved by cases over all twenty-three constructors, and a case analysis is the
+proved by cases over the whole constructor family, and a case analysis is the
 kind of proof that can be *right about every case it lists* while the family it
 lists is not the one a consumer meets. Applying it to a step written before it
 existed is the check on that.

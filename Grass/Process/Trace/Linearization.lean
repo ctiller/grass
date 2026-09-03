@@ -18,7 +18,7 @@ answerable without the diamond.
 ## The two theorems that matter
 
 **The trace only grows.** `observations_extend` is by cases over all
-twenty-three constructors of `NetworkTransition`, and it is the reason a
+constructors of `NetworkTransition`, and it is the reason a
 specification stated over observations is stable under execution: no step
 rewrites or truncates the trace, so an observation a specification demanded
 cannot be dropped by a later step. Twenty-one constructors get it from
@@ -101,7 +101,7 @@ def NetworkTransition.Emits {before after : plan.LogicalProcessNetwork}
 A step that did not declare the trace left it exactly.
 
 Immediate from `touchesOnly`, and the half of the argument that covers
-twenty-one of the twenty-three constructors.
+all but two of the constructors.
 -/
 theorem trace_unchanged_of_silent {before after : plan.LogicalProcessNetwork}
     (transition : plan.NetworkTransition before after) (silent : ¬ transition.Emits) :
@@ -133,7 +133,7 @@ theorem observations_extend {before after : plan.LogicalProcessNetwork}
     ∃ emitted, after.observations = before.observations ++ emitted := by
   by_cases emits : transition.Emits
   · cases transition with
-    | processStep _ _ _ _ emitted _ _ step => exact ⟨emitted, step.observationsExtend⟩
+    | processStep _ _ _ emitted _ _ step => exact ⟨emitted, step.observationsExtend⟩
     | commit emitted step => exact ⟨emitted, step.appended⟩
     | _ => exact absurd emits (by simp [NetworkTransition.Emits, NetworkTransition.scope])
   · exact ⟨[], by rw [← trace_unchanged_of_silent transition emits, List.append_nil]⟩
@@ -157,7 +157,7 @@ theorem emits_iff_the_trace_moved {before after : plan.LogicalProcessNetwork}
   constructor
   · intro emits
     cases transition with
-    | processStep _ _ _ _ emitted _ _ step =>
+    | processStep _ _ _ emitted _ _ step =>
       rcases emits with isSlot | ⟨nonempty, _⟩ | ⟨_, _, isRegion⟩
       · exact absurd isSlot (by simp)
       · intro same

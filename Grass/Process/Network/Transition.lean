@@ -36,29 +36,44 @@ theorem about *steps*: a mixin whose assertion avoids a transition's scope is
 preserved by it, and the scope is now something a transition supplies rather
 than something a caller asserts.
 
-## The ten endings share a shape and stay ten constructors
+## The escrow resolutions share a shape, and four of them have outgrown it
 
-`receive`, `acknowledgeCancel`, `timedOut`, `channelClosed`, `senderDied`,
-`receiverDied`, `channelDied`, `dropped`, `rerouted` and `coalesced` all do the
-same thing to the world: they take one outstanding occurrence on one session and
-write one `ChannelResolution` for it. `ResolvesEscrow` is that shape, and it is
-shared.
+`acknowledgeCancel`, `timeout`, `senderDeath`, `receiverDeath`, `drop` and
+`coalesce` all do the same thing to the world: they take one outstanding
+occurrence on one session and write one `ChannelResolution` for it.
+`ResolvesEscrow` is that shape, and those six share it.
 
-They stay ten constructors rather than one `resolve` carrying a
+Four no longer do, and each moved out for a reason a consumer found.
+`receive` is a `Delivers` because it advances the receiver's session cursor;
+`channelClose` a `ClosesSession` and `channelDeath` a `KillsSession` because
+they move the session's *status*, which nothing could produce while they were
+bare resolutions; and `reroute` a `Reroutes` because it has to write the
+destination's ledger, which `ResolvesEscrow`'s scope forbade.
+
+They stay separate constructors rather than one `resolve` carrying a
 `ChannelResolution`, because §3's routing-coverage claim is about constructors:
 "every endpoint input and output enters through exactly one constructor". A
 single constructor would make the claim vacuous — everything enters through the
 one — and would lose the property `resolution_is_exact` proves, that a
 constructor determines which resolution was written.
 
+The same argument is why `childLifecycle` was split into `childCancelled` and
+`childDied`: taking an arbitrary `ProcessLifecycle` it subsumed `interrupt`,
+`fault`, `environmentViolation` and `processTermination`, so "exactly one
+constructor" was false on the instance-ending side.
+
 ## What is not here
 
 `allocatedNominals` is `Grass/Process/Nominal.lean`'s `Allocation`, and the
 freshness law is `NominalHistory.Admissible` — both already existed, so
-`NetworkStep` is thin. What it is *not* is a claim that this file's constructors
-allocate the right nominals: each supplies its own allocation, and nothing yet
-checks that a spawn's allocation contains the generation the spawned instance
-carries. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.18 records that.
+`NetworkStep` is thin. `Spawns.allocatesTheGeneration` and
+`Restarts.allocatesTheGeneration` now do check that the allocation contains the
+generation the instance carries, which closes what
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.18 recorded.
+
+What is still not checked is the other direction: `send`, `coalesce` and
+`reroute` create message occurrences and are declared non-allocating, against
+§3's list of what `allocatedNominals` contains. §10.36 records it.
 -/
 
 namespace Grass.Process
@@ -270,9 +285,10 @@ end SendsEscrow
 /--
 One instance slot changed, and nothing else did.
 
-The shape shared by the transitions that act on a process rather than on a
-channel. Which slot, and how it changed, is the constructor's business; that it
-changed nothing else is here.
+Once shared by every transition acting on a process; now `Detaches` alone uses
+it. `EndsInstance` outgrew it when the obligation ledger became reachable, and
+`Joins` when a live incarnation turned out to be able to vanish through it
+unclassified.
 -/
 structure ChangesOneInstance (before after : plan.LogicalProcessNetwork)
     (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind) : Prop where
@@ -290,7 +306,20 @@ is what writes it.
 structure EndsInstance (before after : plan.LogicalProcessNetwork)
     (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
     (ending : ProcessLifecycle (plan.topology.protocol kind))
-    (custody : Obligations → Obligations → Prop) : Prop where
+    (custody : Bag (plan.topology.protocol kind).Demand →
+      Obligations → Obligations → Prop) : Prop where
+  /--
+  **The ending really ends it.**
+
+  Without this `EndsInstance` accepted `ending := .running`, so a step could move
+  the obligation ledger while the process it "ended" was still stepping — and
+  `moving_the_ledger_ends_an_instance` reported that as an ending. Local
+  adversarial review built one at a plan with two obligation values.
+
+  `not_live_after` was guarded by the same condition as a hypothesis, which is
+  the tell: the guard belonged in the structure.
+  -/
+  notRunning : ending ≠ .running
   /-- It was live. -/
   wasLive : ∃ incarnation, before.instances kind slot = some incarnation ∧
     incarnation.Live
@@ -303,7 +332,15 @@ structure EndsInstance (before after : plan.LogicalProcessNetwork)
   `docs/PROCESS.md` §2: "termination explicitly resolves, transfers, or permits
   pending". `custody` is a parameter rather than a field, so it is the
   *constructor* that names the transfer and a reader of the transition sees it —
-  the same trade as `written` on `StepsLocally` and `emitted` on `Commits`.
+  the same trade as `emitted` on `Commits`.
+
+  **Indexed by the bag being disposed of.** An earlier version took only the two
+  ledgers, so the transfer said nothing about *what* was being transferred and
+  §2's "pending" had no referent at the network: three outstanding demands could
+  vanish at a termination with nothing accounting for them. It still does not
+  carry §2's three-way *partition* — that wants the specification's
+  `TerminalRemainderLaw`, which a `ProcessPlan` does not hold; see
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.33.
 
   Before this existed, no constructor of `NetworkTransition` named
   `.obligations` in its scope, so by `touchesOnly` the ledger
@@ -311,24 +348,20 @@ structure EndsInstance (before after : plan.LogicalProcessNetwork)
   in any program at all. A weave mixin about obligations framed past every step
   vacuously, and §7's `DisjointOrCommutingObligations` was satisfied by the
   whole family for free.
-  -/
-  custodyDeclared : custody before.obligations after.obligations
-  /--
-  **And the declared custody determines where the ledger went.**
 
-  `custodyDeclared` on its own is satisfied by `custody := fun _ _ => True`, so
-  a constructor could declare a transfer and mean nothing by it — local
-  adversarial review pointed out that the theorem below then existentially
-  quantifies a relation `True` satisfies, and its "the ending carries the
-  custody relation the change satisfies" was decoration.
-
-  This is the same move `Grass/Process/Function/Serial.lean` makes with
-  `SerialFunctionRealizes.converse`: requiring the declared relation to be
+  The second conjunct of `custodyDeclared` is what stops
+  `custody := fun _ _ _ => True`: requiring the declared relation to be
   single-valued at the before-state turns it from a claim the author can make
-  vacuously into one that pins the outcome. At any plan whose `Obligations` has
-  two values, `fun _ _ => True` is now refuted.
+  vacuously into one that pins the outcome, which is the same move
+  `Grass/Process/Function/Serial.lean` makes with
+  `SerialFunctionRealizes.converse`. At any plan whose `Obligations` has two
+  values, `True` is refuted.
   -/
-  custodyExact : ∀ other, custody before.obligations other → other = after.obligations
+  custodyDeclared : ∃ incarnation, before.instances kind slot = some incarnation ∧
+    ∃ sameKind : incarnation.kind = kind,
+      custody (sameKind ▸ incarnation.outstanding) before.obligations after.obligations ∧
+      ∀ other, custody (sameKind ▸ incarnation.outstanding) before.obligations other →
+        other = after.obligations
   /--
   That slot, and the ledger if the ledger moved.
 
@@ -349,8 +382,7 @@ variable {plan}
 
 /-- An ended instance is not live afterwards, whatever the ending was. -/
 theorem not_live_after {before after kind slot ending custody}
-    (ended : plan.EndsInstance before after kind slot ending custody)
-    (notRunning : ending ≠ .running) :
+    (ended : plan.EndsInstance before after kind slot ending custody) :
     ∃ incarnation, after.instances kind slot = some incarnation ∧ ¬ incarnation.Live := by
   obtain ⟨incarnation, found, sameKind, carries⟩ := ended.nowEnded
   refine ⟨incarnation, found, ?_⟩
@@ -358,7 +390,7 @@ theorem not_live_after {before after kind slot ending custody}
   have running := ProcessLifecycle.live_iff_running.mp live
   cases sameKind
   rw [running] at carries
-  exact notRunning carries.symm
+  exact ended.notRunning carries.symm
 
 end EndsInstance
 
@@ -407,7 +439,6 @@ touches what.
 structure StepsLocally (before after : plan.LogicalProcessNetwork)
     (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
     (event : (plan.topology.protocol kind).Event)
-    (written : plan.topology.SharedRegion → Prop)
     (emitted : Trace boundary.Observation)
     (issued : Bag (plan.topology.protocol kind).Demand)
     (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation) :
@@ -428,11 +459,19 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
   `processStep` was not a protocol step at all, and no fixture in the corpus ever
   constructed one to notice.
 
-  With it, the four things §3 requires of a local step are here: the protocol
-  admits the transition, the demands it issues are the protocol's own, the
-  observation segment is the one the protocol emitted, and the issued bag
-  reaches the instance's outstanding demands by §2's linear equation
-  (`SettlesDemands`) rather than being discarded.
+  With it, five things §3 requires of a local step are here: the protocol admits
+  the transition, the demands it issues are the protocol's own, the observation
+  segment is the one the protocol emitted, the issued bag reaches the instance's
+  outstanding demands by §2's linear equation (`SettlesDemands`) rather than
+  being discarded, and **the incarnation stays the same incarnation**.
+
+  The last clause was the second thing missing here. `ProcessInstance` has seven
+  fields and this constrained two, so one tick could move an instance to a
+  different generation and re-parent it under another role — installing a
+  generation nothing allocated, which is `docs/FOUNDATION.md` law 22, while
+  `allocatedNominals` said the step allocated nothing. Local adversarial review
+  built exactly that step and proved the network after it fails
+  `NominalsAllocated` and `ParentageValid`.
   -/
   protocolStep : ∃ (fromInstance toInstance : ProcessInstance plan.topology)
       (fromKind : fromInstance.kind = kind) (toKind : toInstance.kind = kind),
@@ -441,7 +480,10 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
     (plan.topology.protocol kind).Step (fromKind ▸ fromInstance.localState) event
       (toKind ▸ toInstance.localState) issued localEmitted ∧
     plan.SettlesDemands event issued (fromKind ▸ fromInstance.outstanding)
-      (toKind ▸ toInstance.outstanding)
+      (toKind ▸ toInstance.outstanding) ∧
+    toKind ▸ toInstance.ref = fromKind ▸ fromInstance.ref ∧
+    toKind ▸ toInstance.parentage = fromKind ▸ fromInstance.parentage ∧
+    toKind ▸ toInstance.request = fromKind ▸ fromInstance.request
   /--
   **And what reaches the network trace is the projection of what it observed.**
 
@@ -453,13 +495,20 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
   /-- Observations grow by exactly this segment. -/
   observationsExtend : after.observations = before.observations ++ emitted
   /--
-  **And it writes only regions its role may write.**
+  **And every region it actually changed is one its role may write.**
 
   `docs/PROCESS.md` §3: shared logical state is "named separately with
   read/write/atomic capabilities", and this is where that capability is spent
   rather than merely declared.
+
+  Quantified over the regions that *moved* rather than over a `written`
+  predicate the author supplied. The declared form was the same widening the
+  observation scope had: a step could name a region it may write and did not
+  write, and `Grass/Process/Trace/Independence.lean` reads independence off
+  exactly these predicates, so two steps touching nothing in common would fail
+  to commute because one of them said it might.
   -/
-  writesPermitted : ∀ region, written region →
+  writesPermitted : ∀ region, before.shared region ≠ after.shared region →
     (plan.topology.sharedAccess kind region).mayWrite = true
   /--
   Its slot, the regions it wrote, the observation trace **if it actually
@@ -481,7 +530,7 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
   scope : plan.TouchesOnly before after
     (fun fragment => fragment = .instanceState kind slot ∨
       (emitted ≠ [] ∧ fragment = .observations) ∨
-      ∃ region, written region ∧ fragment = .region region)
+      ∃ region, before.shared region ≠ after.shared region ∧ fragment = .region region)
 
 /--
 A new incarnation appears in a slot that was empty.
@@ -532,6 +581,16 @@ structure Restarts (before after : plan.LogicalProcessNetwork)
   /-- It now holds a live incarnation of the right kind. -/
   nowLive : ∃ incarnation, after.instances kind slot = some incarnation ∧
     incarnation.Live ∧ incarnation.kind = kind
+  /--
+  **Whose parent the topology permits.**
+
+  `Spawns` has had this since it was written; `Restarts` did not, so a restart
+  could install a role claiming a parent the graph forbids. Local adversarial
+  review built one and proved the network after it fails `ParentageValid`.
+  -/
+  authorized : ∀ incarnation, after.instances kind slot = some incarnation →
+    ∀ parentKind parent, incarnation.parentage.knownParent = some ⟨parentKind, parent⟩ →
+      plan.topology.maySpawn parentKind incarnation.kind
   /-- Whose generation this step allocated — a restart is a new incarnation. -/
   allocatesTheGeneration : ∀ incarnation, after.instances kind slot = some incarnation →
     incarnation.ref.generation ∈ allocation.entries
@@ -560,6 +619,16 @@ structure Joins (before after : plan.LogicalProcessNetwork)
   wasTerminated : ∃ incarnation, before.instances kind slot = some incarnation ∧
     ∃ sameKind : incarnation.kind = kind,
       sameKind ▸ incarnation.lifecycle = ProcessLifecycle.terminated result
+  /--
+  **And it was somebody's child.**
+
+  The docstring said "a parent collects a terminated child" and nothing required
+  a parent: local adversarial review joined the *root*, which is a program
+  exiting by being collected by nobody. `Detaches` has carried `wasAttached`
+  since it was written; this is the same field.
+  -/
+  wasChild : ∀ incarnation, before.instances kind slot = some incarnation →
+    ¬ incarnation.IsRoot
   /-- And the slot is now free, so a restart may take it. -/
   nowFree : after.instances kind slot = none
   /-- That slot, and nothing else. -/
@@ -609,9 +678,13 @@ A channel dies, taking its session with it.
 
 The sibling of `ClosesSession`, and it was missing for the same reason: with
 `channelDeath` built on `ResolvesEscrow` alone, `SessionStatus.died` was
-producible by nothing, and a channel that had died kept whatever status it had —
-usually `.open`, so `ChannelContract.sendOnOpenSession` still admitted sends on
-it.
+producible by nothing, and a channel that had died kept whatever status it had.
+
+Producing `.died` is not by itself a closure of the channel to further sends:
+`ChannelContract.SessionOpen` is an assertion whose footprint is bounded to the
+session fragment, and nothing ties its `holds` to `sessions.status`. That tie is
+`Channel.lean`'s to make, and until it does, a dead session and an open one are
+distinguishable by this field and not by that contract.
 -/
 structure KillsSession (before after : plan.LogicalProcessNetwork)
     (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
@@ -720,9 +793,11 @@ end Detaches
 /--
 **One step of a logical process network.**
 
-`docs/PROCESS.md` §3's twenty-three constructors. Ten of them are the competing
-escrow resolutions and share `ResolvesEscrow`, distinguished by the resolution
-each writes; the rest carry the shape their own effect needs.
+`docs/PROCESS.md` §3's constructors, twenty-four after `childLifecycle` was
+split. Six of them are competing escrow resolutions sharing `ResolvesEscrow`,
+distinguished by the resolution each writes; four more resolve escrow *and*
+something else, and have their own structures for it; the rest carry the shape
+their own effect needs. See the module note.
 
 Every constructor determines a scope, and `touchesOnly` below proves each one
 respects it. That is what §3's routing coverage means here: there is no
@@ -735,12 +810,10 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
   | processStep (kind : plan.topology.ProcessKind)
       (slot : plan.topology.InstanceId kind)
       (event : (plan.topology.protocol kind).Event)
-      (written : plan.topology.SharedRegion → Prop)
       (emitted : Trace boundary.Observation)
       (issued : Bag (plan.topology.protocol kind).Demand)
       (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation)
-      (step : plan.StepsLocally before after kind slot event written emitted
-        issued localEmitted)
+      (step : plan.StepsLocally before after kind slot event emitted issued localEmitted)
   /-- A new incarnation appears. -/
   | spawn (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
       (allocation : Allocation plan.topology.Carrier)
@@ -767,26 +840,35 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
       (step : plan.ResolvesEscrow before after edge session occurrence .timedOut)
   /-- An instance's outstanding demand was abandoned. -/
   | interrupt (kind slot) (reason : (plan.topology.protocol kind).InterruptReason)
-      (custody : Obligations → Obligations → Prop)
+      (custody : Bag (plan.topology.protocol kind).Demand →
+        Obligations → Obligations → Prop)
       (step : plan.EndsInstance before after kind slot (.interrupted reason) custody)
   /-- An instance faulted. -/
   | fault (kind slot) (fault : (plan.topology.protocol kind).LogicalFault)
-      (custody : Obligations → Obligations → Prop)
+      (custody : Bag (plan.topology.protocol kind).Demand →
+        Obligations → Obligations → Prop)
       (step : plan.EndsInstance before after kind slot (.faulted fault) custody)
   /-- Its environment broke a contract. -/
   | environmentViolation (kind slot)
       (violation : (plan.topology.protocol kind).EnvironmentViolation)
-      (custody : Obligations → Obligations → Prop)
+      (custody : Bag (plan.topology.protocol kind).Demand →
+        Obligations → Obligations → Prop)
       (step : plan.EndsInstance before after kind slot (.violated violation) custody)
-  /-- A child ended, with the exact result decision 129 stores. -/
-  | childLifecycle (kind slot)
-      (ending : ProcessLifecycle (plan.topology.protocol kind))
-      (custody : Obligations → Obligations → Prop)
-      (step : plan.EndsInstance before after kind slot ending custody)
+  /-- A child acknowledged a cancellation, at this point. -/
+  | childCancelled (kind slot) (reason : CancelReason)
+      (custody : Bag (plan.topology.protocol kind).Demand →
+        Obligations → Obligations → Prop)
+      (step : plan.EndsInstance before after kind slot (.cancelled reason) custody)
+  /-- A child stopped existing without finishing. -/
+  | childDied (kind slot) (reason : ProcessDeathReason)
+      (custody : Bag (plan.topology.protocol kind).Demand →
+        Obligations → Obligations → Prop)
+      (step : plan.EndsInstance before after kind slot (.died reason) custody)
   /-- A non-child instance terminated. -/
   | processTermination (kind slot)
       (result : (plan.topology.protocol kind).TerminalResult)
-      (custody : Obligations → Obligations → Prop)
+      (custody : Bag (plan.topology.protocol kind).Demand →
+        Obligations → Obligations → Prop)
       (step : plan.EndsInstance before after kind slot (.terminated result) custody)
   /-- The session was closed in the ordinary way. -/
   | channelClose (edge session occurrence)
@@ -834,10 +916,10 @@ is exhaustive over the family, so there is no transition whose scope is
 undefined and none that can change a fragment without declaring it.
 -/
 def scope : plan.NetworkTransition before after → NetworkFragment plan.topology → Prop
-  | .processStep kind slot _ written emitted _ _ _ =>
+  | .processStep kind slot _ emitted _ _ _ =>
       fun fragment => fragment = .instanceState kind slot ∨
         (emitted ≠ [] ∧ fragment = .observations) ∨
-        ∃ region, written region ∧ fragment = .region region
+        ∃ region, before.shared region ≠ after.shared region ∧ fragment = .region region
   | .spawn kind slot _ _ =>
       fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals
   | .restart kind slot _ _ =>
@@ -868,7 +950,10 @@ def scope : plan.NetworkTransition before after → NetworkFragment plan.topolog
   | .environmentViolation kind slot _ _ _ =>
       fun fragment => fragment = .instanceState kind slot ∨
         (before.obligations ≠ after.obligations ∧ fragment = .obligations)
-  | .childLifecycle kind slot _ _ _ =>
+  | .childCancelled kind slot _ _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨
+        (before.obligations ≠ after.obligations ∧ fragment = .obligations)
+  | .childDied kind slot _ _ _ =>
       fun fragment => fragment = .instanceState kind slot ∨
         (before.obligations ≠ after.obligations ∧ fragment = .obligations)
   | .processTermination kind slot _ _ _ =>
@@ -894,7 +979,7 @@ weave: `docs/PROCESS.md` §8's `Disjoint (TransitionScope step) Scope` now has a
 theorem touchesOnly (transition : plan.NetworkTransition before after) :
     plan.TouchesOnly before after transition.scope := by
   cases transition with
-  | processStep _ _ _ _ _ _ _ step => exact step.scope
+  | processStep _ _ _ _ _ _ step => exact step.scope
   | spawn _ _ _ step => exact step.scope
   | restart _ _ _ step => exact step.scope
   | send _ _ _ step => exact step.scope
@@ -913,24 +998,30 @@ theorem touchesOnly (transition : plan.NetworkTransition before after) :
   | interrupt _ _ _ _ step => exact step.scope
   | fault _ _ _ _ step => exact step.scope
   | environmentViolation _ _ _ _ step => exact step.scope
-  | childLifecycle _ _ _ _ step => exact step.scope
+  | childCancelled _ _ _ _ step => exact step.scope
+  | childDied _ _ _ _ step => exact step.scope
   | processTermination _ _ _ _ step => exact step.scope
   | join _ _ _ step => exact step.scope
   | detach _ _ step => exact step.onlyThatSlot.scope
 
 /--
-**The obligation ledger moves only where a process ends, and only where that
-ending's declared custody sent it.**
+**The obligation ledger moves only where a process ends.**
 
 `docs/PROCESS.md` §2: "termination explicitly resolves, transfers, or permits
 pending". This is that as a fact about every execution rather than about one
-transition: a step that changed the ledger *was* an ending, and the ending's
-declared custody both admits the new ledger (`custodyDeclared`) and admits
-nothing else (`custodyExact`).
+transition: a step that changed the ledger was an `EndsInstance`, and the ending
+is not `.running`.
 
-The second conjunct is what an earlier version's docstring claimed and its
-statement did not deliver: with only `custodyDeclared`, the existential is
-satisfied by `custody := fun _ _ => True` for any movement whatsoever.
+The `EndsInstance` witness carries the rest — `custodyDeclared` says the ending's
+declared custody admits the new ledger, admits nothing else, and is indexed by
+the bag the ending was holding. Those are read off the witness rather than
+restated here, because an earlier version *did* restate them and the restatement
+was weaker than the fields: it existentially quantified a custody relation, and
+`fun _ _ => True` satisfies an existential for any movement whatsoever.
+
+`ending ≠ .running` is likewise the field rather than a derivation. Without it
+this theorem reported a still-live process as having ended, which local
+adversarial review demonstrated at a plan with two obligation values.
 
 The proof is by cases over the whole family and the eighteen non-ending cases
 are all the same: `.obligations` is not in their scope, so `touchesOnly` gives
@@ -946,22 +1037,23 @@ theorem moving_the_ledger_ends_an_instance (transition : plan.NetworkTransition 
     (moved : before.obligations ≠ after.obligations) :
     ∃ (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
       (ending : ProcessLifecycle (plan.topology.protocol kind))
-      (custody : Obligations → Obligations → Prop),
-      plan.EndsInstance before after kind slot ending custody ∧
-        custody before.obligations after.obligations ∧
-        ∀ other, custody before.obligations other → other = after.obligations := by
+      (custody : Bag (plan.topology.protocol kind).Demand →
+        Obligations → Obligations → Prop),
+      plan.EndsInstance before after kind slot ending custody ∧ ending ≠ .running := by
   cases transition with
   | interrupt kind slot _ custody step =>
-    exact ⟨kind, slot, _, custody, step, step.custodyDeclared, step.custodyExact⟩
+    exact ⟨kind, slot, _, custody, step, step.notRunning⟩
   | fault kind slot _ custody step =>
-    exact ⟨kind, slot, _, custody, step, step.custodyDeclared, step.custodyExact⟩
+    exact ⟨kind, slot, _, custody, step, step.notRunning⟩
   | environmentViolation kind slot _ custody step =>
-    exact ⟨kind, slot, _, custody, step, step.custodyDeclared, step.custodyExact⟩
-  | childLifecycle kind slot _ custody step =>
-    exact ⟨kind, slot, _, custody, step, step.custodyDeclared, step.custodyExact⟩
+    exact ⟨kind, slot, _, custody, step, step.notRunning⟩
+  | childCancelled kind slot _ custody step =>
+    exact ⟨kind, slot, _, custody, step, step.notRunning⟩
+  | childDied kind slot _ custody step =>
+    exact ⟨kind, slot, _, custody, step, step.notRunning⟩
   | processTermination kind slot _ custody step =>
-    exact ⟨kind, slot, _, custody, step, step.custodyDeclared, step.custodyExact⟩
-  | processStep _ _ _ _ _ _ _ step =>
+    exact ⟨kind, slot, _, custody, step, step.notRunning⟩
+  | processStep _ _ _ _ _ _ step =>
     exact absurd (step.scope .obligations (by simp)) moved
   | spawn _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
   | restart _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved

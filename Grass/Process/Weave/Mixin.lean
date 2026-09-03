@@ -58,8 +58,14 @@ resource algebra and an obligation ledger that `Grass.Process` does not own and
 fields here, and `ResourceOwnershipObligation` names what a plan composing this
 with the memory layer still owes rather than letting it disappear.
 
-`initial` needs `ExactInitialNetwork`, which is `Transition.lean`'s successor
-work — there is no initial-network relation yet. `HoldsInitially` names it.
+`initial` needs `ExactInitialNetwork`. `HoldsInitially` names the obligation
+over an arbitrary `Initial` predicate, because when this module was written
+there was no initial-network relation to state it against.
+`Grass/Process/Network/Initial.lean` now supplies one, and
+`holds_along_every_execution_from_a_start` there is the composition this module
+could not reach: an invariant that holds at a start and is preserved by every
+step holds along every execution from that start. Without the start, an
+invariant can be "preserved" forever without ever having been true.
 -/
 
 namespace Grass.Process

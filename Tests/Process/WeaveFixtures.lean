@@ -59,8 +59,8 @@ theorem touching_a_region_needs_write_access
     (touches : transition.scope (.region region)) :
     ∃ kind, (serverTopology.sharedAccess kind region).mayWrite = true := by
   cases transition with
-  | processStep kind _ _ written _ _ _ step =>
-    rcases touches with isSlot | ⟨_, isObservations⟩ | ⟨named, wrote, isRegion⟩
+  | processStep kind _ _ _ _ _ step =>
+    rcases touches with isSlot | ⟨_, isObservations⟩ | ⟨named, moved, isRegion⟩
     · exact absurd isSlot (by simp)
     · exact absurd isObservations (by simp)
     · refine ⟨kind, ?_⟩
@@ -68,7 +68,7 @@ theorem touching_a_region_needs_write_access
         injection isRegion with same
         exact same.symm
       rw [← same]
-      exact step.writesPermitted named wrote
+      exact step.writesPermitted named moved
   | _ => exact absurd touches (by simp [ProcessPlan.NetworkTransition.scope])
 
 /--

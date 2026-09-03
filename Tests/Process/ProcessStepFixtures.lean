@@ -101,18 +101,17 @@ because this fixture asserted it.
 theorem the_listener_ticks (remaining : Nat)
     (answer : countdownVocabulary.Result .tick) :
     serverPlan.StepsLocally (busy remaining) (busyAfter remaining) .listener ()
-      (.result .tick answer) (fun _ => False) [Observation.beep] 0
-      [Observation.beep] where
+      (.result .tick answer) [Observation.beep] 0 [Observation.beep] where
   from' := ⟨awaiting remaining, rfl, trivial, rfl⟩
   stillLive := ⟨settled remaining, rfl, trivial⟩
   protocolStep :=
     ⟨awaiting remaining, settled remaining, rfl, rfl, rfl, rfl,
-      ⟨rfl, rfl, rfl⟩, ⟨0, rfl, rfl⟩⟩
+      ⟨rfl, rfl, rfl⟩, ⟨0, rfl, rfl⟩, rfl, rfl, rfl⟩
   emittedIsProjected := rfl
   observationsExtend := rfl
   writesPermitted := by
-    intro region wrote
-    exact absurd wrote id
+    intro region moved
+    exact absurd rfl moved
   scope := by
     intro fragment outside
     cases fragment with
@@ -126,7 +125,7 @@ theorem the_listener_ticks (remaining : Nat)
 /-- So it is a transition of the plan, and one that emits. -/
 def tickStep (remaining : Nat) (answer : countdownVocabulary.Result .tick) :
     serverPlan.NetworkTransition (busy remaining) (busyAfter remaining) :=
-  .processStep .listener () (.result .tick answer) (fun _ => False) [Observation.beep] 0
+  .processStep .listener () (.result .tick answer) [Observation.beep] 0
     [Observation.beep] (the_listener_ticks remaining answer)
 
 /-- **And it declares the trace, because it really moved it.** -/
@@ -138,32 +137,48 @@ theorem the_tick_emits (remaining : Nat) (answer : countdownVocabulary.Result .t
 theorem the_tick_writes_nothing (remaining : Nat)
     (answer : countdownVocabulary.Result .tick) (region : serverTopology.SharedRegion) :
     ¬ (tickStep remaining answer).scope (.region region) := by
-  rintro (isSlot | ⟨_, isObservations⟩ | ⟨_, wrote, _⟩)
+  rintro (isSlot | ⟨_, isObservations⟩ | ⟨_, moved, _⟩)
   · exact absurd isSlot (by simp)
   · exact absurd isObservations (by simp)
-  · exact absurd wrote id
+  · exact absurd rfl moved
 
 /-! ## And what it cannot be -/
+
+/--
+The world the listener would be in if a tick left its countdown alone: same
+state, same outstanding bag, one `beep` on the trace.
+
+The trace has to move, because `countdown.Step` on a `tick` result emits one —
+so a fixture that held the trace still would be excluded by the observation
+equation and would say nothing about the state. That is what an earlier version
+of the next theorem did, and its "real side condition rather than true by luck"
+docstring was the luck.
+-/
+def busyStuck (remaining : Nat) : ServerWorld :=
+  { busy remaining with observations := [Observation.beep] }
 
 /--
 **A step that leaves the countdown where it was is unconstructible.**
 
 What `protocolStep` bought. `countdown.Step` on a `tick` result demands
-`after = state - 1`, so a `StepsLocally` from `busy remaining` to `busy
-remaining` on that event has no `protocolStep` witness — and before the field
-existed, it had every other field and was perfectly constructible.
+`after = state - 1`, and here the trace and the outstanding bag both move
+exactly as the protocol says — so the state equation is the only obstruction
+left and the `0 < remaining` side condition is load-bearing rather than
+decorative. Before the field existed this had every other field and was
+perfectly constructible.
 
-Stated at a `remaining` where `remaining - 1 ≠ remaining`, because `Nat`
-subtraction saturates and the claim is false at zero. That is itself worth
-having in the fixture: the negative case has a real side condition rather than
-being true by luck.
+`Nat` subtraction saturates, so at zero the claim is false and the hypothesis is
+what says so.
 -/
 theorem a_step_that_does_not_tick_is_unconstructible (remaining : Nat)
     (positive : 0 < remaining) (answer : countdownVocabulary.Result .tick)
-    (step : serverPlan.StepsLocally (busy remaining) (busy remaining) .listener ()
-      (.result .tick answer) (fun _ => False) [] 0 []) : False := by
-  obtain ⟨fromInstance, toInstance, _, _, foundFrom, foundTo, moved, _⟩ := step.protocolStep
-  rw [busy_holds_the_listener] at foundFrom foundTo
+    (step : serverPlan.StepsLocally (busy remaining) (busyStuck remaining) .listener ()
+      (.result .tick answer) [Observation.beep] 0 [Observation.beep]) : False := by
+  obtain ⟨fromInstance, toInstance, _, _, foundFrom, foundTo, moved, _, _⟩ := step.protocolStep
+  have found : (busy remaining).instances .listener () = some (awaiting remaining) := rfl
+  have foundStuck : (busyStuck remaining).instances .listener () = some (awaiting remaining) := rfl
+  rw [found] at foundFrom
+  rw [foundStuck] at foundTo
   injection foundFrom with sameFrom
   injection foundTo with sameTo
   subst sameFrom
@@ -178,7 +193,8 @@ theorem a_step_that_does_not_tick_is_unconstructible (remaining : Nat)
 §2's linearity at the network, and the reason `ProcessInstance.outstanding`
 exists. `SettlesDemands` requires an answering event to remove exactly one
 `cons` from the instance's bag, so a listener holding nothing cannot be told its
-`tick` came back — `Bag.not_consume_zero` is the whole proof.
+`tick` came back — `Bag.not_consume_zero` is the whole proof, and the after-world
+is left arbitrary so that nothing else can be doing the work.
 
 Before the field existed, `StepsLocally` required the protocol's `Step`
 relation, obtained an issued bag from it, and discarded the bag. Nothing could
@@ -188,8 +204,8 @@ either.
 theorem answering_an_unissued_demand_is_unconstructible (remaining : Nat)
     (answer : countdownVocabulary.Result .tick) (after : ServerWorld)
     (step : serverPlan.StepsLocally (busyAfter remaining) after .listener ()
-      (.result .tick answer) (fun _ => False) [] 0 []) : False := by
-  obtain ⟨fromInstance, toInstance, _, _, foundFrom, _, _, settles⟩ := step.protocolStep
+      (.result .tick answer) [Observation.beep] 0 [Observation.beep]) : False := by
+  obtain ⟨fromInstance, toInstance, _, _, foundFrom, _, _, settles, _⟩ := step.protocolStep
   have isSettled : fromInstance = settled remaining := by
     have found : (busyAfter remaining).instances .listener () = some (settled remaining) := rfl
     rw [found] at foundFrom
@@ -200,17 +216,27 @@ theorem answering_an_unissued_demand_is_unconstructible (remaining : Nat)
   exact Bag.not_consume_zero consumes
 
 /--
-**And a step cannot append an observation the role did not make.**
+**And the tick preserves the incarnation's identity, which the step now says.**
 
-`emittedIsProjected` at work: what reaches the network trace is the image of the
-protocol's own segment under `ProcessGraph.observeAt`. A step whose protocol
-emitted nothing cannot put a `beep` in the trace.
+The clause local adversarial review found missing: `ProcessInstance` has seven
+fields and `protocolStep` constrained two, so a tick could move the listener to
+a generation nothing allocated and re-parent it under another role while
+`allocatedNominals` reported that the step allocated nothing. The reviewer built
+that step and proved the network after it fails `NominalsAllocated` and
+`ParentageValid`.
+
+Read back off the step rather than off the two definitions, so it is the field
+that is being checked and not the fixture's own arithmetic.
 -/
-theorem an_unprojected_observation_is_unconstructible (remaining : Nat)
-    (event : (serverTopology.protocol .listener).Event)
-    (step : serverPlan.StepsLocally (busy remaining) (busyAfter remaining) .listener ()
-      event (fun _ => False) [Observation.beep] 0 []) : False := by
-  have projected : [Observation.beep] = [] := step.emittedIsProjected
-  exact absurd projected (by simp)
+theorem the_tick_preserves_the_incarnation (remaining : Nat)
+    (answer : countdownVocabulary.Result .tick) :
+    ∃ (fromInstance toInstance : ProcessInstance serverTopology)
+      (fromKind : fromInstance.kind = Role.listener) (toKind : toInstance.kind = Role.listener),
+      toKind ▸ toInstance.ref = fromKind ▸ fromInstance.ref ∧
+      toKind ▸ toInstance.parentage = fromKind ▸ fromInstance.parentage ∧
+      toKind ▸ toInstance.request = fromKind ▸ fromInstance.request := by
+  obtain ⟨fromInstance, toInstance, fromKind, toKind, _, _, _, _, sameRef, sameParent,
+    sameRequest⟩ := (the_listener_ticks remaining answer).protocolStep
+  exact ⟨fromInstance, toInstance, fromKind, toKind, sameRef, sameParent, sameRequest⟩
 
 end Grass.Process.Tests.ProcessStep

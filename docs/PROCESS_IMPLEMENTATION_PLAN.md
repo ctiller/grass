@@ -2225,3 +2225,47 @@ Internally consistent — `allocatedNominals` and the scopes agree, and
 `NetworkStep.historyExact` enforces it — so this is a disagreement with the
 declared contents rather than an unsoundness. Needs a ruling on whether message
 occurrences are nominals in the same history as process generations.
+
+## 12. M4 status
+
+What has landed on `agent/c-process/m4-weave-and-composition`, and what M4's
+exit criteria still need. Written because §10 has grown to thirty-odd entries
+and a reader needs to know which of them are open.
+
+### Landed
+
+| Module | What it proves |
+|---|---|
+| `Weave/Mixin.lean` | §8's mixin, with `frame` derived rather than a field |
+| `Weave/Lens.lean` | §8's refinement lens and the generic contextual theorem |
+| `Trace/Independence.lean` | scope-disjointness independence; the diamond named, not assumed |
+| `Trace/Linearization.lean` | the trace only grows; two independent steps never both emit |
+| `Sequential/Adapter.lean` | §4's elaboration, with `Pending` derived from occurrences |
+| `Function/Serial.lean` | §3's serial contract, with the collapse carrying its own frontier argument |
+| `Network/Progress.lean` | §7's progress theorem, as the cycle law a rank forbids |
+| `Network/Initial.lean` | §3's `ExactInitialNetwork`, and `initial_is_wellformed` |
+
+Each has a fixture file, and each fixture found at least one defect in the
+module it was written against. That is the pattern worth keeping: nothing here
+was found by reading.
+
+### Still owed for M4 exit
+
+* **`flatten_sequential_roundtrip`** — blocked. `ProcessRealization.flatten`
+  produces a `ProcessSpec` whose `Step` consumes an event per transition, and a
+  network's internal steps correspond to no external event. Either the
+  flattened spec's `ExternalEvent` gains a scheduling event or flattening is a
+  different relation; §7 does not say which. Needs a ruling before it can be
+  built.
+* **`serialize_refines_flatten`** — downstream of the above.
+* **The proof-economics acceptance rule** — not started.
+* **`DirectProgramRealizes` transport** — §4 asks the adapter for it; the
+  adapter delivers the syntax half only, and says so.
+
+### Open findings by weight
+
+§10.33's second half (an ending does not dispose of the ended instance's
+outstanding bag), §10.35 (no channel step touches either endpoint's slot), and
+§10.27 (one global observation trace makes §7's congruence trivial) are the
+three that a ruling would most change. The rest are recorded and none blocks
+building.
