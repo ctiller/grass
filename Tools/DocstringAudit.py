@@ -224,7 +224,8 @@ def main() -> int:
             "rewrite as an intended invariant or open obligation."
         )
         return 1
-    print("docstring audit: every strong claim names an enforcing type or theorem")
+    print("docstring audit: every strong claim names something to chase "
+        "(a lexical check; see the module docstring for what it does not cover)")
     return 0
 
 

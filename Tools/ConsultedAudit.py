@@ -84,22 +84,32 @@ STRUCTURE = re.compile(r"^\s*(?:private\s+)?structure\s+([A-Za-z_][A-Za-z0-9_.']
 # discharge it -- so these are skipped by structure rather than field.
 PROOF_BUNDLES = ("WellFormed", "Recognized", "Laws")
 
+# Sixteen entries were deleted from this list after review checked, one at a time,
+# whether removing an entry changed the report. It changed nothing for any of them.
+# Two whole groups had reasons that were simply false: "diagnostic identity, never
+# dispatched on" for `id` and `name`, which are projected twenty-nine and three times
+# respectively, and "structural payloads consumed by pattern matching, which this tool
+# cannot see" for `recognized`, `entries`, `runs`, `bytes`, `start`, `aliases` and
+# `substeps`, every one of which is projected by name -- `d.range.start` alone appears
+# a hundred and fifty times. The rest (`combine`, `alternative`, `le`, `laws`,
+# `issuer`, `owner`, `restartability`) were suppressing nothing either, three of them
+# because a field of the same name is projected on an unrelated structure, which is
+# this tool's documented blind spot rather than a reason to exempt anything.
+#
+# An allowlist is a record of decisions. An entry that suppresses nothing records a
+# decision about nothing, and a *false* reason attached to one is worse than silence:
+# it reads as an argument someone checked. `--inert` reports them now, so the same
+# rot is visible without a reviewer.
+#
+# `AddressSpace.owner` and `AccessDescriptor.restartability` are still genuine gaps
+# with no reader; they are recorded in section 4.2 of
+# docs/MEMORY_IMPLEMENTATION_PLAN.md and in their own docstrings, which is where a
+# gap this tool cannot see belongs.
 ALLOWED = {
     # Diagnostic identity: carried so a report or rejection can name which one,
-    # never dispatched on.
-    "id",
-    "name",
+    # never dispatched on. `id` and `name` were here too and suppressed nothing.
     "label",
     "origin",
-    # Structural payloads consumed by pattern matching rather than projection,
-    # which this tool cannot see.
-    "recognized",
-    "entries",
-    "runs",
-    "bytes",
-    "start",
-    "aliases",
-    "substeps",
     # --- Carried without a projection. Being listed here is not "this is fine":
     # --- it is the record that someone read the corpus and decided. The reasons
     # --- differ, and conflating them is how the first version of section 4.2 of
@@ -109,7 +119,6 @@ ALLOWED = {
     # Genuine gaps: a corpus requirement, no consumer, and no milestone that owns
     # them. Recorded as owed in section 4.2.
     "observations",       # section 7.5 device observation labels; no reader at all
-    "restartability",     # section 7.4 retry rules have no mechanism
     "vocabularyVersion",  # one version exists, so nothing to compare against yet
     #
     # Not gaps: the consumer is a later milestone or another layer, and the field
@@ -117,7 +126,6 @@ ALLOWED = {
     "memoryType",         # section 7.1 requires the event to carry it, and it does
     "coherence",          # likewise; the rules are section 7.2's, which is M8
     "package",            # section 10 gates VerifiedProgram, not this transition
-    "issuer",             # its docstring records this as M10 profile closure
     "obligation",         # TerminalOutcome awaits terminal accounting
     "disposition",   # TerminalOutcome, likewise
     # Proof obligations: their purpose is that a constructor had to discharge
@@ -137,19 +145,11 @@ ALLOWED = {
     # "projected" in the sense this tool looks for. Found by widening the field
     # pattern to accept a capital initial, which is what made it visible at all.
     "Value",
-    "combine",
-    "alternative",
     "zero",
-    "le",
-    "laws",
     "limit",
     "exhaustion",
     "lifecycle",
-    # `AddressSpace.owner`, a genuine gap with no consumer, listed here only because
-    # this tool cannot see it anyway: `owner` is projected as `Obligation.owner`, so
-    # the same-name blind spot hides it whatever this list says. Recorded in section
-    # 4.2 of the plan, where the other carried-and-unread facts are.
-    "owner",
+
     # Proof obligations on structures a *provider* supplies, from modules this
     # branch does not own -- Grass/Core/Demand.lean and Grass/Certificate.lean,
     # which arrived here by merging main. They do work unprojected, because a
@@ -314,6 +314,30 @@ def self_test() -> int:
     return 0
 
 
+def inert_entries(declared: dict[str, str], readers: dict[str, str]) -> list[str]:
+    """The `ALLOWED` entries whose removal would change nothing.
+
+    An allowlist is a record of decisions, so an entry that suppresses nothing
+    records a decision about nothing -- and a false *reason* attached to one is worse
+    than silence, because it reads as an argument someone checked. Review found
+    sixteen such entries here, two whole groups of them with reasons that were simply
+    false. This is that check, mechanised.
+
+    Reported rather than failed: an entry becomes inert when someone adds a
+    projection, which is good news and should not break a build.
+    """
+    global ALLOWED
+    original = set(ALLOWED)
+    base = set(analyse(declared, readers))
+    inert = []
+    for entry in sorted(original):
+        ALLOWED = original - {entry}
+        if not set(analyse(declared, readers)) - base:
+            inert.append(entry)
+    ALLOWED = original
+    return inert
+
+
 def main() -> int:
     if "--self-test" in sys.argv:
         return self_test()
@@ -321,6 +345,14 @@ def main() -> int:
                 for path in DECLARED_IN}
     readers = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
                for path in READERS_IN}
+    if "--inert" in sys.argv:
+        inert = inert_entries(declared, readers)
+        if inert:
+            print("allowlist entries that suppress nothing: " + ", ".join(inert))
+            print("Delete them, or say why the entry is kept with no effect.")
+        else:
+            print("consulted audit: every allowlist entry suppresses a report")
+        return 0
     unread = analyse(declared, readers)
 
     if unread:

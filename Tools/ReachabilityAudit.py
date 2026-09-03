@@ -141,7 +141,19 @@ ALLOWED = {
     "EventKind.fence",
     # `docs/OBLIGATIONS.md` section 3 requires every obligation at a terminal edge to
     # receive a disposition. M5 owns terminal accounting and does not exist, so these
-    # two are named and unbuilt; `Spikes/1_Hello_World` needs both.
+    # two are named and unbuilt.
+    #
+    # An earlier version of this comment added "`Spikes/1_Hello_World` needs both",
+    # and review checked: that directory holds `Program.lean` and `Spec.lean` and
+    # neither mentions a disposition or an obligation at all. A false reason on an
+    # allowlist entry is worse than none, because it reads as an argument somebody
+    # made. The true reason is the first two sentences.
+    #
+    # The other three `Disposition` constructors are *not* listed here and are just
+    # as unbuilt: they appear only in match arms and in three one-line simp theorems,
+    # which this tool counts as construction. That is the blind spot its own docstring
+    # calls the one that matters most, and review demonstrated it by deleting the
+    # three theorems and watching all three constructors get reported.
     "Disposition.transferred",
     "Disposition.teardownAdopted",
     # The resource layer is built ahead of its consumers, which arrive at M7 and M9.

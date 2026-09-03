@@ -96,9 +96,16 @@ end Disposition
 /--
 One obligation's terminal outcome: which obligation, and how it ended.
 
-Keyed by identity rather than by the obligation value, because `Obligation` has
-an existential payload and no equality. A terminal accounting is a statement
-about identities.
+Keyed by identity rather than by the obligation value. An earlier version of this
+sentence gave the reason as "`Obligation` has an existential payload and no
+equality", and both halves are false: it derives `DecidableEq`, and
+`Grass/Obligation/Core.lean`'s own module comment says the existential deliberately
+does *not* live there. Review compiled `example : DecidableEq Obligation :=
+inferInstance` against this tree.
+
+Identity is still the right key, for a reason that survives: `LedgerDelta.transfer`
+changes a duty's owner while it stays the same duty, so an accounting keyed on the
+value would treat one obligation as two.
 -/
 structure TerminalOutcome where
   /-- Which obligation this outcome accounts for. -/

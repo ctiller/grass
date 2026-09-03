@@ -1617,6 +1617,60 @@ theorem a_faithful_join_is_applicable :
         { id := ghostObligationId, kind := .releaseAllocation
           protocol := bufferProtocol, owner := thread₀ }] := by decide
 
+/-- A second live duty of the same kind, protocol and owner, so a fixture can join
+two of them. `Obligation` carries nothing else, so these two are as alike as the type
+permits. -/
+def secondReleaseObligation : Obligation :=
+  { id := ghostObligationId, kind := .releaseAllocation
+    protocol := bufferProtocol, owner := thread₀ }
+
+/-- Both duties live. -/
+private def ledger₂ : FiniteMap ObligationId Obligation :=
+  ledger₁.insert ghostObligationId secondReleaseObligation
+
+/-- **A join onto a live identity is refused.** The freshness half of the join
+clause, which review mutation-tested and found unfixtured: deleting `into.id ∉ live`
+from `LedgerDelta.Applicable` left the whole build green, and a probe then joined one
+source onto a live identity and watched `applyDelta`'s insert overwrite a duty —
+§2's "dropping", silently. Its twin for split was fixtured; this was not. -/
+theorem a_join_onto_a_live_identity_is_refused :
+    ¬ Grass.Op.LedgerEffectApplicable ledger₂ [thread₀, engine₀] thread₀
+      [.join bufferProtocol bufferAuthority [releaseObligationId]
+        secondReleaseObligation] := by decide
+
+/-- And the same join onto a fresh identity is applicable, so the refusal above is
+freshness and not something else in the clause. -/
+theorem a_join_onto_a_fresh_identity_is_applicable :
+    Grass.Op.LedgerEffectApplicable ledger₂ [thread₀, engine₀] thread₀
+      [.join bufferProtocol bufferAuthority [releaseObligationId]
+        { secondReleaseObligation with id := fabricatedObligationId }] := by decide
+
+/-- **And here is what a join of two independent duties does**, which is a gap rather
+than a guard.
+
+`Applicable`'s join clause requires the sources to be live, to share the claimed
+protocol, to be owned by the actor, and to carry the output's kind. Two duties that
+are independent in every sense the model can express satisfy all four, because
+`Obligation` carries no payload: nothing says *what* a duty covers, so nothing can
+say that an output covers what its sources covered. §2's join is "several obligations
+become one, together covering the same duty", and "together covering" is the part
+this layer cannot represent.
+
+So two live duties join into one and a single discharge ends both. Review found it;
+it is here so the gap is visible in compiled code rather than only in a plan, and so
+that closing it — which means giving `Obligation` a coverage payload — breaks this
+theorem rather than passing unnoticed. -/
+theorem a_join_of_two_duties_halves_the_ledger :
+    ledger₂.domain.length = 2 ∧
+    Grass.Op.LedgerEffectApplicable ledger₂ [thread₀, engine₀] thread₀
+      [.join bufferProtocol bufferAuthority [releaseObligationId, ghostObligationId]
+        { secondReleaseObligation with id := fabricatedObligationId }] ∧
+    ((Grass.Op.applyLedgerEffect? ledger₂ [thread₀, engine₀] thread₀
+      [.join bufferProtocol bufferAuthority [releaseObligationId, ghostObligationId]
+        { secondReleaseObligation with id := fabricatedObligationId }]).map
+      (fun ledger => ledger.domain.length)) = some 1 := by
+  exact ⟨by decide, by decide, by decide⟩
+
 /-! ## A provenance that lies about its root's extent
 
 `AccessDescriptor.WellFormedIn.rangeInProvenance` bounds an access by

@@ -1709,6 +1709,70 @@ refuses everything.
   Eight registries still have no coherence condition between them, and that is not a
   gap of the same kind: nothing says a fault class and an allocation source may not
   share a name, because nothing would go wrong if they did.
+- **A join of two independent duties halves the ledger, and one discharge ends
+  both.** `Applicable`'s join clause requires the sources to be live, to share the
+  claimed protocol, to be owned by the actor, and to carry the output's kind. Two
+  duties that are independent in every sense the model can express satisfy all four,
+  because `Obligation` carries no payload: nothing says *what* a duty covers, so
+  nothing can say an output covers what its sources covered. §2's join is "several
+  obligations become one, together covering the same duty", and "together covering" is
+  the part this layer cannot represent.
+
+  Review demonstrated it end to end. `a_join_of_two_duties_halves_the_ledger` is that
+  demonstration kept, so the gap is visible in compiled code and so that closing it —
+  which means giving `Obligation` a coverage payload — breaks a theorem rather than
+  passing unnoticed. Refusing multi-source joins outright was considered and rejected:
+  §2 requires join, and a `join` that accepts only one source is a mechanism whose
+  satisfaction condition has no content, which is the defect class this document
+  exists to record.
+- ~~**The join clause's freshness half had no fixture.**~~ Review deleted
+  `into.id ∉ live` from `Applicable` and the whole build stayed green, then joined
+  onto a live identity and watched `applyDelta`'s insert overwrite a duty — §2's
+  "dropping", silently, no violation. Its twin for split *was* fixtured.
+  `a_join_onto_a_live_identity_is_refused` and its positive control close it, and the
+  mutation is caught now.
+- **Obligation identities are recycled.** `Grass/Obligation/Delta.lean` says outputs
+  must be fresh because "identities come from a supply that never reissues". There is
+  no obligation supply: `MachineState` carries an event supply and nothing else, and
+  `Applicable`'s create clause is `o.id ∉ live`, which is "not currently live" rather
+  than "never issued". Review stepped reserve, release, reserve and got the same
+  `ObligationId` carrying a second distinct duty. Latent, because `TerminalOutcome` is
+  keyed by identity and terminal accounting is M5's, but the sentence is a claim about
+  a mechanism this layer does not have.
+- **§3's terminal disposition has no theorem, and its vocabulary is unconstructed.**
+  `Disposition` and `TerminalOutcome` appear nowhere outside their declaring module
+  except one import. Two constructors are on `Tools/ReachabilityAudit.py`'s allowlist
+  with a reason review checked and found false — `Spikes/1_Hello_World` holds two
+  files and neither mentions an obligation — and the other three pass through that
+  tool's worst blind spot, a constructor named in a theorem about it. Both are
+  corrected in place.
+
+  Underneath is the structural gap: **nothing represents a terminal edge, a process
+  exit, or a context ceasing to execute.** `MachineState.contexts` is only ever
+  inserted into. So "what happens to duties held by a context that stops executing"
+  has no answer here, and `Applicable`'s transfer clause checks "has this identity
+  ever stepped", which is neither §3's *live* nor its *accepted*. M5 owns the theorem;
+  what was not disclosed anywhere is that the vocabulary M5 will use is currently
+  un-constructible.
+- **`Grass/Resource/Algebra.lean` is a facility whose only safety is having no
+  callers**, which is this branch's own recurring defect in the corner of the layer
+  nobody has been reviewing. Nothing under `Grass/` imports it. Of its twenty declared
+  laws, three are ever projected, all three inside one fixture. `ResourceModel`,
+  `HasResourceAxis`, `HasResourceLimit` and `ResourceLimit` have no values or
+  instances anywhere. The module's header already concedes the importer question; what
+  it does not say is that seventeen of its twenty laws have never been used by
+  anything and four of its six exported types have never been inhabited. Two audit
+  blind spots hide the extent: `ResourceAlgebra.compatible` is invisible because
+  `StepPolicy.compatible` satisfies the name, and every lifecycle and exhaustion
+  constructor is allowlisted as unbuilt.
+- ~~**Sixteen `ConsultedAudit.py` allowlist entries suppressed nothing**, two whole
+  groups of them with reasons that were false.~~ "Diagnostic identity, never
+  dispatched on" for `id` and `name`, which are projected twenty-nine and three times;
+  "structural payloads consumed by pattern matching, which this tool cannot see" for
+  seven fields every one of which is projected by name. Deleted, with the record of
+  what happened, and `--inert` reports the condition mechanically now so it cannot rot
+  back. An allowlist is a record of decisions, and an entry that suppresses nothing
+  records a decision about nothing.
 - ~~**`ProtocolAuthority` was decorative.**~~ Round eleven's largest finding, and the
   same shape as round ten's: a name every ledger delta carries, checked by nothing.
   `ProtocolAuthority` is indexed by its protocol, so authority for one cannot be
