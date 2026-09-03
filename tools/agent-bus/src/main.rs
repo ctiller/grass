@@ -1,6 +1,7 @@
 mod apply;
 mod bootstrap;
 mod canon;
+mod cli;
 mod common;
 mod coordinator;
 mod envelope;
@@ -19,6 +20,10 @@ mod stream;
 mod sync;
 
 fn main() {
-    eprintln!("agent-bus v2: not yet wired up");
-    std::process::exit(1);
+    use clap::Parser;
+    let cli = cli::Cli::parse();
+    if let Err(e) = cli::run(cli) {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    }
 }
