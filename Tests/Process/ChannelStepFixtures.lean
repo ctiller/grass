@@ -427,6 +427,13 @@ theorem deadListener_is_not_live : ¬ deadListener.Live := by
   intro live
   cases live
 
+/-- And it died, supervised, at the generation the wire's sender names — the three
+things `ResolvesEscrow.endpointDeathIsEarned` asks. §10.117. -/
+theorem deadListener_died :
+    deadListener.ref.generation = wire.sender.generation ∧
+      deadListener.lifecycle = .died .supervised :=
+  ⟨rfl, rfl⟩
+
 /-- The sent world, with the sender present and dead. -/
 noncomputable def sentWithDeadSender : ServerWorld :=
   { sent with
@@ -541,7 +548,8 @@ theorem the_sender_death :
   endpointDeathIsEarned := by
     constructor
     · intro reason isDeath
-      exact ⟨deadListener, rfl, deadListener_is_not_live⟩
+      cases isDeath
+      exact ⟨deadListener, rfl, deadListener_died.1, deadListener_died.2⟩
     · intro reason isDeath
       cases isDeath
   scope := by
@@ -570,6 +578,192 @@ theorem a_death_needs_a_dead_endpoint
     False := by
   obtain ⟨incarnation, present, _⟩ := died.endpointDeathIsEarned.1 reason rfl
   exact absurd (present.symm.trans (nobodyThere _ _)) (by intro equal; cases equal)
+
+/-- The wire's receiver, stopped, at the generation the wire names. -/
+def deadConnection : ProcessInstance serverTopology where
+  kind := .connection
+  ref := connectionSeven 0
+  parentage := .attached .listener Instances.listenerZero
+  request := ⟨0⟩
+  localState := ⟨0⟩
+  outstanding := 0
+  lifecycle := .died .providerLost
+
+/-- The sent world, with the receiver present and dead. -/
+noncomputable def sentWithDeadReceiver : ServerWorld :=
+  { sent with
+      instances := fun kind current =>
+        match kind, current with
+        | .listener, _ => none
+        | .connection, n => if n = 7 then some deadConnection else none }
+
+theorem sentWithDeadReceiver_slot :
+    sentWithDeadReceiver.instances .connection wire.receiver.instanceId
+      = some deadConnection := rfl
+
+theorem sentWithDeadReceiver_wire :
+    sentWithDeadReceiver.inFlight () wire = pendingLedger := sent_wire
+
+open Classical in
+/-- The ledger with the occurrence resolved by its receiver's death. -/
+noncomputable def receiverDiedLedger :
+    EscrowLedger (EdgeOccurrence serverTopology World.serverMessage ())
+      (serverTopology.ChannelId ()) where
+  created := [escrowed]
+  rank := fun _ => 0
+  rankOrdersCreated := by simp
+  resolution := fun occurrence =>
+    if occurrence = escrowed then some (.receiverDied .providerLost) else none
+  noFabrication := by
+    intro occurrence resolved
+    by_cases isIt : occurrence = escrowed
+    · simp [isIt]
+    · simp [isIt] at resolved
+  coalesceCarrierLater := by
+    intro occurrence carrier merged
+    by_cases isIt : occurrence = escrowed
+    · simp [isIt] at merged
+    · simp [isIt] at merged
+  cancelRequested := fun _ => false
+  acknowledgedWasRequested := by
+    intro occurrence reason acknowledged
+    by_cases isIt : occurrence = escrowed
+    · simp [isIt] at acknowledged
+    · simp [isIt] at acknowledged
+
+open Classical in
+theorem receiverDiedLedger_resolution :
+    receiverDiedLedger.resolution escrowed = some (.receiverDied .providerLost) := by
+  show (if escrowed = escrowed then some (ChannelResolution.receiverDied .providerLost)
+    else none) = some (ChannelResolution.receiverDied .providerLost)
+  rw [if_pos rfl]
+
+open Classical in
+theorem receiverDiedLedger_resolves_nothing_else :
+    ResolvesNothingElse pendingLedger receiverDiedLedger escrowed := by
+  intro occurrence notIt
+  show (if occurrence = escrowed then some (ChannelResolution.receiverDied .providerLost)
+    else none) = none
+  rw [if_neg notIt]
+
+open Classical in
+/-- The world after the receiver's death. -/
+noncomputable def afterReceiverDeath : ServerWorld :=
+  { sentWithDeadReceiver with
+      inFlight := fun _ session =>
+        if session = wire then receiverDiedLedger else EscrowLedger.empty }
+
+open Classical in
+theorem afterReceiverDeath_wire :
+    afterReceiverDeath.inFlight () wire = receiverDiedLedger := by
+  show (if wire = wire then receiverDiedLedger else EscrowLedger.empty) = receiverDiedLedger
+  rw [if_pos rfl]
+
+open Classical in
+theorem afterReceiverDeath_off {session : serverTopology.ChannelId ()}
+    (notWire : session ≠ wire) :
+    afterReceiverDeath.inFlight () session = EscrowLedger.empty := by
+  show (if session = wire then receiverDiedLedger else EscrowLedger.empty) = EscrowLedger.empty
+  rw [if_neg notWire]
+
+/--
+**A receiver's death.**
+
+The corpus's first, and the half of `endpointDeathIsEarned` that was discharged
+`cases isDeath` — vacuously — everywhere. A reviewer pointed out that §10.110's
+rule had been half-run: the sender conjunct had a witness and the receiver
+conjunct had none. §10.117.
+-/
+theorem the_receiver_death :
+    serverPlan.ResolvesEscrow sentWithDeadReceiver afterReceiverDeath () wire escrowed
+      (.receiverDied .providerLost) where
+  onItsSession := rfl
+  wasOutstanding := by
+    rw [sentWithDeadReceiver_wire]
+    exact ⟨List.mem_cons_self, rfl⟩
+  nowResolved := by rw [afterReceiverDeath_wire]; exact receiverDiedLedger_resolution
+  resolvesNothingElse := by
+    rw [sentWithDeadReceiver_wire, afterReceiverDeath_wire]
+    exact receiverDiedLedger_resolves_nothing_else
+  requestsNothing := by
+    show RequestsNothing (sentWithDeadReceiver.inFlight () wire)
+      (afterReceiverDeath.inFlight () wire)
+    rw [sentWithDeadReceiver_wire, afterReceiverDeath_wire]
+    exact fun _ => rfl
+  ledgerExtends := by
+    rw [sentWithDeadReceiver_wire, afterReceiverDeath_wire]
+    exact pending_extends_to receiverDiedLedger rfl (by simp [pendingLedger])
+  createsOnlyTheCarrier := by
+    intro other held fresh
+    refine absurd ?_ fresh
+    show other ∈ (sentWithDeadReceiver.inFlight () wire).created
+    rw [sentWithDeadReceiver_wire]
+    have inList : other ∈ (afterReceiverDeath.inFlight () wire).created := held
+    rw [afterReceiverDeath_wire] at inList
+    exact inList
+  carrierOnItsSession := by intro carrier isCoalesce; cases isCoalesce
+  carrierIsOutstanding := by intro carrier isCoalesce; cases isCoalesce
+  carrierCarriesTheMessage := by intro carrier isCoalesce; cases isCoalesce
+  endpointDeathIsEarned := by
+    constructor
+    · intro reason isDeath
+      cases isDeath
+    · intro reason isDeath
+      cases isDeath
+      exact ⟨deadConnection, sentWithDeadReceiver_slot, rfl, rfl⟩
+  scope := by
+    intro fragment outside
+    cases fragment with
+    | escrow edge session =>
+      have sameEdge : edge = () := rfl
+      subst sameEdge
+      have notWire : ¬ (session = wire) := fun isWire => outside (by rw [isWire])
+      show ledgerAt false session = afterReceiverDeath.inFlight () session
+      rw [ledgerAt_off_wire_empty notWire, afterReceiverDeath_off notWire]
+    | _ => rfl
+
+/--
+**And a process that finished is not a process that died.**
+
+`ProcessLifecycle.Live` is `running` and nothing else, so an earlier version of
+`endpointDeathIsEarned` — which asked only `¬ Live` — accepted a `.terminated`
+incarnation, one that had *completed its protocol*. `ProcessDeathReason` is
+documented as why a process stopped "without finishing".
+`Grass/Process/Network/Death.lean` says the same. §10.117.
+-/
+theorem a_terminated_sender_did_not_die
+    {before after : ServerWorld} {reason : ProcessDeathReason}
+    {incarnation : ProcessInstance serverTopology}
+    (present : before.instances .listener wire.sender.instanceId = some incarnation)
+    (finished : ∃ result, incarnation.lifecycle = .terminated result)
+    (died : serverPlan.ResolvesEscrow before after () wire escrowed (.senderDied reason)) :
+    False := by
+  obtain ⟨found, sameSlot, _, itDied⟩ := died.endpointDeathIsEarned.1 reason rfl
+  have same : found = incarnation := Option.some.inj (sameSlot.symm.trans present)
+  subst same
+  obtain ⟨result, terminated⟩ := finished
+  rw [terminated] at itDied
+  exact absurd itDied (by intro equal; cases equal)
+
+/--
+**And a death recorded against a stale reference is refused.**
+
+The other half a reviewer found: the first version read the *slot* and never
+compared generations, so a restarted incarnation satisfied a death recorded
+against its predecessor. `ProcessRef` splits `instanceId` from `generation`
+precisely so a stale reference fails. §10.117.
+-/
+theorem a_stale_reference_cannot_die
+    {before after : ServerWorld} {reason : ProcessDeathReason}
+    {incarnation : ProcessInstance serverTopology}
+    (present : before.instances .listener wire.sender.instanceId = some incarnation)
+    (restarted : incarnation.ref.generation ≠ wire.sender.generation)
+    (died : serverPlan.ResolvesEscrow before after () wire escrowed (.senderDied reason)) :
+    False := by
+  obtain ⟨found, sameSlot, sameGeneration, _⟩ := died.endpointDeathIsEarned.1 reason rfl
+  have same : found = incarnation := Option.some.inj (sameSlot.symm.trans present)
+  subst same
+  exact restarted sameGeneration
 
 /-- **A cancellation request**, which records and does not resolve. -/
 theorem the_request : serverPlan.RequestsCancel sent afterRequesting () wire escrowed where

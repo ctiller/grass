@@ -270,16 +270,41 @@ structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
   `EndsInstance.endingIsEarned`. The two escrow constructors that name a process
   death were not, and the reference is right there in the `ChannelId`, so this
   was a missing field rather than a layering boundary.
+
+  **Three things it has to say, and the first version said one.** §10.117.
+
+  * The incarnation **died**, and did not merely stop being `Live`.
+    `ProcessLifecycle.Live` is `running` and nothing else, so `¬ Live` is
+    satisfied by `.terminated` — a process that *finished its protocol* — as well
+    as by `.cancelled`, `.interrupted`, `.faulted` and `.violated`.
+    `ProcessDeathReason` is documented as why a process stopped "without
+    finishing", and `Grass/Process/Network/Death.lean` is explicit that a
+    terminated process did not die. A reviewer compiled the well-formed world
+    recording both.
+  * **For this reason.** The bound `reason` appeared nowhere in the first
+    version's conclusion, so `.senderDied .providerLost` could be written against
+    an incarnation that died `.supervised`. Decision 129's stored classification
+    is only readable off network state if the two agree.
+  * **And this incarnation.** The first version read the *slot* and never compared
+    generations, so a restarted incarnation satisfied a death recorded against its
+    predecessor's reference — the reviewer built that too. `ProcessRef` splits
+    `instanceId` from `generation` exactly so a stale reference fails, and
+    `EndsInstance.identityPreserved` and `Spawns.slotAgrees` are the siblings that
+    already check it.
   -/
   endpointDeathIsEarned :
     (∀ reason, resolution = .senderDied reason →
       ∃ incarnation,
         before.instances (plan.topology.endpoints edge).1 session.sender.instanceId
-          = some incarnation ∧ ¬ incarnation.Live) ∧
+          = some incarnation ∧
+        incarnation.ref.generation = session.sender.generation ∧
+        incarnation.lifecycle = .died reason) ∧
     (∀ reason, resolution = .receiverDied reason →
       ∃ incarnation,
         before.instances (plan.topology.endpoints edge).2 session.receiver.instanceId
-          = some incarnation ∧ ¬ incarnation.Live)
+          = some incarnation ∧
+        incarnation.ref.generation = session.receiver.generation ∧
+        incarnation.lifecycle = .died reason)
   /--
   **And the only occurrence it escrows is a coalesce's carrier.**
 
