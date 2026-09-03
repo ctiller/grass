@@ -13,6 +13,8 @@ mod frontier;
 mod gitrepo;
 mod merge_candidate;
 mod merge_ready;
+#[cfg(test)]
+mod multihost_proptest;
 mod outbox;
 mod publish;
 mod registry;
