@@ -124,7 +124,8 @@ in the corpus had ever satisfied `Emits`, and every theorem about emitting steps
 was being checked against an empty case.
 -/
 def beepCommit : serverPlan.NetworkTransition beforeReceive afterBeep :=
-  .commit quietRunCoalesces.committed.observations beep_is_committed.toCommits
+  .commit quietRunCoalesces.committed.observations
+    (beep_is_committed.toCommits (by simp [quietRunCoalesces, Grass.Process.Tests.Commit.beeps]))
 
 /-- **And it emits** — the `Emits` predicate is inhabited at this plan. -/
 theorem the_commit_emits : beepCommit.Emits :=

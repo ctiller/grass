@@ -224,11 +224,20 @@ namespace CommitsRender
 
 variable {plan}
 
-/-- A commit is a `Commits`, so it is a `NetworkTransition.commit`. -/
+/--
+A commit is a `Commits`, so it is a `NetworkTransition.commit` — provided the
+render it committed carried something.
+
+The hypothesis is `Commits.nonempty`, and it is not a formality: a commit that
+appends nothing changes nothing at all, which would make it a one-step silent
+cycle and `Grass/Process/Network/Progress.lean`'s §7 theorem vacuous. A
+reconciler that skipped every render has not committed; it has decided not to.
+-/
 theorem toCommits {before after demanded} {coalescing : Coalescing demanded}
-    (commit : plan.CommitsRender before after coalescing) :
+    (commit : plan.CommitsRender before after coalescing)
+    (rendered : coalescing.committed.observations ≠ []) :
     plan.Commits before after coalescing.committed.observations :=
-  { appended := commit.appended, scope := commit.scope }
+  { appended := commit.appended, nonempty := rendered, scope := commit.scope }
 
 /--
 **A commit drops no demanded observation.**

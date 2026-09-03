@@ -661,6 +661,25 @@ structure Commits (before after : plan.LogicalProcessNetwork)
     (emitted : Trace boundary.Observation) : Prop where
   /-- The trace grew by exactly this much. -/
   appended : after.observations = before.observations ++ emitted
+  /--
+  **And it grew.**
+
+  `docs/PROCESS.md` §6 says a commit "appends to the observation trace";
+  appending nothing is not a commit. Without this field `commit []` is a
+  transition whose scope is empty and which changes nothing at all — a genuine
+  no-op step, at every network, in every plan.
+
+  That is worse than untidy. It is a one-step silent cycle, so
+  `Grass/Process/Network/Progress.lean`'s `no_silent_cycle` would force every
+  `NetworkProgressMeasure` to declare *every* network at a frontier, and §7's
+  progress theorem would be vacuous everywhere. It is also the one thing
+  `Grass/Process/Trace/Independence.lean`'s `self_independent_iff_scopeless`
+  calls out as degenerate: a step independent of itself.
+
+  Found by trying to build a progress measure at the M2 fixture plan and
+  discovering the measure could not exist.
+  -/
+  nonempty : emitted ≠ []
   /-- The observation trace **if it actually appended**, and nothing else. -/
   scope : plan.TouchesOnly before after
     (fun fragment => emitted ≠ [] ∧ fragment = .observations)
