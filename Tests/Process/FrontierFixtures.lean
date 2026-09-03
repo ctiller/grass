@@ -470,8 +470,15 @@ except wait for a tick and tidy up after worlds it cannot reach. §7 excuses an
 infinite run that remains at a frontier, and an infinite run of ticks is exactly
 that. A measure that had to descend on those steps would be claiming the network
 was doing something.
+
+`Reachable := fun _ => True` — the *widest* choice, which is again the hardest,
+since the two obligations are then demanded at every world. This measure does not
+need the reachability index that
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.64 asked for, because `slack` already
+pays for the unreachable worlds; it is here so that a plan which cannot afford
+them has somewhere to say so.
 -/
-def waitingMeasure : waitingPlan.NetworkProgressMeasure where
+def waitingMeasure : waitingPlan.NetworkProgressMeasure waiting where
   Rank := Nat
   rankLt := Nat.lt
   rankWellFounded := Nat.lt_wfRel.wf
@@ -479,8 +486,11 @@ def waitingMeasure : waitingPlan.NetworkProgressMeasure where
   rank := rankOf
   demanded := fun observation => observation.elim
   AtFrontier := fun _ => True
-  frontierIsExternal := fun _ step => entropy_or_descends step.transition
-  descendsOrProduces := fun _ => Or.inr (Or.inr trivial)
+  Reachable := fun _ => True
+  reachableStart := trivial
+  reachableClosed := fun _ _ => trivial
+  frontierIsExternal := fun _ _ step => entropy_or_descends step.transition
+  descendsOrProduces := fun _ _ => Or.inr (Or.inr trivial)
 
 /-- **And `waiting` is at a frontier under it**, which is the class that was
 empty for every measure at the M2 plan. -/

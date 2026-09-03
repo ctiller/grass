@@ -2904,11 +2904,16 @@ bookkeeping. Read as §7 content it says almost nothing; read as an inhabitance
 proof it is the first `NetworkProgressMeasure` in the corpus and the first
 non-empty `AtFrontier`.
 
-The fix is the one `MeetsProcessProgress` already had for the same reason one
-layer down: index the measure by a starting network and quantify both fields over
-`plan.StepsTo start before`. It touches `SilentRun` and every theorem in
-`Grass/Process/Network/Progress.lean`, so it needs a ruling before it is done, not
-after.
+**Fixed.** `NetworkProgressMeasure` is now indexed by the network a run begins
+at and carries a `Reachable` predicate with `reachableStart` and
+`reachableClosed`, and both obligations are quantified over it — the same repair
+`MeetsProcessProgress` had one layer down for the same reason. `Reachable` is not
+a free predicate: the two closure fields force it to contain everything an
+execution from `start` reaches, so `fun _ => False` is unavailable and the least
+choice is exactly `plan.StepsTo start`.
+
+What is not fixed is §10.65: nothing requires `start` to be a network a run may
+actually begin at.
 
 ### 10.65 `ExactInitialNetwork` and the network measure are not connected
 

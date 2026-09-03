@@ -71,6 +71,12 @@ theorem the_receive_is_not_entropy : ¬ receiveStep.DrivenByEntropy := id
 the program is not the outside world acting, so the only way to call
 `beforeReceive` paused is to show the rank descends across it anyway.
 
+`Reachable beforeReceive` is a hypothesis rather than a fact, and cannot be
+anything else here: this file names a world and no start, and
+`NetworkProgressMeasure` is now indexed by the network a run begins at. A caller
+who cannot say that `beforeReceive` is somewhere their program can be has not
+made a claim about their program.
+
 An earlier version of this file concluded `¬ measure.AtFrontier beforeReceive`,
 from a `frontierIsExternal` with no rank disjunct. That was true and vacuous:
 local adversarial review proved the same argument applies to a *commit*, which
@@ -81,10 +87,12 @@ every measure and every theorem in the progress module was about nothing.
 Quantified over every measure, which is the form that matters — this is not a
 fact about one badly chosen measure but about the type.
 -/
-theorem pausing_beforeReceive_costs_rank (measure : serverPlan.NetworkProgressMeasure)
+theorem pausing_beforeReceive_costs_rank {start : serverPlan.LogicalProcessNetwork}
+    (measure : serverPlan.NetworkProgressMeasure start)
+    (reached : measure.Reachable beforeReceive)
     (paused : measure.AtFrontier beforeReceive) :
     measure.rankLt (measure.rank afterReceive) (measure.rank beforeReceive) :=
-  (measure.frontierIsExternal paused receiveAsStep).elim
+  (measure.frontierIsExternal reached paused receiveAsStep).elim
     (fun entropy => absurd entropy the_receive_is_not_entropy) id
 
 /-! ## What that costs a measure -/
@@ -100,10 +108,12 @@ The `¬ AtFrontier` hypothesis was a theorem here until `frontierIsExternal`
 gained its rank disjunct, and it was a theorem about an empty class — see
 `pausing_beforeReceive_costs_rank`.
 -/
-theorem the_receive_is_a_silent_run (measure : serverPlan.NetworkProgressMeasure)
+theorem the_receive_is_a_silent_run {start : serverPlan.LogicalProcessNetwork}
+    (measure : serverPlan.NetworkProgressMeasure start)
+    (reached : measure.Reachable beforeReceive)
     (running : ¬ measure.AtFrontier beforeReceive) :
     ProcessPlan.NetworkProgressMeasure.SilentRun measure beforeReceive afterReceive :=
-  .one receiveAsStep
+  .one receiveAsStep reached
     (fun emitted observation appended _ present => by
       rw [the_receive_emits_nothing emitted appended] at present
       exact absurd present (by simp))
@@ -119,10 +129,12 @@ charges the rank because a receive is not entropy. Not paused,
 nothing — so the rank descends. There is no hypothesis left for a measure to
 wriggle out through.
 -/
-theorem every_measure_pays_for_the_receive (measure : serverPlan.NetworkProgressMeasure) :
+theorem every_measure_pays_for_the_receive {start : serverPlan.LogicalProcessNetwork}
+    (measure : serverPlan.NetworkProgressMeasure start)
+    (reached : measure.Reachable beforeReceive) :
     measure.rankLt (measure.rank afterReceive) (measure.rank beforeReceive) := by
   by_cases paused : measure.AtFrontier beforeReceive
-  · exact pausing_beforeReceive_costs_rank measure paused
-  · exact measure.silent_run_descends (the_receive_is_a_silent_run measure paused)
+  · exact pausing_beforeReceive_costs_rank measure reached paused
+  · exact measure.silent_run_descends (the_receive_is_a_silent_run measure reached paused)
 
 end Grass.Process.Tests.Progress
