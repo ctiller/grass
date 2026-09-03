@@ -157,17 +157,21 @@ structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
   /-- The ledger only moved forward: nothing erased, nothing reordered. -/
   ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
   /--
-  **And it resolves nothing else in this ledger.**
+  **And every occurrence it ends, it ends this way.**
 
   `ledgerExtends` forbids erasing; it does not forbid *adding*. Local
   construction built a `drop` that appends an unrelated occurrence and resolves
   it `.rerouted` to a session it never touches, breaking
   `LogicalProcessNetworkCore.ReroutesLand` with every other field discharged.
-  See `ResolvesNothingElse` and
-  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.87.
+  See `ResolvesOnlyAs` and `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.87.
+
+  Stated as "ends this way" rather than "ends nothing else" because a coalesce is
+  a `ResolvesEscrow` and `ChannelResolution.coalesced` merges a carrier's "fellow
+  sources", plural. The first version of this field was the narrower one, and a
+  reviewer showed what it forbids: §10.90.
   -/
-  resolvesNothingElse : ResolvesNothingElse
-    (before.inFlight edge session) (after.inFlight edge session) occurrence
+  resolvesOnlyAs : ResolvesOnlyAs
+    (before.inFlight edge session) (after.inFlight edge session) resolution
   /-- And nothing outside this session's escrow changed. -/
   scope : plan.TouchesOnly before after (fun fragment => fragment = .escrow edge session)
 
@@ -219,8 +223,14 @@ structure Delivers (before after : plan.LogicalProcessNetwork)
   nowResolved : (after.inFlight edge session).resolution occurrence = some .received
   /-- The ledger only moved forward. -/
   ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
-  /-- **And it resolves nothing else in this ledger**; see
-  `ResolvesEscrow.resolvesNothingElse` for what that field refuses. -/
+  /--
+  **And it resolves nothing else in this ledger.**
+
+  The narrow form, and here it is the right one: `cursorAdvances` says the
+  receiver consumed *exactly one* message, so a delivery that also recorded a
+  second occurrence `.received` would be recording a delivery that did not
+  happen. See `ResolvesEscrow.resolvesOnlyAs` for why the siblings need the wider form.
+  -/
   resolvesNothingElse : ResolvesNothingElse
     (before.inFlight edge session) (after.inFlight edge session) occurrence
   /-- **The receiver's cursor advances by exactly one.** -/
@@ -274,10 +284,24 @@ structure ClosesSession (before after : plan.LogicalProcessNetwork)
   nowResolved : (after.inFlight edge session).resolution occurrence = some .channelClosed
   /-- The ledger only moved forward. -/
   ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
-  /-- **And it resolves nothing else in this ledger**; see
-  `ResolvesEscrow.resolvesNothingElse` for what that field refuses. -/
-  resolvesNothingElse : ResolvesNothingElse
-    (before.inFlight edge session) (after.inFlight edge session) occurrence
+  /--
+  **And it ends everything that was in flight here, as a closure.**
+
+  `ChannelResolution.channelClosed` exists because "an occurrence in flight at an
+  ordinary close has no ending, and would either strand live forever or have to
+  be misrecorded as a death". Until this field, the close it enables did not
+  happen. A close names *one* occurrence, and local adversarial review built an
+  ordinary two-send world in which the second message is left `Outstanding` on a
+  `.closed` session — with no later close or death possible, since both demand
+  `wasOpen` — so it strands, or a `drop` misrecords it. That is precisely the
+  disjunction this resolution was added to break.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.90.
+  -/
+  closesEverything : ∀ other, (before.inFlight edge session).Outstanding other →
+    (after.inFlight edge session).resolution other = some .channelClosed
+  /-- **And every occurrence it ends, it ends as a closure**; see `ResolvesEscrow.resolvesOnlyAs`. -/
+  resolvesOnlyAs : ResolvesOnlyAs
+    (before.inFlight edge session) (after.inFlight edge session) .channelClosed
   /-- It was open; a channel is not closed twice, and not un-died. -/
   wasOpen : (before.sessions edge session).status = .open
   /-- **And the session is closed.** -/
@@ -348,7 +372,7 @@ structure SendsEscrow (before after : plan.LogicalProcessNetwork)
   ledgerExtends :
     LedgerExtends (before.inFlight edge occurrence.1) (after.inFlight edge occurrence.1)
   /-- **And it resolves nothing at all**; a send escrows, it does not end
-  anything. See `ResolvesEscrow.resolvesNothingElse`. -/
+  anything. See `ResolvesEscrow.resolvesOnlyAs`. -/
   resolvesNothing : ResolvesNothing
     (before.inFlight edge occurrence.1) (after.inFlight edge occurrence.1)
   /-- And nothing outside this session's escrow changed. -/
@@ -941,10 +965,10 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
     some (.rerouted destination)
   /-- This ledger only moved forward. -/
   ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
-  /-- **And it resolves nothing else in this ledger**; see
-  `ResolvesEscrow.resolvesNothingElse` for what that field refuses. -/
-  resolvesNothingElse : ResolvesNothingElse
-    (before.inFlight edge session) (after.inFlight edge session) occurrence
+  /-- **And every occurrence it ends, it ends as a reroute to here**; see
+  `ResolvesEscrow.resolvesOnlyAs`. -/
+  resolvesOnlyAs : ResolvesOnlyAs
+    (before.inFlight edge session) (after.inFlight edge session) (.rerouted destination)
   /-- A reroute goes somewhere else. -/
   elsewhere : destination ≠ session
   /--
@@ -972,7 +996,7 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
   destinationExtends :
     LedgerExtends (before.inFlight edge destination) (after.inFlight edge destination)
   /-- **And it resolves nothing at the destination**: the arrival lands in
-  flight, not already ended. See `ResolvesEscrow.resolvesNothingElse`. -/
+  flight, not already ended. See `ResolvesEscrow.resolvesOnlyAs`. -/
   destinationResolvesNothing : ResolvesNothing
     (before.inFlight edge destination) (after.inFlight edge destination)
   /-- Both sessions' escrow, and nothing else. -/
@@ -1004,10 +1028,16 @@ structure KillsSession (before after : plan.LogicalProcessNetwork)
   nowResolved : (after.inFlight edge session).resolution occurrence = some .channelDied
   /-- The ledger only moved forward. -/
   ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
-  /-- **And it resolves nothing else in this ledger**; see
-  `ResolvesEscrow.resolvesNothingElse` for what that field refuses. -/
-  resolvesNothingElse : ResolvesNothingElse
-    (before.inFlight edge session) (after.inFlight edge session) occurrence
+  /--
+  **And it ends everything that was in flight here, as a death.**
+
+  The sibling of `ClosesSession.closesEverything`, refusing the same strand.
+  -/
+  killsEverything : ∀ other, (before.inFlight edge session).Outstanding other →
+    (after.inFlight edge session).resolution other = some .channelDied
+  /-- **And every occurrence it ends, it ends as a death**; see `ResolvesEscrow.resolvesOnlyAs`. -/
+  resolvesOnlyAs : ResolvesOnlyAs
+    (before.inFlight edge session) (after.inFlight edge session) .channelDied
   /-- It was open; a dead channel is not re-killed, and a closed one not un-closed. -/
   wasOpen : (before.sessions edge session).status = .open
   /-- **And the session is dead.** -/
@@ -1071,7 +1101,7 @@ structure RequestsCancel (before after : plan.LogicalProcessNetwork)
   -/
   ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
   /-- **And it resolves nothing at all**: a request records, it does not end.
-  See `ResolvesEscrow.resolvesNothingElse`. -/
+  See `ResolvesEscrow.resolvesOnlyAs`. -/
   resolvesNothing : ResolvesNothing
     (before.inFlight edge session) (after.inFlight edge session)
   /-- That session's escrow, and nothing else. -/

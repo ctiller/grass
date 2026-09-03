@@ -163,6 +163,11 @@ theorem reroutedLedger_resolution_off {occurrence : EdgeOccurrence serverTopolog
     = none
   rw [if_neg notIt]
 
+/-- It ends nothing but the occurrence it is about. -/
+theorem reroutedLedger_resolves_nothing_else :
+    ResolvesNothingElse pendingLedger reroutedLedger escrowed :=
+  fun _ notIt => reroutedLedger_resolution_off notIt
+
 /-- The world after the reroute. -/
 noncomputable def afterReroute : ServerWorld :=
   { quiet with inFlight := fun _ => reroutedAt }
@@ -185,10 +190,10 @@ theorem the_reroute : serverPlan.Reroutes sent afterReroute () wire escrowed sid
     show (reroutedAt wire).resolution escrowed = some (.rerouted sidewire)
     rw [reroutedAt_wire]
     exact reroutedLedger_resolution
-  resolvesNothingElse := by
-    show ResolvesNothingElse (sent.inFlight () wire) (reroutedAt wire) escrowed
+  resolvesOnlyAs := by
+    show ResolvesOnlyAs (sent.inFlight () wire) (reroutedAt wire) (.rerouted sidewire)
     rw [sent_wire, reroutedAt_wire]
-    exact fun _ notIt => reroutedLedger_resolution_off notIt
+    exact reroutedLedger_resolves_nothing_else.resolvesOnlyAs reroutedLedger_resolution
   destinationResolvesNothing := by
     show ResolvesNothing (ledgerAt false sidewire) (reroutedAt sidewire)
     rw [ledgerAt_off_wire_empty sidewire_ne_wire, reroutedAt_sidewire]
@@ -373,6 +378,9 @@ theorem strandingLedger_strands :
 noncomputable def afterStranding : ServerWorld :=
   { quiet with inFlight := fun _ => strandingAt }
 
+theorem afterStranding_wire : afterStranding.inFlight () wire = strandingLedger :=
+  strandingAt_wire
+
 /--
 **The step that strands it, refused.**
 
@@ -390,11 +398,14 @@ to a session that never receives it.
 theorem the_stranding_drop_is_refused :
     ¬ serverPlan.ResolvesEscrow sent afterStranding () wire escrowed .dropped := by
   intro drops
-  have silent := drops.resolvesNothingElse stranded stranded_ne_escrowed
-  rw [show afterStranding.inFlight () wire = strandingLedger from strandingAt_wire,
-    show sent.inFlight () wire = pendingLedger from sent_wire,
-    strandingLedger_strands] at silent
-  exact absurd silent (by intro equal; cases equal)
+  have moved : (afterStranding.inFlight () wire).resolution stranded
+      ≠ (sent.inFlight () wire).resolution stranded := by
+    rw [afterStranding_wire, sent_wire, strandingLedger_strands]
+    intro equal
+    cases equal
+  have declaredAs := drops.resolvesOnlyAs stranded moved
+  rw [afterStranding_wire, strandingLedger_strands] at declaredAs
+  exact absurd declaredAs (by intro equal; cases equal)
 
 /--
 And the other fields really are all satisfiable there, so the refusal is the

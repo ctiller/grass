@@ -306,6 +306,15 @@ theorem requestedLedger_resolves_nothing :
     ResolvesNothing pendingLedger requestedLedger :=
   fun _ => rfl
 
+/-- At `sent` the wire holds exactly one occurrence in flight, which is what a
+close or a death has to end all of. -/
+theorem only_the_one_is_outstanding {occurrence : EdgeOccurrence serverTopology
+    World.serverMessage ()} (outstanding : (sent.inFlight () wire).Outstanding occurrence) :
+    occurrence = escrowed := by
+  rw [sent_wire] at outstanding
+  have held : occurrence ∈ [escrowed] := outstanding.1
+  simpa using held
+
 /-! ## The four steps -/
 
 /--
@@ -320,9 +329,13 @@ theorem the_close : serverPlan.ClosesSession sent afterClosing () wire escrowed 
   onItsSession := rfl
   wasOutstanding := by rw [sent_wire]; exact ⟨List.mem_cons_self, rfl⟩
   nowResolved := by rw [afterClosing_wire]; exact closedLedger_resolution
-  resolvesNothingElse := by
+  closesEverything := by
+    intro other outstanding
+    rw [only_the_one_is_outstanding outstanding, afterClosing_wire]
+    exact closedLedger_resolution
+  resolvesOnlyAs := by
     rw [sent_wire, afterClosing_wire]
-    exact closedLedger_resolves_nothing_else
+    exact closedLedger_resolves_nothing_else.resolvesOnlyAs closedLedger_resolution
   ledgerExtends := by
     rw [sent_wire, afterClosing_wire]
     exact pending_extends_to closedLedger rfl (by simp [pendingLedger])
@@ -352,9 +365,13 @@ theorem the_death : serverPlan.KillsSession sent afterDying () wire escrowed whe
   onItsSession := rfl
   wasOutstanding := by rw [sent_wire]; exact ⟨List.mem_cons_self, rfl⟩
   nowResolved := by rw [afterDying_wire]; exact diedLedger_resolution
-  resolvesNothingElse := by
+  killsEverything := by
+    intro other outstanding
+    rw [only_the_one_is_outstanding outstanding, afterDying_wire]
+    exact diedLedger_resolution
+  resolvesOnlyAs := by
     rw [sent_wire, afterDying_wire]
-    exact diedLedger_resolves_nothing_else
+    exact diedLedger_resolves_nothing_else.resolvesOnlyAs diedLedger_resolution
   ledgerExtends := by
     rw [sent_wire, afterDying_wire]
     exact pending_extends_to diedLedger rfl (by simp [pendingLedger])
@@ -408,9 +425,9 @@ theorem the_drop : serverPlan.ResolvesEscrow sent afterDropping () wire escrowed
   onItsSession := rfl
   wasOutstanding := by rw [sent_wire]; exact ⟨List.mem_cons_self, rfl⟩
   nowResolved := by rw [afterDropping_wire]; exact droppedLedger_resolution
-  resolvesNothingElse := by
+  resolvesOnlyAs := by
     rw [sent_wire, afterDropping_wire]
-    exact droppedLedger_resolves_nothing_else
+    exact droppedLedger_resolves_nothing_else.resolvesOnlyAs droppedLedger_resolution
   ledgerExtends := by
     rw [sent_wire, afterDropping_wire]
     exact pending_extends_to droppedLedger rfl (by simp [pendingLedger])

@@ -709,16 +709,11 @@ theorem rerouting_stood_or_is_this_step (transition : plan.NetworkTransition bef
       rcases declared with h | h
       · obtain ⟨same, sameSession⟩ := escrowFragment_inj h
         cases same; cases sameSession
-        by_cases isIt : occurrence = occurrence'
-        · subst isIt
-          obtain ⟨arrival, _, arrived, _⟩ := step.arrives
-          have sameDestination : destination' = destination := by
-            rw [step.nowResolved] at resolved
-            cases resolved
-            rfl
-          subst sameDestination
+        rcases stood_or_declared step.resolvesOnlyAs resolved with stood | isIt
+        · exact Or.inl stood
+        · obtain ⟨arrival, _, arrived, _⟩ := step.arrives
+          cases isIt
           exact Or.inr ⟨arrival, arrived⟩
-        · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
       · obtain ⟨same, sameSession⟩ := escrowFragment_inj h
         cases same; cases sameSession
         exact Or.inl (step.destinationResolvesNothing occurrence ▸ resolved)
@@ -747,70 +742,54 @@ theorem rerouting_stood_or_is_this_step (transition : plan.NetworkTransition bef
             · exact h
             · exact absurd h (by intro equal; cases equal))
       cases same; cases sameSession
-      by_cases isIt : occurrence = occurrence'
-      · subst isIt
-        rw [step.nowResolved] at resolved
-        exact absurd resolved (by intro equal; cases equal)
-      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+      rcases stood_or_declared step.resolvesOnlyAs resolved with stood | isIt
+      · exact Or.inl stood
+      · exact absurd isIt (by intro equal; cases equal)
     | channelDeath _ _ occurrence' step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj
         (by rcases declared with h | h
             · exact h
             · exact absurd h (by intro equal; cases equal))
       cases same; cases sameSession
-      by_cases isIt : occurrence = occurrence'
-      · subst isIt
-        rw [step.nowResolved] at resolved
-        exact absurd resolved (by intro equal; cases equal)
-      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+      rcases stood_or_declared step.resolvesOnlyAs resolved with stood | isIt
+      · exact Or.inl stood
+      · exact absurd isIt (by intro equal; cases equal)
     | acknowledgeCancel _ _ occurrence' _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
-      by_cases isIt : occurrence = occurrence'
-      · subst isIt
-        rw [step.nowResolved] at resolved
-        exact absurd resolved (by intro equal; cases equal)
-      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+      rcases stood_or_declared step.resolvesOnlyAs resolved with stood | isIt
+      · exact Or.inl stood
+      · exact absurd isIt (by intro equal; cases equal)
     | timeout _ _ occurrence' step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
-      by_cases isIt : occurrence = occurrence'
-      · subst isIt
-        rw [step.nowResolved] at resolved
-        exact absurd resolved (by intro equal; cases equal)
-      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+      rcases stood_or_declared step.resolvesOnlyAs resolved with stood | isIt
+      · exact Or.inl stood
+      · exact absurd isIt (by intro equal; cases equal)
     | senderDeath _ _ occurrence' _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
-      by_cases isIt : occurrence = occurrence'
-      · subst isIt
-        rw [step.nowResolved] at resolved
-        exact absurd resolved (by intro equal; cases equal)
-      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+      rcases stood_or_declared step.resolvesOnlyAs resolved with stood | isIt
+      · exact Or.inl stood
+      · exact absurd isIt (by intro equal; cases equal)
     | receiverDeath _ _ occurrence' _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
-      by_cases isIt : occurrence = occurrence'
-      · subst isIt
-        rw [step.nowResolved] at resolved
-        exact absurd resolved (by intro equal; cases equal)
-      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+      rcases stood_or_declared step.resolvesOnlyAs resolved with stood | isIt
+      · exact Or.inl stood
+      · exact absurd isIt (by intro equal; cases equal)
     | drop _ _ occurrence' step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
-      by_cases isIt : occurrence = occurrence'
-      · subst isIt
-        rw [step.nowResolved] at resolved
-        exact absurd resolved (by intro equal; cases equal)
-      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+      rcases stood_or_declared step.resolvesOnlyAs resolved with stood | isIt
+      · exact Or.inl stood
+      · exact absurd isIt (by intro equal; cases equal)
     | coalesce _ _ occurrence' _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
-      by_cases isIt : occurrence = occurrence'
-      · subst isIt
-        rw [step.nowResolved] at resolved
-        exact absurd resolved (by intro equal; cases equal)
-      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+      rcases stood_or_declared step.resolvesOnlyAs resolved with stood | isIt
+      · exact Or.inl stood
+      · exact absurd isIt (by intro equal; cases equal)
     | processStep _ _ _ _ _ _ _ =>
       exact absurd declared (by rintro (h | ⟨_, h⟩ | ⟨_, _, h⟩) <;> cases h)
     | spawn _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)

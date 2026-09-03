@@ -445,6 +445,68 @@ def ResolvesNothingElse {Occurrence : Type u} {Session : Type s}
   ∀ other, other ≠ occurrence → later.resolution other = earlier.resolution other
 
 /--
+**One step ended nothing except as it declared.**
+
+The repair to `ResolvesNothingElse`, which was too strong wherever a step
+legitimately ends more than one occurrence. Two such steps exist and
+`ChannelResolution`'s own docstrings name both: an ordinary close, which is why
+`channelClosed` exists at all — "an occurrence in flight at an ordinary close has
+no ending, and would either strand live forever or have to be misrecorded as a
+death" — and a coalesce, which merges a carrier's "fellow sources", plural.
+
+Local adversarial review built the two-send world and showed that under
+`ResolvesNothingElse` a faithful close of it is unconstructible: the close can
+end one message, the second is left `Outstanding` on a `.closed` session, and
+`ClosesSession.wasOpen` and `KillsSession.wasOpen` refuse every later close or
+death — so it strands or is misrecorded, which is exactly the disjunction
+`channelClosed` was added to break.
+
+What is still bounded is the *kind* of ending: a step may end several
+occurrences, and every one of them ends the way this step says it ends. That is
+what §10.87 needs — a `.rerouted` resolution standing after a step is either one
+that already stood or the reroute's own — and it is all §10.87 needs.
+-/
+def ResolvesOnlyAs {Occurrence : Type u} {Session : Type s}
+    (earlier later : EscrowLedger Occurrence Session)
+    (resolution : ChannelResolution Occurrence Session) : Prop :=
+  ∀ occurrence, later.resolution occurrence ≠ earlier.resolution occurrence →
+    later.resolution occurrence = some resolution
+
+/--
+**So a resolution standing after such a step either already stood, or is the one
+the step declared.**
+
+The reading `Grass/Process/Network/WellFormedness.lean` takes of every
+escrow-touching constructor, once. Without it the sixth well-formedness clause
+needs a case analysis per constructor on which occurrence the step named; with
+it, the constructor's declared resolution is the only thing that matters.
+-/
+theorem stood_or_declared {Occurrence : Type u} {Session : Type s}
+    {earlier later : EscrowLedger Occurrence Session}
+    {declared : ChannelResolution Occurrence Session}
+    (bounded : ResolvesOnlyAs earlier later declared)
+    {occurrence : Occurrence} {value : ChannelResolution Occurrence Session}
+    (resolved : later.resolution occurrence = some value) :
+    earlier.resolution occurrence = some value ∨ value = declared := by
+  by_cases moved : later.resolution occurrence = earlier.resolution occurrence
+  · exact Or.inl (moved ▸ resolved)
+  · have declaredHere := bounded occurrence moved
+    rw [resolved] at declaredHere
+    exact Or.inr (Option.some.inj declaredHere)
+
+/-- Ending nothing else is a special case of ending everything the same way. -/
+theorem ResolvesNothingElse.resolvesOnlyAs {Occurrence : Type u} {Session : Type s}
+    {earlier later : EscrowLedger Occurrence Session} {occurrence : Occurrence}
+    (bounded : ResolvesNothingElse earlier later occurrence)
+    {resolution : ChannelResolution Occurrence Session}
+    (declared : later.resolution occurrence = some resolution) :
+    ResolvesOnlyAs earlier later resolution := by
+  intro other moved
+  by_cases isIt : other = occurrence
+  · exact isIt ▸ declared
+  · exact absurd (bounded other isIt) moved
+
+/--
 **One step ended nothing at all.**
 
 The stronger form, for the constructors that genuinely resolve nothing: a send
