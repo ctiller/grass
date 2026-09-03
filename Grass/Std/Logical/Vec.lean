@@ -623,6 +623,66 @@ theorem find?_eq_some {p : α → Bool} {v : Vec α} {a : α} (h : v.find? p = s
   ⟨List.mem_of_find?_eq_some h, List.find?_some h⟩
 
 /-!
+## Instances
+
+`docs/STDLIB.md` §1 says a `Vec`'s "equality and high-level laws are extensional
+over length and indexed elements". `Vec.ext_of_get?` is that as a proof rule;
+these instances are the same statement as something a program can run and a
+tactic can use.
+
+Each is derived through `toList` rather than restated, because `Vec.toList` is
+injective (`Vec.toList_injective`) and so every decision procedure on the
+representation transports exactly. That is the one place where routing through
+the representation is right rather than a leak: an instance is about how values
+are compared and displayed, not about what a consumer may assume of them.
+
+`GetElem` is the reason `v[i]` and `v[i]?` work. It is worth having beyond
+convenience: `docs/STDLIB.md` §3 asks for both a checked and a bounded accessor,
+Lean's indexing notation is exactly that pair, and a container that does not
+support it reads as foreign at every use site. `Vec.getElem_eq_get` and
+`Vec.getElem?_eq_get?` pin that the notation means the accessors and not some
+other thing.
+-/
+
+instance [DecidableEq α] : DecidableEq (Vec α) := fun v w =>
+  decidable_of_iff (v.toList = w.toList)
+    ⟨toList_injective, fun h => by rw [h]⟩
+
+instance [BEq α] : BEq (Vec α) := ⟨fun v w => v.toList == w.toList⟩
+
+instance [BEq α] [LawfulBEq α] : LawfulBEq (Vec α) where
+  eq_of_beq h := toList_injective (eq_of_beq h)
+  rfl := by
+    intro v
+    show (v.toList == v.toList) = true
+    simp
+
+instance [Repr α] : Repr (Vec α) := ⟨fun v prec => Repr.reprPrec v.toList prec⟩
+
+instance : GetElem (Vec α) Nat α (fun v i => i < v.length) where
+  getElem v i h := v.get i h
+
+instance : GetElem? (Vec α) Nat α (fun v i => i < v.length) where
+  getElem? v i := v.get? i
+
+instance : LawfulGetElem (Vec α) Nat α (fun v i => i < v.length) where
+  getElem?_def v i _ := by
+    by_cases h : i < v.length
+    · simp [getElem?, getElem, h, get?_eq_some_get v i h]
+    · simp [getElem?, h, get?_eq_none v (Nat.le_of_not_lt h)]
+
+@[simp] theorem getElem_eq_get (v : Vec α) (i : Nat) (h : i < v.length) :
+    v[i] = v.get i h := rfl
+
+@[simp] theorem getElem?_eq_get? (v : Vec α) (i : Nat) : v[i]? = v.get? i := rfl
+
+/-- Deciding equality agrees with extensional agreement, which is the connection
+`docs/STDLIB.md` §1 asks the instance to have rather than merely to exist. -/
+theorem decide_eq_iff_get?_eq [DecidableEq α] (v w : Vec α) :
+    v = w ↔ ∀ i, v.get? i = w.get? i :=
+  ⟨fun h _ => by rw [h], ext_of_get?⟩
+
+/-!
 ## Positional insertion and removal
 -/
 

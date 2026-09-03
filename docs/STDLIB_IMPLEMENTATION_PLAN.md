@@ -246,7 +246,7 @@ this library has to a named consumer. Every `Vec` operation those files call:
 | `arguments.mapIdx fun index argument => ...` (same file) | **added by this reading**; it was missing |
 | `fields.map fun field => ...` through dot notation | present; dot notation reaches `Vec.map f v` |
 | `++` on instruction fragments | present |
-| array-literal syntax for `Vec` (seven sites) | **absent**; §3.7 |
+| array-literal syntax for `Vec` (seven sites) | **absent**; §3.5 |
 
 `Tests/Std/SpikeSurface.lean` compiles each of the first four in the shape the
 spike writes it, so "the surface supports this" is checked rather than asserted.
@@ -305,7 +305,36 @@ this section would be moot — array-literal syntax would work by construction, 
 would `#[]` and `++`. That is the strongest practical argument in that
 direction, and it is why the two are recorded as one decision rather than two.
 
-### 3.6 Exit criteria
+### 3.6 Instances
+
+`Vec` carries `DecidableEq`, `BEq` with `LawfulBEq`, `Repr`, and `GetElem`/
+`GetElem?` with `LawfulGetElem`, so `v[i]`, `v[i]?`, `==`, and `decide` work on
+one. Each is derived through `toList` rather than restated, which is sound
+because `Vec.toList_injective` transports every decision procedure exactly, and
+is the one place where routing through the representation is right: an instance
+is about how values are compared and displayed, not about what a consumer may
+assume of them.
+
+This is completeness work rather than a new demand, and the argument for doing
+it is §3.2's own. `Vec` is a private structure precisely so consumers write its
+API instead of `List`'s. That trade is only worth making if the API is complete
+enough to write against — a container that cannot be compared, indexed with
+`v[i]`, or printed pushes its users straight back to `Vec.toList`, which is the
+leak the structure was chosen to prevent. An incomplete wrapper is worse than no
+wrapper, because it has the cost and not the benefit.
+
+`GetElem` is worth singling out. [STDLIB.md](STDLIB.md) §3 asks for a checked
+accessor and a bounded one; Lean's `v[i]?` and `v[i]` are exactly that pair, and
+`Vec.getElem?_eq_get?` and `Vec.getElem_eq_get` pin that the notation means those
+accessors rather than a parallel implementation.
+
+`Tests/Std/VecInstances.lean` checks the part no theorem states — that the
+notation and instances a Lean author reaches for without thinking work on a
+`Vec` — and includes the two cases that separate a sequence from a set, since
+every other example in it would pass for a container that forgot order or
+multiplicity.
+
+### 3.7 Exit criteria
 
 S1 is complete when all of the following hold. The first four hold today.
 
@@ -320,7 +349,7 @@ S1 is complete when all of the following hold. The first four hold today.
 5. A reviewer distinct from this agent has merged it, per
    [AGENT_REVIEW.md](AGENT_REVIEW.md).
 
-### 3.7 Open: the `ByteArray` name collides with Lean's
+### 3.8 Open: the `ByteArray` name collides with Lean's
 
 [STDLIB.md](STDLIB.md) §1 fixes the name `ByteArray` for `Vec Byte`. Lean's
 prelude already has `_root_.ByteArray`. A module that opens `Grass.Std.Logical`
@@ -460,7 +489,7 @@ realization.
 **The `ByteArray` name is settled late.** Consumers written against a qualified
 `Grass.Std.Logical.ByteArray` before a rename would need editing after one. The
 mitigation is that there are no such consumers yet, which is the argument for
-ruling on §3.6 soon rather than at leisure.
+ruling on §3.8 soon rather than at leisure.
 
 ## 8. Decisions and open items
 
@@ -483,11 +512,16 @@ reader will want a reason for:
 6. Every operation carries at least one law. An operation without one does not
    remove the need to reason about it, it relocates that reasoning to
    `Vec.toList` in the consumer, which is the leak §3.2 pays for. §3.1.
+7. `Vec` carries the instances a Lean author expects — `DecidableEq`, lawful
+   `BEq`, `Repr`, `GetElem`/`GetElem?` — derived through `toList`. An incomplete
+   wrapper is worse than no wrapper: it has §3.2's cost without its benefit,
+   because a container that cannot be compared or indexed sends its users back to
+   the representation. §3.6.
 
 Open, with the owner each is with:
 
 1. **The `ByteArray` name collision**, with the owner of
-   [STDLIB.md](STDLIB.md). §3.7. Sharper than when it was first raised: the
+   [STDLIB.md](STDLIB.md). §3.8. Sharper than when it was first raised: the
    authored spike sources write bare `ByteArray` in four of the five spikes, so
    "keep the name and qualify at the use site" is a change to the author surface
    and not only to library-internal code.
