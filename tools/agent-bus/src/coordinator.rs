@@ -111,8 +111,21 @@ pub fn drain_outbox(
     let mut rejected = Vec::new();
     for (path, candidate) in &pending {
         let data = candidate.typed_data()?;
-        let observed = build_frontier(repo, &epoch, &worktrees_dir.join("_frontier"), agent, &candidate.extra_refs)?;
-        let env = Envelope::new(agent, next_seq, observed, &data, candidate.extra_refs.clone());
+        let observed = build_frontier(
+            repo,
+            &epoch,
+            &worktrees_dir.join("_frontier"),
+            agent,
+            &candidate.extra_refs,
+            &data,
+        )?;
+        let env = Envelope::new(
+            agent,
+            next_seq,
+            observed,
+            &data,
+            candidate.extra_refs.clone(),
+        );
         match crate::apply::dry_run(&state, &env) {
             Ok(()) => {
                 state = crate::apply::reduce_onto(state, std::slice::from_ref(&env))?;
@@ -169,7 +182,10 @@ pub fn drain_outbox(
         crate::outbox::remove(path)?;
     }
 
-    Ok(DrainResult { published, rejected })
+    Ok(DrainResult {
+        published,
+        rejected,
+    })
 }
 
 /// Removes a rejected candidate from the active outbox and writes it,
@@ -188,9 +204,12 @@ fn reject_candidate(
         path: rejected_dir.display().to_string(),
         source: e,
     })?;
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| invalid(format!("candidate path {} has no file name", path.display())))?;
+    let file_name = path.file_name().ok_or_else(|| {
+        invalid(format!(
+            "candidate path {} has no file name",
+            path.display()
+        ))
+    })?;
     let receipt = serde_json::json!({
         "candidate": candidate,
         "reason": reason,
@@ -219,7 +238,8 @@ pub fn publish_stream(
         Some(tip) => tip,
         None => return Ok(crate::publish::PublicationReceipt::default()),
     };
-    let update = crate::publish::RefUpdate::new(crate::stream::stream_ref(agent).into_string(), tip);
+    let update =
+        crate::publish::RefUpdate::new(crate::stream::stream_ref(agent).into_string(), tip);
     crate::publish::publish(repo, remote, &[update])
 }
 
@@ -252,18 +272,26 @@ pub fn drain_and_publish(
     Ok((drained, receipt))
 }
 
-/// Builds a sparse frontier covering exactly the cross-agent identities
-/// `extra_refs` names, each pinned at that referenced event's own position
-/// against the referenced agent's *current* stream tip. Same-agent
-/// references need no frontier entry (envelope validation follows the
-/// stream's own contiguous sequence for those instead).
+/// Builds whichever frontier kind `data` requires (docs/AGENT_COORDINATION_
+/// EVOLUTION.md section 2.2/4.2, gate 12): a complete frontier -- naming
+/// every active member's current position, not just what `extra_refs`
+/// names -- for an authority event (currently: a broadcast whose selector
+/// is `AllActive`, or a required-ack broadcast on a derived selector, per
+/// `apply::broadcast_requires_complete_frontier`), otherwise the ordinary
+/// sparse frontier covering exactly the cross-agent identities `extra_refs`
+/// names. Same-agent references need no sparse entry (envelope validation
+/// follows the stream's own contiguous sequence for those instead).
 fn build_frontier(
     repo: &Path,
     epoch: &crate::registry::RosterEpoch,
     worktrees_dir: &Path,
     author: &Agent,
     extra_refs: &[EventId],
+    data: &crate::events::EventData,
 ) -> AbResult<ObservedFrontier> {
+    if requires_complete_frontier(data) {
+        return build_complete_frontier(repo, epoch, worktrees_dir);
+    }
     let mut entries = Vec::new();
     for r in extra_refs {
         let ref_agent = r.agent();
@@ -283,6 +311,44 @@ fn build_frontier(
         });
     }
     Ok(ObservedFrontier::sparse(epoch.id.clone(), entries))
+}
+
+fn requires_complete_frontier(data: &crate::events::EventData) -> bool {
+    match data {
+        crate::events::EventData::BroadcastPublished(d) => {
+            crate::apply::broadcast_requires_complete_frontier(d)
+        }
+        _ => false,
+    }
+}
+
+/// Every active member's current stream position, exactly (`ObservedFrontier
+/// ::complete` itself rejects anything short of the epoch's exact active
+/// set). Fails if any active member has not yet published its own stream
+/// root -- a real, honest failure rather than silently omitting them (which
+/// `ObservedFrontier::complete` would reject anyway).
+fn build_complete_frontier(
+    repo: &Path,
+    epoch: &crate::registry::RosterEpoch,
+    worktrees_dir: &Path,
+) -> AbResult<ObservedFrontier> {
+    let mut entries = Vec::new();
+    for member in epoch.active_members.keys() {
+        let tip = crate::stream::read_stream_tip(repo, member)?.ok_or_else(|| {
+            invalid(format!(
+                "cannot build a complete frontier: {member} has not yet published its own stream"
+            ))
+        })?;
+        let reads_dir = worktrees_dir.join(format!("_complete_{member}"));
+        crate::gitrepo::ensure_bus_worktree(repo, &reads_dir, tip.as_str())?;
+        let log_len = crate::storage::read_stream_log(&reads_dir, member)?.len() as u64;
+        entries.push(FrontierEntry {
+            agent: member.clone(),
+            stream_tip: tip,
+            through: EventId::new(member, log_len - 1),
+        });
+    }
+    ObservedFrontier::complete(epoch, entries)
 }
 
 #[cfg(test)]
@@ -410,8 +476,13 @@ mod tests {
                 standby: None,
             },
         );
-        crate::registry::propose_transition(repo.path(), &epoch, members, &repo.path().join("_transition_wt"))
-            .unwrap();
+        crate::registry::propose_transition(
+            repo.path(),
+            &epoch,
+            members,
+            &repo.path().join("_transition_wt"),
+        )
+        .unwrap();
 
         let candidate = Candidate::new(
             &alice,
@@ -440,8 +511,12 @@ mod tests {
         assert_eq!(drained.published.len(), 1);
         assert_eq!(drained.published[0], EventId::new(&alice, 0));
         assert!(drained.rejected.is_empty());
-        assert!(crate::stream::read_stream_tip(repo.path(), &alice).unwrap().is_some());
-        assert!(crate::outbox::list_pending(repo.path(), &alice).unwrap().is_empty());
+        assert!(crate::stream::read_stream_tip(repo.path(), &alice)
+            .unwrap()
+            .is_some());
+        assert!(crate::outbox::list_pending(repo.path(), &alice)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -461,12 +536,8 @@ mod tests {
         )
         .unwrap();
 
-        crate::outbox::submit(
-            repo.path(),
-            "client-1",
-            &status_candidate(&coord1, "first"),
-        )
-        .unwrap();
+        crate::outbox::submit(repo.path(), "client-1", &status_candidate(&coord1, "first"))
+            .unwrap();
         crate::outbox::submit(
             repo.path(),
             "client-2",
@@ -483,7 +554,10 @@ mod tests {
             &repo.path().join("_wt"),
         )
         .unwrap();
-        assert_eq!(drained.published, vec![EventId::new(&coord1, 1), EventId::new(&coord1, 2)]);
+        assert_eq!(
+            drained.published,
+            vec![EventId::new(&coord1, 1), EventId::new(&coord1, 2)]
+        );
         assert!(drained.rejected.is_empty());
 
         let reads_dir = repo.path().join("_reads");
@@ -527,19 +601,11 @@ mod tests {
             }),
             vec![],
         );
-        crate::outbox::submit(
-            repo.path(),
-            "client-1",
-            &status_candidate(&coord1, "first"),
-        )
-        .unwrap();
+        crate::outbox::submit(repo.path(), "client-1", &status_candidate(&coord1, "first"))
+            .unwrap();
         crate::outbox::submit(repo.path(), "client-2", &bogus_ack).unwrap();
-        crate::outbox::submit(
-            repo.path(),
-            "client-3",
-            &status_candidate(&coord1, "third"),
-        )
-        .unwrap();
+        crate::outbox::submit(repo.path(), "client-3", &status_candidate(&coord1, "third"))
+            .unwrap();
 
         let drained = drain_outbox(
             repo.path(),
@@ -553,14 +619,23 @@ mod tests {
 
         // Both valid candidates publish with a contiguous sequence -- no
         // gap left for the rejected one in between.
-        assert_eq!(drained.published, vec![EventId::new(&coord1, 1), EventId::new(&coord1, 2)]);
+        assert_eq!(
+            drained.published,
+            vec![EventId::new(&coord1, 1), EventId::new(&coord1, 2)]
+        );
         assert_eq!(drained.rejected.len(), 1);
         assert_eq!(drained.rejected[0].kind, "issue.acknowledged");
-        assert!(drained.rejected[0].reason.contains("unknown issue"), "{}", drained.rejected[0].reason);
+        assert!(
+            drained.rejected[0].reason.contains("unknown issue"),
+            "{}",
+            drained.rejected[0].reason
+        );
 
         // Nothing left pending, and the rejected candidate's own outbox
         // entry is gone (not stuck retrying forever) but durably recorded.
-        assert!(crate::outbox::list_pending(repo.path(), &coord1).unwrap().is_empty());
+        assert!(crate::outbox::list_pending(repo.path(), &coord1)
+            .unwrap()
+            .is_empty());
         let rejected_dir = crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected");
         let entries: Vec<_> = std::fs::read_dir(&rejected_dir).unwrap().collect();
         assert_eq!(entries.len(), 1);
@@ -607,12 +682,8 @@ mod tests {
         let repo = init_repo();
         let origin = init_bare_origin();
         let alice = a("alice");
-        let receipt = publish_stream(
-            repo.path(),
-            &origin.path().to_string_lossy(),
-            &alice,
-        )
-        .unwrap();
+        let receipt =
+            publish_stream(repo.path(), &origin.path().to_string_lossy(), &alice).unwrap();
         assert_eq!(receipt, crate::publish::PublicationReceipt::default());
     }
 
@@ -637,12 +708,8 @@ mod tests {
         let local_tip = crate::stream::read_stream_tip(repo.path(), &coord1)
             .unwrap()
             .unwrap();
-        let receipt = publish_stream(
-            repo.path(),
-            &origin.path().to_string_lossy(),
-            &coord1,
-        )
-        .unwrap();
+        let receipt =
+            publish_stream(repo.path(), &origin.path().to_string_lossy(), &coord1).unwrap();
         assert_eq!(
             receipt.published.get("refs/heads/agent-events/coord1"),
             Some(&local_tip)
@@ -716,5 +783,119 @@ mod tests {
         assert!(drained.published.is_empty());
         assert!(drained.rejected.is_empty());
         assert_eq!(receipt, crate::publish::PublicationReceipt::default());
+    }
+
+    /// End-to-end proof that `build_frontier` can actually construct a
+    /// complete frontier (not just that `apply.rs` correctly rejects a
+    /// sparse one): an `AllActive` broadcast, submitted through the
+    /// ordinary outbox and drained through the real coordinator path
+    /// (not a hand-built `Envelope`), must publish successfully.
+    #[test]
+    fn drain_outbox_publishes_an_all_active_broadcast_with_a_real_complete_frontier() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        let (_config, epoch, _commit) = crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+            &repo.path().join("_genesis_wt"),
+        )
+        .unwrap();
+
+        let alice = a("alice");
+        let mut members = epoch.active_members.clone();
+        members.insert(
+            alice.clone(),
+            crate::registry::MemberBinding {
+                role: Role::Implementor,
+                host: short("host1"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        let new_epoch = crate::registry::propose_transition(
+            repo.path(),
+            &epoch,
+            members,
+            &repo.path().join("_transition_wt"),
+        )
+        .unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "alice-reg",
+            &Candidate::new(
+                &alice,
+                &EventData::AgentRegistered(crate::events::AgentRegistered {
+                    display_name: short("Alice"),
+                    primary_role: Role::Implementor,
+                    purpose: text("x"),
+                    product_base: None,
+                    product_branch: None,
+                    provider: None,
+                    model: None,
+                }),
+                vec![],
+            ),
+        )
+        .unwrap();
+        drain_outbox(
+            repo.path(),
+            repo.path(),
+            &alice,
+            &short("host1"),
+            0,
+            &repo.path().join("_wt_alice"),
+        )
+        .unwrap();
+
+        let broadcast_data = EventData::BroadcastPublished(crate::events::BroadcastPublished {
+            topics: crate::scalars::StringSet::from_iter([
+                crate::scalars::CoordinationTopic::parse("release.main".into()).unwrap(),
+            ]),
+            importance: crate::common::Importance::Informational,
+            summary: short("s"),
+            detail: text("d"),
+            affected_paths: crate::scalars::StringSet::default(),
+            affected_interfaces: crate::scalars::StringSet::default(),
+            product_commits: crate::scalars::StringSet::default(),
+            audience_selector: crate::common::AudienceSelector::AllActive,
+            audience_epoch: new_epoch.id.clone(),
+            audience_snapshot: crate::scalars::StringSet::from_iter([
+                alice.clone(),
+                coord1.clone(),
+            ]),
+            acknowledgement: crate::common::AckRequirement::None,
+            deadline: None,
+            supersedes: crate::scalars::StringSet::default(),
+            workaround: None,
+            expiry_condition: None,
+        });
+        crate::outbox::submit(
+            repo.path(),
+            "broadcast-1",
+            &Candidate::new(&coord1, &broadcast_data, vec![]),
+        )
+        .unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            &repo.path().join("_wt_coord1"),
+        )
+        .unwrap();
+        assert!(
+            drained.rejected.is_empty(),
+            "broadcast was rejected: {:?}",
+            drained.rejected
+        );
+        assert_eq!(drained.published.len(), 1);
     }
 }

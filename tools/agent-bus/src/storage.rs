@@ -246,7 +246,9 @@ pub fn append_event(stream_root: &Path, env: &Envelope) -> AbResult<()> {
 
     let line = env.to_canonical_line();
     if line.len() > MAX_LINE_BYTES {
-        return Err(invalid(format!("event line exceeds {MAX_LINE_BYTES} bytes")));
+        return Err(invalid(format!(
+            "event line exceeds {MAX_LINE_BYTES} bytes"
+        )));
     }
     existing.push_str(&line);
     existing.push('\n');
@@ -514,7 +516,11 @@ mod tests {
     fn read_stream_log_rejects_agent_field_mismatch() {
         let dir = tempfile::tempdir().unwrap();
         let bob_event = registered_envelope("bob", 0);
-        write_segment(dir.path(), 0, &format!("{}\n", bob_event.to_canonical_line()));
+        write_segment(
+            dir.path(),
+            0,
+            &format!("{}\n", bob_event.to_canonical_line()),
+        );
         let err = read_stream_log(dir.path(), &agent("alice")).unwrap_err();
         assert!(err.to_string().contains("has agent field bob"));
     }

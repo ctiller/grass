@@ -45,7 +45,10 @@ pub struct ObservedFrontier {
 }
 
 impl ObservedFrontier {
-    pub fn sparse(roster_epoch: ObjectId, entries: impl IntoIterator<Item = FrontierEntry>) -> Self {
+    pub fn sparse(
+        roster_epoch: ObjectId,
+        entries: impl IntoIterator<Item = FrontierEntry>,
+    ) -> Self {
         ObservedFrontier {
             kind: FrontierKind::Sparse,
             roster_epoch,
@@ -61,8 +64,10 @@ impl ObservedFrontier {
         epoch: &RosterEpoch,
         stream_tips: impl IntoIterator<Item = FrontierEntry>,
     ) -> AbResult<Self> {
-        let entries: BTreeMap<Agent, FrontierEntry> =
-            stream_tips.into_iter().map(|e| (e.agent.clone(), e)).collect();
+        let entries: BTreeMap<Agent, FrontierEntry> = stream_tips
+            .into_iter()
+            .map(|e| (e.agent.clone(), e))
+            .collect();
         let declared: BTreeSet<&Agent> = entries.keys().collect();
         let expected: BTreeSet<&Agent> = epoch.active_members.keys().collect();
         if declared != expected {
@@ -200,17 +205,19 @@ mod tests {
         let err = frontier
             .validate_reference(&eid(&a("carol"), 0))
             .unwrap_err();
-        assert!(err.to_string().contains("absent from the declared frontier"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("absent from the declared frontier"),
+            "{err}"
+        );
     }
 
     #[test]
     fn complete_accepts_exactly_the_active_member_set() {
         let epoch = epoch_with(&["alice", "bob"]);
-        let frontier = ObservedFrontier::complete(
-            &epoch,
-            [entry(&a("alice"), 1, 0), entry(&a("bob"), 2, 0)],
-        )
-        .unwrap();
+        let frontier =
+            ObservedFrontier::complete(&epoch, [entry(&a("alice"), 1, 0), entry(&a("bob"), 2, 0)])
+                .unwrap();
         assert_eq!(frontier.kind, FrontierKind::Complete);
         assert_eq!(frontier.roster_epoch, epoch.id);
     }

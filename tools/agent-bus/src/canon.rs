@@ -60,8 +60,7 @@ mod tests {
 
     #[test]
     fn non_nfc_object_key_is_rejected() {
-        let value: serde_json::Value =
-            serde_json::from_str("{\"e\u{0301}\": \"ok\"}").unwrap();
+        let value: serde_json::Value = serde_json::from_str("{\"e\u{0301}\": \"ok\"}").unwrap();
         assert!(check_nfc(&value).is_err());
     }
 }

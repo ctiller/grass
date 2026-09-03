@@ -675,12 +675,8 @@ impl EventData {
             EventData::DependencyAcknowledged(d) => {
                 [d.dependency.clone(), d.assignment.clone()].into()
             }
-            EventData::DependencyResolved(d) => {
-                [d.dependency.clone(), d.assignment.clone()].into()
-            }
-            EventData::DependencyRejected(d) => {
-                [d.dependency.clone(), d.assignment.clone()].into()
-            }
+            EventData::DependencyResolved(d) => [d.dependency.clone(), d.assignment.clone()].into(),
+            EventData::DependencyRejected(d) => [d.dependency.clone(), d.assignment.clone()].into(),
             EventData::DependencyReassigned(d) => {
                 [d.dependency.clone(), d.previous_assignment.clone()].into()
             }
@@ -715,7 +711,11 @@ impl EventData {
             EventData::ReviewMergeAuthorized(d) => {
                 [d.nomination.clone(), d.merge_engine_epoch.clone()]
                     .into_iter()
-                    .chain(d.finding_dispositions.iter().map(|f| f.changes_event.clone()))
+                    .chain(
+                        d.finding_dispositions
+                            .iter()
+                            .map(|f| f.changes_event.clone()),
+                    )
                     .chain(d.evidence.iter().cloned())
                     .collect()
             }
@@ -1051,10 +1051,14 @@ mod tests {
                 revisit_trigger: None,
             }),
             EventData::SubscriptionSet(SubscriptionSet {
-                topics: StringSet::from_iter([CoordinationTopic::parse("safety.memory".into()).unwrap()]),
+                topics: StringSet::from_iter([
+                    CoordinationTopic::parse("safety.memory".into()).unwrap()
+                ]),
             }),
             EventData::BroadcastPublished(BroadcastPublished {
-                topics: StringSet::from_iter([CoordinationTopic::parse("release.main".into()).unwrap()]),
+                topics: StringSet::from_iter([
+                    CoordinationTopic::parse("release.main".into()).unwrap()
+                ]),
                 importance: crate::common::Importance::Informational,
                 summary: short("s"),
                 detail: text("d"),

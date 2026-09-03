@@ -191,7 +191,10 @@ mod tests {
             "merge_engine_version": SUPPORTED_MERGE_ENGINE_VERSION,
         });
         let err = BusConfig::parse(&serde_json::to_vec(&value).unwrap()).unwrap_err();
-        assert!(err.to_string().contains("unsupported object_format"), "{err}");
+        assert!(
+            err.to_string().contains("unsupported object_format"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -203,7 +206,10 @@ mod tests {
             "merge_engine_version": SUPPORTED_MERGE_ENGINE_VERSION,
         });
         let err = BusConfig::parse(&serde_json::to_vec(&value).unwrap()).unwrap_err();
-        assert!(err.to_string().contains("unsupported merge_engine"), "{err}");
+        assert!(
+            err.to_string().contains("unsupported merge_engine"),
+            "{err}"
+        );
     }
 
     #[test]

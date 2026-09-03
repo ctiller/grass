@@ -29,7 +29,8 @@ pub const STREAM_REF_PREFIX: &str = "refs/heads/agent-events/";
 /// The agent grammar (`[a-z][a-z0-9-]{0,47}`) is already a valid single ref
 /// component, so this can never fail `Branch::parse`.
 pub fn stream_ref(agent: &Agent) -> Branch {
-    Branch::parse(format!("{STREAM_REF_PREFIX}{agent}")).expect("agent name is a valid ref component")
+    Branch::parse(format!("{STREAM_REF_PREFIX}{agent}"))
+        .expect("agent name is a valid ref component")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,8 +93,8 @@ pub fn read_stream(
     agent: &Agent,
     worktrees_dir: &Path,
 ) -> AbResult<(StreamHeader, Vec<Envelope>)> {
-    let tip = read_stream_tip(repo, agent)?
-        .ok_or_else(|| invalid(format!("{agent} has no stream")))?;
+    let tip =
+        read_stream_tip(repo, agent)?.ok_or_else(|| invalid(format!("{agent} has no stream")))?;
     let worktree = worktrees_dir.join(format!("stream-read-{agent}"));
     crate::gitrepo::ensure_bus_worktree(repo, &worktree, tip.as_str())?;
     let header = read_header(&worktree)?;
@@ -167,12 +168,7 @@ pub fn create_root_commit(
     )?;
     crate::gitrepo::run_ok(
         repo,
-        &[
-            "branch",
-            "-f",
-            stream_ref(&header.agent).as_str(),
-            &commit,
-        ],
+        &["branch", "-f", stream_ref(&header.agent).as_str(), &commit],
     )?;
     crate::gitrepo::run_ok(
         repo,
@@ -365,8 +361,13 @@ mod tests {
         let repo = init_repo();
         let alice = a("alice");
         let wt = repo.path().join("_wt_root");
-        let commit = create_root_commit(repo.path(), &header(&alice), &registered_envelope(&alice, 0), &wt)
-            .unwrap();
+        let commit = create_root_commit(
+            repo.path(),
+            &header(&alice),
+            &registered_envelope(&alice, 0),
+            &wt,
+        )
+        .unwrap();
         assert_eq!(
             read_stream_tip(repo.path(), &alice).unwrap(),
             Some(commit.clone())
@@ -384,10 +385,21 @@ mod tests {
         let repo = init_repo();
         let alice = a("alice");
         let wt = repo.path().join("_wt_root");
-        create_root_commit(repo.path(), &header(&alice), &registered_envelope(&alice, 0), &wt).unwrap();
+        create_root_commit(
+            repo.path(),
+            &header(&alice),
+            &registered_envelope(&alice, 0),
+            &wt,
+        )
+        .unwrap();
         let wt2 = repo.path().join("_wt_root2");
-        let err = create_root_commit(repo.path(), &header(&alice), &registered_envelope(&alice, 0), &wt2)
-            .unwrap_err();
+        let err = create_root_commit(
+            repo.path(),
+            &header(&alice),
+            &registered_envelope(&alice, 0),
+            &wt2,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("already exists"), "{err}");
     }
 
@@ -396,8 +408,13 @@ mod tests {
         let repo = init_repo();
         let alice = a("alice");
         let wt = repo.path().join("_wt_root");
-        let err = create_root_commit(repo.path(), &header(&alice), &status_envelope(&alice, 0), &wt)
-            .unwrap_err();
+        let err = create_root_commit(
+            repo.path(),
+            &header(&alice),
+            &status_envelope(&alice, 0),
+            &wt,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("agent.registered"), "{err}");
     }
 
@@ -406,8 +423,13 @@ mod tests {
         let repo = init_repo();
         let alice = a("alice");
         let wt = repo.path().join("_wt_root");
-        let root = create_root_commit(repo.path(), &header(&alice), &registered_envelope(&alice, 0), &wt)
-            .unwrap();
+        let root = create_root_commit(
+            repo.path(),
+            &header(&alice),
+            &registered_envelope(&alice, 0),
+            &wt,
+        )
+        .unwrap();
 
         let append_wt = repo.path().join("_wt_append");
         let new_tip = append_to_stream(
@@ -418,7 +440,10 @@ mod tests {
             &append_wt,
         )
         .unwrap();
-        assert_eq!(read_stream_tip(repo.path(), &alice).unwrap(), Some(new_tip.clone()));
+        assert_eq!(
+            read_stream_tip(repo.path(), &alice).unwrap(),
+            Some(new_tip.clone())
+        );
         assert_eq!(
             crate::gitrepo::parents_of(repo.path(), new_tip.as_str()).unwrap(),
             vec![root.as_str().to_string()]
@@ -437,11 +462,23 @@ mod tests {
         let repo = init_repo();
         let alice = a("alice");
         let wt = repo.path().join("_wt_root");
-        let root = create_root_commit(repo.path(), &header(&alice), &registered_envelope(&alice, 0), &wt)
-            .unwrap();
+        let root = create_root_commit(
+            repo.path(),
+            &header(&alice),
+            &registered_envelope(&alice, 0),
+            &wt,
+        )
+        .unwrap();
         // Advance the stream out from under a caller still holding `root`.
         let append_wt = repo.path().join("_wt_append1");
-        append_to_stream(repo.path(), &alice, &root, &[status_envelope(&alice, 1)], &append_wt).unwrap();
+        append_to_stream(
+            repo.path(),
+            &alice,
+            &root,
+            &[status_envelope(&alice, 1)],
+            &append_wt,
+        )
+        .unwrap();
 
         let stale_wt = repo.path().join("_wt_append2");
         let err = append_to_stream(
@@ -452,7 +489,10 @@ mod tests {
             &stale_wt,
         )
         .unwrap_err();
-        assert!(err.to_string().contains("stale or duplicate custody"), "{err}");
+        assert!(
+            err.to_string().contains("stale or duplicate custody"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -461,11 +501,22 @@ mod tests {
         let alice = a("alice");
         let bob = a("bob");
         let wt = repo.path().join("_wt_root");
-        let root = create_root_commit(repo.path(), &header(&alice), &registered_envelope(&alice, 0), &wt)
-            .unwrap();
+        let root = create_root_commit(
+            repo.path(),
+            &header(&alice),
+            &registered_envelope(&alice, 0),
+            &wt,
+        )
+        .unwrap();
         let append_wt = repo.path().join("_wt_append");
-        let err = append_to_stream(repo.path(), &alice, &root, &[status_envelope(&bob, 1)], &append_wt)
-            .unwrap_err();
+        let err = append_to_stream(
+            repo.path(),
+            &alice,
+            &root,
+            &[status_envelope(&bob, 1)],
+            &append_wt,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("does not belong to"), "{err}");
     }
 
@@ -474,8 +525,13 @@ mod tests {
         let repo = init_repo();
         let alice = a("alice");
         let wt = repo.path().join("_wt_root");
-        let root = create_root_commit(repo.path(), &header(&alice), &registered_envelope(&alice, 0), &wt)
-            .unwrap();
+        let root = create_root_commit(
+            repo.path(),
+            &header(&alice),
+            &registered_envelope(&alice, 0),
+            &wt,
+        )
+        .unwrap();
         let append_wt = repo.path().join("_wt_append");
         let err = append_to_stream(repo.path(), &alice, &root, &[], &append_wt).unwrap_err();
         assert!(err.to_string().contains("at least one event"), "{err}");

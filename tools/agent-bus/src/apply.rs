@@ -175,22 +175,12 @@ fn apply_event(state: &mut BusState, env: &Envelope) -> AbResult<()> {
         EventData::IssueReassigned(d) => apply_issue_reassigned(state, env, d)?,
         EventData::DependencyRequested(d) => apply_dependency_requested(state, env, d)?,
         EventData::DependencyAcknowledged(d) => apply_dependency_ack(state, env, d)?,
-        EventData::DependencyResolved(d) => apply_dependency_terminal(
-            state,
-            env,
-            &data,
-            &d.dependency,
-            &d.assignment,
-            "resolved",
-        )?,
-        EventData::DependencyRejected(d) => apply_dependency_terminal(
-            state,
-            env,
-            &data,
-            &d.dependency,
-            &d.assignment,
-            "rejected",
-        )?,
+        EventData::DependencyResolved(d) => {
+            apply_dependency_terminal(state, env, &data, &d.dependency, &d.assignment, "resolved")?
+        }
+        EventData::DependencyRejected(d) => {
+            apply_dependency_terminal(state, env, &data, &d.dependency, &d.assignment, "rejected")?
+        }
         EventData::DependencyReassigned(d) => apply_dependency_reassigned(state, env, d)?,
         EventData::HandoffOffered(d) => apply_handoff_offered(state, env, d)?,
         EventData::HandoffAccepted(d) => {
@@ -272,11 +262,7 @@ fn require_bootstrap_coordinator(state: &BusState, a: &Agent) -> AbResult<()> {
 
 // ------------------------------------------------------------------ lifecycle
 
-fn apply_registered(
-    state: &mut BusState,
-    env: &Envelope,
-    d: &AgentRegistered,
-) -> AbResult<()> {
+fn apply_registered(state: &mut BusState, env: &Envelope, d: &AgentRegistered) -> AbResult<()> {
     if env.seq != 0 {
         return Err(invalid(format!(
             "{}: agent.registered must be sequence zero",
@@ -381,7 +367,11 @@ fn apply_retired(state: &mut BusState, env: &Envelope, d: &AgentRetired) -> AbRe
     Ok(())
 }
 
-fn apply_schema_activated(state: &mut BusState, env: &Envelope, d: &SchemaActivated) -> AbResult<()> {
+fn apply_schema_activated(
+    state: &mut BusState,
+    env: &Envelope,
+    d: &SchemaActivated,
+) -> AbResult<()> {
     require_bootstrap_coordinator(state, &env.agent)?;
     if d.version <= state.activated_schema_version {
         return Err(invalid(format!(
@@ -421,9 +411,10 @@ fn apply_merge_engine_activated(
     state.exclusive.record(&key, &env.id, |other| {
         env.observed.validate_reference(other).is_ok()
     })?;
-    state
-        .merge_engine_info
-        .insert(env.id.clone(), (d.merge_engine.clone(), d.merge_engine_version.clone()));
+    state.merge_engine_info.insert(
+        env.id.clone(),
+        (d.merge_engine.clone(), d.merge_engine_version.clone()),
+    );
     if state.exclusive.winner(&key).as_ref() == Some(&env.id) {
         state.current_merge_engine_epoch = Some(env.id.clone());
     }
@@ -454,7 +445,10 @@ fn apply_scope_set(state: &mut BusState, env: &Envelope, d: &ScopeSet) -> AbResu
             env.id
         )));
     }
-    let ag = state.agents.get_mut(&env.agent).expect("checked by require_active_role");
+    let ag = state
+        .agents
+        .get_mut(&env.agent)
+        .expect("checked by require_active_role");
     ag.scope = Some(d.clone());
     Ok(())
 }
@@ -464,7 +458,10 @@ fn apply_plan_set(state: &mut BusState, env: &Envelope, d: &PlanSet) -> AbResult
     let mut ids = std::collections::BTreeSet::new();
     for step in &d.steps {
         if !ids.insert(step.id.as_str()) {
-            return Err(invalid(format!("{}: duplicate plan step id {}", env.id, step.id)));
+            return Err(invalid(format!(
+                "{}: duplicate plan step id {}",
+                env.id, step.id
+            )));
         }
     }
     let active_count = d
@@ -645,7 +642,11 @@ fn reset_issue_to_conflict(
     }
 }
 
-fn apply_issue_reassigned(state: &mut BusState, env: &Envelope, d: &IssueReassigned) -> AbResult<()> {
+fn apply_issue_reassigned(
+    state: &mut BusState,
+    env: &Envelope,
+    d: &IssueReassigned,
+) -> AbResult<()> {
     // Deliberately no upfront `issue.status != Open` check here: `status` is
     // itself a derived, potentially-provisional effect of the exclusive
     // tracker below. A reassignment that is genuinely concurrent with an
@@ -766,7 +767,10 @@ fn apply_dependency_ack(
             env.id, d.assignment
         )));
     }
-    let dep = state.dependencies.get_mut(&d.dependency).expect("just checked");
+    let dep = state
+        .dependencies
+        .get_mut(&d.dependency)
+        .expect("just checked");
     if dep.acknowledged() {
         return Err(invalid(format!(
             "{}: dependency already acknowledged",
@@ -1110,7 +1114,12 @@ fn apply_review_closing(
             }
         }
         "withdrawn" => {
-            if !chain.current_request.authors.iter().any(|a| a == &env.agent) {
+            if !chain
+                .current_request
+                .authors
+                .iter()
+                .any(|a| a == &env.agent)
+            {
                 return Err(invalid(format!(
                     "{}: only an author may withdraw this nomination",
                     env.id
@@ -1203,7 +1212,10 @@ fn apply_review_changes(
     let mut ids = std::collections::BTreeSet::new();
     for f in &d.findings {
         if !ids.insert(f.id.as_str()) {
-            return Err(invalid(format!("{}: duplicate finding id {}", env.id, f.id)));
+            return Err(invalid(format!(
+                "{}: duplicate finding id {}",
+                env.id, f.id
+            )));
         }
     }
     let chain = state.review_chain_mut(&d.nomination).expect("just checked");
@@ -1326,7 +1338,11 @@ fn apply_review_reassigned(
         )));
     }
     require_active_role(state, &d.reviewer, Role::Reviewer)?;
-    let is_author = chain.current_request.authors.iter().any(|a| a == &env.agent);
+    let is_author = chain
+        .current_request
+        .authors
+        .iter()
+        .any(|a| a == &env.agent);
     if !is_author {
         require_bootstrap_coordinator(state, &env.agent)?;
     }
@@ -1399,14 +1415,22 @@ fn apply_review_merge_authorized(
         )));
     }
     for check in &d.checks {
-        if !chain.current_request.required_checks.iter().any(|c| c.as_str() == check.command.as_str())
+        if !chain
+            .current_request
+            .required_checks
+            .iter()
+            .any(|c| c.as_str() == check.command.as_str())
         {
             // Extra checks beyond required are fine; required checks must
             // all be present, verified below.
         }
     }
     for required in chain.current_request.required_checks.iter() {
-        if !d.checks.iter().any(|c| c.command.as_str() == required.as_str()) {
+        if !d
+            .checks
+            .iter()
+            .any(|c| c.command.as_str() == required.as_str())
+        {
             return Err(invalid(format!(
                 "{}: required check {required} is absent",
                 env.id
@@ -1421,7 +1445,9 @@ fn apply_review_merge_authorized(
             )));
         }
     }
-    let chain_mut = state.review_chain_mut(&d.nomination).expect("checked above");
+    let chain_mut = state
+        .review_chain_mut(&d.nomination)
+        .expect("checked above");
     chain_mut.authorizations.push(env.id.clone());
     Ok(())
 }
@@ -1434,10 +1460,12 @@ fn apply_review_merged(state: &mut BusState, env: &Envelope, d: &ReviewMerged) -
             env.id, d.authorization
         )));
     }
-    let auth_env = state
-        .events
-        .get(&d.authorization)
-        .ok_or_else(|| invalid(format!("{}: unknown authorization {}", env.id, d.authorization)))?;
+    let auth_env = state.events.get(&d.authorization).ok_or_else(|| {
+        invalid(format!(
+            "{}: unknown authorization {}",
+            env.id, d.authorization
+        ))
+    })?;
     if auth_env.agent != env.agent {
         return Err(invalid(format!(
             "{}: only the authorizing reviewer may emit review.merged",
@@ -1473,10 +1501,12 @@ fn apply_review_merge_reconciled(
     d: &ReviewMergeReconciled,
 ) -> AbResult<()> {
     require_bootstrap_coordinator(state, &env.agent)?;
-    let auth_env = state
-        .events
-        .get(&d.authorization)
-        .ok_or_else(|| invalid(format!("{}: unknown authorization {}", env.id, d.authorization)))?;
+    let auth_env = state.events.get(&d.authorization).ok_or_else(|| {
+        invalid(format!(
+            "{}: unknown authorization {}",
+            env.id, d.authorization
+        ))
+    })?;
     let EventData::ReviewMergeAuthorized(auth) = auth_env.typed_data()? else {
         return Err(invalid(format!(
             "{}: authorization {} is not a review.merge_authorized event",
@@ -1543,11 +1573,12 @@ fn apply_conflict_resolved(
     // from state.events rather than trusting `data`'s own kind label,
     // so the dispatch below is driven by what was actually recorded, not by
     // an unchecked claim.
-    let winner_env = state
-        .events
-        .get(&d.selected)
-        .cloned()
-        .ok_or_else(|| invalid(format!("{}: selected event {} is unknown", env.id, d.selected)))?;
+    let winner_env = state.events.get(&d.selected).cloned().ok_or_else(|| {
+        invalid(format!(
+            "{}: selected event {} is unknown",
+            env.id, d.selected
+        ))
+    })?;
     let data = winner_env.typed_data()?;
     match &data {
         EventData::IssueResolved(_) => apply_issue_terminal_effect(state, &data, "resolved"),
@@ -1560,15 +1591,9 @@ fn apply_conflict_resolved(
             dependency_terminal_effect(state, &data, &dependency_from(&data), "rejected")
         }
         EventData::DependencyReassigned(rd) => dependency_reassign_effect(state, &d.selected, rd),
-        EventData::HandoffAccepted(hd) => {
-            handoff_terminal_effect(state, &hd.handoff, "accepted")
-        }
-        EventData::HandoffDeclined(hd) => {
-            handoff_terminal_effect(state, &hd.handoff, "declined")
-        }
-        EventData::HandoffWithdrawn(hd) => {
-            handoff_terminal_effect(state, &hd.handoff, "withdrawn")
-        }
+        EventData::HandoffAccepted(hd) => handoff_terminal_effect(state, &hd.handoff, "accepted"),
+        EventData::HandoffDeclined(hd) => handoff_terminal_effect(state, &hd.handoff, "declined"),
+        EventData::HandoffWithdrawn(hd) => handoff_terminal_effect(state, &hd.handoff, "withdrawn"),
         other => {
             return Err(invalid(format!(
                 "{}: selected event kind {} is not an exclusive-transition winner this helper \
@@ -1727,7 +1752,12 @@ pub fn resolve_audience(
                     .agents
                     .get(*a)
                     .and_then(|s| s.scope.as_ref())
-                    .is_some_and(|scope| scope.depends_on.iter().any(|dep| &dep.interface == interface))
+                    .is_some_and(|scope| {
+                        scope
+                            .depends_on
+                            .iter()
+                            .any(|dep| &dep.interface == interface)
+                    })
             })
             .cloned()
             .collect(),
@@ -1735,11 +1765,33 @@ pub fn resolve_audience(
     }
 }
 
+/// Section 4.2: "Selectors involving all active agents, and every
+/// required-ack broadcast to a derived audience, require a complete
+/// frontier for that epoch. An explicit list may use a sparse frontier
+/// containing each named identity." Two independent triggers, either one
+/// requiring completeness: the selector is `AllActive`, or it's a derived
+/// (non-explicit-list) selector on a required-ack broadcast.
+pub fn broadcast_requires_complete_frontier(d: &BroadcastPublished) -> bool {
+    use crate::common::AudienceSelector as Sel;
+    match &d.audience_selector {
+        Sel::AllActive => true,
+        Sel::Agents(_) => false,
+        Sel::Roles(_) | Sel::TopicSubscribers(_) | Sel::InterfaceDependents(_) => {
+            d.acknowledgement == crate::common::AckRequirement::Required
+        }
+    }
+}
+
 /// docs/AGENT_COORDINATION_EVOLUTION.md section 4.1-4.2. `audience_snapshot`
 /// is not trusted as authored -- it is recomputed here by resolving
 /// `audience_selector` against the exact `audience_epoch` and rejected on
-/// any mismatch (gate 12: "audience resolution is exact"), the same pattern
-/// `frontier::validate_complete` uses for authority events.
+/// any mismatch (gate 12: "audience resolution is exact"). That alone
+/// proves the *named* audience is exactly right; it says nothing about
+/// whether the publisher actually had causal visibility into each member's
+/// stream when it computed that answer, which is what `env.observed`
+/// itself (checked here via `broadcast_requires_complete_frontier` and
+/// `ObservedFrontier::validate_complete`) is for -- the two checks are
+/// independent and both required.
 fn apply_broadcast_published(
     state: &mut BusState,
     env: &Envelope,
@@ -1747,7 +1799,10 @@ fn apply_broadcast_published(
 ) -> AbResult<()> {
     require_agent(state, &env.agent)?;
     if d.audience_snapshot.is_empty() {
-        return Err(invalid(format!("{}: audience_snapshot must not be empty", env.id)));
+        return Err(invalid(format!(
+            "{}: audience_snapshot must not be empty",
+            env.id
+        )));
     }
     let epoch = state
         .roster_epoch
@@ -1759,6 +1814,15 @@ fn apply_broadcast_published(
                 env.id, d.audience_epoch
             ))
         })?;
+    if broadcast_requires_complete_frontier(d) {
+        if env.observed.kind != crate::frontier::FrontierKind::Complete {
+            return Err(invalid(format!(
+                "{}: this audience selector requires a complete frontier, not a sparse one",
+                env.id
+            )));
+        }
+        env.observed.validate_complete(epoch)?;
+    }
     let resolved = resolve_audience(state, &d.audience_selector, epoch);
     let claimed: BTreeSet<Agent> = d.audience_snapshot.iter().cloned().collect();
     if resolved != claimed {
@@ -1769,7 +1833,10 @@ fn apply_broadcast_published(
     }
     for id in d.supersedes.iter() {
         if !state.broadcasts.contains_key(id) {
-            return Err(invalid(format!("{}: supersedes unknown broadcast {id}", env.id)));
+            return Err(invalid(format!(
+                "{}: supersedes unknown broadcast {id}",
+                env.id
+            )));
         }
     }
     state.broadcasts.insert(env.id.clone(), d.clone());
@@ -1803,11 +1870,7 @@ fn apply_broadcast_acknowledged(
                 env.id
             )));
         }
-        if !broadcast
-            .audience_snapshot
-            .iter()
-            .any(|a| a == &env.agent)
-        {
+        if !broadcast.audience_snapshot.iter().any(|a| a == &env.agent) {
             return Err(invalid(format!(
                 "{}: {} was not addressed by broadcast {id}",
                 env.id, env.agent
@@ -1987,7 +2050,11 @@ mod tests {
         let env = Envelope::new(&bob, 0, no_frontier(), &data, []);
         let mut state = empty_state(&[]);
         let err = apply_event(&mut state, &env).unwrap_err();
-        assert!(err.to_string().contains("permitted only for an implementor"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("permitted only for an implementor"),
+            "{err}"
+        );
     }
 
     /// A genuine exclusive-transition race needs two *different* agents:
@@ -2041,13 +2108,8 @@ mod tests {
         // alice (the opener) builds this from the same starting state as
         // bob's resolve, never having observed it -- a genuine concurrent
         // claim on the same previous_assignment.
-        let reassign_env = Envelope::new(
-            &alice,
-            2,
-            no_frontier(),
-            &reassign,
-            [issue_env.id.clone()],
-        );
+        let reassign_env =
+            Envelope::new(&alice, 2, no_frontier(), &reassign, [issue_env.id.clone()]);
 
         apply_ok(&mut state, &resolve_env);
         apply_ok(&mut state, &reassign_env);
@@ -2106,7 +2168,8 @@ mod tests {
             new_target: carol.clone(),
             reason: text("bob is unavailable"),
         });
-        let reassign_env = Envelope::new(&alice, 2, no_frontier(), &reassign, [issue_env.id.clone()]);
+        let reassign_env =
+            Envelope::new(&alice, 2, no_frontier(), &reassign, [issue_env.id.clone()]);
 
         let mut forward = empty_state(&[]);
         apply_ok(&mut forward, &register(&alice, Role::Implementor));
@@ -2175,7 +2238,8 @@ mod tests {
             new_target: carol.clone(),
             reason: text("r1"),
         });
-        let to_carol_env = Envelope::new(&alice, 2, no_frontier(), &to_carol, [issue_env.id.clone()]);
+        let to_carol_env =
+            Envelope::new(&alice, 2, no_frontier(), &to_carol, [issue_env.id.clone()]);
         // Authored by a *different* agent than `to_carol_env` -- same-agent
         // events are always causally ordered by stream position (the
         // exclusive tracker treats any two events from the same author as
@@ -2190,7 +2254,8 @@ mod tests {
             new_target: dave.clone(),
             reason: text("r2"),
         });
-        let to_dave_env = Envelope::new(&coord1, 1, no_frontier(), &to_dave, [issue_env.id.clone()]);
+        let to_dave_env =
+            Envelope::new(&coord1, 1, no_frontier(), &to_dave, [issue_env.id.clone()]);
 
         let run = |order: &[&Envelope]| {
             let mut state = empty_state(&[
@@ -2319,7 +2384,8 @@ mod tests {
             new_target: carol.clone(),
             reason: text("r1"),
         });
-        let to_carol_env = Envelope::new(&alice, 2, no_frontier(), &to_carol, [issue_env.id.clone()]);
+        let to_carol_env =
+            Envelope::new(&alice, 2, no_frontier(), &to_carol, [issue_env.id.clone()]);
         apply_ok(&mut state, &to_carol_env);
         // Sole candidate so far: provisionally applied, so acknowledged
         // resets to false for the *new* assignment -- expected, not yet a
@@ -2333,7 +2399,8 @@ mod tests {
             new_target: a("dave"),
             reason: text("r2"),
         });
-        let to_dave_env = Envelope::new(&coord1, 1, no_frontier(), &to_dave, [issue_env.id.clone()]);
+        let to_dave_env =
+            Envelope::new(&coord1, 1, no_frontier(), &to_dave, [issue_env.id.clone()]);
         apply_ok(&mut state, &to_dave_env);
 
         let issue = &state.issues[&issue_env.id];
@@ -2409,7 +2476,11 @@ mod tests {
             let dep = &state.dependencies[&dep_env.id];
             assert_eq!(dep.status, ItemStatus::LifecycleConflict);
             assert_eq!(dep.current_assignment, dep_env.id);
-            assert!(dep.reassignment_chain.is_empty(), "{:?}", dep.reassignment_chain);
+            assert!(
+                dep.reassignment_chain.is_empty(),
+                "{:?}",
+                dep.reassignment_chain
+            );
             assert_eq!(dep.assignment_target.len(), 1);
         }
         assert_eq!(
@@ -2461,13 +2532,8 @@ mod tests {
             new_target: carol.clone(),
             reason: text("bob is unavailable"),
         });
-        let reassign_env = Envelope::new(
-            &alice,
-            2,
-            no_frontier(),
-            &reassign,
-            [issue_env.id.clone()],
-        );
+        let reassign_env =
+            Envelope::new(&alice, 2, no_frontier(), &reassign, [issue_env.id.clone()]);
         apply_ok(&mut state, &resolve_env);
         apply_ok(&mut state, &reassign_env);
         assert_eq!(
@@ -2845,9 +2911,18 @@ mod tests {
             value: 120,
             unit: None,
         }];
-        let env = Envelope::new(&alice, 1, no_frontier(), &EventData::FrictionReported(data), []);
+        let env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::FrictionReported(data),
+            [],
+        );
         let err = apply_event(&mut state, &env).unwrap_err();
-        assert!(err.to_string().contains("must cite supporting evidence"), "{err}");
+        assert!(
+            err.to_string().contains("must cite supporting evidence"),
+            "{err}"
+        );
     }
 
     fn synthesized(
@@ -2952,10 +3027,7 @@ mod tests {
             [],
         );
         let err = apply_event(&mut state, &env).unwrap_err();
-        assert!(
-            err.to_string().contains("promoted_to must be set"),
-            "{err}"
-        );
+        assert!(err.to_string().contains("promoted_to must be set"), "{err}");
     }
 
     #[test]
@@ -2980,7 +3052,13 @@ mod tests {
             crate::common::FrictionDispositionKind::Duplicate,
         );
         data.duplicate_of = Some(EventId::new(&coord1, 99));
-        let env = Envelope::new(&coord1, 1, no_frontier(), &EventData::FrictionSynthesized(data), []);
+        let env = Envelope::new(
+            &coord1,
+            1,
+            no_frontier(),
+            &EventData::FrictionSynthesized(data),
+            [],
+        );
         let err = apply_event(&mut state, &env).unwrap_err();
         assert!(err.to_string().contains("unknown synthesis event"), "{err}");
     }
@@ -3046,6 +3124,19 @@ mod tests {
         }
     }
 
+    /// A structurally-complete frontier (every active member named, at an
+    /// arbitrary stream position) -- enough to satisfy `validate_complete`
+    /// without needing a real git stream behind each entry, since `apply.rs`
+    /// tests construct envelopes directly rather than through `stream.rs`.
+    fn complete_frontier(epoch: &crate::registry::RosterEpoch) -> ObservedFrontier {
+        let entries = epoch.active_members.keys().map(|agent| FrontierEntry {
+            agent: agent.clone(),
+            stream_tip: hash(1),
+            through: EventId::new(agent, 0),
+        });
+        ObservedFrontier::complete(epoch, entries).unwrap()
+    }
+
     #[test]
     fn broadcast_all_active_resolves_to_every_active_member() {
         let mut state = empty_state(&[
@@ -3059,14 +3150,14 @@ mod tests {
         apply_ok(&mut state, &register(&alice, Role::Implementor));
         apply_ok(&mut state, &register(&bob, Role::Implementor));
         apply_ok(&mut state, &register(&coord1, Role::Coordinator));
-        let epoch_id = state.roster_epoch.as_ref().unwrap().id.clone();
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
 
         let env = Envelope::new(
             &coord1,
             1,
-            no_frontier(),
+            complete_frontier(&epoch),
             &EventData::BroadcastPublished(broadcast(
-                epoch_id,
+                epoch.id.clone(),
                 crate::common::AudienceSelector::AllActive,
                 &[&alice, &bob, &coord1],
                 crate::common::AckRequirement::None,
@@ -3077,8 +3168,12 @@ mod tests {
         assert!(state.broadcasts.contains_key(&env.id));
     }
 
+    /// A sparse frontier claiming `AllActive` must be rejected outright,
+    /// before the audience_snapshot comparison even runs -- gate 12's
+    /// completeness requirement is about the frontier itself, not just
+    /// whether the claimed snapshot happens to look right.
     #[test]
-    fn broadcast_rejects_an_audience_snapshot_that_omits_an_active_member() {
+    fn broadcast_all_active_rejects_a_sparse_frontier() {
         let mut state = empty_state(&[("alice", Role::Implementor), ("bob", Role::Implementor)]);
         let alice = a("alice");
         let bob = a("bob");
@@ -3093,13 +3188,44 @@ mod tests {
             &EventData::BroadcastPublished(broadcast(
                 epoch_id,
                 crate::common::AudienceSelector::AllActive,
+                &[&alice, &bob],
+                crate::common::AckRequirement::None,
+            )),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string().contains("requires a complete frontier"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn broadcast_rejects_an_audience_snapshot_that_omits_an_active_member() {
+        let mut state = empty_state(&[("alice", Role::Implementor), ("bob", Role::Implementor)]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
+
+        let env = Envelope::new(
+            &alice,
+            1,
+            complete_frontier(&epoch),
+            &EventData::BroadcastPublished(broadcast(
+                epoch.id.clone(),
+                crate::common::AudienceSelector::AllActive,
                 &[&alice], // missing bob
                 crate::common::AckRequirement::None,
             )),
             [],
         );
         let err = apply_event(&mut state, &env).unwrap_err();
-        assert!(err.to_string().contains("does not match resolving"), "{err}");
+        assert!(
+            err.to_string().contains("does not match resolving"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -3158,7 +3284,10 @@ mod tests {
             [],
         );
         let err = apply_event(&mut state, &env).unwrap_err();
-        assert!(err.to_string().contains("is not the current roster epoch"), "{err}");
+        assert!(
+            err.to_string().contains("is not the current roster epoch"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -3166,14 +3295,14 @@ mod tests {
         let mut state = empty_state(&[("alice", Role::Implementor)]);
         let alice = a("alice");
         apply_ok(&mut state, &register(&alice, Role::Implementor));
-        let epoch_id = state.roster_epoch.as_ref().unwrap().id.clone();
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
 
         let broadcast_env = Envelope::new(
             &alice,
             1,
-            no_frontier(),
+            complete_frontier(&epoch),
             &EventData::BroadcastPublished(broadcast(
-                epoch_id,
+                epoch.id.clone(),
                 crate::common::AudienceSelector::AllActive,
                 &[&alice],
                 crate::common::AckRequirement::None, // not required
@@ -3192,7 +3321,10 @@ mod tests {
             [],
         );
         let err = apply_event(&mut state, &env).unwrap_err();
-        assert!(err.to_string().contains("does not require acknowledgement"), "{err}");
+        assert!(
+            err.to_string().contains("does not require acknowledgement"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -3236,14 +3368,14 @@ mod tests {
         let mut state = empty_state(&[("alice", Role::Implementor)]);
         let alice = a("alice");
         apply_ok(&mut state, &register(&alice, Role::Implementor));
-        let epoch_id = state.roster_epoch.as_ref().unwrap().id.clone();
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
 
         let broadcast_env = Envelope::new(
             &alice,
             1,
-            no_frontier(),
+            complete_frontier(&epoch),
             &EventData::BroadcastPublished(broadcast(
-                epoch_id,
+                epoch.id.clone(),
                 crate::common::AudienceSelector::AllActive,
                 &[&alice],
                 crate::common::AckRequirement::Required,
@@ -3273,14 +3405,14 @@ mod tests {
         let mut state = empty_state(&[("alice", Role::Implementor)]);
         let alice = a("alice");
         apply_ok(&mut state, &register(&alice, Role::Implementor));
-        let epoch_id = state.roster_epoch.as_ref().unwrap().id.clone();
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
 
         let broadcast_env = Envelope::new(
             &alice,
             1,
-            no_frontier(),
+            complete_frontier(&epoch),
             &EventData::BroadcastPublished(broadcast(
-                epoch_id,
+                epoch.id.clone(),
                 crate::common::AudienceSelector::AllActive,
                 &[&alice],
                 crate::common::AckRequirement::None,

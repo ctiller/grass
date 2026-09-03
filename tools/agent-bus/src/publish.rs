@@ -162,12 +162,7 @@ mod tests {
             let clone = tempfile::tempdir().unwrap();
             git(
                 clone.path(),
-                &[
-                    "clone",
-                    "--quiet",
-                    &origin.path().to_string_lossy(),
-                    ".",
-                ],
+                &["clone", "--quiet", &origin.path().to_string_lossy(), "."],
             );
             git(clone.path(), &["config", "user.email", "test@example.com"]);
             git(clone.path(), &["config", "user.name", "Test"]);
@@ -265,10 +260,7 @@ mod tests {
         // Advance origin's `charlie` ref out from under this clone's
         // knowledge, so this batch's own `charlie` update is stale.
         let other_clone = tempfile::tempdir().unwrap();
-        git(
-            other_clone.path(),
-            &["clone", "--quiet", &fx.remote(), "."],
-        );
+        git(other_clone.path(), &["clone", "--quiet", &fx.remote(), "."]);
         git(
             other_clone.path(),
             &["config", "user.email", "other@example.com"],
@@ -306,10 +298,7 @@ mod tests {
             Some(&a)
         );
         assert_eq!(receipt.rejected, vec!["refs/heads/agent-events/charlie"]);
-        assert_eq!(
-            receipt.not_attempted,
-            vec!["refs/heads/agent-events/carol"]
-        );
+        assert_eq!(receipt.not_attempted, vec!["refs/heads/agent-events/carol"]);
     }
 
     #[test]

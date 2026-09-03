@@ -17,7 +17,11 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "agent-bus", version, about = "Grass agent coordination bus (v2)")]
+#[command(
+    name = "agent-bus",
+    version,
+    about = "Grass agent coordination bus (v2)"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -217,7 +221,10 @@ fn default_client_id() -> String {
 }
 
 fn print_json(value: &serde_json::Value) {
-    println!("{}", serde_json::to_string_pretty(value).expect("value always serializable"));
+    println!(
+        "{}",
+        serde_json::to_string_pretty(value).expect("value always serializable")
+    );
 }
 
 pub fn run(cli: Cli) -> AbResult<()> {
@@ -486,7 +493,10 @@ fn succeed(args: SucceedArgs) -> AbResult<()> {
     let registry_receipt = crate::publish::publish(
         &paths.repo,
         &args.remote,
-        &[RefUpdate::new(crate::registry::REGISTRY_REF, new_epoch.id.clone())],
+        &[RefUpdate::new(
+            crate::registry::REGISTRY_REF,
+            new_epoch.id.clone(),
+        )],
     )?;
 
     // Resume whatever was left in `target`'s preserved outbox, now under

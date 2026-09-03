@@ -206,15 +206,12 @@ pub fn propose_custody_succession(
     new_host: Short,
     worktree: &Path,
 ) -> AbResult<RosterEpoch> {
-    let binding = expected_parent
-        .active_members
-        .get(target)
-        .ok_or_else(|| {
-            invalid(format!(
-                "{target} is not an active member of roster epoch {}",
-                expected_parent.id
-            ))
-        })?;
+    let binding = expected_parent.active_members.get(target).ok_or_else(|| {
+        invalid(format!(
+            "{target} is not an active member of roster epoch {}",
+            expected_parent.id
+        ))
+    })?;
     let proposer_is_standby = binding.standby.as_ref() == Some(proposer);
     let proposer_is_a_coordinator = expected_parent
         .active_members
@@ -490,7 +487,10 @@ mod tests {
         create_root(repo.path(), &config, BTreeMap::new(), &wt).unwrap();
         let wt2 = repo.path().join("_wt_root2");
         let err = create_root(repo.path(), &config, BTreeMap::new(), &wt2).unwrap_err();
-        assert!(err.to_string().contains("already has a root epoch"), "{err}");
+        assert!(
+            err.to_string().contains("already has a root epoch"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -504,7 +504,8 @@ mod tests {
 
         members.insert(a("bob"), binding(Role::Reviewer, "host1", 0));
         let transition_wt = repo.path().join("_wt_transition");
-        let child = propose_transition(repo.path(), &root, members.clone(), &transition_wt).unwrap();
+        let child =
+            propose_transition(repo.path(), &root, members.clone(), &transition_wt).unwrap();
         assert_eq!(child.parent, Some(root.id.clone()));
         assert_eq!(child.active_members, members);
         assert_eq!(
@@ -580,7 +581,11 @@ mod tests {
 
     // --------------------------------------------------- custody succession
 
-    fn root_with(repo: &Path, config: &BusConfig, members: BTreeMap<Agent, MemberBinding>) -> RosterEpoch {
+    fn root_with(
+        repo: &Path,
+        config: &BusConfig,
+        members: BTreeMap<Agent, MemberBinding>,
+    ) -> RosterEpoch {
         create_root(repo, config, members, &repo.join("_wt_succession_root")).unwrap()
     }
 

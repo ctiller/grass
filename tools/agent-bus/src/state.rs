@@ -52,7 +52,8 @@ pub struct IssueState {
 
 impl IssueState {
     pub fn acknowledged(&self) -> bool {
-        self.acknowledged_assignments.contains(&self.current_assignment)
+        self.acknowledged_assignments
+            .contains(&self.current_assignment)
     }
 }
 
@@ -72,7 +73,8 @@ pub struct DependencyState {
 
 impl DependencyState {
     pub fn acknowledged(&self) -> bool {
-        self.acknowledged_assignments.contains(&self.current_assignment)
+        self.acknowledged_assignments
+            .contains(&self.current_assignment)
     }
 }
 

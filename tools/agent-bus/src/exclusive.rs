@@ -154,7 +154,8 @@ mod tests {
     #[test]
     fn a_lone_candidate_wins() {
         let mut t = ExclusiveTracker::default();
-        t.record("issue:1", &eid("alice", 0), none_observed).unwrap();
+        t.record("issue:1", &eid("alice", 0), none_observed)
+            .unwrap();
         assert_eq!(t.winner("issue:1"), Some(eid("alice", 0)));
     }
 
@@ -164,7 +165,8 @@ mod tests {
     #[test]
     fn two_mutually_concurrent_candidates_are_contested() {
         let mut t = ExclusiveTracker::default();
-        t.record("issue:1", &eid("alice", 0), none_observed).unwrap();
+        t.record("issue:1", &eid("alice", 0), none_observed)
+            .unwrap();
         t.record("issue:1", &eid("bob", 0), none_observed).unwrap();
         assert_eq!(t.winner("issue:1"), None);
     }
@@ -200,7 +202,10 @@ mod tests {
         let err = t
             .record("issue:1", &eid("bob", 0), |other| *other == first)
             .unwrap_err();
-        assert!(err.to_string().contains("already causally observed"), "{err}");
+        assert!(
+            err.to_string().contains("already causally observed"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -218,7 +223,8 @@ mod tests {
     #[test]
     fn resolve_rejects_a_winner_never_recorded_as_a_candidate() {
         let mut t = ExclusiveTracker::default();
-        t.record("issue:1", &eid("alice", 0), none_observed).unwrap();
+        t.record("issue:1", &eid("alice", 0), none_observed)
+            .unwrap();
         let err = t.resolve("issue:1", eid("mallory", 0)).unwrap_err();
         assert!(err.to_string().contains("never recorded"), "{err}");
     }
@@ -230,7 +236,11 @@ mod tests {
         t.record("issue:1", &alice, none_observed).unwrap();
         t.resolve("issue:1", alice.clone()).unwrap();
         let err = t.resolve("issue:1", alice).unwrap_err();
-        assert!(err.to_string().contains("already has a coordinator-resolved"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("already has a coordinator-resolved"),
+            "{err}"
+        );
     }
 
     /// Once a key is resolved, any further `record` attempt is rejected --
@@ -257,7 +267,10 @@ mod tests {
         let alice = eid("alice", 0);
         let bob = eid("bob", 0);
         t.record("solo:1", &alice, none_observed).unwrap();
-        assert!(!t.is_contested(&alice), "a lone candidate is never contested");
+        assert!(
+            !t.is_contested(&alice),
+            "a lone candidate is never contested"
+        );
 
         t.record("race:1", &alice, none_observed).unwrap();
         t.record("race:1", &bob, none_observed).unwrap();
@@ -265,7 +278,10 @@ mod tests {
         assert!(t.is_contested(&bob));
 
         t.resolve("race:1", alice.clone()).unwrap();
-        assert!(!t.is_contested(&alice), "the resolved winner is no longer contested");
+        assert!(
+            !t.is_contested(&alice),
+            "the resolved winner is no longer contested"
+        );
         assert!(
             t.is_contested(&bob),
             "a resolved group's loser must never become a trusted foundation for later state, \

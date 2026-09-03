@@ -71,11 +71,7 @@ fn candidate_path(git_common_dir: &Path, agent: &Agent, client_id: &str) -> AbRe
 /// error the caller must first distinguish from "someone else already used
 /// this id." Two concurrent submissions from the same agent simply use two
 /// different `client_id`s -- there is nothing here for them to contend on.
-pub fn submit(
-    git_common_dir: &Path,
-    client_id: &str,
-    candidate: &Candidate,
-) -> AbResult<PathBuf> {
+pub fn submit(git_common_dir: &Path, client_id: &str, candidate: &Candidate) -> AbResult<PathBuf> {
     let dir = outbox_dir(git_common_dir, &candidate.agent);
     std::fs::create_dir_all(&dir).map_err(|e| AbError::Io {
         path: dir.display().to_string(),
@@ -210,7 +206,10 @@ mod tests {
     fn submit_rejects_a_malformed_client_id() {
         let dir = tempfile::tempdir().unwrap();
         let err = submit(dir.path(), "has a space", &status_candidate(&a("alice"))).unwrap_err();
-        assert!(err.to_string().contains("invalid outbox client_id"), "{err}");
+        assert!(
+            err.to_string().contains("invalid outbox client_id"),
+            "{err}"
+        );
     }
 
     #[test]

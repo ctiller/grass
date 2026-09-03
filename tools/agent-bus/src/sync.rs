@@ -59,19 +59,13 @@ pub fn cached_snapshot(repo: &Path, worktrees_dir: &Path) -> AbResult<Snapshot> 
 /// The registry must be fetched first: it is what decides which stream
 /// refs to fetch next.
 pub fn synced_snapshot(repo: &Path, remote: &str, worktrees_dir: &Path) -> AbResult<Snapshot> {
-    let registry_refspec = format!(
-        "{0}:{0}",
-        crate::registry::REGISTRY_REF
-    );
+    let registry_refspec = format!("{0}:{0}", crate::registry::REGISTRY_REF);
     crate::gitrepo::fetch_refspecs(repo, remote, &[registry_refspec])?;
 
     let registry_tip = crate::registry::read_registry_tip(repo)?
         .ok_or_else(|| invalid("no registry root exists on the remote"))?;
-    let epoch = crate::registry::read_epoch(
-        repo,
-        &registry_tip,
-        &worktrees_dir.join("_sync_epoch"),
-    )?;
+    let epoch =
+        crate::registry::read_epoch(repo, &registry_tip, &worktrees_dir.join("_sync_epoch"))?;
 
     let stream_refspecs: Vec<String> = epoch
         .active_members
@@ -91,11 +85,8 @@ pub fn synced_snapshot(repo: &Path, remote: &str, worktrees_dir: &Path) -> AbRes
 fn reduce_local(repo: &Path, worktrees_dir: &Path, freshness: Freshness) -> AbResult<Snapshot> {
     let registry_tip = crate::registry::read_registry_tip(repo)?
         .ok_or_else(|| invalid("no registry root exists locally"))?;
-    let epoch = crate::registry::read_epoch(
-        repo,
-        &registry_tip,
-        &worktrees_dir.join("_reduce_epoch"),
-    )?;
+    let epoch =
+        crate::registry::read_epoch(repo, &registry_tip, &worktrees_dir.join("_reduce_epoch"))?;
     let config = crate::registry::read_bus_config(
         repo,
         &registry_tip,
