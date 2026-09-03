@@ -68,6 +68,12 @@ value, a 32-bit write that wrongly preserved the upper half would produce the
 same answer as one that correctly cleared it. -/
 def allOnes : BitVec 64 := 0xFFFFFFFFFFFFFFFF
 
+/-- The RFLAGS value every probe starts from: bit 1 reserved-set, IF set.
+
+A definite value rather than whatever the interpreter left behind, so that a
+flag result is a fact about the instruction and not about the harness. -/
+def standardFlags : BitVec 64 := 0x202
+
 /-- The initial register file: every register all ones. -/
 def initialState : List (BitVec 64) := List.replicate 16 allOnes
 
@@ -93,6 +99,20 @@ structure Probe where
   before : List (BitVec 64)
   /-- The register file the model predicts after. -/
   after : List (BitVec 64)
+  /-- The RFLAGS value loaded before the instruction runs.
+
+  Fixed rather than inherited. A reviewer found the incoming flags were
+  whatever the interpreter happened to leave -- `0x246`, with ZF already set --
+  so a result like "XOR set ZF" was unfalsifiable even in principle. -/
+  flagsIn : BitVec 64
+  /-- The RFLAGS the model predicts, where the model has a prediction.
+
+  `none` for almost everything, because Grass does not model flags yet. That is
+  an **open obligation**, not a claim that these instructions leave flags alone:
+  the runner reports the value it measured and compares nothing. The two probes
+  that do set this are the ones whose flag effect is certain from the incoming
+  value alone, so the mechanism is exercised rather than dead. -/
+  flagsOut : Option (BitVec 64)
   /-- Whether the prediction is one the general operand-size rule would get
   wrong, so the runner can report it separately. -/
   isException : Bool
@@ -106,6 +126,8 @@ def movR32 (r : Gpr) : Probe :=
     bytes := (movRegImm32 r v).toBytes
     before := initialState
     after := predictWrite initialState r .w32 v
+    flagsIn := standardFlags
+    flagsOut := Option.none
     isException := false
     note := "32-bit write: bits 63:32 must become zero (writeBack.w32_clears_high)" }
 
@@ -123,6 +145,8 @@ def nopByte : Probe :=
     bytes := [0x90]
     before := initialState
     after := initialState
+    flagsIn := standardFlags
+    flagsOut := Option.none
     isException := true
     note := "expects RAX unchanged; the unqualified 32-bit rule would predict "
               ++ "0x00000000ffffffff" }
@@ -133,6 +157,8 @@ def xchgEaxEax : Probe :=
     bytes := [0x87, 0xC0]
     before := initialState
     after := predictWrite initialState .rax .w32 0xFFFFFFFF
+    flagsIn := standardFlags
+    flagsOut := Option.none
     isException := false
     note := "same operation as 0x90 but a real 32-bit write, so it zero-extends" }
 
@@ -144,6 +170,8 @@ def xchgR8dEax : Probe :=
     before := initialState
     after := predictWrite (predictWrite initialState .rax .w32 0xFFFFFFFF)
                .r8 .w32 0xFFFFFFFF
+    flagsIn := standardFlags
+    flagsOut := Option.none
     isException := false
     note := "REX.B makes this a real xchg; both destinations zero-extend" }
 
@@ -157,6 +185,8 @@ def movAh : Probe :=
     bytes := [0xB4, 0x5A]
     before := initialState
     after := setReg initialState .rax 0xFFFFFFFFFFFF5AFF
+    flagsIn := standardFlags
+    flagsOut := Option.none
     isException := true
     note := "writes bits 15:8 and preserves 7:0; writeBack .w8 writes 7:0, so "
               ++ "the model cannot express this case at all" }
@@ -167,6 +197,8 @@ def movAl : Probe :=
     bytes := [0xB0, 0x5A]
     before := initialState
     after := predictWrite initialState .rax .w8 0x5A
+    flagsIn := standardFlags
+    flagsOut := Option.none
     isException := false
     note := "8-bit write: bits 63:8 preserved (writeBack.w8_preserves_high)" }
 
@@ -176,6 +208,8 @@ def movAx : Probe :=
     bytes := [0x66, 0xB8, 0x5A, 0x5A]
     before := initialState
     after := predictWrite initialState .rax .w16 0x5A5A
+    flagsIn := standardFlags
+    flagsOut := Option.none
     isException := false
     note := "16-bit write: bits 63:16 preserved (writeBack.w16_preserves_high)" }
 
@@ -198,6 +232,8 @@ def movR64 : Probe :=
     bytes := [0x48, 0xC7, 0xC0, 0x44, 0x33, 0x22, 0x11]
     before := initialState
     after := predictWrite initialState .rax .w64 0x0000000011223344
+    flagsIn := standardFlags
+    flagsOut := Option.none
     isException := false
     note := "64-bit write: replaces the register (writeBack.w64_independent)" }
 
@@ -220,6 +256,8 @@ def bsfZeroSource : Probe :=
     bytes := [0x0F, 0xBC, 0xC1]
     before := setReg initialState .rcx 0
     after := setReg initialState .rcx 0
+    flagsIn := standardFlags
+    flagsOut := Option.none
     isException := true
     note := "expects RAX entirely unchanged, so no 32-bit write occurred; the "
               ++ "unqualified rule would predict 0x00000000ffffffff" }
@@ -233,6 +271,8 @@ def movAxOther : Probe :=
     bytes := [0x66, 0xB8, 0xFF, 0xFF]
     before := setReg initialState .rax 0
     after := predictWrite (setReg initialState .rax 0) .rax .w16 0xFFFF
+    flagsIn := standardFlags
+    flagsOut := Option.none
     isException := false
     note := "16-bit write into a zeroed register: bits 63:16 stay zero" }
 
@@ -242,8 +282,36 @@ def movAlOther : Probe :=
     bytes := [0xB0, 0xFF]
     before := setReg initialState .rax 0
     after := predictWrite (setReg initialState .rax 0) .rax .w8 0xFF
+    flagsIn := standardFlags
+    flagsOut := Option.none
     isException := false
     note := "8-bit write into a zeroed register: bits 63:8 stay zero" }
+
+/-- `F9` — `STC`, which sets CF and leaves the other flags alone.
+
+One of the two probes whose flag effect is certain from `standardFlags` alone,
+so the flags comparison is exercised rather than carried dead. -/
+def stc : Probe :=
+  { label := "F9 (stc -- sets CF)"
+    bytes := [0xF9]
+    before := initialState
+    after := initialState
+    flagsIn := standardFlags
+    flagsOut := some (standardFlags ||| 1)
+    isException := false
+    note := "sets CF and touches no register" }
+
+/-- `F8` — `CLC`, which clears CF. Starting from `standardFlags`, where CF is
+already clear, the flags come back unchanged. -/
+def clc : Probe :=
+  { label := "F8 (clc -- clears CF)"
+    bytes := [0xF8]
+    before := initialState
+    after := initialState
+    flagsIn := standardFlags ||| 1
+    flagsOut := some standardFlags
+    isException := false
+    note := "clears CF; started with CF set so the change is visible" }
 
 /-- The whole corpus.
 
@@ -253,7 +321,7 @@ appear, and one no other corpus covers. -/
 def corpus : List Probe :=
   ((Gpr.all.filter (fun r => r != .rsp)).map movR32)
     ++ [nopByte, xchgEaxEax, xchgR8dEax, movAh, movAl, movAx,
-        movR64, bsfZeroSource, movAxOther, movAlOther]
+        movR64, bsfZeroSource, movAxOther, movAlOther, stc, clc]
 
 end Grass.Tests.ISA.X86.Probe
 
@@ -269,6 +337,10 @@ def main : IO Unit := do
   for p in Grass.Tests.ISA.X86.Probe.corpus do
     let before := String.intercalate "," (p.before.map hex64)
     let after := String.intercalate "," (p.after.map hex64)
+    let flagsOut := match p.flagsOut with
+      | some v => hex64 v
+      | Option.none => "-"
     IO.println (p.label ++ "\t" ++ Grass.Tests.ISA.X86.Corpus.hexBytes p.bytes ++
       "\t" ++ before ++ "\t" ++ after ++ "\t" ++
-      (if p.isException then "exception" else "rule") ++ "\t" ++ p.note)
+      (if p.isException then "exception" else "rule") ++ "\t" ++ p.note ++
+      "\t" ++ hex64 p.flagsIn ++ "\t" ++ flagsOut)

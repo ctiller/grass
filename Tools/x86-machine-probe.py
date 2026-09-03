@@ -76,7 +76,7 @@ REGS = ("rax rcx rdx rbx rsp rbp rsi rdi "
 RSP = 4  # never loaded or compared: it is the harness's own stack
 
 # The corpus this tool was last reviewed against. See corpus_digest.
-EXPECTED_DIGEST = "00058cbfe27e301098b3e3c32e927bb663d915fd38a4a953c2941490fc400687"
+EXPECTED_DIGEST = "985e0209048fd6c3ca5670c0f12ec27a1dd18c71c2ccb53aaaf1c8bc3f125105"
 
 PROBE_TIMEOUT_SECONDS = 30
 
@@ -112,49 +112,106 @@ def find_tool(name: str) -> str:
     sys.exit(f"{name} not found on PATH or in the usual install locations")
 
 
+TEMPLATE = r"""; probe(buf in rcx). buf is 17 qwords: 16 GPRs in encoding order, then RFLAGS.
+;
+; Callee-saved state and the buffer pointer live in a save area inside this
+; allocation, addressed RIP-relatively, not on the stack. The stack is exactly
+; what a probe may move, and parking our own state there is why `push rax` used
+; to be reported as a processor fault.
+  ; Take the return address off the stack immediately. A probe that writes at
+  ; [rsp] would otherwise overwrite it and `ret` would jump into whatever it
+  ; wrote -- a harness limitation that would read as a processor fault.
+  pop qword [rel save_ret]
+  mov [rel save_rbx], rbx
+  mov [rel save_rbp], rbp
+  mov [rel save_rsi], rsi
+  mov [rel save_rdi], rdi
+  mov [rel save_r12], r12
+  mov [rel save_r13], r13
+  mov [rel save_r14], r14
+  mov [rel save_r15], r15
+  mov [rel save_rsp], rsp
+  mov [rel save_buf], rcx
+
+  mov rax, rcx
+{loads}
+  ; Incoming flags, from slot 16. A memory-operand push needs no scratch
+  ; register, so this can happen after every register is loaded.
+  push qword [rax+8*16]
+  popfq
+  mov rax, [rax+8*0]        ; mov does not modify flags
+
+  db {body}
+
+  ; `mov` does not modify flags, so the outgoing flags survive until the
+  ; stack has been restored and pushfq is safe again.
+  mov [rel save_rax], rax
+  mov rsp, [rel save_rsp]
+  pushfq
+  pop rax
+  mov [rel save_flags], rax
+  mov rax, [rel save_buf]
+{stores}
+  mov rcx, [rel save_rax]
+  mov [rax+8*0], rcx
+  mov rcx, [rel save_flags]
+  mov [rax+8*16], rcx
+  ; Report the stack pointer the probe left behind, so a probe that moved it is
+  ; visible as data instead of corrupting the harness.
+  mov rcx, [rel save_rsp]
+  mov [rax+8*4], rcx
+
+  mov rbx, [rel save_rbx]
+  mov rbp, [rel save_rbp]
+  mov rsi, [rel save_rsi]
+  mov rdi, [rel save_rdi]
+  mov r12, [rel save_r12]
+  mov r13, [rel save_r13]
+  mov r14, [rel save_r14]
+  mov r15, [rel save_r15]
+  jmp qword [rel save_ret]
+
+align 16
+save_rbx:   dq 0
+save_rbp:   dq 0
+save_rsi:   dq 0
+save_rdi:   dq 0
+save_r12:   dq 0
+save_r13:   dq 0
+save_r14:   dq 0
+save_r15:   dq 0
+save_rsp:   dq 0
+save_buf:   dq 0
+save_rax:   dq 0
+save_flags: dq 0
+save_ret:   dq 0
+"""
+
+
 def wrapper_source(insn_hex: str) -> str:
     """NASM source for the probe wrapper around one instruction.
 
-    The buffer is 17 qwords: sixteen GPRs in encoding order, then RFLAGS.
-    RFLAGS is captured first, before any instruction that could disturb it."""
+    The buffer is 17 qwords: sixteen GPRs in encoding order, then RFLAGS. Slot 4
+    is RSP: it is not loaded from the buffer, and on the way out it reports the
+    stack pointer the probe left behind.
+
+    Callee-saved state, the buffer pointer and the return address live in a save
+    area inside this allocation, addressed RIP-relatively. None of it is on the
+    stack, because the stack is exactly what a probe may move: parking the
+    harness's own state there is why an ordinary `push rax` used to be reported
+    as a processor fault, and why a `mov [rsp], rax` overwrote the return
+    address and crashed the child.
+
+    Incoming flags come from slot 16, so the state before the instruction is
+    controlled rather than whatever the interpreter happened to leave. Outgoing
+    flags survive the stack restore because `mov` does not modify flags.
+    """
     body = ", ".join("0x" + insn_hex[i:i + 2] for i in range(0, len(insn_hex), 2))
     loads = "\n".join(
         f"  mov {REGS[i]}, [rax+8*{i}]" for i in range(16) if i not in (0, RSP))
     stores = "\n".join(
         f"  mov [rax+8*{i}], {REGS[i]}" for i in range(1, 16) if i != RSP)
-    return f"""BITS 64
-  push rbx
-  push rbp
-  push rsi
-  push rdi
-  push r12
-  push r13
-  push r14
-  push r15
-  push rcx
-  mov rax, rcx
-{loads}
-  mov rax, [rax+8*0]
-  db {body}
-  pushfq
-  push rax
-  mov rax, [rsp+16]
-{stores}
-  mov rcx, [rsp]
-  mov [rax+8*0], rcx
-  mov rcx, [rsp+8]
-  mov [rax+8*16], rcx
-  add rsp, 24
-  pop r15
-  pop r14
-  pop r13
-  pop r12
-  pop rdi
-  pop rsi
-  pop rbp
-  pop rbx
-  ret
-"""
+    return "BITS 64\n" + TEMPLATE.format(body=body, loads=loads, stores=stores)
 
 
 WORKER = r'''
@@ -287,13 +344,14 @@ def main() -> int:
         if not line.strip():
             continue
         parts = line.split("\t")
-        if len(parts) != 6:
-            sys.exit(f"malformed probe line, expected 6 fields: {line!r}")
-        label, insn, before, after, kind, note = parts
+        if len(parts) != 8:
+            sys.exit(f"malformed probe line, expected 8 fields: {line!r}")
+        label, insn, before, after, kind, note, flags_in, flags_out = parts
         rows.append((label, insn,
-                     [int(v, 16) for v in before.split(",")],
+                     [int(v, 16) for v in before.split(",")] + [int(flags_in, 16)],
                      [int(v, 16) for v in after.split(",")],
-                     kind, note))
+                     kind, note,
+                     None if flags_out == "-" else int(flags_out, 16)))
 
     actual_digest = corpus_digest(
         Path(sys.argv[1]).read_text(encoding="utf-8"))
@@ -313,7 +371,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         worker = Path(tmp) / "worker.py"
         worker.write_text(WORKER, encoding="ascii")
-        for label, insn, before, expected, kind, note in rows:
+        for label, insn, before, expected, kind, note, flags_out in rows:
             asm = Path(tmp) / "probe.asm"
             binary = Path(tmp) / "probe.bin"
             asm.write_text(wrapper_source(insn), encoding="ascii")
@@ -334,6 +392,8 @@ def main() -> int:
                 for i in range(16)
                 if i != RSP and expected[i] != actual[i]
             ]
+            if flags_out is not None and actual[16] != flags_out:
+                differing.append(("rflags", flags_out, actual[16]))
             if differing:
                 detail = "; ".join(
                     f"{name}: model {e:#018x}, cpu {a:#018x}"
