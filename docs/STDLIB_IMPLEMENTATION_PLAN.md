@@ -246,7 +246,7 @@ this library has to a named consumer. Every `Vec` operation those files call:
 | `arguments.mapIdx fun index argument => ...` (same file) | **added by this reading**; it was missing |
 | `fields.map fun field => ...` through dot notation | present; dot notation reaches `Vec.map f v` |
 | `++` on instruction fragments | present |
-| array-literal syntax for `Vec` (seven sites) | **absent**; §3.7 |
+| array-literal syntax for `Vec` (seven sites) | **absent**; §3.5 |
 
 `Tests/Std/SpikeSurface.lean` compiles each of the first four in the shape the
 spike writes it, so "the surface supports this" is checked rather than asserted.
@@ -305,7 +305,36 @@ this section would be moot — array-literal syntax would work by construction, 
 would `#[]` and `++`. That is the strongest practical argument in that
 direction, and it is why the two are recorded as one decision rather than two.
 
-### 3.6 Exit criteria
+### 3.6 Flattening and chunking
+
+`Vec.concat` closes a gap in [STDLIB.md](STDLIB.md) §3's own list — it names
+`concat` among the composition operations and this library did not have it — but
+what fixes its laws is §6, which gives `Std.Process.ByteFlow` a contract with a
+sequence fact inside:
+
+> Positive partial reads produce nonempty ordered chunks; parsers consume their
+> concatenation independent of chunk boundaries.
+
+The process half of that waits on `c-process`. The sequence half waits on
+nothing, and it is the half that says what "independent of chunk boundaries"
+*means*: `Vec.chunk_extensional`, which holds for any consumer expressed as a
+function of `Vec.concat`. Its content is entirely in the hypothesis shape — being
+chunk-extensional is a property of how a consumer is written, not something it
+can be granted, and a parser that inspected the chunk sequence would not have
+that type. The theorem is nearly trivial once written, which is the argument for
+writing it: "independent of chunk boundaries" reads as a guarantee and is easy to
+assume without ever fixing what it quantifies over.
+
+`Vec.AllNonEmpty` and `Vec.length_le_length_concat` are why §6 says *positive*
+reads. Without that word a provider could return unboundedly many empty chunks
+while a reader waited for input that never arrived, and no length argument would
+detect it. This is the read-side counterpart of `Vec.length_drop_lt_of_pos` in
+§3.1, and with it the two directions of the ByteFlow contract now have the same
+shape: `Tests/Std/PartialWrite.lean` commits exact prefixes of a payload,
+`Tests/Std/Chunking.lean` receives one in arbitrary pieces, and neither mentions
+a handle.
+
+### 3.7 Exit criteria
 
 S1 is complete when all of the following hold. The first four hold today.
 
@@ -320,7 +349,7 @@ S1 is complete when all of the following hold. The first four hold today.
 5. A reviewer distinct from this agent has merged it, per
    [AGENT_REVIEW.md](AGENT_REVIEW.md).
 
-### 3.7 Open: the `ByteArray` name collides with Lean's
+### 3.8 Open: the `ByteArray` name collides with Lean's
 
 [STDLIB.md](STDLIB.md) §1 fixes the name `ByteArray` for `Vec Byte`. Lean's
 prelude already has `_root_.ByteArray`. A module that opens `Grass.Std.Logical`
@@ -460,7 +489,7 @@ realization.
 **The `ByteArray` name is settled late.** Consumers written against a qualified
 `Grass.Std.Logical.ByteArray` before a rename would need editing after one. The
 mitigation is that there are no such consumers yet, which is the argument for
-ruling on §3.6 soon rather than at leisure.
+ruling on §3.8 soon rather than at leisure.
 
 ## 8. Decisions and open items
 
@@ -484,10 +513,19 @@ reader will want a reason for:
    remove the need to reason about it, it relocates that reasoning to
    `Vec.toList` in the consumer, which is the leak §3.2 pays for. §3.1.
 
+Found in a shared tool rather than in this library, and reported rather than
+changed: `Tools/DocstringAudit.py` defines `SELF_NAMING` to exempt a theorem's
+own docstring — its module comment says "a theorem's own docstring is exempt,
+because the theorem beneath it *is* the enforcement" — but the constant is never
+used, so that exemption is not implemented and the gate is stricter than it
+documents. This plan did not change it. Loosening a gate every agent depends on
+is not a unilateral edit, and the workaround is cheap: name the theorem in its
+own docstring, which reads better anyway.
+
 Open, with the owner each is with:
 
 1. **The `ByteArray` name collision**, with the owner of
-   [STDLIB.md](STDLIB.md). §3.7. Sharper than when it was first raised: the
+   [STDLIB.md](STDLIB.md). §3.8. Sharper than when it was first raised: the
    authored spike sources write bare `ByteArray` in four of the five spikes, so
    "keep the name and qualify at the use site" is a change to the author surface
    and not only to library-internal code.
