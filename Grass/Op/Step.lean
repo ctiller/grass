@@ -199,6 +199,16 @@ inductive StepRejection where
   way to declare that and is refused here. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2
   records it as an open obligation on the facet rather than on this check. -/
   | operationOrderingDisagrees (declared requested : OrderingDemand)
+  /-- The operation declares an ordering mode or scope the profile never registered.
+
+  `AdmitsOrder` and `AdmitsScope` check an *access descriptor's* ordering, and
+  checking the operation's only through its accesses is vacuous for a sequence with
+  none: a `.compute`-only operation declaring `MemoryOrder.profileSpecific` with any
+  name at all stepped. Review found it, along with the fact that omitting the facet
+  skips the disagreement check entirely — which is `Closes`'s question and is why
+  `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records that no policy in the tree lists
+  `.ordering` as required. -/
+  | operationOrderingNotRegistered (name : Name)
 deriving DecidableEq, Repr
 
 /-- What one step produced. -/
@@ -983,6 +993,17 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
                 (fun d => (declared, d.ordering))) with
           | some (declared, requested) =>
               .rejected (.operationOrderingDisagrees declared requested)
+          | Option.none =>
+          -- And against the vocabulary directly. Checking it only through the
+          -- accesses is vacuous for an access-free sequence, and a `.compute`-only
+          -- operation declaring an unregistered profile-specific mode stepped.
+          match operation.facets.ordering.bind (fun declared =>
+              if ¬ policy.profile.vocabulary.AdmitsOrder declared.order then
+                declared.order.profileName?
+              else if ¬ policy.profile.vocabulary.AdmitsScope declared.scope then
+                declared.scope.profileName?
+              else Option.none) with
+          | some name => .rejected (.operationOrderingNotRegistered name)
           | Option.none =>
           match faultAt sequence with
           | .none =>

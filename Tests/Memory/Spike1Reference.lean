@@ -257,6 +257,9 @@ justification.
 def movEaxTransferred : SubstepSequence :=
   .single (access transferredProvenance ⟨32, 4⟩ 0x1020 .read .readWrite 4 true false)
 
+/-- `#UD`, the invalid-opcode fault `ud2` exists to raise. -/
+def invalidOpcode : FaultClassId := ⟨⟨"invalidOpcode"⟩⟩
+
 /--
 `ud2 @containment_tail(.excessWriteCount)` — faults having touched nothing.
 
@@ -267,8 +270,17 @@ contract violation, where `docs/SEMANTICS.md` §2 allows only the maximal safe
 prefix. A declaration that quietly discharged outstanding obligations here would
 be the "silently considering obligations discharged on process failure" shortcut
 `docs/DECISIONS.md` rejects.
+**It is a `compute` substep, not `none_`.** It was `.none_`, whose own docstring is
+"performs no access **and cannot fault**" — and `ud2`'s entire semantics is raising
+`#UD`. `FaultPlan.before` indexes with `Fin substeps.length`, so with an empty
+sequence no fault plan could point at anything and the instruction was
+declared unable to do the one thing it does. A theorem below offered
+`substeps = []` as the evidence that it discharges nothing, which is a fact about
+emptiness standing in for a fault the declaration could not express. Review found
+it.
 -/
-def ud2Containment : SubstepSequence := .none_
+def ud2Containment : SubstepSequence :=
+  { substeps := [.compute [invalidOpcode]], onFault := .priorEffectsVisible }
 
 /-! ## Two cases from outside Spike 1
 
@@ -449,8 +461,17 @@ claimless — not its length, which `ClaimsAtomicity` used to consult and no lon
 does. -/
 theorem call_claims_no_atomicity : ¬ callImportWriteFile.ClaimsAtomicity := fun h => h
 
-/-- Reaching the containment tail discharges nothing. -/
-theorem ud2_discharges_nothing : ud2Containment.substeps = [] := rfl
+/-- **Reaching the containment tail discharges nothing, and it does fault.**
+
+The first half was `substeps = []`, which was true of a declaration that could not
+fault at all — an emptiness standing in for the `#UD` `ud2` exists to raise. Now the
+sequence has a compute substep declaring that fault and no descriptor, so it touches
+no memory and carries no ledger effect, and a fault plan can point at it. -/
+theorem ud2_discharges_nothing :
+    ud2Containment.accesses = [] ∧
+    ud2Containment.substeps.length = 1 ∧
+    ud2Containment.substeps.map Substep.faults = [[invalidOpcode]] := by
+  exact ⟨by decide, by decide, rfl⟩
 
 /-- **`push` and `call`'s stack writes are distinct slots in the same storage.**
 

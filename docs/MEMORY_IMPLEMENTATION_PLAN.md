@@ -711,6 +711,48 @@ one outright defect that had already merged — see §3.11's denial row.
   consults the registries directly rather than through `RequiresJustification`, so
   that predicate's only consumer is `unregisteredOnFaultRule?_priorEffectsVisible`,
   a theorem.
+- **The layer cannot carry Spike 1, and the reason is not a missing convenience.**
+  `WriteFile` is a second execution context, and `Grass/Op/Step.lean`'s
+  `ConflictsWithHistory` refuses any cross-context access whose event conflicts with
+  an earlier one — `StepPolicy.compatible` defaults to refusing every pair, which the
+  comment there names as "the conservative direction" pending M8's happens-before.
+  Review built a Spike 1 `StepPolicy` and stepped it: the program's
+  `mov transferred, 0` runs clean, and the API agent's write to the slot it was lent
+  is refused and recorded, which [MEMORY_MODEL.md](MEMORY_MODEL.md) §8 requires to be
+  empty for a `VerifiedProgram`.
+
+  The conservative direction is right; what was not recorded is its consequence. M8
+  is scoped to Spike 4 in §5 and described as additive. It is not: the single-context
+  assumption is violated by the *first* acceptance program, so the M2 and M3–M5
+  acceptance criteria cannot close without either M8's ordering or a profile-supplied
+  `compatible` relation that says what an external API agent's write is ordered
+  against. That is a design question and it is the largest one on this list.
+- **Nothing steps the M1 reference instruction set.** §3's exit criterion is that it
+  "steps end to end over a hand-built `MemState`". No Spike 1 descriptor is ever
+  passed to `Grass.Op.step`: `Tests/Memory/Spike1Block.lean` runs `runBlock`, the
+  `applyAccess`-level executor, and says so; there is no `StepPolicy`,
+  `MemoryProfile` or `AdmittedVocabulary` anywhere under `Tests/Memory/`. What steps
+  end to end is `Tests/Op/FakeIsa.lean`, which is explicitly a fake. Five of the
+  eight reference cases are executed by nothing. Review wrote the missing policy in
+  about forty lines, so this is an absent fixture rather than an inexpressible one.
+- **`Tests/Memory/Spike1Block.lean` proves the wrong data flow.** The block is
+  `mov transferred, 0` / `call` / `mov eax, transferred`, and it proves the reload
+  reads **zero**. In the program the reload reads the byte count `WriteFile` wrote,
+  and the loop's correctness turns on it. The intervening block contains only the
+  import read and the return-address write; the API agent's effects are absent
+  entirely. So the "a straight-line Spike 1 block discharges" criterion is met about
+  a block that is not Spike 1's, and `movEaxTransferred`'s declared justification
+  ("produced by `WriteFile`, not by this program") is discharged by the program's own
+  store.
+- **`MEMORY_VOCABULARY.md` does not exist**, and M1's exit criteria require it:
+  "a published note lists, declaration by declaration, which shapes are frozen … and
+  which are explicitly provisional".
+- **Two of §9 risk 1's five mandatory pre-freeze fixtures are absent.** Present:
+  the divide fault between two memory effects (`divMem`), the implicit-stack
+  operation (`pushR12`), the misaligned crossing access (`splitPageStore`). Absent: a
+  repeated string operation, and a locked read-modify-write — and `rep movsb` and
+  `rep stosw` are both in `Spikes/2_Sort` and `Spikes/3_Gzip`. §3.13 records that
+  `lock cmpxchg16b` "still cannot declare its compare and swap operands".
 - **Aliased allocations have independent byte stores.** `MemoryState.SharesBytes`
   says two allocations name the same bytes, and the whole authority layer believes
   it: `grantsOver`, `AuthorizedBy` and `MemoryEvent.Conflicts` all key on it. But
@@ -765,6 +807,12 @@ one outright defect that had already merged — see §3.11's denial row.
   zero-size descriptor, so a consumer on the `applyAccess` path — which
   `Grass/Memory/Apply.lean` contemplates — still meets it. The predicates are not
   reconciled; the access gate routes around them.
+- **No policy in the tree requires the `.ordering` facet**, so omitting it skips the
+  agreement check entirely. `Tests/Op/FakeIsa.lean`'s policy requires
+  `[.memoryEffects, .faults, .restartability]`. Whether a facet is required is
+  `OperationFacets.Closes`'s question and a profile's to answer, but the pressure the
+  strictness creates is toward not declaring, and nothing records which facets a
+  profile *should* require.
 - **`OperationFacets.ordering` is single-valued.** `step` now requires it to equal
   every access substep's ordering, which is the only relation this layer can state:
   `Grass/Memory/Ordering.lean` deliberately defines no strength order, because the

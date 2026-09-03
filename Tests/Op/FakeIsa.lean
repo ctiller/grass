@@ -196,6 +196,9 @@ inductive Alpha where
   /-- An operation whose provenance claims a root extent the allocation does not
   have. -/
   | lyingRootExtent
+  /-- An access-free operation declaring an ordering mode the profile never
+  registered, so the per-access check cannot see it. -/
+  | computeWithUnregisteredOrdering
   /-- A load reading uninitialized bytes under a rule this profile never
   registered. -/
   | unregisteredInitRule
@@ -420,6 +423,12 @@ instance : HasOperationFacets Alpha where
               onFault := .transactional ⟨"fake.splitStore"⟩ }
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
+    | .computeWithUnregisteredOrdering =>
+        { memoryEffects := some
+            { substeps := [ .compute [.pageFault] ]
+              onFault := .priorEffectsVisible }
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some { order := .profileSpecific ⟨"fake.neverRegistered"⟩ } }
     | .lyingRootExtent =>
         { memoryEffects := some (.single (acc
             { bufferProv with rootExtent := ⟨0, 4096⟩ } ⟨0, 8⟩ 0x1000 .write .readWrite
@@ -1444,6 +1453,16 @@ theorem a_portable_order_needs_no_registration :
     vocabulary.orderingModes.recognized = [⟨"fake.deviceRelease"⟩] ∧
     (stepAlpha state₀ .atomicAdd).state?.isSome := by
   exact ⟨by decide, by decide, by decide⟩
+
+/-- **An access-free operation's ordering declaration is checked too.**
+
+Checking the operation's ordering only through its accesses is vacuous for a
+sequence with none, and review stepped a `.compute`-only operation declaring
+`MemoryOrder.profileSpecific` with a name in no registry. -/
+theorem an_access_free_operation_cannot_hide_its_ordering :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.computeWithUnregisteredOrdering)
+      thread₀ .thread ⟨⟨"alpha"⟩⟩ =
+      .rejected (.operationOrderingNotRegistered ⟨"fake.neverRegistered"⟩) := rfl
 
 /-- **The operation's own ordering declaration is checked against its accesses.**
 `OperationFacets.ordering` was the second facet consumed by nothing, and six of this
