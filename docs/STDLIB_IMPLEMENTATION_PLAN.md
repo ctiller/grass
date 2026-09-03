@@ -328,7 +328,7 @@ It stops at the Lean value. An *OS buffer* — a pointer and a length handed to
 `OwnedVec`'s `PinLoan`, and none of that is here.
 
 Two findings from building it, both recorded because they are about the design
-rather than the code. First, the naming collision of §3.8 stopped being
+rather than the code. First, the naming collision of §3.9 stopped being
 hypothetical: `Tests/Std/HostBytes.lean` is the first module in the repository to
 mention both byte arrays at once, and a bare `ByteArray` in it is an ambiguity
 error. It is now the concrete instance of that question rather than an argument
@@ -340,7 +340,61 @@ the same value reached through a type ascription. An operation that resolves
 depending on how its argument's type was spelled is worse than one with a longer
 name, so the names carry `Bytes`.
 
-### 3.7 Exit criteria
+### 3.7 Text as bytes
+
+`Grass/Std/Logical/Text.lean` supplies `Text.utf8 : String → Vec Byte` with
+`length_utf8`, `toHostBytes_utf8`, `utf8_empty`, and `utf8_injective`.
+
+[STDLIB.md](STDLIB.md) §6 states two demands here and they are different in kind.
+The second — "the ordinary law-bearing encoding API" — is the function and its
+laws. The first is a *reduction* property: "UTF-8 conversion of a literal used as
+a logical constant reduces during kernel elaboration to the canonical `Vec Byte`,
+so consumers reason directly about its bytes and derive its length." No theorem
+discharges that, because a theorem proved by `simp` would establish that the
+equation holds and not that it holds *by reduction*, which is what a consumer
+relies on when it writes `decide` or matches on a payload's bytes.
+`Tests/Std/Text.lean` therefore closes every literal case by `rfl` and would be
+worthless closed any other way. It covers one, two, three, and four-byte
+characters, because a length derived from a character count would pass an
+ASCII-only fixture and be wrong.
+
+`Spikes/4_Web_Server/Spec.lean` is the consumer that makes this concrete: it
+states a response-body equation against an encoded literal, which is checkable
+only if the literal's bytes are computable.
+
+**This delegates to Lean's encoder, deliberately.** `Text.utf8` is
+`Vec.ofHostBytes ∘ String.toUTF8`. A second encoder would need either a proof
+that it agrees with Lean's — against a specification neither this library nor
+[STDLIB.md](STDLIB.md) supplies — or two encoders in the trusted base where the
+corpus wants one. The trust boundary is worth stating exactly: `String.toUTF8`
+carries `@[extern "lean_string_to_utf8"]` over the Lean model `String.toByteArray`,
+kernel reduction and every theorem here use the model, and the extern is what
+runs. `length_utf8` is therefore a theorem about the model, and a compiled
+program's bytes matching it rests on the extern agreeing with its model — a
+standard Lean trust assumption already inside the boundary
+[FOUNDATION.md](FOUNDATION.md) §3 draws around the toolchain, not one this module
+widens.
+
+**Absent: decoding.** Core has `String.fromUTF8` with a validity argument but no
+round-trip theorem relating it to `String.toUTF8`, so a `Vec Byte → String` here
+could carry no law worth having. Supplying that law means proving UTF-8
+correctness against a specification, which is a project rather than a function,
+and no consumer has asked — [GZIP.md](GZIP.md) and
+[HTTP2_CONSTRAINTS.md](HTTP2_CONSTRAINTS.md) decode bytes as protocol data rather
+than as text. Encoding-indexed text *views*, §6's own phrase, are absent for the
+same reason: a `Text enc` type should be designed against a consumer with a
+second encoding, and UTF-8 is the only encoding any spike uses.
+
+**Found while building it.** The spike surface writes `"...".toUTF8` at three
+sites and expects a Grass `ByteArray`. That cannot typecheck: dot notation on a
+`String` resolves to core's `String.toUTF8`, which returns the host type, and
+this library deliberately rejects a silent crossing. So those three lines need
+either a coercion this library argues against, or a different spelling —
+`Text.utf8 "..."`. Like the array-literal question in §3.5 this is a change to an
+authored surface [SPIKE_AUTHORING.md](SPIKE_AUTHORING.md) owns, not a gap this
+plan can close alone.
+
+### 3.8 Exit criteria
 
 S1 is complete when all of the following hold. The first four hold today.
 
@@ -355,7 +409,7 @@ S1 is complete when all of the following hold. The first four hold today.
 5. A reviewer distinct from this agent has merged it, per
    [AGENT_REVIEW.md](AGENT_REVIEW.md).
 
-### 3.8 Open: the `ByteArray` name collides with Lean's
+### 3.9 Open: the `ByteArray` name collides with Lean's
 
 [STDLIB.md](STDLIB.md) §1 fixes the name `ByteArray` for `Vec Byte`. Lean's
 prelude already has `_root_.ByteArray`. A module that opens `Grass.Std.Logical`
@@ -495,7 +549,7 @@ realization.
 **The `ByteArray` name is settled late.** Consumers written against a qualified
 `Grass.Std.Logical.ByteArray` before a rename would need editing after one. The
 mitigation is that there are no such consumers yet, which is the argument for
-ruling on §3.8 soon rather than at leisure.
+ruling on §3.9 soon rather than at leisure.
 
 ## 8. Decisions and open items
 
@@ -522,11 +576,14 @@ reader will want a reason for:
    visible at the use site, and it lives in the `Vec` namespace with `Bytes` in
    its name because `ByteArray` is an `abbrev` and dot notation on it resolves in
    `Vec`. §3.6.
+8. UTF-8 encoding delegates to Lean's `String.toUTF8` rather than being
+   re-implemented, and the `@[extern]` trust boundary that creates is stated
+   rather than left implicit. §3.7.
 
 Open, with the owner each is with:
 
 1. **The `ByteArray` name collision**, with the owner of
-   [STDLIB.md](STDLIB.md). §3.8. Twice sharper than when it was first raised.
+   [STDLIB.md](STDLIB.md). §3.9. Twice sharper than when it was first raised.
    The authored spike sources write bare `ByteArray` in four of the five spikes,
    so "keep the name and qualify at the use site" is a change to the author
    surface and not only to library-internal code. And it is no longer
@@ -541,14 +598,21 @@ Open, with the owner each is with:
    the only cheap mechanism breaks `Array` literals repository-wide and partly
    because the authored surface is [SPIKE_AUTHORING.md](SPIKE_AUTHORING.md)'s.
    §3.5.
-4. **The `Bag` representation**, inherited undecided from `c-process:28` and
+4. **The spike surface's `"...".toUTF8` cannot typecheck** against a Grass
+   `ByteArray`, at three sites, for the same reason and with the same owner as
+   the previous item: dot notation resolves to core's `String.toUTF8`, which
+   returns the host type. `Text.utf8 "..."` is the available spelling. §3.7.
+5. **UTF-8 decoding has no round-trip law**, so it is unbuilt. Closing it means
+   proving UTF-8 correctness against a specification rather than writing a
+   function, and no consumer has asked. §3.7.
+6. **The `Bag` representation**, inherited undecided from `c-process:28` and
    genuinely blocked on the repository-wide mathlib dependency question rather
    than on a container judgement. §4.2.
-5. **`Grass.Effect`, `Grass.Grammar`, and `Grass.CFG` have no owner**, which
+7. **`Grass.Effect`, `Grass.Grammar`, and `Grass.CFG` have no owner**, which
    blocks `mapM`/`traverse`, the parser combinators, and the worklists
    respectively. Raised with the coordinator when one becomes a blocker. §3.4,
    §5.
-6. **The `ByteSeq` retirement**, which is an edit to `Grass/Memory/**` and
+8. **The `ByteSeq` retirement**, which is an edit to `Grass/Memory/**` and
    therefore `c-mem`'s to make. §4.1.
 
 Items 1, 2, and 3 were all sharpened or found by reading the spike corpus for
