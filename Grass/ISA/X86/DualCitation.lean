@@ -250,8 +250,26 @@ construct." Splitting and excluding produce a `VendorRefinement` and an
 `Excluded`; only the first two cases produce a common rule, and they are these.
 -/
 inductive CommonBasis where
-  /-- Both manuals state the same guarantee, and the modeled rule is it. -/
-  | agreed
+  /--
+  Grass reads both manuals as stating the guarantee, but nobody has followed
+  either anchor to check.
+
+  Deliberately **first**, so it is what `Inhabited` produces and what a rule
+  falls back to. It is also the only honest basis for a rule whose anchors are
+  unconfirmed, which today is all of them.
+  -/
+  | assertedPendingConfirmation
+  /--
+  Both manuals state the same guarantee, and someone has confirmed both anchors
+  on the given dates.
+
+  The dates are not decoration. `CommonRule.agreedIsConfirmed` requires them to
+  match the two citations' `Citation.confirmed`, so this constructor **cannot be
+  written for a document nobody has opened**. Reviewers found eight rules
+  asserting agreement while the AMD manual was unretrievable and no anchor was
+  confirmed; that is now a type error rather than a finding.
+  -/
+  | agreed (intelConfirmed amdConfirmed : Date)
   /-- The manuals differ and the modeled rule is deliberately weaker than at
   least one of them. Both notes record what each vendor actually states, so a
   reviewer can check that the modeled rule really is implied by both rather than
@@ -267,8 +285,14 @@ A disagreement is a finding under `docs/VALIDATION.md` §7 and is reported even
 though it was resolved, because the resolution is a restriction that a later
 reader must be able to see. -/
 def isDivergent : CommonBasis → Bool
-  | .agreed => false
+  | .assertedPendingConfirmation => false
+  | .agreed _ _ => false
   | .weakerCommon _ _ => true
+
+/-- Whether the basis has actually been checked against both manuals. -/
+def isConfirmed : CommonBasis → Bool
+  | .agreed _ _ => true
+  | _ => false
 
 end CommonBasis
 
@@ -288,6 +312,20 @@ structure CommonRule where
   citation : DualCitation subject
   /-- Whether the vendors agreed, or the rule is the weaker intersection. -/
   basis : CommonBasis
+  /--
+  `CommonBasis.agreed` may only be claimed when both anchors are confirmed on
+  the dates it names.
+
+  This is the field that makes an unfounded agreement claim a *type error*.
+  `agreed` asserts that both manuals state the same guarantee, which cannot be
+  established from a document nobody has opened, and nothing previously stopped
+  a rule saying it. The default proof discharges the obligation for every other
+  basis, where the hypothesis is contradictory, so only an actual `agreed`
+  rule pays anything — and it pays by having to have been checked.
+  -/
+  agreedIsConfirmed : ∀ di da, basis = .agreed di da →
+      citation.intel.confirmed = some di ∧ citation.amd.confirmed = some da := by
+    intro _ _ h; exact absurd h (by simp)
 
 namespace CommonRule
 
@@ -296,6 +334,11 @@ def documents (r : CommonRule) : List SourceDocument := r.citation.documents
 
 /-- Whether this rule records a resolved vendor disagreement. -/
 def isDivergent (r : CommonRule) : Bool := r.basis.isDivergent
+
+/-- Whether this rule's basis has been checked against both manuals.
+
+`Ledger` reports the rules where it has not, which is every rule today. -/
+def basisConfirmed (r : CommonRule) : Bool := r.basis.isConfirmed
 
 end CommonRule
 

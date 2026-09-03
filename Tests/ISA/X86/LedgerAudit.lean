@@ -192,12 +192,16 @@ def anchorFault (env : Environment) (s : Name) : Option String :=
 def accountedBy (env : Environment) (subjects : List Name) (d : Name) : Bool :=
   subjects.any fun s => subjectAnchor env s == some d
 
-/-- Gate C: `CommonBasis.agreed` asserts both manuals state the same guarantee,
-which cannot be established from a document nobody has opened. -/
-def agreedWithoutConfirmation (l : Ledger) : List Grass.Core.Name :=
-  (l.common.filter fun r =>
-      r.basis.isDivergent = false &&
-        !(r.citation.intel.isConfirmed && r.citation.amd.isConfirmed)).map (·.subject)
+/-- Gate C: rules whose basis has not been checked against both manuals.
+
+This used to catch rules claiming `CommonBasis.agreed` about a document nobody
+had opened. That is no longer possible: `CommonRule.agreedIsConfirmed` makes it
+a type error, so the eight rules that claimed it now carry
+`assertedPendingConfirmation` instead. What remains here is a work list --
+which rules are still waiting for someone to open a manual -- rather than a
+list of unfounded claims. -/
+def basisUnconfirmed (l : Ledger) : List Grass.Core.Name :=
+  (l.common.filter fun r => !r.basisConfirmed).map (·.subject)
 
 end Grass.Tests.ISA.X86.LedgerAudit
 
@@ -240,9 +244,10 @@ review."
     unless modeled.contains d do
       logError m!"owed lists {d}, which is not a modeled declaration"
 
-  -- Gate C: report, do not fail. Every rule is in this state today, so failing
-  -- would make the gate unlandable; it shrinks as anchors get confirmed.
-  let unfounded := agreedWithoutConfirmation l
+  -- Gate C: a work list, not a violation. `CommonBasis.agreed` can no longer be
+  -- written without confirmed anchors, so what is left here is which rules are
+  -- still waiting on someone opening a manual.
+  let unfounded := basisUnconfirmed l
 
   -- Counted directly rather than by subtraction. Deriving "cited" as
   -- everything-minus-the-debt folds the 27 waived declarations into it and
@@ -253,4 +258,4 @@ review."
 {cited.size} carry a citation, {owed.length} owed, \
 {notBehaviour.length} reviewed as carrying no external behaviour. \
 {subjects.length} ledger subjects, all anchoring to real declarations. \
-{unfounded.length} rules assert CommonBasis.agreed without a confirmed anchor."
+{unfounded.length} rules await a confirmed basis."

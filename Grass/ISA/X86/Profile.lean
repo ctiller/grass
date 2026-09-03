@@ -19,11 +19,15 @@ names anchored to the declaration they constrain — `decodeMem.ripRelative`,
 
 ## State of these citations
 
-Every rule below is dual-cited, and none is confirmed. Eight assert
-`CommonBasis.agreed`; `registerWriteExtension` does not, because that
-constructor claims both manuals state the same guarantee and the AMD manual is
-unretrievable, so its carve-outs were settled on hardware instead. That is the
-honest current state and the ledger reports it rather than implying otherwise:
+Every rule below is dual-cited, and none is confirmed. None claims
+`CommonBasis.agreed` either, and none can: `CommonRule.agreedIsConfirmed`
+requires that constructor's dates to match both citations' `confirmed` field, so
+asserting that two manuals say the same thing about a document nobody has opened
+is a type error rather than a review finding. Eight rules carry
+`assertedPendingConfirmation`; `registerWriteExtension` carries `weakerCommon`,
+because its carve-outs were settled on hardware and the BSF/BSR case is where
+the vendors are reported to differ. That is the honest current state and the
+ledger reports it rather than implying otherwise:
 
 - `Ledger.releaseBlockers` is non-empty, because the AMD APM's recorded
   retrieval location is dead and the manual is `referenceOnly`. See
@@ -163,7 +167,7 @@ def rexPrefixLayout : CommonRule :=
       "separated from the opcode by any other prefix is ignored, and the " ++
       "instruction then executes without the register extensions and without " ++
       "the 64-bit operand size."
-    basis := .agreed
+    basis := .assertedPendingConfirmation
     citation := dual rexLayout
       (cite .intel Volume.intelInstructionFormat "2.2.1"
         "REX Prefixes" [rexLayout]
@@ -187,7 +191,7 @@ def byteRegisterRexInteraction : CommonRule :=
       "through 7 denote AH, CH, DH and BH. When any REX prefix is present, " ++
       "including one with no bits set, those numbers denote SPL, BPL, SIL and " ++
       "DIL instead, and AH, CH, DH and BH are not encodable."
-    basis := .agreed
+    basis := .assertedPendingConfirmation
     citation := dual rexByteRegisters
       (cite .intel Volume.intelInstructionFormat "2.2.1.2"
         "More on REX Prefix Fields" [rexByteRegisters]
@@ -209,7 +213,7 @@ def modRmByteLayout : CommonRule :=
       "2:0. mod=11 selects a register operand for rm; the other three values " ++
       "select memory forms. The reg field is either a register number or an " ++
       "opcode extension, determined by the opcode."
-    basis := .agreed
+    basis := .assertedPendingConfirmation
     citation := dual modRmLayout
       (cite .intel Volume.intelInstructionFormat "2.1.3"
         "ModR/M and SIB Bytes" [modRmLayout]
@@ -232,7 +236,7 @@ def sibByteLayout : CommonRule :=
       "bits 2:0. The index register is scaled by 1, 2, 4 or 8 as scale is 00, " ++
       "01, 10 or 11. A SIB byte is present exactly when the ModRM rm field is " ++
       "100 and mod is not 11."
-    basis := .agreed
+    basis := .assertedPendingConfirmation
     citation := dual sibLayout
       (cite .intel Volume.intelInstructionFormat "2.1.3"
         "ModR/M and SIB Bytes" [sibLayout]
@@ -255,7 +259,7 @@ def ripRelativeForm : CommonRule :=
       "encoding does not denote an absolute 32-bit displacement, which it does " ++
       "in 32-bit and compatibility modes, and it names no general-purpose " ++
       "register, so REX.B does not apply to it."
-    basis := .agreed
+    basis := .assertedPendingConfirmation
     citation := dual ripRelative
       (cite .intel Volume.intelInstructionFormat "2.2.1.6"
         "RIP-Relative Addressing" [ripRelative]
@@ -278,7 +282,7 @@ def sibEscapeForm : CommonRule :=
       "byte, and does not denote the register whose number is 100. A memory " ++
       "operand based on RSP, or on R12 which shares those low three bits, is " ++
       "therefore encoded through a SIB byte naming that register as its base."
-    basis := .agreed
+    basis := .assertedPendingConfirmation
     citation := dual sibEscape
       (cite .intel Volume.intelInstructionFormat "2.1.5"
         "Addressing-Mode Encoding of ModR/M and SIB Bytes" [sibEscape]
@@ -298,7 +302,7 @@ def noIndexForm : CommonRule :=
       "register, and the scale field has no effect. Because REX.X supplies the " ++
       "high bit, index=100 with REX.X set denotes R12, which is a usable index " ++
       "register; RSP is not encodable as an index register at all."
-    basis := .agreed
+    basis := .assertedPendingConfirmation
     citation := dual noIndex
       (cite .intel Volume.intelInstructionFormat "2.1.5"
         "Addressing-Mode Encoding of ModR/M and SIB Bytes" [noIndex]
@@ -320,7 +324,7 @@ def noBaseForm : CommonRule :=
       "mod=01 or mod=10 the same base field denotes RBP, or R13 when REX.B is " ++
       "set. This is the only encoding of an absolute 32-bit address in 64-bit " ++
       "mode, since mod=00 with rm=101 is RIP-relative."
-    basis := .agreed
+    basis := .assertedPendingConfirmation
     citation := dual noBase
       (cite .intel Volume.intelInstructionFormat "2.1.5"
         "Addressing-Mode Encoding of ModR/M and SIB Bytes" [noBase]

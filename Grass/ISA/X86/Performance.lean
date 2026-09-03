@@ -132,10 +132,10 @@ namespace LeakageChannel
 
 /-- Every channel this model knows about.
 
-A profile lists the channels it *establishes* closed, so a channel added to this
-type is closed by no existing profile until someone reviews and adds it — which
-is the reopening `LeakageProfile.closed` describes. `sealed_closes_all` is
-stated over this list, so it stops holding the moment the list grows. -/
+`LeakageProfile` has one field per constructor here, so adding a channel to this
+type stops every existing profile compiling until someone says what it claims
+about the new one. This list is what `Closes` quantifies over when a caller
+wants "all of them". -/
 def all : List LeakageChannel := [.operandValue, .dataAddress, .controlFlow]
 
 theorem mem_all (c : LeakageChannel) : c ∈ all := by cases c <;> decide
@@ -145,23 +145,30 @@ end LeakageChannel
 /--
 Which channels a fact establishes are closed.
 
-`docs/INSTRUCTIONS.md` §1: "Missing metadata is rejection, not a default empty
-effect." The empty profile therefore establishes *nothing* and closes no
-channel, which is the honest reading of silence. Claiming a channel closed takes
-an entry, and that entry needs the citation `TimingFact` carries.
+One field per channel, rather than a list, and that is the whole design. A list
+of channels *leaked* makes an unconsidered channel closed by default — the
+"default empty effect" `docs/INSTRUCTIONS.md` §1 forbids — and a list of
+channels *established* fixes the default but still lets a new channel be
+forgotten silently.
+
+A field per channel makes forgetting impossible: adding a fourth
+`LeakageChannel` means adding a fourth field, and **every existing profile stops
+compiling** until someone says what it claims about the new channel. That is the
+reopening the header promises, enforced by the elaborator rather than by a
+reviewer noticing.
+
+`Inhabited` is deliberately not derived. A default profile would be
+all-`false`, which is safe, but a default `TimingFact` built from it would still
+be a claim about the empty name; see `TimingBasis`.
 -/
 structure LeakageProfile where
-  /-- The channels this fact **establishes** are closed.
-
-  This direction, not "channels it leaks through", and the difference is the
-  whole point. With a leaks-through list, a channel nobody considered is absent
-  from it and therefore closed — so adding a fourth `LeakageChannel` tomorrow
-  would silently make every existing profile claim to close it. Listing what is
-  *established* means an unconsidered channel is open until someone accounts for
-  it, which is what `docs/INSTRUCTIONS.md` §1 requires: "Missing metadata is
-  rejection, not a default empty effect." -/
-  closed : List LeakageChannel
-deriving DecidableEq, Repr, Inhabited
+  /-- Whether this fact establishes that operand values do not affect timing. -/
+  operandValue : Bool
+  /-- Whether it establishes that the addresses touched do not. -/
+  dataAddress : Bool
+  /-- Whether it establishes that the path taken does not. -/
+  controlFlow : Bool
+deriving DecidableEq, Repr
 
 namespace LeakageProfile
 
@@ -172,14 +179,17 @@ Written out rather than defined as `⟨LeakageChannel.all⟩`, so that adding a
 channel does *not* silently extend this claim to cover it. A new constructor
 leaves `sealed` open on it until someone reviews and adds it here, which is the
 reopening the header promises. -/
-def sealed : LeakageProfile := ⟨[.operandValue, .dataAddress, .controlFlow]⟩
+def sealed : LeakageProfile := ⟨true, true, true⟩
 
 /-- Closes everything except the addresses it touches — the profile of an
 ordinary load or store whose timing does not depend on the value moved. -/
-def addressOnly : LeakageProfile := ⟨[.operandValue, .controlFlow]⟩
+def addressOnly : LeakageProfile := ⟨true, false, true⟩
 
 /-- Whether this profile establishes that a channel is closed. -/
-def closes (p : LeakageProfile) (c : LeakageChannel) : Bool := p.closed.contains c
+def closes (p : LeakageProfile) : LeakageChannel → Bool
+  | .operandValue => p.operandValue
+  | .dataAddress => p.dataAddress
+  | .controlFlow => p.controlFlow
 
 /-- The profile closes every channel in the given set. -/
 def Closes (p : LeakageProfile) (cs : List LeakageChannel) : Prop :=
@@ -195,19 +205,25 @@ form was provable for *every* list, including channels that did not exist, which
 is what made the default-closed representation look sound. -/
 @[simp] theorem sealed_closes_all : sealed.Closes LeakageChannel.all := by decide
 
+/-- `addressOnly` genuinely leaves the address channel open, so the two named
+profiles are not the same claim. Stated because a profile that closed
+everything by accident would still satisfy every theorem above. -/
+theorem addressOnly_leaves_dataAddress_open :
+    addressOnly.closes .dataAddress = false := rfl
+
 /-- Running two things in sequence closes only what **both** close.
 
 An intersection, not a union: if either part leaks through a channel, the
 sequence does. -/
 def sequence (p q : LeakageProfile) : LeakageProfile :=
-  ⟨p.closed.filter (fun c => q.closed.contains c)⟩
+  ⟨p.operandValue && q.operandValue,
+   p.dataAddress && q.dataAddress,
+   p.controlFlow && q.controlFlow⟩
 
 theorem closes_sequence {p q : LeakageProfile} {c : LeakageChannel}
     (hp : p.closes c = true) (hq : q.closes c = true) :
     (p.sequence q).closes c = true := by
-  simp only [closes, sequence, List.contains_eq_mem, decide_eq_true_eq,
-    List.mem_filter] at *
-  exact ⟨hp, by simpa using hq⟩
+  cases c <;> simp_all [closes, sequence]
 
 end LeakageProfile
 
