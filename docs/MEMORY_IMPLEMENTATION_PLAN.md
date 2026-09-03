@@ -1466,6 +1466,44 @@ refuses everything.
   where calling a door directly is what a fixture is for. Negative-tested by adding a
   real call to `Grass/Op/LoanAuthority.lean` and watching it fail, not only by its
   own self-test.
+- ~~**`GrantKind` is an open nominal name with no registry.**~~ Closed by
+  `AdmittedVocabulary.grantKinds`, and the timing is the point: it did not matter
+  while only a fixture could mint a grant, and it mattered the moment
+  `AccessDescriptor.authorityEffect` let an *operation* mint one. Every other open
+  nominal name in this layer that reached an operation acquired a registry — fault
+  classes, allocation sources, provenance step kinds, obligation kinds, ordering
+  modes and scopes, and three justification registries — and this is the same shape.
+
+  What made it worth closing rather than recording is that `MemoryState.AnyGrantOver`
+  is kind-blind: every rule that asks whether anything is held over some bytes counts
+  a grant of any kind, so a grant of an invented kind freezes bytes while no
+  provider's `GrantedOfKind` can ever match it. The rejection is `accessNotAdmitted`
+  with `AdmissibilityFailure.grantKindNotRecognized`, before any question of whether
+  the map would accept the lend, and `an_invented_grant_kind_is_refused` is it
+  stepped, with a companion showing the declared kind runs.
+
+  Two things this cost, recorded because they are the kind of thing that gets left
+  out. Every profile must now declare its grant kinds, which is a breaking change to
+  `AdmittedVocabulary` — both fixture profiles gained a line, and Spike 1's says
+  `loan` only, because `frame` is M4's and its reference set models no frame grant.
+  And appending a clause to `admissibilityFailures` cost one `Or.inl` in each of
+  seven existing proofs, because the clause list is a left-associative `++` chain;
+  that is a real maintenance tax on adding the *next* clause, and the honest fix is a
+  `List (List AdmissibilityFailure)` joined once, which is not done here.
+- ~~**Three of `AuthorityDelta`'s five constructors were declared and never
+  built.**~~ `returnGrant`, `join` and `transfer` had no fixture two commits after
+  the type arrived, and `Tools/ReachabilityAudit.py` was silent on all three: it is
+  namespace-blind, so `LedgerDelta.join` and `LedgerDelta.transfer` satisfied two of
+  them, and `transferredHead.returnGrant? owner firstLoan` reads as a construction of
+  the third because the scan matches the name and not the `?`. Found by reading the
+  commit rather than by a gate, which is what that tool's docstring says to expect.
+  `Tests/Op/FakeIsa.lean` now steps all five, each with a refusal beside it.
+
+  The same reading found that every new step fixture is of the form
+  `∀ s, (step …).state? = some s → P s`, which `cases hs` closes vacuously when the
+  step is *rejected* — a trap this branch fell into once already.
+  `the_authority_effect_steps_run` asserts all eleven stepped states exist, which
+  closes the class rather than one instance.
 - **§5's arena reset requires returning all live use loans, and there is no bulk
   operation.** `MemoryState.allocate?` refuses one reallocation at a time; a profile
   tearing an arena down has to walk its allocations itself, and nothing checks that it

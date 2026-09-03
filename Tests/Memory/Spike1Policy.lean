@@ -64,7 +64,10 @@ def vocabulary : AdmittedVocabulary :=
     orderingScopes := ⟨[]⟩
     initializationJustifications := ⟨[]⟩
     atomicityJustifications := ⟨[]⟩
-    faultVisibilityRules := ⟨[⟨"x86.splitPageStore"⟩]⟩ }
+    faultVisibilityRules := ⟨[⟨"x86.splitPageStore"⟩]⟩
+    -- §6's call lends the frame slot it passes, so `loan` is Spike 1's; `frame` is
+    -- M4's and this reference set does not model a frame grant yet.
+    grantKinds := ⟨[.loan]⟩ }
 
 /-- The profile. Its §10 package is explicitly unproved, like the seam fixture's:
 `RequiredProofPackage.Holds` is what nothing here establishes, and a fixture that

@@ -142,6 +142,35 @@ deriving DecidableEq, Repr
 /-- The authority changes one access declares, applied in order. -/
 abbrev AuthorityEffect := List AuthorityDelta
 
+namespace AuthorityEffect
+
+/--
+The grant kinds this effect issues.
+
+The analogue of `LedgerEffect.createdKinds`, and for the same reason: `GrantKind` is
+an open nominal name, so a profile must be able to say which kinds exist in it before
+an operation is allowed to mint one. Only `issue` mints; `split`, `join` and
+`transfer` carry the kind of a grant the map already holds, and `returnGrant`
+consumes one.
+-/
+def issuedKinds (effect : AuthorityEffect) : List GrantKind :=
+  effect.filterMap fun delta =>
+    match delta with
+    | .issue _ grant => some grant.kind
+    | _ => Option.none
+
+/-- Nothing declared mints nothing. -/
+@[simp] theorem issuedKinds_nil : issuedKinds [] = [] := rfl
+
+/-- An issue's kind is one of them, which is the fact the admissibility check needs
+and the one a `filterMap` makes easy to get wrong. -/
+theorem mem_issuedKinds_of_issue {effect : AuthorityEffect} {id : GrantId}
+    {grant : AuthorityGrant} (h : AuthorityDelta.issue id grant ∈ effect) :
+    grant.kind ∈ issuedKinds effect :=
+  List.mem_filterMap.mpr ⟨.issue id grant, h, rfl⟩
+
+end AuthorityEffect
+
 /-! Whether a grant authorizes an access is **not** decided here.
 
 It was: the deleted `Authorizes` function lived in this namespace and matched provenances

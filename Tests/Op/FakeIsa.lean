@@ -240,6 +240,14 @@ inductive Alpha where
   /-- A store that also splits the loan the acting context holds. Stepped from a
   state where another context holds it, the same operation is the non-holder case. -/
   | splitLoan
+  /-- A store that also returns the loan the acting context holds. -/
+  | returnLoanSlot
+  /-- A store that also joins two adjacent loans into one. -/
+  | joinHalves
+  /-- A store that also hands its loan to the device engine. -/
+  | handOn
+  /-- A store lending under a grant kind this profile never declared. -/
+  | lendInventedKind
 deriving DecidableEq, Repr
 
 /-- The divide-error fault this family can raise. Named so the fixtures can
@@ -306,6 +314,11 @@ def lowSlot : GrantId := grants₀.fresh.2.fresh.2.fresh.2.fresh.2.fresh.1
 
 /-- The high half. -/
 def highSlot : GrantId := grants₀.fresh.2.fresh.2.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- A grant kind no profile in this file declares. `GrantKind` is open nominal, so
+nothing stops an operation naming one; the vocabulary is what stops it being
+admitted. -/
+def inventedKind : GrantKind := ⟨⟨"fake.inventedAuthority"⟩⟩
 
 /-- The grant an operation declares lending: the buffer's head, read-only, to the
 device engine, lent by the program thread. -/
@@ -428,6 +441,27 @@ instance : HasOperationFacets Alpha where
     | .splitLoan =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
             false true [] false thread₀ [.split bufferLoan lowSlot highSlot 32]))
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .returnLoanSlot =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true [] false thread₀ [.returnGrant bufferLoan]))
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .joinHalves =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true [] false thread₀ [.join bufferLoan secondBufferLoan lentSlot]))
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .handOn =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true [] false thread₀ [.transfer bufferLoan engine₀]))
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .lendInventedKind =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true [] false thread₀
+            [.issue lentSlot { declaredLoan with kind := inventedKind }]))
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .dischargeWithWrongAuthority =>
@@ -632,7 +666,11 @@ def vocabulary : AdmittedVocabulary :=
     orderingScopes := ⟨[⟨"fake.queue"⟩]⟩
     initializationJustifications := ⟨[⟨"fake.zeroedByLoader"⟩]⟩
     atomicityJustifications := ⟨[⟨"fake.atomicSplitStore"⟩]⟩
-    faultVisibilityRules := ⟨[⟨"fake.splitStore"⟩]⟩ }
+    faultVisibilityRules := ⟨[⟨"fake.splitStore"⟩]⟩
+    -- The kinds of authority this profile has. `GrantKind` is open nominal, so an
+    -- operation minting one mints one named here: the fixtures lend and frame, and
+    -- `docs/MEMORY_MODEL.md` §5.1's pin is not this profile's.
+    grantKinds := ⟨[.loan, .frame]⟩ }
 
 /-- A profile whose §10 package is explicitly unproved. It is a checklist of
 propositions, not evidence for them, and this fixture does not pretend otherwise:
@@ -823,6 +861,25 @@ theorem the_engine_authority_issue_succeeds :
       some { kind := .loan, holder := engine₀, lender := thread₀, provenance := borrowedProv
              range := ⟨0, 64⟩, rights := .readWrite } := by
   exact ⟨by decide, by decide⟩
+
+/-- The borrowed storage held as two adjacent halves by the program thread, so an
+operation can join them. -/
+def stateWithHalves : MachineState :=
+  { state₀ with
+    memory :=
+      (((state₀.memory.issue? bufferLoan
+        { kind := .loan, holder := thread₀, lender := engine₀, provenance := borrowedProv
+          range := ⟨0, 32⟩, rights := .readWrite }).getD state₀.memory).issue?
+        secondBufferLoan
+        { kind := .loan, holder := thread₀, lender := engine₀, provenance := borrowedProv
+          range := ⟨32, 32⟩, rights := .readWrite }).getD state₀.memory }
+
+/-- Both halves are outstanding and adjacent, so the join fixture is about the join. -/
+theorem the_halves_are_outstanding :
+    (stateWithHalves.memory.grantAt? bufferLoan).isSome ∧
+    (stateWithHalves.memory.grantAt? secondBufferLoan).isSome ∧
+    stateWithHalves.memory.grantAt? lentSlot = Option.none := by
+  exact ⟨by decide, by decide, by decide⟩
 
 /-- Step one `Alpha` operation. -/
 def stepAlpha (state : MachineState) (op : Alpha) : StepOutcome :=
@@ -2113,6 +2170,8 @@ theorem every_alpha_step_extends_violations (op : Alpha) :
     first
       | exact AuditViolationLedger.Extends.refl _
       | exact AuditViolationLedger.extends_append _ _
+      | exact (Grass.Op.runStep_extends_violations _ _ _ _ _ _ _).trans
+          (AuditViolationLedger.Extends.refl _)
 
 /-! ## 8 again, through the transition rather than a lemma
 
@@ -2300,6 +2359,117 @@ theorem the_non_holder_split_is_refused :
   intro s hs
   cases hs
   exact ⟨by decide, by decide, by decide, by decide, by decide⟩
+
+/--
+**None of the authority-effect fixtures is vacuous.**
+
+Every one of them is `∀ s, (stepAlpha … ).state? = some s → P s`, and `cases hs` on
+`none = some s` closes such a goal without looking at `P`. So a *rejected* step makes
+its fixture prove nothing, and this branch has made that mistake once already — a
+theorem about a store presented by the wrong context, which `contextMismatch`
+rejects. These are the steps those fixtures are about, asserted to run.
+-/
+theorem the_authority_effect_steps_run :
+    (stepAlpha state₀ .lendSlot).state?.isSome ∧
+    (stepAlpha state₀ .forgedLend).state?.isSome ∧
+    (stepAlpha state₀ .lendTwice).state?.isSome ∧
+    (stepAlpha stateWithAuthority .splitLoan).state?.isSome ∧
+    (stepAlpha stateWithEngineAuthority .splitLoan).state?.isSome ∧
+    (stepAlpha stateWithAuthority .returnLoanSlot).state?.isSome ∧
+    (stepAlpha stateWithHalves .joinHalves).state?.isSome ∧
+    (stepAlpha stateWithAuthority .handOn).state?.isSome ∧
+    (stepAlpha state₀ .returnLoanSlot).state?.isSome ∧
+    (stepAlpha stateWithAuthority .joinHalves).state?.isSome ∧
+    (stepAlpha stateWithEngineAuthority .handOn).state?.isSome := by
+  exact ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide,
+    by decide, by decide, by decide, by decide⟩
+
+/-- **An operation returns the loan it holds**, which consumes that exact identity —
+§3's rule, performed by a transition rather than by a fixture. -/
+theorem the_declared_return_lands :
+    ∀ s, (stepAlpha stateWithAuthority .returnLoanSlot).state? = some s →
+      s.violations.IsEmpty ∧ s.memory.grantAt? bufferLoan = Option.none ∧
+      (s.memory.grantAt? liveFrame).isSome := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **And returning an identity the map does not hold is refused**, from the same
+operation stepped against a state where nothing is lent. -/
+theorem the_return_of_nothing_is_refused :
+    ∀ s, (stepAlpha state₀ .returnLoanSlot).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 ∧
+      s.violations.records?.any (fun r => r.class_ = .authorityEffectRefused) := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **An operation joins the two halves it holds.** Both sources are consumed and the
+join is recorded under the identity the operation named. -/
+theorem the_declared_join_lands :
+    ∀ s, (stepAlpha stateWithHalves .joinHalves).state? = some s →
+      s.violations.IsEmpty ∧ s.memory.grantAt? bufferLoan = Option.none ∧
+      s.memory.grantAt? secondBufferLoan = Option.none ∧
+      (s.memory.grantAt? lentSlot).isSome := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-- **And the same join is refused where the sources are not adjacent** — here
+because only one of them exists, which is the unknown-source clause; the adjacency
+clause itself is `Tests/Memory/Loans.lean`'s `a_gapped_join_is_refused`. -/
+theorem the_join_of_one_half_is_refused :
+    ∀ s, (stepAlpha stateWithAuthority .joinHalves).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 ∧
+      (s.memory.grantAt? bufferLoan).isSome := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **An operation hands its loan on**, keeping the identity so the lender can still
+return it — §6's return protocol surviving a transfer. -/
+theorem the_declared_transfer_lands :
+    ∀ s, (stepAlpha stateWithAuthority .handOn).state? = some s →
+      s.violations.IsEmpty ∧
+      (s.memory.grantAt? bufferLoan).any (fun grant => grant.holder = engine₀) ∧
+      (s.memory.returnGrant? engine₀ bufferLoan).isSome := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **And the same transfer is refused where the acting context does not hold the
+grant.** In `stateWithEngineAuthority` the engine holds it and the thread only lent
+it, so this is the only-the-holder-may-transfer rule, not the conflict rule. -/
+theorem the_non_holder_transfer_is_refused :
+    ∀ s, (stepAlpha stateWithEngineAuthority .handOn).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 ∧
+      (s.memory.grantAt? bufferLoan).any (fun grant => grant.holder = engine₀) := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **A grant kind the profile never declared is not admitted.**
+
+`GrantKind` was an open nominal name with no registry, which did not matter while
+only a fixture could mint a grant: nothing an operation carried could. Now that
+`AccessDescriptor.authorityEffect` exists, an operation can, and
+`MemoryState.AnyGrantOver` is kind-blind — every rule that asks whether anything is
+held over some bytes counts a grant of any kind — so an invented kind would freeze
+bytes while no provider's `GrantedOfKind` could ever match it.
+
+The rejection is `accessNotAdmitted`, before any question of whether the map would
+accept the lend, which is where every other undeclared open name is caught. -/
+theorem an_invented_grant_kind_is_refused :
+    (stepAlpha state₀ .lendInventedKind).rejection? =
+      some (.accessNotAdmitted (.grantKindNotRecognized inventedKind)) := by decide
+
+/-- And the same operation with the declared kind runs, so the rejection is the
+registry and not the lend. -/
+theorem the_declared_kind_is_admitted :
+    (stepAlpha state₀ .lendSlot).state?.isSome ∧
+    vocabulary.grantKinds.Recognizes GrantKind.loan ∧
+    ¬ vocabulary.grantKinds.Recognizes inventedKind := by
+  exact ⟨by decide, by decide, by decide⟩
 
 end Grass.Tests.FakeIsa
 

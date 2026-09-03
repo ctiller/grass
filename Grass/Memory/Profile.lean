@@ -159,6 +159,16 @@ structure AdmittedVocabulary where
   auditViolationClasses : NameRegistry AuditViolationClass
   /-- Obligation kinds this profile's protocols use. -/
   obligationKinds : NameRegistry ObligationKindId
+  /-- The kinds of authority grant this profile has. `GrantKind` is an open nominal
+  name — `docs/MEMORY_MODEL.md` §3 names loans and frames and §5.1 names pins, and a
+  target with a fourth is not this layer's business — so an operation minting one
+  must mint one the profile declared.
+
+  Not needed while only a fixture could issue a grant. It is needed now that
+  `AccessDescriptor.authorityEffect` lets an operation issue one, because
+  `MemoryState.AnyGrantOver` is kind-blind: a grant of an invented kind freezes bytes
+  for every rule that asks whether anything is held. -/
+  grantKinds : NameRegistry GrantKind
   /-- Ordering modes this profile owns, beyond the five portable ones.
 
   `docs/MEMORY_MODEL.md` §7.1 fixes the portable modes and allows a profile its
@@ -341,6 +351,8 @@ inductive AdmissibilityFailure where
   | scopeNotRegistered (name : Name)
   /-- The initialization rule the access cites is unregistered. -/
   | initializationRuleNotRegistered (name : Name)
+  /-- The effect issues a grant of a kind this profile never declared. -/
+  | grantKindNotRecognized (kind : GrantKind)
 deriving DecidableEq, Repr
 
 /--
@@ -386,7 +398,10 @@ def admissibilityFailures (vocabulary : AdmittedVocabulary) (d : AccessDescripto
    | some justification =>
        if vocabulary.initializationJustifications.Recognizes justification then []
        else [.initializationRuleNotRegistered justification]
-   | Option.none => [])
+   | Option.none => []) ++
+  (d.authorityEffect.issuedKinds.filterMap fun kind =>
+    if vocabulary.grantKinds.Recognizes kind then Option.none
+    else some (.grantKindNotRecognized kind))
 
 /--
 `vocabulary.Admits d` holds when every open name the access descriptor uses is one
@@ -437,7 +452,7 @@ theorem not_admits_of_no_address_spaces {vocabulary : AdmittedVocabulary}
   unfold admissibilityFailures
   rw [h]
   simp only [List.mem_append]
-  refine Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl ?_)))))))
+  refine Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl ?_))))))))
   simp [AddressSpaceTable.empty, AddressSpaceTable.find?]
 
 /--
@@ -455,7 +470,7 @@ theorem not_admits_of_undeclared_space {vocabulary : AdmittedVocabulary}
   refine not_admits_of_failure (failure := .spaceNotDeclared d.space) ?_
   unfold admissibilityFailures
   simp only [List.mem_append]
-  refine Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl ?_)))))))
+  refine Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl ?_))))))))
   cases hfind : vocabulary.addressSpaces.find? d.space with
   | none => simp
   | some space => exact absurd (by simp [AddressSpaceTable.Declares, hfind]) h
@@ -468,7 +483,7 @@ theorem not_admits_of_unrecognized_fault {vocabulary : AdmittedVocabulary}
   refine not_admits_of_failure (failure := .faultClassNotRecognized fault) ?_
   unfold admissibilityFailures
   simp only [List.mem_append, List.mem_filterMap]
-  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr ⟨fault, hmem, by simp [h]⟩)))))
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr ⟨fault, hmem, by simp [h]⟩))))))
 
 /--
 An access whose ledger effect would drop or fabricate a duty is not admitted.
@@ -482,7 +497,25 @@ theorem not_admits_of_ill_formed_ledger_effect {vocabulary : AdmittedVocabulary}
   refine not_admits_of_failure (failure := .ledgerEffectIllFormed) ?_
   unfold admissibilityFailures
   simp only [List.mem_append]
-  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inr (by simp [h])))))
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr (by simp [h]))))))
+
+/-- **An access issuing a grant of a kind the profile never declared is not
+admitted.**
+
+The clause that stops an operation inventing an authority kind. It matters because
+`MemoryState.AnyGrantOver` is kind-blind: every rule that asks whether anything is
+held over some bytes counts a grant of any kind, so an invented kind freezes bytes
+even though no provider's `GrantedOfKind` will ever match it. Before
+`AccessDescriptor.authorityEffect` existed only a fixture could mint one, which is
+why this registry arrived a milestone after the others. -/
+theorem not_admits_of_undeclared_grant_kind {vocabulary : AdmittedVocabulary}
+    {d : AccessDescriptor} {kind : GrantKind}
+    (hmem : kind ∈ d.authorityEffect.issuedKinds)
+    (h : ¬ vocabulary.grantKinds.Recognizes kind) : ¬ vocabulary.Admits d := by
+  refine not_admits_of_failure (failure := .grantKindNotRecognized kind) ?_
+  unfold admissibilityFailures
+  simp only [List.mem_append, List.mem_filterMap]
+  exact Or.inr ⟨kind, hmem, by simp [h]⟩
 
 /-- An access creating an obligation of a kind the profile never declared is not
 admitted. -/
@@ -493,7 +526,7 @@ theorem not_admits_of_undeclared_obligation_kind {vocabulary : AdmittedVocabular
   refine not_admits_of_failure (failure := .obligationKindNotRecognized kind) ?_
   unfold admissibilityFailures
   simp only [List.mem_append, List.mem_filterMap]
-  exact Or.inl (Or.inl (Or.inl (Or.inr ⟨kind, hmem, by simp [h]⟩)))
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inr ⟨kind, hmem, by simp [h]⟩))))
 
 /-- **An access citing an initialization rule the profile never declared is not
 admitted.** A name no profile claimed is not a rule. This does not rest on
@@ -507,7 +540,7 @@ theorem not_admits_of_unregistered_justification {vocabulary : AdmittedVocabular
   refine not_admits_of_failure (failure := .initializationRuleNotRegistered justification) ?_
   unfold admissibilityFailures
   simp only [List.mem_append]
-  exact Or.inr (by rw [hmem]; simp [h])
+  exact Or.inl (Or.inr (by rw [hmem]; simp [h]))
 
 /-- **An access requesting an ordering mode the profile never declared is not
 admitted.** `docs/MEMORY_MODEL.md` §7.1: an unsupported mapping is rejected. -/
@@ -518,7 +551,7 @@ theorem not_admits_of_unregistered_order {vocabulary : AdmittedVocabulary}
   refine not_admits_of_failure (failure := .orderNotRegistered name) ?_
   unfold admissibilityFailures
   simp only [List.mem_append]
-  exact Or.inl (Or.inl (Or.inr (by rw [hname]; simp [h])))
+  exact Or.inl (Or.inl (Or.inl (Or.inr (by rw [hname]; simp [h]))))
 
 /-- And one claiming a scope the profile never declared is not admitted. A device
 fence claiming a scope nobody defined is not a weaker fence; it is an undefined
@@ -530,7 +563,7 @@ theorem not_admits_of_unregistered_scope {vocabulary : AdmittedVocabulary}
   refine not_admits_of_failure (failure := .scopeNotRegistered name) ?_
   unfold admissibilityFailures
   simp only [List.mem_append]
-  exact Or.inl (Or.inr (by rw [hname]; simp [h]))
+  exact Or.inl (Or.inl (Or.inr (by rw [hname]; simp [h])))
 
 end AdmittedVocabulary
 
