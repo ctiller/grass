@@ -1110,13 +1110,17 @@ theorem both_creates_are_individually_applicable :
       (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
         Obligation.protocol)
       (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
-        Obligation.owner) thread₀
+        Obligation.owner)
+      (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
+        Obligation.kind) thread₀
       (.create bufferProtocol bufferAuthority collidingFirst) ∧
     LedgerDelta.Applicable ((FiniteMap.empty : FiniteMap ObligationId Obligation).domain)
       (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
         Obligation.protocol)
       (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
-        Obligation.owner) thread₀
+        Obligation.owner)
+      (fun id => ((FiniteMap.empty : FiniteMap ObligationId Obligation).lookup id).map
+        Obligation.kind) thread₀
       (.create bufferProtocol bufferAuthority collidingSecond) := by decide
 
 /-- Together in one effect they are not applicable, because the second is checked
@@ -1379,18 +1383,68 @@ theorem an_undeclared_fault_is_not_recognized :
 
 `LedgerDelta.Applicable`'s split clause pinned each output's protocol and owner and
 not its `kind`, and allowed an output to reuse the source's identity. So a
-one-element split onto the source's own id, with a different kind, was legal: one duty
-in, one duty out, same identity, relabelled — and `docs/OBLIGATIONS.md` §3's terminal
-disposition theorem would then report against the wrong duty. It also made this
-module's own statement of the M5 law ("no identity is produced that was already live")
-false of deltas the checker accepted. Outputs must be fresh now. -/
+one-element split, with a different kind, was legal: one duty in, one duty out,
+relabelled, no `discharge` anywhere in the effect — and `docs/OBLIGATIONS.md` §3's
+terminal disposition theorem would then report against the wrong duty. Identity reuse
+also made this module's own statement of the M5 law ("no identity is produced that was
+already live") false of deltas the checker accepted.
 
-/-- **A split onto the source's own identity is refused.** -/
+Both halves are closed, and the second needed the first's repair *and* a `kindOf`:
+freshness alone left the relabelling legal under a new name, which review
+demonstrated a second time. §3's split is one duty becoming several that together
+cover the same duty, so every output carries the source's kind.
+
+The fixtures below run against a ledger where the source is live, so a refusal is
+about the split rather than about liveness — the earlier version of the first one
+stepped an empty ledger and would have passed with no split rule at all. -/
+
+/-- A ledger holding the release duty. -/
+private def ledger₁ : FiniteMap ObligationId Obligation :=
+  (FiniteMap.empty : FiniteMap ObligationId Obligation).insert releaseObligationId
+    releaseObligation
+
+/-- The source is live here, and its kind is the one a faithful split must carry. -/
+theorem the_split_source_is_live :
+    ledger₁.lookup releaseObligationId = some releaseObligation ∧
+      releaseObligation.kind = .releaseAllocation := by decide
+
+/-- **A split onto the source's own identity is refused** — the freshness half. -/
 theorem a_relabelling_split_is_refused :
-    ¬ Grass.Op.LedgerEffectApplicable state₀.obligations thread₀
+    ¬ Grass.Op.LedgerEffectApplicable ledger₁ thread₀
       [.split bufferProtocol bufferAuthority releaseObligationId
         [{ id := releaseObligationId, kind := .closeHandle
            protocol := bufferProtocol, owner := thread₀ }]] := by decide
+
+/-- **A split onto a fresh identity with a different kind is refused too** — the half
+freshness does not catch, and the one that mattered. -/
+theorem a_relabelling_split_under_a_fresh_id_is_refused :
+    ¬ Grass.Op.LedgerEffectApplicable ledger₁ thread₀
+      [.split bufferProtocol bufferAuthority releaseObligationId
+        [{ id := ghostObligationId, kind := .closeHandle
+           protocol := bufferProtocol, owner := thread₀ }]] := by decide
+
+/-- The same split keeping the source's kind is applicable, so the two refusals above
+are the identity and the kind and not some other clause. -/
+theorem a_faithful_split_is_applicable :
+    Grass.Op.LedgerEffectApplicable ledger₁ thread₀
+      [.split bufferProtocol bufferAuthority releaseObligationId
+        [{ id := ghostObligationId, kind := .releaseAllocation
+           protocol := bufferProtocol, owner := thread₀ }]] := by decide
+
+/-- **A join may not relabel either**, and the same pair of fixtures says so from the
+other direction: joining a `releaseAllocation` duty into a `closeHandle` one is
+refused, and into a duty of its own kind is not. -/
+theorem a_relabelling_join_is_refused :
+    ¬ Grass.Op.LedgerEffectApplicable ledger₁ thread₀
+      [.join bufferProtocol bufferAuthority [releaseObligationId]
+        { id := ghostObligationId, kind := .closeHandle
+          protocol := bufferProtocol, owner := thread₀ }] := by decide
+
+theorem a_faithful_join_is_applicable :
+    Grass.Op.LedgerEffectApplicable ledger₁ thread₀
+      [.join bufferProtocol bufferAuthority [releaseObligationId]
+        { id := ghostObligationId, kind := .releaseAllocation
+          protocol := bufferProtocol, owner := thread₀ }] := by decide
 
 /-! ## A provenance that lies about its root's extent
 

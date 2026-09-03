@@ -314,6 +314,92 @@ theorem currentEpoch_of_live {state : MemoryState} {provenance : Provenance}
       exact ((Bool.and_eq_true _ _).mp h).2
 
 /--
+The grants outstanding over the same *bytes* as `provenance`, meeting `range`, in
+the epoch that provenance names.
+
+Three departures from the obvious filter, each of which review demonstrated:
+
+**`MemoryState.SharesBytes`, not `Provenance.SameStorage`.** `Grass/Memory/State.lean`
+records that `Conflicts` used to require `SameStorage` and "declared every aliased
+pair non-conflicting: a write through a mapped view and a write through the file it
+maps would not conflict", which is why `SharesBytes` exists at all — and this
+function was written with `SameStorage` anyway. Review drove a thread's store to
+lent bytes through an aliasing view and it committed with no violation.
+
+**`ByteRange.Meets`, not `¬ Disjoint`.** An empty range covers no offset, so every
+range is `Disjoint` from a position, and asking what was outstanding over offset 4
+while `[0, 8)` was lent returned nothing.
+
+**Every kind of grant, not only loans.** `docs/MEMORY_MODEL.md` §7.3's conflict is
+about authority, not about one kind of it. Filtering to `GrantKind.loan` meant a
+`.frame` grant — or one of a kind a profile invented, which `GrantKind` is open
+nominal to allow — carried write authority that froze nobody and conflicted with
+nothing. `loansOver` below is this list narrowed to loans, for §3's laws, which
+really are about loans.
+
+**And no epoch clause.** There was one, on the grant's own provenance, and it was
+wrong in the unsafe direction: review re-epoched one member of an alias set and the
+grant over it vanished from this list while the other member stayed live, so the
+freeze lifted and an unauthorized store committed. A grant that names a defunct
+epoch is also unable to *authorize* anything — `MemoryState.AuthorizedAt` checks
+both provenances — so dropping it here means a stale grant freezes without
+authorizing, which is the refuse-both-ways answer `docs/FOUNDATION.md` law 8 asks
+for. §5.1 requires live use loans to be returned before reallocation, so a stale
+grant that still freezes is a profile that skipped a step, not a case to be
+accommodated.
+
+It also restores agreement with `LoanConflicts`, which has no epoch clause either.
+The epoch filter had made the two disagree about which grants exist, and review used
+exactly that gap: a context could not *obtain* a loan (the conflict test saw the
+stale grant) and did not need one (this list did not), so the write proceeded
+unauthorized.
+-/
+def grantsOver (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
+    List (GrantId × AuthorityGrant) :=
+  state.grantEntries.filter fun entry =>
+    decide (state.SharesBytes entry.2.provenance.root provenance.root) &&
+      decide (entry.2.range.Meets range)
+
+/-- The loans among them. §3's laws — exclusivity, counts, return by identity — are
+about loans, so they are stated over this; the access-time conflict rule is about
+authority, so it is stated over `grantsOver`. -/
+def loansOver (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
+    List (GrantId × AuthorityGrant) :=
+  (state.grantsOver provenance range).filter (fun entry => entry.2.kind = GrantKind.loan)
+
+/-- `state.AnyGrantOver provenance range` holds when *some* context holds authority
+over those bytes, of any kind.
+
+The question the transition's holder test should be asking, and it took three tries
+to arrive at.
+
+It was `Exclusive` — the *loan* map empty of everyone's loans — which is §3's
+sentence about exclusive authority and not a question about this access. A lender
+that had lent read-only could not read its own bytes, and a context following this
+layer's own "declare a loan to yourself" idiom with a read-only self-loan could not
+write those bytes even after every other loan was returned.
+
+Then it was `LoanHeldBySelf`, which fixed the self-loan case and opened a worse one:
+a context holding *nothing* was asked nothing, so when others held atomic-only
+grants and `authorityOf` reported `atomicShared`, any context at all could join the
+protocol atomically. Review demonstrated two contexts atomically writing the same
+live bytes with one of them holding no grant. It also keyed on `GrantKind.loan`
+while the state half did not, so two grants identical but for `kind` gave opposite
+answers about whether their holder may write.
+
+So: if anything is held over these bytes, an accessor needs authority of its own.
+The cost is that the lender's read of its own shared-immutably-lent bytes is refused
+along with a stranger's — `AllocationRecord` records no owner, so the two are
+indistinguishable here, and permitting one permits both.
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records that. -/
+def AnyGrantOver (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
+    Prop := state.grantsOver provenance range ≠ []
+
+instance (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
+    Decidable (state.AnyGrantOver provenance range) :=
+  inferInstanceAs (Decidable (_ ≠ _))
+
+/--
 Two grants issue conflicting authority.
 
 `docs/MEMORY_MODEL.md` §7.3 defines a conflict as overlapping live bytes with at
@@ -365,6 +451,58 @@ def LoanConflicts (state : MemoryState) (a b : AuthorityGrant) : Prop :=
 instance (state : MemoryState) (a b : AuthorityGrant) :
     Decidable (state.LoanConflicts a b) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
+
+/--
+`state.MayLend grant` holds when the grant's lender has the authority it is lending.
+
+**You cannot lend what you do not have**, which `issue?_eq_none_of_nothing_to_lend`
+now says and nothing said before. `issue?` checked
+reissue, emptiness, liveness, nestedness, extent agreement, containment and conflict,
+and never related the lender to the storage — while `LoanConflicts` requires distinct
+holders, so the *first* grant over any bytes conflicts with nothing. Review had one
+context issue itself a whole-buffer write loan over an allocation another context
+exclusively owned: the owner became `frozen`, its counter-grant was refused as
+conflicting, it could not return a grant it neither held nor lent, and it could not
+free or re-epoch the allocation because a grant was outstanding. Permanent seizure, in
+one accepted call. `AuthorityGrant.kind`'s own docstring calls a loan "a borrow of
+authority over bytes the lender retains".
+
+Three ways to have it, and the third is the one that took thinking about.
+
+Nothing is held over the bytes at all — the unlent case, which is how a first grant is
+ever issued, and which matches `Grass/Op/LoanAuthority.lean`'s reading that unheld
+bytes are not this rule's business. Or the lender holds a grant covering the range
+with rights that supply what is being lent, which is `Permission.Grants` at the
+authority layer. Or every grant outstanding over the bytes was lent *by this lender* —
+whoever put them out may put more out.
+
+Without the third, an owner who lends once can never lend again, because it holds
+nothing itself: `AllocationRecord` records no owner, so a lender's claim on unheld
+bytes leaves no trace except in the grants it issued. Two read loans from one owner is
+`sharedImmutable`'s whole point, and the first two disjuncts alone refuse the second
+of them.
+
+**What this does not stop**, and cannot: seizing bytes nothing is held over. That is
+the first disjunct, and it is the same rule a legitimate owner's first loan needs — so
+with no owner in `AllocationRecord`, the model cannot tell the two apart. What it does
+stop is stealing from a lender: once a context has lent bytes out, no other context can
+issue a grant over them, which is what closed review's permanent-seizure state. The
+residue is the missing-owner gap `Grass/Op/LoanAuthority.lean` records from the other
+side and `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records as owed.
+-/
+def MayLend (state : MemoryState) (grant : AuthorityGrant) : Prop :=
+  ¬ state.AnyGrantOver grant.provenance grant.range ∨
+    state.grantEntries.any (fun entry =>
+      entry.2.holder = grant.lender &&
+        decide (state.SharesBytes entry.2.provenance.root grant.provenance.root) &&
+        decide (state.CurrentEpoch entry.2.provenance) &&
+        decide (entry.2.range.Contains grant.range) &&
+        decide (entry.2.rights.Grants grant.rights)) = true ∨
+    (state.grantsOver grant.provenance grant.range).all
+      (fun entry => entry.2.lender = grant.lender) = true
+
+instance (state : MemoryState) (grant : AuthorityGrant) : Decidable (state.MayLend grant) :=
+  inferInstanceAs (Decidable (¬ _ ∨ _ = _ ∨ _ = _))
 
 /--
 Issue a grant, or refuse.
@@ -421,10 +559,41 @@ def issue? (state : MemoryState) (id : GrantId) (grant : AuthorityGrant) :
   else if ¬ grant.provenance.Nested then Option.none
   else if ¬ state.RootExtentAgrees grant.provenance then Option.none
   else if ¬ grant.provenance.extent.Contains grant.range then Option.none
+  else if ¬ state.MayLend grant then Option.none
   else if state.grantEntries.any
       (fun entry => decide (state.LoanConflicts entry.2 grant))
     then Option.none
   else some { state with grants := state.grants.insert id grant }
+
+/-- **A lender with nothing may not lend over held bytes.** -/
+theorem issue?_eq_none_of_nothing_to_lend (state : MemoryState) (id : GrantId)
+    (grant : AuthorityGrant) (h : ¬ state.MayLend grant) :
+    state.issue? id grant = Option.none := by
+  unfold issue?
+  by_cases hfresh : (state.grants.lookup id).isSome = true
+  · rw [if_pos hfresh]
+  · rw [if_neg hfresh]
+    by_cases hempty : grant.range.IsEmpty
+    · rw [if_pos hempty]
+    · rw [if_neg hempty]
+      by_cases hlive : state.Live grant.provenance
+      · rw [if_neg (by simpa using hlive)]
+        by_cases hnest : grant.provenance.Nested
+        · rw [if_neg (by simpa using hnest)]
+          by_cases hext : state.RootExtentAgrees grant.provenance
+          · rw [if_neg (by simpa using hext)]
+            by_cases hin : grant.provenance.extent.Contains grant.range
+            · rw [if_neg (by simpa using hin), if_pos (by simpa using h)]
+            · rw [if_pos (by simpa using hin)]
+          · rw [if_pos (by simpa using hext)]
+        · rw [if_pos (by simpa using hnest)]
+      · rw [if_pos (by simpa using hlive)]
+
+/-- Over bytes nothing is held on, anyone may lend. That is how a first grant is ever
+issued, and it is the claim `MayLend`'s docstring says is not a transfer. -/
+theorem mayLend_of_unheld {state : MemoryState} {grant : AuthorityGrant}
+    (h : ¬ state.AnyGrantOver grant.provenance grant.range) : state.MayLend grant :=
+  Or.inl h
 
 /-- **A grant over no bytes is refused.** It would conflict at issue with a live one
 — `LoanConflicts` tries `Meets` in both directions — and freeze nobody once
@@ -513,7 +682,10 @@ theorem issue?_eq_none_of_conflict (state : MemoryState) (id : GrantId)
           by_cases hext : state.RootExtentAgrees grant.provenance
           · rw [if_neg (by simpa using hext)]
             by_cases hin : grant.provenance.extent.Contains grant.range
-            · rw [if_neg (by simpa using hin), if_pos h]
+            · rw [if_neg (by simpa using hin)]
+              by_cases hlend : state.MayLend grant
+              · rw [if_neg (by simpa using hlend), if_pos h]
+              · rw [if_pos (by simpa using hlend)]
             · rw [if_pos (by simpa using hin)]
           · rw [if_pos (by simpa using hext)]
         · rw [if_pos (by simpa using hnest)]
@@ -546,6 +718,8 @@ theorem grantAt?_issue?_self {state issued : MemoryState} {id : GrantId}
     {grant : AuthorityGrant} (h : state.issue? id grant = some issued) :
     issued.grantAt? id = some grant := by
   unfold issue? at h
+  split at h
+  · exact absurd h (by simp)
   split at h
   · exact absurd h (by simp)
   split at h
@@ -762,6 +936,54 @@ theorem granted_of_covering {state : MemoryState} {context : ContextId}
   fun _ hi => ⟨entry, hmem,
     authorizedAt_of_covering hi hcover hholder hshares hgrant haccess hrights⟩
 
+/--
+The same bridge from an identity rather than from a membership.
+
+`granted_of_covering`'s `entry ∈ grantEntries` hypothesis is what a concrete fixture
+has and a symbolic caller does not — review found that every fixture in `Tests/`
+discharges it by `decide`, so the bridge had never been used the way a general
+theorem would use it. `Grass/Std/Logical/FiniteMap.lean`'s `mem_entries_of_lookup`
+supplies the step, and this is the form to reach for: it takes the `grantAt?` a caller
+holding a grant identity actually has.
+-/
+theorem granted_of_grantAt {state : MemoryState} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    {id : GrantId} {grant : AuthorityGrant} (hat : state.grantAt? id = some grant)
+    (hcover : grant.range.Contains range)
+    (hholder : grant.holder = context)
+    (hshares : state.SharesBytes grant.provenance.root provenance.root)
+    (hgrant : state.CurrentEpoch grant.provenance)
+    (haccess : state.CurrentEpoch provenance)
+    (hrights : grant.rights.Permits intent) :
+    state.Granted context provenance range intent :=
+  granted_of_covering (entry := (id, grant))
+    (Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hat)
+    hcover hholder hshares hgrant haccess hrights
+
+/--
+`Granted` refuted, from a refutation of every outstanding grant.
+
+The `not_authorizedAt_of_*` family says a *particular* grant does not authorize a
+particular byte, and `Granted` is existential over `grantEntries`, so those negatives
+composed into nothing: review pointed out that no theorem in the tree turns them into
+a `¬ Granted`. This is the composition. The `¬ range.IsEmpty` hypothesis is not
+incidental — `Granted` is vacuously true on an empty range, in every state, which is
+why `AccessDescriptor.WellFormedIn.rangeNonEmpty` exists two layers up.
+-/
+theorem not_granted_of_no_authorizing_entry {state : MemoryState} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    (hne : ¬ range.IsEmpty)
+    (h : ∀ entry ∈ state.grantEntries, ∀ offset,
+      ¬ state.AuthorizedAt entry.2 context provenance offset intent) :
+    ¬ state.Granted context provenance range intent := by
+  intro hgranted
+  have hsize : 0 < range.size := by
+    rcases Nat.eq_zero_or_pos range.size with hzero | hpos
+    · exact absurd (by simpa [ByteRange.IsEmpty] using hzero) hne
+    · exact hpos
+  obtain ⟨entry, hmem, hauth⟩ := hgranted 0 hsize
+  exact h entry hmem (range.start + 0) hauth
+
 /-- `state.GrantedOfKind` additionally requires the authorizing grant to be of a
 particular kind, which is how one provider distinguishes itself from another over
 the same table. -/
@@ -825,7 +1047,7 @@ def allocate? (state : MemoryState) (id : AllocId) (record : AllocationRecord) :
     Option MemoryState :=
   match state.allocations.lookup id with
   | some existing =>
-      if (existing.epoch ≠ record.epoch ∨ (existing.live ∧ ¬ record.live)) ∧
+      if existing.metadata ≠ record.metadata ∧
           state.grantEntries.any
             (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) then
         Option.none
@@ -855,26 +1077,26 @@ refusal rather than as a sentence. -/
 theorem allocate?_eq_none_of_outstanding {state : MemoryState} {id : AllocId}
     {record existing : AllocationRecord}
     (hlook : state.allocations.lookup id = some existing)
-    (hchange : existing.epoch ≠ record.epoch ∨ (existing.live ∧ ¬ record.live))
+    (hchange : existing.metadata ≠ record.metadata)
     (hgrants : state.grantEntries.any
       (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) = true) :
     state.allocate? id record = Option.none := by
   unfold allocate?
   rw [hlook]
   simp only []
-  rw [if_pos (show (existing.epoch ≠ record.epoch ∨ _) ∧ _ from ⟨hchange, hgrants⟩)]
+  rw [if_pos (show existing.metadata ≠ record.metadata ∧ _ from ⟨hchange, hgrants⟩)]
 
 /-- A record replaced without changing its epoch is accepted, grants or not: a
 permission, liveness or placement change is not a reallocation. -/
-theorem allocate?_isSome_of_same_epoch {state : MemoryState} {id : AllocId}
+theorem allocate?_isSome_of_same_metadata {state : MemoryState} {id : AllocId}
     {record existing : AllocationRecord}
     (hlook : state.allocations.lookup id = some existing)
-    (hepoch : existing.epoch = record.epoch) (hlive : record.live) :
+    (hsame : existing.metadata = record.metadata) :
     (state.allocate? id record).isSome := by
   unfold allocate?
   rw [hlook]
   simp only []
-  rw [if_neg (fun h => h.1.elim (fun he => he hepoch) (fun hk => hk.2 hlive))]
+  rw [if_neg (fun h => h.1 hsame)]
   rfl
 
 /-- Declare that two allocations name the same storage. -/

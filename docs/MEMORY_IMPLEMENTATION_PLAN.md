@@ -1401,6 +1401,62 @@ refuses everything.
   cannot drift, and `the_three_refusals_are_distinguishable` is the fixture the old
   shape could not have. This bullet stayed on the owed list for two commits after the
   work landed, which is the same failure as an overclaim pointing the other way.
+- ~~**A context could lend bytes it neither held nor lent.**~~ Closed by
+  `MemoryState.MayLend`, and worth recording because of how long it survived. `issue?`
+  had grown seven checks — reissue, emptiness, liveness, nestedness, extent agreement,
+  containment, conflict — and not one of them related the *lender* to the storage,
+  while `LoanConflicts` requires distinct holders, so the first grant over any bytes
+  conflicted with nothing. Review had one context issue itself a whole-buffer write
+  loan over an allocation another exclusively owned: the owner went `frozen`, its
+  counter-grant was refused as conflicting, it could not return a grant it neither held
+  nor lent, and it could not free or re-epoch the allocation because a grant was
+  outstanding. Permanent seizure, in one accepted call, and reachable through `step`.
+
+  `MayLend` has three ways to be satisfied — nothing is held over the bytes, the
+  lender holds covering authority that `Permission.Grants` what it is lending, or every
+  grant over those bytes was lent by this lender — and each is a fixture in
+  `Tests/Op/StandardLoan.lean`. The first is the one that still admits a claim: seizing
+  bytes *nothing* is held over is indistinguishable from a legitimate owner's first
+  loan, and stays so until `AllocationRecord` records an owner, which is the same gap
+  the bullet below records from the other side.
+- **`denialOf`'s `Permits` clause is unreachable for every page this layer can
+  describe.** The clause rejects an access whose intent the *page's* permission does
+  not permit, and it sits behind the `Grants` clause, which rejects an access whose
+  declared permission the page does not grant. `AccessDescriptor.WellFormedIn` already
+  requires the descriptor's declared permission to permit its own intent, so a
+  descriptor reaching the `Permits` clause has a permission the page grants and which
+  permits the intent — and `Permission.permits_of_grants_of_permits` is that
+  implication, proved. The clause is retained because it is the sentence §1 states and
+  because `Grants` is the newer of the two, but no fixture can distinguish it and none
+  claims to.
+- **`MemoryEvent.ofOutcome`'s space guard cannot fail from `step`.** `ofOutcome`
+  refuses to mint an event whose `AddressSpace` disagrees with the descriptor's
+  `provenance.space`, which is `ValidMemoryEvent.WellFormed`'s
+  `spaceAgreesWithProvenance` at the door. `step` resolves the space *from* the
+  provenance, so the two never disagree there, and the refusal is reachable only for a
+  direct caller of `ofOutcome`. That makes the guard a door-check on an unreachable
+  path rather than a demonstrated rejection, and it is the shape this branch has
+  learned to distrust: a mismatch becomes a silent absence of an event rather than a
+  violation. Making it a rejection means `runStep` distinguishing "no event because
+  nothing to record" from "no event because minting failed", which is `Grass/Op/`
+  work.
+- ~~**The `AuthorizedAt` negatives yield no `¬ Granted`.**~~ Closed.
+  `not_authorizedAt_of_other_holder` and its three siblings say a specific grant does
+  not authorize a specific byte; `Granted` quantifies existentially over
+  `grantEntries`, so refuting it needs every entry refuted, and nothing composed the
+  two. `granted_of_covering` had the same shape from the other side: its
+  `entry ∈ grantEntries` hypothesis was discharged by `decide` for a concrete map and
+  by nothing for an abstract one, because `Grass/Std/Logical/FiniteMap.lean` had no
+  lemma taking `lookup id = some v` to `(id, v) ∈ entries`. Every fixture in `Tests/`
+  is concrete, which is exactly why the gap was invisible: the lemmas had a use, and it
+  was the only one they had.
+
+  `FiniteMap.mem_entries_of_lookup` is the missing step, `MemoryState.granted_of_grantAt`
+  the bridge from an identity, and `MemoryState.not_granted_of_no_authorizing_entry`
+  the composition of the negatives — whose `¬ range.IsEmpty` hypothesis is where
+  `Granted`'s vacuity on an empty range becomes visible in a signature.
+  `Tests/Memory/Loans.lean` states both over an arbitrary state with no `decide` in
+  sight, since a fixture that could `decide` it would not be testing the bridge.
 - **The lender of a read-only loan is refused the read of its own bytes.** The loan
   provider's holder half asks whether *anything* is held over the bytes, and if so
   requires the accessor to hold covering authority. `AllocationRecord` records no
@@ -1422,12 +1478,22 @@ refuses everything.
   authorized for a read-modify-write only if one grant permits both. That is the safe
   direction and it is not stated anywhere.
 - ~~**A stale-epoch grant freezes the next epoch's storage and only its holder or
-  lender can clear it.**~~ Closed at the source. `MemoryState.allocate?` refuses a
-  reallocation — an epoch change on an existing identity — while any grant is
-  outstanding over that storage, which is §5.1's "reallocation requires the return of
-  all live use loans" as a refusal rather than a sentence. A fresh identity is always
-  accepted, and so is replacing a record without changing its epoch: a permission,
-  liveness or placement change is not a reallocation.
+  lender can clear it.**~~ Closed at the source. `MemoryState.allocate?` refuses to
+  replace an existing record while any grant is outstanding over that storage, which
+  is §5.1's "reallocation requires the return of all live use loans" as a refusal
+  rather than a sentence. A fresh identity is always accepted, and so is re-writing a
+  record with the metadata it already has, so an idempotent registration still works
+  — `allocate?_isSome_of_same_metadata` is that.
+
+  An earlier version of this refusal, and of this paragraph, limited it to an epoch
+  change or a teardown and said in as many words that "a permission, liveness or
+  placement change is not a reallocation". Review took the sentence at its word:
+  narrowing the buffer's `extent` under a live grant left the grant's range outside
+  the allocation it was issued against, and moving its `base` left the grant naming
+  bytes that had moved — both while the holder kept authority the record no longer
+  supported. Any metadata difference is now the refusal, because the property that
+  matters is that the record a grant was checked against is still the record in the
+  table, and `AllocationRecord.Metadata` is exactly the part `denialOf` reads.
 
   The state that skipping it produced was the one three rounds kept circling — a
   grant that freezes the storage that replaced it, authorizes nothing, and blocks a

@@ -24,14 +24,20 @@ vocabulary and the projections, not those theorems.
 
 **The second of those was false of deltas `Applicable` accepted**, and review found
 it. `split`'s clause was `∀ o ∈ into, o.id ∉ live ∨ o.id = source` and `join`'s was
-`into.id ∉ live ∨ into.id ∈ sources`, so an output could reuse an input's identity —
-and a one-element split onto the source's own id, with a *different* `kind`, was
-legal: one duty in, one duty out, same identity, relabelled, with the terminal
-disposition theorem then reporting against the wrong duty. `Applicable` pinned the
-output's protocol and owner and not its kind.
-
-Outputs must now be fresh. §3 does not ask for identity reuse, identities come from a
+`into.id ∉ live ∨ into.id ∈ sources`, so an output could reuse an input's identity.
+Outputs must be fresh now: §3 does not ask for identity reuse, identities come from a
 supply that never reissues, and the law above is a law again.
+
+**And the `kind` was unpinned, which is the defect that mattered and which the
+freshness rule did not close.** `Applicable` pinned each output's protocol and owner
+and not its kind, so a one-element split — now with a *fresh* identity — still
+replaced a live duty of one kind with an unrelated duty of another, and no `discharge`
+appeared anywhere in the effect. Review demonstrated it a second time after the
+freshness repair, on the same clause the first repair's own commit message had
+diagnosed. `docs/OBLIGATIONS.md`'s split is "one obligation becomes several, together
+covering the same duty", and a duty of a different kind is not the same duty, so every
+output's kind must be the source's — and a join's source kinds must be the output's.
+`Applicable` takes a `kindOf` for it.
 -/
 
 namespace Grass.Obligation
@@ -258,7 +264,9 @@ write down, and carried no authority at all.
 -/
 def Applicable (live : List ObligationId)
     (protocolOf : ObligationId → Option ObligationProtocolId)
-    (ownerOf : ObligationId → Option ContextId) (actor : ContextId) : LedgerDelta → Prop
+    (ownerOf : ObligationId → Option ContextId)
+    (kindOf : ObligationId → Option ObligationKindId) (actor : ContextId) :
+    LedgerDelta → Prop
   | .create claimed _ o => o.id ∉ live ∧ o.protocol = claimed ∧ o.owner = actor
   | .discharge claimed _ id =>
       id ∈ live ∧ protocolOf id = some claimed ∧ ownerOf id = some actor
@@ -267,11 +275,13 @@ def Applicable (live : List ObligationId)
       ownerOf source = some actor ∧
       (∀ o ∈ into, o.id ∉ live) ∧
       (∀ o ∈ into, o.protocol = claimed) ∧
-      (∀ o ∈ into, o.owner = actor)
+      (∀ o ∈ into, o.owner = actor) ∧
+      (∀ o ∈ into, kindOf source = some o.kind)
   | .join claimed _ sources into =>
       (∀ id ∈ sources, id ∈ live) ∧
       (∀ id ∈ sources, protocolOf id = some claimed) ∧
       (∀ id ∈ sources, ownerOf id = some actor) ∧
+      (∀ id ∈ sources, kindOf id = some into.kind) ∧
       into.id ∉ live ∧
       into.protocol = claimed ∧ into.owner = actor
   | .transfer claimed _ id _ =>
@@ -279,8 +289,10 @@ def Applicable (live : List ObligationId)
 
 instance (live : List ObligationId)
     (protocolOf : ObligationId → Option ObligationProtocolId)
-    (ownerOf : ObligationId → Option ContextId) (actor : ContextId) :
-    (delta : LedgerDelta) → Decidable (Applicable live protocolOf ownerOf actor delta)
+    (ownerOf : ObligationId → Option ContextId)
+    (kindOf : ObligationId → Option ObligationKindId) (actor : ContextId) :
+    (delta : LedgerDelta) →
+      Decidable (Applicable live protocolOf ownerOf kindOf actor delta)
   | .create _ _ _ => inferInstanceAs (Decidable (_ ∧ _ ∧ _))
   | .discharge _ _ _ => inferInstanceAs (Decidable (_ ∧ _ ∧ _))
   | .split _ _ _ _ => inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
@@ -291,10 +303,11 @@ instance (live : List ObligationId)
 silent drop the transition used to perform. -/
 theorem not_applicable_discharge_of_not_live {live : List ObligationId}
     {protocolOf : ObligationId → Option ObligationProtocolId}
-    {ownerOf : ObligationId → Option ContextId} {actor : ContextId} {id : ObligationId}
+    {ownerOf : ObligationId → Option ContextId}
+    {kindOf : ObligationId → Option ObligationKindId} {actor : ContextId} {id : ObligationId}
     {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
     (h : id ∉ live) :
-    ¬ Applicable live protocolOf ownerOf actor (.discharge claimed authority id) :=
+    ¬ Applicable live protocolOf ownerOf kindOf actor (.discharge claimed authority id) :=
   fun ha => h ha.1
 
 /-- Authority for one protocol does not authorize a duty governed by another.
@@ -302,10 +315,11 @@ This is the state-level half; the type-level half is that a
 `ProtocolAuthority p` is not a `ProtocolAuthority q`. -/
 theorem not_applicable_discharge_of_wrong_protocol {live : List ObligationId}
     {protocolOf : ObligationId → Option ObligationProtocolId}
-    {ownerOf : ObligationId → Option ContextId} {actor : ContextId} {id : ObligationId}
+    {ownerOf : ObligationId → Option ContextId}
+    {kindOf : ObligationId → Option ObligationKindId} {actor : ContextId} {id : ObligationId}
     {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
     (h : protocolOf id ≠ some claimed) :
-    ¬ Applicable live protocolOf ownerOf actor (.discharge claimed authority id) :=
+    ¬ Applicable live protocolOf ownerOf kindOf actor (.discharge claimed authority id) :=
   fun ha => h ha.2.1
 
 /--
@@ -321,41 +335,45 @@ consulted.
 -/
 theorem not_applicable_discharge_of_wrong_owner {live : List ObligationId}
     {protocolOf : ObligationId → Option ObligationProtocolId}
-    {ownerOf : ObligationId → Option ContextId} {actor : ContextId} {id : ObligationId}
+    {ownerOf : ObligationId → Option ContextId}
+    {kindOf : ObligationId → Option ObligationKindId} {actor : ContextId} {id : ObligationId}
     {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
     (h : ownerOf id ≠ some actor) :
-    ¬ Applicable live protocolOf ownerOf actor (.discharge claimed authority id) :=
+    ¬ Applicable live protocolOf ownerOf kindOf actor (.discharge claimed authority id) :=
   fun ha => h ha.2.2
 
 /-- A join whose sources were never live is not applicable. This is the
 fabrication. -/
 theorem not_applicable_join_of_dead_source {live : List ObligationId}
     {protocolOf : ObligationId → Option ObligationProtocolId}
-    {ownerOf : ObligationId → Option ContextId} {actor : ContextId}
+    {ownerOf : ObligationId → Option ContextId}
+    {kindOf : ObligationId → Option ObligationKindId} {actor : ContextId}
     {sources : List ObligationId} {into : Obligation} {id : ObligationId}
     {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
     (hmem : id ∈ sources) (h : id ∉ live) :
-    ¬ Applicable live protocolOf ownerOf actor (.join claimed authority sources into) :=
+    ¬ Applicable live protocolOf ownerOf kindOf actor (.join claimed authority sources into) :=
   fun ha => h (ha.1 id hmem)
 
 /-- A create of an identity that is already live is not applicable. This is the
 duplication that silently overwrote a live duty. -/
 theorem not_applicable_create_of_live {live : List ObligationId}
     {protocolOf : ObligationId → Option ObligationProtocolId}
-    {ownerOf : ObligationId → Option ContextId} {actor : ContextId} {o : Obligation}
+    {ownerOf : ObligationId → Option ContextId}
+    {kindOf : ObligationId → Option ObligationKindId} {actor : ContextId} {o : Obligation}
     {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
     (h : o.id ∈ live) :
-    ¬ Applicable live protocolOf ownerOf actor (.create claimed authority o) :=
+    ¬ Applicable live protocolOf ownerOf kindOf actor (.create claimed authority o) :=
   fun ha => ha.1 h
 
 /-- A context may not create a duty in another's name either, which is the
 fabrication half of ownership. -/
 theorem not_applicable_create_of_wrong_owner {live : List ObligationId}
     {protocolOf : ObligationId → Option ObligationProtocolId}
-    {ownerOf : ObligationId → Option ContextId} {actor : ContextId} {o : Obligation}
+    {ownerOf : ObligationId → Option ContextId}
+    {kindOf : ObligationId → Option ObligationKindId} {actor : ContextId} {o : Obligation}
     {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
     (h : o.owner ≠ actor) :
-    ¬ Applicable live protocolOf ownerOf actor (.create claimed authority o) :=
+    ¬ Applicable live protocolOf ownerOf kindOf actor (.create claimed authority o) :=
   fun ha => h ha.2.2
 
 end LedgerDelta

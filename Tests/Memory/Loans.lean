@@ -563,4 +563,37 @@ theorem a_frame_grant_is_not_a_loan :
     (unlent.issue? firstLoan frameGrant).isSome := by
   exact ⟨by decide, by decide⟩
 
+/-! ## The negatives, composed, over a state nobody built
+
+Every fixture above is concrete, and `decide` settles a concrete state. Review's point
+was that the `not_authorizedAt_of_*` family and `granted_of_covering` had *only* that
+use: the negatives refute one grant at one byte and `Granted` is existential over the
+entry list, so nothing turned them into a `¬ Granted`; and `granted_of_covering`'s
+`entry ∈ grantEntries` hypothesis was dischargeable by `decide` and by nothing else.
+The two theorems below take an arbitrary `state` — no fixture, no `decide` — which is
+the use those lemmas were written for and had never had. -/
+
+/-- **A context that holds no grant is granted nothing**, in any state, over any
+storage, for any intent. -/
+theorem a_non_holder_is_granted_nothing (state : MemoryState) (context : ContextId)
+    (provenance : Provenance) (range : ByteRange) (intent : AccessIntent)
+    (hne : ¬ range.IsEmpty)
+    (h : ∀ entry ∈ state.grantEntries, entry.2.holder ≠ context) :
+    ¬ state.Granted context provenance range intent :=
+  MemoryState.not_granted_of_no_authorizing_entry hne fun entry hmem _ =>
+    MemoryState.not_authorizedAt_of_other_holder (h entry hmem)
+
+/-- **And a grant identity is enough to establish authority**, without knowing what
+else the state holds. -/
+theorem an_identity_suffices (state : MemoryState) (context : ContextId)
+    (provenance : Provenance) (range : ByteRange) (intent : AccessIntent)
+    (id : GrantId) (grant : AuthorityGrant) (hat : state.grantAt? id = some grant)
+    (hcover : grant.range.Contains range) (hholder : grant.holder = context)
+    (hshares : state.SharesBytes grant.provenance.root provenance.root)
+    (hgrant : state.CurrentEpoch grant.provenance)
+    (haccess : state.CurrentEpoch provenance)
+    (hrights : grant.rights.Permits intent) :
+    state.Granted context provenance range intent :=
+  MemoryState.granted_of_grantAt hat hcover hholder hshares hgrant haccess hrights
+
 end Tests.Memory.Loans

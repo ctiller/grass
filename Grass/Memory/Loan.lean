@@ -286,60 +286,6 @@ end AuthorityState
 
 namespace MemoryState
 
-/--
-The grants outstanding over the same *bytes* as `provenance`, meeting `range`, in
-the epoch that provenance names.
-
-Three departures from the obvious filter, each of which review demonstrated:
-
-**`MemoryState.SharesBytes`, not `Provenance.SameStorage`.** `Grass/Memory/State.lean`
-records that `Conflicts` used to require `SameStorage` and "declared every aliased
-pair non-conflicting: a write through a mapped view and a write through the file it
-maps would not conflict", which is why `SharesBytes` exists at all — and this
-function was written with `SameStorage` anyway. Review drove a thread's store to
-lent bytes through an aliasing view and it committed with no violation.
-
-**`ByteRange.Meets`, not `¬ Disjoint`.** An empty range covers no offset, so every
-range is `Disjoint` from a position, and asking what was outstanding over offset 4
-while `[0, 8)` was lent returned nothing.
-
-**Every kind of grant, not only loans.** `docs/MEMORY_MODEL.md` §7.3's conflict is
-about authority, not about one kind of it. Filtering to `GrantKind.loan` meant a
-`.frame` grant — or one of a kind a profile invented, which `GrantKind` is open
-nominal to allow — carried write authority that froze nobody and conflicted with
-nothing. `loansOver` below is this list narrowed to loans, for §3's laws, which
-really are about loans.
-
-**And no epoch clause.** There was one, on the grant's own provenance, and it was
-wrong in the unsafe direction: review re-epoched one member of an alias set and the
-grant over it vanished from this list while the other member stayed live, so the
-freeze lifted and an unauthorized store committed. A grant that names a defunct
-epoch is also unable to *authorize* anything — `MemoryState.AuthorizedAt` checks
-both provenances — so dropping it here means a stale grant freezes without
-authorizing, which is the refuse-both-ways answer `docs/FOUNDATION.md` law 8 asks
-for. §5.1 requires live use loans to be returned before reallocation, so a stale
-grant that still freezes is a profile that skipped a step, not a case to be
-accommodated.
-
-It also restores agreement with `LoanConflicts`, which has no epoch clause either.
-The epoch filter had made the two disagree about which grants exist, and review used
-exactly that gap: a context could not *obtain* a loan (the conflict test saw the
-stale grant) and did not need one (this list did not), so the write proceeded
-unauthorized.
--/
-def grantsOver (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
-    List (GrantId × AuthorityGrant) :=
-  state.grantEntries.filter fun entry =>
-    decide (state.SharesBytes entry.2.provenance.root provenance.root) &&
-      decide (entry.2.range.Meets range)
-
-/-- The loans among them. §3's laws — exclusivity, counts, return by identity — are
-about loans, so they are stated over this; the access-time conflict rule is about
-authority, so it is stated over `grantsOver`. -/
-def loansOver (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
-    List (GrantId × AuthorityGrant) :=
-  (state.grantsOver provenance range).filter (fun entry => entry.2.kind = GrantKind.loan)
-
 /-- How many loans are outstanding. A derived cache in the strict sense: it is a
 function of the map and there is nowhere else for it to live. -/
 def outstandingLoans (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
@@ -389,38 +335,6 @@ def HeldByAnother (state : MemoryState) (context : ContextId) (provenance : Prov
 instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
     (range : ByteRange) : Decidable (state.HeldByAnother context provenance range) :=
   inferInstanceAs (Decidable (_ = _))
-
-/-- `state.AnyGrantOver provenance range` holds when *some* context holds authority
-over those bytes, of any kind.
-
-The question the transition's holder test should be asking, and it took three tries
-to arrive at.
-
-It was `Exclusive` — the *loan* map empty of everyone's loans — which is §3's
-sentence about exclusive authority and not a question about this access. A lender
-that had lent read-only could not read its own bytes, and a context following this
-layer's own "declare a loan to yourself" idiom with a read-only self-loan could not
-write those bytes even after every other loan was returned.
-
-Then it was `LoanHeldBySelf`, which fixed the self-loan case and opened a worse one:
-a context holding *nothing* was asked nothing, so when others held atomic-only
-grants and `authorityOf` reported `atomicShared`, any context at all could join the
-protocol atomically. Review demonstrated two contexts atomically writing the same
-live bytes with one of them holding no grant. It also keyed on `GrantKind.loan`
-while the state half did not, so two grants identical but for `kind` gave opposite
-answers about whether their holder may write.
-
-So: if anything is held over these bytes, an accessor needs authority of its own.
-The cost is that the lender's read of its own shared-immutably-lent bytes is refused
-along with a stranger's — `AllocationRecord` records no owner, so the two are
-indistinguishable here, and permitting one permits both.
-`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records that. -/
-def AnyGrantOver (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
-    Prop := state.grantsOver provenance range ≠ []
-
-instance (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
-    Decidable (state.AnyGrantOver provenance range) :=
-  inferInstanceAs (Decidable (_ ≠ _))
 
 /-- Nothing held means nothing outstanding for anybody. -/
 theorem not_heldByAnother_of_not_anyGrantOver {state : MemoryState} {context : ContextId}

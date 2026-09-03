@@ -478,4 +478,88 @@ theorem rights_do_not_compose :
     ¬ readAndWriteGrants.Granted thread₀ bufferProv ⟨0, 8⟩ AccessIntent.readWrite := by
   exact ⟨by decide, by decide, by decide, by decide, by decide⟩
 
+/-- A grant a context that holds and lends nothing writes for itself, over bytes
+another context has lent out. `engine₁` is that context: `Tests/Op/FakeIsa.lean`
+defines it holding and lending nothing precisely so a fixture can ask what a stranger
+may do. -/
+def strangerSeizure : AuthorityGrant :=
+  { kind := .loan, holder := engine₁, lender := engine₁, provenance := bufferProv
+    range := ⟨0, 8⟩, rights := .readWrite }
+
+/--
+**A context may not lend bytes it neither holds nor lent.**
+
+`issue?` checked reissue, emptiness, liveness, nestedness, extent agreement,
+containment and conflict, and never related the *lender* to the storage — while
+`LoanConflicts` requires distinct holders, so the first grant over any bytes conflicts
+with nothing. Review had one context issue itself a whole-buffer write loan over an
+allocation another exclusively owned: the owner became frozen, its counter-grant was
+refused as conflicting, it could not return a grant it neither held nor lent, and it
+could not free or re-epoch the allocation because a grant was outstanding. Permanent
+seizure, in one accepted call.
+
+**What this does not stop is seizing bytes nothing is held over**, because that is the
+same rule a legitimate owner's first loan needs and `AllocationRecord` records no
+owner. `MemoryState.MayLend`'s docstring says so and §4.4.1 records it.
+-/
+theorem a_stranger_may_not_lend_what_another_lent :
+    lentToEngine.memory.issue? secondBufferLoan strangerSeizure = Option.none ∧
+    ¬ lentToEngine.memory.MayLend strangerSeizure := by
+  exact ⟨by decide, by decide⟩
+
+/-- And the refusal is `MayLend` rather than the conflict rule underneath it: the same
+seizure over bytes *nothing* is held on is accepted, which is §4.4.1's open gap and
+not this rule's business. -/
+theorem the_stranger_refusal_is_the_lender_rule :
+    (state₀.memory.issue? secondBufferLoan strangerSeizure).isSome ∧
+    state₀.memory.MayLend strangerSeizure := by
+  exact ⟨by decide, MemoryState.mayLend_of_unheld (by decide)⟩
+
+/-- The thread holding a read loan of the buffer's head, lent by the engine. The
+`readWrite` state above cannot exercise sublending, because any second grant to a
+different holder over those bytes conflicts on the write. -/
+def readLentToThread : MemoryState :=
+  (state₀.memory.issue? bufferLoan
+    { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
+      range := ⟨0, 8⟩, rights := .readOnly }).getD state₀.memory
+
+/-- The read loan is outstanding, so the two fixtures below are about a lender's
+authority and not about an empty map. -/
+theorem the_read_loan_is_outstanding :
+    (readLentToThread.grantAt? bufferLoan).isSome ∧
+    readLentToThread.AnyGrantOver bufferProv ⟨0, 4⟩ := by
+  exact ⟨by decide, by decide⟩
+
+/-- **A borrower may sublend what it holds.** This is `MayLend`'s second disjunct, and
+it is the reachable one: the third (“every grant over these bytes is mine”) covers a
+lender lending again, and without this a borrower could never pass a fragment on —
+§3's authority is transferable by construction. -/
+theorem a_borrower_may_sublend_what_it_holds :
+    (readLentToThread.issue? secondBufferLoan
+      { kind := .loan, holder := engine₁, lender := thread₀, provenance := bufferProv
+        range := ⟨0, 4⟩, rights := .readOnly }).isSome := by decide
+
+/-- **And may not sublend more than it holds.** The borrower holds read authority; the
+sublease claims write. Neither the unheld disjunct nor the lender-lends-again disjunct
+applies, and `Permission.Grants` is what refuses it — which is the same relation
+`denialOf` uses for a descriptor's declared permission. -/
+theorem a_borrower_may_not_sublend_more_than_it_holds :
+    readLentToThread.issue? secondBufferLoan
+      { kind := .loan, holder := engine₁, lender := thread₀, provenance := bufferProv
+        range := ⟨0, 4⟩, rights := .readWrite } = Option.none ∧
+    ¬ readLentToThread.MayLend
+      { kind := .loan, holder := engine₁, lender := thread₀, provenance := bufferProv
+        range := ⟨0, 4⟩, rights := .readWrite } := by
+  exact ⟨by decide, by decide⟩
+
+/-- **A lender may lend again.** `lentToThread`'s grant was lent by the engine, so the
+engine's second lend over the same bytes is not a seizure — it is the third disjunct,
+and without it an owner that had lent a fragment out could never lend the rest, since
+an owner holds no grant of its own. Refused here on the *conflict* rule instead,
+which is the right rule: two write holders over one range. -/
+theorem the_lender_may_lend_again :
+    readLentToThread.MayLend
+      { kind := .loan, holder := engine₁, lender := engine₀, provenance := bufferProv
+        range := ⟨0, 4⟩, rights := .readOnly } := by decide
+
 end Tests.Op.StandardLoan

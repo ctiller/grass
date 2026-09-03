@@ -555,7 +555,8 @@ def LedgerEffectApplicable (obligations : FiniteMap ObligationId Obligation)
   | delta :: rest =>
       LedgerDelta.Applicable obligations.domain
         (fun id => (obligations.lookup id).map Obligation.protocol)
-        (fun id => (obligations.lookup id).map Obligation.owner) actor delta ∧
+        (fun id => (obligations.lookup id).map Obligation.owner)
+        (fun id => (obligations.lookup id).map Obligation.kind) actor delta ∧
       LedgerEffectApplicable (applyDelta obligations delta) actor rest
 
 instance decLedgerEffectApplicable (obligations : FiniteMap ObligationId Obligation)
@@ -1241,12 +1242,21 @@ When `MemoryEvent.ofOutcome` yields no event and the outcome carries no violatio
 So this is a third path distinct from the two theorems above, and review found the
 docstring there claiming a pair covered every refusal.
 
-It reaches this only for an *inert* access — one that neither reads nor writes —
-because `MemoryEvent.ofOutcome` returns `none` for a committed outcome only in that
-case. `AccessDescriptor.WellFormedIn.notInert` makes such a descriptor
-unadmittable, so `step` never gets here. The theorem exists anyway, for the reason
+`MemoryEvent.ofOutcome` returns `none` for a committed outcome in two cases, and
+neither is reachable from `step`. One is an *inert* access — one that neither reads
+nor writes — which `AccessDescriptor.WellFormedIn.notInert` makes unadmittable. The
+other is a `space` whose identity disagrees with `d.provenance.space`, which
+`ValidMemoryEvent.WellFormed.spaceAgreesWithProvenance` requires and which `step`
+cannot produce because it resolves the space *from* the provenance. An earlier version
+of this docstring named only the first and said "only in that case"; the second
+arrived with the well-formedness field and the docstring did not.
+
+The theorem exists anyway, for the reason
 `unknown_space_preserves_everything_but_the_ledger` gives: `performAccess` is
-public, and unreachable-by-construction-elsewhere is not proved harmless.
+public, and unreachable-by-construction-elsewhere is not proved harmless. The space
+case is the less comfortable of the two, because a disagreement becomes a silent
+no-op rather than a violation; `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records
+what turning it into a rejection would take.
 
 Worth naming precisely, because it is the one place a *denial* goes unrecorded: an
 inert access over dead provenance is refused by `denialOf` and this branch returns

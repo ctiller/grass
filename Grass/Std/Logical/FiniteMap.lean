@@ -62,6 +62,30 @@ theorem findValue_cons_ne [DecidableEq K] {k key : K} (h : k ≠ key) (value : V
     (rest : List (K × V)) : findValue ((k, value) :: rest) key = findValue rest key := by
   simp [findValue, h]
 
+/--
+A found value is one of the entries.
+
+The bundled form, `FiniteMap.mem_entries_of_lookup`, is the missing half of a bridge
+review found broken: `MemoryState.granted_of_covering` takes an
+`entry ∈ state.grantEntries` hypothesis, which `decide` discharges for a concrete map
+and which nothing discharged for an abstract one, so no general theorem about
+authority could be stated from a `lookup`. Proved by induction on the entry list,
+which is why `findValue` operates on the raw list.
+-/
+theorem mem_of_findValue [DecidableEq K] {entries : List (K × V)} {key : K} {value : V}
+    (h : findValue entries key = some value) : (key, value) ∈ entries := by
+  induction entries with
+  | nil => simp [findValue] at h
+  | cons entry rest ih =>
+    obtain ⟨k, v⟩ := entry
+    by_cases hk : k = key
+    · subst hk
+      rw [findValue_cons_self] at h
+      cases h
+      exact List.mem_cons_self
+    · rw [findValue, if_neg hk] at h
+      exact List.mem_cons_of_mem _ (ih h)
+
 @[simp] theorem eraseKey_nil [DecidableEq K] (key : K) :
     eraseKey ([] : List (K × V)) key = [] := rfl
 
@@ -133,6 +157,12 @@ such a map. Use `Binds`, or `domain` only up to membership, until the
 `Std.Logical` owner supplies a deduplicating count with its own law.
 -/
 def domain (m : FiniteMap K V) : List K := m.entries.map Prod.fst
+
+/-- A binding is one of the entries. The converse fails on a map with shadowed
+duplicates, which is why this direction only. -/
+theorem mem_entries_of_lookup {m : FiniteMap K V} {key : K} {value : V}
+    (h : m.lookup key = some value) : (key, value) ∈ m.entries :=
+  mem_of_findValue h
 
 /-- `m.Binds key` holds when `m` has a binding for `key`. -/
 def Binds (m : FiniteMap K V) (key : K) : Prop := (m.lookup key).isSome
