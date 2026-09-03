@@ -110,6 +110,36 @@ theorem the_two_loans_differ_only_in_identity :
     loanOfHead = loanOfHead ∧ firstLoan ≠ secondLoan := by
   exact ⟨rfl, by decide⟩
 
+/-! ## Lending freezes the owner's fragment
+
+§3 lists "frozen owner fragments while loans exist" among the canonical authority
+states. `ownerAuthority` is what puts an owner into one, and it is a function of
+the map: lending freezes, returning thaws, and no field has to be kept in step. -/
+
+/-- Owning and lending nothing is exclusive, and an ordinary write is permitted. -/
+theorem an_unlent_owner_may_write :
+    unlent.ownerAuthority bufferProv ⟨0, 8⟩ = .exclusive ∧
+    (unlent.ownerAuthority bufferProv ⟨0, 8⟩).PermitsOrdinaryWrite := by
+  exact ⟨by decide, by decide⟩
+
+/-- **Lending freezes the owner, and a frozen owner may not write.** The borrow
+discipline: the bytes are lent out, so the owner does not have them. -/
+theorem a_lending_owner_may_not_write :
+    (unlent.lend firstLoan loanOfHead).ownerAuthority bufferProv ⟨0, 8⟩ = .frozen ∧
+    ¬ ((unlent.lend firstLoan loanOfHead).ownerAuthority bufferProv ⟨0, 8⟩).PermitsOrdinaryWrite := by
+  exact ⟨by decide, by decide⟩
+
+/-- Returning thaws it, so the freeze is not a one-way door. -/
+theorem returning_thaws_the_owner :
+    ((unlent.lend firstLoan loanOfHead).returnLoan firstLoan).ownerAuthority
+      bufferProv ⟨0, 8⟩ = .exclusive := by decide
+
+/-- The owner keeps bytes it did not lend. A loan of the head does not freeze the
+tail, which is what makes "frozen *fragments*" fragments. -/
+theorem lending_the_head_leaves_the_tail_writable :
+    (unlent.lend firstLoan loanOfHead).ownerAuthority bufferProv ⟨8, 8⟩ = .exclusive := by
+  decide
+
 /-! ## Atomic authority is not ordinary authority -/
 
 /-- §3: "Atomics do not grant ordinary non-atomic access." -/

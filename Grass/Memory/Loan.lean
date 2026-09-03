@@ -12,8 +12,18 @@ exclusivity-iff-empty are M3's. This is M3's.
 ## What §3 actually demands
 
 Five canonical authority states, named here as `AuthorityState`. A loan map keyed
-by identity, carrying holder, range, rights, **lifetime, and conditions** — the
-last two are what M1's grant lacked. And three laws:
+by identity, carrying holder, range, rights, lifetime, and conditions.
+
+**`AuthorityGrant` carries the first four and not the last two**, and this file
+does not add them. Its own docstring already said so; the sentence here originally
+described what §3 demands and read as a description of the code, which is the
+drift this branch keeps being corrected for. A lifetime nothing consults would be
+one more field carried and never read — the shape that produced
+`AllocationRecord.initialized` and `AccessIntent.isDevice`. The lifetime discipline
+belongs with M4's frames, where a bounded lifetime has something to mean, and
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records it as owed.
+
+And three laws:
 
 - a return consumes that exact identity — `MemoryState.lookup_returnLoan_self`
   with `MemoryState.lookup_returnLoan_ne`;
@@ -31,10 +41,11 @@ places this layer has been bitten by a second source of truth.
 
 ## What is not here
 
-Split and join of loans, and frozen owner fragments, are §3 as well and are not in
-this file yet; `docs/MEMORY_IMPLEMENTATION_PLAN.md` records them. What is here is
-the identity and exclusivity discipline they would be built on, which is the part
-every later law depends on.
+Split and join of loans. `MemoryState.ownerAuthority` puts an owner into
+`AuthorityState.frozen` while a loan is outstanding and
+`not_permitsOrdinaryWrite_of_not_exclusive` is the borrow discipline that follows,
+so the freeze half of §3 is here; splitting one loan into two and joining two back
+is not. Nor is the lifetime field above.
 -/
 
 namespace Grass.Memory
@@ -140,6 +151,67 @@ theorem exclusive_iff_no_outstanding (state : MemoryState) (provenance : Provena
     state.Exclusive provenance range ↔ state.outstandingLoans provenance range = 0 := by
   unfold Exclusive outstandingLoans
   exact ⟨fun h => by rw [h]; rfl, fun h => List.eq_nil_of_length_eq_zero h⟩
+
+/--
+The authority an *owner* holds over bytes it may have lent.
+
+`docs/MEMORY_MODEL.md` §3 lists "frozen owner fragments while loans exist" among
+the canonical states, and this is what puts an owner into one. An owner with no
+outstanding loan over the bytes holds them exclusively; an owner with one holds a
+frozen fragment, and `AuthorityState.PermitsOrdinaryWrite` is false of that.
+
+It is a *function of the map*, like `outstandingLoans` and for the same reason: an
+owner's authority is not a fact stored beside the loans that could disagree with
+them. Lending is what freezes, returning is what thaws, and neither needs to
+remember to update a field.
+
+This is the owner's view. A borrower's authority is its loan's `rights`, which
+`AuthorityGrant.Authorizes` already decides; the two are different questions and
+this answers only the first.
+-/
+def ownerAuthority (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
+    AuthorityState :=
+  if state.Exclusive provenance range then .exclusive else .frozen
+
+/-- An owner is exclusive exactly when nothing is lent. -/
+@[simp] theorem ownerAuthority_eq_exclusive_iff (state : MemoryState)
+    (provenance : Provenance) (range : ByteRange) :
+    state.ownerAuthority provenance range = .exclusive ↔
+      state.Exclusive provenance range := by
+  unfold ownerAuthority
+  by_cases h : state.Exclusive provenance range <;> simp [h]
+
+/-- And frozen exactly when something is. -/
+@[simp] theorem ownerAuthority_eq_frozen_iff (state : MemoryState)
+    (provenance : Provenance) (range : ByteRange) :
+    state.ownerAuthority provenance range = .frozen ↔
+      ¬ state.Exclusive provenance range := by
+  unfold ownerAuthority
+  by_cases h : state.Exclusive provenance range <;> simp [h]
+
+/--
+**An owner may not write bytes it has lent.**
+
+The borrow discipline, as a theorem rather than as a convention. While any loan is
+outstanding over the range the owner's fragment is frozen, and
+`AuthorityState.PermitsOrdinaryWrite` is false of `frozen` — so the owner regains
+the ability to write only by the relevant map becoming empty, which §3 requires and
+which `Exclusive` is defined as.
+-/
+theorem not_permitsOrdinaryWrite_of_not_exclusive {state : MemoryState}
+    {provenance : Provenance} {range : ByteRange}
+    (h : ¬ state.Exclusive provenance range) :
+    ¬ (state.ownerAuthority provenance range).PermitsOrdinaryWrite := by
+  rw [(ownerAuthority_eq_frozen_iff state provenance range).mpr h]
+  exact AuthorityState.not_permitsOrdinaryWrite_frozen
+
+/-- And regains it when the map empties, so the freeze is not a one-way door. -/
+theorem permitsOrdinaryWrite_of_exclusive {state : MemoryState}
+    {provenance : Provenance} {range : ByteRange}
+    (h : state.Exclusive provenance range) :
+    (state.ownerAuthority provenance range).PermitsOrdinaryWrite := by
+  rw [(ownerAuthority_eq_exclusive_iff state provenance range).mpr h]
+  trivial
 
 /-- Record a loan under a fresh identity. -/
 def lend (state : MemoryState) (id : GrantId) (grant : AuthorityGrant) : MemoryState :=

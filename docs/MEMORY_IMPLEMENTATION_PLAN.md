@@ -908,6 +908,47 @@ above is proved.
 
 Unblocks: the `verify_assembly` owner, and Spike 1 block certificates.
 
+## 4.4 M3 begun: loans
+
+`Grass/Memory/Loan.lean` implements the part of [MEMORY_MODEL.md](MEMORY_MODEL.md)
+§3 that every later authority law rests on, and `Tests/Memory/Loans.lean` checks
+it.
+
+`AuthorityState` names the five canonical states §3 lists, closed because §3 names
+them as the canonical list — a profile needing another does not add a constructor,
+since `atomicShared` carries the profile's own ordering and a new *kind* of
+authority is a `GrantKind`, which is open nominal so this does not have to be.
+`PermitsOrdinaryWrite` holds only of `exclusive`, which puts §3's "atomics do not
+grant ordinary non-atomic access" in a theorem.
+
+Three laws are proved. A return consumes that exact identity, which
+`returning_one_of_two_leaves_the_other` earns by returning one of two loans
+identical in range, rights and holder — a map keyed by shape fails there and
+nothing else in the fixture would notice. Exclusivity is the emptiness of the
+relevant map, defined as that rather than checked against a stored number. And
+counts are derived: `outstandingLoans` computes from the map and no field records
+one, which is the discipline that removed `AllocationRecord.initialized` and
+`AccessIntent.isDevice` after each turned out to be a second source of truth.
+
+`ownerAuthority` is the freeze: an owner with a loan outstanding holds
+`AuthorityState.frozen` and `not_permitsOrdinaryWrite_of_not_exclusive` is the
+borrow discipline that follows. It too is a function of the map, so lending
+freezes and returning thaws without a field to keep in step, and
+`lending_the_head_leaves_the_tail_writable` shows the freeze is per-fragment rather
+than per-allocation.
+
+### 4.4.1 What M3 still owes
+
+- **Split and join of loans**, which §3 requires and which the identity discipline
+  above is the foundation for.
+- **Lifetime and conditions on a grant.** §3's map carries them and
+  `AuthorityGrant` does not. Adding fields nothing consults is the shape this layer
+  has been bitten by three times, so they wait for M4's frames, where a bounded
+  lifetime has something to mean.
+- **Wiring the loan map into a reusable `AuthorityProvider`.** `Tests/Op/FakeIsa.lean`
+  has an ad-hoc one; a profile should be able to take a standard loan provider
+  rather than write its own, and the freeze law above is what it would enforce.
+
 ## 5. M3–M5 — The Spike 1 acceptance path
 
 These three run in the order given and, together with M2, close everything
