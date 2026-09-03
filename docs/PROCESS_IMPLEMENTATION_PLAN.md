@@ -678,19 +678,20 @@ representation relation.
 
 ## 5. M3 — Cancellation and lifecycle
 
-**Status: three modules written, unmerged, unratified.** `coord1:6` ruled the
+**Status: four modules written, unmerged, unratified.** `coord1:6` ruled the
 canonical scoped cancellation form while M2 was in progress, so
 `Cancellation/Identity.lean` and `Cancellation/Policy.lean` were built out of
 order to discharge that disposition. `Cancellation/Compose.lean` follows, and it
-discharges the first two thirds of the exit criterion below. Termination
-contracts, facets, and all of byte flow have not started.
+discharges the first two thirds of the exit criterion below. `Termination.lean`
+carries the safety half of the termination contract. Facets and all of byte flow
+have not started.
 
 ```text
 Grass/Process/Cancellation/Identity.lean masks, point/call/region ids, CancelReason
 Grass/Process/Cancellation/Policy.lean   scoped policy and certificate (written
                                          early under coord1:6, ahead of M3)
 Grass/Process/Cancellation/Compose.lean  the |> algebra and bounded cancellation
-Grass/Process/Termination.lean           modes, contracts, dispositions
+Grass/Process/Termination.lean           modes, contracts, dispositions (safety half)
 Grass/Process/Facet.lean                 TerminationFacet and its constructors
 Grass/Process/ByteFlow/Ingress.lean      phases, resolutions, conservation
 Grass/Process/ByteFlow/Egress.lean       offered/committed/queued, suffix retention
@@ -720,6 +721,29 @@ Exit criterion, in three parts:
   needed, which is why this reads more simply than the criterion anticipated.
 - **Not started.** Both byte-flow conservation theorems over their full
   transition families.
+
+`Termination.lean` carries `docs/PROCESS.md` §3's typed-termination principle
+and the field that makes it one: `noArbitraryDeath`, which says a permitted stop
+is either at a proved safe point or is a fault. The theorems that follow are the
+ones a supervisor's author needs — a forced stop is safe, a cooperative stop is
+safe, and off a safe point the only permitted mode is `faulted`, which is §3's
+"a supervisor cannot manufacture a safe forced stop".
+
+Its first draft was uninhabitable twice, in the same way and for the same reason
+`ProcessCorrect` once was: a field quantified over more situations than can
+arise. It demanded a `TerminalDisposition` for a *faulted* stop, which contains
+`p.Terminal` and so is impossible for a process that faults away from a terminal
+state; and it let `permitted` see the state but not the outstanding demands
+while `disposition` ranged over every bag, which is impossible under the `strict`
+remainder law the corpus supplies by name. Both were found by writing the
+fixture, not by reading the module, and both are recorded in its note.
+
+What is deferred and named rather than dropped: `reachesSafePoint`, §3's
+cooperative-cancellation *liveness* theorem, which needs a fairness model and a
+`TerminationPremiseFamily` this layer does not have — `ReachesSafePointObligation`
+names it — and the fault path's custody of the demands a faulting process was
+holding, which `FaultCustodyObligation` names. Writing either as a discharged
+field would have been the liveness theorem in name only.
 
 What `Compose.lean` deliberately does *not* model is §3's `CancellationSummary`
 itself, whose fields — `PendingCancellationCustody`,
