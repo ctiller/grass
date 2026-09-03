@@ -134,6 +134,35 @@ inductive StepRejection where
   to zero. Review found that asymmetry: an impossible count on a compute substep
   was refused while an impossible count on an access was approximated. -/
   | faultCommitOutOfRange
+  /-- A substep may raise a fault class the operation's `faults` facet does not
+  declare.
+
+  `OperationFacets.faults` is what an operation says it may raise, and it was
+  consumed by nothing: `OperationFacets.supplied` reads only `isSome`, so an
+  operation declaring `faults := some []` closed the facet and then page-faulted
+  through a substep that admitted one. The substep-level list was checked
+  (`faultClassNotDeclared`); the operation-level declaration above it was not
+  cross-checked against anything, which made it a fact the model carried and
+  nothing consulted — the shape this layer has removed from `AllocationRecord` and
+  `AccessIntent` already.
+
+  Checked statically, on every step rather than only on a faulting one. An
+  operation whose two facets contradict each other is refused before it runs,
+  because `docs/FOUNDATION.md` law 8 says the answer to two declarations that
+  disagree is not to pick one. Together with `faultClassNotDeclared` this gives
+  what a caller reading the facet is entitled to assume: a raised class is one the
+  operation declared. -/
+  | operationFaultsIncomplete (fault : FaultClassId)
+  /-- The operation declares a fault class the profile's vocabulary does not
+  recognize.
+
+  `MemoryProfile.Admits` closes this for an access's `admittedFaults` and
+  `computeFaultNotRecognized` closes it for a compute substep. The operation-level
+  list was the third place a fault class could be named, and the only one no
+  registry saw. `Grass/Memory/Profile.lean` claims every registry here is
+  consulted, so an unrecognized name reaching a declaration the profile accepts is
+  that claim failing. -/
+  | operationFaultNotRecognized (fault : FaultClassId)
 deriving DecidableEq, Repr
 
 /-- What one step produced. -/
@@ -846,6 +875,24 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
                   faults.find? (fun f =>
                     ! decide (policy.profile.vocabulary.faultClasses.Recognizes f))) with
           | some fault => .rejected (.computeFaultNotRecognized fault)
+          | Option.none =>
+          -- The operation's own fault declaration, cross-checked against the
+          -- substeps below it and against the vocabulary. Both directions matter:
+          -- a substep that may raise a class the operation does not declare makes
+          -- the declaration a lie, and a class the operation declares that no
+          -- registry recognizes is a name nothing admitted. Neither was checked.
+          -- An absent facet is *not* a declaration of no faults: law 8 again, and
+          -- whether the profile may leave it absent is `Closes`'s question, not
+          -- this one. There is simply nothing to cross-check.
+          match operation.facets.faults.bind (fun declared =>
+              declared.find? (fun f =>
+                ! decide (policy.profile.vocabulary.faultClasses.Recognizes f))) with
+          | some fault => .rejected (.operationFaultNotRecognized fault)
+          | Option.none =>
+          match operation.facets.faults.bind (fun declared =>
+              sequence.substeps.findSome? (fun sub =>
+                sub.faults.find? (fun f => !declared.contains f))) with
+          | some fault => .rejected (.operationFaultsIncomplete fault)
           | Option.none =>
           match faultAt sequence with
           | .none =>

@@ -664,10 +664,21 @@ one outright defect that had already merged — see §3.11's denial row.
   ones already carry is the defect shape this branch has found eight times.
 - **`InitializationDemand.permitsUninitialized`'s justification names nothing**,
   like `FaultVisibility.transactional`'s, and unlike that one it was not recorded.
-- **The operation-level `faults` facet is consumed by nothing.**
-  `OperationFacets.supplied` reads only `isSome`, so an operation declaring
-  `faults = some []` can still raise one. The substep-level lists are checked now;
-  the operation-level declaration is not cross-checked against them.
+- ~~**The operation-level `faults` facet is consumed by nothing.**~~ Closed.
+  `OperationFacets.supplied` read only `isSome`, so an operation declaring
+  `faults = some []` closed the facet and then page-faulted through a substep that
+  admitted one. `step` now cross-checks it in both directions before running
+  anything: every class a substep may raise must appear in the operation's list
+  (`operationFaultsIncomplete`), and every class the operation names must be
+  recognized by the vocabulary (`operationFaultNotRecognized`) — the third place a
+  fault class could be named and the only one no registry saw. Statically, on every
+  step rather than only on a faulting one, because two declarations that disagree
+  are refused rather than reconciled ([FOUNDATION.md](FOUNDATION.md) law 8).
+
+  An **absent** facet is still not a declaration of no faults; whether it may be
+  absent is `Closes`'s question. Eighteen of `Tests/Op/FakeIsa.lean`'s own
+  operations were inconsistent when the check went in, which is the measure of how
+  little a declaration nobody reads constrains.
 - **Ordering modes are unchecked.** `MemoryOrder.IsPortable` and
   `MemoryScope.IsPortable` have no consumer, `AdmittedVocabulary` has no ordering
   registry, and an access declaring `profileSpecific` with an unregistered name

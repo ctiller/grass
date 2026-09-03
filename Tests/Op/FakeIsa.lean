@@ -165,6 +165,12 @@ inductive Alpha where
   | impersonatingDmaWrite
   /-- A compute substep declaring a fault class the vocabulary never admitted. -/
   | computeWithPhantomFault
+  /-- An operation declaring that it raises no faults, over an access that admits a
+  page fault. Its two facets contradict each other. -/
+  | faultsUnderdeclared
+  /-- An operation declaring a fault class the vocabulary never admitted, with no
+  compute substep to carry it — so `computeFaultNotRecognized` does not see it. -/
+  | operationWithPhantomFault
   /-- Discharges an obligation that was never live. -/
   | dischargeGhost
   /-- Joins two obligations that were never live into a new one. -/
@@ -251,12 +257,12 @@ instance : HasOperationFacets Alpha where
     | .reserve =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
             false true [.create bufferProtocol bufferAuthority releaseObligation]))
-          faults := some [], restartability := some .notRestartable
+          faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .release =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
             false true [.discharge bufferProtocol bufferAuthority releaseObligationId]))
-          faults := some [], restartability := some .notRestartable
+          faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .divide =>
         { memoryEffects := some
@@ -264,7 +270,7 @@ instance : HasOperationFacets Alpha where
                 [ .access (acc bufferProv ⟨0, 8⟩ 0x1000 .read .readWrite true false)
                   , .compute [divideError] ]
               onFault := .priorEffectsVisible }
-          faults := some [divideError], restartability := some .notRestartable
+          faults := some [.pageFault, divideError], restartability := some .notRestartable
           ordering := some .plain }
     | .storeThroughView =>
         { memoryEffects := some (.single (acc viewProv ⟨0, 8⟩ 0x1000 .write .readWrite
@@ -274,59 +280,59 @@ instance : HasOperationFacets Alpha where
     | .badPermission =>
         { memoryEffects := some (.single (acc constProv ⟨0, 8⟩ 0x1000 .write .readOnly
             false true))
-          faults := some [], restartability := some .notRestartable
+          faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .badRange =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 4096⟩ 0x1000 .write .readWrite
             false true))
-          faults := some [], restartability := some .notRestartable
+          faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .badLedger =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
             false true [.split bufferProtocol bufferAuthority releaseObligationId []]))
-          faults := some [], restartability := some .notRestartable
+          faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .staleEpoch =>
         { memoryEffects := some (.single (acc staleProv ⟨0, 8⟩ 0x1000 .write .readWrite
             false true))
-          faults := some [], restartability := some .notRestartable
+          faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .dischargeGhost =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
             false true [.discharge bufferProtocol bufferAuthority ghostObligationId]))
-          faults := some [], restartability := some .notRestartable
+          faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .joinGhosts =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
             false true [.join bufferProtocol bufferAuthority [ghostObligationId, ghostObligationId₂] fabricatedObligation]))
-          faults := some [], restartability := some .notRestartable
+          faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .splitGhost =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
             false true [.split bufferProtocol bufferAuthority ghostObligationId [fabricatedObligation]]))
-          faults := some [], restartability := some .notRestartable
+          faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .writeThroughLoan =>
         { memoryEffects := some (.single (acc borrowedProv ⟨0, 8⟩ 0x3000 .write .readWrite
             false true))
-          faults := some [], restartability := some .notRestartable
+          faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .writeStackSlot =>
         { memoryEffects := some (.single (acc frameProv ⟨0, 8⟩ 0x2000 .write .readWrite
             false true))
-          faults := some [], restartability := some .notRestartable
+          faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .createTwice =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
             false true
             [ .create bufferProtocol bufferAuthority collidingFirst
             , .create bufferProtocol bufferAuthority collidingSecond ]))
-          faults := some [], restartability := some .notRestartable
+          faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .dischargeWithWrongAuthority =>
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
             false true [.discharge otherProtocol otherAuthority releaseObligationId]))
-          faults := some [], restartability := some .notRestartable
+          faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .deniedThenStore =>
         { memoryEffects := some
@@ -334,7 +340,7 @@ instance : HasOperationFacets Alpha where
                 [ .access (acc staleProv ⟨0, 8⟩ 0x1000 .write .readWrite false true)
                   , .access (acc bufferProv ⟨8, 8⟩ 0x1008 .write .readWrite false true) ]
               onFault := .priorEffectsVisible }
-          faults := some [], restartability := some .notRestartable
+          faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .splitStore =>
         { memoryEffects := some
@@ -349,6 +355,16 @@ instance : HasOperationFacets Alpha where
             false true [] false thread₀))
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
+    | .faultsUnderdeclared =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true))
+          faults := some [], restartability := some .notRestartable
+          ordering := some .plain }
+    | .operationWithPhantomFault =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true))
+          faults := some [.pageFault, ⟨⟨"fake.neverDeclaredFault"⟩⟩]
+          restartability := some .notRestartable, ordering := some .plain }
     | .computeWithPhantomFault =>
         { memoryEffects := some
             { substeps := [ .compute [⟨⟨"fake.neverDeclaredFault"⟩⟩] ]
@@ -389,14 +405,14 @@ instance : HasOperationFacets Beta where
             { acc viewProv ⟨0, 8⟩ 0x1000 .write .readWrite false true
                 (context := engine₀) with
               intent := { reads := false, writes := true } })
-          faults := some [.deviceFault], restartability := some .notRestartable
+          faults := some [.pageFault, .deviceFault], restartability := some .notRestartable
           ordering := some .plain }
     | .dmaWriteChained =>
         { memoryEffects := some (.single
             { acc chainedProv ⟨0, 8⟩ 0x4000 .write .readWrite false true
                 (context := engine₀) with
               intent := { reads := false, writes := true } })
-          faults := some [.deviceFault], restartability := some .notRestartable
+          faults := some [.pageFault, .deviceFault], restartability := some .notRestartable
           ordering := some .plain }
     | .dmaDischargesTheThreadsDuty =>
         { memoryEffects := some (.single
@@ -404,7 +420,7 @@ instance : HasOperationFacets Beta where
                 [.discharge bufferProtocol bufferAuthority releaseObligationId]
                 (context := engine₀) with
               intent := { reads := false, writes := true } })
-          faults := some [.deviceFault], restartability := some .notRestartable
+          faults := some [.pageFault, .deviceFault], restartability := some .notRestartable
           ordering := some .plain }
     | .undeclared => {}
 
@@ -1145,6 +1161,47 @@ theorem a_compute_substep_with_an_unrecognized_fault_is_refused :
     Grass.Op.step policy state₀ (SomeOperation.of Alpha.computeWithPhantomFault) thread₀
       .thread ⟨⟨"alpha"⟩⟩ =
       .rejected (.computeFaultNotRecognized ⟨⟨"fake.neverDeclaredFault"⟩⟩) := rfl
+
+/-! ## And so is the operation's own fault declaration
+
+`OperationFacets.faults` was consumed by nothing. `OperationFacets.supplied` reads
+only `isSome`, so an operation declaring `faults := some []` closed the facet and
+then page-faulted through a substep that admitted one — the substep-level list was
+checked, the operation-level list above it was checked against nothing. That is a
+fact the model carries and nothing consults, which is the shape this layer removed
+from `AllocationRecord.initialized` and `AccessIntent.isDevice`.
+
+Eighteen of this fixture's own operations were inconsistent when the check went in,
+which is how little a declaration nobody reads constrains. -/
+
+/-- **An operation that declares no faults, over an access that admits one, is
+refused.** Refused statically, before any fault plan is supplied, because the two
+declarations contradict each other and law 8's answer to that is not to pick one. -/
+theorem an_underdeclared_operation_is_refused :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.faultsUnderdeclared) thread₀
+      .thread ⟨⟨"alpha"⟩⟩ = .rejected (.operationFaultsIncomplete .pageFault) := rfl
+
+/-- And it is refused with no fault plan at all, so this is a check on the
+declaration rather than on what the machine did. -/
+theorem an_underdeclared_operation_is_refused_without_a_fault :
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.faultsUnderdeclared) thread₀
+      .thread ⟨⟨"alpha"⟩⟩ (faultAt := fun _ => .none)).Ran = False := by
+  decide
+
+/-- **An operation declaring a fault class the vocabulary never admitted is
+refused**, with no compute substep involved — that was the only other place an
+unrecognized class was caught, and this operation has none. -/
+theorem an_operation_with_a_phantom_fault_is_refused :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.operationWithPhantomFault) thread₀
+      .thread ⟨⟨"alpha"⟩⟩ =
+      .rejected (.operationFaultNotRecognized ⟨⟨"fake.neverDeclaredFault"⟩⟩) := rfl
+
+/-- An operation may declare *more* than its substeps can raise: `store` declaring
+`[.pageFault]` over one access that admits exactly that still runs, so the check is
+containment rather than equality. Without this the two theorems above would be
+consistent with refusing every operation that declares a fault. -/
+theorem a_consistent_declaration_still_runs :
+    (stepAlpha state₀ .store).state?.isSome := by decide
 
 /-- `divide`'s compute substep declares `divideError`, which the vocabulary does
 recognize, so it still runs *and commits its load*. Same reason as
