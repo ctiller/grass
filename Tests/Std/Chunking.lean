@@ -61,6 +61,20 @@ example : byteAtATime ≠ uneven := by
 byte. Anything expressible as a function of the concatenation will do. -/
 def parse (input : Vec Byte) : Nat × Option Byte := (input.length, input.get? 0)
 
+/-! The two applications below were both closable by `rfl` in an earlier version,
+because the chunkings are concrete and reduction settles them without the
+theorem. Adversarial review pointed that out. The symbolic statement is kept
+first, since it is the one the theorem is actually needed for. -/
+
+/-- Symbolic: any two chunkings of the same sequence, any consumer of the
+flattening. `rfl` cannot close this. -/
+example {δ : Type} (f : Vec Byte → δ) (cs ds : Vec (Vec Byte)) (v : Vec Byte)
+    (hc : Vec.IsChunking cs v) (hd : Vec.IsChunking ds v) :
+    f (Vec.flatten cs) = f (Vec.flatten ds) :=
+  Vec.chunk_extensional f hc hd
+
+/-- The concrete instances, which reduce, and are kept for readability rather
+than as evidence about the theorem. -/
 example :
     parse (Vec.flatten byteAtATime) = parse (Vec.flatten uneven) :=
   Vec.chunk_extensional parse (rfl : Vec.IsChunking byteAtATime message) rfl
