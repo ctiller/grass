@@ -323,6 +323,35 @@ theorem isRoot_kind {parentage : ProcessParentage topology kind}
   | root => rfl
   | _ => exact absurd root (fun h => h)
 
+/--
+**And only the root has no known parent.**
+
+`knownParent_eq_none_of_isRoot`'s converse, and the half a preservation proof needs.
+`LogicalProcessNetworkCore.RootUnique` is a claim about which incarnations are
+roots, and the only thing a step carrying an incarnation across a slot agrees on
+is `knownParent` — so without this, root-ness cannot be carried and the clause
+cannot be proved for `processStep`, `detach` or any ending.
+-/
+theorem isRoot_of_knownParent_none {parentage : ProcessParentage topology kind}
+    (unparented : parentage.knownParent = none) : parentage.IsRoot := by
+  cases parentage with
+  | root => trivial
+  | attached _ _ => exact absurd unparented (by intro equal; cases equal)
+  | detached _ _ => exact absurd unparented (by intro equal; cases equal)
+
+/--
+A root holds no parent authority either, which is the form
+`Spawns.spawnsAChild` refutes.
+
+That field says a spawned incarnation has a current parent; this says a root has
+none. Together they are why a spawn cannot install a second root.
+-/
+theorem root_currentParent {parentage : ProcessParentage topology kind}
+    (root : parentage.IsRoot) : parentage.currentParent = none := by
+  cases parentage with
+  | root => rfl
+  | _ => exact absurd root (fun h => h)
+
 /-- Neither a detached nor an attached process is the root. -/
 theorem detached_not_root (parentKind : topology.ProcessKind)
     (parent : topology.ProcessRef parentKind) :
@@ -435,6 +464,37 @@ theorem live_witnessed_vacuously {incarnation : ProcessInstance topology}
   intro result ended
   rw [ProcessLifecycle.live_iff_running.mp live] at ended
   exact absurd ended (by simp)
+
+/--
+Two incarnations carried to a common role, agreeing on the three fields
+`LifecycleWitnessed` reads, witness the same lifecycles.
+
+`Grass/Process/Network/Transition.lean` states its identity fields over
+transported values — an incarnation carries its own `kind`, so two of them in one
+slot are only comparable after both are carried to that slot's kind — and
+`LifecycleWitnessed` is stated at the incarnation's *own* kind. This is the
+bridge, and `Grass/Process/Network/WellFormedness.lean` is what needs it:
+`processStep`, `detach` and the six endings all pin these three fields, and none
+of them can hand the clause over without it.
+-/
+theorem lifecycleWitnessed_transfer {left right : ProcessInstance topology}
+    {kind : topology.ProcessKind}
+    (leftKind : left.kind = kind) (rightKind : right.kind = kind)
+    (sameLifecycle : leftKind ▸ left.lifecycle = rightKind ▸ right.lifecycle)
+    (sameRequest : leftKind ▸ left.request = rightKind ▸ right.request)
+    (sameLocal : leftKind ▸ left.localState = rightKind ▸ right.localState)
+    (witnessed : right.LifecycleWitnessed) : left.LifecycleWitnessed := by
+  cases left with
+  | mk leftRole leftRef leftParentage leftRequest leftLocal leftOutstanding leftLifecycle =>
+  cases right with
+  | mk _ rightRef rightParentage rightRequest rightLocal rightOutstanding rightLifecycle =>
+  cases leftKind
+  cases rightKind
+  have life : leftLifecycle = rightLifecycle := sameLifecycle
+  have request : leftRequest = rightRequest := sameRequest
+  have local' : leftLocal = rightLocal := sameLocal
+  subst life; subst request; subst local'
+  exact witnessed
 
 /-- Detaching this instance: parentage only, and only where there is authority. -/
 def detach (incarnation : ProcessInstance topology) : ProcessInstance topology :=
