@@ -3431,11 +3431,20 @@ signal: none of the five structures has a witness. §10.79.
 ### 10.79 Ten of the eleven channel constructors have never been inhabited
 
 `SendsEscrow`, `ClosesSession`, `KillsSession`, `RequestsCancel` and `Reroutes`
-have no witness anywhere in the corpus, and of `NetworkTransition`'s channel
-constructors only `.receive` is ever built. A reviewer built witnesses for
+had no witness anywhere in the corpus, and of `NetworkTransition`'s channel
+constructors only `.receive` was ever built. A reviewer built witnesses for
 `send`, `channelClose`, `channelDeath`, `requestCancel`, `acknowledgeCancel`,
-`drop` and `reroute` in scratch, so none is uninhabitable — the corpus simply
-does not exercise them.
+`drop` and `reroute` in scratch, so none is uninhabitable — the corpus simply did
+not exercise them.
+
+**Four of the five are now built**, at the world `the_send` reaches:
+`Tests/Process/ChannelStepFixtures.lean` carries a close, a channel death, a
+cancellation request and a drop, together with
+`a_close_on_the_wrong_session_is_refused`, which is what `onItsSession` buys.
+
+`Reroutes` is the one left, and it is left for a reason worth stating: it needs
+two sessions on one edge and this topology names one, so building it is a change
+to the fixture *world* rather than an addition beside it.
 
 Two consequences it found, both worth more than the count:
 
