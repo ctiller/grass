@@ -344,6 +344,21 @@ eight-byte range — the opposite of what §4 says, in the function whose docstr
 claimed to be what every initialization argument goes through. It was not: the
 initialization path is `MemoryState.commit`'s byte list, which is why the error
 never reached memory. Review found both the defect and the false claim.
+
+**And it has no consumer.** `MemoryEvent.committedWriteRange` is the one the tree
+uses — same definition over an event's own range and count, consumed by
+`MemoryEvent.Conflicts` through `committedRange`. This one is applied nowhere; its
+only mention outside its own four theorems is a sentence in
+`Tests/Memory/Spike1Reference.lean` saying "`AccessDescriptor.committedWriteRange` is
+what a later proof reads", which is not so. Two Lean encodings of one sentence in one
+layer is the [FOUNDATION.md](../../docs/FOUNDATION.md) law 11 objection this document
+raises against `LoanConflicts`, and here the duplicate is the dead one.
+
+Kept rather than deleted for one reason: the *event* version is derived from a
+descriptor's range and an outcome's count, so a proof relating an event's committed
+range to the descriptor that produced it will want this side of the equation, and
+`Grass/Op/Step.lean` has no such theorem yet. If M8's graph does not want it, it
+should go. Recorded in `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1.
 -/
 def committedWriteRange (d : AccessDescriptor) (status : AccessStatus) : ByteRange :=
   d.range.take status.committedWrites

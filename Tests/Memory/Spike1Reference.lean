@@ -244,7 +244,10 @@ def payloadPointer : PointerValue :=
 `mov transferred, 0` — a typed frame-slot write that produces initialization.
 
 `producesInitialized` is a claim about the bytes this access *commits*, not the
-bytes it names; `AccessDescriptor.committedWriteRange` is what a later proof reads.
+bytes it names. This sentence used to add "`AccessDescriptor.committedWriteRange` is
+what a later proof reads", and no proof reads it — the tree's committed-range consumer
+is `MemoryEvent.committedWriteRange`, through `Conflicts`. What actually carries the
+claim is `MemoryState.commit`'s byte list, bounded by `Committed.writtenFits`.
 -/
 def movTransferredZero : SubstepSequence :=
   .single (access transferredProvenance ⟨32, 4⟩ 0x1020 .write .readWrite 4 false true)

@@ -1425,6 +1425,39 @@ with what it used to say.
   This was the weakest coverage in the layer and it was in the declaration-time seal
   — the thing §1 asks for before any question of what the state permits.
 
+- **`Provenance.source` has no counterpart in the state.** `AllocationRecord` records
+  extent, epoch, space, permission, liveness, bytes and base — not where the storage
+  came from. The only consumer of `d.provenance.source` under `Grass/` is
+  `admissibilityFailures`, which checks the *name* against a registry. §2 requires a
+  profile to distinguish `VirtualAlloc`, heap, `malloc`, stack, mapped file and device
+  memory; nothing can compare a claim to the storage, so two provenances differing
+  only in `source` are the same storage to every rule in the layer and both are
+  admitted. The same shape as the deleted `AccessIntent.isDevice`, and as
+  `requiredPermission` before `Permission.Grants` existed.
+- ~~**`MemoryState.allocate?`, `allocateAll?` and `tearDown?` were outside the door
+  audit.**~~ §1's chokepoint sentence names bytes before authority — "raw mutation of
+  memory bytes, initialization, permissions, provenance, or race state outside that
+  interface is prohibited" — and `Tools/DoorAudit.py` guarded only the authority half.
+  The three allocation-table mutators are doors now, negative-tested.
+
+  `MemoryState.write` is deliberately not one, and the reason is the tool's documented
+  namespace blindness: `write` is also `ByteStore.write` and `.write` is an
+  `AccessIntent` constructor, so adding it produced twenty-six reports and none of
+  them was a call to the mutator. Guarding it needs elaboration rather than a regex.
+- **`AccessDescriptor.committedWriteRange` has no consumer**, and duplicates
+  `MemoryEvent.committedWriteRange`, which does — through `Conflicts`. Two Lean
+  encodings of one sentence in one layer is the law 11 objection this document raises
+  against `LoanConflicts`, with the dead one here. Kept for now because a proof
+  relating an event's committed range back to its descriptor would want this side of
+  the equation and `Grass/Op/Step.lean` has no such theorem; if M8's graph does not
+  want it, it should go. A fixture claiming "a later proof reads it" is corrected.
+- **The commutation results do not reach `step`.** `applyAccess_comm` and its
+  neighbours are about `applyAccess`; `refusalOf` reads the grant map, the aliases,
+  the obligations, the contexts and the event trace, and has no congruence theorem at
+  all. So §4's exit criterion — "reads and writes to disjoint ranges commute and
+  frame" — is discharged for the block evaluator and, for the transition, only its
+  framing half.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Three consecutive review rounds found the same shape and it is worth naming as a

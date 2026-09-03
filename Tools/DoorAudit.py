@@ -110,6 +110,25 @@ DOORS = {
     # declares it. `Tests/` is not scanned, and a fixture minting authority to build a
     # state is exactly what a fixture is for.
     "mintedBy": {"Grass/Obligation/Core.lean"},
+    # The byte mutators. §1's chokepoint sentence names bytes before authority --
+    # "raw mutation of memory bytes, initialization, permissions, provenance, or race
+    # state outside that interface is prohibited" -- and this audit guarded only the
+    # authority half until review pointed that out. `write` is public and unbounded by
+    # the record's extent; `allocate?` and `tearDown?` change permission, liveness,
+    # extent and placement.
+    #
+    # `MemoryState.write` is deliberately *not* listed, and the reason is this tool's
+    # documented namespace blindness rather than a judgement about the function.
+    # `write` is also `ByteStore.write`, used throughout `Grass/Memory/ByteStore.lean`
+    # and `State.lean`, and `.write` is an `AccessIntent` constructor -- adding the
+    # name produced twenty-six reports, none of them a call to the mutator. Guarding
+    # it needs elaboration, not a regex. Its two `Grass/` callers today are
+    # `MemoryState.commit` and `Shape.lean`'s `writeField`, and
+    # `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records that the second is unbounded
+    # by the allocation and safe only for want of callers.
+    "allocate?": {"Grass/Memory/State.lean"},
+    "allocateAll?": {"Grass/Memory/State.lean"},
+    "tearDown?": {"Grass/Memory/State.lean"},
 }
 
 BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
