@@ -1409,6 +1409,22 @@ fact closed. The four stale sentences it found all pointed the other way — a c
 thing described as open, or a count that had moved — and each is corrected in place
 with what it used to say.
 
+- ~~**Twelve of `WellFormedIn`'s fourteen clauses were untested.**~~ Review mutated
+  each clause's proposition to `True`, one at a time, and rebuilt: only
+  `rangeInProvenance` and `permissionSufficient` were caught. The other twelve could
+  be deleted and nothing in the tree would notice — including `notInert` and
+  `rangeNonEmpty`, which carry law-8 docstrings arguing at length for their existence,
+  and `atomicityAgrees`, which a fixture in `Tests/Memory/RiskOneCases.lean` names in
+  its prose while proving something that survives the clause's removal.
+
+  `Tests/Memory/WellFormedClauses.lean` is one baseline proved well formed and
+  fourteen neighbours differing in a single field. The pairing is the point: a
+  refusal alone would not distinguish "this clause caught it" from "some other clause
+  did". Spot-checked by mutation on four clauses; each turns four theorems red.
+
+  This was the weakest coverage in the layer and it was in the declaration-time seal
+  — the thing §1 asks for before any question of what the state permits.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Three consecutive review rounds found the same shape and it is worth naming as a
