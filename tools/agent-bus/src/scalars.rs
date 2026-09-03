@@ -298,6 +298,33 @@ impl Short {
 
 validated_string!(Text, "UTF-8 string of 0..4096 bytes after JSON decoding.");
 
+// Note: distinct from `Topic` above, which names a *product branch* slug
+// (`agent/<agent>/<topic>`, no dots). `CoordinationTopic` is the friction/
+// broadcast vocabulary's dotted name -- an unrelated grammar that happens to
+// share a plain-English name with the branch concept.
+validated_string!(
+    CoordinationTopic,
+    "Dotted lower-case topic name (docs/AGENT_COORDINATION_EVOLUTION.md \
+     sections 3.1/4.1), e.g. `proof.rebuild` or `interface.process.breaking`: \
+     one or more `[a-z][a-z0-9-]*` segments joined by `.`."
+);
+
+impl CoordinationTopic {
+    pub fn parse(s: String) -> AbResult<Self> {
+        let ok_len = !s.is_empty() && s.len() <= 128;
+        let ok_segments = ok_len
+            && s.split('.').all(|seg| {
+                let mut chars = seg.chars();
+                matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
+                    && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+            });
+        if !ok_segments {
+            return Err(invalid(format!("invalid coordination topic: {s:?}")));
+        }
+        Ok(CoordinationTopic(s))
+    }
+}
+
 impl Text {
     pub fn parse(s: String) -> AbResult<Self> {
         let n = s.len();
@@ -439,6 +466,18 @@ mod tests {
         assert!(Timestamp::parse("2026-09-02T12:00:00".into()).is_err());
         let now = Timestamp::now_utc();
         assert!(Timestamp::parse(now.into_string()).is_ok());
+    }
+
+    #[test]
+    fn coordination_topic_grammar() {
+        assert!(CoordinationTopic::parse("proof.rebuild".into()).is_ok());
+        assert!(CoordinationTopic::parse("interface.process.breaking".into()).is_ok());
+        assert!(CoordinationTopic::parse("bus.publication-contention".into()).is_ok());
+        assert!(CoordinationTopic::parse("".into()).is_err());
+        assert!(CoordinationTopic::parse("Proof.Rebuild".into()).is_err());
+        assert!(CoordinationTopic::parse("proof..rebuild".into()).is_err());
+        assert!(CoordinationTopic::parse(".proof".into()).is_err());
+        assert!(CoordinationTopic::parse("2proof".into()).is_err());
     }
 
     #[test]

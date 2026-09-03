@@ -232,6 +232,8 @@ fn apply_event(state: &mut BusState, env: &Envelope) -> AbResult<()> {
         EventData::ReviewMerged(d) => apply_review_merged(state, env, d)?,
         EventData::ReviewMergeReconciled(d) => apply_review_merge_reconciled(state, env, d)?,
         EventData::LifecycleConflictResolved(d) => apply_conflict_resolved(state, env, d)?,
+        EventData::FrictionReported(d) => apply_friction_reported(state, env, d)?,
+        EventData::FrictionSynthesized(d) => apply_friction_synthesized(state, env, d)?,
     }
     Ok(())
 }
@@ -1552,6 +1554,98 @@ fn apply_conflict_resolved(
     Ok(())
 }
 
+// -------------------------------------------------------------- friction
+
+/// docs/AGENT_COORDINATION_EVOLUTION.md section 3.1. Records the report and
+/// nothing else -- gate 11's "no target obligation" means there is no
+/// status, assignment, or acknowledgement to derive here, unlike every
+/// issue/dependency/handoff handler above.
+fn apply_friction_reported(
+    state: &mut BusState,
+    env: &Envelope,
+    d: &FrictionReported,
+) -> AbResult<()> {
+    require_agent(state, &env.agent)?;
+    if let Some(owner) = &d.likely_owner {
+        require_agent(state, owner)?;
+    }
+    // "evidence fields are required when the report makes a quantitative
+    // claim" (section 3.1) -- read as: citing measurements is exactly what
+    // makes a report's claim quantitative.
+    if !d.measurements.is_empty() && d.evidence.is_empty() {
+        return Err(invalid(format!(
+            "{}: a friction report with measurements must cite supporting evidence",
+            env.id
+        )));
+    }
+    state.friction_reports.insert(env.id.clone(), d.clone());
+    Ok(())
+}
+
+/// docs/AGENT_COORDINATION_EVOLUTION.md section 3.3. `disposition` fixes
+/// which of `promoted_to`/`duplicate_of`/`revisit_trigger` is required; the
+/// other two must be absent so a synthesis event can never carry a
+/// companion field its own disposition disclaims.
+fn apply_friction_synthesized(
+    state: &mut BusState,
+    env: &Envelope,
+    d: &FrictionSynthesized,
+) -> AbResult<()> {
+    require_agent(state, &env.agent)?;
+    if d.reports.is_empty() {
+        return Err(invalid(format!(
+            "{}: friction.synthesized must group at least one report",
+            env.id
+        )));
+    }
+    for r in d.reports.iter() {
+        if !state.friction_reports.contains_key(r) {
+            return Err(invalid(format!(
+                "{}: cites unknown friction report {r}",
+                env.id
+            )));
+        }
+    }
+    use crate::common::FrictionDispositionKind as K;
+    let (needs_promoted, needs_duplicate, needs_revisit) = match d.disposition {
+        K::Promoted => (true, false, false),
+        K::Duplicate => (false, true, false),
+        K::Deferred => (false, false, true),
+        K::AcceptedCost | K::NeedsEvidence => (false, false, false),
+    };
+    if needs_promoted != d.promoted_to.is_some() {
+        return Err(invalid(format!(
+            "{}: promoted_to must be set if and only if disposition is promoted",
+            env.id
+        )));
+    }
+    if needs_duplicate != d.duplicate_of.is_some() {
+        return Err(invalid(format!(
+            "{}: duplicate_of must be set if and only if disposition is duplicate",
+            env.id
+        )));
+    }
+    if needs_revisit != d.revisit_trigger.is_some() {
+        return Err(invalid(format!(
+            "{}: revisit_trigger must be set if and only if disposition is deferred",
+            env.id
+        )));
+    }
+    if let Some(dup) = &d.duplicate_of {
+        if !state.friction_synthesis.contains_key(dup) {
+            return Err(invalid(format!(
+                "{}: duplicate_of names unknown synthesis event {dup}",
+                env.id
+            )));
+        }
+    }
+    state
+        .friction_theme_synthesis
+        .insert(d.theme.clone(), env.id.clone());
+    state.friction_synthesis.insert(env.id.clone(), d.clone());
+    Ok(())
+}
+
 fn dependency_from(data: &EventData) -> EventId {
     match data {
         EventData::DependencyResolved(d) => d.dependency.clone(),
@@ -2209,5 +2303,233 @@ mod tests {
         );
         assert!(state.agents[&alice].scope.is_some());
         assert!(state.agents[&bob].scope.is_some());
+    }
+
+    // -------------------------------------------------------------- friction
+
+    fn topic(s: &str) -> crate::scalars::CoordinationTopic {
+        crate::scalars::CoordinationTopic::parse(s.to_string()).unwrap()
+    }
+
+    fn friction_report(area: &str) -> FrictionReported {
+        FrictionReported {
+            area: topic(area),
+            summary: short("s"),
+            impact: crate::common::Impact::Rebuild,
+            evidence: StringSet::default(),
+            product_locations: vec![],
+            measurements: vec![],
+            frequency: None,
+            workaround: None,
+            suggestion: None,
+            likely_owner: None,
+        }
+    }
+
+    /// Gate 11: a friction report is recorded as evidence and creates no
+    /// target obligation -- unlike `issue.opened`, nothing in `state` gains
+    /// a status, an assignment, or an acknowledgement duty from it.
+    #[test]
+    fn friction_report_creates_no_target_obligation() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        let env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::FrictionReported(friction_report("proof.rebuild")),
+            [],
+        );
+        apply_ok(&mut state, &env);
+        assert!(state.friction_reports.contains_key(&env.id));
+        assert!(state.issues.is_empty());
+        assert!(state.dependencies.is_empty());
+        assert!(state.handoffs.is_empty());
+    }
+
+    #[test]
+    fn friction_report_with_measurements_requires_evidence() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        let mut data = friction_report("proof.rebuild");
+        data.measurements = vec![crate::common::Measurement {
+            metric: short("wall_time_seconds"),
+            value: 120,
+            unit: None,
+        }];
+        let env = Envelope::new(&alice, 1, no_frontier(), &EventData::FrictionReported(data), []);
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(err.to_string().contains("must cite supporting evidence"), "{err}");
+    }
+
+    fn synthesized(
+        theme: &str,
+        reports: &[&EventId],
+        disposition: crate::common::FrictionDispositionKind,
+    ) -> FrictionSynthesized {
+        FrictionSynthesized {
+            theme: topic(theme),
+            reports: StringSet::from_iter(reports.iter().map(|r| (*r).clone())),
+            disposition,
+            rationale: text("r"),
+            promoted_to: None,
+            duplicate_of: None,
+            revisit_trigger: None,
+        }
+    }
+
+    #[test]
+    fn friction_synthesized_rejects_a_report_it_never_saw() {
+        let mut state = empty_state(&[]);
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let phantom = EventId::new(&a("alice"), 1);
+        let env = Envelope::new(
+            &coord1,
+            1,
+            no_frontier(),
+            &EventData::FrictionSynthesized(synthesized(
+                "proof.rebuild",
+                &[&phantom],
+                crate::common::FrictionDispositionKind::AcceptedCost,
+            )),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(err.to_string().contains("unknown friction report"), "{err}");
+    }
+
+    /// `accepted_cost` and `needs_evidence` are the two dispositions with no
+    /// companion field at all -- the happy path with none of promoted_to/
+    /// duplicate_of/revisit_trigger set.
+    #[test]
+    fn friction_synthesized_accepted_cost_needs_no_companion_field() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let report_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::FrictionReported(friction_report("proof.rebuild")),
+            [],
+        );
+        apply_ok(&mut state, &report_env);
+
+        let env = Envelope::new(
+            &coord1,
+            1,
+            no_frontier(),
+            &EventData::FrictionSynthesized(synthesized(
+                "proof.rebuild",
+                &[&report_env.id],
+                crate::common::FrictionDispositionKind::AcceptedCost,
+            )),
+            [],
+        );
+        apply_ok(&mut state, &env);
+        assert_eq!(
+            state.friction_theme_synthesis.get(&topic("proof.rebuild")),
+            Some(&env.id)
+        );
+    }
+
+    #[test]
+    fn friction_synthesized_promoted_requires_promoted_to() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let report_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::FrictionReported(friction_report("proof.rebuild")),
+            [],
+        );
+        apply_ok(&mut state, &report_env);
+
+        let env = Envelope::new(
+            &coord1,
+            1,
+            no_frontier(),
+            &EventData::FrictionSynthesized(synthesized(
+                "proof.rebuild",
+                &[&report_env.id],
+                crate::common::FrictionDispositionKind::Promoted,
+            )),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string().contains("promoted_to must be set"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn friction_synthesized_duplicate_must_name_a_known_prior_synthesis() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let report_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::FrictionReported(friction_report("proof.rebuild")),
+            [],
+        );
+        apply_ok(&mut state, &report_env);
+
+        let mut data = synthesized(
+            "proof.rebuild",
+            &[&report_env.id],
+            crate::common::FrictionDispositionKind::Duplicate,
+        );
+        data.duplicate_of = Some(EventId::new(&coord1, 99));
+        let env = Envelope::new(&coord1, 1, no_frontier(), &EventData::FrictionSynthesized(data), []);
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(err.to_string().contains("unknown synthesis event"), "{err}");
+    }
+
+    #[test]
+    fn friction_synthesized_deferred_requires_revisit_trigger() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let report_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::FrictionReported(friction_report("proof.rebuild")),
+            [],
+        );
+        apply_ok(&mut state, &report_env);
+
+        let env = Envelope::new(
+            &coord1,
+            1,
+            no_frontier(),
+            &EventData::FrictionSynthesized(synthesized(
+                "proof.rebuild",
+                &[&report_env.id],
+                crate::common::FrictionDispositionKind::Deferred,
+            )),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string().contains("revisit_trigger must be set"),
+            "{err}"
+        );
     }
 }

@@ -6,7 +6,7 @@
 
 use crate::common::*;
 use crate::error::{invalid, AbResult};
-use crate::scalars::{Agent, Branch, EventId, ObjectId, Short, StringSet, Text};
+use crate::scalars::{Agent, Branch, CoordinationTopic, EventId, ObjectId, Short, StringSet, Text};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt;
@@ -446,6 +446,57 @@ pub struct LifecycleConflictResolved {
     pub user_authority: Text,
 }
 
+// ------------------------------------------------------------------ friction
+
+/// docs/AGENT_COORDINATION_EVOLUTION.md section 3.1. Deliberately not an
+/// issue: creates no target obligation, blocks nothing, and assigns no
+/// repair work (gate 11) -- `likely_owner` is triage context only, never a
+/// target the way `IssueOpened.target` is.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrictionReported {
+    pub area: CoordinationTopic,
+    pub summary: Short,
+    pub impact: crate::common::Impact,
+    pub evidence: StringSet<EventId>,
+    pub product_locations: Vec<Text>,
+    pub measurements: Vec<crate::common::Measurement>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frequency: Option<crate::common::Frequency>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workaround: Option<Text>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestion: Option<Text>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub likely_owner: Option<Agent>,
+}
+
+/// docs/AGENT_COORDINATION_EVOLUTION.md section 3.3: the design steward's
+/// periodic grouping of reports under one theme with exactly one
+/// disposition. `promoted_to`/`duplicate_of`/`revisit_trigger` are each
+/// required or forbidden depending on `disposition` -- see
+/// `apply::apply_friction_synthesized`, not enforced structurally here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrictionSynthesized {
+    pub theme: CoordinationTopic,
+    pub reports: StringSet<EventId>,
+    pub disposition: crate::common::FrictionDispositionKind,
+    pub rationale: Text,
+    /// Required when `disposition` is `promoted`: the issue/dependency event
+    /// this synthesis turned into targeted, obligated work.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub promoted_to: Option<EventId>,
+    /// Required when `disposition` is `duplicate`: the existing theme's own
+    /// prior `friction.synthesized` event.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duplicate_of: Option<EventId>,
+    /// Required when `disposition` is `deferred`: what should trigger
+    /// revisiting this theme.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revisit_trigger: Option<Text>,
+}
+
 // -------------------------------------------------------------- EventData
 
 macro_rules! event_data {
@@ -520,6 +571,8 @@ event_data! {
     ReviewMerged(ReviewMerged) = "review.merged",
     ReviewMergeReconciled(ReviewMergeReconciled) = "review.merge_reconciled",
     LifecycleConflictResolved(LifecycleConflictResolved) = "lifecycle.conflict_resolved",
+    FrictionReported(FrictionReported) = "friction.reported",
+    FrictionSynthesized(FrictionSynthesized) = "friction.synthesized",
 }
 
 impl EventData {
@@ -602,6 +655,14 @@ impl EventData {
             EventData::LifecycleConflictResolved(d) => [d.root.clone()]
                 .into_iter()
                 .chain(d.competing.iter().cloned())
+                .collect(),
+            EventData::FrictionReported(d) => d.evidence.iter().cloned().collect(),
+            EventData::FrictionSynthesized(d) => d
+                .reports
+                .iter()
+                .cloned()
+                .chain(d.promoted_to.iter().cloned())
+                .chain(d.duplicate_of.iter().cloned())
                 .collect(),
         }
     }
@@ -895,6 +956,27 @@ mod tests {
                 reason: text("r"),
                 user_authority: text("u"),
             }),
+            EventData::FrictionReported(FrictionReported {
+                area: CoordinationTopic::parse("proof.rebuild".into()).unwrap(),
+                summary: short("s"),
+                impact: crate::common::Impact::Rebuild,
+                evidence: StringSet::default(),
+                product_locations: vec![],
+                measurements: vec![],
+                frequency: None,
+                workaround: None,
+                suggestion: None,
+                likely_owner: None,
+            }),
+            EventData::FrictionSynthesized(FrictionSynthesized {
+                theme: CoordinationTopic::parse("proof.rebuild".into()).unwrap(),
+                reports: StringSet::from_iter([previous.clone()]),
+                disposition: crate::common::FrictionDispositionKind::AcceptedCost,
+                rationale: text("r"),
+                promoted_to: None,
+                duplicate_of: None,
+                revisit_trigger: None,
+            }),
         ];
 
         let all_kinds: BTreeSet<&str> = EventData::all_kinds().into_iter().collect();
@@ -955,6 +1037,38 @@ mod tests {
             })
             .referenced_ids(),
             [issue, assignment].into()
+        );
+
+        let report = eid("carol", 3);
+        let promoted = eid("carol", 4);
+        assert_eq!(
+            EventData::FrictionReported(FrictionReported {
+                area: CoordinationTopic::parse("proof.rebuild".into()).unwrap(),
+                summary: short("s"),
+                impact: crate::common::Impact::Rebuild,
+                evidence: StringSet::from_iter([report.clone()]),
+                product_locations: vec![],
+                measurements: vec![],
+                frequency: None,
+                workaround: None,
+                suggestion: None,
+                likely_owner: None,
+            })
+            .referenced_ids(),
+            [report.clone()].into()
+        );
+        assert_eq!(
+            EventData::FrictionSynthesized(FrictionSynthesized {
+                theme: CoordinationTopic::parse("proof.rebuild".into()).unwrap(),
+                reports: StringSet::from_iter([report.clone()]),
+                disposition: crate::common::FrictionDispositionKind::Promoted,
+                rationale: text("r"),
+                promoted_to: Some(promoted.clone()),
+                duplicate_of: None,
+                revisit_trigger: None,
+            })
+            .referenced_ids(),
+            [report, promoted].into()
         );
     }
 

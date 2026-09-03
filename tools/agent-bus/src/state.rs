@@ -177,6 +177,15 @@ pub struct BusState {
     pub merge_engine_info: BTreeMap<EventId, (Short, Short)>,
     /// Highest `schema.activated` version seen so far (0 = none yet).
     pub activated_schema_version: u32,
+    /// Every `friction.reported` event, verbatim -- durable evidence only;
+    /// unlike `issues`, nothing here ever gains a status or an assignment
+    /// (gate 11: a friction report creates no target obligation).
+    pub friction_reports: BTreeMap<EventId, FrictionReported>,
+    /// Every `friction.synthesized` event, verbatim.
+    pub friction_synthesis: BTreeMap<EventId, FrictionSynthesized>,
+    /// The most recent synthesis event for each theme -- what a later
+    /// `duplicate_of` reference and `agent-bus friction --theme` both read.
+    pub friction_theme_synthesis: BTreeMap<crate::scalars::CoordinationTopic, EventId>,
 }
 
 impl BusState {
@@ -196,6 +205,9 @@ impl BusState {
             current_merge_engine_epoch: None,
             merge_engine_info: BTreeMap::new(),
             activated_schema_version: 0,
+            friction_reports: BTreeMap::new(),
+            friction_synthesis: BTreeMap::new(),
+            friction_theme_synthesis: BTreeMap::new(),
         }
     }
 
