@@ -469,10 +469,13 @@ Three of the four files above exist, under different names than the sketch.
 `Grass/Memory/Addressing.lean` proves the bridge arithmetic. `addressOf` places an
 offset in an allocation based at a `MachineAddress`, and
 `disjoint_ranges_do_not_alias` is the lemma the section above records as owed.
-**It is not wired up**, and the section above's debt is therefore not discharged:
-`AllocationRecord` carries no base address, so nothing below can be instantiated
-for a state the model can build. §4.2 records the wiring as owed and says why it
-is a design question rather than an oversight. It is conditioned on `FitsAllocation`:
+It is wired now, and the section above's debt is discharged.
+`AllocationRecord.base` places an allocation, `MemoryState.addressAt?` reads the
+address of an offset, and `MemoryState.addressAt?_ne_of_disjoint` connects `Nat`
+disjointness to distinct machine addresses for a state the model builds. The base
+is optional because §7.5's logical spaces have allocations with no machine address,
+and it is not authority: `denialOf` reads none of it, and two allocations sharing a
+base are still distinct storage unless `aliases` says otherwise. It is conditioned on `FitsAllocation`:
 the allocation's own bytes do not wrap. That is not a convenience — an allocation
 whose last byte wraps past `2^64` has two offsets at one address, so no
 disjointness argument about it could be sound, and a profile admitting one has
@@ -634,14 +637,6 @@ Recorded rather than implied, and expanded twice after adversarial review. The
 first round found three of these stated as done; the second found three more, and
 one outright defect that had already merged — see §3.11's denial row.
 
-- **Wiring `Addressing.lean` to `MemoryState`.** `AllocationRecord` has no base
-  address, so `addressOf`, `FitsAllocation`, and `disjoint_ranges_do_not_alias`
-  cannot be instantiated for any state the model builds. This is a design
-  question, not a missing line: [MEMORY_MODEL.md](MEMORY_MODEL.md) §2 makes
-  provenance rather than address the authority, and a logical address space has
-  allocations with no machine address at all, so a base must be optional and
-  per-space. Until it is wired, the offset-to-address debt
-  [Range.lean](../Grass/Memory/Range.lean) records is *not* discharged.
 - **Trace agreement between `runBlock` and `step`.** They agree on memory, through
   `MemoryState.commit`. Nothing proves they agree on the recorded trace, so a
   straight-line argument over `runBlock` is an argument about memory and not about

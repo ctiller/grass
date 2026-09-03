@@ -545,23 +545,32 @@ def memory₀ : MemoryState :=
   (((MemoryState.empty.allocate bufferAlloc
       { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
         permission := .readWrite, live := true
-        bytes := zeroed64 }).allocate viewAlloc
+        bytes := zeroed64, base := some 0x1000 }).allocate viewAlloc
       { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
         permission := .readWrite, live := true
-        bytes := zeroed64 }).allocate constAlloc
+        bytes := zeroed64, base := some 0x1000 }).allocate constAlloc
       { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
         permission := .readOnly, live := true
-        bytes := zeroed64 }).alias bufferAlloc viewAlloc
+        bytes := zeroed64, base := some 0x2000 }).alias bufferAlloc viewAlloc
 
-/-- The stack reservation the frame provider guards. -/
+/-- The stack reservation the frame provider guards.
+
+`viewAlloc` and `chainedAlloc` share `bufferAlloc`'s base, which is the point of
+an alias: distinct allocation identities over the same storage. Placement does not
+decide aliasing — `MemoryState.aliases` does, and `docs/MEMORY_MODEL.md` §2 makes
+provenance rather than address the authority — so the two facts are declared
+separately and agreeing here is the fixture being realistic rather than a rule. -/
 def memory₁ : MemoryState :=
   ((((memory₀.allocate stackAlloc
       { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-        permission := .readWrite, live := true, bytes := zeroed64 }).allocate borrowedAlloc
+        permission := .readWrite, live := true, bytes := zeroed64
+        base := some 0x3000 }).allocate borrowedAlloc
       { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-        permission := .readWrite, live := true, bytes := zeroed64 }).allocate chainedAlloc
+        permission := .readWrite, live := true, bytes := zeroed64
+        base := some 0x4000 }).allocate chainedAlloc
       { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-        permission := .readWrite, live := true, bytes := zeroed64 }).alias viewAlloc
+        permission := .readWrite, live := true, bytes := zeroed64
+        base := some 0x1000 }).alias viewAlloc
     chainedAlloc)
 
 /-- The starting machine state: allocations exist, but no authority is held. -/

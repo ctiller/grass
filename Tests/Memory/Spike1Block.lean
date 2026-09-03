@@ -61,14 +61,16 @@ zeros, and starting from `ByteStore.empty` is what keeps `mov transferred, 0`
 being the thing that initializes the slot. -/
 def stackRecord : AllocationRecord :=
   { extent := ⟨0, 4096⟩, epoch := epoch₀, space := .cpuVirtual
-    permission := .readWrite, live := true, bytes := .empty }
+    permission := .readWrite, live := true, bytes := .empty
+    base := some 0x0000 }
 
 /-- The loaded image. Only the import-table slot is given contents, because it is
 the only part of the image this block reads. -/
 def imageRecord : AllocationRecord :=
   { extent := ⟨0, 8192⟩, epoch := epoch₀, space := .cpuVirtual
     permission := .readOnly, live := true
-    bytes := ByteStore.empty.write 2048 (List.replicate 8 0x40) true }
+    bytes := ByteStore.empty.write 2048 (List.replicate 8 0x40) true
+    base := some 0x2000 }
 
 /-- The state at the top of the block. -/
 def state₀ : MemoryState :=

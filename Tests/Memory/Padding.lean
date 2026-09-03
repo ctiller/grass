@@ -63,7 +63,8 @@ which is the state a fresh allocation is actually in — `docs/MEMORY_MODEL.md` 
 does not hand out zeros. -/
 def stackRecord₀ : AllocationRecord :=
   { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
-    permission := .readWrite, live := true, bytes := .empty }
+    permission := .readWrite, live := true, bytes := .empty
+    base := some 0x1000 }
 
 /-- The state before anything is written. -/
 def state₀ : MemoryState := MemoryState.empty.allocate alloc stackRecord₀

@@ -1,3 +1,4 @@
+import Grass.Memory.Addressing
 import Grass.Memory.ByteStore
 import Grass.Memory.Audit
 import Grass.Memory.Authority
@@ -55,6 +56,20 @@ structure AllocationRecord where
   of initialized offsets was a second source of truth that could disagree with
   the values, and `RangeInitialized` now cannot drift from what was written. -/
   bytes : ByteStore
+  /-- Where the allocation sits in its address space, if it sits anywhere.
+
+  `Option`, and not because placement is optional bookkeeping. `docs/MEMORY_MODEL.md`
+  §7.5 makes address spaces non-interchangeable and a logical space — a SPIR-V
+  `Private` storage class, say — has allocations with no machine address at all, so
+  a mandatory base would force every profile to invent one. Placement is also not
+  authority: §2 makes provenance decide what an access may touch, and nothing in
+  `denialOf` reads this. It is here so `Grass/Memory/Addressing.lean`'s bridge can
+  be instantiated, which §4.2 recorded as owed for as long as no allocation carried
+  an address.
+
+  No default. A profile placing an allocation says where; a profile that does not
+  place it says `none` deliberately. -/
+  base : Option MachineAddress
 deriving DecidableEq, Repr
 
 /--
@@ -631,6 +646,59 @@ theorem write_comm_of_ne (state : MemoryState) {a b : AllocId} (hne : a ≠ b)
         cellAt?_write_of_not_covers _ a (Or.inl hoa),
         cellAt?_write_of_not_covers _ a (Or.inl hoa),
         cellAt?_write_of_not_covers _ b (Or.inl hob)]
+
+/-! ### Placement
+
+`Grass/Memory/Addressing.lean` proves that inside a non-wrapping allocation
+distinct offsets have distinct machine addresses. Until an allocation carried a
+base there was nothing to instantiate it with, and
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 recorded the offset-to-address debt as
+undischarged for exactly that reason. These connect the two.
+
+Placement is not authority. `denialOf` reads none of this: `docs/MEMORY_MODEL.md`
+§2 makes provenance decide what an access may touch, and two allocations at one
+base are still distinct storage unless `aliases` says otherwise. What placement
+answers is the different question of whether two offsets name the same machine
+byte. -/
+
+/-- The machine address of an offset in `id`, if `id` is placed at all. -/
+def addressAt? (state : MemoryState) (id : AllocId) (offset : Nat) :
+    Option MachineAddress :=
+  (state.allocations.lookup id).bind (fun record => record.base.map (addressOf · offset))
+
+/-- `state.PlacedWithoutWrap id` holds when `id` is placed and its own bytes do not
+wrap the address space. The hypothesis every bridge lemma needs, and the one a
+profile owes for each allocation it places. -/
+def PlacedWithoutWrap (state : MemoryState) (id : AllocId) : Prop :=
+  ∀ record ∈ state.allocations.lookup id, ∀ base ∈ record.base,
+    FitsAllocation base record.extent.size
+
+instance (state : MemoryState) (id : AllocId) : Decidable (state.PlacedWithoutWrap id) :=
+  inferInstanceAs (Decidable (∀ _ ∈ _, ∀ _ ∈ _, _))
+
+/--
+**Disjoint ranges in one placed allocation do not alias.**
+
+The bridge `Grass/Memory/Range.lean` records as owed, instantiated at last. Offsets
+are `Nat` and disjointness is `Nat` arithmetic; this is what connects that to
+machine addresses, for an allocation a profile actually placed.
+-/
+theorem addressAt?_ne_of_disjoint {state : MemoryState} {id : AllocId}
+    (hplaced : state.PlacedWithoutWrap id) {record : AllocationRecord}
+    (hfound : state.allocations.lookup id = some record) {r t : ByteRange}
+    (hr : r.WithinBound record.extent.size) (ht : t.WithinBound record.extent.size)
+    (hd : r.Disjoint t) {i j : Nat} (hi : r.Covers i) (hj : t.Covers j)
+    {base : MachineAddress} (hbase : record.base = some base) :
+    state.addressAt? id i ≠ state.addressAt? id j := by
+  have hfits : FitsAllocation base record.extent.size :=
+    hplaced record (by rw [hfound]; simp) base (by rw [hbase]; simp)
+  have hne := disjoint_ranges_do_not_alias hfits hr ht hd hi hj
+  unfold addressAt?
+  rw [hfound]
+  simp only [Option.bind_some]
+  rw [hbase]
+  simp only [Option.map_some, ne_eq, Option.some.injEq]
+  exact hne
 
 /--
 **Writes to disjoint ranges commute.**
