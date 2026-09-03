@@ -166,6 +166,33 @@ pub fn genesis(
     };
 
     if let Some(existing_tip) = crate::stream::read_stream_tip(repo, coordinator)? {
+        // Resuming across a crash between the two commits genesis makes
+        // must not silently accept a *different* display_name/purpose than
+        // what this call would have written -- the epoch-mismatch check
+        // above only covers the first commit's content, so without this the
+        // second commit's content could diverge from the caller's current
+        // arguments without ever being noticed.
+        let (_, log) = crate::stream::read_stream(
+            repo,
+            coordinator,
+            &worktrees_dir.join("_stream_resume_check"),
+        )?;
+        let first = log
+            .first()
+            .ok_or_else(|| invalid(format!("{coordinator}'s stream exists but has no events")))?;
+        let crate::events::EventData::AgentRegistered(existing) = first.typed_data()? else {
+            return Err(invalid(format!(
+                "{coordinator}'s stream root is not an agent.registered event"
+            )));
+        };
+        if existing.display_name != display_name || existing.purpose != purpose {
+            return Err(invalid(
+                "the agent-registry already has a root epoch and this coordinator's stream \
+                 already exists, but with a different display_name/purpose than this genesis \
+                 call -- this bus was already activated (possibly differently); use `register` \
+                 to add a further agent instead of `genesis`",
+            ));
+        }
         return Ok((config, epoch, existing_tip));
     }
 
@@ -471,6 +498,63 @@ mod tests {
         .unwrap_err();
         assert!(
             err.to_string().contains("does not match this genesis call"),
+            "{err}"
+        );
+    }
+
+    /// Round-2 adversarial review's Significant finding: the resume check
+    /// above (same coordinator, same host/role/config) never compared
+    /// display_name/purpose against what the coordinator's *own stream*
+    /// already recorded -- so once that stream root existed, a second
+    /// genesis call for the same coordinator with a different display_name
+    /// or purpose would silently succeed and return the old commit,
+    /// discarding the caller's new arguments without any error.
+    #[test]
+    fn genesis_refuses_to_resume_with_a_different_display_name_or_purpose() {
+        let repo = init_repo();
+        let coord1 = crate::scalars::Agent::parse("coord1".to_string()).unwrap();
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        genesis(
+            repo.path(),
+            &coord1,
+            crate::scalars::Short::parse("Coordinator One".to_string()).unwrap(),
+            crate::scalars::Text::parse("bootstraps the fleet".to_string()).unwrap(),
+            "sha1".to_string(),
+            ObjectId::parse(review_from.clone()).unwrap(),
+            crate::scalars::Short::parse("host1".to_string()).unwrap(),
+            &repo.path().join("_worktrees"),
+        )
+        .unwrap();
+
+        let err = genesis(
+            repo.path(),
+            &coord1,
+            crate::scalars::Short::parse("Coordinator One But Different".to_string()).unwrap(),
+            crate::scalars::Text::parse("bootstraps the fleet".to_string()).unwrap(),
+            "sha1".to_string(),
+            ObjectId::parse(review_from.clone()).unwrap(),
+            crate::scalars::Short::parse("host1".to_string()).unwrap(),
+            &repo.path().join("_worktrees_name"),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("different display_name/purpose"),
+            "{err}"
+        );
+
+        let err = genesis(
+            repo.path(),
+            &coord1,
+            crate::scalars::Short::parse("Coordinator One".to_string()).unwrap(),
+            crate::scalars::Text::parse("a whole different purpose".to_string()).unwrap(),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            crate::scalars::Short::parse("host1".to_string()).unwrap(),
+            &repo.path().join("_worktrees_purpose"),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("different display_name/purpose"),
             "{err}"
         );
     }
