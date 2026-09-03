@@ -185,6 +185,28 @@ pub fn drain_outbox(
                 continue;
             }
         }
+        // AGENT_REVIEW.md section 11/`apply.rs`'s own module doc: `apply::
+        // apply_review_merge_reconciled` only checks that the submitted
+        // values equal the named authorization -- it never touches git, so
+        // it cannot confirm the recovery receipt's own precondition ("only
+        // after checking the authorized candidate is already the
+        // corresponding first-parent `main` commit"). Nothing stops a
+        // hand-crafted `submit --kind review.merge_reconciled` from
+        // asserting that regardless of what real `main` history actually
+        // says -- re-run it here, at the actual publication gate, exactly
+        // like the identical `review.merge_authorized` gate just above (see
+        // `verify_review_merge_reconciled`'s own doc comment).
+        if let crate::events::EventData::ReviewMergeReconciled(d) = &data {
+            if let Err(e) = verify_review_merge_reconciled(repo, &state, d) {
+                let reason = e.to_string();
+                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+                rejected.push(RejectedCandidate {
+                    kind: candidate.kind.clone(),
+                    reason,
+                });
+                continue;
+            }
+        }
         let observed = build_frontier(
             repo,
             &epoch,
@@ -494,6 +516,58 @@ fn verify_review_merge_authorized(
         return Err(invalid(format!(
             "candidate tag refs/tags/{tag} is not fetchable from {remote}; other agents could \
              not verify this merge"
+        )));
+    }
+    Ok(())
+}
+
+/// The git-linked half of `review.merge_reconciled` validation
+/// (AGENT_REVIEW.md section 11) that `apply.rs` deliberately leaves out of
+/// its pure, git-repo-free reduction -- see `apply.rs`'s own module doc, and
+/// `apply::apply_review_merge_reconciled`'s own field-equality-only checks
+/// against the named authorization. Section 11: a bootstrap-authorized
+/// coordinator "emits `review.merge_reconciled` only after checking the
+/// authorized candidate is already the corresponding first-parent `main`
+/// commit" -- exactly the live-Git fact this function checks, ported from
+/// the shipped version-one helper's `review_cmds::reconcile` (`rev_list_
+/// first_parent(previous_main, refs/heads/main)` containing `main_commit`),
+/// mirroring `verify_review_merge_authorized`'s identical reasoning for why
+/// this cannot live in `apply.rs` and cannot be skipped just because `cli::
+/// reconcile` doesn't exist: unlike `review.merge_authorized`/`merge-ready`
+/// (which have dedicated `prepare-merge`/`merge-ready` CLI commands because
+/// they *construct* or *pre-flight-check* a candidate), `review.merge_
+/// reconciled` is published through the ordinary generic `submit --kind
+/// review.merge_reconciled` path (see `cli.rs`'s module doc on the commands
+/// it does and does not special-case) -- so this gate, not a dedicated CLI
+/// wrapper, is the only place that can ever re-derive this fact from real
+/// git history before the event is durably published.
+///
+/// `Ok(())` when `d.authorization` does not resolve to a `review.merge_
+/// authorized` event in `state` at all (an unknown/wrong-kind authorization
+/// id): that is an ordinary, unrelated validation failure `apply::dry_run`
+/// reports moments later via `apply_review_merge_reconciled`'s own clearer,
+/// authorization-specific message, so it is not duplicated here.
+fn verify_review_merge_reconciled(
+    repo: &Path,
+    state: &crate::state::BusState,
+    d: &crate::events::ReviewMergeReconciled,
+) -> AbResult<()> {
+    let Some(auth_env) = state.events.get(&d.authorization) else {
+        return Ok(());
+    };
+    match auth_env.typed_data() {
+        Ok(crate::events::EventData::ReviewMergeAuthorized(_)) => {}
+        _ => return Ok(()),
+    }
+    let is_first_parent_of_main =
+        crate::gitrepo::rev_list_first_parent(repo, d.previous_main.as_str(), "refs/heads/main")?
+            .iter()
+            .any(|c| c == d.main_commit.as_str());
+    if !is_first_parent_of_main {
+        return Err(invalid(format!(
+            "main_commit {} is not a first-parent successor of previous_main {} on current \
+             main -- reconcile only records a merge that has genuinely already landed",
+            d.main_commit, d.previous_main
         )));
     }
     Ok(())
@@ -2125,5 +2199,368 @@ mod tests {
             "{}",
             drained.rejected[0].reason
         );
+    }
+
+    // ---------------------------------------------------------------
+    // `review.merge_reconciled`'s git-linked gate (AGENT_REVIEW.md section
+    // 11; see `verify_review_merge_reconciled`'s own doc comment). Mirrors
+    // the shipped version-one helper's `review_cmds.rs` falsifying test
+    // pair (`reconcile_rejects_non_first_parent_successor`/`reconcile_
+    // succeeds_when_main_was_advanced_out_of_band`) plus the two "no-op,
+    // defer to `apply::dry_run`" branches this gate shares in spirit with
+    // `verify_review_merge_authorized`'s own identical pair.
+
+    fn minimal_config() -> crate::bootstrap::BusConfig {
+        crate::bootstrap::BusConfig {
+            object_format: "sha1".to_string(),
+            product_review_from: ObjectId::parse("0".repeat(40)).unwrap(),
+            merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
+            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+        }
+    }
+
+    fn no_frontier() -> crate::frontier::ObservedFrontier {
+        crate::frontier::ObservedFrontier::sparse(ObjectId::parse("0".repeat(40)).unwrap(), [])
+    }
+
+    /// Inserts a bare `review.merge_authorized` event (no review chain --
+    /// `verify_review_merge_reconciled` only ever needs `state.events` to
+    /// resolve `d.authorization` to the right *kind* of event, not a real
+    /// chain: the nomination-chain-consistency half is `apply_review_merge_
+    /// reconciled`'s own job) naming `previous_main`/`reviewed_commit`/
+    /// `candidate`, and returns its id.
+    fn state_with_bare_authorization(
+        previous_main: &str,
+        reviewed_commit: &str,
+        candidate: &str,
+    ) -> (crate::state::BusState, EventId) {
+        use crate::events::ReviewMergeAuthorized;
+        use crate::scalars::{Branch, PathClaim, StringSet};
+        let mut state = crate::state::BusState::new(minimal_config());
+        let data = ReviewMergeAuthorized {
+            nomination: EventId::new(&a("zoe"), 0),
+            product_branch: Branch::parse("refs/heads/agent/zoe/feature".into()).unwrap(),
+            previous_main: ObjectId::parse(previous_main.to_string()).unwrap(),
+            reviewed_commit: ObjectId::parse(reviewed_commit.to_string()).unwrap(),
+            candidate: ObjectId::parse(candidate.to_string()).unwrap(),
+            merge_engine_epoch: EventId::new(&a("coord1"), 0),
+            checks: vec![],
+            finding_dispositions: vec![],
+            evidence: StringSet::default(),
+            reviewed_scope: StringSet::from_iter([PathClaim::parse("feature.txt".into()).unwrap()]),
+            limitations: vec![],
+            summary: text("looks good"),
+        };
+        let env = Envelope::new(
+            &a("aiden"),
+            0,
+            no_frontier(),
+            &EventData::ReviewMergeAuthorized(data),
+            [],
+        );
+        let id = env.id.clone();
+        state.events.insert(id.clone(), env);
+        (state, id)
+    }
+
+    fn reconciled_data(
+        authorization: &EventId,
+        previous_main: &str,
+        reviewed_commit: &str,
+        main_commit: &str,
+    ) -> crate::events::ReviewMergeReconciled {
+        use crate::scalars::Branch;
+        crate::events::ReviewMergeReconciled {
+            authorization: authorization.clone(),
+            previous_main: ObjectId::parse(previous_main.to_string()).unwrap(),
+            main_commit: ObjectId::parse(main_commit.to_string()).unwrap(),
+            product_branch: Branch::parse("refs/heads/agent/zoe/feature".into()).unwrap(),
+            reviewed_commit: ObjectId::parse(reviewed_commit.to_string()).unwrap(),
+            reason: text("manual merge outside the bus"),
+            user_authority: text("repo owner"),
+        }
+    }
+
+    #[test]
+    fn verify_review_merge_reconciled_rejects_when_main_was_never_advanced() {
+        let dir = init_repo();
+        let previous_main = crate::gitrepo::rev_parse(dir.path(), "main").unwrap();
+        let next = author_commit_for_reconcile(dir.path(), &previous_main, "feature.txt");
+        let (state, auth_id) = state_with_bare_authorization(&previous_main, &next, &next);
+        let d = reconciled_data(&auth_id, &previous_main, &next, &next);
+        let err = verify_review_merge_reconciled(dir.path(), &state, &d).unwrap_err();
+        assert!(
+            err.to_string().contains("not a first-parent successor"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn verify_review_merge_reconciled_accepts_when_main_was_genuinely_advanced() {
+        let dir = init_repo();
+        let previous_main = crate::gitrepo::rev_parse(dir.path(), "main").unwrap();
+        let next = author_commit_for_reconcile(dir.path(), &previous_main, "feature.txt");
+        git(dir.path(), &["update-ref", "refs/heads/main", &next]);
+        let (state, auth_id) = state_with_bare_authorization(&previous_main, &next, &next);
+        let d = reconciled_data(&auth_id, &previous_main, &next, &next);
+        verify_review_merge_reconciled(dir.path(), &state, &d).expect("must accept");
+    }
+
+    /// An unknown `authorization` id must not be rejected by this gate's own
+    /// text -- `apply::dry_run` reports that moments later via `apply_
+    /// review_merge_reconciled`'s own clearer, authorization-specific
+    /// message (see `verify_review_merge_reconciled`'s doc comment).
+    #[test]
+    fn verify_review_merge_reconciled_is_a_no_op_for_an_unknown_authorization() {
+        let dir = init_repo();
+        let previous_main = crate::gitrepo::rev_parse(dir.path(), "main").unwrap();
+        // `main` deliberately never advanced -- if this gate did not defer,
+        // it would reject on the live-Git check instead of the (correct)
+        // no-op, and this test would still pass for the wrong reason. The
+        // companion "genuinely advanced" test above already proves the
+        // live-Git branch itself is reachable and load-bearing.
+        let state = crate::state::BusState::new(minimal_config());
+        let bogus = EventId::new(&a("aiden"), 99);
+        let d = reconciled_data(&bogus, &previous_main, &previous_main, &previous_main);
+        verify_review_merge_reconciled(dir.path(), &state, &d)
+            .expect("unknown authorization defers to apply::dry_run, not a hard reject here");
+    }
+
+    /// `authorization` resolving to a real event that is *not* a `review.
+    /// merge_authorized` (e.g. someone's own registration id, reused by
+    /// mistake) must likewise defer rather than reject here.
+    #[test]
+    fn verify_review_merge_reconciled_is_a_no_op_when_authorization_names_the_wrong_kind_of_event()
+    {
+        let dir = init_repo();
+        let previous_main = crate::gitrepo::rev_parse(dir.path(), "main").unwrap();
+        let mut state = crate::state::BusState::new(minimal_config());
+        let wrong_kind_env = Envelope::new(
+            &a("aiden"),
+            0,
+            no_frontier(),
+            &EventData::AgentRegistered(crate::events::AgentRegistered {
+                display_name: short("aiden"),
+                primary_role: Role::Reviewer,
+                purpose: text("x"),
+                product_base: None,
+                product_branch: None,
+                provider: None,
+                model: None,
+            }),
+            [],
+        );
+        let wrong_kind_id = wrong_kind_env.id.clone();
+        state.events.insert(wrong_kind_id.clone(), wrong_kind_env);
+        let d = reconciled_data(
+            &wrong_kind_id,
+            &previous_main,
+            &previous_main,
+            &previous_main,
+        );
+        verify_review_merge_reconciled(dir.path(), &state, &d)
+            .expect("wrong-kind authorization defers to apply::dry_run, not a hard reject here");
+    }
+
+    /// A minimal single-commit-on-`previous_main` helper local to this test
+    /// section -- deliberately not reusing `ReviewFixture`'s heavier
+    /// `commit_feature_with_trailer`-equivalent setup, since these four
+    /// tests exercise `verify_review_merge_reconciled` directly and need
+    /// nothing beyond "one more real commit reachable from `base`".
+    fn author_commit_for_reconcile(path: &Path, base: &str, file: &str) -> String {
+        git(path, &["checkout", "--quiet", "--detach", base]);
+        std::fs::write(path.join(file), "content\n").unwrap();
+        git(path, &["add", file]);
+        git(
+            path,
+            &["commit", "-q", "-m", "add feature\n\nAgent-Bus-Agent: zoe"],
+        );
+        let commit = git(path, &["rev-parse", "HEAD"]);
+        git(path, &["checkout", "--quiet", "main"]);
+        commit
+    }
+
+    // ---------------------------------------------------------------
+    // The same gate, now proven actually wired into `drain_outbox` for a
+    // real, genuinely-published authorization -- not merely called
+    // correctly in isolation. Reuses `ReviewFixture` plus a local `merge_
+    // engine.activated` activation (this test section's own analogue of
+    // `tests/cli_flow.rs`'s `activate_merge_engine` helper, which the
+    // existing `review.merge_authorized` gate tests above deliberately
+    // don't need since they stop at proving *this* gate's own rejection/
+    // acceptance, not a full publish -- see `merge_authorized_candidate`'s
+    // own comment on that pre-existing, separate gap).
+
+    fn activate_merge_engine_for(f: &ReviewFixture) -> EventId {
+        use crate::events::MergeEngineActivated;
+        let data = MergeEngineActivated {
+            previous_epoch: EventId::new(&f.coord1, 0),
+            merge_engine: short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+            merge_engine_version: short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+            design_commit: ObjectId::parse("0".repeat(40)).unwrap(),
+            helper_commit: ObjectId::parse("0".repeat(40)).unwrap(),
+        };
+        crate::outbox::submit(
+            f.repo.path(),
+            "activate",
+            &Candidate::new(&f.coord1, &EventData::MergeEngineActivated(data), vec![]),
+        )
+        .unwrap();
+        let drained = drain_outbox(
+            f.repo.path(),
+            f.repo.path(),
+            &f.coord1,
+            &short("host1"),
+            0,
+            &f.repo.path().join("_wt_activate_engine"),
+            &f.remote,
+        )
+        .unwrap();
+        assert!(drained.rejected.is_empty(), "{:?}", drained.rejected);
+        drained.published[0].clone()
+    }
+
+    /// Builds a genuinely valid, genuinely *published* `review.merge_
+    /// authorized` on `f` (activating the merge engine first -- otherwise
+    /// `apply_review_merge_authorized`'s own downstream check always fails,
+    /// see `merge_authorized_candidate`'s comment), and returns `(candidate,
+    /// authorization_id)`.
+    fn authorized_and_published(f: &ReviewFixture) -> (String, EventId) {
+        use crate::common::{CheckOutcome, CheckResult};
+        use crate::events::ReviewMergeAuthorized;
+        use crate::scalars::{Branch, PathClaim, StringSet};
+
+        let merge_engine_epoch = activate_merge_engine_for(f);
+        let candidate = crate::merge_candidate::reconstruct_candidate(
+            f.repo.path(),
+            &f.previous_main,
+            &f.feature_commit,
+            &f.reviewer,
+        )
+        .unwrap();
+        let tag = crate::merge_candidate::candidate_tag_name(&f.reviewer, &candidate);
+        crate::gitrepo::tag_lightweight(f.repo.path(), &tag, &candidate).unwrap();
+        let push = crate::gitrepo::run(
+            f.repo.path(),
+            &["push", &f.remote, &format!("refs/tags/{tag}")],
+        )
+        .unwrap();
+        assert!(push.success, "{push:?}");
+
+        let data = ReviewMergeAuthorized {
+            nomination: f.nomination.clone(),
+            product_branch: Branch::parse("refs/heads/agent/zoe/feature".into()).unwrap(),
+            previous_main: ObjectId::parse(f.previous_main.clone()).unwrap(),
+            reviewed_commit: ObjectId::parse(f.feature_commit.clone()).unwrap(),
+            candidate: ObjectId::parse(candidate.clone()).unwrap(),
+            merge_engine_epoch,
+            checks: vec![CheckResult {
+                command: text("build"),
+                result: CheckOutcome::Passed,
+                evidence: None,
+            }],
+            finding_dispositions: vec![],
+            evidence: StringSet::default(),
+            reviewed_scope: StringSet::from_iter([PathClaim::parse("feature.txt".into()).unwrap()]),
+            limitations: vec![],
+            summary: text("looks good"),
+        };
+        crate::outbox::submit(
+            f.repo.path(),
+            "auth",
+            &Candidate::new(&f.reviewer, &EventData::ReviewMergeAuthorized(data), vec![]),
+        )
+        .unwrap();
+        let drained = drain_reviewer(f);
+        assert!(drained.rejected.is_empty(), "{:?}", drained.rejected);
+        assert_eq!(drained.published.len(), 1);
+        (candidate, drained.published[0].clone())
+    }
+
+    fn drain_coord1(f: &ReviewFixture) -> DrainResult {
+        drain_outbox(
+            f.repo.path(),
+            f.repo.path(),
+            &f.coord1,
+            &short("host1"),
+            0,
+            &f.repo.path().join("_wt_reconcile"),
+            &f.remote,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn drain_outbox_rejects_review_merge_reconciled_when_main_was_never_advanced() {
+        let f = build_review_fixture(Some("zoe"));
+        let (candidate, authorization_id) = authorized_and_published(&f);
+        // `main` deliberately left at `previous_main` -- the candidate was
+        // never actually pushed.
+        let d = reconciled_data(
+            &authorization_id,
+            &f.previous_main,
+            &f.feature_commit,
+            &candidate,
+        );
+        crate::outbox::submit(
+            f.repo.path(),
+            "reconcile",
+            &Candidate::new(
+                &f.coord1,
+                &EventData::ReviewMergeReconciled(d),
+                vec![authorization_id],
+            ),
+        )
+        .unwrap();
+
+        let drained = drain_coord1(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0]
+                .reason
+                .contains("not a first-parent successor"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    /// The section 11 recovery path succeeding end to end: a real
+    /// authorization, `main` genuinely (if manually) advanced to the exact
+    /// authorized candidate, and a bootstrap coordinator's `review.merge_
+    /// reconciled` actually publishing -- proving `verify_review_merge_
+    /// reconciled` is reached from real `drain_outbox`, not merely callable
+    /// in isolation (the four `verify_review_merge_reconciled_*` tests
+    /// above), and that it does not itself block a genuinely valid
+    /// reconciliation.
+    #[test]
+    fn drain_outbox_accepts_review_merge_reconciled_when_main_was_genuinely_advanced() {
+        let f = build_review_fixture(Some("zoe"));
+        let (candidate, authorization_id) = authorized_and_published(&f);
+        git(
+            f.repo.path(),
+            &["update-ref", "refs/heads/main", &candidate],
+        );
+
+        let d = reconciled_data(
+            &authorization_id,
+            &f.previous_main,
+            &f.feature_commit,
+            &candidate,
+        );
+        crate::outbox::submit(
+            f.repo.path(),
+            "reconcile",
+            &Candidate::new(
+                &f.coord1,
+                &EventData::ReviewMergeReconciled(d),
+                vec![authorization_id],
+            ),
+        )
+        .unwrap();
+
+        let drained = drain_coord1(&f);
+        assert!(drained.rejected.is_empty(), "{:?}", drained.rejected);
+        assert_eq!(drained.published.len(), 1);
     }
 }
