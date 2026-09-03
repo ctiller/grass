@@ -31,12 +31,31 @@ a real limit on what this check covers, and it is stated rather than hidden: the
 short-displacement forms are exercised by the decoder, not by this tool.
 """
 
+import hashlib
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+
+
+def corpus_digest(text: str) -> str:
+    """A digest of the corpus content, line endings normalised.
+
+    The row count was the only binding between this tool and the Lean
+    generator, and a reviewer defeated it twice: a corpus of one row reported
+    success, and so did a corpus whose every row was a copy of the first, since
+    the count was still right. A digest binds content, so substituting a
+    same-length corpus fails.
+
+    Changing the corpus therefore requires updating EXPECTED_DIGEST here, which
+    is the reviewed edit `docs/VALIDATION.md` section 7 asks for rather than a
+    silent change to what is being checked."""
+    normalised = "\n".join(
+        line.rstrip("\r") for line in text.splitlines() if line.strip())
+    return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 
 def find_nasm() -> str:
@@ -61,8 +80,8 @@ LISTING = re.compile(r"^\s*(\d+)\s+[0-9A-F]{8}\s+([0-9A-F]+-?)\s*(.*)$")
 
 PROLOGUE = ["BITS 64", "DEFAULT ABS"]
 
-# How many rows Tests/ISA/X86/NasmCorpus.lean generates. See the check in main.
-EXPECTED_ROWS = 1085
+# The corpus this tool was last reviewed against. See corpus_digest.
+EXPECTED_DIGEST = "08ce1b23377b5cd3c1624a05684af37235536b93de33293e0c0b09d1cafb2b7b"
 
 # Disagreements that were investigated and found to be NASM canonicalising an
 # address rather than Grass encoding it wrongly. `docs/VALIDATION.md` section 2
@@ -136,15 +155,13 @@ def main() -> int:
     if not rows:
         sys.exit("corpus is empty; did the Lean generator run?")
 
-    # A count the generator also knows. Without it this tool reports success on
-    # a corpus that is one row, or on 1084 of 1085 with the one telling row
-    # removed -- both demonstrated during review. Nothing else binds the file
-    # it is handed to the repository's generator, so the count is the binding.
-    if len(rows) != EXPECTED_ROWS:
+    actual_digest = corpus_digest(
+        Path(sys.argv[1]).read_text(encoding="utf-8"))
+    if actual_digest != EXPECTED_DIGEST:
         sys.exit(
-            f"corpus has {len(rows)} rows, expected {EXPECTED_ROWS}. "
-            "Regenerate it from the Lean corpus, or update EXPECTED_ROWS here "
-            "and in the corpus module if the corpus genuinely changed."
+            f"corpus digest {actual_digest} does not match the reviewed "
+            f"{EXPECTED_DIGEST}. Regenerate it from the Lean corpus, or update "
+            "EXPECTED_DIGEST here if the corpus genuinely changed."
         )
 
     assembled = assemble(nasm, [source for _, source in rows])

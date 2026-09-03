@@ -40,6 +40,7 @@ Usage:
 Exit status is 1 on any mismatch.
 """
 
+import hashlib
 import re
 import shutil
 import subprocess
@@ -48,11 +49,47 @@ import tempfile
 from pathlib import Path
 
 # NDISASM prints "00000000  4C8D2D44332211    lea r13,[rel 0x11223351]".
-# The target is what we check; the mnemonic text is deliberately not compared,
-# because disassembler formatting (operand order, `near`, `qword`, `*1`
-# elision) differs from any rendering Grass would produce and none of it is a
-# fact about the encoding.
 TARGET = re.compile(r"\[rel (0x[0-9a-fA-F]+)\]")
+
+# Operand-size and distance keywords NDISASM prints and Grass does not model as
+# text. Stripping them, along with spaces and case, leaves the part that is a
+# fact about the encoding: the mnemonic, the register, and the target.
+NOISE = ("qword", "dword", "word", "byte", "near", "short", "far")
+
+
+
+def corpus_digest(text: str) -> str:
+    """A digest of the corpus content, line endings normalised.
+
+    The row count was the only binding between this tool and the Lean
+    generator, and a reviewer defeated it twice: a corpus of one row reported
+    success, and so did a corpus whose every row was a copy of the first, since
+    the count was still right. A digest binds content, so substituting a
+    same-length corpus fails.
+
+    Changing the corpus therefore requires updating EXPECTED_DIGEST here, which
+    is the reviewed edit `docs/VALIDATION.md` section 7 asks for rather than a
+    silent change to what is being checked."""
+    normalised = "\n".join(
+        line.rstrip("\r") for line in text.splitlines() if line.strip())
+    return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
+
+
+def normalise(text: str) -> str:
+    """The comparable part of a disassembly line.
+
+    The target alone is not enough. Both Grass's expected target and NDISASM's
+    are functions of the same instruction length, so they move together: a
+    reviewer stripped REX.W from all sixteen `lea` rows -- turning
+    `lea rax,[rel ...]` into the different instruction `lea eax,[rel ...]` --
+    and every row still agreed. Replacing all nineteen rows with identical bytes
+    also passed. The register field was invisible until this compared text."""
+    body = text.split(None, 2)
+    body = body[2] if len(body) > 2 else ""
+    lowered = body.lower()
+    for word in NOISE:
+        lowered = lowered.replace(word, "")
+    return "".join(lowered.split())
 
 # NDISASM starts each instruction with its 8-hex-digit address in column 0, and
 # wraps an instruction whose bytes do not fit onto continuation lines that are
@@ -62,8 +99,8 @@ TARGET = re.compile(r"\[rel (0x[0-9a-fA-F]+)\]")
 # targets were in fact correct.
 INSTRUCTION_LINE = re.compile(r"^[0-9A-F]{8}\s")
 
-# How many rows Tests/ISA/X86/RipCorpus.lean generates. See the check in main.
-EXPECTED_ROWS = 19
+# The corpus this tool was last reviewed against. See corpus_digest.
+EXPECTED_DIGEST = "17d42f62ab26f1f69e92aec7d13716f954827628d64faedfb08e8f0d0e1e3111"
 
 
 def find_tool(name: str) -> str:
@@ -107,28 +144,26 @@ def main() -> int:
     for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
-        parts = line.split("\t", 2)
-        if len(parts) != 3:
-            sys.exit(f"malformed corpus line, expected 3 fields: {line!r}")
-        hexbytes, target, label = parts
-        rows.append((bytes.fromhex(hexbytes), int(target), label))
+        parts = line.split("\t", 3)
+        if len(parts) != 4:
+            sys.exit(f"malformed corpus line, expected 4 fields: {line!r}")
+        hexbytes, target, expected_text, label = parts
+        rows.append((bytes.fromhex(hexbytes), int(target, 16), expected_text, label))
 
     if not rows:
         sys.exit("corpus is empty; did the Lean generator run?")
 
-    # A count the generator also knows. Without it this tool reports success on
-    # a corpus that is one row, or on 1084 of 1085 with the one telling row
-    # removed -- both demonstrated during review. Nothing else binds the file
-    # it is handed to the repository's generator, so the count is the binding.
-    if len(rows) != EXPECTED_ROWS:
+    actual_digest = corpus_digest(
+        Path(sys.argv[1]).read_text(encoding="utf-8"))
+    if actual_digest != EXPECTED_DIGEST:
         sys.exit(
-            f"corpus has {len(rows)} rows, expected {EXPECTED_ROWS}. "
-            "Regenerate it from the Lean corpus, or update EXPECTED_ROWS here "
-            "and in the corpus module if the corpus genuinely changed."
+            f"corpus digest {actual_digest} does not match the reviewed "
+            f"{EXPECTED_DIGEST}. Regenerate it from the Lean corpus, or update "
+            "EXPECTED_DIGEST here if the corpus genuinely changed."
         )
 
     mismatches = []
-    for raw, expected, label in rows:
+    for raw, expected, expected_text, label in rows:
         got = disassemble(ndisasm, raw)
         if got is None:
             mismatches.append((label, raw.hex(), "ndisasm refused the bytes"))
@@ -153,6 +188,14 @@ def main() -> int:
                 label, raw.hex(),
                 f"target {actual:#x}, expected {expected:#x} "
                 f"(instruction length {len(raw)}); {text.strip()}",
+            ))
+            continue
+        got = normalise(text)
+        if not got.startswith(expected_text):
+            mismatches.append((
+                label, raw.hex(),
+                f"operands {got!r} do not start with the predicted "
+                f"{expected_text!r}",
             ))
 
     print(f"x86 NDISASM differential: {len(rows)} RIP-relative encodings, "

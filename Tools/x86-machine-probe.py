@@ -63,6 +63,7 @@ Usage:
 Exit status is 1 if any probe disagrees with the model.
 """
 
+import hashlib
 import platform
 import shutil
 import subprocess
@@ -74,11 +75,28 @@ REGS = ("rax rcx rdx rbx rsp rbp rsi rdi "
         "r8 r9 r10 r11 r12 r13 r14 r15").split()
 RSP = 4  # never loaded or compared: it is the harness's own stack
 
-# How many probes Tests/ISA/X86/MachineProbes.lean generates. Without this the
-# runner reports success on a truncated corpus.
-EXPECTED_ROWS = 25
+# The corpus this tool was last reviewed against. See corpus_digest.
+EXPECTED_DIGEST = "00058cbfe27e301098b3e3c32e927bb663d915fd38a4a953c2941490fc400687"
 
 PROBE_TIMEOUT_SECONDS = 30
+
+
+
+def corpus_digest(text: str) -> str:
+    """A digest of the corpus content, line endings normalised.
+
+    The row count was the only binding between this tool and the Lean
+    generator, and a reviewer defeated it twice: a corpus of one row reported
+    success, and so did a corpus whose every row was a copy of the first, since
+    the count was still right. A digest binds content, so substituting a
+    same-length corpus fails.
+
+    Changing the corpus therefore requires updating EXPECTED_DIGEST here, which
+    is the reviewed edit `docs/VALIDATION.md` section 7 asks for rather than a
+    silent change to what is being checked."""
+    normalised = "\n".join(
+        line.rstrip("\r") for line in text.splitlines() if line.strip())
+    return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 
 def find_tool(name: str) -> str:
@@ -277,8 +295,14 @@ def main() -> int:
                      [int(v, 16) for v in after.split(",")],
                      kind, note))
 
-    if len(rows) != EXPECTED_ROWS:
-        sys.exit(f"corpus has {len(rows)} probes, expected {EXPECTED_ROWS}")
+    actual_digest = corpus_digest(
+        Path(sys.argv[1]).read_text(encoding="utf-8"))
+    if actual_digest != EXPECTED_DIGEST:
+        sys.exit(
+            f"corpus digest {actual_digest} does not match the reviewed "
+            f"{EXPECTED_DIGEST}. Regenerate it from the Lean corpus, or update "
+            "EXPECTED_DIGEST here if the corpus genuinely changed."
+        )
 
     print("x86 physical probe campaign")
     for line in describe_host():

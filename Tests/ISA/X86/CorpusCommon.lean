@@ -59,6 +59,19 @@ def hexByte (b : Byte) : String :=
 /-- Lowercase hex for a byte string, no separators. -/
 def hexBytes (bs : ByteSeq) : String := String.join (bs.map hexByte)
 
+/-- A 64-bit value in lowercase hex with no leading zeros, which is how NDISASM
+prints a RIP-relative target. `0` prints as `0`, not as the empty string. -/
+def hexTrim (v : BitVec 64) : String :=
+  let full := hexBytes
+    [BitVec.extractLsb' 56 8 v, BitVec.extractLsb' 48 8 v,
+     BitVec.extractLsb' 40 8 v, BitVec.extractLsb' 32 8 v,
+     BitVec.extractLsb' 24 8 v, BitVec.extractLsb' 16 8 v,
+     BitVec.extractLsb' 8 8 v, BitVec.extractLsb' 0 8 v]
+  -- `String.dropWhile` returns a slice in this toolchain, so take the list
+  -- route: it is a sixteen-character string and clarity beats cleverness.
+  let trimmed := String.ofList (full.toList.dropWhile (· == '0'))
+  if trimmed.isEmpty then "0" else trimmed
+
 /-- A 32-bit value as a NASM hex literal. -/
 def hex32 (v : BitVec 32) : String :=
   "0x" ++ hexBytes [BitVec.extractLsb' 24 8 v, BitVec.extractLsb' 16 8 v,
