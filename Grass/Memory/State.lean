@@ -707,6 +707,476 @@ def returnGrant? (state : MemoryState) (context : ContextId) (id : GrantId) :
       else Option.none
   | Option.none => Option.none
 
+/-!
+## Splitting and joining a grant
+
+`docs/MEMORY_MODEL.md` §3 lists `split` and `join` as operations on the authority
+map, and `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 has carried them as owed since
+M3 opened. They are here now, in the module that owns the map, for the reason every
+other mutator is: a caller that could build the parts itself would be a second door.
+
+**Binary, at an offset, with the parts derived.** A list-of-parts door would have to
+check that the parts cover the source's range and lie inside it, and a coverage
+predicate over a list is a satisfaction condition with room to be empty — the class
+of defect this branch found in §10's proof package. Two parts either side of an
+offset need no coverage check, because coverage is arithmetic: the low part runs to
+the boundary and the high part runs from it. An *n*-way split is *n* − 1 of these.
+
+**Neither door re-runs `issue?`.** A split is not a new claim of authority, it is a
+re-description of one the map already accepted, and re-running the door would refuse
+correct splits: `MayLend`'s unheld disjunct is false once the source is outstanding,
+and its lender-lends-again disjunct fails when the source coexists with another
+lender's grant over the same bytes. What justifies skipping the door is a theorem
+rather than an argument — `splitGrant?_creates_no_authority` says the result
+authorizes nothing the source did not, and `splitGrant?_preserves_authority` says it
+authorizes everything the source did.
+
+**What is not stated is an `↔` over the whole map**, because `Granted` ranges over
+the raw entry list and a map carrying a shadowed duplicate under the source's
+identity would lose that duplicate's authority to the `erase`. No such map can be
+built — `mk` and the field are private and every mutator here goes through `insert`
+and `erase` — but that is an invariant with no theorem, which
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 already records for `Exclusive`. The two
+directions above hold of every map, shadowed or not.
+-/
+
+end MemoryState
+
+namespace AuthorityGrant
+
+/-- The part of `grant` below `boundary`. -/
+def lowPart (grant : AuthorityGrant) (boundary : Nat) : AuthorityGrant :=
+  { grant with range := ⟨grant.range.start, boundary - grant.range.start⟩ }
+
+/-- The part of `grant` from `boundary` up. -/
+def highPart (grant : AuthorityGrant) (boundary : Nat) : AuthorityGrant :=
+  { grant with range := ⟨boundary, grant.range.stop - boundary⟩ }
+
+/-- The parts carry everything except the range, which is the whole of what a split
+changes: a split may not relabel, re-holder or re-rights a grant.
+`Grass/Obligation/Delta.lean` learned that from the other side, where an unpinned
+`kind` let a split relabel a live duty. Here the fields are not parameters at all,
+so there is nothing to pin. -/
+theorem parts_differ_only_in_range (grant : AuthorityGrant) (boundary : Nat) :
+    (grant.lowPart boundary).kind = grant.kind ∧
+    (grant.lowPart boundary).holder = grant.holder ∧
+    (grant.lowPart boundary).lender = grant.lender ∧
+    (grant.lowPart boundary).provenance = grant.provenance ∧
+    (grant.lowPart boundary).rights = grant.rights ∧
+    (grant.highPart boundary).kind = grant.kind ∧
+    (grant.highPart boundary).holder = grant.holder ∧
+    (grant.highPart boundary).lender = grant.lender ∧
+    (grant.highPart boundary).provenance = grant.provenance ∧
+    (grant.highPart boundary).rights = grant.rights :=
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+
+/-- Each part lies within the source. This is what makes a split not a claim. -/
+theorem lowPart_contained {grant : AuthorityGrant} {boundary : Nat}
+    (h : boundary ≤ grant.range.stop) :
+    grant.range.Contains (grant.lowPart boundary).range := by
+  have h' : boundary ≤ grant.range.start + grant.range.size := h
+  refine ⟨Nat.le_refl _, ?_⟩
+  simp only [lowPart, ByteRange.stop]
+  omega
+
+theorem highPart_contained {grant : AuthorityGrant} {boundary : Nat}
+    (hlow : grant.range.start ≤ boundary) (hhigh : boundary ≤ grant.range.stop) :
+    grant.range.Contains (grant.highPart boundary).range := by
+  have h' : boundary ≤ grant.range.start + grant.range.size := hhigh
+  refine ⟨hlow, ?_⟩
+  simp only [highPart, ByteRange.stop]
+  omega
+
+/-- The grant a join produces: the low one, stretched over both. -/
+def joined (low high : AuthorityGrant) : AuthorityGrant :=
+  { low with range := ⟨low.range.start, low.range.size + high.range.size⟩ }
+
+/-- And together they cover it: every offset the source covers is covered by one of
+them. No predicate checks this; it is arithmetic. -/
+theorem covered_by_part {grant : AuthorityGrant} {boundary offset : Nat}
+    (h : grant.range.Covers offset) :
+    (grant.lowPart boundary).range.Covers offset ∨
+      (grant.highPart boundary).range.Covers offset := by
+  have h' : grant.range.start ≤ offset ∧ offset < grant.range.start + grant.range.size := h
+  rcases Nat.lt_or_ge offset boundary with hcase | hcase
+  · refine Or.inl ⟨h'.1, ?_⟩
+    simp only [lowPart, ByteRange.stop]
+    omega
+  · refine Or.inr ⟨hcase, ?_⟩
+    simp only [highPart, ByteRange.stop]
+    omega
+
+end AuthorityGrant
+
+namespace MemoryState
+
+/-- The map a successful split leaves. Private: it names the private field, and the
+public theorems below speak of `splitGrant?`'s result rather than of this. -/
+private def splitMap (state : MemoryState) (id low high : GrantId) (boundary : Nat)
+    (grant : AuthorityGrant) : FiniteMap GrantId AuthorityGrant :=
+  ((state.grants.erase id).insert low (grant.lowPart boundary)).insert
+    high (grant.highPart boundary)
+
+/-!
+### What a grants-only update leaves alone
+
+`SharesBytes`, `CurrentEpoch` and `Live` read the allocation table and the alias
+list, so a state that differs only in `grants` agrees with the original on all
+three. For the last two that is definitional — they are non-recursive definitions
+over a projection — but `SharesAfter` recurses on the alias-chain length, so its
+state argument does not reduce and the agreement needs an induction. Without it
+every theorem below would have to carry a hypothesis about the split state that it
+cannot discharge.
+-/
+
+private theorem sharesAfter_grants (state : MemoryState)
+    (g : FiniteMap GrantId AuthorityGrant) (n : Nat) (a b : AllocId) :
+    SharesAfter { state with grants := g } n a b ↔ state.SharesAfter n a b := by
+  induction n generalizing a b with
+  | zero => exact Iff.rfl
+  | succ n ih =>
+    constructor
+    · rintro (rfl | ⟨mid, hmem, hhop, hrest⟩)
+      · exact Or.inl rfl
+      · exact Or.inr ⟨mid, hmem, hhop, (ih mid b).mp hrest⟩
+    · rintro (rfl | ⟨mid, hmem, hhop, hrest⟩)
+      · exact Or.inl rfl
+      · exact Or.inr ⟨mid, hmem, hhop, (ih mid b).mpr hrest⟩
+
+private theorem sharesBytes_grants (state : MemoryState)
+    (g : FiniteMap GrantId AuthorityGrant) (a b : AllocId) :
+    SharesBytes { state with grants := g } a b ↔ state.SharesBytes a b :=
+  sharesAfter_grants state g _ a b
+
+private theorem currentEpoch_grants (state : MemoryState)
+    (g : FiniteMap GrantId AuthorityGrant) (provenance : Provenance) :
+    CurrentEpoch { state with grants := g } provenance ↔ state.CurrentEpoch provenance :=
+  Iff.rfl
+
+/--
+Split one outstanding grant into two, at `boundary`.
+
+The source identity is consumed and the two parts are recorded under fresh
+identities, which is §3's return-consumes-that-exact-identity discipline applied to a
+split: a part reusing the source's identity would make "the source is gone" and "the
+part is here" the same fact, and `Grass/Obligation/Delta.lean` shows what that costs
+when the two are conflated.
+
+Refused when the source is unknown, when either part identity is taken (which
+includes the source's own, since it is taken), when the two part identities are the
+same, and when `boundary` is not strictly inside the source's range — an `⟨start, 0⟩`
+part would be a grant `issue?` refuses to issue, so a split may not manufacture one.
+-/
+def splitGrant? (state : MemoryState) (id low high : GrantId) (boundary : Nat) :
+    Option MemoryState :=
+  (state.grants.lookup id).bind fun grant =>
+    if low = high then Option.none
+    else if (state.grants.lookup low).isSome then Option.none
+    else if (state.grants.lookup high).isSome then Option.none
+    else if ¬ grant.range.start < boundary then Option.none
+    else if ¬ boundary < grant.range.stop then Option.none
+    else some { state with grants := state.splitMap id low high boundary grant }
+
+/-- **An unknown identity cannot be split**, which `splitGrant?` refuses before it
+looks at anything else. -/
+theorem splitGrant?_eq_none_of_unknown {state : MemoryState} {id low high : GrantId}
+    {boundary : Nat} (h : state.grantAt? id = Option.none) :
+    state.splitGrant? id low high boundary = Option.none := by
+  unfold splitGrant?
+  rw [show state.grants.lookup id = Option.none from h, Option.bind_none]
+
+/-- **A part may not land on a taken identity**, the source's own included. -/
+theorem splitGrant?_eq_none_of_taken {state : MemoryState} {id low high : GrantId}
+    {boundary : Nat} (hne : low ≠ high) (h : (state.grantAt? low).isSome) :
+    state.splitGrant? id low high boundary = Option.none := by
+  unfold splitGrant?
+  cases hlook : state.grants.lookup id with
+  | none => rfl
+  | some grant =>
+    rw [Option.bind_some, if_neg hne,
+      if_pos (show (state.grants.lookup low).isSome = true from h)]
+
+/-- **The two parts may not share an identity**, which would record one part and
+lose the other. -/
+theorem splitGrant?_eq_none_of_same_identity {state : MemoryState} {id low : GrantId}
+    {boundary : Nat} : state.splitGrant? id low low boundary = Option.none := by
+  unfold splitGrant?
+  cases hlook : state.grants.lookup id with
+  | none => rfl
+  | some grant => rw [Option.bind_some, if_pos rfl]
+
+/-- **A boundary outside the source is refused**, in either direction, because a part
+of size zero is a grant `issue?` would not issue. -/
+theorem splitGrant?_eq_none_of_boundary_low {state : MemoryState} {id low high : GrantId}
+    {boundary : Nat} {grant : AuthorityGrant} (hat : state.grantAt? id = some grant)
+    (hne : low ≠ high) (hlow : (state.grantAt? low).isSome = false)
+    (hhigh : (state.grantAt? high).isSome = false)
+    (h : ¬ grant.range.start < boundary) :
+    state.splitGrant? id low high boundary = Option.none := by
+  have hlow' : (state.grants.lookup low).isSome = false := hlow
+  have hhigh' : (state.grants.lookup high).isSome = false := hhigh
+  unfold splitGrant?
+  rw [show state.grants.lookup id = some grant from hat, Option.bind_some, if_neg hne,
+    if_neg (by simpa using hlow'), if_neg (by simpa using hhigh'),
+    if_pos (by simpa using h)]
+
+theorem splitGrant?_eq_none_of_boundary_high {state : MemoryState} {id low high : GrantId}
+    {boundary : Nat} {grant : AuthorityGrant} (hat : state.grantAt? id = some grant)
+    (hne : low ≠ high) (hlow : (state.grantAt? low).isSome = false)
+    (hhigh : (state.grantAt? high).isSome = false)
+    (h : ¬ boundary < grant.range.stop) :
+    state.splitGrant? id low high boundary = Option.none := by
+  have hlow' : (state.grants.lookup low).isSome = false := hlow
+  have hhigh' : (state.grants.lookup high).isSome = false := hhigh
+  unfold splitGrant?
+  rw [show state.grants.lookup id = some grant from hat, Option.bind_some, if_neg hne,
+    if_neg (by simpa using hlow'), if_neg (by simpa using hhigh')]
+  by_cases hstart : grant.range.start < boundary
+  · rw [if_neg (by simpa using hstart), if_pos (by simpa using h)]
+  · rw [if_pos (by simpa using hstart)]
+
+/-- What a successful split produced, and the five facts its guards established. -/
+private theorem splitGrant?_eq {state next : MemoryState} {id low high : GrantId}
+    {boundary : Nat} {grant : AuthorityGrant}
+    (h : state.splitGrant? id low high boundary = some next)
+    (hat : state.grantAt? id = some grant) :
+    next = { state with grants := state.splitMap id low high boundary grant } ∧
+      low ≠ high ∧ (state.grants.lookup low).isSome = false ∧
+      (state.grants.lookup high).isSome = false ∧
+      grant.range.start < boundary ∧ boundary < grant.range.stop := by
+  unfold splitGrant? at h
+  rw [show state.grants.lookup id = some grant from hat, Option.bind_some] at h
+  split at h
+  · exact absurd h (by simp)
+  · next hne =>
+    split at h
+    · exact absurd h (by simp)
+    · next hlow =>
+      split at h
+      · exact absurd h (by simp)
+      · next hhigh =>
+        split at h
+        · exact absurd h (by simp)
+        · next hstart =>
+          split at h
+          · exact absurd h (by simp)
+          · next hstop =>
+            injection h with h
+            exact ⟨h.symm, hne, by simpa using hlow, by simpa using hhigh,
+              by simpa using hstart, by simpa using hstop⟩
+
+/-- **A split consumes the source and records both parts.** -/
+theorem splitGrant?_yields_the_parts {state next : MemoryState} {id low high : GrantId}
+    {boundary : Nat} {grant : AuthorityGrant}
+    (h : state.splitGrant? id low high boundary = some next)
+    (hat : state.grantAt? id = some grant) :
+    next.grantAt? low = some (grant.lowPart boundary) ∧
+    next.grantAt? high = some (grant.highPart boundary) ∧
+    next.grantAt? id = Option.none := by
+  obtain ⟨hnext, hne, hlow, hhigh, _, _⟩ := splitGrant?_eq h hat
+  have hatl : state.grants.lookup id = some grant := hat
+  have hidlow : id ≠ low := by
+    intro hid
+    subst hid
+    rw [hatl] at hlow
+    simp at hlow
+  have hidhigh : id ≠ high := by
+    intro hid
+    subst hid
+    rw [hatl] at hhigh
+    simp at hhigh
+  subst hnext
+  refine ⟨?_, ?_, ?_⟩
+  · show (state.splitMap id low high boundary grant).lookup low = _
+    unfold splitMap
+    rw [FiniteMap.lookup_insert_ne _ hne, FiniteMap.lookup_insert_self]
+  · show (state.splitMap id low high boundary grant).lookup high = _
+    unfold splitMap
+    rw [FiniteMap.lookup_insert_self]
+  · show (state.splitMap id low high boundary grant).lookup id = _
+    unfold splitMap
+    rw [FiniteMap.lookup_insert_ne _ hidhigh, FiniteMap.lookup_insert_ne _ hidlow,
+      FiniteMap.lookup_erase_self]
+
+/-- A split leaves every other identity alone. -/
+theorem splitGrant?_other {state next : MemoryState} {id low high other : GrantId}
+    {boundary : Nat} {grant : AuthorityGrant}
+    (h : state.splitGrant? id low high boundary = some next)
+    (hat : state.grantAt? id = some grant) (hid : other ≠ id) (hlow : other ≠ low)
+    (hhigh : other ≠ high) : next.grantAt? other = state.grantAt? other := by
+  obtain ⟨hnext, _, _, _, _, _⟩ := splitGrant?_eq h hat
+  subst hnext
+  show (state.splitMap id low high boundary grant).lookup other = _
+  unfold splitMap
+  rw [FiniteMap.lookup_insert_ne _ hhigh, FiniteMap.lookup_insert_ne _ hlow,
+    FiniteMap.lookup_erase_ne _ hid]
+  rfl
+
+/-- The map a successful join leaves. Private, for the reason `splitMap` is. -/
+private def joinMap (state : MemoryState) (low high into : GrantId)
+    (grant : AuthorityGrant) : FiniteMap GrantId AuthorityGrant :=
+  ((state.grants.erase low).erase high).insert into grant
+
+/--
+Join two adjacent grants into one.
+
+The inverse of `splitGrant?`, and the checks are the ones that make it an inverse
+rather than an accumulation. Both sources must be outstanding, the target identity
+must be free, the two sources must be distinct identities, and — the clause that
+carries the weight — the two grants must be *equal except for their ranges*, with
+the low one's range ending exactly where the high one's begins.
+
+**Equality of everything but the range is `decide`d, not spot-checked.**
+`AuthorityGrant` derives `DecidableEq`, so `low.grant = { high.grant with range := … }`
+compares every field there is, and a field added later is compared without this door
+being edited. A door listing the fields it cares about is the shape that let
+`Grass/Obligation/Delta.lean` relabel a duty: it pinned protocol and owner because
+those were the fields someone thought of.
+
+**Adjacency, not overlap or a gap.** A gap would join authority over bytes neither
+source covered, which is the creation `joinGrants?_creates_no_authority` forbids. An
+overlap cannot happen between two grants this map holds for the same holder over the
+same storage — `LoanConflicts` does not forbid it, since conflict needs distinct
+holders — so it is refused here rather than assumed away.
+-/
+def joinGrants? (state : MemoryState) (low high into : GrantId) :
+    Option MemoryState :=
+  (state.grants.lookup low).bind fun lowGrant =>
+    (state.grants.lookup high).bind fun highGrant =>
+      if low = high then Option.none
+      else if (state.grants.lookup into).isSome then Option.none
+      else if lowGrant ≠ { highGrant with range := lowGrant.range } then Option.none
+      else if lowGrant.range.stop ≠ highGrant.range.start then Option.none
+      else
+        some { state with grants := state.joinMap low high into (lowGrant.joined highGrant) }
+
+/-- **An unknown source cannot be joined**, from either side, which `joinGrants?`
+refuses in the `bind` before any check runs. -/
+theorem joinGrants?_eq_none_of_unknown_low {state : MemoryState} {low high into : GrantId}
+    (h : state.grantAt? low = Option.none) :
+    state.joinGrants? low high into = Option.none := by
+  unfold joinGrants?
+  rw [show state.grants.lookup low = Option.none from h, Option.bind_none]
+
+theorem joinGrants?_eq_none_of_unknown_high {state : MemoryState} {low high into : GrantId}
+    (h : state.grantAt? high = Option.none) :
+    state.joinGrants? low high into = Option.none := by
+  have h' : state.grants.lookup high = Option.none := h
+  unfold joinGrants?
+  cases hlook : state.grants.lookup low with
+  | none => rfl
+  | some lowGrant => rw [Option.bind_some, h', Option.bind_none]
+
+/-- **A join may not land on a taken identity.** -/
+theorem joinGrants?_eq_none_of_taken {state : MemoryState} {low high into : GrantId}
+    {lowGrant highGrant : AuthorityGrant} (hlow : state.grantAt? low = some lowGrant)
+    (hhigh : state.grantAt? high = some highGrant) (hne : low ≠ high)
+    (h : (state.grantAt? into).isSome) :
+    state.joinGrants? low high into = Option.none := by
+  have hlow' : state.grants.lookup low = some lowGrant := hlow
+  have hhigh' : state.grants.lookup high = some highGrant := hhigh
+  have h' : (state.grants.lookup into).isSome = true := h
+  unfold joinGrants?
+  rw [hlow', Option.bind_some, hhigh', Option.bind_some, if_neg hne, if_pos h']
+
+/-- **Two grants differing in anything but their range may not be joined**, which is
+the whole of the equality this door checks. -/
+theorem joinGrants?_eq_none_of_mismatch {state : MemoryState} {low high into : GrantId}
+    {lowGrant highGrant : AuthorityGrant} (hlow : state.grantAt? low = some lowGrant)
+    (hhigh : state.grantAt? high = some highGrant) (hne : low ≠ high)
+    (hinto : (state.grantAt? into).isSome = false)
+    (h : lowGrant ≠ { highGrant with range := lowGrant.range }) :
+    state.joinGrants? low high into = Option.none := by
+  have hlow' : state.grants.lookup low = some lowGrant := hlow
+  have hhigh' : state.grants.lookup high = some highGrant := hhigh
+  have hinto' : (state.grants.lookup into).isSome = false := hinto
+  unfold joinGrants?
+  rw [hlow', Option.bind_some, hhigh', Option.bind_some, if_neg hne,
+    if_neg (by simpa using hinto'), if_pos h]
+
+/-- **And two grants that do not meet may not be joined**, whether they gap or
+overlap. -/
+theorem joinGrants?_eq_none_of_not_adjacent {state : MemoryState} {low high into : GrantId}
+    {lowGrant highGrant : AuthorityGrant} (hlow : state.grantAt? low = some lowGrant)
+    (hhigh : state.grantAt? high = some highGrant) (hne : low ≠ high)
+    (hinto : (state.grantAt? into).isSome = false)
+    (hmatch : lowGrant = { highGrant with range := lowGrant.range })
+    (h : lowGrant.range.stop ≠ highGrant.range.start) :
+    state.joinGrants? low high into = Option.none := by
+  have hlow' : state.grants.lookup low = some lowGrant := hlow
+  have hhigh' : state.grants.lookup high = some highGrant := hhigh
+  have hinto' : (state.grants.lookup into).isSome = false := hinto
+  unfold joinGrants?
+  rw [hlow', Option.bind_some, hhigh', Option.bind_some, if_neg hne,
+    if_neg (by simpa using hinto'), if_neg (by simpa using hmatch), if_pos h]
+
+/-- What a successful join produced, and the four facts its guards established. -/
+private theorem joinGrants?_eq {state next : MemoryState} {low high into : GrantId}
+    {lowGrant highGrant : AuthorityGrant}
+    (h : state.joinGrants? low high into = some next)
+    (hlow : state.grantAt? low = some lowGrant)
+    (hhigh : state.grantAt? high = some highGrant) :
+    next = { state with grants := state.joinMap low high into (lowGrant.joined highGrant) } ∧
+      low ≠ high ∧ (state.grants.lookup into).isSome = false ∧
+      lowGrant = { highGrant with range := lowGrant.range } ∧
+      lowGrant.range.stop = highGrant.range.start := by
+  have hlow' : state.grants.lookup low = some lowGrant := hlow
+  have hhigh' : state.grants.lookup high = some highGrant := hhigh
+  unfold joinGrants? at h
+  rw [hlow', Option.bind_some, hhigh', Option.bind_some] at h
+  split at h
+  · exact absurd h (by simp)
+  · next hne =>
+    split at h
+    · exact absurd h (by simp)
+    · next hinto =>
+      split at h
+      · exact absurd h (by simp)
+      · next hmatch =>
+        split at h
+        · exact absurd h (by simp)
+        · next hadjacent =>
+          injection h with h
+          exact ⟨h.symm, hne, by simpa using hinto, by simpa using hmatch,
+            by simpa using hadjacent⟩
+
+/-- **A join consumes both sources and records the joined grant.** -/
+theorem joinGrants?_yields_the_join {state next : MemoryState} {low high into : GrantId}
+    {lowGrant highGrant : AuthorityGrant}
+    (h : state.joinGrants? low high into = some next)
+    (hlow : state.grantAt? low = some lowGrant)
+    (hhigh : state.grantAt? high = some highGrant) :
+    next.grantAt? into = some (lowGrant.joined highGrant) ∧
+    next.grantAt? low = Option.none ∧ next.grantAt? high = Option.none := by
+  obtain ⟨hnext, hne, hinto, _, _⟩ := joinGrants?_eq h hlow hhigh
+  have hlow' : state.grants.lookup low = some lowGrant := hlow
+  have hhigh' : state.grants.lookup high = some highGrant := hhigh
+  have hintolow : into ≠ low := by
+    intro hid
+    subst hid
+    rw [hlow'] at hinto
+    simp at hinto
+  have hintohigh : into ≠ high := by
+    intro hid
+    subst hid
+    rw [hhigh'] at hinto
+    simp at hinto
+  subst hnext
+  refine ⟨?_, ?_, ?_⟩
+  · show (state.joinMap low high into (lowGrant.joined highGrant)).lookup into
+      = _
+    unfold joinMap
+    rw [FiniteMap.lookup_insert_self]
+  · show (state.joinMap low high into (lowGrant.joined highGrant)).lookup low
+      = _
+    unfold joinMap
+    rw [FiniteMap.lookup_insert_ne _ (Ne.symm hintolow), FiniteMap.lookup_erase_ne _ hne,
+      FiniteMap.lookup_erase_self]
+  · show (state.joinMap low high into (lowGrant.joined highGrant)).lookup high
+      = _
+    unfold joinMap
+    rw [FiniteMap.lookup_insert_ne _ (Ne.symm hintohigh), FiniteMap.lookup_erase_self]
+
 @[simp] theorem grantAt?_eq_lookup (state : MemoryState) (id : GrantId) :
     state.grantAt? id = state.grants.lookup id := rfl
 
@@ -983,6 +1453,290 @@ theorem not_granted_of_no_authorizing_entry {state : MemoryState} {context : Con
     · exact hpos
   obtain ⟨entry, hmem, hauth⟩ := hgranted 0 hsize
   exact h entry hmem (range.start + 0) hauth
+
+/--
+**A split preserves the source's authority.**
+
+The hypotheses are `granted_of_grantAt`'s, so this reads: whatever the source
+authorized, the parts still authorize. Per byte, because that is how `Granted`
+composes — an offset below the boundary is the low part's and one at or above it is
+the high part's, and `AuthorityGrant.covered_by_part` is that arithmetic.
+-/
+theorem splitGrant?_preserves_authority {state next : MemoryState} {id low high : GrantId}
+    {boundary : Nat} {grant : AuthorityGrant} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    (h : state.splitGrant? id low high boundary = some next)
+    (hat : state.grantAt? id = some grant)
+    (hcover : grant.range.Contains range)
+    (hholder : grant.holder = context)
+    (hshares : state.SharesBytes grant.provenance.root provenance.root)
+    (hgrant : state.CurrentEpoch grant.provenance)
+    (haccess : state.CurrentEpoch provenance) (hrights : grant.rights.Permits intent) :
+    next.Granted context provenance range intent := by
+  obtain ⟨hlowat, hhighat, _⟩ := splitGrant?_yields_the_parts h hat
+  obtain ⟨hnext, _, _, _, _, _⟩ := splitGrant?_eq h hat
+  intro i hi
+  have hcontains : grant.range.start ≤ range.start ∧
+      range.start + range.size ≤ grant.range.start + grant.range.size := hcover
+  have hcovers : grant.range.Covers (range.start + i) := by
+    refine ⟨by omega, ?_⟩
+    show range.start + i < grant.range.start + grant.range.size
+    omega
+  have hshares' : next.SharesBytes grant.provenance.root provenance.root := by
+    subst hnext
+    exact (sharesBytes_grants state _ _ _).mpr hshares
+  have hgrant' : next.CurrentEpoch grant.provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mpr hgrant
+  have haccess' : next.CurrentEpoch provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mpr haccess
+  rcases AuthorityGrant.covered_by_part (boundary := boundary) hcovers with hpart | hpart
+  · exact ⟨(low, grant.lowPart boundary),
+      Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hlowat,
+      hholder, hshares', hgrant', haccess', hpart, hrights⟩
+  · exact ⟨(high, grant.highPart boundary),
+      Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hhighat,
+      hholder, hshares', hgrant', haccess', hpart, hrights⟩
+
+/--
+**A split creates no authority.**
+
+The other direction, and the one that justifies not re-running `issue?`: every entry
+of the split state is one of the two parts or an entry the state already had, and
+each part's range lies inside the source's, so an offset a part authorizes is one the
+source authorized. `Grass/Std/Logical/FiniteMap.lean`'s `mem_entries_insert` and
+`mem_entries_erase` are what bound the new entry list from above; without them a
+theorem about a modified map has to unfold the association list here.
+-/
+theorem splitGrant?_creates_no_authority {state next : MemoryState}
+    {id low high : GrantId} {boundary : Nat} {grant : AuthorityGrant}
+    {context : ContextId} {provenance : Provenance} {range : ByteRange}
+    {intent : AccessIntent}
+    (h : state.splitGrant? id low high boundary = some next)
+    (hat : state.grantAt? id = some grant)
+    (hgranted : next.Granted context provenance range intent) :
+    state.Granted context provenance range intent := by
+  obtain ⟨hnext, _, _, _, hstart, hstop⟩ := splitGrant?_eq h hat
+  intro i hi
+  obtain ⟨entry, hmem, hauth⟩ := hgranted i hi
+  have hsource : (id, grant) ∈ state.grantEntries :=
+    Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hat
+  have hmem' : entry = (high, grant.highPart boundary) ∨
+      entry = (low, grant.lowPart boundary) ∨ entry ∈ state.grantEntries := by
+    have hlist : entry ∈ (state.splitMap id low high boundary grant).entries := by
+      subst hnext; exact hmem
+    unfold splitMap at hlist
+    rcases Grass.Std.Logical.FiniteMap.mem_entries_insert hlist with hcase | hcase
+    · exact Or.inl hcase
+    · rcases Grass.Std.Logical.FiniteMap.mem_entries_insert hcase with hcase | hcase
+      · exact Or.inr (Or.inl hcase)
+      · exact Or.inr (Or.inr (Grass.Std.Logical.FiniteMap.mem_entries_erase hcase))
+  obtain ⟨hholder, hshares, hgrantepoch, haccess, hcovers, hrights⟩ := hauth
+  have hshares' : state.SharesBytes entry.2.provenance.root provenance.root := by
+    subst hnext
+    exact (sharesBytes_grants state _ _ _).mp hshares
+  have hgrantepoch' : state.CurrentEpoch entry.2.provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mp hgrantepoch
+  have haccess' : state.CurrentEpoch provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mp haccess
+  have hstop' : boundary < grant.range.start + grant.range.size := hstop
+  rcases hmem' with hcase | hcase | hcase
+  · subst hcase
+    obtain ⟨hc1, hc2⟩ : boundary ≤ range.start + i ∧
+        range.start + i < boundary + (grant.range.start + grant.range.size - boundary) :=
+      hcovers
+    refine ⟨(id, grant), hsource, hholder, hshares', hgrantepoch', haccess', ?_, hrights⟩
+    refine ⟨Nat.le_trans (Nat.le_of_lt hstart) hc1, ?_⟩
+    show range.start + i < grant.range.start + grant.range.size
+    omega
+  · subst hcase
+    obtain ⟨hc1, hc2⟩ : grant.range.start ≤ range.start + i ∧
+        range.start + i < grant.range.start + (boundary - grant.range.start) := hcovers
+    refine ⟨(id, grant), hsource, hholder, hshares', hgrantepoch', haccess', ?_, hrights⟩
+    refine ⟨hc1, ?_⟩
+    show range.start + i < grant.range.start + grant.range.size
+    omega
+  · exact ⟨entry, hcase, hholder, hshares', hgrantepoch', haccess', hcovers, hrights⟩
+
+/--
+**A join preserves each source's authority.**
+
+Stated for the low source; `joinGrants?_preserves_high_authority` is the other. The
+joined range starts where the low one does and runs the sum of the two sizes, so
+every offset a source covered the join covers, and the adjacency check is what makes
+that true of the high source too.
+-/
+theorem joinGrants?_preserves_low_authority {state next : MemoryState}
+    {low high into : GrantId} {lowGrant highGrant : AuthorityGrant} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    (h : state.joinGrants? low high into = some next)
+    (hlow : state.grantAt? low = some lowGrant)
+    (hhigh : state.grantAt? high = some highGrant)
+    (hcover : lowGrant.range.Contains range)
+    (hholder : lowGrant.holder = context)
+    (hshares : state.SharesBytes lowGrant.provenance.root provenance.root)
+    (hgrant : state.CurrentEpoch lowGrant.provenance)
+    (haccess : state.CurrentEpoch provenance) (hrights : lowGrant.rights.Permits intent) :
+    next.Granted context provenance range intent := by
+  obtain ⟨hintoat, _, _⟩ := joinGrants?_yields_the_join h hlow hhigh
+  obtain ⟨hnext, _, _, _, _⟩ := joinGrants?_eq h hlow hhigh
+  intro i hi
+  obtain ⟨hc1, hc2⟩ : lowGrant.range.start ≤ range.start ∧
+      range.start + range.size ≤ lowGrant.range.start + lowGrant.range.size := hcover
+  have hshares' : next.SharesBytes lowGrant.provenance.root provenance.root := by
+    subst hnext
+    exact (sharesBytes_grants state _ _ _).mpr hshares
+  have hgrant' : next.CurrentEpoch lowGrant.provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mpr hgrant
+  have haccess' : next.CurrentEpoch provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mpr haccess
+  refine ⟨(into, lowGrant.joined highGrant),
+    Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hintoat,
+    hholder, hshares', hgrant', haccess', ⟨?_, ?_⟩, hrights⟩
+  · show lowGrant.range.start ≤ range.start + i
+    omega
+  · show range.start + i <
+      lowGrant.range.start + (lowGrant.range.size + highGrant.range.size)
+    omega
+
+/-- The high source's authority survives too, which is where adjacency is used. -/
+theorem joinGrants?_preserves_high_authority {state next : MemoryState}
+    {low high into : GrantId} {lowGrant highGrant : AuthorityGrant} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    (h : state.joinGrants? low high into = some next)
+    (hlow : state.grantAt? low = some lowGrant)
+    (hhigh : state.grantAt? high = some highGrant)
+    (hcover : highGrant.range.Contains range)
+    (hholder : highGrant.holder = context)
+    (hshares : state.SharesBytes highGrant.provenance.root provenance.root)
+    (hgrant : state.CurrentEpoch highGrant.provenance)
+    (haccess : state.CurrentEpoch provenance) (hrights : highGrant.rights.Permits intent) :
+    next.Granted context provenance range intent := by
+  obtain ⟨hintoat, _, _⟩ := joinGrants?_yields_the_join h hlow hhigh
+  obtain ⟨hnext, _, _, hmatch, hadjacent⟩ := joinGrants?_eq h hlow hhigh
+  intro i hi
+  obtain ⟨hc1, hc2⟩ : highGrant.range.start ≤ range.start ∧
+      range.start + range.size ≤ highGrant.range.start + highGrant.range.size := hcover
+  have hstop : lowGrant.range.start + lowGrant.range.size = highGrant.range.start :=
+    hadjacent
+  have hholder' : (lowGrant.joined highGrant).holder = context := by
+    show lowGrant.holder = context
+    rw [hmatch]
+    exact hholder
+  have hprov : lowGrant.provenance = highGrant.provenance := by rw [hmatch]
+  have hrights' : (lowGrant.joined highGrant).rights.Permits intent := by
+    show lowGrant.rights.Permits intent
+    rw [hmatch]
+    exact hrights
+  have hshares' : next.SharesBytes (lowGrant.joined highGrant).provenance.root
+      provenance.root := by
+    subst hnext
+    refine (sharesBytes_grants state _ _ _).mpr ?_
+    show state.SharesBytes lowGrant.provenance.root provenance.root
+    rw [hprov]
+    exact hshares
+  have hgrant' : next.CurrentEpoch (lowGrant.joined highGrant).provenance := by
+    subst hnext
+    refine (currentEpoch_grants state _ _).mpr ?_
+    show state.CurrentEpoch lowGrant.provenance
+    rw [hprov]
+    exact hgrant
+  have haccess' : next.CurrentEpoch provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mpr haccess
+  refine ⟨(into, lowGrant.joined highGrant),
+    Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hintoat,
+    hholder', hshares', hgrant', haccess', ⟨?_, ?_⟩, hrights'⟩
+  · show lowGrant.range.start ≤ range.start + i
+    omega
+  · show range.start + i < lowGrant.range.start + (lowGrant.range.size + highGrant.range.size)
+    omega
+
+/--
+**A join creates no authority.**
+
+The direction that justifies not re-running `issue?`, and the one adjacency is for: a
+gap between the sources would put bytes inside the joined range that neither source
+covered, and this theorem would be false. Every entry of the joined state is the
+joined grant or an entry the state already had, and the joined grant's every offset
+is one source's or the other's.
+-/
+theorem joinGrants?_creates_no_authority {state next : MemoryState}
+    {low high into : GrantId} {lowGrant highGrant : AuthorityGrant} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    (h : state.joinGrants? low high into = some next)
+    (hlow : state.grantAt? low = some lowGrant)
+    (hhigh : state.grantAt? high = some highGrant)
+    (hgranted : next.Granted context provenance range intent) :
+    state.Granted context provenance range intent := by
+  obtain ⟨hnext, _, _, hmatch, hadjacent⟩ := joinGrants?_eq h hlow hhigh
+  intro i hi
+  obtain ⟨entry, hmem, hauth⟩ := hgranted i hi
+  have hmem' : entry = (into, lowGrant.joined highGrant) ∨
+      entry ∈ state.grantEntries := by
+    have hlist : entry ∈ (state.joinMap low high into
+        (lowGrant.joined highGrant)).entries := by
+      subst hnext; exact hmem
+    unfold joinMap at hlist
+    rcases Grass.Std.Logical.FiniteMap.mem_entries_insert hlist with hcase | hcase
+    · exact Or.inl hcase
+    · exact Or.inr (Grass.Std.Logical.FiniteMap.mem_entries_erase
+        (Grass.Std.Logical.FiniteMap.mem_entries_erase hcase))
+  obtain ⟨hholder, hshares, hgrantepoch, haccess, hcovers, hrights⟩ := hauth
+  have hshares' : state.SharesBytes entry.2.provenance.root provenance.root := by
+    subst hnext
+    exact (sharesBytes_grants state _ _ _).mp hshares
+  have hgrantepoch' : state.CurrentEpoch entry.2.provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mp hgrantepoch
+  have haccess' : state.CurrentEpoch provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mp haccess
+  have hstop : lowGrant.range.start + lowGrant.range.size = highGrant.range.start :=
+    hadjacent
+  rcases hmem' with hcase | hcase
+  · subst hcase
+    obtain ⟨hc1, hc2⟩ : lowGrant.range.start ≤ range.start + i ∧
+        range.start + i <
+          lowGrant.range.start + (lowGrant.range.size + highGrant.range.size) := hcovers
+    rcases Nat.lt_or_ge (range.start + i) (lowGrant.range.start + lowGrant.range.size) with
+      hlt | hge
+    · refine ⟨(low, lowGrant), Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hlow,
+        ?_, ?_, ?_, haccess', ⟨hc1, ?_⟩, ?_⟩
+      · show lowGrant.holder = context
+        exact hholder
+      · show state.SharesBytes lowGrant.provenance.root provenance.root
+        exact hshares'
+      · show state.CurrentEpoch lowGrant.provenance
+        exact hgrantepoch'
+      · show range.start + i < lowGrant.range.start + lowGrant.range.size
+        omega
+      · show lowGrant.rights.Permits intent
+        exact hrights
+    · refine ⟨(high, highGrant), Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hhigh,
+        ?_, ?_, ?_, haccess', ⟨?_, ?_⟩, ?_⟩
+      · show highGrant.holder = context
+        rw [← show lowGrant.holder = highGrant.holder from by rw [hmatch]]
+        exact hholder
+      · show state.SharesBytes highGrant.provenance.root provenance.root
+        rw [← show lowGrant.provenance = highGrant.provenance from by rw [hmatch]]
+        exact hshares'
+      · show state.CurrentEpoch highGrant.provenance
+        rw [← show lowGrant.provenance = highGrant.provenance from by rw [hmatch]]
+        exact hgrantepoch'
+      · show highGrant.range.start ≤ range.start + i
+        omega
+      · show range.start + i < highGrant.range.start + highGrant.range.size
+        omega
+      · show highGrant.rights.Permits intent
+        rw [← show lowGrant.rights = highGrant.rights from by rw [hmatch]]
+        exact hrights
+  · exact ⟨entry, hcase, hholder, hshares', hgrantepoch', haccess', hcovers, hrights⟩
 
 /-- `state.GrantedOfKind` additionally requires the authorizing grant to be of a
 particular kind, which is how one provider distinguishes itself from another over

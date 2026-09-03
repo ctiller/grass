@@ -563,6 +563,161 @@ theorem a_frame_grant_is_not_a_loan :
     (unlent.issue? firstLoan frameGrant).isSome := by
   exact ⟨by decide, by decide⟩
 
+/-! ## Splitting and joining a loan
+
+`docs/MEMORY_MODEL.md` §3's split and join, exercised on a concrete map. The two
+theorems that carry the design — authority is preserved and none is created — are
+proved in `Grass/Memory/State.lean` over an arbitrary state; what a fixture adds is
+that the doors accept the cases they should and refuse the ones they should, and that
+the state after a split is the state a reader would expect rather than a fallback.
+-/
+
+/-- A fourth identity, for the low part of a split. -/
+def lowLoan : GrantId := grants.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- A fifth, for the high part. -/
+def highLoan : GrantId := grants.fresh.2.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- A sixth, for the grant a join produces. -/
+def joinedLoan : GrantId := grants.fresh.2.fresh.2.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- The head loan, split at offset four. -/
+def splitHead : MemoryState :=
+  (lentHead.splitGrant? firstLoan lowLoan highLoan 4).getD lentHead
+
+/-- **The split happened**, so the theorems below are not about `lentHead`. The
+identities are the ones asked for, the source is gone, and the parts are the halves.
+-/
+theorem the_split_succeeds :
+    (lentHead.splitGrant? firstLoan lowLoan highLoan 4).isSome ∧
+    splitHead.grantAt? firstLoan = Option.none ∧
+    splitHead.grantAt? lowLoan = some (loanOfHead.lowPart 4) ∧
+    splitHead.grantAt? highLoan = some (loanOfHead.highPart 4) ∧
+    (loanOfHead.lowPart 4).range = ⟨0, 4⟩ ∧
+    (loanOfHead.highPart 4).range = ⟨4, 4⟩ := by
+  exact ⟨by decide, by decide, by decide, by decide, by decide, by decide⟩
+
+/-- **And it changed no authority.** The borrower is still granted the whole eight
+bytes it was lent, and the owner is still frozen out of them — which is the pair a
+split that leaked or lost authority would break. -/
+theorem the_split_preserves_the_authority :
+    splitHead.Granted borrower bufferProv ⟨0, 8⟩ AccessIntent.readWrite ∧
+    ¬ splitHead.Granted owner bufferProv ⟨0, 8⟩ AccessIntent.write ∧
+    splitHead.authorityOf owner bufferProv ⟨0, 8⟩ = AuthorityState.frozen ∧
+    ¬ splitHead.Exclusive bufferProv ⟨0, 8⟩ := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-- **A stranger gains nothing from a split either**, which is the leak a
+re-description of authority could most easily produce. -/
+theorem the_split_grants_the_stranger_nothing :
+    ¬ splitHead.Granted stranger bufferProv ⟨0, 4⟩ AccessIntent.read ∧
+    ¬ splitHead.Granted stranger bufferProv ⟨4, 4⟩ AccessIntent.read := by
+  exact ⟨by decide, by decide⟩
+
+/-- **A boundary on either end is refused**, because a part of size zero is a grant
+`issue?` would not issue. -/
+theorem the_degenerate_boundaries_are_refused :
+    lentHead.splitGrant? firstLoan lowLoan highLoan 0 = Option.none ∧
+    lentHead.splitGrant? firstLoan lowLoan highLoan 8 = Option.none ∧
+    lentHead.splitGrant? firstLoan lowLoan highLoan 9 = Option.none := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **A part may not land on a taken identity**, the source's own included, and the
+two parts may not share one. -/
+theorem the_taken_identities_are_refused :
+    lentHead.splitGrant? firstLoan firstLoan highLoan 4 = Option.none ∧
+    lentHead.splitGrant? firstLoan lowLoan firstLoan 4 = Option.none ∧
+    lentHead.splitGrant? firstLoan lowLoan lowLoan 4 = Option.none := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **An unknown source is refused.** -/
+theorem splitting_an_unknown_loan_is_refused :
+    unlent.splitGrant? firstLoan lowLoan highLoan 4 = Option.none := by decide
+
+/-- The parts, rejoined. -/
+def rejoinedHead : MemoryState :=
+  (splitHead.joinGrants? lowLoan highLoan joinedLoan).getD splitHead
+
+/-- **A join puts the halves back**, under a fresh identity and with the original
+range, and both parts are consumed. -/
+theorem the_join_restores_the_loan :
+    (splitHead.joinGrants? lowLoan highLoan joinedLoan).isSome ∧
+    rejoinedHead.grantAt? joinedLoan = some loanOfHead ∧
+    rejoinedHead.grantAt? lowLoan = Option.none ∧
+    rejoinedHead.grantAt? highLoan = Option.none := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-- **And the authority is the authority the source had.** `loanOfHead` is what the
+join produced, so this is the round trip closing: split, join, and the map is back to
+one grant of the head with a new identity. -/
+theorem the_round_trip_preserves_the_authority :
+    rejoinedHead.Granted borrower bufferProv ⟨0, 8⟩ AccessIntent.readWrite ∧
+    rejoinedHead.authorityOf owner bufferProv ⟨0, 8⟩ = AuthorityState.frozen ∧
+    rejoinedHead.outstandingLoans bufferProv ⟨0, 8⟩ = 1 := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **A join in the wrong order is refused**, because the low grant's range must end
+where the high one's begins and these do not. -/
+theorem the_reversed_join_is_refused :
+    splitHead.joinGrants? highLoan lowLoan joinedLoan = Option.none := by decide
+
+/-- A lone low half, with nothing adjacent to it. -/
+def loneLowHalf : MemoryState :=
+  (unlent.issue? firstLoan { loanOfHead with range := ⟨0, 4⟩ }).getD unlent
+
+/-- The two adjacent halves, differing only in rights. -/
+def mismatchedPair : MemoryState :=
+  (loneLowHalf.issue? secondLoan { readLoanOfHead with range := ⟨4, 4⟩ }).getD loneLowHalf
+
+/-- Both states are the states they are named for, so the refusals below are about
+the join rather than about a missing source. -/
+theorem the_join_fixtures_are_real :
+    loneLowHalf.grantAt? firstLoan = some { loanOfHead with range := ⟨0, 4⟩ } ∧
+    loneLowHalf.grantAt? secondLoan = Option.none ∧
+    mismatchedPair.grantAt? firstLoan = some { loanOfHead with range := ⟨0, 4⟩ } ∧
+    mismatchedPair.grantAt? secondLoan = some { readLoanOfHead with range := ⟨4, 4⟩ } := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-- **A missing partner is refused**, which is the unknown-source clause: nothing is
+outstanding under `secondLoan` in `loneLowHalf`. -/
+theorem joining_with_an_unknown_partner_is_refused :
+    loneLowHalf.joinGrants? firstLoan secondLoan joinedLoan = Option.none := by decide
+
+/-- **And grants differing in anything but their range are refused.** The rights
+differ here; nothing about the door mentions rights, because it compares the whole
+grant — a door listing the fields it cares about is the shape that let a duty be
+relabelled in `Grass/Obligation/Delta.lean`. -/
+theorem a_mismatched_join_is_refused :
+    mismatchedPair.joinGrants? firstLoan secondLoan joinedLoan = Option.none := by decide
+
+/-- Two grants of the same rights with four bytes of gap between them. -/
+def gappedPair : MemoryState :=
+  (loneLowHalf.issue? secondLoan { loanOfHead with range := ⟨8, 4⟩ }).getD loneLowHalf
+
+/-- **A gap is refused**, and this is the refusal the design rests on: joining
+⟨0,4⟩ to ⟨8,4⟩ would produce a grant over ⟨0,12⟩, authorizing four bytes neither
+source covered. `joinGrants?_creates_no_authority` would be false without the
+adjacency check, so here it is as a refusal. -/
+theorem a_gapped_join_is_refused :
+    gappedPair.joinGrants? firstLoan secondLoan joinedLoan = Option.none ∧
+    gappedPair.grantAt? firstLoan = some { loanOfHead with range := ⟨0, 4⟩ } ∧
+    gappedPair.grantAt? secondLoan = some { loanOfHead with range := ⟨8, 4⟩ } := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- And the bytes in the gap are granted to nobody, before or after the refused
+join, which is what "neither source covered them" means here. -/
+theorem the_gap_is_granted_to_nobody :
+    ¬ gappedPair.Granted borrower bufferProv ⟨4, 4⟩ AccessIntent.read ∧
+    gappedPair.Granted borrower bufferProv ⟨0, 4⟩ AccessIntent.readWrite ∧
+    gappedPair.Granted borrower bufferProv ⟨8, 4⟩ AccessIntent.readWrite := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- The same pair with matching rights joins, so the refusal above is the mismatch
+and nothing else about the state. -/
+theorem the_matching_pair_joins :
+    ((loneLowHalf.issue? secondLoan { loanOfHead with range := ⟨4, 4⟩ }).getD
+      loneLowHalf).joinGrants? firstLoan secondLoan joinedLoan |>.isSome := by decide
+
 /-! ## The negatives, composed, over a state nobody built
 
 Every fixture above is concrete, and `decide` settles a concrete state. Review's point

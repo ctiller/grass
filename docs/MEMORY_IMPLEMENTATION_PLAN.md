@@ -1333,8 +1333,48 @@ refuses everything.
 
 ### 4.4.1 What M3 still owes
 
-- **Split and join of loans**, which §3 requires and which the identity discipline
-  above is the foundation for.
+- ~~**Split and join of loans**, which §3 requires and which the identity discipline
+  above is the foundation for.~~ Done. `MemoryState.splitGrant?` and
+  `MemoryState.joinGrants?` are the doors, in the module that owns the map, and three
+  decisions are worth recording.
+
+  **Binary, at an offset, with the parts derived rather than supplied.** A
+  list-of-parts door needs a predicate saying the parts cover the source's range and
+  lie inside it, and this branch has learned what a satisfaction condition with room
+  to be empty is worth — §10's proof package is closable by `True` eleven times. Two
+  parts either side of an offset need no coverage check: coverage is arithmetic, and
+  `AuthorityGrant.covered_by_part` is three lines of `omega`. An *n*-way split is
+  *n* − 1 of these.
+
+  **Neither door re-runs `issue?`, and a theorem says why that is safe.** Re-running
+  it would refuse correct splits, because `MayLend`'s unheld disjunct is false once
+  the source is outstanding and its lender-lends-again disjunct fails when the source
+  coexists with another lender's grant over the same bytes. So the justification is
+  `splitGrant?_creates_no_authority` and `joinGrants?_creates_no_authority` — the
+  result authorizes nothing the sources did not — with
+  `splitGrant?_preserves_authority` and the two `joinGrants?_preserves_*_authority`
+  for the other direction. Every one is over an arbitrary state; the fixtures in
+  `Tests/Memory/Loans.lean` are the concrete round trip.
+
+  **The join compares whole grants.** `lowGrant = { highGrant with range := … }` is
+  one `decide` over `DecidableEq`, so a field added to `AuthorityGrant` later is
+  compared without this door being edited. A door listing the fields it cares about
+  is precisely the shape that let `LedgerDelta.Applicable` relabel a duty: it pinned
+  protocol and owner because those were the fields someone thought of. Adjacency is
+  checked for the same reason — a gap would join authority over bytes neither source
+  covered, and `joinGrants?_creates_no_authority` would be false without it.
+
+  What is *not* stated is an `↔` between the two maps' `Granted`, because `Granted`
+  ranges over the raw entry list and a map carrying a shadowed duplicate under the
+  source's identity would lose that duplicate to the `erase`. No such map can be
+  built, for the same privacy reason §4.4.1 records below for `Exclusive`, and that is
+  again an invariant with no theorem. Both directions above hold of every map,
+  shadowed or not.
+
+  `Grass/Std/Logical/FiniteMap.lean` gained `mem_of_mem_eraseKey`,
+  `mem_entries_insert` and `mem_entries_erase` for this: bounding a modified map's
+  entry list from above is what a no-new-authority theorem needs, and without them
+  the proof has to unfold the association list at the call site.
 - **Lifetime and conditions on a grant.** §3's map carries them and
   `AuthorityGrant` does not. Adding fields nothing consults is the shape this layer
   has been bitten by three times, so they wait for M4's frames, where a bounded

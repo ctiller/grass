@@ -158,6 +158,21 @@ such a map. Use `Binds`, or `domain` only up to membership, until the
 -/
 def domain (m : FiniteMap K V) : List K := m.entries.map Prod.fst
 
+/-- Erasing removes entries and adds none. -/
+theorem mem_of_mem_eraseKey {entries : List (K × V)} {key : K}
+    {entry : K × V} (h : entry ∈ eraseKey entries key) : entry ∈ entries := by
+  induction entries with
+  | nil => simp [eraseKey] at h
+  | cons e rest ih =>
+    obtain ⟨k, v⟩ := e
+    by_cases hk : k = key
+    · rw [eraseKey, if_pos hk] at h
+      exact List.mem_cons_of_mem _ (ih h)
+    · rw [eraseKey, if_neg hk] at h
+      rcases List.mem_cons.mp h with h | h
+      · exact h ▸ List.mem_cons_self
+      · exact List.mem_cons_of_mem _ (ih h)
+
 /-- A binding is one of the entries. The converse fails on a map with shadowed
 duplicates, which is why this direction only. -/
 theorem mem_entries_of_lookup {m : FiniteMap K V} {key : K} {value : V}
@@ -166,6 +181,26 @@ theorem mem_entries_of_lookup {m : FiniteMap K V} {key : K} {value : V}
 
 /-- `m.Binds key` holds when `m` has a binding for `key`. -/
 def Binds (m : FiniteMap K V) (key : K) : Prop := (m.lookup key).isSome
+
+/--
+The entries of a map after an insert or an erase, bounded from above.
+
+`mem_entries_of_lookup` says what a map holds; these two say what it does *not*
+hold, which is what a no-new-authority theorem needs: every entry of the new map
+is either the one just inserted or an entry of the old map. Without them a
+theorem about a modified map has to unfold the association list at the call site.
+-/
+theorem mem_entries_insert {m : FiniteMap K V} {key : K} {value : V} {entry : K × V}
+    (h : entry ∈ (m.insert key value).entries) :
+    entry = (key, value) ∨ entry ∈ m.entries := by
+  rcases List.mem_cons.mp (show entry ∈ (key, value) :: eraseKey m.entries key from h) with
+    h | h
+  · exact Or.inl h
+  · exact Or.inr (mem_of_mem_eraseKey h)
+
+theorem mem_entries_erase {m : FiniteMap K V} {key : K} {entry : K × V}
+    (h : entry ∈ (m.erase key).entries) : entry ∈ m.entries :=
+  mem_of_mem_eraseKey h
 
 /-- `m.IsEmpty` holds when `m` binds nothing. -/
 def IsEmpty (m : FiniteMap K V) : Prop := ∀ key, m.lookup key = none
