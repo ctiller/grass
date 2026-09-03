@@ -161,6 +161,13 @@ Implementations beneath them are replaceable. When a requirement changes, the
 preferred workflow is a branch, deletion of obsolete machinery, and a clean
 rebuild against the reviewed interface. Git preserves old implementations.
 
+Formal review therefore evaluates theorem adequacy as well as kernel acceptance.
+For material theorem families, the reviewer distinguishes universal proofs from
+point fixtures, checks non-vacuity and connection to their consumers, records
+why the proved statement is sufficient and where it is deliberately weaker,
+and assesses proof economy by reusable abstraction rather than raw line count.
+[AGENT_REVIEW.md](AGENT_REVIEW.md) owns the operational review standard.
+
 A clean rebuild checks reproducibility after obsolete machinery is deleted; it
 is not the expected incremental invalidation cone. During ordinary development,
 the mandatory invalidation plan and build-execution report must show local

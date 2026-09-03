@@ -192,6 +192,54 @@ enough context to judge correctness, scope, and integration.
   emitted artifacts retain their authority connections.
 - Stable names do not hide changed semantic dependencies.
 
+For every material Lean theorem added, changed, or newly relied upon, review is
+about the proposition and its use—not whether a declaration happens to compile.
+The reviewer records a proportionate proof assessment covering the following
+questions. Closely related routine lemmas may be assessed as one family.
+
+1. **Role and adequacy.** What claim does the theorem establish, which root or
+   exported contract consumes it, and why is that claim the right strength for
+   the normative demand? The report also states what the theorem does *not*
+   establish when a plausible stronger reading would be unsafe. A green build,
+   impressive theorem name, or large declaration count is not adequacy evidence.
+2. **Quantification and coverage.** Inputs, API results, schedules, faults,
+   allocation choices, and other admitted entropy are universally quantified at
+   the correct boundary. Concrete evaluations, fuzz cases, examples, and
+   execution traces are fixtures only. They may refute a theorem or validate a
+   model boundary; they never prove domain coverage. `bv_decide` is acceptable
+   when it produces a kernel-checked proof of the universally quantified finite
+   proposition. `native_decide` is not proof authority, and a closed point proof
+   is acceptable only for a genuinely closed point claim.
+3. **Method and trust.** The proof method matches the structure of the claim:
+   induction covers every constructor or recursive descent; extensional proofs
+   compare every observable component; decidability procedures close the stated
+   proposition rather than a sampled surrogate; and imported lemmas have the
+   required hypotheses. The transitive axiom/unsafe audit must satisfy
+   [FOUNDATION.md](FOUNDATION.md). Automation must be a checked certificate
+   producer or consumer with a documented residual-goal boundary, never hidden
+   invariant discovery or admission.
+4. **Non-vacuity and adversarial resistance.** Premises are jointly inhabitable,
+   conclusions discriminate good from bad behavior, and representation or
+   refinement relations actually connect the two intended objects. Reviewers
+   use small negative constructions or mutation fixtures where they materially
+   test vacuity, missing constructors, weakened hypotheses, ignored fields, or
+   disconnected twins. Such fixtures challenge the proof statement; they do not
+   replace its universal proof.
+5. **Proof economy and generality.** Prefer a small reusable lemma over repeated
+   case splits, and a structural theorem over pointwise enumeration. Concision
+   means that domain structure and reusable library laws carry the argument; it
+   is not raw line minimization, proof-term opacity, or a one-line tactic that
+   conceals unbounded search and brittle residual obligations. Bespoke proof is
+   justified when the implementation is genuinely novel or the theorem is
+   intrinsically local.
+
+The authorization evidence for a Lean-bearing nomination summarizes why the
+important theorem families are adequate, how universal coverage was checked,
+which proof/trust audits ran, and any meaningful insufficiency that remains.
+It need not reproduce proofs line by line, but it must be specific enough that a
+later reviewer can distinguish a proved contract from a fixture, convention, or
+aspirational comment.
+
 ### 5.3 Implementation and assembly
 
 - Relevant failure, partial I/O, nondeterminism, faults, cancellation, cleanup,
@@ -221,6 +269,23 @@ enough context to judge correctness, scope, and integration.
 The reviewer need not reconstruct every kernel proof by hand. They must verify
 that checked or generated evidence has the claimed shape and no unreviewed
 semantic leap bridges the change.
+
+### 5.6 Monotonic improvement and limitations
+
+A nomination may merge with a non-blocking limitation only when the selected
+snapshot is a monotonic improvement: it preserves every previously claimed
+theorem and trust guarantee, satisfies the present milestone contract, and does
+not make a known counterexample easier to admit. A limitation cannot excuse an
+unsound theorem, missing required case, disconnected certificate, trust-boundary
+expansion, or regression against a normative demand.
+
+Each accepted limitation is recorded in the authorization with its exact scope,
+why it is non-blocking now, and a bus issue or other durable follow-up naming an
+owner and closure condition. “Future work,” proof size, or schedule pressure
+alone is not a disposition. A later milestone that depends on the absent
+property promotes the item to a blocker. Conversely, reviewers should not block
+sound local progress merely because a stronger theorem would be useful but is
+neither currently claimed nor required.
 
 ## 6. Findings and continuing authoring
 
