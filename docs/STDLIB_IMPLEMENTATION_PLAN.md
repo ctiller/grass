@@ -286,6 +286,8 @@ absence is a band-3 item under §1 with a named blocker, not an oversight:
 | `foldMap` | a monoid vocabulary, which no consumer has demanded. |
 | lexicographic comparison | an ordering vocabulary, likewise undemanded. |
 | indexing laws for `insertAt`/`eraseAt` | a consumer that indexes across an insertion. The operations and their length laws are present; the index-shifting laws are large and are better written against a real proof than guessed at. |
+| ~~`Vec.filter`~~ | **Withdrawn by the consumer who asked for it.** A review called its absence "startling" in round 1, then wrote six client modules and never once needed it. Recorded because a retracted demand is as useful as a demand, and because band 3 was right. |
+| ~~`reverse`, `takeWhile`, `extract`, `foldlM`, `head?`, `tail`, a `Sorted`/sort~~ | Same review, same verdict: never reached for. `Pairwise` plus decidability covered every ordering need including `insertSorted`; `Spikes/2_Sort` specifies sortedness and does not ask this library to perform one. `head?`/`tail` were subsumed by `Vec.recOnCons` — what was wanted was the induction principle, not the accessors. |
 | ~~`Vec` iterators~~ | **Supplied.** §3 lists iteration among the observations and this library had none; adversarial review found that neither the absence list nor the instances fixture had caught it. `Vec` now has `ForIn`, so `for x in v do …` works. |
 | fold/map/traverse *fusion* laws beyond `map_map` | a consumer. §5 asks for fusion "where their premises hold"; only `map` fusion exists, and there is no `foldl_map`, `foldr_map`, `foldl_append`, or `foldr_append`. Found by adversarial review; this row is the correction. |
 | pure immutable views/subsequences | a consumer. §3 lists them; `take`/`drop` copy instead. Also found by review, also previously unlisted. |
@@ -647,6 +649,47 @@ Goal: the three inherited pieces of §2 become this library's, and the
 Nothing in S2 is urgent and nothing in it blocks another agent; it is scheduled
 second because it is cheap and because leaving ownership split invites a fourth
 agent to add a fourth piece.
+
+### 4.0 The `ByteSeq` migration, costed
+
+A cross-agent review ran this migration against `c-mem`'s real branches rather
+than reasoning about it, and its headline finding inverts what §4.1 assumed.
+
+**Do not retype the use sites to `ByteArray`.** Every `Grass/Memory/*.lean` opens
+`Grass.Std.Logical`, and `ByteArray` is ambiguous there against the prelude's, so
+retyping ~83 fields produces ~83 elaboration errors. The migration `Byte.lean`'s
+docstring actually promised is **one line** — `abbrev ByteSeq := Vec Byte` — after
+which no field or parameter changes at all. Whether `ByteSeq` is later retired in
+favour of a qualified name is a separate cosmetic pass and a naming question for
+§3.12's owner.
+
+**Size: one line plus about twenty-two edits, a single sitting.**
+`agent/c-mem/memory-obligation-resource` is one line and zero proofs;
+`memory-semantics` is ~7 value-level edits (mostly `List.replicate` →
+`Vec.replicate`) and ~15 proof steps, of which 12 are mechanical name
+substitution. The other ~76 `ByteSeq` mentions are types that do not change.
+
+**Why it is that cheap, which is not obvious from the site count:** the memory
+layer already treats byte sequences abstractly. Across ~95 lines there are zero
+pattern matches on a byte sequence, zero concatenations, and only four operations
+used — `length`, `take`, `[i]?`, `replicate`. `Byte.lean`'s original instruction,
+"write `ByteSeq`, not `List Byte`", was followed, and it worked.
+
+**What this library owed first, now supplied.** The review found two genuine gaps
+and both are in: `Vec.ofFn` with `length_ofFn`, `get?_ofFn`, and `ofFn_congr`,
+without which `Grass/Memory/Apply.lean`'s `observedBytes` has no `Vec` spelling
+that a reviewer should accept; and `Vec.get?_eq_some_iff` with
+`Vec.lt_of_get?_eq_some`, the missing half of the `get?` characterisation — the
+module stated the `none` case both ways and the `some` case only in the direction
+that builds one, which is a real asymmetry rather than a stylistic one.
+
+**One trap to hand over with it.** `Vec`'s `GetElem?` is definitionally
+`v.toList[i]?`, so `List` lemmas *unify* against a `Vec` and then leave goals
+mixing `Vec.length v` with `v.toList.length`, which `omega` cannot bridge. The
+proof does not fail with a type error; it fails with a nonsense arithmetic goal.
+Adding `Vec.getElem?_eq_get?` to the normalising `simp` set turns the whole class
+into mechanical substitution. Note also that this repository has no mathlib, so
+`by_contra` is unavailable and contrapositives need `Nat.lt_or_ge`.
 
 ### 4.1 `Byte.lean`
 
