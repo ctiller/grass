@@ -9,6 +9,7 @@ import Grass.ISA.X86.Citation
 import Grass.ISA.X86.DualCitation
 import Grass.ISA.X86.Encoding
 import Grass.ISA.X86.Ledger
+import Grass.ISA.X86.Performance
 import Grass.ISA.X86.Profile
 import Grass.ISA.X86.Register
 import Grass.ISA.X86.Sources
