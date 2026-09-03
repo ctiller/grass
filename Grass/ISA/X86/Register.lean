@@ -36,10 +36,39 @@ the written low bits:
 | .w16, old, v => BitVec.extractLsb' 16 48 old ++ v
 ```
 
-That is what "preserves the upper bits" means, said once, in the type. The
+That is what "preserves the upper bits" means, said in one line. The
 alternative — masking with `old &&& 0xFFFFFFFFFFFF0000` and OR-ing — encodes the
 same rule in a hexadecimal literal that has to be counted to be checked, and
 whose four variants differ only in how many `F`s they have.
+
+## Exactly how much of this the type enforces
+
+Less than an earlier version of this section implied, and the distinction is
+worth stating because it decides where to look when something changes.
+
+The dependent type `BitVec w.bits` forces each arm's two slices to sum to 64.
+That rules out three mistakes outright, as *type* errors: swapping the `.w16`
+and `.w8` arms, and mis-sizing either preserved slice — `extractLsb' 8 56` in
+the `.w16` arm gives `BitVec (56 + 16)`, which is not `BitVec 64`.
+
+It does not pin where a preserved slice *starts*, and it does not distinguish
+preserving from zero-extending at all. A reviewer wrote six further mutations
+that all typecheck cleanly: `.w32` preserving the high bits instead of clearing
+them, `.w32` emitting `v ++ 0#32`, `.w16` reading from offset 0 instead of 16,
+`.w8` from offset 0 instead of 8, `.w8` writing into bits 15:8, and `.w64`
+ignoring its argument. Every one is caught, but by the theorems below rather
+than by the type: `read_back` pins the low `w.bits`, and `w32_clears_high`,
+`w32_independent`, `w16_preserves_high`, `w8_preserves_high` and
+`read_back_w64` pin the rest, so between them all 64 bits of all four cases are
+determined and no semantically different definition survives `lake build`.
+
+The one worth naming is `.w32` preserving instead of clearing, because it is the
+mutation this module exists to prevent and it is *not* type-prevented. Two of
+the mutations also fail as `maximum number of heartbeats` timeouts rather than
+as clean refutations, which is a fragile way to be caught — a raised
+`maxHeartbeats` would turn them green. `w32_clears_high` is the theorem that
+catches it semantically, and `Tests/ISA/X86/MachineProbes.lean` catches it on
+silicon.
 
 ## Why not `bv_decide`
 
