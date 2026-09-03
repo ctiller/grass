@@ -273,6 +273,35 @@ theorem not_fresh_of_allocated {reference : topology.ProcessRef kind}
     ¬ history.Fresh reference.generation :=
   fun fresh => fresh allocated
 
+/--
+**Transporting a reference to another name for its role carries its instance
+identity with it.**
+
+`ProcessParentage.knownParent_cast`'s counterpart, needed for the same reason and
+by the same reader. `Grass/Process/Network/Transition.lean` states its
+instance-identity fields over transported values, and
+`LogicalProcessNetworkCore.SlotsAgree` reads `instanceId` through exactly such a
+transport, so a proof that a step preserves that clause cannot get from one to
+the other without this.
+-/
+theorem instanceId_cast {left right : topology.ProcessKind} (sameKind : left = right)
+    (reference : topology.ProcessRef left) :
+    (sameKind ▸ reference : topology.ProcessRef right).instanceId
+      = sameKind ▸ reference.instanceId := by
+  cases sameKind; rfl
+
+/--
+And the generation, whose type does not mention the role at all, is unmoved by
+the transport.
+
+`Allocated` and `Stale` are both stated over `generation`, so this is what lets a
+clause about allocation survive an instance being carried across a step.
+-/
+theorem generation_cast {left right : topology.ProcessKind} (sameKind : left = right)
+    (reference : topology.ProcessRef left) :
+    (sameKind ▸ reference : topology.ProcessRef right).generation = reference.generation := by
+  cases sameKind; rfl
+
 end ProcessRef
 
 section KindTags

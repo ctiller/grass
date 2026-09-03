@@ -90,75 +90,91 @@ theorem instanceFragment_inj {kind kind' : plan.topology.ProcessKind}
   cases equal
   exact ⟨rfl, rfl⟩
 
-/-! ## Parentage -/
+/-! ## What a step does to the slot it declares -/
 
 /--
-An incarnation that records the parent another one recorded inherits its
-validity.
-
-The shared body of eight of `parentageValid_preserved`'s cases. Whether the
-parentage was *pinned* (`processStep`, the six endings) or *moved* (`detach`,
-which changes `attached` to `detached` and keeps the reference), what the clause
-reads is `knownParent`, and that is what these constructors agree on.
+Transporting two parentages to a common role and finding them equal is finding
+the same recorded parent.
 -/
-theorem parentage_transfers (valid : before.ParentageValid)
-    {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
-    {fromInstance toInstance : ProcessInstance plan.topology}
-    (fromKind : fromInstance.kind = kind) (toKind : toInstance.kind = kind)
-    (foundBefore : before.instances kind slot = some fromInstance)
-    (sameKnown : toInstance.parentage.knownParent = fromInstance.parentage.knownParent) :
-    ∀ parentKind parent, toInstance.parentage.knownParent = some ⟨parentKind, parent⟩ →
-      plan.topology.maySpawn parentKind toInstance.kind := by
-  intro parentKind parent known
-  have permitted :=
-    valid kind slot fromInstance foundBefore parentKind parent (sameKnown ▸ known)
-  rw [toKind, ← fromKind]
-  exact permitted
+theorem knownParent_of_transported
+    {left right : ProcessInstance plan.topology} {kind : plan.topology.ProcessKind}
+    (leftKind : left.kind = kind) (rightKind : right.kind = kind)
+    (same : leftKind ▸ left.parentage = rightKind ▸ right.parentage) :
+    left.parentage.knownParent = right.parentage.knownParent := by
+  rw [← ProcessParentage.knownParent_cast leftKind left.parentage,
+    ← ProcessParentage.knownParent_cast rightKind right.parentage, same]
 
-/-- And the six ending constructors all pin the parentage, so they all inherit
-it the same way. -/
-theorem endsInstance_parentage (valid : before.ParentageValid)
-    {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
+/--
+And finding one to be the other's detachment is the same, because detaching
+removes authority and keeps the parent it knew.
+-/
+theorem knownParent_of_detached
+    {left right : ProcessInstance plan.topology} {kind : plan.topology.ProcessKind}
+    (leftKind : left.kind = kind) (rightKind : right.kind = kind)
+    (same : leftKind ▸ left.parentage = (rightKind ▸ right.parentage).detach) :
+    left.parentage.knownParent = right.parentage.knownParent := by
+  rw [← ProcessParentage.knownParent_cast leftKind left.parentage,
+    ← ProcessParentage.knownParent_cast rightKind right.parentage, same,
+    ProcessParentage.detach_preserves_knownParent]
+
+/-- The six ending constructors carry the identity across in the same way, so
+they answer `declared_slot_outcome`'s second disjunct in the same way. -/
+theorem endsInstance_carries {kind : plan.topology.ProcessKind}
+    {slot : plan.topology.InstanceId kind}
     {ending : ProcessLifecycle (plan.topology.protocol kind)}
     {custody : Bag (plan.topology.protocol kind).Demand → Obligations → Obligations → Prop}
-    {incarnation : ProcessInstance plan.topology}
-    (found : after.instances kind slot = some incarnation)
     (step : plan.EndsInstance before after kind slot ending custody) :
-    ∀ parentKind parent, incarnation.parentage.knownParent = some ⟨parentKind, parent⟩ →
-      plan.topology.maySpawn parentKind incarnation.kind := by
+    ∃ (fromInstance toInstance : ProcessInstance plan.topology)
+      (fromKind : fromInstance.kind = kind) (toKind : toInstance.kind = kind),
+      before.instances kind slot = some fromInstance ∧
+      after.instances kind slot = some toInstance ∧
+      toKind ▸ toInstance.ref = fromKind ▸ fromInstance.ref ∧
+      toInstance.parentage.knownParent = fromInstance.parentage.knownParent := by
   obtain ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter,
-    _, sameParentage, _⟩ := step.identityPreserved
-  have same : toInstance = incarnation := Option.some.inj (foundAfter.symm.trans found)
-  subst same
-  refine parentage_transfers valid fromKind toKind foundBefore ?_
-  rw [← ProcessParentage.knownParent_cast toKind toInstance.parentage,
-    ← ProcessParentage.knownParent_cast fromKind fromInstance.parentage, sameParentage]
+    sameRef, sameParentage, _⟩ := step.identityPreserved
+  exact ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter, sameRef,
+    knownParent_of_transported toKind fromKind sameParentage⟩
 
 /--
-**A step preserves the validity of recorded parenthood.**
+**Three things a step can do to the slot it declared, and no fourth.**
 
-`docs/DECISIONS.md` decision 130's law, and the first clause of the capstone this
-module is for. Six kinds of constructor can put an incarnation in a slot and each
-answers for the parent it records:
+The case analysis every instance-shaped clause of `WellFormed` shares, done once.
+Twenty-four constructors, thirteen of which declare no instance fragment at all —
+for those the declaration is absurd. Of the eleven that remain:
 
-* `spawn` and `restart` answer with `authorized`, which is the law itself;
-* `processStep` and the six endings pin the parentage, so the before-network
-  answers;
-* `detach` moves it from `attached` to `detached`, which
-  `ProcessParentage.detach_preserves_knownParent` says keeps the recorded parent;
-* `join` empties the slot, so there is nothing to answer for.
+* `join` empties the slot, and a clause about what a slot holds asks nothing of
+  an empty one;
+* `processStep`, `detach` and the six endings *carry* an incarnation across,
+  agreeing on the reference and on the parent it knows, so the before-network
+  answers for it. They allocate nothing, which is what `¬ scope .nominals`
+  records — the clause about allocation needs it and cannot get it from the
+  identity fields;
+* `spawn` and `restart` *install* one and answer for it themselves, with
+  `slotAgrees`, `authorized`, `allocatesTheGeneration` and `nowLive`.
 
-Everything else declares no instance fragment and is
-`instanceProperty_preserved`'s other branch.
+Doing this once rather than once per clause is the difference between one
+twenty-four-way split and five, and it puts the constructor names in one place: a
+new constructor breaks this proof and nothing else.
 -/
-theorem parentageValid_preserved (transition : plan.NetworkTransition before after)
-    (valid : before.ParentageValid) : after.ParentageValid := by
-  refine instanceProperty_preserved
-    (Property := fun _ _ incarnation => ∀ parentKind parent,
-      incarnation.parentage.knownParent = some ⟨parentKind, parent⟩ →
-        plan.topology.maySpawn parentKind incarnation.kind)
-    transition valid ?_
-  intro kind slot incarnation declared found
+theorem declared_slot_outcome (transition : plan.NetworkTransition before after)
+    {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
+    (declared : transition.scope (.instanceState kind slot)) :
+    after.instances kind slot = none
+    ∨ (¬ transition.scope .nominals ∧
+        ∃ (fromInstance toInstance : ProcessInstance plan.topology)
+          (fromKind : fromInstance.kind = kind) (toKind : toInstance.kind = kind),
+          before.instances kind slot = some fromInstance ∧
+          after.instances kind slot = some toInstance ∧
+          toKind ▸ toInstance.ref = fromKind ▸ fromInstance.ref ∧
+          toInstance.parentage.knownParent = fromInstance.parentage.knownParent)
+    ∨ (∀ incarnation, after.instances kind slot = some incarnation →
+        (∃ sameKind : incarnation.kind = kind,
+          sameKind ▸ incarnation.ref.instanceId = slot) ∧
+        (∀ parentKind parent,
+          incarnation.parentage.knownParent = some ⟨parentKind, parent⟩ →
+          plan.topology.maySpawn parentKind incarnation.kind) ∧
+        incarnation.ref.generation ∈ transition.allocatedNominals.entries ∧
+        incarnation.Live) := by
   cases transition with
   | processStep _ _ _ _ _ _ step =>
     obtain ⟨same, sameSlot⟩ := instanceFragment_inj
@@ -168,12 +184,22 @@ theorem parentageValid_preserved (transition : plan.NetworkTransition before aft
           · exact absurd h (by intro equal; cases equal))
     cases same; cases sameSlot
     obtain ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter, _, _,
-      _, sameParentage, _⟩ := step.protocolStep
-    have same : toInstance = incarnation := Option.some.inj (foundAfter.symm.trans found)
-    subst same
-    refine parentage_transfers valid fromKind toKind foundBefore ?_
-    rw [← ProcessParentage.knownParent_cast toKind toInstance.parentage,
-      ← ProcessParentage.knownParent_cast fromKind fromInstance.parentage, sameParentage]
+      sameRef, sameParentage, _⟩ := step.protocolStep
+    exact Or.inr (Or.inl ⟨(by rintro (h | ⟨_, h⟩ | ⟨_, _, h⟩) <;> cases h),
+      fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter, sameRef,
+      knownParent_of_transported toKind fromKind sameParentage⟩)
+  | detach _ _ step =>
+    obtain ⟨same, sameSlot⟩ := instanceFragment_inj declared
+    cases same; cases sameSlot
+    obtain ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter,
+      isDetach, _, sameRef, _⟩ := step.identityPreserved
+    exact Or.inr (Or.inl ⟨(by intro h; cases h),
+      fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter, sameRef,
+      knownParent_of_detached toKind fromKind isDetach⟩)
+  | join _ _ _ step =>
+    obtain ⟨same, sameSlot⟩ := instanceFragment_inj declared
+    cases same; cases sameSlot
+    exact Or.inl step.nowFree
   | spawn _ _ _ _ _ step =>
     obtain ⟨same, sameSlot⟩ := instanceFragment_inj
       (by rcases declared with h | h | h
@@ -181,7 +207,10 @@ theorem parentageValid_preserved (transition : plan.NetworkTransition before aft
           · exact absurd h (by intro equal; cases equal)
           · exact absurd h.2 (by intro equal; cases equal))
     cases same; cases sameSlot
-    exact step.authorized incarnation found
+    refine Or.inr (Or.inr fun incarnation found => ⟨step.slotAgrees incarnation found,
+      step.authorized incarnation found, step.allocatesTheGeneration incarnation found, ?_⟩)
+    obtain ⟨live, foundLive, isLive, _⟩ := step.nowLive
+    exact Option.some.inj (foundLive.symm.trans found) ▸ isLive
   | restart _ _ _ _ _ step =>
     obtain ⟨same, sameSlot⟩ := instanceFragment_inj
       (by rcases declared with h | h | h
@@ -189,64 +218,52 @@ theorem parentageValid_preserved (transition : plan.NetworkTransition before aft
           · exact absurd h (by intro equal; cases equal)
           · exact absurd h.2 (by intro equal; cases equal))
     cases same; cases sameSlot
-    exact step.authorized incarnation found
-  | detach _ _ step =>
-    obtain ⟨same, sameSlot⟩ := instanceFragment_inj declared
-    cases same; cases sameSlot
-    obtain ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter,
-      isDetach, _⟩ := step.identityPreserved
-    have same : toInstance = incarnation := Option.some.inj (foundAfter.symm.trans found)
-    subst same
-    refine parentage_transfers valid fromKind toKind foundBefore ?_
-    rw [← ProcessParentage.knownParent_cast toKind toInstance.parentage,
-      ← ProcessParentage.knownParent_cast fromKind fromInstance.parentage, isDetach,
-      ProcessParentage.detach_preserves_knownParent]
-  | join _ _ _ step =>
-    obtain ⟨same, sameSlot⟩ := instanceFragment_inj declared
-    cases same; cases sameSlot
-    exact absurd (step.nowFree.symm.trans found) (by intro equal; cases equal)
+    refine Or.inr (Or.inr fun incarnation found => ⟨step.slotAgrees incarnation found,
+      step.authorized incarnation found, step.allocatesTheGeneration incarnation found, ?_⟩)
+    obtain ⟨live, foundLive, isLive, _⟩ := step.nowLive
+    exact Option.some.inj (foundLive.symm.trans found) ▸ isLive
   | interrupt _ _ _ _ step =>
     obtain ⟨same, sameSlot⟩ := instanceFragment_inj
       (by rcases declared with h | h
           · exact h
           · exact absurd h.2 (by intro equal; cases equal))
     cases same; cases sameSlot
-    exact endsInstance_parentage valid found step
+    exact Or.inr (Or.inl ⟨(by rintro (h | ⟨_, h⟩) <;> cases h), endsInstance_carries step⟩)
   | fault _ _ _ _ step =>
     obtain ⟨same, sameSlot⟩ := instanceFragment_inj
       (by rcases declared with h | h
           · exact h
           · exact absurd h.2 (by intro equal; cases equal))
     cases same; cases sameSlot
-    exact endsInstance_parentage valid found step
+    exact Or.inr (Or.inl ⟨(by rintro (h | ⟨_, h⟩) <;> cases h), endsInstance_carries step⟩)
   | environmentViolation _ _ _ _ step =>
     obtain ⟨same, sameSlot⟩ := instanceFragment_inj
       (by rcases declared with h | h
           · exact h
           · exact absurd h.2 (by intro equal; cases equal))
     cases same; cases sameSlot
-    exact endsInstance_parentage valid found step
+    exact Or.inr (Or.inl ⟨(by rintro (h | ⟨_, h⟩) <;> cases h), endsInstance_carries step⟩)
   | childCancelled _ _ _ _ _ step =>
     obtain ⟨same, sameSlot⟩ := instanceFragment_inj
       (by rcases declared with h | h
           · exact h
           · exact absurd h.2 (by intro equal; cases equal))
     cases same; cases sameSlot
-    exact endsInstance_parentage valid found step
+    exact Or.inr (Or.inl ⟨(by rintro (h | ⟨_, h⟩) <;> cases h), endsInstance_carries step⟩)
   | childDied _ _ _ _ _ step =>
     obtain ⟨same, sameSlot⟩ := instanceFragment_inj
       (by rcases declared with h | h
           · exact h
           · exact absurd h.2 (by intro equal; cases equal))
     cases same; cases sameSlot
-    exact endsInstance_parentage valid found step
+    exact Or.inr (Or.inl ⟨(by rintro (h | ⟨_, h⟩) <;> cases h), endsInstance_carries step⟩)
   | processTermination _ _ _ _ step =>
     obtain ⟨same, sameSlot⟩ := instanceFragment_inj
       (by rcases declared with h | h
           · exact h
           · exact absurd h.2 (by intro equal; cases equal))
     cases same; cases sameSlot
-    exact endsInstance_parentage valid found step
+    exact Or.inr (Or.inl ⟨(by rintro (h | ⟨_, h⟩) <;> cases h), endsInstance_carries step⟩)
   | send _ _ _ _ => exact absurd declared (by intro equal; cases equal)
   | requestCancel _ _ _ _ => exact absurd declared (by intro equal; cases equal)
   | acknowledgeCancel _ _ _ _ _ => exact absurd declared (by intro equal; cases equal)
@@ -266,6 +283,101 @@ theorem parentageValid_preserved (transition : plan.NetworkTransition before aft
   | reroute _ _ _ _ _ =>
     rcases declared with h | h <;> exact absurd h (by intro equal; cases equal)
 
+/-! ## The clauses -/
+
+/--
+**A step preserves the validity of recorded parenthood.**
+
+`docs/DECISIONS.md` decision 130's law. A carried incarnation knows the parent
+the one before it knew, and the before-network answered for that; an installed
+one answers with `authorized`, which is the law itself; an emptied slot has
+nothing to answer for.
+-/
+theorem parentageValid_preserved (transition : plan.NetworkTransition before after)
+    (valid : before.ParentageValid) : after.ParentageValid := by
+  refine instanceProperty_preserved
+    (Property := fun _ _ incarnation => ∀ parentKind parent,
+      incarnation.parentage.knownParent = some ⟨parentKind, parent⟩ →
+        plan.topology.maySpawn parentKind incarnation.kind)
+    transition valid ?_
+  intro kind slot incarnation declared found
+  rcases declared_slot_outcome transition declared with empty | ⟨_, carried⟩ | installed
+  · exact absurd (empty.symm.trans found) (by intro equal; cases equal)
+  · obtain ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter,
+      _, sameKnown⟩ := carried
+    have same : toInstance = incarnation := Option.some.inj (foundAfter.symm.trans found)
+    subst same
+    intro parentKind parent known
+    have permitted :=
+      valid kind slot fromInstance foundBefore parentKind parent (sameKnown ▸ known)
+    rw [toKind, ← fromKind]
+    exact permitted
+  · exact (installed incarnation found).2.1
+
+/--
+**A step preserves the agreement between a slot and what it holds.**
+
+The clause that stopped a spawn installing an incarnation naming slot 3 into slot
+7. A carried incarnation has the reference the one before it had, and the
+before-network placed that correctly; an installed one answers with `slotAgrees`,
+which is the field local adversarial review put there.
+-/
+theorem slotsAgree_preserved (transition : plan.NetworkTransition before after)
+    (agree : before.SlotsAgree) : after.SlotsAgree := by
+  refine instanceProperty_preserved
+    (Property := fun kind slot incarnation => ∃ sameKind : incarnation.kind = kind,
+      (sameKind ▸ incarnation.ref.instanceId : plan.topology.InstanceId kind) = slot)
+    transition agree ?_
+  intro kind slot incarnation declared found
+  rcases declared_slot_outcome transition declared with empty | ⟨_, carried⟩ | installed
+  · exact absurd (empty.symm.trans found) (by intro equal; cases equal)
+  · obtain ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter,
+      sameRef, _⟩ := carried
+    have same : toInstance = incarnation := Option.some.inj (foundAfter.symm.trans found)
+    subst same
+    obtain ⟨_, atSlot⟩ := agree kind slot fromInstance foundBefore
+    refine ⟨toKind, ?_⟩
+    rw [← ProcessTopologyCore.ProcessRef.instanceId_cast toKind toInstance.ref, sameRef,
+      ProcessTopologyCore.ProcessRef.instanceId_cast fromKind fromInstance.ref]
+    exact atSlot
+  · exact (installed incarnation found).1
+
+/--
+**A step preserves the allocation of every live generation.**
+
+`docs/FOUNDATION.md` law 22 at the network, and the one clause that is a law of
+`NetworkStep` rather than of `NetworkTransition`: `usedNominals` moves by
+`historyExact`, which is a field of the step and not of the transition. A
+transition alone can shrink the history and strand every generation in it.
+
+The history only grows, so a carried incarnation — whose reference is the one it
+had — stays allocated. An installed one has a generation this step allocated, and
+`NetworkStep.allocations_are_recorded` puts it in the history afterwards.
+-/
+theorem nominalsAllocated_preserved (step : plan.NetworkStep before after)
+    (allocated : before.NominalsAllocated) : after.NominalsAllocated := by
+  have grows : ∀ nominal ∈ before.usedNominals.used, nominal ∈ after.usedNominals.used := by
+    intro nominal member
+    rw [step.historyExact]
+    exact NominalHistory.mem_extend.mpr (Or.inr member)
+  refine instanceProperty_preserved
+    (Property := fun _ _ incarnation => incarnation.ref.Allocated after.usedNominals)
+    step.transition
+    (fun kind slot incarnation found => grows _ (allocated kind slot incarnation found)) ?_
+  intro kind slot incarnation declared found
+  rcases declared_slot_outcome step.transition declared with empty | ⟨_, carried⟩ | installed
+  · exact absurd (empty.symm.trans found) (by intro equal; cases equal)
+  · obtain ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter,
+      sameRef, _⟩ := carried
+    have same : toInstance = incarnation := Option.some.inj (foundAfter.symm.trans found)
+    subst same
+    have sameGeneration : toInstance.ref.generation = fromInstance.ref.generation := by
+      rw [← ProcessTopologyCore.ProcessRef.generation_cast toKind toInstance.ref, sameRef,
+        ProcessTopologyCore.ProcessRef.generation_cast fromKind fromInstance.ref]
+    show toInstance.ref.generation ∈ after.usedNominals.used
+    rw [sameGeneration]
+    exact grows _ (allocated kind slot fromInstance foundBefore)
+  · exact step.allocations_are_recorded (installed incarnation found).2.2.1
 
 end ProcessPlan
 
