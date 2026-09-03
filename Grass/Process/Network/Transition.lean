@@ -370,7 +370,10 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
     (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
     (event : (plan.topology.protocol kind).Event)
     (written : plan.topology.SharedRegion → Prop)
-    (emitted : Trace boundary.Observation) : Prop where
+    (emitted : Trace boundary.Observation)
+    (issued : Bag (plan.topology.protocol kind).Demand)
+    (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation) :
+    Prop where
   /-- It was live, and this is the state it stepped from. -/
   from' : ∃ incarnation, before.instances kind slot = some incarnation ∧
     incarnation.Live ∧ incarnation.kind = kind
@@ -378,6 +381,33 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
   constructor. -/
   stillLive : ∃ incarnation, after.instances kind slot = some incarnation ∧
     incarnation.Live
+  /--
+  **And its private state moves by the protocol's own `Step` relation.**
+
+  The field this structure spent four revisions without, while its docstring
+  claimed it. `event` was a parameter used nowhere, `issued` did not exist, and
+  the instance's new state was arbitrary as long as it was live — so a
+  `processStep` was not a protocol step at all, and no fixture in the corpus ever
+  constructed one to notice.
+
+  With it, the three things §3 requires of a local step are here: the protocol
+  admits the transition, the demands it issues are the protocol's own, and the
+  observation segment is the one the protocol emitted.
+  -/
+  protocolStep : ∃ fromState toState : (plan.topology.protocol kind).State,
+    (∃ incarnation, before.instances kind slot = some incarnation ∧
+      ∃ same : incarnation.kind = kind, same ▸ incarnation.localState = fromState) ∧
+    (∃ incarnation, after.instances kind slot = some incarnation ∧
+      ∃ same : incarnation.kind = kind, same ▸ incarnation.localState = toState) ∧
+    (plan.topology.protocol kind).Step fromState event toState issued localEmitted
+  /--
+  **And what reaches the network trace is the projection of what it observed.**
+
+  `ProcessGraph.observeAt` is the declaration; this is where it is spent. Before
+  it, `emitted` was an arbitrary boundary segment: a step could append anything
+  to the program's trace regardless of what the role observed.
+  -/
+  emittedIsProjected : emitted = localEmitted.filterMap (plan.topology.observeAt kind)
   /-- Observations grow by exactly this segment. -/
   observationsExtend : after.observations = before.observations ++ emitted
   /--
@@ -525,7 +555,10 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
       (event : (plan.topology.protocol kind).Event)
       (written : plan.topology.SharedRegion → Prop)
       (emitted : Trace boundary.Observation)
-      (step : plan.StepsLocally before after kind slot event written emitted)
+      (issued : Bag (plan.topology.protocol kind).Demand)
+      (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation)
+      (step : plan.StepsLocally before after kind slot event written emitted
+        issued localEmitted)
   /-- A new incarnation appears. -/
   | spawn (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
       (allocation : Allocation plan.topology.Carrier)
@@ -618,7 +651,7 @@ is exhaustive over the family, so there is no transition whose scope is
 undefined and none that can change a fragment without declaring it.
 -/
 def scope : plan.NetworkTransition before after → NetworkFragment plan.topology → Prop
-  | .processStep kind slot _ written emitted _ =>
+  | .processStep kind slot _ written emitted _ _ _ =>
       fun fragment => fragment = .instanceState kind slot ∨
         (emitted ≠ [] ∧ fragment = .observations) ∨
         ∃ region, written region ∧ fragment = .region region
@@ -676,7 +709,7 @@ weave: `docs/PROCESS.md` §8's `Disjoint (TransitionScope step) Scope` now has a
 theorem touchesOnly (transition : plan.NetworkTransition before after) :
     plan.TouchesOnly before after transition.scope := by
   cases transition with
-  | processStep _ _ _ _ _ step => exact step.scope
+  | processStep _ _ _ _ _ _ _ step => exact step.scope
   | spawn _ _ _ step => exact step.scope
   | restart _ _ _ step => exact step.scope
   | send _ _ _ step => exact step.scope
@@ -737,7 +770,7 @@ theorem moving_the_ledger_ends_an_instance (transition : plan.NetworkTransition 
     exact ⟨kind, slot, _, custody, step, step.custodyDeclared⟩
   | processTermination kind slot _ custody step =>
     exact ⟨kind, slot, _, custody, step, step.custodyDeclared⟩
-  | processStep _ _ _ _ _ step =>
+  | processStep _ _ _ _ _ _ _ step =>
     exact absurd (step.scope .obligations (by simp)) moved
   | spawn _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
   | restart _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved

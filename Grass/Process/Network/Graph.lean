@@ -270,6 +270,29 @@ structure ProcessGraph (registry : ProtocolRegistry.{u, w, v})
   Parenthood of a particular *instance* is a topology fact, not a graph fact.
   -/
   maySpawn : ProcessKind → ProcessKind → Prop
+  /--
+  How each role's observations appear at the boundary.
+
+  `rootBoundary.observe` gives this for the root and for nothing else, yet a
+  `processStep` on *any* role may emit. Without a per-role projection a non-root
+  process's observations reach the network trace with no declared relation to
+  what the role actually observed, and `StepsLocally.emitted` was for a while
+  exactly that: a boundary segment with nothing tying it to the protocol.
+
+  Partial for the same reason `ProtocolExposesBoundary.observe` is:
+  `docs/PROCESS.md` §6 lets a commit be hidden from the product projection while
+  remaining in the audit trace.
+  -/
+  observeAt : (kind : ProcessKind) →
+    (registry.protocol (protocolKey kind)).Observation → Option boundary.Observation
+  /--
+  And the root's is the one `rootBoundary` already declared.
+
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.15 records that the boundary
+  projection is declared twice; this is the equation that stops the two
+  declarations disagreeing.
+  -/
+  observeAtRoot : observeAt root = rootBoundary.observe
   /-- What each role may do to each shared region. -/
   sharedAccess : ProcessKind → SharedRegion → LogicalAccess
   /-- How many instances of each role, and whether they carry generations. -/

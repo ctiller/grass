@@ -192,6 +192,11 @@ inductive Answerer
   protocolKey := id
   root := .blind
   rootBoundary := answerExposure
+  observeAt := fun kind =>
+    match kind with
+    | .blind => some
+    | .determined => fun _ => none
+  observeAtRoot := rfl
   maySpawn := fun parent child => parent = .blind ∧ child = .determined
   sharedAccess := fun _ region => region.elim
   population :=

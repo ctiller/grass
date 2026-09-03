@@ -74,6 +74,8 @@ protocols. -/
   protocolKey := fun _ => ()
   root := .listener
   rootBoundary := fixtureExposure
+  observeAt := fun _ => some
+  observeAtRoot := rfl
   maySpawn := fun parent child => parent = .listener ∧ child = .connection
   sharedAccess := fun role region =>
     match role, region with
