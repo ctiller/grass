@@ -26,11 +26,16 @@ exists: exclusive and frozen from the grant map, shared-immutable and atomic-sha
 from the rights on the outstanding grants, and unavailable from allocation liveness
 and epoch.
 
-§3's fifth entry is "transferred **or** unavailable authority", and `unavailable`
-covers the second half only. Nothing here represents a transfer — authority moved
-rather than lent — and §4.4.1 of `docs/MEMORY_IMPLEMENTATION_PLAN.md` records it as
-owed. The count was "four of five" for one round, which read as coverage of a bullet
-half-delivered; that is the mistake this file keeps making, in miniature.
+§3's fifth entry is "transferred **or** unavailable authority". `unavailable`
+covers the second half and `MemoryState.transferGrant?` is the first: authority moved
+rather than lent, with `transferGrant?_creates_no_authority` and
+`transferGrant?_grants_the_recipient` the pair that says the move is a move.
+
+This paragraph said the opposite for two milestones after `transferGrant?` landed,
+and it survived a sweep for retracted claims because it names no declaration a
+citation check could chase. That is the mistake this file keeps making, in miniature,
+and review found it by reading the module comment against the elaborated
+environment.
 
 §3's third entry, atomic shared access, took the longest road and the record is
 worth keeping. There was an `atomicShared (ordering : OrderingDemand)` constructor
@@ -87,12 +92,16 @@ places this layer has been bitten by a second source of truth.
 
 ## What is not here
 
-Split and join of loans. `MemoryState.authorityOf` puts an owner into
+The lifetime field. `MemoryState.authorityOf` puts an owner into
 `AuthorityState.frozen` while another context's write grant is outstanding and
 `not_permitsOrdinaryWrite_of_writableByAnother` is the borrow discipline that
-follows, so the freeze half of §3 is here; splitting one loan into two and joining
-two back is not. Nor is the lifetime field, nor atomic authority, nor transferred
-authority — all above.
+follows, so the freeze half of §3 is here; a grant's *lifetime* is not, and
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records it.
+
+Split, join, transfer and atomic authority were on this list and are not any more:
+`MemoryState.splitGrant?`, `MemoryState.joinGrants?` and `MemoryState.transferGrant?`
+are doors with laws, and `AuthorityState.atomicShared` is a constructor `authorityOf`
+builds. The list outlived all four.
 
 ## What consumes `AuthorityState`
 
@@ -131,7 +140,7 @@ which is an enumeration a profile may extend; this is a sum, which it may not.
 
 The closure is this module's decision and it is **not** the safe direction, which an
 earlier version of this docstring claimed while citing law 8 for it. `authorityOf`
-is a total function into these four: a situation they do not describe is not
+is a total function into these five: a situation they do not describe is not
 rejected, it is classified as the nearest one. `docs/FOUNDATION.md` law 8 demands
 rejection of what the model has no account of, and nothing here rejects. The
 closure is kept because the alternative — an open sum with a permissive default —
@@ -143,8 +152,10 @@ the freeze.
 
 Every constructor here is built by `authorityOf` below. That is a standing
 requirement rather than an accident: two of them were built by nothing, which made
-the theorems about them vacuous, and a fifth constructor for atomic shared access
-was deleted for the same reason (see the module comment).
+the theorems about them vacuous, and `atomicShared` was deleted for that reason and
+restored once `Permission.atomicOnly` gave `authorityOf` something to derive it from
+(see the module comment). This sentence still called it deleted, eleven lines above
+the constructor, and review found it.
 -/
 inductive AuthorityState where
   /-- Exclusive read/write ownership: the storage is live and in this provenance's

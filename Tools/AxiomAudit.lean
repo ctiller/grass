@@ -149,8 +149,7 @@ run_cmd do
   -- `String.toUTF8` puts `String.toUTF8.eq_1` in a `Grass/` module under the `String`
   -- namespace. Nobody wrote it and its axioms are the core function's, so the gap
   -- this check is about -- an *authored* declaration escaping `isAudited` -- does not
-  -- arise. Generated suffixes are exempt by name; an authored declaration cannot have
-  -- one, because the elaborator reserves them.
+  -- arise. Generated suffixes are exempt by name.
   -- Matched against the *last component* only. An earlier version matched these as
   -- substrings of the whole name, so `.ind` would have exempted anything with a
   -- component like `index` -- a filter wide enough to hide the declarations this
@@ -158,14 +157,27 @@ run_cmd do
   let generatedExact : List String :=
     ["eq_def", "induct", "sizeOf_spec", "brecOn", "below", "ind", "noConfusion",
      "noConfusionType", "injEq", "ctorIdx"]
-  let generatedPrefix : List String := ["eq_", "match_", "proof_", "fun_", "eq_"]
+  -- Generated *numbered* suffixes are exempt by shape, not by prefix. The prefix
+  -- form was a hole and the reason attached to it was false: it said "an authored
+  -- declaration cannot have one, because the elaborator reserves them", and Lean
+  -- reserves `f.eq_1` and `f.eq_def`, not the string `eq_`. `theorem eq_of_mem` is
+  -- ordinary Lean. Review appended `axiom List.eq_probeFalse` and a theorem using
+  -- it: `lake build` passed and this audit printed its clean line unchanged, while
+  -- the same axiom named `probeFalseControl` was caught. The two entries the
+  -- exemption silences in the real tree -- `String.fromUTF8.eq_1` and
+  -- `String.toUTF8.eq_1` -- match the numbered shape and still pass.
+  let generatedNumbered : String -> Bool := fun component =>
+    ["eq_", "match_", "proof_", "fun_"].any (fun marker =>
+      marker.isPrefixOf component &&
+        let rest := component.drop marker.length
+        !rest.isEmpty && rest.all Char.isDigit)
   let mut strays : Array Name := #[]
   for (name, _) in env.constants.toList do
     if name.isInternal then continue
     if (`Grass).isPrefixOf name then continue
     let component := name.getString!
     if generatedExact.contains component then continue
-    if generatedPrefix.any (fun marker => marker.isPrefixOf component) then continue
+    if generatedNumbered component then continue
     match env.getModuleIdxFor? name with
     | some idx =>
         match env.header.moduleNames[idx.toNat]? with

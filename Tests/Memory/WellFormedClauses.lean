@@ -22,6 +22,14 @@ that is well formed, and fourteen neighbours differing in a single field.
 **The point is the pairing.** A refusal alone would not distinguish "this clause
 caught it" from "some other clause did", so the baseline is proved well formed in the
 same theorem — the two together say the difference is the clause.
+
+**The pairing is only as good as the neighbour being one field away, and three were
+not.** The inert intent, the over-wide range and the demandless read each failed a
+*second* clause, so each theorem held with the clause it names deleted — which review
+demonstrated by deciding all fourteen clauses separately and then rebuilding the tree
+with `notInert`, `rangeFitsSpace` and `initializationMatchesIntent` replaced by `True`
+in turn. Each of the three now carries its own control, because it is two fields from
+the baseline and the baseline can no longer serve.
 -/
 
 namespace Tests.Memory.WellFormedClauses
@@ -69,11 +77,30 @@ theorem a_mismatched_space_is_refused :
           { prov with space := .spirvPrivate } } : AccessDescriptor).WellFormedIn space := by
   decide
 
+/-- The baseline with an intent that reads, writes and executes nothing, and with the
+initialization claim dropped to match. -/
+def inertStore : AccessDescriptor :=
+  { store with
+    intent := { reads := false, writes := false }
+    producesInitialized := false }
+
 /-- `notInert`: an access that neither reads nor writes is not an access.
 `MemoryEvent.ofOutcome` mints nothing for one, so admitting it would put a committed
-access with no event in the trace. -/
-theorem an_inert_intent_is_refused :
-    ¬ ({ store with intent := { reads := false, writes := false } } :
+access with no event in the trace.
+
+`producesInitialized := false` is not decoration and its absence was a defect: an
+inert intent writes nothing, so the baseline's `producesInitialized := true` also
+failed `producesInitializedOnlyIfWrites`, and this theorem held whether `notInert`
+existed or not. Review found it by deciding every clause separately and then deleting
+`notInert` with the tree green. Two fields now differ from the baseline, so the
+baseline is no longer the control; `the_writing_non_producer_is_well_formed` below
+is. -/
+theorem an_inert_intent_is_refused : ¬ inertStore.WellFormedIn space := by decide
+
+/-- The control for it: the same descriptor with a writing intent is well formed, so
+the refusal above is the intent and not the initialization claim. -/
+theorem the_writing_non_producer_is_well_formed :
+    ({ store with producesInitialized := false } :
       AccessDescriptor).WellFormedIn space := by decide
 
 /-- `rangeNonEmpty`: `MemoryState.Granted` quantifies over a range's bytes and is
@@ -124,10 +151,22 @@ theorem a_misaligned_address_is_refused :
     ¬ ({ store with address := .numeric 0x1004 } :
       AccessDescriptor).WellFormedIn space := by decide
 
-/-- `rangeFitsSpace`: the range must fit the space's own width. -/
+/-- `rangeFitsSpace`: the range must fit the space's own width.
+
+The address is `0` rather than the baseline's `0x1000`, because `0x1000` is not
+representable in two bits either — the neighbour failed `addressRepresentable` as well,
+and the theorem held with `rangeFitsSpace` deleted. Review found it. `0` is
+representable and still satisfies the declared alignment of eight, so the width of the
+range is the only thing wrong with it. -/
 theorem a_range_past_the_space_is_refused :
-    ¬ ({ store with range := ⟨0, 8⟩ } : AccessDescriptor).WellFormedIn
-      { space with repr := .numeric 2 } := by decide
+    ¬ ({ store with address := .numeric 0, range := ⟨0, 8⟩ } :
+      AccessDescriptor).WellFormedIn { space with repr := .numeric 2 } := by decide
+
+/-- The control for it: the same descriptor in the same two-bit space with a range
+that fits is well formed, so the refusal above is the width and not the space. -/
+theorem a_range_inside_the_space_is_admitted :
+    ({ store with address := .numeric 0, range := ⟨0, 2⟩ } :
+      AccessDescriptor).WellFormedIn { space with repr := .numeric 2 } := by decide
 
 /-- `atomicityAgrees`: the intent's atomicity and the requested ordering's are two
 records of one fact, and this is the clause tying them. §7.3's conflict rule reads
@@ -142,11 +181,27 @@ theorem an_insufficient_permission_is_refused :
     ¬ ({ store with requiredPermission := .readOnly } :
       AccessDescriptor).WellFormedIn space := by decide
 
+/-- A read that states no initialization demand, and claims to initialize nothing. -/
+def demandlessRead : AccessDescriptor :=
+  { store with
+    intent := .read
+    requiredPermission := .readOnly
+    producesInitialized := false }
+
 /-- `initializationMatchesIntent`: a reading access must state an initialization
 demand and a non-reading one must not. Without it a read could declare
-`readsNothing` and skip `denialOf`'s uninitialized clause entirely. -/
+`readsNothing` and skip `denialOf`'s uninitialized clause entirely.
+
+`producesInitialized := false` for the same reason as the inert case: a read writes
+nothing, so without it the neighbour also failed `producesInitializedOnlyIfWrites` and
+this theorem held with `initializationMatchesIntent` deleted. `readProducer` below is
+the control, differing from this descriptor in the initialization demand alone. -/
 theorem a_read_that_demands_nothing_is_refused :
-    ¬ ({ store with intent := .read, requiredPermission := .readOnly } :
+    ¬ demandlessRead.WellFormedIn space := by decide
+
+/-- The control for it: the same read that *does* state a demand is well formed. -/
+theorem a_read_that_demands_initialization_is_admitted :
+    ({ demandlessRead with initialization := .allBytesInitialized } :
       AccessDescriptor).WellFormedIn space := by decide
 
 /-- A read that claims to have initialized what it read. -/

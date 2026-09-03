@@ -105,33 +105,54 @@ theorem the_lends_succeed :
 /--
 **The holder of atomic authority may not perform an ordinary write.**
 
-§3's sentence, at the gate. `GrantedOfKind` is what
-the transition's holder test consults, so this is the transition's
+§3's sentence, at the gate. `Granted` is what the transition's holder test consults
+-- `Grass/Op/Step.lean`'s `refusalOf` asks it directly -- so this is the transition's
 own question asked of the map.
+
+These five theorems were stated over `GrantedOfKind`, which has no caller under
+`Grass/`, while this file's own module comment said so twelve lines from here. The
+rule reached the transition anyway, because both predicates route through
+`AuthorizedAt`'s `rights.Permits intent`; what was wrong was the evidence, attached to
+a `def` a reader auditing "who checks §3's atomic rule" would follow to nothing.
+Review replaced the body of `GrantedOfKind` with `True` and the library still built.
+`the_kind_test_agrees_here` below keeps the kind-aware variant exercised and says what
+it is.
 -/
 theorem an_atomic_grant_does_not_authorize_an_ordinary_write :
-    ¬ lentAtomically.GrantedOfKind .loan holder counterProv ⟨0, 8⟩ AccessIntent.write := by
+    ¬ lentAtomically.Granted holder counterProv ⟨0, 8⟩ AccessIntent.write := by
   decide
 
 /-- **Nor an ordinary read.** §3 says atomics do not grant ordinary non-atomic
 *access*, which is not only writes — a plain load of a word another context is
 updating atomically is exactly the race the rule exists for. -/
 theorem an_atomic_grant_does_not_authorize_an_ordinary_read :
-    ¬ lentAtomically.GrantedOfKind .loan holder counterProv ⟨0, 8⟩ AccessIntent.read := by
+    ¬ lentAtomically.Granted holder counterProv ⟨0, 8⟩ AccessIntent.read := by
   decide
 
 /-- **But it does authorize the atomic access it exists for.** Without this the two
 theorems above would be consistent with a grant that authorizes nothing, which is
 not a rule about atomicity. -/
 theorem an_atomic_grant_authorizes_an_atomic_access :
-    lentAtomically.GrantedOfKind .loan holder counterProv ⟨0, 8⟩
+    lentAtomically.Granted holder counterProv ⟨0, 8⟩
       AccessIntent.atomicReadWrite := by decide
+
+/-- The kind-aware variant agrees here, which is all a fixture can say about it:
+`MemoryState.GrantedOfKind` has no caller under `Grass/`, so this is a check that the
+kind clause does not change the answer for a grant of the kind it names, and not
+evidence about the transition. `Granted` above is the transition's question. -/
+theorem the_kind_test_agrees_here :
+    lentAtomically.GrantedOfKind .loan holder counterProv ⟨0, 8⟩
+      AccessIntent.atomicReadWrite ∧
+    ¬ lentAtomically.GrantedOfKind .loan holder counterProv ⟨0, 8⟩ AccessIntent.write ∧
+    ¬ lentAtomically.GrantedOfKind .frame holder counterProv ⟨0, 8⟩
+      AccessIntent.atomicReadWrite := by
+  exact ⟨by decide, by decide, by decide⟩
 
 /-- The ordinary grant differs in exactly one field and does authorize the ordinary
 write, so the refusals above are `atomicOnly` biting rather than something else in
 the fixture. -/
 theorem the_ordinary_grant_authorizes_the_ordinary_write :
-    lentOrdinarily.GrantedOfKind .loan holder counterProv ⟨0, 8⟩ AccessIntent.write ∧
+    lentOrdinarily.Granted holder counterProv ⟨0, 8⟩ AccessIntent.write ∧
     atomicGrant.rights.read = ordinaryGrant.rights.read ∧
     atomicGrant.rights.write = ordinaryGrant.rights.write ∧
     atomicGrant.rights.execute = ordinaryGrant.rights.execute ∧
@@ -141,7 +162,7 @@ theorem the_ordinary_grant_authorizes_the_ordinary_write :
 /-- And an ordinary permission conveys an atomic access, so the restriction runs one
 way only: a profile that never says `atomicOnly` has acquired no new refusal. -/
 theorem an_ordinary_grant_authorizes_an_atomic_access :
-    lentOrdinarily.GrantedOfKind .loan holder counterProv ⟨0, 8⟩
+    lentOrdinarily.Granted holder counterProv ⟨0, 8⟩
       AccessIntent.atomicWrite := by decide
 
 /-! ## It is still a grant for every other purpose

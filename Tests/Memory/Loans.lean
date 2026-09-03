@@ -426,37 +426,36 @@ theorem the_same_grant_with_bytes_is_accepted :
 
 /-! ## Only exclusive authority permits an ordinary write
 
-There is no atomic case here and no `AuthorityState.atomicShared`. §3 lists atomic
-shared access among the canonical states, and `AuthorityGrant` carries no ordering
-— `kind`, `holder`, `provenance`, `range`, `rights` — so `authorityOf`, which reads
-only the grant map, had nothing to derive that state from and the theorem about it
-held of an unreachable case. A vacuous theorem reads as coverage, so both were
-deleted and `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records the law as owed.
+This section once said there was no `AuthorityState.atomicShared` and that
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 recorded the law as owed. Both were true
+when written and neither is now: `Permission.atomicOnly` gave `authorityOf` something
+to derive the state from, the constructor came back, and §4.4.1 records the bullet as
+closed. `Tests/Memory/AtomicAuthority.lean` is where the atomic rule is exercised.
 
-Ordering itself does exist at this layer — `Grass/Memory/Ordering.lean`,
-`AccessDescriptor.ordering`, `AccessIntent.isAtomic` — so it is not true that §3's
-atomic rule has nothing to constrain, and §4.4.1 says where it could bite. What is
-missing is any link from ordering to what a grant permits. -/
+The theorems below predicted their own defect — "a fifth constructor would leave this
+true" — and then a fifth constructor arrived and left them true, with the prose above
+them asserting it did not exist. They enumerate all five now. -/
 
-/-- Every state, and what each permits. A record of the current sum, not a guard: a
-fifth constructor would leave this true. What refuses to compile is
-`AuthorityState.PermitsIntent`, which enumerates the constructors with no
-wildcard. -/
+/-- Every state, and what each permits. A record of the current sum, not a guard.
+What refuses to compile is `AuthorityState.PermitsIntent`, which enumerates the
+constructors with no wildcard. -/
 theorem only_exclusive_permits_an_ordinary_write :
     AuthorityState.exclusive.PermitsOrdinaryWrite ∧
     ¬ AuthorityState.sharedImmutable.PermitsOrdinaryWrite ∧
+    ¬ AuthorityState.atomicShared.PermitsOrdinaryWrite ∧
     ¬ AuthorityState.frozen.PermitsOrdinaryWrite ∧
     ¬ AuthorityState.unavailable.PermitsOrdinaryWrite := by
-  exact ⟨by decide, by decide, by decide, by decide⟩
+  exact ⟨by decide, by decide, by decide, by decide, by decide⟩
 
 /-- And what each permits a *read*: `sharedImmutable` is the only state that
 distinguishes the two, which is the whole reason it is a state and not a name. -/
 theorem only_shared_immutable_distinguishes_reads :
     AuthorityState.exclusive.PermitsIntent AccessIntent.read ∧
     AuthorityState.sharedImmutable.PermitsIntent AccessIntent.read ∧
+    ¬ AuthorityState.atomicShared.PermitsIntent AccessIntent.read ∧
     ¬ AuthorityState.frozen.PermitsIntent AccessIntent.read ∧
     ¬ AuthorityState.unavailable.PermitsIntent AccessIntent.read := by
-  exact ⟨by decide, by decide, by decide, by decide⟩
+  exact ⟨by decide, by decide, by decide, by decide, by decide⟩
 
 /-! ## Authority ends with the epoch, and is not only about loans -/
 

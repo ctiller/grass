@@ -89,8 +89,16 @@ HEDGES = (
     "M6", "M7", "M8", "M9", "M10", "no arrangement", "is not the check",
     "not by itself", "on its own", "nothing here", "cannot tell", "is not that",
     "not something", "deliberately", "no way to", "unrepresentable",
-    # "X cannot do Y" is a statement of limitation, which is the honest
-    # alternative the rule asks for rather than the drift it targets.
+    # These are noise suppression, not a principled category, and the comment here
+    # used to claim otherwise: "\"X cannot do Y\" is a statement of limitation, which
+    # is the honest alternative the rule asks for". Review checked it against the
+    # tree and found the entries silencing guarantees as readily as limitations --
+    # "a table cannot answer with a space under the wrong name", "a protocol cannot
+    # introduce a duty of a kind the target never declared", "holdings that cannot
+    # coexist are charged at their maximum". All three happen to be true and none
+    # names an enforcing declaration, which is exactly what this tool exists to
+    # report. `--hedged` lists what the whole HEDGES set silences, so the
+    # suppression is reviewable rather than invisible.
     "cannot state", "cannot be demonstrated", "cannot read", "cannot fault",
     "cannot lawfully", "cannot coexist", "cannot be checked", "cannot introduce",
     "cannot enforce", "cannot answer", "cannot express", "cannot know",
@@ -154,6 +162,34 @@ def check_source(source: str, path: Path) -> list[str]:
     return findings
 
 
+def hedged(source: str, path: Path) -> list[str]:
+    """Every claim sentence a hedge silences that names nothing enforcing it.
+
+    The listing `--hedged` prints. HEDGES is the tool's largest bypass and it was
+    invisible: an entry could silence a guarantee for years and the success line
+    would not change. This makes the suppression reviewable the way
+    `ConsultedAudit.py --inert` made its allowlist reviewable. It is a listing and
+    never an exit code -- a hedged sentence is not a finding, it is something a
+    reader should be able to see.
+    """
+    listed = []
+    for line, block in doc_blocks(source):
+        for sentence in sentences(block):
+            lowered = sentence.lower()
+            if not (any(word in lowered for word in CLAIM_WORDS)
+                    or any(pattern.match(lowered) for pattern in CLAIM_PATTERNS)):
+                continue
+            hit = next((h for h in HEDGES if h.lower() in lowered), None)
+            if hit is None:
+                continue
+            if any(not NOT_IDENT.match(i) for i in IDENT.findall(sentence)):
+                continue
+            listed.append(
+                f"{path.as_posix()}:{line}: silenced by {hit!r}: {sentence!r}"
+            )
+    return listed
+
+
 def self_test() -> int:
     """Seed a claim the tool must report, and the near-misses it must not.
 
@@ -197,6 +233,19 @@ def self_test() -> int:
 def main() -> int:
     if "--self-test" in sys.argv:
         return self_test()
+    if "--hedged" in sys.argv:
+        root = ROOT / "Grass"
+        listed = []
+        for path in sorted(root.rglob("*.lean")):
+            listed.extend(
+                hedged(path.read_text(encoding="utf-8"), path.relative_to(ROOT))
+            )
+        for entry in listed:
+            sys.stdout.buffer.write((chr(32)*2 + entry + chr(10)).encode("utf-8", "replace"))
+        print()
+        print(f"docstring audit: {len(listed)} claim sentence(s) silenced by a "
+              "hedge and naming nothing enforcing them")
+        return 0
     # `Tests/` is excluded, and not for the reason this comment used to give.
     # Fixture comments are not all value-shaped -- review found thirteen
     # mechanism-shaped sentences there, all backed. They are excluded because a

@@ -159,6 +159,19 @@ def strip(source: str) -> str:
     return LINE.sub("", STRING.sub('""', BLOCK.sub(blank, source)))
 
 
+TACTIC_OPENER = re.compile(r"(?:^|\bby\b|;|<;>|·|\|)[ \t]*$")
+
+
+def is_tactic_position(line: str, tactic: "re.Match[str]") -> bool:
+    """Whether `tactic` occurs where a tactic can begin.
+
+    A tactic starts a line, or follows `by`, `;`, `<;>`, a focus dot, or a match
+    alternative bar. A word in a binder list or an argument position does not, which
+    is what stops `(delta : AuthorityDelta)` silencing the call that follows it.
+    """
+    return TACTIC_OPENER.search(line[: tactic.start()]) is not None
+
+
 def applications(source: str, door: str) -> list[int]:
     """The 1-based line numbers where `door` appears in applied position."""
     # `.door` or `Namespace.door`, then an argument: anything that is not a closing
@@ -176,10 +189,19 @@ def applications(source: str, door: str) -> list[int]:
             continue
         # `unfold MemoryState.issue?`, `simp [MemoryState.issue?]`, `exact
         # MemoryState.issue?_eq_none_of_absent h`: named inside a proof, not applied
-        # in a definition. The tactic has to come *before* the door on the line, or
-        # an argument named `delta` or `fold` would silence a real call — which it
-        # did, and the self-test caught it.
-        if any(tactic.end() <= match.start() for tactic in NAMING_TACTIC.finditer(line)):
+        # in a definition. The tactic has to come *before* the door on the line, and
+        # has to be where a tactic can start — the beginning of the line, or after
+        # `by`, `;`, `<;>` or a focus dot.
+        #
+        # Requiring only "earlier on the line" was the bug, and the comment here said
+        # that requirement *was* the fix: a binder named `delta` is earlier on the
+        # line than the call it precedes, so `def f (delta : AuthorityDelta) := …
+        # applyAuthorityDelta? actor delta` was silent — which is the shape of
+        # `MemoryState.applyAuthorityDelta?`'s own signature. Review appended three
+        # such definitions to a module allowed for no door and only the control was
+        # reported. `self_test` now seeds that line.
+        if any(is_tactic_position(line, tactic) and tactic.end() <= match.start()
+               for tactic in NAMING_TACTIC.finditer(line)):
             continue
         found.append(number)
     return found
@@ -224,6 +246,19 @@ def self_test() -> int:
         print("  SELF-TEST FAILED: a door named in a simp set is reported")
         failures += 1
 
+    # Review found this one: a binder named after a tactic is *earlier on the line*
+    # than the call that follows it, so the positional rule alone silenced a real
+    # call -- and the comment above the rule claimed that positioning was the fix.
+    # This is the shape of `applyAuthorityDelta?`'s own signature.
+    binder = "def f (s : MemoryState) (delta : AuthorityDelta) := s.issue? id grant\n"
+    if not analyse({OUTSIDE: binder}):
+        print("  SELF-TEST FAILED: a binder named `delta` silences a real door call")
+        failures += 1
+
+    focused = "theorem t : True := by\n  constructor <;> simp [MemoryState.issue?]\n"
+    if analyse({OUTSIDE: focused}):
+        print("  SELF-TEST FAILED: a door named in a chained simp set is reported")
+        failures += 1
     unfolded = "theorem t : True := by\n  unfold MemoryState.issue?\n"
     if analyse({OUTSIDE: unfolded}):
         print("  SELF-TEST FAILED: a door named by `unfold` is reported")
@@ -302,7 +337,8 @@ def main() -> int:
         print(
             f"{len(reported)} call site(s). Route the change through "
             "`MemoryState.applyAuthorityDelta?`, which checks it against an acting "
-            "context, or add the module to ALLOWED_CALLERS with the reason."
+            "context, or add the module to the door's entry in DOORS with the "
+            "reason it is allowed."
         )
         return 1
     print(

@@ -1514,6 +1514,59 @@ with what it used to say.
   holding a grant over one byte of a range is bound over all of it. That is the
   conservative direction and is stated here rather than fixed.
 
+- ~~**Three of the fourteen declaration-time seal clauses were still untested**, in the
+  file written to close exactly that gap.~~ `Tests/Memory/WellFormedClauses.lean`'s
+  argument is that each neighbour is one field from a well-formed baseline, so the
+  refusal must be the clause the neighbour names. Three neighbours were two clauses
+  away, not one: the inert intent and the demandless read both also failed
+  `producesInitializedOnlyIfWrites`, because the baseline sets
+  `producesInitialized := true` and neither writes; the over-wide range also failed
+  `addressRepresentable`, because `0x1000` does not fit two bits either. Each of the
+  three theorems therefore held with the clause it names replaced by `True`, which
+  review demonstrated by rebuilding the tree three times.
+
+  The three now differ from the baseline in two fields and carry their own controls
+  (`the_writing_non_producer_is_well_formed`, `a_range_inside_the_space_is_admitted`,
+  `a_read_that_demands_initialization_is_admitted`), because the shared baseline can
+  no longer serve as the pairing for them. The commit that added the file claimed
+  four clauses were mutation-verified; one of the four was `notInert`, and it was not.
+  All fourteen are swept now rather than spot-checked.
+- ~~**`Tools/AxiomAudit.lean`'s namespace-gap check had a name-shaped hole with a false
+  reason attached.**~~ The check exists because review once appended a root-namespace
+  `axiom` to a `Grass/` module and both gates passed. Its exemption list matched
+the four generated-name prefixes as *prefixes* of the last name component, on
+  the stated grounds that "an authored declaration cannot have one, because the
+  elaborator reserves them". Lean reserves the numbered equation lemmas and the
+  definitional one, not the prefix on its own, and a theorem named "eq_of_mem" is
+  ordinary Lean. Review appended
+  `axiom List.eq_probeFalse` with a theorem using it: `lake build` passed and this
+  audit printed its clean line byte-identically, while the same axiom named
+  `probeFalseControl` was caught. The exemption is now the generated shape --
+  one of those four prefixes followed by digits and nothing else -- which still
+  passes the only two entries it silences in the real tree, the two `String` UTF-8
+  equation lemmas that `Grass/Std/Logical/Text.lean` pulls in.
+- ~~**`Tools/DoorAudit.py` was silenced on a real call by a binder named after a
+  tactic**, and the comment above the rule presented that rule as the fix for exactly
+  this.~~ The tactic-naming filter required only that the tactic appear *earlier on
+  the line* than the door, and a binder is earlier than the call that follows it, so
+  `def f (delta : AuthorityDelta) := s.applyAuthorityDelta? actor delta` reported
+  nothing -- the shape of `applyAuthorityDelta?`'s own signature. Review appended
+  three such definitions to a module allowed for no door and only the control was
+  reported. A tactic must now also be *in tactic position*: at the start of the line
+  or after `by`, `;`, `<;>`, a focus dot or a match bar. The tool's self-test seeds
+  the binder line, and neutering the position test turns it red.
+- ~~**`Tools/DocstringAudit.py`'s hedge list was justified as covering statements of
+  limitation and silences guarantees.**~~ Three examples, each naming nothing that
+  enforces it: "a table cannot answer with a space under the wrong name", "a protocol
+  cannot introduce a duty of a kind the target never declared", "holdings that cannot
+  coexist are charged at their maximum". All three are true; none was reportable. The
+  justification is corrected to what the entries are -- noise suppression -- and
+  `--hedged` now lists every claim sentence a hedge silences that names nothing, so
+  the tool's largest bypass is reviewable rather than invisible. Thirty-one today.
+- ~~**`Tools/DoorAudit.py`'s failure message named a structure the file does not
+  define.**~~ It told the reader to add the module to "ALLOWED_CALLERS"; the structure
+  is the door table. This is the second finding of that shape in the same file.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Three consecutive review rounds found the same shape and it is worth naming as a
@@ -1920,9 +1973,17 @@ the field belongs beside it as something that can only add.
 - ~~**The join clause's freshness half had no fixture.**~~ Review deleted
   `into.id ∉ live` from `Applicable` and the whole build stayed green, then joined
   onto a live identity and watched `applyDelta`'s insert overwrite a duty — §2's
-  "dropping", silently, no violation. Its twin for split *was* fixtured.
-  `a_join_onto_a_live_identity_is_refused` and its positive control close it, and the
-  mutation is caught now.
+  "dropping", silently, no violation. `a_join_onto_a_live_identity_is_refused` and its
+  positive control close it, and the mutation is caught now.
+
+  **"Its twin for split *was* fixtured" was false**, and stood here for a milestone.
+  The two fixtures it pointed at — `a_relabelling_split_is_refused` and
+  `a_relabelling_split_under_a_fresh_id_is_refused` — both give the outputs a `kind`
+  the source does not have, so both are refused by the kind clause and both stay green
+  with `∀ o ∈ into, o.id ∉ live` deleted. That is the discrimination problem §4.4.1b
+  names for the declaration-time seal, in the ledger: a refusal alone does not say
+  which clause caught it. See the entry below for the sweep that found it and the five
+  siblings it found beside it.
 - **Obligation identities are recycled.** `Grass/Obligation/Delta.lean` said outputs
   must be fresh because "identities come from a supply that never reissues". There is
   no obligation supply: `MachineState` carries an event supply and nothing else, and

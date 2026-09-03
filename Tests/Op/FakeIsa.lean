@@ -1648,7 +1648,9 @@ private def ledger₂ : FiniteMap ObligationId Obligation :=
 clause, which review mutation-tested and found unfixtured: deleting `into.id ∉ live`
 from `LedgerDelta.Applicable` left the whole build green, and a probe then joined one
 source onto a live identity and watched `applyDelta`'s insert overwrite a duty —
-§2's "dropping", silently. Its twin for split was fixtured; this was not. -/
+§2's "dropping", silently. The docstring here and the plan both said the split twin
+was fixtured; review checked and it was not — see `a_relabelling_split_is_refused`
+below, whose outputs also carry the wrong kind. -/
 theorem a_join_onto_a_live_identity_is_refused :
     ¬ Grass.Op.LedgerEffectApplicable ledger₂ [thread₀, engine₀] thread₀
       [.join bufferProtocol bufferAuthority [releaseObligationId]
