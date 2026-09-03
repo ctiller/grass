@@ -162,6 +162,29 @@ structure AdmittedVocabulary where
   /-- Scopes this profile owns, beyond thread, process, device, and system. §7.1
   allows these on the same terms as the modes above. -/
   orderingScopes : NameRegistry Name
+  /-- Rules under which this profile permits an access to read uninitialized
+  bytes.
+
+  `InitializationDemand.permitsUninitialized` names one, and nothing held the
+  names, so an access read uninitialized bytes by declaring a string.
+  `docs/MEMORY_MODEL.md` §4 makes reading uninitialized storage a violation unless
+  a profile rule says otherwise; this is where "a profile rule says otherwise"
+  becomes checkable. -/
+  initializationJustifications : NameRegistry Name
+  /-- Target theorems this profile claims for cross-substep atomicity.
+
+  `FaultVisibility.transactional` names one. Kept apart from the registry above
+  rather than sharing a namespace with it: a rule permitting an uninitialized read
+  is not a proof that a two-substep store is all-or-nothing, and one registry would
+  let either name satisfy the other. Two facts in one carrier is the defect this
+  layer removed from `AccessIntent.isDevice`. -/
+  atomicityJustifications : NameRegistry Name
+  /-- Fault-visibility rules this profile owns.
+
+  `FaultVisibility.profileSpecific` names one. `SubstepSequence.visibleEffects?`
+  already refuses to guess what such a rule says, but only on a faulting path — a
+  sequence carrying an unregistered rule name and not faulting ran. -/
+  faultVisibilityRules : NameRegistry Name
 deriving Repr
 
 namespace AdmittedVocabulary
@@ -252,7 +275,9 @@ def Admits (vocabulary : AdmittedVocabulary) (d : AccessDescriptor) : Prop :=
   d.ledgerEffect.WellFormed ∧
   (∀ id ∈ d.ledgerEffect.createdKinds, vocabulary.obligationKinds.Recognizes id) ∧
   vocabulary.AdmitsOrder d.ordering.order ∧
-  vocabulary.AdmitsScope d.ordering.scope
+  vocabulary.AdmitsScope d.ordering.scope ∧
+  (∀ justification ∈ d.initialization.justification?,
+    vocabulary.initializationJustifications.Recognizes justification)
 
 instance (vocabulary : AdmittedVocabulary) (d : AccessDescriptor) :
     Decidable (vocabulary.Admits d) := by
@@ -293,6 +318,16 @@ theorem not_admits_of_ill_formed_ledger_effect {vocabulary : AdmittedVocabulary}
     {d : AccessDescriptor} (h : ¬ d.ledgerEffect.WellFormed) : ¬ vocabulary.Admits d :=
   fun ha => h ha.2.2.2.2.1
 
+/-- **An access citing an initialization rule the profile never declared is not
+admitted.** `docs/MEMORY_MODEL.md` §4 makes an uninitialized read a violation
+unless a profile rule permits it; an unregistered name is not such a rule. -/
+theorem not_admits_of_unregistered_justification {vocabulary : AdmittedVocabulary}
+    {d : AccessDescriptor} {justification : Name}
+    (hmem : justification ∈ d.initialization.justification?)
+    (h : ¬ vocabulary.initializationJustifications.Recognizes justification) :
+    ¬ vocabulary.Admits d :=
+  fun ha => h (ha.2.2.2.2.2.2.2.2 justification hmem)
+
 /-- **An access requesting an ordering mode the profile never declared is not
 admitted.** `docs/MEMORY_MODEL.md` §7.1: an unsupported mapping is rejected. -/
 theorem not_admits_of_unregistered_order {vocabulary : AdmittedVocabulary}
@@ -306,7 +341,7 @@ one. -/
 theorem not_admits_of_unregistered_scope {vocabulary : AdmittedVocabulary}
     {d : AccessDescriptor} (h : ¬ vocabulary.AdmitsScope d.ordering.scope) :
     ¬ vocabulary.Admits d :=
-  fun ha => h ha.2.2.2.2.2.2.2
+  fun ha => h ha.2.2.2.2.2.2.2.1
 
 /-- An access creating an obligation of a kind the profile never declared is not
 admitted. -/

@@ -90,6 +90,30 @@ inductive InitializationDemand where
   | readsNothing
 deriving DecidableEq, Repr
 
+namespace InitializationDemand
+
+/-- The rule this demand cites, when it cites one.
+
+`Option`, so "cites a rule" and "does not" are one match rather than two
+predicates that could disagree — the same shape as `MemoryOrder.profileName?`.
+`AdmittedVocabulary.Admits` requires the cited rule to be one the profile
+registered; before that registry existed, an access read uninitialized bytes by
+declaring a string. -/
+def justification? : InitializationDemand → Option Name
+  | .permitsUninitialized justification => some justification
+  | _ => Option.none
+
+@[simp] theorem justification?_allBytesInitialized :
+    allBytesInitialized.justification? = Option.none := rfl
+
+@[simp] theorem justification?_readsNothing :
+    readsNothing.justification? = Option.none := rfl
+
+@[simp] theorem justification?_permitsUninitialized (justification : Name) :
+    (permitsUninitialized justification).justification? = some justification := rfl
+
+end InitializationDemand
+
 /--
 One declared memory access.
 

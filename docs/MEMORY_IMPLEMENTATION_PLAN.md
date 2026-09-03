@@ -662,8 +662,17 @@ one outright defect that had already merged — see §3.11's denial row.
   `denialOf` checks and which §7.5 makes non-interchangeable precisely so the
   identity carries the fact. A third, unconsulted source for a fact two consulted
   ones already carry is the defect shape this branch has found eight times.
-- **`InitializationDemand.permitsUninitialized`'s justification names nothing**,
-  like `FaultVisibility.transactional`'s, and unlike that one it was not recorded.
+- ~~**`InitializationDemand.permitsUninitialized`'s justification names nothing**~~
+  Closed together with `FaultVisibility.transactional`'s and
+  `FaultVisibility.profileSpecific`'s. `AdmittedVocabulary` carries
+  `initializationJustifications`, `atomicityJustifications` and
+  `faultVisibilityRules`; `Admits` requires the first and `step` requires the other
+  two (`onFaultRuleNotRegistered`). Three registries and not one, because a rule
+  permitting an uninitialized read is not a proof that a two-substep store is
+  all-or-nothing, and a shared namespace would let either name satisfy the other.
+
+  Registration is not discharge. A registered name says the profile owns the claim;
+  §10's package is where it is proved, and that remains M10's.
 - ~~**The operation-level `faults` facet is consumed by nothing.**~~ Closed.
   `OperationFacets.supplied` read only `isSome`, so an operation declaring
   `faults = some []` closed the facet and then page-faulted through a substep that
@@ -695,12 +704,13 @@ one outright defect that had already merged — see §3.11's denial row.
   the name. It does not say the name means anything on a target, and nothing here
   can — the refinement obligation belongs to an ISA owner, and the strength relation
   it would be proved against is M8's `ConsistencyProfile`.
-- **`FaultVisibility.transactional`'s `justification` names nothing.**
-  `RequiresJustification` and `SubstepSequence.ClaimsAtomicity` exist so a §10
-  package can enumerate outstanding claims, and nothing under `Grass/` consults
-  either; no registry holds justification names. A sequence gets all-or-nothing
-  fault semantics by declaring a string. `FaultVisibility.profileSpecific`'s name
-  is likewise unchecked.
+- **`SubstepSequence.ClaimsAtomicity` still has no consumer.** The justification
+  *names* are registered now (above), but `RequiresJustification` and
+  `ClaimsAtomicity` exist so a §10 package can enumerate outstanding claims and
+  nothing under `Grass/` enumerates them. `StepPolicy.unregisteredOnFaultRule?`
+  consults the registries directly rather than through `RequiresJustification`, so
+  that predicate's only consumer is `unregisteredOnFaultRule?_priorEffectsVisible`,
+  a theorem.
 - **`Restartability` is declared and never read.** A profile can require the facet
   and a descriptor carries a value, but nothing in the transition consults it, so
   [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.4's retry rules have no mechanism here.

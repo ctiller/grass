@@ -163,6 +163,21 @@ inductive StepRejection where
   consulted, so an unrecognized name reaching a declaration the profile accepts is
   that claim failing. -/
   | operationFaultNotRecognized (fault : FaultClassId)
+  /-- The sequence's fault-visibility rule names something the profile never
+  registered.
+
+  `FaultVisibility.transactional` names the target theorem `docs/INSTRUCTIONS.md`
+  §4 requires and `FaultVisibility.profileSpecific` names a rule the profile owns,
+  and no registry held either. A sequence got all-or-nothing fault semantics by
+  declaring a string. `SubstepSequence.visibleEffects?` already refused to guess
+  what a profile rule says, but only on a faulting path, so a sequence carrying a
+  name nobody had registered and not faulting ran and minted its events.
+
+  `RequiresJustification` marks which constructors make a claim; this is the check
+  that the claim was made *to* someone. It is still not the proof: a registered
+  name says the profile owns the claim, not that it discharged it, and §10's
+  package is where discharge lives. -/
+  | onFaultRuleNotRegistered (rule : Name)
 deriving DecidableEq, Repr
 
 /-- What one step produced. -/
@@ -824,6 +839,37 @@ def runStep (policy : StepPolicy) (state : MachineState) (sequence : SubstepSequ
             | _ => faulted
 
 /--
+The fault-visibility rule this sequence names, if the profile has not registered
+it.
+
+Two registries, not one: a target theorem for cross-substep atomicity is a
+different claim from a profile's own visibility rule, and sharing a namespace
+would let either name satisfy the other. `priorEffectsVisible` names nothing and
+claims nothing, which `FaultVisibility.RequiresJustification` is the predicate
+for.
+-/
+def StepPolicy.unregisteredOnFaultRule? (policy : StepPolicy) (sequence : SubstepSequence) :
+    Option Name :=
+  match sequence.onFault with
+  | .priorEffectsVisible => Option.none
+  | .transactional justification =>
+      if policy.profile.vocabulary.atomicityJustifications.Recognizes justification then
+        Option.none
+      else some justification
+  | .profileSpecific rule =>
+      if policy.profile.vocabulary.faultVisibilityRules.Recognizes rule then Option.none
+      else some rule
+
+/-- **A rule that claims nothing needs no registration.** `priorEffectsVisible` is
+the one constructor `FaultVisibility.RequiresJustification` calls claimless, and it
+is exactly the one this never reports. -/
+@[simp] theorem unregisteredOnFaultRule?_priorEffectsVisible (policy : StepPolicy)
+    (sequence : SubstepSequence) (h : sequence.onFault = .priorEffectsVisible) :
+    policy.unregisteredOnFaultRule? sequence = Option.none := by
+  unfold StepPolicy.unregisteredOnFaultRule?
+  rw [h]
+
+/--
 Step one operation.
 
 The whole vertical, in the order the module comment gives. `faultAt` says whether
@@ -893,6 +939,12 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
               sequence.substeps.findSome? (fun sub =>
                 sub.faults.find? (fun f => !declared.contains f))) with
           | some fault => .rejected (.operationFaultsIncomplete fault)
+          | Option.none =>
+          -- Checked here rather than in `visibleEffects?`, which only runs on a
+          -- faulting path: a sequence naming an unregistered rule and not faulting
+          -- ran and minted its events with the claim unexamined.
+          match policy.unregisteredOnFaultRule? sequence with
+          | some rule => .rejected (.onFaultRuleNotRegistered rule)
           | Option.none =>
           match faultAt sequence with
           | .none =>

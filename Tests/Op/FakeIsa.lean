@@ -177,6 +177,16 @@ inductive Alpha where
   | registeredOrder
   /-- A store claiming an ordering scope this profile never registered. -/
   | unregisteredScope
+  /-- A sequence claiming a fault-visibility rule this profile never registered. -/
+  | unregisteredVisibilityRule
+  /-- A sequence claiming cross-substep atomicity under a target theorem this
+  profile never registered. -/
+  | unregisteredAtomicityClaim
+  /-- A load reading uninitialized bytes under a rule this profile never
+  registered. -/
+  | unregisteredInitRule
+  /-- The same load, under the rule the profile does register. -/
+  | registeredInitRule
   /-- Discharges an obligation that was never live. -/
   | dischargeGhost
   /-- Joins two obligations that were never live into a new one. -/
@@ -371,6 +381,34 @@ instance : HasOperationFacets Alpha where
             false true))
           faults := some [.pageFault, ⟨⟨"fake.neverDeclaredFault"⟩⟩]
           restartability := some .notRestartable, ordering := some .plain }
+    | .unregisteredVisibilityRule =>
+        { memoryEffects := some
+            { substeps :=
+                [ .access (acc bufferProv ⟨0, 4⟩ 0x1000 .write .readWrite false true)
+                  , .access (acc bufferProv ⟨4, 4⟩ 0x1004 .write .readWrite false true) ]
+              onFault := .profileSpecific ⟨"fake.neverRegistered"⟩ }
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .unregisteredAtomicityClaim =>
+        { memoryEffects := some
+            { substeps :=
+                [ .access (acc bufferProv ⟨0, 4⟩ 0x1000 .write .readWrite false true)
+                  , .access (acc bufferProv ⟨4, 4⟩ 0x1004 .write .readWrite false true) ]
+              onFault := .transactional ⟨"fake.neverRegistered"⟩ }
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .unregisteredInitRule =>
+        { memoryEffects := some (.single
+            { acc bufferProv ⟨0, 8⟩ 0x1000 .read .readWrite true false with
+              initialization := .permitsUninitialized ⟨"fake.neverRegistered"⟩ })
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .registeredInitRule =>
+        { memoryEffects := some (.single
+            { acc bufferProv ⟨0, 8⟩ 0x1000 .read .readWrite true false with
+              initialization := .permitsUninitialized ⟨"fake.zeroedByLoader"⟩ })
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
     | .unregisteredOrder =>
         { memoryEffects := some (.single
             { acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite false true [] true with
@@ -474,7 +512,10 @@ def vocabulary : AdmittedVocabulary :=
       ⟨AuditViolationClass.emittedByTransition ++ [frameAuthorityUnavailable]⟩
     obligationKinds := ⟨[.releaseAllocation, .closeHandle]⟩
     orderingModes := ⟨[⟨"fake.deviceRelease"⟩]⟩
-    orderingScopes := ⟨[⟨"fake.queue"⟩]⟩ }
+    orderingScopes := ⟨[⟨"fake.queue"⟩]⟩
+    initializationJustifications := ⟨[⟨"fake.zeroedByLoader"⟩]⟩
+    atomicityJustifications := ⟨[⟨"fake.atomicSplitStore"⟩]⟩
+    faultVisibilityRules := ⟨[⟨"fake.splitStore"⟩]⟩ }
 
 /-- A profile whose §10 package is explicitly unproved. It is a checklist of
 propositions, not evidence for them, and this fixture does not pretend otherwise:
@@ -1189,6 +1230,54 @@ theorem a_compute_substep_with_an_unrecognized_fault_is_refused :
     Grass.Op.step policy state₀ (SomeOperation.of Alpha.computeWithPhantomFault) thread₀
       .thread ⟨⟨"alpha"⟩⟩ =
       .rejected (.computeFaultNotRecognized ⟨⟨"fake.neverDeclaredFault"⟩⟩) := rfl
+
+/-! ## A justification the profile never registered is rejected
+
+`INSTRUCTIONS.md` §4 wants a target theorem behind a cross-substep atomicity claim,
+`MEMORY_MODEL.md` §4 wants a profile rule behind an uninitialized read, and §7.1
+wants a profile behind a fault-visibility rule it owns. All three were names and
+nothing held them: a sequence got all-or-nothing fault semantics, and an access
+read uninitialized bytes, by declaring a string.
+
+Three registries rather than one. A rule permitting an uninitialized read is not a
+proof that a two-substep store is all-or-nothing, and one namespace would let
+either name satisfy the other — two facts in one carrier is what this layer removed
+from `AccessIntent.isDevice`. -/
+
+/-- **An unregistered fault-visibility rule is refused.** -/
+theorem an_unregistered_visibility_rule_is_refused :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.unregisteredVisibilityRule) thread₀
+      .thread ⟨⟨"alpha"⟩⟩ =
+      .rejected (.onFaultRuleNotRegistered ⟨"fake.neverRegistered"⟩) := rfl
+
+/-- **An unregistered atomicity claim is refused**, and it is checked against a
+*different* registry: the name below is registered as a visibility rule and still
+does not satisfy a `transactional` claim. -/
+theorem an_unregistered_atomicity_claim_is_refused :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.unregisteredAtomicityClaim) thread₀
+      .thread ⟨⟨"alpha"⟩⟩ =
+      .rejected (.onFaultRuleNotRegistered ⟨"fake.neverRegistered"⟩) := rfl
+
+/-- The registries really are separate: `fake.splitStore` is a visibility rule and
+`fake.atomicSplitStore` an atomicity claim, and neither appears in the other's
+registry. Without this the two theorems above would be consistent with one shared
+namespace. -/
+theorem the_justification_registries_are_separate :
+    ¬ vocabulary.atomicityJustifications.Recognizes ⟨"fake.splitStore"⟩ ∧
+    ¬ vocabulary.faultVisibilityRules.Recognizes ⟨"fake.atomicSplitStore"⟩ ∧
+    (stepAlpha state₀ .splitStore).state?.isSome ∧
+    (stepAlpha state₀ .atomicSplitStore).state?.isSome := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-- **An uninitialized read under an unregistered rule is not admitted.** -/
+theorem an_unregistered_initialization_rule_is_refused :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.unregisteredInitRule) thread₀
+      .thread ⟨⟨"alpha"⟩⟩ = .rejected .accessNotAdmitted := rfl
+
+/-- And the registered rule is admitted, so the refusal is about the registry
+rather than about `permitsUninitialized` being refused outright. -/
+theorem the_registered_initialization_rule_is_admitted :
+    (stepAlpha state₀ .registeredInitRule).state?.isSome := by decide
 
 /-! ## An ordering mode the profile never registered is rejected
 
