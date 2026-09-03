@@ -94,7 +94,7 @@ unexercised in both directions corpus-wide;
 @[reducible] def countdownAcceptance : ProcessAcceptance countdown where
   TerminalAccepts := fun _ _ => True
   TraceAccepts := fun _ => True
-  ViewAccepts := fun _ _ => True
+  ViewAccepts := fun _ _ _ => True
   DemandsWellFormed := fun _ => True
   Demanded := fun _ => False
   terminalRemainder := countdownRemainder

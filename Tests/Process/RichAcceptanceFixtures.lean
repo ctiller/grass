@@ -157,7 +157,7 @@ Read the five together: this is the shape §10.62 says the corpus was missing.
   TraceAccepts := fun trace => Sound.blip ∉ trace
   -- No step issues more than one occurrence.
   DemandsWellFormed := fun issued => issued.card ≤ 1
-  ViewAccepts := fun _ _ => True
+  ViewAccepts := fun _ _ _ => True
   -- A beep is what the specification asked for.
   Demanded := fun observation => observation = Sound.beep
   terminalRemainder := hiccupRemainder

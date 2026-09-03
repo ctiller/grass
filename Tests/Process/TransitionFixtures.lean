@@ -259,6 +259,10 @@ theorem receiving_resolves_the_escrow :
     show CreatesNothing (beforeReceive.inFlight () wire) (afterReceive.inFlight () wire)
     rw [beforeReceive_wire, afterReceive_wire]
     rfl
+  requestsNothing := by
+    show RequestsNothing (beforeReceive.inFlight () wire) (afterReceive.inFlight () wire)
+    rw [beforeReceive_wire, afterReceive_wire]
+    exact fun _ => rfl
   ledgerExtends := by
     rw [beforeReceive_wire, afterReceive_wire]
     exact
@@ -499,6 +503,10 @@ theorem the_send : serverPlan.SendsEscrow quiet sent () payload occurrenceOf whe
     show ResolvesNothing (quiet.inFlight () wire) (sent.inFlight () wire)
     rw [quiet_holds_nothing, sent_wire]
     exact send_resolves_nothing
+  requestsNothing := by
+    show RequestsNothing (quiet.inFlight () wire) (sent.inFlight () wire)
+    rw [quiet_holds_nothing, sent_wire]
+    exact fun _ => rfl
   createsOnlyTheMessage := by
     intro other held _
     show other = escrowed
@@ -570,6 +578,10 @@ theorem the_receive_after_the_send :
     show CreatesNothing (sent.inFlight () wire) (received.inFlight () wire)
     rw [sent_wire, received_wire]
     rfl
+  requestsNothing := by
+    show RequestsNothing (sent.inFlight () wire) (received.inFlight () wire)
+    rw [sent_wire, received_wire]
+    exact fun _ => rfl
   nowResolved := by
     rw [received_wire]
     exact settled_resolution

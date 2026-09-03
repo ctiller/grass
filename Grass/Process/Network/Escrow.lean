@@ -454,6 +454,29 @@ def ResolvesNothingElse {Occurrence : Type u} {Session : Type s}
   ∀ other, other ≠ occurrence → later.resolution other = earlier.resolution other
 
 /--
+**One step requested no cancellation it did not name.**
+
+`acknowledgedWasRequested` is a law of *one ledger*: an acknowledgement in it
+must have a request in it. Nothing said the request was there *before the step*,
+so an `acknowledgeCancel` could write the request it was acknowledging in the
+same move — local adversarial review compiled exactly that, from a world where
+`cancelRequested` is `false` everywhere. `ProcessPlan.RequestsCancel`, with all
+its `wasNotRequested` and `stillOutstanding` guards, was bypassable entirely, and
+`docs/PROCESS.md` §3's affine cancellation request was enforced by nothing.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.97.
+-/
+def RequestsNothing {Occurrence : Type u} {Session : Type s}
+    (earlier later : EscrowLedger Occurrence Session) : Prop :=
+  ∀ occurrence, later.cancelRequested occurrence = earlier.cancelRequested occurrence
+
+/-- The same, for the one constructor whose job is to request: it may request
+this occurrence's cancellation and no other's. -/
+def RequestsNothingElse {Occurrence : Type u} {Session : Type s}
+    (earlier later : EscrowLedger Occurrence Session) (occurrence : Occurrence) : Prop :=
+  ∀ other, other ≠ occurrence →
+    later.cancelRequested other = earlier.cancelRequested other
+
+/--
 **One step escrowed nothing new here.**
 
 The create-side twin of `ResolvesOnlyAs`, and it was missing for the same reason

@@ -28,27 +28,39 @@ that acquires one is the same process.
 
 ## What makes the obligation falsifiable
 
-`ViewAccepts := fun _ _ => True` is what the five existing fixtures use, and it
+`ViewAccepts := fun _ _ _ => True` is what the five existing fixtures use, and it
 asks nothing.
 
-The first version of this file used the **image of the render** — acceptable
-exactly when some state renders to it — and a reviewer showed that is no better
-for the *obligation*: `viewAccepts` is asked for
-`ViewAccepts facet (facet.render state)`, and `⟨state, rfl⟩` discharges it for
-any facet, any render, any spec. The reviewer compiled a bogus facet the spec
-does not carry and had it accepted, and mutated `render` to a constant without
-breaking anything. The predicate refused `2`; the *obligation* could not fail.
+It took two rounds and a change to `ProcessAcceptance` to get this right, and
+both wrong answers are worth recording because they are the same mistake.
 
-What is here now is a **bound**: at the facet this specification carries, a
-rendered view is at most one step of remaining work. It is falsifiable in the
-way that matters — mutate `render` and `gaugeCorrect.viewAccepts` stops
-elaborating, which the image formulation did not.
+The first version used the **image of the render** — acceptable exactly when some
+state renders to it. `viewAccepts` is asked for
+`ViewAccepts facet (facet.render state)`, and the witness `⟨state, rfl⟩`
+discharges that for any facet, any render, any specification. A reviewer compiled
+a bogus facet the spec does not carry and had it accepted.
 
-It is stated as `∀ same : facet = remaining, …` because `ViewAccepts` is given a
-facet and a value and nothing else, so a bound on *this* specification's view has
-to name the facet to say anything about the value's type. At any other facet it
-asks nothing, and `the_bound_is_only_about_this_facet` says so rather than
-leaving a reader to find out.
+The second was a **bound**: at most one step of remaining work. A second reviewer
+mutated the render to the constant zero and the bound survived — a view reporting
+"no work remains" at the working state was accepted, because the clause could not
+see the state to disagree with. The file claimed at that point that mutating
+`render` breaks the obligation; only mutating it *upward* did.
+
+Both failures have one cause, and it was in `ProcessAcceptance` rather than here:
+`ViewAccepts` received a facet and a value and **not the state**, so it could not
+say a view *reflects* anything. §10.99 gave it the state.
+
+What is here now is an **agreement**: `intendedView` is what this specification
+says a view of `gauge` should report, and `ViewAccepts` asks the rendered value
+to equal it *at that state*. `gaugeCorrect.viewAccepts` then obliges
+`remaining.render` to agree with `intendedView` everywhere, so any mutation of
+the render breaks it — constant, off-by-one or swapped alike.
+
+It is still stated as `∀ same : facet = remaining, …`, because `ViewAccepts`
+receives a facet and a value of *that facet's* view type, so an agreement about
+this specification's view has to name the facet before it can compare values. At
+any other facet it asks nothing, and `the_clause_is_only_about_this_facet` says
+so rather than leaving a reader to find out.
 -/
 
 namespace Grass.Process.Tests.View
@@ -91,24 +103,34 @@ correctness record below differs from `oneShotCorrect` in exactly one field.
 /-- And it really carries it, which is the hypothesis `viewAccepts` waits on. -/
 theorem gauge_has_a_view : gauge.view = some remaining := rfl
 
+/--
+**What the specification says a view of this process should report.**
+
+Written out separately from `remaining.render`, which is the point: the render is
+the *process's* projection and this is the *specification's* intent, and
+`ProcessCorrect.viewAccepts` is the obligation that they agree. Were they one
+definition the obligation would be `rfl` and would test nothing.
+-/
+def intendedView : Bool → Nat := fun finished => cond finished 0 1
+
 /-- The strictest terminal law: this process may only finish holding nothing. -/
 @[reducible] def gaugeRemainder : TerminalRemainderLaw gauge :=
   TerminalRemainderLaw.strict gauge
 
 /--
-An acceptance whose view clause bounds the rendered value.
+An acceptance whose view clause pins the rendered value at each state.
 
-`fun _ _ => True` is what the five view-less fixtures use and it asks nothing.
-This asks that a view of `gauge` reports at most one step of remaining work,
-which is a fact about `remaining.render` and therefore something
-`ProcessCorrect.viewAccepts` can fail to establish.
+`fun _ _ _ => True` is what the five view-less fixtures use and it asks nothing.
+This asks that a view of `gauge` reports exactly `intendedView` of the state it
+was rendered from — a claim about `remaining.render`, which
+`ProcessCorrect.viewAccepts` therefore has to establish and can fail to.
 -/
 @[reducible] def gaugeAcceptance : ProcessAcceptance gauge where
   TerminalAccepts := fun _ _ => True
   TraceAccepts := fun _ => True
   DemandsWellFormed := fun _ => True
-  ViewAccepts := fun facet value =>
-    ∀ same : facet = remaining, (same ▸ value : remaining.View) ≤ 1
+  ViewAccepts := fun facet state value =>
+    ∀ same : facet = remaining, (same ▸ value : remaining.View) = intendedView state
   Demanded := fun _ => False
   terminalRemainder := gaugeRemainder
 
@@ -173,8 +195,8 @@ def gaugeCorrect : ProcessCorrect gauge gaugeAcceptance where
   viewAccepts := by
     intro facet _ state _ same
     subst same
-    show remaining.render state ≤ 1
-    cases state <;> decide
+    show remaining.render state = intendedView state
+    cases state <;> rfl
   observationsAccept := by intros; trivial
   progress := gaugeProgress
 
@@ -186,17 +208,18 @@ fixtures cannot state this theorem at all, because there is no facet to state it
 about.
 -/
 theorem the_render_is_accepted (state : Bool) :
-    gaugeAcceptance.ViewAccepts remaining (remaining.render state) :=
+    gaugeAcceptance.ViewAccepts remaining state (remaining.render state) :=
   gaugeCorrect.viewAccepts remaining gauge_has_a_view state trivial
 
 /--
-**And what it says is a bound the render has to satisfy.**
+**And what it says is that the render implements the intent.**
 
-The whole chain, ending in a fact about `remaining.render` rather than in an
-`∃` witnessed by its own argument. Change `render` and this stops being true, and
-`gaugeCorrect` stops elaborating with it.
+The whole chain, ending in a fact relating two independently written definitions
+rather than in a predicate satisfied by its own argument. Change `render` in any
+way at all and this stops being true, and `gaugeCorrect` stops elaborating.
 -/
-theorem the_bound_is_real (state : Bool) : remaining.render state ≤ 1 :=
+theorem the_render_implements_the_intent (state : Bool) :
+    remaining.render state = intendedView state :=
   the_render_is_accepted state rfl
 
 /--
@@ -208,9 +231,9 @@ bound on a particular view has to name the facet before it can mention the value
 Saying so is better than a heading claiming more than the clause delivers, which
 is what the first version of this file did.
 -/
-theorem the_bound_is_only_about_this_facet
-    (facet : ViewFacet Bool) (different : facet ≠ remaining) (value : facet.View) :
-    gaugeAcceptance.ViewAccepts facet value :=
+theorem the_clause_is_only_about_this_facet
+    (facet : ViewFacet Bool) (different : facet ≠ remaining) (state : Bool)
+    (value : facet.View) : gaugeAcceptance.ViewAccepts facet state value :=
   fun same => absurd same different
 
 /-- Working renders to one step remaining. -/
@@ -220,14 +243,20 @@ theorem working_renders_one : remaining.render false = 1 := rfl
 theorem finished_renders_zero : remaining.render true = 0 := rfl
 
 /--
-**And a view reporting two steps of work is refused.**
+**And a view that disagrees with the state is refused.**
 
-What `ViewAccepts := fun _ _ => True` cannot say: this process is never two steps
-from finishing, so a view claiming it is is not an acceptable view of it.
+The thing neither earlier version could say. Zero is a perfectly good view value —
+`finished_renders_zero` — and it is the *wrong* one at the working state. A clause
+that cannot see the state accepts it; this one does not.
 -/
-theorem a_view_no_state_renders_is_refused :
-    ¬ gaugeAcceptance.ViewAccepts remaining 2 := by
+theorem a_view_that_disagrees_with_the_state_is_refused :
+    ¬ gaugeAcceptance.ViewAccepts remaining false 0 := by
   intro accepted
   exact absurd (accepted rfl) (by decide)
+
+/-- And the same value at the other state is accepted, so the refusal is about
+the disagreement and not about the number. -/
+theorem the_same_view_is_accepted_where_it_is_right :
+    gaugeAcceptance.ViewAccepts remaining true 0 := fun _ => rfl
 
 end Grass.Process.Tests.View

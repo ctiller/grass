@@ -301,6 +301,14 @@ theorem droppedLedger_resolves_nothing_else :
   show (if occurrence = escrowed then some ChannelResolution.dropped else none) = none
   rw [if_neg notIt]
 
+open Classical in
+/-- And it requests the cancellation of that occurrence and no other. -/
+theorem requestedLedger_requests_nothing_else :
+    RequestsNothingElse pendingLedger requestedLedger escrowed := by
+  intro other notIt
+  show (if other = escrowed then true else false) = false
+  rw [if_neg notIt]
+
 /-- A cancellation request resolves nothing at all: it records and does not end. -/
 theorem requestedLedger_resolves_nothing :
     ResolvesNothing pendingLedger requestedLedger :=
@@ -330,7 +338,7 @@ theorem the_close : serverPlan.ClosesSession sent afterClosing () wire escrowed 
   wasOutstanding := by rw [sent_wire]; exact ⟨List.mem_cons_self, rfl⟩
   nowResolved := by rw [afterClosing_wire]; exact closedLedger_resolution
   closesEverything := by
-    intro other outstanding
+    intro other _ outstanding
     rw [only_the_one_is_outstanding outstanding, afterClosing_wire]
     exact closedLedger_resolution
   resolvesOnlyAs := by
@@ -340,6 +348,10 @@ theorem the_close : serverPlan.ClosesSession sent afterClosing () wire escrowed 
     show CreatesNothing (sent.inFlight () wire) (afterClosing.inFlight () wire)
     rw [sent_wire, afterClosing_wire]
     rfl
+  requestsNothing := by
+    show RequestsNothing (sent.inFlight () wire) (afterClosing.inFlight () wire)
+    rw [sent_wire, afterClosing_wire]
+    exact fun _ => rfl
   ledgerExtends := by
     rw [sent_wire, afterClosing_wire]
     exact pending_extends_to closedLedger rfl (by simp [pendingLedger])
@@ -370,7 +382,7 @@ theorem the_death : serverPlan.KillsSession sent afterDying () wire escrowed whe
   wasOutstanding := by rw [sent_wire]; exact ⟨List.mem_cons_self, rfl⟩
   nowResolved := by rw [afterDying_wire]; exact diedLedger_resolution
   killsEverything := by
-    intro other outstanding
+    intro other _ outstanding
     rw [only_the_one_is_outstanding outstanding, afterDying_wire]
     exact diedLedger_resolution
   resolvesOnlyAs := by
@@ -380,6 +392,10 @@ theorem the_death : serverPlan.KillsSession sent afterDying () wire escrowed whe
     show CreatesNothing (sent.inFlight () wire) (afterDying.inFlight () wire)
     rw [sent_wire, afterDying_wire]
     rfl
+  requestsNothing := by
+    show RequestsNothing (sent.inFlight () wire) (afterDying.inFlight () wire)
+    rw [sent_wire, afterDying_wire]
+    exact fun _ => rfl
   ledgerExtends := by
     rw [sent_wire, afterDying_wire]
     exact pending_extends_to diedLedger rfl (by simp [pendingLedger])
@@ -419,6 +435,10 @@ theorem the_request : serverPlan.RequestsCancel sent afterRequesting () wire esc
     show CreatesNothing (sent.inFlight () wire) (afterRequesting.inFlight () wire)
     rw [sent_wire, afterRequesting_wire]
     rfl
+  requestsNothingElse := by
+    show RequestsNothingElse (sent.inFlight () wire) (afterRequesting.inFlight () wire) escrowed
+    rw [sent_wire, afterRequesting_wire]
+    exact requestedLedger_requests_nothing_else
   ledgerExtends := by
     rw [sent_wire, afterRequesting_wire]
     exact pending_extends_to requestedLedger rfl (by simp [pendingLedger])
@@ -437,9 +457,14 @@ theorem the_drop : serverPlan.ResolvesEscrow sent afterDropping () wire escrowed
   onItsSession := rfl
   wasOutstanding := by rw [sent_wire]; exact ⟨List.mem_cons_self, rfl⟩
   nowResolved := by rw [afterDropping_wire]; exact droppedLedger_resolution
-  resolvesOnlyAs := by
+  resolvesNothingElse := by
     rw [sent_wire, afterDropping_wire]
-    exact droppedLedger_resolves_nothing_else.resolvesOnlyAs droppedLedger_resolution
+    exact droppedLedger_resolves_nothing_else
+  requestsNothing := by
+    show RequestsNothing (sent.inFlight () wire) (afterDropping.inFlight () wire)
+    rw [sent_wire, afterDropping_wire]
+    exact fun _ => rfl
+  acknowledgesARequest := by intro reason isAck; cases isAck
   createsOnlyTheCarrier := by
     intro other held fresh
     exact absurd (by rw [sent_wire]; rw [afterDropping_wire] at held; exact held) fresh

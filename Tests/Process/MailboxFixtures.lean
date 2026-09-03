@@ -32,9 +32,16 @@ found by a reviewer who mutated it field by field.
   matches: `selected = none`, `skipped` is both entries, `rest` is `[]` because
   it has to be.
 * **`PerSenderPair` was named as a cost and never paid.** It appeared nowhere in
-  the file and both entries carried the same sender. `twoSenders` is a mailbox
-  with two, and `the_profile_holds` and `the_profile_ignores_the_interleaving`
-  are the law and its negative half evaluated at it.
+  the file. `the_profile_holds` evaluates it at `twoEntry`, whose two entries
+  come from the *same* sender — which is what makes it a real two-element
+  ordering claim rather than the singleton a one-entry-per-sender mailbox would
+  give — and `the_profile_fails_out_of_order` is the negative half.
+  `the_profile_ignores_the_interleaving` is the module's own theorem, used.
+
+  A reviewer caught an earlier version of this paragraph naming a `twoSenders`
+  definition the file does not contain, and calling the interleaving theorem the
+  negative half of the wrong claim. A docstring describing a file that was not
+  written is the same defect as a fixture testing a record nothing inhabits.
 -/
 
 namespace Grass.Process.Tests.Mailbox

@@ -703,7 +703,7 @@ theorem rerouting_stood_or_is_this_step (transition : plan.NetworkTransition bef
       = some (.rerouted destination)) :
     (before.inFlight edge session).resolution occurrence = some (.rerouted destination)
     ∨ ∃ arrival, arrival ∈ (after.inFlight edge destination).created ∧
-        arrival.1 = occurrence.1 := by
+        arrival.1 = occurrence.1 ∧ arrival.2.1 = destination := by
   by_cases declared : transition.scope (.escrow edge session)
   · cases transition with
     | reroute _ session' occurrence' destination' step =>
@@ -712,13 +712,13 @@ theorem rerouting_stood_or_is_this_step (transition : plan.NetworkTransition bef
         cases same; cases sameSession
         by_cases isIt : occurrence = occurrence'
         · subst isIt
-          obtain ⟨arrival, _, arrived, carries⟩ := step.arrives
+          obtain ⟨arrival, _, arrived, carries, onSession, _⟩ := step.arrives
           have sameDestination : destination' = destination := by
             rw [step.nowResolved] at resolved
             cases resolved
             rfl
           subst sameDestination
-          exact Or.inr ⟨arrival, arrived, carries⟩
+          exact Or.inr ⟨arrival, arrived, carries, onSession⟩
         · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
       · obtain ⟨same, sameSession⟩ := escrowFragment_inj h
         cases same; cases sameSession
@@ -763,39 +763,51 @@ theorem rerouting_stood_or_is_this_step (transition : plan.NetworkTransition bef
     | acknowledgeCancel _ _ occurrence' _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
-      rcases stood_or_declared step.resolvesOnlyAs resolved with stood | isIt
-      · exact Or.inl stood
-      · exact absurd isIt (by intro equal; cases equal)
+      by_cases isIt : occurrence = occurrence'
+      · subst isIt
+        rw [step.nowResolved] at resolved
+        exact absurd resolved (by intro equal; cases equal)
+      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
     | timeout _ _ occurrence' step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
-      rcases stood_or_declared step.resolvesOnlyAs resolved with stood | isIt
-      · exact Or.inl stood
-      · exact absurd isIt (by intro equal; cases equal)
+      by_cases isIt : occurrence = occurrence'
+      · subst isIt
+        rw [step.nowResolved] at resolved
+        exact absurd resolved (by intro equal; cases equal)
+      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
     | senderDeath _ _ occurrence' _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
-      rcases stood_or_declared step.resolvesOnlyAs resolved with stood | isIt
-      · exact Or.inl stood
-      · exact absurd isIt (by intro equal; cases equal)
+      by_cases isIt : occurrence = occurrence'
+      · subst isIt
+        rw [step.nowResolved] at resolved
+        exact absurd resolved (by intro equal; cases equal)
+      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
     | receiverDeath _ _ occurrence' _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
-      rcases stood_or_declared step.resolvesOnlyAs resolved with stood | isIt
-      · exact Or.inl stood
-      · exact absurd isIt (by intro equal; cases equal)
+      by_cases isIt : occurrence = occurrence'
+      · subst isIt
+        rw [step.nowResolved] at resolved
+        exact absurd resolved (by intro equal; cases equal)
+      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
     | drop _ _ occurrence' step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
-      rcases stood_or_declared step.resolvesOnlyAs resolved with stood | isIt
-      · exact Or.inl stood
-      · exact absurd isIt (by intro equal; cases equal)
+      by_cases isIt : occurrence = occurrence'
+      · subst isIt
+        rw [step.nowResolved] at resolved
+        exact absurd resolved (by intro equal; cases equal)
+      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
     | coalesce _ _ occurrence' _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
-      rcases stood_or_declared step.resolvesOnlyAs resolved with stood | isIt
-      · exact Or.inl stood
-      · exact absurd isIt (by intro equal; cases equal)
+      by_cases isIt : occurrence = occurrence'
+      · subst isIt
+        rw [step.nowResolved] at resolved
+        exact absurd resolved (by intro equal; cases equal)
+      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
     | processStep _ _ _ _ _ _ _ =>
       exact absurd declared (by rintro (h | ⟨_, h⟩ | ⟨_, _, h⟩) <;> cases h)
     | spawn _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
@@ -824,9 +836,10 @@ theorem reroutesLand_preserved (transition : plan.NetworkTransition before after
     (lands : before.ReroutesLand) : after.ReroutesLand := by
   intro edge session occurrence destination resolved
   rcases rerouting_stood_or_is_this_step transition resolved with stood | ⟨arrival, landed⟩
-  · obtain ⟨arrival, arrived, carries⟩ := lands edge session occurrence destination stood
+  · obtain ⟨arrival, arrived, carries, onSession⟩ :=
+      lands edge session occurrence destination stood
     exact ⟨arrival,
-      (ledgers_extend transition edge destination).created_preserved arrived, carries⟩
+      (ledgers_extend transition edge destination).created_preserved arrived, carries, onSession⟩
   · exact ⟨arrival, landed⟩
 
 /-! ## The capstone -/

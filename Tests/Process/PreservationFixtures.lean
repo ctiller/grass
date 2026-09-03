@@ -2,6 +2,7 @@ import Grass.Process.Network.Initial
 import Grass.Process.Network.WellFormedness
 import Tests.Process.LifecycleStepFixtures
 import Tests.Process.RerouteFixtures
+import Tests.Process.CloseFixtures
 
 /-!
 # The capstone, spent
@@ -64,6 +65,33 @@ theorem a_spawn_that_records_nothing_is_not_well_formed :
   exact absurd inHistory (by
     show newborn.ref.generation ∉ (holding newborn).usedNominals.used
     exact List.not_mem_nil)
+
+/--
+**And no step reaching that world can allocate the generation the spawn hands
+out.**
+
+The other half of the claim above, which a reviewer pointed out was prose.
+`a_spawn_that_records_nothing_is_not_well_formed` shows the world is ill-formed;
+this shows `NetworkStep.historyExact` cannot hold there, so the transition is not
+merely a step to a bad world — it is not a step at all.
+-/
+theorem no_allocating_step_reaches_the_fixture_world
+    (step : serverPlan.NetworkStep quiet (holding newborn))
+    (allocates : (⟨.processGeneration, 0⟩ : LogicalNominal serverTopology.Carrier)
+      ∈ step.transition.allocatedNominals.entries) : False := by
+  have recorded := step.allocations_are_recorded allocates
+  exact absurd recorded (by
+    show (⟨.processGeneration, 0⟩ : LogicalNominal serverTopology.Carrier)
+      ∉ (holding newborn).usedNominals.used
+    exact List.not_mem_nil)
+
+/-- And `the_spawn` allocates exactly that, so nothing wraps it. -/
+theorem the_fixture_spawn_is_not_a_step
+    (step : serverPlan.NetworkStep quiet (holding newborn))
+    (isTheSpawn : step.transition.allocatedNominals = theGeneration) : False :=
+  no_allocating_step_reaches_the_fixture_world step (by
+    rw [isTheSpawn]
+    exact List.mem_cons_self)
 
 /-! ## The world a spawn actually reaches -/
 
@@ -230,12 +258,36 @@ theorem afterReroute_is_wellFormed : Grass.Process.Tests.Reroute.afterReroute.We
   ProcessPlan.wellFormed_preserved theRerouteStep
     (ProcessPlan.wellFormed_preserved theSendStep World.quiet_is_wellFormed)
 
+/-- The second send is a step. -/
+def theSecondSendStep : serverPlan.NetworkStep sent Close.sent2 where
+  transition := .send () payload Close.strandedOccurrence Close.the_second_send
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-- And so is the close that ends both messages. -/
+def theFullCloseStep : serverPlan.NetworkStep Close.sent2 Close.afterFullClose where
+  transition := .channelClose () wire escrowed Close.the_full_close
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/--
+**Three steps, one certificate**: `quiet` to `sent` to `sent2` to
+`afterFullClose`.
+
+The longest chain in the corpus, and the one where the escrow clauses do the most
+work: two messages go in flight and both come out ended.
+-/
+theorem afterFullClose_is_wellFormed : Close.afterFullClose.WellFormed :=
+  ProcessPlan.wellFormed_preserved theFullCloseStep
+    (ProcessPlan.wellFormed_preserved theSecondSendStep
+      (ProcessPlan.wellFormed_preserved theSendStep World.quiet_is_wellFormed))
+
 /-- Read back out of it: the rerouted payload lands. -/
 theorem the_rerouted_payload_lands :
     (Grass.Process.Tests.Reroute.afterReroute.inFlight () wire).ReroutedElsewhere
       (fun occurrence destination arrival =>
         arrival ∈ (Grass.Process.Tests.Reroute.afterReroute.inFlight () destination).created ∧
-          arrival.1 = occurrence.1) :=
+          arrival.1 = occurrence.1 ∧ arrival.2.1 = destination) :=
   afterReroute_is_wellFormed.reroutesLand () wire
 
 /-! ## And a start at a plan with something in it

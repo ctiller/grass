@@ -389,7 +389,8 @@ def ReroutesLand : Prop :=
   ∀ (edge : topology.ChannelKind) (session : topology.ChannelId edge),
     (network.inFlight edge session).ReroutedElsewhere
       (fun occurrence destination arrival =>
-        arrival ∈ (network.inFlight edge destination).created ∧ arrival.1 = occurrence.1)
+        arrival ∈ (network.inFlight edge destination).created ∧
+          arrival.1 = occurrence.1 ∧ arrival.2.1 = destination)
 
 /--
 **Every instance's stored ending is one its protocol reaches.**

@@ -78,9 +78,13 @@ theorem sidewire_ne_wire : sidewire ≠ wire := by
 def arrival : EdgeOccurrence serverTopology World.serverMessage () :=
   ⟨payload, ⟨sidewire, { id := ⟨.messageOccurrence, 1⟩, isMessage := rfl }⟩⟩
 
-/-- It carries the message the rerouted occurrence carried, which is
-`Reroutes.arrives`'s third conjunct. -/
+/-- It carries the message the rerouted occurrence carried, and it is on the
+destination session — `Reroutes.arrives`'s third and fourth conjuncts. -/
 theorem arrival_carries_the_message : arrival.1 = escrowed.1 := rfl
+
+/-- And it belongs to the session it arrived on, which is what stops a
+"destination" acquiring the source session's own occurrence. §10.96. -/
+theorem arrival_is_on_the_destination : arrival.2.1 = sidewire := rfl
 
 /-! ## The two ledgers the step moves -/
 
@@ -203,13 +207,14 @@ theorem the_reroute : serverPlan.Reroutes sent afterReroute () wire escrowed sid
     show ResolvesNothing (ledgerAt false sidewire) (reroutedAt sidewire)
     rw [ledgerAt_off_wire_empty sidewire_ne_wire, reroutedAt_sidewire]
     exact fun _ => rfl
-  destinationCreatesOnlyArrivals := by
-    intro other held _
-    have inList : other ∈ (reroutedAt sidewire).created := held
-    rw [reroutedAt_sidewire] at inList
-    have single : other ∈ [arrival] := inList
-    rw [List.mem_singleton.mp single]
-    exact arrival_carries_the_message
+  destinationRequestsNothing := by
+    show RequestsNothing (ledgerAt false sidewire) (reroutedAt sidewire)
+    rw [ledgerAt_off_wire_empty sidewire_ne_wire, reroutedAt_sidewire]
+    exact fun _ => rfl
+  requestsNothing := by
+    show RequestsNothing (sent.inFlight () wire) (reroutedAt wire)
+    rw [sent_wire, reroutedAt_wire]
+    exact fun _ => rfl
   createsNothing := by
     show CreatesNothing (sent.inFlight () wire) (reroutedAt wire)
     rw [sent_wire, reroutedAt_wire]
@@ -226,13 +231,18 @@ theorem the_reroute : serverPlan.Reroutes sent afterReroute () wire escrowed sid
           intro occurrence requested
           exact absurd requested (by simp [pendingLedger]) }
   arrives := by
-    refine ⟨arrival, ?_, ?_, arrival_carries_the_message⟩
+    refine ⟨arrival, ?_, ?_, arrival_carries_the_message, arrival_is_on_the_destination, ?_⟩
     · show arrival ∉ (ledgerAt false sidewire).created
       rw [ledgerAt_off_wire_empty sidewire_ne_wire]
       exact List.not_mem_nil
     · show arrival ∈ (reroutedAt sidewire).created
       rw [reroutedAt_sidewire]
       exact List.mem_cons_self
+    · intro other held _
+      have inList : other ∈ (reroutedAt sidewire).created := held
+      rw [reroutedAt_sidewire] at inList
+      have single : other ∈ [arrival] := inList
+      exact List.mem_singleton.mp single
   destinationExtends := by
     show LedgerExtends (ledgerAt false sidewire) (reroutedAt sidewire)
     rw [ledgerAt_off_wire_empty sidewire_ne_wire, reroutedAt_sidewire]
@@ -323,6 +333,61 @@ theorem a_reroute_must_deliver
   obtain ⟨arrival, fresh, arrived, _⟩ := rerouted.arrives
   rw [unchanged] at arrived
   exact fresh arrived
+
+/--
+**And a reroute may not duplicate the payload.**
+
+`arrives` bounds the arrival's existence and its message; until §10.94's round it
+bounded neither the arrival's *session* nor the *count*, so one reroute of one
+occurrence could put two occurrences carrying the same payload in flight at the
+destination — a reviewer compiled it, and proved the resulting world still
+satisfied `ReroutesLand`. The uniqueness clause is what refuses it.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.98.
+-/
+theorem a_reroute_may_not_duplicate
+    {before after : ServerWorld} {destination : serverTopology.ChannelId ()}
+    {first second : EdgeOccurrence serverTopology World.serverMessage ()}
+    (firstFresh : first ∉ (before.inFlight () destination).created)
+    (firstNew : first ∈ (after.inFlight () destination).created)
+    (secondFresh : second ∉ (before.inFlight () destination).created)
+    (secondNew : second ∈ (after.inFlight () destination).created)
+    (different : first ≠ second)
+    (rerouted : serverPlan.Reroutes before after () wire escrowed destination) : False := by
+  obtain ⟨_, _, _, _, _, unique⟩ := rerouted.arrives
+  exact different
+    ((unique first firstNew firstFresh).trans (unique second secondNew secondFresh).symm)
+
+/--
+**And what arrives at a destination belongs to that destination.**
+
+The other half of the same round, and the one that matters most. A reviewer built
+a reroute whose destination acquires the *source* session's own occurrence —
+legal, because `arrives` asked only that the arrival carry the same message — and
+then a close of that destination, which `ClosesSession.closesEverything`
+*obliges* to resolve it a second time while the first resolution still stands.
+That is exactly the two-endings defect `ResolvesEscrow.onItsSession` exists to
+refuse, reached by a path it does not cover. §10.96.
+-/
+theorem an_arrival_belongs_to_its_destination
+    {before after : ServerWorld} {destination : serverTopology.ChannelId ()}
+    (rerouted : serverPlan.Reroutes before after () wire escrowed destination)
+    {other : EdgeOccurrence serverTopology World.serverMessage ()}
+    (fresh : other ∉ (before.inFlight () destination).created)
+    (arrived : other ∈ (after.inFlight () destination).created) : other.2.1 = destination := by
+  obtain ⟨_, _, _, _, onSession, unique⟩ := rerouted.arrives
+  rw [unique other arrived fresh]
+  exact onSession
+
+/--
+And so a reroute cannot hand the source session's own occurrence to the
+destination, which is the step the attack above needed.
+-/
+theorem a_reroute_cannot_move_the_occurrence_itself
+    {before after : ServerWorld}
+    (fresh : escrowed ∉ (before.inFlight () sidewire).created)
+    (arrived : escrowed ∈ (after.inFlight () sidewire).created)
+    (rerouted : serverPlan.Reroutes before after () wire escrowed sidewire) : False :=
+  sidewire_ne_wire (an_arrival_belongs_to_its_destination rerouted fresh arrived).symm
 
 /-! ## And the step that strands one -/
 
@@ -443,9 +508,8 @@ theorem the_stranding_drop_is_refused :
     rw [afterStranding_wire, sent_wire, strandingLedger_strands]
     intro equal
     cases equal
-  have declaredAs := drops.resolvesOnlyAs stranded moved
-  rw [afterStranding_wire, strandingLedger_strands] at declaredAs
-  exact absurd declaredAs (by intro equal; cases equal)
+  have silent := drops.resolvesNothingElse stranded stranded_ne_escrowed
+  exact absurd silent moved
 
 /--
 And the other fields really are all satisfiable there, so the refusal is the

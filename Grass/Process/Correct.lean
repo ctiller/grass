@@ -129,9 +129,17 @@ structure ProcessCorrect (p : ProcessSpec.{u, w}) (accept : ProcessAcceptance p)
       (emitted : p.Segment),
     (∀ request, p.Terminal request state result) →
     ¬ p.Step state event after issued emitted
-  /-- If the process has a view, every invariant-satisfying render is accepted. -/
+  /--
+  If the process has a view, every invariant-satisfying render is accepted *at
+  the state it rendered from*.
+
+  The state reaches `ViewAccepts` since §10.99, and that is what turns this from
+  a clause discharged by the render's own image into one an acceptance can state
+  and a process can fail.
+  -/
   viewAccepts : ∀ (facet : ViewFacet p.State), p.view = some facet →
-    ∀ state : p.State, Invariant state → accept.ViewAccepts facet (facet.render state)
+    ∀ state : p.State, Invariant state →
+      accept.ViewAccepts facet state (facet.render state)
   /--
   Every reachable observation prefix is accepted.
 

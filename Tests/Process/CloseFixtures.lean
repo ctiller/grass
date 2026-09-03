@@ -106,6 +106,10 @@ theorem the_second_send : serverPlan.SendsEscrow sent sent2 () payload strandedO
     show ResolvesNothing (sent.inFlight () wire) (sent2.inFlight () wire)
     rw [sent_wire, sent2_wire]
     exact fun _ => rfl
+  requestsNothing := by
+    show RequestsNothing (sent.inFlight () wire) (sent2.inFlight () wire)
+    rw [sent_wire, sent2_wire]
+    exact fun _ => rfl
   createsOnlyTheMessage := by
     intro other held fresh
     show other = stranded
@@ -250,7 +254,7 @@ theorem the_full_close : serverPlan.ClosesSession sent2 afterFullClose () wire e
   wasOutstanding := both_are_outstanding.1
   nowResolved := by rw [afterFullClose_wire]; exact bothClosed_first
   closesEverything := by
-    intro other outstanding
+    intro other _ outstanding
     rw [sent2_wire] at outstanding
     have held : other ∈ [escrowed, stranded] := outstanding.1
     rw [afterFullClose_wire]
@@ -271,6 +275,10 @@ theorem the_full_close : serverPlan.ClosesSession sent2 afterFullClose () wire e
     show CreatesNothing (sent2.inFlight () wire) (afterFullClose.inFlight () wire)
     rw [sent2_wire, afterFullClose_wire]
     rfl
+  requestsNothing := by
+    show RequestsNothing (sent2.inFlight () wire) (afterFullClose.inFlight () wire)
+    rw [sent2_wire, afterFullClose_wire]
+    exact fun _ => rfl
   resolvesOnlyAs := by
     rw [sent2_wire, afterFullClose_wire]
     intro occurrence moved
@@ -357,7 +365,7 @@ death can reach — `wasOpen` refuses both — so the only remaining ending was 
 theorem a_close_that_leaves_one_behind_is_refused :
     ¬ serverPlan.ClosesSession sent2 afterPartialClose () wire escrowed := by
   intro closes
-  have ended := closes.closesEverything stranded both_are_outstanding.2
+  have ended := closes.closesEverything stranded rfl both_are_outstanding.2
   rw [afterPartialClose_wire, onlyOneClosed_second] at ended
   exact absurd ended (by intro equal; cases equal)
 
@@ -461,5 +469,70 @@ theorem the_conjured_message_would_be_in_flight :
     exact stranded_ne_escrowed (List.mem_singleton.mp inList)
   · rw [afterFabricate_wire]
     exact ⟨List.mem_cons_of_mem _ List.mem_cons_self, fabricated_second⟩
+
+/--
+**And no later close or death can reach it.**
+
+Both demand `wasOpen`, and the session is closed. This is the half the module
+docstring asserted and did not compile — a reviewer pointed out that
+`the_strand_is_real` proves the status and stops there, leaving the "strands
+forever" claim as prose. It is two lines, so there was no reason for it to be.
+-/
+theorem no_later_close_reaches_the_strand
+    {after : ServerWorld} {occurrence : EdgeOccurrence serverTopology World.serverMessage ()} :
+    ¬ serverPlan.ClosesSession afterPartialClose after () wire occurrence := by
+  intro closes
+  have wasOpen := closes.wasOpen
+  rw [the_strand_is_real.2] at wasOpen
+  cases wasOpen
+
+/-- And neither can a death. -/
+theorem no_later_death_reaches_the_strand
+    {after : ServerWorld} {occurrence : EdgeOccurrence serverTopology World.serverMessage ()} :
+    ¬ serverPlan.KillsSession afterPartialClose after () wire occurrence := by
+  intro kills
+  have wasOpen := kills.wasOpen
+  rw [the_strand_is_real.2] at wasOpen
+  cases wasOpen
+
+/-! ## And the cancellation request that was never made -/
+
+/--
+**An acknowledgement acknowledges a request that was already made.**
+
+`EscrowLedger.acknowledgedWasRequested` is a law of one ledger: an
+acknowledgement in it needs a request in it. It says nothing about *when* the
+request arrived, so a reviewer compiled an `acknowledgeCancel` from `sent` —
+where `cancelRequested` is `false` for every occurrence — that writes the request
+and the acknowledgement in the same move. `ProcessPlan.RequestsCancel`, with all
+its guards, was bypassable entirely, and §3's affine cancellation request was
+enforced by nothing. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.97.
+-/
+theorem an_acknowledgement_needs_a_request
+    {before after : ServerWorld} {reason : CancelReason}
+    (nothingRequested : (before.inFlight () wire).cancelRequested escrowed = false)
+    (acknowledged : serverPlan.ResolvesEscrow before after () wire escrowed
+      (.cancelAcknowledged reason)) : False := by
+  have requested := acknowledged.acknowledgesARequest reason rfl
+  rw [nothingRequested] at requested
+  exact absurd requested (by decide)
+
+/-- Nothing is requested at `sent`, so no acknowledgement can start there. -/
+theorem nothing_is_requested_yet
+    (occurrence : EdgeOccurrence serverTopology World.serverMessage ()) :
+    (sent.inFlight () wire).cancelRequested occurrence = false := by
+  rw [sent_wire]
+  rfl
+
+/-- **And a request primes only the occurrence it names.** -/
+theorem a_request_may_not_prime_another
+    {before after : ServerWorld} {other : EdgeOccurrence serverTopology World.serverMessage ()}
+    (notIt : other ≠ escrowed)
+    (wasNot : (before.inFlight () wire).cancelRequested other = false)
+    (nowIs : (after.inFlight () wire).cancelRequested other = true)
+    (requested : serverPlan.RequestsCancel before after () wire escrowed) : False := by
+  have unchanged := requested.requestsNothingElse other notIt
+  rw [nowIs, wasNot] at unchanged
+  exact absurd unchanged (by decide)
 
 end Grass.Process.Tests.Close

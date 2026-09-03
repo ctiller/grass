@@ -157,21 +157,43 @@ structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
   /-- The ledger only moved forward: nothing erased, nothing reordered. -/
   ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
   /--
-  **And every occurrence it ends, it ends this way.**
+  **And it resolves nothing else in this ledger.**
 
   `ledgerExtends` forbids erasing; it does not forbid *adding*. Local
   construction built a `drop` that appends an unrelated occurrence and resolves
   it `.rerouted` to a session it never touches, breaking
   `LogicalProcessNetworkCore.ReroutesLand` with every other field discharged.
-  See `ResolvesOnlyAs` and `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.87.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.87.
 
-  Stated as "ends this way" rather than "ends nothing else" because a coalesce is
-  a `ResolvesEscrow` and `ChannelResolution.coalesced` merges a carrier's "fellow
-  sources", plural. The first version of this field was the narrower one, and a
-  reviewer showed what it forbids: §10.90.
+  This was briefly widened to `ResolvesOnlyAs`, on the reasoning that
+  `ChannelResolution.coalesced` "merges a carrier's fellow sources, plural" and so
+  one step must be able to end several. That conflated two things, and a reviewer
+  separated them: the *carrier* collects several sources, and each source is
+  consumed by its own `coalesce` step. §3's disposition acts on "that exact reply
+  occurrence", and the reviewer compiled a `drop` that disposes of two messages
+  while naming one — after which `NetworkTransition.drop`'s occurrence parameter
+  no longer determines what the step did. §10.95.
+
+  `ClosesSession` and `KillsSession` are the constructors that genuinely end a
+  whole session at once, and `ResolvesOnlyAs` is theirs.
   -/
-  resolvesOnlyAs : ResolvesOnlyAs
-    (before.inFlight edge session) (after.inFlight edge session) resolution
+  resolvesNothingElse : ResolvesNothingElse
+    (before.inFlight edge session) (after.inFlight edge session) occurrence
+  /-- **And it requests no cancellation**; see `EscrowLedger.RequestsNothing`. -/
+  requestsNothing : RequestsNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /--
+  **And an acknowledgement acknowledges a request that was already made.**
+
+  `EscrowLedger.acknowledgedWasRequested` is a law of one ledger — an
+  acknowledgement in it needs a request in it — and says nothing about *when* the
+  request arrived. Local adversarial review compiled an `acknowledgeCancel` from
+  a world where nothing was requested at all: the step wrote the request and the
+  acknowledgement together, bypassing `RequestsCancel` entirely.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.97.
+  -/
+  acknowledgesARequest : ∀ reason, resolution = .cancelAcknowledged reason →
+    (before.inFlight edge session).cancelRequested occurrence = true
   /--
   **And the only occurrence it escrows is a coalesce's carrier.**
 
@@ -254,6 +276,9 @@ structure Delivers (before after : plan.LogicalProcessNetwork)
   /-- **And it escrows nothing new**: a delivery consumes, it does not send. -/
   createsNothing : CreatesNothing
     (before.inFlight edge session) (after.inFlight edge session)
+  /-- **And it requests no cancellation.** -/
+  requestsNothing : RequestsNothing
+    (before.inFlight edge session) (after.inFlight edge session)
   /-- **The receiver's cursor advances by exactly one.** -/
   cursorAdvances : (after.sessions edge session).delivered =
     (before.sessions edge session).delivered + 1
@@ -317,14 +342,25 @@ structure ClosesSession (before after : plan.LogicalProcessNetwork)
   `wasOpen` — so it strands, or a `drop` misrecords it. That is precisely the
   disjunction this resolution was added to break.
   `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.90.
+
+  **The `other.2.1 = session` guard is `ResolvesEscrow.onItsSession`'s, and it was
+  missing here for one review round.** Without it this field *mandates* the very
+  defect that one refuses: a reviewer built a reroute whose destination acquires
+  the source session's own occurrence, after which every close of the destination
+  is obliged to write a second `ChannelResolution` for it while the first still
+  stands. §10.96.
   -/
-  closesEverything : ∀ other, (before.inFlight edge session).Outstanding other →
+  closesEverything : ∀ other, other.2.1 = session →
+    (before.inFlight edge session).Outstanding other →
     (after.inFlight edge session).resolution other = some .channelClosed
   /-- **And every occurrence it ends, it ends as a closure**; see `ResolvesEscrow.resolvesOnlyAs`. -/
   resolvesOnlyAs : ResolvesOnlyAs
     (before.inFlight edge session) (after.inFlight edge session) .channelClosed
   /-- **And it escrows nothing new**: a close ends, it does not send. -/
   createsNothing : CreatesNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /-- **And it requests no cancellation.** -/
+  requestsNothing : RequestsNothing
     (before.inFlight edge session) (after.inFlight edge session)
   /-- It was open; a channel is not closed twice, and not un-died. -/
   wasOpen : (before.sessions edge session).status = .open
@@ -406,6 +442,9 @@ structure SendsEscrow (before after : plan.LogicalProcessNetwork)
   -/
   createsOnlyTheMessage : ∀ other, other ∈ (after.inFlight edge occurrence.1).created →
     other ∉ (before.inFlight edge occurrence.1).created → other = ⟨message, occurrence⟩
+  /-- **And it requests no cancellation**: a send sends. -/
+  requestsNothing : RequestsNothing
+    (before.inFlight edge occurrence.1) (after.inFlight edge occurrence.1)
   /-- And nothing outside this session's escrow changed. -/
   scope : plan.TouchesOnly before after
     (fun fragment => fragment = .escrow edge occurrence.1)
@@ -1033,7 +1072,10 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
   is what stops the "different occurrence" being the same one.
   -/
   arrives : ∃ arrival, arrival ∉ (before.inFlight edge destination).created ∧
-    arrival ∈ (after.inFlight edge destination).created ∧ arrival.1 = occurrence.1
+    arrival ∈ (after.inFlight edge destination).created ∧
+    arrival.1 = occurrence.1 ∧ arrival.2.1 = destination ∧
+    ∀ other, other ∈ (after.inFlight edge destination).created →
+      other ∉ (before.inFlight edge destination).created → other = arrival
   /-- Whose ledger also only moved forward. -/
   destinationExtends :
     LedgerExtends (before.inFlight edge destination) (after.inFlight edge destination)
@@ -1041,15 +1083,12 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
   flight, not already ended. See `ResolvesEscrow.resolvesOnlyAs`. -/
   destinationResolvesNothing : ResolvesNothing
     (before.inFlight edge destination) (after.inFlight edge destination)
-  /--
-  **And what the destination gains carries this occurrence's message.**
-
-  `arrives` says the destination gained *an* arrival carrying it. This says it
-  gained nothing else: without it a reroute is also a send of anything it likes
-  onto a session it merely names. See `ResolvesEscrow.createsOnlyTheCarrier` and `CreatesNothing`.
-  -/
-  destinationCreatesOnlyArrivals : ∀ other, other ∈ (after.inFlight edge destination).created →
-    other ∉ (before.inFlight edge destination).created → other.1 = occurrence.1
+  /-- **And it requests no cancellation here.** -/
+  requestsNothing : RequestsNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /-- **And it requests no cancellation at the destination.** -/
+  destinationRequestsNothing : RequestsNothing
+    (before.inFlight edge destination) (after.inFlight edge destination)
   /-- Both sessions' escrow, and nothing else. -/
   scope : plan.TouchesOnly before after
     (fun fragment => fragment = .escrow edge session ∨ fragment = .escrow edge destination)
@@ -1116,13 +1155,17 @@ structure KillsSession (before after : plan.LogicalProcessNetwork)
 
   The sibling of `ClosesSession.closesEverything`, refusing the same strand.
   -/
-  killsEverything : ∀ other, (before.inFlight edge session).Outstanding other →
+  killsEverything : ∀ other, other.2.1 = session →
+    (before.inFlight edge session).Outstanding other →
     (after.inFlight edge session).resolution other = some .channelDied
   /-- **And every occurrence it ends, it ends as a death**; see `ResolvesEscrow.resolvesOnlyAs`. -/
   resolvesOnlyAs : ResolvesOnlyAs
     (before.inFlight edge session) (after.inFlight edge session) .channelDied
   /-- **And it escrows nothing new**: a death ends, it does not send. -/
   createsNothing : CreatesNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /-- **And it requests no cancellation.** -/
+  requestsNothing : RequestsNothing
     (before.inFlight edge session) (after.inFlight edge session)
   /-- It was open; a dead channel is not re-killed, and a closed one not un-closed. -/
   wasOpen : (before.sessions edge session).status = .open
@@ -1193,6 +1236,15 @@ structure RequestsCancel (before after : plan.LogicalProcessNetwork)
   /-- **And it escrows nothing new**: a request records, it does not send. -/
   createsNothing : CreatesNothing
     (before.inFlight edge session) (after.inFlight edge session)
+  /--
+  **And it requests the cancellation of this occurrence and no other.**
+
+  The affine half. Without it a request could prime every occurrence on the
+  session for a later acknowledgement, which is the same gap
+  `ResolvesEscrow.acknowledgesARequest` closes from the other end. §10.97.
+  -/
+  requestsNothingElse : RequestsNothingElse
+    (before.inFlight edge session) (after.inFlight edge session) occurrence
   /-- That session's escrow, and nothing else. -/
   scope : plan.TouchesOnly before after (fun fragment => fragment = .escrow edge session)
 

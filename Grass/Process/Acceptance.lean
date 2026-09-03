@@ -73,8 +73,27 @@ structure ProcessAcceptance (p : ProcessSpec.{u, w}) where
   the state looks like.
   -/
   DemandsWellFormed : Bag p.Demand → Prop
-  /-- Which rendered views are acceptable, for a process that has a view. -/
-  ViewAccepts : (facet : ViewFacet p.State) → facet.View → Prop
+  /--
+  **Which rendered views are acceptable, at which states.**
+
+  The state argument is what makes this an obligation. Without it the clause sees
+  a facet and a value and nothing else, so it cannot say the view *reflects*
+  anything — and `ProcessCorrect.viewAccepts` is handed exactly
+  `ViewAccepts facet (facet.render state)`, which any predicate satisfied by the
+  render's own image discharges for free.
+
+  Two rounds of local adversarial review made that concrete.
+  `Tests/Process/ViewFixtures.lean` first closed §10.56 with the image of the
+  render, and a reviewer discharged the obligation at a facet the specification
+  does not carry. It was replaced with a *bound*, and a second reviewer mutated
+  the render to a constant and watched the bound survive: a view reporting "no
+  work remains" at a working state was accepted, because nothing in the clause
+  could see the state to disagree with.
+
+  With the state here, an acceptance names the projection it intends and the
+  process has to implement it. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.99.
+  -/
+  ViewAccepts : (facet : ViewFacet p.State) → p.State → facet.View → Prop
   /--
   Which observations the specification *demands*, as opposed to merely permits.
 
@@ -129,7 +148,7 @@ def trivial (p : ProcessSpec.{u, w}) : ProcessAcceptance p where
   TerminalAccepts := fun _ _ => True
   TraceAccepts := fun _ => True
   DemandsWellFormed := fun _ => True
-  ViewAccepts := fun _ _ => True
+  ViewAccepts := fun _ _ _ => True
   Demanded := fun _ => False
   terminalRemainder := TerminalRemainderLaw.unconstrained p
 

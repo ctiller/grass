@@ -108,7 +108,7 @@ specification would have.
   TerminalAccepts := fun _ _ => True
   TraceAccepts := fun _ => True
   DemandsWellFormed := fun _ => True
-  ViewAccepts := fun _ _ => True
+  ViewAccepts := fun _ _ _ => True
   Demanded := fun observation => observation = Chirp.beep
   terminalRemainder := TerminalRemainderLaw.strict chatter
 

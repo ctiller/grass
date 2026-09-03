@@ -82,7 +82,7 @@ Count arrivals; finish once there are `request` of them.
   TerminalAccepts := fun _ _ => True
   TraceAccepts := fun _ => True
   DemandsWellFormed := fun _ => True
-  ViewAccepts := fun _ _ => True
+  ViewAccepts := fun _ _ _ => True
   Demanded := fun _ => False
   terminalRemainder := TerminalRemainderLaw.strict upto
 
