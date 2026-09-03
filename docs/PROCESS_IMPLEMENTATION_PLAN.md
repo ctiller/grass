@@ -622,6 +622,8 @@ Grass/Process/Network/Channel.lean     ChannelContract and its footprint discipl
 Grass/Process/Network/Plan.lean        ProcessPlan, LogicalProcessNetwork, the projection
 Grass/Process/Network/Transition.lean  NetworkTransition, scopes, NetworkStep
 Grass/Process/Network/Commit.lean      coalescing and the demanded-observation law
+Grass/Process.lean                     the authoring facade (decision 134)
+Grass/Process/Cancellation.lean        the cancellation facet (decision 134)
 Grass/Process/Network/Transition.lean  NetworkTransition, NetworkStep, freshness
 Grass/Process/Network/Child.lean       child requests, bindings, lifecycle events
 Grass/Process/Network/Mailbox.lean     ordering profiles, selective receive
@@ -1512,3 +1514,67 @@ law and not be it.
 
 Blocks: M2's first exit criterion, which is routing coverage over the full
 family.
+
+## 11. The authoring facade
+
+`docs/DECISIONS.md` decision 134, ruling `c-spike:4`'s third question and the
+process-side facts `c-process` supplied for it: `Grass.Process` is a bounded
+signature-only authoring facade, and `Grass.Process.Cancellation` a bounded
+public facet. Neither is the Lake root and neither is an aggregate of
+`Grass/Process/**`.
+
+The spikes have written `import Grass.Process` since they were drafted, and
+until decision 134 that line named nothing. The question was never whether to
+add the module — an author surface that does not exist is not an author surface
+— but what shape [OLEAN_SHARDING.md](OLEAN_SHARDING.md) §2 leaves available,
+given that it forbids both a leaf importing a whole-program umbrella and an
+aggregate importing every leaf.
+
+### 11.1 What "bounded" can mean, and what it cannot
+
+It cannot mean hiding. Importing a module in Lean makes its whole transitive
+closure visible, and `export` adds names rather than removing them, so a facade
+cannot show an author less than what it imports. A module note claiming
+otherwise would be the overclaiming this plan's §9.2 lists as the defect class
+local review keeps finding.
+
+What it can mean is that the closure is small, declared, and *checked*.
+`Grass/Process.lean` imports four modules; `Grass/Process/Cancellation.lean`
+imports two. `Tests/Process/FacadeFixtures.lean` and
+`Tests/Process/FacadeCancellationFixtures.lean` author against each import line
+alone and then guard that the excluded vocabulary does not resolve, so widening
+either list breaks a fixture rather than passing unnoticed.
+
+That is `g-foundation:46`'s lesson applied before it could be taught twice: an
+import list is only a check if something fails when it changes.
+
+### 11.2 The two closures are not nested
+
+`Grass.Process` excludes cancellation. `Grass.Process.Cancellation` excludes the
+network — no plan, no channel contract, no assertion, no escrow ledger, no
+topology. Neither is a subset of the other, which is why decision 134 makes them
+two facets rather than one with a larger closure.
+
+The second exclusion is [PROCESS_SHARDING.md](PROCESS_SHARDING.md) §4's argument
+made visible in the import graph. A policy is exact against one scope's
+discovered blocking calls; a policy indexed by a plan would make `callsExact` a
+global equality, so adding one `Sleep` anywhere would invalidate every
+cancellation proof in the program. A facet that cannot name a topology cannot
+acquire one by accident.
+
+### 11.3 What is out, and on what grounds
+
+Mailboxes, the structural network, child bindings, cross-vocabulary delivery,
+the transition family and the commit law are machinery a *realization* consumes,
+not vocabulary an author writes. An author who needs one imports the module that
+owns it, which is what §2's "consumers import the narrowest module that owns the
+fact they need" already says.
+
+`Grass.Specification.Boundary` arrives through `Sequential/Machine.lean` and is
+deliberately not excluded. That is not leakage: `coord1:5` puts the neutral
+vocabulary *below* both Semantics and Process, so a process author naming
+`DriverBoundary` reaches down the diamond rather than across it.
+
+`Grass.lean` remains the Lake root, still imports nothing, and is a different
+object from the facade. If a definition ever appears in either facade module, it
+has stopped being one.
