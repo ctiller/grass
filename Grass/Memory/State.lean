@@ -3073,7 +3073,7 @@ which it does not, and `Tests/Memory/Placement.lean`'s deliberately unplaced
 allocation satisfies it. -/
 def PlacedWithoutWrap (state : MemoryState) (id : AllocId) : Prop :=
   ∀ record ∈ state.allocations.lookup id, ∀ base ∈ record.base,
-    FitsAllocation base record.extent.size
+    FitsAllocation base record.extent.stop
 
 instance (state : MemoryState) (id : AllocId) : Decidable (state.PlacedWithoutWrap id) :=
   inferInstanceAs (Decidable (∀ _ ∈ _, ∀ _ ∈ _, _))
@@ -3088,11 +3088,11 @@ machine addresses, for an allocation a profile actually placed.
 theorem addressAt?_ne_of_disjoint {state : MemoryState} {id : AllocId}
     (hplaced : state.PlacedWithoutWrap id) {record : AllocationRecord}
     (hfound : state.allocations.lookup id = some record) {r t : ByteRange}
-    (hr : r.WithinBound record.extent.size) (ht : t.WithinBound record.extent.size)
+    (hr : r.WithinBound record.extent.stop) (ht : t.WithinBound record.extent.stop)
     (hd : r.Disjoint t) {i j : Nat} (hi : r.Covers i) (hj : t.Covers j)
     {base : MachineAddress} (hbase : record.base = some base) :
     state.addressAt? id i ≠ state.addressAt? id j := by
-  have hfits : FitsAllocation base record.extent.size :=
+  have hfits : FitsAllocation base record.extent.stop :=
     hplaced record (by rw [hfound]; simp) base (by rw [hbase]; simp)
   have hne := disjoint_ranges_do_not_alias hfits hr ht hd hi hj
   unfold addressAt?

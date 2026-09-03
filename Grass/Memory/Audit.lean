@@ -159,6 +159,11 @@ def addressDisagreesWithPlacement : AuditViolationClass :=
 
 /-- An allocation placed so that its own bytes wrap the address space.
 
+The clause bounds by `extent.stop`. It bounded by `extent.size` until review placed
+an allocation with a non-zero `extent.start` past the wrap point and had its store
+admitted at an address inside another live allocation — the same demonstration that
+motivated this class, defeated by the one arithmetic difference nothing had stated.
+
 `Grass/Memory/Addressing.lean`'s `addressOf` is `base + offset` in `BitVec 64`,
 which reduces mod 2^64, and every bridge lemma in that module takes `FitsAllocation`
 as a hypothesis. Nothing checked it. Review placed a sixty-four-byte allocation at

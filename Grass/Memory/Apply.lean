@@ -103,7 +103,7 @@ def denialOf (state : MemoryState) (d : AccessDescriptor) : Option AuditViolatio
       else if record.space ≠ d.provenance.space then some .wrongAddressSpace
       else if record.extent ≠ d.provenance.rootExtent then some .provenanceExtentMismatch
       else if ¬ record.extent.Contains d.range then some .outOfBounds
-      else if record.base.any (fun b => !decide (FitsAllocation b record.extent.size)) then
+      else if record.base.any (fun b => !decide (FitsAllocation b record.extent.stop)) then
         some .placementWraps
       else if record.base.any
                 (fun b => d.address != Address.numeric (addressOf b d.range.start)) then

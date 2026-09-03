@@ -2132,16 +2132,23 @@ the field belongs beside it as something that can only add.
   `Tests/Foundation.lean`'s `aliasedVerified` and `inferredVerified` are consumed by
   an environment-walking audit rather than by name, so no lexical scan can see their
   consumer.
-- **`denialOf`'s `Permits` clause is unreachable for every page this layer can
-  describe.** The clause rejects an access whose intent the *page's* permission does
-  not permit, and it sits behind the `Grants` clause, which rejects an access whose
-  declared permission the page does not grant. `AccessDescriptor.WellFormedIn` already
-  requires the descriptor's declared permission to permit its own intent, so a
-  descriptor reaching the `Permits` clause has a permission the page grants and which
-  permits the intent — and `Permission.permits_of_grants_of_permits` is that
-  implication, proved. The clause is retained because it is the sentence §1 states and
-  because `Grants` is the newer of the two, but no fixture can distinguish it and none
-  claims to.
+- ~~**`denialOf`'s `Permits` clause is unreachable for every page this layer can
+  describe.**~~ **That entry was wrong, and wrong in the direction that invites
+  deleting a live rule.** It argued from
+  `Permission.permits_of_grants_of_permits` — which is conditioned on
+  `page.atomicOnly = false`, and `Grants` deliberately does not compare `atomicOnly`.
+  So a page whose permission is `atomicReadWrite` grants an ordinary write's declared
+  permission and does not permit its intent, and the `Permits` clause is what refuses
+  it. Review built the page and stepped it.
+
+  That clause is the only enforcement of §3's "atomics do not grant ordinary
+  non-atomic access" on this path, which `Grass/Memory/Rights.lean` states in as many
+  words — so the entry named a load-bearing check as dead code.
+  `the_ordinary_write_to_an_atomic_page_is_denied` is it, with the grants-but-does-not-permit
+  pair beside it and the atomic access admitted as the control.
+
+  The lesson generalises past this entry: "unreachable" is a claim about every input,
+  and this one was made by reading a theorem's conclusion without its hypothesis.
 - **`MemoryEvent.ofOutcome`'s space guard cannot fail from `step`.** `ofOutcome`
   refuses to mint an event whose `AddressSpace` disagrees with the descriptor's
   `provenance.space`, which is `ValidMemoryEvent.WellFormed`'s

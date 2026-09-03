@@ -47,6 +47,17 @@ def addressOf (base : MachineAddress) (offset : Nat) : MachineAddress :=
 
 The hypothesis every bridge lemma below needs, and the one a profile owes for each
 allocation it admits.
+
+**Callers pass `extent.stop`, not `extent.size`, and the difference is a soundness
+bug that shipped.** `AllocationRecord.extent` is a `ByteRange`, so an allocation may
+start at a non-zero offset, and `MemoryState.addressAt?` maps the *raw* offset — the
+addresses an access can reach run to `extent.stop`. `denialOf`'s wrap clause and
+`MemoryState.PlacedWithoutWrap` both passed `extent.size`, so an allocation with
+`extent := ⟨200, 50⟩` based at `2 ^ 64 - 100` passed the check and had its offset-200
+store admitted at address 100, which is inside a second unrelated live allocation.
+Review built exactly that, with `SharesBytes` false between the two so it is not the
+recorded same-base-alias case. Three mechanisms had assumed `extent.start = 0` and
+nothing said so.
 -/
 def FitsAllocation (base : MachineAddress) (size : Nat) : Prop :=
   base.toNat + size ≤ 2 ^ 64

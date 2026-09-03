@@ -1,3 +1,4 @@
+import Grass.Memory.Apply
 import Grass.Memory.Loan
 
 /-!
@@ -229,5 +230,66 @@ theorem no_ordering_is_carried :
     atomicGrant.rights.atomicOnly = true ∧
     lentAtomically.grantAt? atomicLoan = some atomicGrant := by
   exact ⟨by decide, by decide⟩
+
+/-! ## The same rule at the page, and `denialOf`'s `Permits` clause is reachable
+
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 recorded that `denialOf`'s `Permits`
+clause is "unreachable for every page this layer can describe", because
+`Permission.permits_of_grants_of_permits` derives it from the `Grants` clause ahead of
+it. Review read the theorem's hypotheses: it is conditioned on
+`page.atomicOnly = false`, and `Grants` deliberately does not compare `atomicOnly`.
+
+So a page whose permission is `atomicReadWrite` grants an ordinary write's *declared*
+permission and does not permit its *intent*, and the `Permits` clause is what refuses
+it — the only enforcement of §3's "atomics do not grant ordinary non-atomic access" on
+this path, which `Grass/Memory/Rights.lean` says in as many words. An entry telling a
+later reader that clause is unreachable is an invitation to delete a live rule.
+-/
+
+/-- Storage the platform exposes for atomic access only. -/
+def atomicPage : AllocId := allocs.fresh.2.fresh.2.fresh.1
+
+/-- Provenance of it. -/
+def atomicPageProv : Provenance :=
+  { counterProv with root := atomicPage }
+
+/-- A state holding it. -/
+def pagedAtomically : MemoryState :=
+  (owned.allocate? atomicPage
+    { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
+      permission := .atomicReadWrite, live := true, bytes := .empty
+      base := some 0x3000 }).getD owned
+
+/-- An ordinary write to it. Its declared permission is what the page grants. -/
+def plainStore : AccessDescriptor :=
+  { context := holder, address := .numeric 0x3000, space := .cpuVirtual
+    provenance := atomicPageProv, range := ⟨0, 8⟩, intent := .write
+    requiredPermission := .readWrite, alignment := 1
+    initialization := .readsNothing, producesInitialized := true }
+
+/-- **The page grants the declaration and does not permit the intent**, which is the
+gap `Grants` leaves and `Permits` closes. -/
+theorem the_page_grants_but_does_not_permit :
+    (pagedAtomically.allocations.lookup atomicPage).isSome ∧
+    Permission.atomicReadWrite.Grants plainStore.requiredPermission ∧
+    ¬ Permission.atomicReadWrite.Permits plainStore.intent := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **So the ordinary write is denied**, by the clause §4.4.1 called unreachable. -/
+theorem the_ordinary_write_to_an_atomic_page_is_denied :
+    denialOf pagedAtomically plainStore = some AuditViolationClass.permissionDenied := by
+  decide
+
+/-- And the atomic access to the same page is admitted, so the page is not one that
+denies everything and the theorem above is the intent rather than the storage.
+
+The initialization demand stays `readsNothing`, which `denialOf` accepts: the page's
+bytes are uninitialized, and demanding them would fire a different clause and prove a
+different thing. -/
+theorem the_atomic_access_to_it_is_admitted :
+    denialOf pagedAtomically
+      { plainStore with
+        intent := AccessIntent.atomicReadWrite
+        requiredPermission := .atomicReadWrite } = Option.none := by decide
 
 end Tests.Memory.AtomicAuthority

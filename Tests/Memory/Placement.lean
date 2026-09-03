@@ -1,4 +1,4 @@
-import Grass.Memory.State
+import Grass.Memory.Apply
 
 /-!
 # Placement, instantiated
@@ -13,9 +13,13 @@ listed the debt as undischarged.
 This file is the check that it is discharged: the bridge applies to a state built
 the ordinary way, not only to a hypothetical one.
 
-It also pins the two things placement is *not*. It is not authority — `denialOf`
-reads none of it — and it is not aliasing, since two allocations may share a base
-and remain distinct storage until `MemoryState.aliases` says otherwise.
+It also pins the two things placement is *not*. It is not aliasing, since two
+allocations may share a base and remain distinct storage until `MemoryState.aliases`
+says otherwise; and it is not *authority*, in the narrow sense
+`placement_is_not_authority` states — an unplaced allocation is live, readable and
+writable exactly as a placed one is. What it is not any more is invisible to
+`denialOf`, which reads `base` in two clauses; three docstrings in this tree still
+said otherwise a round after the plan recorded the correction, and this was one.
 -/
 
 namespace Tests.Memory.Placement
@@ -112,6 +116,71 @@ theorem placement_is_not_authority :
         (fun m => (m.extent, m.epoch, m.space, m.permission, m.live)) ∧
     (state.MetadataAt placed).bind (fun m => m.base) ≠
       (state.MetadataAt unplaced).bind (fun m => m.base) := by
+  exact ⟨by decide, by decide⟩
+
+/-! ## An extent that does not start at zero
+
+`denialOf`'s wrap clause bounded by `extent.size` and the addresses an access can
+reach run to `extent.stop`. Review placed an allocation with a non-zero
+`extent.start` past the wrap point and had its store admitted at an address inside a
+second, unrelated live allocation — with `SharesBytes` false between the two, so it
+is not §4.4.1b's same-base case. These are that state, refused.
+-/
+
+private def contexts : FreshSupply ContextTag := .initial
+
+/-- Some context; the theorems below are not about who accesses. -/
+def someContext : ContextId := contexts.fresh.1
+
+/-- A third allocation, whose extent starts at 200 and ends at 250. -/
+def offsetAlloc : AllocId := allocs.fresh.2.fresh.2.fresh.1
+
+/-- Based so that offset 200 lands at address 100 — past the wrap. Its *size* is 50,
+which fits; its *stop* is 250, which does not. -/
+def offsetRecord : AllocationRecord :=
+  { extent := ⟨200, 50⟩, epoch := epoch, space := .cpuVirtual
+    permission := .readWrite, live := true, bytes := .empty
+    base := some (0 - 100) }
+
+/-- A state holding it beside the placed allocation, which sits at `0x1000`. -/
+def wrapped : MemoryState :=
+  (state.allocate? offsetAlloc offsetRecord).getD state
+
+/-- The allocation is there, and the two are not aliases — so any collision below is
+a placement collision rather than a declared one. -/
+theorem the_wrapped_allocation_is_there :
+    (wrapped.allocations.lookup offsetAlloc).isSome ∧
+    ¬ wrapped.SharesBytes offsetAlloc placed := by
+  exact ⟨by decide, by decide⟩
+
+/-- **The wrap is refused.** With the clause bounded by `extent.size` this allocation
+passed, because 50 bytes fit anywhere. -/
+theorem the_offset_wrap_is_refused :
+    denialOf wrapped
+      { context := someContext, address := .numeric 100, space := .cpuVirtual
+        provenance :=
+          { space := .cpuVirtual, root := offsetAlloc, epoch := epoch
+            source := .virtualAlloc, rootExtent := ⟨200, 50⟩, path := [] }
+        range := ⟨200, 8⟩, intent := .write, requiredPermission := .readWrite
+        alignment := 1, initialization := .readsNothing
+        producesInitialized := true } = some AuditViolationClass.placementWraps := by
+  decide
+
+/-- And an allocation with the same non-zero start that does *not* wrap is still
+admitted, so the clause did not simply become "refuse a non-zero start". -/
+def fitting : MemoryState :=
+  (state.allocate? offsetAlloc { offsetRecord with base := some 0x2000 }).getD state
+
+theorem an_offset_allocation_that_fits_is_admitted :
+    (fitting.allocations.lookup offsetAlloc).isSome ∧
+    denialOf fitting
+      { context := someContext, address := .numeric (0x2000 + 200), space := .cpuVirtual
+        provenance :=
+          { space := .cpuVirtual, root := offsetAlloc, epoch := epoch
+            source := .virtualAlloc, rootExtent := ⟨200, 50⟩, path := [] }
+        range := ⟨200, 8⟩, intent := .write, requiredPermission := .readWrite
+        alignment := 1, initialization := .readsNothing
+        producesInitialized := true } = Option.none := by
   exact ⟨by decide, by decide⟩
 
 end Tests.Memory.Placement
