@@ -3943,6 +3943,41 @@ the same one: after adding a field or a clause, try to satisfy it *badly* — wi
 the wrong render, the wrong occurrence, the field deleted — and see whether
 anything notices.
 
+### 10.94 The strongest field of a reroute was spent and thrown away
+
+`Reroutes.arrives` was strengthened after review built a reroute that delivers
+nothing: it now says the destination *gained* an occurrence, and that what it
+gained carries this occurrence's message. `LogicalProcessNetworkCore.ReroutesLand`
+— the well-formedness clause that field feeds — said only that the destination's
+ledger holds *something*.
+
+So the strengthening bought a fact about the *step* and nothing about the
+*network*. A reviewer built the world: fully `WellFormed`, an occurrence resolved
+`.rerouted` to a session, and nothing on that session carrying the payload.
+`wellFormed_preserved` propagates the clause faithfully, and the clause was the
+weak one — which matters because `WellFormed` is what every module downstream
+assumes, not `Reroutes`.
+
+**Closed.** `EscrowLedger.ReroutedElsewhere`'s `landsAt` now takes the rerouted
+occurrence as well as the destination and the arrival, and `ReroutesLand` asks
+`arrival.1 = occurrence.1`. `reroutesLand_preserved` carries it: a standing
+reroute keeps its arrival by `ledgers_extend`, and a new one is this step's, with
+`arrives` supplying both halves.
+
+One consequence worth recording, because it reverses part of §10.90.
+`Reroutes` had been given the wide `ResolvesOnlyAs` along with its siblings, and
+under the strengthened clause that is wrong: `arrives` witnesses *one* arrival, so
+a reroute marking several occurrences `.rerouted` to one destination would satisfy
+the clause for one of them and fail it for the rest. `Reroutes` takes the narrow
+`ResolvesNothingElse`, like `Delivers`, and for a reason of the same shape — the
+constructor's other fields are singular, so its resolution bound has to be too.
+
+**Three entries, one field.** §10.34 asked for an arrival field; §10.78's round
+strengthened it; this one connected it to the clause it exists to serve. Each
+round was right about what it fixed and silent about the seam beyond it. What
+finds a seam is asking what a *consumer* of the invariant can conclude — not what
+the constructor guarantees.
+
 ### 10.89 A spawn can satisfy every field it has and not be a step
 
 `Tests/Process/LifecycleStepFixtures.lean`'s `the_spawn` is a complete `Spawns` —

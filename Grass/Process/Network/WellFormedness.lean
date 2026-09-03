@@ -686,7 +686,7 @@ theorem ledgers_extend (transition : plan.NetworkTransition before after)
 
 /--
 **A `.rerouted` resolution standing after a step either stood before it, or is
-the reroute that wrote it.**
+the reroute that wrote it — and in the second case the payload has landed.**
 
 The other half of the sixth clause, and the half that did not exist until a
 construction forced it. `ResolvesNothingElse` is what makes the disjunction
@@ -702,18 +702,24 @@ theorem rerouting_stood_or_is_this_step (transition : plan.NetworkTransition bef
     (resolved : (after.inFlight edge session).resolution occurrence
       = some (.rerouted destination)) :
     (before.inFlight edge session).resolution occurrence = some (.rerouted destination)
-    ∨ ∃ arrival, arrival ∈ (after.inFlight edge destination).created := by
+    ∨ ∃ arrival, arrival ∈ (after.inFlight edge destination).created ∧
+        arrival.1 = occurrence.1 := by
   by_cases declared : transition.scope (.escrow edge session)
   · cases transition with
     | reroute _ session' occurrence' destination' step =>
       rcases declared with h | h
       · obtain ⟨same, sameSession⟩ := escrowFragment_inj h
         cases same; cases sameSession
-        rcases stood_or_declared step.resolvesOnlyAs resolved with stood | isIt
-        · exact Or.inl stood
-        · obtain ⟨arrival, _, arrived, _⟩ := step.arrives
-          cases isIt
-          exact Or.inr ⟨arrival, arrived⟩
+        by_cases isIt : occurrence = occurrence'
+        · subst isIt
+          obtain ⟨arrival, _, arrived, carries⟩ := step.arrives
+          have sameDestination : destination' = destination := by
+            rw [step.nowResolved] at resolved
+            cases resolved
+            rfl
+          subst sameDestination
+          exact Or.inr ⟨arrival, arrived, carries⟩
+        · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
       · obtain ⟨same, sameSession⟩ := escrowFragment_inj h
         cases same; cases sameSession
         exact Or.inl (step.destinationResolvesNothing occurrence ▸ resolved)
@@ -817,10 +823,11 @@ or is this step's own, and `Reroutes.arrives` is the arrival.
 theorem reroutesLand_preserved (transition : plan.NetworkTransition before after)
     (lands : before.ReroutesLand) : after.ReroutesLand := by
   intro edge session occurrence destination resolved
-  rcases rerouting_stood_or_is_this_step transition resolved with stood | ⟨arrival, arrived⟩
-  · obtain ⟨arrival, arrived⟩ := lands edge session occurrence destination stood
-    exact ⟨arrival, (ledgers_extend transition edge destination).created_preserved arrived⟩
-  · exact ⟨arrival, arrived⟩
+  rcases rerouting_stood_or_is_this_step transition resolved with stood | ⟨arrival, landed⟩
+  · obtain ⟨arrival, arrived, carries⟩ := lands edge session occurrence destination stood
+    exact ⟨arrival,
+      (ledgers_extend transition edge destination).created_preserved arrived, carries⟩
+  · exact ⟨arrival, landed⟩
 
 /-! ## The capstone -/
 

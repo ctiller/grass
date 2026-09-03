@@ -377,11 +377,19 @@ destination is a `ChannelId` of the same edge. So the obligation is dischargeabl
 one layer lower than it was recorded, and here it is.
 
 Without it, `rerouted` is a drop with a forwarding address nobody checks.
+
+**And the arrival has to carry the message**, which an earlier revision left out.
+`ProcessPlan.Reroutes.arrives` says the destination *gained* an occurrence
+carrying this one's message; the clause said only that the destination's ledger
+holds something. So the transition's strongest field was spent and discarded, and
+a network could satisfy this clause with a payload that went nowhere — a reviewer
+built the world. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.94.
 -/
 def ReroutesLand : Prop :=
   ∀ (edge : topology.ChannelKind) (session : topology.ChannelId edge),
     (network.inFlight edge session).ReroutedElsewhere
-      (fun destination arrival => arrival ∈ (network.inFlight edge destination).created)
+      (fun occurrence destination arrival =>
+        arrival ∈ (network.inFlight edge destination).created ∧ arrival.1 = occurrence.1)
 
 /--
 **Every instance's stored ending is one its protocol reaches.**

@@ -233,8 +233,9 @@ theorem afterReroute_is_wellFormed : Grass.Process.Tests.Reroute.afterReroute.We
 /-- Read back out of it: the rerouted payload lands. -/
 theorem the_rerouted_payload_lands :
     (Grass.Process.Tests.Reroute.afterReroute.inFlight () wire).ReroutedElsewhere
-      (fun destination arrival =>
-        arrival ∈ (Grass.Process.Tests.Reroute.afterReroute.inFlight () destination).created) :=
+      (fun occurrence destination arrival =>
+        arrival ∈ (Grass.Process.Tests.Reroute.afterReroute.inFlight () destination).created ∧
+          arrival.1 = occurrence.1) :=
   afterReroute_is_wellFormed.reroutesLand () wire
 
 /-! ## And a start at a plan with something in it

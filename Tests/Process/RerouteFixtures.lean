@@ -195,10 +195,10 @@ theorem the_reroute : serverPlan.Reroutes sent afterReroute () wire escrowed sid
     show (reroutedAt wire).resolution escrowed = some (.rerouted sidewire)
     rw [reroutedAt_wire]
     exact reroutedLedger_resolution
-  resolvesOnlyAs := by
-    show ResolvesOnlyAs (sent.inFlight () wire) (reroutedAt wire) (.rerouted sidewire)
+  resolvesNothingElse := by
+    show ResolvesNothingElse (sent.inFlight () wire) (reroutedAt wire) escrowed
     rw [sent_wire, reroutedAt_wire]
-    exact reroutedLedger_resolves_nothing_else.resolvesOnlyAs reroutedLedger_resolution
+    exact reroutedLedger_resolves_nothing_else
   destinationResolvesNothing := by
     show ResolvesNothing (ledgerAt false sidewire) (reroutedAt sidewire)
     rw [ledgerAt_off_wire_empty sidewire_ne_wire, reroutedAt_sidewire]
@@ -268,24 +268,23 @@ at the session the reroute resolved.
 -/
 theorem the_reroute_lands :
     (afterReroute.inFlight () wire).ReroutedElsewhere
-      (fun destination arrived => arrived ∈ (afterReroute.inFlight () destination).created) := by
+      (fun occurrence destination arrived =>
+        arrived ∈ (afterReroute.inFlight () destination).created ∧
+          arrived.1 = occurrence.1) := by
   intro occurrence destination rerouted
-  refine ⟨arrival, ?_⟩
-  have sameDestination : destination = sidewire := by
-    have resolved : (reroutedAt wire).resolution occurrence = some (.rerouted destination) :=
-      rerouted
-    rw [reroutedAt_wire] at resolved
-    by_cases isIt : occurrence = escrowed
-    · subst isIt
-      rw [reroutedLedger_resolution] at resolved
-      cases resolved
-      rfl
-    · rw [reroutedLedger_resolution_off isIt] at resolved
-      exact absurd resolved (by intro equal; cases equal)
-  subst sameDestination
-  show arrival ∈ (reroutedAt sidewire).created
-  rw [reroutedAt_sidewire]
-  exact List.mem_cons_self
+  have resolved : (reroutedAt wire).resolution occurrence = some (.rerouted destination) :=
+    rerouted
+  rw [reroutedAt_wire] at resolved
+  by_cases isIt : occurrence = escrowed
+  · subst isIt
+    rw [reroutedLedger_resolution] at resolved
+    cases resolved
+    refine ⟨arrival, ?_, arrival_carries_the_message⟩
+    show arrival ∈ (reroutedAt sidewire).created
+    rw [reroutedAt_sidewire]
+    exact List.mem_cons_self
+  · rw [reroutedLedger_resolution_off isIt] at resolved
+    exact absurd resolved (by intro equal; cases equal)
 
 /--
 **And a reroute that names its own session is refused.**

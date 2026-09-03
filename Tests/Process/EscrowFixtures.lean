@@ -136,7 +136,7 @@ theorem reroute_is_not_terminal :
   ChannelResolution.rerouted_not_terminal Wire.away
 
 /-- And the obligation it creates is dischargeable — here, trivially. -/
-theorem home_reroutes_land : homeLedger.ReroutedElsewhere (fun _ _ => True) := by
+theorem home_reroutes_land : homeLedger.ReroutedElsewhere (fun _ _ _ => True) := by
   intro _ _ _
   exact ⟨.first, trivial⟩
 

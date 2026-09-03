@@ -996,10 +996,19 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
     some (.rerouted destination)
   /-- This ledger only moved forward. -/
   ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
-  /-- **And every occurrence it ends, it ends as a reroute to here**; see
-  `ResolvesEscrow.resolvesOnlyAs`. -/
-  resolvesOnlyAs : ResolvesOnlyAs
-    (before.inFlight edge session) (after.inFlight edge session) (.rerouted destination)
+  /--
+  **And it resolves nothing else in this ledger.**
+
+  The narrow form, as for `Delivers`, and for the same kind of reason: `arrives`
+  witnesses *one* arrival, for the occurrence this step names. Under the wider
+  `ResolvesOnlyAs` a reroute could mark several occurrences `.rerouted` to one
+  destination while delivering only one of them, and
+  `LogicalProcessNetworkCore.ReroutesLand` — which since
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.94 asks the arrival to carry the
+  rerouted occurrence's message — would be false for the rest.
+  -/
+  resolvesNothingElse : ResolvesNothingElse
+    (before.inFlight edge session) (after.inFlight edge session) occurrence
   /-- **And it escrows nothing new here**: what a reroute creates, it creates at
   the destination. -/
   createsNothing : CreatesNothing

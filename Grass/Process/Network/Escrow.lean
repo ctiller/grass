@@ -409,13 +409,22 @@ cannot say it arrived. This predicate names what a plan holding every channel's
 ledger must prove: for each rerouted occurrence, the destination session escrows
 something carrying it.
 
+`landsAt` takes the *rerouted occurrence* as well as the destination and the
+arrival, and that argument is the whole difference between an obligation and a
+formality. Without it the predicate can only say the destination holds
+*something*, which `ProcessPlan.Reroutes.arrives` was strengthened away from after
+review built a reroute that delivers nothing — and a reviewer then pointed out
+that the strengthening was spent by the transition and thrown away, because the
+network-level clause it feeds could not express it.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.94.
+
 Stated here so the obligation is written down at the point it is created rather
 than remembered at the point it could be discharged.
 -/
-def ReroutedElsewhere (landsAt : Session → Occurrence → Prop) : Prop :=
+def ReroutedElsewhere (landsAt : Occurrence → Session → Occurrence → Prop) : Prop :=
   ∀ occurrence destination,
     ledger.resolution occurrence = some (.rerouted destination) →
-    ∃ arrival, landsAt destination arrival
+    ∃ arrival, landsAt occurrence destination arrival
 
 end EscrowLedger
 
