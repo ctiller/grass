@@ -3,6 +3,7 @@ mod common;
 mod envelope;
 mod error;
 mod events;
+mod exclusive;
 mod frontier;
 mod gitrepo;
 mod outbox;
