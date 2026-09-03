@@ -190,6 +190,21 @@ theorem get?_eq_none (v : Vec α) {i : Nat} (h : v.length ≤ i) : v.get? i = no
   simp only [get?, List.getElem?_eq_none_iff]
   exact h
 
+/-- Both directions. A consumer review needed the converse twice while writing a
+byte cursor and had to derive it each time; a read failing is exactly a read past
+the end. -/
+theorem get?_eq_none_iff (v : Vec α) (i : Nat) : v.get? i = none ↔ v.length ≤ i := by
+  simp [get?, length]
+
+/-- An emptiness characterisation that reaches `= empty`.
+`Vec.isEmpty_iff_length_eq_zero` relates a `Bool` to a `Nat` and stops there. -/
+theorem eq_empty_iff_length_eq_zero (v : Vec α) : v = empty ↔ v.length = 0 := by
+  constructor
+  · intro h; rw [h]; rfl
+  · intro h
+    apply toList_injective
+    simpa [empty, length] using List.eq_nil_of_length_eq_zero h
+
 /-!
 ## Extensionality
 
@@ -290,6 +305,50 @@ theorem pop?_isSome_iff (v : Vec α) : v.pop?.isSome = true ↔ v.length ≠ 0 :
   simp [pop?, length, List.getLast?_isSome]
 
 /-!
+## Induction
+
+A consumer review built five client modules against this library and reported
+that the worst thing in it was the absence of this principle. `Vec.foldl_push`
+and `Vec.foldr_push` are advertised as recursion laws, and until now there was no
+recursor to run them with: `induction v using Vec.recOnPush` was an unknown
+constant, so anyone proving a property of a sequence they *built* — an
+accumulator, a writer, an encoder — had to hand-roll snoc induction over
+`List.reverse` or give up and work in `List`.
+
+That is the leak this module's whole design exists to prevent, and it was not a
+missing law but a missing way to use the laws. The library states plenty about
+sequences a consumer was handed and, without this, almost nothing usable about
+sequences a consumer makes.
+
+`docs/STDLIB.md` §3 does not list an induction principle, because §3 lists
+operations. This is not an operation; it is what makes the operations provable
+about.
+-/
+
+/--
+Induct on a sequence as `empty` or `w.push a`.
+
+The direction matters: `push` is how sequences are built here, so this is the
+principle that matches the way consumers construct them. Proved by snoc-induction
+over the reversed representation, which is the derivation a consumer would
+otherwise write for themselves.
+-/
+@[elab_as_elim] theorem recOnPush {motive : Vec α → Prop} (v : Vec α)
+    (empty : motive empty)
+    (push : ∀ (w : Vec α) (a : α), motive w → motive (w.push a)) : motive v := by
+  have key : ∀ r : List α, motive (fromList r.reverse) := by
+    intro r
+    induction r with
+    | nil => exact empty
+    | cons a t ih =>
+      rw [List.reverse_cons]
+      exact push (fromList t.reverse) a ih
+  cases v with
+  | fromList l =>
+    have h := key l.reverse
+    rwa [List.reverse_reverse] at h
+
+/-!
 ## Composition
 -/
 
@@ -381,6 +440,45 @@ theorem get?_take (v : Vec α) (n i : Nat) :
 
 theorem get?_drop (v : Vec α) (n i : Nat) : (v.drop n).get? i = v.get? (n + i) := by
   simp [get?, drop]
+
+/-!
+### Splitting a concatenation
+
+`Vec.take_add` gives the increment of the partial-write story and these give the
+split. A consumer review found them missing and reported that the advertised
+property was therefore not reachable from this module: twenty lines of
+`ext_of_get?` boilerplate had to be written before a single line of frame-parsing
+code.
+-/
+
+/-- Taking exactly the first part of a concatenation returns it. The frame-reading
+law: a length-prefixed payload is recovered by taking its own length. -/
+@[simp] theorem take_append (u w : Vec α) : (u ++ w).take u.length = u := by
+  apply ext_of_get?
+  intro i
+  rw [get?_take]
+  by_cases h : i < u.length
+  · simp only [h, if_true]
+    exact get?_append_left h w
+  · simp only [h, if_false]
+    exact (get?_eq_none u (Nat.le_of_not_lt h)).symm
+
+/-- And dropping it returns the rest. -/
+@[simp] theorem drop_append (u w : Vec α) : (u ++ w).drop u.length = w := by
+  apply ext_of_get?
+  intro i
+  rw [get?_drop]
+  exact get?_append_right (Nat.le_add_right _ _) w |>.trans (by simp)
+
+/-- Taking the whole sequence is the identity. -/
+@[simp] theorem take_length (v : Vec α) : v.take v.length = v := by
+  apply toList_injective
+  simp [take, length]
+
+/-- Dropping the whole sequence leaves nothing. -/
+@[simp] theorem drop_length (v : Vec α) : v.drop v.length = empty := by
+  apply toList_injective
+  simp [drop, length, empty]
 
 
 /-!
@@ -607,6 +705,21 @@ instance : Membership α (Vec α) := ⟨fun v a => Mem a v⟩
 
 theorem mem_iff_mem_toList {a : α} {v : Vec α} : a ∈ v ↔ a ∈ v.toList := Iff.rfl
 
+/-- Membership is decidable, so `by decide` discharges it on concrete data.
+`Vec.contains` and `Vec.all_eq_true_iff` existed and a consumer review still had
+to route a concrete `∀ x ∈ v, …` goal through `of_decide_eq_true` by hand. -/
+instance [DecidableEq α] (a : α) (v : Vec α) : Decidable (a ∈ v) :=
+  inferInstanceAs (Decidable (a ∈ v.toList))
+
+/-- And bounded quantification over it, which is the shape a concrete goal
+actually takes: `∀ x ∈ v, p x`. -/
+instance (p : α → Prop) [DecidablePred p] (v : Vec α) : Decidable (∀ x ∈ v, p x) :=
+  inferInstanceAs (Decidable (∀ x ∈ v.toList, p x))
+
+/-- The existential form, likewise. -/
+instance (p : α → Prop) [DecidablePred p] (v : Vec α) : Decidable (∃ x ∈ v, p x) :=
+  inferInstanceAs (Decidable (∃ x ∈ v.toList, p x))
+
 /--
 Membership is occurrence at some index.
 
@@ -739,15 +852,16 @@ laws.
 > concatenation independent of chunk boundaries.
 
 The process half of that — readiness, EOF, cancellation, backpressure — belongs
-to `Std.Process` and waits on the process vocabulary. The sequence half does not
-wait on anything, and it is the half that says what "independent of chunk
-boundaries" means: `Vec.chunk_extensional` below. A consumer that reads only
-`Vec.flatten` of its input cannot distinguish two chunkings of the same bytes,
-because it is a function of a value both chunkings equal.
+to `Std.Process` and waits on the process vocabulary.
 
-That statement is nearly trivial once written down, which is the point of writing
-it down. "Independent of chunk boundaries" is the kind of phrase that reads as a
-guarantee and is easy to assume without ever fixing what it quantifies over.
+The sequence half is smaller than an earlier version of this comment claimed. It
+said this section "says what 'independent of chunk boundaries' means", naming
+`Vec.chunk_extensional`; that declaration's own docstring now retracts it, and
+this paragraph was left asserting the retracted version. What `flatten` supplies
+is that the flattening is well defined independent of how the chunks were cut —
+the obligation a real chunk-extensionality theorem would discharge, not that
+theorem. `docs/PROCESS.md` states the real one over a `StreamingParser`, and it
+belongs to `Std.Process`.
 -/
 
 /-- Flatten a sequence of sequences, in order. -/
@@ -760,9 +874,20 @@ def flatten (chunks : Vec (Vec α)) : Vec α :=
   apply toList_injective
   simp [flatten, singleton]
 
+/--
+Add up a sequence of counts.
+
+`Vec.length_flatten`'s right-hand side used to be `((chunks.map length).toList).sum`,
+which sent every consumer of that law to `Vec.toList` — the leak this module's
+whole design is meant to prevent, and the one place it did the leaking itself.
+Adversarial review found it. `sum` costs a line because `foldl` already exists.
+-/
+def sum (v : Vec Nat) : Nat := v.foldl (· + ·) 0
+
 @[simp] theorem length_flatten (chunks : Vec (Vec α)) :
-    (flatten chunks).length = ((chunks.map length).toList).sum := by
-  simp only [flatten, length, map, toList_fromList, List.length_flatten, List.map_map]
+    (flatten chunks).length = (chunks.map length).sum := by
+  simp only [flatten, length, map, toList_fromList, List.length_flatten, List.map_map,
+    sum, foldl, List.sum_eq_foldl]
   rfl
 
 /-- Flattening distributes over appending chunk sequences, which is what lets a
@@ -778,6 +903,25 @@ counterpart of `Vec.push` and the step law a chunk accumulator needs. -/
     flatten (chunks.push chunk) = flatten chunks ++ chunk := by
   apply toList_injective
   simp [flatten, push]
+
+/--
+Flattening one more chunk reads through to the chunk it came from.
+
+`Vec.flatten` had no indexing law — only length and the append/push recursion —
+which adversarial review flagged as the one operation in the module characterised
+solely by its recursion. This is the missing observation: past the first chunk,
+an index into the flattening is an index into the flattening of the rest.
+-/
+theorem get?_flatten_cons (chunk : Vec α) (rest : Vec (Vec α)) (i : Nat) :
+    (flatten (singleton chunk ++ rest)).get? i =
+      if i < chunk.length then chunk.get? i
+      else (flatten rest).get? (i - chunk.length) := by
+  have hcat : flatten (singleton chunk ++ rest) = chunk ++ flatten rest := by
+    rw [flatten_append, flatten_singleton]
+  rw [hcat]
+  by_cases h : i < chunk.length
+  · simp [get?_append_left h, h]
+  · simp [get?_append_right (Nat.le_of_not_lt h), h]
 
 /-- `chunks` is a chunking of `v` when it flattens to it. Chunk boundaries are
 data about how `v` arrived, not about `v`. -/

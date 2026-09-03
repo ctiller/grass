@@ -123,11 +123,12 @@ operation, get-after-construction and get-after-update laws, order preservation
 for `append` and `map`, and `map` fusion. `abbrev ByteArray := Vec Byte`
 realizes the §1 name.
 
-Every operation in the module carries at least one law, and the rule that
-produced that property is worth stating because it is cheap to violate: an
-operation with no law is a name a consumer can call and cannot reason about, so
-it will be reasoned about through `Vec.toList` instead, which is precisely the
-leak §3.2 pays for the wrapper to prevent. `Vec.pop?` is the case that made the
+Every operation carries laws that determine it up to extensional equality —
+decision 6, arrived at after the weaker rule this paragraph used to state ("every
+operation carries at least one law") was broken twice by adversarial review. The
+motivation survives the rule that failed to capture it: an operation a consumer
+can call and cannot reason about will be reasoned about through `Vec.toList`
+instead, which is precisely the leak §3.2 pays for the wrapper to prevent. `Vec.pop?` is the case that made the
 rule concrete — it was written with no law at all, and `Vec.pop?_push`,
 `Vec.length_of_pop?`, and `Vec.pop?_isSome_iff` are what it needed to be usable.
 `Vec.mem_iff_exists_get?` is the same rule applied to membership: reaching the
@@ -784,10 +785,18 @@ Open, with the owner each is with:
    and not only to library-internal code. And it is no longer
    hypothetical: `Tests/Std/HostBytes.lean` is the first module to mention both
    byte arrays at once, and a bare `ByteArray` in it is an ambiguity error.
-2. **Whether `Vec α` should be `Array α`**, with this branch's reviewer in the
-   first instance. Lean's `Array` is the same one-field structure over `List`,
-   and adopting it would delete the restatement cost and settle the literal
-   syntax below at a stroke. §3.2.
+2. **What the representation should be**, with this branch's reviewer in the
+   first instance, and now a four-way question rather than a two-way one. The
+   "adopting `Array` would delete the restatement cost" half of how this item
+   used to read is **refuted**: the probe that tested it kept every body
+   list-shaped, and the genuine port in §3.2 measured ten laws native, four
+   needing `toList`, one awkward. The "settles the literal syntax" half stands.
+   What decides it is §3.2's two-axis measurement, and the constraint found with
+   it: an `Array`-backed arm using core's `DecidableEq (Array α)` costs 37 s of
+   kernel `decide` where the current representation costs 1.3 s, so such an arm
+   must carry a `toList`-routed instance. [HELLO_WORLD.md](HELLO_WORLD.md)
+   forbids `native_decide`, so kernel `decide` is the only evaluation a Grass
+   proof has. §3.2.
 3. **`Vec` has no literal syntax**, which the spike surface needs and which
    interacts with the previous item. Not settled unilaterally, partly because
    the only cheap mechanism breaks `Array` literals repository-wide and partly

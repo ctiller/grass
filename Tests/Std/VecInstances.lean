@@ -67,8 +67,10 @@ example : digits = Vec.fromList [10, 20, 30] := by decide
 example : digits ≠ Vec.fromList [10, 20] := by decide
 example : (Vec.empty : Vec Nat) ≠ digits := by decide
 
-/-- Deciding equality is deciding extensional agreement, which is the connection
-that makes the instance the right one rather than merely a working one. -/
+/-- Equality is agreement at every index. This says nothing about the `Decidable`
+instance — an earlier version of this docstring claimed it did, and the library
+declaration it names was renamed precisely to stop making that claim. The `BEq`
+section below is what actually reaches the instances. -/
 example (v w : Vec Nat) : v = w ↔ ∀ i, v.get? i = w.get? i :=
   Vec.eq_iff_get?_eq v w
 
@@ -99,9 +101,11 @@ example : Vec.fromList [1, 1] ≠ Vec.fromList [1] := by decide
 
 /-! ## Representation
 
-A `Vec` prints as its elements in order. The point is not the punctuation but
-that a debugging session shows a sequence rather than a structure wrapping a
-list, so the representation stays where the module comment says it is.
+A `Vec` prints as its elements in order. An earlier version of this comment said
+that this keeps a `Vec` and a `List` apart in a debugging session; it does the
+opposite — the output is byte-identical to a `List Nat`, which adversarial review
+pointed out is the one place the type distinction is invisible. That is a
+deliberate readability choice, not a property of the representation.
 -/
 
 /-- info: [10, 20, 30] -/
