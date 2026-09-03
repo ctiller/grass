@@ -53,7 +53,7 @@ from pathlib import Path
 # means substituting a same-length corpus fails. Changing the corpus requires
 # updating this constant, which is the reviewed edit `docs/VALIDATION.md`
 # section 7 asks for rather than a silent change to what is being checked.
-EXPECTED_DIGEST = "27e2270a847b9a70479b5498669f6b911d5c7e8ec1bc1a6f1685e2d423e6be21"
+EXPECTED_DIGEST = "22e38844c9c90b41a24fe622687e1c5ef233fca312c660affa5ec1455d33c433"
 # The coverage this tool was reviewed at. Shrinking the corpus must be a
 # deliberate, reviewed edit rather than a side effect of regenerating it.
 #
@@ -63,7 +63,7 @@ EXPECTED_DIGEST = "27e2270a847b9a70479b5498669f6b911d5c7e8ec1bc1a6f1685e2d423e6b
 # demonstrated it -- one `.take 1` plus a digest update turned 1085 encodings
 # into 1 and still reported no disagreement. `docs/VALIDATION.md` section 7's
 # ratchet is meant to prevent exactly that, and this is it applied to corpora.
-EXPECTED_ROWS = 50
+EXPECTED_ROWS = 52
 
 
 TEMPLATE = """\

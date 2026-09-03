@@ -167,7 +167,16 @@ TEMPLATE = r"""; probe(buf in rcx). buf is 17 qwords: 16 GPRs in encoding order,
   mov [rax+8*0], rcx
   mov rcx, [rel save_flags]
   mov [rax+8*16], rcx
-  ; Report the stack pointer the probe left behind, so a probe that moved it is
+  ; Report the stack pointer as it was *before* the probe ran. `save_rsp` is
+  ; written above and never rewritten, so this is the entry value, not the
+  ; value the probe left behind -- and slot 4 is excluded from comparison
+  ; anyway. A reviewer measured the difference against an in-probe capture and
+  ; found it is exactly the negation of the probe's stack delta.
+  ;
+  ; So a probe that moves RSP is unobservable here, twice over. Reporting the
+  ; value after the body -- which needs a second store below the epilogue's
+  ; restore -- is an open obligation; the shipped corpus contains no
+  ; stack-moving probe, so nothing currently depends on it.
   ; visible as data instead of corrupting the harness.
   mov rcx, [rel save_rsp]
   mov [rax+8*4], rcx
@@ -204,7 +213,11 @@ def wrapper_source(insn_hex: str) -> str:
 
     The buffer is 17 qwords: sixteen GPRs in encoding order, then RFLAGS. Slot 4
     is RSP: it is not loaded from the buffer, and on the way out it reports the
-    stack pointer the probe left behind.
+    stack pointer as it stood before the probe body ran. It is not the value
+    the probe left behind: `save_rsp` is written before the body and never
+    rewritten, so a probe that moved the stack cannot be detected from it. The
+    slot is excluded from comparison, and closing this is an open obligation
+    recorded in `TEMPLATE`.
 
     Callee-saved state, the buffer pointer and the return address live in a save
     area inside this allocation, addressed RIP-relatively. None of it is on the

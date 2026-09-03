@@ -20,13 +20,30 @@ bucket is the right place for them until a Microsoft `SourceDocument` is
 registered.
 
 What this module has instead is stronger than a citation and weaker than a
-proof: the layouts are confirmed against bytes emitted by Microsoft's own
-toolchain. `Tools/win64-unwind-differential.py` compiles C with `cl.exe`,
-extracts the `.xdata` and `.pdata` sections straight out of the COFF objects,
-decodes each `UNWIND_INFO`, and checks that re-encoding it through
-`UnwindInfo.toBytes` reproduces the original bytes. Every field order below was
-read off that output rather than inferred, including the two that a reader of
-the C struct declarations would most likely get backwards:
+proof: some of the layouts are confirmed against bytes emitted by Microsoft's
+own toolchain. `Tools/win64-unwind-differential.py` assembles MASM `PROC FRAME`
+prologues with `ml64.exe`, reads the `.xdata` section straight out of the COFF
+object, and compares it byte for byte against `UnwindInfo.toBytes`.
+
+An earlier version of this paragraph described a different tool -- one that
+compiled C with `cl.exe`, extracted `.pdata` as well, and decoded each
+`UNWIND_INFO` to re-encode it. No such tool has ever existed here; `cl.exe` was
+used once by hand while working out the field orders, and the paragraph
+described that session rather than the check. A reviewer caught it.
+
+The distinction matters because it changes what is covered. `UNWIND_INFO` for
+the four operations this profile models is covered, on 50 prologues.
+`RuntimeFunction.toBytes`, `PdataSection.toBytes`, `SearchablePdata.toBytes`,
+`UnwindTail.flags`, `UnwindTail.handlerRva` and `UnwindTail.toBytes` are covered
+by nothing: every corpus row uses `.noHandler` and none emits `.pdata`. A
+reviewer hand-checked one handler case -- `PROC FRAME:myhandler; push rbp` gives
+`19010100015000000000000000000000`, which `.bothHandlers 0 [0]` reproduces --
+but that measurement is not in any corpus and nothing re-runs it. Extending the
+corpus to the handler tails and to `.pdata` is an open obligation.
+
+Every field order below was read off `ml64` output rather than inferred,
+including the two that a reader of the C struct declarations would most likely
+get backwards:
 
 * `Version : 3` then `Flags : 5` in one byte means version occupies bits 2:0 and
   flags bits 7:3, because MSVC packs the first-declared bitfield into the low

@@ -90,13 +90,21 @@ The instruction's length in bytes.
 This is a claim about encodings, and the differential is what checks it. A push
 of `r12`-`r15` carries `REX.B`; `sub rsp, imm8` reaches 127; `mov r, rsp` is
 `REX.W` plus opcode plus ModRM; `lea r, [rsp+off]` adds a SIB byte because the
-base is `rsp`, plus a one-byte displacement.
+base is `rsp`, plus a displacement.
+
+That displacement is one byte only up to 127. `.setframe` permits offsets to
+240, and `lea rbp, [rsp+240]` needs a `disp32` and is eight bytes. The model
+said five for every nonzero offset, which a reviewer measured against `ml64`
+for `push rbp; sub rsp, 240; .setframe rbp, 240`: `SizeOfProlog` 16 against
+Grass's 13. No corpus row exceeded 32, so nothing caught it -- and it would
+have blocked extending the corpus to the top of the `off ≤ 240` bound that
+`UnwindOp.Encodable` now permits.
 -/
 def length : Step → Nat
   | .push r => if r.rexBit then 2 else 1
   | .alloc n => if n ≤ 127 then 4 else 7
   | .setFrame _ 0 => 3
-  | .setFrame _ _ => 5
+  | .setFrame _ off => if off ≤ 127 then 5 else 8
 
 /-- The unwind operation the directive records. `ml64` picks the small form up
 to 128 bytes, which is exactly `UnwindOp.SmallAllocEncodable`'s range. -/
@@ -194,7 +202,13 @@ def frameRows : List Row :=
   [ rowOf "frame-rbp-0" [.push .rbp, .alloc 32, .setFrame .rbp 0]
   , rowOf "frame-rbp-32" [.push .rbp, .alloc 48, .setFrame .rbp 32]
   , rowOf "frame-r13-16" [.push .r13, .alloc 64, .setFrame .r13 16]
-  , rowOf "frame-rsi-0" [.push .rsi, .alloc 8, .setFrame .rsi 0] ].reduceOption
+  , rowOf "frame-rsi-0" [.push .rsi, .alloc 8, .setFrame .rsi 0]
+  -- The top of the `off <= 240` bound `UnwindOp.Encodable` permits, where the
+  -- establishing `lea` needs a disp32 and is eight bytes rather than five.
+  -- `Step.length` said five for every nonzero offset until a reviewer measured
+  -- this shape against `ml64`; no row reached past 32, so nothing caught it.
+  , rowOf "frame-rbp-240" [.push .rbp, .alloc 256, .setFrame .rbp 240]
+  , rowOf "frame-r14-128" [.push .r14, .alloc 144, .setFrame .r14 128] ].reduceOption
 
 /-- Spike 1's prologue, as the differential sees it. -/
 def spike1Rows : List Row :=
