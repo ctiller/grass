@@ -286,6 +286,25 @@ structure RmEncoding where
   rexB : BitVec 1
 deriving DecidableEq, Repr, Inhabited
 
+/--
+How many displacement bytes a ModR/M byte and its SIB promise, as a function of
+just those fields.
+
+Standalone rather than a method on `RmEncoding`, because the decoder needs the
+answer *before* it has read the displacement -- that is the whole point of the
+question -- and a decoder that asked a different function than the encoder's
+well-formedness condition could disagree with it. One definition, two callers.
+-/
+def dispKindFor (mod : BitVec 2) (rm : BitVec 3) (sib : Option Sib) : DispKind :=
+  if mod = ModRm.modDisp8 then .d8
+  else if mod = ModRm.modDisp32 then .d32
+  else if mod = ModRm.modNoDisplacement then
+    if rm = ModRm.rmSelectsRipRelative then .d32
+    else match sib with
+      | some s => if s.base = Sib.baseNone then .d32 else .none
+      | Option.none => .none
+  else .none
+
 namespace RmEncoding
 
 /--
@@ -327,15 +346,7 @@ def needsRex (e : RmEncoding) : Bool := e.rexX == 1 || e.rexB == 1
 
 /-- The displacement these fields promise the instruction stream carries. See
 `DispKind`. -/
-def requiredDisp (e : RmEncoding) : DispKind :=
-  if e.mod = ModRm.modDisp8 then .d8
-  else if e.mod = ModRm.modDisp32 then .d32
-  else if e.mod = ModRm.modNoDisplacement then
-    if e.rm = ModRm.rmSelectsRipRelative then .d32
-    else match e.sib with
-      | some sib => if sib.base = Sib.baseNone then .d32 else .none
-      | Option.none => .none
-  else .none
+def requiredDisp (e : RmEncoding) : DispKind := dispKindFor e.mod e.rm e.sib
 
 /-- A SIB byte is in the stream exactly when `rm=100` and `mod ≠ 11`. -/
 def requiresSib (e : RmEncoding) : Bool :=

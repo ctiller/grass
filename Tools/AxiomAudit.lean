@@ -8,6 +8,7 @@ import Grass.ABI.Win64.Unwind
 import Grass.ISA.X86.Addressing
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.Citation
+import Grass.ISA.X86.Decode
 import Grass.ISA.X86.DualCitation
 import Grass.ISA.X86.Encoding
 import Grass.ISA.X86.Ledger

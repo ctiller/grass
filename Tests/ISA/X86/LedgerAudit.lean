@@ -1,5 +1,6 @@
 import Lean.Elab.Command
 import Grass.ISA.X86.Bytes
+import Grass.ISA.X86.Decode
 import Grass.ISA.X86.Profile
 
 /-!
@@ -65,7 +66,7 @@ The citation machinery itself is not modeled behaviour and is not audited: a
 `Citation` record makes no claim about a processor. -/
 def auditedModules : List Name :=
   [`Grass.ISA.X86.Register, `Grass.ISA.X86.Encoding,
-   `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes]
+   `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.Decode]
 
 /-- Compiler-generated names that are not authored declarations. -/
 def generatedSuffixes : List Name :=
@@ -104,6 +105,14 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Immediate.size, `Grass.ISA.X86.Immediate.sizeOf,
     `Grass.ISA.X86.InsnEncoding.size, `Grass.ISA.X86.InsnEncoding.escapeByte,
     `Grass.ISA.X86.RegField.bits, `Grass.ISA.X86.RegField.extended,
+    -- One-line adapters that lift an already-cited byte layout to "this field's
+    -- bytes, or none". Whether the field is *present* is a vendor fact, and it
+    -- is `RmEncoding.requiresSib` and `dispKindFor`, both listed as owed.
+    `Grass.ISA.X86.InsnEncoding.rexBytes, `Grass.ISA.X86.InsnEncoding.escapeBytes,
+    `Grass.ISA.X86.InsnEncoding.modrmBytes, `Grass.ISA.X86.InsnEncoding.sibBytes,
+    -- Decoder plumbing over Grass's own types, and the diagnostics vocabulary.
+    `Grass.ISA.X86.findSpec, `Grass.ISA.X86.plusRegRows,
+    `Grass.ISA.X86.MatchesSpec,
     -- Encodability predicates: Grass's decision about what it will emit, not a
     -- statement about what the processor does.
     `Grass.ISA.X86.MemOperand.Encodable,
@@ -142,6 +151,7 @@ def owed : List Name :=
     `Grass.ISA.X86.Rex.bare, `Grass.ISA.X86.Rex.isRexByte,
     `Grass.ISA.X86.Rex.ofByte?,
     `Grass.ISA.X86.RmEncoding.requiredDisp, `Grass.ISA.X86.RmEncoding.requiresSib,
+    `Grass.ISA.X86.dispKindFor,
     `Grass.ISA.X86.RmEncoding.WellFormed,
     `Grass.ISA.X86.Displacement.value,
     `Grass.ISA.X86.encodeMem, `Grass.ISA.X86.decodeMem,
@@ -150,7 +160,11 @@ def owed : List Name :=
     `Grass.ISA.X86.InsnEncoding.toBytes, `Grass.ISA.X86.InsnEncoding.WellFormed,
     `Grass.ISA.X86.encodeMemInsn, `Grass.ISA.X86.movRegImm32,
     `Grass.ISA.X86.leaR64, `Grass.ISA.X86.callMem64,
-    `Grass.ISA.X86.movMem32Imm32, `Grass.ISA.X86.movMem64Imm32 ]
+    `Grass.ISA.X86.movMem32Imm32, `Grass.ISA.X86.movMem64Imm32,
+    -- The opcode table is the largest single block of uncited vendor fact in
+    -- the tree: every row asserts what follows an opcode in the byte stream.
+    `Grass.ISA.X86.opcodeTable, `Grass.ISA.X86.decodeInsn,
+    `Grass.ISA.X86.decodeOperands ]
 
 /-- The declarations this gate holds the ledger responsible for. -/
 def modeledDeclarations : MetaM (Array Name) := do

@@ -169,6 +169,31 @@ namespace InsnEncoding
 /-- The `0F` escape byte. -/
 def escapeByte : Byte := 0x0F
 
+/-! Each optional field's bytes, named.
+
+Named rather than written as inline matches inside `toBytes`, so that the
+decoder's round-trip proof and the writer speak the same language: a proof about
+`sibBytes i.sib` has to be about the same term the writer emitted, and an inline
+match forces the proof to reconstruct it. -/
+
+/-- The REX prefix byte, if there is one. -/
+def rexBytes : Option Rex → ByteSeq
+  | some r => [r.toByte]
+  | Option.none => []
+
+/-- The `0F` escape byte, if the opcode is in the two-byte space. -/
+def escapeBytes (escape : Bool) : ByteSeq := if escape then [escapeByte] else []
+
+/-- The ModR/M byte, if the opcode takes one. -/
+def modrmBytes : Option ModRm → ByteSeq
+  | some m => [m.toByte]
+  | Option.none => []
+
+/-- The SIB byte, if the ModR/M byte selects one. -/
+def sibBytes : Option Sib → ByteSeq
+  | some s => [s.toByte]
+  | Option.none => []
+
 /--
 The instruction's bytes, in stream order.
 
@@ -177,12 +202,8 @@ processor reads them. A REX prefix cannot land in the wrong place because
 `InsnEncoding` has no field that could hold one elsewhere.
 -/
 def toBytes (i : InsnEncoding) : ByteSeq :=
-  (match i.rex with | some r => [r.toByte] | Option.none => []) ++
-  (if i.escape then [escapeByte] else []) ++
-  [i.opcode] ++
-  (match i.modrm with | some m => [m.toByte] | Option.none => []) ++
-  (match i.sib with | some s => [s.toByte] | Option.none => []) ++
-  i.disp.toBytes ++ i.imm.toBytes
+  rexBytes i.rex ++ escapeBytes i.escape ++ [i.opcode] ++
+    modrmBytes i.modrm ++ sibBytes i.sib ++ i.disp.toBytes ++ i.imm.toBytes
 
 /--
 This record denotes an instruction a decoder could read back.
@@ -221,8 +242,7 @@ def WellFormed (i : InsnEncoding) : Prop :=
     (∀ m, i.modrm = some m →
       (m.rm = ModRm.rmSelectsSib ∧ m.mod ≠ ModRm.modRegisterDirect →
         i.sib.isSome) ∧
-      i.disp.kind = ({ mod := m.mod, rm := m.rm, sib := i.sib, disp := i.disp,
-                       rexX := 0, rexB := 0 } : RmEncoding).requiredDisp) ∧
+      i.disp.kind = dispKindFor m.mod m.rm i.sib) ∧
     (i.disp ≠ .none → i.modrm.isSome)
 
 instance (i : InsnEncoding) : Decidable i.WellFormed := by
@@ -256,7 +276,7 @@ to add later — a legacy-prefix field counted in one and emitted in the other. 
 @[simp] theorem length_toBytes (i : InsnEncoding) : i.toBytes.length = i.size := by
   cases i with | mk rex escape opcode modrm sib disp imm =>
   cases rex <;> cases escape <;> cases modrm <;> cases sib <;>
-    simp [toBytes, size] <;> omega
+    simp [toBytes, size, rexBytes, escapeBytes, modrmBytes, sibBytes] <;> omega
 
 end InsnEncoding
 
