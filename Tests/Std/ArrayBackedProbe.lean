@@ -99,6 +99,21 @@ but is expected to have type
 #guard_msgs in
 example (v : Vec Nat) : Grass.Std.Logical.ByteArray := v
 
+/-! ## The host-byte crossing is representation-independent
+
+`Grass/Std/Logical/HostBytes.lean` and `Tests/Std/HostBytes.lean` were written
+against the structure representation on `agent/c-stdlib/host-byte-bridge` and
+cherry-picked here without a single edit: 292 lines of definitions, connection
+theorems, and fixtures compile unchanged under `Vec := Array`.
+
+That is a stronger result than it looks. The crossing is the one place in the
+library that has to know what a `Vec Byte` is made of, since it takes the
+elements apart and rebuilds them as `UInt8`. If any part of the module were
+leaning on the private representation rather than on `Vec.toList`, `Vec.fromList`,
+and the indexing laws, this is where it would have broken. It did not, so the
+representation question of §3.2 does not reach the adapter either.
+-/
+
 /-! ## What is still owed
 
 `Array` does not carry `size_take`, `size_drop`, or `take_append_drop`, so the
