@@ -224,4 +224,48 @@ theorem the_wrong_address_is_another_allocations_base :
       some (some 0x2000) := by
   exact ⟨by decide, by decide⟩
 
+/-! ## The bounds clause fires through the block evaluator, and only there
+
+`the_bounds_clause_cannot_fire` proves that `step` never reaches `denialOf`'s bounds
+clause: well-formedness supplies nesting and containment and the extent clause forces
+the record's extent to equal the declared root extent. `applyAccess` asks `denialOf`
+with no well-formedness hypothesis, so for a block descriptor the clause is the only
+thing between the access and a write outside its allocation. Nothing tested it --
+`outOfBounds` appeared nowhere under `Tests/` except in one prose comment. -/
+
+/-- A block store reaching far past the allocation it names. Every other clause of
+`denialOf` passes: the allocation is live, in the right epoch, space and source, its
+extent agrees with the provenance's declared root extent, the placement does not wrap,
+the declared address is the one the placement gives, and the permission covers the
+intent. -/
+def overrunningStore : AccessDescriptor :=
+  { context := someContext, address := .numeric (0x2000 + 200), space := .cpuVirtual
+    provenance :=
+      { space := .cpuVirtual, root := offsetAlloc, epoch := epoch
+        source := .virtualAlloc, rootExtent := ⟨200, 50⟩, path := [] }
+    range := ⟨200, 4096⟩, intent := .write, requiredPermission := .readWrite
+    alignment := 1, initialization := .readsNothing
+    producesInitialized := true }
+
+/-- **A block access outside its allocation is refused.** -/
+theorem a_block_access_out_of_bounds_is_refused :
+    denialOf fitting overrunningStore = some AuditViolationClass.outOfBounds := by
+  decide
+
+/-- The same store with a range that fits is denied nothing, so the refusal is the
+bound and not the descriptor. -/
+theorem the_same_block_access_inside_the_allocation_is_admitted :
+    denialOf fitting { overrunningStore with range := ⟨200, 8⟩ } = Option.none := by
+  decide
+
+/-- And the refusal changes nothing, which is what makes it a refusal rather than a
+partial write. `applyAccess_refused_preserves_state` is stated over an arbitrary state;
+this discharges its hypothesis for a concrete one, so the block evaluator really does
+leave `fitting` alone. -/
+theorem the_refused_block_access_changes_nothing :
+    applyAccess fitting overrunningStore (List.replicate 4096 0) (fun _ => 0) =
+      (.refused AuditViolationClass.outOfBounds, fitting) :=
+  applyAccess_refused_preserves_state fitting overrunningStore _ _
+    a_block_access_out_of_bounds_is_refused
+
 end Tests.Memory.Placement

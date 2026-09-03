@@ -1604,13 +1604,29 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   the clause as `the_bounds_clause_cannot_fire`, so the fact is compiled rather than
   argued.
 
-  Two consequences are open. `AuditViolationClass.outOfBounds` is in
-  `emittedByTransition`, so every profile must declare a class the transition cannot
-  emit — and `denialOf`'s own docstring rejects exactly that shape for alignment: "an
-  unreachable branch that looks like a check is worse than no branch". And the clause
-  survives for `applyAccess`, which has no application anywhere under `Grass/` or
-  `Tests/`. Removing either needs a decision about whether the block evaluator is a
-  supported entry point, which is not this document's to take alone.
+  ~~Two consequences are open.~~ Neither survived checking, and the second entry here
+  was false in the same way as the prose it was correcting.
+
+  "`applyAccess` has no application anywhere under `Grass/` or `Tests/`" was review's
+  observation, repeated here and into `Grass/Memory/Apply.lean` without checking.
+  `runBlock` calls it, and `Tests/Memory/Spike1Block.lean` and
+  `Tests/Memory/StraightLineBlock.lean` both run blocks and apply it directly. So the
+  block evaluator is a supported entry point, it asks `denialOf` with no
+  well-formedness hypothesis at all, and the bounds clause is the only thing between a
+  block descriptor and a write outside its allocation.
+  `Tests/Memory/Placement.lean`'s `a_block_access_out_of_bounds_is_refused` is that
+  case with its positive control and the state-preservation half; it is the only
+  fixture in the tree that reaches the branch, and `outOfBounds` had appeared nowhere
+  under `Tests/` except in a prose comment.
+
+  `AuditViolationClass.outOfBounds` therefore belongs in the declared set: this layer
+  emits it. What was wrong is `denialOf`'s ordering sentence, which reads as though
+  `step` bounds-checks the state; it does not, because `the_bounds_clause_cannot_fire`
+  says it cannot need to.
+
+  The lesson is the one this section keeps recording: a reviewer's observation is
+  evidence about where to look, not a fact to copy. This entry copied one, and it took
+  a `grep` to falsify.
 - ~~**`step`'s fault-plan commit-count gate was entirely untested**, including the
   regression its own docstring records.~~ `AuditViolationClass.faultCommitOutOfRange`
   appeared nowhere under `Tests/`. Review restored the pre-repair form of the bound —

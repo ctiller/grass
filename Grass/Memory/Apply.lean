@@ -144,13 +144,20 @@ the tree green, then proving the reason rather than leaving it as an observation
 which is the standing rule here, after a "one check subsumes another" claim on this
 branch turned out to be false within the hour.
 
-Two things follow and neither is settled here. `AuditViolationClass.outOfBounds` is in
-`emittedByTransition`, so every profile must declare a class the transition cannot
-emit, and `denialOf`'s own docstring rejects that shape for alignment: an unreachable
-branch that looks like a check is worse than no branch. And the clause is not dead in
-general -- `applyAccess` calls `denialOf` without any well-formedness hypothesis --
-but `applyAccess` has no application anywhere under `Grass/` or `Tests/`.
-`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records both.
+The clause is not dead, and the first version of this paragraph said it was: it
+claimed `applyAccess` "has no application anywhere under `Grass/` or `Tests/`", which
+was review's observation and was wrong. `runBlock` below calls it, and
+`Tests/Memory/Spike1Block.lean` and `Tests/Memory/StraightLineBlock.lean` both run
+blocks and apply it directly. `applyAccess` asks `denialOf` with no well-formedness
+hypothesis at all, so the bounds clause is the only thing standing between a block
+descriptor and a write outside its allocation -- `Tests/Memory/Placement.lean`'s
+`a_block_access_out_of_bounds_is_refused` is that case, and it is the only fixture in
+the tree that reaches this branch.
+
+So `AuditViolationClass.outOfBounds` is emitted by this layer and belongs in the
+declared set; what is *not* true is the ordering sentence above, which reads as though
+`step` bounds-checks the state. It does not, because it cannot need to.
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records the distinction.
 -/
 theorem the_bounds_clause_cannot_fire {d : AccessDescriptor} {space : AddressSpace}
     {record : AllocationRecord} (hwf : d.WellFormedIn space)
