@@ -216,6 +216,109 @@ fn prepare_merge(repo: &Path, agent: &str, nomination: &str, reviewed_commit: &s
     ]))
 }
 
+fn merge_ready(repo: &Path, agent: &str, authorization: &str) -> Value {
+    run_json(bin().current_dir(repo).args([
+        "merge-ready",
+        "--agent",
+        agent,
+        "--authorization",
+        authorization,
+    ]))
+}
+
+/// Activates the merge engine as `coordinator` (a bootstrap coordinator),
+/// naming its own registration event (`<coordinator>:0`) as `previous_epoch`
+/// -- the one legitimate "nothing real to reference yet" case
+/// `apply_merge_engine_activated` carves out for a fresh bus (see that
+/// function's own doc comment). Every active member must already have a
+/// published stream before this call (`require_complete_frontier`), so
+/// callers run this *after* registering/nominating/accepting, not before.
+/// Without a real `merge_engine.activated` event, `review.merge_authorized`
+/// can never actually publish (`current_merge_engine_epoch` stays `None`) --
+/// see `prepare_merge`'s own tests, which document that gap and stop short
+/// of it; `merge-ready`'s tests need a genuinely *published* authorization to
+/// exercise, so they close it for real instead.
+///
+/// Returns the id of the just-published `merge_engine.activated` event
+/// itself -- *not* `previous_epoch` -- since that event's own id (not the
+/// registration event it names as `previous_epoch`) is what becomes `state.
+/// current_merge_engine_epoch`, and therefore what a `review.merge_
+/// authorized`'s own `merge_engine_epoch` field must equal
+/// (`apply_review_merge_authorized`).
+fn activate_merge_engine(repo: &Path, coordinator: &str) -> String {
+    let data = serde_json::json!({
+        "previous_epoch": format!("{coordinator}:0"),
+        "merge_engine": "git-ort",
+        "merge_engine_version": "2.53.0",
+        "design_commit": "0".repeat(40),
+        "helper_commit": "0".repeat(40),
+    });
+    submit(
+        repo,
+        coordinator,
+        "merge_engine.activated",
+        &data.to_string(),
+        "activate-merge-engine",
+    );
+    let coordinated = coordinate(repo, coordinator, "host1", 0);
+    assert_eq!(
+        coordinated["outbox_rejected"],
+        serde_json::json!([]),
+        "{coordinated}"
+    );
+    coordinated["published_events"][0]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// Submits and coordinates a `review.merge_authorized` event, returning the
+/// resulting authorization event id. `merge_engine_epoch` should ordinarily
+/// be the id returned by a prior `activate_merge_engine` call.
+#[allow(clippy::too_many_arguments)]
+fn authorize_merge(
+    repo: &Path,
+    reviewer: &str,
+    nomination: &str,
+    previous_main: &str,
+    reviewed_commit: &str,
+    candidate: &str,
+    merge_engine_epoch: &str,
+    reviewed_scope: &[&str],
+) -> String {
+    let data = serde_json::json!({
+        "nomination": nomination,
+        "product_branch": "refs/heads/agent/zoe/feature",
+        "previous_main": previous_main,
+        "reviewed_commit": reviewed_commit,
+        "candidate": candidate,
+        "merge_engine_epoch": merge_engine_epoch,
+        "checks": [{"command": "build", "result": "passed"}],
+        "finding_dispositions": [],
+        "evidence": [],
+        "reviewed_scope": reviewed_scope,
+        "limitations": [],
+        "summary": "looks good",
+    });
+    submit(
+        repo,
+        reviewer,
+        "review.merge_authorized",
+        &data.to_string(),
+        "authorize",
+    );
+    let coordinated = coordinate(repo, reviewer, "host2", 0);
+    assert_eq!(
+        coordinated["outbox_rejected"],
+        serde_json::json!([]),
+        "{coordinated}"
+    );
+    coordinated["published_events"][0]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
 /// Commits `feature.txt` on top of the repo's current `main`, with an
 /// `Agent-Bus-Agent: <trailer_agent>` trailer, and returns `(previous_main,
 /// feature_commit)`. Leaves the repo checked out on `main` afterward.
@@ -1582,6 +1685,244 @@ fn prepare_merge_rejects_an_unknown_nomination() {
 // update calls, used by every stream and the registry root, well outside
 // this task's git-linked-review-checks scope) -- flagged, not fixed, here.
 
+// ======================================================= merge-ready (gate 8)
+//
+// AGENT_REVIEW.md section 8: run immediately after publishing `review.
+// merge_authorized` and immediately before pushing the candidate to `main`.
+// `merge_ready_reports_ready_for_a_genuinely_valid_authorization` below is
+// the one full end-to-end happy path in this suite that actually reaches a
+// *published* `review.merge_authorized` (via `activate_merge_engine` --
+// `prepare_merge`'s own tests document why they stop short of that).
+
+/// The full, genuinely valid path: nominate, accept, activate the merge
+/// engine, prepare the candidate, authorize it, then confirm `merge-ready`
+/// reports it ready and names the exact same candidate.
+#[test]
+fn merge_ready_reports_ready_for_a_genuinely_valid_authorization() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    let merge_engine_epoch = activate_merge_engine(repo.path(), "coord1");
+
+    let prepared = prepare_merge(repo.path(), "aiden", &nomination, &feature_commit);
+    let candidate = prepared["candidate"].as_str().unwrap().to_string();
+
+    let authorization_id = authorize_merge(
+        repo.path(),
+        "aiden",
+        &nomination,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+        &merge_engine_epoch,
+        &["feature.txt"],
+    );
+
+    let out = merge_ready(repo.path(), "aiden", &authorization_id);
+    assert_eq!(out["ready"], true, "{out}");
+    assert_eq!(out["candidate"], candidate, "{out}");
+}
+
+#[test]
+fn merge_ready_rejects_unknown_authorization() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register(repo.path(), "aiden", "reviewer", "host2");
+
+    bin()
+        .current_dir(repo.path())
+        .args([
+            "merge-ready",
+            "--agent",
+            "aiden",
+            "--authorization",
+            "aiden:99",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown authorization"));
+}
+
+/// The authorizing reviewer was `aiden`; a different registered reviewer
+/// asking `merge-ready` about the same authorization id must be refused.
+#[test]
+fn merge_ready_rejects_wrong_authorizer() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    let merge_engine_epoch = activate_merge_engine(repo.path(), "coord1");
+    let prepared = prepare_merge(repo.path(), "aiden", &nomination, &feature_commit);
+    let candidate = prepared["candidate"].as_str().unwrap().to_string();
+    let authorization_id = authorize_merge(
+        repo.path(),
+        "aiden",
+        &nomination,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+        &merge_engine_epoch,
+        &["feature.txt"],
+    );
+    register(repo.path(), "mallory", "reviewer", "host3");
+
+    bin()
+        .current_dir(repo.path())
+        .args([
+            "merge-ready",
+            "--agent",
+            "mallory",
+            "--authorization",
+            &authorization_id,
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "was not published by the given reviewer",
+        ));
+}
+
+/// `main` moving out from under an already-published authorization is
+/// exactly the time-sensitive scenario this whole gate exists to catch --
+/// neither `apply_review_merge_authorized` (reduction time) nor `coordinator
+/// ::verify_review_merge_authorized` (publication time) could ever observe
+/// this, since both run before `main` has had the chance to move.
+#[test]
+fn merge_ready_rejects_main_advanced() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    let merge_engine_epoch = activate_merge_engine(repo.path(), "coord1");
+    let prepared = prepare_merge(repo.path(), "aiden", &nomination, &feature_commit);
+    let candidate = prepared["candidate"].as_str().unwrap().to_string();
+    let authorization_id = authorize_merge(
+        repo.path(),
+        "aiden",
+        &nomination,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+        &merge_engine_epoch,
+        &["feature.txt"],
+    );
+
+    // Advance `main` past `previous_main` out from under the authorization,
+    // as a hand push (or a different, concurrently-merged reviewer) would.
+    git(
+        repo.path(),
+        &["update-ref", "refs/heads/main", &feature_commit],
+    );
+
+    bin()
+        .current_dir(repo.path())
+        .args([
+            "merge-ready",
+            "--agent",
+            "aiden",
+            "--authorization",
+            &authorization_id,
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "has advanced past authorized previous_main",
+        ));
+}
+
+/// The reviewed commit touches sneaky.txt too, but review_scope/
+/// reviewed_scope only ever name feature.txt -- `merge-ready`'s own diff
+/// check is what must catch this (nothing upstream of it inspects changed
+/// paths at all: neither `apply_review_merge_authorized` nor `prepare-merge`
+/// ever looks at the actual diff content).
+#[test]
+fn merge_ready_rejects_a_changed_path_outside_reviewed_scope() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register(repo.path(), "aiden", "reviewer", "host2");
+    register(repo.path(), "zoe", "implementor", "host2");
+
+    let previous_main = crate_rev_parse(repo.path(), "main");
+    git(
+        repo.path(),
+        &["checkout", "--quiet", "--detach", &previous_main],
+    );
+    std::fs::write(repo.path().join("feature.txt"), "feature content\n").unwrap();
+    std::fs::write(repo.path().join("sneaky.txt"), "sneaky content\n").unwrap();
+    git(repo.path(), &["add", "."]);
+    git(
+        repo.path(),
+        &["commit", "-q", "-m", "add feature\n\nAgent-Bus-Agent: zoe"],
+    );
+    let feature_commit = crate_rev_parse(repo.path(), "HEAD");
+    git(repo.path(), &["checkout", "--quiet", "main"]);
+
+    let nominate_data = serde_json::json!({
+        "authors": ["zoe"],
+        "product_branch": "refs/heads/agent/zoe/feature",
+        "reviewer": "aiden",
+        "required_checks": ["build"],
+        "review_scope": ["feature.txt"],
+        "summary": "add feature",
+        "target_branch": "refs/heads/main",
+        "evidence": [],
+    });
+    submit(
+        repo.path(),
+        "zoe",
+        "review.nominated",
+        &nominate_data.to_string(),
+        "nominate",
+    );
+    let coordinated = coordinate(repo.path(), "zoe", "host2", 0);
+    let nomination = coordinated["published_events"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let accept_data = serde_json::json!({"nomination": nomination, "note": "ok"});
+    run_json(bin().current_dir(repo.path()).args([
+        "submit",
+        "--agent",
+        "aiden",
+        "--kind",
+        "review.nomination_accepted",
+        "--data",
+        &accept_data.to_string(),
+        "--client-id",
+        "accept",
+        "--observes",
+        &nomination,
+    ]));
+    coordinate(repo.path(), "aiden", "host2", 0);
+    let merge_engine_epoch = activate_merge_engine(repo.path(), "coord1");
+
+    let prepared = prepare_merge(repo.path(), "aiden", &nomination, &feature_commit);
+    let candidate = prepared["candidate"].as_str().unwrap().to_string();
+    // Authorized `reviewed_scope` matches the nomination's declared scope
+    // exactly (["feature.txt"]) -- only the *actual* diff leaks sneaky.txt.
+    let authorization_id = authorize_merge(
+        repo.path(),
+        "aiden",
+        &nomination,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+        &merge_engine_epoch,
+        &["feature.txt"],
+    );
+
+    bin()
+        .current_dir(repo.path())
+        .args([
+            "merge-ready",
+            "--agent",
+            "aiden",
+            "--authorization",
+            &authorization_id,
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is outside reviewed_scope"));
+}
+
 // ================================================================ golden tests
 
 // ================================================================ golden tests
@@ -1730,6 +2071,30 @@ fn golden_prepare_merge_output() {
     insta::assert_json_snapshot!(out, {
         ".candidate" => insta::dynamic_redaction(redact_noise),
         ".previous_main" => insta::dynamic_redaction(redact_noise),
+    });
+}
+
+#[test]
+fn golden_merge_ready_output() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    let merge_engine_epoch = activate_merge_engine(repo.path(), "coord1");
+    let prepared = prepare_merge(repo.path(), "aiden", &nomination, &feature_commit);
+    let candidate = prepared["candidate"].as_str().unwrap().to_string();
+    let authorization_id = authorize_merge(
+        repo.path(),
+        "aiden",
+        &nomination,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+        &merge_engine_epoch,
+        &["feature.txt"],
+    );
+    let out = merge_ready(repo.path(), "aiden", &authorization_id);
+    insta::assert_json_snapshot!(out, {
+        ".candidate" => insta::dynamic_redaction(redact_noise),
     });
 }
 

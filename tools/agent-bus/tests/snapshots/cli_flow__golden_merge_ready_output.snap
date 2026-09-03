@@ -1,0 +1,9 @@
+---
+source: tests/cli_flow.rs
+assertion_line: 2098
+expression: out
+---
+{
+  "candidate": "[hash]",
+  "ready": true
+}
