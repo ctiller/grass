@@ -480,6 +480,49 @@ theorem observedBytes_congr {a b : MemoryState} (d : AccessDescriptor)
   rw [List.mem_range] at hi
   rw [h i hi]
 
+/--
+**An access gets the same result whichever side of a disjoint access it runs on.**
+
+The half `applyAccess_comm` does not conclude. That theorem is about the resulting
+state; this is about the `AccessResult`, which is both the refusal decision and the
+observed bytes. Together they say a disjoint pair commutes in every respect the
+model records, which is what §4's "reads and writes to disjoint ranges commute"
+asks for and what §4.2 recorded as still owed.
+
+Both halves come from framing rather than from anything new:
+`denialOf_applyAccess_of_disjoint` for the decision, and
+`applyAccess_frames_disjoint_range` fed through `observedBytes_congr` for the read.
+-/
+theorem applyAccess_result (state : MemoryState) (d : AccessDescriptor)
+    (writeData : ByteSeq) (indeterminate : Nat → Byte) :
+    (applyAccess state d writeData indeterminate).1 =
+      match denialOf state d with
+      | some class_ => AccessResult.refused class_
+      | Option.none =>
+          { observed :=
+              if d.intent.reads then some (observedBytes state d indeterminate)
+              else Option.none
+            refusal := Option.none } := by
+  unfold applyAccess
+  cases denialOf state d <;> rfl
+
+theorem applyAccess_result_comm (state : MemoryState) (dA dB : AccessDescriptor)
+    (writeA writeB : ByteSeq) (indetA indetB : Nat → Byte)
+    (hroot : dA.provenance.root = dB.provenance.root)
+    (hd : dA.range.Disjoint dB.range) :
+    (applyAccess (applyAccess state dB writeB indetB).2 dA writeA indetA).1 =
+      (applyAccess state dA writeA indetA).1 := by
+  have hobs : observedBytes (applyAccess state dB writeB indetB).2 dA indetA =
+      observedBytes state dA indetA := by
+    refine observedBytes_congr dA indetA (fun offset hlt => ?_)
+    have hcov : dA.range.Covers (dA.range.start + offset) :=
+      ByteRange.covers_of (Nat.le_add_right _ _) (by omega)
+    have := applyAccess_frames_disjoint_range state dB writeB indetB hd.symm hcov
+    rw [← hroot] at this
+    exact this
+  rw [applyAccess_result, applyAccess_result,
+    denialOf_applyAccess_of_disjoint state dB dA writeB indetB hroot.symm hd.symm, hobs]
+
 /-! ## Straight-line blocks
 
 `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4's exit criterion is that the framing set

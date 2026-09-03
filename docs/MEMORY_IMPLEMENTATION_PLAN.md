@@ -527,8 +527,11 @@ repair.
 `applyAccess_refused_preserves_state` is §4's first required law.
 `applyAccess_frames_other_allocation` and `applyAccess_frames_disjoint_range` are
 the framing half of "reads and writes to disjoint ranges commute and frame";
-`applyAccess_comm` is the commutation half — for two accesses within one
-allocation, and about the resulting state rather than about the results.
+`applyAccess_comm` is the state half of commutation and `applyAccess_result_comm`
+the result half — the same access gets the same refusal decision and observes the
+same bytes on either side of a disjoint one. Both are for two accesses within one
+allocation; the cross-allocation theorem is still unstated, though
+`denialOf_write_of_other_allocation` is its decision half.
 
 Commutation is stated as `MemoryState.AgreesOn` — agreement at every offset, in
 byte and in initialization — and not as state equality. That is forced rather than
@@ -685,11 +688,6 @@ one outright defect that had already merged — see §3.11's denial row.
 - **`Restartability` is declared and never read.** A profile can require the facet
   and a descriptor carries a value, but nothing in the transition consults it, so
   [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.4's retry rules have no mechanism here.
-- **Result-level commutation.** `applyAccess_comm` concludes about the resulting
-  state only. That neither order refuses what the other commits is now assemblable
-  from `denialOf_congr_of_agrees` and `MemoryState.metadataAt_write`, but the
-  theorem combining them is not stated; nor is the read-observes-the-same-bytes
-  half, for which `observedBytes_congr` is the piece.
 - **`runStep_records_the_fault`'s `hreached` has no abstract discharge.** A caller
   can close it by `decide` on a concrete fixture. There is no lemma taking "no
   survivor is refused" to it, because that has to thread state through the
