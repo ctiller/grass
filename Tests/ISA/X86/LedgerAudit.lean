@@ -159,7 +159,7 @@ def owed : List Name :=
     `Grass.ISA.X86.le32, `Grass.ISA.X86.le16,
     `Grass.ISA.X86.Displacement.toBytes, `Grass.ISA.X86.Immediate.toBytes,
     `Grass.ISA.X86.InsnEncoding.toBytes, `Grass.ISA.X86.InsnEncoding.WellFormed,
-    `Grass.ISA.X86.encodeMemInsn, `Grass.ISA.X86.movRegImm32,
+    `Grass.ISA.X86.encodeMemInsn, `Grass.ISA.X86.movRegImm64, `Grass.ISA.X86.movRegImm32,
     `Grass.ISA.X86.leaR64, `Grass.ISA.X86.callMem64,
     `Grass.ISA.X86.movMem32Imm32, `Grass.ISA.X86.movMem64Imm32,
     -- The opcode table is the largest single block of uncited vendor fact in

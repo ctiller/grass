@@ -412,6 +412,45 @@ theorem movRegImm32_wellFormed (r : Gpr) (v : BitVec 32) :
   · intro m hm; exact absurd hm (by simp [movRegImm32])
   · intro h; exact absurd rfl h
 
+/--
+`MOV r64, imm64` — `REX.W + B8+rd io`.
+
+The one x86-64 instruction with a full 64-bit immediate, and the only producer
+of `Immediate.i64` anywhere in this library.
+
+That last part is why it exists. A reviewer pointed out that `le64` had no
+producer at all: nothing constructed an `i64` except the decoder, and the only
+oracle touching the decoder compares length. So `le64`'s byte order rested
+entirely on `split64`, which is agreement with `takeLe64` rather than with the
+architecture. They reversed both together -- the same permutation, so `split64`'s
+statement and proof were untouched -- and the build, both audits and all four
+differentials stayed green while the decoder read
+`48 B8 EF CD AB 89 67 45 23 01` as `0xefcdab8967452301` instead of
+`0x0123456789abcdef`.
+
+The contrast is what makes the point specific: the same permutation applied to
+`le32` is caught instantly, because encoders emit 32-bit immediates and all 1085
+NASM rows mismatch. `Tests/ISA/X86/NasmCorpus.lean` now emits this form too, so
+`le64` sits under the same oracle.
+-/
+def movRegImm64 (r : Gpr) (v : BitVec 64) : InsnEncoding :=
+  { rex := some (Rex.of true false false r.rexBit)
+    escape := false
+    opcode := 0xB8 + BitVec.setWidth 8 r.encodingBits
+    modrm := Option.none
+    sib := Option.none
+    disp := .none
+    imm := .i64 v }
+
+/-- Well-formed for the same reason `movRegImm32` is: no ModR/M byte, so nothing
+to serialise into one and no displacement to disagree with. -/
+theorem movRegImm64_wellFormed (r : Gpr) (v : BitVec 64) :
+    (movRegImm64 r v).WellFormed := by
+  refine ⟨?_, ?_, ?_⟩
+  · intro h; exact absurd h (by simp [movRegImm64])
+  · intro m hm; exact absurd hm (by simp [movRegImm64])
+  · intro h; exact absurd rfl h
+
 /-- `LEA r64, m` — `REX.W + 8D /r`.
 
 The workhorse of the differential campaign: `LEA` accepts every memory operand,

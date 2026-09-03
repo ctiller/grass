@@ -77,4 +77,15 @@ def hex32 (v : BitVec 32) : String :=
   "0x" ++ hexBytes [BitVec.extractLsb' 24 8 v, BitVec.extractLsb' 16 8 v,
                     BitVec.extractLsb' 8 8 v, BitVec.extractLsb' 0 8 v]
 
+/-- A 64-bit value as a NASM hex literal, zero-padded to sixteen digits.
+
+Padded rather than trimmed because NASM sizes an unadorned literal by its
+written width in some contexts; a full-width literal is unambiguous. -/
+def hex64 (v : BitVec 64) : String :=
+  "0x" ++ hexBytes
+    [BitVec.extractLsb' 56 8 v, BitVec.extractLsb' 48 8 v,
+     BitVec.extractLsb' 40 8 v, BitVec.extractLsb' 32 8 v,
+     BitVec.extractLsb' 24 8 v, BitVec.extractLsb' 16 8 v,
+     BitVec.extractLsb' 8 8 v, BitVec.extractLsb' 0 8 v]
+
 end Grass.Tests.ISA.X86.Corpus

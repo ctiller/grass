@@ -81,7 +81,7 @@ LISTING = re.compile(r"^\s*(\d+)\s+[0-9A-F]{8}\s+([0-9A-F]+-?)\s*(.*)$")
 PROLOGUE = ["BITS 64", "DEFAULT ABS"]
 
 # The corpus this tool was last reviewed against. See corpus_digest.
-EXPECTED_DIGEST = "08ce1b23377b5cd3c1624a05684af37235536b93de33293e0c0b09d1cafb2b7b"
+EXPECTED_DIGEST = "b4666dd400d6a8c1ac438bdcb774a46b95b55922d76440a08f6c4b28fdb8a6db"
 # The coverage this tool was reviewed at. Shrinking the corpus must be a
 # deliberate, reviewed edit rather than a side effect of regenerating it.
 #
@@ -91,7 +91,7 @@ EXPECTED_DIGEST = "08ce1b23377b5cd3c1624a05684af37235536b93de33293e0c0b09d1cafb2
 # demonstrated it -- one `.take 1` plus a digest update turned 1085 encodings
 # into 1 and still reported no disagreement. `docs/VALIDATION.md` section 7's
 # ratchet is meant to prevent exactly that, and this is it applied to corpora.
-EXPECTED_ROWS = 1085
+EXPECTED_ROWS = 1117
 
 
 # Disagreements that were investigated and found to be NASM canonicalising an

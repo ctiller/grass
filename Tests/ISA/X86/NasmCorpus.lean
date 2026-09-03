@@ -134,10 +134,46 @@ def movRows : List Row :=
       { source := "mov dword " ++ nasmAddr m ++ ", " ++ hex32 immValue,
         bytes := hexBytes i.toBytes }
 
+/--
+The 64-bit immediate value the `mov r64, imm64` rows carry.
+
+Every byte distinct and the top byte nonzero, so a reversed or truncated
+immediate cannot coincide with the correct one. It must also not fit in 32 bits,
+or NASM would legitimately choose the shorter `mov r32, imm32` form and the
+comparison would report a policy difference as a defect -- the same reasoning as
+`disp`.
+-/
+def imm64Value : BitVec 64 := 0x89abcdef01234567
+
+/--
+`mov r32, imm32` over every register: the opcode-embedded register form.
+
+`movRegImm32` had no automated external validation at all -- it appeared only in
+`Tests/ISA/X86/MachineProbes.lean`, the one corpus deliberately outside CI, so
+one of the five encoders in the tree rested entirely on a manual probe run.
+-/
+def movRegImm32Rows : List Row :=
+  Gpr.all.map fun r =>
+    { source := "mov " ++ nasmName32 r ++ ", " ++ hex32 immValue,
+      bytes := hexBytes (movRegImm32 r immValue).toBytes }
+
+/--
+`mov r64, imm64` over every register.
+
+The rows that put `le64` under an oracle. Before these, nothing in the library
+produced an `Immediate.i64`, so its byte order was checked only against
+`takeLe64` -- and a reviewer reversed both together with every check staying
+green. See `Grass.ISA.X86.movRegImm64`.
+-/
+def movRegImm64Rows : List Row :=
+  Gpr.all.map fun r =>
+    { source := "mov " ++ nasmName r ++ ", " ++ hex64 imm64Value,
+      bytes := hexBytes (movRegImm64 r imm64Value).toBytes }
+
 /-- The whole corpus. -/
 def corpus : List Row :=
   baseRows ++ destRows ++ baseIndexRows ++ indexOnlyRows ++ absoluteRows ++
-    callRows ++ movRows
+    callRows ++ movRows ++ movRegImm32Rows ++ movRegImm64Rows
 
 end Grass.Tests.ISA.X86.Nasm
 
