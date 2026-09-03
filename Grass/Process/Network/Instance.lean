@@ -243,6 +243,19 @@ theorem root_is_not_detached (parentKind : topology.ProcessKind)
         = some ⟨parentKind, parent⟩ :=
   ⟨rfl, rfl⟩
 
+/--
+**A root has no parent, known or former.**
+
+The `Option` half of decision 130's distinction, in the direction a
+well-formedness proof consumes: `ParentageValid` quantifies over recorded
+parenthood, and at a network holding only the root there is none to check.
+-/
+theorem knownParent_eq_none_of_isRoot {parentage : ProcessParentage topology kind}
+    (root : parentage.IsRoot) : parentage.knownParent = none := by
+  cases parentage with
+  | root => rfl
+  | _ => exact absurd root (fun h => h)
+
 /-- A root's kind is the topology's root kind, by construction. -/
 theorem isRoot_kind {parentage : ProcessParentage topology kind}
     (root : parentage.IsRoot) : kind = topology.root := by
