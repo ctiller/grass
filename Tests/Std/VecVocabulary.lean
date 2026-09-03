@@ -84,23 +84,41 @@ example : (Vec.fromList ([0x48, 0x69, 0x21] : List Byte)).length = 3 := rfl
 
 /-! ## Extensionality concludes equality -/
 
-/--
-The same three-element sequence reached two ways.
+/-! `docs/STDLIB.md` §5 asks for "extensionality by length and indexed values".
 
-`docs/STDLIB.md` §5 asks for "extensionality by length and indexed values". This
-is that law used the way a consumer would use it: two constructions that share no
-step are equal because they agree at every index. Note the conclusion is `=`, not
-a `Vec.Equiv`, which is the difference from `FiniteMap` the module comment
-records.
--/
-theorem built_two_ways :
-    ((Vec.empty.push (1 : Nat)).push 2).push 3 = Vec.fromList [1, 2, 3] :=
-  Vec.ext_of_get? (fun i => by
-    match i with
-    | 0 => rfl
-    | 1 => rfl
-    | 2 => rfl
-    | _ + 3 => rfl)
+Demonstrating that law needs care that an earlier version of this section did not
+take. On a canonical representation every *concrete* pair of equal sequences is
+already equal by `rfl`, so an example over literals exercises reduction and not
+the theorem: adversarial review confirmed that this section's previous
+`built_two_ways`, which invoked `Vec.ext_of_get?` with a `match`, is closed by
+plain `rfl` outright. It demonstrated computation while claiming to demonstrate
+extensionality.
+
+The examples below are stated over *symbolic* sequences, where reduction cannot
+close them and the law has to do the work. The concrete one is kept, relabelled
+as what it is. -/
+
+/-- Concrete, and closed by computation — which is the honest label for it. -/
+example : ((Vec.empty.push (1 : Nat)).push 2).push 3 = Vec.fromList [1, 2, 3] := rfl
+
+/-- Symbolic, and not closed by `rfl`: mapping a function that changes nothing is
+the identity, which is only visible index by index. -/
+theorem map_id_symbolic (v : Vec Nat) : v.map (· + 0) = v := by
+  apply Vec.ext_of_get?
+  intro i
+  simp
+
+/-- Also symbolic: two different routes to the same prefix. Neither side reduces
+to the other, and `Vec.ext_of_get?` is what closes the gap. -/
+theorem two_routes_to_a_prefix (v : Vec Nat) (a : Nat) :
+    (v.push a).take v.length = v.take v.length := by
+  apply Vec.ext_of_get?
+  intro i
+  rw [Vec.get?_take, Vec.get?_take]
+  by_cases h : i < v.length
+  · simp only [h, if_true]
+    exact Vec.get?_push_lt v a h
+  · simp [h]
 
 /-- `replicate` builds what its name says. By construction rather than by index —
 an earlier docstring here described a fold and an index, and there is neither. -/
