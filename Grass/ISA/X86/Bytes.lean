@@ -195,10 +195,19 @@ into the ModR/M position, so `8D 00 44 33 22 11` reads as `lea rax,[rax]`
 followed by three stray bytes that the processor decodes as whatever they
 happen to be.
 
-`WellFormed` states two conditions, and neither is about what address is named:
+`WellFormed` states the conditions in both directions, and none is about what
+address is named:
 
 - a SIB byte exists only as part of a ModR/M byte's r/m operand, so `WellFormed`
   requires a ModR/M byte that is actually selecting it;
+- and the mirror: a ModR/M byte that *says* a SIB follows must have one. The
+  first version checked only the direction that had a theorem, so
+  `48 8D 04 44332211` -- ModR/M `mod=00, rm=100` with no SIB -- was well-formed
+  and decodes as `lea rax,[rsp+rax*2]` followed by two stray instructions;
+- the displacement matches what `mod` and the SIB promise, reusing
+  `RmEncoding.requiredDisp` rather than restating it. `mod=00, rm=101` is the
+  case that matters most: it is RIP-relative, it *requires* a disp32, and it is
+  the form Spike 1 depends on;
 - a displacement belongs to a ModR/M operand, so `WellFormed` requires one.
 
 The immediate is deliberately *not* constrained here. Which immediate an opcode
@@ -209,6 +218,11 @@ guess here would be inventing a constraint rather than modeling one. It is an
 def WellFormed (i : InsnEncoding) : Prop :=
   (i.sib.isSome → ∃ m, i.modrm = some m ∧ m.rm = ModRm.rmSelectsSib ∧
       m.mod ≠ ModRm.modRegisterDirect) ∧
+    (∀ m, i.modrm = some m →
+      (m.rm = ModRm.rmSelectsSib ∧ m.mod ≠ ModRm.modRegisterDirect →
+        i.sib.isSome) ∧
+      i.disp.kind = ({ mod := m.mod, rm := m.rm, sib := i.sib, disp := i.disp,
+                       rexX := 0, rexB := 0 } : RmEncoding).requiredDisp) ∧
     (i.disp ≠ .none → i.modrm.isSome)
 
 instance (i : InsnEncoding) : Decidable i.WellFormed := by
@@ -337,8 +351,9 @@ reason `InsnEncoding.WellFormed` cares about: nothing to serialise into a
 position that is not there. -/
 theorem movRegImm32_wellFormed (r : Gpr) (v : BitVec 32) :
     (movRegImm32 r v).WellFormed := by
-  constructor
-  · intro h; exact absurd h (by cases r <;> simp [movRegImm32])
+  refine ⟨?_, ?_, ?_⟩
+  · intro h; exact absurd h (by simp [movRegImm32])
+  · intro m hm; exact absurd hm (by simp [movRegImm32])
   · intro h; exact absurd rfl h
 
 /-- `LEA r64, m` — `REX.W + 8D /r`.

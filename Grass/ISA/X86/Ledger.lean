@@ -33,6 +33,11 @@ hygiene:
 - A duplicated common subject means two rules claim to be *the* intersection
   guarantee for one declaration, and a consumer reading the first would get a
   different answer than one reading the second.
+- The same argument applies to two refinements *from one vendor* for one
+  subject, which the first version of this predicate did not exclude: a reviewer
+  built a ledger where Intel both set and cleared a flag and it was `Coherent`.
+  Two refinements from *different* vendors for one subject are fine and
+  expected, so the check is on the subject-and-vendor pair.
 
 A refinement *may* share a subject with a common rule — that is exactly the
 `supersedes` case, a vendor strengthening a common guarantee — so those two are
@@ -124,6 +129,8 @@ subjects: that is `VendorRefinement.supersedes`.
 -/
 def Coherent (l : Ledger) : Prop :=
   l.commonSubjects.Nodup ∧
+    (l.refinements.map (fun r => (r.subject, r.vendor))).Nodup ∧
+    l.excludedSubjects.Nodup ∧
     (∀ s ∈ l.excludedSubjects, s ∉ l.commonSubjects) ∧
     (∀ s ∈ l.excludedSubjects, s ∉ l.refinedSubjects)
 
@@ -136,11 +143,11 @@ instance (l : Ledger) : Decidable l.Coherent :=
 /-- A ledger satisfying `Coherent` never both guarantees and declines one
 subject. -/
 theorem not_common_of_excluded {l : Ledger} (h : l.Coherent) {s : Name}
-    (hs : s ∈ l.excludedSubjects) : s ∉ l.commonSubjects := h.2.1 s hs
+    (hs : s ∈ l.excludedSubjects) : s ∉ l.commonSubjects := h.2.2.2.1 s hs
 
 /-- A coherent ledger never both refines and declines the same subject. -/
 theorem not_refined_of_excluded {l : Ledger} (h : l.Coherent) {s : Name}
-    (hs : s ∈ l.excludedSubjects) : s ∉ l.refinedSubjects := h.2.2 s hs
+    (hs : s ∈ l.excludedSubjects) : s ∉ l.refinedSubjects := h.2.2.2.2 s hs
 
 /--
 Every citation this ledger rests on.
