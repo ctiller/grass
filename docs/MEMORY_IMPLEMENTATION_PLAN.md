@@ -1448,13 +1448,13 @@ refuses everything.
   destination, with `applyDelta` unaffected both times and neither miss caught by the
   shape.
 
-  The ledger is now tied rather than unified, because bringing it to the
-  `Option` shape means rewriting every fixture that states `LedgerEffectApplicable`.
-  `ledgerEffectApplicable_iff_isSome` says the predicate is exactly the applier
-  succeeding, and `applyLedgerEffect?_eq_some_of_applicable` says that on the path the
-  transition takes, the applier is the fold the transition installs. Tied by proof
-  rather than by shape is second best and is recorded as such; the remaining work is
-  to make `performAccess` install the `Option` applier's result and delete the fold.
+  The ledger is unified now. `performAccess` installs `applyLedgerEffect?`'s result
+  and the unconditional fold is deleted, so there is no longer a third description of
+  what a delta does: `applyLedgerDelta?` gates `applyDelta` behind the very predicate
+  `refusalOf` asks about, and `ledgerEffectApplicable_iff_isSome` says the two are the
+  same rule. The `none` branch on the committing path is unreachable and recorded
+  rather than fallen back from, exactly as the authority effect's is, with
+  `ledger_effect_applies_when_nothing_refuses` as the proof.
 
   **Authority is not data**, which the transition's framing law needs: the effect is
   applied to the pre-access map and the bytes are written on top, so

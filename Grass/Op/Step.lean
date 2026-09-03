@@ -623,8 +623,16 @@ def applyLedgerEffect? (obligations : FiniteMap ObligationId Obligation)
       (applyLedgerDelta? obligations contexts actor delta).bind
         (applyLedgerEffect? · contexts actor rest)
 
-/-- **The predicate and the applier are the same rule.** Without this they are two
-descriptions of it, which is what the shape is for. -/
+/--
+**The predicate and the applier are the same rule.**
+
+`refusalOf` decides with `LedgerEffectApplicable` and `performAccess` installs
+`applyLedgerEffect?`'s result, so without this they would be two descriptions of one
+rule and a clause could be added to either alone. There is no longer a third
+description: the unconditional fold the transition used to install is deleted, and
+`applyLedgerDelta?` gates `applyDelta` behind the very predicate `refusalOf` asks
+about.
+-/
 theorem ledgerEffectApplicable_iff_isSome (obligations : FiniteMap ObligationId Obligation)
     (contexts : List ContextId) (actor : ContextId) :
     ∀ (effect : LedgerEffect),
@@ -654,37 +662,6 @@ theorem ledgerEffectApplicable_iff_isSome (obligations : FiniteMap ObligationId 
       · unfold applyLedgerDelta? at h'
         rw [if_neg happly, Option.bind_none] at h'
         exact absurd h' (by simp)
-
-/-- The applied ledger, for the transition to install. -/
-def applyLedgerEffect (obligations : FiniteMap ObligationId Obligation)
-    (effect : LedgerEffect) : FiniteMap ObligationId Obligation :=
-  effect.foldl applyDelta obligations
-
-/-- **And on the applicable path the applier is the fold the transition installs.**
-
-This is the theorem that makes the pair safe rather than merely parallel:
-`performAccess` installs `applyLedgerEffect`, `refusalOf` decides with
-`LedgerEffectApplicable`, and these two theorems together say the decision and the
-installation are about the same ledger. A clause added to `Applicable` and forgotten
-in `applyDelta` would now have to survive this proof.
--/
-theorem applyLedgerEffect?_eq_some_of_applicable
-    (obligations : FiniteMap ObligationId Obligation) (contexts : List ContextId)
-    (actor : ContextId) :
-    ∀ (effect : LedgerEffect),
-      LedgerEffectApplicable obligations contexts actor effect →
-        applyLedgerEffect? obligations contexts actor effect =
-          some (applyLedgerEffect obligations effect) := by
-  intro effect
-  induction effect generalizing obligations with
-  | nil => intro _; rfl
-  | cons delta rest ih =>
-    rintro ⟨happly, hrest⟩
-    show (Option.bind _ _) = _
-    unfold applyLedgerDelta?
-    rw [if_pos happly, Option.bind_some, ih _ hrest]
-    unfold applyLedgerEffect
-    rw [List.foldl_cons]
 
 /--
 `ConflictsWithHistory` holds when an event contends with one already performed.
@@ -806,6 +783,27 @@ theorem refusalOf_mem_emittedClasses {policy : StepPolicy} {state : MachineState
               | exact absurd h (by simp)
 
 /--
+**Nothing refusing the access means the declared ledger changes apply.**
+
+The ledger's half of the same argument. `performAccess` has a branch for
+`applyLedgerEffect?` returning `none` on the committing path, and this rules it out:
+`refusalOf` decided with `LedgerEffectApplicable`, and `ledgerEffectApplicable_iff_isSome`
+says that is exactly this function succeeding.
+-/
+theorem ledger_effect_applies_when_nothing_refuses {policy : StepPolicy}
+    {state : MachineState} {d : AccessDescriptor} {prospective : Option MemoryEvent}
+    (h : refusalOf policy state d prospective = Option.none) :
+    (applyLedgerEffect? state.obligations state.contexts.domain d.context
+      d.ledgerEffect).isSome := by
+  unfold refusalOf at h
+  split at h
+  · exact absurd h (by simp)
+  · split at h
+    · exact absurd h (by simp)
+    · next happly =>
+      exact (ledgerEffectApplicable_iff_isSome _ _ _ _).mp (by simpa using happly)
+
+/--
 **Nothing refusing the access means the declared authority changes apply.**
 
 `performAccess` has a branch for the applier returning `none` on the committing
@@ -902,6 +900,20 @@ def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescri
           | some class_ =>
               { state with violations := state.violations.append (violationOf d class_) }
           | Option.none =>
+            match applyLedgerEffect? state.obligations state.contexts.domain d.context
+                d.ledgerEffect with
+            | Option.none =>
+                -- Unreachable, for the same reason the authority branch below is:
+                -- `refusalOf` decided applicability with `LedgerEffectApplicable`, and
+                -- `ledgerEffectApplicable_iff_isSome` says that is exactly this
+                -- function succeeding. `ledger_effect_applies_when_nothing_refuses` is
+                -- the proof. Recorded rather than falling back to the unchanged ledger,
+                -- because a fallback would commit an access whose declared duty did not
+                -- appear.
+                { state with
+                  violations :=
+                    state.violations.append (violationOf d .obligationNotAuthorized) }
+            | some ledger =>
             match state.memory.applyAuthorityEffect? d.context d.authorityEffect with
             | Option.none =>
                 -- Unreachable: `refusalOf` returned `none`, and its authority clause
@@ -935,7 +947,7 @@ def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescri
                 -- two commute; doing it the other way would check a lend against
                 -- one map and apply it to another.
                 memory := lent.commit d (outcome.committed?.bind Committed.written)
-                obligations := applyLedgerEffect state.obligations d.ledgerEffect }
+                obligations := ledger }
 
 /--
 Perform the accesses that survive, in order, stopping at the first denial.
@@ -1529,8 +1541,10 @@ theorem performAccess_preserves_authority_of_no_effect (policy : StepPolicy)
     · split <;> rfl
     · split
       · rfl
-      · rw [h, MemoryState.applyAuthorityEffect?_nil]
-        exact Grass.Memory.grantEntries_commit _ _ _
+      · split
+        · rfl
+        · rw [h, MemoryState.applyAuthorityEffect?_nil]
+          exact Grass.Memory.grantEntries_commit _ _ _
 
 /--
 **And a whole run of such accesses makes none.**
@@ -1643,7 +1657,9 @@ theorem performAccess_extends_violations (policy : StepPolicy) (state : MachineS
       · exact AuditViolationLedger.extends_append _ _
       · split
         · exact AuditViolationLedger.extends_append _ _
-        · exact AuditViolationLedger.Extends.refl _
+        · split
+          · exact AuditViolationLedger.extends_append _ _
+          · exact AuditViolationLedger.Extends.refl _
 
 /-- Running a list of accesses extends the violation ledger, including when it
 stops early at a refusal. Built from the per-access form above. -/
