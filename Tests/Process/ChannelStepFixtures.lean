@@ -271,6 +271,41 @@ theorem off_wire_ledgers {session : serverTopology.ChannelId ()} (notWire : sess
   rw [isEmpty, show sent.inFlight () session = ledgerAt false session from rfl,
     ledgerAt_off_wire_empty notWire]
 
+open Classical in
+/--
+And what each of them says about every *other* occurrence: nothing.
+
+`ResolvesNothingElse` is the field local construction forced -- see
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.87 and the stranding drop in
+`Tests/Process/RerouteFixtures.lean` it refuses. Each of these ledgers resolves
+exactly the one occurrence its step is about, which is what makes them honest
+witnesses of it rather than ledgers that happen to satisfy it.
+-/
+theorem closedLedger_resolves_nothing_else :
+    ResolvesNothingElse pendingLedger closedLedger escrowed := by
+  intro occurrence notIt
+  show (if occurrence = escrowed then some ChannelResolution.channelClosed else none) = none
+  rw [if_neg notIt]
+
+open Classical in
+theorem diedLedger_resolves_nothing_else :
+    ResolvesNothingElse pendingLedger diedLedger escrowed := by
+  intro occurrence notIt
+  show (if occurrence = escrowed then some ChannelResolution.channelDied else none) = none
+  rw [if_neg notIt]
+
+open Classical in
+theorem droppedLedger_resolves_nothing_else :
+    ResolvesNothingElse pendingLedger droppedLedger escrowed := by
+  intro occurrence notIt
+  show (if occurrence = escrowed then some ChannelResolution.dropped else none) = none
+  rw [if_neg notIt]
+
+/-- A cancellation request resolves nothing at all: it records and does not end. -/
+theorem requestedLedger_resolves_nothing_else :
+    ResolvesNothingElse pendingLedger requestedLedger escrowed :=
+  fun _ _ => rfl
+
 /-! ## The four steps -/
 
 /--
@@ -285,6 +320,9 @@ theorem the_close : serverPlan.ClosesSession sent afterClosing () wire escrowed 
   onItsSession := rfl
   wasOutstanding := by rw [sent_wire]; exact ⟨List.mem_cons_self, rfl⟩
   nowResolved := by rw [afterClosing_wire]; exact closedLedger_resolution
+  resolvesNothingElse := by
+    rw [sent_wire, afterClosing_wire]
+    exact closedLedger_resolves_nothing_else
   ledgerExtends := by
     rw [sent_wire, afterClosing_wire]
     exact pending_extends_to closedLedger rfl (by simp [pendingLedger])
@@ -314,6 +352,9 @@ theorem the_death : serverPlan.KillsSession sent afterDying () wire escrowed whe
   onItsSession := rfl
   wasOutstanding := by rw [sent_wire]; exact ⟨List.mem_cons_self, rfl⟩
   nowResolved := by rw [afterDying_wire]; exact diedLedger_resolution
+  resolvesNothingElse := by
+    rw [sent_wire, afterDying_wire]
+    exact diedLedger_resolves_nothing_else
   ledgerExtends := by
     rw [sent_wire, afterDying_wire]
     exact pending_extends_to diedLedger rfl (by simp [pendingLedger])
@@ -346,6 +387,9 @@ theorem the_request : serverPlan.RequestsCancel sent afterRequesting () wire esc
   stillOutstanding := by
     rw [afterRequesting_wire]
     exact ⟨List.mem_cons_self, rfl⟩
+  resolvesNothingElse := by
+    rw [sent_wire, afterRequesting_wire]
+    exact requestedLedger_resolves_nothing_else
   ledgerExtends := by
     rw [sent_wire, afterRequesting_wire]
     exact pending_extends_to requestedLedger rfl (by simp [pendingLedger])
@@ -364,6 +408,9 @@ theorem the_drop : serverPlan.ResolvesEscrow sent afterDropping () wire escrowed
   onItsSession := rfl
   wasOutstanding := by rw [sent_wire]; exact ⟨List.mem_cons_self, rfl⟩
   nowResolved := by rw [afterDropping_wire]; exact droppedLedger_resolution
+  resolvesNothingElse := by
+    rw [sent_wire, afterDropping_wire]
+    exact droppedLedger_resolves_nothing_else
   ledgerExtends := by
     rw [sent_wire, afterDropping_wire]
     exact pending_extends_to droppedLedger rfl (by simp [pendingLedger])

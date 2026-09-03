@@ -420,6 +420,42 @@ def ReroutedElsewhere (landsAt : Session → Occurrence → Prop) : Prop :=
 end EscrowLedger
 
 /--
+**One step resolved at most this occurrence.**
+
+`LedgerExtends` below says nothing was *erased*: a resolution once written is
+permanent, a cancellation request does not evaporate, occurrences are only
+appended. It says nothing about what was *added* — so a step that legally
+resolves one occurrence may, in the same move, append an unrelated occurrence and
+resolve it too, and no field of any constructor mentions it.
+
+That is not hypothetical. `Tests/Process/RerouteFixtures.lean` builds a `drop`
+discharging every field `ProcessPlan.ResolvesEscrow` had, which appends a second
+occurrence and resolves it `.rerouted` to a session whose ledger the step never
+touches — taking a network satisfying `LogicalProcessNetworkCore.ReroutesLand` to
+one that does not. That clause is the sixth of `WellFormed`, and it is not
+preserved without this. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.87.
+
+Stated as "nothing *else*" rather than "exactly this" because the constructors
+already say what happens to their own occurrence, each in its own way — a
+delivery resolves `.received`, a reroute `.rerouted`, a send resolves nothing at
+all — and a second statement of it would be a second chance to disagree.
+-/
+def ResolvesNothingElse {Occurrence : Type u} {Session : Type s}
+    (earlier later : EscrowLedger Occurrence Session) (occurrence : Occurrence) : Prop :=
+  ∀ other, other ≠ occurrence → later.resolution other = earlier.resolution other
+
+/--
+A step that touches no ledger resolves nothing else in it.
+
+The shape every off-session discharge takes: the two ledgers are equal, so every
+occurrence reads the same.
+-/
+theorem resolvesNothingElse_of_eq {Occurrence : Type u} {Session : Type s}
+    {earlier later : EscrowLedger Occurrence Session} {occurrence : Occurrence}
+    (same : earlier = later) : ResolvesNothingElse earlier later occurrence :=
+  fun _ _ => same ▸ rfl
+
+/--
 One ledger is a later point of the same execution than another.
 
 The prefix relation `docs/PROCESS.md` §3's unconditional laws are stated over.

@@ -26,6 +26,17 @@ field now says the destination *gained* an occurrence carrying this message.
 
 `a_reroute_to_the_same_session_is_refused` is the other half: `elsewhere` is what
 stops a "reroute" that names its own session and therefore moves nothing.
+
+## And what building it found
+
+Trying to prove `WellFormed`'s sixth clause preserved led to a `drop` that
+discharged every field `ResolvesEscrow` had while appending an unrelated
+occurrence and resolving it `.rerouted` to a session it never touched.
+`LedgerExtends` forbids erasing and says nothing about adding, so the step was
+legal and the clause was false. `ResolvesNothingElse` is the field that closes
+it; `the_stranding_drop_is_refused` is the refusal, and
+`the_stranding_ledger_extends` and `the_stranding_scope` show the other fields
+really were satisfiable there. §10.87.
 -/
 
 namespace Grass.Process.Tests.Reroute
@@ -174,6 +185,14 @@ theorem the_reroute : serverPlan.Reroutes sent afterReroute () wire escrowed sid
     show (reroutedAt wire).resolution escrowed = some (.rerouted sidewire)
     rw [reroutedAt_wire]
     exact reroutedLedger_resolution
+  resolvesNothingElse := by
+    show ResolvesNothingElse (sent.inFlight () wire) (reroutedAt wire) escrowed
+    rw [sent_wire, reroutedAt_wire]
+    exact fun _ notIt => reroutedLedger_resolution_off notIt
+  destinationResolvesNothing := by
+    show ResolvesNothingElse (ledgerAt false sidewire) (reroutedAt sidewire) escrowed
+    rw [ledgerAt_off_wire_empty sidewire_ne_wire, reroutedAt_sidewire]
+    exact fun _ _ => rfl
   ledgerExtends := by
     show LedgerExtends (sent.inFlight () wire) (reroutedAt wire)
     rw [sent_wire, reroutedAt_wire]
@@ -355,46 +374,57 @@ noncomputable def afterStranding : ServerWorld :=
   { quiet with inFlight := fun _ => strandingAt }
 
 /--
-**A legal drop that strands a reroute.**
+**The step that strands it, refused.**
 
-Every field of `ResolvesEscrow` is discharged. `nowResolved` and `onItsSession`
-are about `escrowed`; `ledgerExtends` forbids *rewriting* a resolution and
-permits *appending* to `created`; `scope` is one session's escrow. Nothing in the
-structure — nothing in any of the six constructors built on it — says which
-*other* occurrences a step may resolve.
+Every *other* field of `ResolvesEscrow` is discharged at this pair of worlds, and
+that is what made the defect real: `onItsSession` and `nowResolved` are about
+`escrowed`, `ledgerExtends` forbids rewriting a resolution and permits appending
+to `created`, and `scope` is one session's escrow. Nothing said which *other*
+occurrences a step may resolve, so this drop was a legal step of the family and
+it takes a network where every reroute lands to one where a payload is rerouted
+to a session that never receives it.
+
+`ResolvesNothingElse` is the field that closes it, and this is the refusal.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.87.
 -/
-theorem the_stranding_drop :
-    serverPlan.ResolvesEscrow sent afterStranding () wire escrowed .dropped where
-  onItsSession := rfl
-  wasOutstanding := by
-    show (sent.inFlight () wire).Outstanding escrowed
-    rw [sent_wire]
-    exact ⟨List.mem_cons_self, rfl⟩
-  nowResolved := by
-    show (strandingAt wire).resolution escrowed = some .dropped
-    rw [strandingAt_wire]
-    exact strandingLedger_drops
-  ledgerExtends := by
-    show LedgerExtends (sent.inFlight () wire) (strandingAt wire)
-    rw [sent_wire, strandingAt_wire]
-    exact
-      { createdPrefix := ⟨[stranded], rfl⟩
-        resolutionPermanent := by
-          intro occurrence resolution ended
-          exact absurd ended (by simp [pendingLedger])
-        cancelRequestMonotone := by
-          intro occurrence requested
-          exact absurd requested (by simp [pendingLedger]) }
-  scope := by
-    intro fragment outside
-    cases fragment with
-    | escrow edge session =>
-      have sameEdge : edge = () := rfl
-      subst sameEdge
-      have notWire : session ≠ wire := fun isWire => outside (by rw [isWire])
-      show ledgerAt false session = strandingAt session
-      rw [ledgerAt_off_wire_empty notWire, strandingAt_off notWire]
-    | _ => rfl
+theorem the_stranding_drop_is_refused :
+    ¬ serverPlan.ResolvesEscrow sent afterStranding () wire escrowed .dropped := by
+  intro drops
+  have silent := drops.resolvesNothingElse stranded stranded_ne_escrowed
+  rw [show afterStranding.inFlight () wire = strandingLedger from strandingAt_wire,
+    show sent.inFlight () wire = pendingLedger from sent_wire,
+    strandingLedger_strands] at silent
+  exact absurd silent (by intro equal; cases equal)
+
+/--
+And the other fields really are all satisfiable there, so the refusal is the
+new field's doing and not an accident of the world.
+-/
+theorem the_stranding_ledger_extends :
+    LedgerExtends (sent.inFlight () wire) (afterStranding.inFlight () wire) := by
+  show LedgerExtends (sent.inFlight () wire) (strandingAt wire)
+  rw [sent_wire, strandingAt_wire]
+  exact
+    { createdPrefix := ⟨[stranded], rfl⟩
+      resolutionPermanent := by
+        intro occurrence resolution ended
+        exact absurd ended (by simp [pendingLedger])
+      cancelRequestMonotone := by
+        intro occurrence requested
+        exact absurd requested (by simp [pendingLedger]) }
+
+/-- And it is one session's escrow and nothing else. -/
+theorem the_stranding_scope :
+    serverPlan.TouchesOnly sent afterStranding (fun fragment => fragment = .escrow () wire) := by
+  intro fragment outside
+  cases fragment with
+  | escrow edge session =>
+    have sameEdge : edge = () := rfl
+    subst sameEdge
+    have notWire : session ≠ wire := fun isWire => outside (by rw [isWire])
+    show ledgerAt false session = strandingAt session
+    rw [ledgerAt_off_wire_empty notWire, strandingAt_off notWire]
+  | _ => rfl
 
 /-- Before the step, every reroute lands, because nothing is resolved at all. -/
 theorem sent_reroutes_land : sent.ReroutesLand := by
@@ -410,18 +440,18 @@ theorem sent_reroutes_land : sent.ReroutesLand := by
     exact absurd rerouted (by simp [EscrowLedger.empty])
 
 /--
-**And after it, one does not.**
+**And at `afterStranding`, one does not.**
 
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.87. `LogicalProcessNetworkCore.WellFormed`'s
-sixth clause is *not* preserved by this transition family, and this is the step
-that breaks it: a `drop` that is legal in every field it has, taking a network
-where every reroute lands to one where a payload is rerouted to a session that
-never receives it.
+The world the refused step would have reached, shown to be genuinely bad rather
+than merely unreachable. `LogicalProcessNetworkCore.WellFormed`'s sixth clause
+fails here: a payload is rerouted to a session whose ledger holds nothing.
 
-The missing constraint is not `LedgerExtends`, which does its job — nothing was
-erased or reordered. It is that **no constructor bounds which occurrences other
-than its own it may resolve.** A `ResolvesEscrow` says what happens to
-`occurrence` and is silent about every other entry in the ledger it writes.
+The missing constraint was never `LedgerExtends`, which does its job — nothing is
+erased or reordered here, and `the_stranding_ledger_extends` proves it. It was
+that no constructor bounded which occurrences *other* than its own it may
+resolve. `ResolvesNothingElse` is that bound, and
+`the_stranding_drop_is_refused` is it working.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.87.
 -/
 theorem the_stranding_drop_breaks_reroutesLand : ¬ afterStranding.ReroutesLand := by
   intro lands

@@ -197,6 +197,30 @@ theorem worlds_agree_off_wire {session : serverTopology.ChannelId ()}
 @[simp] theorem pending_resolution :
     pendingLedger.resolution escrowed = none := rfl
 
+open Classical in
+/--
+And what it says about every *other* occurrence: nothing.
+
+`ResolvesNothingElse` is the field that stops a step resolving an occurrence it
+never mentioned — see `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.87 and the drop
+in `Tests/Process/RerouteFixtures.lean` that the field now refuses. Here it is
+the honest reading of a ledger that resolves exactly one thing.
+-/
+theorem settled_resolution_off {occurrence : EdgeOccurrence serverTopology
+    World.serverMessage ()} (notIt : occurrence ≠ escrowed) :
+    settledLedger.resolution occurrence = none := by
+  show (if occurrence = escrowed then some ChannelResolution.received else none) = none
+  rw [if_neg notIt]
+
+/-- A receive resolves the occurrence it received, and nothing else. -/
+theorem receive_resolves_nothing_else :
+    ResolvesNothingElse pendingLedger settledLedger escrowed :=
+  fun _ notIt => settled_resolution_off notIt
+
+/-- And a send resolves nothing at all: both ledgers are silent. -/
+theorem send_resolves_nothing : ResolvesNothingElse EscrowLedger.empty pendingLedger escrowed :=
+  fun _ _ => rfl
+
 /-! ## The step -/
 
 /--
@@ -228,6 +252,9 @@ theorem receiving_resolves_the_escrow :
   nowResolved := by
     rw [afterReceive_wire]
     exact settled_resolution
+  resolvesNothingElse := by
+    rw [beforeReceive_wire, afterReceive_wire]
+    exact receive_resolves_nothing_else
   ledgerExtends := by
     rw [beforeReceive_wire, afterReceive_wire]
     exact
@@ -464,6 +491,10 @@ theorem the_send : serverPlan.SendsEscrow quiet sent () payload occurrenceOf whe
     show (sent.inFlight () wire).Outstanding escrowed
     rw [sent_wire]
     exact ⟨List.mem_cons_self, rfl⟩
+  resolvesNothingElse := by
+    show ResolvesNothingElse (quiet.inFlight () wire) (sent.inFlight () wire) escrowed
+    rw [quiet_holds_nothing, sent_wire]
+    exact send_resolves_nothing
   ledgerExtends := by
     show LedgerExtends (quiet.inFlight () wire) (sent.inFlight () wire)
     rw [quiet_holds_nothing, sent_wire]
@@ -521,6 +552,9 @@ theorem the_receive_after_the_send :
   wasOutstanding := by
     rw [sent_wire]
     exact ⟨List.mem_cons_self, rfl⟩
+  resolvesNothingElse := by
+    rw [sent_wire, received_wire]
+    exact receive_resolves_nothing_else
   nowResolved := by
     rw [received_wire]
     exact settled_resolution
