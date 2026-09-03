@@ -3572,7 +3572,17 @@ so one edge between one pair of incarnations can carry more than one session —
 closed-and-reopened channel inherit the old session's in-flight messages". A
 second session is `wire` with a later epoch.
 `Tests/Process/RerouteFixtures.lean` is the witness, and it is an addition beside
-the fixture after all. **Eleven of eleven channel constructors now have one.**
+the fixture after all.
+
+**And "eleven of eleven channel constructors now have one" was wrong twice**, as
+a later claims audit found. There are *twelve* channel constructors, and what has
+a witness is not the same as what is exercised. At the `NetworkTransition` level,
+four are ever applied — `.send`, `.receive`, `.reroute`, `.channelClose`, all in
+`Tests/Process/PreservationFixtures.lean`. At the step-record level `ResolvesEscrow`
+is witnessed only at `.dropped`, so `timeout`, `acknowledgeCancel`, `senderDeath`,
+`receiverDeath` and `coalesce` have no positive witness at their own
+`ChannelResolution`; `Tests/Process/CloseFixtures.lean` takes an acknowledgement
+as a hypothesis rather than building one. §10.105.
 
 An independent emptiness sweep reached the same conclusion at the same time,
 which is worth recording: two readers who each *built* the thing agreed, and the
@@ -3831,11 +3841,17 @@ network it certifies holds a child: `the_newborn_has_a_permitted_parent`,
 `the_newborn_generation_is_allocated` and `the_newborn_is_where_it_says` are read
 out of it, and none is statable at `quiet`.
 
-So what remains open is narrower than the paragraph above says: `Sound`,
-`ExactInitialNetwork` and `NetworkProgressMeasure` have only `waitingPlan`, and
-`serverPlan` has the channels and the slots but no `ExactInitialNetwork`. That is
-still the largest single gap this milestone leaves, and it is a gap in the
-*progress* layer rather than in well-formedness.
+**And that paragraph is itself now stale**, which a claims audit caught: since
+`Tests/Process/PreservationFixtures.lean` landed, `serverPlan` has
+`withRoot_is_a_start : ExactInitialNetwork`, `withRoot_is_wellFormed`,
+`withRoot_is_sound` and `spawned_is_sound`. Three of the four records named above
+have a second witness family, at the plan with real channels, slots and
+observations.
+
+What remains is **`NetworkProgressMeasure`**, which still has only `waitingPlan`
+— a plan whose `Observation` type is empty, so the "or produces a demanded
+observation" disjunct of `descendsOrProduces` can never fire. That is the largest
+single gap this milestone leaves, and it is a gap in the *progress* layer alone.
 
 ### 10.90 `ResolvesNothingElse` forbade the close it was meant to enable
 
@@ -4108,6 +4124,197 @@ fix a signature-level defect, and each repair looked like progress because it
 refused *something*. The question that would have found it in one round is not
 "does the predicate refuse anything?" but "**what would the obligation have to see
 in order to fail?**" — and `ViewAccepts` could not see it.
+
+### 10.100 A coalesce could import a carrier from another session
+
+The worst thing found on this branch, and every part of it was compiled.
+
+`ChannelResolution.coalesced`'s docstring says the carrier is "this occurrence of
+the same session". Nothing enforced it: `ResolvesEscrow.onItsSession` constrains
+the *source*, `EscrowLedger.coalesceCarrierLater` asks only that the carrier be in
+this `created` with a later rank, and §10.91's `createsOnlyTheCarrier` asks only
+that a created occurrence *be* the carrier.
+
+So a coalesce may install a carrier whose own `ChannelId` is a different session.
+That carrier is outstanding on this ledger, and §10.96's on-session guard on
+`ClosesSession.closesEverything` cannot see it. A reviewer compiled the
+consequences in both directions:
+
+* **The payload strands and no transition can ever end it.** Close, death,
+  disposition, delivery and reroute all carry `onItsSession`, and none of them can
+  name an occurrence belonging to another session. That is precisely the
+  disjunction `ChannelResolution.channelClosed` was added to break, and it is
+  reached by the one path the guard skips.
+* **And the session becomes unclosable**, because a close must end everything
+  outstanding and the only thing outstanding is the thing the guard excludes.
+
+**Closed** by `ResolvesEscrow.carrierOnItsSession`, the twin of the
+`arrival.2.1 = destination` conjunct §10.98 gave `Reroutes.arrives`.
+
+**Why it went unnoticed for a round.** The field that would have caught it —
+`ClosesSession.resolvesNothingElse`, before §10.90 widened it — was weakened in
+the same round that §10.96's guard created the hole. Two changes to adjacent
+fields, each defensible alone; the gap was between them. The check that finds
+this is not about either field: it is *for each occurrence a step can leave in a
+ledger, which constructor can end it?*
+
+### 10.101 A reroute could deliver into a closed session
+
+A reroute puts a live payload into a session, which is what a send does, and
+`SendsEscrow.sendOnOpenSession` has guarded a send since `ChannelContract`
+acquired the law. `Reroutes` had no such guard: its scope names two escrow
+fragments, and no field of it mentioned `sessions` at all. A reviewer compiled a
+complete reroute delivering into a session already `.closed` — after which no
+close or death of that session is possible either, since both demand `wasOpen`.
+
+**Closed** by `Reroutes.destinationWasOpen`. Reading a session's status is not
+writing it, so the field needs nothing from `scope`.
+
+The general shape: **two constructors that do the same thing to the world should
+carry the same preconditions**, and `send` and `reroute` both put a payload in
+flight. Nothing in the module layout makes that visible, because they are
+different structures in different parts of one file.
+
+### 10.102 `ViewAccepts` still admits a clause that cannot fail
+
+§10.99 gave `ViewAccepts` the state, which made a real obligation *possible*. It
+did not make a vacuous one impossible, and a reviewer showed the vacuous one
+survives the anti-vacuity test this codebase uses elsewhere.
+
+`ViewAccepts := fun facet state view => view = facet.render state` — the *render
+graph* — discharges `ProcessCorrect.viewAccepts` by `rw` for every specification,
+facet and render. And it is *single-valued* in `view` at each state, which is the
+property `EndsInstance.custodyDeclared`'s second conjunct uses to rule out
+`fun _ _ _ => True`. So the standard test passes it.
+
+The reason single-valuedness does not help here: `custodyDeclared` is quantified
+over *candidate* after-states, so pinning the outcome is content;
+`ViewAccepts` receives the render's output as an argument, so pinning it to that
+argument is not.
+
+Not closed, and it may not be closable at this layer.
+`Tests/Process/ViewFixtures.lean`'s `intendedView` is textually identical to
+`remaining.render`, so that fixture passes by *intent* rather than by
+construction — a reader has to trust that the author wrote the intent first.
+
+This is the same family as §10.49 (`Demanded`), §10.56's original form, and
+§10.70: **an author-supplied predicate can always be made vacuous, and no field
+of the record can stop it.** What distinguishes the ones this milestone closed is
+that the vacuity was forced by the *signature* rather than chosen by the author.
+Needs a ruling on whether that distinction is worth a mechanism.
+
+### 10.103 Two things a step may write that nothing bounds
+
+The check §12 records — *for each field of a state a step may write, which field
+of the step bounds it?* — was run family-wide by a reviewer. `EscrowLedger`'s
+`created`, `resolution` and `cancelRequested` are bounded (§10.91, §10.87,
+§10.97); `ChannelSession.status` and `.delivered` are bounded at all three
+constructors that scope `.session`; `ProcessInstance`'s seven fields are bounded
+everywhere except `outstanding` at an ending, which is deliberate and recorded
+(§10.33). Two are not.
+
+**Shared region content.** `StepsLocally.writesPermitted` bounds *which* regions
+may move — those with `mayWrite` — and nothing bounds the *value* written.
+`protocolStep` relates `localState`, `outstanding`, `ref`, `parentage` and
+`request`; `shared` appears in `Grass/Process/` only in scope and capability
+positions. A `processStep` may set any writable region to any value whatever,
+unrelated to the event it is handling.
+
+Nothing breaks today, because no clause of `WellFormed` is about shared regions —
+which is exactly the shape §10.87, §10.91 and §10.97 each had at a ledger field
+before something downstream needed them. Closing it needs `ProcessSpec.Step` to
+mention shared state, which it does not, so this is a ruling rather than a patch.
+
+**`EscrowLedger.rank`.** No field of any structure mentions it and `LedgerExtends`
+says nothing about it, so a step may renumber freely. The reviewer tried and could
+not break it: `rankOrdersCreated` at the after-ledger forces rank to increase
+along `created`, `created` only grows, and `coalesceCarrierLater` is re-checked
+against every standing resolution at every ledger, so a cross-step rank cycle is
+refused. Recorded because it is pinned *indirectly*, and the next change to any of
+those three laws could unpin it without anything noticing.
+
+### 10.104 Coalescing is one transition in §3 and several here
+
+`docs/PROCESS.md` §3: "Coalescing consumes every source token and creates one
+fresh occurrence" — one transition. §10.95 reverted `ResolvesEscrow` to the narrow
+resolution bound on the reasoning that a carrier collects its sources over several
+`coalesce` steps, and a reviewer confirmed that decomposition is constructible:
+two `ResolvesEscrow` steps into one carrier, the first creating it, the second
+creating nothing.
+
+It is not *atomic*, though, and the intermediate worlds are visible: the carrier
+is outstanding alongside sources that have not yet merged into it. Whether §3
+requires atomicity here is a ruling. If it does, `coalesce` needs its own
+structure taking a list of sources, and §10.95's revert is right for the wrong
+reason.
+
+### 10.105 Three more fields that had become theorems, and twenty false claims
+
+A claims-auditing reviewer swept every docstring on the branch. Thirty-one
+findings, and the shape of them is worth as much as the list.
+
+**Three fields were derivable**, §10.92's defect three more times.
+`ClosesSession.nowResolved` and `KillsSession.nowResolved` follow from
+`closesEverything`/`killsEverything` (§10.90) plus the on-session guard
+(§10.96); `RequestsCancel.stillOutstanding` follows from `ledgerExtends` and
+`resolvesNothing`, both of which post-date it. Each is one line, each is now a
+theorem, and each was found by the same check: **after adding a field, try
+deleting the ones beside it.** A field that has quietly become implied still
+elaborates, its fixture still discharges it, and its docstring goes on explaining
+why it is needed.
+
+**Five docstrings named declarations that do not exist** — `commits_anywhere`,
+`an_unprojected_observation_is_unconstructible`,
+`overlapping_names_have_two_routings`, `the_send_then_the_receive`,
+`retained_contract_forbids_arbitrary_death` — and one of those,
+`an_unprojected_observation_is_unconstructible`, also described a claim its file
+does not make.
+
+**Two hung a live argument on a deleted field.** `Assertion.lean` and
+`Transition.lean` both reasoned "…so `NetworkProgressMeasure.frontierIsExternal`
+forbids any network from being at a frontier", and §10.68 replaced that field
+with a definition. The arguments were sound when written; a reader following them
+now hits a name that is not there.
+
+**Eight counts were wrong**, all of them stale rather than careless: seven
+network fragments that are eight (`pending`, from the §10.27 trace split), three
+indexed fragments that are four, two divergences from §3's record that are three,
+eleven channel constructors that are twelve, nine `ProcessCorrect` fields that
+are ten, eight fixture-world fields that are nine, "the other six" sharing
+`ResolvesEscrow` that is the other five, and a `ChannelContract` field count this
+document is cited as recording and does not.
+
+**The rest were this document's own** — §12's tables and several §10 entries
+describing a corpus two rounds out of date. Those are corrected in place, and §12
+now says what its tables are for.
+
+**Why this is a finding and not housekeeping.** Every one of these is a claim a
+reader would act on. The ones about counts and names cost a reader time; the
+three derivable fields cost a reader *correctness*, because a docstring saying
+"without this field, <attack>" is evidence about the design, and three of them
+were false. This corpus's whole method is that prose earns its place by being
+checkable — and nothing checks it. Rerunning this sweep is the cheapest review
+round available.
+
+### 10.106 `ExactInitialNetwork` was missing the field a spawn has
+
+`ProcessPlan.Spawns.slotAgrees` exists because local adversarial review built a
+spawn installing an incarnation naming slot 3 into slot 7. `ExactInitialNetwork`
+had `rootKind` and no counterpart, so a *start* could do the same thing at the
+first network of a run.
+
+The tell was in `initial_is_wellformed`'s signature: it took `SlotsAgree` as a
+**hypothesis**. A reviewer read that and said what it means — a clause passed in
+rather than discharged is what a missing field looks like from the caller's side.
+The module's own prose had been claiming for two rounds that "the remaining two
+come from the root's own record", and one of the two was being handed in.
+
+**Closed** by `rootSlotAgrees`. `initial_is_wellformed` now takes no hypothesis,
+and exactness buys five of `WellFormed`'s six clauses rather than four.
+
+**The check**: a theorem about a structure that takes a hypothesis the structure
+*could* carry is either a deliberate parameterisation or a missing field, and the
+docstring should say which. Nothing in the build distinguishes them.
 
 ### 10.89 A spawn can satisfy every field it has and not be a step
 
