@@ -624,8 +624,18 @@ authority over bytes the lender retains".
 
 Three ways to have it, and the third is the one that took thinking about.
 
-Nothing is held over the bytes *and the lender owns the allocation* — the unlent case,
-which is how a first grant is ever issued. Or the lender holds a grant covering the
+Nothing is held over the bytes, *the lender owns the allocation, and the storage
+carries the rights being lent* — the unlent case, which is how a first grant is ever
+issued.
+
+**The third conjunct is what made `issue?_eq_none_of_nothing_to_lend`'s sentence true
+of this disjunct.** The second disjunct bounds a sublet by `entry.2.rights.Grants
+grant.rights`; the first had no rights term at all, so that sentence was false of the
+path which issues every first grant. Review had an owner lend `readWrite` over a read-only
+page: `issue?` accepted it, and `authorityOf` then reported the owner `frozen` over its
+own data and refused it even a read, from a write authority the model had just
+certified nobody has. `Permission.Grants` is the same relation `denialOf` uses for a
+descriptor's declared permission, asked here at the authority layer. Or the lender holds a grant covering the
 range with rights that supply what is being lent, which is `Permission.Grants` at the
 authority layer. Or every grant outstanding over the bytes was lent *by this lender* —
 whoever put them out may put more out — and there must *be* some, because `List.all`
@@ -652,7 +662,9 @@ permanent-seizure state.
 -/
 def MayLend (state : MemoryState) (grant : AuthorityGrant) : Prop :=
   (¬ state.AnyGrantOver grant.provenance grant.range ∧
-      state.OwnedBy grant.lender grant.provenance) ∨
+      state.OwnedBy grant.lender grant.provenance ∧
+      (state.allocations.lookup grant.provenance.root).any
+        (fun record => decide (record.permission.Grants grant.rights)) = true) ∨
     state.grantEntries.any (fun entry =>
       entry.2.holder = grant.lender &&
         decide (state.SharesBytes entry.2.provenance.root grant.provenance.root) &&
@@ -664,7 +676,7 @@ def MayLend (state : MemoryState) (grant : AuthorityGrant) : Prop :=
         (fun entry => entry.2.lender = grant.lender) = true)
 
 instance (state : MemoryState) (grant : AuthorityGrant) : Decidable (state.MayLend grant) :=
-  inferInstanceAs (Decidable ((¬ _ ∧ _) ∨ _ = _ ∨ (_ ∧ _ = _)))
+  inferInstanceAs (Decidable ((¬ _ ∧ _ ∧ _ = _) ∨ _ = _ ∨ (_ ∧ _ = _)))
 
 /--
 Issue a grant, or refuse.
@@ -757,8 +769,11 @@ read "over bytes nothing is held on, *anyone* may lend", which was true of the c
 and was the gap. -/
 theorem mayLend_of_unheld_of_owned {state : MemoryState} {grant : AuthorityGrant}
     (h : ¬ state.AnyGrantOver grant.provenance grant.range)
-    (howns : state.OwnedBy grant.lender grant.provenance) : state.MayLend grant :=
-  Or.inl ⟨h, howns⟩
+    (howns : state.OwnedBy grant.lender grant.provenance)
+    (hrights : (state.allocations.lookup grant.provenance.root).any
+      (fun record => decide (record.permission.Grants grant.rights)) = true) :
+    state.MayLend grant :=
+  Or.inl ⟨h, howns, hrights⟩
 
 /-- **A stranger may not lend bytes nothing is held on.** The falsifying half of the
 theorem above, and the one that would have failed before `AllocationRecord.owners`
@@ -768,7 +783,7 @@ theorem not_mayLend_of_unheld_of_unowned {state : MemoryState} {grant : Authorit
     (h : ¬ state.AnyGrantOver grant.provenance grant.range)
     (howns : ¬ state.OwnedBy grant.lender grant.provenance)
     (hne : ¬ grant.range.IsEmpty) : ¬ state.MayLend grant := by
-  rintro (⟨_, howned⟩ | hheld | ⟨hany, _⟩)
+  rintro (⟨_, howned, _⟩ | hheld | ⟨hany, _⟩)
   · exact howns howned
   · -- The lender holding a covering grant *is* a grant over the bytes, so the
     -- second disjunct implies the first is false. `Contains` needs the range to be
@@ -2451,14 +2466,36 @@ grant held over a mapped view did not block a reallocation of the file it maps, 
 though `SharesBytes` says they are the same bytes — the asymmetry this layer has now
 fixed three times in three places.
 
-A *fresh* identity is always accepted, and so is replacing a record without changing
-its epoch or killing it: a permission change, a placement, a byte write.
+**And the guard was on the metadata, which is not the whole record.**
+`AllocationRecord.Metadata` deliberately omits `owners` and `bytes` -- `denialOf` reads
+neither, and leaving them out is what makes `denialOf_congr_of_agrees` the stronger
+statement -- so under an outstanding grant this refused a change to extent, epoch,
+space, source, permission, liveness and placement, and *accepted* a change to who owns
+the allocation or to what its bytes say.
+
+Both are authority. `owners` is the field `MayLend`'s unlent disjunct and
+`Grass/Op/Step.lean`'s owner exemption read, so a context that wrote itself into it
+bought §3's authority over storage another context had lent out: review did exactly
+that and watched `a_stranger_may_not_join_the_atomic_protocol` and
+`the_stranger_may_not_seize_unheld_bytes` both flip, through one accepted call that
+changed no metadata. And `bytes` is raw memory, which §1's chokepoint sentence names
+before permissions or provenance -- review rewrote the first byte of a range frozen
+under a write loan.
+
+So the guard is the whole record now: while authority is outstanding over an
+identity's bytes, `allocate?` may not change that identity's record at all. That is
+narrower than "a reallocation is refused" and it is the right width, because the
+question §5.1 asks is not whether the caller called this a reallocation.
+
+A *fresh* identity is always accepted. An identity with nothing outstanding over it
+may be replaced freely, which is how a fixture builds a state and how a profile
+records a permission change or a placement.
 -/
 def allocate? (state : MemoryState) (id : AllocId) (record : AllocationRecord) :
     Option MemoryState :=
   match state.allocations.lookup id with
   | some existing =>
-      if existing.metadata ≠ record.metadata ∧
+      if existing ≠ record ∧
           state.grantEntries.any
             (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) then
         Option.none
@@ -2518,27 +2555,50 @@ refusal rather than as a sentence. -/
 theorem allocate?_eq_none_of_outstanding {state : MemoryState} {id : AllocId}
     {record existing : AllocationRecord}
     (hlook : state.allocations.lookup id = some existing)
-    (hchange : existing.metadata ≠ record.metadata)
+    (hchange : existing ≠ record)
     (hgrants : state.grantEntries.any
       (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) = true) :
     state.allocate? id record = Option.none := by
   unfold allocate?
   rw [hlook]
   simp only []
-  rw [if_pos (show existing.metadata ≠ record.metadata ∧ _ from ⟨hchange, hgrants⟩)]
+  rw [if_pos (show existing ≠ record ∧ _ from ⟨hchange, hgrants⟩)]
 
-/-- A record replaced without changing its epoch is accepted, grants or not: a
-permission, liveness or placement change is not a reallocation. -/
-theorem allocate?_isSome_of_same_metadata {state : MemoryState} {id : AllocId}
+/-- **A record replaced by an equal one is accepted, grants or not**, which is all the
+identity case says.
+
+This theorem took `existing.metadata = record.metadata` and its docstring said "a
+permission, liveness or placement change is not a reallocation" -- which was false in
+both directions. Permission, liveness and placement are *in* the metadata, so those
+changes were refused under an outstanding grant, not accepted; and what the metadata
+left out was `owners` and `bytes`, so those changes were accepted, which is the hole
+`allocate?`'s guard now closes. Review found the sentence and the hole together. -/
+theorem allocate?_isSome_of_same_record {state : MemoryState} {id : AllocId}
     {record existing : AllocationRecord}
     (hlook : state.allocations.lookup id = some existing)
-    (hsame : existing.metadata = record.metadata) :
+    (hsame : existing = record) :
     (state.allocate? id record).isSome := by
   unfold allocate?
   rw [hlook]
   simp only []
   rw [if_neg (fun h => h.1 hsame)]
   rfl
+
+/-- **And a record replaced under nothing outstanding is accepted however it
+changes.** The other half of the guard, and the half that keeps `allocate?` usable:
+a profile that has lent nothing out may re-record whatever it likes. -/
+theorem allocate?_isSome_of_nothing_outstanding {state : MemoryState} {id : AllocId}
+    {record : AllocationRecord}
+    (hgrants : state.grantEntries.any
+      (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) = false) :
+    (state.allocate? id record).isSome := by
+  unfold allocate?
+  cases hlook : state.allocations.lookup id with
+  | none => rfl
+  | some existing =>
+    simp only []
+    rw [if_neg (fun h => by rw [hgrants] at h; exact absurd h.2 (by simp))]
+    rfl
 
 /--
 Tear down several allocations at once, or refuse.
@@ -2591,10 +2651,9 @@ theorem tearDown?_eq_none_of_outstanding {state : MemoryState} {id : AllocId}
     state.tearDown? (id :: rest) = Option.none := by
   unfold tearDown?
   rw [hlook, Option.bind_some]
-  have hmeta : record.metadata ≠ ({ record with live := false } : AllocationRecord).metadata := by
+  have hmeta : record ≠ ({ record with live := false } : AllocationRecord) := by
     intro hcontra
-    have : record.live = false :=
-      congrArg AllocationRecord.Metadata.live hcontra
+    have : record.live = false := congrArg AllocationRecord.live hcontra
     rw [hlive] at this
     exact absurd this (by simp)
   rw [allocate?_eq_none_of_outstanding hlook hmeta hgrants, Option.bind_none]
@@ -3280,8 +3339,13 @@ bare `Prop`; see `LoanMapLaws` for why that matters and
 that remain.
 
 Freshness is two conjuncts rather than one, and the pair is the point: an unused
-identity can always be allocated, and an identity whose *metadata would change* while
-authority is outstanding over its bytes cannot -- §5.1's precondition. Teardown says
+identity can always be allocated, and an identity whose *record would change at all*
+while authority is outstanding over its bytes cannot -- §5.1's precondition.
+
+The second conjunct read "whose metadata would change" and that was the width of the
+guard, which review found too narrow: `AllocationRecord.Metadata` omits `owners` and
+`bytes`, so a stranger could write itself into an allocation's owner list under
+somebody else's outstanding loan and buy §3's authority with it. Teardown says
 every name given is dead afterwards and no other name moved. Epoch invalidation is
 the two liveness refusals above, which is what makes a stale pointer unusable rather
 than merely stale.
@@ -3295,7 +3359,7 @@ def AllocatorLaws : Prop :=
       state.allocations.lookup id = Option.none → (state.allocate? id record).isSome) ∧
   (∀ (state : MemoryState) (id : AllocId) (record existing : AllocationRecord),
       state.allocations.lookup id = some existing →
-      existing.metadata ≠ record.metadata →
+      existing ≠ record →
       state.grantEntries.any
         (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) = true →
       state.allocate? id record = Option.none) ∧

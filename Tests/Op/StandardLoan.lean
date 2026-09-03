@@ -708,6 +708,49 @@ theorem a_borrower_may_not_sublend_more_than_it_holds :
         range := ⟨0, 4⟩, rights := .readWrite } := by
   exact ⟨by decide, by decide⟩
 
+/-! ## An owner may not lend rights its storage does not carry
+
+`MayLend`'s second disjunct bounds a sublet by `entry.2.rights.Grants grant.rights`.
+Its first -- the one that issues every *first* grant -- had no rights term at all, so
+the file's boldfaced "you cannot lend what you do not have" was false of the path it is
+stated about. Review had `thread₀` lend `readWrite` over `constAlloc`, a read-only page
+it owns: `issue?` accepted it, and `authorityOf` then reported the owner `frozen` over
+its own data and refused it even a read -- from a write authority the model had just
+certified nobody has. Over-refusal rather than unsoundness, because `denialOf`'s
+permission clause still refuses the holder's write; but three of `AuthorityState`'s five
+constructors were being derived from rights that do not exist. -/
+
+/-- A whole-page write loan of the read-only page, offered by the context that owns
+it. -/
+def overreachingLoan : AuthorityGrant :=
+  { kind := .loan, holder := engine₀, lender := thread₀, provenance := constProv
+    range := ⟨0, 8⟩, rights := .readWrite }
+
+/-- **Refused.** The page carries `readOnly` and `thread₀` owns it, so this is the
+first disjunct being asked about rights rather than only about ownership. -/
+theorem an_owner_may_not_lend_rights_its_storage_lacks :
+    ¬ state₀.memory.MayLend overreachingLoan ∧
+    state₀.memory.issue? bufferLoan overreachingLoan = Option.none := by
+  exact ⟨by decide, by decide⟩
+
+/-- And the same loan of the rights the page *does* carry is accepted, so the refusal
+is the rights and not the page. The two grants differ in one field. -/
+theorem the_same_loan_of_the_rights_it_carries_is_accepted :
+    state₀.memory.MayLend { overreachingLoan with rights := .readOnly } ∧
+    (state₀.memory.issue? bufferLoan
+      { overreachingLoan with rights := .readOnly }).isSome := by
+  exact ⟨by decide, by decide⟩
+
+/-- The fixture is what it says: the page is read-only, the lender owns it, and
+nothing is held over it. Without this the refusal above would be compatible with the
+lender not owning the page at all. -/
+theorem the_read_only_page_is_owned_and_unlent :
+    (state₀.memory.allocations.lookup constAlloc).map AllocationRecord.permission =
+      some Permission.readOnly ∧
+    state₀.memory.OwnedBy thread₀ constProv ∧
+    ¬ state₀.memory.AnyGrantOver constProv ⟨0, 8⟩ := by
+  exact ⟨by decide, by decide, by decide⟩
+
 /-- **A lender may lend again.** `readLentToThread`'s grant was lent by the engine, so
 the engine's second lend over the same bytes is not a seizure — it is the third
 disjunct, and without it an owner that had lent a fragment out could never lend the

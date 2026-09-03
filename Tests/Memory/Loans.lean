@@ -457,6 +457,66 @@ theorem only_shared_immutable_distinguishes_reads :
     ¬ AuthorityState.unavailable.PermitsIntent AccessIntent.read := by
   exact ⟨by decide, by decide, by decide, by decide, by decide⟩
 
+/-! ## Reallocation may not rewrite an owner list or a byte under an outstanding grant
+
+`allocate?`'s guard was `existing.metadata ≠ record.metadata`, and
+`AllocationRecord.Metadata` deliberately omits `owners` and `bytes` -- `denialOf` reads
+neither. So under an outstanding grant it refused a change to extent, epoch, space,
+source, permission, liveness and placement, and accepted a change to who owns the
+allocation or to what its bytes say.
+
+Review wrote a stranger into an owner list under somebody else's outstanding loan and
+watched `Tests/Op/StandardLoan.lean`'s `a_stranger_may_not_join_the_atomic_protocol`
+and `the_stranger_may_not_seize_unheld_bytes` both flip, and separately rewrote the
+first byte of a range frozen under a write loan. One accepted call, no metadata
+changed. The guard is the whole record now. -/
+
+/-- The buffer's record as `unlent` holds it. -/
+def bufferRecord : AllocationRecord :=
+  { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
+    source := .virtualAlloc, owners := [owner]
+    permission := .readWrite, live := true, bytes := .empty
+    base := some 0x1000 }
+
+/-- The starting state really does hold that record, so the refusals below are about
+the change and not about the lookup. -/
+theorem the_buffer_record_is_what_it_looks_like :
+    unlent.allocations.lookup buffer = some bufferRecord ∧
+    lentHead.allocations.lookup buffer = some bufferRecord := by
+  exact ⟨by decide, by decide⟩
+
+/-- **A stranger may not write itself into the owner list under an outstanding
+grant.** `owners` is what `MayLend`'s unlent disjunct and `Grass/Op/Step.lean`'s owner
+exemption read, so this call bought §3's authority over storage another context had
+lent out. -/
+theorem an_owner_list_may_not_be_rewritten_under_a_grant :
+    lentHead.allocate? buffer { bufferRecord with owners := [owner, stranger] } =
+      Option.none := by decide
+
+/-- **Nor may its bytes be rewritten.** §1's chokepoint sentence names raw memory
+before permissions or provenance, and this was a second door onto it. -/
+theorem bytes_may_not_be_rewritten_under_a_grant :
+    lentHead.allocate? buffer
+      { bufferRecord with bytes := ByteStore.empty.write 0 [0xde] true } =
+      Option.none := by decide
+
+/-- And with nothing outstanding both are accepted, so the refusals are the grant and
+not the fields. This is the half that keeps `allocate?` usable: a profile that has lent
+nothing out may re-record whatever it likes. -/
+theorem both_are_accepted_with_nothing_outstanding :
+    (unlent.allocate? buffer
+      { bufferRecord with owners := [owner, stranger] }).isSome ∧
+    (unlent.allocate? buffer
+      { bufferRecord with bytes := ByteStore.empty.write 0 [0xde] true }).isSome ∧
+    ¬ unlent.AnyGrantOver bufferProv ⟨0, 8⟩ ∧
+    lentHead.AnyGrantOver bufferProv ⟨0, 8⟩ := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-- And an unchanged record is accepted either way, which is what the identity case
+says and all it says. -/
+theorem an_unchanged_record_is_accepted :
+    (lentHead.allocate? buffer bufferRecord).isSome := by decide
+
 /-! ## Authority ends with the epoch, and is not only about loans -/
 
 /-- The buffer, freed: same epoch, no longer live. -/
