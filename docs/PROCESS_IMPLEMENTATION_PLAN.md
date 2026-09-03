@@ -3744,7 +3744,7 @@ both. Second: it was found by trying to prove a theorem, not by reading the
 structures — five review rounds over `Transition.lean` had not found it, and the
 proof found it in one.
 
-### 10.88 The whole progress and well-formedness layer rests on one emptied plan
+### 10.88 The progress layer rests on one emptied plan
 
 An emptiness sweep observed that `Sound`, `ExactInitialNetwork`,
 `NetworkProgressMeasure` and `LogicalProcessNetworkCore.WellFormed` have exactly
@@ -3763,10 +3763,52 @@ it is the **only** instance, so `Network/Progress.lean` and `Network/Plan.lean`
 are known to hold of exactly one `Unit`-slotted, channel-less, observation-less
 world.
 
-`wellFormed_preserved` is not in that position — it is a theorem about every plan
-— but its *usefulness* is, since the clauses it preserves have only ever been
-established at that plan. What is owed is a second plan-level witness with a
-non-empty observation type and at least two slots. `serverPlan` has the channels
-and the slots; what it lacks is an `ExactInitialNetwork`.
+**A correction to the paragraph above, made the same way the rest of this ledger
+gets corrected — by looking rather than by agreeing.** `WellFormed` does not
+belong on that list. `Tests/Process/WorldFixtures.lean`'s `quiet_is_wellFormed`
+is a second witness, at `serverPlan`. It is *vacuous* — all six clauses are
+`absurd found`, the empty network being well formed because there is nothing to
+be wrong about — which is a different complaint from having no witness, and the
+sweep's own table said so. Stating it as "no witness" would have been the same
+overclaim §12's table made about `Spawns`.
 
-Needs the fixture, and it is the largest single gap this milestone leaves.
+**And `WellFormed` now has a non-vacuous one.**
+`Tests/Process/PreservationFixtures.lean`'s `spawned_is_wellFormed` is
+`quiet_is_wellFormed` carried across one spawn by `wellFormed_preserved`, and the
+network it certifies holds a child: `the_newborn_has_a_permitted_parent`,
+`the_newborn_generation_is_allocated` and `the_newborn_is_where_it_says` are read
+out of it, and none is statable at `quiet`.
+
+So what remains open is narrower than the paragraph above says: `Sound`,
+`ExactInitialNetwork` and `NetworkProgressMeasure` have only `waitingPlan`, and
+`serverPlan` has the channels and the slots but no `ExactInitialNetwork`. That is
+still the largest single gap this milestone leaves, and it is a gap in the
+*progress* layer rather than in well-formedness.
+
+### 10.89 A spawn can satisfy every field it has and not be a step
+
+`Tests/Process/LifecycleStepFixtures.lean`'s `the_spawn` is a complete `Spawns` —
+ten Prop fields, all discharged — reaching `Ending.holding newborn`, which is
+`quiet` with the slot filled and **`quiet`'s empty nominal history**. So the
+generation the spawn hands out is in no history, that world fails
+`NominalsAllocated`, and no `NetworkStep` wraps the transition at all:
+`historyExact` cannot hold.
+
+`Spawns.allocatesTheGeneration` says the new incarnation's generation is in the
+*allocation the step declares*, and that is all it can say — a
+`LogicalProcessNetwork` and a `Spawns` between two of them know nothing about
+`NetworkStep.historyExact`. This is §10.87's shape again at a different seam: a
+law stated where it can be stated, relied on for something it does not say.
+
+Not a defect in the transition family; it is exactly why
+`nominalsAllocated_preserved` is a law of `NetworkStep`. It *is* a defect in the
+fixture, which claimed a spawn and built a transition no execution can contain.
+`a_spawn_that_records_nothing_is_not_well_formed` records it and
+`the_allocating_spawn` is the corrected one — whose scope has to declare
+`.nominals`, which the original's proof discharged with `rfl` because nothing had
+moved.
+
+**The general check this suggests**, and it is cheap: for every `NetworkTransition`
+witness in the corpus, is there a `NetworkStep` wrapping it? A transition nothing
+can wrap is a transition no execution contains, and every theorem stated over
+steps passes it by. Owed.
