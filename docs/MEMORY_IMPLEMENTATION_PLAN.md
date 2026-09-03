@@ -1980,13 +1980,24 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   `transferGrant?` have no counterpart. Review issued a grant to a context outside
   `MachineState.contexts` and the map took it.
 
-  Weaker than the ledger case and recorded rather than repaired: `returnGrant?` accepts
-  the *lender* as well as the holder and `transferGrant?` preserves the lender, so the
-  bytes are recoverable rather than stranded, and review could not construct a state
-  from which they are not. What is owed is either the contexts condition on
-  `applyAuthorityDelta?`'s issue and transfer cases — which would have to be threaded
-  from `refusalOf`, since neither receives it — or a row in §4.4.1a saying why the ledger
-  needs it and authority does not. The asymmetry is the finding.
+  Weaker than the ledger case, and the asymmetry turns out to be right rather than
+  owed. §6's call hands authority to a callee *before* the callee runs, so at the moment
+  Spike 1's `callWithLoan` steps, `apiAgent` has never executed a Grass step and
+  `MachineState.contexts` does not contain it —
+  `the_loan_is_issued_to_a_context_not_yet_seen` pins exactly that. Requiring the holder
+  to be a known context would refuse the reference set's central case.
+
+  What makes the two different is what stranding costs. A grant's bytes are recoverable
+  by the lender: `returnGrant?` accepts the lender as well as the holder, and
+  `transferGrant?` preserves it, so a holder that never runs costs nothing permanent. A
+  duty has no lender, which is the whole of `LedgerDelta.Applicable`'s argument for
+  `newOwner ∈ contexts`.
+
+  The finding was the asymmetry being unexplained, and this is the explanation, in the
+  reference set rather than in prose. What remains genuinely open is narrower: nothing
+  stops a *chain* of transfers from moving a grant to a context that never runs while
+  the lender is a context that has already halted, and review did not construct such a
+  state either.
 
 ### 4.4.1a Which profile inputs can weaken a rule
 

@@ -246,6 +246,35 @@ theorem the_spike_lend_runs :
   cases ht
   exact ⟨by decide, by decide⟩
 
+/-- **The loan is issued to a context the machine has never seen**, and that is why a
+grant's holder needs no known context where a duty's owner does.
+
+`LedgerDelta.Applicable`'s transfer clause requires `newOwner ∈ contexts`, on the
+argument its module comment gives: a duty handed to an identity no context ever had is
+a duty stranded permanently. Review found no counterpart on the authority side and
+reported the asymmetry. This is the reason for it, in the reference set rather than in
+prose: §6's call hands authority to a callee *before* the callee runs, so at the moment
+`callWithLoan` steps, `apiAgent` has never executed a Grass step and
+`MachineState.contexts` does not contain it. Requiring the holder to be a known context
+would refuse Spike 1's central case.
+
+The duty and the grant differ in what stranding means. A grant's bytes are recoverable
+by the lender -- `returnGrant?` accepts the lender as well as the holder, and
+`transferGrant?` preserves the lender -- so a holder that never runs costs nothing
+permanent. A duty has no lender. -/
+theorem the_loan_is_issued_to_a_context_not_yet_seen :
+    ∀ s, (stepThread machine₀ .movTransferredZero).state? = some s →
+      apiAgent ∉ s.contexts.domain ∧
+      ∀ t, (stepThread s .callWithLoan).state? = some t →
+        apiAgent ∉ t.contexts.domain ∧
+        ((t.memory.grantAt? slotLoan).map AuthorityGrant.holder) = some apiAgent := by
+  intro s hs
+  cases hs
+  refine ⟨by decide, ?_⟩
+  intro t ht
+  cases ht
+  exact ⟨by decide, by decide⟩
+
 /-- **And the program's own reload is then refused**, by §3's rule rather than §7.3's.
 The class is the discriminating part: `authorityUnavailable`, not
 `conflictingAccess`, so this is the loan and not the race. -/
