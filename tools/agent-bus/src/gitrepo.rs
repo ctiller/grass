@@ -833,7 +833,42 @@ mod outer_tests {
     /// real repository and a real (invalid) tree object id.
     #[test]
     fn commit_tree_deterministic_reports_a_real_git_failure() {
-        let repo = crate::test_support::init_repo();
+        fn init_repo() -> tempfile::TempDir {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path();
+            std::process::Command::new("git")
+                .args(["init", "--quiet", "-b", "main"])
+                .arg(path)
+                .status()
+                .unwrap();
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(path)
+                .args(["config", "user.email", "test@example.com"])
+                .status()
+                .unwrap();
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(path)
+                .args(["config", "user.name", "Test"])
+                .status()
+                .unwrap();
+            std::fs::write(path.join("README.md"), "hello\n").unwrap();
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(path)
+                .args(["add", "README.md"])
+                .status()
+                .unwrap();
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(path)
+                .args(["commit", "-q", "-m", "initial"])
+                .status()
+                .unwrap();
+            dir
+        }
+        let repo = init_repo();
         let err = commit_tree_deterministic(
             repo.path(),
             "0000000000000000000000000000000000000000",
