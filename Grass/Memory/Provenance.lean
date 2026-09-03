@@ -149,7 +149,7 @@ structure Provenance where
   this. It is a field rather than a lookup because without it `extent` would be
   partial, and a descriptor with an empty path would satisfy every range
   condition vacuously — a sixteen-exabyte access was well formed before this
-  existed. M2 checks it against the allocation table; the point here is that no
+  existed. nothing checks it against the allocation table; the point here is that no
   descriptor escapes having *some* declared bound. -/
   rootExtent : ByteRange
   /-- The hierarchical path from the root allocation to what this designates. -/

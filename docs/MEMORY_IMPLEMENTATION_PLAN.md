@@ -711,6 +711,68 @@ one outright defect that had already merged — see §3.11's denial row.
   consults the registries directly rather than through `RequiresJustification`, so
   that predicate's only consumer is `unregisteredOnFaultRule?_priorEffectsVisible`,
   a theorem.
+- **Aliased allocations have independent byte stores.** `MemoryState.SharesBytes`
+  says two allocations name the same bytes, and the whole authority layer believes
+  it: `grantsOver`, `AuthorizedBy` and `MemoryEvent.Conflicts` all key on it. But
+  `MemoryState.write` writes `record.bytes` of the *named* allocation only, so a
+  store through a mapped view leaves the file's bytes unchanged and a read of the
+  file afterwards sees the old value. "Same storage" is an authority-level fiction
+  with no byte-level counterpart, which means `Tests/Op/StandardLoan.lean`'s
+  `a_loan_cannot_be_bypassed_through_an_alias` guards a relation the memory
+  semantics does not implement.
+
+  This is the largest thing on this list. Closing it means `write` propagating to
+  the alias set and every framing lemma re-proved against that, and it needs the
+  offset question below answered first.
+- **`MemoryState.aliases` records no offset mapping.** `AuthorizedBy` and
+  `grantsOver` compare `ByteRange`s across aliased allocations with `Contains` and
+  `Meets`, which assumes aliased allocations agree offset for offset. A view mapped
+  at a non-zero file offset — the ordinary `MapViewOfFile` case — does not.
+- **`AccessDescriptor.WellFormedIn.rangeInProvenance` is self-certifying.** It bounds
+  the access by `provenance.rootExtent`, and nothing compares `rootExtent` to the
+  allocation record's `extent`; `grep` finds no reader of the field outside
+  `Grass/Memory/Provenance.lean`. A descriptor supplies the bound it is checked
+  against. `denialOf` catches the oversized access with `outOfBounds`, so this is a
+  recorded violation rather than a rejection, and no authority escalates — but the
+  clause is not what stops it, and `Provenance.rootExtent`'s docstring claimed M2
+  checked it. Provenance `path` extents are unchecked in the same way.
+- **`ByteRange.Contains` and `ByteRange.Meets` disagree about one past the end.**
+  `Contains` places `empty r.stop` inside `r`, which is what a bounds check wants;
+  `Meets` places it outside, which is what an authority check wants. Both cite §5.1.
+  `AccessDescriptor.WellFormedIn.rangeNonEmpty` makes the position unreachable from
+  an access and therefore from `step`, but `denialOf` still returns `none` for a
+  zero-size descriptor, so a consumer on the `applyAccess` path — which
+  `Grass/Memory/Apply.lean` contemplates — still meets it. The predicates are not
+  reconciled; the access gate routes around them.
+- **`OperationFacets.ordering` is single-valued.** `step` now requires it to equal
+  every access substep's ordering, which is the only relation this layer can state:
+  `Grass/Memory/Ordering.lean` deliberately defines no strength order, because the
+  one that matters is M8's. An operation whose substeps genuinely differ in ordering
+  — a store with an implicit fence — cannot declare that and is refused. The facet
+  needs to become per-substep, or the check needs M8's relation.
+- **`InitializationDemand` is per-access.** §4 asks for initialization "tracked at
+  the granularity required to justify every read", and a struct copy with three
+  padding bytes must declare `permitsUninitialized` for the whole range, turning the
+  check off for every byte. The registry added for the justification name gates the
+  name and not the granularity, and §4 does not describe the escape at all.
+- **`AdmittedVocabulary.faultVisibilityRules` holds names, and the transition needs
+  an answer.** `SubstepSequence.visibleEffects?` returns `none` for
+  `FaultVisibility.profileSpecific` and `step` rejects, so registering a rule name
+  unblocks only the path on which the rule is never consulted — a sequence that does
+  not fault. `Tests/Memory/Spike1Reference.lean`'s `splitPageStore` is the corpus's
+  own example and an ordinary x86-64 event. The registry should map a name to a
+  survivor rule, not to nothing; the danger of leaving it is that someone later makes
+  `visibleEffects?` consult it, find a bare name, and fall back to
+  `priorEffectsVisible`, which `Grass/Memory/Substep.lean`'s module comment calls the
+  worst available behavior.
+- **`SubstepSequence.ClaimsAtomicity` requires more than one substep.** So a
+  single-access sequence declaring `transactional` "claims nothing", while
+  `step`'s registration check is unconditional on length. For a page-crossing store
+  `transactional` says the commit is all-or-nothing, which is a substantive claim at
+  length one. Either the conjunct goes or the reason it is there needs writing down.
+- **`WritableByAnother` is the only rights-sensitive predicate in `authorityOf`.** A
+  grant permitting `execute` but not `write` reads as read-only, and `AuthorityState`
+  has no state for execute-only sharing. Nothing exploits it today.
 - **`Restartability` is declared and never read.** A profile can require the facet
   and a descriptor carries a value, but nothing in the transition consults it, so
   [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.4's retry rules have no mechanism here.
@@ -1131,6 +1193,24 @@ refuses everything.
   ordering model". Nothing relates a grant to `AccessDescriptor.ordering`, and
   nothing here can — that needs §7.1's refinement theorem, which an ISA owner owes,
   and the strength relation M8's `ConsistencyProfile` induces.
+- **Loan splitting blocks M4, not merely M3.** §6's ABI call profile "lends the
+  exact buffer/slot authorities to the environment, retains only disjoint residual
+  frame authority". Once M4 represents that residual as a writable `.frame` grant
+  held by the caller, lending a slot inside it to the environment is a distinct
+  holder, an overlapping range and a writer — refused at issue — and installing it
+  anyway would leave the borrower frozen by the caller's own frame grant. The
+  operation §6 needs is a *split* that consumes and narrows the lender's grant so
+  the residual conflicts with nothing. Recorded under M3 as owed; it is a
+  prerequisite for `CallFrame.lean`.
+- **`MemoryState.returnLoan?` requires the holder, and §6 needs the lender.** §6
+  says the caller "consumes the same loan identities to reconstruct local authority
+  on a conforming return", and the returning party is the caller, not the callee.
+  For an external API agent — `Spikes/1_Hello_World`'s `WriteFile`, which never
+  executes a Grass step — nothing in the model can perform the return at all, so the
+  slot stays lent and the read after the call is refused. `AuthorityGrant` records no
+  lender; adding one and accepting a return by holder *or* lender is the smaller
+  change, and the alternative is every ABI profile bypassing the checked door. §5's
+  arena reset and §5.1's reallocation precondition have the same shape.
 - **Transferred authority.** §3's fifth entry is "transferred or unavailable";
   `unavailable` derives from liveness and epoch and nothing represents a transfer.
   §7.4 makes transfer real ("acquire operations may transfer protected memory
@@ -1143,6 +1223,21 @@ refuses everything.
   through `MemoryEvent.Conflicts` would fix this and give the atomic clause above a
   home in M3; it is not done, because the two currently differ in what they range
   over (grants versus events) and reconciling that is a design question.
+- **"Registration is not discharge" is maintained in prose only.** Once
+  `onFaultRuleNotRegistered` passes, `SubstepSequence.visibleEffects?` gives a
+  `transactional` sequence full all-or-nothing semantics on the strength of a
+  registered string, and `denialOf` skips `uninitializedRead` for any
+  `permitsUninitialized _`. No type, predicate or theorem separates a claimed
+  justification from a discharged one — §10's package is where discharge would live
+  and nothing enumerates outstanding claims. `FaultVisibility.RequiresJustification`
+  and `SubstepSequence.ClaimsAtomicity` exist for that enumeration and have no
+  consumer under `Grass/`.
+- **Three admissibility failures report one rejection.** An unregistered ordering
+  mode, an unregistered scope and an unregistered initialization rule are all
+  `accessNotAdmitted`, and the three fixtures pinning them assert that constructor,
+  which any `Admits` failure satisfies. `step` argues the opposite standard for
+  facets — "a rejection says *which* one is missing" — and follows it for the three
+  fault checks. Closing this means a `whyNotAdmitted?` on the vocabulary.
 - **Nothing enforces that every `AuthorityState` constructor stays reachable.** Four
   fixtures exhibit one each. A fifth constructor, or a change that made one
   unreachable, would be caught by a reader and not by a gate.

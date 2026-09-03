@@ -132,9 +132,16 @@ end NameRegistry
 /--
 The open vocabulary a profile admits.
 
-Every registry must be listed. A profile with an empty registry on some axis
-admits nothing on that axis, which is the safe direction: it rejects rather than
-accepting silently.
+Every registry must be listed. A profile with an empty registry on an axis whose
+names are *entirely* the profile's admits nothing on that axis, which is the safe
+direction.
+
+That is not true of every registry here, and saying it flatly was wrong. The five
+added for ordering and justifications gate only the profile-specific half of their
+axis: with `orderingModes` empty, `AdmitsOrder .sequentiallyConsistent` still holds,
+because §7.1 fixes the portable modes and there is nothing profile-local to declare
+about them. The unqualified claim would have a reader believe an empty vocabulary
+rejects every ordering request, and it does not.
 -/
 structure AdmittedVocabulary where
   /-- The address spaces this profile models, with their representations,
@@ -166,10 +173,18 @@ structure AdmittedVocabulary where
   bytes.
 
   `InitializationDemand.permitsUninitialized` names one, and nothing held the
-  names, so an access read uninitialized bytes by declaring a string.
-  `docs/MEMORY_MODEL.md` §4 makes reading uninitialized storage a violation unless
-  a profile rule says otherwise; this is where "a profile rule says otherwise"
-  becomes checkable. -/
+  names, so an access read uninitialized bytes by declaring a string. This registry
+  is where the name becomes checkable.
+
+  **`docs/MEMORY_MODEL.md` §4 does not authorize the escape**, and an earlier
+  version of this docstring said it did. §4's whole sentence on the subject is
+  "Initialization is tracked at the granularity required to justify every read"; it
+  states no violation and describes no profile exception. The escape is
+  `InitializationDemand`'s own design, this registry gates its name, and neither is
+  §4's. What §4 actually asks for — granularity sufficient to justify *every* read —
+  is not delivered either: the demand is per-access, so a struct copy with three
+  padding bytes must declare `permitsUninitialized` for the whole range, which turns
+  the check off for every byte. §4.2 of the plan records that. -/
   initializationJustifications : NameRegistry Name
   /-- Target theorems this profile claims for cross-substep atomicity.
 
@@ -207,50 +222,92 @@ instance (vocabulary : AdmittedVocabulary) : Decidable vocabulary.WellFormed :=
 /--
 `vocabulary.AdmitsOrder order` holds when the access may request that ordering.
 
-The five portable modes are always admissible: `docs/MEMORY_MODEL.md` §7.1 fixes
-them, so there is nothing profile-local to declare. A `profileSpecific` mode must
-be a name this profile registered — §7.1 says an unsupported mapping is rejected,
-and a name no profile ever claimed is the clearest case of one.
+A `profileSpecific` mode must be a name this profile registered: §7.1 says an
+unsupported mapping is rejected, and a name no profile ever claimed is the clearest
+case of one. The five portable modes pass without a registry entry.
 
-This is **not** §7.1's refinement theorem. Registration says the profile owns the
-name; it does not say the name has a proved target meaning on any ISA. That
-obligation is recorded in `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2.
+**That exemption is this module's, not §7.1's**, and an earlier version of this
+docstring credited §7.1 with it. §7.1's sentence is "Ordering requests use a
+portable vocabulary *only where it has a proved target meaning*: relaxed, acquire,
+release, acquire-release, sequentially consistent, and profile-specific modes." The
+condition attaches to the portable names too. §7.1 fixes the vocabulary; it does not
+make any of it unconditionally admissible, and this predicate lets a profile that
+has proved nothing request `sequentiallyConsistent`.
+
+What would close that is §7.1's refinement theorem — "Mapping a high-level order to
+an ISA/API operation requires a refinement theorem" — which no profile here has and
+which an ISA owner owes. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records it.
 -/
-def AdmitsOrder (vocabulary : AdmittedVocabulary) : MemoryOrder → Prop
-  | .profileSpecific name => vocabulary.orderingModes.Recognizes name
-  | _ => True
+def AdmitsOrder (vocabulary : AdmittedVocabulary) (order : MemoryOrder) : Prop :=
+  match order.profileName? with
+  | some name => vocabulary.orderingModes.Recognizes name
+  | Option.none => True
 
-instance (vocabulary : AdmittedVocabulary) :
-    (order : MemoryOrder) → Decidable (vocabulary.AdmitsOrder order)
-  | .relaxed | .acquire | .release | .acquireRelease | .sequentiallyConsistent =>
-      .isTrue trivial
-  | .profileSpecific name =>
-      inferInstanceAs (Decidable (vocabulary.orderingModes.Recognizes name))
+instance (vocabulary : AdmittedVocabulary) (order : MemoryOrder) :
+    Decidable (vocabulary.AdmitsOrder order) := by
+  unfold AdmitsOrder
+  split <;> infer_instance
 
 /-- `vocabulary.AdmitsScope scope` holds when the access may claim that scope. The
 same rule as `AdmitsOrder`, over §7.1's four portable scopes. -/
-def AdmitsScope (vocabulary : AdmittedVocabulary) : MemoryScope → Prop
-  | .profileSpecific name => vocabulary.orderingScopes.Recognizes name
-  | _ => True
+def AdmitsScope (vocabulary : AdmittedVocabulary) (scope : MemoryScope) : Prop :=
+  match scope.profileName? with
+  | some name => vocabulary.orderingScopes.Recognizes name
+  | Option.none => True
 
-instance (vocabulary : AdmittedVocabulary) :
-    (scope : MemoryScope) → Decidable (vocabulary.AdmitsScope scope)
-  | .thread | .process | .device | .system => .isTrue trivial
-  | .profileSpecific name =>
-      inferInstanceAs (Decidable (vocabulary.orderingScopes.Recognizes name))
+instance (vocabulary : AdmittedVocabulary) (scope : MemoryScope) :
+    Decidable (vocabulary.AdmitsScope scope) := by
+  unfold AdmitsScope
+  split <;> infer_instance
 
-/-- **A portable mode needs no registration.** This is `MemoryOrder.IsPortable`'s
-consumer: the predicate was written to distinguish the mode that needs a profile
-behind it from the mode that does not, and until this theorem nothing made that
-distinction do anything. -/
+/-- A portable mode needs no registration. -/
 theorem admitsOrder_of_isPortable {vocabulary : AdmittedVocabulary} {order : MemoryOrder}
     (h : order.IsPortable) : vocabulary.AdmitsOrder order := by
-  cases order <;> first | exact trivial | exact absurd h (by simp)
+  unfold AdmitsOrder
+  rw [MemoryOrder.profileName?_eq_none_iff_isPortable.mpr h]
+  trivial
 
 /-- And a portable scope needs none either. -/
 theorem admitsScope_of_isPortable {vocabulary : AdmittedVocabulary} {scope : MemoryScope}
     (h : scope.IsPortable) : vocabulary.AdmitsScope scope := by
-  cases scope <;> first | exact trivial | exact absurd h (by simp [MemoryScope.IsPortable])
+  unfold AdmitsScope
+  rw [MemoryScope.profileName?_eq_none_iff_isPortable.mpr h]
+  trivial
+
+/--
+**An admissible mode is portable or registered**, and there is no third way.
+
+The direction that carries the weight, and the two above do not. Review replaced
+`AdmitsOrder` with `fun _ => True` and both of them still compiled: a theorem saying
+portable modes are admitted holds of a predicate that admits everything, so it
+cannot detect the drift its docstring claimed to prevent. This one cannot be proved
+of a vacuous `AdmitsOrder`, which is what makes `MemoryOrder.IsPortable`
+load-bearing rather than merely mentioned.
+-/
+theorem isPortable_or_registered_of_admitsOrder {vocabulary : AdmittedVocabulary}
+    {order : MemoryOrder} (h : vocabulary.AdmitsOrder order) :
+    order.IsPortable ∨
+      ∃ name, order.profileName? = some name ∧ vocabulary.orderingModes.Recognizes name := by
+  unfold AdmitsOrder at h
+  cases hp : order.profileName? with
+  | none => exact Or.inl (MemoryOrder.profileName?_eq_none_iff_isPortable.mp hp)
+  | some name =>
+      refine Or.inr ⟨name, rfl, ?_⟩
+      rw [hp] at h
+      exact h
+
+/-- The same for scopes. -/
+theorem isPortable_or_registered_of_admitsScope {vocabulary : AdmittedVocabulary}
+    {scope : MemoryScope} (h : vocabulary.AdmitsScope scope) :
+    scope.IsPortable ∨
+      ∃ name, scope.profileName? = some name ∧ vocabulary.orderingScopes.Recognizes name := by
+  unfold AdmitsScope at h
+  cases hp : scope.profileName? with
+  | none => exact Or.inl (MemoryScope.profileName?_eq_none_iff_isPortable.mp hp)
+  | some name =>
+      refine Or.inr ⟨name, rfl, ?_⟩
+      rw [hp] at h
+      exact h
 
 /--
 `vocabulary.Admits d` holds when every open name the access descriptor uses is
@@ -319,8 +376,9 @@ theorem not_admits_of_ill_formed_ledger_effect {vocabulary : AdmittedVocabulary}
   fun ha => h ha.2.2.2.2.1
 
 /-- **An access citing an initialization rule the profile never declared is not
-admitted.** `docs/MEMORY_MODEL.md` §4 makes an uninitialized read a violation
-unless a profile rule permits it; an unregistered name is not such a rule. -/
+admitted.** A name no profile claimed is not a rule. This does not rest on
+`docs/MEMORY_MODEL.md` §4, which says nothing about uninitialized reads — see
+`initializationJustifications`. -/
 theorem not_admits_of_unregistered_justification {vocabulary : AdmittedVocabulary}
     {d : AccessDescriptor} {justification : Name}
     (hmem : justification ∈ d.initialization.justification?)

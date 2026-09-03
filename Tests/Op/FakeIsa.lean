@@ -183,6 +183,12 @@ inductive Alpha where
   /-- A sequence claiming cross-substep atomicity under a target theorem this
   profile never registered. -/
   | unregisteredAtomicityClaim
+  /-- A sequence claiming cross-substep atomicity under a name the profile
+  registered as a *fault-visibility rule*, which is a different registry. -/
+  | atomicityClaimFromTheWrongRegistry
+  /-- An operation whose declared ordering is not the ordering its access
+  requests. -/
+  | orderingFacetDisagrees
   /-- A load reading uninitialized bytes under a rule this profile never
   registered. -/
   | unregisteredInitRule
@@ -267,8 +273,9 @@ instance : HasOperationFacets Alpha where
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .atomicAdd =>
-        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .readWrite
-            .readWrite true true [] true))
+        { memoryEffects := some (.single
+            { acc bufferProv ⟨0, 8⟩ 0x1000 .readWrite .readWrite true true [] true with
+              ordering := { atomicity := .atomic, order := .acquireRelease } })
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some { atomicity := .atomic, order := .acquireRelease } }
     | .reserve =>
@@ -398,6 +405,19 @@ instance : HasOperationFacets Alpha where
               onFault := .transactional ⟨"fake.neverRegistered"⟩ }
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
+    | .atomicityClaimFromTheWrongRegistry =>
+        { memoryEffects := some
+            { substeps :=
+                [ .access (acc bufferProv ⟨0, 4⟩ 0x1000 .write .readWrite false true)
+                  , .access (acc bufferProv ⟨4, 4⟩ 0x1004 .write .readWrite false true) ]
+              onFault := .transactional ⟨"fake.splitStore"⟩ }
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .orderingFacetDisagrees =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true))
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some { order := .acquire } }
     | .unregisteredInitRule =>
         { memoryEffects := some (.single
             { acc bufferProv ⟨0, 8⟩ 0x1000 .read .readWrite true false with
@@ -416,20 +436,22 @@ instance : HasOperationFacets Alpha where
               ordering := { atomicity := .atomic
                             order := .profileSpecific ⟨"fake.neverRegistered"⟩ } })
           faults := some [.pageFault], restartability := some .notRestartable
-          ordering := some .plain }
+          ordering := some { atomicity := .atomic
+                             order := .profileSpecific ⟨"fake.neverRegistered"⟩ } }
     | .registeredOrder =>
         { memoryEffects := some (.single
             { acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite false true [] true with
               ordering := { atomicity := .atomic
                             order := .profileSpecific ⟨"fake.deviceRelease"⟩ } })
           faults := some [.pageFault], restartability := some .notRestartable
-          ordering := some .plain }
+          ordering := some { atomicity := .atomic
+                             order := .profileSpecific ⟨"fake.deviceRelease"⟩ } }
     | .unregisteredScope =>
         { memoryEffects := some (.single
             { acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite false true with
               ordering := { scope := .profileSpecific ⟨"fake.neverRegistered"⟩ } })
           faults := some [.pageFault], restartability := some .notRestartable
-          ordering := some .plain }
+          ordering := some { scope := .profileSpecific ⟨"fake.neverRegistered"⟩ } }
     | .computeWithPhantomFault =>
         { memoryEffects := some
             { substeps := [ .compute [⟨⟨"fake.neverDeclaredFault"⟩⟩] ]
@@ -1275,16 +1297,32 @@ theorem an_unregistered_atomicity_claim_is_refused :
       .thread ⟨⟨"alpha"⟩⟩ =
       .rejected (.onFaultRuleNotRegistered ⟨"fake.neverRegistered"⟩) := rfl
 
-/-- The registries really are separate: `fake.splitStore` is a visibility rule and
-`fake.atomicSplitStore` an atomicity claim, and neither appears in the other's
-registry. Without this the two theorems above would be consistent with one shared
-namespace. -/
-theorem the_justification_registries_are_separate :
+/--
+**A name registered in the other registry does not satisfy the claim.**
+
+The fixture that pins separation, and it was missing for a round: the theorems above
+cite `fake.neverRegistered`, which is in neither registry, so they hold equally of an
+implementation that consults both. Review patched `unregisteredOnFaultRule?` to
+accept a name found in *either* — the shared namespace the commit message said was
+pinned against — and the whole suite stayed green.
+
+`fake.splitStore` is registered as a fault-visibility rule and is refused as an
+atomicity claim.
+-/
+theorem a_name_from_the_wrong_registry_is_refused :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.atomicityClaimFromTheWrongRegistry)
+      thread₀ .thread ⟨⟨"alpha"⟩⟩ =
+      .rejected (.onFaultRuleNotRegistered ⟨"fake.splitStore"⟩) := rfl
+
+/-- And the same name *is* accepted where it belongs, so the refusal above is about
+the registry rather than about the name. -/
+theorem the_registries_hold_what_they_should :
+    vocabulary.faultVisibilityRules.Recognizes ⟨"fake.splitStore"⟩ ∧
     ¬ vocabulary.atomicityJustifications.Recognizes ⟨"fake.splitStore"⟩ ∧
     ¬ vocabulary.faultVisibilityRules.Recognizes ⟨"fake.atomicSplitStore"⟩ ∧
     (stepAlpha state₀ .splitStore).state?.isSome ∧
     (stepAlpha state₀ .atomicSplitStore).state?.isSome := by
-  exact ⟨by decide, by decide, by decide, by decide⟩
+  exact ⟨by decide, by decide, by decide, by decide, by decide⟩
 
 /-- **An uninitialized read under an unregistered rule is not admitted.** -/
 theorem an_unregistered_initialization_rule_is_refused :
@@ -1322,13 +1360,29 @@ theorem an_unregistered_scope_is_refused :
     Grass.Op.step policy state₀ (SomeOperation.of Alpha.unregisteredScope) thread₀
       .thread ⟨⟨"alpha"⟩⟩ = .rejected .accessNotAdmitted := rfl
 
-/-- And a portable mode needs no registration at all, which is what
-`admitsOrder_of_isPortable` says: every other operation in this fixture requests
-`relaxed` or `acquireRelease` and neither appears in `orderingModes`. -/
+/-- **A portable mode needs no registration**, exercised on a mode that is not
+`relaxed`: `atomicAdd` requests `acquireRelease` and the profile registers only
+`fake.deviceRelease`.
+
+An earlier version of this theorem asserted `¬ Recognizes ⟨"acquireRelease"⟩`, which
+is true of every possible implementation — `AdmitsOrder` never looks a portable mode
+up, and `"acquireRelease"` is not how a `MemoryOrder` constructor would be spelled in
+a registry in any case — and paired it with a step of an operation whose descriptor
+requested `relaxed`, the same mode as every other fixture in the file. It could not
+have failed. -/
 theorem a_portable_order_needs_no_registration :
-    ¬ vocabulary.orderingModes.Recognizes ⟨"acquireRelease"⟩ ∧
+    vocabulary.AdmitsOrder (.acquireRelease) ∧
+    vocabulary.orderingModes.recognized = [⟨"fake.deviceRelease"⟩] ∧
     (stepAlpha state₀ .atomicAdd).state?.isSome := by
-  exact ⟨by decide, by decide⟩
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **The operation's own ordering declaration is checked against its accesses.**
+`OperationFacets.ordering` was the second facet consumed by nothing, and six of this
+fixture's operations declared an ordering their accesses did not request. -/
+theorem an_operation_whose_ordering_disagrees_is_refused :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.orderingFacetDisagrees) thread₀
+      .thread ⟨⟨"alpha"⟩⟩ =
+      .rejected (.operationOrderingDisagrees { order := .acquire } .plain) := rfl
 
 /-! ## And so is the operation's own fault declaration
 
@@ -1364,12 +1418,18 @@ theorem an_operation_with_a_phantom_fault_is_refused :
       .thread ⟨⟨"alpha"⟩⟩ =
       .rejected (.operationFaultNotRecognized ⟨⟨"fake.neverDeclaredFault"⟩⟩) := rfl
 
-/-- An operation may declare *more* than its substeps can raise: `store` declaring
-`[.pageFault]` over one access that admits exactly that still runs, so the check is
-containment rather than equality. Without this the two theorems above would be
-consistent with refusing every operation that declares a fault. -/
-theorem a_consistent_declaration_still_runs :
-    (stepAlpha state₀ .store).state?.isSome := by decide
+/-- An operation may declare *more* than its substeps can raise, so the check is
+containment and not equality: the device operations declare `[.pageFault,
+.deviceFault]` over accesses that admit only the first, and they run.
+
+`store` used to be cited here, and it declares exactly what its access admits — an
+equality case, which cannot distinguish containment from equality. Review
+strengthened the check to equality and only the device operations failed, so they
+are the ones that pin it. -/
+theorem a_declaration_wider_than_the_substeps_still_runs :
+    (stepBeta state₀ .dmaWrite).state?.isSome ∧
+    (stepAlpha state₀ .store).state?.isSome := by
+  exact ⟨by decide, by decide⟩
 
 /-- `divide`'s compute substep declares `divideError`, which the vocabulary does
 recognize, so it still runs *and commits its load*. Same reason as

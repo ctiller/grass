@@ -71,8 +71,7 @@ inductive StepRejection where
   name a class no registry admitted and the transition would record it — into
   `RaisedFault` and into a `ValidMemoryEvent`'s status, since
   `MemoryEvent.WellFormed` constrains counts and lengths but not fault identity.
-  That is `AuthorityProvider.violationClass`'s hole in a second place, and
-  `Grass/Memory/Profile.lean` claims every registry here is consulted. Review
+  That is `AuthorityProvider.violationClass`'s hole in a second place. Review
   found it. -/
   | faultClassNotDeclared (fault : FaultClassId)
   /-- The machine reported a fault at a substep whose access carries an obligation
@@ -159,9 +158,10 @@ inductive StepRejection where
   `MemoryProfile.Admits` closes this for an access's `admittedFaults` and
   `computeFaultNotRecognized` closes it for a compute substep. The operation-level
   list was the third place a fault class could be named, and the only one no
-  registry saw. `Grass/Memory/Profile.lean` claims every registry here is
-  consulted, so an unrecognized name reaching a declaration the profile accepts is
-  that claim failing. -/
+  registry saw. `Grass/Memory/Profile.lean` requires every registry to be
+  *listed*, which is weaker than every registry being consulted and was quoted here
+  as the stronger claim; nothing states the stronger one, and the operation-level
+  fault list was the case where it was false. -/
   | operationFaultNotRecognized (fault : FaultClassId)
   /-- The sequence's fault-visibility rule names something the profile never
   registered.
@@ -178,6 +178,27 @@ inductive StepRejection where
   name says the profile owns the claim, not that it discharged it, and §10's
   package is where discharge lives. -/
   | onFaultRuleNotRegistered (rule : Name)
+  /-- An access substep requests an ordering the operation's `ordering` facet does
+  not declare.
+
+  `OperationFacets.ordering` was the second facet consumed by nothing —
+  `OperationFacets.supplied` reads only `isSome` — and `AdmitsOrder`/`AdmitsScope`
+  check the *descriptor's* ordering, never the operation's. So
+  `docs/INSTRUCTIONS.md` §1's "atomicity and memory ordering" declaration was a
+  value nothing compared to anything, and a profile could declare an operation
+  sequentially consistent over relaxed accesses, or relaxed over atomic ones. Six of
+  this fixture's own operations did the latter.
+
+  Equality, not containment, because `Grass/Memory/Ordering.lean` deliberately
+  defines no strength order between modes — the relation that matters is the one a
+  `ConsistencyProfile` induces over a whole event graph, which is M8's, and a
+  weaker-than order defined here would be a second, unproved one. So the only
+  relation this layer can state is that the two declarations agree, and law 8's
+  answer to two that do not is to refuse rather than pick. `OperationFacets.ordering` is
+  single-valued, so an operation whose substeps genuinely differ in ordering has no
+  way to declare that and is refused here. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2
+  records it as an open obligation on the facet rather than on this check. -/
+  | operationOrderingDisagrees (declared requested : OrderingDemand)
 deriving DecidableEq, Repr
 
 /-- What one step produced. -/
@@ -860,10 +881,17 @@ def StepPolicy.unregisteredOnFaultRule? (policy : StepPolicy) (sequence : Subste
       if policy.profile.vocabulary.faultVisibilityRules.Recognizes rule then Option.none
       else some rule
 
-/-- **A rule that claims nothing needs no registration.** `priorEffectsVisible` is
-the one constructor `FaultVisibility.RequiresJustification` calls claimless, and it
-is exactly the one this never reports. -/
-@[simp] theorem unregisteredOnFaultRule?_priorEffectsVisible (policy : StepPolicy)
+/-- **A rule that claims nothing needs no registration.**
+
+One direction only: `priorEffectsVisible` is never reported. It does not say that
+the other two always are, and it does not mention
+`FaultVisibility.RequiresJustification` — an earlier version of this docstring said
+this was "exactly the one this never reports", which claims a uniqueness the
+statement does not have, and tied it to a predicate the statement never names.
+
+Not a `simp` lemma: its left-hand side is fully general and its hypothesis would
+have to be discharged from context at every occurrence. -/
+theorem unregisteredOnFaultRule?_priorEffectsVisible (policy : StepPolicy)
     (sequence : SubstepSequence) (h : sequence.onFault = .priorEffectsVisible) :
     policy.unregisteredOnFaultRule? sequence = Option.none := by
   unfold StepPolicy.unregisteredOnFaultRule?
@@ -945,6 +973,15 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
           -- ran and minted its events with the claim unexamined.
           match policy.unregisteredOnFaultRule? sequence with
           | some rule => .rejected (.onFaultRuleNotRegistered rule)
+          | Option.none =>
+          -- The operation's ordering declaration against the substeps below it.
+          -- Skipped when the facet is absent: absence is not a declaration of
+          -- `plain`, and whether it may be absent is `Closes`'s question.
+          match operation.facets.ordering.bind (fun declared =>
+              (sequence.accesses.find? (fun d => d.ordering != declared)).map
+                (fun d => (declared, d.ordering))) with
+          | some (declared, requested) =>
+              .rejected (.operationOrderingDisagrees declared requested)
           | Option.none =>
           match faultAt sequence with
           | .none =>
