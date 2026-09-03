@@ -260,4 +260,179 @@ theorem a_reroute_to_the_same_session_is_refused
     (rerouted : serverPlan.Reroutes sent afterReroute () wire escrowed wire) : False :=
   rerouted.elsewhere rfl
 
+/-! ## And the step that strands one -/
+
+/--
+A second occurrence on the wire, which no send ever put there.
+
+`EscrowLedger.noFabrication` says a *resolved* occurrence must be in `created`,
+and `LedgerExtends.createdPrefix` lets a step append to `created`. So a step may
+introduce this occurrence and resolve it in the same move.
+-/
+def stranded : EdgeOccurrence serverTopology World.serverMessage () :=
+  ⟨payload, ⟨wire, { id := ⟨.messageOccurrence, 2⟩, isMessage := rfl }⟩⟩
+
+/-- And it is not the occurrence the step is about. -/
+theorem stranded_ne_escrowed : stranded ≠ escrowed := by
+  intro same
+  have ids := congrArg (fun occurrence => occurrence.2.2.id.carrier) same
+  simp [stranded, escrowed, occurrenceOf] at ids
+
+open Classical in
+/--
+The wire's ledger after a drop that also invents a reroute.
+
+`escrowed` is dropped, which is what the step declares. `stranded` is appended
+and resolved as rerouted to `sidewire`, which the step declares nothing about.
+-/
+noncomputable def strandingLedger :
+    EscrowLedger (EdgeOccurrence serverTopology World.serverMessage ())
+      (serverTopology.ChannelId ()) where
+  created := [escrowed, stranded]
+  rank := fun occurrence => occurrence.2.2.id.carrier
+  rankOrdersCreated := by decide
+  resolution := fun occurrence =>
+    if occurrence = escrowed then some .dropped
+    else if occurrence = stranded then some (.rerouted sidewire) else none
+  noFabrication := by
+    intro occurrence resolved
+    by_cases isFirst : occurrence = escrowed
+    · simp [isFirst]
+    · by_cases isSecond : occurrence = stranded
+      · simp [isSecond]
+      · simp [isFirst, isSecond] at resolved
+  coalesceCarrierLater := by
+    intro occurrence carrier merged
+    by_cases isFirst : occurrence = escrowed
+    · simp [isFirst] at merged
+    · by_cases isSecond : occurrence = stranded
+      · simp [isSecond, stranded_ne_escrowed] at merged
+      · simp [isFirst, isSecond] at merged
+  cancelRequested := fun _ => false
+  acknowledgedWasRequested := by
+    intro occurrence reason acknowledged
+    by_cases isFirst : occurrence = escrowed
+    · simp [isFirst] at acknowledged
+    · by_cases isSecond : occurrence = stranded
+      · simp [isSecond, stranded_ne_escrowed] at acknowledged
+      · simp [isFirst, isSecond] at acknowledged
+
+open Classical in
+/-- Every session's escrow after that drop: the wire's moved, nothing else. -/
+noncomputable def strandingAt (session : serverTopology.ChannelId ()) :
+    EscrowLedger (EdgeOccurrence serverTopology World.serverMessage ())
+      (serverTopology.ChannelId ()) :=
+  if session = wire then strandingLedger else EscrowLedger.empty
+
+open Classical in
+theorem strandingAt_wire : strandingAt wire = strandingLedger := by
+  unfold strandingAt
+  rw [if_pos rfl]
+
+open Classical in
+theorem strandingAt_off {session : serverTopology.ChannelId ()} (notWire : session ≠ wire) :
+    strandingAt session = EscrowLedger.empty := by
+  unfold strandingAt
+  rw [if_neg notWire]
+
+open Classical in
+theorem strandingLedger_drops : strandingLedger.resolution escrowed = some .dropped := by
+  show (if escrowed = escrowed then some ChannelResolution.dropped
+    else if escrowed = stranded then some (ChannelResolution.rerouted sidewire) else none)
+      = some ChannelResolution.dropped
+  rw [if_pos rfl]
+
+open Classical in
+theorem strandingLedger_strands :
+    strandingLedger.resolution stranded = some (.rerouted sidewire) := by
+  show (if stranded = escrowed then some ChannelResolution.dropped
+    else if stranded = stranded then some (ChannelResolution.rerouted sidewire) else none)
+      = some (ChannelResolution.rerouted sidewire)
+  rw [if_neg stranded_ne_escrowed, if_pos rfl]
+
+/-- The world after it. -/
+noncomputable def afterStranding : ServerWorld :=
+  { quiet with inFlight := fun _ => strandingAt }
+
+/--
+**A legal drop that strands a reroute.**
+
+Every field of `ResolvesEscrow` is discharged. `nowResolved` and `onItsSession`
+are about `escrowed`; `ledgerExtends` forbids *rewriting* a resolution and
+permits *appending* to `created`; `scope` is one session's escrow. Nothing in the
+structure — nothing in any of the six constructors built on it — says which
+*other* occurrences a step may resolve.
+-/
+theorem the_stranding_drop :
+    serverPlan.ResolvesEscrow sent afterStranding () wire escrowed .dropped where
+  onItsSession := rfl
+  wasOutstanding := by
+    show (sent.inFlight () wire).Outstanding escrowed
+    rw [sent_wire]
+    exact ⟨List.mem_cons_self, rfl⟩
+  nowResolved := by
+    show (strandingAt wire).resolution escrowed = some .dropped
+    rw [strandingAt_wire]
+    exact strandingLedger_drops
+  ledgerExtends := by
+    show LedgerExtends (sent.inFlight () wire) (strandingAt wire)
+    rw [sent_wire, strandingAt_wire]
+    exact
+      { createdPrefix := ⟨[stranded], rfl⟩
+        resolutionPermanent := by
+          intro occurrence resolution ended
+          exact absurd ended (by simp [pendingLedger])
+        cancelRequestMonotone := by
+          intro occurrence requested
+          exact absurd requested (by simp [pendingLedger]) }
+  scope := by
+    intro fragment outside
+    cases fragment with
+    | escrow edge session =>
+      have sameEdge : edge = () := rfl
+      subst sameEdge
+      have notWire : session ≠ wire := fun isWire => outside (by rw [isWire])
+      show ledgerAt false session = strandingAt session
+      rw [ledgerAt_off_wire_empty notWire, strandingAt_off notWire]
+    | _ => rfl
+
+/-- Before the step, every reroute lands, because nothing is resolved at all. -/
+theorem sent_reroutes_land : sent.ReroutesLand := by
+  intro edge session occurrence destination rerouted
+  have sameEdge : edge = () := rfl
+  subst sameEdge
+  by_cases isWire : session = wire
+  · subst isWire
+    rw [sent_wire] at rerouted
+    exact absurd rerouted (by simp [pendingLedger])
+  · rw [show sent.inFlight () session = ledgerAt false session from rfl,
+      ledgerAt_off_wire_empty isWire] at rerouted
+    exact absurd rerouted (by simp [EscrowLedger.empty])
+
+/--
+**And after it, one does not.**
+
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.87. `LogicalProcessNetworkCore.WellFormed`'s
+sixth clause is *not* preserved by this transition family, and this is the step
+that breaks it: a `drop` that is legal in every field it has, taking a network
+where every reroute lands to one where a payload is rerouted to a session that
+never receives it.
+
+The missing constraint is not `LedgerExtends`, which does its job — nothing was
+erased or reordered. It is that **no constructor bounds which occurrences other
+than its own it may resolve.** A `ResolvesEscrow` says what happens to
+`occurrence` and is silent about every other entry in the ledger it writes.
+-/
+theorem the_stranding_drop_breaks_reroutesLand : ¬ afterStranding.ReroutesLand := by
+  intro lands
+  obtain ⟨arrival, arrived⟩ := lands () wire stranded sidewire (by
+    show (strandingAt wire).resolution stranded = some (.rerouted sidewire)
+    rw [strandingAt_wire]
+    exact strandingLedger_strands)
+  have empty : afterStranding.inFlight () sidewire = EscrowLedger.empty := by
+    show strandingAt sidewire = EscrowLedger.empty
+    exact strandingAt_off sidewire_ne_wire
+  rw [empty] at arrived
+  exact absurd arrived (by simp [EscrowLedger.empty])
+
 end Grass.Process.Tests.Reroute
