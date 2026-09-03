@@ -13,7 +13,7 @@ use crate::error::{invalid, AbResult};
 use crate::events::*;
 use crate::scalars::{Agent, EventId};
 use crate::state::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Reduces every known stream into a `BusState`. `streams` maps each agent
 /// to its full, already-validated event list (`stream::read_stream`), in
@@ -234,6 +234,10 @@ fn apply_event(state: &mut BusState, env: &Envelope) -> AbResult<()> {
         EventData::LifecycleConflictResolved(d) => apply_conflict_resolved(state, env, d)?,
         EventData::FrictionReported(d) => apply_friction_reported(state, env, d)?,
         EventData::FrictionSynthesized(d) => apply_friction_synthesized(state, env, d)?,
+        EventData::SubscriptionSet(d) => apply_subscription_set(state, env, d)?,
+        EventData::BroadcastPublished(d) => apply_broadcast_published(state, env, d)?,
+        EventData::BroadcastAcknowledged(d) => apply_broadcast_acknowledged(state, env, d)?,
+        EventData::BroadcastSeen(d) => apply_broadcast_seen(state, env, d)?,
     }
     Ok(())
 }
@@ -315,6 +319,7 @@ fn apply_registered(
             plan: None,
             progress_tail: Vec::new(),
             next_seq: 1,
+            subscribed_topics: crate::scalars::StringSet::default(),
         },
     );
     Ok(())
@@ -1646,6 +1651,184 @@ fn apply_friction_synthesized(
     Ok(())
 }
 
+// ------------------------------------------------------------- broadcasts
+
+fn apply_subscription_set(
+    state: &mut BusState,
+    env: &Envelope,
+    d: &SubscriptionSet,
+) -> AbResult<()> {
+    require_agent(state, &env.agent)?;
+    let ag = state.agents.get_mut(&env.agent).expect("just checked");
+    ag.subscribed_topics = d.topics.clone();
+    Ok(())
+}
+
+/// Resolves `selector` against `epoch`'s active membership (docs/AGENT_
+/// COORDINATION_EVOLUTION.md section 4.2). Used both to check a claimed
+/// `audience_snapshot` at reduction time and, later, by a CLI command
+/// composing a new broadcast.
+pub fn resolve_audience(
+    state: &BusState,
+    selector: &crate::common::AudienceSelector,
+    epoch: &crate::registry::RosterEpoch,
+) -> BTreeSet<Agent> {
+    use crate::common::AudienceSelector as Sel;
+    match selector {
+        Sel::Agents(set) => set
+            .iter()
+            .filter(|a| epoch.is_active_member(a))
+            .cloned()
+            .collect(),
+        Sel::Roles(roles) => epoch
+            .active_members
+            .iter()
+            .filter(|(_, binding)| roles.contains(&binding.role))
+            .map(|(a, _)| a.clone())
+            .collect(),
+        Sel::TopicSubscribers(topic) => epoch
+            .active_members
+            .keys()
+            .filter(|a| {
+                state
+                    .agents
+                    .get(*a)
+                    .is_some_and(|s| s.subscribed_topics.iter().any(|t| t == topic))
+            })
+            .cloned()
+            .collect(),
+        Sel::InterfaceDependents(interface) => epoch
+            .active_members
+            .keys()
+            .filter(|a| {
+                state
+                    .agents
+                    .get(*a)
+                    .and_then(|s| s.scope.as_ref())
+                    .is_some_and(|scope| scope.depends_on.iter().any(|dep| &dep.interface == interface))
+            })
+            .cloned()
+            .collect(),
+        Sel::AllActive => epoch.active_members.keys().cloned().collect(),
+    }
+}
+
+/// docs/AGENT_COORDINATION_EVOLUTION.md section 4.1-4.2. `audience_snapshot`
+/// is not trusted as authored -- it is recomputed here by resolving
+/// `audience_selector` against the exact `audience_epoch` and rejected on
+/// any mismatch (gate 12: "audience resolution is exact"), the same pattern
+/// `frontier::validate_complete` uses for authority events.
+fn apply_broadcast_published(
+    state: &mut BusState,
+    env: &Envelope,
+    d: &BroadcastPublished,
+) -> AbResult<()> {
+    require_agent(state, &env.agent)?;
+    if d.audience_snapshot.is_empty() {
+        return Err(invalid(format!("{}: audience_snapshot must not be empty", env.id)));
+    }
+    let epoch = state
+        .roster_epoch
+        .as_ref()
+        .filter(|e| e.id == d.audience_epoch)
+        .ok_or_else(|| {
+            invalid(format!(
+                "{}: audience_epoch {} is not the current roster epoch",
+                env.id, d.audience_epoch
+            ))
+        })?;
+    let resolved = resolve_audience(state, &d.audience_selector, epoch);
+    let claimed: BTreeSet<Agent> = d.audience_snapshot.iter().cloned().collect();
+    if resolved != claimed {
+        return Err(invalid(format!(
+            "{}: audience_snapshot does not match resolving audience_selector against epoch {}",
+            env.id, d.audience_epoch
+        )));
+    }
+    for id in d.supersedes.iter() {
+        if !state.broadcasts.contains_key(id) {
+            return Err(invalid(format!("{}: supersedes unknown broadcast {id}", env.id)));
+        }
+    }
+    state.broadcasts.insert(env.id.clone(), d.clone());
+    Ok(())
+}
+
+/// docs/AGENT_COORDINATION_EVOLUTION.md section 4.2: only a broadcast whose
+/// own `acknowledgement` is `required` accepts an acknowledgement, and only
+/// from an agent its `audience_snapshot` actually named -- an unaddressed
+/// bystander cannot manufacture an acknowledgement receipt.
+fn apply_broadcast_acknowledged(
+    state: &mut BusState,
+    env: &Envelope,
+    d: &BroadcastAcknowledged,
+) -> AbResult<()> {
+    require_agent(state, &env.agent)?;
+    if d.broadcasts.is_empty() {
+        return Err(invalid(format!(
+            "{}: broadcast.acknowledged must name at least one broadcast",
+            env.id
+        )));
+    }
+    for id in d.broadcasts.iter() {
+        let broadcast = state
+            .broadcasts
+            .get(id)
+            .ok_or_else(|| invalid(format!("{}: unknown broadcast {id}", env.id)))?;
+        if broadcast.acknowledgement != crate::common::AckRequirement::Required {
+            return Err(invalid(format!(
+                "{}: broadcast {id} does not require acknowledgement",
+                env.id
+            )));
+        }
+        if !broadcast
+            .audience_snapshot
+            .iter()
+            .any(|a| a == &env.agent)
+        {
+            return Err(invalid(format!(
+                "{}: {} was not addressed by broadcast {id}",
+                env.id, env.agent
+            )));
+        }
+    }
+    for id in d.broadcasts.iter() {
+        state
+            .broadcast_acknowledged_by
+            .entry(id.clone())
+            .or_default()
+            .insert(env.agent.clone());
+    }
+    Ok(())
+}
+
+/// docs/AGENT_COORDINATION_EVOLUTION.md section 4.2: a purely optional,
+/// non-authoritative read receipt -- gate 13's "informational broadcasts
+/// cause no mandatory acknowledgement events" holds trivially here since
+/// nothing ever requires this kind to be published at all.
+fn apply_broadcast_seen(state: &mut BusState, env: &Envelope, d: &BroadcastSeen) -> AbResult<()> {
+    require_agent(state, &env.agent)?;
+    if d.broadcasts.is_empty() {
+        return Err(invalid(format!(
+            "{}: broadcast.seen must name at least one broadcast",
+            env.id
+        )));
+    }
+    for id in d.broadcasts.iter() {
+        if !state.broadcasts.contains_key(id) {
+            return Err(invalid(format!("{}: unknown broadcast {id}", env.id)));
+        }
+    }
+    for id in d.broadcasts.iter() {
+        state
+            .broadcast_seen_by
+            .entry(id.clone())
+            .or_default()
+            .insert(env.agent.clone());
+    }
+    Ok(())
+}
+
 fn dependency_from(data: &EventData) -> EventId {
     match data {
         EventData::DependencyResolved(d) => d.dependency.clone(),
@@ -2531,5 +2714,288 @@ mod tests {
             err.to_string().contains("revisit_trigger must be set"),
             "{err}"
         );
+    }
+
+    // ------------------------------------------------------------- broadcasts
+
+    fn broadcast(
+        audience_epoch: ObjectId,
+        selector: crate::common::AudienceSelector,
+        snapshot: &[&Agent],
+        acknowledgement: crate::common::AckRequirement,
+    ) -> BroadcastPublished {
+        BroadcastPublished {
+            topics: StringSet::from_iter([topic("release.main")]),
+            importance: crate::common::Importance::Informational,
+            summary: short("s"),
+            detail: text("d"),
+            affected_paths: StringSet::default(),
+            affected_interfaces: StringSet::default(),
+            product_commits: StringSet::default(),
+            audience_selector: selector,
+            audience_epoch,
+            audience_snapshot: StringSet::from_iter(snapshot.iter().map(|a| (*a).clone())),
+            acknowledgement,
+            deadline: None,
+            supersedes: StringSet::default(),
+            workaround: None,
+            expiry_condition: None,
+        }
+    }
+
+    #[test]
+    fn broadcast_all_active_resolves_to_every_active_member() {
+        let mut state = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Implementor),
+            ("coord1", Role::Coordinator),
+        ]);
+        let alice = a("alice");
+        let bob = a("bob");
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let epoch_id = state.roster_epoch.as_ref().unwrap().id.clone();
+
+        let env = Envelope::new(
+            &coord1,
+            1,
+            no_frontier(),
+            &EventData::BroadcastPublished(broadcast(
+                epoch_id,
+                crate::common::AudienceSelector::AllActive,
+                &[&alice, &bob, &coord1],
+                crate::common::AckRequirement::None,
+            )),
+            [],
+        );
+        apply_ok(&mut state, &env);
+        assert!(state.broadcasts.contains_key(&env.id));
+    }
+
+    #[test]
+    fn broadcast_rejects_an_audience_snapshot_that_omits_an_active_member() {
+        let mut state = empty_state(&[("alice", Role::Implementor), ("bob", Role::Implementor)]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        let epoch_id = state.roster_epoch.as_ref().unwrap().id.clone();
+
+        let env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::BroadcastPublished(broadcast(
+                epoch_id,
+                crate::common::AudienceSelector::AllActive,
+                &[&alice], // missing bob
+                crate::common::AckRequirement::None,
+            )),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(err.to_string().contains("does not match resolving"), "{err}");
+    }
+
+    #[test]
+    fn broadcast_topic_subscribers_resolves_from_subscription_set() {
+        let mut state = empty_state(&[("alice", Role::Implementor), ("bob", Role::Implementor)]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        apply_ok(
+            &mut state,
+            &Envelope::new(
+                &alice,
+                1,
+                no_frontier(),
+                &EventData::SubscriptionSet(SubscriptionSet {
+                    topics: StringSet::from_iter([topic("safety.memory")]),
+                }),
+                [],
+            ),
+        );
+        let epoch_id = state.roster_epoch.as_ref().unwrap().id.clone();
+
+        let env = Envelope::new(
+            &alice,
+            2,
+            no_frontier(),
+            &EventData::BroadcastPublished(broadcast(
+                epoch_id,
+                crate::common::AudienceSelector::TopicSubscribers(topic("safety.memory")),
+                &[&alice],
+                crate::common::AckRequirement::None,
+            )),
+            [],
+        );
+        apply_ok(&mut state, &env);
+        assert!(state.broadcasts.contains_key(&env.id));
+    }
+
+    #[test]
+    fn broadcast_rejects_a_stale_audience_epoch() {
+        let mut state = empty_state(&[("alice", Role::Implementor)]);
+        let alice = a("alice");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+
+        let env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::BroadcastPublished(broadcast(
+                hash(12345), // not the current roster epoch id
+                crate::common::AudienceSelector::AllActive,
+                &[&alice],
+                crate::common::AckRequirement::None,
+            )),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(err.to_string().contains("is not the current roster epoch"), "{err}");
+    }
+
+    #[test]
+    fn broadcast_acknowledged_requires_required_acknowledgement() {
+        let mut state = empty_state(&[("alice", Role::Implementor)]);
+        let alice = a("alice");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        let epoch_id = state.roster_epoch.as_ref().unwrap().id.clone();
+
+        let broadcast_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::BroadcastPublished(broadcast(
+                epoch_id,
+                crate::common::AudienceSelector::AllActive,
+                &[&alice],
+                crate::common::AckRequirement::None, // not required
+            )),
+            [],
+        );
+        apply_ok(&mut state, &broadcast_env);
+
+        let env = Envelope::new(
+            &alice,
+            2,
+            no_frontier(),
+            &EventData::BroadcastAcknowledged(BroadcastAcknowledged {
+                broadcasts: StringSet::from_iter([broadcast_env.id.clone()]),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(err.to_string().contains("does not require acknowledgement"), "{err}");
+    }
+
+    #[test]
+    fn broadcast_acknowledged_rejects_an_agent_outside_the_audience() {
+        let mut state = empty_state(&[("alice", Role::Implementor), ("bob", Role::Implementor)]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        let epoch_id = state.roster_epoch.as_ref().unwrap().id.clone();
+
+        let broadcast_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::BroadcastPublished(broadcast(
+                epoch_id,
+                crate::common::AudienceSelector::Agents(StringSet::from_iter([alice.clone()])),
+                &[&alice], // bob is not addressed
+                crate::common::AckRequirement::Required,
+            )),
+            [],
+        );
+        apply_ok(&mut state, &broadcast_env);
+
+        let env = Envelope::new(
+            &bob,
+            1,
+            no_frontier(),
+            &EventData::BroadcastAcknowledged(BroadcastAcknowledged {
+                broadcasts: StringSet::from_iter([broadcast_env.id.clone()]),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(err.to_string().contains("was not addressed"), "{err}");
+    }
+
+    #[test]
+    fn broadcast_acknowledged_by_an_addressed_agent_records_it() {
+        let mut state = empty_state(&[("alice", Role::Implementor)]);
+        let alice = a("alice");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        let epoch_id = state.roster_epoch.as_ref().unwrap().id.clone();
+
+        let broadcast_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::BroadcastPublished(broadcast(
+                epoch_id,
+                crate::common::AudienceSelector::AllActive,
+                &[&alice],
+                crate::common::AckRequirement::Required,
+            )),
+            [],
+        );
+        apply_ok(&mut state, &broadcast_env);
+
+        let env = Envelope::new(
+            &alice,
+            2,
+            no_frontier(),
+            &EventData::BroadcastAcknowledged(BroadcastAcknowledged {
+                broadcasts: StringSet::from_iter([broadcast_env.id.clone()]),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &env);
+        assert!(state.broadcast_acknowledged_by[&broadcast_env.id].contains(&alice));
+    }
+
+    /// Gate 13: `broadcast.seen` never implies the announced problem is
+    /// fixed and is accepted regardless of `acknowledgement` -- unlike
+    /// `broadcast.acknowledged`, there is no "required" precondition at all.
+    #[test]
+    fn broadcast_seen_is_accepted_for_an_informational_broadcast() {
+        let mut state = empty_state(&[("alice", Role::Implementor)]);
+        let alice = a("alice");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        let epoch_id = state.roster_epoch.as_ref().unwrap().id.clone();
+
+        let broadcast_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::BroadcastPublished(broadcast(
+                epoch_id,
+                crate::common::AudienceSelector::AllActive,
+                &[&alice],
+                crate::common::AckRequirement::None,
+            )),
+            [],
+        );
+        apply_ok(&mut state, &broadcast_env);
+
+        let env = Envelope::new(
+            &alice,
+            2,
+            no_frontier(),
+            &EventData::BroadcastSeen(BroadcastSeen {
+                broadcasts: StringSet::from_iter([broadcast_env.id.clone()]),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &env);
+        assert!(state.broadcast_seen_by[&broadcast_env.id].contains(&alice));
     }
 }

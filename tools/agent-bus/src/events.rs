@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     Implementor,
@@ -497,6 +497,71 @@ pub struct FrictionSynthesized {
     pub revisit_trigger: Option<Text>,
 }
 
+// ----------------------------------------------------------------- broadcast
+
+/// docs/AGENT_COORDINATION_EVOLUTION.md section 4.2: a replacement
+/// declaration of an agent's *explicitly* selected subscription topics.
+/// Role-implied topics, interfaces named in scope dependencies, and
+/// mandatory safety/active-protocol topics are not carried here -- those
+/// are computed from already-known state (`primary_role`, `scope`), not
+/// separately declared, so this event only ever needs to state what the
+/// agent additionally opted into.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubscriptionSet {
+    pub topics: StringSet<CoordinationTopic>,
+}
+
+/// docs/AGENT_COORDINATION_EVOLUTION.md section 4.1's `Broadcast` record.
+/// `audience_snapshot` is the checked publisher's own resolution of
+/// `audience_selector` against `audience_epoch`, fixed at publish time --
+/// "later scope, role, or subscription changes do not retroactively change
+/// who was addressed" (section 4.2, gate 12).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BroadcastPublished {
+    pub topics: StringSet<CoordinationTopic>,
+    pub importance: crate::common::Importance,
+    pub summary: Short,
+    pub detail: Text,
+    pub affected_paths: StringSet<crate::scalars::PathClaim>,
+    pub affected_interfaces: StringSet<Short>,
+    pub product_commits: StringSet<ObjectId>,
+    pub audience_selector: crate::common::AudienceSelector,
+    /// The exact roster epoch `audience_selector` was resolved against --
+    /// what a later validator re-resolves the selector relative to, to
+    /// confirm `audience_snapshot` rather than merely trust it.
+    pub audience_epoch: ObjectId,
+    pub audience_snapshot: StringSet<Agent>,
+    pub acknowledgement: crate::common::AckRequirement,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deadline: Option<crate::scalars::Timestamp>,
+    pub supersedes: StringSet<EventId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workaround: Option<Text>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expiry_condition: Option<Text>,
+}
+
+/// docs/AGENT_COORDINATION_EVOLUTION.md section 4.2: an explicit,
+/// batchable acknowledgement of one or more `acknowledgement: required`
+/// broadcasts -- never implies the announced problem is fixed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BroadcastAcknowledged {
+    pub broadcasts: StringSet<EventId>,
+}
+
+/// docs/AGENT_COORDINATION_EVOLUTION.md section 4.2: an optional, batched,
+/// non-authoritative read receipt -- "reading position is disposable local
+/// state by default"; this is only ever published when an auditable
+/// receipt is specifically useful, never required (gate 13).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BroadcastSeen {
+    pub broadcasts: StringSet<EventId>,
+}
+
 // -------------------------------------------------------------- EventData
 
 macro_rules! event_data {
@@ -573,6 +638,10 @@ event_data! {
     LifecycleConflictResolved(LifecycleConflictResolved) = "lifecycle.conflict_resolved",
     FrictionReported(FrictionReported) = "friction.reported",
     FrictionSynthesized(FrictionSynthesized) = "friction.synthesized",
+    SubscriptionSet(SubscriptionSet) = "subscription.set",
+    BroadcastPublished(BroadcastPublished) = "broadcast.published",
+    BroadcastAcknowledged(BroadcastAcknowledged) = "broadcast.acknowledged",
+    BroadcastSeen(BroadcastSeen) = "broadcast.seen",
 }
 
 impl EventData {
@@ -664,6 +733,10 @@ impl EventData {
                 .chain(d.promoted_to.iter().cloned())
                 .chain(d.duplicate_of.iter().cloned())
                 .collect(),
+            EventData::SubscriptionSet(_) => BTreeSet::new(),
+            EventData::BroadcastPublished(d) => d.supersedes.iter().cloned().collect(),
+            EventData::BroadcastAcknowledged(d) => d.broadcasts.iter().cloned().collect(),
+            EventData::BroadcastSeen(d) => d.broadcasts.iter().cloned().collect(),
         }
     }
 }
@@ -977,6 +1050,32 @@ mod tests {
                 duplicate_of: None,
                 revisit_trigger: None,
             }),
+            EventData::SubscriptionSet(SubscriptionSet {
+                topics: StringSet::from_iter([CoordinationTopic::parse("safety.memory".into()).unwrap()]),
+            }),
+            EventData::BroadcastPublished(BroadcastPublished {
+                topics: StringSet::from_iter([CoordinationTopic::parse("release.main".into()).unwrap()]),
+                importance: crate::common::Importance::Informational,
+                summary: short("s"),
+                detail: text("d"),
+                affected_paths: StringSet::default(),
+                affected_interfaces: StringSet::default(),
+                product_commits: StringSet::default(),
+                audience_selector: crate::common::AudienceSelector::AllActive,
+                audience_epoch: crate::scalars::ObjectId::parse("a".repeat(40)).unwrap(),
+                audience_snapshot: StringSet::from_iter([a("bob")]),
+                acknowledgement: crate::common::AckRequirement::None,
+                deadline: None,
+                supersedes: StringSet::default(),
+                workaround: None,
+                expiry_condition: None,
+            }),
+            EventData::BroadcastAcknowledged(BroadcastAcknowledged {
+                broadcasts: StringSet::from_iter([previous.clone()]),
+            }),
+            EventData::BroadcastSeen(BroadcastSeen {
+                broadcasts: StringSet::from_iter([previous.clone()]),
+            }),
         ];
 
         let all_kinds: BTreeSet<&str> = EventData::all_kinds().into_iter().collect();
@@ -1069,6 +1168,51 @@ mod tests {
             })
             .referenced_ids(),
             [report, promoted].into()
+        );
+
+        assert_eq!(
+            EventData::SubscriptionSet(SubscriptionSet {
+                topics: StringSet::default(),
+            })
+            .referenced_ids(),
+            BTreeSet::new()
+        );
+
+        let broadcast = eid("dave", 5);
+        assert_eq!(
+            EventData::BroadcastPublished(BroadcastPublished {
+                topics: StringSet::default(),
+                importance: crate::common::Importance::Critical,
+                summary: short("s"),
+                detail: text("d"),
+                affected_paths: StringSet::default(),
+                affected_interfaces: StringSet::default(),
+                product_commits: StringSet::default(),
+                audience_selector: crate::common::AudienceSelector::AllActive,
+                audience_epoch: crate::scalars::ObjectId::parse("a".repeat(40)).unwrap(),
+                audience_snapshot: StringSet::from_iter([a("bob")]),
+                acknowledgement: crate::common::AckRequirement::Required,
+                deadline: None,
+                supersedes: StringSet::from_iter([broadcast.clone()]),
+                workaround: None,
+                expiry_condition: None,
+            })
+            .referenced_ids(),
+            [broadcast.clone()].into()
+        );
+        assert_eq!(
+            EventData::BroadcastAcknowledged(BroadcastAcknowledged {
+                broadcasts: StringSet::from_iter([broadcast.clone()]),
+            })
+            .referenced_ids(),
+            [broadcast.clone()].into()
+        );
+        assert_eq!(
+            EventData::BroadcastSeen(BroadcastSeen {
+                broadcasts: StringSet::from_iter([broadcast.clone()]),
+            })
+            .referenced_ids(),
+            [broadcast].into()
         );
     }
 

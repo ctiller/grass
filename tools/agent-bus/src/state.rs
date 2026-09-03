@@ -9,7 +9,7 @@ use crate::bootstrap::BusConfig;
 use crate::common::Priority;
 use crate::events::*;
 use crate::scalars::{Agent, EventId, ObjectId, Short, Text};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ItemStatus {
@@ -141,6 +141,12 @@ pub struct AgentState {
     pub plan: Option<PlanSet>,
     pub progress_tail: Vec<ProgressReported>,
     pub next_seq: u64,
+    /// Explicitly selected subscription topics from this agent's most
+    /// recent `subscription.set` (docs/AGENT_COORDINATION_EVOLUTION.md
+    /// section 4.2) -- role-implied and mandatory topics are not stored
+    /// here since they are derived from `primary_role`/`scope`, not
+    /// separately declared.
+    pub subscribed_topics: crate::scalars::StringSet<crate::scalars::CoordinationTopic>,
 }
 
 impl AgentState {
@@ -186,6 +192,18 @@ pub struct BusState {
     /// The most recent synthesis event for each theme -- what a later
     /// `duplicate_of` reference and `agent-bus friction --theme` both read.
     pub friction_theme_synthesis: BTreeMap<crate::scalars::CoordinationTopic, EventId>,
+    /// Every `broadcast.published` event, verbatim.
+    pub broadcasts: BTreeMap<EventId, BroadcastPublished>,
+    /// Who has acknowledged each broadcast, by `broadcast.acknowledged`.
+    /// Absent key == nobody yet. Only ever populated for a broadcast whose
+    /// own `acknowledgement` is `required`, but keyed by any broadcast id
+    /// for simplicity -- `apply::apply_broadcast_acknowledged` is what
+    /// enforces the "must be required" precondition.
+    pub broadcast_acknowledged_by: BTreeMap<EventId, BTreeSet<Agent>>,
+    /// Who has published a `broadcast.seen` receipt for each broadcast --
+    /// purely an optional, non-authoritative audit trail (gate 13: this is
+    /// never required, regardless of importance or acknowledgement).
+    pub broadcast_seen_by: BTreeMap<EventId, BTreeSet<Agent>>,
 }
 
 impl BusState {
@@ -208,6 +226,9 @@ impl BusState {
             friction_reports: BTreeMap::new(),
             friction_synthesis: BTreeMap::new(),
             friction_theme_synthesis: BTreeMap::new(),
+            broadcasts: BTreeMap::new(),
+            broadcast_acknowledged_by: BTreeMap::new(),
+            broadcast_seen_by: BTreeMap::new(),
         }
     }
 

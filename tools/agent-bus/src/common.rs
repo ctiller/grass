@@ -1,6 +1,7 @@
 //! Common records shared across event kinds (AGENT_BUS_SCHEMA.md section 3).
 
-use crate::scalars::{Agent, EventId, Short, Text};
+use crate::events::Role;
+use crate::scalars::{Agent, CoordinationTopic, EventId, Short, StringSet, Text};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -139,4 +140,38 @@ pub enum FrictionDispositionKind {
     Duplicate,
     NeedsEvidence,
     Deferred,
+}
+
+// -------------------------------------------------------------- broadcasts
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Importance {
+    Informational,
+    Elevated,
+    Critical,
+}
+
+/// docs/AGENT_COORDINATION_EVOLUTION.md section 4.1's `acknowledgement:
+/// none | required`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AckRequirement {
+    None,
+    Required,
+}
+
+/// Who a broadcast addresses, before resolution fixes it into a concrete
+/// `audience_snapshot` (section 4.2). Each variant is exactly one of the
+/// selector shapes the doc names: "an audience selector may name agents,
+/// roles, topic subscribers, dependents of an interface, or all active
+/// agents."
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "value")]
+pub enum AudienceSelector {
+    Agents(StringSet<Agent>),
+    Roles(std::collections::BTreeSet<Role>),
+    TopicSubscribers(CoordinationTopic),
+    InterfaceDependents(Short),
+    AllActive,
 }
