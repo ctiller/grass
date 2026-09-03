@@ -1109,10 +1109,20 @@ fn apply_review_accept(
         .review_chain(&d.nomination)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {}", env.id, d.nomination)))?;
     if chain.current_nomination != d.nomination {
-        return Err(invalid(format!(
-            "{}: {} is not the current nomination in its chain",
-            env.id, d.nomination
-        )));
+        // `d.nomination` was once this chain's current link but has since
+        // been superseded -- ordinarily, or by a concurrent reassignment
+        // this event's independently-published author could not have
+        // observed (AGENT_COORDINATION_EVOLUTION.md section 2.1: per-agent
+        // streams are single-writer and published without cross-observing
+        // each other). AGENT_BUS_SCHEMA.md section 8 says such an
+        // acceptance "never becomes an orphaned concurrent successor of a
+        // published reassignment" -- the fix is a no-op, not an `Err`:
+        // `reduce()`/`reduce_onto()` propagate any `Err` here via a bare
+        // `?` with no per-event isolation, so a hard failure would
+        // permanently break reduction of the *entire* bus for every host
+        // that has fetched both streams, not just this one chain
+        // (round-3 adversarial review, confirmed fleet-wide DoS).
+        return Ok(());
     }
     let expected_reviewer = chain
         .nomination_reviewer
@@ -1254,15 +1264,21 @@ fn apply_review_changes(
         .review_chain(&d.nomination)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {}", env.id, d.nomination)))?;
     if chain.current_nomination != d.nomination {
-        return Err(invalid(format!(
-            "{}: {} is not the current nomination in its chain",
-            env.id, d.nomination
-        )));
+        // See the identical comment in `apply_review_accept`: a no-op, not
+        // an `Err` -- a hard failure here would permanently break reduction
+        // of the entire bus, not just this chain.
+        return Ok(());
     }
     let reviewer = chain.nomination_reviewer.get(&d.nomination).unwrap();
     if reviewer != &env.agent {
         return Err(invalid(format!(
             "{}: only the accepting reviewer may request changes",
+            env.id
+        )));
+    }
+    if !chain.accepted() {
+        return Err(invalid(format!(
+            "{}: the named reviewer must accept the nomination before requesting changes",
             env.id
         )));
     }
@@ -1312,17 +1328,23 @@ fn apply_finding_disposition(
     // reassignment must not retain disposal authority merely by citing
     // their own now-stale nomination id, even though that id's own
     // nomination_reviewer entry never gets removed (it stays as a durable
-    // record of who accepted that particular link).
+    // record of who accepted that particular link). See the identical
+    // comment in `apply_review_accept` for why this is a no-op rather than
+    // an `Err`: a hard failure here would permanently break reduction of
+    // the entire bus, not just this chain.
     if chain.current_nomination != *nomination {
-        return Err(invalid(format!(
-            "{}: {nomination} is not the current nomination in its chain",
-            env.id
-        )));
+        return Ok(());
     }
     let reviewer = chain.nomination_reviewer.get(nomination).cloned();
     if reviewer.as_ref() != Some(&env.agent) {
         return Err(invalid(format!(
             "{}: only the accepting reviewer for the current nomination may dispose of findings",
+            env.id
+        )));
+    }
+    if !chain.accepted() {
+        return Err(invalid(format!(
+            "{}: the named reviewer must accept the nomination before disposing of findings",
             env.id
         )));
     }
@@ -1480,6 +1502,12 @@ fn apply_review_merge_authorized(
     if reviewer != &env.agent {
         return Err(invalid(format!(
             "{}: only the accepting reviewer may authorize a merge",
+            env.id
+        )));
+    }
+    if !chain.accepted() {
+        return Err(invalid(format!(
+            "{}: the named reviewer must accept the nomination before authorizing a merge",
             env.id
         )));
     }
@@ -5773,8 +5801,17 @@ mod tests {
         assert!(err.to_string().contains("unknown finding"), "{err}");
     }
 
+    /// Round-3 adversarial review, Critical finding: a `Err` here would
+    /// propagate via `reduce()`'s bare `?` with no per-event isolation,
+    /// permanently breaking reduction of the *entire* bus for every host
+    /// that has fetched both streams -- not merely this one review chain --
+    /// the moment a genuinely concurrent disposal and reassignment (two
+    /// independently-published, single-writer streams, neither observing
+    /// the other) are reduced together. The fix is a no-op: bob's stale
+    /// disposal simply does not apply, and the finding stays exactly as the
+    /// reassignment (which inherited it) left it.
     #[test]
-    fn rejects_finding_disposal_against_a_stale_nomination() {
+    fn ignores_finding_disposal_against_a_stale_nomination() {
         let mut state = empty_state(&[]);
         let alice = a("alice");
         let bob = a("bob");
@@ -5837,10 +5874,310 @@ mod tests {
             }),
             [],
         );
+        apply_ok(&mut state, &cleared_env);
+        let root = state.review_chain_by_nomination[&nominate_env.id].clone();
+        let key = (changes_env.id.clone(), "f1".to_string());
+        assert_eq!(
+            state.reviews[&root].findings[&key].disposition,
+            FindingDisposition::Open,
+            "bob's stale disposal must not have taken effect"
+        );
+    }
+
+    /// Companion to `ignores_finding_disposal_against_a_stale_nomination`
+    /// for `apply_review_accept`: bob never gets a chance to accept before
+    /// alice reassigns the nomination away from him. His late acceptance
+    /// must be a no-op, not a fatal `Err`.
+    #[test]
+    fn ignores_review_accept_against_a_stale_nomination() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        let mut state = empty_state(&[]);
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        apply_ok(&mut state, &register(&carol, Role::Reviewer));
+
+        let request = review_request(&[&alice], &bob);
+        let nominate_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::ReviewNominated(request.clone()),
+            [],
+        );
+        apply_ok(&mut state, &nominate_env);
+
+        let reassign_env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewReassigned(ReviewReassigned {
+                authors: request.authors.clone(),
+                product_branch: request.product_branch.clone(),
+                reviewer: carol.clone(),
+                required_checks: request.required_checks.clone(),
+                review_scope: request.review_scope.clone(),
+                summary: request.summary.clone(),
+                target_branch: request.target_branch.clone(),
+                evidence: request.evidence.clone(),
+                replaces: nominate_env.id.clone(),
+                reason: text("bob went quiet"),
+                inherited_findings: vec![],
+            }),
+            [],
+        );
+        apply_ok(&mut state, &reassign_env);
+
+        // bob, unaware his nomination was already reassigned, accepts it
+        // anyway under its now-stale id.
+        let accept_env = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewNominationAccepted(ReviewNominationAccepted {
+                nomination: nominate_env.id.clone(),
+                note: text(""),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &accept_env);
+
+        let chain = state.review_chain(&reassign_env.id).unwrap();
+        assert_eq!(chain.current_nomination, reassign_env.id);
+        assert!(
+            !chain.accepted_nominations.contains(&nominate_env.id),
+            "bob's stale acceptance must not have taken effect"
+        );
+        assert!(!chain.accepted());
+    }
+
+    /// Companion to `ignores_finding_disposal_against_a_stale_nomination`
+    /// for `apply_review_changes`: bob accepts, then loses a genuinely
+    /// concurrent reassignment race he never observed. His changes-request
+    /// against the stale nomination must be a no-op, not a fatal `Err` that
+    /// would (via `reduce()`'s bare `?` propagation) break reduction of the
+    /// entire bus for any host that later fetches both streams.
+    #[test]
+    fn ignores_review_changes_requested_against_a_stale_nomination() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        let mut state = empty_state(&[]);
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        apply_ok(&mut state, &register(&carol, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+
+        let request = review_request(&[&alice], &bob);
+        let reassign_env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewReassigned(ReviewReassigned {
+                authors: request.authors.clone(),
+                product_branch: request.product_branch.clone(),
+                reviewer: carol.clone(),
+                required_checks: request.required_checks.clone(),
+                review_scope: request.review_scope.clone(),
+                summary: request.summary.clone(),
+                target_branch: request.target_branch.clone(),
+                evidence: request.evidence.clone(),
+                replaces: nominate_env.id.clone(),
+                reason: text("bob went quiet"),
+                inherited_findings: vec![],
+            }),
+            [],
+        );
+        apply_ok(&mut state, &reassign_env);
+
+        // bob, unaware of the reassignment, requests changes against the
+        // now-stale nomination.
+        let changes_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                nomination: nominate_env.id.clone(),
+                reviewed_commit: hash(3),
+                findings: vec![finding("f1")],
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &changes_env);
+
+        let root = state.review_chain_by_nomination[&nominate_env.id].clone();
+        assert!(
+            state.reviews[&root].findings.is_empty(),
+            "bob's stale changes-request must not have recorded any finding"
+        );
+    }
+
+    /// Round-3 adversarial review, Significant finding: AGENT_BUS.md section
+    /// 6.6 / AGENT_BUS_SCHEMA.md section 8 say only the agent who *accepted*
+    /// a nomination may emit review.changes_requested, review.findings_
+    /// cleared/superseded, or review.merge_authorized -- being merely the
+    /// *named* reviewer is not enough. Previously only reviewer identity was
+    /// checked, so a nominated-but-never-accepted reviewer could still
+    /// validly request changes.
+    #[test]
+    fn rejects_review_changes_requested_before_the_reviewer_has_accepted() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let mut state = empty_state(&[]);
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let request = review_request(&[&alice], &bob);
+        let nominate_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::ReviewNominated(request),
+            [],
+        );
+        apply_ok(&mut state, &nominate_env);
+
+        let changes_env = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                nomination: nominate_env.id.clone(),
+                reviewed_commit: hash(3),
+                findings: vec![finding("f1")],
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+        let err = apply_event(&mut state, &changes_env).unwrap_err();
+        assert!(
+            err.to_string().contains("must accept the nomination"),
+            "{err}"
+        );
+    }
+
+    /// Companion to the above for `review.merge_authorized`.
+    #[test]
+    fn rejects_review_merge_authorized_before_the_reviewer_has_accepted() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let mut state = empty_state(&[("coord1", Role::Coordinator)]);
+        let coord1 = a("coord1");
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
+        let engine_epoch = default_merge_engine_epoch();
+        state.merge_engine_info.insert(
+            engine_epoch.clone(),
+            (
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+            ),
+        );
+        state.current_merge_engine_epoch = Some(engine_epoch);
+        let request = review_request(&[&alice], &bob);
+        let nominate_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::ReviewNominated(request),
+            [],
+        );
+        apply_ok(&mut state, &nominate_env);
+
+        let authorize_env = Envelope::new(
+            &bob,
+            1,
+            complete_frontier(&epoch),
+            &EventData::ReviewMergeAuthorized(merge_authorized(
+                &nominate_env.id,
+                StringSet::default(),
+                &[],
+            )),
+            [],
+        );
+        let err = apply_event(&mut state, &authorize_env).unwrap_err();
+        assert!(
+            err.to_string().contains("must accept the nomination"),
+            "{err}"
+        );
+    }
+
+    /// Companion to the above for finding disposal -- this one needs an
+    /// *already-open* finding under a reassignment whose new reviewer has
+    /// not yet accepted, since a finding cannot exist at all without a
+    /// prior accepted changes-request. Findings persist chain-wide across
+    /// reassignment (they are inherited, not per-link), so the still-open
+    /// finding is exactly what the new, not-yet-accepted reviewer would
+    /// otherwise be able to dispose of.
+    #[test]
+    fn rejects_finding_disposal_before_the_new_reviewer_has_accepted() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        let mut state = empty_state(&[]);
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        apply_ok(&mut state, &register(&carol, Role::Reviewer));
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let changes_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                nomination: nominate_env.id.clone(),
+                reviewed_commit: hash(3),
+                findings: vec![finding("f1")],
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &changes_env);
+
+        let request = review_request(&[&alice], &bob);
+        let reassign_env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&nominate_env.id, &changes_env.id]),
+            &EventData::ReviewReassigned(ReviewReassigned {
+                authors: request.authors.clone(),
+                product_branch: request.product_branch.clone(),
+                reviewer: carol.clone(),
+                required_checks: request.required_checks.clone(),
+                review_scope: request.review_scope.clone(),
+                summary: request.summary.clone(),
+                target_branch: request.target_branch.clone(),
+                evidence: request.evidence.clone(),
+                replaces: nominate_env.id.clone(),
+                reason: text("bob went quiet"),
+                inherited_findings: vec![crate::common::FindingRef {
+                    changes_event: changes_env.id.clone(),
+                    finding_id: short("f1"),
+                }],
+            }),
+            [],
+        );
+        apply_ok(&mut state, &reassign_env);
+
+        // carol, the new reviewer, has not accepted yet.
+        let cleared_env = Envelope::new(
+            &carol,
+            1,
+            frontier_seeing(&[&reassign_env.id]),
+            &EventData::ReviewFindingsCleared(ReviewFindingsCleared {
+                nomination: reassign_env.id.clone(),
+                changes_event: changes_env.id.clone(),
+                finding_id: short("f1"),
+                resolved_commit: hash(4),
+                summary: text("fixed"),
+            }),
+            [],
+        );
         let err = apply_event(&mut state, &cleared_env).unwrap_err();
         assert!(
-            err.to_string()
-                .contains("is not the current nomination in its chain"),
+            err.to_string().contains("must accept the nomination"),
             "{err}"
         );
     }
