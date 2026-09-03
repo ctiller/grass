@@ -61,6 +61,63 @@ theorem the_lend_freezes_the_head :
     lentToEngine.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ = AuthorityState.frozen := by
   exact ⟨by decide, by decide⟩
 
+/-- **The same profile with no authority providers at all**, which is what
+`StepPolicy.authorities`' own default gives a profile author who writes nothing.
+
+Review stepped exactly this: `lendSlot` minted a grant *through `step`*, and the very
+next ordinary store walked over it — event minted, ledger empty, byte overwritten —
+because the grant map was consulted by one optional provider and by nothing else.
+Every law in `Grass/Memory/Loan.lean` was conditioned on a policy field. The rule is
+`refusalOf`'s now, so this policy enforces it too, and the theorems below are the
+demonstration. -/
+def nakedPolicy : StepPolicy :=
+  { Grass.Tests.FakeIsa.policy with
+    authorities := []
+    violationClassesDeclared := by decide }
+
+/-- Step an `Alpha` operation with no providers listed. -/
+def nakedStep (state : MachineState) (op : Alpha) : StepOutcome :=
+  Grass.Op.step nakedPolicy state (SomeOperation.of op) thread₀ .thread ⟨⟨"alpha"⟩⟩
+
+/-- **A store to lent bytes is refused with no provider listed.** -/
+theorem the_transition_enforces_the_loan_rule_without_a_provider :
+    ∀ s, (nakedStep lentToEngine .store).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 ∧
+      s.memory.byteAt? bufferAlloc 0 = some 0x00 := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **And a grant minted by an operation is enforced against the next one.** The
+whole path, with nothing hand-built: `lendSlot` lends the buffer's head to the engine
+through `step`, and the following store is refused by a policy that lists no
+authority providers.
+
+The event count stays at one rather than dropping to zero, because the lend's own
+store committed and events accumulate — an earlier version of this fixture asserted
+`events = []` and was wrong about which step the event came from. -/
+theorem a_grant_minted_through_step_is_enforced_without_a_provider :
+    ∀ s₁, (nakedStep state₀ .lendSlot).state? = some s₁ →
+      s₁.memory.AnyGrantOver bufferProv ⟨0, 8⟩ ∧ s₁.violations.IsEmpty ∧
+      ∀ s₂, (nakedStep s₁ .store).state? = some s₂ →
+        s₂.events.length = 1 ∧ s₂.violations.recordCount = 1 ∧
+        s₂.violations.records?.any (fun r => r.class_ = .authorityUnavailable) := by
+  intro s₁ hs₁
+  cases hs₁
+  refine ⟨by decide, by decide, ?_⟩
+  intro s₂ hs₂
+  cases hs₂
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- The unlent store still commits under the same providerless policy, so the
+refusals above are the loan rule and not a policy that refuses everything. -/
+theorem the_unlent_store_commits_without_a_provider :
+    ∀ s, (nakedStep state₀ .store).state? = some s →
+      s.events.length = 1 ∧ s.violations.IsEmpty := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
 /--
 **The thread's store to lent bytes is refused, through `step`.**
 

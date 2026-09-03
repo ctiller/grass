@@ -1621,6 +1621,38 @@ refuses everything.
   bytes *nothing* is held over is indistinguishable from a legitimate owner's first
   loan, and stays so until `AllocationRecord` records an owner, which is the same gap
   the bullet below records from the other side.
+- ~~**The loan rule was a provider a profile could decline to list.**~~ The largest
+  finding of round ten, and the same shape as the round before it one level up.
+  `StepPolicy.authorities` defaults to `[]`; the grant map was read by
+  `AuthorityProvider.loan` and by nothing else — `denialOf` reads the allocation
+  table and never `grants` — so a profile that declared no providers got no authority
+  enforcement at all. Review took the fixture profile, changed that one field to the
+  structure's own default, and stepped the fixture's own operations: `lendSlot` minted
+  a grant *through `step`*, and the next ordinary store walked over it with an event
+  minted, no violation, and the byte overwritten. Every law in
+  `Grass/Memory/Loan.lean` was conditioned on a policy field a profile author gets
+  wrong by writing nothing.
+
+  §3's rule is `refusalOf`'s now, ahead of the provider search, so no provider list
+  can remove it and a provider may only add its own refusals.
+  `refusalOf_refuses_the_unauthorized` is the law and it quantifies over `policy`,
+  which is the point; `refusalOf_allows_the_unheld` is the companion that stops it
+  refusing everything. `Tests/Op/StandardLoan.lean` steps the whole path under a
+  policy listing no providers at all: a store to lent bytes refused, a grant minted by
+  one operation enforced against the next, and an unlent store still committing.
+
+  What this leaves is `AuthorityProvider.loan`, whose refusal condition is now a
+  strict subset of the transition's own — two encodings of one rule, which
+  [FOUNDATION.md](FOUNDATION.md) law 11 forbids. Deleting it means rewriting eighteen
+  citations across five modules, and it is the next thing to do here rather than a
+  thing done under the same commit as the fix.
+
+  The deeper half of review's finding stands and is not closed: `AuthorityProvider` is
+  `refuses : MachineState → AccessDescriptor → Bool` with no locality, monotonicity or
+  soundness condition attached, and `StepPolicy` carries a proof obligation about a
+  provider's *class* and none about its behaviour. A provider keyed on
+  `state.events.length` is well formed. Making refusal monotone in the state, or
+  local to the access, is a design question this branch has not answered.
 - ~~**A faulting substep applied its whole authority effect.**~~ The first real
   soundness defect an adversarial round found in the authority-effect work, and it
   was a gate that was not extended rather than a rule nobody wrote.
