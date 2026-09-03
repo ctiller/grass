@@ -23,15 +23,26 @@ does not cover this offset, so the lookup skips it", which is a one-line case
 split rather than an argument about maintained sortedness.
 
 The cost is that a read scans runs, so a long-running program's reads degrade.
-That is a real cost and it is **not** paid off here. What makes it acceptable is
-that the representation does not escape: `runs`, `Run`, and every lemma mentioning
-either are `private`, so the exported surface is `cellAt?`, `byteAt?`,
-`InitializedAt`, `Initialized`, `empty`, `write`, and theorems over those. A
-compacting store agreeing pointwise satisfies every exported theorem unchanged,
-and `docs/OLEAN_SHARDING.md` §1 asks for exactly that — facts crossing the
-boundary as exported theorems rather than as a representation consumers unfold.
-Compaction is owed, and is recorded as owed in
-`docs/MEMORY_IMPLEMENTATION_PLAN.md`.
+What makes that acceptable is that the representation does not escape: `runs`,
+`Run`, and every lemma mentioning either are `private`, so the exported surface is
+`cellAt?`, `byteAt?`, `InitializedAt`, `Initialized`, `empty`, `write`, `compact`,
+and theorems over those. A store agreeing pointwise satisfies every exported
+theorem unchanged, and `docs/OLEAN_SHARDING.md` §1 asks for exactly that — facts
+crossing the boundary as exported theorems rather than as a representation
+consumers unfold.
+
+`compact` is that argument discharged rather than promised: `cellAt?_compact`
+proves the compacted store answers every offset identically, so it is a drop-in by
+theorem and not by intention. **It is partial.** It drops a run every byte of which
+a newer run covers, which is the degenerate case — a loop storing to one slot — and
+it does not merge adjacent runs or clip partially overlapping ones, because that
+needs splitting a run against a range. Reads are therefore bounded by the number of
+distinct live regions plus unnormalised partial overlaps, not by the number of
+writes. The remainder is recorded in `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2.
+
+Nothing calls `compact` automatically. Calling it on every write would restore the
+cost it exists to avoid, so when to call it is a policy an owner of the allocation
+lifecycle should set, not something this module should decide.
 
 That is a claim about the exported *theorems*, and it needs both halves of that
 qualification. It was not true of the theorems when first written: `cellAt?_write`
@@ -430,6 +441,160 @@ theorem not_initialized_write_false (store : ByteStore) {start : Nat} {bytes : B
   have hcov : (ByteRange.mk start bytes.length).Covers start :=
     ByteRange.covers_of (Nat.le_refl _) (by show start < start + bytes.length; omega)
   exact fun hinit => not_initializedAt_write_false store hcov (hinit start hcov)
+
+/-!
+## Compaction
+
+The journal grows by one run per write and a read scans it, so a program that
+stores to one slot in a loop pays for every past store on every later read. That
+cost was recorded as owed from the day the store landed, on the argument that
+every exported theorem is stated over `cellAt?` and so a compacting store agreeing
+pointwise would satisfy them unchanged. `cellAt?_compact` is that argument
+discharged rather than asserted: it is the same claim, proved.
+
+What `compact` removes is a run every one of whose bytes a *newer* run already
+covers. `findSome?` returns the first covering run and the newer one is earlier,
+so such a run can never be the answer and dropping it is invisible. That is the
+degenerate case exactly — repeated writes to one range — and it is the one worth
+paying for.
+
+What it does **not** do is merge or split runs. Two writes to adjacent ranges stay
+two runs, and a write partially overlapping an older one leaves both. Normalising
+those needs clipping a run against a range, which splits it, and that is a larger
+piece of work than this. So compaction here bounds the degenerate case and does
+not make reads generally cheap; `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records
+the remainder.
+-/
+
+/-- `runCoveredBy r seen` holds when every byte `r` holds is also held by some run in
+`seen`. Bounded by the run's own length, so it is decidable. -/
+private def runCoveredBy (r : Run) (seen : List Run) : Prop :=
+  ∀ i, i < r.bytes.length → ∃ s ∈ seen, s.range.Covers (r.start + i)
+
+private instance decRunCoveredBy (r : Run) (seen : List Run) :
+    Decidable (runCoveredBy r seen) :=
+  inferInstanceAs (Decidable (∀ i, i < r.bytes.length → ∃ s ∈ seen, s.range.Covers (r.start + i)))
+
+/-- Drop every run all of whose bytes an already-scanned (newer) run covers.
+`seen` is the runs kept so far, which are exactly the ones a reader meets first. -/
+private def pruneFrom (seen : List Run) : List Run → List Run
+  | [] => []
+  | r :: rest =>
+      if runCoveredBy r seen then pruneFrom seen rest
+      else r :: pruneFrom (r :: seen) rest
+
+/-- The cell a single run offers a reader at `offset`. -/
+private def cellOf (offset : Nat) (run : Run) : Option (Byte × Bool) :=
+  (run.byteAt? offset).map (·, run.initializes)
+
+private theorem cellOf_isSome_iff {offset : Nat} {run : Run} :
+    (cellOf offset run).isSome ↔ run.range.Covers offset := by
+  unfold cellOf
+  rw [← Run.byteAt?_isSome_iff]
+  cases run.byteAt? offset <;> simp
+
+/--
+Pruning does not change what a reader finds.
+
+`seen` holds the runs already scanned, so the hypothesis is the invariant a reader
+carries: it has not yet found a covering run. A dropped run is covered everywhere
+by runs in `seen`, which come earlier, so it was never the one `findSome?` would
+have returned.
+-/
+private theorem findSome?_pruneFrom (offset : Nat) :
+    ∀ (seen : List Run) (l : List Run),
+      (∀ s ∈ seen, ¬ s.range.Covers offset) →
+      (pruneFrom seen l).findSome? (cellOf offset) = l.findSome? (cellOf offset)
+  | _, [], _ => rfl
+  | seen, r :: rest, hseen => by
+    unfold pruneFrom
+    by_cases hcov : r.range.Covers offset
+    · have hb : r.start ≤ offset ∧ offset < r.start + r.bytes.length := by
+        have h := hcov
+        rw [ByteRange.covers_def] at h
+        exact ⟨h.1, h.2⟩
+      have hnot : ¬ runCoveredBy r seen := by
+        intro hcovered
+        obtain ⟨s, hmem, hs⟩ := hcovered (offset - r.start) (by omega)
+        rw [show r.start + (offset - r.start) = offset from by omega] at hs
+        exact hseen s hmem hs
+      rw [if_neg hnot]
+      have hsome : (cellOf offset r).isSome := cellOf_isSome_iff.mpr hcov
+      cases hc : cellOf offset r with
+      | none => rw [hc] at hsome; simp at hsome
+      | some v => simp [hc]
+    · have hnone : cellOf offset r = Option.none := by
+        cases hc : cellOf offset r with
+        | none => rfl
+        | some v => exact absurd (cellOf_isSome_iff.mp (by rw [hc]; simp)) hcov
+      by_cases hcovered : runCoveredBy r seen
+      · rw [if_pos hcovered, findSome?_pruneFrom offset seen rest hseen,
+          List.findSome?_cons, hnone]
+      · rw [if_neg hcovered, List.findSome?_cons, List.findSome?_cons, hnone]
+        simp only []
+        exact findSome?_pruneFrom offset (r :: seen) rest
+          (fun s hs => by
+            rcases List.mem_cons.mp hs with rfl | hs'
+            · exact hcov
+            · exact hseen s hs')
+
+/--
+Drop the runs a reader can never reach.
+
+**The compaction the module comment promised.** `cellAt?_compact` is the property
+that makes it a drop-in: it agrees with the original at every offset, so every
+exported theorem holds of it unchanged, because every exported theorem is stated
+over `cellAt?`.
+-/
+def compact (store : ByteStore) : ByteStore := ⟨pruneFrom [] store.runs⟩
+
+/-- **Compaction is invisible.** The store it produces answers every offset
+exactly as the original does, in byte and in initialization. -/
+@[simp] theorem cellAt?_compact (store : ByteStore) (offset : Nat) :
+    store.compact.cellAt? offset = store.cellAt? offset :=
+  findSome?_pruneFrom offset [] store.runs (by simp)
+
+/-- The byte consequence. -/
+@[simp] theorem byteAt?_compact (store : ByteStore) (offset : Nat) :
+    store.compact.byteAt? offset = store.byteAt? offset := by
+  unfold byteAt?; rw [cellAt?_compact]
+
+/-- The initialization consequence, so a framing argument survives compaction. -/
+@[simp] theorem initializedAt_compact (store : ByteStore) (offset : Nat) :
+    store.compact.InitializedAt offset ↔ store.InitializedAt offset := by
+  unfold InitializedAt; rw [cellAt?_compact]
+
+/-! ### That it removes anything
+
+`cellAt?_compact` would hold of a `compact` that did nothing, so these say it does
+something and does not do too much. They live inside the module because `runs` is
+private: a consumer cannot count runs, which is the point of sealing it. -/
+
+/-- Two writes to one range leave two runs, and compaction leaves one. This is the
+degenerate case the journal was worst at -- a loop storing to one slot. -/
+example :
+    ((empty.write 0 [1, 2] true).write 0 [3, 4] true).runs.length = 2 ∧
+    (((empty.write 0 [1, 2] true).write 0 [3, 4] true).compact).runs.length = 1 := by
+  decide
+
+/-- Writes to disjoint ranges are both kept: neither shadows the other, so
+compaction does not remove a run a reader can still reach. -/
+example :
+    (((empty.write 0 [1, 2] true).write 8 [3, 4] true).compact).runs.length = 2 := by
+  decide
+
+/-- A partial overlap keeps both, because the older run still answers the bytes the
+newer one does not cover. This is the case compaction does *not* normalise. -/
+example :
+    (((empty.write 0 [1, 2, 3, 4] true).write 0 [9] true).compact).runs.length = 2 := by
+  decide
+
+/-- And the range form. -/
+theorem initialized_compact (store : ByteStore) (range : ByteRange) :
+    store.compact.Initialized range ↔ store.Initialized range := by
+  constructor <;> intro h offset hcov
+  · exact (initializedAt_compact store offset).mp (h offset hcov)
+  · exact (initializedAt_compact store offset).mpr (h offset hcov)
 
 end ByteStore
 

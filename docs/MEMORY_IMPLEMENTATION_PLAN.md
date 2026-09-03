@@ -704,6 +704,15 @@ one outright defect that had already merged — see §3.11's denial row.
   survivor is refused" to it, because that has to thread state through the
   `runAccesses` recursion. The theorem is not vacuous and is currently only usable
   concretely.
+- **Byte-store compaction is partial.** `ByteStore.compact` drops runs a newer run
+  covers everywhere, which is the degenerate case, and `cellAt?_compact` proves it
+  answers every offset identically — so the "a compacting store is a drop-in"
+  argument the module was designed around is now discharged rather than promised.
+  It does not merge adjacent runs or clip partial overlaps, which needs splitting a
+  run against a range. Reads are bounded by distinct live regions plus
+  unnormalised overlaps rather than by write count. Nothing calls it automatically,
+  because calling it per write restores the cost it avoids; when to call it belongs
+  to whoever owns the allocation lifecycle.
 - **`ByteStore` structural equality observes the journal.** Every exported
   *theorem* is representation-independent, but the derived `DecidableEq` is not:
   two pointwise-identical stores built by different write sequences are provably
