@@ -749,6 +749,51 @@ mod outer_tests {
     use crate::gitrepo::mock::MockGit;
     use std::path::PathBuf;
 
+    /// Run a real `git` subcommand and assert it succeeded -- for test setup
+    /// only, never for the behavior under test itself. Mirrors the pattern
+    /// already established in `sync.rs`'s test module.
+    fn git(dir: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed in {}", dir.display());
+    }
+
+    /// A real, non-bare repository with one commit on `main` -- the common
+    /// starting point for tests that exercise real `git` subprocess
+    /// behavior (as opposed to the `MockGit` seam used above).
+    fn init_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        git(path, &["init", "--quiet", "-b", "main"]);
+        git(path, &["config", "user.email", "test@example.com"]);
+        git(path, &["config", "user.name", "Test"]);
+        std::fs::write(path.join("README.md"), "hello\n").unwrap();
+        git(path, &["add", "README.md"]);
+        git(path, &["commit", "-q", "-m", "initial"]);
+        dir
+    }
+
+    /// A real bare repository, standing in for a remote (as in `sync.rs`'s
+    /// `init_bare_origin`).
+    fn init_bare_origin() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        git(dir.path(), &["init", "--quiet", "--bare", "-b", "main"]);
+        dir
+    }
+
+    /// Write `name` with `contents`, stage it, and commit it with `message`
+    /// -- the common "add one more real commit" step used by several tests
+    /// below to build up branch/merge history.
+    fn commit_file(dir: &Path, name: &str, contents: &str, message: &str) {
+        std::fs::write(dir.join(name), contents).unwrap();
+        git(dir, &["add", name]);
+        git(dir, &["commit", "-q", "-m", message]);
+    }
+
     /// `--git-common-dir` returning an already-absolute path (the common case
     /// from within a linked worktree, AGENT_BUS.md section 2) must be used
     /// as-is, not re-joined onto `start`.
@@ -904,41 +949,6 @@ mod outer_tests {
     /// real repository and a real (invalid) tree object id.
     #[test]
     fn commit_tree_deterministic_reports_a_real_git_failure() {
-        fn init_repo() -> tempfile::TempDir {
-            let dir = tempfile::tempdir().unwrap();
-            let path = dir.path();
-            std::process::Command::new("git")
-                .args(["init", "--quiet", "-b", "main"])
-                .arg(path)
-                .status()
-                .unwrap();
-            std::process::Command::new("git")
-                .arg("-C")
-                .arg(path)
-                .args(["config", "user.email", "test@example.com"])
-                .status()
-                .unwrap();
-            std::process::Command::new("git")
-                .arg("-C")
-                .arg(path)
-                .args(["config", "user.name", "Test"])
-                .status()
-                .unwrap();
-            std::fs::write(path.join("README.md"), "hello\n").unwrap();
-            std::process::Command::new("git")
-                .arg("-C")
-                .arg(path)
-                .args(["add", "README.md"])
-                .status()
-                .unwrap();
-            std::process::Command::new("git")
-                .arg("-C")
-                .arg(path)
-                .args(["commit", "-q", "-m", "initial"])
-                .status()
-                .unwrap();
-            dir
-        }
         let repo = init_repo();
         let err = commit_tree_deterministic(
             repo.path(),
@@ -948,5 +958,515 @@ mod outer_tests {
         )
         .unwrap_err();
         assert!(format!("{err}").contains("commit-tree failed"), "{err}");
+    }
+
+    /// The success path: given a real parent and its real tree, the
+    /// resulting commit's metadata must be exactly what the function's own
+    /// doc comment promises -- fixed author/committer identity, a timestamp
+    /// exactly one second past the (sole) parent's, no extra headers, and
+    /// the exact given message and parent list.
+    #[test]
+    fn commit_tree_deterministic_produces_a_real_deterministic_commit() {
+        let repo = init_repo();
+        let parent = rev_parse(repo.path(), "HEAD").unwrap();
+        let parent_ts = committer_timestamp(repo.path(), &parent).unwrap();
+        let tree = run_ok(repo.path(), &["rev-parse", "HEAD^{tree}"])
+            .unwrap()
+            .trim()
+            .to_string();
+
+        let commit_id =
+            commit_tree_deterministic(repo.path(), &tree, &[&parent], "deterministic message")
+                .unwrap();
+
+        let got_ts = committer_timestamp(repo.path(), &commit_id).unwrap();
+        assert_eq!(got_ts, parent_ts + 1);
+
+        let author = run_ok(
+            repo.path(),
+            &["show", "-s", "--format=%an <%ae>", &commit_id],
+        )
+        .unwrap();
+        assert_eq!(author.trim(), "Grass Agent Bus <agent-bus@invalid>");
+
+        let subject = run_ok(repo.path(), &["show", "-s", "--format=%s", &commit_id]).unwrap();
+        assert_eq!(subject.trim(), "deterministic message");
+
+        let parents = run_ok(repo.path(), &["show", "-s", "--format=%P", &commit_id]).unwrap();
+        assert_eq!(parents.trim(), parent);
+    }
+
+    /// `push` against a real bare "remote": the pushed refspec must land at
+    /// exactly the local tip.
+    #[test]
+    fn push_updates_a_real_remote_ref() {
+        let origin = init_bare_origin();
+        let repo = init_repo();
+        let origin_url = origin.path().to_string_lossy().to_string();
+
+        let out = push(repo.path(), &origin_url, "HEAD:refs/heads/main").unwrap();
+        assert!(out.success, "{out:?}");
+
+        let local_head = rev_parse(repo.path(), "HEAD").unwrap();
+        let remote_head = run_ok(origin.path(), &["rev-parse", "main"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(remote_head, local_head);
+    }
+
+    /// Without `--force`, a push whose new value is not a fast-forward of
+    /// the remote's current tip must be rejected by the real remote-side
+    /// compare-and-swap, not silently rewrite history (the whole reason
+    /// `push_refspecs`'s own doc comment says a plain push already gives
+    /// the CAS the coordinator needs).
+    #[test]
+    fn push_rejects_a_non_fast_forward_update() {
+        let origin = init_bare_origin();
+        let origin_url = origin.path().to_string_lossy().to_string();
+
+        let repo_a = init_repo();
+        let out_a = push(repo_a.path(), &origin_url, "HEAD:refs/heads/main").unwrap();
+        assert!(out_a.success, "{out_a:?}");
+
+        // repo_b is a wholly separate, unrelated history pushed to the same
+        // branch name -- never a fast-forward of repo_a's tip.
+        let repo_b = init_repo();
+        let out_b = push(repo_b.path(), &origin_url, "HEAD:refs/heads/main").unwrap();
+        assert!(
+            !out_b.success,
+            "expected a non-fast-forward push to be rejected: {out_b:?}"
+        );
+        assert!(
+            out_b.stderr.to_lowercase().contains("rejected"),
+            "{out_b:?}"
+        );
+
+        // and the remote's ref must still be at repo_a's tip, unmodified.
+        let remote_head = run_ok(origin.path(), &["rev-parse", "main"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(remote_head, rev_parse(repo_a.path(), "HEAD").unwrap());
+    }
+
+    /// A clean checkout reports no changes; an untracked file and a
+    /// modified tracked file must both show up in the real `--porcelain`
+    /// output.
+    #[test]
+    fn status_porcelain_reports_untracked_and_modified_files() {
+        let repo = init_repo();
+        let clean = status_porcelain(repo.path()).unwrap();
+        assert_eq!(clean, "");
+
+        std::fs::write(repo.path().join("untracked.txt"), "new\n").unwrap();
+        std::fs::write(repo.path().join("README.md"), "changed\n").unwrap();
+        let dirty = status_porcelain(repo.path()).unwrap();
+        let lines: Vec<String> = dirty.lines().map(|l| l.trim().to_string()).collect();
+        assert!(lines.iter().any(|l| l == "?? untracked.txt"), "{dirty:?}");
+        assert!(lines.iter().any(|l| l == "M README.md"), "{dirty:?}");
+    }
+
+    /// The ordinary path: rebasing a detached feature commit onto a
+    /// diverged (but non-conflicting) `main` succeeds and replays the
+    /// commit on top of the new base.
+    #[test]
+    fn rebase_onto_replays_detached_commits_cleanly() {
+        let repo = init_repo();
+        git(repo.path(), &["checkout", "-q", "-b", "feature"]);
+        commit_file(repo.path(), "feature.txt", "feature\n", "feature work");
+        let feature_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        git(repo.path(), &["checkout", "-q", "main"]);
+        commit_file(repo.path(), "main.txt", "main\n", "main work");
+        let main_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        checkout_detach(repo.path(), &feature_tip).unwrap();
+        let out = rebase_onto(repo.path(), "main").unwrap();
+        assert!(out.success, "{out:?}");
+
+        assert!(is_ancestor(repo.path(), &main_tip, "HEAD").unwrap());
+        assert!(repo.path().join("feature.txt").exists());
+        assert!(repo.path().join("main.txt").exists());
+    }
+
+    /// A real, unresolvable conflict must fail the rebase (`GitOutput.
+    /// success == false`, not an `Err`) and leave the repository genuinely
+    /// mid-rebase -- exactly the state `rebase_abort` exists to clean up.
+    /// `rebase_abort` must then restore a clean, non-rebasing worktree.
+    #[test]
+    fn rebase_onto_reports_a_real_conflict_and_rebase_abort_cleans_it_up() {
+        let repo = init_repo();
+        git(repo.path(), &["checkout", "-q", "-b", "feature"]);
+        commit_file(
+            repo.path(),
+            "README.md",
+            "feature change\n",
+            "feature edits readme",
+        );
+        let feature_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        git(repo.path(), &["checkout", "-q", "main"]);
+        commit_file(
+            repo.path(),
+            "README.md",
+            "main change\n",
+            "main edits readme",
+        );
+
+        checkout_detach(repo.path(), &feature_tip).unwrap();
+        let out = rebase_onto(repo.path(), "main").unwrap();
+        assert!(!out.success, "expected a real conflict: {out:?}");
+
+        let rebase_in_progress = repo.path().join(".git").join("rebase-merge").exists()
+            || repo.path().join(".git").join("rebase-apply").exists();
+        assert!(rebase_in_progress, "expected git to be mid-rebase");
+
+        rebase_abort(repo.path()).unwrap();
+        assert!(!repo.path().join(".git").join("rebase-merge").exists());
+        assert!(!repo.path().join(".git").join("rebase-apply").exists());
+        // aborting must actually restore the pre-rebase detached commit.
+        assert_eq!(rev_parse(repo.path(), "HEAD").unwrap(), feature_tip);
+    }
+
+    /// `rebase_abort` must be a safe no-op (never an `Err`) even when there
+    /// is nothing to abort -- its own body deliberately discards the
+    /// underlying `git rebase --abort` failure for exactly this case.
+    #[test]
+    fn rebase_abort_is_a_safe_noop_when_no_rebase_is_in_progress() {
+        let repo = init_repo();
+        rebase_abort(repo.path()).unwrap();
+    }
+
+    /// The success path, parsing real `interpret-trailers` output for a
+    /// commit that actually has trailers.
+    #[test]
+    fn commit_message_trailers_parses_real_trailers_from_a_commit() {
+        let repo = init_repo();
+        git(
+            repo.path(),
+            &[
+                "commit",
+                "--allow-empty",
+                "-q",
+                "-m",
+                "subject line\n\nAgent-Bus-Agent: alice\nAgent-Bus-Seq: 3",
+            ],
+        );
+        let trailers = commit_message_trailers(repo.path(), "HEAD").unwrap();
+        assert_eq!(
+            trailers,
+            vec![
+                ("Agent-Bus-Agent".to_string(), "alice".to_string()),
+                ("Agent-Bus-Seq".to_string(), "3".to_string()),
+            ]
+        );
+    }
+
+    /// A commit with no trailers at all must report an empty list, not an
+    /// error.
+    #[test]
+    fn commit_message_trailers_is_empty_for_a_commit_with_no_trailers() {
+        let repo = init_repo();
+        let trailers = commit_message_trailers(repo.path(), "HEAD").unwrap();
+        assert!(trailers.is_empty(), "{trailers:?}");
+    }
+
+    /// `run_stdin`'s own real (non-mocked) subprocess path: stdin actually
+    /// reaches the spawned `git` process and its stdout comes back.
+    #[test]
+    fn run_stdin_pipes_input_to_a_real_git_process() {
+        let repo = init_repo();
+        let out = run_stdin(
+            repo.path(),
+            &["interpret-trailers", "--parse"],
+            "subject\n\nSigned-off-by: Alice <alice@example.com>",
+        )
+        .unwrap();
+        assert!(out.success, "{out:?}");
+        assert!(
+            out.stdout
+                .contains("Signed-off-by: Alice <alice@example.com>"),
+            "{}",
+            out.stdout
+        );
+    }
+
+    /// A real (non-mocked) git failure reached through `run_stdin` must
+    /// come back as `success == false` with real stderr, not an `Err` or a
+    /// panic.
+    #[test]
+    fn run_stdin_reports_a_real_git_failure() {
+        let repo = init_repo();
+        let out = run_stdin(
+            repo.path(),
+            &["hash-object", "--stdin", "-t", "bogus-type"],
+            "data",
+        )
+        .unwrap();
+        assert!(!out.success, "{out:?}");
+        assert!(!out.stderr.is_empty(), "{out:?}");
+    }
+
+    /// The success path: a real, cleanly-mergeable pair of branches must
+    /// produce a real, resolvable tree object containing both sides'
+    /// changes.
+    #[test]
+    fn merge_tree_write_tree_produces_a_real_clean_merge() {
+        let repo = init_repo();
+        git(repo.path(), &["checkout", "-q", "-b", "theirs"]);
+        commit_file(repo.path(), "theirs.txt", "theirs\n", "add theirs.txt");
+        let theirs_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        git(repo.path(), &["checkout", "-q", "main"]);
+        commit_file(repo.path(), "ours.txt", "ours\n", "add ours.txt");
+        let ours_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        let tree = merge_tree_write_tree(repo.path(), &ours_tip, &theirs_tip).unwrap();
+        let listing = run_ok(repo.path(), &["ls-tree", "--name-only", &tree]).unwrap();
+        assert!(listing.contains("ours.txt"), "{listing}");
+        assert!(listing.contains("theirs.txt"), "{listing}");
+        assert!(listing.contains("README.md"), "{listing}");
+    }
+
+    /// A real (non-mocked) conflicting merge: `git merge-tree --write-tree`
+    /// reports the conflict on stdout with an *empty* stderr, so this
+    /// exercises the branch the existing mocked conflict test (which always
+    /// supplies stderr) cannot reach.
+    #[test]
+    fn merge_tree_write_tree_reports_a_real_conflicting_merge() {
+        let repo = init_repo();
+        git(repo.path(), &["checkout", "-q", "-b", "theirs"]);
+        commit_file(
+            repo.path(),
+            "README.md",
+            "theirs change\n",
+            "theirs edits readme",
+        );
+        let theirs_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        git(repo.path(), &["checkout", "-q", "main"]);
+        commit_file(
+            repo.path(),
+            "README.md",
+            "ours change\n",
+            "ours edits readme",
+        );
+        let ours_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        let err = merge_tree_write_tree(repo.path(), &ours_tip, &theirs_tip).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("could not cleanly merge"), "{msg}");
+        assert!(msg.to_lowercase().contains("conflict"), "{msg}");
+    }
+
+    /// A real commit's committer timestamp must match exactly what `git
+    /// show --format=%ct` itself reports.
+    #[test]
+    fn committer_timestamp_reads_a_real_commits_committer_date() {
+        let repo = init_repo();
+        let head = rev_parse(repo.path(), "HEAD").unwrap();
+        let ts = committer_timestamp(repo.path(), &head).unwrap();
+        let expected: i64 = run_ok(repo.path(), &["show", "-s", "--format=%ct", &head])
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert_eq!(ts, expected);
+        assert!(ts > 0, "expected a real unix timestamp, got {ts}");
+    }
+
+    /// A nonexistent revision is a real, realistic failure path (`git show`
+    /// itself fails) rather than the unreachable-in-practice parse-error
+    /// branch.
+    #[test]
+    fn committer_timestamp_fails_for_a_nonexistent_revision() {
+        let repo = init_repo();
+        let err = committer_timestamp(repo.path(), "not-a-real-rev").unwrap_err();
+        assert!(matches!(err, AbError::Git(_)), "{err:?}");
+    }
+
+    /// Two branches with exactly one common ancestor must report a count of
+    /// exactly one.
+    #[test]
+    fn merge_base_count_finds_the_single_common_ancestor() {
+        let repo = init_repo();
+        git(repo.path(), &["checkout", "-q", "-b", "a"]);
+        commit_file(repo.path(), "a.txt", "a\n", "a work");
+        let a_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        git(repo.path(), &["checkout", "-q", "main"]);
+        commit_file(repo.path(), "b.txt", "b\n", "b work");
+        let b_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        let count = merge_base_count(repo.path(), &a_tip, &b_tip).unwrap();
+        assert_eq!(count, 1);
+    }
+
+    /// Genuinely unrelated (orphan) histories share no merge base at all.
+    /// NOTE: this is a real, observed quirk of `merge_base_count`'s current
+    /// implementation, not a design choice this test is merely confirming:
+    /// `git merge-base --all` on unrelated histories exits nonzero with no
+    /// output ("no common commits"), and `merge_base_count` calls it via
+    /// `run_ok`, which turns *any* nonzero exit into an `Err` -- so the
+    /// "genuinely unrelated" case a caller most likely wants distinguished
+    /// as `Ok(0)` instead surfaces as an opaque `AbError::Git` with an empty
+    /// message, indistinguishable from a real usage error (e.g. a bad
+    /// revision). See this function's report note.
+    #[test]
+    fn merge_base_count_errs_for_unrelated_orphan_histories() {
+        let repo = init_repo();
+        let main_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        git(repo.path(), &["checkout", "-q", "--orphan", "unrelated"]);
+        git(repo.path(), &["rm", "-rf", "-q", "."]);
+        commit_file(repo.path(), "other.txt", "other\n", "unrelated root");
+        let orphan_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        let err = merge_base_count(repo.path(), &main_tip, &orphan_tip).unwrap_err();
+        assert!(matches!(err, AbError::Git(_)), "{err:?}");
+    }
+
+    /// The ordinary path: a lightweight tag must resolve back to exactly
+    /// the target it was created at.
+    #[test]
+    fn tag_lightweight_creates_a_real_tag_pointing_at_the_target() {
+        let repo = init_repo();
+        let head = rev_parse(repo.path(), "HEAD").unwrap();
+        tag_lightweight(repo.path(), "v-test", &head).unwrap();
+        let resolved = run_ok(repo.path(), &["rev-parse", "refs/tags/v-test"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(resolved, head);
+    }
+
+    /// Covers all three real outcomes: the tag exists and matches, the tag
+    /// exists but points elsewhere, and no such tag exists at all.
+    #[test]
+    fn tag_exists_at_covers_matching_mismatching_and_missing_tags() {
+        let repo = init_repo();
+        let head = rev_parse(repo.path(), "HEAD").unwrap();
+        commit_file(repo.path(), "second.txt", "x\n", "second commit");
+        let second = rev_parse(repo.path(), "HEAD").unwrap();
+        tag_lightweight(repo.path(), "v1", &head).unwrap();
+
+        assert!(tag_exists_at(repo.path(), "v1", &head).unwrap());
+        assert!(!tag_exists_at(repo.path(), "v1", &second).unwrap());
+        assert!(!tag_exists_at(repo.path(), "no-such-tag", &head).unwrap());
+    }
+
+    /// Against a real bare "remote": covers a tag that reached the remote
+    /// and matches, one that reached the remote but points elsewhere there,
+    /// and one that never reached the remote at all (a purely local tag
+    /// must not be confused with a published one).
+    #[test]
+    fn remote_tag_matches_covers_matching_mismatching_and_missing_remote_tags() {
+        let origin = init_bare_origin();
+        let origin_url = origin.path().to_string_lossy().to_string();
+        let repo = init_repo();
+        let head = rev_parse(repo.path(), "HEAD").unwrap();
+        commit_file(repo.path(), "second.txt", "x\n", "second commit");
+        let second = rev_parse(repo.path(), "HEAD").unwrap();
+
+        push(repo.path(), &origin_url, "HEAD:refs/heads/main").unwrap();
+        tag_lightweight(repo.path(), "v1", &head).unwrap();
+        push(repo.path(), &origin_url, "refs/tags/v1:refs/tags/v1").unwrap();
+        // a second, purely local tag that is never pushed at all.
+        tag_lightweight(repo.path(), "local-only", &second).unwrap();
+
+        assert!(remote_tag_matches(repo.path(), &origin_url, "v1", &head).unwrap());
+        assert!(!remote_tag_matches(repo.path(), &origin_url, "v1", &second).unwrap());
+        assert!(!remote_tag_matches(repo.path(), &origin_url, "no-such-tag", &head).unwrap());
+        assert!(!remote_tag_matches(repo.path(), &origin_url, "local-only", &second).unwrap());
+    }
+
+    /// A merge commit's first-parent history must list the mainline
+    /// commits (including the merge commit itself) in oldest-first order,
+    /// and must exclude commits reachable only via the merge's second
+    /// parent.
+    #[test]
+    fn rev_list_first_parent_lists_only_first_parent_commits_in_order() {
+        let repo = init_repo();
+        let base = rev_parse(repo.path(), "HEAD").unwrap();
+
+        git(repo.path(), &["checkout", "-q", "-b", "side"]);
+        commit_file(repo.path(), "side.txt", "side\n", "side work");
+        let side_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        git(repo.path(), &["checkout", "-q", "main"]);
+        commit_file(repo.path(), "main2.txt", "main2\n", "main work");
+
+        git(
+            repo.path(),
+            &["merge", "-q", "--no-ff", "-m", "merge side", "side"],
+        );
+        let merge_commit = rev_parse(repo.path(), "HEAD").unwrap();
+        commit_file(repo.path(), "main3.txt", "main3\n", "more main work");
+        let final_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        let commits = rev_list_first_parent(repo.path(), &base, &final_tip).unwrap();
+        assert_eq!(commits.len(), 3, "{commits:?}");
+        assert_eq!(commits[1], merge_commit);
+        assert_eq!(*commits.last().unwrap(), final_tip);
+        assert!(!commits.contains(&side_tip));
+    }
+
+    /// The commits a merge's second parent actually introduced, relative to
+    /// the first-parent ancestor -- newest first, per plain `git rev-list`
+    /// ordering.
+    #[test]
+    fn commits_between_first_parent_exclusive_lists_the_second_parents_new_commits() {
+        let repo = init_repo();
+        let base = rev_parse(repo.path(), "HEAD").unwrap();
+
+        git(repo.path(), &["checkout", "-q", "-b", "side"]);
+        commit_file(repo.path(), "side1.txt", "1\n", "side commit 1");
+        commit_file(repo.path(), "side2.txt", "2\n", "side commit 2");
+        let side_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        git(repo.path(), &["checkout", "-q", "main"]);
+        git(
+            repo.path(),
+            &["merge", "-q", "--no-ff", "-m", "merge side", "side"],
+        );
+
+        let commits =
+            commits_between_first_parent_exclusive(repo.path(), &base, &side_tip).unwrap();
+        assert_eq!(commits.len(), 2, "{commits:?}");
+        let subjects: Vec<String> = commits
+            .iter()
+            .map(|c| {
+                run_ok(repo.path(), &["show", "-s", "--format=%s", c])
+                    .unwrap()
+                    .trim()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            subjects,
+            vec!["side commit 2".to_string(), "side commit 1".to_string()]
+        );
+    }
+
+    /// A real ancestor reports true; the reverse (descendant checked as
+    /// ancestor of its own ancestor) and a genuinely unrelated orphan
+    /// commit both report false -- not an error.
+    #[test]
+    fn is_ancestor_is_true_for_a_real_ancestor_and_false_for_unrelated_history() {
+        let repo = init_repo();
+        let base = rev_parse(repo.path(), "HEAD").unwrap();
+        commit_file(repo.path(), "next.txt", "x\n", "next commit");
+        let tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        assert!(is_ancestor(repo.path(), &base, &tip).unwrap());
+        assert!(!is_ancestor(repo.path(), &tip, &base).unwrap());
+
+        git(repo.path(), &["checkout", "-q", "--orphan", "unrelated"]);
+        git(repo.path(), &["rm", "-rf", "-q", "."]);
+        commit_file(repo.path(), "other.txt", "other\n", "unrelated root");
+        let unrelated_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        assert!(!is_ancestor(repo.path(), &base, &unrelated_tip).unwrap());
     }
 }
