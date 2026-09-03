@@ -148,6 +148,7 @@ ALLOWED = {
     # That is this tool's documented same-name blind spot, recorded here rather
     # than papered over with an allowlist entry `--inert` would then report.
     "allocatorFreshnessTeardownEpoch",
+    "rangeProvenanceInitializationPreservation",
     # Diagnostic provenance carried into the trace for a report to read, never
     # dispatched on, like `id` and `origin` above.
     "cause",

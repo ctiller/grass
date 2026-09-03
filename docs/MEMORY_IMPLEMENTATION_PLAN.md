@@ -1698,7 +1698,7 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   raised it and judged it short of a finding; it is written down here so the next
   reviewer does not have to rediscover the judgement.
 
-- **§10's proof package: two of eleven items closed, and the pattern for the rest.**
+- **§10's proof package: three of eleven items stated, and the pattern for the rest.**
   `RequiredProofPackage`'s fields were bare `Prop`s, so a profile chose the *sentence*
   as well as the proof and `True` closed each item. It was the one input in §4.4.1a's
   table with no constraint at all, and it is the last gate before `VerifiedProgram`.
@@ -1719,7 +1719,14 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   as a refusal. `not_live_of_stale_epoch` and `not_live_of_dead` are new and are what
   that last pair needed.
 
-  `RequiredProofPackage.Holds` conjoins the nine that remain. Every item that gains this
+  `rangeProvenanceInitializationPreservation` followed, as `PreservationLaws`, and it is
+  the first *partial* one: a refused access changes nothing and observes nothing, a
+  non-writing access changes nothing, no access moves any allocation's metadata, and the
+  three framing laws hold. Initialization is not a separate conjunct because it is read
+  off the bytes — `RangeInitialized` cannot drift from what was written, which is why
+  `AllocationRecord.initialized` was deleted.
+
+  `RequiredProofPackage.Holds` conjoins the eight that remain. Every item that gains this
   treatment leaves that conjunction, and when it is empty §10 is closed by the type
   rather than by a profile's word.
 
@@ -1738,11 +1745,23 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   `synchronizationAndObligationTransfer` needs M8 and §7.4; `callStackFrameLifetime`
   needs M4's frames; `erasurePreservation` needs M9; `validationMetadata` is M10's.
 
-  `rangeProvenanceInitializationPreservation` is the next one to take and is
-  half-statable today: `applyAccess_refused_preserves_state`, the write-framing laws and
-  the commutation results are all here, and they are about `applyAccess` rather than
-  `step`. Stating the half that exists would make the field's type honest about which
-  half; leaving it a bare `Prop` says nothing at all.
+  **And doing the third one turned up a structural obstacle the first two hid.**
+  `PreservationLaws` covers `applyAccess` and not `step`, and that is not a missing
+  theorem: `Grass/Op/Step.lean` imports `Grass/Memory/Profile.lean`, so the package
+  cannot mention the transition at all. Every remaining item whose subject is the
+  transition — `accessDescriptorSoundness`, `permissionEnforcementAndFaultFidelity`,
+  the two M8 items, `synchronizationAndObligationTransfer` — is blocked on that as well
+  as on its milestone.
+
+  Two ways out, neither taken here. Move `MemoryProfile` below `Grass/Op/Step.lean`,
+  which means `StepPolicy` can no longer carry a profile in the shape it does. Or split
+  the record: the items a profile *names* stay where they are, and the items the layer
+  *states* move to a structure `StepPolicy` carries beside its profile. The second
+  looks right and is a change to what §10's gate means structurally, so it wants the
+  design owner rather than this document.
+
+  A partial statement is still worth more than a bare `Prop`: it has content, and a
+  profile cannot choose it. The docstring says which half, because the type cannot.
 
   **A layering change came with it.** `Grass/Memory/State.lean` imported
   `Grass/Memory/Profile.lean` and used nothing from it, which is why the dependency
@@ -1782,7 +1801,7 @@ its entries one at a time.
 | `AdmittedVocabulary.WellFormed` | — | the address-space table is checked and the three justification registries are pairwise disjoint; the other nine have no coherence condition and need none |
 | `StepPolicy.oracle` | can only fail *about commits* | `Oracle.answer` returns a proof-carrying `CompleteCommitted` or `none`, and `none` records `machineAnswerIncomplete`; it cannot claim a commit it cannot witness. "Can only fail" was an overclaim and review said so: it also supplies the bytes that land in memory and the values that reach the trace, and it takes a whole `MachineState` where `AuthorityProvider.refuses` was deliberately narrowed to a `MemoryState`. No repair is proposed because `writeData` has nowhere else to come from today |
 | `StepPolicy.requiredFacets` | demands more | a facet a profile requires and an operation does not supply is a rejection, and `closes_iff_no_missing` says the gate deciding that is `OperationFacets.Closes`. A profile requiring *nothing* still cannot step an operation with no memory-effect facet, because the branch after the gate refuses it |
-| `MemoryProfile.package` | **nine of eleven items still name their own sentence** | `loanMapLaws` and `allocatorFreshnessTeardownEpoch` have types this layer states, so those items are proofs the profile supplies and cannot weaken. The other nine are bare `Prop`s and `True` closes each; `RequiredProofPackage.Holds` conjoins exactly those nine, so the conjunction shrinks as items are stated. Still the weakest input here, and the last gate before `VerifiedProgram` |
+| `MemoryProfile.package` | **eight of eleven items still name their own sentence** | `loanMapLaws`, `allocatorFreshnessTeardownEpoch` and `rangeProvenanceInitializationPreservation` have types this layer states, so those items are proofs the profile supplies and cannot weaken — the third partially, covering `applyAccess` and not `step`. The other eight are bare `Prop`s and `True` closes each; `RequiredProofPackage.Holds` conjoins exactly those eight, so the conjunction shrinks as items are stated. Still the weakest input here, and the last gate before `VerifiedProgram` |
 | `faultAt`, the fault plan | adds paths | a `step` argument rather than a profile field; every plan it can name is checked against the sequence's own declarations |
 
 The pattern to apply to a new field: if a profile can fill it in so that a sentence of

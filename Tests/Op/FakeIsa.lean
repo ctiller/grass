@@ -746,7 +746,7 @@ def profile : MemoryProfile :=
   { id := ⟨"fake.isa"⟩, vocabularyVersion := 1, vocabulary := vocabulary
     package :=
       { accessDescriptorSoundness := True
-        rangeProvenanceInitializationPreservation := True
+        rangeProvenanceInitializationPreservation := preservationLaws
         permissionEnforcementAndFaultFidelity := True
         loanMapLaws := MemoryState.loanMapLaws
         consistencyGraphWellFormedness := True

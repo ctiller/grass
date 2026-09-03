@@ -1,3 +1,4 @@
+import Grass.Memory.Apply
 import Grass.Memory.Audit
 import Grass.Memory.Access
 import Grass.Memory.State
@@ -630,20 +631,24 @@ operations, or to any theorem in the tree, so a profile supplying `True` closes 
 item and `Holds` is proved by `trivial`. Review found that seven rounds had asked who
 consumes this record and none had asked whether its content is constrained.
 
-`loanMapLaws` and `allocatorFreshnessTeardownEpoch` are the exceptions and the pattern
-for the rest. Their types are `Grass.Memory.MemoryState.LoanMapLaws` and
-`Grass.Memory.MemoryState.AllocatorLaws`, propositions this layer states with one
-conjunct per theorem, so a profile supplies a *proof* rather than a sentence. The
-proofs are `MemoryState.loanMapLaws` and `MemoryState.allocatorLaws` and are the same
-for every profile, which is the right answer for laws about a map this layer owns: the
-items are discharged by construction and cannot be weakened by the profile that closes
-them.
+Three items are the exceptions and the pattern for the rest. Their types are
+`Grass.Memory.MemoryState.LoanMapLaws`, `Grass.Memory.MemoryState.AllocatorLaws` and
+`Grass.Memory.PreservationLaws`, propositions this layer states with one conjunct per
+theorem, so a profile supplies a *proof* rather than a sentence. The proofs are
+`MemoryState.loanMapLaws`, `MemoryState.allocatorLaws` and `preservationLaws`, the
+same for every profile, which is the right answer for laws about a map and a state
+this layer owns: the items are discharged by construction and cannot be weakened by
+the profile that closes them.
 
-The other nine stay `Prop` because their propositions are not statable yet: they are
-about an ISA's declared effects, a consistency graph M8 owns, a frame discipline M4
-owns, and an erasure M9 owns. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records which
-milestone owes each of them the same treatment, and until then a profile closing them
-with `True` is closing nothing -- both fixture profiles do that and say so.
+The third of them is *partial* and its docstring says so: it covers `applyAccess` and
+not `step`, because `Grass/Op/Step.lean` imports this module and the package therefore
+cannot mention the transition at all. That is the shape of what stands between the
+remaining eight and the same treatment, and it is not only milestone work: some of
+those items are about an ISA's declared effects, a consistency graph M8 owns, a frame
+discipline M4 owns and an erasure M9 owns, and some are about the transition, which is
+a layering decision rather than a proof. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1
+separates the two. Until then a profile closing them with `True` is closing nothing --
+both fixture profiles do that and say so.
 
 §10's sentence is "The profile is not usable by `VerifiedProgram` until this package
 closes for all of its admitted operations."
@@ -656,8 +661,12 @@ instruction, and M10 audits that no field was left open.
 structure RequiredProofPackage where
   /-- Declared events cover all physical effects. -/
   accessDescriptorSoundness : Prop
-  /-- Range, provenance, and initialization are preserved by admitted steps. -/
-  rangeProvenanceInitializationPreservation : Prop
+  /-- Range, provenance, and initialization are preserved by admitted steps.
+
+  Not a `Prop` the profile names: the statement is
+  `Grass.Memory.PreservationLaws` and the profile supplies the proof. It covers
+  `applyAccess` and not `step`, for the layering reason its own docstring gives. -/
+  rangeProvenanceInitializationPreservation : Grass.Memory.PreservationLaws
   /-- Permissions are enforced and faults are faithful to the hardware model. -/
   permissionEnforcementAndFaultFidelity : Prop
   /-- Loan identities are unique, and split, join, transfer, and reclamation
@@ -688,23 +697,21 @@ structure RequiredProofPackage where
 namespace RequiredProofPackage
 
 /--
-`package.Holds` is the conjunction of the nine propositions the profile still *names*.
+`package.Holds` is the conjunction of the eight propositions the profile still
+*names*.
 
 This is what a consumer demands when it wants the §10 package *discharged* rather
 than merely enumerated. `VerifiedProgram` will require it; nothing in M1 does,
 because the propositions themselves are not yet statable.
 
-`loanMapLaws` and `allocatorFreshnessTeardownEpoch` are absent from this conjunction
-and that is not an omission: their fields are *proofs* of
-`Grass.Memory.MemoryState.LoanMapLaws` and `Grass.Memory.MemoryState.AllocatorLaws`
-rather than propositions, so constructing the record discharges them and there is
-nothing left for `Holds` to demand. Every item this record gains that treatment leaves
-this conjunction, and when it is empty §10 is closed by the type rather than by a
-profile's word. Nine to go.
+Three items are absent from this conjunction and that is not an omission: their fields
+are *proofs* rather than propositions, so constructing the record discharges them and
+there is nothing left for `Holds` to demand. Every item this record gains that
+treatment leaves this conjunction, and when it is empty §10 is closed by the type
+rather than by a profile's word. Eight to go.
 -/
 def Holds (package : RequiredProofPackage) : Prop :=
   package.accessDescriptorSoundness ∧
-  package.rangeProvenanceInitializationPreservation ∧
   package.permissionEnforcementAndFaultFidelity ∧
   package.consistencyGraphWellFormedness ∧
   package.raceFreedomConsequences ∧

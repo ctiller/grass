@@ -676,6 +676,86 @@ declared range, so the stronger hypothesis would buy nothing and cost every
 caller an extra obligation.
 -/
 
+/-- **An access moves no allocation's metadata.** The bytes are the only thing it
+moves, which is what makes a later access decided the same way. -/
+theorem applyAccess_preserves_metadata (state : MemoryState) (d : AccessDescriptor)
+    (writeData : ByteSeq) (indeterminate : Nat → Byte) (other : AllocId) :
+    (applyAccess state d writeData indeterminate).2.MetadataAt other =
+      state.MetadataAt other := by
+  rw [applyAccess_state]
+  split
+  · exact MemoryState.metadataAt_write _ _ _ _ _ _
+  · rfl
+
+/--
+**§10's preservation item, as far as this layer can state it.**
+
+`docs/MEMORY_MODEL.md` §10 asks that "range, provenance, and initialization are
+preserved by admitted steps". The third field of `RequiredProofPackage` to stop being a
+bare `Prop`; `MemoryState.LoanMapLaws` has the argument for why that matters.
+
+**It is the half about `applyAccess`, and the docstring says so because the type
+cannot.** `Grass/Op/Step.lean` imports `Grass/Memory/Profile.lean`, so the package
+cannot mention the transition at all — that is a layering fact, not a missing theorem,
+and `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records what moving it would cost. A
+partial statement is still worth more than a `Prop` a profile names: this one has
+content, and a profile cannot choose it.
+
+The conjuncts, in order: a refused access changes nothing and observes nothing; a
+non-writing access changes nothing; a write moves no allocation's metadata, so no
+allocation's extent, epoch, space, source, permission or liveness moves under any
+access; and the three framing laws — another allocation, an uncovered offset in this
+one, a disjoint range — which are "range preserved" pointwise. Initialization is not a
+separate conjunct because it is read off the bytes: `RangeInitialized` cannot drift
+from what was written, which is why `AllocationRecord.initialized` was deleted.
+-/
+def PreservationLaws : Prop :=
+  (∀ (state : MemoryState) (d : AccessDescriptor) (writeData : ByteSeq)
+      (indeterminate : Nat → Byte) (class_ : AuditViolationClass),
+      denialOf state d = some class_ →
+      applyAccess state d writeData indeterminate = (.refused class_, state)) ∧
+  (∀ (state : MemoryState) (d : AccessDescriptor) (writeData : ByteSeq)
+      (indeterminate : Nat → Byte),
+      d.intent.writes = false →
+      (applyAccess state d writeData indeterminate).2 = state) ∧
+  (∀ (state : MemoryState) (d : AccessDescriptor) (writeData : ByteSeq)
+      (indeterminate : Nat → Byte) (other : AllocId),
+      (applyAccess state d writeData indeterminate).2.MetadataAt other =
+        state.MetadataAt other) ∧
+  (∀ (state : MemoryState) (d : AccessDescriptor) (writeData : ByteSeq)
+      (indeterminate : Nat → Byte) (other : AllocId),
+      other ≠ d.provenance.root → ∀ (offset : Nat),
+        (applyAccess state d writeData indeterminate).2.byteAt? other offset =
+          state.byteAt? other offset) ∧
+  (∀ (state : MemoryState) (d : AccessDescriptor) (writeData : ByteSeq)
+      (indeterminate : Nat → Byte) (offset : Nat),
+      ¬ (ByteRange.mk d.range.start (writeData.take d.range.size).length).Covers offset →
+        (applyAccess state d writeData indeterminate).2.byteAt? d.provenance.root offset =
+          state.byteAt? d.provenance.root offset) ∧
+  (∀ (state : MemoryState) (d : AccessDescriptor) (writeData : ByteSeq)
+      (indeterminate : Nat → Byte) (other : ByteRange),
+      d.range.Disjoint other → ∀ (offset : Nat), other.Covers offset →
+        (applyAccess state d writeData indeterminate).2.byteAt? d.provenance.root offset =
+          state.byteAt? d.provenance.root offset)
+
+/-- **The preservation laws hold**, which is the proof every `MemoryProfile` supplies
+for §10's preservation item. Its conjuncts are, in order,
+`applyAccess_refused_preserves_state`, `applyAccess_read_preserves_state`,
+`applyAccess_preserves_metadata`, `applyAccess_frames_other_allocation`,
+`applyAccess_frames_uncovered_offset` and `applyAccess_frames_disjoint_range`. -/
+theorem preservationLaws : PreservationLaws :=
+  ⟨fun state d writeData ind _ h =>
+     applyAccess_refused_preserves_state state d writeData ind h,
+   fun state d writeData ind h => applyAccess_read_preserves_state state d writeData ind h,
+   fun state d writeData ind other =>
+     applyAccess_preserves_metadata state d writeData ind other,
+   fun state d writeData ind _ hne offset =>
+     applyAccess_frames_other_allocation state d writeData ind hne offset,
+   fun state d writeData ind _ hout =>
+     applyAccess_frames_uncovered_offset state d writeData ind hout,
+   fun state d writeData ind _ hd _ hcov =>
+     applyAccess_frames_disjoint_range state d writeData ind hd hcov⟩
+
 /-- Run a block of accesses in order, threading the state. -/
 def runBlock (state : MemoryState) (indeterminate : Nat → Byte) :
     List (AccessDescriptor × ByteSeq) → List AccessResult × MemoryState

@@ -79,7 +79,7 @@ def profile : MemoryProfile :=
   { id := ⟨"spike1.win64"⟩, vocabularyVersion := 1, vocabulary := vocabulary
     package :=
       { accessDescriptorSoundness := True
-        rangeProvenanceInitializationPreservation := True
+        rangeProvenanceInitializationPreservation := preservationLaws
         permissionEnforcementAndFaultFidelity := True
         loanMapLaws := MemoryState.loanMapLaws
         consistencyGraphWellFormedness := True
