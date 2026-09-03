@@ -10,6 +10,7 @@ import Grass.Memory.Apply
 import Grass.Memory.Audit
 import Grass.Memory.Authority
 import Grass.Memory.Event
+import Grass.Memory.Loan
 import Grass.Memory.Fault
 import Grass.Memory.Ordering
 import Grass.Memory.Profile
