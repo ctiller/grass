@@ -5,6 +5,9 @@ expression: out
 {
   "activation_event": null,
   "agent": "coord1",
+  "causal_frontier": {
+    "coord1": "[hash]"
+  },
   "events": [
     {
       "agent": "coord1",
@@ -25,5 +28,11 @@ expression: out
       "time": "[time]",
       "v": 2
     }
-  ]
+  ],
+  "freshness": "cached",
+  "last_synced": null,
+  "roster_epoch": "[hash]",
+  "snapshot_receipt": {
+    "coord1": "[hash]"
+  }
 }

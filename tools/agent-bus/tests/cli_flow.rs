@@ -784,6 +784,198 @@ fn succeed_surfaces_a_rejected_candidate_from_the_resumed_outbox() {
     assert_eq!(succeeded["stream_not_attempted"], serde_json::json!([]));
 }
 
+// ------------------------------------------------- freshness envelope tests
+//
+// docs/AGENT_COORDINATION_EVOLUTION.md section 2.4: "Every human and
+// machine-readable result states its snapshot receipt, roster epoch, causal
+// frontier, last successful synchronization time, and freshness class."
+// The golden tests above already pin the exact shape for six commands; the
+// tests here instead prove the *values* are real and correctly scoped, not
+// merely present-and-empty -- an all-null/all-redacted golden snapshot
+// would pass even if every field were silently wired to a constant.
+
+/// A fresh checkout's first `status --sync` performs a genuine remote
+/// probe: `last_synced` goes from never-recorded to a real timestamp, and a
+/// *subsequent* plain (cached) `status` on that same checkout reads back
+/// exactly that same recorded value -- proving the record is durable on
+/// disk (see `sync::read_last_synced`/`record_last_synced`), not merely
+/// returned transiently by the one call that performed the fetch.
+#[test]
+fn status_sync_records_last_synced_and_a_later_cached_status_reads_it_back() {
+    let (origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+
+    let fresh = init_repo(origin.path());
+    let synced = status(fresh.path(), true);
+    assert_eq!(synced["freshness"], "current-as-of-remote-probe");
+    let recorded = synced["last_synced"]
+        .as_str()
+        .expect("just synced successfully");
+    assert!(is_rfc3339_timestamp(recorded), "{recorded}");
+    assert!(is_object_hash(synced["roster_epoch"].as_str().unwrap()));
+    let receipt = synced["snapshot_receipt"].as_object().unwrap();
+    assert!(is_object_hash(receipt["coord1"].as_str().unwrap()));
+    assert_eq!(synced["causal_frontier"], synced["snapshot_receipt"]);
+
+    let cached = status(fresh.path(), false);
+    assert_eq!(cached["freshness"], "cached");
+    assert_eq!(cached["last_synced"].as_str(), Some(recorded));
+    assert_eq!(cached["roster_epoch"], synced["roster_epoch"]);
+}
+
+/// `tail`'s `snapshot_receipt`/`causal_frontier` are scoped to just the
+/// queried agent, not the whole roster -- reporting every other agent's tip
+/// on a single-stream read would overstate what `tail` actually looked at.
+#[test]
+fn tail_scopes_its_freshness_envelope_to_the_queried_agent_only() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register(repo.path(), "bob", "reviewer", "host2");
+
+    let out = tail(repo.path(), "coord1");
+    assert_eq!(out["freshness"], "cached");
+    assert!(out["last_synced"].is_null());
+    assert!(is_object_hash(out["roster_epoch"].as_str().unwrap()));
+    let receipt = out["snapshot_receipt"].as_object().unwrap();
+    assert_eq!(receipt.len(), 1, "{out}");
+    assert!(is_object_hash(receipt["coord1"].as_str().unwrap()));
+    assert_eq!(out["causal_frontier"], out["snapshot_receipt"]);
+}
+
+/// `tail --sync` fetches the whole roster cut (see `TailArgs::sync`'s doc
+/// comment), so it can honestly report `current-as-of-remote-probe` and a
+/// freshly recorded `last_synced`, exactly like `status --sync`.
+#[test]
+fn tail_sync_reports_current_as_of_remote_probe_and_a_fresh_last_synced() {
+    let (origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+
+    let fresh = init_repo(origin.path());
+    let out = run_json(
+        bin()
+            .current_dir(fresh.path())
+            .args(["tail", "--agent", "coord1", "--sync"]),
+    );
+    assert_eq!(out["freshness"], "current-as-of-remote-probe");
+    let recorded = out["last_synced"]
+        .as_str()
+        .expect("just synced successfully");
+    assert!(is_rfc3339_timestamp(recorded), "{recorded}");
+}
+
+/// `coordinate`'s freshness envelope reflects the just-published local
+/// state (`freshness: "cached"`, per its own doc comment in `cli.rs`): a
+/// real roster epoch and a real stream tip for the coordinated agent, not
+/// null or empty placeholders.
+#[test]
+fn coordinate_reports_a_populated_freshness_envelope() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    submit(
+        repo.path(),
+        "coord1",
+        "agent.status",
+        r#"{"status":"active","note":"hi"}"#,
+        "c1",
+    );
+    let out = coordinate(repo.path(), "coord1", "host1", 0);
+    assert_eq!(out["freshness"], "cached");
+    assert!(out["last_synced"].is_null());
+    assert!(is_object_hash(out["roster_epoch"].as_str().unwrap()));
+    let receipt = out["snapshot_receipt"].as_object().unwrap();
+    assert!(is_object_hash(receipt["coord1"].as_str().unwrap()));
+    assert_eq!(out["causal_frontier"], out["snapshot_receipt"]);
+}
+
+/// `register`'s freshness envelope reflects the *post*-registration roster
+/// (both the pre-existing coordinator and the just-registered agent), and
+/// its `roster_epoch` agrees with the same transition's own `registry_
+/// epoch` field -- both describe the one epoch `register` just published.
+#[test]
+fn register_reports_a_populated_freshness_envelope_reflecting_the_new_roster() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let out = register(repo.path(), "bob", "reviewer", "host2");
+    assert_eq!(out["freshness"], "cached");
+    assert!(out["last_synced"].is_null());
+    assert_eq!(out["roster_epoch"], out["registry_epoch"]);
+    let receipt = out["snapshot_receipt"].as_object().unwrap();
+    assert_eq!(receipt.len(), 2, "{out}");
+    assert!(is_object_hash(receipt["coord1"].as_str().unwrap()));
+    assert!(is_object_hash(receipt["bob"].as_str().unwrap()));
+}
+
+/// `succeed`'s freshness envelope likewise reflects the post-succession
+/// roster (both the coordinator and the agent whose custody just moved).
+#[test]
+fn succeed_reports_a_populated_freshness_envelope_reflecting_the_post_succession_roster() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register_with(
+        repo.path(),
+        "alice",
+        "implementor",
+        "host-a",
+        Some("alice-standby"),
+    );
+    let out = succeed(repo.path(), "alice-standby", "alice", "host-b");
+    assert_eq!(out["freshness"], "cached");
+    assert!(out["last_synced"].is_null());
+    assert_eq!(out["roster_epoch"], out["registry_epoch"]);
+    let receipt = out["snapshot_receipt"].as_object().unwrap();
+    assert!(is_object_hash(receipt["coord1"].as_str().unwrap()));
+    assert!(is_object_hash(receipt["alice"].as_str().unwrap()));
+}
+
+/// `outbox` (gate 8/18: a purely local read, no network round trip ever)
+/// still reports a populated freshness envelope once a registry exists
+/// locally to read it from.
+#[test]
+fn outbox_reports_a_populated_freshness_envelope_once_a_registry_exists() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    submit(
+        repo.path(),
+        "coord1",
+        "agent.status",
+        r#"{"status":"active","note":"hi"}"#,
+        "c1",
+    );
+
+    let out = outbox(repo.path(), "coord1");
+    assert_eq!(out["freshness"], "cached");
+    assert!(out["last_synced"].is_null());
+    assert!(is_object_hash(out["roster_epoch"].as_str().unwrap()));
+    let receipt = out["snapshot_receipt"].as_object().unwrap();
+    assert!(is_object_hash(receipt["coord1"].as_str().unwrap()));
+    assert_eq!(out["causal_frontier"], out["snapshot_receipt"]);
+}
+
+/// `outbox` must keep working exactly as before `genesis` has ever run
+/// locally (`submit` itself requires no prior registry at all) -- the
+/// roster-wide envelope fields are honestly `null`/empty rather than this
+/// command now refusing to show local outbox state it could always show.
+#[test]
+fn outbox_reports_null_roster_fields_before_genesis_ever_runs() {
+    let (_origin, repo) = fresh_bus();
+    submit(
+        repo.path(),
+        "coord1",
+        "agent.status",
+        r#"{"status":"active","note":"hi"}"#,
+        "c1",
+    );
+
+    let out = outbox(repo.path(), "coord1");
+    assert_eq!(out["freshness"], "cached");
+    assert!(out["last_synced"].is_null());
+    assert!(out["roster_epoch"].is_null());
+    assert_eq!(out["snapshot_receipt"], serde_json::json!({}));
+    assert_eq!(out["causal_frontier"], serde_json::json!({}));
+    let pending = out["pending"].as_array().unwrap();
+    assert_eq!(pending.len(), 1, "{out}");
+}
+
 // ---------------------------------------------------------- error-path tests
 //
 // Every case here is also reviewed (see the final report) for whether the
@@ -1058,6 +1250,9 @@ fn golden_register_output() {
     insta::assert_json_snapshot!(out, {
         ".registry_epoch" => insta::dynamic_redaction(redact_noise),
         ".published.*" => insta::dynamic_redaction(redact_noise),
+        ".roster_epoch" => insta::dynamic_redaction(redact_noise),
+        ".snapshot_receipt.*" => insta::dynamic_redaction(redact_noise),
+        ".causal_frontier.*" => insta::dynamic_redaction(redact_noise),
     });
 }
 
@@ -1091,6 +1286,9 @@ fn golden_coordinate_output() {
     let out = coordinate(repo.path(), "coord1", "host1", 0);
     insta::assert_json_snapshot!(out, {
         ".published.*" => insta::dynamic_redaction(redact_noise),
+        ".roster_epoch" => insta::dynamic_redaction(redact_noise),
+        ".snapshot_receipt.*" => insta::dynamic_redaction(redact_noise),
+        ".causal_frontier.*" => insta::dynamic_redaction(redact_noise),
     });
 }
 
@@ -1102,6 +1300,9 @@ fn golden_tail_output() {
     insta::assert_json_snapshot!(out, {
         ".events[].time" => insta::dynamic_redaction(redact_noise),
         ".events[].observed.roster_epoch" => insta::dynamic_redaction(redact_noise),
+        ".roster_epoch" => insta::dynamic_redaction(redact_noise),
+        ".snapshot_receipt.*" => insta::dynamic_redaction(redact_noise),
+        ".causal_frontier.*" => insta::dynamic_redaction(redact_noise),
     });
 }
 
@@ -1119,6 +1320,9 @@ fn golden_outbox_output() {
     let out = outbox(repo.path(), "coord1");
     insta::assert_json_snapshot!(out, {
         ".pending[].outbox_path" => "[outbox_path]",
+        ".roster_epoch" => insta::dynamic_redaction(redact_noise),
+        ".snapshot_receipt.*" => insta::dynamic_redaction(redact_noise),
+        ".causal_frontier.*" => insta::dynamic_redaction(redact_noise),
     });
 }
 
@@ -1130,6 +1334,8 @@ fn golden_status_output() {
     insta::assert_json_snapshot!(out, {
         ".roster_epoch" => insta::dynamic_redaction(redact_noise),
         ".agents[].stream_tip" => insta::dynamic_redaction(redact_noise),
+        ".snapshot_receipt.*" => insta::dynamic_redaction(redact_noise),
+        ".causal_frontier.*" => insta::dynamic_redaction(redact_noise),
     });
 }
 
@@ -1149,6 +1355,9 @@ fn golden_succeed_output() {
         ".registry_epoch" => insta::dynamic_redaction(redact_noise),
         ".registry_published.*" => insta::dynamic_redaction(redact_noise),
         ".stream_published.*" => insta::dynamic_redaction(redact_noise),
+        ".roster_epoch" => insta::dynamic_redaction(redact_noise),
+        ".snapshot_receipt.*" => insta::dynamic_redaction(redact_noise),
+        ".causal_frontier.*" => insta::dynamic_redaction(redact_noise),
     });
 }
 

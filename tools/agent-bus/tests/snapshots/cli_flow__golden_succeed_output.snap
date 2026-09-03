@@ -3,6 +3,12 @@ source: tests/cli_flow.rs
 expression: out
 ---
 {
+  "causal_frontier": {
+    "alice": "[hash]",
+    "coord1": "[hash]"
+  },
+  "freshness": "cached",
+  "last_synced": null,
   "new_custody_epoch": 1,
   "registry_epoch": "[hash]",
   "registry_not_attempted": [],
@@ -12,6 +18,11 @@ expression: out
   "registry_rejected": [],
   "resumed_events": [],
   "resumed_rejected": [],
+  "roster_epoch": "[hash]",
+  "snapshot_receipt": {
+    "alice": "[hash]",
+    "coord1": "[hash]"
+  },
   "stream_not_attempted": [],
   "stream_published": {
     "refs/heads/agent-events/alice": "[hash]"

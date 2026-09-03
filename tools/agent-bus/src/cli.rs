@@ -14,6 +14,7 @@ use crate::publish::RefUpdate;
 use crate::registry::MemberBinding;
 use crate::scalars::{Agent, EventId, ObjectId, Short, Text};
 use clap::{Parser, Subcommand};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -151,8 +152,13 @@ pub struct CoordinateArgs {
 pub struct TailArgs {
     #[arg(long)]
     agent: String,
-    /// Fetch `--agent`'s stream from the remote first, rather than reading
-    /// whatever is already local.
+    /// Probe the remote before reading, rather than reading whatever is
+    /// already local. Fetches the same complete roster cut `status --sync`
+    /// does (registry plus every active member's stream, not just `--agent`'s
+    /// own), since that is what backs this command's `roster_epoch`/
+    /// `freshness` fields honestly reporting a genuine
+    /// `current-as-of-remote-probe` receipt rather than mixing a
+    /// freshly-fetched stream with a possibly-stale local registry read.
     #[arg(long, default_value = "origin")]
     remote: String,
     #[arg(long)]
@@ -250,6 +256,87 @@ fn print_json(value: &serde_json::Value) {
     );
 }
 
+/// The freshness envelope every command result whose output depends on a
+/// [`crate::sync::Snapshot`] states (docs/AGENT_COORDINATION_EVOLUTION.md
+/// section 2.4: "Every human and machine-readable result states its
+/// snapshot receipt, roster epoch, causal frontier, last successful
+/// synchronization time, and freshness class"; section 5 gate 8: "every
+/// result labels its stale cut"). `submit` (no snapshot read at all -- a
+/// pure local outbox write) and `genesis` (bootstrap; no prior snapshot
+/// exists to report on) are deliberately not wired to this -- see their own
+/// functions below.
+///
+/// `snapshot_receipt` and `causal_frontier` are two names for the same
+/// underlying value here, `stream_tips`: it is simultaneously "what a later
+/// validation re-checks a snapshot against" (its own receipt -- see
+/// `sync::Snapshot`'s doc comment) and exactly the per-agent frontier a
+/// causally-dependent event would be built against at this cut (see
+/// `coordinator::build_frontier`/`build_complete_frontier`, which both
+/// source their entries from the same per-agent stream tips). Nothing in
+/// this crate has yet needed those two concepts to diverge, so rather than
+/// invent a second, currently-identical representation, both field names
+/// are kept (matching the design doc's own vocabulary) and populated from
+/// the one value that is genuinely both.
+///
+/// `last_synced` is `null` if this local checkout has never yet completed a
+/// synchronization (`sync::synced_snapshot`'s own fetch step succeeding),
+/// never a fabricated or `now()`-derived value. Per section 2.4, "time
+/// since sync is diagnostic; it never confers authority" -- nothing here,
+/// or anywhere else in this crate, uses `last_synced`'s value to authorize
+/// anything; `freshness` alone (not how recent `last_synced` looks) is what
+/// a currency-sensitive caller must check.
+fn freshness_fields(
+    stream_tips: &BTreeMap<Agent, ObjectId>,
+    roster_epoch: Option<&ObjectId>,
+    last_synced: Option<&crate::scalars::Timestamp>,
+    freshness: crate::sync::Freshness,
+) -> serde_json::Value {
+    let tips_json = serde_json::Value::Object(
+        stream_tips
+            .iter()
+            .map(|(agent, tip)| (agent.as_str().to_string(), tip.as_str().into()))
+            .collect(),
+    );
+    serde_json::json!({
+        "snapshot_receipt": tips_json.clone(),
+        "roster_epoch": roster_epoch.map(|e| e.as_str()),
+        "causal_frontier": tips_json,
+        "last_synced": last_synced.map(|t| t.as_str()),
+        "freshness": match freshness {
+            crate::sync::Freshness::Cached => "cached",
+            crate::sync::Freshness::CurrentAsOfRemoteProbe => "current-as-of-remote-probe",
+        },
+    })
+}
+
+/// [`freshness_fields`] scoped to the whole roster a [`crate::sync::
+/// Snapshot`] already knows -- the natural default for a command whose
+/// result concerns the roster as a whole (`status`, `coordinate`,
+/// `register`, `succeed`). `tail` builds its own narrower, single-agent
+/// version directly instead (see `tail` below), since reporting every
+/// other agent's tip for a single-stream read would overstate what that
+/// command actually looked at.
+fn freshness_envelope(snapshot: &crate::sync::Snapshot) -> serde_json::Value {
+    freshness_fields(
+        &snapshot.stream_tips,
+        Some(&snapshot.roster_epoch.id),
+        snapshot.last_synced.as_ref(),
+        snapshot.freshness,
+    )
+}
+
+/// Merges `extra`'s top-level fields into `value` (both expected to be JSON
+/// objects), so every command below can build its own distinctive fields
+/// first and then layer the shared freshness envelope on top in one place,
+/// rather than six independent ad-hoc `json!{}` blocks whose field names
+/// could silently drift apart from each other.
+fn with_freshness(mut value: serde_json::Value, envelope: serde_json::Value) -> serde_json::Value {
+    if let (Some(obj), serde_json::Value::Object(extra)) = (value.as_object_mut(), envelope) {
+        obj.extend(extra);
+    }
+    value
+}
+
 pub fn run(cli: Cli) -> AbResult<()> {
     match cli.command {
         Command::Genesis(args) => genesis(args),
@@ -263,6 +350,10 @@ pub fn run(cli: Cli) -> AbResult<()> {
     }
 }
 
+/// Deliberately does not report a freshness envelope (see
+/// [`freshness_fields`]'s doc comment): this is the bus's bootstrap event --
+/// there is no prior snapshot for a "snapshot receipt" or "roster epoch" to
+/// have been read *from*, only the one this call itself is about to create.
 fn genesis(args: GenesisArgs) -> AbResult<()> {
     let paths = resolve_paths()?;
     let agent = parse_agent(&args.agent)?;
@@ -379,16 +470,31 @@ fn register(args: RegisterArgs) -> AbResult<()> {
     ];
     let receipt = crate::publish::publish(&paths.repo, &args.remote, &updates)?;
 
-    print_json(&serde_json::json!({
-        "registry_epoch": new_epoch.id.as_str(),
-        "published_events": drained.published.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
-        "outbox_rejected": drained.rejected.iter().map(|r| serde_json::json!({"kind": r.kind, "reason": r.reason})).collect::<Vec<_>>(),
-        "published": receipt.published,
-        "rejected": receipt.rejected,
-    }));
+    // A fresh local reduction of the just-published result -- not an
+    // additional remote probe (the publish above already landed everything
+    // this command changed), so this is honestly reported as `cached`, per
+    // [`freshness_envelope`]'s doc comment: it reflects what is now known
+    // locally, exactly like any other cached read taken immediately after
+    // a local write.
+    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?;
+
+    print_json(&with_freshness(
+        serde_json::json!({
+            "registry_epoch": new_epoch.id.as_str(),
+            "published_events": drained.published.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
+            "outbox_rejected": drained.rejected.iter().map(|r| serde_json::json!({"kind": r.kind, "reason": r.reason})).collect::<Vec<_>>(),
+            "published": receipt.published,
+            "rejected": receipt.rejected,
+        }),
+        freshness_envelope(&snapshot),
+    ));
     Ok(())
 }
 
+/// Deliberately does not report a freshness envelope (see
+/// [`freshness_fields`]'s doc comment): a pure local outbox write with no
+/// snapshot read at all -- there is nothing here to have a receipt/epoch/
+/// frontier/freshness *of*.
 fn submit(args: SubmitArgs) -> AbResult<()> {
     let paths = resolve_paths()?;
     let agent = parse_agent(&args.agent)?;
@@ -427,45 +533,84 @@ fn coordinate(args: CoordinateArgs) -> AbResult<()> {
         &paths.worktrees,
         &args.remote,
     )?;
-    print_json(&serde_json::json!({
-        "published_events": drained.published.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
-        "outbox_rejected": drained.rejected.iter().map(|r| serde_json::json!({"kind": r.kind, "reason": r.reason})).collect::<Vec<_>>(),
-        "published": receipt.published,
-        "rejected": receipt.rejected,
-        "not_attempted": receipt.not_attempted,
-    }));
+
+    // See `register`'s identical comment: a local-only reduction of what
+    // was just published, honestly reported as `cached`.
+    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?;
+
+    print_json(&with_freshness(
+        serde_json::json!({
+            "published_events": drained.published.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
+            "outbox_rejected": drained.rejected.iter().map(|r| serde_json::json!({"kind": r.kind, "reason": r.reason})).collect::<Vec<_>>(),
+            "published": receipt.published,
+            "rejected": receipt.rejected,
+            "not_attempted": receipt.not_attempted,
+        }),
+        freshness_envelope(&snapshot),
+    ));
     Ok(())
 }
 
+/// `--sync` fetches the same complete roster cut `status --sync` does (see
+/// `TailArgs::sync`'s doc comment) rather than only `--agent`'s own stream:
+/// `roster_epoch` and `freshness` are reported honestly only if the
+/// registry itself was actually just probed too, not merely whichever
+/// single stream `--agent` names.
 fn tail(args: TailArgs) -> AbResult<()> {
     let paths = resolve_paths()?;
     let agent = parse_agent(&args.agent)?;
-    if args.sync {
-        let refspec = {
-            let r = crate::stream::stream_ref(&agent).into_string();
-            format!("{r}:{r}")
-        };
-        crate::gitrepo::fetch_refspecs(&paths.repo, &args.remote, &[refspec])?;
-    }
+    let snapshot = if args.sync {
+        crate::sync::synced_snapshot(
+            &paths.repo,
+            &paths.common_dir,
+            &args.remote,
+            &paths.worktrees,
+        )?
+    } else {
+        crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?
+    };
     let (header, log) = crate::stream::read_stream(
         &paths.repo,
         &agent,
         &paths.worktrees.join(format!("_tail_{agent}")),
     )?;
-    print_json(&serde_json::json!({
-        "agent": agent.as_str(),
-        "activation_event": header.activation_event.map(|e| e.as_str().to_string()),
-        "events": log,
-    }));
+
+    // Scoped to just `--agent`'s own tip (see `freshness_envelope`'s doc
+    // comment on `tail`): reporting every other agent's tip here would
+    // overstate what a single-stream read actually looked at.
+    let mut scoped_tips = BTreeMap::new();
+    if let Some(tip) = snapshot.stream_tips.get(&agent) {
+        scoped_tips.insert(agent.clone(), tip.clone());
+    }
+    let envelope = freshness_fields(
+        &scoped_tips,
+        Some(&snapshot.roster_epoch.id),
+        snapshot.last_synced.as_ref(),
+        snapshot.freshness,
+    );
+
+    print_json(&with_freshness(
+        serde_json::json!({
+            "agent": agent.as_str(),
+            "activation_event": header.activation_event.map(|e| e.as_str().to_string()),
+            "events": log,
+        }),
+        envelope,
+    ));
     Ok(())
 }
 
 fn status(args: StatusArgs) -> AbResult<()> {
     let paths = resolve_paths()?;
     let snapshot = if args.sync {
-        crate::sync::synced_snapshot(&paths.repo, &args.remote, &paths.worktrees)?
+        crate::sync::synced_snapshot(
+            &paths.repo,
+            &paths.common_dir,
+            &args.remote,
+            &paths.worktrees,
+        )?
     } else {
-        crate::sync::cached_snapshot(&paths.repo, &paths.worktrees)?
+        crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?
     };
 
     let agents: Vec<serde_json::Value> = snapshot
@@ -486,14 +631,10 @@ fn status(args: StatusArgs) -> AbResult<()> {
         })
         .collect();
 
-    print_json(&serde_json::json!({
-        "roster_epoch": snapshot.roster_epoch.id.as_str(),
-        "freshness": match snapshot.freshness {
-            crate::sync::Freshness::Cached => "cached",
-            crate::sync::Freshness::CurrentAsOfRemoteProbe => "current-as-of-remote-probe",
-        },
-        "agents": agents,
-    }));
+    print_json(&with_freshness(
+        serde_json::json!({ "agents": agents }),
+        freshness_envelope(&snapshot),
+    ));
     Ok(())
 }
 
@@ -543,21 +684,45 @@ fn succeed(args: SucceedArgs) -> AbResult<()> {
         &args.remote,
     )?;
 
-    print_json(&serde_json::json!({
-        "registry_epoch": new_epoch.id.as_str(),
-        "new_custody_epoch": new_custody_epoch,
-        "registry_published": registry_receipt.published,
-        "registry_rejected": registry_receipt.rejected,
-        "registry_not_attempted": registry_receipt.not_attempted,
-        "resumed_events": resumed.published.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
-        "resumed_rejected": resumed.rejected.iter().map(|r| serde_json::json!({"kind": r.kind, "reason": r.reason})).collect::<Vec<_>>(),
-        "stream_published": stream_receipt.published,
-        "stream_rejected": stream_receipt.rejected,
-        "stream_not_attempted": stream_receipt.not_attempted,
-    }));
+    // See `register`'s identical comment: a local-only reduction of what
+    // was just published, honestly reported as `cached`.
+    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?;
+
+    print_json(&with_freshness(
+        serde_json::json!({
+            "registry_epoch": new_epoch.id.as_str(),
+            "new_custody_epoch": new_custody_epoch,
+            "registry_published": registry_receipt.published,
+            "registry_rejected": registry_receipt.rejected,
+            "registry_not_attempted": registry_receipt.not_attempted,
+            "resumed_events": resumed.published.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
+            "resumed_rejected": resumed.rejected.iter().map(|r| serde_json::json!({"kind": r.kind, "reason": r.reason})).collect::<Vec<_>>(),
+            "stream_published": stream_receipt.published,
+            "stream_rejected": stream_receipt.rejected,
+            "stream_not_attempted": stream_receipt.not_attempted,
+        }),
+        freshness_envelope(&snapshot),
+    ));
     Ok(())
 }
 
+/// Reports a freshness envelope like every other snapshot-touching command
+/// (gate 8: "cached reads and local candidate submission complete while the
+/// host coordinator is stalled on the network indefinitely, and every
+/// result labels its stale cut" -- this command is exactly that "cached
+/// read... while stalled" scenario, so it must label its cut too), but with
+/// one deliberate difference: `freshness` is unconditionally `"cached"` and
+/// nothing here ever performs a network round trip to build it, preserving
+/// this command's own documented "no network round trip at all" property
+/// (see `Command::Outbox`'s doc comment). The roster-wide fields
+/// (`snapshot_receipt`/`roster_epoch`/`causal_frontier`) come from a local
+/// [`crate::sync::cached_snapshot`] read on a best-effort basis: `outbox`
+/// itself has never required a registry to exist locally (`submit` writes
+/// directly with no registry check at all), so a `cached_snapshot` failure
+/// here (most commonly "no registry root exists locally" before the first
+/// `genesis`) is not treated as an error -- those fields are simply `null`/
+/// empty rather than this command now refusing to show local outbox state
+/// it could always show before.
 fn outbox(args: OutboxArgs) -> AbResult<()> {
     let paths = resolve_paths()?;
     let agent = parse_agent(&args.agent)?;
@@ -596,10 +761,27 @@ fn outbox(args: OutboxArgs) -> AbResult<()> {
         }
     }
 
-    print_json(&serde_json::json!({
-        "agent": agent.as_str(),
-        "pending": pending_json,
-        "rejected": rejected_json,
-    }));
+    let empty_tips = BTreeMap::new();
+    let (tips, roster_epoch) =
+        match crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees) {
+            Ok(snapshot) => (snapshot.stream_tips, Some(snapshot.roster_epoch.id)),
+            Err(_) => (empty_tips, None),
+        };
+    let last_synced = crate::sync::read_last_synced(&paths.common_dir)?;
+    let envelope = freshness_fields(
+        &tips,
+        roster_epoch.as_ref(),
+        last_synced.as_ref(),
+        crate::sync::Freshness::Cached,
+    );
+
+    print_json(&with_freshness(
+        serde_json::json!({
+            "agent": agent.as_str(),
+            "pending": pending_json,
+            "rejected": rejected_json,
+        }),
+        envelope,
+    ));
     Ok(())
 }

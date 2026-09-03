@@ -3,6 +3,11 @@ source: tests/cli_flow.rs
 expression: out
 ---
 {
+  "causal_frontier": {
+    "coord1": "[hash]"
+  },
+  "freshness": "cached",
+  "last_synced": null,
   "not_attempted": [],
   "outbox_rejected": [],
   "published": {
@@ -11,5 +16,9 @@ expression: out
   "published_events": [
     "coord1:1"
   ],
-  "rejected": []
+  "rejected": [],
+  "roster_epoch": "[hash]",
+  "snapshot_receipt": {
+    "coord1": "[hash]"
+  }
 }

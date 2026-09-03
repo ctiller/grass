@@ -14,6 +14,13 @@ expression: out
       "stream_tip": "[hash]"
     }
   ],
+  "causal_frontier": {
+    "coord1": "[hash]"
+  },
   "freshness": "cached",
-  "roster_epoch": "[hash]"
+  "last_synced": null,
+  "roster_epoch": "[hash]",
+  "snapshot_receipt": {
+    "coord1": "[hash]"
+  }
 }
