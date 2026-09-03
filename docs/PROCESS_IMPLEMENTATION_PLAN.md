@@ -2267,7 +2267,7 @@ was found by reading.
 
 The exit criterion §10.54 proposed — every named record has a positive witness
 before the layer is nominated — turned out to be the most productive rule in this
-milestone. Six records were inhabited for the first time, and each was empty for a
+milestone. Seven records were inhabited for the first time, and each was empty for a
 *different* reason that reading had not found:
 
 | Record | Why it was empty | Witness |
@@ -2278,8 +2278,9 @@ milestone. Six records were inhabited for the first time, and each was empty for
 | `EndsInstance` | nothing; it had absorbed three | `Tests/Process/EndingFixtures.lean` |
 | `Spawns` | nothing | `Tests/Process/FrontierFixtures.lean` |
 | `Restarts` | nothing | `Tests/Process/RestartFixtures.lean` |
+| `WeaveInvariantFamily` | nothing | `Tests/Process/WeaveFixtures.lean` |
 
-The pattern is worth stating because it held six times out of six: **a record
+The pattern is worth stating because it held seven times out of seven: **a record
 that absorbs a new field without a single proof breaking is a record nothing
 inhabits.** That is a cheap check and it is now the first one to run after any
 structural change.
@@ -3305,3 +3306,70 @@ the other five: the field went in and not one proof broke.
 supervisor starts a fresh incarnation at a new generation — with the two
 refusals the structure is for: reusing the dead incarnation's generation (law
 22, refused by `NetworkStep.admissible`) and installing a root.
+
+### 10.73 `well_formedness_is_preserved` is argued and not proved
+
+`Grass/Process/Network/WellFormedness.lean` carries the two lemmas a proof of it
+would be built from — `instanceProperty_preserved`, which is where the scope
+discipline is spent, and `instanceFragment_inj` — and a clause-by-clause plan for
+the six clauses of `LogicalProcessNetworkCore.WellFormed`.
+
+Working that plan is what found §10.72's two defects, so it earned its keep
+before it was finished. But the plan is an *argument*, and this ledger has five
+entries recording defects that did not exist, every one filed from an argument
+rather than a construction. It should be read as owed work, not as a result.
+
+### 10.74 Three defects the trace split left behind in the weave layer
+
+The `pending`/`observations` split gave `Commits` provenance and left stale
+claims one module over, which a reviewer found by construction:
+
+* `Grass/Process/Weave/Lens.lean`'s `emitting_steps_need_the_trace_inside` named
+  `.observations`, which after the split only `commit` declares — so it
+  constrained *driver* steps and said nothing about a role emitting, and a lens
+  excluding `.observations` could select an emitting `processStep` and get the
+  trace framed for free. It is now
+  `emitting_steps_need_the_produced_trace_inside` over `.pending`, with
+  `committing_steps_need_the_committed_trace_inside` kept for the narrower claim.
+* `at_most_one_lens_may_emit` was "at most one lens may *commit*". Same repair.
+* `Tests/Process/LensFixtures.lean`'s `the_connection_refinement_is_silent` was
+  negative about a class no receive could be in: after the split, "this
+  non-commit step does not declare `.observations`" is true of every non-commit
+  step of every plan.
+
+**Fixed, and the shape is the point.** A cross-module claim about another
+module's fragment discipline is worth exactly as much as the last time someone
+checked it — which is the same lesson `Grass/Process/Run.lean`'s "no replay"
+qualification taught twice.
+
+### 10.75 A lens could select no role at all
+
+`ProcessRefinementLens.interiorChannelsTouchTheSelection` ties an interior
+*escrow* fragment to a selected endpoint, and its docstring said that without it
+"a lens with `Selected := fun _ => False` could still select real channel steps".
+It closed the escrow route and left `.observations`, `.pending`, `.nominals`,
+`.obligations` and `.session` unguarded, so the empty-selection lens was still a
+full lens — a reviewer built one that owns the two trace fragments and selects a
+real commit, with all four coupling fields discharged vacuously.
+
+`selectsSomething` is the field. It is the cheap half of the repair and it is
+honest about what is left: the *global* fragments — the two traces, the nominal
+history, the obligation ledger — have no role attribution at this layer, so a
+non-empty lens can still own one and select a step that has nothing to do with
+the roles it named. That is §10.29's neighbourhood and is not closed.
+
+### 10.76 `WeaveInvariantFamily.complete` asserted nothing
+
+A field typed `(NetworkFragment → Prop) → Prop` with no law, whose docstring said
+the structure "can refuse to let a family claim coverage it has not stated, which
+is what making this a field does". Making it a field did nothing: a reviewer
+built a family with `Key := Empty`, no mixins, and `complete := fun _ => True`.
+
+It is now `Covers` plus `coversMeansCovered`: a claim of coverage obliges a mixin
+for every fragment in the scope claimed.
+`Tests/Process/WeaveFixtures.lean`'s `routeTableFamily` is the record's first
+witness — the seventh record found empty this milestone, and found the same way —
+and `the_family_may_not_claim_more` is the refusal.
+
+What is still not required is that the claimed scopes be the ones the
+*application* needs, which is the half `Grass.Process` genuinely cannot know.

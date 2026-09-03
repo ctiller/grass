@@ -51,6 +51,7 @@ they are for: an `Interior` chosen to suit a theorem would fail one of them.
 -/
 def connectionLens : serverPlan.ProcessRefinementLens where
   Selected := fun role => role = .connection
+  selectsSomething := ⟨.connection, rfl⟩
   Interior := fun fragment =>
     fragment = .escrow () wire ∨ fragment = .session () wire ∨
       ∃ slot, fragment = .instanceState .connection slot
@@ -158,6 +159,7 @@ theorem the_listener_did_not_move (slot : serverTopology.InstanceId .listener) :
 /-- A second refinement, of the listener role. -/
 def listenerLens : serverPlan.ProcessRefinementLens where
   Selected := fun role => role = .listener
+  selectsSomething := ⟨.listener, rfl⟩
   Interior := fun fragment => ∃ slot, fragment = .instanceState .listener slot
   selectedStateInterior := by
     rintro kind slot rfl
@@ -206,11 +208,17 @@ theorem the_listener_refinement_is_not_reopened
 **And neither may emit without the other knowing.**
 
 `at_most_one_lens_may_emit` at these two: since they are disjoint, at most one
-owns the observation trace, so at most one refinement can change what the
-program observes. Here neither does — the receive is silent — which is why the
-listener refinement can be written without an origin-preservation argument.
+owns the *produced* trace, so at most one refinement can change what the program
+says. Here neither does — the receive is silent — which is why the listener
+refinement can be written without an origin-preservation argument.
+
+`.pending`, not `.observations`. A reviewer pointed out that the earlier version
+of this theorem was negative about a class no receive could ever be in: after the
+trace split only `commit` declares `.observations`, so "this receive does not
+declare it" was true of every non-commit step of every plan and checked nothing.
+`.pending` is the fragment an emitting step actually declares.
 -/
-theorem the_connection_refinement_is_silent : ¬ receiveStep.scope .observations := by
+theorem the_connection_refinement_is_silent : ¬ receiveStep.scope .pending := by
   intro emits
   rcases (receive_scope_is_the_session _).mp emits with isEscrow | isSession
   · exact absurd isEscrow (by simp)

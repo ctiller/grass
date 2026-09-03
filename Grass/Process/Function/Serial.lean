@@ -477,25 +477,49 @@ variable {State : Type w} {contract : SerialFunctionContract State}
   {source : SerialFunctionSource contract}
 
 /--
-**A serial call's answer is determined by its input.**
+**A serial call's exit *and* its answer are determined by its input.**
 
 The theorem the whole module is for. `converse` sends each permitted answer to a
 machine execution, `exit_is_unique` says there is only one, and `read` is a
-function — so two permitted answers to one call are the same answer.
+function — so two permitted answers to one call agree, and so do the exits they
+came out of.
+
+**Both halves, and for a round it was only the second.** The earlier statement
+fixed a single `exitState` and concluded the after-states equal, which says
+nothing about a contract whose `Post` is single-valued *per exit* and answers one
+input two ways through *two* exits. A reviewer built exactly that contract — a
+non-degenerate `SerialFunctionContract` with `ExitState := Bool` answering one
+input as `(1,0)` at one exit and `(2,0)` at the other — and it satisfied the
+refusal below vacuously. The fields were always enough for the stronger
+statement; nobody had written it.
 -/
+theorem exit_and_answer_are_determined (realizes : SerialFunctionRealizes contract source)
+    {input : contract.Input} {before left right : State}
+    {exitLeft exitRight : contract.ExitState} (pre : contract.Pre input before)
+    (leftPost : contract.Post input exitLeft before left)
+    (rightPost : contract.Post input exitRight before right) :
+    exitLeft = exitRight ∧ left = right := by
+  obtain ⟨finishLeft, stepsLeft, decidesLeft, readsLeft⟩ :=
+    realizes.converse input before exitLeft left pre leftPost
+  obtain ⟨finishRight, stepsRight, decidesRight, readsRight⟩ :=
+    realizes.converse input before exitRight right pre rightPost
+  have same : finishLeft = finishRight :=
+    SerialFunctionSource.exit_is_unique stepsLeft (by rw [decidesLeft]; trivial)
+      stepsRight (by rw [decidesRight]; trivial)
+  subst same
+  have sameDecision : (SerialDecision.exit exitLeft : SerialDecision _ _) = .exit exitRight :=
+    decidesLeft.symm.trans decidesRight
+  injection sameDecision with sameExit
+  exact ⟨sameExit, by rw [← readsLeft, ← readsRight]⟩
+
+/-- **So one exit's answer is determined**, which is the same theorem read at a
+fixed exit. -/
 theorem post_is_determined (realizes : SerialFunctionRealizes contract source)
     {input : contract.Input} {before left right : State}
     {exitState : contract.ExitState} (pre : contract.Pre input before)
     (leftPost : contract.Post input exitState before left)
-    (rightPost : contract.Post input exitState before right) : left = right := by
-  obtain ⟨finishLeft, stepsLeft, exitLeft, readsLeft⟩ :=
-    realizes.converse input before exitState left pre leftPost
-  obtain ⟨finishRight, stepsRight, exitRight, readsRight⟩ :=
-    realizes.converse input before exitState right pre rightPost
-  have same : finishLeft = finishRight :=
-    SerialFunctionSource.exit_is_unique stepsLeft (by rw [exitLeft]; trivial)
-      stepsRight (by rw [exitRight]; trivial)
-  rw [← readsLeft, ← readsRight, same]
+    (rightPost : contract.Post input exitState before right) : left = right :=
+  (realizes.exit_and_answer_are_determined pre leftPost rightPost).2
 
 /--
 **So a call that can answer two ways is not a serial call.**
@@ -511,15 +535,30 @@ protocol because its return is external entropy, even when its selected machine
 realization is one blocking ABI call". An earlier version of this module argued
 the same conclusion from the shape of `SerialDecision`, and local adversarial
 review built exactly this contract, gave it a source, and collapsed it.
+
+A second review pass then built the contract this refusal could *not* reach: one
+whose `Post` is single-valued at each exit and answers one input two ways through
+two exits. `a_call_that_can_exit_two_ways_is_not_serial` is the companion, and
+both come from `exit_and_answer_are_determined`.
 -/
 theorem a_call_that_can_answer_two_ways_is_not_serial
     (realizes : SerialFunctionRealizes contract source) {input : contract.Input}
-    {before left right : State} {exitState : contract.ExitState}
+    {before left right : State} {exitLeft exitRight : contract.ExitState}
     (pre : contract.Pre input before)
-    (leftPost : contract.Post input exitState before left)
-    (rightPost : contract.Post input exitState before right)
+    (leftPost : contract.Post input exitLeft before left)
+    (rightPost : contract.Post input exitRight before right)
     (different : left ≠ right) : False :=
-  different (realizes.post_is_determined pre leftPost rightPost)
+  different (realizes.exit_and_answer_are_determined pre leftPost rightPost).2
+
+/-- **And a call that can leave two ways is not one either.** -/
+theorem a_call_that_can_exit_two_ways_is_not_serial
+    (realizes : SerialFunctionRealizes contract source) {input : contract.Input}
+    {before left right : State} {exitLeft exitRight : contract.ExitState}
+    (pre : contract.Pre input before)
+    (leftPost : contract.Post input exitLeft before left)
+    (rightPost : contract.Post input exitRight before right)
+    (different : exitLeft ≠ exitRight) : False :=
+  different (realizes.exit_and_answer_are_determined pre leftPost rightPost).1
 
 /-- **And a claimed responsiveness bound is met by the machine.** -/
 theorem responsive_is_realized (realizes : SerialFunctionRealizes contract source)

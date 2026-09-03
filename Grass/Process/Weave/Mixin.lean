@@ -214,11 +214,15 @@ inductive StepsTo : plan.LogicalProcessNetwork → plan.LogicalProcessNetwork �
 /--
 A family of mixins covering one plan.
 
-§8's `WeaveInvariantFamily`. `complete` is the field that matters: a family that
+§8's `WeaveInvariantFamily`. `Covers` is the field that matters: a family that
 covered only the invariants someone remembered would let a cross-process
 dependency go unnamed, which is the whole failure mode §8's "not one
 application-sized proof term" is trading against — small mixins are only safe if
 *every* dependency has one.
+
+It was called `complete` and was a bare `(NetworkFragment → Prop) → Prop` with no
+law, so a family with no mixins at all could claim to cover everything.
+`coversMeansCovered` is what makes the claim cost something.
 -/
 structure WeaveInvariantFamily where
   /-- What indexes the family. -/
@@ -226,14 +230,30 @@ structure WeaveInvariantFamily where
   /-- The mixin at each key. -/
   mixin : Key → plan.WeaveInvariantMixin
   /--
-  Every cross-process dependency is named by some mixin.
+  Which regions this family claims to cover.
 
-  Supplied rather than derived: what counts as a dependency is a fact about the
-  application, and `Grass.Process` cannot enumerate them. What it *can* do is
-  refuse to let a family claim coverage it has not stated, which is what making
-  this a field does.
+  Supplied rather than derived: what counts as a cross-process dependency is a
+  fact about the application, and `Grass.Process` cannot enumerate them.
   -/
-  complete : (NetworkFragment plan.topology → Prop) → Prop
+  Covers : plan.NetworkScope → Prop
+  /--
+  **And a claim of coverage is a claim there is a mixin for every fragment in
+  it.**
+
+  The field that gives `Covers` content, and the thing this structure said it did
+  and did not do. `Covers` alone is a predicate on predicates with no laws: a
+  family with no keys at all could set it to `fun _ => True` and claim to cover
+  everything, and a reviewer built exactly that. The docstring said the structure
+  "can refuse to let a family claim coverage it has not stated, which is what
+  making this a field does" — making it a field did nothing; this is what does.
+
+  Note what it still does not do: nothing says the claimed scopes are the ones
+  the *application* needs, which is the half `Grass.Process` genuinely cannot
+  know. A family covering the empty scope is legal and useless, and saying so is
+  better than a field that reads as though it forbade it.
+  -/
+  coversMeansCovered : ∀ scope, Covers scope →
+    ∀ fragment, scope fragment → ∃ key, (mixin key).Scope fragment
 
 namespace WeaveInvariantFamily
 

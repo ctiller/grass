@@ -188,4 +188,53 @@ theorem escrow_reading_mixin_is_not_route_table_scoped
   rw [claimsRouteTable] at inScope
   exact absurd inScope (by simp)
 
+/-! ## A family with one mixin in it -/
+
+/--
+**A `WeaveInvariantFamily` that covers exactly what it has a mixin for.**
+
+`WeaveInvariantFamily` was the seventh record this milestone found with no
+witness, and it was found the same way as the other six: a field went in —
+`coversMeansCovered` — and not one proof broke.
+
+The field is what gives `Covers` content. Before it, `complete` was a bare
+`(NetworkFragment → Prop) → Prop` with no law, so a family with no mixins at all
+could set it to `fun _ => True` and claim to cover everything; a reviewer built
+that family. Now a claim of coverage costs a mixin for every fragment in the
+scope claimed.
+
+This family covers the route table, which is the one fragment it has a mixin
+for. `the_family_may_not_claim_more` is the other half: it cannot also claim the
+accept counter, because nothing in it is about that region.
+-/
+noncomputable def routeTableFamily : serverPlan.WeaveInvariantFamily where
+  Key := Unit
+  mixin := fun _ => routeTableStable
+  Covers := fun scope => ∀ fragment, scope fragment → fragment = .region .routeTable
+  coversMeansCovered := fun _ covers fragment inScope =>
+    ⟨(), covers fragment inScope⟩
+
+/-- **And every mixin in it survives every execution**, which is what a family is
+for. -/
+theorem the_family_survives {final : serverPlan.LogicalProcessNetwork}
+    (execution : serverPlan.StepsTo beforeReceive final) (key : Unit) :
+    (routeTableFamily.mixin key).assertion.holds final :=
+  routeTableFamily.all_preserved_along execution (fun _ => route_table_is_empty_before) key
+
+/--
+**It may not claim a region it has no mixin for.**
+
+`coversMeansCovered` at a scope this family does not cover: the accept counter is
+a fragment of this topology and nothing in the family is about it, so claiming a
+scope that contains it is refused.
+
+Before the field, the claim was free — which is what the structure's own
+docstring said it was not.
+-/
+theorem the_family_may_not_claim_more :
+    ¬ routeTableFamily.Covers (fun fragment => fragment = .region .acceptCount) := by
+  intro claims
+  exact absurd (claims (.region .acceptCount) rfl) (by intro equal; cases equal)
+
+
 end Grass.Process.Tests.Weave

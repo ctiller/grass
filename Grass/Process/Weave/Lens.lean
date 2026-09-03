@@ -36,18 +36,28 @@ other exists.
 
 ## What a lens must include to be worth anything
 
-A lens whose interior excludes the observation trace selects **no emitting
-step** — `emitting_steps_need_the_trace_inside`. That is not a defect to route
-around; it is the honest statement of a real constraint, and it is why §8 lists
-"observation origin" first among the things a replacement must preserve. A
-refinement of a subgraph that emits has the trace in its interior, so an
-exterior invariant about the trace is *not* framed for free and the refinement
-owes the origin-preservation obligation instead.
+A lens whose interior excludes the *produced* trace selects **no emitting
+step** — `emitting_steps_need_the_produced_trace_inside`. That is not a defect
+to route around; it is the honest statement of a real constraint, and it is why
+§8 lists "observation origin" first among the things a replacement must
+preserve. A refinement of a subgraph that emits has `.pending` in its interior,
+so an exterior invariant about what the program has said is *not* framed for
+free and the refinement owes the origin-preservation obligation instead.
+
+**`.pending`, not `.observations`, and for one round it said the wrong one.**
+`NetworkFragment` split the trace in two — a process produces into `pending` and
+a driver commits from it — and the theorem here was left naming `.observations`,
+which after the split only `commit` declares. So it constrained *driver* steps
+and said nothing about a role emitting, and a reviewer built a legal lens that
+excludes `.observations`, selects a `processStep` that emits a `beep`, and gets
+the trace framed for free. `committing_steps_need_the_committed_trace_inside` is
+the `.observations` statement, kept because it is also true and is about a
+different thing.
 
 The same shape appears in `Grass/Process/Trace/Linearization.lean`: two
-independent steps never both emit, because the trace is one fragment. Two
-disjoint lenses likewise cannot both contain it, so at most one refinement in a
-weave may change what the program observes without an explicit argument.
+independent steps never both emit, because one fragment carries every emission.
+Two disjoint lenses likewise cannot both contain it, so at most one refinement in
+a weave may change what the program produces without an explicit argument.
 
 ## What `Disjoint` does not separate
 
@@ -119,6 +129,22 @@ change and is recorded in `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.29.
 structure ProcessRefinementLens where
   /-- The roles this refinement replaces. -/
   Selected : plan.topology.ProcessKind → Prop
+  /--
+  **And it replaces at least one.**
+
+  `docs/PROCESS.md` §8's lens is "one abstract role or subgraph and its complete
+  typed boundary", and a lens that names no role is not a refinement of anything.
+
+  Without this a lens with `Selected := fun _ => False` was legal — every
+  coupling field below is vacuous at it — and it could still own the trace
+  fragments and *select real steps* through them, so every framing theorem in
+  this module applied to a refinement of nothing. A reviewer built it. The
+  escrow half of that hole had already been closed by
+  `interiorChannelsTouchTheSelection`, which is what makes the shape of the
+  remaining half legible: see the module note on what `Disjoint` does not
+  separate.
+  -/
+  selectsSomething : ∃ kind, Selected kind
   /-- The fragments it owns. -/
   Interior : plan.NetworkScope
   /-- A selected role's own state is interior. -/
@@ -297,35 +323,55 @@ approximated by a theorem that reads like it says something.
 /-! ## What a lens has to own to select anything -/
 
 /--
-**A lens whose interior excludes the observation trace selects no emitting
-step.**
+**A lens whose interior excludes the produced trace selects no emitting step.**
 
 Not a defect to route around. It is why §8 lists "observation origin" first
 among the things a replacement must preserve: a refinement of a subgraph that
-emits *does* own the trace, so an exterior invariant about the trace is not
-framed for free and the refinement owes an origin-preservation argument instead.
+emits *does* own `.pending`, so an exterior invariant about what the program has
+said is not framed for free and the refinement owes an origin-preservation
+argument instead.
 
 `Grass/Process/Trace/Linearization.lean` reaches the same shape from the other
-side — two independent steps never both emit, because the trace is one fragment.
-Two disjoint lenses likewise cannot both contain it.
--/
-theorem emitting_steps_need_the_trace_inside {before after : plan.LogicalProcessNetwork}
-    {transition : plan.NetworkTransition before after}
-    (inside : lens.Selects transition) (emits : transition.scope .observations) :
-    lens.Interior .observations :=
-  inside .observations emits
+side — two independent steps never both emit, because one fragment carries every
+emission. Two disjoint lenses likewise cannot both contain it.
 
-/-- So two disjoint lenses cannot both own the trace, and at most one may emit. -/
+This named `.observations` for one round after the trace split, which made it a
+statement about *commits*: only `commit` declares that fragment now. A reviewer
+built a lens excluding `.observations` that selects an emitting `processStep`,
+and got the trace framed for free.
+-/
+theorem emitting_steps_need_the_produced_trace_inside {before after : plan.LogicalProcessNetwork}
+    {transition : plan.NetworkTransition before after}
+    (inside : lens.Selects transition) (emits : transition.scope .pending) :
+    lens.Interior .pending :=
+  inside .pending emits
+
+/--
+**And a lens that excludes the committed trace selects no commit.**
+
+The `.observations` statement, which is a different and narrower thing: only
+`commit` declares that fragment, so this is about the driver step that publishes
+rather than about a role that emits.
+-/
+theorem committing_steps_need_the_committed_trace_inside
+    {before after : plan.LogicalProcessNetwork}
+    {transition : plan.NetworkTransition before after}
+    (inside : lens.Selects transition) (publishes : transition.scope .observations) :
+    lens.Interior .observations :=
+  inside .observations publishes
+
+/-- So two disjoint lenses cannot both own the produced trace, and at most one
+may emit. -/
 theorem at_most_one_lens_may_emit
     {left right : plan.ProcessRefinementLens} (disjoint : Disjoint left right)
     {a b c d : plan.LogicalProcessNetwork}
     {leftStep : plan.NetworkTransition a b} {rightStep : plan.NetworkTransition c d}
     (insideLeft : left.Selects leftStep) (insideRight : right.Selects rightStep)
-    (leftEmits : leftStep.scope .observations) : ¬ rightStep.scope .observations :=
+    (leftEmits : leftStep.scope .pending) : ¬ rightStep.scope .pending :=
   fun rightEmits =>
-    disjoint .observations
-      (emitting_steps_need_the_trace_inside insideLeft leftEmits)
-      (emitting_steps_need_the_trace_inside insideRight rightEmits)
+    disjoint .pending
+      (emitting_steps_need_the_produced_trace_inside insideLeft leftEmits)
+      (emitting_steps_need_the_produced_trace_inside insideRight rightEmits)
 
 /-! ## The obligations a replacement still owes -/
 
