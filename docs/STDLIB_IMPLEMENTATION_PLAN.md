@@ -129,11 +129,15 @@ rule concrete — it was written with no law at all, and `Vec.pop?_push`,
 representation is available through `Vec.mem_iff_mem_toList`, but a consumer
 should not have to.
 
-`Tests/Std/VecVocabulary.lean` is the fixture. Per `Tests.lean` it establishes
-expressibility rather than a theorem: that a `List Byte` and a host
-`_root_.ByteArray` are each rejected where a Grass `ByteArray` is required, that
-extensionality is usable in the shape a consumer would use it, and that the
-update framing law composes the way the memory layer applies it.
+There are two fixtures. Per `Tests.lean` both establish expressibility rather
+than a theorem. `Tests/Std/VecVocabulary.lean` covers the type's own claims: that
+a `List Byte` and a host `_root_.ByteArray` are each rejected where a Grass
+`ByteArray` is required, that extensionality is usable in the shape a consumer
+would use it, and that the update framing law composes the way the memory layer
+applies it. `Tests/Std/SpikeSurface.lean` covers the demand side: every `Vec`
+operation the authored spike sources call, compiled in the shape they call it,
+so that §3.4's "no consumer has demanded it" rests on a reading of the corpus
+rather than on an assumption about it.
 
 ### 3.2 The representation decision
 
@@ -151,6 +155,37 @@ This is reversible in one direction only. Changing `Vec` from a structure to an
 abbreviation later is a small edit; changing it the other way after consumers
 have leaned on `List` lemmas is not. That asymmetry is the reason for choosing
 the stricter option first rather than the cheaper one.
+
+**A fact found after the decision, recorded because it argues against it.** Lean's
+own `Array` is, in `Init/Prelude.lean`:
+
+```lean
+structure Array (α : Type u) where
+  mk ::
+  toList : List α
+```
+
+That is `Vec`, field for field. The difference is the name, the `@[extern]`
+runtime overrides on `Array.mk` and `Array.toList`, and an API in core that is
+far larger than the one restated here. So the option this plan never considered —
+`Vec α := Array α` — would keep every property §3.2 claims for the structure
+(`ByteArray` still would not reduce to `List Byte`, and `Array (BitVec 8)` is
+still not Lean's `ByteArray`), while deleting the restatement cost and inheriting
+core's proved laws and array-literal syntax.
+
+The argument against it is the same one made above against `abbrev Vec := List`,
+transposed: an abbreviation makes Lean's `Array` API, rather than
+[STDLIB.md](STDLIB.md) §3, the reviewed surface. Whether that objection has the
+same force for `Array` as for `List` is a real question, and the fact that
+[MODULES.md](MODULES.md) names `Vec` as a distinct library type does not settle
+it, since a `def` with its own API would also satisfy that.
+
+This plan is not changing the decision while the branch is under review. Flipping
+a foundational representation underneath a reviewer mid-review is worse than
+surfacing the evidence and letting the review weigh it, and the nomination
+already asks for exactly this argument to be attacked. It is recorded here so
+that the reviewer has the strongest version of the counter-case rather than the
+version this owner happened to think of first.
 
 ### 3.3 Equality
 
@@ -175,9 +210,63 @@ absence is a band-3 item under §1 with a named blocker, not an oversight:
 | `foldMap` | a monoid vocabulary, which no consumer has demanded. |
 | lexicographic comparison | an ordering vocabulary, likewise undemanded. |
 | indexing laws for `insertAt`/`eraseAt` | a consumer that indexes across an insertion. The operations and their length laws are present; the index-shifting laws are large and are better written against a real proof than guessed at. |
-| `Vec` iterators | a consumer. §3 lists iteration; `foldl`, `foldr`, and `map` cover every use on the branch today. |
+| `Vec` iterators | a consumer. §3 lists iteration; `foldl`, `foldr`, `map`, and `mapIdx` cover every use in the spike corpus. |
 
-### 3.5 Exit criteria
+The absences above are only honest if the corpus was read for demands rather
+than assumed to have none, so it was read. `Spikes/` holds the comment-free
+expected author source that [SPIKE_AUTHORING.md](SPIKE_AUTHORING.md) makes the
+reviewed statement of what an author writes, which makes it the closest thing
+this library has to a named consumer. Every `Vec` operation those files call:
+
+| Called by the spike surface | Status |
+|---|---|
+| `Vec.zipWith f v w` (`5_Spinning_Cube/Macros.lean`) | present, at that argument order |
+| `arguments.mapIdx fun index argument => ...` (same file) | **added by this reading**; it was missing |
+| `fields.map fun field => ...` through dot notation | present; dot notation reaches `Vec.map f v` |
+| `++` on instruction fragments | present |
+| array-literal syntax for `Vec` (seven sites) | **absent**; §3.7 |
+
+`Tests/Std/SpikeSurface.lean` compiles each of the first four in the shape the
+spike writes it, so "the surface supports this" is checked rather than asserted.
+Nothing else in the five spikes calls a `Vec` operation. `List` appears once, in
+`4_Web_Server/Process.lean`, and is left alone: [STDLIB.md](STDLIB.md) §6 lists
+persistent `List` and contiguous `Vec` as separate offerings, so that is a
+choice, not a `Vec` demand.
+
+### 3.5 Open: `Vec` has no literal syntax, and the obvious fix is harmful
+
+The spike sources write `Vec` literals with array-literal syntax — seven ascribed
+sites such as `def deviceExtensionNames : Vec CString := #["VK_KHR_swapchain"]`,
+plus `#[]` returned where a `Vec` is expected and `#[...]` as an operand of `++`.
+This library provides no such notation, so those lines do not elaborate, and
+`Vec.fromList [...]` is what they have to be written as today.
+
+Three mechanisms were tried against a probe covering the spike's shapes. None is
+shippable, and the results are recorded because two of them look obviously
+correct until measured:
+
+| Mechanism | Result |
+|---|---|
+| `macro_rules \| \`(#[$elems,*]) => \`(Vec.fromList [$elems,*])` | **Harmful.** It does not overload with Lean's array literal, it shadows it. With the rule in scope, `def c : Array Nat := #[1, 2, 3]` stops elaborating and `let xs := #[1,2,3]` silently becomes a `Vec`. Since `macro_rules` is global once imported, this would break `Array` literals in every module that transitively imports `Std.Logical` — which, through `Memory`, is most of the repository. |
+| `instance : CoeTail (Array α) (Vec α)` | **Insufficient.** Ascribed non-empty literals work and `Array` literals are unaffected, but `def b : Vec Nat := #[]` fails, because the element type is a metavariable and the coercion does not fire; and `v ++ #[9]` fails, because the coercion does not reach into `HAppend`. The spike uses both. It also silently converts any `Array` value, not just a literal. |
+| `elab_rules : term <= expectedType` deferring to `Array` | **Does not fire.** `#[...]` is expanded by a macro, and macro expansion wins over a term elaborator for the same syntax kind, so the rule never runs. It would also require `import Lean` in `Grass/Std/Logical/Vec.lean`, putting Lean's metaprogramming frontend at the base of the dependency chain that [MODULES.md](MODULES.md) starts with `Core`. |
+
+Two conclusions. First, if notation is added it belongs in a separate module that
+consumers opt into, not in `Vec.lean`, because of the `import Lean` cost and
+because a global literal rule is not something a library at the bottom of the
+chain should impose. Second, the choice is not wholly this library's: the
+authored spike surface is governed by [SPIKE_AUTHORING.md](SPIKE_AUTHORING.md),
+so "the spikes should write `Vec.fromList [...]`" is as available an answer as
+"the library should support `#[...]`", and it is a cheaper one. Breaking `Array`
+literals repository-wide to save this library some punctuation is not a trade
+this owner takes quietly.
+
+This interacts with §3.2's open question. If `Vec α := Array α` were adopted,
+this section would be moot — array-literal syntax would work by construction, as
+would `#[]` and `++`. That is the strongest practical argument in that
+direction, and it is why the two are recorded as one decision rather than two.
+
+### 3.6 Exit criteria
 
 S1 is complete when all of the following hold. The first four hold today.
 
@@ -192,7 +281,7 @@ S1 is complete when all of the following hold. The first four hold today.
 5. A reviewer distinct from this agent has merged it, per
    [AGENT_REVIEW.md](AGENT_REVIEW.md).
 
-### 3.6 Open: the `ByteArray` name collides with Lean's
+### 3.7 Open: the `ByteArray` name collides with Lean's
 
 [STDLIB.md](STDLIB.md) §1 fixes the name `ByteArray` for `Vec Byte`. Lean's
 prelude already has `_root_.ByteArray`. A module that opens `Grass.Std.Logical`
@@ -352,16 +441,37 @@ reader will want a reason for:
 5. Stages are lettered `S`, not `M`, to avoid collision with
    [MEMORY_IMPLEMENTATION_PLAN.md](MEMORY_IMPLEMENTATION_PLAN.md). §1.
 
+6. Every operation carries at least one law. An operation without one does not
+   remove the need to reason about it, it relocates that reasoning to
+   `Vec.toList` in the consumer, which is the leak §3.2 pays for. §3.1.
+
 Open, with the owner each is with:
 
 1. **The `ByteArray` name collision**, with the owner of
-   [STDLIB.md](STDLIB.md). §3.6.
-2. **The `Bag` representation**, inherited undecided from `c-process:28` and
+   [STDLIB.md](STDLIB.md). §3.7. Sharper than when it was first raised: the
+   authored spike sources write bare `ByteArray` in four of the five spikes, so
+   "keep the name and qualify at the use site" is a change to the author surface
+   and not only to library-internal code.
+2. **Whether `Vec α` should be `Array α`**, with this branch's reviewer in the
+   first instance. Lean's `Array` is the same one-field structure over `List`,
+   and adopting it would delete the restatement cost and settle the literal
+   syntax below at a stroke. §3.2.
+3. **`Vec` has no literal syntax**, which the spike surface needs and which
+   interacts with the previous item. Not settled unilaterally, partly because
+   the only cheap mechanism breaks `Array` literals repository-wide and partly
+   because the authored surface is [SPIKE_AUTHORING.md](SPIKE_AUTHORING.md)'s.
+   §3.5.
+4. **The `Bag` representation**, inherited undecided from `c-process:28` and
    genuinely blocked on the repository-wide mathlib dependency question rather
    than on a container judgement. §4.2.
-3. **`Grass.Effect`, `Grass.Grammar`, and `Grass.CFG` have no owner**, which
+5. **`Grass.Effect`, `Grass.Grammar`, and `Grass.CFG` have no owner**, which
    blocks `mapM`/`traverse`, the parser combinators, and the worklists
    respectively. Raised with the coordinator when one becomes a blocker. §3.4,
    §5.
-4. **The `ByteSeq` retirement**, which is an edit to `Grass/Memory/**` and
+6. **The `ByteSeq` retirement**, which is an edit to `Grass/Memory/**` and
    therefore `c-mem`'s to make. §4.1.
+
+Items 1, 2, and 3 were all sharpened or found by reading the spike corpus for
+demands rather than by reasoning about the library in isolation, which is an
+argument for doing that reading earlier next time rather than after a
+nomination.
