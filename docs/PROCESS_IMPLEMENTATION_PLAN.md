@@ -2323,6 +2323,29 @@ resolve it `.rerouted`, and point it at a session it never touched — breaking
 `ReroutesLand` with every field it had discharged. Six reworkings of
 `Transition.lean` had not found it. Trying to prove one theorem did.
 
+### The rule this milestone ends on: attack the repair
+
+§10.90, §10.91, §10.92 and §10.93 are four entries in a row about *repairs that
+were not attacked*, and they arrived in one review round:
+
+* §10.87's field was the narrowest thing that made the proof go through, and it
+  forbade the ordinary close that `ChannelResolution.channelClosed` exists for.
+* It bounded what a step may *end* and left what a step may *create* wide open,
+  so a `drop` could escrow a message nothing sent — and thereby establish an edge
+  contract's `Escrow` assertion, which §3 gives only a send the power to do.
+* `Reroutes.elsewhere` became *implied* by a field added beside it, and stayed a
+  field, with a docstring that had stopped being true.
+* §10.56's view fixture closed the gap with an acceptance whose obligation
+  `⟨state, rfl⟩` discharges for any facet, any render and any specification.
+
+§12's existing rule — a record that absorbs a field without a proof breaking is a
+record nothing inhabits — catches empty records. It does not catch any of these.
+The rule that does is the dual, and it is just as cheap: **after adding a field or
+a clause, try to satisfy it badly.** Delete it and see whether anything breaks
+(§10.92). Satisfy it with the wrong render, the wrong occurrence, an unrelated
+message (§10.90, §10.91, §10.93). A repair deserves the round its subject got,
+and none of these four survived one.
+
 ### Still owed for M4 exit
 
 * **`flatten_sequential_roundtrip`** — blocked on §10.42, which is the same
@@ -3702,13 +3725,27 @@ being silently discarded, had never been evaluated at an outcome.
 **Closed** by `Tests/Process/ChildBindingFixtures.lean` for the inhabitation.
 `theBinding` routes all six child outcomes and `death_is_named` evaluates `Drops`.
 
-**Not closed**, and the fixture says so: `reflectsEveryAnswer` asks that every
-answer the parent could receive is one some child outcome produces, and it is
-cheap whenever the demand's result type is a singleton. **Every demand in this
-corpus has a singleton result type**, so the law has never been asked a question
-it could fail. §10.60's `Tests/Process/RichAcceptanceFixtures.lean` answered the
-same objection about acceptance by building a richer vocabulary; the same is owed
-here. Same family as §10.56.
+An earlier version of this entry said: "`reflectsEveryAnswer` is cheap whenever
+the demand's result type is a singleton, and **every demand in this corpus has a
+singleton result type**, so the law has never been asked a question it could
+fail." **That was false, and a reviewer refuted it in one line.** `Demand.log`'s
+result type is `Bool`, in `Tests/Process/M1Fixtures.lean` — the file the binding
+fixture imports. The law could have been asked a real question at any point; the
+fixture had bound `.tick`, whose result is `Unit`, and the entry generalised from
+the fixture to the corpus without looking.
+
+**Closed.** `theLogBinding` binds `.log`, and the shape of it is forced rather
+than chosen: `the_terminal_result_is_a_singleton` shows a `.succeeded` outcome
+carries no information at this child, so success can supply at most one of the
+two answers and `pendingDoesNotAnswer` forbids pending supplying the other. The
+second answer comes from a supervised death. Delete either branch and
+`reflectsEveryAnswer` fails.
+
+One docstring corrected with it. `Drops` was described as "what stops a binding
+routing a failure to nothing at all"; it stops nothing, since
+`ChildDemandBinding` has three laws and none is about failure outcomes. What
+rules out silent discarding is that `classify` is *total*, plus
+`routed_or_dropped`. `Drops` names the choice; it does not constrain it.
 
 ### 10.87 A step could resolve an occurrence it never mentioned
 
@@ -3784,6 +3821,127 @@ So what remains open is narrower than the paragraph above says: `Sound`,
 `serverPlan` has the channels and the slots but no `ExactInitialNetwork`. That is
 still the largest single gap this milestone leaves, and it is a gap in the
 *progress* layer rather than in well-formedness.
+
+### 10.90 `ResolvesNothingElse` forbade the close it was meant to enable
+
+§10.87's repair was too strong. `ChannelResolution.channelClosed` exists because
+"an occurrence in flight at an ordinary close has no ending, and would either
+strand live forever or have to be misrecorded as a death" — so an ordinary close
+must end *every* message in flight on the session. `ResolvesNothingElse` on
+`ClosesSession` forbade exactly that.
+
+Local adversarial review built the world: two ordinary sends on one session, then
+a close. The close could end one message; the second is left `Outstanding` on a
+`.closed` session, and `ClosesSession.wasOpen` and `KillsSession.wasOpen` refuse
+every later close or death, so it strands or a `drop` misrecords it. The field
+defeated the reason the resolution is in the language.
+
+`ChannelResolution.coalesced` is the second case, and its own docstring names it:
+a coalesce merges a carrier's "fellow sources", plural.
+
+**Closed** by `ResolvesOnlyAs`, which bounds the *kind* of ending rather than the
+count — a step may end several occurrences, and every one ends the way the step
+says. That is all §10.87 needed, and `stood_or_declared` is the reading
+`WellFormedness.lean` takes of it, which made the sixth clause's proof shorter:
+the case split on which occurrence the step named disappears.
+
+`Delivers` keeps the narrow form, and that is not an oversight: `cursorAdvances`
+says the receiver consumed *exactly one* message, so a delivery recording a
+second occurrence `.received` would be recording a delivery that did not happen.
+
+And the positive obligation that had been missing all along went in with it:
+`ClosesSession.closesEverything` and `KillsSession.killsEverything`.
+`Tests/Process/CloseFixtures.lean` is both halves, at a world `the_second_send`
+proves reachable.
+
+**What this pair of entries is really about.** §10.87 was found by trying to
+prove a theorem and §10.90 by attacking the repair, one round apart. The first
+field was the narrowest thing that made the proof go through, and narrowest-that-
+works is not the same as right. A repair deserves the same adversarial round as
+the thing it repairs.
+
+### 10.91 A step could escrow a message nothing sent
+
+The create-side twin of §10.87, missing for the same reason.
+`LedgerExtends.createdPrefix` says occurrences are only *appended*, and appending
+is the hole: `ResolvesOnlyAs` bounds what a step *ends* and nothing bounded what
+it *creates*.
+
+Local adversarial review built a `drop` discharging every field
+`ResolvesEscrow` had which conjures an unrelated occurrence into flight, and then
+proved the thing that makes it serious: at the after-world the edge contract's
+`Escrow` assertion **holds** of a message nothing sent. `docs/PROCESS.md` §3
+gives only a send that power, and `SendsEscrow.contractual` is the only field
+tying a step to a plan's own `Send` relation. It was being bypassed.
+
+**Closed** by `CreatesNothing` on `Delivers`, `ClosesSession`, `KillsSession` and
+`RequestsCancel` — a delivery consumes, a close and a death end, a request
+records, and none sends — by `SendsEscrow.createsOnlyTheMessage`, by
+`Reroutes.destinationCreatesOnlyArrivals`, and by
+`ResolvesEscrow.createsOnlyTheCarrier`, which carries the one exception:
+`ChannelResolution.coalesced`'s carrier, which `coalesceCarrierLater` requires to
+be in this ledger and strictly later and which `NominalKind.coalescedReplacement`
+says is fresh.
+
+`Tests/Process/CloseFixtures.lean`'s `a_drop_that_conjures_a_message_is_refused`
+is the refusal.
+
+### 10.92 `Reroutes.elsewhere` was a field and is a theorem
+
+`wasOutstanding` says the occurrence is unresolved on its own session,
+`destinationResolvesNothing` says the destination's ledger resolves nothing this
+step, and `nowResolved` says it *is* resolved afterwards. A reroute to its own
+session needs all three, so `destination ≠ session` follows and does not need
+asserting. A reviewer proved it generically, at every plan and every pair of
+worlds.
+
+The field's docstring claimed something else — that without it "resolving an
+occurrence as `.rerouted` to the session it is already on would satisfy `arrives`
+from the ledger it is leaving". That was true of an earlier `Reroutes`. It stopped
+being true when `destinationResolvesNothing` went in, and nothing noticed, because
+a field that is *implied* still elaborates and its fixture still discharges it.
+
+**Closed**: the field is gone and `Reroutes.elsewhere` is the theorem, so
+`a_reroute_to_the_same_session_is_refused` still reads the same and now rests on
+something.
+
+**The general lesson, which is the reason to keep this one.** §12's rule is that a
+record absorbing a field without a proof breaking is a record nothing inhabits.
+This is the dual: a record absorbing a field that *nothing breaks when you delete*
+is a record with a redundant field, and the only way to find one is to try
+deleting it. Nothing in the build detects it — a redundant field costs a line in
+each fixture and buys nothing, and the docstring explaining why it is needed goes
+on being read as if it were true.
+
+### 10.93 A view obligation that could not fail
+
+`Tests/Process/ViewFixtures.lean` closed §10.56 with an acceptance whose view
+clause was the *image of the render*: a rendered view is acceptable when some
+state renders to it. The predicate refused values outside the range, and the file
+claimed that made the obligation non-vacuous.
+
+It did not. `ProcessCorrect.viewAccepts` is asked for
+`ViewAccepts facet (facet.render state)`, and `⟨state, rfl⟩` discharges that for
+*any* facet, *any* render and *any* specification. A reviewer compiled a bogus
+facet the spec does not carry and had it accepted, re-proved the file's own
+theorem without the `gauge.view = some facet` hypothesis, and mutated `render` to
+a constant without breaking the build. It was `fun _ _ => True` wearing an
+existential.
+
+**Closed** by making the clause a *bound* — a view of `gauge` reports at most one
+step of remaining work — checked by mutating `render` to `fun _ => 2` and
+confirming `gaugeCorrect` stops elaborating.
+
+`the_bound_is_only_about_this_facet` records the honest limit: `ViewAccepts`
+receives a facet and a value of that facet's view type and nothing else, so a
+bound on a particular view has to name the facet before it can say anything about
+the value, and at any other facet the clause asks nothing.
+
+**Third entry in a row about the same mistake.** §10.90, §10.92 and this one are
+all repairs that were not attacked. The check that would have caught all three is
+the same one: after adding a field or a clause, try to satisfy it *badly* — with
+the wrong render, the wrong occurrence, the field deleted — and see whether
+anything notices.
 
 ### 10.89 A spawn can satisfy every field it has and not be a step
 
