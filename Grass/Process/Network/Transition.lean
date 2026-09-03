@@ -123,6 +123,68 @@ structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
   /-- And nothing outside this session's escrow changed. -/
   scope : plan.TouchesOnly before after (fun fragment => fragment = .escrow edge session)
 
+/--
+The receiver consumes an occurrence and advances its own cursor.
+
+A separate structure from `ResolvesEscrow` rather than a use of it, because its
+*scope is wider*: a delivery moves the escrow ledger **and** the session cursor.
+
+That distinction is the whole reason this exists. With `receive` built on
+`ResolvesEscrow` alone, no constructor of `NetworkTransition` named `.session`
+in its scope at all — so by `touchesOnly` a session's `delivered` count and its
+status could never move, for any step of any program. `ChannelSession.delivered`
+was provably constant, and a weave mixin about a session cursor framed past
+every step in the program, vacuously. `Grass/Process/Weave/Lens.lean`'s review
+is what surfaced it; the same defect for shared regions is recorded on
+`StepsLocally` above.
+
+`statusUnchanged` is what keeps the widening honest: a delivery advances the
+cursor and does not close a channel, so a caller reading the status still learns
+something from it.
+-/
+structure Delivers (before after : plan.LogicalProcessNetwork)
+    (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
+    (occurrence : EdgeOccurrence plan.topology plan.message edge) : Prop where
+  /-- It was in flight. -/
+  wasOutstanding : (before.inFlight edge session).Outstanding occurrence
+  /-- It is now received. -/
+  nowResolved : (after.inFlight edge session).resolution occurrence = some .received
+  /-- The ledger only moved forward. -/
+  ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
+  /-- **The receiver's cursor advances by exactly one.** -/
+  cursorAdvances : (after.sessions edge session).delivered =
+    (before.sessions edge session).delivered + 1
+  /-- And the session is not closed by being read from. -/
+  statusUnchanged : (after.sessions edge session).status = (before.sessions edge session).status
+  /-- This session's escrow and this session's cursor, and nothing else. -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .escrow edge session ∨ fragment = .session edge session)
+
+/--
+A channel is closed in the ordinary way.
+
+Like `Delivers`, wider than `ResolvesEscrow` because it moves the session's
+status. `docs/PROCESS.md` §3's `SessionStatus` has a `closed` constructor, and
+before this nothing could ever produce one.
+-/
+structure ClosesSession (before after : plan.LogicalProcessNetwork)
+    (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
+    (occurrence : EdgeOccurrence plan.topology plan.message edge) : Prop where
+  /-- It was in flight. -/
+  wasOutstanding : (before.inFlight edge session).Outstanding occurrence
+  /-- It is now resolved as closed. -/
+  nowResolved : (after.inFlight edge session).resolution occurrence = some .channelClosed
+  /-- The ledger only moved forward. -/
+  ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
+  /-- **And the session is closed.** -/
+  nowClosed : (after.sessions edge session).status = .closed
+  /-- A close delivers nothing, so the cursor does not move. -/
+  cursorUnchanged : (after.sessions edge session).delivered =
+    (before.sessions edge session).delivered
+  /-- This session's escrow and this session's cursor, and nothing else. -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .escrow edge session ∨ fragment = .session edge session)
+
 namespace ResolvesEscrow
 
 variable {plan}
@@ -444,9 +506,9 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
   | send (edge : plan.topology.ChannelKind) (message : plan.message edge)
       (occurrence : plan.topology.ChannelOccurrence edge message)
       (step : plan.SendsEscrow before after edge message occurrence)
-  /-- The receiver consumes it. -/
+  /-- The receiver consumes it, advancing its cursor. -/
   | receive (edge session occurrence)
-      (step : plan.ResolvesEscrow before after edge session occurrence .received)
+      (step : plan.Delivers before after edge session occurrence)
   /-- Observations are committed. -/
   | commit (emitted : Trace boundary.Observation)
       (step : plan.Commits before after emitted)
@@ -480,7 +542,7 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
       (step : plan.EndsInstance before after kind slot (.terminated result))
   /-- The session was closed in the ordinary way. -/
   | channelClose (edge session occurrence)
-      (step : plan.ResolvesEscrow before after edge session occurrence .channelClosed)
+      (step : plan.ClosesSession before after edge session occurrence)
   /-- The sender died. -/
   | senderDeath (edge session occurrence) (reason : ProcessDeathReason)
       (step : plan.ResolvesEscrow before after edge session occurrence (.senderDied reason))
@@ -533,11 +595,13 @@ def scope : plan.NetworkTransition before after → NetworkFragment plan.topolog
       fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals
   | .send edge _ occurrence _ => fun fragment => fragment = .escrow edge occurrence.1
   | .commit emitted _ => fun fragment => emitted ≠ [] ∧ fragment = .observations
-  | .receive edge session _ _ => fun fragment => fragment = .escrow edge session
+  | .receive edge session _ _ =>
+      fun fragment => fragment = .escrow edge session ∨ fragment = .session edge session
   | .requestCancel edge session _ _ => fun fragment => fragment = .escrow edge session
   | .acknowledgeCancel edge session _ _ _ => fun fragment => fragment = .escrow edge session
   | .timeout edge session _ _ => fun fragment => fragment = .escrow edge session
-  | .channelClose edge session _ _ => fun fragment => fragment = .escrow edge session
+  | .channelClose edge session _ _ =>
+      fun fragment => fragment = .escrow edge session ∨ fragment = .session edge session
   | .senderDeath edge session _ _ _ => fun fragment => fragment = .escrow edge session
   | .receiverDeath edge session _ _ _ => fun fragment => fragment = .escrow edge session
   | .channelDeath edge session _ _ => fun fragment => fragment = .escrow edge session

@@ -134,13 +134,31 @@ theorem ledgerAt_off_wire {session : serverTopology.ChannelId ()}
     (notWire : session ≠ wire) : ledgerAt false session = ledgerAt true session := by
   simp [ledgerAt, notWire]
 
+open Classical in
+/--
+The receiver's cursor on each session, before and after.
+
+A delivery advances the cursor of the session it was delivered on and no other,
+which is what makes `Delivers.scope` a real constraint rather than a formality.
+-/
+noncomputable def cursorAt (advanced : Bool) (session : serverTopology.ChannelId ()) :
+    ChannelSession :=
+  if session = wire then
+    { quiet.sessions () wire with
+        delivered := (quiet.sessions () wire).delivered + (if advanced then 1 else 0) }
+  else quiet.sessions () session
+
+theorem cursorAt_off_wire {session : serverTopology.ChannelId ()} (notWire : session ≠ wire)
+    (advanced : Bool) : cursorAt advanced session = quiet.sessions () session := by
+  simp [cursorAt, notWire]
+
 /-- The world before the receive. -/
 noncomputable def beforeReceive : ServerWorld :=
-  { quiet with inFlight := fun _ => ledgerAt false }
+  { quiet with inFlight := fun _ => ledgerAt false, sessions := fun _ => cursorAt false }
 
-/-- And after it. -/
+/-- And after it: the escrow settled, and the receiver's cursor moved by one. -/
 noncomputable def afterReceive : ServerWorld :=
-  { quiet with inFlight := fun _ => ledgerAt true }
+  { quiet with inFlight := fun _ => ledgerAt true, sessions := fun _ => cursorAt true }
 
 /-- What each world holds on `wire`. -/
 @[simp] theorem beforeReceive_wire :
@@ -168,14 +186,21 @@ theorem worlds_agree_off_wire {session : serverTopology.ChannelId ()}
 /-! ## The step -/
 
 /--
-**A receive resolves the escrow.**
+**A receive resolves the escrow and advances the receiver's cursor.**
 
-Every field of `ResolvesEscrow` at a concrete pair of worlds: the occurrence was
+Every field of `Delivers` at a concrete pair of worlds: the occurrence was
 outstanding, it is now `received` and nothing else, the ledger only moved
-forward, and the step's scope is this session's escrow fragment alone.
+forward, the cursor advanced by exactly one, the session is still open, and the
+step's scope is this session's escrow and this session's cursor.
+
+The cursor is here because it had to be. Before `Delivers` existed, `receive`
+was a `ResolvesEscrow` whose scope named the escrow alone — so no constructor in
+the family named `.session` at all, and by `touchesOnly` a session's cursor and
+status could never move in any program. `ChannelSession.delivered` was provably
+constant.
 -/
 theorem receiving_resolves_the_escrow :
-    serverPlan.ResolvesEscrow beforeReceive afterReceive () wire escrowed .received where
+    serverPlan.Delivers beforeReceive afterReceive () wire escrowed where
   wasOutstanding := by
     rw [beforeReceive_wire]
     exact ⟨List.mem_cons_self, rfl⟩
@@ -192,6 +217,8 @@ theorem receiving_resolves_the_escrow :
         cancelRequestMonotone := by
           intro occurrence requested
           exact absurd requested (by simp [pendingLedger]) }
+  cursorAdvances := by simp [beforeReceive, afterReceive, cursorAt]
+  statusUnchanged := by simp [beforeReceive, afterReceive, cursorAt]
   scope := by
     intro fragment outside
     cases fragment with
@@ -201,21 +228,35 @@ theorem receiving_resolves_the_escrow :
       have notWire : ¬ (session = wire) := by
         intro isWire
         subst isWire
-        exact outside rfl
+        exact outside (Or.inl rfl)
       exact worlds_agree_off_wire notWire
+    | session edge session =>
+      have sameEdge : edge = () := rfl
+      subst sameEdge
+      have notWire : ¬ (session = wire) := by
+        intro isWire
+        subst isWire
+        exact outside (Or.inr rfl)
+      show cursorAt false session = cursorAt true session
+      rw [cursorAt_off_wire notWire, cursorAt_off_wire notWire]
     | _ => rfl
 
 /--
 **And it cannot happen twice.**
 
-The affine half of §3's resolve token, at the step. `ResolvesEscrow` demands the
-occurrence was outstanding *before*, so a second receive of the same occurrence
-— from the world the first one produced — is unconstructible.
+The affine half of §3's resolve token, at the step — now with a second,
+independent reason. `Delivers` demands the occurrence was outstanding *before*,
+so a second receive from the world the first produced is unconstructible on the
+escrow; and its cursor law demands `delivered = delivered + 1`, which is
+unsatisfiable at a single world whatever the escrow says.
+
+Proved from the cursor, because that is the half `Delivers` added and it is
+worth checking that the addition is load-bearing.
 -/
 theorem cannot_receive_twice
-    (again : serverPlan.ResolvesEscrow afterReceive afterReceive () wire escrowed .received) :
-    False :=
-  again.cannot_resolve_twice (earlier := .received) (by rw [afterReceive_wire]; exact settled_resolution)
+    (again : serverPlan.Delivers afterReceive afterReceive () wire escrowed) : False := by
+  have counted := again.cursorAdvances
+  omega
 
 /--
 **The observation trace did not move.**
@@ -226,7 +267,7 @@ what `docs/PROCESS.md` §8's `Disjoint (TransitionScope step) Scope` buys.
 -/
 theorem observations_did_not_move :
     beforeReceive.observations = afterReceive.observations :=
-  receiving_resolves_the_escrow.observations_untouched
+  receiving_resolves_the_escrow.scope .observations (by simp)
 
 /-- As did every instance slot, which the same proof gives. -/
 theorem instances_did_not_move (kind : serverTopology.ProcessKind)
@@ -253,9 +294,39 @@ theorem receive_touches_only_its_session :
     serverPlan.TouchesOnly beforeReceive afterReceive receiveStep.scope :=
   receiveStep.touchesOnly
 
-/-- And that scope is the one session's escrow, nothing more. -/
+/--
+And that scope is the one session's escrow and the one session's cursor,
+nothing more.
+-/
 theorem receive_scope_is_the_session (fragment : NetworkFragment serverTopology) :
-    receiveStep.scope fragment ↔ fragment = .escrow () wire := Iff.rfl
+    receiveStep.scope fragment ↔
+      (fragment = .escrow () wire ∨ fragment = .session () wire) := Iff.rfl
+
+/--
+**The receiver's cursor really moved.**
+
+The anti-vacuity check on `Delivers`. Before it existed no constructor named
+`.session` in its scope, so `ChannelSession.delivered` was provably constant in
+every program and a weave mixin about a session cursor framed past every step.
+-/
+theorem the_cursor_advanced :
+    (afterReceive.sessions () wire).delivered =
+      (beforeReceive.sessions () wire).delivered + 1 :=
+  receiving_resolves_the_escrow.cursorAdvances
+
+/-- **And `.session` is a fragment some step of some program actually declares.** -/
+theorem the_receive_touches_its_session : receiveStep.scope (.session () wire) :=
+  Or.inr rfl
+
+/-- But only its own: another session's cursor is untouched. -/
+theorem other_cursors_did_not_move {session : serverTopology.ChannelId ()}
+    (notWire : session ≠ wire) :
+    beforeReceive.sessions () session = afterReceive.sessions () session :=
+  receiveStep.touchesOnly (.session () session) (by
+    rintro (isEscrow | isSession)
+    · exact absurd isEscrow (by simp)
+    · injection isSession with _ sameSession
+      exact notWire sameSession)
 
 /-- A receive allocates nothing, definitionally. -/
 theorem receive_allocates_nothing :

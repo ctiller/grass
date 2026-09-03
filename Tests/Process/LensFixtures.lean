@@ -43,30 +43,35 @@ open Grass.Process.Tests.Channel (wire)
 /-! ## The lens -/
 
 /--
-A refinement of the connection role and the channel it owns.
+A refinement of the connection role and the channel it owns — both its escrow
+and its session cursor, since a delivery moves each.
 
-The two coupling fields are discharged by case analysis on `Role`, which is what
+The coupling fields are discharged by case analysis on `Role`, which is what
 they are for: an `Interior` chosen to suit a theorem would fail one of them.
 -/
 def connectionLens : serverPlan.ProcessRefinementLens where
   Selected := fun role => role = .connection
   Interior := fun fragment =>
-    fragment = .escrow () wire ∨ ∃ slot, fragment = .instanceState .connection slot
+    fragment = .escrow () wire ∨ fragment = .session () wire ∨
+      ∃ slot, fragment = .instanceState .connection slot
   selectedStateInterior := by
     rintro kind slot rfl
-    exact Or.inr ⟨slot, rfl⟩
+    exact Or.inr (Or.inr ⟨slot, rfl⟩)
   unselectedStateExterior := by
-    rintro kind slot notConnection (isEscrow | ⟨other, isConnection⟩)
+    rintro kind slot notConnection (isEscrow | isSession | ⟨other, isConnection⟩)
     · exact absurd isEscrow (by simp)
+    · exact absurd isSession (by simp)
     · injection isConnection with sameKind
       exact notConnection sameKind
   interiorChannelsTouchTheSelection := by
-    rintro edge session (isEscrow | ⟨_, isInstance⟩)
+    rintro edge session (isEscrow | isSession | ⟨_, isInstance⟩)
+    · exact Or.inr rfl
     · exact Or.inr rfl
     · exact absurd isInstance (by simp)
   interiorRegionsAreWritable := by
-    rintro region (isEscrow | ⟨_, isInstance⟩)
+    rintro region (isEscrow | isSession | ⟨_, isInstance⟩)
     · exact absurd isEscrow (by simp)
+    · exact absurd isSession (by simp)
     · exact absurd isInstance (by simp)
   refinedRequirements := RequirementSet.empty
   refinementOnlyAdds := RequirementSet.Covers.refl _
@@ -82,8 +87,9 @@ theorem the_lens_owns_something : connectionLens.Interior (.escrow () wire) := O
 /-- And it does not own the route table. -/
 theorem the_lens_does_not_own_the_route_table :
     ¬ connectionLens.Interior (.region .routeTable) := by
-  rintro (isEscrow | ⟨_, isInstance⟩)
+  rintro (isEscrow | isSession | ⟨_, isInstance⟩)
   · exact absurd isEscrow (by simp)
+  · exact absurd isSession (by simp)
   · exact absurd isInstance (by simp)
 
 /-! ## A real step inside it -/
@@ -97,7 +103,9 @@ owned the connection role but not its channel would select no channel step.
 -/
 theorem the_receive_is_inside : connectionLens.Selects receiveStep := by
   intro fragment inScope
-  exact Or.inl ((receive_scope_is_the_session fragment).mp inScope)
+  rcases (receive_scope_is_the_session fragment).mp inScope with isEscrow | isSession
+  · exact Or.inl isEscrow
+  · exact Or.inr (Or.inl isSession)
 
 /-! ## And an invariant outside it, framed -/
 
@@ -170,8 +178,10 @@ def listenerLens : serverPlan.ProcessRefinementLens where
 /-- **They are disjoint.** -/
 theorem the_two_lenses_are_disjoint :
     ProcessPlan.ProcessRefinementLens.Disjoint connectionLens listenerLens := by
-  rintro fragment (isEscrow | ⟨_, isConnection⟩) ⟨_, isListener⟩
+  rintro fragment (isEscrow | isSession | ⟨_, isConnection⟩) ⟨_, isListener⟩
   · rw [isEscrow] at isListener
+    exact absurd isListener (by simp)
+  · rw [isSession] at isListener
     exact absurd isListener (by simp)
   · rw [isConnection] at isListener
     injection isListener with sameKind
@@ -202,6 +212,8 @@ listener refinement can be written without an origin-preservation argument.
 -/
 theorem the_connection_refinement_is_silent : ¬ receiveStep.scope .observations := by
   intro emits
-  exact absurd ((receive_scope_is_the_session _).mp emits) (by simp)
+  rcases (receive_scope_is_the_session _).mp emits with isEscrow | isSession
+  · exact absurd isEscrow (by simp)
+  · exact absurd isSession (by simp)
 
 end Grass.Process.Tests.Lens

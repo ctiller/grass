@@ -149,8 +149,11 @@ theorem the_receive_extends_the_trace :
 theorem the_commit_and_the_receive_are_independent : beepCommit.Independent receiveStep := by
   intro fragment inCommit inReceive
   obtain ⟨_, isObservations⟩ := inCommit
-  rw [(receive_scope_is_the_session fragment).mp inReceive] at isObservations
-  exact absurd isObservations (by simp)
+  rcases (receive_scope_is_the_session fragment).mp inReceive with isEscrow | isSession
+  · rw [isEscrow] at isObservations
+    exact absurd isObservations (by simp)
+  · rw [isSession] at isObservations
+    exact absurd isObservations (by simp)
 
 /--
 **And nothing independent of the commit may emit.**

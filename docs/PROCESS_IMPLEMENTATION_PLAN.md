@@ -2027,11 +2027,32 @@ Two consequences, both bad in the way this layer keeps finding:
   preserves … obligations" are satisfied by the whole family for free.
 
 This is a defect in `Grass/Process/Network/Transition.lean`, which is mine.
-Fixing it means giving the session-affecting constructors — `send` on a fresh
-session, `channelClose`, `channelDeath` — a `.session` scope and a law about the
-status they move it to, and giving the obligation-affecting ones an obligation
-scope. It is a larger change than this branch should carry and is the next
-substantial item on this layer's list.
+
+**The session half is now fixed.** `receive` is built on a new `Delivers`
+structure rather than on `ResolvesEscrow`, with a wider scope — this session's
+escrow *and* this session's cursor — and a law that the cursor advances by
+exactly one while the status does not change. `channelClose` is built on
+`ClosesSession`, which moves the status to `.closed` and leaves the cursor
+alone. `Tests/Process/TransitionFixtures.lean`'s `the_receive_touches_its_session`
+and `the_cursor_advanced` are the anti-vacuity checks, and
+`cannot_receive_twice` is now proved from the cursor law rather than from the
+escrow, so the addition is load-bearing.
+
+Two pieces of the session half remain. `channelDeath`, `senderDeath` and
+`receiverDeath` still leave the status alone, so `SessionStatus.died` is
+produced by nothing; and nothing opens a session, which is defensible only
+because `sessions` is a total function and every `ChannelId` already has a
+status — a fresh epoch's session being `open` is a fact about the initial
+network, and there is no initial-network relation yet
+(`Grass/Process/Weave/Mixin.lean`'s `HoldsInitially` names the same gap).
+
+**The obligation half is not fixed.** No constructor scopes `.obligations`, so
+the ledger `Grass/Process/Network/World.lean` parameterises can still never move
+and §7's `DisjointOrCommutingObligations` is still free. Fixing it means giving
+`processTermination` — and whichever other constructors transfer custody — an
+obligation scope and a law relating the move to the termination contract, which
+is `Grass/Process/Termination.lean`'s. That is the next substantial item on this
+layer's list.
 
 ### 10.29 `ProcessRefinementLens.Selects` cannot attribute a channel step to a role
 
