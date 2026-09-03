@@ -1,3 +1,4 @@
+import Grass.Process.Network.Initial
 import Grass.Process.Network.Progress
 
 /-!
@@ -166,7 +167,7 @@ incarnation recording any parent at all is rejected.
 
 /-- The plan. Every channel-shaped field is an elimination of the empty edge
 type, which is what "no channels" costs. -/
-@[reducible] def waitingPlan : ProcessPlan waitRegistry waitBoundary NoObligations where
+@[reducible] def waitingPlan : ProcessPlan.{0, 0, 0, 0, 0, 0} waitRegistry waitBoundary NoObligations where
   topology := waitTopology
   message := fun edge => edge.elim
   steps := fun edge => edge.elim
@@ -186,6 +187,27 @@ type, which is what "no channels" costs. -/
   outstanding := 0
   lifecycle := .running
 
+/-- The one identity this plan ever allocates: the root's generation. -/
+def theRootsGeneration : Allocation waitTopology.Carrier where
+  entries := [⟨.processGeneration, ()⟩]
+  distinct := List.nodup_cons.mpr ⟨List.not_mem_nil, List.nodup_nil⟩
+
+theorem theRootsGeneration_admissible :
+    (NominalHistory.initial : NominalHistory waitTopology.Carrier).Admissible
+      theRootsGeneration := by
+  intro nominal _ used
+  exact absurd used (by simp)
+
+/--
+The history a start has: the root's generation, allocated, and nothing else.
+
+`NominalHistory.initial` will not do, and finding that out is what
+`ExactInitialNetwork.rootAllocated` is for — a start whose root carries a
+generation the history has never seen is a start that fabricated an identity.
+-/
+def startingHistory : NominalHistory waitTopology.Carrier :=
+  NominalHistory.initial.extend theRootsGeneration theRootsGeneration_admissible
+
 /-- The network: the root is live, everything else is empty. -/
 @[reducible] def waiting : waitingPlan.LogicalProcessNetwork where
   instances := fun _ _ => some theRoot
@@ -195,7 +217,7 @@ type, which is what "no channels" costs. -/
   obligations := ()
   observations := []
   pending := []
-  usedNominals := NominalHistory.initial
+  usedNominals := startingHistory
 
 theorem waiting_holds_the_root : waiting.instances () () = some theRoot := rfl
 
@@ -557,6 +579,55 @@ theorem the_tick_is_entropy : tickStep.transition.DrivenByEntropy := trivial
 /-- **And the world it reaches is the world it left.** -/
 theorem the_tick_returns_to_waiting :
     ∃ _ : waitingPlan.NetworkStep waiting waiting, True := ⟨tickStep, trivial⟩
+
+
+/-! ## And it is where a run begins -/
+
+/--
+**`waiting` is an exact initial network.**
+
+The record `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.59 recorded as having no
+witness, and §10.65 as being disconnected from the measure. This closes the first
+and half of the second: `waitingMeasure` is indexed by `waiting`, and `waiting`
+is a network a run may begin at.
+
+Fifteen fields, and the two that took work are the two that were added by
+review rather than written down at the start. `nothingCommitted` is the trace
+split — a start produces nothing and publishes nothing, and while one trace
+served both roles a "start" could begin with a published history.
+`rootAllocated` is law 22 — the root's generation has to be in the history, so
+the history a run starts from is not the empty one.
+-/
+def waiting_is_a_start : waitingPlan.ExactInitialNetwork () waiting where
+  rootSlot := ()
+  root := theRoot
+  rootPresent := rfl
+  rootKind := rfl
+  rootEmitted := []
+  rootInitial := ⟨rfl, rfl, rfl⟩
+  pendingProjected := rfl
+  nothingCommitted := rfl
+  rootRequest := rfl
+  rootRunning := rfl
+  rootParentage := trivial
+  rootAllocated := by simp [ProcessTopologyCore.ProcessRef.Allocated, startingHistory,
+    theRootsGeneration, NominalHistory.extend]
+  onlyTheRoot := fun _ _ _ _ => ⟨rfl, rfl⟩
+  nothingInFlight := fun edge => edge.elim
+  sessionsFresh := fun edge => edge.elim
+  historyFromEmpty := .extend (.refl _) theRootsGeneration theRootsGeneration_admissible
+
+/--
+**So the measure's index is a start, not an arbitrary world.**
+
+`NetworkProgressMeasure` takes the network a run begins at and does not require
+it to be one — §10.65 — so a plan could index a measure by a world no run reaches
+and satisfy `reachableStart` vacuously. This fixture does not, and saying so is
+the point of stating it.
+-/
+theorem the_measure_starts_where_a_run_starts :
+    Nonempty (waitingPlan.ExactInitialNetwork () waiting) ∧ waitingMeasure.Reachable waiting :=
+  ⟨⟨waiting_is_a_start⟩, waitingMeasure.reachableStart⟩
 
 
 end Grass.Process.Tests.Frontier

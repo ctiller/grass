@@ -2796,7 +2796,7 @@ Needs a ruling on which. `Grass/Process/Network/Commit.lean` is `docs/PROCESS.md
 §6's reconciler and the pending trace is §3's world; the two documents do not
 say how they meet.
 
-### 10.59 `ExactInitialNetwork` has no witness
+### 10.59 ~~`ExactInitialNetwork` has no witness~~ — **closed**
 
 `Grass/Process/Network/Initial.lean` pins every fragment of a starting network,
 including — since the trace split — that its committed trace is empty and its
@@ -2808,7 +2808,14 @@ breaking, which is the signature of an uninhabited class. §10.54's exit criteri
 says every named record needs a positive witness before the layer is nominated;
 this is the one that does not have one.
 
-Not a defect in the record as far as anyone can tell — which is the problem.
+Not a defect in the record as far as anyone can tell — which was the problem.
+
+`Tests/Process/FrontierFixtures.lean`'s `waiting_is_a_start` is the witness, and
+building it spent both of the fields review had added: `nothingCommitted`, which
+the trace split made statable, and `rootAllocated`, which forced the start's
+nominal history to hold the root's generation rather than being the empty one.
+A record that absorbs two fields with no proof breaking is a record nothing
+inhabits, and that is what it was.
 
 ### 10.60 No `NetworkProgressMeasure` exists at the M2 fixture plan, and that is the plan's fault
 
@@ -2923,6 +2930,14 @@ nothing relates them. Whichever way §10.64 is ruled, the reachability the measu
 needs is reachability *from an `ExactInitialNetwork`*, which is the definition
 that has no witness.
 
-Both are wanted by the same fixture: `Tests/Process/FrontierFixtures.lean` builds
-a plan and a measure, and cannot say that `waiting` is where a run of that plan
-begins.
+`Tests/Process/FrontierFixtures.lean` now says it — `waiting_is_a_start` and
+`the_measure_starts_where_a_run_starts` — but says it *beside* the measure rather
+than through it. `NetworkProgressMeasure` still takes any world as its `start`, so
+a plan may index a measure by a world no run reaches and discharge
+`reachableStart` vacuously.
+
+The fix is a field: `startIsInitial : ∃ request, plan.ExactInitialNetwork request
+start`. It is cheap now that the record has a witness, and it was not statable
+before. Needs a ruling only on whether the request should be an index of the
+measure rather than existentially quantified — a plan started with two different
+requests has two different progress arguments, and nothing here says which.
