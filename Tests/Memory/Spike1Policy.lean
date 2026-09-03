@@ -84,7 +84,8 @@ def profile : MemoryProfile :=
         loanMapLaws := MemoryState.loanMapLaws
         consistencyGraphWellFormedness := True
         raceFreedomConsequences := True, synchronizationAndObligationTransfer := True
-        allocatorFreshnessTeardownEpoch := True, callStackFrameLifetime := True
+        allocatorFreshnessTeardownEpoch := MemoryState.allocatorLaws
+        callStackFrameLifetime := True
         erasurePreservation := True, validationMetadata := True } }
 
 /-- What a store writes: a pattern distinct from what the state starts with, so

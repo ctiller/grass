@@ -134,6 +134,20 @@ ALLOWED = {
     "readsFull",
     "writesFull",
     "vocabularyWellFormed",
+    # Section 10 items that have stopped being `Prop`s the profile names. Their
+    # fields hold *proofs* of propositions this layer states, so the elaborator
+    # reads them at construction and nothing projects them afterwards -- that is
+    # the whole point, and it is the opposite of a fact carried and never read.
+    # `RequiredProofPackage.Holds` conjoins only the items still named, so each
+    # one that gains a statement lands here.
+    #
+    # `RequiredProofPackage.loanMapLaws` belongs here on the same reasoning and is
+    # NOT listed, because listing it would be an inert entry: the theorem
+    # `MemoryState.loanMapLaws` shares its final name component, so the scan finds
+    # a "projection" that is nothing of the kind and the field passes by accident.
+    # That is this tool's documented same-name blind spot, recorded here rather
+    # than papered over with an allowlist entry `--inert` would then report.
+    "allocatorFreshnessTeardownEpoch",
     # Diagnostic provenance carried into the trace for a report to read, never
     # dispatched on, like `id` and `origin` above.
     "cause",

@@ -3249,6 +3249,91 @@ theorem rangeInitialized_write (state : MemoryState) {id : AllocId} {start : Nat
   exact ByteStore.initialized_write record.bytes start bytes
 
 
+/-- **A provenance in a superseded epoch is not live.** `docs/MEMORY_MODEL.md` §2:
+address reuse never revives old pointers, and §5 makes an arena advance the epoch
+before reusing storage. This is that sentence read as a refusal. -/
+theorem not_live_of_stale_epoch {state : MemoryState} {provenance : Provenance}
+    {record : AllocationRecord}
+    (hlook : state.allocations.lookup provenance.root = some record)
+    (hepoch : record.epoch ≠ provenance.epoch) : ¬ state.Live provenance := by
+  unfold Live
+  rw [hlook]
+  simp [hepoch]
+
+/-- **A torn-down allocation is not live**, whatever provenance is presented. -/
+theorem not_live_of_dead {state : MemoryState} {provenance : Provenance}
+    {record : AllocationRecord}
+    (hlook : state.allocations.lookup provenance.root = some record)
+    (hdead : record.live = false) : ¬ state.Live provenance := by
+  unfold Live
+  rw [hlook]
+  simp [hdead]
+
+/--
+**§10's allocator item, as a proposition this layer states rather than one a profile
+names.**
+
+`docs/MEMORY_MODEL.md` §10 asks for "allocator/arena freshness, teardown, and epoch
+invalidation". The second of `RequiredProofPackage`'s eleven fields to stop being a
+bare `Prop`; see `LoanMapLaws` for why that matters and
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 for which milestone owes each of the nine
+that remain.
+
+Freshness is two conjuncts rather than one, and the pair is the point: an unused
+identity can always be allocated, and an identity whose *metadata would change* while
+authority is outstanding over its bytes cannot -- §5.1's precondition. Teardown says
+every name given is dead afterwards and no other name moved. Epoch invalidation is
+the two liveness refusals above, which is what makes a stale pointer unusable rather
+than merely stale.
+
+What this does not say: that a profile's own allocator is faithful to any of it. It
+says the state's allocation table obeys these laws for every profile, so no profile
+can close §10's allocator item by naming a weaker sentence.
+-/
+def AllocatorLaws : Prop :=
+  (∀ (state : MemoryState) (id : AllocId) (record : AllocationRecord),
+      state.allocations.lookup id = Option.none → (state.allocate? id record).isSome) ∧
+  (∀ (state : MemoryState) (id : AllocId) (record existing : AllocationRecord),
+      state.allocations.lookup id = some existing →
+      existing.metadata ≠ record.metadata →
+      state.grantEntries.any
+        (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) = true →
+      state.allocate? id record = Option.none) ∧
+  (∀ (state next : MemoryState) (id : AllocId) (record : AllocationRecord),
+      state.allocate? id record = some next →
+      next.allocations.lookup id = some record) ∧
+  (∀ (state next : MemoryState) (id other : AllocId) (record : AllocationRecord),
+      state.allocate? id record = some next → other ≠ id →
+      next.allocations.lookup other = state.allocations.lookup other) ∧
+  (∀ (state next : MemoryState) (ids : List AllocId),
+      state.tearDown? ids = some next →
+      ∀ id ∈ ids, (next.allocations.lookup id).any (fun record => !record.live) = true) ∧
+  (∀ (state next : MemoryState) (ids : List AllocId),
+      state.tearDown? ids = some next →
+      ∀ (id : AllocId), id ∉ ids →
+        next.allocations.lookup id = state.allocations.lookup id) ∧
+  (∀ (state : MemoryState) (provenance : Provenance) (record : AllocationRecord),
+      state.allocations.lookup provenance.root = some record →
+      record.epoch ≠ provenance.epoch → ¬ state.Live provenance) ∧
+  (∀ (state : MemoryState) (provenance : Provenance) (record : AllocationRecord),
+      state.allocations.lookup provenance.root = some record →
+      record.live = false → ¬ state.Live provenance)
+
+/-- **The allocator laws hold**, which is the proof every `MemoryProfile` supplies for
+§10's allocator item. Its conjuncts are, in order, `allocate?_isSome_of_fresh`,
+`allocate?_eq_none_of_outstanding`, `allocate?_lookup_self`, `allocate?_lookup_ne`,
+`tearDown?_kills_every_name`, `tearDown?_lookup_of_not_mem`, `not_live_of_stale_epoch`
+and `not_live_of_dead`. -/
+theorem allocatorLaws : AllocatorLaws :=
+  ⟨fun state id record h => allocate?_isSome_of_fresh state id record h,
+   fun _ _ _ _ hl hc hg => allocate?_eq_none_of_outstanding hl hc hg,
+   fun _ _ _ _ h => allocate?_lookup_self h,
+   fun _ _ _ _ _ h hne => allocate?_lookup_ne h hne,
+   fun _ _ _ h => tearDown?_kills_every_name h,
+   fun _ _ _ h _ hmem => tearDown?_lookup_of_not_mem h hmem,
+   fun _ _ _ hl he => not_live_of_stale_epoch hl he,
+   fun _ _ _ hl hd => not_live_of_dead hl hd⟩
+
 /--
 **§10's loan-map item, as a proposition this layer states rather than one a profile
 names.**

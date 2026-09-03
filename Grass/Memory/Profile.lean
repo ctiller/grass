@@ -630,15 +630,16 @@ operations, or to any theorem in the tree, so a profile supplying `True` closes 
 item and `Holds` is proved by `trivial`. Review found that seven rounds had asked who
 consumes this record and none had asked whether its content is constrained.
 
-`loanMapLaws` is the exception and the pattern for the rest. Its type is
-`Grass.Memory.MemoryState.LoanMapLaws`, a proposition this layer states -- unique loan
-identity, split, join, transfer, reclamation, one conjunct per theorem -- so a profile
-supplies a *proof* rather than a sentence. The proof is `MemoryState.loanMapLaws` and
-is the same for every profile, which is the right answer for laws about a map this
-layer owns: the item is discharged by construction and cannot be weakened by the
-profile that closes it.
+`loanMapLaws` and `allocatorFreshnessTeardownEpoch` are the exceptions and the pattern
+for the rest. Their types are `Grass.Memory.MemoryState.LoanMapLaws` and
+`Grass.Memory.MemoryState.AllocatorLaws`, propositions this layer states with one
+conjunct per theorem, so a profile supplies a *proof* rather than a sentence. The
+proofs are `MemoryState.loanMapLaws` and `MemoryState.allocatorLaws` and are the same
+for every profile, which is the right answer for laws about a map this layer owns: the
+items are discharged by construction and cannot be weakened by the profile that closes
+them.
 
-The other ten stay `Prop` because their propositions are not statable yet: they are
+The other nine stay `Prop` because their propositions are not statable yet: they are
 about an ISA's declared effects, a consistency graph M8 owns, a frame discipline M4
 owns, and an erasure M9 owns. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records which
 milestone owes each of them the same treatment, and until then a profile closing them
@@ -672,8 +673,11 @@ structure RequiredProofPackage where
   /-- Synchronization and obligation transfer obey their laws. -/
   synchronizationAndObligationTransfer : Prop
   /-- Allocators and arenas are fresh, tear down correctly, and invalidate
-  epochs. -/
-  allocatorFreshnessTeardownEpoch : Prop
+  epochs.
+
+  Not a `Prop` the profile names: the statement is
+  `Grass.Memory.MemoryState.AllocatorLaws` and the profile supplies the proof. -/
+  allocatorFreshnessTeardownEpoch : Grass.Memory.MemoryState.AllocatorLaws
   /-- Call-stack and frame lifetimes are preserved. -/
   callStackFrameLifetime : Prop
   /-- Ghost memory and obligation operations survive erasure. -/
@@ -684,17 +688,19 @@ structure RequiredProofPackage where
 namespace RequiredProofPackage
 
 /--
-`package.Holds` is the conjunction of the ten propositions the profile still *names*.
+`package.Holds` is the conjunction of the nine propositions the profile still *names*.
 
 This is what a consumer demands when it wants the §10 package *discharged* rather
 than merely enumerated. `VerifiedProgram` will require it; nothing in M1 does,
 because the propositions themselves are not yet statable.
 
-`loanMapLaws` is absent from this conjunction and that is not an omission: its field
-is a *proof* of `Grass.Memory.MemoryState.LoanMapLaws` rather than a proposition, so
-constructing the record discharges it and there is nothing left for `Holds` to demand.
-Every item this record gains that treatment leaves this conjunction, and when it is
-empty §10 is closed by the type rather than by a profile's word. Ten to go.
+`loanMapLaws` and `allocatorFreshnessTeardownEpoch` are absent from this conjunction
+and that is not an omission: their fields are *proofs* of
+`Grass.Memory.MemoryState.LoanMapLaws` and `Grass.Memory.MemoryState.AllocatorLaws`
+rather than propositions, so constructing the record discharges them and there is
+nothing left for `Holds` to demand. Every item this record gains that treatment leaves
+this conjunction, and when it is empty §10 is closed by the type rather than by a
+profile's word. Nine to go.
 -/
 def Holds (package : RequiredProofPackage) : Prop :=
   package.accessDescriptorSoundness ∧
@@ -703,7 +709,6 @@ def Holds (package : RequiredProofPackage) : Prop :=
   package.consistencyGraphWellFormedness ∧
   package.raceFreedomConsequences ∧
   package.synchronizationAndObligationTransfer ∧
-  package.allocatorFreshnessTeardownEpoch ∧
   package.callStackFrameLifetime ∧
   package.erasurePreservation ∧
   package.validationMetadata
