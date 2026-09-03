@@ -263,11 +263,29 @@ inductive CommonBasis where
   Both manuals state the same guarantee, and someone has confirmed both anchors
   on the given dates.
 
-  The dates are not decoration. `CommonRule.agreedIsConfirmed` requires them to
-  match the two citations' `Citation.confirmed`, so this constructor **cannot be
-  written for a document nobody has opened**. Reviewers found eight rules
-  asserting agreement while the AMD manual was unretrievable and no anchor was
-  confirmed; that is now a type error rather than a finding.
+  What the type enforces, precisely. `CommonRule.agreedIsConfirmed` requires the
+  dates to match both citations' `Citation.confirmed`, requires both citations
+  to be `Citation.FullyChecked`, and requires both dates to be
+  `Date.WellFormed`. `FullyChecked` is the conjunct with teeth, because it
+  carries `SourceDocument.retrieval.isVerified` -- a status this corpus sets by
+  probing the location, not by an author typing a date.
+
+  What it does **not** enforce is that anyone read the manual. An earlier
+  version of this docstring said the constructor "cannot be written for a
+  document nobody has opened", and a reviewer disproved it in about a dozen
+  lines: with only the date-matching conjunct, the obligation was a consistency
+  check between two fields the same author writes, so typing the same fabricated
+  date twice discharged it -- over a document recorded as dead, with a date of
+  0000-00-00. Requiring `FullyChecked` and `Date.WellFormed` kills that
+  particular construction. It does not make agreement *evidence*: no proposition
+  in Lean can witness a human opening a PDF, and `Citation.confirmed` remains a
+  claim.
+
+  The honest statement is narrower and still worth having: via
+  `Citation.FullyChecked`, this constructor cannot be written for a document the
+  corpus records as unretrievable. That is why no rule in this profile claims it
+  today -- the AMD manual is dead. The anchor-following obligation stays open,
+  and the ledger reports it.
   -/
   | agreed (intelConfirmed amdConfirmed : Date)
   /-- The manuals differ and the modeled rule is deliberately weaker than at
@@ -313,18 +331,29 @@ structure CommonRule where
   /-- Whether the vendors agreed, or the rule is the weaker intersection. -/
   basis : CommonBasis
   /--
-  `CommonBasis.agreed` may only be claimed when both anchors are confirmed on
-  the dates it names.
+  `CommonBasis.agreed` may only be claimed when both citations are checkable end
+  to end and confirmed on the dates it names.
 
-  This is the field that makes an unfounded agreement claim a *type error*.
-  `agreed` asserts that both manuals state the same guarantee, which cannot be
-  established from a document nobody has opened, and nothing previously stopped
-  a rule saying it. The default proof discharges the obligation for every other
-  basis, where the hypothesis is contradictory, so only an actual `agreed`
-  rule pays anything — and it pays by having to have been checked.
+  This is what stops an `agreed` basis being free. It is *not* what makes an
+  unfounded agreement claim impossible, and the difference matters: a reviewer
+  built a `CommonRule` claiming `agreed` over two dead documents when this
+  obligation was only that the dates match `Citation.confirmed`, because both
+  the basis and the confirmation dates are fields the same author writes, so the
+  obligation was self-consistency rather than evidence.
+
+  The `FullyChecked` conjuncts are what a determined author cannot simply type:
+  they carry `SourceDocument.retrieval.isVerified`, which this corpus sets by
+  probing the recorded location. `Date.WellFormed` rules out the placeholder
+  date the same reviewer used. What remains unenforceable is whether anyone
+  followed the anchor; see `CommonBasis.agreed`.
+
+  The default proof discharges the obligation for every other basis, where the
+  hypothesis is contradictory, so only an actual `agreed` rule pays anything.
   -/
   agreedIsConfirmed : ∀ di da, basis = .agreed di da →
-      citation.intel.confirmed = some di ∧ citation.amd.confirmed = some da := by
+      citation.intel.confirmed = some di ∧ citation.amd.confirmed = some da ∧
+        citation.intel.FullyChecked ∧ citation.amd.FullyChecked ∧
+          di.WellFormed ∧ da.WellFormed := by
     intro _ _ h; exact absurd h (by simp)
 
 namespace CommonRule

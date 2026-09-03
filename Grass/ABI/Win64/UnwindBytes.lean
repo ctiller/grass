@@ -177,6 +177,23 @@ Three conditions, each of which a plausible generator gets wrong:
   complete at the same byte and the array is a reversal of this order;
 * no offset exceeds `SizeOfProlog`, because an offset past the prologue
   describes an instruction the unwinder will never be executing inside.
+
+## Open obligation: the offsets are not checked against any instruction
+
+These three conditions are internal. Nothing here relates `codeOffset` or
+`SizeOfProlog` to the bytes an assembler would actually emit, because this
+module models unwind data and not instructions -- there is no encoder for `push`
+or `sub rsp` to compare against. So a layout claiming three two-byte pushes end
+at 1, 2 and 3, or one claiming `SizeOfProlog = 255` for a ten-byte prologue,
+satisfies `WellFormed`. Both mis-unwind: the second has Windows treat every
+address below 255 as mid-prologue and restore nothing.
+
+`Tests/ABI/Win64/UnwindCorpus.lean` closes this for the prologues it builds,
+because it derives the offsets from a length model that `ml64` then checks. It
+closes nothing for a `Layout` a caller writes directly. Closing it properly
+needs `push`/`sub` in `Grass.ISA.X86.Bytes` and a recogniser relating an encoded
+prologue to a `Layout`, which is what `docs/PLATFORM_ABI.md` section 3 asks for
+and is owed rather than done.
 -/
 def WellFormed (l : Layout) : Prop :=
   l.prologue.Encodable ∧ Ascends l.offsets ∧ ∀ o ∈ l.offsets, o ≤ l.sizeOfProlog

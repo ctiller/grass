@@ -19,11 +19,22 @@ names anchored to the declaration they constrain — `decodeMem.ripRelative`,
 
 ## State of these citations
 
-Every rule below is dual-cited, and none is confirmed. None claims
-`CommonBasis.agreed` either, and none can: `CommonRule.agreedIsConfirmed`
-requires that constructor's dates to match both citations' `confirmed` field, so
-asserting that two manuals say the same thing about a document nobody has opened
-is a type error rather than a review finding. Eight rules carry
+Every rule below is dual-cited. Nine of the eighteen anchors are confirmed, all
+of them Intel; the nine AMD anchors are not, because the AMD manual is
+unretrievable.
+
+None claims `CommonBasis.agreed`, and none can while that is true:
+`CommonRule.agreedIsConfirmed` requires both citations to be
+`Citation.FullyChecked`, which carries a verified retrieval status, as well as
+requiring the constructor's dates to match both `Citation.confirmed` fields.
+
+That obligation used to be the date-matching alone, and a reviewer showed what
+it was worth: both the basis and the confirmation dates are fields the same
+author writes, so typing the same fabricated date twice discharged it over two
+dead documents. The `FullyChecked` conjuncts are what an author cannot type.
+Even so, the claim that agreement is *evidence* would still be too strong --
+nothing here witnesses a human opening a manual, and the anchor-following
+obligation stays open. Eight rules carry
 `assertedPendingConfirmation`; `registerWriteExtension` carries `weakerCommon`,
 because its carve-outs were settled on hardware and the BSF/BSR case is where
 the vendors are reported to differ. That is the honest current state and the

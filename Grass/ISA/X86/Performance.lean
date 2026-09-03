@@ -415,12 +415,25 @@ def zeroModel : CostModel Nat Nat := ⟨fun _ _ => 0⟩
 
 satisfied every premise and proved every program timing-safe.
 
-`zeroModel` still satisfies `independent`. What it cannot produce is `fact`: a
-`TimingFact` carries a `DualCitation`, so justifying it needs an Intel anchor
-and an AMD anchor for the instruction, and `sound` additionally requires the
-basis to be `architectural` — which `TimingBasis.admissibleForSecurity` rejects
-for anything measured. The citation is now a premise of the security argument
-instead of a record beside it.
+`zeroModel` still satisfies `independent`. What it cannot produce is a
+*justification*: `sound` requires each fact's basis to be `architectural`, which
+`TimingBasis.admissibleForSecurity` rejects for anything measured, and
+`citationsChecked` requires both of its anchors to be `Citation.FullyChecked`.
+
+The second of those was added after a reviewer showed the first was not enough.
+Requiring a `DualCitation` puts a citation *record* on the proof path, and a
+record is data the author writes: the reviewer built a `JustifiedCostModel` from
+facts with an `architectural` basis over two documents recorded as dead and
+proved every trace equicost with it. `FullyChecked` carries
+`SourceDocument.retrieval.isVerified`, which this corpus sets by probing the
+location rather than by an author asserting it, so that construction no longer
+typechecks.
+
+The honest consequence is that **no `JustifiedCostModel` can be built today**,
+because the AMD manual is unretrievable (`Grass/ISA/X86/Sources.lean`). A
+structure nobody can instantiate is the correct state for a security premise
+whose evidence is missing; the alternative is one that can be instantiated
+without evidence, which is what this was.
 -/
 structure JustifiedCostModel (Insn Vals : Type) where
   /-- The cost function. -/
@@ -435,6 +448,22 @@ structure JustifiedCostModel (Insn Vals : Type) where
   that the model does not implement, and this without a citation is the
   assertion the structure exists to prevent. -/
   independent : ∀ i, model.ValueIndependent i
+  /--
+  Both of each fact's anchors are checkable end to end.
+
+  Without this, the citation on the proof path is a record the author fills in,
+  and `sound` is satisfied by an `architectural` claim over documents this
+  corpus has recorded as dead -- a reviewer demonstrated exactly that.
+  `Citation.FullyChecked` carries `SourceDocument.retrieval.isVerified`, which
+  is set by probing rather than by assertion, so the premise costs something a
+  determined author cannot simply type.
+
+  It does not establish that anyone read the passage; `Citation.confirmed` is
+  still a claim. See `Grass.ISA.X86.CommonBasis.agreed` for the same limit
+  stated where it also applies.
+  -/
+  citationsChecked : ∀ i,
+    (fact i).citation.intel.FullyChecked ∧ (fact i).citation.amd.FullyChecked
 
 namespace JustifiedCostModel
 
@@ -464,6 +493,18 @@ theorem traceCost_eq (j : JustifiedCostModel Insn Vals)
 Extracted so a report can state it without reconstructing `SoundFor`. -/
 theorem basis_architectural (j : JustifiedCostModel Insn Vals) (i : Insn) :
     (j.fact i).basis.admissibleForSecurity = true := (j.sound i).1
+
+/--
+**Both cited documents are retrievable.**
+
+The consequence of `citationsChecked` that makes it more than a restatement of
+`Citation.confirmed`: a justification cannot rest on a document this corpus has
+probed and found dead. This is the conjunct that fails today, for AMD.
+-/
+theorem citations_retrievable (j : JustifiedCostModel Insn Vals) (i : Insn) :
+    (j.fact i).citation.intel.document.retrieval.isVerified = true ∧
+      (j.fact i).citation.amd.document.retrieval.isVerified = true :=
+  ⟨(j.citationsChecked i).1.1, (j.citationsChecked i).2.1⟩
 
 /-- A measured timing fact cannot justify a `JustifiedCostModel`.
 
