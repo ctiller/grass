@@ -522,6 +522,34 @@ structure StepPolicy where
   `Prop`-valued field would have made the conflict test undecidable and the check
   would have quietly become documentation. -/
   compatible : MemoryEvent → MemoryEvent → Bool := fun _ _ => false
+  /-- Compatibility is a property of *atomic* pairs.
+
+  `docs/MEMORY_MODEL.md` §7.3's sentence is "they are not both **compatible atomic
+  accesses** under one profile", and the atomicity half was enforced nowhere:
+  `MemoryEvent.Conflicts` never reads `ordering.atomicity`, and this field had no
+  conditions at all. So a profile could declare two plain non-atomic stores
+  compatible, which is not a weakening of §7.3 but a step outside it. Review set
+  `compatible := fun _ _ => true` on the fixture's own profile and watched the
+  cross-context pair that `aliased_cross_context_store_is_denied` denies commit with
+  an empty ledger — the loan rule's defect, one field over: a policy field that can
+  only *remove* a refusal, where `AuthorityProvider.refuses` can only add one.
+
+  A proof field rather than a check, for the reason `vocabularyWellFormed` is one: a
+  policy that cannot discharge it cannot be constructed. The default discharges it
+  trivially, because nothing is compatible. -/
+  compatibleIsAtomic : ∀ a b, compatible a b = true →
+    a.ordering.atomicity = .atomic ∧ b.ordering.atomicity = .atomic := by
+      intro _ _ h; exact absurd h (by simp)
+  /-- And compatibility is symmetric.
+
+  `MemoryEvent.Conflicts.symm` takes symmetry as a hypothesis and nothing discharged
+  it, so whether two events conflicted depended on which one the trace saw first.
+  Review built `compatible := fun a _ => decide (a.context.id = thread₀)` and got two
+  events and an empty ledger stepping thread-then-engine, one event and a violation
+  stepping the same two accesses engine-then-thread. A conflict is a symmetric fact
+  about a pair; this field could make it not one. -/
+  compatibleSymm : ∀ a b, compatible a b = true → compatible b a = true := by
+      intro _ _ h; exact absurd h (by simp)
 
 namespace StepPolicy
 
@@ -712,6 +740,71 @@ instance (policy : StepPolicy) (state : MachineState) (event : MemoryEvent) :
     earlier.event.context.id ≠ event.context.id ∧
     MemoryEvent.Conflicts state.memory.SharesBytes
       (fun a b => policy.compatible a b = true) earlier.event event))
+
+/--
+**A non-atomic overlapping pair conflicts under every policy.**
+
+The theorem this area was missing, and the direct analogue of
+`refusalOf_refuses_the_unauthorized`: it quantifies over `policy`, so no
+compatibility relation a profile writes can make a race disappear.
+
+`docs/MEMORY_MODEL.md` §7.3 exempts "compatible **atomic** accesses", and
+`StepPolicy.compatibleIsAtomic` is what makes the adjective load-bearing — without it
+`MemoryEvent.Conflicts` read `compatible` and nothing read `ordering.atomicity`, so a
+profile could declare two plain stores compatible and step them past each other.
+Review did exactly that on the fixture's own profile.
+-/
+theorem conflicts_of_not_atomic {policy : StepPolicy}
+    {sharesBytes : AllocId → AllocId → Prop} {a b : MemoryEvent}
+    (hatouch : a.kind.touchesMemory = true) (hbtouch : b.kind.touchesMemory = true)
+    (hspace : a.provenance.space = b.provenance.space)
+    (hshares : sharesBytes a.provenance.root b.provenance.root)
+    (hoverlap : a.committedRange.Overlaps b.committedRange)
+    (hwrites : a.kind.writes = true ∨ b.kind.writes = true)
+    (hatomic : a.ordering.atomicity ≠ .atomic) :
+    MemoryEvent.Conflicts sharesBytes (fun x y => policy.compatible x y = true) a b := by
+  refine ⟨hatouch, hbtouch, hspace, hshares, hoverlap, hwrites, ?_⟩
+  intro hcompatible
+  exact hatomic (policy.compatibleIsAtomic a b hcompatible).1
+
+/--
+**Conflict is symmetric under any policy.**
+
+`MemoryEvent.Conflicts.symm` takes symmetry of the compatibility relation as a
+hypothesis and nothing discharged it, so whether two events conflicted could depend on
+which one the trace saw first — review built a `compatible` keyed on the first
+argument's context and got two events and an empty ledger one way, one event and a
+violation the other. `StepPolicy.compatibleSymm` is what supplies it, and this is its
+consumer.
+
+The `sharesBytes` half is still a hypothesis, because `MemoryState.SharesBytes` has no
+symmetry theorem — it is the bounded alias-hop closure and reversing a path needs a
+back-peeling lemma the module does not have. `docs/MEMORY_IMPLEMENTATION_PLAN.md`
+§4.4.1 records it; `AliasHop` is symmetric by construction, so the fact is true and
+only the proof is missing.
+-/
+theorem conflicts_symm {policy : StepPolicy} {sharesBytes : AllocId → AllocId → Prop}
+    {a b : MemoryEvent} (shareSymm : ∀ x y, sharesBytes x y → sharesBytes y x)
+    (h : MemoryEvent.Conflicts sharesBytes (fun x y => policy.compatible x y = true) a b) :
+    MemoryEvent.Conflicts sharesBytes (fun x y => policy.compatible x y = true) b a :=
+  h.symm shareSymm (fun x y hxy => policy.compatibleSymm x y hxy)
+
+/-- The same at the trace level: an earlier event from another context that a
+non-atomic access overlaps is a conflict, whatever the policy says. -/
+theorem conflictsWithHistory_of_not_atomic {policy : StepPolicy} {state : MachineState}
+    {event : MemoryEvent} {earlier : ValidMemoryEvent} (hmem : earlier ∈ state.events)
+    (hcontext : earlier.event.context.id ≠ event.context.id)
+    (hatouch : earlier.event.kind.touchesMemory = true)
+    (hbtouch : event.kind.touchesMemory = true)
+    (hspace : earlier.event.provenance.space = event.provenance.space)
+    (hshares : state.memory.SharesBytes earlier.event.provenance.root
+      event.provenance.root)
+    (hoverlap : earlier.event.committedRange.Overlaps event.committedRange)
+    (hwrites : earlier.event.kind.writes = true ∨ event.kind.writes = true)
+    (hatomic : earlier.event.ordering.atomicity ≠ .atomic) :
+    ConflictsWithHistory policy state event :=
+  ⟨earlier, hmem, hcontext,
+    conflicts_of_not_atomic hatouch hbtouch hspace hshares hoverlap hwrites hatomic⟩
 
 /--
 Why this access is refused, or `none` if nothing refuses it.

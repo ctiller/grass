@@ -1779,6 +1779,33 @@ refuses everything.
   what happened, and `--inert` reports the condition mechanically now so it cannot rot
   back. An allowlist is a record of decisions, and an entry that suppresses nothing
   records a decision about nothing.
+- ~~**`StepPolicy.compatible` could switch §7.3's race check off.**~~ Round twelve's
+  largest finding, and the loan rule's defect one field over: `compatible` is the only
+  field in `StepPolicy` that can *remove* a refusal, where `AuthorityProvider.refuses`
+  can only add one. Review set `compatible := fun _ _ => true` on the fixture's own
+  profile and the cross-context pair `aliased_cross_context_store_is_denied` denies
+  committed with an empty ledger.
+
+  Two distinct problems underneath. §7.3's sentence is "not both **compatible atomic**
+  accesses", and the atomicity half was enforced nowhere — `MemoryEvent.Conflicts`
+  never reads `ordering.atomicity` and the field had no conditions — so a profile could
+  exempt two plain stores, which is outside §7.3 rather than a weakening of it. And
+  `compatible` had no symmetry condition, so the verdict depended on interleaving
+  order: review's asymmetric relation gave two events and an empty ledger one way, one
+  event and a violation the other, for the same two accesses.
+
+  `compatibleIsAtomic` and `compatibleSymm` are proof fields now, in the shape
+  `vocabularyWellFormed` uses, so a policy that cannot discharge them cannot be
+  constructed; the default discharges both trivially because nothing is compatible.
+  `conflicts_of_not_atomic` and `conflictsWithHistory_of_not_atomic` are the theorems
+  quantified over `policy` — the analogue of `refusalOf_refuses_the_unauthorized` — and
+  `conflicts_symm` is `compatibleSymm`'s consumer. `Tests/Op/FakeIsa.lean` builds a
+  permissive profile that exempts every *atomic* pair, which §7.3 allows, and steps the
+  race under it: still denied.
+- **`MemoryState.SharesBytes` has no symmetry theorem.** `conflicts_symm` takes it as
+  a hypothesis for that reason. `AliasHop` is symmetric by construction so the fact is
+  true; the proof needs a back-peeling lemma for the bounded alias-hop closure that
+  `Grass/Memory/State.lean` does not have.
 - ~~**`ProtocolAuthority` was decorative.**~~ Round eleven's largest finding, and the
   same shape as round ten's: a name every ledger delta carries, checked by nothing.
   `ProtocolAuthority` is indexed by its protocol, so authority for one cannot be

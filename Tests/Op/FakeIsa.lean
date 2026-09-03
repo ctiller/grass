@@ -2623,6 +2623,65 @@ theorem the_forged_lend_is_refused_on_the_map :
       (.issue lentSlot { declaredLoan with lender := engine₀ })).isSome := by
   exact ⟨by decide, by decide⟩
 
+/-! ## No compatibility relation can switch the race check off
+
+`StepPolicy.compatible` is the one field a profile writes that can *remove* a refusal
+rather than add one, and review used it: `compatible := fun _ _ => true` on this very
+profile made every §7.3 conflict vanish, and the cross-context pair
+`aliased_cross_context_store_is_denied` denies committed with an empty ledger.
+
+§7.3's sentence exempts "compatible **atomic** accesses", and the adjective was
+enforced nowhere — `MemoryEvent.Conflicts` never read `ordering.atomicity`.
+`StepPolicy.compatibleIsAtomic` is what makes it load-bearing, and it is a proof field
+rather than a check, so a policy that cannot discharge it cannot be constructed.
+-/
+
+/-- A profile that declares every pair compatible. It type-checks only because the
+two accesses it would exempt are both atomic; the fixture's own operations are not,
+which is the point of the theorem below. -/
+def permissiveCompatible (a b : MemoryEvent) : Bool :=
+  decide (a.ordering.atomicity = .atomic) && decide (b.ordering.atomicity = .atomic)
+
+/-- The permissive policy is constructible, so the theorem below is not about a
+vacuous premise: a profile may exempt every *atomic* pair, which is exactly what
+§7.3 allows. -/
+def permissivePolicy : StepPolicy :=
+  { policy with
+    compatible := permissiveCompatible
+    compatibleIsAtomic := by
+      intro a b h
+      simp only [permissiveCompatible, Bool.and_eq_true, decide_eq_true_eq] at h
+      exact h
+    compatibleSymm := by
+      intro a b h
+      simp only [permissiveCompatible, Bool.and_eq_true, decide_eq_true_eq] at h ⊢
+      exact ⟨h.2, h.1⟩ }
+
+/-- **And the race is still refused under it.** The thread's store and the engine's
+write to the same bytes are non-atomic, so no compatibility relation a profile can
+write exempts them — `compatibleIsAtomic` is what closes that. -/
+theorem the_permissive_policy_still_denies_the_race :
+    ∀ s, (Grass.Op.step permissivePolicy state₀ (SomeOperation.of Alpha.store) thread₀
+        .thread ⟨⟨"alpha"⟩⟩).state? = some s →
+      ∀ t, (Grass.Op.step permissivePolicy s (SomeOperation.of Beta.dmaWrite) engine₀
+          .dmaEngine ⟨⟨"beta"⟩⟩).state? = some t →
+        t.events.length = 1 ∧ ¬ t.violations.IsEmpty := by
+  intro s hs t ht
+  cases hs
+  cases ht
+  exact ⟨by decide, by decide⟩
+
+/-- And the same pair under the default policy, so the theorem above is the
+compatibility relation and not something else about the permissive profile. -/
+theorem the_default_policy_denies_the_race :
+    ∀ s, (stepAlpha state₀ .store).state? = some s →
+      ∀ t, (stepBeta s .dmaWrite).state? = some t →
+        t.events.length = 1 ∧ ¬ t.violations.IsEmpty := by
+  intro s hs t ht
+  cases hs
+  cases ht
+  exact ⟨by decide, by decide⟩
+
 /-! ## An obligation identity is reused after its duty ends
 
 `LedgerDelta.Applicable`'s create clause is `o.id ∉ live` — "not currently live",
