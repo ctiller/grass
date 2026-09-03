@@ -178,6 +178,19 @@ pub fn push_refspecs(
     run(dir, &arg_refs)
 }
 
+/// Fetch one or more explicit `<remote-ref>:<local-ref>` refspecs. Without
+/// `--force`, this refuses to move a local branch ref except as a fast-
+/// forward -- exactly the property a read-only fetch of another agent's
+/// stream wants: an unexpected rewrite on the remote surfaces as a loud
+/// fetch failure here rather than silently overwriting local history (AGENT_
+/// COORDINATION_EVOLUTION.md section 1: "force pushes... are prohibited").
+pub fn fetch_refspecs(dir: &Path, remote: &str, refspecs: &[String]) -> AbResult<GitOutput> {
+    let mut args: Vec<String> = vec!["fetch".to_string(), remote.to_string()];
+    args.extend(refspecs.iter().cloned());
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run(dir, &arg_refs)
+}
+
 /// Ensure a detached worktree checked out at `origin/agent-bus` exists at
 /// `worktree_path`, creating it if necessary (AGENT_BUS.md section 2: "Multiple
 /// agents sharing one clone use detached worktrees").

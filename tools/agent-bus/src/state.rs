@@ -149,7 +149,7 @@ impl AgentState {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct BusState {
     pub config: BusConfig,
     /// The registry epoch this reduction's authority checks are relative to

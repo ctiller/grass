@@ -16,6 +16,7 @@ mod scalars;
 mod state;
 mod storage;
 mod stream;
+mod sync;
 
 fn main() {
     eprintln!("agent-bus v2: not yet wired up");
