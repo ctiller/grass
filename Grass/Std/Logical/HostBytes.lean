@@ -60,6 +60,32 @@ def toUInt8 (b : Byte) : UInt8 := UInt8.ofBitVec b
 /-- Lean's byte as Grass's. -/
 def ofUInt8 (u : UInt8) : Byte := u.toBitVec
 
+/--
+A byte from a number, truncating.
+
+A consumer review reported defining this in the first ten lines of the first
+client file, for a library whose flagship type is `ByteArray` and whose named
+consumers are `docs/ARTIFACTS.md` and `docs/HTTP2_CONSTRAINTS.md`.
+`Spikes/4_Web_Server/Macros.lean` writes `toDecimalBytes routeBody.size`, so
+converting a number to bytes is demanded by the corpus and not only convenient.
+
+Truncation is deliberate and is why `Byte.toNat_ofNat` states a modulus rather
+than an equality: a byte holds eight bits, and a conversion that silently
+narrowed without saying so is the kind of thing `docs/FOUNDATION.md` objects to.
+-/
+def ofNat (n : Nat) : Byte := BitVec.ofNat 8 n
+
+/-- The number a byte denotes, in `[0, 256)`. -/
+def toNat (b : Byte) : Nat := BitVec.toNat b
+
+@[simp] theorem toNat_ofNat (n : Nat) : toNat (ofNat n) = n % 256 := by
+  simp [toNat, ofNat, BitVec.toNat_ofNat]
+
+@[simp] theorem ofNat_toNat (b : Byte) : ofNat (toNat b) = b := by
+  simp [toNat, ofNat]
+
+theorem toNat_lt (b : Byte) : toNat b < 256 := BitVec.isLt b
+
 @[simp] theorem ofUInt8_toUInt8 (b : Byte) : ofUInt8 (toUInt8 b) = b := rfl
 
 @[simp] theorem toUInt8_ofUInt8 (u : UInt8) : toUInt8 (ofUInt8 u) = u := rfl
