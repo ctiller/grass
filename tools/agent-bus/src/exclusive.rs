@@ -122,6 +122,17 @@ impl ExclusiveTracker {
             group.len() > 1 && group.contains(id) && self.winner(key).as_ref() != Some(id)
         })
     }
+
+    /// Finds the still-unresolved group whose membership equals exactly
+    /// `competing` -- how `lifecycle.conflict_resolved` locates the
+    /// predecessor key it names by its complete competing set rather than by
+    /// an internal key string the event format never exposes.
+    pub fn key_with_exact_group(&self, competing: &BTreeSet<EventId>) -> Option<String> {
+        self.groups
+            .iter()
+            .find(|(key, group)| !self.resolved.contains_key(*key) && *group == competing)
+            .map(|(key, _)| key.clone())
+    }
 }
 
 #[cfg(test)]

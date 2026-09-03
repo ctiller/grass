@@ -1,3 +1,4 @@
+mod apply;
 mod bootstrap;
 mod canon;
 mod common;
