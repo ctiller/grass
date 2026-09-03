@@ -12,7 +12,24 @@ access descriptor of `docs/MEMORY_MODEL.md` §1.
 
 The point is not that these are correct x86-64 models — the ISA agent owns that,
 and these deliberately do not claim a citation. The point is that each case is
-**expressible without an escape hatch**. If one of them could not be written, the
+**expressible without an escape hatch**.
+
+**The frame geometry here is not `docs/SPIKE_1.md`'s, and that is a known divergence
+rather than a modelling choice.** That document's frame table puts the Win64 shadow
+space at `+0`–`32`, the fifth argument at `+32`, `bytesWritten` at `+40`, and saved
+`r14`/`r13`/`r12` at `+48`/`+56`/`+64`. This file has the frame at `⟨0, 64⟩`,
+`transferred` at `⟨32, 4⟩`, saved `r12` at `⟨0, 8⟩` and the return address at
+`⟨24, 8⟩` — so `transferred` sits on the `OVERLAPPED*` slot, the saved registers sit
+in the shadow space, and the frame cannot contain the table's saved `r12` at all.
+`arg WriteFile.overlapped, 0`, an eight-byte write the program performs, has no case
+here for the same reason: the fixture's `transferred` write is on its low half.
+
+Review found it. It is recorded rather than repaired because the repair is not an
+edit: the return address is pushed *below* the frame base, so it cannot descend
+through the frame step at all, and re-laying the frame to the table means
+restructuring the provenance paths and every offset and address in this file and its
+two siblings. Choosing that geometry is the ISA question this file disclaims, so it
+wants an owner who has one. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1b carries it. If one of them could not be written, the
 descriptor is not sufficient and the freeze has not earned its name. That is the
 one question §9 risk 1 says must be answered before ISA authoring begins, and it
 is answered by elaboration rather than by assertion.
