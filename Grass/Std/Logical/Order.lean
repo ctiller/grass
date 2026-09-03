@@ -170,6 +170,25 @@ theorem pairwise_iff_get {R : α → α → Prop} (v : Vec α) :
       ∀ (i j : Nat) (hi : i < v.length) (hj : j < v.length), i < j → R (v.get i hi) (v.get j hj) :=
   List.pairwise_iff_getElem
 
+/--
+Pushing a larger element onto an ordered sequence keeps it ordered.
+
+`Vec.Pairwise` had only destructors — `take` and `drop` — and no way to build an
+ordered sequence at all. A consumer review reported that an accumulating writer,
+the HTTP/2 case where stream identifiers must strictly increase, could not state
+its invariant without unfolding to `List.Pairwise`. That is the escape this
+library exists to prevent, so the constructor belongs here.
+-/
+theorem Pairwise.push {R : α → α → Prop} {v : Vec α} {a : α}
+    (h : Pairwise R v) (hlast : ∀ x ∈ v, R x a) : Pairwise R (v.push a) := by
+  show List.Pairwise R (v.toList ++ [a])
+  rw [List.pairwise_append]
+  refine ⟨h, List.pairwise_singleton .., ?_⟩
+  intro x hx b hb
+  cases hb with
+  | head => exact hlast x (mem_iff_mem_toList.mpr hx)
+  | tail _ hb' => cases hb'
+
 /-- A pairwise-ordered sequence stays ordered when its tail is dropped. -/
 theorem Pairwise.take {R : α → α → Prop} {v : Vec α} (h : Pairwise R v) (n : Nat) :
     Pairwise R (v.take n) :=

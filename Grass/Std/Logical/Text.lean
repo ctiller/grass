@@ -86,9 +86,18 @@ delegates rather than re-implements.
 -/
 def utf8 (s : String) : Vec Byte := Vec.ofHostBytes s.toUTF8
 
-/-- The crossing back is exactly Lean's encoding, so nothing is lost by routing
-through `Vec Byte`. -/
-@[simp] theorem toHostBytes_utf8 (s : String) : (utf8 s).toHostBytes = s.toUTF8 :=
+/--
+The crossing back is exactly Lean's encoding, so nothing is lost by routing
+through `Vec Byte`.
+
+Deliberately **not** `@[simp]`. A consumer review found that as a simp lemma it
+fires inside `Vec.ofHostBytes (Vec.toHostBytes (Text.utf8 s))` before the general
+`Vec.ofHostBytes_toHostBytes` can, rewriting away the redex that law needs and
+leaving a goal that looks like it should have closed. A lemma that destroys a
+more general lemma's left-hand side does not belong in the default set, and this
+one is wanted at specific sites rather than everywhere.
+-/
+theorem toHostBytes_utf8 (s : String) : (utf8 s).toHostBytes = s.toUTF8 :=
   Vec.toHostBytes_ofHostBytes s.toUTF8
 
 /-- The encoded length is the string's UTF-8 byte size, which is the "derive its

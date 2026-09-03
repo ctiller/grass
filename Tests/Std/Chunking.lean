@@ -9,10 +9,14 @@ is a claim about what a parser can see:
 > Positive partial reads produce nonempty ordered chunks; parsers consume their
 > concatenation independent of chunk boundaries.
 
-`Grass/Std/Logical/Vec.lean` proves `Vec.chunk_extensional`, which is that claim
-for any consumer at all. This fixture is the part a theorem cannot carry: that
-the statement is about something, by exhibiting two genuinely different chunkings
-of the same bytes and a consumer that cannot tell them apart.
+`Grass/Std/Logical/Vec.lean` proves `Vec.chunk_extensional`, which is **weaker
+than that claim** and says so in its own docstring: the proof is two rewrites and
+a `refl`, and the same statement holds with `Vec.flatten` replaced by any
+function, including boundary-observing ones. `docs/PROCESS.md` states the real
+property over a `StreamingParser` and it belongs to `Std.Process`. This fixture
+exhibits the sequence-level fact the real theorem would rest on — two genuinely
+different chunkings of the same bytes, and a consumer written as a function of
+the flattening that therefore cannot tell them apart.
 
 The read side and the write side now meet. `Tests/Std/PartialWrite.lean` shows a
 writer committing exact prefixes of a payload; this shows a reader receiving that
