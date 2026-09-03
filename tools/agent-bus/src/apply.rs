@@ -1054,18 +1054,16 @@ fn apply_review_closing(
     nomination: &EventId,
     label: &'static str,
 ) -> AbResult<()> {
+    // Deliberately no upfront `chain.is_closed()` or `current_nomination ==
+    // nomination` check here: see apply_issue_reassigned's comment. A
+    // decline/withdraw genuinely concurrent with an already-processed
+    // reassignment on this same nomination must be recorded as a competing
+    // candidate, not rejected merely because the other side happened to be
+    // reduced first and provisionally advanced `current_nomination` away
+    // from the id this event actually names.
     let chain = state
         .review_chain(nomination)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {nomination}", env.id)))?;
-    if chain.current_nomination != *nomination {
-        return Err(invalid(format!(
-            "{}: {nomination} is not the current nomination in its chain",
-            env.id
-        )));
-    }
-    if chain.is_closed() {
-        return Err(invalid(format!("{}: review chain already closed", env.id)));
-    }
     match label {
         "declined" => {
             let reviewer = chain.nomination_reviewer.get(nomination).unwrap();
@@ -1098,9 +1096,55 @@ fn apply_review_closing(
         }
         _ => unreachable!(),
     }
-    let chain = state.review_chain_mut(nomination).expect("just checked");
-    chain.decline_or_withdraw_or_reassign_status = ItemStatus::Terminal(label);
+    let key = review_key(nomination);
+    state.exclusive.record(&key, &env.id, |other| {
+        env.observed.validate_reference(other).is_ok() || other.agent() == env.agent
+    })?;
+    if state.exclusive.winner(&key).as_ref() == Some(&env.id) {
+        let chain = state.review_chain_mut(nomination).expect("just checked");
+        chain.decline_or_withdraw_or_reassign_status = ItemStatus::Terminal(label);
+    } else {
+        reset_review_to_conflict(state, nomination);
+    }
     Ok(())
+}
+
+/// See `reset_issue_to_conflict`'s doc comment for the general rationale.
+/// Reviews need more than a status reset: a reassignment racing against
+/// this decline/withdraw may have already provisionally extended the chain
+/// to a new nomination link before the conflict was discovered. That link
+/// is fully retracted -- removed from `nomination_events`,
+/// `nomination_reviewer`, and `review_chain_by_nomination` -- and
+/// `current_nomination`/`current_request` revert to the shared pre-race
+/// baseline (`nomination`'s own already-reduced request), recovered from
+/// its own event rather than re-derived, since nothing else records what a
+/// nomination's request was independent of the chain's current (possibly
+/// -reverting) state.
+fn reset_review_to_conflict(state: &mut BusState, nomination: &EventId) {
+    let Some(root) = state.review_chain_by_nomination.get(nomination).cloned() else {
+        return;
+    };
+    let baseline_request = state.events.get(nomination).and_then(|env| {
+        env.typed_data().ok().and_then(|d| match d {
+            EventData::ReviewNominated(r) => Some(r),
+            EventData::ReviewReassigned(r) => Some(r.request()),
+            _ => None,
+        })
+    });
+    let Some(chain) = state.reviews.get_mut(&root) else {
+        return;
+    };
+    chain.decline_or_withdraw_or_reassign_status = ItemStatus::LifecycleConflict;
+    if chain.current_nomination != *nomination {
+        let provisional = chain.current_nomination.clone();
+        chain.nomination_events.retain(|id| id != &provisional);
+        chain.nomination_reviewer.remove(&provisional);
+        chain.current_nomination = nomination.clone();
+        if let Some(r) = baseline_request {
+            chain.current_request = r;
+        }
+        state.review_chain_by_nomination.remove(&provisional);
+    }
 }
 
 fn apply_review_changes(
@@ -1162,6 +1206,18 @@ fn apply_finding_disposition(
     let chain = state
         .review_chain(nomination)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {nomination}", env.id)))?;
+    // Authority belongs to the reviewer of the chain's *current* nomination
+    // link specifically -- a reviewer who has since been superseded by a
+    // reassignment must not retain disposal authority merely by citing
+    // their own now-stale nomination id, even though that id's own
+    // nomination_reviewer entry never gets removed (it stays as a durable
+    // record of who accepted that particular link).
+    if chain.current_nomination != *nomination {
+        return Err(invalid(format!(
+            "{}: {nomination} is not the current nomination in its chain",
+            env.id
+        )));
+    }
     let reviewer = chain.nomination_reviewer.get(nomination).cloned();
     if reviewer.as_ref() != Some(&env.agent) {
         return Err(invalid(format!(
@@ -1197,21 +1253,32 @@ fn apply_review_reassigned(
     env: &Envelope,
     d: &ReviewReassigned,
 ) -> AbResult<()> {
+    // Note: only the decline/withdraw/reassign race is checked via the
+    // exclusive tracker below (see apply_issue_reassigned's comment for
+    // why there is no upfront check on *that* status specifically). A real
+    // product merge or reconciliation is a stronger, always-final fact
+    // unrelated to that race and is still checked eagerly here -- it must
+    // block reassignment unconditionally, not be treated as one more
+    // competing candidate.
     let chain = state
         .review_chain(&d.replaces)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {}", env.id, d.replaces)))?;
-    if chain.current_nomination != d.replaces {
+    if !chain.merged.is_empty() || !chain.reconciled.is_empty() {
         return Err(invalid(format!(
-            "{}: {} is not the current nomination in its chain",
-            env.id, d.replaces
-        )));
-    }
-    if chain.is_closed() {
-        return Err(invalid(format!(
-            "{}: cannot reassign a closed review chain",
+            "{}: cannot reassign a review chain that has already merged or reconciled",
             env.id
         )));
     }
+    // Deliberately no upfront `current_nomination == d.replaces` check: a
+    // second, genuinely concurrent reassignment (or a reassignment racing a
+    // decline that never moves `current_nomination` at all) must not be
+    // rejected merely because a different competing candidate happened to
+    // be reduced first and provisionally advanced the chain. `chain.
+    // current_request`'s non-reviewer fields are compared below regardless
+    // of which link is currently "current" -- every valid reassignment from
+    // the same predecessor must carry the identical non-reviewer fields, so
+    // this comparison is meaningful even against another concurrent
+    // reassignment's already-applied state.
     let same_except_reviewer = {
         let mut a = d.request();
         a.reviewer = chain.current_request.reviewer.clone();
@@ -1253,17 +1320,25 @@ fn apply_review_reassigned(
     }
 
     let root = chain.root.clone();
-    let chain_mut = state.reviews.get_mut(&root).expect("chain exists");
-    chain_mut.nomination_events.push(env.id.clone());
-    chain_mut.current_nomination = env.id.clone();
-    chain_mut.current_request = d.request();
-    chain_mut
-        .nomination_reviewer
-        .insert(env.id.clone(), d.reviewer.clone());
-    chain_mut.decline_or_withdraw_or_reassign_status = ItemStatus::Open;
-    state
-        .review_chain_by_nomination
-        .insert(env.id.clone(), root);
+    let key = review_key(&d.replaces);
+    state.exclusive.record(&key, &env.id, |other| {
+        env.observed.validate_reference(other).is_ok() || other.agent() == env.agent
+    })?;
+    if state.exclusive.winner(&key).as_ref() == Some(&env.id) {
+        let chain_mut = state.reviews.get_mut(&root).expect("chain exists");
+        chain_mut.nomination_events.push(env.id.clone());
+        chain_mut.current_nomination = env.id.clone();
+        chain_mut.current_request = d.request();
+        chain_mut
+            .nomination_reviewer
+            .insert(env.id.clone(), d.reviewer.clone());
+        chain_mut.decline_or_withdraw_or_reassign_status = ItemStatus::Open;
+        state
+            .review_chain_by_nomination
+            .insert(env.id.clone(), root);
+    } else {
+        reset_review_to_conflict(state, &d.replaces);
+    }
     Ok(())
 }
 
@@ -1999,6 +2074,107 @@ mod tests {
         );
         let err = apply_event(&mut state, &authorize_env).unwrap_err();
         assert!(err.to_string().contains("required check"), "{err}");
+    }
+
+    /// AGENT_BUS.md section 10: "review decline/withdraw/reassign from one
+    /// nomination" is an exclusive set. An author reassigning to a new
+    /// reviewer, concurrent with the (unaware, not-yet-superseded) reviewer
+    /// declining, must produce a lifecycle conflict -- not let whichever one
+    /// happens to be reduced first silently win, and not leave the chain in
+    /// a state that depends on reduction order.
+    #[test]
+    fn review_decline_and_reassign_race_produces_a_lifecycle_conflict() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+
+        let request = ReviewRequest {
+            authors: StringSet::from_iter([alice.clone()]),
+            product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+            reviewer: bob.clone(),
+            required_checks: vec![],
+            review_scope: StringSet::default(),
+            summary: text("s"),
+            target_branch: Branch::parse("refs/heads/main".into()).unwrap(),
+            evidence: StringSet::default(),
+        };
+        let nominate_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::ReviewNominated(request.clone()),
+            [],
+        );
+
+        let decline_data = EventData::ReviewNominationDeclined(ReviewNominationDeclined {
+            nomination: nominate_env.id.clone(),
+            reason: text("too busy"),
+        });
+        let decline_env = Envelope::new(
+            &bob,
+            1,
+            no_frontier(),
+            &decline_data,
+            [nominate_env.id.clone()],
+        );
+
+        let reassign_data = EventData::ReviewReassigned(ReviewReassigned {
+            authors: request.authors.clone(),
+            product_branch: request.product_branch.clone(),
+            reviewer: carol.clone(),
+            required_checks: request.required_checks.clone(),
+            review_scope: request.review_scope.clone(),
+            summary: request.summary.clone(),
+            target_branch: request.target_branch.clone(),
+            evidence: request.evidence.clone(),
+            replaces: nominate_env.id.clone(),
+            reason: text("bob went quiet"),
+            inherited_findings: vec![],
+        });
+        let reassign_env = Envelope::new(
+            &alice,
+            2,
+            no_frontier(),
+            &reassign_data,
+            [nominate_env.id.clone()],
+        );
+
+        let mut forward = empty_state(&[]);
+        apply_ok(&mut forward, &register(&alice, Role::Implementor));
+        apply_ok(&mut forward, &register(&bob, Role::Reviewer));
+        apply_ok(&mut forward, &register(&carol, Role::Reviewer));
+        apply_ok(&mut forward, &nominate_env);
+        apply_ok(&mut forward, &decline_env);
+        apply_ok(&mut forward, &reassign_env);
+
+        let mut reverse = empty_state(&[]);
+        apply_ok(&mut reverse, &register(&alice, Role::Implementor));
+        apply_ok(&mut reverse, &register(&bob, Role::Reviewer));
+        apply_ok(&mut reverse, &register(&carol, Role::Reviewer));
+        apply_ok(&mut reverse, &nominate_env);
+        apply_ok(&mut reverse, &reassign_env);
+        apply_ok(&mut reverse, &decline_env);
+
+        for (label, state) in [("forward", &forward), ("reverse", &reverse)] {
+            let chain = state.review_chain(&nominate_env.id).unwrap();
+            assert_eq!(
+                chain.decline_or_withdraw_or_reassign_status,
+                ItemStatus::LifecycleConflict,
+                "{label} order"
+            );
+            assert_eq!(
+                chain.current_nomination, nominate_env.id,
+                "{label} order: the provisional reassignment link must be fully retracted, \
+                 not left dangling as the chain's current nomination"
+            );
+            assert_eq!(chain.current_request, request, "{label} order");
+            assert!(
+                !state
+                    .review_chain_by_nomination
+                    .contains_key(&reassign_env.id),
+                "{label} order: the retracted link's phantom mapping must not remain queryable"
+            );
+        }
     }
 
     #[test]
