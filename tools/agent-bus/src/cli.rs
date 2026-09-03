@@ -275,11 +275,20 @@ fn default_client_id() -> String {
     format!("cli-{}-{nanos}", std::process::id())
 }
 
+/// Writes `value` to stdout as pretty JSON. A broken pipe (the common,
+/// entirely expected case of piping output into `head`, `grep -q`, or
+/// anything else that can close its stdin early) exits quietly rather than
+/// panicking with a backtrace -- there is no result left to report to
+/// either the user or a downstream tool once the reader is gone.
 fn print_json(value: &serde_json::Value) {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(value).expect("value always serializable")
-    );
+    use std::io::Write;
+    let text = serde_json::to_string_pretty(value).expect("value always serializable");
+    if let Err(e) = writeln!(std::io::stdout(), "{text}") {
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            std::process::exit(0);
+        }
+        panic!("failed writing to stdout: {e}");
+    }
 }
 
 /// The freshness envelope every command result whose output depends on a

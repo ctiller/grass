@@ -353,9 +353,31 @@ pub fn drain_and_publish(
 /// names -- for an authority event (currently: a broadcast whose selector
 /// is `AllActive`, or a required-ack broadcast on a derived selector, per
 /// `apply::broadcast_requires_complete_frontier`), otherwise the ordinary
-/// sparse frontier covering exactly the cross-agent identities `extra_refs`
-/// names. Same-agent references need no sparse entry (envelope validation
-/// follows the stream's own contiguous sequence for those instead).
+/// sparse frontier covering every cross-agent identity `data` itself
+/// references (`EventData::referenced_ids()`) unioned with whatever
+/// `extra_refs` additionally names. Same-agent references need no sparse
+/// entry (envelope validation follows the stream's own contiguous sequence
+/// for those instead).
+///
+/// Deliberately derived from `data.referenced_ids()`, not just `extra_refs`
+/// (the CLI's `--observes` list) alone: `Envelope::new` sets the resulting
+/// envelope's `refs` field to `data.referenced_ids() ∪ extra_refs`
+/// (envelope.rs), and gate 4 (`ObservedFrontier::validate_reference`)
+/// requires every cross-agent id in `refs` to already have frontier
+/// coverage. Building coverage from `extra_refs` alone left that entirely
+/// up to the caller remembering to pass `--observes` for every
+/// payload-referenced id even when the payload already names it plainly
+/// (e.g. `ReviewNominationAccepted.nomination`) -- an easy, non-adversarial
+/// operator mistake, not a malicious one. Missing it here doesn't merely
+/// fail this one submission: `apply_event`'s own gate-4 recheck (added
+/// alongside this fix) would still catch the resulting self-inconsistent
+/// envelope, but only in `dry_run`, i.e. only for submissions that go
+/// through this function in the first place -- so fixing the frontier's own
+/// construction is the real, source-level fix (round-5 adversarial review,
+/// reproduced live across two checkouts: omitting `--observes` for a plain
+/// `review.nomination_accepted` durably corrupted that stream fleet-wide,
+/// since nothing at write time re-checked what `Envelope::parse_line`
+/// enforces at read time).
 fn build_frontier(
     repo: &Path,
     epoch: &crate::registry::RosterEpoch,
@@ -367,12 +389,26 @@ fn build_frontier(
     if requires_complete_frontier(data) {
         return build_complete_frontier(repo, epoch, worktrees_dir);
     }
-    let mut entries = Vec::new();
-    for r in extra_refs {
+    // One entry per cross-agent identity referenced, `through` set to the
+    // *furthest* seq referenced for that agent (so gate 4 accepts every
+    // reference to it, not just the last one considered).
+    let mut through: std::collections::BTreeMap<Agent, EventId> = std::collections::BTreeMap::new();
+    for r in data.referenced_ids().iter().chain(extra_refs.iter()) {
         let ref_agent = r.agent();
         if ref_agent == *author {
             continue;
         }
+        through
+            .entry(ref_agent)
+            .and_modify(|existing| {
+                if r.seq() > existing.seq() {
+                    *existing = r.clone();
+                }
+            })
+            .or_insert_with(|| r.clone());
+    }
+    let mut entries = Vec::with_capacity(through.len());
+    for (ref_agent, r) in through {
         let tip = crate::stream::read_stream_tip(repo, &ref_agent)?.ok_or_else(|| {
             invalid(format!(
                 "cannot build a frontier entry for {ref_agent}: it has no stream"
@@ -382,7 +418,7 @@ fn build_frontier(
         entries.push(FrontierEntry {
             agent: ref_agent,
             stream_tip: tip,
-            through: r.clone(),
+            through: r,
         });
     }
     Ok(ObservedFrontier::sparse(epoch.id.clone(), entries))
@@ -394,11 +430,12 @@ fn build_frontier(
 /// authorship`/`reconstruct_candidate` against the *submitted* payload
 /// (`d`) -- not merely trusting that `cli::prepare_merge` was ever run, or
 /// run honestly -- and confirms the candidate tag `prepare-merge` would
-/// have published is both locally present and independently fetchable from
-/// `remote` (`gitrepo::tag_exists_at`/`remote_tag_matches`; the latter is a
-/// real `ls-remote`, since local presence alone cannot distinguish a tag
-/// that genuinely reached `remote` from one that only ever existed in this
-/// reviewer's own clone).
+/// have published is independently fetchable from `remote`
+/// (`gitrepo::remote_tag_matches`, a real `ls-remote`). Deliberately does
+/// *not* additionally require the tag to already exist in this checkout's
+/// own local clone: `drain_outbox` may run from any checkout, not just the
+/// one that ran `prepare-merge`, and a tag genuinely pushed from elsewhere
+/// is valid here even though this checkout has never fetched it.
 ///
 /// `Ok(())` when `d.nomination` does not resolve in `state` at all: that is
 /// an ordinary, unrelated validation failure `apply::dry_run` reports
@@ -445,12 +482,14 @@ fn verify_review_merge_authorized(
             d.candidate
         )));
     }
+    // Deliberately no local-only `tag_exists_at` precondition here: `drain_outbox`
+    // may run from any checkout, not just the one `prepare-merge` ran from, and a
+    // tag `prepare-merge` pushed from a *different* checkout is genuinely valid
+    // even though this checkout has never fetched it. `remote_tag_matches` (a real
+    // `ls-remote`) is the checkout-independent, authoritative check for "other
+    // agents could verify this merge" -- see its own doc comment -- so it alone is
+    // both necessary and sufficient here.
     let tag = crate::merge_candidate::candidate_tag_name(reviewer, d.candidate.as_str());
-    if !crate::gitrepo::tag_exists_at(repo, &tag, d.candidate.as_str())? {
-        return Err(invalid(
-            "candidate tag is not fetchable before authorization",
-        ));
-    }
     if !crate::gitrepo::remote_tag_matches(repo, remote, &tag, d.candidate.as_str())? {
         return Err(invalid(format!(
             "candidate tag refs/tags/{tag} is not fetchable from {remote}; other agents could \
@@ -1238,6 +1277,167 @@ mod tests {
         assert_eq!(drained.published.len(), 1);
     }
 
+    /// Round-5 adversarial review, reproduced live: a sparse-frontier
+    /// event's author omits `--observes` for a cross-agent id their own
+    /// payload already names (a plausible, non-adversarial operator
+    /// mistake -- there is no dedicated `issue take`/`review accept`
+    /// command, only generic `submit`). Before this fix, `build_frontier`
+    /// only covered `extra_refs` (`--observes`), so the resulting envelope's
+    /// `refs` (derived by `Envelope::new` from `data.referenced_ids()`)
+    /// named an agent the envelope's own `observed` frontier didn't cover
+    /// -- `apply::dry_run` never caught it (no gate-4 recheck existed), so
+    /// it committed and published, and then permanently failed to reduce
+    /// on *any* checkout (including this one, on its next cold read) via
+    /// `Envelope::parse_line`'s stricter gate-4 check. Proves both halves
+    /// of the fix at once: `drain_outbox` accepts the omitted-`--observes`
+    /// submission (frontier auto-derived from the payload), and the
+    /// resulting committed stream survives a full independent re-read
+    /// through `stream::read_stream` (which round-trips every line through
+    /// `parse_line`) -- i.e. it does not corrupt itself.
+    #[test]
+    fn drain_outbox_auto_derives_frontier_coverage_for_a_cross_agent_reference_missing_observes() {
+        let repo = init_repo();
+        let origin = init_bare_origin();
+        let remote = origin.path().to_string_lossy().to_string();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        let (_config, epoch, _commit) = crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+            &repo.path().join("_genesis_wt"),
+        )
+        .unwrap();
+
+        let alice = a("alice");
+        let mut members = epoch.active_members.clone();
+        members.insert(
+            alice.clone(),
+            crate::registry::MemberBinding {
+                role: Role::Implementor,
+                host: short("host1"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        crate::registry::propose_transition(
+            repo.path(),
+            &epoch,
+            members,
+            &repo.path().join("_transition_wt"),
+        )
+        .unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "alice-reg",
+            &Candidate::new(
+                &alice,
+                &EventData::AgentRegistered(crate::events::AgentRegistered {
+                    display_name: short("Alice"),
+                    primary_role: Role::Implementor,
+                    purpose: text("x"),
+                    product_base: None,
+                    product_branch: None,
+                    provider: None,
+                    model: None,
+                }),
+                vec![],
+            ),
+        )
+        .unwrap();
+        drain_outbox(
+            repo.path(),
+            repo.path(),
+            &alice,
+            &short("host1"),
+            0,
+            &repo.path().join("_wt_alice"),
+            &remote,
+        )
+        .unwrap();
+
+        let issue_data = EventData::IssueOpened(crate::events::IssueOpened {
+            target: alice.clone(),
+            issue_kind: crate::events::IssueKind::Bug,
+            severity: crate::common::Priority::Normal,
+            summary: text("s"),
+            code_commit: None,
+            locations: vec![],
+            expected: None,
+            observed_behavior: None,
+            reproduction: vec![],
+            blocks: crate::scalars::StringSet::default(),
+            evidence: crate::scalars::StringSet::default(),
+        });
+        crate::outbox::submit(
+            repo.path(),
+            "issue-1",
+            &Candidate::new(&coord1, &issue_data, vec![]),
+        )
+        .unwrap();
+        let issue_drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            &repo.path().join("_wt_coord1"),
+            &remote,
+        )
+        .unwrap();
+        assert!(
+            issue_drained.rejected.is_empty(),
+            "{:?}",
+            issue_drained.rejected
+        );
+        let issue_id = issue_drained.published[0].clone();
+
+        // The bug trigger: alice acknowledges coord1's issue but the
+        // candidate carries no `extra_refs` at all -- exactly what a plain
+        // `submit` with no `--observes` flag produces.
+        let ack_data = EventData::IssueAcknowledged(crate::events::IssueAcknowledged {
+            issue: issue_id.clone(),
+            assignment: issue_id.clone(),
+            note: text("on it"),
+        });
+        crate::outbox::submit(
+            repo.path(),
+            "ack-1",
+            &Candidate::new(&alice, &ack_data, vec![]),
+        )
+        .unwrap();
+        let ack_drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &alice,
+            &short("host1"),
+            0,
+            &repo.path().join("_wt_alice_ack"),
+            &remote,
+        )
+        .unwrap();
+        assert!(
+            ack_drained.rejected.is_empty(),
+            "cross-agent reference should have been auto-covered by build_frontier: {:?}",
+            ack_drained.rejected
+        );
+        assert_eq!(ack_drained.published.len(), 1);
+
+        // And the committed stream survives a full independent re-read --
+        // every line round-trips through `Envelope::parse_line`'s own
+        // gate-4 check, proving the envelope actually written to disk is
+        // self-consistent, not merely that `dry_run` was fooled the same
+        // way twice.
+        let (_header, log) =
+            crate::stream::read_stream(repo.path(), &alice, &repo.path().join("_reread_alice"))
+                .unwrap();
+        assert_eq!(log.len(), 2); // registration + acknowledgement
+    }
+
     // ---------------------------------------------------------------
     // `review.merge_authorized`'s git-linked gate (AGENT_REVIEW.md section
     // 7; see `verify_review_merge_authorized`'s own doc comment). Mirrors
@@ -1562,8 +1762,12 @@ mod tests {
             // or (the one "everything this gate checks is valid" positive
             // test) explicitly asserts the rejection it still sees is that
             // known, unrelated downstream one -- proof this gate itself let
-            // the candidate through.
-            merge_engine_epoch: EventId::new(&f.coord1, 999),
+            // the candidate through. Must still be a *structurally real*
+            // event (coord1's own actual registration, not a made-up future
+            // seq): `dry_run`'s gate-4 recheck (round-5 review) now rejects
+            // any reference this event's complete frontier doesn't actually
+            // cover, before the downstream check below ever runs.
+            merge_engine_epoch: EventId::new(&f.coord1, 0),
             checks: vec![CheckResult {
                 command: text("build"),
                 result: CheckOutcome::Passed,
@@ -1728,9 +1932,7 @@ mod tests {
         assert!(drained.published.is_empty());
         assert_eq!(drained.rejected.len(), 1);
         assert!(
-            drained.rejected[0]
-                .reason
-                .contains("candidate tag is not fetchable before authorization"),
+            drained.rejected[0].reason.contains("is not fetchable from"),
             "{}",
             drained.rejected[0].reason
         );
@@ -1829,6 +2031,75 @@ mod tests {
         }
     }
 
+    /// The exact scenario `verify_review_merge_authorized`'s doc comment
+    /// describes: `prepare-merge` tags and pushes the candidate from one
+    /// checkout, but `drain_outbox` for the resulting `review.merge_
+    /// authorized` runs from a *different* checkout that has never fetched
+    /// that tag -- simulated here by deleting the local tag ref right after
+    /// pushing it, which leaves this checkout in exactly the state a fresh
+    /// second checkout would be in with respect to this gate's own checks
+    /// (`remote_tag_matches` is a pure `ls-remote` against `remote`, with no
+    /// dependency on any other local state). Before this fix this hard-
+    /// rejected with "candidate tag is not fetchable before authorization"
+    /// even though the tag was genuinely valid and pushed -- a real,
+    /// severe bug: any host whose checkout didn't happen to be the one that
+    /// ran `prepare-merge` could never validly drain the authorization.
+    #[test]
+    fn drain_outbox_review_merge_authorized_gate_accepts_a_tag_never_fetched_into_this_checkout() {
+        let f = build_review_fixture(Some("zoe"));
+        let candidate = crate::merge_candidate::reconstruct_candidate(
+            f.repo.path(),
+            &f.previous_main,
+            &f.feature_commit,
+            &f.reviewer,
+        )
+        .unwrap();
+        let tag = crate::merge_candidate::candidate_tag_name(&f.reviewer, &candidate);
+        crate::gitrepo::tag_lightweight(f.repo.path(), &tag, &candidate).unwrap();
+        let push = crate::gitrepo::run(
+            f.repo.path(),
+            &["push", &f.remote, &format!("refs/tags/{tag}")],
+        )
+        .unwrap();
+        assert!(push.success, "{push:?}");
+        // This checkout now forgets the tag it just pushed -- it never
+        // "fetched" it, exactly like a checkout that didn't run prepare-merge.
+        let untag = crate::gitrepo::run(
+            f.repo.path(),
+            &["update-ref", "-d", &format!("refs/tags/{tag}")],
+        )
+        .unwrap();
+        assert!(untag.success, "{untag:?}");
+        crate::outbox::submit(
+            f.repo.path(),
+            "auth",
+            &merge_authorized_candidate(&f, &candidate),
+        )
+        .unwrap();
+
+        let drained = drain_reviewer(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        let reason = &drained.rejected[0].reason;
+        assert!(
+            reason.contains("is not the currently selected merge engine epoch"),
+            "expected the known downstream merge_engine_epoch rejection, got: {reason}"
+        );
+        for this_gates_own_text in [
+            "has no Agent-Bus-Agent trailer",
+            "ineligible to merge",
+            "do not match nomination authors",
+            "does not match the deterministic reconstruction",
+            "candidate tag is not fetchable",
+            "is not fetchable from",
+        ] {
+            assert!(
+                !reason.contains(this_gates_own_text),
+                "rejection should not come from verify_review_merge_authorized, got: {reason}"
+            );
+        }
+    }
+
     /// A `review.merge_authorized` naming an unknown nomination must not be
     /// rejected by this gate's own text -- `apply::dry_run` reports that
     /// moments later with a clearer, nomination-specific message (see
@@ -1836,7 +2107,12 @@ mod tests {
     #[test]
     fn drain_outbox_defers_unknown_nomination_in_review_merge_authorized_to_dry_run() {
         let f = build_review_fixture(Some("zoe"));
-        let bogus_nomination = EventId::new(&f.author, 999);
+        // Names a real, in-frontier event (the author's own registration)
+        // that simply isn't a nomination -- not an out-of-range seq, which
+        // `dry_run`'s gate-4 recheck (round-5 review) would now reject
+        // before ever reaching the nomination-specific check this test
+        // means to exercise.
+        let bogus_nomination = EventId::new(&f.author, 0);
         let mut candidate = merge_authorized_candidate(&f, &"a".repeat(40));
         candidate.data["nomination"] = serde_json::json!(bogus_nomination.as_str());
         crate::outbox::submit(f.repo.path(), "auth", &candidate).unwrap();

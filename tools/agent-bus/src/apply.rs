@@ -62,7 +62,33 @@ pub fn reduce_onto(mut state: BusState, new_events: &[Envelope]) -> AbResult<Bus
 /// Dry-run one not-yet-published event against `state` (a clone is mutated
 /// and discarded), so a submission command can refuse to publish an event
 /// that reduction would reject.
+///
+/// This is the *only* place in the crate that validates an `Envelope` built
+/// directly via `Envelope::new` rather than one already read back through
+/// `Envelope::parse_line` (`reduce`/`reduce_onto` only ever see envelopes
+/// `stream::read_stream`/`storage::read_stream_log` already parsed that
+/// way). `parse_line` enforces gate 4 -- every cross-agent id in `refs`
+/// must have frontier coverage in `observed` -- but `apply_event` alone
+/// does not, so gate 4 is re-checked here explicitly. Without this, a
+/// self-inconsistent envelope (its own `refs`, derived by `Envelope::new`
+/// from `data.referenced_ids()`, naming an agent `observed` doesn't cover)
+/// would sail through dry-run, get committed and pushed, and then
+/// permanently fail to reduce for every host that ever fetches it --
+/// round-5 adversarial review, reproduced live across two checkouts: a
+/// `review.nomination_accepted` submitted without the operator remembering
+/// `--observes` for the nomination it names durably corrupted that stream
+/// fleet-wide. (`coordinator::build_frontier` is now fixed to derive
+/// coverage from `data.referenced_ids()` automatically, closing the gap at
+/// its source -- this check is the defense-in-depth backstop for any other
+/// path that might one day construct an envelope the same way.)
 pub fn dry_run(state: &BusState, env: &Envelope) -> AbResult<()> {
+    for r in env.refs.iter() {
+        if r.agent() != env.agent {
+            env.observed
+                .validate_reference(r)
+                .map_err(|e| invalid(format!("{}: {e}", env.id)))?;
+        }
+    }
     let mut trial = state.clone();
     apply_event(&mut trial, env)
 }
@@ -2250,6 +2276,60 @@ mod tests {
         apply_ok(&mut state, &register(&alice, Role::Implementor));
         assert!(state.agents.contains_key(&alice));
         assert!(state.agents[&alice].active());
+    }
+
+    /// `dry_run`'s gate-4 recheck (round-5 adversarial review): a
+    /// self-inconsistent envelope -- `refs` naming a cross-agent event
+    /// `observed` does not cover -- must be rejected by `dry_run` even
+    /// though `apply_event` alone has no opinion on frontier coverage at
+    /// all. Proves the check genuinely lives at the `dry_run` boundary
+    /// (the only place a not-yet-`parse_line`-validated envelope is ever
+    /// checked), not merely that some other rule happens to also reject
+    /// this particular envelope.
+    #[test]
+    fn dry_run_rejects_a_self_inconsistent_envelope_apply_event_alone_would_accept() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+
+        let issue_data = EventData::IssueOpened(IssueOpened {
+            target: bob.clone(),
+            issue_kind: IssueKind::Bug,
+            severity: Priority::Normal,
+            summary: text("s"),
+            code_commit: None,
+            locations: vec![],
+            expected: None,
+            observed_behavior: None,
+            reproduction: vec![],
+            blocks: StringSet::default(),
+            evidence: StringSet::default(),
+        });
+        let issue_env = Envelope::new(&alice, 1, no_frontier(), &issue_data, []);
+        apply_ok(&mut state, &issue_env);
+
+        let ack = EventData::IssueAcknowledged(IssueAcknowledged {
+            issue: issue_env.id.clone(),
+            assignment: issue_env.id.clone(),
+            note: text("on it"),
+        });
+        // References alice's issue cross-agent, but `observed` is empty --
+        // exactly the shape `coordinator::build_frontier` could produce
+        // before its own fix, and what `Envelope::parse_line` would reject
+        // on any later read-back.
+        let ack_env = Envelope::new(&bob, 1, no_frontier(), &ack, [issue_env.id.clone()]);
+
+        let mut trial = state.clone();
+        apply_event(&mut trial, &ack_env).expect("apply_event alone does not check gate 4");
+
+        let err = dry_run(&state, &ack_env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("names an agent absent from the declared frontier"),
+            "{err}"
+        );
     }
 
     #[test]

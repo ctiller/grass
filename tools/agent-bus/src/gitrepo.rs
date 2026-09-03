@@ -557,19 +557,16 @@ pub fn tag_lightweight(dir: &Path, name: &str, target: &str) -> AbResult<()> {
     Ok(())
 }
 
-pub fn tag_exists_at(dir: &Path, name: &str, target: &str) -> AbResult<bool> {
-    match rev_parse_opt(dir, &format!("refs/tags/{name}"))? {
-        Some(id) => Ok(id == target),
-        None => Ok(false),
-    }
-}
-
 /// Whether `remote` actually has a tag named `name` pointing at `target` --
 /// a real `ls-remote` network round trip, not a check against anything
-/// already fetched into the local repository. `tag_exists_at` alone cannot
-/// tell the difference between "this tag reached origin" and "this tag only
-/// ever existed in the reviewer's own clone" (AGENT_BUS_SCHEMA.md's linked
-/// validation, and every other agent, need the former).
+/// already fetched into the local repository. A local-only existence check
+/// alone cannot tell the difference between "this tag reached origin" and
+/// "this tag only ever existed in the reviewer's own clone" (AGENT_BUS_
+/// SCHEMA.md's linked validation, and every other agent, need the former) --
+/// and it also cannot be a *precondition* for validation to even start,
+/// since the checkout doing the validating may not be the one that pushed
+/// the tag (`coordinator::verify_review_merge_authorized` relies on this
+/// function alone for exactly that reason).
 pub fn remote_tag_matches(dir: &Path, remote: &str, name: &str, target: &str) -> AbResult<bool> {
     let refspec = format!("refs/tags/{name}");
     let out = run(dir, &["ls-remote", "--tags", remote, &refspec])?;
@@ -1546,21 +1543,6 @@ mod outer_tests {
             .trim()
             .to_string();
         assert_eq!(resolved, head);
-    }
-
-    /// Covers all three real outcomes: the tag exists and matches, the tag
-    /// exists but points elsewhere, and no such tag exists at all.
-    #[test]
-    fn tag_exists_at_covers_matching_mismatching_and_missing_tags() {
-        let repo = init_repo();
-        let head = rev_parse(repo.path(), "HEAD").unwrap();
-        commit_file(repo.path(), "second.txt", "x\n", "second commit");
-        let second = rev_parse(repo.path(), "HEAD").unwrap();
-        tag_lightweight(repo.path(), "v1", &head).unwrap();
-
-        assert!(tag_exists_at(repo.path(), "v1", &head).unwrap());
-        assert!(!tag_exists_at(repo.path(), "v1", &second).unwrap());
-        assert!(!tag_exists_at(repo.path(), "no-such-tag", &head).unwrap());
     }
 
     /// Against a real bare "remote": covers a tag that reached the remote
