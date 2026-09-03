@@ -12,12 +12,13 @@
 //! (fetching and re-reducing only advanced streams) is real further work,
 //! not silently assumed done.
 
-use crate::error::{invalid, AbResult};
+use crate::error::{invalid, AbError, AbResult};
 use crate::registry::RosterEpoch;
-use crate::scalars::{Agent, ObjectId};
+use crate::scalars::{Agent, ObjectId, Timestamp};
 use crate::state::BusState;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Whether a [`Snapshot`] reflects a just-completed remote probe or only
 /// whatever was already known locally. Currency-sensitive operations (merge
@@ -35,20 +36,40 @@ pub enum Freshness {
 /// One reduced view of the bus: the resulting `BusState`, the exact roster
 /// epoch it was built against, each contributing stream's tip (the
 /// snapshot's own receipt -- what a later validation re-checks itself
-/// against, not merely diagnostic), and how fresh it is.
+/// against, not merely diagnostic), how fresh it is, and when this local
+/// checkout last completed a successful remote synchronization (`None` if
+/// never -- see [`read_last_synced`]). Every field here, together with
+/// `freshness`, is what section 2.4 requires every result to state
+/// ("snapshot receipt, roster epoch, causal frontier, last successful
+/// synchronization time, and freshness class"); `last_synced` in particular
+/// is diagnostic only -- "time since sync ... never confers authority", so
+/// nothing here treats a recent `last_synced` as a substitute for an actual
+/// `CurrentAsOfRemoteProbe` freshness class.
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub state: BusState,
     pub roster_epoch: RosterEpoch,
     pub stream_tips: BTreeMap<Agent, ObjectId>,
     pub freshness: Freshness,
+    pub last_synced: Option<Timestamp>,
 }
 
 /// Reduces whatever is already local -- no network round trip -- into a
 /// `Snapshot` marked `Cached`. Fails if the registry has never been created
-/// locally at all.
-pub fn cached_snapshot(repo: &Path, worktrees_dir: &Path) -> AbResult<Snapshot> {
-    reduce_local(repo, worktrees_dir, Freshness::Cached)
+/// locally at all. `last_synced` reports whatever [`synced_snapshot`] most
+/// recently recorded on this local checkout (via `git_common_dir`), or
+/// `None` if a synchronization has never yet succeeded here -- never a
+/// fabricated or `now()`-derived value, since a cached read must be able to
+/// report a last-sync time from long before "now".
+pub fn cached_snapshot(
+    repo: &Path,
+    git_common_dir: &Path,
+    worktrees_dir: &Path,
+) -> AbResult<Snapshot> {
+    let last_synced = read_last_synced(git_common_dir)?;
+    let mut snapshot = reduce_local(repo, worktrees_dir, Freshness::Cached)?;
+    snapshot.last_synced = last_synced;
+    Ok(snapshot)
 }
 
 /// Fetches the registry ref, then every currently active member's stream
@@ -58,7 +79,22 @@ pub fn cached_snapshot(repo: &Path, worktrees_dir: &Path) -> AbResult<Snapshot> 
 /// reduces the result into a `Snapshot` marked `CurrentAsOfRemoteProbe`.
 /// The registry must be fetched first: it is what decides which stream
 /// refs to fetch next.
-pub fn synced_snapshot(repo: &Path, remote: &str, worktrees_dir: &Path) -> AbResult<Snapshot> {
+///
+/// Once the fetch itself succeeds, the current time is durably recorded
+/// (via `git_common_dir`, see [`record_last_synced`]) as this checkout's
+/// last successful synchronization time *before* the subsequent local
+/// reduction is attempted -- "synchronization" here means the remote probe
+/// itself succeeded, which is true independent of whether reducing what was
+/// just fetched later fails for some unrelated reason (e.g. a malformed
+/// event). A later `cached_snapshot` (or a `synced_snapshot` whose own
+/// fetch fails) then correctly reports that recorded time rather than
+/// `None`.
+pub fn synced_snapshot(
+    repo: &Path,
+    git_common_dir: &Path,
+    remote: &str,
+    worktrees_dir: &Path,
+) -> AbResult<Snapshot> {
     let registry_refspec = format!("{0}:{0}", crate::registry::REGISTRY_REF);
     crate::gitrepo::fetch_refspecs(repo, remote, &[registry_refspec])?;
 
@@ -88,7 +124,57 @@ pub fn synced_snapshot(repo: &Path, remote: &str, worktrees_dir: &Path) -> AbRes
         crate::gitrepo::fetch_refspecs(repo, remote, &stream_refspecs)?;
     }
 
-    reduce_local(repo, worktrees_dir, Freshness::CurrentAsOfRemoteProbe)
+    let now = Timestamp::now_utc();
+    record_last_synced(git_common_dir, &now)?;
+
+    let mut snapshot = reduce_local(repo, worktrees_dir, Freshness::CurrentAsOfRemoteProbe)?;
+    snapshot.last_synced = Some(now);
+    Ok(snapshot)
+}
+
+/// The durable record of this local checkout's last successful
+/// synchronization time, kept under the same `<git_common_dir>/agent-bus/`
+/// operational-state directory `outbox.rs`'s outbox and the CLI's read
+/// worktrees already use -- not part of any committed tree (git history
+/// stays substrate for bus events only), and not derived from `SystemTime::
+/// now()` at read time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LastSyncedRecord {
+    last_synced: Timestamp,
+}
+
+fn last_synced_path(git_common_dir: &Path) -> PathBuf {
+    git_common_dir.join("agent-bus").join("last_synced.json")
+}
+
+/// Reads this local checkout's last successful synchronization time, or
+/// `None` if [`synced_snapshot`] has never yet completed a fetch here.
+pub fn read_last_synced(git_common_dir: &Path) -> AbResult<Option<Timestamp>> {
+    let path = last_synced_path(git_common_dir);
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            let record: LastSyncedRecord = serde_json::from_slice(&bytes)?;
+            Ok(Some(record.last_synced))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(AbError::Io {
+            path: path.display().to_string(),
+            source: e,
+        }),
+    }
+}
+
+fn record_last_synced(git_common_dir: &Path, at: &Timestamp) -> AbResult<()> {
+    let path = last_synced_path(git_common_dir);
+    let dir = path.parent().expect("last_synced_path always has a parent");
+    std::fs::create_dir_all(dir).map_err(|e| AbError::Io {
+        path: dir.display().to_string(),
+        source: e,
+    })?;
+    let record = LastSyncedRecord {
+        last_synced: at.clone(),
+    };
+    crate::storage::atomic_write(&path, &serde_json::to_vec_pretty(&record)?)
 }
 
 fn reduce_local(repo: &Path, worktrees_dir: &Path, freshness: Freshness) -> AbResult<Snapshot> {
@@ -135,6 +221,10 @@ fn reduce_local(repo: &Path, worktrees_dir: &Path, freshness: Freshness) -> AbRe
         roster_epoch: epoch,
         stream_tips,
         freshness,
+        // Filled in by the two public callers above, which each know the
+        // correct value in their own way; `reduce_local` itself has no
+        // opinion on it.
+        last_synced: None,
     })
 }
 
@@ -195,10 +285,75 @@ mod tests {
         Candidate::new(agent, &data, vec![])
     }
 
+    /// `read_last_synced`'s generic `AbError::Io` arm, distinct from the
+    /// "never synced yet" `NotFound` case: `last_synced.json` exists as a
+    /// directory here, not a file, so `fs::read` on it fails with a real
+    /// I/O error that is not `NotFound` (a plain missing *parent*
+    /// component, tried first, is reported as `NotFound` on this platform
+    /// and would not exercise this arm -- a directory in the file's own
+    /// place is what reliably does).
+    #[test]
+    fn read_last_synced_reports_a_genuine_io_error_not_just_never_synced() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("agent-bus").join("last_synced.json")).unwrap();
+        let err = read_last_synced(dir.path()).unwrap_err();
+        assert!(matches!(err, crate::error::AbError::Io { .. }), "{err}");
+    }
+
+    /// `synced_snapshot` surfaces a genuine I/O error from `record_last_
+    /// synced` (called only after the fetch itself has already succeeded)
+    /// rather than silently losing it: blocking `agent-bus` the same way as
+    /// above makes `record_last_synced`'s own `create_dir_all` fail.
+    #[test]
+    fn synced_snapshot_reports_io_error_when_last_synced_cannot_be_recorded() {
+        let origin = init_bare_origin();
+
+        let host_a = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(host_a.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            host_a.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            crate::scalars::ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+            &host_a.path().join("_genesis_wt"),
+        )
+        .unwrap();
+        let registry_tip = crate::registry::read_registry_tip(host_a.path())
+            .unwrap()
+            .unwrap();
+        crate::publish::publish(
+            host_a.path(),
+            &origin.path().to_string_lossy(),
+            &[crate::publish::RefUpdate::new(
+                crate::registry::REGISTRY_REF,
+                registry_tip,
+            )],
+        )
+        .unwrap();
+
+        let host_b = init_repo();
+        std::fs::write(host_b.path().join("agent-bus"), b"blocked").unwrap();
+        let err = synced_snapshot(
+            host_b.path(),
+            host_b.path(),
+            &origin.path().to_string_lossy(),
+            &host_b.path().join("_sync_wt"),
+        )
+        .unwrap_err();
+        assert!(matches!(err, crate::error::AbError::Io { .. }), "{err}");
+        // The fetch itself genuinely succeeded before the recording step
+        // failed, so nothing here should be mistaken for "no registry".
+        assert!(!err.to_string().contains("no registry root"), "{err}");
+    }
+
     #[test]
     fn cached_snapshot_fails_before_any_registry_exists() {
         let repo = init_repo();
-        let err = cached_snapshot(repo.path(), &repo.path().join("_wt")).unwrap_err();
+        let err = cached_snapshot(repo.path(), repo.path(), &repo.path().join("_wt")).unwrap_err();
         assert!(err.to_string().contains("no registry root"), "{err}");
     }
 
@@ -219,11 +374,16 @@ mod tests {
         )
         .unwrap();
 
-        let snap = cached_snapshot(repo.path(), &repo.path().join("_snap_wt")).unwrap();
+        let snap =
+            cached_snapshot(repo.path(), repo.path(), &repo.path().join("_snap_wt")).unwrap();
         assert_eq!(snap.freshness, Freshness::Cached);
         assert!(snap.roster_epoch.is_active_member(&coord1));
         assert!(snap.state.agents.contains_key(&coord1));
         assert_eq!(snap.stream_tips.len(), 1);
+        // Nothing has ever synced in this repo -- a cached read before the
+        // first successful remote probe must report `None`, not a
+        // fabricated time.
+        assert!(snap.last_synced.is_none());
     }
 
     /// Two hosts sharing one remote: host A publishes coord1's status event
@@ -282,7 +442,10 @@ mod tests {
         .unwrap();
 
         let host_b = init_repo();
+        // No synchronization has ever happened on host_b yet.
+        assert!(read_last_synced(host_b.path()).unwrap().is_none());
         let snap = synced_snapshot(
+            host_b.path(),
             host_b.path(),
             &origin.path().to_string_lossy(),
             &host_b.path().join("_sync_wt"),
@@ -292,6 +455,11 @@ mod tests {
         assert!(snap.roster_epoch.is_active_member(&coord1));
         let agent_state = snap.state.agents.get(&coord1).unwrap();
         assert_eq!(agent_state.next_seq, 2); // registration + the one status event
+                                             // A successful sync leaves a real, non-fabricated `last_synced`,
+                                             // both on the returned snapshot and durably on disk for a later
+                                             // `cached_snapshot` to read back.
+        let recorded = snap.last_synced.clone().expect("just synced successfully");
+        assert_eq!(read_last_synced(host_b.path()).unwrap(), Some(recorded));
     }
 
     /// Regression: a registry epoch member who has not yet published their
@@ -364,6 +532,7 @@ mod tests {
         let host_b = init_repo();
         let snap = synced_snapshot(
             host_b.path(),
+            host_b.path(),
             &origin.path().to_string_lossy(),
             &host_b.path().join("_sync_wt"),
         )
@@ -383,10 +552,107 @@ mod tests {
         let repo = init_repo();
         let err = synced_snapshot(
             repo.path(),
+            repo.path(),
             &origin.path().to_string_lossy(),
             &repo.path().join("_sync_wt"),
         )
         .unwrap_err();
         assert!(err.to_string().contains("no registry root"), "{err}");
+        // The fetch itself never got far enough to succeed (the registry
+        // ref doesn't even exist on the remote), so nothing was recorded --
+        // a failed synchronization must not fabricate a successful one.
+        assert!(read_last_synced(repo.path()).unwrap().is_none());
+    }
+
+    /// If the fetch itself genuinely succeeds but the subsequent local
+    /// reduction fails for an unrelated reason, the synchronization time is
+    /// still recorded: "synchronization" means the remote probe succeeded,
+    /// independent of whether interpreting what was fetched later fails.
+    /// Simulated by publishing a registry root whose `epoch.json` is intact
+    /// (so `synced_snapshot`'s own pre-record `read_epoch` call, and the
+    /// fetch itself, both succeed) but whose `bus_config.json` is not valid
+    /// JSON -- `reduce_local`'s `read_bus_config` call, which happens only
+    /// *after* `synced_snapshot` has already recorded the sync time, is
+    /// what actually fails.
+    #[test]
+    fn synced_snapshot_records_last_synced_even_when_the_subsequent_reduce_fails() {
+        let origin = init_bare_origin();
+
+        let host_a = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(host_a.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            host_a.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            crate::scalars::ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+            &host_a.path().join("_genesis_wt"),
+        )
+        .unwrap();
+        let registry_tip = crate::registry::read_registry_tip(host_a.path())
+            .unwrap()
+            .unwrap();
+
+        // A second commit on the registry root, in an ordinary linked
+        // worktree of host_a (so it shares host_a's own committer identity
+        // config), that changes only `bus_config.json` -- `epoch.json`
+        // carries forward from the parent tree untouched.
+        let corrupt_dir = tempfile::tempdir().unwrap();
+        let corrupt_path = corrupt_dir.path().to_str().unwrap().to_string();
+        git(
+            host_a.path(),
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                &corrupt_path,
+                registry_tip.as_str(),
+            ],
+        );
+        std::fs::write(
+            corrupt_dir.path().join("bus_config.json"),
+            "not valid json\n",
+        )
+        .unwrap();
+        git(corrupt_dir.path(), &["add", "bus_config.json"]);
+        git(
+            corrupt_dir.path(),
+            &["commit", "-q", "-m", "corrupt config"],
+        );
+        let corrupt_commit = crate::gitrepo::rev_parse(corrupt_dir.path(), "HEAD").unwrap();
+        git(
+            host_a.path(),
+            &["worktree", "remove", "--force", &corrupt_path],
+        );
+
+        crate::publish::publish(
+            host_a.path(),
+            &origin.path().to_string_lossy(),
+            &[crate::publish::RefUpdate::new(
+                crate::registry::REGISTRY_REF,
+                crate::scalars::ObjectId::parse(corrupt_commit).unwrap(),
+            )],
+        )
+        .unwrap();
+
+        let host_b = init_repo();
+        let err = synced_snapshot(
+            host_b.path(),
+            host_b.path(),
+            &origin.path().to_string_lossy(),
+            &host_b.path().join("_sync_wt"),
+        )
+        .unwrap_err();
+        // Confirms the failure is genuinely the intended one (the corrupt
+        // config, reached only after a successful fetch and epoch read),
+        // not some earlier failure this recipe didn't anticipate.
+        assert!(err.to_string().contains("malformed bus config"), "{err}");
+
+        // The fetch itself genuinely succeeded, so the synchronization time
+        // was recorded despite the later reduce failure.
+        assert!(read_last_synced(host_b.path()).unwrap().is_some());
     }
 }

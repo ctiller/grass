@@ -100,7 +100,12 @@ pub fn drain_outbox(
     let mut fresh_sync_err: Option<String> = None;
     let mut fresh_state = None;
     if needs_fresh {
-        match crate::sync::synced_snapshot(repo, remote, &worktrees_dir.join("_validate_synced")) {
+        match crate::sync::synced_snapshot(
+            repo,
+            git_common_dir,
+            remote,
+            &worktrees_dir.join("_validate_synced"),
+        ) {
             Ok(snap) => fresh_state = Some(snap.state),
             Err(e) => fresh_sync_err = Some(e.to_string()),
         }
@@ -113,7 +118,10 @@ pub fn drain_outbox(
 
     let mut state = match fresh_state {
         Some(s) => s,
-        None => crate::sync::cached_snapshot(repo, &worktrees_dir.join("_validate"))?.state,
+        None => {
+            crate::sync::cached_snapshot(repo, git_common_dir, &worktrees_dir.join("_validate"))?
+                .state
+        }
     };
 
     let existing_tip = crate::stream::read_stream_tip(repo, agent)?;
@@ -784,7 +792,9 @@ mod tests {
 
         // The stream itself is clean: reduce() must not choke on anything
         // that was never actually published.
-        let snap = crate::sync::cached_snapshot(repo.path(), &repo.path().join("_snap")).unwrap();
+        let snap =
+            crate::sync::cached_snapshot(repo.path(), repo.path(), &repo.path().join("_snap"))
+                .unwrap();
         assert_eq!(snap.state.agents[&coord1].next_seq, 3);
     }
 
