@@ -683,6 +683,112 @@ theorem decide_eq_iff_get?_eq [DecidableEq α] (v w : Vec α) :
   ⟨fun h _ => by rw [h], ext_of_get?⟩
 
 /-!
+## Flattening and chunking
+
+`docs/STDLIB.md` §3 lists `concat` among the composition operations. It is here
+for a second reason as well, which is what fixes its laws.
+
+§6 gives `Std.Process.ByteFlow` a contract with a sequence fact inside it:
+
+> Positive partial reads produce nonempty ordered chunks; parsers consume their
+> concatenation independent of chunk boundaries.
+
+The process half of that — readiness, EOF, cancellation, backpressure — belongs
+to `Std.Process` and waits on the process vocabulary. The sequence half does not
+wait on anything, and it is the half that says what "independent of chunk
+boundaries" means: `Vec.chunk_extensional` below. A consumer that reads only
+`Vec.concat` of its input cannot distinguish two chunkings of the same bytes,
+because it is a function of a value both chunkings equal.
+
+That statement is nearly trivial once written down, which is the point of writing
+it down. "Independent of chunk boundaries" is the kind of phrase that reads as a
+guarantee and is easy to assume without ever fixing what it quantifies over.
+-/
+
+/-- Flatten a sequence of sequences, in order. -/
+def concat (chunks : Vec (Vec α)) : Vec α :=
+  fromList (chunks.toList.map toList).flatten
+
+@[simp] theorem concat_empty : concat (empty : Vec (Vec α)) = empty := rfl
+
+@[simp] theorem concat_singleton (v : Vec α) : concat (singleton v) = v := by
+  apply toList_injective
+  simp [concat, singleton]
+
+@[simp] theorem length_concat (chunks : Vec (Vec α)) :
+    (concat chunks).length = ((chunks.map length).toList).sum := by
+  simp only [concat, length, map, toList_fromList, List.length_flatten, List.map_map]
+  rfl
+
+/-- Flattening distributes over appending chunk sequences, which is what lets a
+reader accumulate chunks without recomputing the whole. -/
+@[simp] theorem concat_append (chunks rest : Vec (Vec α)) :
+    concat (chunks ++ rest) = concat chunks ++ concat rest := by
+  apply toList_injective
+  simp [concat]
+
+/-- One more chunk appends its elements and nothing else. This is the read-side
+counterpart of `Vec.push` and the step law a chunk accumulator needs. -/
+@[simp] theorem concat_push (chunks : Vec (Vec α)) (chunk : Vec α) :
+    concat (chunks.push chunk) = concat chunks ++ chunk := by
+  apply toList_injective
+  simp [concat, push]
+
+/-- `chunks` is a chunking of `v` when it flattens to it. Chunk boundaries are
+data about how `v` arrived, not about `v`. -/
+def IsChunking (chunks : Vec (Vec α)) (v : Vec α) : Prop := concat chunks = v
+
+theorem isChunking_singleton (v : Vec α) : IsChunking (singleton v) v := by
+  simp [IsChunking]
+
+/--
+`Vec.chunk_extensional` is what stops a consumer of the concatenation from
+observing chunk boundaries.
+
+This is `docs/STDLIB.md` §6's "parsers consume their concatenation independent of
+chunk boundaries", stated for any consumer `f` at all. Its content is entirely in
+the hypothesis shape: `f` is applied to `Vec.concat`, so being chunk-extensional
+is a property of how a consumer is written rather than a property it can be
+granted. A parser that inspected the chunk sequence itself would not have this
+type.
+-/
+theorem chunk_extensional {δ : Type v} (f : Vec α → δ) {chunks other : Vec (Vec α)}
+    {v : Vec α} (hc : IsChunking chunks v) (ho : IsChunking other v) :
+    f (concat chunks) = f (concat other) := by
+  rw [hc, ho]
+
+/-- Every chunk carries at least one element, which is what `docs/STDLIB.md` §6
+means by a *positive* partial read. -/
+def AllNonEmpty (chunks : Vec (Vec α)) : Prop := ∀ chunk ∈ chunks, chunk.length ≠ 0
+
+@[simp] theorem allNonEmpty_empty : AllNonEmpty (empty : Vec (Vec α)) := by
+  intro chunk hmem
+  simp at hmem
+
+/--
+Nonempty chunks make progress: `n` of them deliver at least `n` elements.
+
+This is the read-side analogue of `Vec.length_drop_lt_of_pos`, and it is why §6
+insists the chunks be nonempty. Without it a provider could return unboundedly
+many empty chunks while a reader waited for input that never arrived, and no
+length argument would detect it.
+-/
+theorem length_le_length_concat {chunks : Vec (Vec α)} (h : AllNonEmpty chunks) :
+    chunks.length ≤ (concat chunks).length := by
+  obtain ⟨cs⟩ := chunks
+  induction cs with
+  | nil => simp [concat]
+  | cons c rest ih =>
+    have hc : c.length ≠ 0 := h c (by simp [mem_iff_mem_toList])
+    have hrest : AllNonEmpty (fromList rest) := by
+      intro chunk hmem
+      exact h chunk (by simp [mem_iff_mem_toList] at hmem ⊢; exact Or.inr hmem)
+    have := ih hrest
+    simp only [concat, length, toList_fromList, List.map_cons, List.flatten_cons,
+      List.length_cons, List.length_append] at *
+    omega
+
+/-!
 ## Positional insertion and removal
 -/
 
