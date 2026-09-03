@@ -679,11 +679,22 @@ one outright defect that had already merged — see §3.11's denial row.
   absent is `Closes`'s question. Eighteen of `Tests/Op/FakeIsa.lean`'s own
   operations were inconsistent when the check went in, which is the measure of how
   little a declaration nobody reads constrains.
-- **Ordering modes are unchecked.** `MemoryOrder.IsPortable` and
-  `MemoryScope.IsPortable` have no consumer, `AdmittedVocabulary` has no ordering
-  registry, and an access declaring `profileSpecific` with an unregistered name
-  steps and mints an event carrying it. [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.1
-  says unsupported mappings are rejected.
+- **Ordering modes are checked against a registry; the refinement theorem is still
+  owed.** `AdmittedVocabulary` now carries `orderingModes` and `orderingScopes`, and
+  `Admits` requires a `profileSpecific` mode or scope to be a name the profile
+  registered (`AdmitsOrder`, `AdmitsScope`, and the two `not_admits_of_unregistered_*`
+  theorems). `MemoryOrder.IsPortable` gained its consumer in
+  `admitsOrder_of_isPortable`: a portable mode needs no entry, since
+  [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.1 fixes those five. Before this, an access
+  declaring `profileSpecific` with any name at all stepped and minted an event
+  carrying it.
+
+  What remains owed is §7.1's actual demand: an ordering request may be used "only
+  where it has a proved target meaning", and mapping a portable order onto an ISA or
+  API operation requires a refinement theorem. Registration says the profile owns
+  the name. It does not say the name means anything on a target, and nothing here
+  can — the refinement obligation belongs to an ISA owner, and the strength relation
+  it would be proved against is M8's `ConsistencyProfile`.
 - **`FaultVisibility.transactional`'s `justification` names nothing.**
   `RequiresJustification` and `SubstepSequence.ClaimsAtomicity` exist so a §10
   package can enumerate outstanding claims, and nothing under `Grass/` consults

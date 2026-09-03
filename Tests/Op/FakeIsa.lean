@@ -171,6 +171,12 @@ inductive Alpha where
   /-- An operation declaring a fault class the vocabulary never admitted, with no
   compute substep to carry it — so `computeFaultNotRecognized` does not see it. -/
   | operationWithPhantomFault
+  /-- An atomic store requesting an ordering mode this profile never registered. -/
+  | unregisteredOrder
+  /-- The same store requesting the mode the profile *does* register. -/
+  | registeredOrder
+  /-- A store claiming an ordering scope this profile never registered. -/
+  | unregisteredScope
   /-- Discharges an obligation that was never live. -/
   | dischargeGhost
   /-- Joins two obligations that were never live into a new one. -/
@@ -365,6 +371,26 @@ instance : HasOperationFacets Alpha where
             false true))
           faults := some [.pageFault, ⟨⟨"fake.neverDeclaredFault"⟩⟩]
           restartability := some .notRestartable, ordering := some .plain }
+    | .unregisteredOrder =>
+        { memoryEffects := some (.single
+            { acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite false true [] true with
+              ordering := { atomicity := .atomic
+                            order := .profileSpecific ⟨"fake.neverRegistered"⟩ } })
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .registeredOrder =>
+        { memoryEffects := some (.single
+            { acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite false true [] true with
+              ordering := { atomicity := .atomic
+                            order := .profileSpecific ⟨"fake.deviceRelease"⟩ } })
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .unregisteredScope =>
+        { memoryEffects := some (.single
+            { acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite false true with
+              ordering := { scope := .profileSpecific ⟨"fake.neverRegistered"⟩ } })
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
     | .computeWithPhantomFault =>
         { memoryEffects := some
             { substeps := [ .compute [⟨⟨"fake.neverDeclaredFault"⟩⟩] ]
@@ -446,7 +472,9 @@ def vocabulary : AdmittedVocabulary :=
     provenanceStepKinds := ⟨[]⟩
     auditViolationClasses :=
       ⟨AuditViolationClass.emittedByTransition ++ [frameAuthorityUnavailable]⟩
-    obligationKinds := ⟨[.releaseAllocation, .closeHandle]⟩ }
+    obligationKinds := ⟨[.releaseAllocation, .closeHandle]⟩
+    orderingModes := ⟨[⟨"fake.deviceRelease"⟩]⟩
+    orderingScopes := ⟨[⟨"fake.queue"⟩]⟩ }
 
 /-- A profile whose §10 package is explicitly unproved. It is a checklist of
 propositions, not evidence for them, and this fixture does not pretend otherwise:
@@ -1161,6 +1189,40 @@ theorem a_compute_substep_with_an_unrecognized_fault_is_refused :
     Grass.Op.step policy state₀ (SomeOperation.of Alpha.computeWithPhantomFault) thread₀
       .thread ⟨⟨"alpha"⟩⟩ =
       .rejected (.computeFaultNotRecognized ⟨⟨"fake.neverDeclaredFault"⟩⟩) := rfl
+
+/-! ## An ordering mode the profile never registered is rejected
+
+`docs/MEMORY_MODEL.md` §7.1 fixes five portable modes and four portable scopes and
+allows a profile its own, and says an unsupported mapping is rejected. Nothing
+rejected one: `MemoryOrder.IsPortable` had no consumer, `AdmittedVocabulary` had no
+ordering registry, and an access declaring `profileSpecific` with any name at all
+stepped and minted an event carrying it. -/
+
+/-- **An unregistered ordering mode is not admitted.** -/
+theorem an_unregistered_order_is_refused :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.unregisteredOrder) thread₀
+      .thread ⟨⟨"alpha"⟩⟩ = .rejected .accessNotAdmitted := rfl
+
+/-- **The registered mode is admitted**, so the rejection above is about the
+registry rather than about profile-specific modes being refused outright. Without
+this the theorem above would be consistent with rejecting every non-portable
+mode. -/
+theorem the_registered_order_is_admitted :
+    (stepAlpha state₀ .registeredOrder).state?.isSome := by decide
+
+/-- **An unregistered scope is not admitted either.** A device fence claiming a
+scope nobody defined is not a weaker fence; it is an undefined one. -/
+theorem an_unregistered_scope_is_refused :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.unregisteredScope) thread₀
+      .thread ⟨⟨"alpha"⟩⟩ = .rejected .accessNotAdmitted := rfl
+
+/-- And a portable mode needs no registration at all, which is what
+`admitsOrder_of_isPortable` says: every other operation in this fixture requests
+`relaxed` or `acquireRelease` and neither appears in `orderingModes`. -/
+theorem a_portable_order_needs_no_registration :
+    ¬ vocabulary.orderingModes.Recognizes ⟨"acquireRelease"⟩ ∧
+    (stepAlpha state₀ .atomicAdd).state?.isSome := by
+  exact ⟨by decide, by decide⟩
 
 /-! ## And so is the operation's own fault declaration
 

@@ -91,7 +91,6 @@ ALLOWED = {
     # them. Recorded as owed in section 4.2.
     "observations",       # section 7.5 device observation labels; no reader at all
     "restartability",     # section 7.4 retry rules have no mechanism
-    "scope",              # ordering scope, with no registry to check it against
     "vocabularyVersion",  # one version exists, so nothing to compare against yet
     #
     # Not gaps: the consumer is a later milestone or another layer, and the field

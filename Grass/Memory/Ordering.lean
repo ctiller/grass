@@ -68,14 +68,17 @@ meaning.
 A consumer that accepts a non-portable order without knowing its profile is
 exactly the "permissive fallback" `docs/FOUNDATION.md` law 8 forbids.
 
-**No consumer.** Nothing under `Grass/` calls this, `AdmittedVocabulary` has no
-ordering registry, and `MemoryProfile.Admits` does not consult `d.ordering` beyond
-`atomicityAgrees` — so an access declaring `profileSpecific` with a name no profile
-ever registered steps and mints an event carrying it. `docs/MEMORY_MODEL.md` §7.1
-says unsupported mappings are rejected, and this predicate was written to be the
-rejection. Recorded as owed in `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2; review
-found the gap and the sentence below, which described a consumer that does not
-exist.
+`AdmittedVocabulary.AdmitsOrder` is what rejects the unsupported case, and
+`admitsOrder_of_isPortable` is this predicate's link to it: a portable mode needs no
+registration, a profile-specific one must be a name the profile declared. Neither
+existed for several milestones — nothing under `Grass/` called this, the vocabulary
+had no ordering registry, and an access declaring `profileSpecific` with a name no
+profile ever registered stepped and minted an event carrying it. Review found the
+gap and found the sentence that had described a consumer that did not exist.
+
+What is still **not** here is §7.1's refinement theorem. Registration says the
+profile owns the name; it does not say the name has a proved target meaning. That
+is an ISA obligation and `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records it.
 -/
 def IsPortable : MemoryOrder → Prop
   | .profileSpecific _ => False
@@ -90,6 +93,23 @@ instance : (order : MemoryOrder) → Decidable order.IsPortable
 
 @[simp] theorem not_isPortable_profileSpecific (name : Name) :
     ¬ IsPortable (.profileSpecific name) := fun h => h
+
+/-- The profile's own name for this mode, when it has one.
+
+`Option`, so that "portable" and "profile-specific with a name" are one match
+rather than two predicates that could disagree. A consumer needing the name to
+check a registry gets it here, and gets `none` exactly when there is nothing to
+check. -/
+def profileName? : MemoryOrder → Option Name
+  | .profileSpecific name => some name
+  | _ => Option.none
+
+/-- **A mode has no profile name exactly when it is portable.** The two ways of
+asking are one question, which is what stops a registry check and `IsPortable`
+drifting apart. -/
+@[simp] theorem profileName?_eq_none_iff_isPortable {order : MemoryOrder} :
+    order.profileName? = Option.none ↔ order.IsPortable := by
+  cases order <;> simp [profileName?, IsPortable]
 
 end MemoryOrder
 
@@ -123,6 +143,18 @@ def IsPortable : MemoryScope → Prop
 instance : (scope : MemoryScope) → Decidable scope.IsPortable
   | .thread | .process | .device | .system => .isTrue trivial
   | .profileSpecific _ => .isFalse (fun h => h)
+
+/-- The profile's own name for this scope, when it has one. As for
+`MemoryOrder.profileName?`: §7.1 allows profile-specific scopes, and a scope a
+profile never declared is as unsupported as a mode it never declared. -/
+def profileName? : MemoryScope → Option Name
+  | .profileSpecific name => some name
+  | _ => Option.none
+
+/-- A scope has no profile name exactly when it is portable. -/
+@[simp] theorem profileName?_eq_none_iff_isPortable {scope : MemoryScope} :
+    scope.profileName? = Option.none ↔ scope.IsPortable := by
+  cases scope <;> simp [profileName?, IsPortable]
 
 end MemoryScope
 

@@ -152,6 +152,16 @@ structure AdmittedVocabulary where
   auditViolationClasses : NameRegistry AuditViolationClass
   /-- Obligation kinds this profile's protocols use. -/
   obligationKinds : NameRegistry ObligationKindId
+  /-- Ordering modes this profile owns, beyond the five portable ones.
+
+  `docs/MEMORY_MODEL.md` §7.1 fixes the portable modes and allows a profile its
+  own; a portable mode therefore needs no entry here and a profile-specific one
+  does. Nothing registered these for several milestones, so an access could declare
+  `MemoryOrder.profileSpecific` with any name at all and step. -/
+  orderingModes : NameRegistry Name
+  /-- Scopes this profile owns, beyond thread, process, device, and system. §7.1
+  allows these on the same terms as the modes above. -/
+  orderingScopes : NameRegistry Name
 deriving Repr
 
 namespace AdmittedVocabulary
@@ -170,6 +180,54 @@ def WellFormed (vocabulary : AdmittedVocabulary) : Prop :=
 
 instance (vocabulary : AdmittedVocabulary) : Decidable vocabulary.WellFormed :=
   inferInstanceAs (Decidable (_ ∧ _))
+
+/--
+`vocabulary.AdmitsOrder order` holds when the access may request that ordering.
+
+The five portable modes are always admissible: `docs/MEMORY_MODEL.md` §7.1 fixes
+them, so there is nothing profile-local to declare. A `profileSpecific` mode must
+be a name this profile registered — §7.1 says an unsupported mapping is rejected,
+and a name no profile ever claimed is the clearest case of one.
+
+This is **not** §7.1's refinement theorem. Registration says the profile owns the
+name; it does not say the name has a proved target meaning on any ISA. That
+obligation is recorded in `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2.
+-/
+def AdmitsOrder (vocabulary : AdmittedVocabulary) : MemoryOrder → Prop
+  | .profileSpecific name => vocabulary.orderingModes.Recognizes name
+  | _ => True
+
+instance (vocabulary : AdmittedVocabulary) :
+    (order : MemoryOrder) → Decidable (vocabulary.AdmitsOrder order)
+  | .relaxed | .acquire | .release | .acquireRelease | .sequentiallyConsistent =>
+      .isTrue trivial
+  | .profileSpecific name =>
+      inferInstanceAs (Decidable (vocabulary.orderingModes.Recognizes name))
+
+/-- `vocabulary.AdmitsScope scope` holds when the access may claim that scope. The
+same rule as `AdmitsOrder`, over §7.1's four portable scopes. -/
+def AdmitsScope (vocabulary : AdmittedVocabulary) : MemoryScope → Prop
+  | .profileSpecific name => vocabulary.orderingScopes.Recognizes name
+  | _ => True
+
+instance (vocabulary : AdmittedVocabulary) :
+    (scope : MemoryScope) → Decidable (vocabulary.AdmitsScope scope)
+  | .thread | .process | .device | .system => .isTrue trivial
+  | .profileSpecific name =>
+      inferInstanceAs (Decidable (vocabulary.orderingScopes.Recognizes name))
+
+/-- **A portable mode needs no registration.** This is `MemoryOrder.IsPortable`'s
+consumer: the predicate was written to distinguish the mode that needs a profile
+behind it from the mode that does not, and until this theorem nothing made that
+distinction do anything. -/
+theorem admitsOrder_of_isPortable {vocabulary : AdmittedVocabulary} {order : MemoryOrder}
+    (h : order.IsPortable) : vocabulary.AdmitsOrder order := by
+  cases order <;> first | exact trivial | exact absurd h (by simp)
+
+/-- And a portable scope needs none either. -/
+theorem admitsScope_of_isPortable {vocabulary : AdmittedVocabulary} {scope : MemoryScope}
+    (h : scope.IsPortable) : vocabulary.AdmitsScope scope := by
+  cases scope <;> first | exact trivial | exact absurd h (by simp [MemoryScope.IsPortable])
 
 /--
 `vocabulary.Admits d` holds when every open name the access descriptor uses is
@@ -192,7 +250,9 @@ def Admits (vocabulary : AdmittedVocabulary) (d : AccessDescriptor) : Prop :=
   (∀ step ∈ d.provenance.path, vocabulary.provenanceStepKinds.Recognizes step.kind) ∧
   (∀ fault ∈ d.admittedFaults, vocabulary.faultClasses.Recognizes fault) ∧
   d.ledgerEffect.WellFormed ∧
-  (∀ id ∈ d.ledgerEffect.createdKinds, vocabulary.obligationKinds.Recognizes id)
+  (∀ id ∈ d.ledgerEffect.createdKinds, vocabulary.obligationKinds.Recognizes id) ∧
+  vocabulary.AdmitsOrder d.ordering.order ∧
+  vocabulary.AdmitsScope d.ordering.scope
 
 instance (vocabulary : AdmittedVocabulary) (d : AccessDescriptor) :
     Decidable (vocabulary.Admits d) := by
@@ -233,13 +293,28 @@ theorem not_admits_of_ill_formed_ledger_effect {vocabulary : AdmittedVocabulary}
     {d : AccessDescriptor} (h : ¬ d.ledgerEffect.WellFormed) : ¬ vocabulary.Admits d :=
   fun ha => h ha.2.2.2.2.1
 
+/-- **An access requesting an ordering mode the profile never declared is not
+admitted.** `docs/MEMORY_MODEL.md` §7.1: an unsupported mapping is rejected. -/
+theorem not_admits_of_unregistered_order {vocabulary : AdmittedVocabulary}
+    {d : AccessDescriptor} (h : ¬ vocabulary.AdmitsOrder d.ordering.order) :
+    ¬ vocabulary.Admits d :=
+  fun ha => h ha.2.2.2.2.2.2.1
+
+/-- And one claiming a scope the profile never declared is not admitted. A device
+fence claiming a scope nobody defined is not a weaker fence; it is an undefined
+one. -/
+theorem not_admits_of_unregistered_scope {vocabulary : AdmittedVocabulary}
+    {d : AccessDescriptor} (h : ¬ vocabulary.AdmitsScope d.ordering.scope) :
+    ¬ vocabulary.Admits d :=
+  fun ha => h ha.2.2.2.2.2.2.2
+
 /-- An access creating an obligation of a kind the profile never declared is not
 admitted. -/
 theorem not_admits_of_undeclared_obligation_kind {vocabulary : AdmittedVocabulary}
     {d : AccessDescriptor} {kind : ObligationKindId}
     (hmem : kind ∈ d.ledgerEffect.createdKinds)
     (h : ¬ vocabulary.obligationKinds.Recognizes kind) : ¬ vocabulary.Admits d :=
-  fun ha => h (ha.2.2.2.2.2 kind hmem)
+  fun ha => h (ha.2.2.2.2.2.1 kind hmem)
 
 /--
 A vocabulary never admits an access whose declared space it does not declare, and
