@@ -2,6 +2,7 @@ mod apply;
 mod bootstrap;
 mod canon;
 mod common;
+mod coordinator;
 mod envelope;
 mod error;
 mod events;
