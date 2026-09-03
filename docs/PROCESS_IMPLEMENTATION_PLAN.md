@@ -2046,13 +2046,20 @@ status — a fresh epoch's session being `open` is a fact about the initial
 network, and there is no initial-network relation yet
 (`Grass/Process/Weave/Mixin.lean`'s `HoldsInitially` names the same gap).
 
-**The obligation half is not fixed.** No constructor scopes `.obligations`, so
-the ledger `Grass/Process/Network/World.lean` parameterises can still never move
-and §7's `DisjointOrCommutingObligations` is still free. Fixing it means giving
-`processTermination` — and whichever other constructors transfer custody — an
-obligation scope and a law relating the move to the termination contract, which
-is `Grass/Process/Termination.lean`'s. That is the next substantial item on this
-layer's list.
+**The obligation half is fixed too.** `EndsInstance` carries a `custody`
+parameter with `custodyDeclared` (the ledger moved that way) and `custodyExact`
+(the declared relation admits nothing else, so `fun _ _ => True` is refuted at
+any plan whose `Obligations` has two values).
+`moving_the_ledger_ends_an_instance` is what it buys, by cases over all
+twenty-three constructors.
+
+`SessionStatus.died` is now producible as well: `channelDeath` is built on
+`KillsSession` rather than on a bare `ResolvesEscrow`, which was the same defect
+`ClosesSession` fixed for its sibling and which left a dead channel with an
+`.open` status that `ChannelContract.sendOnOpenSession` still accepted sends on.
+
+What remains open is §10.33: the ledger can only ever be *consumed*, because no
+constructor can put an obligation into it.
 
 ### 10.29 `ProcessRefinementLens.Selects` cannot attribute a channel step to a role
 
@@ -2089,3 +2096,120 @@ arguments; it has been deleted rather than kept.
 `ProviderEnv` has no declaration anywhere in the tree. Needs a ruling on where
 the union lives — `Grass/Specification/Boundary.lean` is `g-design`'s, and this
 is a one-line addition there plus a `Nodup` merge.
+
+### 10.31 A serial function's footprint is state-level, not fragment-level
+
+`Grass/Process/Function/Serial.lean` carries `footprintAgrees : State → State →
+Prop` and `postWithinFootprint`, and `footprintSeparates` forbids the degenerate
+`fun _ _ => True` that discharged the latter by `trivial`.
+
+That is weaker than the precedent it cites. `NetworkAssertion`'s agreement is
+supplied by the *world owner* and constrained by `agreesSymm` and `agreesGlue`,
+so an assertion author supplies only `holds` and `footprint`. Here the same
+author supplies `Post` and `footprintAgrees`, so a wide-but-not-total footprint
+is still self-certifying: an author who declares "everything except the third
+field" and writes a `Post` that changes the third field fails, but one who
+declares "everything except nothing in particular" does not.
+
+Closing it needs the footprint to range over *fragments* of the process's
+logical state — the analogue of `NetworkFragment` at the process-local level —
+which `ProcessSpec.State` being an opaque `Type w` forbids. That is a question
+about the process state model, not about serial calls. Needs a ruling; blocks
+nothing today.
+
+### 10.32 `SerialCallVisibility`'s exclusivity is not tied to the footprint
+
+§3 writes `exclusive (owned : CallerExclusivelyOwns contract.footprint input
+before)`. The implementation takes `Exclusive : Input → State → Prop` as a
+parameter with no relation to `footprintAgrees`, so a plan choosing
+`fun _ _ => True` gets `.exclusive trivial` for every call and §3's "a footprint
+alone is insufficient" is typed rather than enforced — what is required is in
+fact *weaker* than a footprint.
+
+The tie needs a notion of the caller owning a region of the process's state,
+which is the memory layer's resource algebra rather than this one's. Recorded
+rather than approximated: a field asserting exclusivity implies something about
+`footprintAgrees` would have been satisfiable by the same trivial choice.
+
+### 10.33 A protocol step's issued demands are written nowhere
+
+`StepsLocally.protocolStep` now requires `(protocol kind).Step fromState event
+toState issued localEmitted`, which is the fix recorded above. But `issued` does
+not land anywhere: `ProcessInstance` has no outstanding-demand field, and
+`NetworkFragment` names no fragment for outstanding demands, so
+`StepsLocally.scope` cannot mention one and the bag is discarded.
+
+The consequence is sharp. `moving_the_ledger_ends_an_instance` says the
+obligation ledger moves only at an ending, and no constructor can put an
+obligation *into* it — so §2's "termination explicitly resolves, transfers, or
+permits pending" quantifies over pending obligations that nothing in the family
+can create. The ledger can shrink and never grow.
+
+This is the same shape as the four scope defects already fixed, one level in:
+`.obligations` is reachable, but only by the constructor that consumes it.
+Fixing it means either a `NetworkFragment.outstanding kind slot` with a per-
+instance demand bag, or an `Obligations`-side law relating a protocol step's
+issued bag to the ledger. The first is a change to
+`Grass/Process/Network/Assertion.lean`'s fragment family and to
+`LogicalProcessNetworkCore`; the second needs the ledger to stop being opaque.
+Needs a ruling on which. This is the largest open item on this layer.
+
+### 10.34 `reroute` cannot write the session it reroutes to
+
+`reroute` is a `ResolvesEscrow`, whose scope is `fragment = .escrow edge
+session` — the *source* session. `ChannelResolution.rerouted` names a
+destination and says the payload "is re-created as a fresh occurrence this
+ledger does not hold", and the destination's ledger is a different fragment the
+step may not touch.
+
+So `WellFormed.ReroutesLand` degenerates: it can only be satisfied at a
+destination that was already non-empty before the step, and the reroute itself
+can never make one so. `reroute` is a drop with a forwarding address.
+
+The fix is the `Delivers` shape again — a dedicated structure whose scope names
+both sessions' escrows, with a field putting the arrival in the destination.
+Not done here because it wants the destination occurrence's identity, which is
+§10.36's question too.
+
+### 10.35 No channel step may touch either endpoint's instance slot
+
+`Delivers`, `SendsEscrow` and every `ResolvesEscrow` scope the escrow (and now,
+for delivery and the two closings, the session cursor) and nothing else. So a
+delivery moves the ledger and the cursor and reaches no process:
+
+```lean
+theorem delivery_never_reaches_the_receiver
+    (delivered : plan.Delivers a b edge session occurrence) (kind slot) :
+    a.instances kind slot = b.instances kind slot
+```
+
+`Grass/Process/Network/Channel.lean`'s `receiverPreLocal` was deliberately
+widened to admit the receiver's own `instanceState`, and
+`ReceiverEventEmbedding.arrives` maps a message to the receiver's `Event` — but
+nothing applies that event to anything. `Delivers` also has no `contractual`
+field where `SendsEscrow` has one, so `ChannelContract.receive`,
+`receivePrecondition` and `ReceiverPost` are unreachable from the transition
+family.
+
+Whether a delivery should move the receiver in the same step, or whether the
+receiver's `processStep` consumes the arrival separately, is a ruling. The
+second reading is defensible and is probably intended — but then §3's receiver
+contract needs a law relating the two steps, and there is none.
+
+### 10.36 `send`, `coalesce` and `reroute` are declared non-allocating
+
+The transition module quotes §3: `allocatedNominals` "contains every new process
+generation, channel epoch, local/child/message occurrence, restart identity, and
+coalesced replacement". `allocatedNominals` returns `Allocation.empty` for
+`send`, `coalesce` and `reroute`, and none of them scopes `.nominals`, so no
+step that creates a message occurrence may move the nominal history.
+
+`Grass/Process/Network/Channel.lean`'s `escrowLocal` admits `.nominals` in
+`Escrow`'s footprint specifically for the affine resolve token, and
+`EscrowLedger.rank` is documented as "the occurrence's position in the monotone
+allocation history — §3's `usedNominals` ordering". Neither can be established.
+
+Internally consistent — `allocatedNominals` and the scopes agree, and
+`NetworkStep.historyExact` enforces it — so this is a disagreement with the
+declared contents rather than an unsoundness. Needs a ruling on whether message
+occurrences are nominals in the same history as process generations.

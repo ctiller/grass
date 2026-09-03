@@ -51,16 +51,19 @@ weave may change what the program observes without an explicit argument.
 
 ## What `Disjoint` does not separate
 
-Two disjoint lenses can still interfere through fragments neither declares, and
-in this corpus that is not hypothetical: **no constructor of
-`NetworkTransition` names `.obligations` or `.session` in its scope at all.** A
-mixin about the obligation ledger or a session cursor therefore frames past
-every step in the program, vacuously — the same defect
-`Tests/Process/WeaveFixtures.lean` records having caught for shared regions, and
-still live for these two. §8's "Replacing it preserves … obligations" is free
-here because nothing can change them. Recorded in
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.28; it is a `Transition.lean` defect
-and it makes several claims below cost-free.
+Two disjoint lenses can still interfere through fragments neither declares.
+When this module was written that was not hypothetical: no constructor of
+`NetworkTransition` named `.obligations` or `.session` in its scope at all, so a
+mixin about either framed past every step in the program, vacuously. Both are
+fixed — `Delivers`, `ClosesSession` and `KillsSession` move the session,
+`EndsInstance` moves the ledger — and `docs/PROCESS_IMPLEMENTATION_PLAN.md`
+§10.28 records what remains.
+
+What still is not separated: `Disjoint` is disjointness of *interiors*, and a
+channel between a selected and an unselected role is achieved by one lens taking
+the shared boundary outright rather than by there being no shared boundary. A
+listener mixin about the listener's own channel behaviour is excluded from
+`disjoint_lenses_do_not_reopen_each_other` for that reason.
 -/
 
 namespace Grass.Process
