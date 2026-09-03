@@ -56,7 +56,7 @@ from pathlib import Path
 # The corpus this tool was reviewed against, as a digest of its content. A row
 # count is not enough: a truncated or duplicated corpus keeps a plausible count
 # and checks nothing. See the same guard in the other x86 differentials.
-EXPECTED_DIGEST = "8eacf772ff5e31dade3862460be455fefce41dbc2cc53256bc663a8466897db6"
+EXPECTED_DIGEST = "4a8d5b5e6df83bd8bca5e40079ac361ef268146430c1914e47b088a10dff3ba7"
 
 # Must match `Grass.Tests.ISA.X86.DecodeC.windowBytes`. The tool checks this
 # against the corpus rather than trusting it.

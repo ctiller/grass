@@ -112,7 +112,7 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.InsnEncoding.modrmBytes, `Grass.ISA.X86.InsnEncoding.sibBytes,
     -- Decoder plumbing over Grass's own types, and the diagnostics vocabulary.
     `Grass.ISA.X86.findSpec, `Grass.ISA.X86.plusRegRows,
-    `Grass.ISA.X86.MatchesSpec,
+    `Grass.ISA.X86.MatchesSpec, `Grass.ISA.X86.specShapeFor,
     -- Encodability predicates: Grass's decision about what it will emit, not a
     -- statement about what the processor does.
     `Grass.ISA.X86.MemOperand.Encodable,

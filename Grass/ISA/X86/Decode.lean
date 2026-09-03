@@ -139,6 +139,28 @@ The opcodes this profile decodes.
 
 Spike 1's instruction set, plus the forms the probe corpus executes. Anything
 absent is `unknownOpcode`, deliberately.
+
+## What a row asserts, and what it does not
+
+A row asserts a *shape*: whether a ModR/M byte follows, and how large an
+immediate does. That is enough to find the end of the instruction, which is what
+`decodeInsn` is for. It asserts nothing about which operand combinations are
+legal, and this decoder accepts encodings no processor will execute -- `8D` with
+`mod=11` is `#UD` because `LEA` has no register-source form, and several
+`/digit` values in the group opcodes are unassigned. NDISASM rejects 1336 of the
+windows in `Tests/ISA/X86/DecodeCorpus.lean` that this decoder reads happily.
+
+That is a real limit rather than a bug, but it is a limit: `decodeInsn` is a
+length-and-fields parser, `DecodeError` has no case for "that opcode does not
+take that extension", and a caller wanting validity has to check elsewhere. The
+decoder differential reports those windows separately rather than counting them
+as agreement.
+
+Two mnemonics carry a caveat instead of a name, because the byte alone does not
+determine the instruction: `0x90` is `NOP` only without `REX.B`, and `0xB4`
+names `AH` only without a REX prefix. The field is diagnostic and nothing
+consumes it, but AH-versus-SPL is exactly the silent substitution
+`Grass.ISA.X86.Rex.bare` exists to make visible.
 -/
 def opcodeTable : List OpcodeSpec :=
   [ { escape := false, opcode := 0x8D, hasModrm := true, immSize := .none,
@@ -172,11 +194,11 @@ def opcodeTable : List OpcodeSpec :=
     { escape := false, opcode := 0xEB, hasModrm := false, immSize := .i8,
       mnemonic := "jmp rel8" },
     { escape := false, opcode := 0x90, hasModrm := false, immSize := .none,
-      mnemonic := "nop / xchg eax, eax" },
+      mnemonic := "nop, or xchg r8d, eax under REX.B" },
     { escape := false, opcode := 0xB0, hasModrm := false, immSize := .i8,
       mnemonic := "mov al, imm8" },
     { escape := false, opcode := 0xB4, hasModrm := false, immSize := .i8,
-      mnemonic := "mov ah, imm8" },
+      mnemonic := "mov ah, imm8; mov spl, imm8 under any REX" },
     { escape := true, opcode := 0x0B, hasModrm := false, immSize := .none,
       mnemonic := "ud2" },
     { escape := true, opcode := 0x84, hasModrm := false, immSize := .i32,
@@ -443,7 +465,27 @@ would have its opcode eaten as a prefix, and the round-trip below would be
 `decide`, so adding such an opcode fails here rather than breaking the decoder
 silently. -/
 theorem no_table_opcode_is_rex :
-    ∀ s ∈ opcodeTable, Rex.isRexByte s.opcode = false := by decide
+    ∀ s ∈ opcodeTable, s.escape = false →
+      Rex.isRexByte s.opcode = false := by decide
+
+/--
+The two-byte opcode space is deliberately outside that statement.
+
+`no_table_opcode_is_rex` used to quantify over every row, and that was
+over-strong in a way that would have cost a later author real time. The hazard
+it guards is that `decodeInsn` reads the first byte and asks whether it is a REX
+prefix; after a `0F` escape byte it does no such thing, so an escaped opcode in
+`0x40`-`0x4F` decodes correctly. The unscoped statement nevertheless forbade
+those sixteen opcodes -- which are exactly the sixteen `CMOVcc` forms.
+
+A reviewer found this by adding a `CMOVE` row and watching the `decide` go red
+on a theorem whose docstring says it keeps the round-trip true. The danger is
+not the red `decide`; it is that the natural response to it is to weaken the
+statement in the wrong direction. This example records that the byte really is
+in the REX range, so the scoping is visibly deliberate rather than a slip.
+-/
+theorem cmovcc_opcode_is_in_rex_range : Rex.isRexByte (0x44 : Byte) = true := by
+  decide
 
 /-- No single-byte opcode in the table is the `0F` escape byte -- the same
 hazard one step later, where the decoder would take the opcode as an escape. -/
@@ -512,6 +554,35 @@ The premises are the three facts `InsnEncoding` cannot hold on its own:
 `rest` is universally quantified rather than empty, which is what makes this a
 statement about *streams*. An instruction whose modeled length disagreed with
 its emitted length would satisfy an empty-tail version and fail here.
+
+## What this does not establish
+
+The same disclaimer `Grass/ISA/X86/Addressing.lean` carries for
+`encode_then_decode`, and it is sharper here. This relates two Grass definitions
+to each other, so an encoder and decoder wrong in the same way satisfy it. Two
+specific ways that matters:
+
+`MatchesSpec` and `hfind` together say little more than "the decoder could have
+produced this record". A reviewer checked exhaustively that for every byte
+string of length at most three, and for 2.3 million length-four strings over a
+targeted alphabet, a successful `decodeInsn` yields a record satisfying all
+three premises and re-encoding to the original bytes -- so the premise set is
+essentially the image of `decodeInsn`, and this theorem is a section/retraction
+about Grass's own pair. That is worth having and is not evidence about x86.
+
+More sharply, `opcodeTable` carries no evidence at all. `MatchesSpec` asks the
+record and the row to agree with each other, never with the ISA, so a row
+claiming the wrong immediate size leaves this theorem true and every decoded
+length wrong. The claim that these lengths are x86-64 rests on
+`Tools/x86-decode-differential.py`, which compares 56104 windows against NDISASM
+and was written after five separate table and `dispKindFor` mutations survived
+the whole build.
+
+There is also no converse: no `write (decode b) = b` for byte strings outside
+the image of `toBytes`, no injectivity of `decodeInsn`, and no completeness
+theorem for the table. The reviewer looked for a byte string on which
+`decodeInsn` succeeds and re-encodes differently and could not produce one, but
+looking is not proving.
 -/
 theorem decodeInsn_toBytes {i : InsnEncoding} {s : OpcodeSpec} (rest : ByteSeq)
     (hfind : findSpec i.escape i.opcode = some s)
@@ -523,8 +594,10 @@ theorem decodeInsn_toBytes {i : InsnEncoding} {s : OpcodeSpec} (rest : ByteSeq)
     have h := hfind
     simp only [findSpec] at h
     exact List.mem_of_find?_eq_some h
-  have hnotrex : Rex.isRexByte i.opcode = false := by
-    rw [← hop]; exact no_table_opcode_is_rex s hmem
+  have hnotrex : i.escape = false → Rex.isRexByte i.opcode = false := by
+    intro h
+    rw [← hop]
+    exact no_table_opcode_is_rex s hmem (hesc.trans h)
   have hnotesc : i.escape = false →
       (i.opcode == InsnEncoding.escapeByte) = false := by
     intro h
@@ -542,7 +615,7 @@ theorem decodeInsn_toBytes {i : InsnEncoding} {s : OpcodeSpec} (rest : ByteSeq)
             | false =>
                 simp only [InsnEncoding.toBytes, decodeInsn, List.nil_append,
                   Bool.false_eq_true, if_false,
-                  List.cons_append, List.append_assoc, hnotrex, hnotesc rfl,
+                  List.cons_append, List.append_assoc, hnotrex rfl, hnotesc rfl,
                   hfind, InsnEncoding.rexBytes, InsnEncoding.escapeBytes,
                   InsnEncoding.modrmBytes, Bool.false_eq_true, if_false,
                   takeByte, Except.bind, bind, pure, Except.pure]
@@ -603,7 +676,7 @@ theorem decodeInsn_toBytes {i : InsnEncoding} {s : OpcodeSpec} (rest : ByteSeq)
             | false =>
                 simp only [InsnEncoding.toBytes, decodeInsn, List.nil_append,
                   Bool.false_eq_true, if_false,
-                  List.cons_append, hnotrex, hnotesc rfl,
+                  List.cons_append, hnotrex rfl, hnotesc rfl,
                   hfind, InsnEncoding.rexBytes, InsnEncoding.escapeBytes,
                   InsnEncoding.modrmBytes, InsnEncoding.sibBytes,
                   Displacement.toBytes,
@@ -645,5 +718,135 @@ theorem decodeInsn_toBytes {i : InsnEncoding} {s : OpcodeSpec} (rest : ByteSeq)
                   takeByte, Except.bind, bind, pure, Except.pure]
                 exact decodeOperands_bytes_noModrm (some r) true opcode s imm
                   rest (by simpa using hmodrmSpec) himmSpec
+
+/-! ## The round-trip, at the encoders that actually emit
+
+`decodeInsn_toBytes` takes three premises, and until now nothing discharged them
+for any encoder in `Grass/ISA/X86/Bytes.lean`. `movRegImm32_wellFormed` proved
+one of the three for one encoder; there was no `MatchesSpec` lemma for any of
+them. So every row of the NASM and RIP corpora -- every encoding this profile
+actually emits -- sat outside the theorem's reach as stated, and a reviewer had
+to check by evaluation that the premises even hold.
+
+They do, and these corollaries say so once and for all. The point is not that
+the premises were in doubt; it is that a theorem nobody can instantiate proves
+nothing about the encoder, and that these corollaries go red under exactly the
+table mutations `Tools/x86-decode-differential.py` was written to catch.
+-/
+
+/-- The row `findSpec` returns is the row for the opcode asked about.
+
+Needed because `MatchesSpec` compares the record's opcode against the *row's*,
+and a corollary that knows only `findSpec escape opcode = some s` has to get
+back from `s` to `escape` and `opcode`. -/
+theorem findSpec_escape_opcode {escape : Bool} {opcode : Byte} {s : OpcodeSpec}
+    (h : findSpec escape opcode = some s) : s.escape = escape ∧ s.opcode = opcode := by
+  simp only [findSpec] at h
+  have hp := List.find?_some h
+  simp only [Bool.and_eq_true, beq_iff_eq] at hp
+  exact hp
+
+/--
+Whether the table row for an opcode has the shape an encoder assumes.
+
+A `Bool` so that each corollary below discharges its premise by reduction rather
+than by spelling out a row literal, which would have to repeat the mnemonic
+string and would break on an unrelated edit to it.
+-/
+def specShapeFor (escape : Bool) (opcode : Byte) (hasModrm : Bool)
+    (immSize : Immediate.Size) : Bool :=
+  match findSpec escape opcode with
+  | some s =>
+      s.hasModrm == hasModrm && s.immPromotedByRexW == false && s.immSize == immSize
+  | Option.none => false
+
+/--
+Everything `encodeMemInsn` builds is well-formed.
+
+`RmEncoding.WellFormed` already says the displacement matches what the ModR/M
+and SIB fields promise, and that the SIB byte is present exactly when `rm=100`
+with `mod ≠ 11`. `InsnEncoding.WellFormed` asks the same two questions of the
+assembled instruction, plus that a displacement implies a ModR/M byte -- which
+holds because `encodeMemInsn` always emits one.
+-/
+theorem encodeMemInsn_wellFormed {escape : Bool} {opcode : Byte} {w : Bool}
+    {reg : RegField} {m : MemOperand} {imm : Immediate} {i : InsnEncoding}
+    (h : encodeMemInsn escape opcode w reg m imm = some i) : i.WellFormed := by
+  simp only [encodeMemInsn, Option.map_eq_some_iff] at h
+  obtain ⟨e, he, rfl⟩ := h
+  obtain ⟨hdisp, hsib⟩ := encodeMem_wellFormed m e he
+  simp only [RmEncoding.requiresSib, RmEncoding.requiredDisp] at hsib hdisp
+  refine ⟨?_, ?_, ?_⟩
+  · intro hs
+    refine ⟨e.modrm reg.bits, rfl, ?_, ?_⟩
+    · rw [hsib] at hs
+      simp only [Bool.and_eq_true, beq_iff_eq] at hs
+      exact hs.1
+    · rw [hsib] at hs
+      simp only [Bool.and_eq_true, bne_iff_ne, ne_eq] at hs
+      exact hs.2
+  · intro m' hm'
+    cases hm'
+    refine ⟨?_, hdisp⟩
+    intro hcond
+    rw [hsib]
+    simp only [Bool.and_eq_true, beq_iff_eq, bne_iff_ne, ne_eq]
+    exact hcond
+  · intro _
+    simp
+
+/--
+**The writer's round-trip, for a memory-operand encoder.**
+
+Instantiating `decodeInsn_toBytes` at everything `encodeMemInsn` produces. The
+`specShapeFor` premise is the one carrying content: it says the table agrees
+with the encoder about whether a ModR/M byte and an immediate are present.
+-/
+theorem encodeMemInsn_decodes {escape : Bool} {opcode : Byte} {w : Bool}
+    {reg : RegField} {m : MemOperand} {imm : Immediate} {i : InsnEncoding}
+    (henc : encodeMemInsn escape opcode w reg m imm = some i)
+    (hshape : specShapeFor escape opcode true imm.sizeOf = true)
+    (rest : ByteSeq) :
+    decodeInsn (i.toBytes ++ rest) = .ok (i, rest) := by
+  have hwf := encodeMemInsn_wellFormed henc
+  simp only [encodeMemInsn, Option.map_eq_some_iff] at henc
+  obtain ⟨e, _, rfl⟩ := henc
+  simp only [specShapeFor] at hshape
+  match hf : findSpec escape opcode with
+  | Option.none => rw [hf] at hshape; exact absurd hshape (by simp)
+  | some spec =>
+      rw [hf] at hshape
+      simp only [Bool.and_eq_true, beq_iff_eq] at hshape
+      obtain ⟨⟨hmod, hprom⟩, himm⟩ := hshape
+      obtain ⟨hesc, hop⟩ := findSpec_escape_opcode hf
+      refine decodeInsn_toBytes (s := spec) rest hf ?_ hwf
+      refine ⟨hesc, hop, ?_, ?_⟩
+      · simpa using hmod
+      · rw [OpcodeSpec.immSizeFor_not_promoted hprom]
+        exact himm
+
+/-- `LEA r64, m` round-trips through its bytes. -/
+theorem leaR64_decodes {dst : Gpr} {m : MemOperand} {i : InsnEncoding}
+    (h : leaR64 dst m = some i) (rest : ByteSeq) :
+    decodeInsn (i.toBytes ++ rest) = .ok (i, rest) :=
+  encodeMemInsn_decodes h rfl rest
+
+/-- `CALL qword ptr m` round-trips through its bytes. -/
+theorem callMem64_decodes {m : MemOperand} {i : InsnEncoding}
+    (h : callMem64 m = some i) (rest : ByteSeq) :
+    decodeInsn (i.toBytes ++ rest) = .ok (i, rest) :=
+  encodeMemInsn_decodes h rfl rest
+
+/-- `MOV dword ptr m, imm32` round-trips through its bytes. -/
+theorem movMem32Imm32_decodes {m : MemOperand} {v : BitVec 32} {i : InsnEncoding}
+    (h : movMem32Imm32 m v = some i) (rest : ByteSeq) :
+    decodeInsn (i.toBytes ++ rest) = .ok (i, rest) :=
+  encodeMemInsn_decodes h rfl rest
+
+/-- `MOV qword ptr m, imm32` round-trips through its bytes. -/
+theorem movMem64Imm32_decodes {m : MemOperand} {v : BitVec 32} {i : InsnEncoding}
+    (h : movMem64Imm32 m v = some i) (rest : ByteSeq) :
+    decodeInsn (i.toBytes ++ rest) = .ok (i, rest) :=
+  encodeMemInsn_decodes h rfl rest
 
 end Grass.ISA.X86
