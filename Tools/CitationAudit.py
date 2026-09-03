@@ -494,11 +494,23 @@ def main() -> int:
     # tight pattern exists to avoid, where a document name and an unrelated "RFC
     # 9113 §5.2" sit in different cells of one markdown table row, so the join is
     # per block.
+    #
+    # **Blanked in place rather than concatenated**, for the reason `comment_text`
+    # above gives: a concatenation makes every reported line number an index into a
+    # reconstruction. That fix landed for the declaration half and not for this one,
+    # one round after the note saying it had -- a section citation at real line 433 of
+    # a 431-line file was reported at line 36. Each block is flattened onto its own
+    # first line and the rest of the file is blank, so the join is still per block
+    # and the number reported is the source's.
     joined: dict[str, str] = {}
     for path in LEAN_FILES:
-        blocks = re.findall(r"/-.*?-/", path.read_text(encoding="utf-8"), re.DOTALL)
-        joined[path.relative_to(ROOT).as_posix()] = "\n".join(
-            " ".join(line.strip() for line in block.splitlines()) for block in blocks)
+        source = path.read_text(encoding="utf-8")
+        out = [""] * len(source.splitlines())
+        for match in re.finditer(r"/-.*?-/", source, re.DOTALL):
+            first = source[: match.start()].count(chr(10))
+            out[first] = " ".join(
+                line.strip() for line in match.group(0).splitlines())
+        joined[path.relative_to(ROOT).as_posix()] = chr(10).join(out)
     documents: dict[str, str] = {}
     for path in DOC_FILES:
         documents[path.relative_to(ROOT).as_posix()] = path.read_text(encoding="utf-8")
@@ -508,6 +520,14 @@ def main() -> int:
     problems = (check_declarations(prose, names)
                 + check_declarations(lean_facing, names)
                 + check_sections(joined, sections)
+                # Line comments too. `comment_text` keeps them and keeps the line
+                # structure, and `DOC_SECTION` requires the document name and the
+                # section mark on one line, so a line comment needs no joining. The
+                # section half scanned block comments only, while the module docstring
+                # claimed it checked every section mark following a document name in
+                # the same sentence; review put a wrong section in a line comment and
+                # the audit passed.
+                + check_sections(prose, sections)
                 + check_sections(documents, sections)
                 + check_links(prose))
     if problems:

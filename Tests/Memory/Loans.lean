@@ -517,6 +517,69 @@ says and all it says. -/
 theorem an_unchanged_record_is_accepted :
     (lentHead.allocate? buffer bufferRecord).isSome := by decide
 
+/-! ## Two write loans over disjoint halves do not conflict
+
+`LoanConflicts`'s overlap conjunct is what makes the freeze per-fragment rather than
+per-allocation -- without it, lending one field of a struct locks the struct. Nothing
+tested it: no fixture accepted a second grant over one allocation *because* the ranges
+are disjoint, and review deleted the conjunct with the tree green. That is the
+over-refusing direction, so a regression here is silent. -/
+
+/-- A write loan of the buffer's tail, to a third context. -/
+def tailLoan : AuthorityGrant :=
+  { kind := .loan, holder := stranger, lender := owner, provenance := bufferProv
+    range := ⟨8, 8⟩, rights := .readWrite }
+
+/-- **Two write loans to different holders over disjoint halves are both issued.** -/
+theorem disjoint_halves_do_not_conflict :
+    ¬ lentHead.LoanConflicts loanOfHead tailLoan ∧
+    (lentHead.issue? secondLoan tailLoan).isSome := by
+  exact ⟨by decide, by decide⟩
+
+/-- And the same second loan overlapping the first is refused, so the acceptance above
+is the disjointness and not the holders. The two grants differ in `range` alone. -/
+theorem an_overlapping_half_conflicts :
+    lentHead.LoanConflicts loanOfHead { tailLoan with range := ⟨4, 8⟩ } ∧
+    lentHead.issue? secondLoan { tailLoan with range := ⟨4, 8⟩ } = Option.none := by
+  exact ⟨by decide, by decide⟩
+
+/-! ## A grant is bounded by what its provenance designates, not by its root
+
+`issue?`'s containment clause reads `grant.provenance.extent` -- what the *path*
+designates -- and every grant in this tree had an empty path, so the designated extent
+was the root extent and the clause was indistinguishable from a root-extent bound.
+Review replaced it with `rootExtent` and the whole tree stayed green. §3's sublet bound
+is the point: a grant claiming to descend from one field of a struct may not cover the
+struct. -/
+
+/-- Provenance of the buffer's first field: eight bytes of a sixty-four byte root. -/
+def fieldProv : Provenance :=
+  { bufferProv with path := [{ kind := .field, label := ⟨"head"⟩, extent := ⟨0, 8⟩ }] }
+
+/-- It designates the field and descends from the root, so the refusal below is the
+containment clause and not the nesting one. -/
+theorem the_field_provenance_designates_the_field :
+    fieldProv.extent = ⟨0, 8⟩ ∧ fieldProv.rootExtent = ⟨0, 64⟩ ∧
+    fieldProv.Nested ∧ unlent.RootExtentAgrees fieldProv := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-- **A grant may not cover bytes its own path does not designate**, even where the
+root allocation does. -/
+theorem a_grant_beyond_its_path_is_refused :
+    unlent.issue? firstLoan
+      { kind := .loan, holder := borrower, lender := owner, provenance := fieldProv
+        range := ⟨8, 8⟩, rights := .readWrite } = Option.none := by decide
+
+/-- And within the path it is accepted, so the refusal is the descent and not the
+provenance. The two grants differ in `range` alone, and both ranges lie inside the
+root. -/
+theorem a_grant_within_its_path_is_accepted :
+    (unlent.issue? firstLoan
+      { kind := .loan, holder := borrower, lender := owner, provenance := fieldProv
+        range := ⟨0, 8⟩, rights := .readWrite }).isSome ∧
+    bufferProv.rootExtent.Contains ⟨8, 8⟩ := by
+  exact ⟨by decide, by decide⟩
+
 /-! ## Authority ends with the epoch, and is not only about loans -/
 
 /-- The buffer, freed: same epoch, no longer live. -/

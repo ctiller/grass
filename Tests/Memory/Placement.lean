@@ -268,4 +268,81 @@ theorem the_refused_block_access_changes_nothing :
   applyAccess_refused_preserves_state fitting overrunningStore _ _
     a_block_access_out_of_bounds_is_refused
 
+/-! ## The four clauses ahead of the bounds clause, which nothing discriminated
+
+`AuditViolationClass.emittedByTransition` declares fourteen classes a profile must
+recognize. Two of them -- `wrongAddressSpace` and `deadProvenance` -- appeared nowhere
+under `Tests/` at all, and review switched off each of the four `denialOf` clauses that
+produce them with the tree staying green.
+
+They matter most on the block path, for the reason
+`a_block_access_out_of_bounds_is_refused` above already gives: `applyAccess` asks
+`denialOf` with no well-formedness hypothesis, so these clauses are the only thing
+between a block descriptor and a write into storage the table does not hold, into a
+torn-down allocation, or through a stale-epoch provenance -- §2's "address reuse never
+revives old pointers", as a committed write. On the `step` path `authorityOf` reports
+`unavailable` for a dead provenance, so the access is refused anyway, under the wrong
+class. -/
+
+/-- A fourth allocation, torn down. -/
+def freedAlloc : AllocId := allocs.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- A fifth the table never holds, so a descriptor may name it. -/
+def absentAlloc : AllocId := allocs.fresh.2.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- A second epoch, so a provenance can be stale. -/
+private def laterEpoch : EpochId := (FreshSupply.initial (Tag := EpochTag)).fresh.2.fresh.1
+
+/-- The `fitting` state with a dead allocation beside it. -/
+def withFreed : MemoryState :=
+  (fitting.allocate? freedAlloc { placedRecord with live := false }).getD fitting
+
+/-- The four descriptors below differ from `overrunningStore` in one field each, and
+the state holds what they name -- so each refusal is the clause it is named for. -/
+theorem the_liveness_fixtures_are_real :
+    (withFreed.allocations.lookup freedAlloc).map AllocationRecord.live = some false ∧
+    withFreed.allocations.lookup absentAlloc = Option.none ∧
+    (withFreed.allocations.lookup offsetAlloc).map AllocationRecord.live = some true ∧
+    (withFreed.allocations.lookup offsetAlloc).map AllocationRecord.epoch = some epoch ∧
+    laterEpoch ≠ epoch := by
+  exact ⟨by decide, by decide, by decide, by decide, by decide⟩
+
+/-- The same store bounded to eight bytes, which `withFreed` admits: the control every
+refusal below is measured against. -/
+def fittingStore : AccessDescriptor := { overrunningStore with range := ⟨200, 8⟩ }
+
+/-- It is admitted, so the four refusals are their clauses and not the descriptor. -/
+theorem the_fitting_store_is_admitted :
+    denialOf withFreed fittingStore = Option.none := by decide
+
+/-- **A provenance the allocation table does not hold is refused.** -/
+theorem an_absent_allocation_is_refused :
+    denialOf withFreed
+      { fittingStore with provenance := { fittingStore.provenance with root := absentAlloc } } =
+      some AuditViolationClass.deadProvenance := by decide
+
+/-- **A torn-down allocation is refused**, which is §5's teardown read at the access. -/
+theorem a_dead_allocation_is_refused :
+    denialOf withFreed
+      { fittingStore with provenance := { fittingStore.provenance with root := freedAlloc } } =
+      some AuditViolationClass.deadProvenance := by decide
+
+/-- **A stale-epoch provenance is refused**, which is §2's "address reuse never revives
+old pointers" at the access. -/
+theorem a_stale_epoch_is_refused :
+    denialOf withFreed
+      { fittingStore with provenance := { fittingStore.provenance with epoch := laterEpoch } } =
+      some AuditViolationClass.deadProvenance := by decide
+
+/-- **And a provenance naming a different address space is refused.** §7.5 makes
+spaces non-interchangeable, and this clause is the only comparison of the *record's*
+space with the provenance's anywhere in the layer: `WellFormedIn.spaceAgrees` relates
+the descriptor to itself, admissibility resolves the descriptor's space in the profile's
+table, and `authorityOf` reads neither. -/
+theorem a_provenance_in_another_space_is_refused :
+    denialOf withFreed
+      { fittingStore with provenance :=
+        { fittingStore.provenance with space := .deviceHostVisible } } =
+      some AuditViolationClass.wrongAddressSpace := by decide
+
 end Tests.Memory.Placement

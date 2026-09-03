@@ -222,6 +222,9 @@ inductive Alpha where
   /-- An access-free operation declaring an ordering mode the profile never
   registered, so the per-access check cannot see it. -/
   | computeWithUnregisteredOrdering
+  /-- The same shape for the *scope* half: a registered order and a scope in no
+  registry. Only the order half of that repair had a fixture. -/
+  | computeWithUnregisteredScope
   /-- A *load* of the read-only page declaring it needs write and execute
   permission the page does not grant. -/
   | overDeclaredPermission
@@ -594,6 +597,12 @@ instance : HasOperationFacets Alpha where
               onFault := .priorEffectsVisible }
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some { order := .profileSpecific ⟨"fake.neverRegistered"⟩ } }
+    | .computeWithUnregisteredScope =>
+        { memoryEffects := some
+            { substeps := [ .compute [.pageFault] ]
+              onFault := .priorEffectsVisible }
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some { scope := .profileSpecific ⟨"fake.neverRegisteredScope"⟩ } }
     | .lyingRootExtent =>
         { memoryEffects := some (.single (acc
             { bufferProv with rootExtent := ⟨0, 4096⟩ } ⟨0, 8⟩ 0x1000 .write .readWrite
@@ -2123,6 +2132,14 @@ theorem an_access_free_operation_cannot_hide_its_ordering :
     Grass.Op.step policy state₀ (SomeOperation.of Alpha.computeWithUnregisteredOrdering)
       thread₀ .thread ⟨⟨"alpha"⟩⟩ =
       .rejected (.operationOrderingNotRegistered ⟨"fake.neverRegistered"⟩) := rfl
+
+/-- **And so is its scope.** The gate is two clauses and only the order half had a
+fixture: this operation's `order` is the registered default and its `scope` is a
+profile-specific name in no registry, so nothing but the scope clause refuses it. -/
+theorem an_access_free_operation_cannot_hide_its_scope :
+    Grass.Op.step policy state₀ (SomeOperation.of Alpha.computeWithUnregisteredScope)
+      thread₀ .thread ⟨⟨"alpha"⟩⟩ =
+      .rejected (.operationOrderingNotRegistered ⟨"fake.neverRegisteredScope"⟩) := rfl
 
 /-- **The operation's own ordering declaration is checked against its accesses.**
 `OperationFacets.ordering` was the second facet consumed by nothing, and six of this

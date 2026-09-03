@@ -761,7 +761,7 @@ reads the map it finds; this is the cheaper check that stops the honest caller
 earlier.
 
 Refusing rather than overwriting or ignoring is `docs/FOUNDATION.md` law 8's
-direction. Four of the five refusals are stated —  `issue?_eq_none_of_reissued`,
+direction. Eight of the nine refusals are stated —  `issue?_eq_none_of_reissued`,
 `issue?_eq_none_of_empty`, `issue?_eq_none_of_not_live` and
 `issue?_eq_none_of_conflict` — so a caller that cannot issue finds out which rule
 stopped it. The extent clause has no theorem of its own; it is checked and not

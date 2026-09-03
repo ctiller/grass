@@ -85,12 +85,14 @@ CLAIM_PATTERNS = (re.compile(r"^\*{0,2}must\s"),)
 # A sentence that says a property is aspirational, absent, or owed elsewhere is
 # not making a mechanised claim, and the rule explicitly permits it.
 HEDGES = (
-    "intended", "not enforced", "does not", "cannot be made", "owes", "owed",
-    "open obligation", "would", "used to", "an earlier", "M2", "M3", "M4", "M5",
-    "M6", "M7", "M8", "M9", "M10", "no arrangement", "is not the check",
-    "not by itself", "on its own", "nothing here", "cannot tell", "is not that",
-    "not something", "deliberately", "no way to", "unrepresentable",
-    # These are noise suppression, not a principled category, and the comment here
+    # Twenty-two entries stood here that `--inert` reports as silencing nothing --
+    # eight milestone names, and fourteen phrases no claim sentence in the tree
+    # contains. Three sibling tools grew that check after being found carrying dead
+    # entries; this was the fourth allowlist and had the opposite half of the fix,
+    # `--hedged`, which lists the silenced *sentences* rather than the entries that
+    # have stopped paying for themselves. Both halves now.
+    "intended", "does not", "owes", "owed",
+    "would",     "M8", "no arrangement",     "nothing here", "cannot tell",     "deliberately",     # These are noise suppression, not a principled category, and the comment here
     # used to claim otherwise: "\"X cannot do Y\" is a statement of limitation, which
     # is the honest alternative the rule asks for". Review checked it against the
     # tree and found the entries silencing guarantees as readily as limitations --
@@ -102,8 +104,7 @@ HEDGES = (
     # suppression is reviewable rather than invisible.
     "cannot state", "cannot be demonstrated", "cannot read", "cannot fault",
     "cannot lawfully", "cannot coexist", "cannot be checked", "cannot introduce",
-    "cannot enforce", "cannot answer", "cannot express", "cannot know",
-    "cannot be erased or masked",
+    "cannot enforce", "cannot answer",     "cannot be erased or masked",
 )
 
 # A backticked identifier is the "names the enforcing type or theorem" part.
@@ -229,6 +230,29 @@ def self_test() -> int:
 def main() -> int:
     if "--self-test" in sys.argv:
         return self_test()
+    if "--inert" in sys.argv:
+        # Which HEDGES entries silence nothing. `--hedged` above lists the silenced
+        # *sentences*, which is the other half: it shows what the bypass costs and
+        # not which entries have stopped paying for themselves. Three sibling tools
+        # grew exactly this check after being found with dead entries, and this was
+        # the fourth allowlist and the only one that had the opposite half of the
+        # fix. Review then found twenty-two of forty-three inert.
+        global HEDGES
+        root = ROOT / "Grass"
+        saved = HEDGES
+        HEDGES = ()
+        reported = []
+        for path in sorted(root.rglob("*.lean")):
+            reported.extend(check_source(path.read_text(encoding="utf-8"), path))
+        HEDGES = saved
+        blob = " ".join(reported).lower()
+        inert = [entry for entry in HEDGES if entry.lower() not in blob]
+        if inert:
+            print("hedge entries that silence nothing: " + ", ".join(sorted(inert)))
+            print("Delete them, or say why the entry is kept with no effect.")
+        else:
+            print("docstring audit: every hedge entry silences a report")
+        return 0
     if "--hedged" in sys.argv:
         root = ROOT / "Grass"
         listed = []

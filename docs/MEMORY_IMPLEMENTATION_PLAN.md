@@ -2069,6 +2069,72 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   `allocate?`'s guard, and introducing a second view beside `Metadata` without deciding
   which one `denialOf_congr_of_agrees` should be stated over would leave three.
 
+- ~~**Four `denialOf` clauses that nothing discriminated**, producing two of the
+  fourteen classes `emittedByTransition` obliges every profile to declare.~~
+  `wrongAddressSpace` and `deadProvenance` appeared nowhere under `Tests/` at all, and
+  review switched off each of the four clauses — absent allocation, dead allocation,
+  stale epoch, wrong space — with the tree staying green.
+
+  They matter most on the block path, for the reason
+  `a_block_access_out_of_bounds_is_refused` already gave: `applyAccess` asks `denialOf`
+  with no well-formedness hypothesis, so these are the only thing between a block
+  descriptor and a committed write into storage the table does not hold, into a
+  torn-down allocation, or through a stale-epoch provenance — §2's "address reuse never
+  revives old pointers", as a write. The space clause is worse than untested: it is the
+  *only* comparison of an allocation record's space with a provenance's anywhere in the
+  layer, since `WellFormedIn.spaceAgrees` relates the descriptor to itself and
+  `authorityOf` reads neither.
+- ~~**`issue?`'s containment clause was indistinguishable from a root-extent bound.**~~
+  It reads `grant.provenance.extent` — what the *path* designates — and every grant in
+  the tree had an empty path, so review replaced it with `rootExtent` and the tree
+  stayed green. §3's sublet bound is the point: a grant claiming to descend from one
+  field of a struct may not cover the struct.
+- ~~**`LoanConflicts`'s overlap conjunct had neither a theorem nor a fixture.**~~ It is
+  what makes the freeze per-fragment rather than per-allocation — §4.4.1b's own argument
+  — and no fixture accepted a second grant *because* the ranges are disjoint. The
+  over-refusing direction, so a regression would have been silent.
+- ~~**`step`'s ordering gate is two clauses and only the order half had a fixture.**~~
+  The repair that added the operation-level check was made because "a `.compute`-only
+  operation declaring an unregistered profile-specific mode stepped", and the fixture
+  written for it leaves `scope` at its default, so the scope clause was never reached.
+- ~~**`AdmissibilityFailure.notWellFormedInSpace` cannot be reported through the
+  transition.**~~ `step` requires `Substep.WellFormedIn` before it asks
+  `whyNotAdmitted?`, and that predicate resolves the same space in the same table and
+  applies the same seal — so `substepsNotWellFormed` always answers first.
+  `no_space_failure_of_wellFormedIn` states it, on the model of
+  `the_bounds_clause_cannot_fire`; the branch is kept because
+  `AdmittedVocabulary.Admits` has callers that are not `step`.
+- ~~**`issue?`'s docstring miscounted its own refusals**, and the miscount hid a
+  finding.~~ It said "four of the five refusals are stated … the extent clause has no
+  theorem of its own". `issue?` has nine gates, eight are stated, and "the extent
+  clause" names the one that *does* have a theorem. The genuinely unstated gate is
+  containment — the entry two above — which the sentence never mentions, so a reviewer
+  following it checked the wrong clause.
+- ~~**`Tools/CitationAudit.py`'s section check never scanned Lean line comments**, and
+  reported the wrong line for the block comments it did scan.~~ The module docstring
+  claims it checks "every §N that follows a document name in the same sentence"; a wrong
+  section in a line comment passed. And the line-number fix that landed for the
+  declaration half did not land for this one, one round after the note saying it had —
+  a citation at real line 433 of a 431-line file was reported at line 36.
+- ~~**`Tools/DocstringAudit.py`'s hedge list was the fourth allowlist and had the
+  opposite half of the fix.**~~ `--hedged` lists the silenced *sentences*; what three
+  sibling tools grew was `--inert`, which lists the entries that have stopped silencing
+  anything. Twenty-two of forty-three were inert. Both halves now.
+- ~~**`Tools/DoorAudit.py` allowed the transition to call `applyAuthorityDelta?`**, on a
+  reason true only of its neighbour.~~ The transition applies the *effect* in five
+  places and the delta in none, so this was a widened permission granted for no caller
+  — on the door whose whole purpose is the actor check. Its self-test now asserts both
+  directions.
+- **A mutation that breaks the owning module's proof script is inconclusive, not
+  caught**, and this is the methodological finding of the round. Neutering a clause
+  that `Grass/Memory/State.lean` proves theorems about with `rw [if_neg …]` chains
+  fails inside that module before any fixture runs, so the sweep reports "caught" for
+  the proof and says nothing about the evidence. Review re-ran every such case with the
+  affected binders co-edited, and two of this round's findings came out of the re-run.
+  Sweeps recorded in this document before round eighteen should be read with that
+  caveat: the ones over `Tests/`-only clauses stand, the ones over clauses with
+  equation-lemma proofs may not.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Four review rounds found the same shape and it is worth naming as a shape rather than

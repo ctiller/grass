@@ -489,6 +489,40 @@ def whyNotAdmitted? (vocabulary : AdmittedVocabulary) (d : AccessDescriptor) :
     Option AdmissibilityFailure :=
   (vocabulary.admissibilityFailures d).head?
 
+/--
+**`notWellFormedInSpace` cannot be reported through the transition**, and it looked
+like a check the profile gate performs.
+
+`Grass/Op/Step.lean`'s `step` requires `Substep.WellFormedIn` on the whole sequence
+before it asks `whyNotAdmitted?` about any access, and that predicate resolves the
+access's space in the same table and applies the same `AccessDescriptor.WellFormedIn`.
+So by the time this clause is reached it is already true, and `step` answers
+`substepsNotWellFormed` for every case that would have produced this failure. Review
+switched the clause off and the tree stayed green.
+
+Stated rather than deleted, because `AdmittedVocabulary.Admits` has callers that are
+not `step` and this is a real reason for one of them. `Grass/Memory/Apply.lean`'s
+`the_bounds_clause_cannot_fire` is the same shape and the same argument: a branch that
+looks like a check the transition performs is worth a theorem saying which layer
+actually performs it.
+-/
+theorem no_space_failure_of_wellFormedIn {vocabulary : AdmittedVocabulary}
+    {d : AccessDescriptor} {space : AddressSpace}
+    (hfind : vocabulary.addressSpaces.find? d.space = some space)
+    (hwf : d.WellFormedIn space) :
+    .notWellFormedInSpace d.space ∉ vocabulary.admissibilityFailures d := by
+  unfold admissibilityFailures
+  rw [hfind]
+  simp only [if_pos hwf, List.nil_append, List.mem_append, List.mem_filterMap,
+    List.mem_flatMap]
+  rintro (((((((((((h | h) | h) | h) | h) | h) | h) | h) | h) | h) | h) | h) <;>
+    first
+      | simp_all
+      | (obtain ⟨_, _, hcontra⟩ := h; exact absurd hcontra (by simp))
+      | (obtain ⟨_, _, _, _, hcontra⟩ := h; exact absurd hcontra (by simp))
+      | exact absurd h (by simp)
+      | (split at h <;> simp_all)
+
 /-- **The reason and the predicate cannot disagree**: `admits_iff_whyNotAdmitted?_eq_none`
 is that, and it is `Iff` on one list rather than a comparison of two encodings. -/
 theorem admits_iff_whyNotAdmitted?_eq_none (vocabulary : AdmittedVocabulary)

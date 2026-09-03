@@ -18,9 +18,14 @@ argument or by the end of the line — so `state.issue? id grant` is a call, so 
 
 The doors are the five that change the map plus the two effect appliers, and the
 allowed callers differ: only the two modules that own the field may reach the map's
-doors, while the transition may reach `applyAuthorityDelta?` and
-`applyAuthorityEffect?`, because that is the one place the acting context is not the
-caller's to choose.
+doors, while the transition may reach `applyAuthorityEffect?`, because that is the one
+place the acting context is not the caller's to choose.
+
+`applyAuthorityDelta?` is *not* on the wider list, and it was, with that same reason
+attached. The transition applies the effect in five places and the delta in none, so
+the allowance was a widened permission granted for no caller -- on the door whose whole
+purpose is the actor check. Review removed it and nothing changed, which is how it was
+found.
 
 The rule it enforces is narrow and worth stating precisely, because the obvious
 stronger rule is wrong. `MemoryState.issue?` takes no acting context: it reads the
@@ -93,7 +98,14 @@ DOORS = {
     "splitGrant?": MAP_OWNERS,
     "joinGrants?": MAP_OWNERS,
     "transferGrant?": MAP_OWNERS,
-    "applyAuthorityDelta?": {"Grass/Memory/State.lean", "Grass/Op/Step.lean"},
+    # `Grass/Op/Step.lean` is allowed the *effect* and not the *delta*: it applies
+    # `applyAuthorityEffect?` in five places and `applyAuthorityDelta?` in none. The
+    # allowance was on both, with a reason true only of the second -- "the transition
+    # may reach `applyAuthorityDelta?` … because that is the one place the acting
+    # context is not the caller's to choose" -- so the door whose whole purpose is the
+    # actor check carried a widened permission granted for no caller. Removing it
+    # changed nothing, which is how review found it.
+    "applyAuthorityDelta?": MAP_OWNERS,
     "applyAuthorityEffect?": {"Grass/Memory/State.lean", "Grass/Op/Step.lean"},
     # `alias` changes which allocations name the same bytes, which is an authority
     # question -- every rule in the layer keys on `SharesBytes`. It is deliberately
@@ -297,11 +309,20 @@ def self_test() -> int:
             print(f"  SELF-TEST FAILED: `{door}` is not scanned for")
             failures += 1
 
-    # The appliers are doors with a wider allowlist: the transition may call them,
-    # because that is the one place the actor is not the caller's to choose.
-    applier = "def f (s : MemoryState) := s.applyAuthorityDelta? actor delta\n"
+    # The *effect* applier is the door with a wider allowlist: the transition may
+    # call it, because that is the one place the actor is not the caller's to choose.
+    applier = "def f (s : MemoryState) := s.applyAuthorityEffect? actor effect\n"
     if analyse({"Grass/Op/Step.lean": applier}):
-        print("  SELF-TEST FAILED: the transition may call an applier and is reported")
+        print("  SELF-TEST FAILED: the transition may call the effect applier and is "
+              "reported")
+        failures += 1
+
+    # And the *delta* applier is not: the transition calls it nowhere, so the
+    # allowance it used to carry was permission for no caller.
+    delta_applier = "def f (s : MemoryState) := s.applyAuthorityDelta? actor delta\n"
+    if not analyse({"Grass/Op/Step.lean": delta_applier}):
+        print("  SELF-TEST FAILED: the transition may not call the delta applier and "
+              "is not reported")
         failures += 1
     if not analyse({OUTSIDE: applier}):
         print("  SELF-TEST FAILED: an applier called from elsewhere is not reported")
