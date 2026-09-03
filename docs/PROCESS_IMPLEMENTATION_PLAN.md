@@ -2269,3 +2269,40 @@ outstanding bag), §10.35 (no channel step touches either endpoint's slot), and
 §10.27 (one global observation trace makes §7's congruence trivial) are the
 three that a ruling would most change. The rest are recorded and none blocks
 building.
+
+### 10.37 Only a terminated child can free its slot
+
+`Joins.wasTerminated` demands `ProcessLifecycle.terminated`, so a slot holding a
+`faulted`, `interrupted`, `violated`, `cancelled` or `died` incarnation can
+never be emptied — only restarted. `Spawns.wasEmpty` therefore never applies to
+it again, and a supervisor that wants to retire a crashed role rather than
+restart it has no transition for that.
+
+Defensible: `docs/PROCESS.md` §3 describes a join as collecting a *result*, and
+a crashed child has none. But then §3 owes a separate reap for the other five
+endings, and there is none. Needs a ruling on whether a slot can be retired.
+
+### 10.38 A canonical custody exists for every ledger movement
+
+`EndsInstance.custodyDeclared` requires the declared custody to admit the new
+ledger and admit nothing else, which refutes `fun _ _ _ => True` at any plan
+whose `Obligations` has two values. It does not stop an author writing
+`fun _ _ after => after = network.obligations` — a canonical custody that exists
+for *every* movement — so `moving_the_ledger_ends_an_instance`'s existential is
+satisfiable whatever the ledger did.
+
+What would close it is a law relating the declared custody to the ending's
+*kind*: a termination's custody is not a fault's. That law is the specification's
+`TerminalRemainderLaw` and its `Accepts`, which a `ProcessPlan` does not hold —
+the same missing link as §10.33. Recorded together with it.
+
+### 10.39 `NominalKind.restartIncarnation` is produced by nothing
+
+`Grass/Process/Nominal.lean` declares it and the transition module quotes §3's
+"restart identity" among what `allocatedNominals` contains, but `Restarts`
+requires only that the allocation contain the incarnation's *generation*, which
+is a `processGeneration`. Nothing ever allocates a `restartIncarnation`.
+
+Either the kind is redundant with `processGeneration` — in which case §3's list
+names one thing twice — or a restart owes a second identity that this layer does
+not allocate. Needs a ruling. Low weight: no theorem depends on it either way.
