@@ -152,8 +152,16 @@ structure LogicalProcessNetworkCore {registry : ProtocolRegistry.{u, w, v}}
   sessions : (edge : topology.ChannelKind) → topology.ChannelId edge → ChannelSession
   /-- The obligation ledger, whose shape belongs to another layer. -/
   obligations : Obligations
-  /-- The observations emitted so far, in order. -/
+  /--
+  The observations committed so far, in order.
+
+  What a specification's trace acceptance reads. Only
+  `Grass/Process/Network/Transition.lean`'s `commit` moves it; see
+  `NetworkFragment.pending` for why.
+  -/
   observations : Trace boundary.Observation
+  /-- What processes have produced and no commit has published yet, in order. -/
+  pending : Trace boundary.Observation
   /-- Every nominal ever allocated. Freshness is absence from this. -/
   usedNominals : NominalHistory topology.Carrier
 
@@ -173,6 +181,7 @@ def Agrees (fragment : NetworkFragment topology)
   | .session edge session => left.sessions edge session = right.sessions edge session
   | .obligations => left.obligations = right.obligations
   | .observations => left.observations = right.observations
+  | .pending => left.pending = right.pending
   | .nominals => left.usedNominals = right.usedNominals
 
 theorem agrees_refl (fragment : NetworkFragment topology)
@@ -222,6 +231,7 @@ theorem agrees_glue (inside : NetworkFragment topology → Prop)
     obligations := if inside .obligations then left.obligations else right.obligations
     observations :=
       if inside .observations then left.observations else right.observations
+    pending := if inside .pending then left.pending else right.pending
     usedNominals := if inside .nominals then left.usedNominals else right.usedNominals },
     ?_, ?_⟩
   · intro fragment member

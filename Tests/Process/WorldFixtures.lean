@@ -70,6 +70,7 @@ def quiet : ServerWorld where
   sessions := fun _ _ => ⟨.open, 0⟩
   obligations := ()
   observations := []
+  pending := []
   usedNominals := NominalHistory.initial
 
 /-- One connection accepted: the counter moved, and nothing else. -/

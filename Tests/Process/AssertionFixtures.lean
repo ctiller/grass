@@ -80,8 +80,10 @@ structure FixtureWorld where
     serverTopology.ChannelId edge → Nat
   /-- `obligations`. -/
   obligations : Nat
-  /-- `observations`. -/
+  /-- `observations`: what has been committed. -/
   observations : List String
+  /-- `pending`: what processes have produced and no commit has published. -/
+  pending : List String
   /-- `nominals`: how much of the monotone history has been consumed. -/
   nominals : Nat
 
@@ -96,6 +98,7 @@ def fixtureAgrees : NetworkFragment serverTopology →
       left.received edge session = right.received edge session
   | .obligations, left, right => left.obligations = right.obligations
   | .observations, left, right => left.observations = right.observations
+  | .pending, left, right => left.pending = right.pending
   | .nominals, left, right => left.nominals = right.nominals
 
 open Classical in
@@ -145,6 +148,7 @@ noncomputable def fixtureAgreement : WorldAgreement serverTopology FixtureWorld 
         else right.received edge session
       obligations := if inside .obligations then left.obligations else right.obligations
       observations := if inside .observations then left.observations else right.observations
+      pending := if inside .pending then left.pending else right.pending
       nominals := if inside .nominals then left.nominals else right.nominals }, ?_, ?_⟩
     · intro fragment member
       cases fragment with
@@ -164,6 +168,7 @@ def quiet : FixtureWorld where
   received := fun _ _ => 0
   obligations := 0
   observations := []
+  pending := []
   nominals := 0
 
 /-- After: one connection accepted. The table is untouched. -/

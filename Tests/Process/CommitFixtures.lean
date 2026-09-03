@@ -98,9 +98,10 @@ theorem can_still_commit_when_all_are_demanded :
 
 /-! ## The commit itself -/
 
-/-- The world after committing a `beep`. -/
+/-- The world after committing a `beep`: it is in the committed trace, and it
+is no longer pending. -/
 noncomputable def afterBeep : World.ServerWorld :=
-  { Transition.beforeReceive with observations := [.beep] }
+  { Transition.beforeReceive with observations := [.beep], pending := [] }
 
 /--
 Committing appends the survivor's observations and touches nothing else.
@@ -114,7 +115,8 @@ theorem beep_is_committed :
   scope := by
     intro fragment outside
     cases fragment with
-    | observations => exact absurd ⟨by simp [quietRunCoalesces, beeps], rfl⟩ outside
+    | observations => exact absurd ⟨by simp [quietRunCoalesces, beeps], Or.inl rfl⟩ outside
+    | pending => exact absurd ⟨by simp [quietRunCoalesces, beeps], Or.inr rfl⟩ outside
     | _ => rfl
 
 /-- And what was already observed stays observed. -/

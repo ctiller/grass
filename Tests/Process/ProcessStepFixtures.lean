@@ -70,14 +70,17 @@ def busy (remaining : Nat) : ServerWorld :=
         | .listener => some (awaiting remaining)
         | .connection => none }
 
-/-- And after one tick: one lower, holding nothing, with a `beep` in the trace. -/
+/-- And after one tick: one lower, holding nothing, with a `beep` produced.
+
+`pending`, not `observations`. A process step produces; only a commit publishes.
+See `Grass/Process/Network/Assertion.lean`'s `NetworkFragment.pending`. -/
 def busyAfter (remaining : Nat) : ServerWorld :=
   { quiet with
       instances := fun kind _ =>
         match kind with
         | .listener => some (settled remaining)
         | .connection => none
-      observations := [Observation.beep] }
+      pending := [Observation.beep] }
 
 theorem busy_holds_the_listener (remaining : Nat) :
     (busy remaining).instances .listener () = some (awaiting remaining) := rfl
@@ -108,7 +111,7 @@ theorem the_listener_ticks (remaining : Nat) (running : remaining ≠ 0)
     ⟨awaiting remaining, settled remaining, rfl, rfl, rfl, rfl,
       ⟨running, rfl, rfl, rfl⟩, ⟨0, rfl, rfl⟩, rfl, rfl, rfl⟩
   emittedIsProjected := rfl
-  observationsExtend := rfl
+  producesPending := rfl
   writesPermitted := by
     intro region moved
     exact absurd rfl moved
@@ -119,7 +122,7 @@ theorem the_listener_ticks (remaining : Nat) (running : remaining ≠ 0)
       cases kind with
       | listener => exact absurd (Or.inl rfl) outside
       | connection => rfl
-    | observations => exact absurd (Or.inr (Or.inl ⟨by simp, rfl⟩)) outside
+    | pending => exact absurd (Or.inr (Or.inl ⟨by simp, rfl⟩)) outside
     | _ => rfl
 
 /-- So it is a transition of the plan, and one that emits. -/
@@ -129,10 +132,10 @@ def tickStep (remaining : Nat) (running : remaining ≠ 0)
   .processStep .listener () (.result .tick answer) [Observation.beep] 0
     [Observation.beep] (the_listener_ticks remaining running answer)
 
-/-- **And it declares the trace, because it really moved it.** -/
+/-- **And it declares the pending trace, because it really moved it.** -/
 theorem the_tick_emits (remaining : Nat) (running : remaining ≠ 0)
     (answer : countdownVocabulary.Result .tick) :
-    (tickStep remaining running answer).scope .observations :=
+    (tickStep remaining running answer).scope .pending :=
   Or.inr (Or.inl ⟨by simp, rfl⟩)
 
 /-- It writes no shared region, so the route-table immutability argument still applies. -/

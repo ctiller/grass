@@ -79,14 +79,27 @@ structure ExactInitialNetwork
   rootInitial : (plan.topology.protocol plan.topology.root).Initial request
     (rootKind ▸ root.localState) (rootKind ▸ root.outstanding) rootEmitted
   /--
-  And the trace holds exactly the projection of what starting emitted.
+  And the pending trace holds exactly the projection of what starting emitted.
 
   The same seam as `StepsLocally.emittedIsProjected`: a role's observations
-  reach the network trace through `ProcessGraph.observeAt` and not otherwise, so
-  a start cannot put anything in the trace the root did not observe.
+  reach the network through `ProcessGraph.observeAt` and not otherwise, so a
+  start cannot put anything in the trace the root did not observe.
+
+  `pending`, not `observations`, since `NetworkFragment.pending` split the two:
+  a start *produces*, and nothing is committed until a driver commits it.
   -/
-  observationsProjected : network.observations =
+  pendingProjected : network.pending =
     rootEmitted.filterMap (plan.topology.observeAt plan.topology.root)
+  /--
+  **And nothing has been committed.**
+
+  The committed trace at a start is empty, because only `commit` moves it and no
+  commit has happened. Without this field a "start" could begin with an arbitrary
+  history of published observations, which is exactly the fabrication
+  `ExactInitialNetwork` exists to exclude — and it was invisible while one trace
+  served both roles.
+  -/
+  nothingCommitted : network.observations = []
   /-- Started with the request it was given. -/
   rootRequest : rootKind ▸ root.request = request
   /-- Running. -/

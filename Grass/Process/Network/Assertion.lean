@@ -135,8 +135,27 @@ inductive NetworkFragment {registry : ProtocolRegistry.{u, w, v}}
   | session (edge : topology.ChannelKind) (session : topology.ChannelId edge)
   /-- The obligation ledger. -/
   | obligations
-  /-- The observation trace. -/
+  /-- The committed observation trace. -/
   | observations
+  /--
+  Observations processes have produced and the driver has not committed.
+
+  `docs/PROCESS.md` §6 draws a line this world did not: "step emissions name only
+  portable logical observations", and "a driver commit is the sole transition
+  allowed to change provider resources or **append a committed external
+  observation**". With one trace, `processStep` and `commit` both appended to it,
+  the commit had nothing to be about, and `Commits` constrained the trace and
+  nothing else — so a commit of an arbitrary observation was a legal step of
+  *every* network. Local adversarial review proved that generically and drew the
+  consequence: `.commit` is not `DrivenByEntropy`, so
+  `NetworkProgressMeasure.frontierIsExternal` then forbids *any* network from
+  being at a frontier, and §7's whole progress module is vacuous.
+
+  With two fragments, a step produces into `pending` and a commit moves a prefix
+  of `pending` into `observations`. A commit can only publish what a process
+  actually emitted, and it can publish it once.
+  -/
+  | pending
   /-- The monotone nominal history that freshness is absence from. -/
   | nominals
 

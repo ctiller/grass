@@ -2776,3 +2776,36 @@ Kept for now because removing it would make the progress record unusable on its
 own. Needs a ruling on whether `MeetsProcessProgress` is meant to be stated apart
 from `ProcessCorrect` at all; if it is not, the parameter should go and the two
 records should merge.
+
+### 10.58 The reconciler's render ledger and the world's pending trace are two accounts of the same thing
+
+`Grass/Process/Network/Commit.lean`'s `Coalescing` splits *pending renders* into
+committed and skipped; `NetworkFragment.pending` holds the observations processes
+have produced and no commit has published. Nothing relates them, so
+`CommitsRender.toCommits` takes `Commits.earned` — "what I publish is the front
+of what is pending" — as a hypothesis its caller must supply.
+
+That is honest and it is not finished. A `PendingRender` carries observations and
+no provenance, so the reconciler cannot say which pending observations its
+committed render corresponds to, and a plan could commit a render whose
+observations are pending for an unrelated reason. Closing it means either giving
+a render a position in the pending trace, or deriving the render ledger from the
+pending trace rather than declaring it beside it.
+
+Needs a ruling on which. `Grass/Process/Network/Commit.lean` is `docs/PROCESS.md`
+§6's reconciler and the pending trace is §3's world; the two documents do not
+say how they meet.
+
+### 10.59 `ExactInitialNetwork` has no witness
+
+`Grass/Process/Network/Initial.lean` pins every fragment of a starting network,
+including — since the trace split — that its committed trace is empty and its
+pending trace is exactly the root's projected start emission. Nothing in the
+corpus constructs one.
+
+The record survived a change that added two fields without a single proof
+breaking, which is the signature of an uninhabited class. §10.54's exit criterion
+says every named record needs a positive witness before the layer is nominated;
+this is the one that does not have one.
+
+Not a defect in the record as far as anyone can tell — which is the problem.

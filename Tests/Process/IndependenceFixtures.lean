@@ -55,7 +55,7 @@ open Grass.Process.Tests.Channel (wire)
 
 /-- Both things have happened: the message was delivered and the `beep` committed. -/
 noncomputable def afterBoth : ServerWorld :=
-  { afterReceive with observations := [Observation.beep] }
+  { afterReceive with observations := [Observation.beep], pending := [] }
 
 /-- The world with only the `beep` is the commit fixture's. -/
 theorem afterBeep_is_quiet_but_noisy :
@@ -109,18 +109,21 @@ def receiveAfterBeep :
 /--
 **And the commit, taken after the receive.**
 
-Likewise: `Commits` is about the observation trace, and a delivery changes none
-of it.
+Likewise: `Commits` is about the two observation traces, and a delivery changes
+neither.
 -/
 theorem committing_after_the_receive :
     serverPlan.Commits afterReceive afterBoth quietRunCoalesces.committed.observations where
+  earned := rfl
   appended := rfl
   nonempty := by simp [quietRunCoalesces, beeps]
   scope := by
     intro fragment outside
     cases fragment with
     | observations =>
-      exact absurd ⟨by simp [quietRunCoalesces, beeps], rfl⟩ outside
+      exact absurd ⟨by simp [quietRunCoalesces, beeps], Or.inl rfl⟩ outside
+    | pending =>
+      exact absurd ⟨by simp [quietRunCoalesces, beeps], Or.inr rfl⟩ outside
     | _ => rfl
 
 /-- As a transition. -/

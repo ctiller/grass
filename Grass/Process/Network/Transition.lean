@@ -558,8 +558,17 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
   to the program's trace regardless of what the role observed.
   -/
   emittedIsProjected : emitted = localEmitted.filterMap (plan.topology.observeAt kind)
-  /-- Observations grow by exactly this segment. -/
-  observationsExtend : after.observations = before.observations ++ emitted
+  /--
+  **What it produced joins the pending trace, and the committed trace does not
+  move.**
+
+  `docs/PROCESS.md` §6: "step emissions name only portable logical observations",
+  and "a driver commit is the sole transition allowed to … append a committed
+  external observation". A step produces; only `Commits` publishes. Until
+  `NetworkFragment.pending` existed both appended to one trace, which left
+  `Commits` with nothing to be about — see that structure.
+  -/
+  producesPending : after.pending = before.pending ++ emitted
   /--
   **And every region it actually changed is one its role may write.**
 
@@ -595,7 +604,7 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
   -/
   scope : plan.TouchesOnly before after
     (fun fragment => fragment = .instanceState kind slot ∨
-      (emitted ≠ [] ∧ fragment = .observations) ∨
+      (emitted ≠ [] ∧ fragment = .pending) ∨
       ∃ region, before.shared region ≠ after.shared region ∧ fragment = .region region)
 
 /--
@@ -653,12 +662,13 @@ structure Spawns (before after : plan.LogicalProcessNetwork)
         (sameKind ▸ incarnation.localState) (sameKind ▸ incarnation.outstanding) localEmitted
   /-- And what reaches the network trace is the projection of what it observed. -/
   emittedIsProjected : emitted = localEmitted.filterMap (plan.topology.observeAt kind)
-  /-- Observations grow by exactly that. -/
-  observationsExtend : after.observations = before.observations ++ emitted
-  /-- That slot, the nominal history, the trace if it emitted, and nothing else. -/
+  /-- What it produced joins the pending trace; see `StepsLocally`. -/
+  producesPending : after.pending = before.pending ++ emitted
+  /-- That slot, the nominal history, the pending trace if it produced, and
+  nothing else. -/
   scope : plan.TouchesOnly before after
     (fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals ∨
-      (emitted ≠ [] ∧ fragment = .observations))
+      (emitted ≠ [] ∧ fragment = .pending))
 
 /--
 A supervisor restarts a slot whose incarnation ended.
@@ -727,12 +737,13 @@ structure Restarts (before after : plan.LogicalProcessNetwork)
         (sameKind ▸ incarnation.localState) (sameKind ▸ incarnation.outstanding) localEmitted
   /-- And what reaches the network trace is the projection of what it observed. -/
   emittedIsProjected : emitted = localEmitted.filterMap (plan.topology.observeAt kind)
-  /-- Observations grow by exactly that. -/
-  observationsExtend : after.observations = before.observations ++ emitted
-  /-- That slot, the nominal history, the trace if it emitted, and nothing else. -/
+  /-- What it produced joins the pending trace; see `StepsLocally`. -/
+  producesPending : after.pending = before.pending ++ emitted
+  /-- That slot, the nominal history, the pending trace if it produced, and
+  nothing else. -/
   scope : plan.TouchesOnly before after
     (fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals ∨
-      (emitted ≠ [] ∧ fragment = .observations))
+      (emitted ≠ [] ∧ fragment = .pending))
 
 /--
 A parent collects a terminated child and frees its slot.
@@ -894,15 +905,44 @@ structure RequestsCancel (before after : plan.LogicalProcessNetwork)
   scope : plan.TouchesOnly before after (fun fragment => fragment = .escrow edge session)
 
 /--
-A commit appends to the observation trace.
+A commit appends to the observation trace, and may only append what a live
+process could have produced.
 
 `docs/PROCESS.md` §6's transition, at the only fragment it touches. Appending
 rather than replacing is the content: a trace that could be rewritten would let
 a reconciler drop an observation a specification demanded.
+
+`earned` is the second half, and it was missing for five review passes.
+`Commits` constrained the trace and nothing else, so nothing tied `emitted` to
+anything a process observed — and a commit of an arbitrary observation was a
+legal step of **every** network of every plan with an inhabited
+`boundary.Observation`. Local adversarial review proved it generically
+(`commits_anywhere`) and drew the consequence: since `.commit` is not
+`DrivenByEntropy`, `NetworkProgressMeasure.frontierIsExternal` then forbids
+*any* network from being at a frontier, §7's "remain at a declared external
+frontier" escape is unreachable, and every theorem in
+`Grass/Process/Network/Progress.lean` is vacuous.
+
+The tie is the one `StepsLocally` already uses: the emitted trace is the
+boundary projection of a local segment, at a role with a live incarnation. That
+is weaker than "these observations were produced by that step" — which needs a
+pending-observation buffer in the world, recorded as
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.58 — and it is enough to stop a commit
+being enabled everywhere: a network with no live instance of a role whose
+protocol can project these observations cannot take one.
 -/
 structure Commits (before after : plan.LogicalProcessNetwork)
     (emitted : Trace boundary.Observation) : Prop where
-  /-- The trace grew by exactly this much. -/
+  /--
+  **What is committed is the front of what processes produced, and it stops
+  being pending.**
+
+  The provenance field, and the whole reason `NetworkFragment.pending` exists. A
+  commit can publish only what some step actually emitted, in the order it was
+  emitted, and can publish it once.
+  -/
+  earned : before.pending = emitted ++ after.pending
+  /-- The committed trace grew by exactly that much. -/
   appended : after.observations = before.observations ++ emitted
   /--
   **And it grew.**
@@ -920,12 +960,14 @@ structure Commits (before after : plan.LogicalProcessNetwork)
   calls out as degenerate: a step independent of itself.
 
   Found by trying to build a progress measure at the M2 fixture plan and
-  discovering the measure could not exist.
+  discovering the measure could not exist. Trying again found that `nonempty`
+  alone does not save it — see `earned` — which is the second finding this field
+  produced.
   -/
   nonempty : emitted ≠ []
-  /-- The observation trace **if it actually appended**, and nothing else. -/
+  /-- The two traces **if it actually appended**, and nothing else. -/
   scope : plan.TouchesOnly before after
-    (fun fragment => emitted ≠ [] ∧ fragment = .observations)
+    (fun fragment => emitted ≠ [] ∧ (fragment = .observations ∨ fragment = .pending))
 
 /--
 A parent lets a child go.
@@ -1099,7 +1141,7 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
   /-- The receiver consumes it, advancing its cursor. -/
   | receive (edge session occurrence)
       (step : plan.Delivers before after edge session occurrence)
-  /-- Observations are committed. -/
+  /-- Observations processes produced are committed. -/
   | commit (emitted : Trace boundary.Observation)
       (step : plan.Commits before after emitted)
   /-- A cancellation is requested. Escrow is untouched. -/
@@ -1194,16 +1236,17 @@ undefined and none that can change a fragment without declaring it.
 def scope : plan.NetworkTransition before after → NetworkFragment plan.topology → Prop
   | .processStep kind slot _ emitted _ _ _ =>
       fun fragment => fragment = .instanceState kind slot ∨
-        (emitted ≠ [] ∧ fragment = .observations) ∨
+        (emitted ≠ [] ∧ fragment = .pending) ∨
         ∃ region, before.shared region ≠ after.shared region ∧ fragment = .region region
   | .spawn kind slot _ emitted _ _ =>
       fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals ∨
-        (emitted ≠ [] ∧ fragment = .observations)
+        (emitted ≠ [] ∧ fragment = .pending)
   | .restart kind slot _ emitted _ _ =>
       fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals ∨
-        (emitted ≠ [] ∧ fragment = .observations)
+        (emitted ≠ [] ∧ fragment = .pending)
   | .send edge _ occurrence _ => fun fragment => fragment = .escrow edge occurrence.1
-  | .commit emitted _ => fun fragment => emitted ≠ [] ∧ fragment = .observations
+  | .commit emitted _ =>
+      fun fragment => emitted ≠ [] ∧ (fragment = .observations ∨ fragment = .pending)
   | .receive edge session _ _ =>
       fun fragment => fragment = .escrow edge session ∨ fragment = .session edge session
   | .requestCancel edge session _ _ => fun fragment => fragment = .escrow edge session

@@ -118,23 +118,40 @@ theorem two_emitting_steps_are_never_independent
 A commit of a `beep`, as a transition.
 
 `Tests/Process/CommitFixtures.lean` proves the reconciler's side of this; here
-it is fed to the `commit` constructor so that the two non-trivial cases of
-`observations_extend` are both exercised at a concrete step. Without it nothing
-in the corpus had ever satisfied `Emits`, and every theorem about emitting steps
-was being checked against an empty case.
+it is fed to the `commit` constructor so that both non-trivial cases of
+`observations_extend` are exercised at a concrete step. Without it nothing in the
+corpus had ever satisfied `Emits`, and every theorem about emitting steps was
+being checked against an empty case.
+
+`toCommits`'s third argument is `Commits.earned`, the provenance equation: the
+`beep` this publishes is the one `beforeReceive` was already holding as pending,
+and `afterBeep` is not holding it any more. Until `NetworkFragment.pending`
+existed there was nothing to supply, and a commit of an arbitrary observation was
+a step of every network.
 -/
 def beepCommit : serverPlan.NetworkTransition beforeReceive afterBeep :=
   .commit quietRunCoalesces.committed.observations
-    (beep_is_committed.toCommits (by simp [quietRunCoalesces, Grass.Process.Tests.Commit.beeps]))
+    (beep_is_committed.toCommits
+      (by simp [quietRunCoalesces, Grass.Process.Tests.Commit.beeps]) rfl)
 
 /-- **And it emits** — the `Emits` predicate is inhabited at this plan. -/
 theorem the_commit_emits : beepCommit.Emits :=
-  ⟨by simp [quietRunCoalesces, Grass.Process.Tests.Commit.beeps], rfl⟩
+  ⟨by simp [quietRunCoalesces, Grass.Process.Tests.Commit.beeps], Or.inr rfl⟩
 
-/-- **So the trace moved across it**, by the exactness of `Emits`. -/
+/-- And it publishes, which is the narrower claim. -/
+theorem the_commit_publishes :
+    beepCommit.scope (.observations : NetworkFragment serverTopology) :=
+  ⟨by simp [quietRunCoalesces, Grass.Process.Tests.Commit.beeps], Or.inl rfl⟩
+
+/-- **So the committed trace moved across it**, by the exactness of publishing. -/
 theorem the_commit_moved_the_trace :
     beforeReceive.observations ≠ afterBeep.observations :=
-  (ProcessPlan.emits_iff_the_trace_moved beepCommit).mp the_commit_emits
+  (ProcessPlan.publishes_iff_the_trace_moved beepCommit).mp the_commit_publishes
+
+/-- **And the pending trace moved too** — the `beep` stopped being pending. -/
+theorem the_commit_moved_the_pending_trace :
+    beforeReceive.pending ≠ afterBeep.pending :=
+  (ProcessPlan.emits_iff_the_pending_trace_moved beepCommit).mp the_commit_emits
 
 /-- The commit's own instance of the extension law. -/
 theorem the_commit_extends_the_trace :
@@ -149,12 +166,12 @@ theorem the_receive_extends_the_trace :
 /-- The commit and the receive really are independent: escrow and trace are disjoint. -/
 theorem the_commit_and_the_receive_are_independent : beepCommit.Independent receiveStep := by
   intro fragment inCommit inReceive
-  obtain ⟨_, isObservations⟩ := inCommit
+  obtain ⟨_, isTrace⟩ := inCommit
   rcases (receive_scope_is_the_session fragment).mp inReceive with isEscrow | isSession
-  · rw [isEscrow] at isObservations
-    exact absurd isObservations (by simp)
-  · rw [isSession] at isObservations
-    exact absurd isObservations (by simp)
+  · rw [isEscrow] at isTrace
+    rcases isTrace with h | h <;> exact absurd h (by simp)
+  · rw [isSession] at isTrace
+    rcases isTrace with h | h <;> exact absurd h (by simp)
 
 /--
 **And nothing independent of the commit may emit.**
@@ -169,7 +186,7 @@ theorem anything_independent_of_the_commit_is_silent
     {other : serverPlan.NetworkTransition c d}
     (independent : beepCommit.Independent other) : c.observations = d.observations :=
   ProcessPlan.trace_unchanged_of_silent other
-    (fun emits => independent .observations the_commit_emits emits)
+    (fun emits => independent .pending the_commit_emits emits)
 
 /-- In particular the receive is, which is the concrete instance. -/
 theorem the_receive_is_silent_because_the_commit_emits :

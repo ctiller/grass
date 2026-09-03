@@ -156,11 +156,17 @@ theorem cursorAt_off_wire {session : serverTopology.ChannelId ()} (notWire : ses
 
 /-- The world before the receive. -/
 noncomputable def beforeReceive : ServerWorld :=
-  { quiet with inFlight := fun _ => ledgerAt false, sessions := fun _ => cursorAt false }
+  { quiet with
+      inFlight := fun _ => ledgerAt false
+      sessions := fun _ => cursorAt false
+      pending := [Observation.beep] }
 
 /-- And after it: the escrow settled, and the receiver's cursor moved by one. -/
 noncomputable def afterReceive : ServerWorld :=
-  { quiet with inFlight := fun _ => ledgerAt true, sessions := fun _ => cursorAt true }
+  { quiet with
+      inFlight := fun _ => ledgerAt true
+      sessions := fun _ => cursorAt true
+      pending := [Observation.beep] }
 
 /-- What each world holds on `wire`. -/
 @[simp] theorem beforeReceive_wire :

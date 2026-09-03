@@ -17,24 +17,28 @@ answerable without the diamond.
 
 ## The two theorems that matter
 
-**The trace only grows.** `observations_extend` is by cases over all
-constructors of `NetworkTransition`, and it is the reason a
-specification stated over observations is stable under execution: no step
-rewrites or truncates the trace, so an observation a specification demanded
-cannot be dropped by a later step. Twenty-one constructors get it from
-`touchesOnly` — they do not scope the trace at all — and the four that do,
-`processStep`, `commit`, `spawn` and `restart`, carry an append equation as a
-field. `spawn` and `restart` joined that list when they were tied to
-`ProcessSpec.Initial`, which returns "the observations emitted by starting";
-before that a spawn could not emit and the theorem covered one fewer case for
-the wrong reason.
+**The committed trace only grows.** `observations_extend` is by cases over all
+constructors of `NetworkTransition`, and it is the reason a specification stated
+over observations is stable under execution: no step rewrites or truncates it, so
+an observation a specification demanded cannot be dropped by a later step.
+Twenty-three constructors get it from `touchesOnly` — they do not scope
+`.observations` at all — and `commit`, the one that does, carries the append
+equation as a field.
+
+That case count changed when `NetworkFragment.pending` split the two traces.
+`processStep`, `spawn` and `restart` used to append to `observations` directly,
+which is what left `Commits` with nothing to be about; they now append to
+`pending`, and only a commit publishes. The theorem is unchanged and its proof is
+three cases shorter.
 
 **Two independent steps cannot both emit.** `independent_steps_do_not_both_emit`
-is a one-line consequence of both emitting constructors declaring
-`.observations` in their scope while `Independent` is scope disjointness. So of
-any two independent steps, at least one leaves the trace exactly as it found it,
-and swapping them cannot reorder two emissions because there are never two to
-reorder.
+is a one-line consequence of every observation-touching constructor declaring
+`.pending` in its scope while `Independent` is scope disjointness. `Emits` is
+`.pending`-in-scope rather than `.observations`-in-scope, and the two agree on
+which steps they select because a commit declares both — `publishing_produces`
+is that containment. So of any two independent steps, at least one leaves both
+traces exactly as it found them, and swapping them cannot reorder two emissions
+because there are never two to reorder.
 
 **This is a narrowing, not a strengthening, and the difference matters.** A
 first draft of this module reported it as making §7's
@@ -49,9 +53,9 @@ here. It is recorded in `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.27.
 What the same review *did* fix is worse and is now gone: `StepsLocally` used to
 declare `.observations` unconditionally, so two local steps on unrelated
 instances that emitted nothing were never independent either. The guard is now
-`emitted ≠ []`, and `emits_iff_the_trace_moved` is the check — `Emits` holds
-exactly when the trace actually moved, not when the constructor might have moved
-it.
+`emitted ≠ []`, and `emits_iff_the_pending_trace_moved` is the check — `Emits`
+holds exactly when a trace actually moved, not when the constructor might have
+moved it.
 
 ## What is still owed, and where
 
@@ -90,27 +94,48 @@ variable {registry : ProtocolRegistry.{u, w, v}} {boundary : DriverBoundary.{u}}
 /-! ## Who may write the trace -/
 
 /--
-A step that appends to the observation trace.
+A step that touches an observation trace — either by producing into `pending` or
+by publishing from it.
 
-Not a new field: it is `.observations` being in the step's declared scope. Since
-both emitting constructors guard that on their segment being non-empty,
-`emits_iff_the_trace_moved` below makes this exact rather than an
-over-approximation — `Emits` holds precisely when the trace actually moved.
+Not a new field: it is `.pending` being in the step's declared scope. Every
+constructor that appends to `observations` also declares `.pending`
+(`publishing_produces`), because the only one is `commit` and a commit consumes
+the pending prefix it publishes — so this single fragment selects exactly the
+steps that could compete for a position in the trace, which is what law 18 needs.
+
+Since every such constructor guards its scope on the segment being non-empty,
+`emits_iff_the_pending_trace_moved` below makes this exact rather than an
+over-approximation.
 -/
 def NetworkTransition.Emits {before after : plan.LogicalProcessNetwork}
     (transition : plan.NetworkTransition before after) : Prop :=
-  transition.scope .observations
+  transition.scope .pending
 
 /--
-A step that did not declare the trace left it exactly.
+**Publishing implies producing.**
 
-Immediate from `touchesOnly`, and the half of the argument that covers
-all but two of the constructors.
+The containment that lets one fragment stand for both traces. `commit` is the
+only constructor whose scope holds at `.observations`, and its scope is a
+disjunction over the two trace fragments, so it holds at `.pending` too.
+-/
+theorem publishing_produces {before after : plan.LogicalProcessNetwork}
+    (transition : plan.NetworkTransition before after)
+    (publishes : transition.scope .observations) : transition.Emits := by
+  cases transition with
+  | commit _ _ => exact ⟨publishes.1, Or.inr rfl⟩
+  | _ => exact absurd publishes (by simp [NetworkTransition.scope])
+
+/--
+A step that did not declare either trace left the committed one exactly.
+
+Immediate from `touchesOnly` and `publishing_produces`, and the half of the
+argument that covers all but one of the constructors.
 -/
 theorem trace_unchanged_of_silent {before after : plan.LogicalProcessNetwork}
     (transition : plan.NetworkTransition before after) (silent : ¬ transition.Emits) :
     before.observations = after.observations :=
-  transition.touchesOnly .observations silent
+  transition.touchesOnly .observations
+    (fun publishes => silent (publishing_produces transition publishes))
 
 /--
 **The observation trace only ever grows.**
@@ -121,45 +146,66 @@ rewrites or truncates it. A specification stated over observations is therefore
 stable under execution — an observation it demanded cannot be dropped by a later
 step, whatever that step was.
 
-The proof is a case split on whether the step declared the trace at all. If it
-did not, `touchesOnly` gives equality. If it did, it is one of exactly four
-constructors, and each carries the append equation as a field: `processStep`'s,
-`spawn`'s and `restart`'s `observationsExtend`, and `commit`'s `appended`.
+The proof is a case split on whether the step declared the committed trace at
+all. If it did not, `touchesOnly` gives equality. If it did, it is `commit`, and
+`Commits.appended` is the equation.
 
 Worth noting what would have gone wrong without the scope discipline. There is
 nothing in `LogicalProcessNetworkCore` that stops a transition from setting
 `observations` to `[]`; what stops it is that such a step would have to declare
-`.observations` in its scope, and then it would have to be one of these two
-constructors, and both of them append.
+`.observations` in its scope, and then it would have to be `commit`, and a commit
+appends.
 -/
 theorem observations_extend {before after : plan.LogicalProcessNetwork}
     (transition : plan.NetworkTransition before after) :
     ∃ emitted, after.observations = before.observations ++ emitted := by
-  by_cases emits : transition.Emits
+  by_cases publishes : transition.scope (.observations : NetworkFragment plan.topology)
   · cases transition with
-    | processStep _ _ _ emitted _ _ step => exact ⟨emitted, step.observationsExtend⟩
     | commit emitted step => exact ⟨emitted, step.appended⟩
-    | spawn _ _ _ emitted _ step => exact ⟨emitted, step.observationsExtend⟩
-    | restart _ _ _ emitted _ step => exact ⟨emitted, step.observationsExtend⟩
-    | _ => exact absurd emits (by simp [NetworkTransition.Emits, NetworkTransition.scope])
-  · exact ⟨[], by rw [← trace_unchanged_of_silent transition emits, List.append_nil]⟩
+    | _ => exact absurd publishes (by simp [NetworkTransition.scope])
+  · refine ⟨[], ?_⟩
+    rw [← transition.touchesOnly .observations publishes, List.append_nil]
 
 /--
-**A step emits exactly when the trace moved.**
+**A step that publishes moved the committed trace, and no other step did.**
 
-Both directions are content. Backward is `trace_unchanged_of_silent`
-contraposed: a step cannot change the trace without declaring it, which is the
-scope discipline. Forward is the `emitted ≠ []` guard on the two emitting
-constructors: a step that declares the trace really did append something to it.
+Backward is `trace_unchanged_of_silent` contraposed: a step cannot change the
+committed trace without declaring it, which is the scope discipline. Forward is
+`Commits.nonempty`: the only publishing constructor really did append something.
+-/
+theorem publishes_iff_the_trace_moved {before after : plan.LogicalProcessNetwork}
+    (transition : plan.NetworkTransition before after) :
+    transition.scope (.observations : NetworkFragment plan.topology) ↔
+      before.observations ≠ after.observations := by
+  constructor
+  · intro publishes
+    cases transition with
+    | commit emitted step =>
+      obtain ⟨nonempty, _⟩ := publishes
+      intro same
+      have lengths := congrArg List.length step.appended
+      rw [← same, List.length_append] at lengths
+      exact nonempty (List.eq_nil_of_length_eq_zero (by omega))
+    | _ => exact absurd publishes (by simp [NetworkTransition.scope])
+  · intro moved
+    exact Classical.byContradiction
+      (fun silent => moved (transition.touchesOnly .observations silent))
+
+/--
+**And a step emits exactly when the pending trace moved.**
+
+The `Emits` version, and the one law 18 uses. Forward is the `emitted ≠ []` guard
+that every observation-touching constructor carries; backward is the scope
+discipline again.
 
 Without the guard the forward direction is false — a `processStep` with an empty
 segment would declare the trace and move nothing — and `Emits` would be a
 *may-emit* predicate wearing an emit predicate's name. That is what an earlier
 draft had, and what made every pair of local steps non-independent.
 -/
-theorem emits_iff_the_trace_moved {before after : plan.LogicalProcessNetwork}
+theorem emits_iff_the_pending_trace_moved {before after : plan.LogicalProcessNetwork}
     (transition : plan.NetworkTransition before after) :
-    transition.Emits ↔ before.observations ≠ after.observations := by
+    transition.Emits ↔ before.pending ≠ after.pending := by
   constructor
   · intro emits
     cases transition with
@@ -167,24 +213,22 @@ theorem emits_iff_the_trace_moved {before after : plan.LogicalProcessNetwork}
       rcases emits with isSlot | ⟨nonempty, _⟩ | ⟨_, _, isRegion⟩
       · exact absurd isSlot (by simp)
       · intro same
-        have lengths := congrArg List.length step.observationsExtend
+        have lengths := congrArg List.length step.producesPending
         rw [← same, List.length_append] at lengths
-        have : emitted.length = 0 := by omega
-        exact nonempty (List.eq_nil_of_length_eq_zero this)
+        exact nonempty (List.eq_nil_of_length_eq_zero (by omega))
       · exact absurd isRegion (by simp)
     | commit emitted step =>
       obtain ⟨nonempty, _⟩ := emits
       intro same
-      have lengths := congrArg List.length step.appended
-      rw [← same, List.length_append] at lengths
-      have : emitted.length = 0 := by omega
-      exact nonempty (List.eq_nil_of_length_eq_zero this)
+      have lengths := congrArg List.length step.earned
+      rw [same, List.length_append] at lengths
+      exact nonempty (List.eq_nil_of_length_eq_zero (by omega))
     | spawn _ _ _ emitted _ step =>
       rcases emits with isSlot | isNominals | ⟨nonempty, _⟩
       · exact absurd isSlot (by simp)
       · exact absurd isNominals (by simp)
       · intro same
-        have lengths := congrArg List.length step.observationsExtend
+        have lengths := congrArg List.length step.producesPending
         rw [← same, List.length_append] at lengths
         exact nonempty (List.eq_nil_of_length_eq_zero (by omega))
     | restart _ _ _ emitted _ step =>
@@ -192,13 +236,13 @@ theorem emits_iff_the_trace_moved {before after : plan.LogicalProcessNetwork}
       · exact absurd isSlot (by simp)
       · exact absurd isNominals (by simp)
       · intro same
-        have lengths := congrArg List.length step.observationsExtend
+        have lengths := congrArg List.length step.producesPending
         rw [← same, List.length_append] at lengths
         exact nonempty (List.eq_nil_of_length_eq_zero (by omega))
     | _ => exact absurd emits (by simp [NetworkTransition.Emits, NetworkTransition.scope])
   · intro moved
     exact Classical.byContradiction
-      (fun silent => moved (trace_unchanged_of_silent transition silent))
+      (fun silent => moved (transition.touchesOnly .pending silent))
 
 /-- So the trace before a step is a prefix of the trace after it. -/
 theorem observations_prefix {before after : plan.LogicalProcessNetwork}
@@ -238,8 +282,8 @@ theorem execution_observations_prefix {before after : plan.LogicalProcessNetwork
 **Two independent steps cannot both emit.**
 
 The Mazurkiewicz content of `docs/PROCESS.md` §7, and it costs one line because
-of a fact nothing arranged for it: both emitting constructors declare
-`.observations` in their scope, and `NetworkTransition.Independent` is scope
+of a fact nothing arranged for it: every observation-touching constructor
+declares `.pending` in its scope, and `NetworkTransition.Independent` is scope
 disjointness.
 
 So a swap of two independent steps cannot reorder two emissions — there are
@@ -250,7 +294,7 @@ theorem independent_steps_do_not_both_emit
     {a b c d : plan.LogicalProcessNetwork}
     {left : plan.NetworkTransition a b} {right : plan.NetworkTransition c d}
     (independent : left.Independent right) : ¬ (left.Emits ∧ right.Emits) :=
-  fun both => independent .observations both.1 both.2
+  fun both => independent .pending both.1 both.2
 
 /--
 **So one of any two independent steps leaves the trace exactly.**
@@ -265,7 +309,7 @@ theorem one_of_two_independent_steps_is_silent
     a.observations = b.observations ∨ c.observations = d.observations := by
   by_cases emits : left.Emits
   · exact Or.inr (trace_unchanged_of_silent right
-      (fun inRight => independent .observations emits inRight))
+      (fun inRight => independent .pending emits inRight))
   · exact Or.inl (trace_unchanged_of_silent left emits)
 
 /--
@@ -284,7 +328,7 @@ theorem emission_is_attributable
     c.observations = d.observations := by
   refine trace_unchanged_of_silent right (fun inRight => ?_)
   refine emitted (trace_unchanged_of_silent left (fun inLeft => ?_))
-  exact independent .observations inLeft inRight
+  exact independent .pending inLeft inRight
 
 /--
 **A swap moves the emission from one side of the schedule to the other, and

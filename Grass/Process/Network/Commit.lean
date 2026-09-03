@@ -200,7 +200,7 @@ discharged — belong to layers `Grass.Process` cannot see, and are not silently
 omitted here so much as owed by whoever composes this with them.
 
 The transition itself is `Grass/Process/Network/Transition.lean`'s `commit`
-constructor, whose scope is the observation fragment alone; this is the law
+constructor, whose scope is the two observation fragments; this is the law
 relating what it appends to what the reconciler chose.
 -/
 structure CommitsRender (before after : plan.LogicalProcessNetwork)
@@ -209,16 +209,21 @@ structure CommitsRender (before after : plan.LogicalProcessNetwork)
   /-- The trace grew by exactly the committed render's observations. -/
   appended : after.observations = before.observations ++ coalescing.committed.observations
   /--
-  And nothing outside the observation trace changed — nothing at all if the
+  And nothing outside the two observation traces changed — nothing at all if the
   committed render was empty.
 
   The `≠ []` guard matches `Grass/Process/Network/Transition.lean`'s `Commits`:
-  a commit that appends nothing has not touched the trace, and saying it did
+  a commit that appends nothing has not touched either trace, and saying it did
   would make it non-independent of every other emitting step for no reason.
+
+  `.pending` is here because a commit *consumes* what it publishes. Until that
+  fragment existed a commit only appended, which is what left it with no
+  provenance at all — see `Commits.earned`.
   -/
   scope : plan.TouchesOnly before after
     (fun fragment =>
-      coalescing.committed.observations ≠ [] ∧ fragment = .observations)
+      coalescing.committed.observations ≠ [] ∧
+        (fragment = .observations ∨ fragment = .pending))
 
 namespace CommitsRender
 
@@ -226,18 +231,30 @@ variable {plan}
 
 /--
 A commit is a `Commits`, so it is a `NetworkTransition.commit` — provided the
-render it committed carried something.
+render it committed carried something, and provided the caller can say which
+live process produced it.
 
-The hypothesis is `Commits.nonempty`, and it is not a formality: a commit that
+`rendered` is `Commits.nonempty`, and it is not a formality: a commit that
 appends nothing changes nothing at all, which would make it a one-step silent
 cycle and `Grass/Process/Network/Progress.lean`'s §7 theorem vacuous. A
 reconciler that skipped every render has not committed; it has decided not to.
+
+`earned` is `Commits`'s provenance field, and it is a hypothesis here rather
+than a fact this module can supply. `CommitsRender` is about a reconciler's
+split of pending *renders* into committed and skipped; `Commits.earned` is about
+the network's pending *observation* trace. Nothing in this module relates the
+two, so its caller supplies the equation. That is the honest shape of the gap
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.58 records — the render ledger and the
+world's pending trace are two accounts of the same thing and are not tied.
 -/
 theorem toCommits {before after demanded} {coalescing : Coalescing demanded}
     (commit : plan.CommitsRender before after coalescing)
-    (rendered : coalescing.committed.observations ≠ []) :
+    (rendered : coalescing.committed.observations ≠ [])
+    (earned : before.pending
+      = coalescing.committed.observations ++ after.pending) :
     plan.Commits before after coalescing.committed.observations :=
-  { appended := commit.appended, nonempty := rendered, scope := commit.scope }
+  { earned := earned, appended := commit.appended,
+    nonempty := rendered, scope := commit.scope }
 
 /--
 **A commit drops no demanded observation.**
