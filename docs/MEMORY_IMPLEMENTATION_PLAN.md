@@ -1625,6 +1625,25 @@ refuses everything.
   bytes *nothing* is held over is indistinguishable from a legitimate owner's first
   loan, and stays so until `AllocationRecord` records an owner, which is the same gap
   the bullet below records from the other side.
+- ~~**`MemoryState.alias` was an unchecked mutator outside every gate.**~~ It changes
+  which allocations name the same bytes, which is an authority question — every rule
+  in the layer keys on `SharesBytes` — and `Tools/DoorAudit.py`'s first version left
+  it out. Review added a real definition calling it to `Grass/Op/LoanAuthority.lean`
+  and the audit printed its green line. It is a door now, negative-tested the same
+  way.
+
+  It stays unchecked, and that is a decision rather than an omission. Declaring an
+  alias can put two grants into conflict that did not conflict when issued, and the
+  tempting fix is to refuse such an alias — which would be a lie in the other
+  direction, because if the platform mapped two views of one file then the alias
+  exists and a model that cannot record it cannot describe the machine. What makes
+  the unchecked form safe is that both halves of §3's rule are asked at access time
+  now, so in the conflicting state each holder is frozen by the other: the state is
+  stuck rather than unsound.
+- **§7.5's unmapping has no representation.** `alias` adds a pair and nothing removes
+  one, so a mapping the platform tears down stays declared forever — and since the
+  conflicting state above is *stuck*, an arena that is unmapped and remapped cannot
+  recover the authority it had. M6 owns the allocator; this is owed with it.
 - ~~**`MemoryProfile.Admits` was dead and wrong about itself.**~~ Deleted. Its
   docstring called it "deliberately not decidable" and the body was a list-emptiness
   test with a `Decidable` instance three definitions above — review wrote the instance

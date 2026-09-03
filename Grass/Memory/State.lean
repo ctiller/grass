@@ -2475,7 +2475,31 @@ theorem tearDown?_kills_every_name {state : MemoryState} :
             rfl
         · exact ih h id hcase
 
-/-- Declare that two allocations name the same storage. -/
+/--
+Declare that two allocations name the same storage.
+
+**Deliberately not an `Option`-returning door**, unlike every other mutator here, and
+the reason is worth stating because review asked. Declaring an alias can put two
+grants into conflict that did not conflict when they were issued: nothing
+re-examines them, and `docs/MEMORY_MODEL.md` §7.5 makes the mapping a real
+transition. The tempting fix is to refuse such an alias. That would be a lie in the
+other direction — if the platform mapped two views of one file, the alias *exists*,
+and a model that cannot record it cannot describe the machine.
+
+What makes the unchecked form safe is that the question is asked at access time
+instead. `Grass/Op/Step.lean`'s `refusalOf` carries both halves of §3's rule, so in
+the conflicting state each holder is frozen by the other and neither may write:
+`Tests/Op/StandardLoan.lean`'s
+`an_alias_declared_after_issue_is_refused_without_a_provider` is that state, stepped
+with no providers listed. The state is stuck rather than unsound, which is the
+conservative answer §7.5's own wording asks for.
+
+`Tools/DoorAudit.py` still guards it, because a `Grass/` caller changing the alias
+set is changing authority whether or not the function refuses anything.
+
+**Unmapping has no representation at all.** §7.5's unmapping would remove a pair,
+and nothing here can; `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records it.
+-/
 def alias (state : MemoryState) (a b : AllocId) : MemoryState :=
   { state with aliases := (a, b) :: state.aliases }
 

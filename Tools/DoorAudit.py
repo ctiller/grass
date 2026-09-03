@@ -95,6 +95,13 @@ DOORS = {
     "transferGrant?": MAP_OWNERS,
     "applyAuthorityDelta?": {"Grass/Memory/State.lean", "Grass/Op/Step.lean"},
     "applyAuthorityEffect?": {"Grass/Memory/State.lean", "Grass/Op/Step.lean"},
+    # `alias` changes which allocations name the same bytes, which is an authority
+    # question -- every rule in the layer keys on `SharesBytes`. It is deliberately
+    # *not* an `Option`-returning door (see its own docstring), which is exactly why
+    # it belongs here: the first version of this file left it out, and review added a
+    # real `Grass/Op/LoanAuthority.lean` definition calling it and watched the audit
+    # print its green line.
+    "alias": MAP_OWNERS,
 }
 
 BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
