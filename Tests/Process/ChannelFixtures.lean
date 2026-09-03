@@ -15,11 +15,19 @@ An earlier revision of this file failed the first half. Its contract had
 vacuous, no fixture invoked `send` or `receive`, and the header claimed the
 discipline was shown "satisfiable by a real contract" on that evidence.
 
-`liveChannel` below sends and receives. Its receive takes `quiet` to
+`liveChannel` below sends and receives. Its send takes `quiet` to a world that
+actually holds the message, and its receive takes *that* world to
 `afterDelivery`, consumes `ReceiverPre * Escrow`, and establishes a
 `ReceiverPost` that is false before the step and true after — so
 `receive_advances_the_cursor` is a fact about a state change and not about an
 empty relation.
+
+Both of those corrections came from `ProcessPlan.escrowImpliesOutstanding`.
+Before it, the contract's `Escrow` assertion was "this occurrence is
+unresolved", which holds at an *empty* ledger — so `Send` could take `quiet` to
+`quiet` and satisfy its postcondition, and the receive's precondition was
+satisfiable at a world where nothing had been sent. Two vacuous laws, both
+invisible until something outside the contract said what escrow means.
 
 The negative halves:
 
@@ -70,17 +78,55 @@ def serverReceiverInput :
   arrives := fun _ => .external .wake
   arrivesUnsettled := fun _ => rfl
 
+open Classical in
+/-- The ledger holding exactly one occurrence, in flight. -/
+noncomputable def holding (occurrence : EdgeOccurrence serverTopology World.serverMessage ()) :
+    EscrowLedger (EdgeOccurrence serverTopology World.serverMessage ())
+      (serverTopology.ChannelId ()) where
+  created := [occurrence]
+  rank := fun _ => 0
+  rankOrdersCreated := by simp
+  resolution := fun _ => none
+  noFabrication := by simp
+  coalesceCarrierLater := by simp
+  cancelRequested := fun _ => false
+  acknowledgedWasRequested := by simp
+
+open Classical in
+/--
+The world a send of one occurrence on the wire reaches.
+
+An earlier version of `liveSteps.Send` had `after = quiet` — a send that put
+nothing in flight. It went unnoticed because the contract's `Escrow` assertion
+was `resolution = none`, which holds at an empty ledger, so the postcondition
+was satisfied by a world where nothing had been sent.
+
+`ProcessPlan.escrowImpliesOutstanding` is what made both visible: it requires
+`EscrowLedger.Outstanding`, which is created-membership *and* unresolvedness,
+and neither the old assertion nor the old after-world could supply the first.
+-/
+noncomputable def afterSend (occurrence : EdgeOccurrence serverTopology World.serverMessage ()) :
+    ServerWorld :=
+  { quiet with
+      inFlight := fun _ session =>
+        if session = wire then holding occurrence else EscrowLedger.empty }
+
+theorem afterSend_wire (occurrence : EdgeOccurrence serverTopology World.serverMessage ()) :
+    (afterSend occurrence).inFlight () wire = holding occurrence := by
+  simp [afterSend]
+
 /--
 The step relations.
 
-`Receive` is inhabited and changes the world, which is the point: a contract
-whose receive relation is empty proves nothing about receive.
+Both are inhabited and both change the world, which is the point: a contract
+whose relations are empty, or whose send goes nowhere, proves nothing.
 -/
 def liveSteps : ChannelSteps serverTopology () ServerMessage ServerWorld where
-  Send := fun _ occurrence before after =>
-    occurrence.1 = wire ∧ before = quiet ∧ after = quiet
-  Receive := fun _ occurrence before after =>
-    occurrence.1 = wire ∧ before = quiet ∧ after = afterDelivery
+  Send := fun message occurrence before after =>
+    occurrence.1 = wire ∧ before = quiet ∧ after = afterSend ⟨message, occurrence⟩
+  Receive := fun message occurrence before after =>
+    occurrence.1 = wire ∧ before = afterSend ⟨message, occurrence⟩ ∧
+      after = afterDelivery
 
 /-! ## The assertions, each reading exactly the fragments it is allowed to -/
 
@@ -94,11 +140,20 @@ noncomputable def sessionOpen (session : serverTopology.ChannelId ()) :
     have same : left.sessions () session = right.sessions () session := agrees _ rfl
     rw [same]
 
-/-- This occurrence has not been resolved on its session. -/
+/--
+This occurrence is escrowed on its session and not yet resolved.
+
+Both conjuncts, because `ProcessPlan.escrowImpliesOutstanding` requires
+`EscrowLedger.Outstanding`, which is created-membership *and* unresolvedness. An
+earlier version of this assertion had only the second, so a contract could claim
+escrow for an occurrence the ledger never created — `Grass/Process/Bag.lean`'s
+"fabricated" at the channel seam. Adding the plan-level tie is what made the
+fixture's own assertion visibly too weak.
+-/
 noncomputable def escrowUnresolved (session : serverTopology.ChannelId ())
     (occurrence : EdgeOccurrence serverTopology World.serverMessage ()) :
     NetworkAssertion serverAgreement where
-  holds := fun network => (network.inFlight () session).resolution occurrence = none
+  holds := fun network => (network.inFlight () session).Outstanding occurrence
   footprint := fun fragment => fragment = .escrow () session
   framed := by
     intro left right agrees
@@ -139,8 +194,12 @@ noncomputable def liveChannel :
     rw [isWire]
     rfl
   send := by
-    rintro _ occurrence before after ⟨_, rfl, rfl⟩ _ _
-    exact ⟨trivial, rfl⟩
+    rintro message occurrence before after ⟨isWire, rfl, rfl⟩ _ _
+    refine ⟨trivial, ?_⟩
+    show ((afterSend ⟨message, occurrence⟩).inFlight () occurrence.1).Outstanding
+      ⟨message, occurrence⟩
+    rw [isWire, afterSend_wire]
+    exact ⟨List.mem_cons_self, rfl⟩
   receive := by
     rintro _ occurrence before after ⟨isWire, rfl, rfl⟩ _ _
     rw [isWire]
@@ -158,7 +217,8 @@ is a fact about a step. `receive_from_conjunction` takes it from
 theorem receive_advances_the_cursor (message : ServerMessage)
     (occurrence : serverTopology.ChannelOccurrence () message)
     (onWire : occurrence.1 = wire)
-    (held : (liveChannel.receivePrecondition message occurrence).holds quiet) :
+    (held : (liveChannel.receivePrecondition message occurrence).holds
+      (afterSend ⟨message, occurrence⟩)) :
     (liveChannel.ReceiverPost message occurrence).holds afterDelivery :=
   liveChannel.receive_from_conjunction message occurrence ⟨onWire, rfl, rfl⟩ held
 
@@ -170,11 +230,30 @@ theorem cursor_had_not_advanced (message : ServerMessage)
   have counted : (0 : Nat) = 1 := advanced
   exact absurd counted (by decide)
 
+/--
+The hypothesis is satisfiable, so that theorem is not empty either — at the
+world a send actually reaches.
+
+It used to be stated at `quiet`, where nothing has been sent. That was provable
+only because the contract's escrow assertion did not require the occurrence to
+have been created.
+-/
+theorem escrow_holds_after_a_send (message : ServerMessage)
+    (occurrence : serverTopology.ChannelOccurrence () message)
+    (onWire : occurrence.1 = wire) :
+    (liveChannel.Escrow message occurrence).holds (afterSend ⟨message, occurrence⟩) := by
+  show ((afterSend ⟨message, occurrence⟩).inFlight () occurrence.1).Outstanding
+    ⟨message, occurrence⟩
+  rw [onWire, afterSend_wire]
+  exact ⟨List.mem_cons_self, rfl⟩
+
 /-- The precondition is satisfiable at `quiet`, so the theorem above is not empty. -/
 theorem receive_precondition_holds (message : ServerMessage)
-    (occurrence : serverTopology.ChannelOccurrence () message) :
-    (liveChannel.receivePrecondition message occurrence).holds quiet :=
-  ⟨rfl, rfl⟩
+    (occurrence : serverTopology.ChannelOccurrence () message)
+    (onWire : occurrence.1 = wire) :
+    (liveChannel.receivePrecondition message occurrence).holds
+      (afterSend ⟨message, occurrence⟩) :=
+  ⟨rfl, escrow_holds_after_a_send message occurrence onWire⟩
 
 /--
 **A send happens on an open session, and the caller proves nothing.**
@@ -242,10 +321,6 @@ theorem escrow_survives_an_unrelated_step (message : ServerMessage)
       | _ => rfl)
     held
 
-/-- The hypothesis is satisfiable, so that theorem is not empty either. -/
-theorem escrow_holds_at_quiet (message : ServerMessage)
-    (occurrence : serverTopology.ChannelOccurrence () message) :
-    (liveChannel.Escrow message occurrence).holds quiet := rfl
 
 /-! ## And what it forbids -/
 

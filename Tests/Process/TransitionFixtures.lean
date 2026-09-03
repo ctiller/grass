@@ -50,6 +50,7 @@ noncomputable def serverPlan : ProcessPlan graphRegistry fixtureBoundary NoOblig
   steps := fun _ => liveSteps
   channel := fun _ => liveChannel
   sessionOpenIsRecorded := fun _ _ _ => Iff.rfl
+  escrowImpliesOutstanding := fun _ _ _ _ escrowed => escrowed
 
 /-- The world a step of it moves through is the one the other fixtures use. -/
 theorem plan_world_is_the_fixture_world :
