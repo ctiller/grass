@@ -19,12 +19,13 @@ is this milestone's seven-for-seven signal that nothing inhabits the structures.
 These are the witnesses, and `a_close_on_the_wrong_session_is_refused` is the
 refusal that field now supplies.
 
-## What is still not here
+## And the eleventh
 
-`Reroutes` needs two sessions on one edge and this topology names one. Building
-it means adding a second `ChannelId` to
-`Tests/Process/ChannelFixtures.lean`'s world rather than adding a fixture beside
-it, so §10.79 keeps it.
+`Reroutes` was held back here on the grounds that it needed a change to the
+fixture world. It did not: a `ChannelId` carries an epoch, so a second session on
+this edge is `wire` with a later one. `Tests/Process/RerouteFixtures.lean` is the
+witness, and the mistaken argument is recorded in §10.79 beside the others this
+milestone made from reading rather than building.
 -/
 
 namespace Grass.Process.Tests.ChannelStep
