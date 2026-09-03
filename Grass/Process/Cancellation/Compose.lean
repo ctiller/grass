@@ -192,14 +192,26 @@ theorem request_is_latched_or_acted_on (sequence : CancellationSequence)
 /-! ## Bounded cancellation -/
 
 /--
-Every region promises to end.
+**Every region that will not act promises to end.**
 
-`docs/PROCESS.md` §3: "A bounded-cancellation claim therefore also needs the two
-uncancellable regions to terminate within named bounds or under named
+`docs/PROCESS.md` §3: "A bounded-cancellation claim therefore also needs **the
+two uncancellable regions** to terminate within named bounds or under named
 environment premises."
+
+Scoped to the uncancellable regions, which is what §3 asks. An earlier version
+demanded a bound of *every* region including the interruptible ones — the ones
+§3 says admit "delivery between any two steps" — so a composite containing a
+single forever-running interruptible region was declared not eventually
+cancellable, which is wrong under §3's own reading of the mask. Local
+adversarial review built it.
+
+That scoping is also what makes `unbounded_region_defeats_cancellation`'s mask
+hypothesis load-bearing: with the old definition the theorem held with
+`region.mask = .uncancellable` deleted, because `BlocksForever`'s first field was
+never used.
 -/
 def Bounded (sequence : CancellationSequence) : Prop :=
-  ∀ region ∈ sequence.regions, region.Bounded
+  ∀ region ∈ sequence.regions, region.mask = .uncancellable → region.Bounded
 
 /-- Some region may act on a request. -/
 def HasCancellationPoint (sequence : CancellationSequence) : Prop :=
@@ -226,12 +238,17 @@ Stated over an arbitrary sequence and an arbitrary position, so it covers the
 case the sentence warns about — an unbounded region *before* the point — and
 equally the case an author is likelier to write by accident, an unbounded
 region after it.
+
+`BlocksForever`'s mask half is load-bearing here, and only became so when
+`CancellationSequence.Bounded` was rescoped to the uncancellable regions.
+`unbounded_interruptible_is_still_cancellable` is the sequence that witnesses
+the difference.
 -/
 theorem unbounded_region_defeats_cancellation {sequence : CancellationSequence}
     {region : CancellationRegion} (present : region ∈ sequence.regions)
     (blocks : region.BlocksForever) : ¬ sequence.EventuallyCancellable :=
   fun cancellable =>
-    region.blocksForever_not_bounded blocks (cancellable.2 region present)
+    region.blocksForever_not_bounded blocks (cancellable.2 region present blocks.1)
 
 /--
 And sequencing does not repair it: if either side blocks forever, so does the
@@ -247,6 +264,28 @@ theorem seq_inherits_unboundedness {before after : CancellationSequence}
   refine unbounded_region_defeats_cancellation ?_ blocks
   rw [seq_regions]
   exact present.elim (List.mem_append_left _) (List.mem_append_right _)
+
+/--
+**And an unbounded region that *does* act does not defeat it.**
+
+The discriminating fixture. `docs/PROCESS.md` §3's warning is about the
+*uncancellable* case, and this is the sequence that separates it from the
+uncancellable one: a cancellation point followed by a forever-running
+interruptible region — a server that answers a cancellation request and then
+serves connections until it is told to stop.
+
+Under an earlier `Bounded` demanding a bound of every region, this sequence was
+*not* eventually cancellable and `unbounded_region_defeats_cancellation` held
+with its `region.mask = .uncancellable` hypothesis deleted. Both were wrong,
+and one theorem cannot tell you so — you need the pair. Local adversarial
+review built the counterexample; this is it, kept.
+-/
+theorem unbounded_interruptible_is_still_cancellable :
+    EventuallyCancellable ⟨[⟨.cancellationPoint, some 1⟩, ⟨.interruptible, none⟩]⟩ := by
+  refine ⟨⟨⟨.cancellationPoint, some 1⟩, by simp, rfl⟩, ?_⟩
+  intro region present uncancellable
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at present
+  rcases present with rfl | rfl <;> simp at uncancellable
 
 /-- Conversely, a bounded composite is bounded on both sides. -/
 theorem seq_bounded_iff {before after : CancellationSequence} :

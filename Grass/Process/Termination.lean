@@ -319,15 +319,35 @@ while proving nothing about scheduling.
 `docs/PROCESS_IMPLEMENTATION_PLAN.md` §5 owns it. What is dischargeable today is
 `Grass/Process/Cancellation/Compose.lean`'s bounded-cancellation algebra, which
 is the part of the argument that does not need fairness.
+
+**The quantifier placement matters and an earlier version had it wrong.**
+`outstanding` was bound *outside* `Eventually`, so the obligation demanded a
+later state permitted while holding *every* bag — unsatisfiable for this
+module's own fixture contract, which local adversarial review demonstrated in
+one line. It is now bound inside and existentially: the process reaches a safe
+point at which a cooperative stop is *possible*.
+
+That is weaker than the claim a reader wants, which is about the bag the process
+is actually holding when it gets there — and that bag lives in
+`Grass/Process/Run.lean`'s run state, not in `p.State`. The same layering that
+makes this an obligation rather than a field is what stops it being stated
+exactly.
+
+The obligation remains free in two other directions and this is not a defect to
+route around: `Eventually` and `Premises` are both author-supplied, so
+`Eventually := fun _ _ => True` or `Premises := fun _ _ => False` discharges it.
+Nothing here can constrain `Eventually` to be a liveness modality, because this
+layer has no fairness model — which is the reason it is a named obligation
+rather than a field. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.52 records it.
 -/
 def ReachesSafePointObligation
     (Premises : contract.Cause → p.State → Prop)
     (Eventually : p.State → (p.State → Prop) → Prop) : Prop :=
-  ∀ cause state outstanding, contract.requested cause state →
+  ∀ cause state, contract.requested cause state →
     Premises cause state →
     Eventually state fun later =>
       contract.SafePoint later ∧
-        contract.permitted .cooperative cause later outstanding
+        ∃ outstanding, contract.permitted .cooperative cause later outstanding
 
 end ProcessTerminationContract
 
