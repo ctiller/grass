@@ -149,6 +149,25 @@ fn submit(repo: &Path, agent: &str, kind: &str, data: &str, client_id: &str) -> 
     ]))
 }
 
+fn submit_urgent(repo: &Path, agent: &str, kind: &str, data: &str, client_id: &str) -> Value {
+    run_json(bin().current_dir(repo).args([
+        "submit",
+        "--agent",
+        agent,
+        "--kind",
+        kind,
+        "--data",
+        data,
+        "--client-id",
+        client_id,
+        "--urgent",
+    ]))
+}
+
+fn outbox(repo: &Path, agent: &str) -> Value {
+    run_json(bin().current_dir(repo).args(["outbox", "--agent", agent]))
+}
+
 fn coordinate(repo: &Path, agent: &str, host: &str, custody_epoch: u64) -> Value {
     run_json(bin().current_dir(repo).args([
         "coordinate",
@@ -358,6 +377,81 @@ fn submit_and_coordinate_publish_an_event_and_tail_shows_it() {
     assert_eq!(events[1]["kind"], "agent.status");
     assert_eq!(events[1]["data"]["status"], "active");
     assert_eq!(events[1]["data"]["note"], "hi");
+}
+
+/// `outbox` surfaces local outbox state with no network round trip at all
+/// (gate 18): before any `coordinate` call, a candidate submitted with
+/// `--urgent` is visibly pending and sorted ahead of an ordinary one
+/// submitted earlier, exactly the "is my urgent event still waiting"
+/// question the command exists to answer.
+#[test]
+fn outbox_shows_urgent_candidates_pending_and_sorted_first() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+
+    submit(
+        repo.path(),
+        "coord1",
+        "agent.status",
+        r#"{"status":"active","note":"ordinary"}"#,
+        "ordinary",
+    );
+    submit_urgent(
+        repo.path(),
+        "coord1",
+        "agent.status",
+        r#"{"status":"active","note":"urgent"}"#,
+        "urgent",
+    );
+
+    let before = outbox(repo.path(), "coord1");
+    let pending = before["pending"].as_array().unwrap();
+    assert_eq!(pending.len(), 2);
+    assert_eq!(pending[0]["urgent"], true);
+    assert!(pending[0]["outbox_path"]
+        .as_str()
+        .unwrap()
+        .ends_with("urgent.json"));
+    assert_eq!(pending[1]["urgent"], false);
+    assert_eq!(before["rejected"], serde_json::json!([]));
+
+    // coordinate: the urgent candidate must have landed first (coord1:1),
+    // the ordinary one second (coord1:2).
+    coordinate(repo.path(), "coord1", "host1", 0);
+    let tailed = tail(repo.path(), "coord1");
+    let events = tailed["events"].as_array().unwrap();
+    assert_eq!(events[1]["data"]["note"], "urgent");
+    assert_eq!(events[2]["data"]["note"], "ordinary");
+
+    let after = outbox(repo.path(), "coord1");
+    assert_eq!(after["pending"], serde_json::json!([]));
+}
+
+/// A rejected candidate's durable receipt (kind + reason) shows up under
+/// `outbox`'s `rejected` list, not just as a one-time `coordinate` response
+/// -- it must stay locally inspectable after the fact.
+#[test]
+fn outbox_shows_a_rejected_candidates_durable_receipt() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    submit(
+        repo.path(),
+        "coord1",
+        "issue.acknowledged",
+        r#"{"issue":"coord1:99","assignment":"coord1:99","note":""}"#,
+        "bogus",
+    );
+    coordinate(repo.path(), "coord1", "host1", 0);
+
+    let after = outbox(repo.path(), "coord1");
+    assert_eq!(after["pending"], serde_json::json!([]));
+    let rejected = after["rejected"].as_array().unwrap();
+    assert_eq!(rejected.len(), 1);
+    assert_eq!(rejected[0]["candidate"]["kind"], "issue.acknowledged");
+    assert!(rejected[0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("unknown issue"));
 }
 
 /// Requirement 4: a genuinely invalid candidate (referencing a nonexistent
@@ -829,6 +923,23 @@ fn golden_tail_output() {
     insta::assert_json_snapshot!(out, {
         ".events[].time" => insta::dynamic_redaction(redact_noise),
         ".events[].observed.roster_epoch" => insta::dynamic_redaction(redact_noise),
+    });
+}
+
+#[test]
+fn golden_outbox_output() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    submit(
+        repo.path(),
+        "coord1",
+        "agent.status",
+        r#"{"status":"active","note":"hi"}"#,
+        "c1",
+    );
+    let out = outbox(repo.path(), "coord1");
+    insta::assert_json_snapshot!(out, {
+        ".pending[].outbox_path" => "[outbox_path]",
     });
 }
 

@@ -1,0 +1,15 @@
+---
+source: tests/cli_flow.rs
+expression: out
+---
+{
+  "agent": "coord1",
+  "pending": [
+    {
+      "kind": "agent.status",
+      "outbox_path": "[outbox_path]",
+      "urgent": false
+    }
+  ],
+  "rejected": []
+}
