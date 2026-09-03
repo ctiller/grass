@@ -60,8 +60,16 @@ def connectionLens : serverPlan.ProcessRefinementLens where
     · exact absurd isEscrow (by simp)
     · injection isConnection with sameKind
       exact notConnection sameKind
-  delta := RequirementSet.empty
-  deltaAccumulates := RequirementSet.Covers.refl _
+  interiorChannelsTouchTheSelection := by
+    rintro edge session (isEscrow | ⟨_, isInstance⟩)
+    · exact Or.inr rfl
+    · exact absurd isInstance (by simp)
+  interiorRegionsAreWritable := by
+    rintro region (isEscrow | ⟨_, isInstance⟩)
+    · exact absurd isEscrow (by simp)
+    · exact absurd isInstance (by simp)
+  refinedRequirements := RequirementSet.empty
+  refinementOnlyAdds := RequirementSet.Covers.refl _
 
 /--
 **The lens owns something.**
@@ -150,8 +158,14 @@ def listenerLens : serverPlan.ProcessRefinementLens where
     rintro kind slot notListener ⟨other, isListener⟩
     injection isListener with sameKind
     exact notListener sameKind
-  delta := RequirementSet.empty
-  deltaAccumulates := RequirementSet.Covers.refl _
+  interiorChannelsTouchTheSelection := by
+    rintro edge session ⟨_, isInstance⟩
+    exact absurd isInstance (by simp)
+  interiorRegionsAreWritable := by
+    rintro region ⟨_, isInstance⟩
+    exact absurd isInstance (by simp)
+  refinedRequirements := RequirementSet.empty
+  refinementOnlyAdds := RequirementSet.Covers.refl _
 
 /-- **They are disjoint.** -/
 theorem the_two_lenses_are_disjoint :

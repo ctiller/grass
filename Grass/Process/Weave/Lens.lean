@@ -48,6 +48,19 @@ The same shape appears in `Grass/Process/Trace/Linearization.lean`: two
 independent steps never both emit, because the trace is one fragment. Two
 disjoint lenses likewise cannot both contain it, so at most one refinement in a
 weave may change what the program observes without an explicit argument.
+
+## What `Disjoint` does not separate
+
+Two disjoint lenses can still interfere through fragments neither declares, and
+in this corpus that is not hypothetical: **no constructor of
+`NetworkTransition` names `.obligations` or `.session` in its scope at all.** A
+mixin about the obligation ledger or a session cursor therefore frames past
+every step in the program, vacuously — the same defect
+`Tests/Process/WeaveFixtures.lean` records having caught for shared regions, and
+still live for these two. §8's "Replacing it preserves … obligations" is free
+here because nothing can change them. Recorded in
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.28; it is a `Transition.lean` defect
+and it makes several claims below cost-free.
 -/
 
 namespace Grass.Process
@@ -69,11 +82,32 @@ needed and neither determines the other: a role owns its own instance state, but
 whether it owns a shared region or the observation trace is a fact about the
 graph, not about the role's name.
 
-The two coupling fields are what stop `Interior` being chosen to suit the
-theorem. `selectedStateInterior` forbids a lens that claims a role and disowns
-its state; `unselectedStateExterior` forbids one that claims a fragment
-belonging to a role it did not select — which is the failure that would make
-`frames_every_exterior_mixin` unsound rather than merely weak.
+Four coupling fields stop `Interior` being chosen to suit the theorem, and it
+is worth being precise about what each one rules out, because a first draft had
+only the first two and local adversarial review walked straight through the gap.
+
+* `selectedStateInterior` forbids a lens that claims a role and disowns its
+  state.
+* `unselectedStateExterior` forbids claiming an *unselected role's private
+  state* — and nothing else. On its own it permitted a lens that owned the
+  shared region only an unselected role was declared against, the global nominal
+  history, the observation trace, and every channel's escrow including channels
+  between two roles it did not select.
+* `interiorChannelsTouchTheSelection` closes the escrow half: a channel is
+  interior only if the lens selected one of its endpoints. Without it a lens
+  with `Selected := fun _ => False` could still select real channel steps, which
+  makes "one abstract role or subgraph" a docstring rather than a type.
+* `interiorRegionsAreWritable` closes the shared-state half, using the
+  capability the graph already declares: a region is interior only if some
+  selected role may write it.
+
+**What remains open, disclosed rather than hidden.** `Selects` is still a
+predicate on a transition's *scope*, and `NetworkTransition`'s twelve channel
+constructors carry an edge and a session but never the role that took the step.
+So a lens selecting one endpoint of a channel may select steps the *other*
+endpoint took on it. Closing that needs the transition family to attribute
+channel steps to endpoints, which is `Grass/Process/Network/Transition.lean`'s
+change and is recorded in `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.29.
 -/
 structure ProcessRefinementLens where
   /-- The roles this refinement replaces. -/
@@ -84,17 +118,44 @@ structure ProcessRefinementLens where
   selectedStateInterior : ∀ kind slot, Selected kind → Interior (.instanceState kind slot)
   /-- And an unselected role's is not. -/
   unselectedStateExterior : ∀ kind slot, ¬ Selected kind → ¬ Interior (.instanceState kind slot)
-  /-- The requirements the replacement adds. -/
-  delta : RequirementSet
   /--
-  And the delta only ever adds.
+  **An interior channel has a selected endpoint.**
+
+  `docs/PROCESS.md` §8's "one abstract role or subgraph *and its complete typed
+  boundary*", at the half a fragment predicate can express. A lens that owned a
+  channel between two roles it did not select would be selecting steps of a
+  subgraph it never named.
+  -/
+  interiorChannelsTouchTheSelection : ∀ edge session,
+    Interior (.escrow edge session) →
+    Selected (plan.topology.endpoints edge).1 ∨ Selected (plan.topology.endpoints edge).2
+  /--
+  **And an interior region is one a selected role may write.**
+
+  Spending the capability `ProcessGraph.sharedAccess` already declares. A lens
+  cannot claim a region that only unselected roles write, nor one that is
+  read-only for everybody — which is exactly the fragment
+  `Tests/Process/WeaveFixtures.lean` builds its immutability mixin around.
+  -/
+  interiorRegionsAreWritable : ∀ region, Interior (.region region) →
+    ∃ kind, Selected kind ∧ (plan.topology.sharedAccess kind region).mayWrite = true
+  /-- The requirements the network faces after this replacement. -/
+  refinedRequirements : RequirementSet
+  /--
+  And the replacement only ever adds.
 
   `docs/PROCESS.md` §8: "Requirement deltas accumulate in the explicit
   `ProviderEnv`." A refinement that could *drop* a requirement would let a
   closure check pass because a frontier stopped being mentioned rather than
   because it was met.
+
+  Named for the post-refinement total rather than for the delta, because that is
+  what the law constrains: `RequirementSet` has no union, so "the delta" is not
+  a value this layer can add to anything. Accumulating two independent
+  refinements' deltas therefore has no statement here — see
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.30.
   -/
-  deltaAccumulates : delta.Covers boundary.requirements
+  refinementOnlyAdds : refinedRequirements.Covers boundary.requirements
 
 namespace ProcessRefinementLens
 
@@ -212,10 +273,19 @@ theorem disjoint_lenses_do_not_reopen_each_other
     (fun fragment inMixin inLeft => disjoint fragment inLeft (belongsToRight fragment inMixin))
     step insideLeft held
 
-/-- Requirement deltas accumulate rather than replacing each other. -/
-theorem deltas_accumulate {left right : plan.ProcessRefinementLens}
-    (staged : right.delta.Covers left.delta) : right.delta.Covers boundary.requirements :=
-  RequirementSet.Covers.trans staged left.deltaAccumulates
+/-!
+### Requirement accumulation across two lenses is not stated here
+
+A first draft had a `deltas_accumulate` theorem whose conclusion was literally a
+field of one of its arguments — `right.refinedRequirements.Covers
+boundary.requirements` is `right.refinementOnlyAdds` — so both hypotheses were
+discardable and it established no relation between two lenses at all.
+
+The real statement needs a union of requirement sets, which
+`Grass/Specification/Boundary.lean` does not provide: `RequirementSet` has
+`Covers` and nothing that combines two sets. Recorded as owed rather than
+approximated by a theorem that reads like it says something.
+-/
 
 /-! ## What a lens has to own to select anything -/
 

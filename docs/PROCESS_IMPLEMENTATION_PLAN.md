@@ -1968,3 +1968,103 @@ checking it off against §4's sentence should know which reading landed where.
 Needs no ruling if the intended reading was temporal; needs one if §4 meant the
 fixture family to be discharged entirely by the sequential adapter, because then
 it cannot be.
+
+### 10.27 The Mazurkiewicz congruence is obtained by narrowing, not by proving
+
+`Grass/Process/Trace/Linearization.lean` proves that two independent steps never
+both emit, and a first draft reported that as making `docs/PROCESS.md` §7's
+`BoundaryObservationsCommute` "contentless". Local adversarial review rejected
+the framing and it was right to.
+
+§7 asks for a congruence under which reordering independent steps preserves the
+observed trace. This layer obtains it by making every pair that could reorder
+two emissions *non-independent*, because `.observations` is a single global
+fragment and `NetworkTransition.Independent` is scope disjointness. The
+obligation has been moved rather than discharged: a plan that wants two
+subsystems to emit concurrently and to reason about the interleaving has no
+statement available, and would need either a per-subsystem trace or an explicit
+commutation argument about segments. Neither exists.
+
+The same shape reaches `Grass/Process/Weave/Lens.lean`: two `Disjoint` lenses
+cannot both own the trace, so at most one refinement in a weave may change what
+the program observes. That is sound and it excludes §8's own graphics-and-disk
+example if both refinements emit.
+
+Needs a ruling on whether the corpus intends one global observation trace. If it
+does, §7's observation-reordering congruence is trivial and should be recorded
+as such rather than sought. If it does not, `LogicalProcessNetworkCore` needs a
+per-origin trace and `docs/PROCESS.md` §3's "observation origin" becomes a field
+rather than a word.
+
+### 10.28 No transition can change the obligation ledger or any session
+
+Found by review of the lens layer, by case analysis over the whole family:
+
+```lean
+theorem nothing_touches_obligations (transition : plan.NetworkTransition a b) :
+    ¬ transition.scope .obligations := by
+  cases transition <;> simp [NetworkTransition.scope]
+
+theorem nothing_touches_session_cursors (transition : plan.NetworkTransition a b)
+    (edge session) : ¬ transition.scope (.session edge session) := by
+  cases transition <;> simp [NetworkTransition.scope]
+```
+
+`NetworkTransition.scope` never names `.obligations` and never names `.session`.
+By `touchesOnly`, that does not mean those fragments are unconstrained — it
+means they can **never move**. A session's status is fixed for the life of the
+network, so no channel can be opened or closed; and the obligation ledger
+`Grass/Process/Network/World.lean` deliberately parameterises can never be
+discharged or extended.
+
+Two consequences, both bad in the way this layer keeps finding:
+
+* A weave mixin about the obligation ledger or a session cursor frames past
+  every step of every program, vacuously and wrongly. That is exactly the defect
+  `Tests/Process/WeaveFixtures.lean` records having caught for shared regions —
+  `StepsLocally` could not touch a region at all — still live for these two.
+* `docs/PROCESS.md` §7's `DisjointOrCommutingObligations` and §8's "Replacing it
+  preserves … obligations" are satisfied by the whole family for free.
+
+This is a defect in `Grass/Process/Network/Transition.lean`, which is mine.
+Fixing it means giving the session-affecting constructors — `send` on a fresh
+session, `channelClose`, `channelDeath` — a `.session` scope and a law about the
+status they move it to, and giving the obligation-affecting ones an obligation
+scope. It is a larger change than this branch should carry and is the next
+substantial item on this layer's list.
+
+### 10.29 `ProcessRefinementLens.Selects` cannot attribute a channel step to a role
+
+`Grass/Process/Weave/Lens.lean`'s `Selects` says a transition's whole scope lies
+inside the lens's interior. `Selected` — the roles the refinement replaces —
+does not appear in it, and cannot: `NetworkTransition`'s twelve channel
+constructors carry an edge and a session and never the role that took the step.
+
+Two coupling fields now close the worst of it. `interiorChannelsTouchTheSelection`
+stops a lens owning a channel between two roles it did not select, and in
+particular stops a lens with `Selected := fun _ => False` selecting real steps.
+`interiorRegionsAreWritable` stops it owning a region only unselected roles may
+write.
+
+What remains is that a lens selecting one endpoint of a channel may select steps
+the *other* endpoint took on it. Closing it needs the transition family to
+attribute channel steps to endpoints — the sending constructor would carry which
+incarnation sent — which is the same `Transition.lean` change §10.28 needs and
+should be made with it.
+
+### 10.30 `RequirementSet` has no union, so deltas cannot accumulate
+
+`docs/PROCESS.md` §8: "Requirement deltas accumulate in the explicit
+`ProviderEnv`." `Grass/Specification/Boundary.lean`'s `RequirementSet` has
+`Covers`, `Covers.refl` and `Covers.trans`, and nothing that combines two sets.
+
+So a lens can carry the requirements the network faces *after* its replacement,
+with a law that it covers the boundary's — which
+`ProcessRefinementLens.refinementOnlyAdds` does — and two independently refined
+regions' requirements cannot be added together. A first draft had a
+`deltas_accumulate` theorem whose conclusion was literally a field of one of its
+arguments; it has been deleted rather than kept.
+
+`ProviderEnv` has no declaration anywhere in the tree. Needs a ruling on where
+the union lives — `Grass/Specification/Boundary.lean` is `g-design`'s, and this
+is a one-line addition there plus a `Nodup` merge.

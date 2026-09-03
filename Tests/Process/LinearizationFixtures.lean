@@ -1,5 +1,5 @@
 import Grass.Process.Trace.Linearization
-import Tests.Process.TransitionFixtures
+import Tests.Process.CommitFixtures
 
 /-!
 # The trace laws at a concrete plan
@@ -28,6 +28,7 @@ open Grass.Process
 open Grass.Process.Tests
 open Grass.Process.Tests.Transition (serverPlan beforeReceive afterReceive receiveAsStep
   receiveStep receive_scope_is_the_session)
+open Grass.Process.Tests.Commit (afterBeep quietRunCoalesces beep_is_committed)
 
 /-! ## One concrete step -/
 
@@ -111,19 +112,64 @@ theorem two_emitting_steps_are_never_independent
   fun rightEmits =>
     ProcessPlan.independent_steps_do_not_both_emit independent ⟨leftEmits, rightEmits⟩
 
-/--
-**A step independent of the receive still cannot be told apart by the trace.**
+/-! ## A step that does emit -/
 
-The receive is silent, so whichever side of it an emission happened, the trace
-is the same. Stated with the receive as one half because it is the concrete step
-this plan has.
+/--
+A commit of a `beep`, as a transition.
+
+`Tests/Process/CommitFixtures.lean` proves the reconciler's side of this; here
+it is fed to the `commit` constructor so that the two non-trivial cases of
+`observations_extend` are both exercised at a concrete step. Without it nothing
+in the corpus had ever satisfied `Emits`, and every theorem about emitting steps
+was being checked against an empty case.
 -/
-theorem nothing_independent_of_the_receive_is_disturbed_by_it
+def beepCommit : serverPlan.NetworkTransition beforeReceive afterBeep :=
+  .commit quietRunCoalesces.committed.observations beep_is_committed.toCommits
+
+/-- **And it emits** — the `Emits` predicate is inhabited at this plan. -/
+theorem the_commit_emits : beepCommit.Emits :=
+  ⟨by simp [quietRunCoalesces, Grass.Process.Tests.Commit.beeps], rfl⟩
+
+/-- **So the trace moved across it**, by the exactness of `Emits`. -/
+theorem the_commit_moved_the_trace :
+    beforeReceive.observations ≠ afterBeep.observations :=
+  (ProcessPlan.emits_iff_the_trace_moved beepCommit).mp the_commit_emits
+
+/-- The commit's own instance of the extension law. -/
+theorem the_commit_extends_the_trace :
+    ∃ emitted, afterBeep.observations = beforeReceive.observations ++ emitted :=
+  ProcessPlan.observations_extend beepCommit
+
+/-- And the receive's, which is the silent case of the same law. -/
+theorem the_receive_extends_the_trace :
+    ∃ emitted, afterReceive.observations = beforeReceive.observations ++ emitted :=
+  ProcessPlan.observations_extend receiveStep
+
+/-- The commit and the receive really are independent: escrow and trace are disjoint. -/
+theorem the_commit_and_the_receive_are_independent : beepCommit.Independent receiveStep := by
+  intro fragment inCommit inReceive
+  obtain ⟨_, isObservations⟩ := inCommit
+  rw [(receive_scope_is_the_session fragment).mp inReceive] at isObservations
+  exact absurd isObservations (by simp)
+
+/--
+**And nothing independent of the commit may emit.**
+
+The hypothesis is load-bearing here, which it was not in an earlier version of
+this fixture: that one concluded a disjunction whose first half was already a
+closed theorem, so the independence hypothesis and the other step were both
+unused. Local adversarial review caught it.
+-/
+theorem anything_independent_of_the_commit_is_silent
     {c d : serverPlan.LogicalProcessNetwork}
     {other : serverPlan.NetworkTransition c d}
-    (independent : receiveStep.Independent other) :
-    beforeReceive.observations = afterReceive.observations ∨
-      c.observations = d.observations :=
-  ProcessPlan.one_of_two_independent_steps_is_silent independent
+    (independent : beepCommit.Independent other) : c.observations = d.observations :=
+  ProcessPlan.trace_unchanged_of_silent other
+    (fun emits => independent .observations the_commit_emits emits)
+
+/-- In particular the receive is, which is the concrete instance. -/
+theorem the_receive_is_silent_because_the_commit_emits :
+    beforeReceive.observations = afterReceive.observations :=
+  anything_independent_of_the_commit_is_silent the_commit_and_the_receive_are_independent
 
 end Grass.Process.Tests.Linearization

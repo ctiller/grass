@@ -26,25 +26,50 @@ cannot be dropped by a later step. Twenty-one constructors get it from
 `processStep` and `commit`, carry an append equation as a field.
 
 **Two independent steps cannot both emit.** `independent_steps_do_not_both_emit`
-is a one-line consequence of a fact that was not arranged for it: both emitting
-constructors declare `.observations` in their scope, and `Independent` is scope
-disjointness. So of any two independent steps, at least one leaves the trace
-exactly as it found it.
+is a one-line consequence of both emitting constructors declaring
+`.observations` in their scope while `Independent` is scope disjointness. So of
+any two independent steps, at least one leaves the trace exactly as it found it,
+and swapping them cannot reorder two emissions because there are never two to
+reorder.
 
-That is the Mazurkiewicz content in the form this layer can support. Swapping
-two independent steps cannot reorder two emissions, because there are never two
-emissions to reorder — the schedule between independent steps is unobservable
-through the trace *by construction*, not by a commutation argument about
-segments.
+**This is a narrowing, not a strengthening, and the difference matters.** A
+first draft of this module reported it as making §7's
+`BoundaryObservationsCommute` "contentless", which local adversarial review
+rejected: §7 asks for a congruence under which reordering independent steps
+preserves the observed trace, and this layer obtains it by making every pair
+that could reorder two emissions non-independent. The obligation has been moved,
+not discharged — a plan that wants two subsystems to emit concurrently needs a
+per-subsystem trace or an explicit commutation argument, and neither exists
+here. It is recorded in `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.27.
+
+What the same review *did* fix is worse and is now gone: `StepsLocally` used to
+declare `.observations` unconditionally, so two local steps on unrelated
+instances that emitted nothing were never independent either. The guard is now
+`emitted ≠ []`, and `emits_iff_the_trace_moved` is the check — `Emits` holds
+exactly when the trace actually moved, not when the constructor might have moved
+it.
 
 ## What is still owed, and where
 
-The constructive diamond stays where `Independence.lean` left it. What this
-module shows is that the diamond is the *whole* remaining obligation for the
-trace: `a_swap_only_moves_the_emission` needs a swap for the reordered
-execution's intermediate state and needs nothing else. A reader tempted to add a
-separate "observations commute" lemma — §7's `BoundaryObservationsCommute` —
-should note that at this layer it would have no content to prove.
+The constructive diamond stays where `Independence.lean` left it, and it is not
+the only thing owed. §7 names, and nothing in this corpus yet states:
+
+* `independent_diamond` — the swap itself, named as `SwapsWith` in
+  `Independence.lean` and discharged nowhere;
+* `syscall_linearizations_equivalent` and `StrongObservedExecutionEquivalence` —
+  there is no syscall, no linearization and no partial order in this module, and
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` assigns this file "syscall partial
+  orders";
+* `TraceRelatedBySwap` — the trace congruence as an object, rather than the two
+  facts about it proved here;
+* `ProviderEffectsCommute` — provider operation footprints, handle identities
+  and interruption laws, none of which this layer has;
+* `NetworkWorldEquivalent` — equality is used throughout instead;
+* `CompatibleSharedAccess` — §7's relation is *compatible*, which is wider than
+  the disjointness of written regions `Independent` uses.
+
+`BoundaryObservationsCommute` is the only §7 name this module engages, and see
+above for how.
 -/
 
 namespace Grass.Process
@@ -61,10 +86,12 @@ variable {registry : ProtocolRegistry.{u, w, v}} {boundary : DriverBoundary.{u}}
 /-! ## Who may write the trace -/
 
 /--
-A step that may append to the observation trace.
+A step that appends to the observation trace.
 
-Not a new field: it is `.observations` being in the step's declared scope, so a
-step emits exactly when it said it might.
+Not a new field: it is `.observations` being in the step's declared scope. Since
+both emitting constructors guard that on their segment being non-empty,
+`emits_iff_the_trace_moved` below makes this exact rather than an
+over-approximation — `Emits` holds precisely when the trace actually moved.
 -/
 def NetworkTransition.Emits {before after : plan.LogicalProcessNetwork}
     (transition : plan.NetworkTransition before after) : Prop :=
@@ -110,6 +137,46 @@ theorem observations_extend {before after : plan.LogicalProcessNetwork}
     | commit emitted step => exact ⟨emitted, step.appended⟩
     | _ => exact absurd emits (by simp [NetworkTransition.Emits, NetworkTransition.scope])
   · exact ⟨[], by rw [← trace_unchanged_of_silent transition emits, List.append_nil]⟩
+
+/--
+**A step emits exactly when the trace moved.**
+
+Both directions are content. Backward is `trace_unchanged_of_silent`
+contraposed: a step cannot change the trace without declaring it, which is the
+scope discipline. Forward is the `emitted ≠ []` guard on the two emitting
+constructors: a step that declares the trace really did append something to it.
+
+Without the guard the forward direction is false — a `processStep` with an empty
+segment would declare the trace and move nothing — and `Emits` would be a
+*may-emit* predicate wearing an emit predicate's name. That is what an earlier
+draft had, and what made every pair of local steps non-independent.
+-/
+theorem emits_iff_the_trace_moved {before after : plan.LogicalProcessNetwork}
+    (transition : plan.NetworkTransition before after) :
+    transition.Emits ↔ before.observations ≠ after.observations := by
+  constructor
+  · intro emits
+    cases transition with
+    | processStep _ _ _ _ emitted step =>
+      rcases emits with isSlot | ⟨nonempty, _⟩ | ⟨_, _, isRegion⟩
+      · exact absurd isSlot (by simp)
+      · intro same
+        have lengths := congrArg List.length step.observationsExtend
+        rw [← same, List.length_append] at lengths
+        have : emitted.length = 0 := by omega
+        exact nonempty (List.eq_nil_of_length_eq_zero this)
+      · exact absurd isRegion (by simp)
+    | commit emitted step =>
+      obtain ⟨nonempty, _⟩ := emits
+      intro same
+      have lengths := congrArg List.length step.appended
+      rw [← same, List.length_append] at lengths
+      have : emitted.length = 0 := by omega
+      exact nonempty (List.eq_nil_of_length_eq_zero this)
+    | _ => exact absurd emits (by simp [NetworkTransition.Emits, NetworkTransition.scope])
+  · intro moved
+    exact Classical.byContradiction
+      (fun silent => moved (trace_unchanged_of_silent transition silent))
 
 /-- So the trace before a step is a prefix of the trace after it. -/
 theorem observations_prefix {before after : plan.LogicalProcessNetwork}
@@ -208,13 +275,14 @@ in two pieces — which is what a commutation argument about observation segment
 would have had to rule out, and what
 `independent_steps_do_not_both_emit` rules out instead.
 
-The swap is what supplies the reordered execution's intermediate state, so this
-says something about *both* orders rather than about one; the scope equations in
-`SwapsWith` are what carry independence across to the reordered pair. An earlier
-draft of this theorem stated only that the reordered execution emitted some
-segment, which is true of any two-step execution and mentions the swap nowhere —
-the unused-variable linter did not catch it, because the hypothesis had been
-named `_swap`.
+The swap is what supplies the reordered execution's intermediate state, and the
+existential carries the two reordered *steps* and their scope equations so that
+`middle` is pinned to the swap's own witness. That matters: a version whose
+existential mentioned only `middle` is satisfied by `⟨first, Or.inl rfl⟩` with
+no independence, no swap and no steps at all. Two earlier drafts were vacuous in
+two different ways — the first took the swap hypothesis and never used it, and
+the second destructured it but concluded something the swap did not bound. Local
+adversarial review found both.
 -/
 theorem a_swap_only_moves_the_emission
     {first second third : plan.LogicalProcessNetwork}
@@ -222,12 +290,18 @@ theorem a_swap_only_moves_the_emission
     (independent : left.transition.Independent right.transition)
     (swap : SwapsWith left right) :
     (first.observations = second.observations ∨ second.observations = third.observations) ∧
-      ∃ middle : plan.LogicalProcessNetwork,
-        first.observations = middle.observations ∨ middle.observations = third.observations := by
+      ∃ (middle : plan.LogicalProcessNetwork)
+        (swappedRight : plan.NetworkStep first middle)
+        (swappedLeft : plan.NetworkStep middle third),
+        (∀ fragment, swappedRight.transition.scope fragment ↔ right.transition.scope fragment) ∧
+        (∀ fragment, swappedLeft.transition.scope fragment ↔ left.transition.scope fragment) ∧
+        (first.observations = middle.observations ∨
+          middle.observations = third.observations) := by
   refine ⟨one_of_two_independent_steps_is_silent independent, ?_⟩
   obtain ⟨middle, swappedRight, swappedLeft, rightScope, leftScope⟩ := swap
-  refine ⟨middle, one_of_two_independent_steps_is_silent (left := swappedRight.transition)
-    (right := swappedLeft.transition) ?_⟩
+  refine ⟨middle, swappedRight, swappedLeft, rightScope, leftScope, ?_⟩
+  refine one_of_two_independent_steps_is_silent (left := swappedRight.transition)
+    (right := swappedLeft.transition) ?_
   intro fragment inSwappedRight inSwappedLeft
   exact independent fragment ((leftScope fragment).mp inSwappedLeft)
     ((rightScope fragment).mp inSwappedRight)
