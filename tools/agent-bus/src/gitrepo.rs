@@ -248,6 +248,21 @@ pub fn ensure_bus_worktree(
     worktree_path: &Path,
     start_point: &str,
 ) -> AbResult<()> {
+    // AGENT_BUS.md section 2 explicitly supports "multiple agents sharing
+    // one clone" via these same deterministic cache paths -- so two
+    // concurrent processes can enter this function for the identical
+    // `worktree_path` at the same time. Without serialization, both could
+    // observe staleness and both race `worktree remove`/`worktree add` for
+    // the same path: one process's remove can delete files mid-read by the
+    // other, one process's add can be clobbered by the other's concurrent
+    // add, and git's own `.git/worktrees/<name>` metadata can end up
+    // half-referencing a path neither process can then re-add to cleanly.
+    // An OS advisory lock on a sibling lock file (released automatically
+    // when this guard drops, *and* automatically by the OS if this process
+    // crashes while holding it -- no manual staleness/timeout logic needed)
+    // makes the whole exists-check/refresh/create sequence atomic across
+    // processes.
+    let _guard = lock_worktree_path(worktree_path)?;
     if worktree_path.exists() {
         let target = rev_parse(repo_dir, start_point)?;
         if rev_parse_opt(worktree_path, "HEAD")?.as_deref() == Some(target.as_str()) {
@@ -292,6 +307,48 @@ pub fn ensure_bus_worktree(
         ],
     )?;
     Ok(())
+}
+
+/// The sibling lock-file path guarding `worktree_path`: same parent
+/// directory, a dot-prefixed `.<name>.lock` name so it never collides with
+/// (or gets swept up by) anything that lists the parent directory looking
+/// for actual worktree entries.
+fn worktree_lock_path(worktree_path: &Path) -> PathBuf {
+    let name = worktree_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    worktree_path.with_file_name(format!(".{name}.lock"))
+}
+
+/// Opens (creating if necessary) and exclusively locks `worktree_path`'s
+/// sibling lock file, blocking until any other process's lock on it is
+/// released. The returned `File` must be kept alive for exactly as long as
+/// the critical section it protects -- dropping it releases the lock.
+fn lock_worktree_path(worktree_path: &Path) -> AbResult<std::fs::File> {
+    use fs4::FileExt;
+    let lock_path = worktree_lock_path(worktree_path);
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| AbError::Io {
+            path: parent.display().to_string(),
+            source: e,
+        })?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|e| AbError::Io {
+            path: lock_path.display().to_string(),
+            source: e,
+        })?;
+    file.lock_exclusive().map_err(|e| AbError::Io {
+        path: lock_path.display().to_string(),
+        source: e,
+    })?;
+    Ok(file)
 }
 
 pub fn add_all(dir: &Path) -> AbResult<()> {
@@ -951,6 +1008,63 @@ mod outer_tests {
         // `rev-parse`s above would panic with "no rule matched" -- in
         // particular no `worktree remove`/`worktree add`.
         ensure_bus_worktree(repo.path(), &worktree, &head).unwrap();
+    }
+
+    /// Round-4 review, Significant finding: the staleness fix above
+    /// introduced a new hazard of its own -- AGENT_BUS.md section 2
+    /// explicitly supports "multiple agents sharing one clone" via these
+    /// same deterministic cache paths, so two concurrent processes can
+    /// legitimately race to refresh the identical `worktree_path` at once.
+    /// Without serialization, one caller's `worktree remove` could delete
+    /// files mid-read by another, or two concurrent `worktree add`s for the
+    /// same path could corrupt git's own worktree metadata. Proves the
+    /// exclusive-lock fix: many threads hammering `ensure_bus_worktree` for
+    /// the *same* path with a *moving* target, concurrently, all succeed
+    /// (no error, no panic), and every one observes the worktree correctly
+    /// checked out at some real, valid commit afterward -- never a
+    /// half-removed or half-added state.
+    #[test]
+    fn ensure_bus_worktree_is_safe_under_concurrent_callers_racing_the_same_path() {
+        let repo = init_repo();
+        let worktree = repo.path().join("_shared_cache_path");
+        let repo_path = repo.path().to_path_buf();
+
+        // Two real commits, so `start_point` genuinely differs across
+        // concurrent calls, not just a no-op every time.
+        let first = rev_parse(&repo_path, "HEAD").unwrap();
+        commit_file(&repo_path, "README.md", "second\n", "second");
+        let second = rev_parse(&repo_path, "HEAD").unwrap();
+        let targets = [first.clone(), second.clone()];
+
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let repo_path = repo_path.clone();
+                let worktree = worktree.clone();
+                let target = targets[i % targets.len()].clone();
+                std::thread::spawn(move || ensure_bus_worktree(&repo_path, &worktree, &target))
+            })
+            .collect();
+        for h in handles {
+            h.join()
+                .expect("thread must not panic")
+                .expect("ensure_bus_worktree must not error under concurrent callers");
+        }
+
+        // The worktree must be left in a fully valid state: checked out at
+        // *one* of the two real commits, never a torn/partial mix.
+        let final_head = rev_parse(&worktree, "HEAD").unwrap();
+        assert!(
+            final_head == first || final_head == second,
+            "worktree ended up at an unexpected commit: {final_head}"
+        );
+        let content = std::fs::read_to_string(worktree.join("README.md"))
+            .unwrap()
+            .trim_end()
+            .to_string();
+        assert!(
+            content == "hello" || content == "second",
+            "worktree content is inconsistent with its own HEAD: {content:?}"
+        );
     }
 
     /// When the worktree path's parent cannot be created (here, because a
