@@ -226,6 +226,22 @@ fn merge_ready(repo: &Path, agent: &str, authorization: &str) -> Value {
     ]))
 }
 
+/// `--json` always parses as a top-level JSON array (possibly empty) of
+/// findings -- unlike every other command here, `audit-main`'s plain-mode
+/// output is deliberately not one-object-per-line JSON at all (`audit-main:
+/// clean`, or one `Display`-formatted finding per line), so this helper
+/// (unlike `run_json`) always passes `--json` rather than trying to make
+/// `run_json`'s "stdout is exactly one JSON value" assumption cover both
+/// output modes.
+fn audit_main_json(repo: &Path, to: Option<&str>) -> Value {
+    let mut args = vec!["audit-main", "--json"];
+    if let Some(t) = to {
+        args.push("--to");
+        args.push(t);
+    }
+    run_json(bin().current_dir(repo).args(args))
+}
+
 /// Activates the merge engine as `coordinator` (a bootstrap coordinator),
 /// naming its own registration event (`<coordinator>:0`) as `previous_epoch`
 /// -- the one legitimate "nothing real to reference yet" case
@@ -317,6 +333,72 @@ fn authorize_merge(
         .as_str()
         .unwrap()
         .to_string()
+}
+
+/// Submits and coordinates a `review.merged` event (the ordinary success
+/// receipt, AGENT_REVIEW.md section 7 step 11) -- there is no dedicated CLI
+/// command for this, unlike `prepare-merge`/`merge-ready`: `review.merged`
+/// is published through the generic `submit --kind review.merged` path, the
+/// same way `review.merge_authorized` itself is (see `Command::AuditMain`'s
+/// own doc comment, and this task's final report, for why `review.merge_
+/// reconciled` follows the identical convention rather than getting its own
+/// dedicated command).
+#[allow(clippy::too_many_arguments)]
+fn submit_review_merged(
+    repo: &Path,
+    reviewer: &str,
+    authorization: &str,
+    previous_main: &str,
+    reviewed_commit: &str,
+    main_commit: &str,
+) -> Value {
+    let data = serde_json::json!({
+        "authorization": authorization,
+        "previous_main": previous_main,
+        "main_commit": main_commit,
+        "product_branch": "refs/heads/agent/zoe/feature",
+        "reviewed_commit": reviewed_commit,
+        "summary": "authorized candidate advanced main",
+    });
+    submit(repo, reviewer, "review.merged", &data.to_string(), "merged");
+    let coordinated = coordinate(repo, reviewer, "host2", 0);
+    assert_eq!(
+        coordinated["outbox_rejected"],
+        serde_json::json!([]),
+        "{coordinated}"
+    );
+    coordinated
+}
+
+/// Submits and coordinates a `review.merge_reconciled` recovery receipt
+/// (AGENT_REVIEW.md section 11) as `coord1` -- the bootstrap coordinator --
+/// through the same generic `submit` path.
+#[allow(clippy::too_many_arguments)]
+fn submit_review_merge_reconciled(
+    repo: &Path,
+    coordinator: &str,
+    authorization: &str,
+    previous_main: &str,
+    reviewed_commit: &str,
+    main_commit: &str,
+) -> Value {
+    let data = serde_json::json!({
+        "authorization": authorization,
+        "previous_main": previous_main,
+        "main_commit": main_commit,
+        "product_branch": "refs/heads/agent/zoe/feature",
+        "reviewed_commit": reviewed_commit,
+        "reason": "manual merge outside the bus",
+        "user_authority": "repo owner",
+    });
+    submit(
+        repo,
+        coordinator,
+        "review.merge_reconciled",
+        &data.to_string(),
+        "reconcile",
+    );
+    coordinate(repo, coordinator, "host1", 0)
 }
 
 /// Commits `feature.txt` on top of the repo's current `main`, with an
@@ -1929,6 +2011,312 @@ fn merge_ready_rejects_a_changed_path_outside_reviewed_scope() {
         .stderr(predicate::str::contains("is outside reviewed_scope"));
 }
 
+// ---------------------------------------------------------------- audit-main
+//
+// AGENT_REVIEW.md sections 9/11/12 (fixture 10). `audit-main` is a read-only
+// correlation walk, so every test here first builds a genuinely valid,
+// genuinely published review chain (nominate/accept/activate/prepare-merge/
+// authorize, mirroring `merge_ready_reports_ready_for_a_genuinely_valid_
+// authorization`), then hand-advances `refs/heads/main` to the authorized
+// candidate with a bare `git update-ref` -- `agent-bus` itself never pushes a
+// candidate to `main` (AGENT_REVIEW.md section 7 step 10 is the reviewer's
+// own `git push`, outside this helper), so every test that wants a
+// "genuinely landed" commit to audit has to perform that push itself.
+
+/// The fully valid path: authorize, advance `main` to the exact candidate,
+/// publish `review.merged`, and `audit-main` reports it clean.
+#[test]
+fn audit_main_reports_clean_when_fully_correlated() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    let merge_engine_epoch = activate_merge_engine(repo.path(), "coord1");
+    let prepared = prepare_merge(repo.path(), "aiden", &nomination, &feature_commit);
+    let candidate = prepared["candidate"].as_str().unwrap().to_string();
+    let authorization_id = authorize_merge(
+        repo.path(),
+        "aiden",
+        &nomination,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+        &merge_engine_epoch,
+        &["feature.txt"],
+    );
+
+    git(repo.path(), &["update-ref", "refs/heads/main", &candidate]);
+    submit_review_merged(
+        repo.path(),
+        "aiden",
+        &authorization_id,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+    );
+
+    let findings = audit_main_json(repo.path(), None);
+    assert_eq!(findings, serde_json::json!([]), "{findings}");
+
+    // Plain (non-JSON) mode reports the same clean verdict as a human-
+    // readable line, not just an empty JSON array.
+    bin()
+        .current_dir(repo.path())
+        .args(["audit-main"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("audit-main: clean"));
+}
+
+/// `main` was genuinely advanced to the authorized candidate, but the
+/// reviewer never published `review.merged` (and nobody reconciled it
+/// either) -- exactly the gap AGENT_REVIEW.md section 1 describes ("a
+/// missing or mismatched receipt is detected by `audit-main`").
+#[test]
+fn audit_main_flags_missing_receipt() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    let merge_engine_epoch = activate_merge_engine(repo.path(), "coord1");
+    let prepared = prepare_merge(repo.path(), "aiden", &nomination, &feature_commit);
+    let candidate = prepared["candidate"].as_str().unwrap().to_string();
+    authorize_merge(
+        repo.path(),
+        "aiden",
+        &nomination,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+        &merge_engine_epoch,
+        &["feature.txt"],
+    );
+    git(repo.path(), &["update-ref", "refs/heads/main", &candidate]);
+
+    let findings = audit_main_json(repo.path(), None);
+    let findings = findings.as_array().unwrap();
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0]["commit"], candidate);
+    assert!(
+        findings[0]["problem"]
+            .as_str()
+            .unwrap()
+            .contains("missing review.merged/review.merge_reconciled receipt"),
+        "{:?}",
+        findings[0]
+    );
+
+    bin()
+        .current_dir(repo.path())
+        .args(["audit-main"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("missing review.merged"));
+}
+
+/// The section 11 recovery path closes exactly the gap the previous test
+/// leaves open: once a bootstrap coordinator reconciles the same landed
+/// commit, `audit-main` reports it clean again.
+#[test]
+fn audit_main_reports_clean_after_review_merge_reconciled() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    let merge_engine_epoch = activate_merge_engine(repo.path(), "coord1");
+    let prepared = prepare_merge(repo.path(), "aiden", &nomination, &feature_commit);
+    let candidate = prepared["candidate"].as_str().unwrap().to_string();
+    let authorization_id = authorize_merge(
+        repo.path(),
+        "aiden",
+        &nomination,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+        &merge_engine_epoch,
+        &["feature.txt"],
+    );
+    git(repo.path(), &["update-ref", "refs/heads/main", &candidate]);
+
+    let reconciled = submit_review_merge_reconciled(
+        repo.path(),
+        "coord1",
+        &authorization_id,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+    );
+    assert_eq!(
+        reconciled["outbox_rejected"],
+        serde_json::json!([]),
+        "{reconciled}"
+    );
+
+    let findings = audit_main_json(repo.path(), None);
+    assert_eq!(findings, serde_json::json!([]), "{findings}");
+}
+
+// ------------------------------------------------------------------ reconcile
+//
+// AGENT_REVIEW.md section 11: "If the reviewer merges but omits `review.
+// merged`, product history remains authoritative... a bootstrap-authorized
+// coordinator emits `review.merge_reconciled` only after checking the
+// authorized candidate is already the corresponding first-parent `main`
+// commit." There is no dedicated `reconcile` CLI command (see `submit_
+// review_merge_reconciled`'s own doc comment) -- these drive the generic
+// `submit --kind review.merge_reconciled` path instead, proving `coordinator
+// ::verify_review_merge_reconciled`'s live-Git gate (`src/coordinator.rs`)
+// is actually reachable end to end through the compiled binary, not just
+// unit-tested in isolation.
+
+/// The exact scenario section 11 exists for: the reviewer's real push landed
+/// (main genuinely advanced to the authorized candidate) but `review.merged`
+/// was never published. A bootstrap coordinator's reconciliation succeeds.
+#[test]
+fn reconcile_via_submit_succeeds_when_main_was_genuinely_advanced() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    let merge_engine_epoch = activate_merge_engine(repo.path(), "coord1");
+    let prepared = prepare_merge(repo.path(), "aiden", &nomination, &feature_commit);
+    let candidate = prepared["candidate"].as_str().unwrap().to_string();
+    let authorization_id = authorize_merge(
+        repo.path(),
+        "aiden",
+        &nomination,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+        &merge_engine_epoch,
+        &["feature.txt"],
+    );
+    git(repo.path(), &["update-ref", "refs/heads/main", &candidate]);
+
+    let reconciled = submit_review_merge_reconciled(
+        repo.path(),
+        "coord1",
+        &authorization_id,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+    );
+    // coord1:0 is genesis registration and coord1:1 is the `merge_engine.
+    // activated` event `activate_merge_engine` already published above, so
+    // this reconciliation lands as coord1:2.
+    assert_eq!(
+        reconciled["published_events"],
+        serde_json::json!(["coord1:2"]),
+        "{reconciled}"
+    );
+    assert_eq!(
+        reconciled["outbox_rejected"],
+        serde_json::json!([]),
+        "{reconciled}"
+    );
+}
+
+/// A coordinator attempting to reconcile a candidate that was never actually
+/// pushed to `main` must be refused -- `review.merge_reconciled` is a
+/// recovery record for a merge that genuinely already happened, not a way to
+/// retroactively authorize one. Neither `apply::apply_review_merge_
+/// reconciled` (pure field equality against the authorization) nor `apply::
+/// dry_run` can catch this: only `coordinator::verify_review_merge_
+/// reconciled`'s live `git rev-list --first-parent` check can.
+#[test]
+fn reconcile_via_submit_rejects_when_main_was_never_advanced() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    let merge_engine_epoch = activate_merge_engine(repo.path(), "coord1");
+    let prepared = prepare_merge(repo.path(), "aiden", &nomination, &feature_commit);
+    let candidate = prepared["candidate"].as_str().unwrap().to_string();
+    let authorization_id = authorize_merge(
+        repo.path(),
+        "aiden",
+        &nomination,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+        &merge_engine_epoch,
+        &["feature.txt"],
+    );
+    // `main` deliberately left at `previous_main` -- the candidate was never
+    // actually pushed.
+
+    let reconciled = submit_review_merge_reconciled(
+        repo.path(),
+        "coord1",
+        &authorization_id,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+    );
+    assert_eq!(reconciled["published_events"], serde_json::json!([]));
+    let rejected = reconciled["outbox_rejected"].as_array().unwrap();
+    assert_eq!(rejected.len(), 1, "{reconciled}");
+    assert_eq!(rejected[0]["kind"], "review.merge_reconciled");
+    assert!(
+        rejected[0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("not a first-parent successor"),
+        "{}",
+        rejected[0]["reason"]
+    );
+}
+
+/// Only a bootstrap coordinator may reconcile -- an ordinary reviewer
+/// (even the authorizing one) is refused by `apply::apply_review_merge_
+/// reconciled`'s own `require_bootstrap_coordinator` gate, exercised here
+/// through the real CLI/outbox path for the first time (previously only
+/// covered by `apply.rs`'s own unit tests).
+#[test]
+fn reconcile_via_submit_rejects_a_non_coordinator_agent() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    let merge_engine_epoch = activate_merge_engine(repo.path(), "coord1");
+    let prepared = prepare_merge(repo.path(), "aiden", &nomination, &feature_commit);
+    let candidate = prepared["candidate"].as_str().unwrap().to_string();
+    let authorization_id = authorize_merge(
+        repo.path(),
+        "aiden",
+        &nomination,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+        &merge_engine_epoch,
+        &["feature.txt"],
+    );
+    git(repo.path(), &["update-ref", "refs/heads/main", &candidate]);
+
+    let data = serde_json::json!({
+        "authorization": authorization_id,
+        "previous_main": previous_main,
+        "main_commit": candidate,
+        "product_branch": "refs/heads/agent/zoe/feature",
+        "reviewed_commit": feature_commit,
+        "reason": "manual merge outside the bus",
+        "user_authority": "repo owner",
+    });
+    submit(
+        repo.path(),
+        "aiden",
+        "review.merge_reconciled",
+        &data.to_string(),
+        "reconcile-as-reviewer",
+    );
+    let coordinated = coordinate(repo.path(), "aiden", "host2", 0);
+    assert_eq!(coordinated["published_events"], serde_json::json!([]));
+    let rejected = coordinated["outbox_rejected"].as_array().unwrap();
+    assert_eq!(rejected.len(), 1, "{coordinated}");
+    assert!(
+        rejected[0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("is not a coordinator"),
+        "{}",
+        rejected[0]["reason"]
+    );
+}
+
 // ================================================================ golden tests
 
 // ================================================================ golden tests
@@ -2102,6 +2490,46 @@ fn golden_merge_ready_output() {
     insta::assert_json_snapshot!(out, {
         ".candidate" => insta::dynamic_redaction(redact_noise),
     });
+}
+
+/// `audit-main --json`'s clean-verdict shape: a bare `[]`, the same shape
+/// regardless of how much history was actually walked. The richer
+/// one-finding shape (`{"commit": ..., "problem": ..., "reviewer": ...}`) is
+/// already pinned field-by-field by `audit_main_flags_missing_receipt`
+/// above -- redacting a `commit` hash embedded inside an array element, as
+/// opposed to an object value/map entry every other golden test here
+/// redacts, needs no *new* insta selector syntax only because this shape
+/// has no hash to redact at all.
+#[test]
+fn golden_audit_main_output() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    let merge_engine_epoch = activate_merge_engine(repo.path(), "coord1");
+    let prepared = prepare_merge(repo.path(), "aiden", &nomination, &feature_commit);
+    let candidate = prepared["candidate"].as_str().unwrap().to_string();
+    let authorization_id = authorize_merge(
+        repo.path(),
+        "aiden",
+        &nomination,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+        &merge_engine_epoch,
+        &["feature.txt"],
+    );
+    git(repo.path(), &["update-ref", "refs/heads/main", &candidate]);
+    submit_review_merged(
+        repo.path(),
+        "aiden",
+        &authorization_id,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+    );
+
+    let out = audit_main_json(repo.path(), None);
+    insta::assert_json_snapshot!(out);
 }
 
 #[test]
