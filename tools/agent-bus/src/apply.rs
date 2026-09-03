@@ -1493,10 +1493,13 @@ fn apply_review_merge_authorized(
         .review_chain(&d.nomination)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {}", env.id, d.nomination)))?;
     if chain.current_nomination != d.nomination {
-        return Err(invalid(format!(
-            "{}: {} is not the current nomination in its chain",
-            env.id, d.nomination
-        )));
+        // See the identical comment in `apply_review_accept`: a no-op, not
+        // an `Err`. Same reasoning applies here -- an authorization against
+        // a nomination link the chain has since moved past from under it
+        // (ordinarily, or via a reassignment this event's
+        // independently-published author never observed) is inapplicable,
+        // not fleet-wide-fatal.
+        return Ok(());
     }
     let reviewer = chain.nomination_reviewer.get(&d.nomination).unwrap();
     if reviewer != &env.agent {
@@ -5083,7 +5086,7 @@ mod tests {
     }
 
     #[test]
-    fn review_merge_authorized_rejects_a_stale_nomination_after_reassignment() {
+    fn review_merge_authorized_ignores_a_stale_nomination_after_reassignment() {
         let mut state = empty_state(&[]);
         let alice = a("alice");
         let bob = a("bob");
@@ -5127,11 +5130,11 @@ mod tests {
             )),
             [],
         );
-        let err = apply_event(&mut state, &env).unwrap_err();
+        apply_ok(&mut state, &env);
+        let chain = state.review_chain(&reassign_env.id).unwrap();
         assert!(
-            err.to_string()
-                .contains("is not the current nomination in its chain"),
-            "{err}"
+            chain.authorizations.is_empty(),
+            "bob's stale authorization must not have taken effect"
         );
     }
 
