@@ -118,8 +118,8 @@ def returnAddress : ByteSeq := List.replicate 8 0x7F
 nothing else, so the block proved `mov eax, transferred` reads **zero** — the value
 `mov transferred, 0` left. In `Spikes/1_Hello_World/Program.lean` the reload reads
 the byte count `WriteFile` wrote, and the loop's correctness turns on it: it is
-tested for zero at `exit_no_progress`, compared against `r14d` at
-`provider_violation`, and used to advance the cursor. So the one instruction whose
+tested for zero at the program's no-progress exit, compared against `r14d` at its
+provider-violation edge, and used to advance the cursor. So the one instruction whose
 result matters was modelled as observing a value that means "no progress", and the
 exit criterion "a straight-line Spike 1 block discharges" was met about a block that
 is not Spike 1's. Review found it.
