@@ -229,11 +229,50 @@ delete the restatement cost and inherit core's proved laws" is therefore wrong a
 stated — the probe inherits none of `Array`'s API, because the operations are
 still `List` operations.
 
-So there is a third option that has been neither costed nor probed: a genuinely
-`Array`-backed `Vec` whose `push` is `Array.push` and whose `get?` is `Array`
-indexing, with every law re-proved against `Array` lemmas. It is the only one of
-the three that can emit a megabyte artifact, and it is the one this plan should
-have been comparing against all along.
+**A fourth option, now costed.** The three-way framing was itself too narrow.
+`Grass/Std/Logical/VecArray.lean` on `agent/c-stdlib/array-backed` is a distinct
+one-field structure whose *field* is an `Array` — keeping everything the
+structure was chosen for while making `push` an `Array.push` and a read an index.
+It is a parallel module named `AVec`; nothing imports it, and it exists to
+produce the two numbers this decision should have been taken against.
+
+*Speed.* Building a sequence by repeated `push` and then reading it, in the Lean
+interpreter on this machine:
+
+| n | shipped `Vec` (over `List`) | `AVec` (over `Array`) |
+|---|---|---|
+| 4,000 | 47 ms | 3 ms |
+| 8,000 | 155 ms | 2 ms |
+| 16,000 | 630 ms | 2 ms |
+| 32,000 | 6,488 ms | 20 ms |
+
+The shipped column roughly quadruples per doubling, which is the O(n²) the
+definitions predict; the other is flat. At 32,000 elements the difference is
+324×, and Spike 5's cube and Spike 4's server are artifacts far larger than that.
+A separate attempt to time `push` alone reported zero at every size and is not
+reported here: the result was being optimised away, and a benchmark that measures
+nothing should not be quoted just because its numbers are favourable.
+
+*Law-porting cost.* Seventeen laws ported. Ten were a native `Array` lemma in one
+line. Two round trips were free. Four had to drop to `Array.toList` —
+extensionality, `length_take`, `length_drop`, `append_splitAt` — because `Array`
+has no `size_take`, `size_drop`, or `take_append_drop`. One, `get?_push_lt`, was
+awkward because `Array.getElem?_push_lt` concludes `= some xs[i]` rather than
+`= xs[i]?`. So the cost is real, bounded, and concentrated exactly where
+`Array`'s own API is thin — which is also where
+[SPIKE_PROOF_BURDEN.md](SPIKE_PROOF_BURDEN.md)'s most-named demand lives, so that
+work is owed under any representation.
+
+*Type distinction.* `Tests/Std/VecArrayCost.lean` pins that `AByteArray` rejects
+a `List Byte`, a host `_root_.ByteArray`, **and** a bare `Array Byte`. The third
+is the one `abbrev Vec := Array` gives up, and it is the one §1 most needs: under
+the abbreviation any array of bytes from anywhere already is the reviewed
+container.
+
+This does not decide anything by itself, and deliberately so — the branch under
+review should be reviewed as it stands. What it does is replace an argument with
+two measurements and a third option, so that whoever takes the decision is not
+choosing between a rationalisation and a rename.
 
 This plan is not changing the decision while the branch is under review. Flipping
 a foundational representation underneath a reviewer mid-review is worse than

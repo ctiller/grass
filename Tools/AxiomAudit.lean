@@ -27,6 +27,7 @@ import Grass.Std.Logical.Byte
 import Grass.Std.Logical.FiniteMap
 import Grass.Std.Logical.HostBytes
 import Grass.Std.Logical.Order
+import Grass.Std.Logical.VecArray
 import Grass.Std.Logical.Text
 import Grass.Std.Logical.Vec
 
