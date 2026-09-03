@@ -210,31 +210,76 @@ structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
   carrierOnItsSession : ∀ carrier, resolution = .coalesced carrier →
     carrier.2.1 = session
   /--
-  **And a coalesce's carrier is fresh.**
+  **And a coalesce's carrier is still in flight afterwards.**
 
-  `ChannelResolution.coalesced`'s sibling docstring already said the carrier is
-  "a fresh occurrence, per `NominalKind.coalescedReplacement`", and
-  `createsOnlyTheCarrier` bounds what a step *creates* without ever saying the
-  carrier *is* created. `EscrowLedger.coalesceCarrierLater` asks for membership
-  and a later rank, and a **previously delivered** occurrence satisfies both.
+  `createsOnlyTheCarrier` bounds what a step *creates* and never says the carrier
+  is in any particular state — and `EscrowLedger.coalesceCarrierLater` asks only
+  for membership and a later rank, which a **previously delivered** occurrence
+  satisfies. A reviewer built the four-step program from `quiet`: send, send,
+  deliver the second, coalesce the first into it. Afterwards the first payload is
+  neither in flight nor delivered, because `.coalesced` is not
+  `ChannelResolution.IsTerminal` — it *passes the payload on* — and what it
+  passed to had been consumed a step earlier.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.111.
 
-  A reviewer built the four-step program from `quiet`: send, send, deliver the
-  second, then coalesce the first into it. Every field discharged,
-  `carrierOnItsSession` included, and `wellFormed_preserved` waved the result
-  through. Afterwards the first payload is neither in flight nor delivered — no
-  close, death, drop or delivery can name it, `.coalesced` is not
-  `ChannelResolution.IsTerminal` because it "passes it on", and what it passed to
-  had been consumed a step earlier. The ledger's accounting says everything is
-  settled and a message is gone.
+  **This field was `carrierIsFresh` for one round, and that was wrong twice.**
+  Freshness forbids a *second* source naming a carrier the first one created —
+  `coalesceCarrierLater` puts the carrier in `created` and `createdPrefix` keeps
+  it there — so it made §3's "Coalescing consumes every source token", plural,
+  unconstructible, and falsified §10.104's recorded decomposition. And it does not
+  close §10.111 anyway: a *fresh* carrier can be delivered later just as well.
 
-  §10.100's twin from the other side: that was a payload in flight forever, this
-  is a payload silently lost. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.111.
-
-  Freshness is what makes the merge a merge: with it the carrier is necessarily
-  `Outstanding` after the step, so the sources' payload is somewhere.
+  Outstanding-afterwards is what the property actually is. It permits the second
+  source (the carrier is created, unresolved, and stays so) and refuses the
+  laundering (a delivered carrier's resolution is permanent, by
+  `LedgerExtends.resolutionPermanent`). §10.113.
   -/
-  carrierIsFresh : ∀ carrier, resolution = .coalesced carrier →
-    carrier ∉ (before.inFlight edge session).created
+  carrierIsOutstanding : ∀ carrier, resolution = .coalesced carrier →
+    (after.inFlight edge session).Outstanding carrier
+  /--
+  **And the carrier carries the source's message.**
+
+  The other half of §10.111, and the half `carrierIsFresh` missed entirely.
+  Nothing related the carrier's *payload* to the source's, so a coalesce could
+  merge `⟨7⟩` into a fresh carrier holding `⟨99⟩`: the reviewer compiled it, and
+  the after-world passes all seven `WellFormed` clauses. The source's payload is
+  gone and a message nobody sent is in flight — which is §10.91's defect
+  reopened through the one exception `createsOnlyTheCarrier` grants.
+
+  `Reroutes.arrives` has carried exactly this conjunct since §10.98, for exactly
+  this reason. The two constructors that "pass a payload on" now say the same
+  thing about it. §10.113.
+  -/
+  carrierCarriesTheMessage : ∀ carrier, resolution = .coalesced carrier →
+    carrier.1 = occurrence.1
+  /--
+  **And an endpoint death is a death of that endpoint.**
+
+  `senderDeath` and `receiverDeath` are bare `ResolvesEscrow`s whose scope is one
+  session's escrow, and until this field they mentioned **no process at all**. A
+  reviewer ran two of them from `quiet` and read the result back: one session's
+  ledger recording that its sender died *and* that its receiver died, in a world
+  where neither incarnation has ever existed, with the session still `.open` to
+  further sends. `senderDeath`, `receiverDeath` and `drop` were the same relation
+  up to the tag written into the ledger — so the stored classification that
+  `docs/DECISIONS.md` decision 129 exists to make readable off network state was
+  fiction. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.114.
+
+  Every *instance*-ending constructor was made to earn its ending —
+  `Joins.wasTerminated`, `childCancelled`'s `wasChild`,
+  `EndsInstance.endingIsEarned`. The two escrow constructors that name a process
+  death were not, and the reference is right there in the `ChannelId`, so this
+  was a missing field rather than a layering boundary.
+  -/
+  endpointDeathIsEarned :
+    (∀ reason, resolution = .senderDied reason →
+      ∃ incarnation,
+        before.instances (plan.topology.endpoints edge).1 session.sender.instanceId
+          = some incarnation ∧ ¬ incarnation.Live) ∧
+    (∀ reason, resolution = .receiverDied reason →
+      ∃ incarnation,
+        before.instances (plan.topology.endpoints edge).2 session.receiver.instanceId
+          = some incarnation ∧ ¬ incarnation.Live)
   /--
   **And the only occurrence it escrows is a coalesce's carrier.**
 

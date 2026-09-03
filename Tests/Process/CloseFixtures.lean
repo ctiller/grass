@@ -662,18 +662,22 @@ theorem the_coalesce :
     intro carrier' isMerge
     cases isMerge
     rfl
-  carrierIsFresh := by
+  carrierIsOutstanding := by
     intro carrier' isMerge
     cases isMerge
-    show carrier ∉ (sent2.inFlight () wire).created
-    rw [sent2_wire]
-    intro held
-    have inList : carrier ∈ [escrowed, stranded] := held
-    rcases List.mem_cons.mp inList with isFirst | rest
-    · exact carrier_ne_escrowed isFirst
-    · have isSecond := List.mem_singleton.mp rest
-      have ids := congrArg (fun occurrence => occurrence.2.2.id.carrier) isSecond
-      simp [carrier, stranded, Reroute.stranded] at ids
+    rw [afterCoalesce_wire]
+    exact ⟨List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self),
+      merged_other carrier_ne_escrowed⟩
+  carrierCarriesTheMessage := by
+    intro carrier' isMerge
+    cases isMerge
+    rfl
+  endpointDeathIsEarned := by
+    constructor
+    · intro reason isDeath
+      cases isDeath
+    · intro reason isDeath
+      cases isDeath
   scope := by
     intro fragment outside
     cases fragment with
@@ -697,32 +701,56 @@ theorem the_merge_happened :
     merged_other carrier_ne_escrowed⟩, merged_first⟩
 
 /--
-**And a coalesce may not name a carrier that is already in the ledger.**
+**And a coalesce may not merge into a message the receiver already took.**
 
-`carrierIsFresh`. Without it a coalesce could merge into an occurrence that had
-already been *delivered*: a reviewer built the four-step program from `quiet` —
-send, send, deliver the second, coalesce the first into it — and afterwards the
-first payload is neither in flight nor delivered, with no constructor able to
-name it and the ledger reporting everything settled.
-§10.100 was a payload in flight forever; this is a payload silently lost.
-§10.111.
+`carrierIsOutstanding`. Without it a coalesce could name a carrier that had
+already been delivered: send, send, deliver the second, coalesce the first into
+it, and afterwards the first payload is neither in flight nor delivered, with no
+constructor able to name it and the ledger reporting everything settled. §10.111.
+
+The field this replaced, `carrierIsFresh`, refused that too — and also refused a
+*second* source naming a carrier the first one created, which §3 requires.
+§10.113.
 -/
-theorem a_coalesce_may_not_name_a_carrier_already_here
-    {before after : ServerWorld}
-    {other : EdgeOccurrence serverTopology World.serverMessage ()}
-    (alreadyHere : other ∈ (before.inFlight () wire).created)
-    (merged : serverPlan.ResolvesEscrow before after () wire escrowed
-      (.coalesced other)) : False :=
-  merged.carrierIsFresh other rfl alreadyHere
-
-/-- So in particular it may not merge into a message the receiver already took. -/
 theorem a_coalesce_may_not_launder_into_a_delivered_message
     {before after : ServerWorld}
     {other : EdgeOccurrence serverTopology World.serverMessage ()}
     (delivered : (before.inFlight () wire).resolution other = some .received)
     (merged : serverPlan.ResolvesEscrow before after () wire escrowed
+      (.coalesced other)) : False := by
+  have stillHere := (merged.carrierIsOutstanding other rfl).2
+  rw [merged.ledgerExtends.resolutionPermanent other .received delivered] at stillHere
+  exact absurd stillHere (by intro equal; cases equal)
+
+/--
+**And it may not merge a payload into a carrier holding a different message.**
+
+`carrierCarriesTheMessage`. Without it a coalesce could merge `⟨7⟩` into a fresh
+carrier holding `⟨99⟩`: the source's payload is gone and a message nobody sent is
+in flight, and the after-world passes every `WellFormed` clause. `Reroutes.arrives`
+has carried the same conjunct since §10.98. §10.113.
+-/
+theorem a_coalesce_may_not_change_the_payload
+    {before after : ServerWorld}
+    {other : EdgeOccurrence serverTopology World.serverMessage ()}
+    (different : other.1 ≠ escrowed.1)
+    (merged : serverPlan.ResolvesEscrow before after () wire escrowed
       (.coalesced other)) : False :=
-  a_coalesce_may_not_name_a_carrier_already_here
-    ((before.inFlight () wire).noFabrication other (by rw [delivered]; rfl)) merged
+  different (merged.carrierCarriesTheMessage other rfl)
+
+/--
+**And two sources may merge into one carrier**, which is what §3's "consumes
+every source token" asks and what `carrierIsFresh` made unconstructible.
+
+Stated as the general fact rather than built as a second fixture: a carrier that
+is outstanding after the first merge is still outstanding before the second, so
+nothing in `ResolvesEscrow` refuses it. §10.113.
+-/
+theorem a_second_source_may_name_the_same_carrier
+    {before middle : ServerWorld}
+    {other : EdgeOccurrence serverTopology World.serverMessage ()}
+    (first : serverPlan.ResolvesEscrow before middle () wire escrowed (.coalesced other)) :
+    (middle.inFlight () wire).Outstanding other :=
+  first.carrierIsOutstanding other rfl
 
 end Grass.Process.Tests.Close

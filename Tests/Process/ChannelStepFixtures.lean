@@ -417,6 +417,160 @@ theorem the_death : serverPlan.KillsSession sent afterDying () wire escrowed whe
       rfl
     | _ => rfl
 
+/-! ## A death that is a death -/
+
+/-- The wire's sender, stopped. -/
+def deadListener : ProcessInstance serverTopology :=
+  { World.rootListener with lifecycle := .died .supervised }
+
+theorem deadListener_is_not_live : ¬ deadListener.Live := by
+  intro live
+  cases live
+
+/-- The sent world, with the sender present and dead. -/
+noncomputable def sentWithDeadSender : ServerWorld :=
+  { sent with
+      instances := fun kind _ =>
+        match kind with
+        | .listener => some deadListener
+        | .connection => none }
+
+theorem sentWithDeadSender_wire :
+    sentWithDeadSender.inFlight () wire = pendingLedger := sent_wire
+
+open Classical in
+/-- The ledger with the occurrence resolved by its sender's death. -/
+noncomputable def senderDiedLedger :
+    EscrowLedger (EdgeOccurrence serverTopology World.serverMessage ())
+      (serverTopology.ChannelId ()) where
+  created := [escrowed]
+  rank := fun _ => 0
+  rankOrdersCreated := by simp
+  resolution := fun occurrence =>
+    if occurrence = escrowed then some (.senderDied .supervised) else none
+  noFabrication := by
+    intro occurrence resolved
+    by_cases isIt : occurrence = escrowed
+    · simp [isIt]
+    · simp [isIt] at resolved
+  coalesceCarrierLater := by
+    intro occurrence carrier merged
+    by_cases isIt : occurrence = escrowed
+    · simp [isIt] at merged
+    · simp [isIt] at merged
+  cancelRequested := fun _ => false
+  acknowledgedWasRequested := by
+    intro occurrence reason acknowledged
+    by_cases isIt : occurrence = escrowed
+    · simp [isIt] at acknowledged
+    · simp [isIt] at acknowledged
+
+open Classical in
+theorem senderDiedLedger_resolution :
+    senderDiedLedger.resolution escrowed = some (.senderDied .supervised) := by
+  show (if escrowed = escrowed then some (ChannelResolution.senderDied .supervised) else none)
+    = some (ChannelResolution.senderDied .supervised)
+  rw [if_pos rfl]
+
+open Classical in
+theorem senderDiedLedger_resolves_nothing_else :
+    ResolvesNothingElse pendingLedger senderDiedLedger escrowed := by
+  intro occurrence notIt
+  show (if occurrence = escrowed then some (ChannelResolution.senderDied .supervised) else none)
+    = none
+  rw [if_neg notIt]
+
+open Classical in
+/-- The world after the sender's death. -/
+noncomputable def afterSenderDeath : ServerWorld :=
+  { sentWithDeadSender with
+      inFlight := fun _ session => if session = wire then senderDiedLedger else EscrowLedger.empty }
+
+open Classical in
+theorem afterSenderDeath_wire : afterSenderDeath.inFlight () wire = senderDiedLedger := by
+  show (if wire = wire then senderDiedLedger else EscrowLedger.empty) = senderDiedLedger
+  rw [if_pos rfl]
+
+open Classical in
+theorem afterSenderDeath_off {session : serverTopology.ChannelId ()} (notWire : session ≠ wire) :
+    afterSenderDeath.inFlight () session = EscrowLedger.empty := by
+  show (if session = wire then senderDiedLedger else EscrowLedger.empty) = EscrowLedger.empty
+  rw [if_neg notWire]
+
+/--
+**A sender's death, at a world where the sender is present and dead.**
+
+The witness `ResolvesEscrow.endpointDeathIsEarned` needed. Before that field,
+`senderDeath` mentioned no process at all: a reviewer ran two of these from
+`quiet` and read back a session whose ledger records both endpoints dead in a
+world where neither has ever existed, with the session still open.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.114.
+
+`a_death_needs_a_dead_endpoint` is the refusal; this is the half §10.110 says a
+new field also needs, so the field is not one that forbids everything.
+-/
+theorem the_sender_death :
+    serverPlan.ResolvesEscrow sentWithDeadSender afterSenderDeath () wire escrowed
+      (.senderDied .supervised) where
+  onItsSession := rfl
+  wasOutstanding := by
+    rw [sentWithDeadSender_wire]
+    exact ⟨List.mem_cons_self, rfl⟩
+  nowResolved := by rw [afterSenderDeath_wire]; exact senderDiedLedger_resolution
+  resolvesNothingElse := by
+    rw [sentWithDeadSender_wire, afterSenderDeath_wire]
+    exact senderDiedLedger_resolves_nothing_else
+  requestsNothing := by
+    show RequestsNothing (sentWithDeadSender.inFlight () wire) (afterSenderDeath.inFlight () wire)
+    rw [sentWithDeadSender_wire, afterSenderDeath_wire]
+    exact fun _ => rfl
+  ledgerExtends := by
+    rw [sentWithDeadSender_wire, afterSenderDeath_wire]
+    exact pending_extends_to senderDiedLedger rfl (by simp [pendingLedger])
+  createsOnlyTheCarrier := by
+    intro other held fresh
+    refine absurd ?_ fresh
+    show other ∈ (sentWithDeadSender.inFlight () wire).created
+    rw [sentWithDeadSender_wire]
+    have inList : other ∈ (afterSenderDeath.inFlight () wire).created := held
+    rw [afterSenderDeath_wire] at inList
+    exact inList
+  carrierOnItsSession := by intro carrier isCoalesce; cases isCoalesce
+  carrierIsOutstanding := by intro carrier isCoalesce; cases isCoalesce
+  carrierCarriesTheMessage := by intro carrier isCoalesce; cases isCoalesce
+  endpointDeathIsEarned := by
+    constructor
+    · intro reason isDeath
+      exact ⟨deadListener, rfl, deadListener_is_not_live⟩
+    · intro reason isDeath
+      cases isDeath
+  scope := by
+    intro fragment outside
+    cases fragment with
+    | escrow edge session =>
+      have sameEdge : edge = () := rfl
+      subst sameEdge
+      have notWire : ¬ (session = wire) := fun isWire => outside (by rw [isWire])
+      show ledgerAt false session = afterSenderDeath.inFlight () session
+      rw [ledgerAt_off_wire_empty notWire, afterSenderDeath_off notWire]
+    | _ => rfl
+
+/--
+**And a death with no dead endpoint is refused.**
+
+The other half. `senderDeath`, `receiverDeath` and `drop` were the same relation
+up to the tag written into the ledger, which made decision 129's stored
+classification unreadable off network state. §10.114.
+-/
+theorem a_death_needs_a_dead_endpoint
+    {before after : ServerWorld} {reason : ProcessDeathReason}
+    (nobodyThere : ∀ (kind : serverPlan.topology.ProcessKind) slot,
+      before.instances kind slot = none)
+    (died : serverPlan.ResolvesEscrow before after () wire escrowed (.senderDied reason)) :
+    False := by
+  obtain ⟨incarnation, present, _⟩ := died.endpointDeathIsEarned.1 reason rfl
+  exact absurd (present.symm.trans (nobodyThere _ _)) (by intro equal; cases equal)
+
 /-- **A cancellation request**, which records and does not resolve. -/
 theorem the_request : serverPlan.RequestsCancel sent afterRequesting () wire escrowed where
   onItsSession := rfl
@@ -460,7 +614,14 @@ theorem the_drop : serverPlan.ResolvesEscrow sent afterDropping () wire escrowed
     rw [sent_wire, afterDropping_wire]
     exact fun _ => rfl
   carrierOnItsSession := by intro carrier isCoalesce; cases isCoalesce
-  carrierIsFresh := by intro carrier isCoalesce; cases isCoalesce
+  carrierIsOutstanding := by intro carrier isCoalesce; cases isCoalesce
+  carrierCarriesTheMessage := by intro carrier isCoalesce; cases isCoalesce
+  endpointDeathIsEarned := by
+    constructor
+    · intro reason isDeath
+      cases isDeath
+    · intro reason isDeath
+      cases isDeath
   createsOnlyTheCarrier := by
     intro other held fresh
     exact absurd (by rw [sent_wire]; rw [afterDropping_wire] at held; exact held) fresh
