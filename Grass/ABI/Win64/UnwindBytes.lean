@@ -193,7 +193,15 @@ Three conditions, each of which a plausible generator gets wrong:
 * the offsets strictly ascend in execution order, since two operations cannot
   complete at the same byte and the array is a reversal of this order;
 * no offset exceeds `SizeOfProlog`, because an offset past the prologue
-  describes an instruction the unwinder will never be executing inside.
+  describes an instruction the unwinder will never be executing inside;
+* no offset is zero. `RtlVirtualUnwind` skips a code while
+  `PrologOffset < CodeOffset`, so a code at offset 0 is applied at the
+  function's very first byte -- popping a register that has not been pushed
+  yet. No real prologue produces one, because the first instruction ends at 1
+  or later, and every offset in every `ml64` and `cl.exe` dump taken while
+  building this module is at least 1. A reviewer noticed this is *not* inside
+  the open obligation below: it needs no instruction encoder, only the
+  observation that offsets count bytes already executed.
 
 ## Open obligation: the offsets are not checked against any instruction
 
@@ -213,10 +221,22 @@ prologue to a `Layout`, which is what `docs/PLATFORM_ABI.md` section 3 asks for
 and is owed rather than done.
 -/
 def WellFormed (l : Layout) : Prop :=
-  l.prologue.Encodable ∧ Ascends l.offsets ∧ ∀ o ∈ l.offsets, o ≤ l.sizeOfProlog
+  l.prologue.Encodable ∧ Ascends l.offsets ∧
+    (∀ o ∈ l.offsets, o ≤ l.sizeOfProlog) ∧ ∀ o ∈ l.offsets, 0 < o.toNat
 
 instance (l : Layout) : Decidable l.WellFormed :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
+
+/--
+A code offset of zero is refused.
+
+The reviewer's case, kept as a theorem. The layout is internally consistent --
+the offsets ascend and stay inside the prologue -- and it describes a `push`
+whose unwind code applies before the `push` has run.
+-/
+theorem zero_codeOffset_not_wellFormed :
+    ¬ (Layout.mk [⟨.pushNonvolatile .rbx, 0⟩, ⟨.allocSmall 32, 4⟩] 4).WellFormed := by
+  decide
 
 /--
 The `UNWIND_CODE` array, in the descending order `.xdata` stores it.

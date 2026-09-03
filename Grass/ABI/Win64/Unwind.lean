@@ -162,9 +162,25 @@ def LargeAllocEncodable (n : Nat) : Prop := 8 ≤ n ∧ n < 524288 ∧ n % 8 = 0
 instance (n : Nat) : Decidable (LargeAllocEncodable n) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 
-/-- The operation is one this profile can actually encode. -/
+/--
+The operation is one this profile can actually encode.
+
+`RSP` is excluded from `pushNonvolatile` even though `volatility .rsp` is
+`.nonvolatile`, and the exclusion is not cosmetic. `UWOP_PUSH_NONVOL` tells the
+unwinder to do `RSP := [RSP]; RSP += 8`, which recovers the pushed register's
+value. For `push rsp` the pushed value is the stack pointer *before* the push,
+so replaying the code yields `RSP_after + 16` where the truth is `RSP_after + 8`
+-- the metadata is wrong even though the instruction is legal. That is exactly
+the class `push_volatile_not_encodable` exists to exclude: "the prologue is
+legal; the *description* is not".
+
+A reviewer found this, and found that the guard already existed in
+`Tests/ABI/Win64/UnwindCorpus.lean`'s `pushable` filter and nowhere in the
+model. `ml64` accepts `.pushreg rsp` and emits the same `0101010001400000` this
+profile did, so no differential could ever have caught it.
+-/
 def Encodable : UnwindOp → Prop
-  | .pushNonvolatile r => volatility r = .nonvolatile
+  | .pushNonvolatile r => volatility r = .nonvolatile ∧ r ≠ .rsp
   | .allocSmall n => SmallAllocEncodable n
   | .allocLarge n => LargeAllocEncodable n
   | .setFramePointer r off =>
@@ -184,7 +200,19 @@ legal; the *description* is not.
 theorem push_volatile_not_encodable {r : Gpr} (h : volatility r = .volatile) :
     ¬ (UnwindOp.pushNonvolatile r).Encodable := by
   simp only [Encodable, h]
-  exact fun hc => absurd hc (by decide)
+  exact fun hc => absurd hc.1 (by decide)
+
+/--
+**`push rsp` has no unwind description.**
+
+`RSP` is nonvolatile, so the volatility rule above does not exclude it, and a
+reviewer found that this profile accepted it. `UWOP_PUSH_NONVOL` replays as
+`RSP := [RSP]; RSP += 8`; for `push rsp` the pushed value is the pre-push stack
+pointer, so the replay lands eight bytes high. `ml64` accepts `.pushreg rsp` and
+emits exactly the bytes this profile emitted, so only the model can refuse it.
+-/
+theorem push_rsp_not_encodable :
+    ¬ (UnwindOp.pushNonvolatile .rsp).Encodable := by decide
 
 /-- An allocation that is not a multiple of eight has no encoding in either
 form. -/

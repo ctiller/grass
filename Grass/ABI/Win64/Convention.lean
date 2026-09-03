@@ -217,7 +217,8 @@ Each push moves `RSP` down 8. The caller wants this to be `0` at any `CALL` it
 makes.
 -/
 def rspAfterPrologue (pushes subtracted : Nat) : Nat :=
-  (entryMisalignment + pushes * 8 + subtracted) % stackAlignment
+  (entryMisalignment + stackAlignment * (pushes + subtracted)
+    - (pushes * 8 + subtracted)) % stackAlignment
 
 /-- The prologue leaves the stack aligned for a call. -/
 def AlignedForCall (pushes subtracted : Nat) : Prop :=
