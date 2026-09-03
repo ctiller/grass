@@ -4679,9 +4679,16 @@ payloads), or it is not and the field is the wrong shape.
 The reviewer confirmed the multi-source merge *is* constructible when the payloads
 coincide, so §10.104's decomposition survives — and also that
 `Tests/Process/CloseFixtures.lean`'s `a_second_source_may_name_the_same_carrier`
-restates the field rather than taking the second step. **§10.113's own new rule —
+restated the field rather than taking the second step. **§10.113's own new rule —
 a new field needs a witness of each thing the specification says it must permit —
-was stated and not run on itself.** That witness is owed.
+was stated and not run on itself.**
+
+**That witness is now built.** `the_second_coalesce` merges `stranded` into the
+carrier `the_coalesce` created, and `both_sources_merged` reads off the world two
+`coalesce` steps reach: both sources ended in the one carrier, which is still in
+flight. So the plural in §3's "consumes every source token" is served by a
+sequence, and the ruling this entry asks for is narrowed to the payload question
+alone.
 
 ### 10.119 A dead sender can still send
 
