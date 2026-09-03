@@ -31,8 +31,23 @@ whose result type is a `Vec`. For each, the audit looks for a theorem somewhere
 in the environment whose statement applies `Vec.length` to a term headed by that
 operation, and likewise for `Vec.get?`.
 
-Three deliberate limits, stated because a checker that overstates its reach is
+It has been attacked, and it failed once. The first version accepted an operation
+carrying `(f v i).length = (f v i).length` and `(f v i).get? j = (f v i).get? j`
+— two `rfl` self-laws — and counted it as covered. That is the same attack
+adversarial review had used to break the *prose* rule, and it worked on the
+checker too. `observesNonVacuously` is the fix: an equation counts only if the
+side that does not observe `op` also does not mention it. Three negative tests
+now pass — no laws, a length law without a `get?` law, and two vacuous laws —
+each of which compiles cleanly under `lake build`.
+
+Four deliberate limits, stated because a checker that overstates its reach is
 worse than none:
+
+- A law stated over the `v[i]?` notation rather than `Vec.get?` would not be
+  seen, since `GetElem?.getElem?` is a different constant. No law in the library
+  is currently written that way, but the audit would produce a false failure if
+  one were.
+
 
 - It does not check that a law is *correct*, only that it exists and is about the
   right thing. The kernel checks correctness.
@@ -105,6 +120,53 @@ partial def observes (obs op : Name) (e : Expr) : Bool :=
     | .proj _ _ b => observes obs op b
     | _ => false
 
+/-- Whether `op` appears anywhere in `e`. -/
+partial def mentions (op : Name) (e : Expr) : Bool :=
+  e.getAppFn.constName? == some op || match e with
+    | .app f a => mentions op f || mentions op a
+    | .lam _ t b _ => mentions op t || mentions op b
+    | .forallE _ t b _ => mentions op t || mentions op b
+    | .letE _ t v b _ => mentions op t || mentions op v || mentions op b
+    | .mdata _ b => mentions op b
+    | .proj _ _ b => mentions op b
+    | _ => false
+
+/--
+Whether `e` contains an equation observing `op` on one side whose *other* side
+does not mention `op`.
+
+This is the non-vacuity condition, and it exists because the audit without it was
+fooled by exactly the attack adversarial review used against the prose rule. A
+probe operation carrying
+
+    @[simp] theorem length_probe (v) (i) : (probe v i).length = (probe v i).length := rfl
+
+compiles, is wrong, and satisfied "a law computing its length" — the audit
+counted it and reported success. Requiring the other side to be free of `op` is
+what makes a law say something about the operation rather than about itself, and
+it is the mechanical form of decision 6's "neither may be `f`'s own definitional
+body".
+-/
+partial def observesNonVacuously (obs op : Name) (e : Expr) : Bool :=
+  let hereEq :=
+    if e.getAppFn.constName? == some ``Eq then
+      match e.getAppArgs.toList with
+      | [_, lhs, rhs] =>
+        (observes obs op lhs && !mentions op rhs) ||
+          (observes obs op rhs && !mentions op lhs)
+      | _ => false
+    else false
+  hereEq || match e with
+    | .app f a => observesNonVacuously obs op f || observesNonVacuously obs op a
+    | .lam _ t b _ => observesNonVacuously obs op t || observesNonVacuously obs op b
+    | .forallE _ t b _ => observesNonVacuously obs op t || observesNonVacuously obs op b
+    | .letE _ t v b _ =>
+      observesNonVacuously obs op t || observesNonVacuously obs op v ||
+        observesNonVacuously obs op b
+    | .mdata _ b => observesNonVacuously obs op b
+    | .proj _ _ b => observesNonVacuously obs op b
+    | _ => false
+
 /-- Whether a constant's result type is a `Vec`. -/
 partial def returnsVec (e : Expr) : Bool :=
   match e with
@@ -141,8 +203,8 @@ run_cmd do
   for op in ops do
     if exempt.contains op then continue
     checked := checked + 1
-    let hasLength := theorems.any fun t => observes lengthName op t
-    let hasGet := theorems.any fun t => observes getName op t
+    let hasLength := theorems.any fun t => observesNonVacuously lengthName op t
+    let hasGet := theorems.any fun t => observesNonVacuously getName op t
     if !hasLength && !hasGet then
       missing := missing.push (op, "no length law and no get? law")
     else if !hasLength then

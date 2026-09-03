@@ -855,9 +855,18 @@ reader will want a reason for:
    `Vec.length_flatten` where every consumer of that law would meet it. Three
    times is not carelessness; it is what an unenforced rule does at this rate of
    change. Both operations now carry recursions, and the checker is
-   negative-tested: a lawless `Vec`-returning operation compiles under
-   `lake build` and fails the audit, as does one with a length law and no `get?`
-   law.
+   negative-tested three ways: a lawless `Vec`-returning operation compiles under
+   `lake build` and fails the audit; so does one with a length law and no `get?`
+   law; and so does one carrying two `rfl` self-laws.
+
+   That third test is there because **the checker failed it at first**. Its
+   original version accepted `(f v i).length = (f v i).length` as "a law
+   computing its length" — the same `rfl` attack that had broken the prose rule,
+   working on the program meant to enforce it. The fix, `observesNonVacuously`,
+   requires the non-observing side of the equation to be free of the operation,
+   which is the mechanical form of "neither may be `f`'s own definitional body".
+   Writing the checker did not by itself make the rule safe; attacking the
+   checker did.
 
    Review also found five holes in the prose version, of which the checker closes
    the ones that matter by construction: it does not accept an alias cycle
