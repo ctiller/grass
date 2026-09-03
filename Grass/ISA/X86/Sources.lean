@@ -58,6 +58,10 @@ resolved to the passage a rule is modeled from. `Grass.Cite.Citation.confirmed`
 carries this one. -/
 def intelAnchorCheckDate : Date := ⟨2026, 9, 3⟩
 
+/-- When the AMD APM's retrieval was last re-attempted across every location
+this corpus knows of. See `amd64Apm409`. -/
+def amdRecheckDate : Date := ⟨2026, 9, 3⟩
+
 /--
 Intel 64 and IA-32 Architectures Software Developer's Manual, combined volume
 set, version 092.
@@ -127,12 +131,25 @@ def amd64Apm409 : SourceDocument :=
     url := "https://docs.amd.com/v/u/en-US/40332_4.09_APM_PUB"
     livenessProbe := some "AMD64 Architecture Programmer"
     retrieval :=
-      .dead sourceCheckDate
-        ("renders a 404 and redirects to the docs.amd.com root; the /v/u/en-US/ " ++
-         "scheme appears retired. HTTP status is 200 with an identical 2575-byte " ++
-         "SPA shell for every path on this host, so a status-code link check " ++
-         "does not detect this. Re-pin against the AMD Technical Information " ++
-         "Portal.")
+      .dead amdRecheckDate
+        ("Re-attempted across every location this corpus knows of, and the " ++
+         "document is not retrievable from any of them. (1) The recorded URL " ++
+         "returns HTTP 200 with a 2575-byte client-routed shell, identical for " ++
+         "every path on that host including paths that render a 404. (2) " ++
+         "amd.com/system/files/TechDocs/<n>.pdf returns 200 with a " ++
+         "208804-byte redirect to the documentation hub, byte-identical for " ++
+         "40332, 24592, 24593 and 24594 alike. (3) The " ++
+         "processor-tech-docs/programmer-references tree returns 404 with a " ++
+         "150594-byte page, again identical for every document number and for " ++
+         "versioned filenames. (4) developer.amd.com's guides page is a 404. " ++
+         "(5) The AMD Technical Information Portal, which amd.com's own " ++
+         "redirect points at, hosts 45900 documents and none of them is this " ++
+         "one: its corpus is the Xilinx lineage -- UG, PG, XD, DS, AM, PB and " ++
+         "WP document numbers -- with zero AMD64 architecture manuals. An " ++
+         "earlier version of this note said to re-pin against that portal; " ++
+         "that advice was wrong and is retracted. There is no known public " ++
+         "location to re-pin to, which is why this is a release blocker rather " ++
+         "than a stale URL.")
     policy := .referenceOnly }
 
 /-- The document a vendor's citations are written against. -/

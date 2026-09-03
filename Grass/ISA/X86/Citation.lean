@@ -148,6 +148,14 @@ healthy while its AMD anchor was unreachable. `livenessProbe` on
 `SourceDocument` exists so a check can assert on *content* instead, and this
 type records the outcome so the ledger can report it rather than leaving a
 reader to assume an unchecked URL works.
+
+Re-checking the AMD manual on 2026-09-03 turned up a third failure mode, worse
+than either: `amd.com` serves a *byte-identical* response for every document
+number under both of its document trees -- 208804 bytes on one, 150594 on the
+other. So a content-length check passes uniformly as well, and even a
+checksum-stability check would report the source healthy indefinitely. Only a
+probe asserting the document's own text separates these cases, which is what
+`livenessProbe` holds and what nothing yet reads. See `amd64Apm409`.
 -/
 inductive RetrievalStatus where
   /-- Recorded from a secondary source and never fetched by this corpus. Not a
