@@ -777,17 +777,31 @@ argument's context and got two events and an empty ledger one way, one event and
 violation the other. `StepPolicy.compatibleSymm` is what supplies it, and this is its
 consumer.
 
-The `sharesBytes` half is still a hypothesis, because `MemoryState.SharesBytes` has no
-symmetry theorem — it is the bounded alias-hop closure and reversing a path needs a
-back-peeling lemma the module does not have. `docs/MEMORY_IMPLEMENTATION_PLAN.md`
-§4.4.1 records it; `AliasHop` is symmetric by construction, so the fact is true and
-only the proof is missing.
+The `sharesBytes` half is a hypothesis in the general form and discharged in the
+specialised one below. It was owed for a round: `MemoryState.SharesBytes` had no
+symmetry theorem, and when one was attempted the definition turned out not to admit
+it — the closure quantified its intermediate over the *allocation table*, so a
+one-hop path needed its far end allocated and the reversed path needed the near end
+allocated. `MemoryState.aliasIdentities` is the repair and `sharesBytes_symm` is the
+theorem.
 -/
 theorem conflicts_symm {policy : StepPolicy} {sharesBytes : AllocId → AllocId → Prop}
     {a b : MemoryEvent} (shareSymm : ∀ x y, sharesBytes x y → sharesBytes y x)
     (h : MemoryEvent.Conflicts sharesBytes (fun x y => policy.compatible x y = true) a b) :
     MemoryEvent.Conflicts sharesBytes (fun x y => policy.compatible x y = true) b a :=
   h.symm shareSymm (fun x y hxy => policy.compatibleSymm x y hxy)
+
+/-- **And conflict over a real memory state is symmetric outright**, with nothing left
+to supply: `MemoryState.sharesBytes_symm` discharges the sharing half and
+`StepPolicy.compatibleSymm` the compatibility half. This is the form
+`ConflictsWithHistory` would use, and the reason the two fields exist. -/
+theorem conflicts_symm_of_state {policy : StepPolicy} {state : MemoryState}
+    {a b : MemoryEvent}
+    (h : MemoryEvent.Conflicts state.SharesBytes
+      (fun x y => policy.compatible x y = true) a b) :
+    MemoryEvent.Conflicts state.SharesBytes
+      (fun x y => policy.compatible x y = true) b a :=
+  conflicts_symm (fun _ _ hxy => MemoryState.sharesBytes_symm hxy) h
 
 /-- The same at the trace level: an earlier event from another context that a
 non-atomic access overlaps is a conflict, whatever the policy says. -/

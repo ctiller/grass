@@ -1940,10 +1940,25 @@ the field belongs beside it as something that can only add.
   will be handed states it did not construct. The violation ledger has four theorems
   for exactly this reason and `events` has none, while §7.2 says steps monotonically
   extend it.
-- **`MemoryState.SharesBytes` has no symmetry theorem.** `conflicts_symm` takes it as
-  a hypothesis for that reason. `AliasHop` is symmetric by construction so the fact is
-  true; the proof needs a back-peeling lemma for the bounded alias-hop closure that
-  `Grass/Memory/State.lean` does not have.
+- ~~**`MemoryState.SharesBytes` has no symmetry theorem.**~~ It has one, and getting
+  it found that the definition did not admit one. `SharesAfter` quantified its
+  intermediate over `allocations.domain`, so a one-hop path `a → b` required `b` to be
+  *allocated* while the reversed path required `a` to be: alias `(a, b)` with `a`
+  allocated and `b` not, and `SharesBytes b a` held while `SharesBytes a b` did not —
+  for a relation whose entire meaning is "these two name the same bytes".
+
+  Unreachable through `step`, because `denialOf` refuses an unallocated root and
+  `issue?` requires a live provenance, so both ends are allocated on every path an
+  operation can take. But a relation asymmetric anywhere cannot have a symmetry
+  theorem, and `conflicts_symm` wanted one.
+
+  `MemoryState.aliasIdentities` is the repair: the closure quantifies over the alias
+  graph's own vertices, which keeps it decidable, makes it symmetric, and is
+  conservative in the safe direction — an alias naming an unallocated identity now
+  propagates sharing rather than silently stopping, and more sharing means more
+  freezing. `sharesAfter_snoc`, `sharesAfter_symm` and `sharesBytes_symm` are the
+  proof, and `conflicts_symm_of_state` is conflict symmetry with nothing left for a
+  caller to supply. `sharesBytes_of_hop` lost a hypothesis in the process.
 - ~~**`ProtocolAuthority` was decorative.**~~ Round eleven's largest finding, and the
   same shape as round ten's: a name every ledger delta carries, checked by nothing.
   `ProtocolAuthority` is indexed by its protocol, so authority for one cannot be

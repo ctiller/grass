@@ -212,12 +212,34 @@ def AliasHop (state : MemoryState) (a b : AllocId) : Prop :=
 instance (state : MemoryState) (a b : AllocId) : Decidable (state.AliasHop a b) :=
   inferInstanceAs (Decidable (_ ∨ _))
 
+/-- Every identity the alias list mentions, in either position.
+
+The vertices of the alias graph. `SharesAfter` quantifies its intermediate over this
+rather than over the allocation table, which is what makes the closure symmetric:
+review was asked for a symmetry theorem and found the definition did not admit one.
+
+`SharesAfter` used `state.allocations.domain`, so a one-hop path `a → b` required
+`b` to be *allocated* while the reversed path required `a` to be. Alias `(a, b)` with
+`a` allocated and `b` not, and `SharesBytes b a` held while `SharesBytes a b` did
+not — for a relation whose whole meaning is "these two name the same bytes".
+Unreachable through `step`, because `denialOf` refuses an unallocated root and
+`issue?` requires a live provenance, so both ends are allocated on every path an
+operation can take; but a relation that is asymmetric anywhere cannot have a symmetry
+theorem, and `conflicts_symm` wanted one.
+
+Quantifying over the graph's own vertices keeps the closure decidable — it is still a
+list — and makes it conservative in the safe direction: an alias naming an
+unallocated identity now propagates sharing rather than silently stopping, and more
+sharing means more freezing. -/
+def aliasIdentities (state : MemoryState) : List AllocId :=
+  state.aliases.flatMap (fun pair => [pair.1, pair.2])
+
 /-- `state.SharesAfter n a b` holds when `b` is reachable from `a` in at most `n`
 declared hops. The bounded form, so the closure below is decidable. -/
 def SharesAfter (state : MemoryState) : Nat → AllocId → AllocId → Prop
   | 0, a, b => a = b
   | n + 1, a, b =>
-      a = b ∨ ∃ mid ∈ state.allocations.domain, state.AliasHop a mid ∧
+      a = b ∨ ∃ mid ∈ state.aliasIdentities, state.AliasHop a mid ∧
         state.SharesAfter n mid b
 
 instance decSharesAfter (state : MemoryState) : (n : Nat) → (a b : AllocId) →
@@ -258,15 +280,78 @@ theorem sharesAfter_zero_of_eq {state : MemoryState} {n : Nat} {a b : AllocId}
 theorem sharesBytes_refl (state : MemoryState) (a : AllocId) : state.SharesBytes a a :=
   sharesAfter_zero_of_eq rfl
 
-/-- One declared hop shares bytes, provided the intermediate allocation exists.
-The direction a profile's `alias` declaration is used in. -/
+/-- Aliasing is symmetric, which `AliasHop` gets by construction. -/
+theorem aliasHop_symm {state : MemoryState} {a b : AllocId} (h : state.AliasHop a b) :
+    state.AliasHop b a := h.symm
+
+/-- A declared hop's far end is one of the alias graph's own vertices. -/
+theorem mem_aliasIdentities_of_hop {state : MemoryState} {a b : AllocId}
+    (h : state.AliasHop a b) : b ∈ state.aliasIdentities := by
+  unfold aliasIdentities
+  rcases h with h | h
+  · exact List.mem_flatMap.mpr ⟨(a, b), h, by simp⟩
+  · exact List.mem_flatMap.mpr ⟨(b, a), h, by simp⟩
+
+/-- A hop may be appended to a path, which is the step the recursion does not give:
+`SharesAfter` peels from the front and a reversal needs to add at the back. -/
+theorem sharesAfter_snoc {state : MemoryState} : ∀ {n : Nat} {a b c : AllocId},
+    state.SharesAfter n a b → state.AliasHop b c → state.SharesAfter (n + 1) a c := by
+  intro n
+  induction n with
+  | zero =>
+    intro a b c hpath hhop
+    have hab : a = b := hpath
+    subst hab
+    exact .inr ⟨c, mem_aliasIdentities_of_hop hhop, hhop, sharesAfter_zero_of_eq rfl⟩
+  | succ m ih =>
+    intro a b c hpath hhop
+    rcases hpath with hab | ⟨mid, hmid, hop, hrest⟩
+    · subst hab
+      exact .inr ⟨c, mem_aliasIdentities_of_hop hhop, hhop, sharesAfter_zero_of_eq rfl⟩
+    · exact .inr ⟨mid, hmid, hop, ih hrest hhop⟩
+
+/--
+**Sharing bytes is symmetric.**
+
+The theorem `Grass/Op/Step.lean`'s `conflicts_symm` takes as a hypothesis, and the
+reason the definition above quantifies over the alias graph's vertices rather than the
+allocation table: with the old quantifier this was false, and review found it when
+asked for the proof.
+
+Reversing a path keeps its length, so the same bound works and no strengthening of
+`aliases.length` is needed — which is why the statement is over `SharesAfter n` for
+every `n` rather than only over the closure.
+-/
+theorem sharesAfter_symm {state : MemoryState} : ∀ {n : Nat} {a b : AllocId},
+    state.SharesAfter n a b → state.SharesAfter n b a := by
+  intro n
+  induction n with
+  | zero => intro a b h; exact (h : a = b).symm
+  | succ m ih =>
+    intro a b h
+    rcases h with hab | ⟨mid, _, hop, hrest⟩
+    · exact .inl hab.symm
+    · exact sharesAfter_snoc (ih hrest) (aliasHop_symm hop)
+
+/-- The closure form. -/
+theorem sharesBytes_symm {state : MemoryState} {a b : AllocId}
+    (h : state.SharesBytes a b) : state.SharesBytes b a :=
+  sharesAfter_symm h
+
+/-- One declared hop shares bytes.
+
+The allocation-table hypothesis is gone with the change above: a hop's far end is a
+vertex of the alias graph by construction, so `mem_aliasIdentities_of_hop` supplies
+what the existential needs and a caller no longer has to prove the far end is
+allocated. -/
 theorem sharesBytes_of_hop {state : MemoryState} {a b : AllocId}
-    (hhop : state.AliasHop a b) (hb : b ∈ state.allocations.domain)
+    (hhop : state.AliasHop a b)
     (hpos : 0 < state.aliases.length) : state.SharesBytes a b := by
   unfold SharesBytes
   cases hn : state.aliases.length with
   | zero => omega
-  | succ m => exact .inr ⟨b, hb, hhop, sharesAfter_zero_of_eq rfl⟩
+  | succ m =>
+    exact .inr ⟨b, mem_aliasIdentities_of_hop hhop, hhop, sharesAfter_zero_of_eq rfl⟩
 
 
 /--
