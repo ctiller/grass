@@ -63,6 +63,17 @@ name: Library build
 # `git add -A`, one of them containing a `sorry`, and a repo-root `.lean` file is
 # outside every gate there is — `lake build` globs `Grass.+` and `Tests.+`, and every
 # audit above scans those two trees. Neither file ever failed anything.
+#
+# Tools/CoverageAudit.lean is the ninth, and it arrived from the standard library's
+# side of the tree rather than this one -- renumbered here because a merge put both
+# enumerations in one comment, and it was written as "a fourth check".
+# docs/STDLIB_IMPLEMENTATION_PLAN.md decision 6
+# requires every Vec-returning operation to carry a law computing its length and
+# a law computing its get?. That rule was stated in prose three times and
+# violated in the same commit that stated it each time - most recently by
+# Vec.sum, on the right-hand side of a law consumers apply. lake build says
+# nothing about it: an operation with no law compiles. Tools/CoverageAudit.lean
+# is what says something.
 
 on:
   push:
@@ -144,3 +155,5 @@ jobs:
 
       - name: Audit citations of declarations and document sections
         run: python3 Tools/CitationAudit.py
+      - name: Audit observation coverage
+        run: lake env lean Tools/CoverageAudit.lean

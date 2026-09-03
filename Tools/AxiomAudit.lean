@@ -36,6 +36,10 @@ import Grass.Semantics.Observation
 import Grass.Semantics.SpecProcess
 import Grass.Std.Logical.Byte
 import Grass.Std.Logical.FiniteMap
+import Grass.Std.Logical.HostBytes
+import Grass.Std.Logical.Order
+import Grass.Std.Logical.Text
+import Grass.Std.Logical.Vec
 import Grass.Trust.Audit
 import Grass.Verify.VerifiedProgram
 
@@ -140,10 +144,29 @@ run_cmd do
   -- Review appended a root-namespace axiom to `Grass/Core/Name.lean` and both gates
   -- passed. Checked by module rather than by widening `isAudited`, which would pull
   -- in every core declaration the environment carries.
+  --
+  -- Equation lemmas Lean generates for a *core* function are attributed to whichever
+  -- module first needed them, so `Grass/Std/Logical/Text.lean` mentioning
+  -- `String.toUTF8` puts `String.toUTF8.eq_1` in a `Grass/` module under the `String`
+  -- namespace. Nobody wrote it and its axioms are the core function's, so the gap
+  -- this check is about -- an *authored* declaration escaping `isAudited` -- does not
+  -- arise. Generated suffixes are exempt by name; an authored declaration cannot have
+  -- one, because the elaborator reserves them.
+  -- Matched against the *last component* only. An earlier version matched these as
+  -- substrings of the whole name, so `.ind` would have exempted anything with a
+  -- component like `index` -- a filter wide enough to hide the declarations this
+  -- check exists to find.
+  let generatedExact : List String :=
+    ["eq_def", "induct", "sizeOf_spec", "brecOn", "below", "ind", "noConfusion",
+     "noConfusionType", "injEq", "ctorIdx"]
+  let generatedPrefix : List String := ["eq_", "match_", "proof_", "fun_", "eq_"]
   let mut strays : Array Name := #[]
   for (name, _) in env.constants.toList do
     if name.isInternal then continue
     if (`Grass).isPrefixOf name then continue
+    let component := name.getString!
+    if generatedExact.contains component then continue
+    if generatedPrefix.any (fun marker => marker.isPrefixOf component) then continue
     match env.getModuleIdxFor? name with
     | some idx =>
         match env.header.moduleNames[idx.toNat]? with

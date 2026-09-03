@@ -73,6 +73,13 @@ ALLOWED: set[str] = {
     # through an inferred type.
     "aliasedVerified",
     "inferredVerified",
+    # Carried deliberately, and its own docstring says so: it is one of a pair of
+    # definitions in `Tests/Std/SpikeSurface.lean` showing how a spike line "has to be
+    # written as today", present "so that the gap is visible in compiled code rather
+    # than only in a plan". Elaborating *is* its purpose, so there is nothing for a
+    # consumer to check; the `resultMove` beside it has an `example` because there is.
+    # Another owner's module, arrived by merging main.
+    "deviceExtensionNames",
 }
 
 

@@ -41,6 +41,10 @@ ALLOWED = {
     # The two umbrella modules the `Grass.+` and `Tests.+` globs name.
     "Grass.lean",
     "Tests.lean",
+    # The coverage audit, which arrived by merging main and is run the same way as
+    # the axiom audit: `lake env lean Tools/CoverageAudit.lean` from the workflow,
+    # not `lake build`. Same reason, different owner.
+    "Tools/CoverageAudit.lean",
     # The axiom audit is run by `lake env lean`, not by `lake build`, because it is a
     # `run_cmd` over the whole environment rather than a library module.
     "Tools/AxiomAudit.lean",
