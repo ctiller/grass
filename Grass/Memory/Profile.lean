@@ -1,5 +1,6 @@
 import Grass.Memory.Audit
 import Grass.Memory.Access
+import Grass.Memory.State
 import Grass.Obligation.Core
 
 /-!
@@ -621,16 +622,27 @@ Exactly the eleven items of `docs/MEMORY_MODEL.md` §10, as fields. They are `Pr
 supplied by the profile owner, so a `MemoryProfile` value cannot be constructed with
 one missing.
 
-**That is weaker than it reads**, and an earlier version of this paragraph called it
-"the mechanical content of" §10's gate. All the elaborator asks is that eleven
-propositions be *named*, which `RequiredProofPackage`'s own field list is. Nothing relates a field to the profile, to its admitted operations, or
-to any theorem in the tree, so a profile supplying `True` eleven times closes §10 and
-`Holds` is proved by `trivial`. `Tests/Op/FakeIsa.lean` does exactly that and says
-so — but that honesty is the fixture's, not the type's. This is the last gate between
-a profile and `VerifiedProgram`, and it is a naming exercise; review found that seven
-rounds had asked who consumes this and none had asked whether its content is
-constrained. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records what closing it would
-take.
+**Ten of the eleven are weaker than they read**, and an earlier version of this
+paragraph said all eleven were "the mechanical content of" §10's gate. For a bare
+`Prop` field all the elaborator asks is that a proposition be *named*, and the field
+list is that naming; nothing relates such a field to the profile, to its admitted
+operations, or to any theorem in the tree, so a profile supplying `True` closes the
+item and `Holds` is proved by `trivial`. Review found that seven rounds had asked who
+consumes this record and none had asked whether its content is constrained.
+
+`loanMapLaws` is the exception and the pattern for the rest. Its type is
+`Grass.Memory.MemoryState.LoanMapLaws`, a proposition this layer states -- unique loan
+identity, split, join, transfer, reclamation, one conjunct per theorem -- so a profile
+supplies a *proof* rather than a sentence. The proof is `MemoryState.loanMapLaws` and
+is the same for every profile, which is the right answer for laws about a map this
+layer owns: the item is discharged by construction and cannot be weakened by the
+profile that closes it.
+
+The other ten stay `Prop` because their propositions are not statable yet: they are
+about an ISA's declared effects, a consistency graph M8 owns, a frame discipline M4
+owns, and an erasure M9 owns. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records which
+milestone owes each of them the same treatment, and until then a profile closing them
+with `True` is closing nothing -- both fixture profiles do that and say so.
 
 §10's sentence is "The profile is not usable by `VerifiedProgram` until this package
 closes for all of its admitted operations."
@@ -648,8 +660,11 @@ structure RequiredProofPackage where
   /-- Permissions are enforced and faults are faithful to the hardware model. -/
   permissionEnforcementAndFaultFidelity : Prop
   /-- Loan identities are unique, and split, join, transfer, and reclamation
-  obey their laws. -/
-  loanMapLaws : Prop
+  obey their laws.
+
+  Not a `Prop` the profile names: the statement is
+  `Grass.Memory.MemoryState.LoanMapLaws` and the profile supplies the proof. -/
+  loanMapLaws : Grass.Memory.MemoryState.LoanMapLaws
   /-- Every admitted execution has a well-formed consistency graph. -/
   consistencyGraphWellFormedness : Prop
   /-- Verified authority and event combinations imply race freedom. -/
@@ -669,17 +684,22 @@ structure RequiredProofPackage where
 namespace RequiredProofPackage
 
 /--
-`package.Holds` is the conjunction of all eleven propositions.
+`package.Holds` is the conjunction of the ten propositions the profile still *names*.
 
 This is what a consumer demands when it wants the §10 package *discharged* rather
 than merely enumerated. `VerifiedProgram` will require it; nothing in M1 does,
 because the propositions themselves are not yet statable.
+
+`loanMapLaws` is absent from this conjunction and that is not an omission: its field
+is a *proof* of `Grass.Memory.MemoryState.LoanMapLaws` rather than a proposition, so
+constructing the record discharges it and there is nothing left for `Holds` to demand.
+Every item this record gains that treatment leaves this conjunction, and when it is
+empty §10 is closed by the type rather than by a profile's word. Ten to go.
 -/
 def Holds (package : RequiredProofPackage) : Prop :=
   package.accessDescriptorSoundness ∧
   package.rangeProvenanceInitializationPreservation ∧
   package.permissionEnforcementAndFaultFidelity ∧
-  package.loanMapLaws ∧
   package.consistencyGraphWellFormedness ∧
   package.raceFreedomConsequences ∧
   package.synchronizationAndObligationTransfer ∧

@@ -748,7 +748,8 @@ def profile : MemoryProfile :=
       { accessDescriptorSoundness := True
         rangeProvenanceInitializationPreservation := True
         permissionEnforcementAndFaultFidelity := True
-        loanMapLaws := True, consistencyGraphWellFormedness := True
+        loanMapLaws := MemoryState.loanMapLaws
+        consistencyGraphWellFormedness := True
         raceFreedomConsequences := True, synchronizationAndObligationTransfer := True
         allocatorFreshnessTeardownEpoch := True, callStackFrameLifetime := True
         erasurePreservation := True, validationMetadata := True } }

@@ -1698,6 +1698,41 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   raised it and judged it short of a finding; it is written down here so the next
   reviewer does not have to rediscover the judgement.
 
+- **§10's proof package: one of eleven items closed, and the pattern for the rest.**
+  `RequiredProofPackage`'s fields were bare `Prop`s, so a profile chose the *sentence*
+  as well as the proof and `True` closed each item. It was the one input in §4.4.1a's
+  table with no constraint at all, and it is the last gate before `VerifiedProgram`.
+
+  `loanMapLaws`'s type is now `MemoryState.LoanMapLaws` — a proposition this layer
+  states, one conjunct per theorem, covering §10's "unique loan identity; split, join,
+  transfer, reclamation" — so a profile supplies a proof rather than a sentence.
+  `MemoryState.loanMapLaws` is that proof and is the same for every profile, which is
+  the right answer for laws about a map this layer owns: the item is discharged by
+  construction and cannot be weakened by the profile closing it. Both fixture profiles
+  supply it; `loanMapLaws := trivial` no longer typechecks.
+
+  `RequiredProofPackage.Holds` conjoins the ten that remain. Every item that gains this
+  treatment leaves that conjunction, and when it is empty §10 is closed by the type
+  rather than by a profile's word.
+
+  The ten are not statable yet and each is owed by the milestone that owns its subject:
+  `accessDescriptorSoundness` and `permissionEnforcementAndFaultFidelity` need an ISA's
+  declared effects; `consistencyGraphWellFormedness` and `raceFreedomConsequences` need
+  M8's happens-before graph; `synchronizationAndObligationTransfer` needs M8 and §7.4;
+  `callStackFrameLifetime` needs M4's frames; `erasurePreservation` needs M9;
+  `allocatorFreshnessTeardownEpoch` is closest — `tearDown?`, `allocate?` and the epoch
+  rules exist, and stating it is the obvious next one to take;
+  `rangeProvenanceInitializationPreservation` is half-statable, since the framing and
+  commutation laws exist over `applyAccess` and not over `step`; `validationMetadata`
+  is M10's.
+
+  **A layering change came with it.** `Grass/Memory/State.lean` imported
+  `Grass/Memory/Profile.lean` and used nothing from it, which is why the dependency
+  could be reversed at all — the package could not mention a `MemoryState` while the
+  state depended on the package. `Profile.lean` now imports `State.lean` and
+  `Grass/Op/Step.lean` imports `Profile.lean` directly instead of inheriting it. The
+  unused import had been there since M1.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Four review rounds found the same shape and it is worth naming as a shape rather than
@@ -1729,7 +1764,7 @@ its entries one at a time.
 | `AdmittedVocabulary.WellFormed` | — | the address-space table is checked and the three justification registries are pairwise disjoint; the other nine have no coherence condition and need none |
 | `StepPolicy.oracle` | can only fail *about commits* | `Oracle.answer` returns a proof-carrying `CompleteCommitted` or `none`, and `none` records `machineAnswerIncomplete`; it cannot claim a commit it cannot witness. "Can only fail" was an overclaim and review said so: it also supplies the bytes that land in memory and the values that reach the trace, and it takes a whole `MachineState` where `AuthorityProvider.refuses` was deliberately narrowed to a `MemoryState`. No repair is proposed because `writeData` has nowhere else to come from today |
 | `StepPolicy.requiredFacets` | demands more | a facet a profile requires and an operation does not supply is a rejection, and `closes_iff_no_missing` says the gate deciding that is `OperationFacets.Closes`. A profile requiring *nothing* still cannot step an operation with no memory-effect facet, because the branch after the gate refuses it |
-| `MemoryProfile.package` | **removes nothing today, and gates everything tomorrow** | eleven bare `Prop`s the profile chooses, so `True` eleven times closes §10. This is the one input on this table with no constraint at all, and it is the last gate before `VerifiedProgram` |
+| `MemoryProfile.package` | **ten of eleven items still name their own sentence** | `loanMapLaws`'s type is `MemoryState.LoanMapLaws`, so that item is a proof the profile supplies and cannot weaken. The other ten are bare `Prop`s and `True` closes each; `RequiredProofPackage.Holds` conjoins exactly those ten, so the conjunction shrinks as items are stated. Still the weakest input here, and the last gate before `VerifiedProgram` |
 | `faultAt`, the fault plan | adds paths | a `step` argument rather than a profile field; every plan it can name is checked against the sequence's own declarations |
 
 The pattern to apply to a new field: if a profile can fill it in so that a sentence of

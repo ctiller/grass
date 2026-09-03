@@ -1,5 +1,6 @@
 import Grass.Memory.Loan
 import Grass.Memory.Apply
+import Grass.Memory.Profile
 import Grass.Memory.State
 import Grass.Op.Facets
 

@@ -3,7 +3,6 @@ import Grass.Memory.ByteStore
 import Grass.Memory.Audit
 import Grass.Memory.Authority
 import Grass.Memory.Event
-import Grass.Memory.Profile
 import Grass.Std.Logical.FiniteMap
 
 /-!
@@ -3249,6 +3248,106 @@ theorem rangeInitialized_write (state : MemoryState) {id : AllocId} {start : Nat
   simp only [hfound, FiniteMap.lookup_insert_self]
   exact ByteStore.initialized_write record.bytes start bytes
 
+
+/--
+**§10's loan-map item, as a proposition this layer states rather than one a profile
+names.**
+
+`docs/MEMORY_MODEL.md` §10 asks for "loan map laws: unique loan identity; split, join,
+transfer, reclamation". `RequiredProofPackage` carried that as a bare `Prop` field, so
+a profile chose the sentence as well as the proof and `True` closed it. The field's
+type is this now, and `MemoryState.loanMapLaws` below is the proof every profile
+supplies, so the item is closed by construction and cannot be weakened by the profile
+that closes it.
+
+Each conjunct is the statement of a theorem already proved here, in order:
+`issue?_eq_none_of_reissued`, `splitGrant?_creates_no_authority`,
+`splitGrant?_yields_the_parts`, `joinGrants?_creates_no_authority`,
+`joinGrants?_yields_the_join`, `transferGrant?_creates_no_authority`,
+`transferGrant?_grants_the_recipient`, `grantAt?_returnGrant?_self` and
+`grantAt?_returnGrant?_ne`.
+
+**What this is not.** It is not a claim that the profile proved anything specific to
+its target -- the proof is generic and identical for every profile, which is the
+correct answer for laws about a map this layer owns. It is a claim that §10's
+loan-map sentence now has one meaning across all profiles. The other ten fields of
+`RequiredProofPackage` are still `Prop`s a profile names, and
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records which milestone owes each of
+them the same treatment.
+-/
+def LoanMapLaws : Prop :=
+  (∀ (state : MemoryState) (id : GrantId) (grant : AuthorityGrant),
+      (state.grantAt? id).isSome → state.issue? id grant = Option.none) ∧
+  (∀ (state next : MemoryState) (id low high : GrantId) (boundary : Nat)
+      (grant : AuthorityGrant) (context : ContextId) (provenance : Provenance)
+      (range : ByteRange) (intent : AccessIntent),
+      state.splitGrant? id low high boundary = some next →
+      state.grantAt? id = some grant →
+      next.Granted context provenance range intent →
+      state.Granted context provenance range intent) ∧
+  (∀ (state next : MemoryState) (id low high : GrantId) (boundary : Nat)
+      (grant : AuthorityGrant),
+      state.splitGrant? id low high boundary = some next →
+      state.grantAt? id = some grant →
+      next.grantAt? low = some (grant.lowPart boundary) ∧
+      next.grantAt? high = some (grant.highPart boundary) ∧
+      next.grantAt? id = Option.none) ∧
+  (∀ (state next : MemoryState) (low high into : GrantId)
+      (lowGrant highGrant : AuthorityGrant) (context : ContextId)
+      (provenance : Provenance) (range : ByteRange) (intent : AccessIntent),
+      state.joinGrants? low high into = some next →
+      state.grantAt? low = some lowGrant →
+      state.grantAt? high = some highGrant →
+      next.Granted context provenance range intent →
+      state.Granted context provenance range intent) ∧
+  (∀ (state next : MemoryState) (low high into : GrantId)
+      (lowGrant highGrant : AuthorityGrant),
+      state.joinGrants? low high into = some next →
+      state.grantAt? low = some lowGrant →
+      state.grantAt? high = some highGrant →
+      next.grantAt? into = some (lowGrant.joined highGrant) ∧
+      next.grantAt? low = Option.none ∧ next.grantAt? high = Option.none) ∧
+  (∀ (state next : MemoryState) (actor : ContextId) (id : GrantId)
+      (recipient : ContextId) (grant : AuthorityGrant) (context : ContextId)
+      (provenance : Provenance) (range : ByteRange) (intent : AccessIntent),
+      state.transferGrant? actor id recipient = some next →
+      state.grantAt? id = some grant → context ≠ recipient →
+      next.Granted context provenance range intent →
+      state.Granted context provenance range intent) ∧
+  (∀ (state next : MemoryState) (actor : ContextId) (id : GrantId)
+      (recipient : ContextId) (grant : AuthorityGrant) (provenance : Provenance)
+      (range : ByteRange) (intent : AccessIntent),
+      state.transferGrant? actor id recipient = some next →
+      state.grantAt? id = some grant →
+      grant.range.Contains range →
+      state.SharesBytes grant.provenance.root provenance.root →
+      state.CurrentEpoch grant.provenance →
+      state.CurrentEpoch provenance →
+      grant.rights.Permits intent →
+      next.Granted recipient provenance range intent) ∧
+  (∀ (state returned : MemoryState) (context : ContextId) (id : GrantId),
+      state.returnGrant? context id = some returned →
+      returned.grantAt? id = Option.none) ∧
+  (∀ (state returned : MemoryState) (context : ContextId) (id other : GrantId),
+      state.returnGrant? context id = some returned → other ≠ id →
+      returned.grantAt? other = state.grantAt? other)
+
+/-- **The loan-map laws hold**, which is the proof every `MemoryProfile` supplies for
+§10's loan-map item. Nothing about it is profile-specific, and that is the point: the
+item is discharged by this layer for every target, so no profile can close §10 by
+naming a weaker sentence. -/
+theorem loanMapLaws : LoanMapLaws :=
+  ⟨fun state _ grant h => issue?_eq_none_of_reissued state grant h,
+   fun _ _ _ _ _ _ _ _ _ _ _ h hat hg => splitGrant?_creates_no_authority h hat hg,
+   fun _ _ _ _ _ _ _ h hat => splitGrant?_yields_the_parts h hat,
+   fun _ _ _ _ _ _ _ _ _ _ _ h hl hh hg => joinGrants?_creates_no_authority h hl hh hg,
+   fun _ _ _ _ _ _ _ h hl hh => joinGrants?_yields_the_join h hl hh,
+   fun _ _ _ _ _ _ _ _ _ _ h hat hne hg =>
+     transferGrant?_creates_no_authority h hat hne hg,
+   fun _ _ _ _ _ _ _ _ _ h hat hc hs hg ha hr =>
+     transferGrant?_grants_the_recipient h hat hc hs hg ha hr,
+   fun _ _ _ _ h => grantAt?_returnGrant?_self h,
+   fun _ _ _ _ _ h hne => grantAt?_returnGrant?_ne h hne⟩
 
 end MemoryState
 
