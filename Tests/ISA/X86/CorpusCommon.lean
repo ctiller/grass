@@ -38,6 +38,13 @@ def nasmName : Gpr -> String
   | .r8 => "r8" | .r9 => "r9" | .r10 => "r10" | .r11 => "r11"
   | .r12 => "r12" | .r13 => "r13" | .r14 => "r14" | .r15 => "r15"
 
+/-- The 32-bit name of a register, for probe labels and disassembly text. -/
+def nasmName32 : Gpr -> String
+  | .rax => "eax" | .rcx => "ecx" | .rdx => "edx" | .rbx => "ebx"
+  | .rsp => "esp" | .rbp => "ebp" | .rsi => "esi" | .rdi => "edi"
+  | .r8 => "r8d" | .r9 => "r9d" | .r10 => "r10d" | .r11 => "r11d"
+  | .r12 => "r12d" | .r13 => "r13d" | .r14 => "r14d" | .r15 => "r15d"
+
 /-- NASM's spelling of a scale factor. -/
 def scaleText : Scale -> String
   | .s1 => "1" | .s2 => "2" | .s4 => "4" | .s8 => "8"

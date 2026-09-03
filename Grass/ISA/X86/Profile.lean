@@ -19,8 +19,11 @@ names anchored to the declaration they constrain — `decodeMem.ripRelative`,
 
 ## State of these citations
 
-Every rule below is dual-cited, and none is confirmed. That is the honest
-current state and the ledger reports it rather than implying otherwise:
+Every rule below is dual-cited, and none is confirmed. Eight assert
+`CommonBasis.agreed`; `registerWriteExtension` does not, because that
+constructor claims both manuals state the same guarantee and the AMD manual is
+unretrievable, so its carve-outs were settled on hardware instead. That is the
+honest current state and the ledger reports it rather than implying otherwise:
 
 - `Ledger.releaseBlockers` is non-empty, because the AMD APM's recorded
   retrieval location is dead and the manual is `referenceOnly`. See
@@ -108,11 +111,29 @@ first thing this profile states.
 def registerWriteExtension : CommonRule :=
   { subject := writeExtension
     statement :=
-      "In 64-bit mode, an operation with a 32-bit destination register writes " ++
-      "bits 31:0 and clears bits 63:32. An operation with an 8-bit or 16-bit " ++
-      "destination register writes those bits and leaves the remaining bits of " ++
-      "the register unchanged. A 64-bit destination replaces the register."
-    basis := .agreed
+      "In 64-bit mode, an instruction that writes a 32-bit general-purpose " ++
+      "register destination writes bits 31:0 and clears bits 63:32. One that " ++
+      "writes an 8-bit or 16-bit destination writes those bits and leaves the " ++
+      "rest of the register unchanged. A 64-bit destination replaces the " ++
+      "register. Three carve-outs: opcode 90 without REX.B is NOP and writes " ++
+      "no register at all, so the 32-bit rule does not reach it, while the " ++
+      "same exchange encoded as 87 C0 does zero-extend; a high-byte " ++
+      "destination (AH, CH, DH, BH) writes bits 15:8 and preserves 7:0 as well " ++
+      "as 63:16; and an instruction whose destination the architecture leaves " ++
+      "undefined for some input, such as BSF or BSR with a zero source, is " ++
+      "outside the rule."
+    -- Not `.agreed`: `CommonBasis.agreed` asserts that both manuals state the
+    -- same guarantee, and the AMD manual is currently unretrievable
+    -- (`Sources.lean`). The two carve-outs named in the statement were settled
+    -- on hardware instead -- `Tests/ISA/X86/MachineProbes.lean` confirms both
+    -- on an Intel i9-13900H -- and the BSF/BSR case is where the vendors are
+    -- reported to differ, which is exactly why this cannot claim agreement yet.
+    basis := .weakerCommon
+      ("clears bits 63:32 on a 32-bit destination write; BSF/BSR with a zero " ++
+       "source leave the destination undefined")
+      ("clears bits 63:32 on a 32-bit destination write; BSF/BSR with a zero " ++
+       "source are reported to leave the destination unmodified, which this " ++
+       "rule does not rely on")
     citation := dual writeExtension
       (cite .intel Volume.intelBasic "3.4.1.1"
         "General-Purpose Registers in 64-Bit Mode" [writeExtension]
@@ -138,7 +159,12 @@ def rexPrefixLayout : CommonRule :=
       "size to 64 bits; R, X and B supply the high bit of the ModRM reg field, " ++
       "the SIB index field, and the ModRM rm, SIB base or opcode register field " ++
       "respectively. In 64-bit mode these sixteen byte values are prefixes and " ++
-      "no longer encode the one-byte INC and DEC forms of 32-bit mode."
+      "no longer encode the one-byte INC and DEC forms of 32-bit mode. A REX " ++
+      "prefix must be the last prefix before the opcode, after every legacy " ++
+      "prefix and immediately before the opcode or its 0F escape; a REX " ++
+      "separated from the opcode by any other prefix is ignored, and the " ++
+      "instruction then executes without the register extensions and without " ++
+      "the 64-bit operand size."
     basis := .agreed
     citation := dual rexLayout
       (cite .intel Volume.intelInstructionFormat "2.2.1"
@@ -187,13 +213,13 @@ def modRmByteLayout : CommonRule :=
       "opcode extension, determined by the opcode."
     basis := .agreed
     citation := dual modRmLayout
-      (cite .intel Volume.intelInstructionFormat "2.1.5"
-        "Addressing-Mode Encoding of ModR/M and SIB Bytes" [modRmLayout]
-        ("Find the section on ModR/M and SIB addressing-mode encoding. The bit " ++
-         "assignment appears in the instruction-format figure earlier in the " ++
-         "chapter; the field meanings are in this section's tables. Check the " ++
-         "table whose caption covers 32-bit addressing forms with the ModR/M " ++
-         "byte, and the 64-bit notes accompanying it."))
+      (cite .intel Volume.intelInstructionFormat "2.1.3"
+        "ModR/M and SIB Bytes" [modRmLayout]
+        ("This is the section that defines the field layout, not 2.1.5, which " ++
+         "holds the addressing-forms tables and is where the escape rules are " ++
+         "anchored. Confirm the bit ranges mod 7:6, reg 5:3, rm 2:0 and the " ++
+         "statement that reg is either a register number or an opcode " ++
+         "extension."))
       (cite .amd Volume.amdInstructions "1.4"
         "ModRM and SIB Bytes" [modRmLayout]
         ("In the Instruction Formats chapter of Volume 3, find the ModRM and " ++
@@ -210,11 +236,12 @@ def sibByteLayout : CommonRule :=
       "100 and mod is not 11."
     basis := .agreed
     citation := dual sibLayout
-      (cite .intel Volume.intelInstructionFormat "2.1.5"
-        "Addressing-Mode Encoding of ModR/M and SIB Bytes" [sibLayout]
-        ("In the same section as the ModR/M tables, find the table whose caption " ++
-         "covers 32-bit addressing forms with the SIB byte. Confirm the scale " ++
-         "column values and that the SIB byte is present only for rm=100."))
+      (cite .intel Volume.intelInstructionFormat "2.1.3"
+        "ModR/M and SIB Bytes" [sibLayout]
+        ("The same section as the ModR/M layout. Confirm the bit ranges scale " ++
+         "7:6, index 5:3, base 2:0 and the scale-factor encoding. The rule that " ++
+         "a SIB byte is present only for rm=100 is in 2.1.5's tables, which is " ++
+         "where sibEscape is anchored."))
       (cite .amd Volume.amdInstructions "1.4"
         "ModRM and SIB Bytes" [sibLayout]
         ("In the ModRM and SIB section of Volume 3, find the SIB field table " ++

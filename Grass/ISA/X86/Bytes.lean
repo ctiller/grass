@@ -309,6 +309,38 @@ def encodeMemInsn (escape : Bool) (opcode : Byte) (w : Bool) (reg : RegField)
       disp := e.disp
       imm := imm }
 
+/--
+`MOV r32, imm32` — `B8+rd id`.
+
+The third place a register number can appear, after `ModRm.reg` and `ModRm.rm`:
+added into the opcode byte itself, with `REX.B` — not `REX.R` — supplying its
+fourth bit. Adding a register to an opcode looks alarming and is exactly what
+the ABI specifies; the low three bits of `B8` are zero, so the sum is a
+concatenation in disguise.
+
+No `REX.W`, so this is the zero-extending 32-bit form: writing `eax` clears the
+top half of `rax`. `Grass/ISA/X86/Register.lean` models that as
+`writeBack.w32_clears_high`, and `Tests/ISA/X86/MachineProbes.lean` checks it on
+the processor.
+-/
+def movRegImm32 (r : Gpr) (v : BitVec 32) : InsnEncoding :=
+  { rex := if r.rexBit then some (Rex.of false false false true) else Option.none
+    escape := false
+    opcode := 0xB8 + BitVec.setWidth 8 r.encodingBits
+    modrm := Option.none
+    sib := Option.none
+    disp := .none
+    imm := .i32 v }
+
+/-- The opcode-embedded form needs no ModR/M byte, so it is well-formed for the
+reason `InsnEncoding.WellFormed` cares about: nothing to serialise into a
+position that is not there. -/
+theorem movRegImm32_wellFormed (r : Gpr) (v : BitVec 32) :
+    (movRegImm32 r v).WellFormed := by
+  constructor
+  · intro h; exact absurd h (by cases r <;> simp [movRegImm32])
+  · intro h; exact absurd rfl h
+
 /-- `LEA r64, m` — `REX.W + 8D /r`.
 
 The workhorse of the differential campaign: `LEA` accepts every memory operand,
