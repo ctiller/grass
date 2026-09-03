@@ -1,6 +1,8 @@
 mod canon;
 mod common;
+mod envelope;
 mod error;
+mod events;
 mod frontier;
 mod gitrepo;
 mod registry;

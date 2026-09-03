@@ -13,20 +13,12 @@
 //! its validation, not the network round trip that publishes one.
 
 use crate::error::{invalid, AbResult};
+use crate::events::Role;
 use crate::scalars::{Agent, ObjectId, Short};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub const REGISTRY_REF: &str = "refs/heads/agent-registry";
-
-/// AGENT_BUS.md's existing three primary roles; unchanged by version two.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Role {
-    Coordinator,
-    Implementor,
-    Reviewer,
-}
 
 /// One active identity's binding within a `RosterEpoch`: which host its
 /// executor runs on, and which of that host's coordinator custody epochs is

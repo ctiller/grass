@@ -132,7 +132,8 @@ impl ObservedFrontier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::{MemberBinding, Role};
+    use crate::events::Role;
+    use crate::registry::MemberBinding;
     use crate::scalars::Short;
 
     fn a(name: &str) -> Agent {
