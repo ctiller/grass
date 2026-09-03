@@ -817,10 +817,32 @@ one outright defect that had already merged — see §3.11's denial row.
 
   The conservative direction is right; what was not recorded is its consequence. M8
   is scoped to Spike 4 in §5 and described as additive. It is not: the single-context
-  assumption is violated by the *first* acceptance program, so the M2 and M3–M5
-  acceptance criteria cannot close without either M8's ordering or a profile-supplied
-  `compatible` relation that says what an external API agent's write is ordered
-  against. That is a design question and it is the largest one on this list.
+  assumption is violated by the *first* acceptance program.
+
+  **Two things block M2's exit criterion, not one, and this entry said one until
+  review modelled the other.** The disjunction it used to offer — "M8's ordering or a
+  profile-supplied `compatible` relation" — is now a singleton: `compatibleIsAtomic`
+  requires a compatible pair to be atomic, and both of Spike 1's accesses are
+  `ordering := .plain`, so no relation a profile can construct exempts them. The
+  escape hatch this paragraph offered was closed by a later entry in this same
+  section, eleven bullets down, and the paragraph was not updated.
+
+  The second blocker is §6's loan. §3.2's table says `lea r9, transferred.addr` is
+  "taking the address of a frame slot for a callee, *and the loan that authorizes
+  it*", and no reference case carried one — `Spike1Policy` declared
+  `grantKinds := ⟨[.loan]⟩` for a loan nothing issued, which is the
+  registry-with-no-consumer shape this document condemns elsewhere. Modelling it
+  changes the milestone graph: `the_reload_is_refused_by_the_loan_rule` is the
+  program's *own* `mov eax, transferred` refused by §3's rule, at a clause `refusalOf`
+  reaches before `ConflictsWithHistory`, with `without_the_lend_the_reload_commits`
+  beside it as the control. What unblocks it is §6's conforming return — M4's — and
+  `the_conforming_return_unblocks_the_reload` steps that through the map door,
+  because no reference case carries a return: `callWithLoan` covers both of the call's
+  accesses in one sequence with no return point.
+
+  So M2's exit criterion waits on M8's happens-before **and** on M4's conforming
+  return. That is a larger claim than the one this entry made, and it is two theorems
+  rather than a design question.
 - ~~**Nothing steps the M1 reference instruction set.**~~ `Tests/Memory/Spike1Policy.lean`
   does: a `MemoryProfile`, an `AdmittedVocabulary` populated from what the reference
   descriptors actually name, and a `StepPolicy` adopting the standard loan rule. Every
@@ -1351,6 +1373,41 @@ Lending the tail leaves the head reachable, so the freeze is per-fragment rather
 than per-allocation — without it, lending one field of a struct would lock the
 struct. And an unlent store commits, so the refusals are not a provider that
 refuses everything.
+
+### 4.4.1b What the Spike 1 reference set does not model
+
+Round thirteen audited the fixture against `Spikes/1_Hello_World/Program.lean` and
+`docs/SPIKE_1.md` rather than against this layer, which is the first round to do so.
+The loan it found is above, in §4.2, because it changes the milestone graph. These are
+the rest, and they are fidelity gaps rather than defects in the layer:
+
+- **The frame layout contradicts `docs/SPIKE_1.md`'s own table.** That table
+  (§"the frame") puts the shadow space at `+0`–`32`, the fifth argument at `+32`, the
+  `DWORD bytesWritten` at `+40`, and saved `r14`/`r13`/`r12` at `+48`/`+56`/`+64`. The
+  reference set has the frame at `⟨0, 64⟩`, `transferred` at `⟨32, 4⟩`, saved `r12` at
+  `⟨0, 8⟩` and the return address at `⟨24, 8⟩`. So `transferred` sits on the
+  `OVERLAPPED*` slot, the saved registers sit in the shadow space, and the frame
+  extent cannot contain the table's saved `r12` at all. The file disclaims x86
+  fidelity — "the ISA agent owns that" — but an offset this project's own spike
+  document specifies is not ISA modelling, and `push_and_call_share_storage` is stated
+  over these offsets.
+- **`arg WriteFile.overlapped, 0` has no counterpart.** It is an eight-byte stack
+  write at `+32` that the program performs, and the fixture's `transferred` write
+  lands on its low half. The 32 bytes of callee-writable shadow space are unmodelled
+  too, as is `WriteFile`'s *read* of the payload — the other half of what the API agent
+  does to memory.
+- Re-laying the frame to the table would move `transferred`, the saved registers and
+  the return address, and the return address belongs *below* the frame base rather
+  than inside it, so it cannot descend through the frame step at all. That is a
+  restructuring of the provenance paths and it is owed; the two facts above are
+  recorded rather than fixed for that reason.
+
+What the same round checked and found sound: every one of the fifty-nine declarations
+this section names exists; none of the ten closed claims it verified was vacuous; the
+`.join` actor rule's closure survives mutation; and no item recorded as open is in
+fact closed. The four stale sentences it found all pointed the other way — a closed
+thing described as open, or a count that had moved — and each is corrected in place
+with what it used to say.
 
 ### 4.4.1a Which profile inputs can weaken a rule
 
@@ -1995,10 +2052,12 @@ the field belongs beside it as something that can only add.
   What review's deletion did expose is real and is closed: the fallback branch sits
   outside `refusalOf_class_declared`'s reach, so nothing said the class it records is
   one the profile declared. `transition_own_classes_declared` says it for that class
-  and for `wrongAddressSpace`. It does *not* say it for the third append site —
-  `AccessOutcome.violation?` carries a class the profile's machine oracle chose, and
-  nothing in this layer bounds it. That is an open gap and it is stated in the
-  theorem's own docstring.
+  and for `wrongAddressSpace`. The third append site is neither
+  covered nor reachable: `AccessOutcome.denied` has no producer anywhere, so the
+  branch that reads `outcome.violation?` is dead code. An earlier version of this
+  entry attributed the gap to the profile's machine oracle, which returns a
+  `CompleteCommitted` and cannot produce an `AccessOutcome` at all — the correction is
+  the entry further down this section, and this one contradicted it for a round.
 - ~~**The `.join` actor rule had no fixture.**~~ Removing "only the holder may join"
   from `applyAuthorityDelta?` left the whole build green, while its `.split` twin is
   caught immediately. `a_non_holder_may_not_join` is the fixture, and it is stated on

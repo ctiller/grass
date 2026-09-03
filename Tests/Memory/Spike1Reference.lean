@@ -61,6 +61,8 @@ def epoch₀ : EpochId := epochSupply₀.fresh.1
 
 private def contextSupply₀ : FreshSupply ContextTag := FreshSupply.initial
 
+private def grantSupply₀ : FreshSupply GrantTag := FreshSupply.initial
+
 /-- The single thread Spike 1 runs on. -/
 def mainThread : ContextId := contextSupply₀.fresh.1
 
@@ -135,9 +137,14 @@ def imageProvenance : Provenance :=
 def rdataStep : ProvenanceStep :=
   { kind := .imageSection, label := ⟨".rdata"⟩, extent := ⟨0, 4096⟩ }
 
-/-- The `payload` static object the spike emits. -/
+/-- The `payload` static object the spike emits.
+
+Fifteen bytes: `docs/SPIKE_1.md` §1 says "the 15 UTF-8 bytes `Hello, World!
+`",
+which is thirteen characters plus the two-byte line ending. This said fourteen until
+review counted, in the file whose mandate is the exact Spike 1 instruction mix. -/
 def payloadStep : ProvenanceStep :=
-  { kind := .symbol, label := ⟨"payload"⟩, extent := ⟨0, 14⟩ }
+  { kind := .symbol, label := ⟨"payload"⟩, extent := ⟨0, 15⟩ }
 
 /-- The `__imp_WriteFile` import table entry. -/
 def importStep : ProvenanceStep :=
@@ -164,7 +171,8 @@ def spaceTable : AddressSpaceTable := .cpuOnly
 /-- Build a plain single-threaded access in the 64-bit CPU space. -/
 def access (provenance : Provenance) (range : ByteRange) (address : MachineAddress)
     (intent : AccessIntent) (permission : Permission) (alignment : Nat)
-    (requiresInitialized producesInitialized : Bool) : AccessDescriptor :=
+    (requiresInitialized producesInitialized : Bool)
+    (authority : AuthorityEffect := []) : AccessDescriptor :=
   { context := mainThread
     address := .numeric address
     space := .cpuVirtual
@@ -176,7 +184,8 @@ def access (provenance : Provenance) (range : ByteRange) (address : MachineAddre
     initialization :=
       if requiresInitialized then .allBytesInitialized else .readsNothing
     producesInitialized := producesInitialized
-    admittedFaults := [.pageFault, .generalProtection] }
+    admittedFaults := [.pageFault, .generalProtection]
+    authorityEffect := authority }
 
 /-! ## The eight reference cases -/
 
@@ -248,6 +257,36 @@ def callImportWriteFile : SubstepSequence :=
   { substeps :=
       [ .access (access importProvenance ⟨2048, 8⟩ 0x3000 .read .readOnly 8 true false),
         .access (access returnSlotProvenance ⟨24, 8⟩ 0x1018 .write .readWrite 8 false true) ]
+    onFault := .priorEffectsVisible }
+
+/-- The identity of the loan the call passes. -/
+def slotLoan : GrantId := grantSupply₀.fresh.1
+
+/--
+`call qword ptr [rip + __imp_WriteFile]`, **with the loan §6 requires**.
+
+§3.2's own table says what `lea r9, transferred.addr` is for: "taking the address of
+a frame slot for a callee, *and the loan that authorizes it*". No reference case
+carried one — `Spike1Policy`'s vocabulary declared `grantKinds := ⟨[.loan]⟩` for a
+loan nothing issued, which is the registry-with-no-consumer shape this branch
+condemns elsewhere. Review found it.
+
+Modelling it changes the milestone conclusion, which is why it is here.
+`the_reload_is_refused_by_the_loan_rule` below is the program's *own* reload refused,
+by §3's rule, at a clause `refusalOf` reaches before `ConflictsWithHistory` — so M8's
+happens-before is not the only thing M2's exit criterion waits on. What unblocks it is
+§6's conforming return, which is M4's and which this reference set has no case for,
+because `callImportWriteFile` covers both of the call's accesses in one sequence with
+no return point.
+-/
+def callWithLoan : SubstepSequence :=
+  { substeps :=
+      [ .access (access importProvenance ⟨2048, 8⟩ 0x3000 .read .readOnly 8 true false),
+        .access (access returnSlotProvenance ⟨24, 8⟩ 0x1018 .write .readWrite 8 false true
+          [.issue slotLoan
+            { kind := .loan, holder := apiAgent, lender := mainThread
+              provenance := transferredProvenance, range := ⟨32, 4⟩
+              rights := .readWrite }]) ]
     onFault := .priorEffectsVisible }
 
 /--
@@ -449,7 +488,7 @@ theorem lea_performs_no_access : leaPayload.substeps = [] := rfl
 /-- The pointer `lea` produces carries `payload`'s provenance, not the image
 root's. Descending is not free: it required the nesting the provenance records. -/
 theorem payloadPointer_provenance :
-    payloadPointer.provenance.extent = ⟨0, 14⟩ := rfl
+    payloadPointer.provenance.extent = ⟨0, 15⟩ := rfl
 
 /-- A `call` through the import table is two accesses, not one. -/
 theorem call_has_two_substeps : callImportWriteFile.substeps.length = 2 := rfl
