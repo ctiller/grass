@@ -2346,6 +2346,21 @@ a clause, try to satisfy it badly.** Delete it and see whether anything breaks
 message (§10.90, §10.91, §10.93). A repair deserves the round its subject got,
 and none of these four survived one.
 
+**And the next round found five more, in the repairs to those four** — §10.95
+through §10.99. The rule works; the point is that it has to be applied every
+time, not once. Three further checks fell out of that round and are worth naming
+because each found something the others did not:
+
+* **Which field of the step bounds this field of the state?** An `EscrowLedger`
+  has three mutable fields. `created` was bounded by §10.91, `resolution` by
+  §10.87, and `cancelRequested` by nothing at all until §10.97.
+* **What would this obligation have to *see* in order to fail?** Two rounds of
+  fixture repair could not fix §10.99, because the clause did not receive the
+  state it was supposed to be about. Each repair refused *something*, which is
+  what made them look like progress.
+* **A repair can be worse than the defect.** §10.96's field made mandatory the
+  step that the field it replaced made impossible.
+
 ### Still owed for M4 exit
 
 * **`flatten_sequential_roundtrip`** — blocked on §10.42, which is the same
@@ -3977,6 +3992,122 @@ strengthened it; this one connected it to the clause it exists to serve. Each
 round was right about what it fixed and silent about the seam beyond it. What
 finds a seam is asking what a *consumer* of the invariant can conclude — not what
 the constructor guarantees.
+
+### 10.95 `ResolvesOnlyAs` was too wide for five of the six it covered
+
+§10.90 replaced `ResolvesNothingElse` with `ResolvesOnlyAs` on `ResolvesEscrow`,
+justifying it by `ChannelResolution.coalesced` merging a carrier's "fellow
+sources, plural". That conflated two things: the *carrier* collects several
+sources, and each source is consumed by its own `coalesce` step. §3's disposition
+acts on "that exact reply occurrence".
+
+A reviewer compiled the consequence: a `drop` that disposes of two in-flight
+messages while naming one. The same shape works for `timeout` and
+`acknowledgeCancel`. Beyond untidiness, `NetworkTransition.drop`'s occurrence
+parameter no longer determines what the step did, which is the property the
+transition family's own module header claims for its constructors.
+
+**Closed**: `ResolvesEscrow` is back to `ResolvesNothingElse`. `ClosesSession`
+and `KillsSession` keep `ResolvesOnlyAs`, because ending the whole session *is*
+what they are for, and `Delivers` and `Reroutes` keep the narrow form for reasons
+of the same shape — `cursorAdvances` and `arrives` are both singular.
+
+### 10.96 `closesEverything` mandated the defect `onItsSession` refuses
+
+§10.90's new field quantified over every outstanding occurrence on the session
+with **no on-session guard**, and `Reroutes.arrives` asked only that the arrival
+carry the rerouted occurrence's *message* — not that it belong to the destination
+session.
+
+A reviewer put the two together and compiled a two-step program: a reroute whose
+destination acquires the source session's own occurrence, then a close of that
+destination. `closesEverything` *obliges* the close to write a second
+`ChannelResolution` for it, while the reroute's own resolution still stands on
+the source ledger. One occurrence, two endings, at one world —
+`ResolvesEscrow.onItsSession`'s docstring names this exact program as the thing
+it exists to refuse, and the new field reached it by a path that field does not
+cover. The reviewer proved it generically: *every* close of that destination
+double-resolves.
+
+**Closed** at both ends. `closesEverything` and `killsEverything` take
+`other.2.1 = session`, and `Reroutes.arrives` pins `arrival.2.1 = destination`, so
+the acquiring reroute is unbuildable in the first place.
+
+The sharpest thing about this one: the pre-§10.90 field made it *impossible*, and
+the repair made it *mandatory*. A repair can be worse than the defect, and the
+only thing that catches that is attacking the repair.
+
+### 10.97 An acknowledgement could write the request it acknowledged
+
+`EscrowLedger.acknowledgedWasRequested` is a law of *one ledger*: an
+acknowledgement in it must have a request in it. Nothing said the request was
+there *before the step*, and no constructor bounded `cancelRequested` at all — so
+an `acknowledgeCancel` could write the request and the acknowledgement in the
+same move. A reviewer compiled one from a world where `cancelRequested` is `false`
+for every occurrence.
+
+`ProcessPlan.RequestsCancel`, with its `wasNotRequested`, `stillOutstanding` and
+`ledgerExtends` guards, was bypassable entirely, and `docs/PROCESS.md` §3's affine
+cancellation request was enforced by nothing. The same step could prime *other*
+occurrences, setting up later acknowledgements.
+
+**Closed** by `RequestsNothing` on every escrow constructor that does not request,
+`RequestsCancel.requestsNothingElse` for the one that does, and
+`ResolvesEscrow.acknowledgesARequest`, which requires the request to have been
+made before the step.
+
+This is §10.87 and §10.91 a third time, at a third ledger field: `created` was
+bounded, then `resolution` was bounded, and `cancelRequested` — the third mutable
+field of an `EscrowLedger` — was bounded by nothing. The general form of the
+check is: **for each field of a state a step may write, which field of the step
+bounds it?**
+
+### 10.98 A reroute could multiply the payload
+
+`arrives` bounded the arrival's existence and its message. It bounded neither the
+arrival's *session* (§10.96) nor the *count*, so one reroute of one occurrence
+could put two distinct occurrences carrying the same payload in flight at the
+destination — a reviewer compiled it, and proved the resulting world still
+satisfies `ReroutesLand`.
+
+**Closed**: `arrives` pins the arrival uniquely — every occurrence the destination
+gains is *that* arrival. `SendsEscrow.createsOnlyTheMessage` and
+`ResolvesEscrow.createsOnlyTheCarrier` had this shape already; the reroute's
+destination did not.
+
+### 10.99 `ViewAccepts` could not see the state, so no view clause could bite
+
+Two attempts at §10.56's fixture failed the same way, and the cause was in
+`ProcessAcceptance` rather than in the fixture.
+
+`ViewAccepts` received a facet and a rendered value and nothing else.
+`ProcessCorrect.viewAccepts` is handed exactly `ViewAccepts facet
+(facet.render state)`, so *any* predicate satisfied by the render's own image
+discharges it for free:
+
+* the **image of the render** — a reviewer discharged the obligation at a bogus
+  facet the specification does not carry, and re-proved the fixture's own theorem
+  without the `view = some facet` hypothesis;
+* a **bound** (`≤ 1`) — a second reviewer mutated the render to the constant zero
+  and the bound survived, so a view reporting "no work remains" at the working
+  state was accepted. The fixture's docstring claimed at that point that mutating
+  `render` breaks the obligation; only mutating it *upward* did.
+
+Neither clause could say a view *reflects* anything, because neither could see
+what it was supposed to reflect.
+
+**Closed** by giving `ViewAccepts` the state.
+`Tests/Process/ViewFixtures.lean` now writes down an `intendedView` — what the
+specification says a view of this process should report — and the clause asks the
+rendered value to equal it at that state, so `viewAccepts` obliges the process's
+`render` to implement the specification's intent. Both the constant and the
+swapped mutation break it; I checked rather than argued.
+
+**What this one is really about.** Two rounds of fixture-level repair could not
+fix a signature-level defect, and each repair looked like progress because it
+refused *something*. The question that would have found it in one round is not
+"does the predicate refuse anything?" but "**what would the obligation have to see
+in order to fail?**" — and `ViewAccepts` could not see it.
 
 ### 10.89 A spawn can satisfy every field it has and not be a step
 
