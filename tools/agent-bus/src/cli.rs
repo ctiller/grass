@@ -14,7 +14,7 @@ use crate::publish::RefUpdate;
 use crate::registry::MemberBinding;
 use crate::scalars::{Agent, EventId, ObjectId, Short, Text};
 use clap::{Parser, Subcommand};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -61,6 +61,16 @@ pub enum Command {
     /// it does not surface coordinator liveness/heartbeat data, which
     /// nothing in this crate tracks yet.
     Outbox(OutboxArgs),
+    /// AGENT_REVIEW.md section 7 step 4: the accepting reviewer constructs
+    /// the no-conflict merge candidate for `--nomination`/`--reviewed-
+    /// commit`, tags it `agent-candidate/<agent>/<candidate>`, and pushes
+    /// that tag to `--remote` (failing hard if the push fails -- a
+    /// candidate tag only the reviewer's own clone can see is useless to
+    /// every other agent and to `coordinator::drain_outbox`'s own gate for
+    /// the eventual `review.merge_authorized` submission). A read-only
+    /// reviewer-side helper, not itself a publication, so it reads whatever
+    /// is already local rather than requiring a fresh remote probe.
+    PrepareMerge(PrepareMergeArgs),
 }
 
 #[derive(clap::Args)]
@@ -197,6 +207,22 @@ pub struct SucceedArgs {
 pub struct OutboxArgs {
     #[arg(long)]
     agent: String,
+}
+
+#[derive(clap::Args)]
+pub struct PrepareMergeArgs {
+    /// The accepting reviewer.
+    #[arg(long)]
+    agent: String,
+    /// The `review.nominated` (or a later `review.reassigned` link) this
+    /// candidate is prepared for.
+    #[arg(long)]
+    nomination: String,
+    /// The exact product-branch commit being reviewed.
+    #[arg(long)]
+    reviewed_commit: String,
+    #[arg(long, default_value = "origin")]
+    remote: String,
 }
 
 struct RepoPaths {
@@ -347,6 +373,7 @@ pub fn run(cli: Cli) -> AbResult<()> {
         Command::Status(args) => status(args),
         Command::Succeed(args) => succeed(args),
         Command::Outbox(args) => outbox(args),
+        Command::PrepareMerge(args) => prepare_merge(args),
     }
 }
 
@@ -783,5 +810,76 @@ fn outbox(args: OutboxArgs) -> AbResult<()> {
         }),
         envelope,
     ));
+    Ok(())
+}
+
+/// AGENT_REVIEW.md section 7 step 4 (see `Command::PrepareMerge`'s own doc
+/// for why this matters): mirrors the shipped version-one helper's
+/// `review_cmds::prepare_merge` closely, ported onto v2's `sync`/`state`
+/// primitives instead of a v1 `BusCtx`/`load_state`. This is a convenience,
+/// not an authority: nothing here is itself checked by `apply.rs` (which
+/// deliberately never touches git -- see its module doc), so
+/// `coordinator::drain_outbox` independently re-runs the same
+/// `merge_candidate` checks against whatever `review.merge_authorized`
+/// payload is actually submitted, rather than trusting that this command
+/// was ever run, let alone run honestly.
+fn prepare_merge(args: PrepareMergeArgs) -> AbResult<()> {
+    let paths = resolve_paths()?;
+    let reviewer = parse_agent(&args.agent)?;
+    let nomination = EventId::parse(args.nomination)?;
+    let reviewed_commit = ObjectId::parse(args.reviewed_commit)?;
+
+    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.worktrees)?;
+    let state = snapshot.state;
+    let chain = state
+        .review_chain(&nomination)
+        .ok_or_else(|| invalid(format!("unknown nomination {nomination}")))?;
+    if chain.current_nomination != nomination {
+        return Err(invalid("nomination is no longer current"));
+    }
+    if !chain.accepted() || chain.current_request.reviewer != reviewer {
+        return Err(invalid("only the accepting reviewer may prepare a merge"));
+    }
+
+    let previous_main = crate::gitrepo::rev_parse(&paths.repo, "refs/heads/main")?;
+    let expected_authors: BTreeSet<Agent> = chain.current_request.authors.iter().cloned().collect();
+    crate::merge_candidate::verify_authorship(
+        &paths.repo,
+        &reviewer,
+        &expected_authors,
+        &previous_main,
+        reviewed_commit.as_str(),
+    )?;
+
+    let candidate = crate::merge_candidate::reconstruct_candidate(
+        &paths.repo,
+        &previous_main,
+        reviewed_commit.as_str(),
+        &reviewer,
+    )?;
+    let tag = crate::merge_candidate::candidate_tag_name(&reviewer, &candidate);
+    crate::gitrepo::tag_lightweight(&paths.repo, &tag, &candidate)?;
+    // A candidate tag that never reaches the remote cannot be fetched or
+    // verified by any other agent, nor by `coordinator::drain_outbox`'s own
+    // gate on a different host -- that must fail `prepare-merge` outright,
+    // not silently proceed to print a `candidate` line the reviewer might
+    // go on to submit an authorization for anyway (mirrors v1's identical
+    // fix, see `merge_candidate.rs`'s module doc).
+    let push = crate::gitrepo::run(
+        &paths.repo,
+        &["push", &args.remote, &format!("refs/tags/{tag}")],
+    )?;
+    if !push.success {
+        return Err(invalid(format!(
+            "failed to publish candidate tag refs/tags/{tag} to {}: {}",
+            args.remote, push.stderr
+        )));
+    }
+
+    print_json(&serde_json::json!({
+        "candidate": candidate,
+        "previous_main": previous_main,
+        "merge_engine_epoch": state.current_merge_engine_epoch.as_ref().map(|e| e.as_str().to_string()),
+    }));
     Ok(())
 }
