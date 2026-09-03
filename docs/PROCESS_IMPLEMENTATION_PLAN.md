@@ -1799,3 +1799,114 @@ conservation theorem — field or predicate — would ever have caught it.
 Which reading the corpus intends is a ruling. Blocks: nothing; the predicate
 form is strictly stronger, so a later move to the field form loses nothing but
 the theorem's name.
+
+### 10.20 `DirectEvent` is undeclared, and cannot be indexed by demand
+
+`docs/PROCESS.md` §4 gives `DirectRelationalProgram.Step` the type
+
+```text
+  Step : State -> DirectEvent boundary -> State ->
+    AbstractDemandBag (EffectDemand boundary) -> List boundary.Observation -> Prop
+```
+
+and never declares `DirectEvent`. `Grass/Process/Sequential/Adapter.lean`
+declares it, and does not give it the signature §4 writes: it takes the
+occurrence type and its demand assignment as parameters, so a delivered result
+names the occurrence it answers rather than the demand it answers.
+
+The reason is the same clause §4 closes the passage with. Suppose a program
+holds two outstanding occurrences of equal demand value — §4 explicitly requires
+that to be possible, since "equal-valued demands retain multiplicity through
+distinct occurrences". An event carrying only `EffectDemand boundary` then
+cannot say which of the two was answered, so `Step` cannot say which one was
+consumed, so the transition equation could only ever be stated up to demand
+value. That is the "set membership" weakening, arrived at not by a lazy proof
+but by the vocabulary the event was given.
+
+`Tests/Process/AdapterFixtures.lean`'s fifth fixture is the concrete case:
+answering one `log "hi"` occurrence and issuing another leaves the demand bag
+literally unchanged, so the demand-level reading of that step is that nothing
+happened.
+
+Needs a ruling on the signature. Blocks: nothing in this layer; the adapter is
+`DirectEvent`'s only producer and consumer today.
+
+### 10.21 §4's `Pending` field permits exactly what §4's closing clause forbids
+
+`DirectRelationalProgram` declares `Pending : State -> AbstractDemandBag
+(EffectDemand boundary)` as a field, alongside a `transitionEquation` connecting
+it to the step outputs. A field is a value the producer supplies, so a program
+can present any demand bag it likes and satisfy the equation by construction —
+including one blind to the multiplicity the `binding` field is separately
+required to supply.
+
+`Grass/Process/Sequential/Adapter.lean` makes `held : State → Bag Occurrence`
+the field and derives `Pending` as `held` mapped through the occurrence's
+demand. `Bag.card_map` then makes multiplicity preservation structural rather
+than an obligation, and a program has no way to present a demand bag that
+disagrees with its occurrences, because it never presents one.
+
+This is the same trade decision 131 adopted for `ChannelContract` and
+`Grass/Process/Weave/Mixin.lean` adopted for §8's `frame`: an opaque field is a
+promise nothing checks; a derived value is a claim about something the author
+supplied. Needs ratification as a deviation from the declared field list.
+
+### 10.22 `sites : FiniteDependentEffectSiteInventory` is dropped, on §4's own grounds
+
+§4 lists a `sites` field and, three paragraphs earlier, says what it must not be
+used for: "an inventory of possible sites is not treated as the effects issued
+by a particular execution". The adapter has no use for one — `held` reports what
+an execution actually holds — and a field a producer asserts unchecked is
+exactly the shape that would let an inventory be mistaken for an issuance.
+
+Recorded rather than silently omitted (law 7). A later module that needs an
+inventory, for code generation say, should add it as an independent claim with
+its own soundness statement relating it to `Step`, not as a field of this
+structure.
+
+### 10.23 `DynamicOccurrences Initial Step` is not definable from `Initial` and `Step`
+
+§4's `binding` field reads
+
+```text
+  binding : forall occurrence,
+    occurrence 2208 DynamicOccurrences Initial Step ->
+    ExactSiteProtocolAndChildBinding occurrence
+```
+
+`Initial` and `Step` are `Prop`-valued relations. A proof of `Step before event
+after issued observations` carries no derivation to name an occurrence by, and
+two different executions reaching the same state are the same proposition — so
+there is no function from `Initial` and `Step` to a set of occurrence
+identities. `DynamicOccurrences` cannot be what its arguments say it is.
+
+The adapter resolves this by generating occurrence identity *before* the
+relation rather than after it: an occurrence is an execution point (the state
+and how many steps reached it), the occurrence type is a field of
+`DirectRelationalProgram`, and `stepBinding` is stated as a law on steps —
+which is where the binding can actually be violated, since a program could carry
+a correct `resumeOf` and still step elsewhere.
+
+Needs a ruling on whether `DynamicOccurrences` is intended as something else
+this reading has missed. Blocks: nothing today.
+
+### 10.24 The sequential route's terminal disposition is vacuous, and that is a limit
+
+A `SequentialMachine` holds at most one outstanding occurrence, because the only
+way to hold one is to be blocked on it (`held_card_le_one`). It follows that it
+cannot reach a terminal state holding anything (`terminal_holds_nothing`), so
+§4's `EveryTerminalStateClassifiesEveryPendingOccurrence` is discharged at this
+route by the empty partition and §3's "resolve, transfer, or permit" has no work
+to do.
+
+Recorded because a reader could carry the conclusion across. It is true of this
+authoring surface and false of the general network, where
+`Grass/Process/Run.lean`'s `TerminalDemandClassification` is what discharges the
+same requirement and has real content. `docs/FOUNDATION.md` law 17 permits the
+degeneracy — "serial authoring may synthesize a degenerate process realization"
+— on condition that it is not an alternate semantics, and the check on that
+condition is that the *equations* here are the general ones and only the bags
+are small.
+
+No ruling needed; this is a note against a later reader concluding that
+termination never has custody work to do.
