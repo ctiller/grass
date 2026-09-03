@@ -12,9 +12,11 @@ register.
 x86-64 has three different answers for one question, and Spike 1 depends on all
 three in a single loop:
 
-- a 64-bit write replaces the register;
-- a **32-bit write zero-extends**, discarding bits 63:32;
-- an 8- or 16-bit write **preserves** the upper bits.
+- a 64-bit write replaces the register (`writeBack.w64_independent`);
+- a **32-bit write zero-extends**, discarding bits 63:32
+  (`writeBack.w32_clears_high`);
+- an 8- or 16-bit write **preserves** the upper bits
+  (`writeBack.w8_preserves_high`, `writeBack.w16_preserves_high`).
 
 `Spikes/1_Hello_World/Program.lean` writes `r14d` and then uses `r13`/`r14` as
 64-bit quantities across a call. If the 32-bit rule were modeled as
@@ -168,8 +170,11 @@ end Gpr
 /-- An operand size, in the four widths 64-bit mode gives general-purpose
 integer operations. -/
 inductive Width where
-  /-- 8-bit. Preserves bits 63:8. -/ | w8
-  /-- 16-bit. Preserves bits 63:16. -/ | w16
+  /-- 8-bit. Leaves bits 63:8 as they were; see `writeBack.w8_preserves_high`. -/
+  | w8
+  /-- 16-bit. Leaves bits 63:16 as they were; see
+  `writeBack.w16_preserves_high`. -/
+  | w16
   /-- 32-bit. Zero-extends: bits 63:32 become zero. -/ | w32
   /-- 64-bit. Replaces the register. -/ | w64
 deriving DecidableEq, Repr, Inhabited
@@ -265,7 +270,8 @@ theorem w32_clears_high (old : BitVec 64) (v : BitVec 32) :
   rw [BitVec.extractLsb'_append_eq_of_le (by omega)]
   simp
 
-/-- A 16-bit write preserves bits 63:16. -/
+/-- A 16-bit write preserves bits 63:16, which is what `w16_preserves_high`
+states. -/
 theorem w16_preserves_high (old : BitVec 64) (v : BitVec 16) :
     BitVec.extractLsb' 16 48 (writeBack .w16 old v) =
       BitVec.extractLsb' 16 48 old := by
@@ -273,7 +279,8 @@ theorem w16_preserves_high (old : BitVec 64) (v : BitVec 16) :
   rw [BitVec.extractLsb'_append_eq_of_le (by omega)]
   simp
 
-/-- An 8-bit write preserves bits 63:8. -/
+/-- An 8-bit write preserves bits 63:8, which is what `w8_preserves_high`
+states. -/
 theorem w8_preserves_high (old : BitVec 64) (v : BitVec 8) :
     BitVec.extractLsb' 8 56 (writeBack .w8 old v) =
       BitVec.extractLsb' 8 56 old := by
@@ -327,7 +334,7 @@ namespace ByteReg
 /-- The registers that have a legacy high-byte form: `ah`, `ch`, `dh`, `bh`. -/
 def highCapable : List Gpr := [.rax, .rcx, .rdx, .rbx]
 
-/-- The low-byte forms that cannot be named without a REX prefix.
+/-- The low-byte forms `ByteReg.Encodable` rejects without a REX prefix.
 
 Without REX, encoding numbers 4-7 in an 8-bit operand denote the high-byte
 registers, so `spl`, `bpl`, `sil` and `dil` are unreachable. A REX prefix with

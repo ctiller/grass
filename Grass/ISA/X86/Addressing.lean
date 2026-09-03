@@ -20,8 +20,8 @@ Every one of these is a case where the obvious encoding means something else.
   base register directly, and neither can `r12`, which shares its low three bits.
 
 - **`[rbp]` and `[r13]` cannot use `mod=00`,** because that encoding is the
-  RIP-relative escape. They need a displacement byte, even when the
-  displacement is zero.
+  RIP-relative escape — see `rbp_base_avoids_mod00` and `r13_base_avoids_mod00`.
+  They need a displacement byte even when the displacement is zero.
 
 - **`rsp` cannot be an index register at all.** `index=100` with `REX.X` clear
   means *no index*. `r12` shares those low bits but sets `REX.X`, so `r12` is a
@@ -30,8 +30,18 @@ Every one of these is a case where the obvious encoding means something else.
   most often got wrong.
 
 `Grass/ISA/X86/Encoding.lean` proves the shared-low-bit facts these rest on.
-Here they become a total encoder that cannot emit them wrongly and a decoder
-that reads them correctly.
+Here they become an encoder that emits each hazard's correct form, checked by
+`rsp_base_uses_sib`, `rbp_base_avoids_mod00`, `no_encoding_for_rsp_index` and
+`ripRelative_encoding`, and a decoder that inverts it (`encode_then_decode`) on
+records that denote a byte string (`encodeMem_wellFormed`).
+
+Note what `encode_then_decode` does *not* establish. It relates two Grass
+definitions to each other, so an encoder and decoder that were wrong in the same
+way — `mod=00, rm=101` treated as absolute throughout, say — would satisfy it
+just as well while emitting instructions no processor executes. Internal
+consistency is all a round-trip theorem can give. The claim that these encodings
+are x86-64 rests on `Tools/x86-nasm-differential.py`, which compares 1085 of
+them against NASM.
 
 ## Why the encoder always uses a 32-bit displacement
 
@@ -202,7 +212,12 @@ deriving DecidableEq, Repr, Inhabited
 
 namespace Displacement
 
-/-- The 32-bit value this displacement contributes. -/
+/-- The 32-bit value this displacement contributes.
+
+Sign-extended, not zero-extended: an 8-bit displacement of `0x80` is `-128`. The
+further sign-extension from 32 to 64 bits happens when the effective address is
+formed, and is why the absolute form reaches only the low and high 2 GiB of the
+address space rather than an arbitrary 32-bit address. -/
 def value : Displacement → BitVec 32
   | .none => 0
   | .d8 v => BitVec.signExtend 32 v
@@ -211,6 +226,34 @@ def value : Displacement → BitVec 32
 /-- The number of bytes emitted. -/
 def size : Displacement → Nat
   | .none => 0 | .d8 _ => 1 | .d32 _ => 4
+
+end Displacement
+
+/--
+How many displacement bytes a set of ModR/M and SIB fields *promises* the
+instruction stream contains.
+
+This is not a preference. In x86-64 the `mod` field tells the processor how many
+bytes to consume before the next instruction begins, so an encoding whose
+displacement disagrees with its `mod` does not denote a different address — it
+desynchronises the decoder and the following bytes are read as an instruction
+that was never written.
+
+The two `mod=00` exceptions are the escapes: `rm=101` is RIP-relative and always
+carries four bytes, and a SIB byte with `base=101` and `mod=00` has no base
+register and also always carries four. Neither is optional.
+-/
+inductive DispKind where
+  /-- No displacement bytes follow. -/ | none
+  /-- One byte follows. -/ | d8
+  /-- Four bytes follow. -/ | d32
+deriving DecidableEq, Repr, Inhabited
+
+namespace Displacement
+
+/-- Which kind of displacement this is. -/
+def kind : Displacement → DispKind
+  | .none => .none | .d8 _ => .d8 | .d32 _ => .d32
 
 end Displacement
 
@@ -255,16 +298,65 @@ The REX prefix this addressing form needs, given the operand size and whether
 the `reg` field names an extended register.
 
 `W` and the `reg` extension come from the instruction; `X` and `B` come from the
-address. Splitting them this way is why an addressing form can be encoded
-without knowing the opcode, and why the opcode cannot accidentally drop an
-extension bit the address needed.
+address, so an addressing form can be encoded without knowing the opcode.
+
+The split has a cost this signature does not fix: `regExtended` is an unchecked
+`Bool` argument, and nothing ties it to whatever register the caller passed to
+`modrm`. A caller naming `r13` in the `reg` field and forgetting `regExtended`
+gets a legal instruction naming `rbp` instead. Nor may it be set on a `/digit`
+form, where REX.R has no meaning. Pairing the two is the job of the
+instruction-level encoder — `encodeMemInsn` in `Grass/ISA/X86/Bytes.lean` takes
+the register once and derives both — and is an **open obligation** here rather
+than a property of this function.
 -/
 def rex (e : RmEncoding) (w regExtended : Bool) : Rex :=
   Rex.of w regExtended (e.rexX == 1) (e.rexB == 1)
 
 /-- Whether this form needs a REX prefix at all when the operand size is not
-promoted and the `reg` field names a low register. -/
+promoted and the `reg` field names a low register.
+
+This answers only for the *address*. A byte operand can require a prefix on its
+own account — see `ByteReg.Encodable` — and an instruction encoder must consider
+both. -/
 def needsRex (e : RmEncoding) : Bool := e.rexX == 1 || e.rexB == 1
+
+/-- The displacement these fields promise the instruction stream carries. See
+`DispKind`. -/
+def requiredDisp (e : RmEncoding) : DispKind :=
+  if e.mod = ModRm.modDisp8 then .d8
+  else if e.mod = ModRm.modDisp32 then .d32
+  else if e.mod = ModRm.modNoDisplacement then
+    if e.rm = ModRm.rmSelectsRipRelative then .d32
+    else match e.sib with
+      | some sib => if sib.base = Sib.baseNone then .d32 else .none
+      | Option.none => .none
+  else .none
+
+/-- A SIB byte is in the stream exactly when `rm=100` and `mod ≠ 11`. -/
+def requiresSib (e : RmEncoding) : Bool :=
+  e.rm == ModRm.rmSelectsSib && e.mod != ModRm.modRegisterDirect
+
+/--
+This record denotes an actual byte string.
+
+`RmEncoding` is a product of independent fields, and most of that product is not
+reachable by any instruction. Two ways it can be unreachable, and both change
+where the *next* instruction starts rather than merely naming a different
+address:
+
+- the displacement disagrees with what `mod` promises (`requiredDisp`);
+- a SIB byte is present where none belongs, or absent where one is mandatory
+  (`requiresSib`).
+
+`decodeMem` rejects a record failing this rather than inventing an address for
+it, and `encodeMem_wellFormed` proves the encoder only produces records that
+satisfy it.
+-/
+def WellFormed (e : RmEncoding) : Prop :=
+  e.disp.kind = e.requiredDisp ∧ (e.sib.isSome = e.requiresSib)
+
+instance (e : RmEncoding) : Decidable e.WellFormed :=
+  inferInstanceAs (Decidable (_ ∧ _))
 
 end RmEncoding
 
@@ -317,6 +409,25 @@ theorem encodeMem_isNone_iff (m : MemOperand) :
     simp [encodeMem, MemOperand.Encodable, MemOperand.indexRegister] <;>
     split <;> simp_all
 
+/-- The encoder only produces records that denote a byte string.
+
+Without this, `decodeMem`'s new well-formedness rejection could silently reject
+the encoder's own output, and `encode_then_decode` would be proving something
+about a smaller set of operands than it appears to. -/
+theorem encodeMem_wellFormed (m : MemOperand) (e : RmEncoding)
+    (h : encodeMem m = some e) : e.WellFormed := by
+  cases m with
+  | ripRelative d => cases h; exact ⟨rfl, rfl⟩
+  | absolute d => cases h; exact ⟨rfl, rfl⟩
+  | base b d =>
+      cases b <;> (simp only [encodeMem] at h; cases h; exact ⟨rfl, rfl⟩)
+  | baseIndex b i s d =>
+      cases i <;> cases b <;> cases s <;> simp only [encodeMem] at h <;>
+        (first | (cases h; exact ⟨rfl, rfl⟩) | exact absurd h (by simp))
+  | indexOnly i s d =>
+      cases i <;> cases s <;> simp only [encodeMem] at h <;>
+        (first | (cases h; exact ⟨rfl, rfl⟩) | exact absurd h (by simp))
+
 /-! ## Decoding -/
 
 /--
@@ -329,7 +440,8 @@ This decoder accepts every legal 64-bit-mode memory form, including the short
 displacement forms `encodeMem` never emits.
 -/
 def decodeMem (e : RmEncoding) : Option MemOperand :=
-  if e.mod = ModRm.modRegisterDirect then Option.none
+  if !decide e.WellFormed then Option.none
+  else if e.mod = ModRm.modRegisterDirect then Option.none
   else if e.mod = ModRm.modNoDisplacement ∧ e.rm = ModRm.rmSelectsRipRelative then
     -- 64-bit mode: this is RIP-relative, not an absolute displacement.
     -- REX.B is ignored here; the form does not name a general-purpose register.

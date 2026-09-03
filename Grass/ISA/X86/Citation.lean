@@ -370,8 +370,8 @@ location, and the anchor has been followed inside it.
 
 The two conjuncts are the two independent ways a citation stops being usable.
 `docs/VALIDATION.md` §1 wants both — a stable retrieval location *and* an exact
-anchor — and a record satisfying only one of them cannot be acted on by a
-reviewer. -/
+anchor — and `FullyChecked` is what a record satisfying only one of them fails,
+because a reviewer cannot act on it. -/
 def FullyChecked (c : Citation) : Prop :=
   c.document.retrieval.isVerified = true ∧ c.isConfirmed = true
 

@@ -55,7 +55,7 @@ structure Ledger where
   profile : Name
   /-- Rules of the intersection, each dual-cited. -/
   common : List CommonRule
-  /-- Single-vendor guarantees outside the intersection. -/
+  /-- Single-vendor facts outside the intersection, each a `VendorRefinement`. -/
   refinements : List VendorRefinement
   /-- Constructs the profile does not model, each dual-cited. -/
   exclusions : List Excluded
@@ -133,7 +133,8 @@ instance (l : Ledger) : Decidable l.Coherent :=
 @[simp] theorem coherent_empty (profile : Name) : (empty profile).Coherent := by
   refine ⟨List.nodup_nil, ?_, ?_⟩ <;> simp [empty, excludedSubjects]
 
-/-- A coherent ledger never both guarantees and declines the same subject. -/
+/-- A ledger satisfying `Coherent` never both guarantees and declines one
+subject. -/
 theorem not_common_of_excluded {l : Ledger} (h : l.Coherent) {s : Name}
     (hs : s ∈ l.excludedSubjects) : s ∉ l.commonSubjects := h.2.1 s hs
 

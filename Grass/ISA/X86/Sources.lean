@@ -154,8 +154,8 @@ only way to file a citation under the wrong vendor.
 `table` is deliberately optional and usually omitted. Table *numbers* drift
 between revisions while table *captions* do not, so the reliable instruction to
 a reviewer is "find the table captioned X in this section", which belongs in
-`locator`. A number is recorded only when it has been confirmed in the revision
-this document pins.
+`locator`. A number goes in `Anchor.table` only once `Citation.confirmed`
+records that it was checked against the revision this document pins.
 -/
 def cite (v : Vendor) (volume section_ heading : String) (subjects : List Name)
     (locator : String) (table : Option String := none)

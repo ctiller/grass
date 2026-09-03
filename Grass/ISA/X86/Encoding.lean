@@ -266,7 +266,8 @@ end ModRm
 /--
 The SIB byte: `scale` in bits 7:6, `index` in bits 5:3, `base` in bits 2:0.
 
-Present only when `ModRm.rm = 100` and `mod ≠ 11`.
+Present exactly in the case `RmEncoding.requiresSib` names: the `rm` field is
+`100` and `mod` is not `11`.
 -/
 structure Sib where
   /-- Bits 7:6. The index is scaled by 1, 2, 4 or 8. -/

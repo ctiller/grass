@@ -15,27 +15,38 @@ This module makes that a construction rather than a review checklist. A
 neither can a `Excluded`, because excluding a construct is a claim about what
 both vendors say and needs both sides on the record.
 
-## The three failure modes this type prevents
+## Three failure modes, two of them closed here
 
-A dual-citation field that is merely a pair of citations prevents none of them.
+A dual-citation field that is merely a pair of citations closes none of them.
 
 1. **Both citations from one vendor.** A rule with two Intel anchors reads as
-   dual-cited in a report. `intelPublisher` and `amdPublisher` are checked
-   against the vendor's own publisher name, so the pair cannot be lopsided.
+   dual-cited in a report. `intelPublisher` and `amdPublisher` check each side
+   against `Vendor.publisher`, so a lopsided pair does not typecheck.
 
-2. **Citations about different things.** An Intel anchor for `MOV` paired with
-   an AMD anchor for `ADD` satisfies "two vendors, two anchors" and establishes
-   nothing about either. `DualCitation` is therefore *indexed by the subject*,
-   and both citations must list it.
-
-3. **A citation that names no location.** `docs/REFERENCES.md` rejects the
+2. **A citation that names no location.** `docs/REFERENCES.md` rejects the
    collection landing page as an anchor. `intelWellFormed`/`amdWellFormed`
    require `Citation.WellFormed`, which rejects a blank section, an empty
    subject list, and a blank locator.
 
-Every one of these obligations is `by decide` on honest concrete data. That is
-the intended cost profile: free when the record is real, unprovable when it is
-not.
+3. **Citations that are not about the subject.** An Intel anchor for `MOV`
+   paired with an AMD anchor for `ADD` satisfies "two vendors, two anchors" and
+   establishes nothing about either. `intelCovers` and `amdCovers` require both
+   sides to *list* the subject, and the subject is a type index so a value built
+   for one rule cannot be moved to another.
+
+   **This third one is not closed, and the check is weaker than it looks.**
+   `Citation.subjects` is a list of names the record's author types in. Nothing
+   relates it to the cited passage, nothing checks the names resolve to
+   declarations, and one anchor may list every subject in the profile — so a
+   preface citing "the whole manual" for all nine rules satisfies every
+   obligation here. Whether an anchor is *about* what it claims is a fact about
+   the manual's text, which no type in Lean can decide. It is an **open
+   obligation** discharged by a reviewer following `Citation.locator` and
+   recording the result in `Citation.confirmed`, and until that field is set the
+   ledger reports the anchor as unconfirmed.
+
+The obligations that *are* mechanised are `by decide` on honest concrete data:
+free when the record is real, unprovable when it is not.
 
 ## What this module does not claim
 
@@ -101,9 +112,10 @@ end Vendor
 /--
 Both vendors' anchors for one named subject.
 
-The subject is a type index, not a field, so that a `DualCitation subject`
-cannot be reused for a different rule. Moving a dual citation to another rule is
-a type error, which is the point: a citation's authority does not transfer.
+The subject is a type index of `DualCitation`, not a field, so a value built for
+one rule cannot be reused for another. Moving a dual citation to a different
+rule is a type error, which is the point: a citation's authority does not
+transfer.
 -/
 structure DualCitation (subject : Name) where
   /-- Intel's anchor for `subject`. -/
@@ -157,7 +169,8 @@ theorem forVendor_wellFormed (d : DualCitation subject) (v : Vendor) :
   · exact d.amdWellFormed
 
 /-- The two sides are never the same document *and* anchor for both vendors,
-because their publishers differ. A single source cannot dual-cite itself. -/
+because their publishers differ. A single source cannot dual-cite itself, since
+`Vendor.publisher_injective` forces the two apart. -/
 theorem intel_ne_amd (d : DualCitation subject) : d.intel ≠ d.amd := by
   intro h
   have : Vendor.intel.publisher = Vendor.amd.publisher := by
