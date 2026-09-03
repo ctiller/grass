@@ -40,6 +40,17 @@ name: Library build
 # for this check in its own words. It is lexical too and reports ten deliberate
 # entries into an allowlist rather than none.
 #
+# Tools/DoorAudit.py is the seventh, and it guards a rule that cannot be enforced
+# inside the thing it protects. `MemoryState`'s grant map has five checked doors and
+# four separate second ways in were found on this branch. `issue?` takes no acting
+# context -- it reads the lender from the grant -- so "the acting context must be the
+# lender it names" cannot live in the door: a caller holding the grant would satisfy
+# an `actor` parameter by passing `grant.lender`, a gate closed with the thing being
+# gated. The check has content only where the actor comes from somewhere the caller
+# does not choose, which is the access descriptor's context, so it lives in
+# `applyAuthorityDelta?` -- and this audit is what keeps every `Grass/` path going
+# through there. `Tests/` is deliberately not scanned.
+#
 # Tools/SourceLocationAudit.py is the sixth, and it exists because of an accident
 # rather than a class: two scratch probe files were swept into commits by a
 # `git add -A`, one of them containing a `sorry`, and a repo-root `.lean` file is
@@ -108,6 +119,12 @@ jobs:
 
       - name: Audit constructors nothing builds
         run: python3 Tools/ReachabilityAudit.py
+
+      - name: Self-test the door audit
+        run: python3 Tools/DoorAudit.py --self-test
+
+      - name: Audit authority-map changes outside the map's own modules
+        run: python3 Tools/DoorAudit.py
 
       - name: Self-test the citation audit
         run: python3 Tools/CitationAudit.py --self-test

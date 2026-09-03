@@ -1440,15 +1440,32 @@ refuses everything.
   keep `performAccess_frames_untouched` true. Every door changes `grants` and nothing
   else, and now there is a theorem saying so rather than an inspection.
 
-  **The actor rules and the invariant checks are in different places, and that is the
-  cost.** `issue?` reads the lender from the grant it is given and has no actor, so
-  "the acting context must be the lender it names" lives in `applyAuthorityDelta?`,
-  as does "only the holder may split or join". A caller reaching `issue?` directly
-  can therefore still name any lender — `MayLend` bounds what that named lender can
-  lend, so nothing is conjured, but one context could strip another's exclusivity by
-  lending that other's bytes to itself. Closing it means an `actor` parameter on
-  `issue?` and ninety-odd call sites; it is the next thing to do here, deliberately
-  rather than as a side effect of the commit that found it.
+  **The actor rules and the invariant checks are in different places**, because
+  `issue?` reads the lender from the grant it is given and has no actor. "The acting
+  context must be the lender it names" lives in `applyAuthorityDelta?`, as does "only
+  the holder may split or join", so a caller reaching `issue?` directly can still
+  name any lender: `MayLend` bounds what that named lender can lend, so nothing is
+  conjured out of nothing, but one context could strip another's exclusivity by
+  lending that other's bytes to itself.
+
+  The commit that introduced this said the fix was an `actor` parameter on `issue?`
+  and ninety-odd call sites, and that it was next. **That is wrong, and the reason is
+  worth keeping.** A caller of `issue?` holds the grant, so it can satisfy
+  `actor = grant.lender` by passing `grant.lender` — the parameter would be a gate
+  the caller closes with the thing being gated, which is the empty-satisfaction-
+  condition defect this document records against §10's proof package. An actor check
+  has content only where the actor comes from somewhere the caller does not choose,
+  and the only such place is the transition's `d.context`. That is where the check
+  is. So the rule holds on every path an operation can take, and `issue?`'s
+  unverified `lender` is a claim rather than a hole — a fixture asserting "I am
+  lending as this context" while building a state, which is what a fixture is for.
+  What was genuinely owed was narrower: nothing stopped a *future* non-fixture caller
+  under `Grass/` from reaching a door outside an authority effect. `Tools/DoorAudit.py`
+  is that guard — it fails on any application of one of the five doors from a
+  `Grass/` module other than the two that own the map, and it does not scan `Tests/`,
+  where calling a door directly is what a fixture is for. Negative-tested by adding a
+  real call to `Grass/Op/LoanAuthority.lean` and watching it fail, not only by its
+  own self-test.
 - **§5's arena reset requires returning all live use loans, and there is no bulk
   operation.** `MemoryState.allocate?` refuses one reallocation at a time; a profile
   tearing an arena down has to walk its allocations itself, and nothing checks that it
