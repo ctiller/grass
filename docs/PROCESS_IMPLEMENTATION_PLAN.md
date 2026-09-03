@@ -678,13 +678,13 @@ representation relation.
 
 ## 5. M3 — Cancellation and lifecycle
 
-**Status: four modules written, unmerged, unratified.** `coord1:6` ruled the
+**Status: five modules written, unmerged, unratified.** `coord1:6` ruled the
 canonical scoped cancellation form while M2 was in progress, so
 `Cancellation/Identity.lean` and `Cancellation/Policy.lean` were built out of
 order to discharge that disposition. `Cancellation/Compose.lean` follows, and it
 discharges the first two thirds of the exit criterion below. `Termination.lean`
-carries the safety half of the termination contract. Facets and all of byte flow
-have not started.
+carries the safety half of the termination contract and `Facet.lean` the
+termination facets. All of byte flow has not started.
 
 ```text
 Grass/Process/Cancellation/Identity.lean masks, point/call/region ids, CancelReason
@@ -692,7 +692,7 @@ Grass/Process/Cancellation/Policy.lean   scoped policy and certificate (written
                                          early under coord1:6, ahead of M3)
 Grass/Process/Cancellation/Compose.lean  the |> algebra and bounded cancellation
 Grass/Process/Termination.lean           modes, contracts, dispositions (safety half)
-Grass/Process/Facet.lean                 TerminationFacet and its constructors
+Grass/Process/Facet.lean                 TerminationFacet, and the two §3 claims it keeps
 Grass/Process/ByteFlow/Ingress.lean      phases, resolutions, conservation
 Grass/Process/ByteFlow/Egress.lean       offered/committed/queued, suffix retention
 Grass/Process/ByteFlow/Rechunk.lean      functional and capacity-aware rechunking
@@ -744,6 +744,33 @@ cooperative-cancellation *liveness* theorem, which needs a fairness model and a
 names it — and the fault path's custody of the demands a faulting process was
 holding, which `FaultCustodyObligation` names. Writing either as a discharged
 field would have been the liveness theorem in name only.
+
+`Facet.lean` makes two of §3's sentences checkable rather than conventional.
+"Pure serial functions, straight-line helpers, and uncancellable leaf processes
+gain no new author obligation" is kept because `TerminationFacet.ordinary` takes
+*no argument at all* — and that is possible because
+`Grass/Process/Run.lean`'s `ProcessRunTransition.terminate` cannot be formed
+without a `TerminalDemandClassification`, so every terminating transition
+already carries the disposition an ordinary facet would otherwise have had to
+supply. `terminal_transitions_have_exact_disposition` is that, proved by case
+analysis over the run relation. If the run relation ever admitted a termination
+without a classification, the proof would fail there rather than the facet
+quietly weakening.
+
+"The bridge cannot discard it after manufacturing a liveness contract" is kept
+by `retainedContract`, and by `cancellable_facet_forbids_arbitrary_death`, which
+derives §3's "a supervisor cannot manufacture a safe forced stop" *from the
+facet*. An earlier revision of that theorem took the contract as a parameter and
+mentioned the facet only in a hypothesis it never used, which made it a theorem
+about contracts wearing a facet's name; the unused-variable linter is what
+caught it.
+
+One tightening over §3's declaration: the retained contract is against
+`accept.terminalRemainder`, the specification's own law, rather than any law the
+author names. §3 writes `ProcessTerminationContract p` with the law open, which
+would let a facet promise cancellation whose dispositions the specification does
+not accept. `SupervisorPolicy` and the version family stay parameters, since
+supervision is a weave combinator rather than this layer's to invent.
 
 What `Compose.lean` deliberately does *not* model is §3's `CancellationSummary`
 itself, whose fields — `PendingCancellationCustody`,
