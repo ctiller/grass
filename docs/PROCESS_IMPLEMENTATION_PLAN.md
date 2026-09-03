@@ -2541,10 +2541,14 @@ a small change and a visible one.
 Found in the same pass, none of them unsound, all of them costs paid for no
 exported consequence:
 
-* ~~`MeetsProcessProgress.handlesEveryEvent`~~ — **closed.** It is now spent by
-  `MeetsProcessProgress.transition_for_event`, which produces a run transition
-  for *the event that arrived* rather than for some event `notStuck` happened to
-  find. Four lines, reusing `exists_transition`'s `settles` case split.
+* ~~`MeetsProcessProgress.handlesEveryEvent`~~ — **closed, on the second
+  attempt.** The first `transition_for_event` concluded
+  `∃ after, ProcessRunTransition … after`, which never mentions the event — so it
+  was `exists_transition`'s conclusion verbatim, provable by discarding the field
+  it was supposed to spend, and a reviewer reproved it that way. It now concludes
+  the *specific* successor: the state the step reaches, the bag `SuccessorBag`
+  computes, and the trace extended by exactly what was emitted. A theorem is about
+  the event it is handed only if the event appears in what it concludes.
 * `ProcessAcceptance.DemandsWellFormed` — its own docstring's example is "at most
   one outstanding write per handle", and "outstanding" is a property of the run's
   bag. It is applied in exactly two places, both to a *per-transition* `issued`
@@ -2668,22 +2672,38 @@ Needs a ruling on whether the termination contract should be restated over run
 states, which would make the exact claim expressible and would move the module
 below `Run.lean` in the import order.
 
-### 10.53 `StepProgresses`'s demand disjunct does not exclude a two-demand cycle
+### 10.53 ~~`StepProgresses`'s demand disjunct does not exclude a two-demand cycle~~ — **withdrawn, and replaced**
 
-`Grass/Process/Progress.lean`'s second disjunct now requires a settling step to
-issue nothing, which excludes a one-demand spin —
-`Tests/Process/SpinFixtures.lean` is the process it excludes, and it had a full
-`ProcessCorrect` for one commit.
+The entry claimed that a cycle through two demands — `d`'s result issues `e`,
+`e`'s issues `d`, the bag never growing and the state never moving — evaded the
+`issued.card = 0` condition, and that excluding it needed an order on the bag
+that its cardinality could not supply.
 
-A cycle through two demands evades it: `d`'s result issues `e`, `e`'s result
-issues `d`, each step answering something and each issuing something, the bag
-never growing and the state never moving. Excluding that needs a well-founded
-order on the outstanding bag, and the bag's cardinality cannot supply one because
-it is constant along the cycle.
+**Both halves were wrong.** A third review pass built that process: every step of
+it issues one demand, so `issued.card = 0` fails, the state does not move so the
+measure disjunct fails, and it has no progress record at all. The cycle was
+already excluded, one step at a time.
 
-Nothing at this layer can build such an order: the demands are the
-specification's and their dependency structure is not declared. Carried with the
-entropy escape in §6 rather than treated as a defect to fix here.
+The real escape was the opposite shape, and the entry's diagnosis pointed away
+from it. `Tests/Process/OscillateFixtures.lean`'s `osc` answers its demand and
+issues **two** while a state rank falls, then answers and issues **none** while
+the rank climbs back — returning the run state bit-for-bit, with a full
+`ProcessCorrect`. The bag's cardinality is not constant along that cycle; it
+oscillates, and so does the rank. What was wrong was having **two independent
+well-founded orders in a disjunction**, which is not an order.
+
+Fixed rather than recorded. `ProcessMeasure.rank` now takes the outstanding bag
+beside the state, `StepProgresses` is back to §7's three disjuncts, and
+`ProcessMeasure.not_decreases_both_ways` closes the cycle by asymmetry. `spin`
+and `osc` are both kept as fixtures because neither is excluded by pinning the
+other.
+
+The method note: this entry was filed from a repair, describing what the repair
+did not yet cover, without building the thing it described. That is the same
+mistake as §10.46 and it produced the same kind of error — a plausible reading,
+recorded as fact, pointing the next round in the wrong direction. Both were
+caught by a reviewer who built the process the entry described and found it
+already excluded.
 
 ### 10.54 A note on how three of this milestone's defects were found
 
@@ -2707,3 +2727,52 @@ regression, and the `countdownRemainder` retraction were found the same way: by
 Recorded as a method note rather than a defect. The exit criterion it suggests
 for the remaining layers is that every named record have at least one *positive*
 witness before the layer is nominated.
+
+### 10.55 `ProcessCorrect` says nothing about a process with no initial state
+
+Found by construction in the third pass on the M1 core. A process with
+`Initial := fun _ _ _ _ => False` and `Step := fun _ _ _ _ _ => True` — every
+state stepping to every state, emitting anything — has a complete
+`ProcessCorrect`, against an acceptance whose `TraceAccepts` accepts no trace and
+whose `DemandsWellFormed` admits no bag. `Reachable` is empty, so
+`observationsAccept` and all three `MeetsProcessProgress` fields are vacuous, and
+`Invariant := fun _ => False` makes the rest vacuous too.
+
+Nothing in the record requires `p.Initial` to be inhabited. This is not caused by
+quantifying `productive` over reachable run states — the same reviewer checked
+that for a specification that *has* initial states, `preserved` forces
+`Invariant` to contain every reachable state, so the reachability form is sound
+there — but it is a class of "correct" process no driver can start.
+
+The fix is a field, or an exit obligation on the fixture corpus rather than on
+the record. Needs a ruling on which.
+
+### 10.56 The view facet is an uninhabited class
+
+`ProcessSpec.view` is `none` in every specification in the repository — `view :=
+some` has zero occurrences — so `ProcessCorrect.viewAccepts` is discharged by
+`absurd hasView (by simp […])` in all five correctness fixtures, and
+`ProcessAcceptance.ViewAccepts` is `fun _ _ => True` in all five. `ViewFacet` is
+constructed nowhere.
+
+The same shape as §10.49's `Demanded`, and worse: `Demanded` is at least
+*settable*, and this whole facet has never had an instance. `docs/PROCESS.md`
+§2's "an optional view facet is pure — it may be evaluated, duplicated, coalesced
+or discarded" has no witness that it can be any of those.
+
+Needs a fixture with a real view, or a ruling that the facet is deferred to the
+layer that consumes it. Recorded rather than fixed because building one is a
+specification-layer question, not a process-layer one.
+
+### 10.57 `MeetsProcessProgress.productive`'s `Invariant` is redundant inside `ProcessCorrect`
+
+`ProcessCorrect.invariant_of_reachable` already yields `Invariant state` at every
+reachable run state, and `productive` is now quantified over reachable run
+states, so the hypothesis buys nothing where the field is used inside a
+correctness record. It is not redundant for a standalone `MeetsProcessProgress`,
+which has no `preserved`.
+
+Kept for now because removing it would make the progress record unusable on its
+own. Needs a ruling on whether `MeetsProcessProgress` is meant to be stated apart
+from `ProcessCorrect` at all; if it is not, the parameter should go and the two
+records should merge.

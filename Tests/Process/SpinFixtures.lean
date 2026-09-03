@@ -22,16 +22,25 @@ Every field was discharged.
 
 Two things then changed, and both are needed:
 
-* the disjunct now requires `issued.card = 0`, so answering a demand counts as
-  progress only when the outstanding bag actually shrinks;
-* `MeetsProcessProgress.productive` moved to reachable, deliverable steps, which
-  is what let `countdown`'s unreachable `.result .log` case stop being the reason
-  the disjunct was widened in the first place.
+* `MeetsProcessProgress.productive` moved to reachable steps with a real
+  successor bag, which is what let `countdown`'s unreachable `.result .log` case
+  stop being the reason the disjunct was widened in the first place;
+* the disjunct itself is gone. `ProcessMeasure.rank` now takes the outstanding
+  bag, so answering a demand is progress exactly when the author's own measure
+  says the run got smaller.
 
-`spin_has_no_progress_record` below is the check, and it is stated for **every**
-measure and every invariant true at the state — not for the particular ones the
-attack used. That is the form a fixture has to take if it is to notice a future
-re-widening rather than a future re-tuning.
+The first repair of the disjunct kept it and added `issued.card = 0`. That
+excludes `spin` and does not exclude `osc` —
+`Tests/Process/OscillateFixtures.lean` — which alternates between shrinking the
+bag and shrinking the state rank and returns the run to where it started. Two
+descent orders in a disjunction are not an order. That is the finding this file
+did not catch, and the reason it is worth saying here: a fixture that pins one
+attack does not pin the class.
+
+`spin_has_no_progress_record` below is stated for **every** measure and every
+invariant true at the state — not for the particular ones the attack used. That
+is the form a fixture has to take if it is to notice a future re-widening rather
+than a future re-tuning.
 
 ## What `spin` still has
 
@@ -189,51 +198,53 @@ theorem spin_is_never_stuck {segmented : Segmented spin.Observation}
 
 /-! ## And what it does not -/
 
-/-- A well-founded relation is irreflexive. -/
-theorem no_self_lt {α : Type} {lt : α → α → Prop} (wf : WellFounded lt) (x : α) :
-    ¬ lt x x := by
-  have acc : Acc lt x := wf.apply x
-  induction acc with
-  | intro _ _ ih => exact fun self => ih _ self self
+/-- The bag `spin` holds is what it holds again: consume the one occurrence,
+issue one back. -/
+theorem spin_successor_bag :
+    SuccessorBag (p := spin) (Bag.ofList [()]) (.result () ()) (Bag.ofList [()])
+      (0 + Bag.ofList [()]) :=
+  ⟨0, rfl, rfl⟩
 
 /--
 **The loop step progresses under no measure at all.**
 
-All four disjuncts refuted, and the second one is the one that changed: the step
-settles a demand, so the old definition stopped here, and it issues one back, so
-`issued.card = 0` fails.
+All three disjuncts refuted, and the third is the one that does the work: the
+step returns the run to the same state holding the same bag, and a well-founded
+order is irreflexive.
 
 Stated for an arbitrary `ProcessMeasure`, which is what makes it a fixture about
-`StepProgresses` rather than about a measure someone chose badly.
+`StepProgresses` rather than about a measure someone chose badly. Note that the
+statement no longer mentions `issued`: the version of `StepProgresses` this file
+was written against had a disjunct about it, and folding that into the measure
+is what made this refutation a two-line consequence of well-foundedness instead
+of a case analysis on the event.
 -/
 theorem spin_step_does_not_progress (measure : ProcessMeasure spin) :
-    ¬ StepProgresses spinAcceptance measure () () (.result () ())
-      (Bag.ofList [()]) [] := by
-  rintro (⟨entropy, isEntropy⟩ | ⟨_, _, noneIssued⟩ | ⟨_, _, demanded⟩ | decreases)
+    ¬ StepProgresses spinAcceptance measure () (Bag.ofList [()]) ()
+      (0 + Bag.ofList [()]) (.result () ()) [] := by
+  rintro (⟨entropy, _⟩ | ⟨_, _, demanded⟩ | decreases)
   · exact entropy.elim
-  · exact absurd noneIssued (by simp)
   · exact demanded
-  · exact no_self_lt measure.wellFounded _ decreases
+  · exact measure.not_decreases_self () (Bag.ofList [()]) (by simpa using decreases)
 
 /--
 **So `spin` has no progress record, whatever measure or invariant is offered.**
 
-`productive` is quantified over reachable, deliverable steps, and this step is
-both: `spin_loop_is_reachable` supplies the run state and the demand is in the
-bag. The invariant is the caller's, so the statement takes an arbitrary one and
-the only hypothesis is that it holds where the loop is — a caller who cannot
-even claim that has not made a progress claim about this process.
+`productive` is quantified over reachable steps with a real successor bag, and
+this step has both: `spin_loop_is_reachable` supplies the run state and
+`spin_successor_bag` consumes the occurrence the bag holds. The invariant is the
+caller's, so the statement takes an arbitrary one and the only hypothesis is that
+it holds where the loop is — a caller who cannot even claim that has not made a
+progress claim about this process.
 -/
 theorem spin_has_no_progress_record (Invariant : spin.State → Prop)
     (holds : Invariant ()) :
     ¬ Nonempty (MeetsProcessProgress spin spinAcceptance Invariant ()) := by
   rintro ⟨progress⟩
-  refine spin_step_does_not_progress progress.measure ?_
-  refine progress.productive _ () (Bag.ofList [()]) [] () (.result () ())
-    (Bag.ofList [()]) [] spin_loop_is_reachable holds ?_ ⟨rfl, rfl, rfl⟩
-  intro demand _
-  cases demand
-  simp
+  exact spin_step_does_not_progress progress.measure
+    (progress.productive _ () (Bag.ofList [()]) [] () (0 + Bag.ofList [()])
+      (.result () ()) (Bag.ofList [()]) [] spin_loop_is_reachable holds
+      spin_successor_bag ⟨rfl, rfl, rfl⟩)
 
 /--
 **And therefore no correctness record either.**

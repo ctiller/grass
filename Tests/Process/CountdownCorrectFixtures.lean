@@ -61,17 +61,23 @@ open Grass.Process.Tests
 /--
 How much counting is left.
 
-Consulted by nothing in `countdownProgress`, and that is worth saying rather
-than leaving for a reader to discover: every `countdown` event is entropy or a
-settlement, so the fourth disjunct is never reached and `rank := fun _ => 0`
-would do as well. `oneShotProgress` in `Tests/Process/M1CorrectFixtures.lean` is
-the fixture that exercises the well-founded half.
+It ignores the outstanding bag, which is legal and is worth a sentence, because
+`ProcessMeasure.rank` takes the bag precisely so that a process whose *state*
+does not move can still descend. `countdown`'s does move: every settling step
+decrements it. The bag would do as well — `linked` proves the two are equal along
+every run — and the state is what a reader of this process expects.
+
+It is now genuinely consulted. Under the four-disjunct `StepProgresses` every
+`countdown` event was entropy or a settlement, so `rank := fun _ _ => 0` would
+have done; with the demand-result disjunct folded into the measure, the `.result
+.tick` and `.interrupted` cases are discharged by this rank descending and by
+nothing else.
 -/
 def countdownMeasure : ProcessMeasure countdown where
   Rank := Nat
   lt := Nat.lt
   wellFounded := Nat.lt_wfRel.wf
-  rank := id
+  rank := fun state _ => state
 
 /-! ## The acceptance: `countdown`'s own remainder law -/
 
@@ -200,10 +206,10 @@ theorem log_is_never_deliverable {request : Nat}
 /--
 **`countdown` meets its progress contract, under `countdownRemainder`.**
 
-`productive` is where the two fixes show. `.external .wake` carries entropy;
-`.result .tick` and `.interrupted` each settle an outstanding demand **and issue
-nothing**, which is the second disjunct's real content; `.result .log` would
-satisfy neither and is discharged by `log_is_never_deliverable`.
+`productive` is where the fixes show. `.external .wake` carries entropy;
+`.result .tick` and `.interrupted` each decrement the state, which is the measure
+descending; `.result .log` does neither and is discharged by
+`log_is_never_deliverable`, through `eventDeliverable_of_successorBag`.
 
 `notStuck`'s terminal branch is where the invariant earns its keep. At state 0
 the bag is empty, so the partition `resolved = 0, transferred = 0, pending = 0`
@@ -243,16 +249,23 @@ def countdownProgress (request : Nat) :
         eventDeliverable_of_settles_none (by simp),
         state, 0, [], finished, rfl, rfl, rfl⟩
   productive := by
-    intro _ _ outstanding _ _ event issued _ reached _ deliverable stepped
-    obtain ⟨_, body⟩ := stepped
-    match event, deliverable, body with
+    intro _ state outstanding _ after _ event issued _ reached _ successor stepped
+    obtain ⟨running, body⟩ := stepped
+    match event, successor, body with
     | .external entropy, _, _ => exact Or.inl ⟨entropy, rfl⟩
-    | .result .tick _, _, ⟨_, isIssued, _⟩ =>
-      exact Or.inr (Or.inl ⟨Demand.tick, rfl, by rw [isIssued]; simp⟩)
-    | .result .log result, deliverable, _ =>
-      exact absurd deliverable (log_is_never_deliverable reached result)
-    | .interrupted demand _, _, ⟨_, isIssued, _⟩ =>
-      exact Or.inr (Or.inl ⟨demand, rfl, by rw [isIssued]; simp⟩)
+    | .result .tick _, _, ⟨isAfter, _, _⟩ =>
+      refine Or.inr (Or.inr ?_)
+      subst isAfter
+      show state - 1 < state
+      exact Nat.sub_lt (Nat.pos_of_ne_zero running) Nat.one_pos
+    | .result .log result, successor, _ =>
+      exact absurd (eventDeliverable_of_successorBag successor)
+        (log_is_never_deliverable reached result)
+    | .interrupted _ _, _, ⟨isAfter, _, _⟩ =>
+      refine Or.inr (Or.inr ?_)
+      subst isAfter
+      show state - 1 < state
+      exact Nat.sub_lt (Nat.pos_of_ne_zero running) Nat.one_pos
     | .fault fault, _, _ => exact fault.elim
     | .environmentViolation violation, _, _ => exact violation.elim
 

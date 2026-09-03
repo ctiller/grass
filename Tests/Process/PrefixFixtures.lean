@@ -130,7 +130,7 @@ consulted. -/
   Rank := Nat
   lt := Nat.lt
   wellFounded := Nat.lt_wfRel.wf
-  rank := fun _ => 0
+  rank := fun _ _ => 0
 
 /--
 `upto` meets its progress contract.
@@ -156,7 +156,7 @@ def uptoProgress (request : Nat) :
       eventDeliverable_of_settles_none (by simp),
       state + 1, 0, [], rfl, rfl, rfl⟩
   productive := by
-    rintro _ _ _ _ _ event _ _ _ _ _ _
+    rintro _ _ _ _ _ _ event _ _ _ _ _ _
     match event with
     | .external entropy => exact Or.inl ⟨entropy, rfl⟩
     | .result demand _ => exact demand.elim

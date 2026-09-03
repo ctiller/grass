@@ -85,7 +85,7 @@ obligation made impossible.
   Rank := Nat
   lt := Nat.lt
   wellFounded := Nat.lt_wfRel.wf
-  rank := fun state => if state then 0 else 1
+  rank := fun state _ => if state then 0 else 1
 
 /--
 `oneShot` meets its progress contract.
@@ -117,9 +117,9 @@ def oneShotProgress (request : Unit) :
       exact TerminalDemandClassification.empty oneShotRemainder request true ()
         ⟨rfl, rfl, rfl⟩
   productive := by
-    rintro _ state _ _ after _ _ _ _ _ _ ⟨working, finished, _, _⟩
+    rintro _ state _ _ after _ _ _ _ _ _ _ ⟨working, finished, _, _⟩
     subst working; subst finished
-    refine Or.inr (Or.inr (Or.inr ?_))
+    refine Or.inr (Or.inr ?_)
     show (0 : Nat) < 1
     omega
 
