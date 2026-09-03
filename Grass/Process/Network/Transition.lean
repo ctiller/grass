@@ -567,6 +567,44 @@ structure Joins (before after : plan.LogicalProcessNetwork)
     (fun fragment => fragment = .instanceState kind slot)
 
 /--
+An occurrence is rerouted to another session, and arrives there.
+
+`ResolvesEscrow`'s scope is the *source* session's escrow alone, so a `reroute`
+built on it could write `rerouted destination` into one ledger and was forbidden
+from touching the destination's. `WellFormed.ReroutesLand` then degenerated: it
+could only hold at a destination that was already non-empty before the step, and
+the reroute itself could never make one so. A reroute was a drop with a
+forwarding address.
+
+`arrives` is stated with exactly the predicate `ReroutesLand` uses, so
+discharging it discharges the well-formedness clause rather than something
+adjacent to it. Its weakness — that "an arrival exists" does not say the arrival
+*carries this payload* — is `Grass/Process/Network/Escrow.lean`'s and is
+recorded there.
+-/
+structure Reroutes (before after : plan.LogicalProcessNetwork)
+    (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
+    (occurrence : EdgeOccurrence plan.topology plan.message edge)
+    (destination : plan.topology.ChannelId edge) : Prop where
+  /-- It was in flight here. -/
+  wasOutstanding : (before.inFlight edge session).Outstanding occurrence
+  /-- It is now resolved as rerouted, to exactly this destination. -/
+  nowResolved : (after.inFlight edge session).resolution occurrence =
+    some (.rerouted destination)
+  /-- This ledger only moved forward. -/
+  ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
+  /-- A reroute goes somewhere else. -/
+  elsewhere : destination ≠ session
+  /-- **And the payload arrives at the destination.** -/
+  arrives : ∃ arrival, arrival ∈ (after.inFlight edge destination).created
+  /-- Whose ledger also only moved forward. -/
+  destinationExtends :
+    LedgerExtends (before.inFlight edge destination) (after.inFlight edge destination)
+  /-- Both sessions' escrow, and nothing else. -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .escrow edge session ∨ fragment = .escrow edge destination)
+
+/--
 A channel dies, taking its session with it.
 
 The sibling of `ClosesSession`, and it was missing for the same reason: with
@@ -749,8 +787,7 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
       (step : plan.ResolvesEscrow before after edge session occurrence .dropped)
   /-- It moved to another session. -/
   | reroute (edge session occurrence) (destination : plan.topology.ChannelId edge)
-      (step : plan.ResolvesEscrow before after edge session occurrence
-        (.rerouted destination))
+      (step : plan.Reroutes before after edge session occurrence destination)
   /-- It merged into another occurrence. -/
   | coalesce (edge session occurrence)
       (carrier : EdgeOccurrence plan.topology plan.message edge)
@@ -800,7 +837,8 @@ def scope : plan.NetworkTransition before after → NetworkFragment plan.topolog
   | .channelDeath edge session _ _ =>
       fun fragment => fragment = .escrow edge session ∨ fragment = .session edge session
   | .drop edge session _ _ => fun fragment => fragment = .escrow edge session
-  | .reroute edge session _ _ _ => fun fragment => fragment = .escrow edge session
+  | .reroute edge session _ destination _ =>
+      fun fragment => fragment = .escrow edge session ∨ fragment = .escrow edge destination
   | .coalesce edge session _ _ _ => fun fragment => fragment = .escrow edge session
   | .interrupt kind slot _ _ _ =>
       fun fragment => fragment = .instanceState kind slot ∨
