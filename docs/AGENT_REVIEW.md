@@ -294,6 +294,25 @@ which earlier assurance boundary should have rejected its defect class. The aim
 is not to assign blame or mechanically add ceremony after every bug; it is to
 turn observed failures into the cheapest durable prevention or detection rule.
 
+**Rebuild is the verb.** Grass expects obsolete implementations, process weaves,
+proof scripts, layouts, and other replaceable machinery to be deleted and
+rebuilt from stable specifications and interfaces. A ratchet should therefore
+survive that rebuild whenever the property itself survives it. Proof demands
+should name semantic contracts and exported boundaries rather than the old
+implementation's helper lemmas or control shape. Tests should exercise public
+models, interfaces, formats, or emitted behavior rather than private names,
+offsets, schedules, and incidental traces. Property, mutation, conformance, and
+negative tests are preferred when they express the defect class across many
+possible rebuilt realizations.
+
+Some checks are necessarily realization-specific—for example, an x86 encoding
+edge case, ABI stack layout, or exact regression in a selected allocator. Those
+remain legitimate, but must be labeled with the narrow boundary they protect.
+Where practical they accompany, rather than replace, a representation-neutral
+proof or test of the higher-level property. Deleting an obsolete realization may
+delete its private regression fixture only after the surviving semantic ratchet
+is identified or the property is shown not to apply to the replacement.
+
 - If existing review evidence should reasonably have exposed the defect, amend
   the relevant review question, checklist, or reviewer guidance and include a
   concrete example of the missed reasoning.
