@@ -8,6 +8,16 @@ It may take any route whose dependent certificates compose those facts without
 skipping a demand. In particular, authored assembly may refine a realized
 platform contract directly instead of imitating a compiler-generated CFG.
 
+This pipeline enforces the vision's **strong specification, free realization**
+law. Refinement constrains preservation, not taste: no act may weaken an
+inherited semantic claim, but no act may require a particular algorithm,
+process decomposition, provider, CFG shape, layout, register assignment, macro,
+or instruction sequence unless the precious specification genuinely observes
+or constrains it. Intermediate artifacts are replaceable witnesses. Multiple
+incompatible realization strategies may prove the same specification, and a
+local replacement reopens only the adjacent certificates whose exported
+boundaries or exact identities changed.
+
 The ordering is local, not a whole-program phase barrier. Different subgraphs
 may temporarily sit at different refinement depths: graphics may already be a
 Vulkan process/call graph while disk I/O remains an abstract storage protocol;
@@ -118,6 +128,30 @@ the same number of processes or channels: one abstract connection session may
 be serialized, multiplexed through a reactor, or distributed across workers as
 long as the refinement preserves its denotation, causal ordering, linear state,
 and demanded resource behavior.
+
+### Non-normative weave records
+
+Proof terms establish that a selected weave is valid; they need not explain why
+it was selected. Implementations should therefore keep short, explicitly
+non-normative weave records when the choice is materially interesting. A record
+should name the exact specification and realization revisions, sketch the
+process/state partition and boundary contracts, explain the performance or
+proof-economy rationale, list serious alternatives and why they were replaced,
+and report measured proof, rebuild, and runtime consequences where available.
+
+Superseded records remain useful as engineering history: they show which weaves
+were attempted, what forced a change, and which theorem boundaries survived it.
+They should be retained as immutable or clearly superseded entries rather than
+rewritten to make the current design appear inevitable. A current record may
+link to its predecessors and state the migration path between them.
+
+These records are commentary, never authority. They may not introduce a hidden
+requirement, weaken a specification, discharge a proof obligation, or substitute
+for the exact refinement certificate. They should live outside the normative
+corpus under an unmistakable location such as `notes/weaves/`, carry a prominent
+`NON-NORMATIVE` status and exact revision references, and be cheap to delete or
+reconstruct. Absence or staleness of a record cannot affect elaboration,
+verification, emission, or the meaning of `VerifiedProgram`.
 
 Local heterogeneous refinement uses an explicit lens:
 

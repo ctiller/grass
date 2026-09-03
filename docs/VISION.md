@@ -20,6 +20,35 @@ The project optimizes for four durable assets:
 4. small, stable contracts which let teams rebuild everything else locally and
    cheaply when specifications or implementations change.
 
+### Strong specification, free realization
+
+Grass maximizes specification strength and implementation freedom. The precious
+specification states everything the product must guarantee—behavior, safety,
+observations, progress, and the selected resource policy—without prescribing
+how an implementation is decomposed. A lowering is a replaceable witness that
+one chosen implementation realizes those guarantees; it is not an extension of
+the product specification and it does not make its engineering choices
+semantically privileged.
+
+Consequently, different algorithms, process presentations, providers, CFGs,
+layouts, register assignments, macros, and exact instruction sequences may all
+realize the same specification. An implementation author may use conventional
+generated code, novel hand-written assembly, or a mixture, and may replace one
+with another without weakening or restating correctness. Each candidate still
+owes the complete adjacent refinement chain and exact-artifact connection.
+
+Grass therefore pursues two separate optimization goals:
+
+1. **semantic leverage**: the precious specification and its portable proofs
+   should establish the strongest useful product-level result; and
+2. **realization freedom**: refinement boundaries should constrain what remains
+   true, not mandate implementation style, so iteration invalidates only the
+   affected witness chain.
+
+The intended asymmetry is deliberate: specifications are minimal in mechanism
+but strong in claims; implementations are rich in choice but must prove every
+claim they inherit.
+
 Grass accepts some additional generated certificate structure—and, where the
 semantics genuinely require it, some explicit author ceremony—in a trivial
 program if that buys one compositional architecture which scales to the systems
