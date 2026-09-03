@@ -287,6 +287,44 @@ property promotes the item to a blocker. Conversely, reviewers should not block
 sound local progress merely because a stronger theorem would be useful but is
 neither currently claimed nor required.
 
+### 5.7 Escaped defects and the rework ratchet
+
+Fixing an escaped defect is not complete until the author and reviewer consider
+which earlier assurance boundary should have rejected its defect class. The aim
+is not to assign blame or mechanically add ceremony after every bug; it is to
+turn observed failures into the cheapest durable prevention or detection rule.
+
+- If existing review evidence should reasonably have exposed the defect, amend
+  the relevant review question, checklist, or reviewer guidance and include a
+  concrete example of the missed reasoning.
+- If a stronger or better-connected theorem could have excluded the defect,
+  strengthen the normative proof demand or reusable library contract and prove
+  it at the narrowest owning boundary. Do not merely prove that the repaired
+  implementation has the desired point value.
+- If an executable test, negative fixture, mutation, fuzzer, parser corpus, or
+  boundary probe could have exposed the defect economically, add that check and
+  demonstrate that it fails against the defective form when practical.
+- If a static audit, generated manifest check, elaborator restriction, type
+  interface, or bus/tooling invariant can reject the entire class earlier and
+  more reliably, prefer that mechanized gate over permanent human vigilance.
+- If the specification admitted the behavior but product intent did not, repair
+  specification adequacy and re-review its affected refinement cone; a stronger
+  implementation proof cannot repair a wrong contract.
+- If the formal model disagreed with a vendor/API/ISA/protocol authority or with
+  observed hardware, update the model, citation, correspondence assumption, and
+  validation probe as applicable. Tests against reality remain evidence about
+  the model boundary, not internal proof.
+- If the escape came from ownership, handoff, scope, or merge procedure, amend
+  the coordination rule or helper invariant at its owner rather than relying on
+  folklore.
+
+Several responses may be warranted as defense in depth. Conversely, the review
+must record why a seemingly available ratchet is disproportionate or incapable
+of detecting the class; “fixed locally” is not by itself a disposition. The
+follow-up references the original defect, the repaired artifact, the chosen
+ratchet, and any deliberately rejected layers. This is the operational form of
+FOUNDATION law 10, **No ratchet regression**.
+
 ## 6. Findings and continuing authoring
 
 The reviewer emits `review.changes_requested` with actionable locations,
