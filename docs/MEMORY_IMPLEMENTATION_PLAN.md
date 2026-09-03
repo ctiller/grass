@@ -1100,27 +1100,37 @@ refuses everything.
   `AuthorityGrant` does not. Adding fields nothing consults is the shape this layer
   has been bitten by three times, so they wait for M4's frames, where a bounded
   lifetime has something to mean.
-- **Atomic shared authority, and §3's rule that atomics do not grant ordinary
-  non-atomic access.** Neither is stated. `AuthorityGrant` carries no ordering, so
-  `authorityOf` — which reads only the grant map — has nothing to derive an atomic
-  state from.
+- ~~**Atomic shared authority, and §3's rule that atomics do not grant ordinary
+  non-atomic access.**~~ Closed, after two wrong turns worth recording.
 
-  The rule itself is a different question, and the earlier wording here ("the rule
-  has nothing to constrain") was wrong. `AccessIntent.isAtomic` and
-  `OrderingDemand.atomicity` exist, `WellFormedIn.atomicityAgrees` ties them, and
-  `Permission.Permits` is the sole rights gate on the chain
-  `AuthorityGrant.Authorizes` → `MemoryState.GrantedOfKind` →
-  `AuthorityProvider.loan.refuses` → `step`. `Permission` has no way to express
-  "atomic only", so the rule is not merely unstated at that gate — it is unstatable
-  there, and any grant a profile issues today authorizes an atomic and a non-atomic
-  access indistinguishably. Closing it means a field on `Permission` and a clause in
-  `Permits`, which is a change to a type three layers depend on and is therefore
-  raised rather than taken unilaterally.
+  `AuthorityState.atomicShared (ordering : OrderingDemand)` and a theorem stating
+  §3's rule about it existed, and nothing built the constructor, so the theorem held
+  of an unreachable case. Both were deleted — right, because a vacuous theorem reads
+  as coverage. The reasoning given for the deletion was wrong: it said the rule had
+  nothing to constrain, and `Permission.Permits` is the sole rights gate on the
+  chain `AuthorityGrant.Authorizes` → `MemoryState.GrantedOfKind` →
+  `AuthorityProvider.loan.refuses` → `step`, so the rule had a gate and no clause
+  there. `Permission.atomicOnly` is that clause, and `authorityOf` derives
+  `atomicShared` from it. The constructor carries no ordering: that was a second
+  place to say what `AccessDescriptor.ordering` says.
+
+  The second wrong turn took minutes and is the reason to distrust a repair that
+  builds. `WritableByAnother` probed `rights.Permits AccessIntent.write`, which an
+  atomic-only grant fails, so a context updating a word atomically stopped freezing
+  another context's ordinary write. §7.3's "at least one writer" asks who may change
+  the bytes, so the probe is `rights.write`. A fixture written at the same time as
+  the field caught it.
 
   §7.3's issuance sentence is "unique loans prevent **ordinary** conflicting
-  authority from being issued", and `LoanConflicts` has no ordinary/atomic
-  distinction, so `lend?` prevents all conflicting authority. Conservative, and
-  unrecorded until now.
+  authority from being issued", and `LoanConflicts` had no ordinary/atomic
+  distinction, so `lend?` prevented all conflicting authority and two contexts could
+  not share a word atomically at all. It exempts two atomic-only grants now, and
+  only those.
+
+  What remains owed is §3's second clause: atomics "must follow the ISA/platform
+  ordering model". Nothing relates a grant to `AccessDescriptor.ordering`, and
+  nothing here can — that needs §7.1's refinement theorem, which an ISA owner owes,
+  and the strength relation M8's `ConsistencyProfile` induces.
 - **Transferred authority.** §3's fifth entry is "transferred or unavailable";
   `unavailable` derives from liveness and epoch and nothing represents a transfer.
   §7.4 makes transfer real ("acquire operations may transfer protected memory

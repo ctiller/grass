@@ -21,31 +21,37 @@ by claiming §3 named a closed list. It does not, and review caught the misreadi
 Closing the sum is this module's decision, not §3's requirement, and the
 consequence is written where the type is declared.
 
-**Three and a half of the five entries** are derived here from state that already
-exists: exclusive and frozen from the grant map, shared-immutable from the rights
-on the outstanding grants, and unavailable from allocation liveness and epoch.
+**Four and a half of the five entries** are derived here from state that already
+exists: exclusive and frozen from the grant map, shared-immutable and atomic-shared
+from the rights on the outstanding grants, and unavailable from allocation liveness
+and epoch.
 
 §3's fifth entry is "transferred **or** unavailable authority", and `unavailable`
 covers the second half only. Nothing here represents a transfer — authority moved
 rather than lent — and §4.4.1 of `docs/MEMORY_IMPLEMENTATION_PLAN.md` records it as
-owed. The count was "four of five" for one round, which read as coverage of a
-bullet half-delivered; that is the mistake this file keeps making, in miniature.
+owed. The count was "four of five" for one round, which read as coverage of a bullet
+half-delivered; that is the mistake this file keeps making, in miniature.
 
-§3's third entry, atomic shared access under an ordering profile, is **not** named
-here at all. `AuthorityGrant` carries `kind`, `holder`, `provenance`, `range` and
-`rights` and no ordering, so `authorityOf` — which reads only the grant map — has
-nothing to derive that state from, and there was a constructor for it that nothing
-built together with a theorem about it that held of an unreachable case. Deleting
-both is the point: a vacuous theorem reads as coverage.
+§3's third entry, atomic shared access, took the longest road and the record is
+worth keeping. There was an `atomicShared (ordering : OrderingDemand)` constructor
+and a theorem stating §3's "atomics do not grant ordinary non-atomic access" about
+it, and nothing built the constructor — `AuthorityGrant` carried nothing an atomic
+state could be read off. So the theorem held of an unreachable case, and both were
+deleted, because a vacuous theorem reads as coverage.
 
-Note what that argument does *not* say. Ordering exists at this layer —
-`Grass/Memory/Ordering.lean`, `AccessDescriptor.ordering`, `AccessIntent.isAtomic`,
-and `WellFormedIn.atomicityAgrees` tying the last two together — so it is false that
-§3's rule "atomics do not grant ordinary non-atomic access" has nothing to
-constrain. What is missing is any link from ordering to what a *grant* permits:
-`Permission` has no way to express "atomic only", so the rule is not merely unstated
-at the rights gate, it is unstatable there. §4.4.1 records that, and where it could
-bite.
+The reasoning offered for that deletion went one step too far, and review caught it:
+it said the rule had nothing to constrain. `Permission.Permits` is the sole rights
+gate on the chain `AuthorityGrant.Authorizes` → `MemoryState.GrantedOfKind` →
+`Grass/Op/LoanAuthority.lean` → `step`, and it had no clause about atomicity, so a
+grant issued for atomic access authorized an ordinary one indistinguishably.
+`Permission.atomicOnly` is that rule at that gate, and it is what the state is now
+derived from. The constructor is back without its ordering payload, which was a
+second place to say what `AccessDescriptor.ordering` already says.
+
+§3's second clause — atomics "must follow the ISA/platform ordering model" — is
+still not here, and nothing here can supply it: it needs the §7.1 refinement theorem
+an ISA owner owes and the strength relation M8's `ConsistencyProfile` induces.
+§4.4.1 records it.
 
 **`AuthorityGrant` carries the first four and not the last two**, and this file
 does not add them. Its own docstring already said so; the sentence here originally
@@ -145,6 +151,20 @@ inductive AuthorityState where
   this state while that map is non-empty. The two are different questions and
   `Grass/Op/LoanAuthority.lean` asks both. -/
   | exclusive
+  /-- Atomic shared access: every outstanding grant held by another context conveys
+  atomic access only, and at least one of them may write.
+
+  §3's third canonical state, and for one round it was **deleted** rather than
+  derived — `AuthorityGrant` carried nothing an atomic state could be read off, so
+  the constructor was built by nothing and the theorem about it held of an
+  unreachable case. `Permission.atomicOnly` is what it is read off now.
+
+  No ordering payload. The deleted constructor carried an `OrderingDemand`, which
+  is a second place to say what `AccessDescriptor.ordering` already says; §3's
+  clause that atomics "must follow the ISA/platform ordering model" is M8's and is
+  recorded as owed. What this state carries is §3's first clause: it permits an
+  atomic access and refuses an ordinary one. -/
+  | atomicShared
   /-- Shared immutable access: grants are outstanding, and none of them may write.
 
   The lender is stopped from writing — `not_permitsOrdinaryWrite_of_heldByAnother`,
@@ -162,6 +182,7 @@ inductive AuthorityState where
   | frozen
   /-- No authority at all: the storage is dead, was never allocated, or has moved
   to a later epoch. Half of §3's "transferred or unavailable"; transfer is owed. -/
+
   | unavailable
 deriving DecidableEq, Repr
 
@@ -181,12 +202,14 @@ writer, so reads under read-only loans are the case that is *not* a conflict.
 -/
 def PermitsIntent : AuthorityState → AccessIntent → Prop
   | .exclusive, _ => True
+  | .atomicShared, intent => intent.isAtomic = true
   | .sharedImmutable, intent => intent.writes = false
   | .frozen, _ => False
   | .unavailable, _ => False
 
 instance : (s : AuthorityState) → (intent : AccessIntent) → Decidable (s.PermitsIntent intent)
   | .exclusive, _ => .isTrue trivial
+  | .atomicShared, _ => inferInstanceAs (Decidable (_ = _))
   | .sharedImmutable, _ => inferInstanceAs (Decidable (_ = _))
   | .frozen, _ => .isFalse (fun h => h)
   | .unavailable, _ => .isFalse (fun h => h)
@@ -205,6 +228,26 @@ itself, which enumerates the constructors. -/
 theorem permitsOrdinaryWrite_iff_exclusive {s : AuthorityState} :
     s.PermitsOrdinaryWrite ↔ s = .exclusive := by
   cases s <;> simp [PermitsOrdinaryWrite, PermitsIntent, AccessIntent.write]
+
+/-- **Atomic authority is not ordinary authority.** `docs/MEMORY_MODEL.md` §3:
+"Atomics do not grant ordinary non-atomic access." The theorem that was deleted for
+holding of an unreachable case, restored now that `authorityOf` reaches the state —
+`Tests/Memory/AtomicAuthority.lean` builds it. -/
+@[simp] theorem not_permitsOrdinaryWrite_atomicShared :
+    ¬ AuthorityState.atomicShared.PermitsOrdinaryWrite := by
+  simp [PermitsOrdinaryWrite, PermitsIntent, AccessIntent.write]
+
+/-- Nor an ordinary read: §3 says atomics do not grant ordinary non-atomic
+*access*, which is not only writes. -/
+@[simp] theorem not_permitsIntent_read_atomicShared :
+    ¬ AuthorityState.atomicShared.PermitsIntent AccessIntent.read := by
+  simp [PermitsIntent, AccessIntent.read]
+
+/-- But it permits the atomic access it exists for, so the two above are a
+restriction and not a state that permits nothing. -/
+@[simp] theorem permitsIntent_atomicReadWrite_atomicShared :
+    AuthorityState.atomicShared.PermitsIntent AccessIntent.atomicReadWrite := by
+  simp [PermitsIntent, AccessIntent.atomicReadWrite]
 
 /-- A frozen fragment does not permit an ordinary write: that is what being frozen
 while another context may write means. -/
@@ -379,19 +422,46 @@ instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
   inferInstanceAs (Decidable (_ = _))
 
 /-- `state.WritableByAnother context provenance range` holds when some other
-context's grant covers those bytes **and may write them**.
+context's grant covers those bytes **and may modify them**.
 
 The distinction `HeldByAnother` alone cannot make. `docs/MEMORY_MODEL.md` §3 lists
 shared immutable access as a state of its own, and §7.3 makes a conflict require at
 least one writer, so grants that may only read are the case that is not a conflict.
-Whether the bytes stay unchanged in fact is §7.3's race question and M8's. -/
+Whether the bytes stay unchanged in fact is §7.3's race question and M8's.
+
+**The probe is `rights.write`, the capability, and not `rights.Permits .write`.**
+Those differ once `Permission.atomicOnly` exists: an atomic-only grant does not
+*permit* an ordinary write, and it certainly may modify the bytes. Writing this
+with `Permits` made a context updating a word atomically stop freezing another
+context's ordinary write — a fixture in `Tests/Memory/AtomicAuthority.lean` caught
+it within minutes of `atomicOnly` landing. §7.3's "at least one writer" is about who
+may change the bytes, not about what intent a permission admits. -/
 def WritableByAnother (state : MemoryState) (context : ContextId) (provenance : Provenance)
     (range : ByteRange) : Prop :=
   (state.grantsOver provenance range).any
-    (fun entry => entry.2.holder ≠ context && decide (entry.2.rights.Permits .write)) = true
+    (fun entry => entry.2.holder ≠ context && entry.2.rights.write) = true
 
 instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
     (range : ByteRange) : Decidable (state.WritableByAnother context provenance range) :=
+  inferInstanceAs (Decidable (_ = _))
+
+/-- `state.NonAtomicHeldByAnother context provenance range` holds when some other
+context's grant over those bytes is **not** atomic-only.
+
+What separates §3's atomic shared access from a freeze. If every other grant
+conveys atomic access only, then an atomic accessor is participating in exactly the
+protocol they are — which is what atomics are for. One ordinary participant among
+them and the situation is an ordinary race, so the state is `frozen` and nothing
+proceeds. This is deliberately decided on the grants that are actually there rather
+than on `lend?` having refused the mixture, because `MemoryState.grant` installs
+grants `lend?` never saw. -/
+def NonAtomicHeldByAnother (state : MemoryState) (context : ContextId)
+    (provenance : Provenance) (range : ByteRange) : Prop :=
+  (state.grantsOver provenance range).any
+    (fun entry => entry.2.holder ≠ context && !entry.2.rights.atomicOnly) = true
+
+instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
+    (range : ByteRange) : Decidable (state.NonAtomicHeldByAnother context provenance range) :=
   inferInstanceAs (Decidable (_ = _))
 
 /-- A grant that may write is a grant. The two predicates are not independent, and
@@ -403,6 +473,17 @@ theorem heldByAnother_of_writableByAnother {state : MemoryState} {context : Cont
     (h : state.WritableByAnother context provenance range) :
     state.HeldByAnother context provenance range := by
   unfold WritableByAnother at h
+  unfold HeldByAnother
+  simp only [List.any_eq_true] at *
+  obtain ⟨entry, hmem, hcond⟩ := h
+  exact ⟨entry, hmem, ((Bool.and_eq_true _ _).mp hcond).1⟩
+
+/-- And a non-atomic grant is a grant. -/
+theorem heldByAnother_of_nonAtomicHeldByAnother {state : MemoryState}
+    {context : ContextId} {provenance : Provenance} {range : ByteRange}
+    (h : state.NonAtomicHeldByAnother context provenance range) :
+    state.HeldByAnother context provenance range := by
+  unfold NonAtomicHeldByAnother at h
   unfold HeldByAnother
   simp only [List.any_eq_true] at *
   obtain ⟨entry, hmem, hcond⟩ := h
@@ -439,8 +520,9 @@ def authorityOf (state : MemoryState) (context : ContextId) (provenance : Proven
     (range : ByteRange) : AuthorityState :=
   if ¬ state.Live provenance then .unavailable
   else if ¬ state.HeldByAnother context provenance range then .exclusive
-  else if state.WritableByAnother context provenance range then .frozen
-  else .sharedImmutable
+  else if ¬ state.WritableByAnother context provenance range then .sharedImmutable
+  else if state.NonAtomicHeldByAnother context provenance range then .frozen
+  else .atomicShared
 
 /-- **Unavailable exactly when the storage is dead, absent, or in another epoch.** -/
 @[simp] theorem authorityOf_eq_unavailable_iff (state : MemoryState) (context : ContextId)
@@ -451,8 +533,12 @@ def authorityOf (state : MemoryState) (context : ContextId) (provenance : Proven
   · rw [if_neg (by simpa using hlive)]
     by_cases hheld : state.HeldByAnother context provenance range
     · rw [if_neg (by simpa using hheld)]
-      by_cases hwrite : state.WritableByAnother context provenance range <;>
-        simp [hwrite, hlive]
+      by_cases hwrite : state.WritableByAnother context provenance range
+      · rw [if_neg (by simpa using hwrite)]
+        by_cases hna : state.NonAtomicHeldByAnother context provenance range <;>
+          simp [hna, hlive]
+      · rw [if_pos (by simpa using hwrite)]
+        simp [hlive]
     · rw [if_pos (by simpa using hheld)]
       simp [hlive]
   · rw [if_pos hlive]
@@ -470,34 +556,19 @@ exclusive ownership of an allocation that does not exist. -/
   · rw [if_neg (by simpa using hlive)]
     by_cases hheld : state.HeldByAnother context provenance range
     · rw [if_neg (by simpa using hheld)]
-      by_cases hwrite : state.WritableByAnother context provenance range <;>
-        simp [hwrite, hheld]
+      by_cases hwrite : state.WritableByAnother context provenance range
+      · rw [if_neg (by simpa using hwrite)]
+        by_cases hna : state.NonAtomicHeldByAnother context provenance range <;>
+          simp [hna, hheld]
+      · rw [if_pos (by simpa using hwrite)]
+        simp [hheld]
     · rw [if_pos (by simpa using hheld)]
       simp [hlive, hheld]
   · rw [if_pos hlive]
     simp [hlive]
 
-/-- **Frozen exactly when the storage is live and another context may write it.** -/
-@[simp] theorem authorityOf_eq_frozen_iff (state : MemoryState) (context : ContextId)
-    (provenance : Provenance) (range : ByteRange) :
-    state.authorityOf context provenance range = .frozen ↔
-      state.Live provenance ∧ state.WritableByAnother context provenance range := by
-  unfold authorityOf
-  by_cases hlive : state.Live provenance
-  · rw [if_neg (by simpa using hlive)]
-    by_cases hheld : state.HeldByAnother context provenance range
-    · rw [if_neg (by simpa using hheld)]
-      by_cases hwrite : state.WritableByAnother context provenance range <;>
-        simp [hwrite, hlive]
-    · rw [if_pos (by simpa using hheld)]
-      have hnw : ¬ state.WritableByAnother context provenance range :=
-        fun hw => hheld (heldByAnother_of_writableByAnother hw)
-      simp [hlive, hnw]
-  · rw [if_pos hlive]
-    simp [hlive]
-
 /-- **Shared immutable exactly when live bytes are held by another context, and by
-none that may write.** -/
+none that may modify them.** -/
 @[simp] theorem authorityOf_eq_sharedImmutable_iff (state : MemoryState)
     (context : ContextId) (provenance : Provenance) (range : ByteRange) :
     state.authorityOf context provenance range = .sharedImmutable ↔
@@ -508,26 +579,71 @@ none that may write.** -/
   · rw [if_neg (by simpa using hlive)]
     by_cases hheld : state.HeldByAnother context provenance range
     · rw [if_neg (by simpa using hheld)]
-      by_cases hwrite : state.WritableByAnother context provenance range <;>
-        simp [hwrite, hlive, hheld]
+      by_cases hwrite : state.WritableByAnother context provenance range
+      · rw [if_neg (by simpa using hwrite)]
+        by_cases hna : state.NonAtomicHeldByAnother context provenance range <;>
+          simp [hna, hlive, hheld, hwrite]
+      · rw [if_pos (by simpa using hwrite)]
+        simp [hlive, hheld, hwrite]
     · rw [if_pos (by simpa using hheld)]
       simp [hheld]
   · rw [if_pos hlive]
     simp [hlive]
 
-/--
-**A context may not write bytes another context may write.**
+/-- **Frozen exactly when another context may modify the bytes and some other
+holder is not atomic-only.** One ordinary participant among the grants makes it an
+ordinary race, whatever the others declare. -/
+@[simp] theorem authorityOf_eq_frozen_iff (state : MemoryState) (context : ContextId)
+    (provenance : Provenance) (range : ByteRange) :
+    state.authorityOf context provenance range = .frozen ↔
+      state.Live provenance ∧ state.WritableByAnother context provenance range ∧
+        state.NonAtomicHeldByAnother context provenance range := by
+  unfold authorityOf
+  by_cases hlive : state.Live provenance
+  · rw [if_neg (by simpa using hlive)]
+    by_cases hheld : state.HeldByAnother context provenance range
+    · rw [if_neg (by simpa using hheld)]
+      by_cases hwrite : state.WritableByAnother context provenance range
+      · rw [if_neg (by simpa using hwrite)]
+        by_cases hna : state.NonAtomicHeldByAnother context provenance range <;>
+          simp [hna, hlive, hwrite]
+      · rw [if_pos (by simpa using hwrite)]
+        simp [hlive, hwrite]
+    · rw [if_pos (by simpa using hheld)]
+      have hnw : ¬ state.WritableByAnother context provenance range :=
+        fun hw => hheld (heldByAnother_of_writableByAnother hw)
+      simp [hlive, hnw]
+  · rw [if_pos hlive]
+    simp [hlive]
 
-The borrow discipline, as a theorem rather than a convention. While another
-context's write grant covers the range this context's fragment is frozen, and
-`AuthorityState.PermitsOrdinaryWrite` is false of `frozen`.
--/
-theorem not_permitsOrdinaryWrite_of_writableByAnother {state : MemoryState}
-    {context : ContextId} {provenance : Provenance} {range : ByteRange}
-    (hlive : state.Live provenance) (h : state.WritableByAnother context provenance range) :
-    ¬ (state.authorityOf context provenance range).PermitsOrdinaryWrite := by
-  rw [(authorityOf_eq_frozen_iff state context provenance range).mpr ⟨hlive, h⟩]
-  exact AuthorityState.not_permitsOrdinaryWrite_frozen
+/-- **Atomic shared exactly when another context may modify the bytes and every
+other holder conveys atomic access only.**
+
+§3's third canonical state, derived. It was a constructor nothing built for one
+round, and the theorem about it was deleted for holding of an unreachable case;
+`Permission.atomicOnly` is what makes it reachable. -/
+@[simp] theorem authorityOf_eq_atomicShared_iff (state : MemoryState)
+    (context : ContextId) (provenance : Provenance) (range : ByteRange) :
+    state.authorityOf context provenance range = .atomicShared ↔
+      state.Live provenance ∧ state.WritableByAnother context provenance range ∧
+        ¬ state.NonAtomicHeldByAnother context provenance range := by
+  unfold authorityOf
+  by_cases hlive : state.Live provenance
+  · rw [if_neg (by simpa using hlive)]
+    by_cases hheld : state.HeldByAnother context provenance range
+    · rw [if_neg (by simpa using hheld)]
+      by_cases hwrite : state.WritableByAnother context provenance range
+      · rw [if_neg (by simpa using hwrite)]
+        by_cases hna : state.NonAtomicHeldByAnother context provenance range <;>
+          simp [hna, hlive, hwrite]
+      · rw [if_pos (by simpa using hwrite)]
+        simp [hwrite]
+    · rw [if_pos (by simpa using hheld)]
+      have hnw : ¬ state.WritableByAnother context provenance range :=
+        fun hw => hheld (heldByAnother_of_writableByAnother hw)
+      simp [hnw]
+  · rw [if_pos hlive]
+    simp [hlive]
 
 /-- **A context may not write bytes another context holds at all**, read grant
 included. §7.3 makes a write against an outstanding read a conflict, and the read
@@ -539,6 +655,19 @@ theorem not_permitsOrdinaryWrite_of_heldByAnother {state : MemoryState}
   rw [AuthorityState.permitsOrdinaryWrite_iff_exclusive,
     authorityOf_eq_exclusive_iff state context provenance range]
   exact fun hc => hc.2 h
+
+/--
+**A context may not write bytes another context may write.**
+
+The borrow discipline, as a theorem rather than a convention. While another
+context's write grant covers the range this context's fragment is frozen, and
+`AuthorityState.PermitsOrdinaryWrite` is false of `frozen`.
+-/
+theorem not_permitsOrdinaryWrite_of_writableByAnother {state : MemoryState}
+    {context : ContextId} {provenance : Provenance} {range : ByteRange}
+    (h : state.WritableByAnother context provenance range) :
+    ¬ (state.authorityOf context provenance range).PermitsOrdinaryWrite :=
+  not_permitsOrdinaryWrite_of_heldByAnother (heldByAnother_of_writableByAnother h)
 
 /-- **Dead, absent or stale-epoch storage may not be written**, however few loans
 are outstanding over it. `Exclusive` says the loan map is empty, and an empty loan
@@ -580,7 +709,15 @@ the query here. `loansOver` moved off `Disjoint` and this did not, which left on
 module with two answers to what "overlapping" means.
 
 Two read-only grants over one range do not conflict, which is `sharedImmutable`
-being a real state rather than a name.
+being a real state rather than a name. Nor do two **atomic-only** grants, which is
+`atomicShared` being one: §7.3's issuance sentence is "unique loans prevent
+*ordinary* conflicting authority from being issued", and this had no
+ordinary/atomic distinction, so `lend?` prevented all conflicting authority and two
+contexts could not share a word atomically at all.
+
+The write probe is `rights.write`, the capability, not `rights.Permits .write`.
+An atomic-only grant may modify the bytes and does not permit an ordinary write, and
+§7.3's "at least one writer" is the first question.
 
 **Refusing at issue is not the whole rule, and an earlier version of this comment
 said it was.** "The point of uniqueness is that the conflicting pair never exists"
@@ -595,11 +732,12 @@ def LoanConflicts (state : MemoryState) (a b : AuthorityGrant) : Prop :=
   a.holder ≠ b.holder ∧
     state.SharesBytes a.provenance.root b.provenance.root ∧
     (a.range.Meets b.range ∨ b.range.Meets a.range) ∧
-    (a.rights.Permits AccessIntent.write ∨ b.rights.Permits AccessIntent.write)
+    (a.rights.write ∨ b.rights.write) ∧
+    ¬ (a.rights.atomicOnly ∧ b.rights.atomicOnly)
 
 instance (state : MemoryState) (a b : AuthorityGrant) :
     Decidable (state.LoanConflicts a b) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /--
 Issue a loan, or refuse.
