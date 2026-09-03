@@ -151,7 +151,7 @@ status could never move, for any step of any program. `ChannelSession.delivered`
 was provably constant, and a weave mixin about a session cursor framed past
 every step in the program, vacuously. `Grass/Process/Weave/Lens.lean`'s review
 is what surfaced it; the same defect for shared regions is recorded on
-`StepsLocally` above.
+`StepsLocally` below.
 
 `statusUnchanged` is what keeps the widening honest: a delivery advances the
 cursor and does not close a channel, so a caller reading the status still learns
@@ -191,6 +191,8 @@ structure ClosesSession (before after : plan.LogicalProcessNetwork)
   nowResolved : (after.inFlight edge session).resolution occurrence = some .channelClosed
   /-- The ledger only moved forward. -/
   ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
+  /-- It was open; a channel is not closed twice, and not un-died. -/
+  wasOpen : (before.sessions edge session).status = .open
   /-- **And the session is closed.** -/
   nowClosed : (after.sessions edge session).status = .closed
   /-- A close delivers nothing, so the cursor does not move. -/
@@ -326,6 +328,27 @@ structure EndsInstance (before after : plan.LogicalProcessNetwork)
   /-- It now carries exactly this ending. -/
   nowEnded : ∃ incarnation, after.instances kind slot = some incarnation ∧
     ∃ sameKind : incarnation.kind = kind, sameKind ▸ incarnation.lifecycle = ending
+  /--
+  **And it is the same incarnation, ended.**
+
+  `nowEnded` constrains the lifecycle and nothing else, so an ending could swap
+  the incarnation's generation, re-parent it, or change the request it was
+  started with — the same hole `StepsLocally.protocolStep` had, with the same
+  consequence: a non-allocating step installing a generation nothing allocated,
+  against `docs/FOUNDATION.md` law 22.
+
+  `outstanding` is deliberately left free: disposing of it is what an ending
+  *does*, and §2's three-way partition of it is
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.33.
+  -/
+  identityPreserved : ∃ (fromInstance toInstance : ProcessInstance plan.topology)
+      (fromKind : fromInstance.kind = kind) (toKind : toInstance.kind = kind),
+    before.instances kind slot = some fromInstance ∧
+    after.instances kind slot = some toInstance ∧
+    toKind ▸ toInstance.ref = fromKind ▸ fromInstance.ref ∧
+    toKind ▸ toInstance.parentage = fromKind ▸ fromInstance.parentage ∧
+    toKind ▸ toInstance.request = fromKind ▸ fromInstance.request ∧
+    toKind ▸ toInstance.localState = fromKind ▸ fromInstance.localState
   /--
   **And the obligation ledger moves exactly as this ending declared.**
 
@@ -559,6 +582,17 @@ structure Spawns (before after : plan.LogicalProcessNetwork)
   allocatesTheGeneration : ∀ incarnation, after.instances kind slot = some incarnation →
     incarnation.ref.generation ∈ allocation.entries
   /--
+  **And it is stored where its own reference says it is.**
+
+  `ProcessRef` has an `instanceId` as well as a generation, and
+  `allocatesTheGeneration` constrains only the second — so a spawn could install
+  an incarnation naming slot 3 into slot 7 and take a well-formed network to one
+  failing `WellFormed.SlotsAgree`. Local adversarial review built exactly that
+  step, with the before-network well formed and the after-network not.
+  -/
+  slotAgrees : ∀ incarnation, after.instances kind slot = some incarnation →
+    ∃ sameKind : incarnation.kind = kind, sameKind ▸ incarnation.ref.instanceId = slot
+  /--
   **And it starts where its own protocol says a start is.**
 
   The field that was missing, and the hole it left was the one `SettlesDemands`
@@ -621,6 +655,17 @@ structure Restarts (before after : plan.LogicalProcessNetwork)
   /-- Whose generation this step allocated — a restart is a new incarnation. -/
   allocatesTheGeneration : ∀ incarnation, after.instances kind slot = some incarnation →
     incarnation.ref.generation ∈ allocation.entries
+  /--
+  **And it is stored where its own reference says it is.**
+
+  `ProcessRef` has an `instanceId` as well as a generation, and
+  `allocatesTheGeneration` constrains only the second — so a spawn could install
+  an incarnation naming slot 3 into slot 7 and take a well-formed network to one
+  failing `WellFormed.SlotsAgree`. Local adversarial review built exactly that
+  step, with the before-network well formed and the after-network not.
+  -/
+  slotAgrees : ∀ incarnation, after.instances kind slot = some incarnation →
+    ∃ sameKind : incarnation.kind = kind, sameKind ▸ incarnation.ref.instanceId = slot
   /--
   **And it starts where its own protocol says a start is.**
 
@@ -743,6 +788,8 @@ structure KillsSession (before after : plan.LogicalProcessNetwork)
   nowResolved : (after.inFlight edge session).resolution occurrence = some .channelDied
   /-- The ledger only moved forward. -/
   ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
+  /-- It was open; a dead channel is not re-killed, and a closed one not un-closed. -/
+  wasOpen : (before.sessions edge session).status = .open
   /-- **And the session is dead.** -/
   nowDied : (after.sessions edge session).status = .died
   /-- A death delivers nothing, so the cursor does not move. -/
@@ -782,6 +829,24 @@ structure RequestsCancel (before after : plan.LogicalProcessNetwork)
   nowRequested : (after.inFlight edge session).cancelRequested occurrence = true
   /-- **And it is still in flight.** -/
   stillOutstanding : (after.inFlight edge session).Outstanding occurrence
+  /--
+  **And the ledger only moved forward.**
+
+  Every other constructor that touches an escrow ledger carries this —
+  `SendsEscrow`, `ResolvesEscrow`, `Delivers`, `ClosesSession`, `KillsSession`,
+  `Reroutes` all do — and this one did not, while its scope licensed it to
+  rewrite the whole session's ledger.
+
+  Local adversarial review built the step: two occurrences in flight, the
+  "request" records the cancellation on the first and *deletes the second from
+  `created`*. An in-flight message destroyed with no `ChannelResolution`
+  recorded, which is the unclassified death §3 forbids, evading
+  `resolution_is_exact` and `cannot_resolve_twice` because no resolution was
+  ever written. The same gap also permitted un-requesting another occurrence's
+  cancellation, against `LedgerExtends.cancelRequestMonotone`, whose own
+  docstring calls that law 7.
+  -/
+  ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
   /-- That session's escrow, and nothing else. -/
   scope : plan.TouchesOnly before after (fun fragment => fragment = .escrow edge session)
 
@@ -834,6 +899,20 @@ structure Detaches (before after : plan.LogicalProcessNetwork)
   /-- It no longer does, and remembers which. -/
   nowDetached : ∃ incarnation, after.instances kind slot = some incarnation ∧
     incarnation.IsDetached ∧ incarnation.parentage.knownParent ≠ none
+  /--
+  **And nothing but the parentage moved.**
+
+  A detach removes authority; it is not a place to change generation, request or
+  private state. Without this it was, for the same reason `EndsInstance` was.
+  -/
+  identityPreserved : ∃ (fromInstance toInstance : ProcessInstance plan.topology)
+      (fromKind : fromInstance.kind = kind) (toKind : toInstance.kind = kind),
+    before.instances kind slot = some fromInstance ∧
+    after.instances kind slot = some toInstance ∧
+    toKind ▸ toInstance.ref = fromKind ▸ fromInstance.ref ∧
+    toKind ▸ toInstance.request = fromKind ▸ fromInstance.request ∧
+    toKind ▸ toInstance.localState = fromKind ▸ fromInstance.localState ∧
+    toKind ▸ toInstance.outstanding = fromKind ▸ fromInstance.outstanding
   /-- That slot, and nothing else. -/
   onlyThatSlot : plan.ChangesOneInstance before after kind slot
 
@@ -1038,16 +1117,38 @@ A step driven by entropy from outside the program.
 environment from one *spinning*: a frontier is a place only the outside world
 can move you off.
 
-Three constructors qualify. A `processStep` on an `.external` event is the
-per-process notion verbatim. A `timeout` and an `environmentViolation` are the
-environment acting on the network rather than the network acting on itself —
-every other constructor, including the deaths and the channel closings, is
-something a process in the network did.
+A `processStep` qualifies when its event either carries entropy *or* settles an
+outstanding demand, and a `timeout` qualifies outright. Both halves of the first
+clause are needed and a first draft had neither right.
+
+**It was too narrow.** §7 asks a plan to "reach a law-bearing
+external/**demand-result** frontier", and the step that leaves a demand-result
+frontier is a `processStep` on `.result`, whose `externalEntropy` is `none`. So
+a network blocked on a boundary demand could not be declared at a frontier at
+all, and a reactive plan that services requests forever without emitting a
+demanded observation had no `NetworkProgressMeasure` — the measure was
+unconstructible rather than merely hard.
+
+**And too wide.** `environmentViolation` was in the list.
+`Grass/Process/Vocabulary.lean` proves
+`(ProcessEvent.environmentViolation v).externalEntropy = none`, and
+`Grass/Process/Progress.lean`'s `silent_nonentropy_step_decreases` says the
+per-process layer changed from `settles` to `externalEntropy` precisely so that
+faults and environment violations stop buying progress for free. Handing it back
+at the network was inconsistent with that, and internally inconsistent too: a
+`processStep` carrying `.environmentViolation` was not entropy-driven while the
+`environmentViolation` *constructor* was — the same occurrence classified two
+ways by which constructor a plan routed it through.
+
+Both were found by local adversarial review. What remains open: a `.result` may
+be answered by a child rather than by the driver, and this cannot tell them
+apart — `rootLocalDemandProjection` exists only for the root's protocol. That
+makes the predicate slightly wider than "the outside must act", and
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.44 records it.
 -/
 def DrivenByEntropy : plan.NetworkTransition before after → Prop
-  | .processStep _ _ event _ _ _ _ => event.externalEntropy ≠ none
+  | .processStep _ _ event _ _ _ _ => event.externalEntropy ≠ none ∨ event.settles ≠ none
   | .timeout _ _ _ _ => True
-  | .environmentViolation _ _ _ _ _ => True
   | _ => False
 
 /--
