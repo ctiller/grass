@@ -1709,6 +1709,26 @@ refuses everything.
   Eight registries still have no coherence condition between them, and that is not a
   gap of the same kind: nothing says a fault class and an allocation source may not
   share a name, because nothing would go wrong if they did.
+- ~~**`ProtocolAuthority` was decorative.**~~ Round eleven's largest finding, and the
+  same shape as round ten's: a name every ledger delta carries, checked by nothing.
+  `ProtocolAuthority` is indexed by its protocol, so authority for one cannot be
+  *presented* for another — and `mintedBy` is public, total and unconditioned, so
+  authority for any protocol can be *minted* by anyone. Review built one from a string
+  in a module that owns nothing, put it in an operation's ledger effect, and
+  discharged a duty the ISA family had created under its own protocol: duty gone,
+  ledger clean, no violation. §2's "only through the owning protocol theorem" was
+  enforced by ownership alone.
+
+  `AdmittedVocabulary.protocols` is the registry, `protocolNotRecognized` the failure,
+  and `not_admits_of_undeclared_protocol` the theorem — exactly what `GrantKind` got
+  one round earlier, and for the same reason. `a_forged_protocol_is_refused` steps the
+  forged discharge and gets `accessNotAdmitted`, with a companion showing the declared
+  protocol still runs. `mintedBy` is in `Tools/DoorAudit.py` now, negative-tested.
+
+  This is not a capability, and the docstring says so twice: a profile can still
+  declare a protocol and then mint authority for it anywhere, and §2's theorem needs
+  something this layer cannot state. What changed is that the claim is declared rather
+  than unchecked.
 - ~~**The loan rule was a provider a profile could decline to list.**~~ The largest
   finding of round ten, and the same shape as the round before it one level up.
   `StepPolicy.authorities` defaults to `[]`; the grant map was read by

@@ -426,6 +426,28 @@ def createdKinds (effect : LedgerEffect) : List ObligationKindId :=
     | .join _ _ _ into => [into.kind]
     | .discharge _ _ _ | .transfer _ _ _ _ => []
 
+/--
+The protocols this effect claims authority under.
+
+`ProtocolAuthority` is indexed by the protocol, so authority for one cannot be
+*presented* for another — but `mintedBy` is public, total and unconditioned, so
+authority for any protocol can be *minted* by anyone. Review built one out of a
+string in a foreign module and used it to discharge a duty the ISA family had created
+under its own protocol: no violation, duty gone. The type index restricts nothing
+about where the value came from.
+
+A profile checks these, exactly as it checks `createdKinds`, so an operation cannot
+act under a protocol the target never declared. That is not a capability either —
+`docs/OBLIGATIONS.md` §2's "only through the owning protocol theorem" needs a theorem
+this layer cannot state — but it moves the claim from unchecked to declared, which is
+what every other open nominal name in this tree got.
+-/
+def claimedProtocols (effect : LedgerEffect) : List ObligationProtocolId :=
+  effect.map fun delta =>
+    match delta with
+    | .create claimed _ _ | .discharge claimed _ _ | .split claimed _ _ _
+    | .join claimed _ _ _ | .transfer claimed _ _ _ => claimed
+
 /-- Every identity this effect reassigns to a new owner. -/
 def reowns (effect : LedgerEffect) : List ObligationId :=
   effect.flatMap LedgerDelta.reowns

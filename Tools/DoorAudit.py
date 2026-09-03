@@ -102,6 +102,14 @@ DOORS = {
     # real `Grass/Op/LoanAuthority.lean` definition calling it and watched the audit
     # print its green line.
     "alias": MAP_OWNERS,
+    # `ProtocolAuthority.mintedBy` is the one door onto the value every ledger delta
+    # carries, and it is public, total and unconditioned: review minted authority for
+    # a protocol out of a string in a module that owns nothing and discharged another
+    # family's duty with it. `AdmittedVocabulary.protocols` is what checks the claim
+    # now, and this keeps a `Grass/` caller from minting outside the module that
+    # declares it. `Tests/` is not scanned, and a fixture minting authority to build a
+    # state is exactly what a fixture is for.
+    "mintedBy": {"Grass/Obligation/Core.lean"},
 }
 
 BLOCK = re.compile(r"/-.*?-/", re.DOTALL)

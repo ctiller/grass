@@ -248,6 +248,9 @@ inductive Alpha where
   | handOn
   /-- A store lending under a grant kind this profile never declared. -/
   | lendInventedKind
+  /-- A store discharging the release duty under a protocol this profile never
+  declared, with authority minted for it out of a string. -/
+  | forgedProtocolRelease
   /-- A store handing the release duty to a context the machine has never seen. -/
   | handDutyToAStranger
   /-- The same, to the device engine, which the machine has seen. -/
@@ -272,6 +275,19 @@ def bufferAuthority : ProtocolAuthority bufferProtocol :=
 /-- A different protocol, and authority under it. Used to show that authority for
 one protocol does not authorize a duty governed by another. -/
 def otherProtocol : ObligationProtocolId := ⟨⟨"fake.other"⟩⟩
+
+/-- A protocol no profile in this file declares, and authority minted for it.
+
+`ProtocolAuthority` is indexed by its protocol, so authority for one cannot be
+*presented* for another — and `mintedBy` is public, total and unconditioned, so
+authority for any protocol can be *minted* by anyone. Review built one exactly like
+this in a module that owns nothing and discharged a duty this family had created
+under its own protocol, with no violation recorded. -/
+def forgedProtocol : ObligationProtocolId := ⟨⟨"attacker.no.such.protocol"⟩⟩
+
+/-- The forged authority itself. Nothing about this value is ill-typed. -/
+def forgedAuthority : ProtocolAuthority forgedProtocol :=
+  .mintedBy forgedProtocol ⟨"attacker.no.such.profile"⟩
 
 /-- Authority to act under `otherProtocol`, which governs nothing here. -/
 def otherAuthority : ProtocolAuthority otherProtocol :=
@@ -466,6 +482,12 @@ instance : HasOperationFacets Alpha where
         { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
             false true [] false thread₀
             [.issue lentSlot { declaredLoan with kind := inventedKind }]))
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .forgedProtocolRelease =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true
+            [.discharge forgedProtocol forgedAuthority releaseObligationId]))
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .handDutyToAStranger =>
@@ -686,7 +708,12 @@ def vocabulary : AdmittedVocabulary :=
     -- The kinds of authority this profile has. `GrantKind` is open nominal, so an
     -- operation minting one mints one named here: the fixtures lend and frame, and
     -- `docs/MEMORY_MODEL.md` §5.1's pin is not this profile's.
-    grantKinds := ⟨[.loan, .frame]⟩ }
+    grantKinds := ⟨[.loan, .frame]⟩
+    -- The protocols this profile governs. `bufferProtocol` is its own;
+    -- `otherProtocol` is declared so a fixture can present authority for a protocol
+    -- that exists and does not govern the duty it names, which is a different
+    -- failure from presenting one the profile never heard of.
+    protocols := ⟨[bufferProtocol, otherProtocol]⟩ }
 
 /-- A profile whose §10 package is explicitly unproved. It is a checklist of
 propositions, not evidence for them, and this fixture does not pretend otherwise:
@@ -2604,6 +2631,30 @@ now, and `StepPolicy.vocabularyWellFormed` makes that a construction obligation.
 theorem a_confused_vocabulary_is_not_well_formed :
     ¬ confusedVocabulary.WellFormed ∧ vocabulary.WellFormed := by
   exact ⟨by decide, by decide⟩
+
+/-- **A protocol the profile never declared is not admitted.**
+
+The clause that makes `ProtocolAuthority` mean something. Its type index stops
+authority for one protocol being presented for another, and stopped nothing else:
+`mintedBy` is public and total, so review minted authority for a protocol out of a
+string in a foreign module and used it to discharge a duty this family had created
+under `bufferProtocol` — duty gone, ledger clean, no violation. The rejection is
+`accessNotAdmitted`, before applicability is asked, which is where every other
+undeclared open name is caught. -/
+theorem a_forged_protocol_is_refused :
+    (stepAlpha state₀ .forgedProtocolRelease).rejection? =
+      some (.accessNotAdmitted (.protocolNotRecognized forgedProtocol)) := by decide
+
+/-- And the same discharge under the protocol the profile *does* declare runs, so the
+rejection is the registry and not the discharge. The duty has to exist first. -/
+theorem the_declared_protocol_is_admitted :
+    ∀ s, (stepAlpha state₀ .reserve).state? = some s →
+      (stepAlpha s .release).state?.isSome ∧
+      vocabulary.protocols.Recognizes bufferProtocol ∧
+      ¬ vocabulary.protocols.Recognizes forgedProtocol := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide⟩
 
 /-- **A grant kind the profile never declared is not admitted.**
 

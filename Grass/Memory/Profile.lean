@@ -169,6 +169,12 @@ structure AdmittedVocabulary where
   `MemoryState.AnyGrantOver` is kind-blind: a grant of an invented kind freezes bytes
   for every rule that asks whether anything is held. -/
   grantKinds : NameRegistry GrantKind
+  /-- The obligation protocols this profile has. `ObligationProtocolId` is an open
+  nominal name and `ProtocolAuthority.mintedBy` is public, total and unconditioned,
+  so any module can mint authority for any protocol — review minted one from a string
+  in a foreign file and discharged another family's duty with it, no violation
+  recorded. Declaring the protocols is what makes a claim checkable at all. -/
+  protocols : NameRegistry ObligationProtocolId
   /-- Ordering modes this profile owns, beyond the five portable ones.
 
   `docs/MEMORY_MODEL.md` §7.1 fixes the portable modes and allows a profile its
@@ -372,6 +378,8 @@ inductive AdmissibilityFailure where
   | initializationRuleNotRegistered (name : Name)
   /-- The effect issues a grant of a kind this profile never declared. -/
   | grantKindNotRecognized (kind : GrantKind)
+  /-- The effect claims authority under a protocol this profile never declared. -/
+  | protocolNotRecognized (protocol : ObligationProtocolId)
 deriving DecidableEq, Repr
 
 /--
@@ -420,7 +428,10 @@ def admissibilityFailures (vocabulary : AdmittedVocabulary) (d : AccessDescripto
    | Option.none => []) ++
   (d.authorityEffect.issuedKinds.filterMap fun kind =>
     if vocabulary.grantKinds.Recognizes kind then Option.none
-    else some (.grantKindNotRecognized kind))
+    else some (.grantKindNotRecognized kind)) ++
+  (d.ledgerEffect.claimedProtocols.filterMap fun protocol =>
+    if vocabulary.protocols.Recognizes protocol then Option.none
+    else some (.protocolNotRecognized protocol))
 
 /--
 `vocabulary.Admits d` holds when every open name the access descriptor uses is one
@@ -471,7 +482,7 @@ theorem not_admits_of_no_address_spaces {vocabulary : AdmittedVocabulary}
   unfold admissibilityFailures
   rw [h]
   simp only [List.mem_append]
-  refine Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl ?_))))))))
+  refine Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl ?_)))))))))
   simp [AddressSpaceTable.empty, AddressSpaceTable.find?]
 
 /--
@@ -502,7 +513,7 @@ theorem not_admits_of_unrecognized_fault {vocabulary : AdmittedVocabulary}
   refine not_admits_of_failure (failure := .faultClassNotRecognized fault) ?_
   unfold admissibilityFailures
   simp only [List.mem_append, List.mem_filterMap]
-  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr ⟨fault, hmem, by simp [h]⟩))))))
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr ⟨fault, hmem, by simp [h]⟩)))))))
 
 /--
 An access whose ledger effect would drop or fabricate a duty is not admitted.
@@ -516,7 +527,24 @@ theorem not_admits_of_ill_formed_ledger_effect {vocabulary : AdmittedVocabulary}
   refine not_admits_of_failure (failure := .ledgerEffectIllFormed) ?_
   unfold admissibilityFailures
   simp only [List.mem_append]
-  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr (by simp [h]))))))
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr (by simp [h])))))))
+
+/-- **An access claiming a protocol the profile never declared is not admitted.**
+
+The clause that makes `ProtocolAuthority` mean anything. The type index stops
+authority for one protocol being presented for another; nothing stopped it being
+minted for any protocol at all, by any module, since `mintedBy` is public and total.
+Review minted one from a string in a foreign file and discharged a duty another
+family had created. A protocol the profile did not declare is refused here, before
+`LedgerEffectApplicable` is asked whether the delta is applicable. -/
+theorem not_admits_of_undeclared_protocol {vocabulary : AdmittedVocabulary}
+    {d : AccessDescriptor} {protocol : ObligationProtocolId}
+    (hmem : protocol ∈ d.ledgerEffect.claimedProtocols)
+    (h : ¬ vocabulary.protocols.Recognizes protocol) : ¬ vocabulary.Admits d := by
+  refine not_admits_of_failure (failure := .protocolNotRecognized protocol) ?_
+  unfold admissibilityFailures
+  simp only [List.mem_append, List.mem_filterMap]
+  exact Or.inr ⟨protocol, hmem, by simp [h]⟩
 
 /-- **An access issuing a grant of a kind the profile never declared is not
 admitted.**
@@ -534,7 +562,7 @@ theorem not_admits_of_undeclared_grant_kind {vocabulary : AdmittedVocabulary}
   refine not_admits_of_failure (failure := .grantKindNotRecognized kind) ?_
   unfold admissibilityFailures
   simp only [List.mem_append, List.mem_filterMap]
-  exact Or.inr ⟨kind, hmem, by simp [h]⟩
+  exact Or.inl (Or.inr ⟨kind, hmem, by simp [h]⟩)
 
 /-- An access creating an obligation of a kind the profile never declared is not
 admitted. -/
@@ -545,7 +573,7 @@ theorem not_admits_of_undeclared_obligation_kind {vocabulary : AdmittedVocabular
   refine not_admits_of_failure (failure := .obligationKindNotRecognized kind) ?_
   unfold admissibilityFailures
   simp only [List.mem_append, List.mem_filterMap]
-  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inr ⟨kind, hmem, by simp [h]⟩))))
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr ⟨kind, hmem, by simp [h]⟩)))))
 
 /-- **An access citing an initialization rule the profile never declared is not
 admitted.** A name no profile claimed is not a rule. This does not rest on
@@ -559,7 +587,7 @@ theorem not_admits_of_unregistered_justification {vocabulary : AdmittedVocabular
   refine not_admits_of_failure (failure := .initializationRuleNotRegistered justification) ?_
   unfold admissibilityFailures
   simp only [List.mem_append]
-  exact Or.inl (Or.inr (by rw [hmem]; simp [h]))
+  exact Or.inl (Or.inl (Or.inr (by rw [hmem]; simp [h])))
 
 /-- **An access requesting an ordering mode the profile never declared is not
 admitted.** `docs/MEMORY_MODEL.md` §7.1: an unsupported mapping is rejected. -/
@@ -570,7 +598,7 @@ theorem not_admits_of_unregistered_order {vocabulary : AdmittedVocabulary}
   refine not_admits_of_failure (failure := .orderNotRegistered name) ?_
   unfold admissibilityFailures
   simp only [List.mem_append]
-  exact Or.inl (Or.inl (Or.inl (Or.inr (by rw [hname]; simp [h]))))
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inr (by rw [hname]; simp [h])))))
 
 /-- And one claiming a scope the profile never declared is not admitted. A device
 fence claiming a scope nobody defined is not a weaker fence; it is an undefined
@@ -582,7 +610,7 @@ theorem not_admits_of_unregistered_scope {vocabulary : AdmittedVocabulary}
   refine not_admits_of_failure (failure := .scopeNotRegistered name) ?_
   unfold admissibilityFailures
   simp only [List.mem_append]
-  exact Or.inl (Or.inl (Or.inr (by rw [hname]; simp [h])))
+  exact Or.inl (Or.inl (Or.inl (Or.inr (by rw [hname]; simp [h]))))
 
 end AdmittedVocabulary
 

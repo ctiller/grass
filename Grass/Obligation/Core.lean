@@ -146,9 +146,23 @@ namespace ProtocolAuthority
 
 /-- Mint authority for `protocol`, recording which profile did so.
 
-The one door. Not a capability check — nothing here can perform one — but a single
-auditable site, where before there were as many as there were callers of the
-anonymous constructor. -/
+The one door. **Not a capability check, and until review it was not a check of any
+kind**: this function is public, total and unconditioned, so any module can mint
+authority for any protocol, and review did — a value built from a string in a file
+that owns nothing, used to discharge a duty another family had created under its own
+protocol, with no violation recorded. The type index stops authority for one protocol
+being *presented* for another and says nothing about where the value came from.
+
+Two things check it now, neither of them a capability.
+`AdmittedVocabulary.protocols` is the registry a profile declares, and
+`AdmittedVocabulary.admissibilityFailures` refuses a descriptor whose ledger effect
+claims a protocol the profile never declared — which is what `GrantKind` already had
+and this did not. `Tools/DoorAudit.py` keeps a `Grass/` caller from minting outside
+this module.
+
+`issuer` is still read by nothing but this file's own simp lemma. It is a record for
+a report that does not exist yet; §10's profile closure is where it would be
+consumed. -/
 def mintedBy (protocol : ObligationProtocolId) (issuer : Name) :
     ProtocolAuthority protocol := ⟨issuer⟩
 
