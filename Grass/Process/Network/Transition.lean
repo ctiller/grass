@@ -658,6 +658,27 @@ structure Spawns (before after : plan.LogicalProcessNetwork)
   /-- It now holds a live incarnation of the right kind. -/
   nowLive : ∃ incarnation, after.instances kind slot = some incarnation ∧
     incarnation.Live ∧ incarnation.kind = kind
+  /--
+  **And it has a parent at all.**
+
+  `docs/PROCESS.md` §3's spawn is a parent creating a child, and without this
+  field it was not: `authorized` reads the permitted-parent law off the new
+  incarnation's own `knownParent`, so an incarnation recording *no* parent
+  discharged it vacuously and a spawn could install a **root**.
+
+  Two things that makes wrong. A root is what a run *begins* with —
+  `Grass/Process/Network/Initial.lean`'s `ExactInitialNetwork` — and beginning is
+  not a transition; and `LogicalProcessNetworkCore.RootUnique` is a
+  well-formedness law that a second root breaks, so a spawn could take a
+  well-formed network to an ill-formed one, which is the shape `slotAgrees` was
+  added to close.
+
+  `currentParent` rather than `knownParent`, so a spawn cannot install a child
+  already *detached* from a parent that never held it — the same predicate
+  `Detaches.wasAttached` and `Joins.wasChild` ask, and for the same reason.
+  -/
+  spawnsAChild : ∀ incarnation, after.instances kind slot = some incarnation →
+    incarnation.parentage.currentParent ≠ none
   /-- Whose parent the topology permits. -/
   authorized : ∀ incarnation, after.instances kind slot = some incarnation →
     ∀ parentKind parent, incarnation.parentage.knownParent = some ⟨parentKind, parent⟩ →

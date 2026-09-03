@@ -3243,3 +3243,56 @@ Needs a ruling on whether §7's "independently specified observation" is meant t
 be a per-observation predicate at all, or a property of the trace — which would
 be a `ProcessAcceptance` change and would give §10.49, §10.69 and this entry one
 answer.
+
+### 10.71 A frontier and a deadlock are the same thing
+
+`ProcessPlan.AtFrontier network` is "every step from here is driven by entropy",
+which a network with **no steps at all** satisfies vacuously.
+`Tests/Process/FrontierFixtures.lean`'s `emptyWorld` is one — nothing can spawn
+into it because a spawn needs a parent, nothing can restart because the slot is
+empty, and every other constructor is uninhabited at that plan — and
+`the_empty_world_is_a_frontier` is the consequence.
+
+§7 excuses an infinite run that "remains at a declared external frontier". A run
+that reaches a deadlock is not remaining at a frontier; it has stopped, and §7's
+theorem has nothing to say because there is no infinite run to be about. So this
+is not unsound as far as the progress theorem goes — but it means `AtFrontier` is
+two things wearing one name, and a consumer that reads it as "this network is
+waiting for the environment" would be wrong.
+
+The narrower definition is "every step is entropy-driven **and** there is one":
+`∀ step, DrivenByEntropy step` together with `∃ after, Nonempty (NetworkStep …)`.
+Whether that is what §7 means is a question about the document — a program that
+has genuinely finished all its work and is waiting for a request it will never
+receive is, arguably, at a frontier and stuck at the same time.
+
+Found while attempting `well_formedness_is_preserved`, which is what produced
+§10.72 as well.
+
+### 10.72 A spawn could install a root
+
+`Spawns.authorized` reads the permitted-parent law off the new incarnation's own
+`knownParent`, so an incarnation recording *no* parent discharged it vacuously —
+and `docs/PROCESS.md` §3's spawn is a parent creating a child, not a program
+beginning.
+
+Two things it made possible. A run's beginning is
+`Grass/Process/Network/Initial.lean`'s `ExactInitialNetwork`, not a transition, so
+a spawned root is a start modelled as a step. And
+`LogicalProcessNetworkCore.RootUnique` is a well-formedness law that a second
+root breaks, so a spawn could take a well-formed network to an ill-formed one —
+the shape `Spawns.slotAgrees` was added to close, one field over.
+
+Fixed: `Spawns.spawnsAChild` requires `currentParent ≠ none`, the same predicate
+`Detaches.wasAttached` and `Joins.wasChild` ask.
+
+`Tests/Process/FrontierFixtures.lean` was the only `Spawns` witness and it was
+exactly this defect: it spawned the root to model the program starting. It now
+uses a detach instead, which is a real network step, and `emptyWorld` becomes a
+network nothing can move — which is §10.71.
+
+**`Restarts` has the same hole and is not fixed.** Its `authorized` is the same
+shape, so a restart may install a root into a slot whose previous incarnation had
+ended. That is arguably right — a supervisor restarting a root is a program
+restarting itself — and arguably not, for the same reason a spawn of one is
+wrong. Needs a ruling.

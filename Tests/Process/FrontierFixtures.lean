@@ -401,12 +401,11 @@ theorem entropy_or_descends {before after : waitingPlan.LogicalProcessNetwork}
     | .environmentViolation v, _ => exact v.elim
   | spawn kind slot _ _ _ step =>
     cases kind; cases slot
-    obtain ⟨fresh, found, live, _⟩ := step.nowLive
-    refine Or.inr ?_
-    show slack (after.instances () ()) < slack (before.instances () ())
-    rw [step.wasEmpty, found]
-    rw [slack_of_live_root live (authorized_is_root (step.authorized fresh found))]
-    simp [slack]
+    obtain ⟨fresh, found, _, _⟩ := step.nowLive
+    exact absurd
+      ((authorized_is_root (step.authorized fresh found)) ▸ rfl :
+        fresh.parentage.currentParent = none)
+      (step.spawnsAChild fresh found)
   | restart kind slot _ _ _ step =>
     cases kind; cases slot
     obtain ⟨old, foundOld, dead⟩ := step.wasEnded
@@ -537,74 +536,150 @@ def waiting_is_a_start : waitingPlan.ExactInitialNetwork () waiting where
   historyFromEmpty := .extend (.refl _) theRootsGeneration theRootsGeneration_admissible
 
 
-/-! ## An empty slot, and the spawn that fills it -/
+/-! ## An empty slot nothing can fill, and a child the program lets go -/
 
 /--
 The same plan with nobody in the slot, and no history.
 
-Not a start — `ExactInitialNetwork.rootPresent` needs an incarnation — and not a
-frontier: nothing outside can move it, and the program leaves it by spawning.
-That combination is what makes it the interesting network of this plan.
+Not a start — `ExactInitialNetwork.rootPresent` needs an incarnation — and, since
+`Spawns` gained `spawnsAChild`, not a network any step can leave: a spawn needs a
+parent and there is nobody to be one, a restart needs an ended incarnation and
+the slot is empty, and every other constructor is uninhabited at this plan.
+
+`nothing_moves_the_empty_world` is that, and it is worth having because
+`ProcessPlan.AtFrontier` holds of it *vacuously*. "Only the outside can move this
+network" is satisfied by a network nothing can move at all, so a frontier and a
+deadlock are indistinguishable at this definition.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.71 records it.
 -/
 @[reducible] def emptyWorld : waitingPlan.LogicalProcessNetwork :=
   { waiting with
       instances := fun _ _ => none
       usedNominals := NominalHistory.initial }
 
-/--
-**Spawning the root takes `emptyWorld` to `waiting`.**
+/-- A network holding one given incarnation in the one slot. -/
+@[reducible] def holdingOne
+    (incarnation : ProcessInstance waitTopology) : waitingPlan.LogicalProcessNetwork :=
+  { waiting with instances := fun _ _ => some incarnation }
 
-`Spawns` is another record this corpus had never inhabited, and the arithmetic
-lines up on its own: the generation this spawn allocates is the one
-`startingHistory` holds, so `NetworkStep.historyExact` is the extension equation
-rather than something arranged.
-
-`authorized` is discharged vacuously and that is the content, not a shortcut:
-`maySpawn` permits nothing at this graph, so the only incarnation a spawn may
-install is one recording no parent — which is `authorized_is_root`.
--/
-theorem the_spawn : waitingPlan.Spawns emptyWorld waiting () () theRootsGeneration [] [] where
-  wasEmpty := rfl
-  nowLive := ⟨theRoot, rfl, trivial, rfl⟩
-  authorized := fun incarnation found _ _ known => by
-    rw [(rfl : waiting.instances () () = some theRoot)] at found
-    injection found with same
-    rw [← same] at known
-    exact absurd known (by simp [ProcessParentage.knownParent])
-  allocatesTheGeneration := fun incarnation found => by
-    rw [(rfl : waiting.instances () () = some theRoot)] at found
-    injection found with same
-    rw [← same]
-    simp [theRootsGeneration]
-  slotAgrees := fun incarnation found => by
-    rw [(rfl : waiting.instances () () = some theRoot)] at found
-    injection found with same
-    exact ⟨rfl, by rw [← same]⟩
-  startsInitial := fun incarnation found => by
-    rw [(rfl : waiting.instances () () = some theRoot)] at found
-    injection found with same
-    exact ⟨rfl, by rw [← same]; exact ⟨rfl, rfl, rfl⟩⟩
-  emittedIsProjected := rfl
-  producesPending := rfl
+/-- Only that slot differs between two of them. -/
+theorem holdingOne_changesOne (left right : ProcessInstance waitTopology) :
+    waitingPlan.ChangesOneInstance (holdingOne left) (holdingOne right) () () where
   scope := by
     intro fragment outside
     cases fragment with
-    | instanceState _ _ => exact absurd (Or.inl rfl) outside
-    | nominals => exact absurd (Or.inr (Or.inl rfl)) outside
+    | instanceState kind slot =>
+      cases kind; cases slot
+      exact absurd rfl outside
     | region region => exact region.elim
     | escrow edge _ => exact edge.elim
     | session edge _ => exact edge.elim
     | _ => rfl
 
-/-- As a step. The generation it allocates was never allocated before, because
-`emptyWorld`'s history is empty. -/
-def spawnStep : waitingPlan.NetworkStep emptyWorld waiting where
-  transition := .spawn () () theRootsGeneration [] [] the_spawn
-  admissible := theRootsGeneration_admissible
-  historyExact := rfl
+/-- A live child of the root: not a shape a run of this plan reaches, since
+nothing may spawn here, but a world of its world type. -/
+@[reducible] def attachedChild : ProcessInstance waitTopology :=
+  { theRoot with parentage := .attached () theRoot.ref }
 
-/-- **It is not entropy**: nothing outside had to happen for it. -/
-theorem the_spawn_is_not_entropy : ¬ spawnStep.transition.DrivenByEntropy := id
+/-- The same child, let go. -/
+@[reducible] def detachedChild : ProcessInstance waitTopology :=
+  { attachedChild with parentage := attachedChild.parentage.detach }
+
+/--
+**Detaching it is a step of this plan.**
+
+The non-entropy step the fixture needs, and it replaces a spawn that should never
+have been one: `the_spawn` used to install the *root*, modelling a program's
+start as a transition. `Spawns.spawnsAChild` now forbids that, and finding it is
+what the attempt at a well-formedness capstone produced.
+-/
+theorem the_detach :
+    waitingPlan.Detaches (holdingOne attachedChild) (holdingOne detachedChild) () () where
+  wasAttached := ⟨attachedChild, rfl, by intro equal; cases equal⟩
+  identityPreserved :=
+    ⟨attachedChild, detachedChild, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+  onlyThatSlot := holdingOne_changesOne attachedChild detachedChild
+
+/-- As a step: a detach allocates nothing, so the history does not move. -/
+def detachStep : waitingPlan.NetworkStep (holdingOne attachedChild) (holdingOne detachedChild) where
+  transition := .detach () () the_detach
+  admissible := by
+    intro nominal allocated
+    exact absurd allocated (fun inEmpty => List.not_mem_nil inEmpty)
+  historyExact := (NominalHistory.extend_empty _ _).symm
+
+/-- **It is not entropy**: the parent let go on its own initiative. -/
+theorem the_detach_is_not_entropy : ¬ detachStep.transition.DrivenByEntropy := id
+
+/--
+**Nothing at all moves the empty world.**
+
+Every constructor needs something this network does not have: `processStep` a
+live incarnation, `spawn` a parent, `restart` an ended one, `detach` an attached
+one, the endings a live one, `join` a terminated one, `commit` a non-empty trace
+of an empty observation type, and the twelve channel constructors an edge.
+
+`ProcessPlan.AtFrontier emptyWorld` therefore holds — vacuously. §7's frontier is
+"only the outside can move this network", and a network nothing can move at all
+satisfies it. So a frontier and a deadlock are indistinguishable at this
+definition, and §7's progress theorem excuses both.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.71.
+-/
+theorem nothing_moves_the_empty_world {after : waitingPlan.LogicalProcessNetwork}
+    (transition : waitingPlan.NetworkTransition emptyWorld after) : False := by
+  cases transition with
+  | processStep kind slot _ _ _ _ step =>
+    cases kind; cases slot
+    obtain ⟨_, found, _, _⟩ := step.from'
+    exact absurd found (by simp)
+  | spawn kind slot _ _ _ step =>
+    cases kind; cases slot
+    obtain ⟨fresh, found, _, _⟩ := step.nowLive
+    exact absurd
+      ((authorized_is_root (step.authorized fresh found)) ▸ rfl :
+        fresh.parentage.currentParent = none)
+      (step.spawnsAChild fresh found)
+  | restart kind slot _ _ _ step =>
+    cases kind; cases slot
+    obtain ⟨_, found, _⟩ := step.wasEnded
+    exact absurd found (by simp)
+  | detach kind slot step =>
+    cases kind; cases slot
+    obtain ⟨_, found, _⟩ := step.wasAttached
+    exact absurd found (by simp)
+  | childCancelled kind slot _ _ _ step =>
+    cases kind; cases slot
+    obtain ⟨_, found, _⟩ := step.wasLive
+    exact absurd found (by simp)
+  | childDied kind slot _ _ _ step =>
+    cases kind; cases slot
+    obtain ⟨_, found, _⟩ := step.wasLive
+    exact absurd found (by simp)
+  | join kind slot result _ => exact result.elim
+  | interrupt _ _ reason _ _ => exact reason.elim
+  | fault _ _ f _ _ => exact f.elim
+  | environmentViolation _ _ violation _ _ => exact violation.elim
+  | processTermination _ _ result _ _ => exact result.elim
+  | commit emitted step =>
+    exact step.nonempty (match emitted with
+      | [] => rfl
+      | observation :: _ => observation.elim)
+  | send edge _ _ _ => exact edge.elim
+  | receive edge _ _ _ => exact edge.elim
+  | requestCancel edge _ _ _ => exact edge.elim
+  | acknowledgeCancel edge _ _ _ => exact edge.elim
+  | timeout edge _ _ _ => exact edge.elim
+  | senderDeath edge _ _ _ _ => exact edge.elim
+  | receiverDeath edge _ _ _ _ => exact edge.elim
+  | drop edge _ _ _ => exact edge.elim
+  | coalesce edge _ _ _ _ => exact edge.elim
+  | reroute edge _ _ _ _ => exact edge.elim
+  | channelClose edge _ _ _ => exact edge.elim
+  | channelDeath edge _ _ _ => exact edge.elim
+
+/-- **So it is at a frontier**, which is exactly the problem. -/
+theorem the_empty_world_is_a_frontier : waitingPlan.AtFrontier emptyWorld :=
+  fun step => (nothing_moves_the_empty_world step.transition).elim
 
 /-! ## So a measure exists, and it is a useful one -/
 
@@ -678,10 +753,10 @@ the change — two rounds were spent on measures declaring the wrong networks
 paused.
 -/
 theorem the_plan_is_useful : waitingPlan.Useful :=
-  ⟨emptyWorld, fun paused => the_spawn_is_not_entropy (paused spawnStep)⟩
+  ⟨holdingOne attachedChild, fun paused => the_detach_is_not_entropy (paused detachStep)⟩
 
 /--
-**The spawn is a silent run**, so this plan's `SilentRun` class is not empty.
+**The detach is a silent run**, so this plan's `SilentRun` class is not empty.
 
 That matters more than it looks. `SilentRun` used to require each step to start
 at a network the *measure* did not call paused, so under an all-paused measure the
@@ -689,19 +764,22 @@ class was empty and every theorem in `Grass/Process/Network/Progress.lean` —
 including its headline `no_infinite_silent_run` — was discharged from its own
 hypothesis at the corpus's only measure. A reviewer proved that. It now requires
 the step itself not to be entropy-driven, which nothing can declare away, and a
-spawn is such a step.
+detach is such a step.
 -/
-theorem the_spawn_is_a_silent_run :
-    ProcessPlan.NetworkProgressMeasure.SilentRun waitingMeasure emptyWorld waiting :=
-  .one spawnStep trivial
+theorem the_detach_is_a_silent_run :
+    ProcessPlan.NetworkProgressMeasure.SilentRun waitingMeasure
+      (holdingOne attachedChild) (holdingOne detachedChild) :=
+  .one detachStep trivial
     (fun _ observation _ _ _ => observation.elim)
-    the_spawn_is_not_entropy
+    the_detach_is_not_entropy
 
 /-- **So the measure pays for it**, which is `silent_run_descends` at a run that
-exists. -/
-theorem the_spawn_costs_rank :
-    waitingMeasure.rankLt (waitingMeasure.rank waiting) (waitingMeasure.rank emptyWorld) :=
-  waitingMeasure.silent_run_descends the_spawn_is_a_silent_run
+exists: `slack` falls from 4 to 2, because a detached child has one fewer thing
+that can happen to it than an attached one. -/
+theorem the_detach_costs_rank :
+    waitingMeasure.rankLt (waitingMeasure.rank (holdingOne detachedChild))
+      (waitingMeasure.rank (holdingOne attachedChild)) :=
+  waitingMeasure.silent_run_descends the_detach_is_a_silent_run
 
 
 /-! ## And the network really does run forever at it -/
