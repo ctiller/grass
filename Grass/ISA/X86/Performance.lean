@@ -18,8 +18,8 @@ chip, carried as `TimingBasis.measured` rather than as anything guaranteed.
 
 These are separated throughout, because merging them is how an unguaranteed
 measurement ends up load-bearing in a security proof. `TimingBasis` records
-which kind of claim each fact is, and `LeakageProfile.SoundFor` — the predicate
-the security theorem consumes — accepts only architectural guarantees.
+which kind of claim each fact is, and `TimingFact.SoundFor` accepts only
+architectural guarantees.
 
 ## Why not floats
 
@@ -69,16 +69,22 @@ consume only `architectural`, because that is the only class anyone has
 promised. `measured` numbers are a description of one chip on one day.
 -/
 inductive TimingBasis where
+  /-- Measured on named hardware by a named harness. A fact about a part, not
+  about an architecture.
+
+  Deliberately **first**, so that it is what `Inhabited` hands out. With
+  `architectural` first, `default : TimingBasis` was a vendor guarantee, and
+  anything reaching for a default — `Option.getD`, an empty-list lookup — minted
+  one silently. The weakest claim is the safe default; the strongest must be
+  written on purpose. -/
+  | measured (part : String)
+  /-- The vendor's optimization guide states it as guidance. Useful, revisable,
+  and not a promise. -/
+  | optimizationGuide
   /-- The vendor documents this as a guarantee of the architecture — for
   example a published data-operand-independent-timing instruction list. Binding
   on future parts that claim the same architecture. -/
   | architectural
-  /-- The vendor's optimization guide states it as guidance. Useful, revisable,
-  and not a promise. -/
-  | optimizationGuide
-  /-- Measured on named hardware by a named harness. A fact about a part, not
-  about an architecture. -/
-  | measured (part : String)
 deriving DecidableEq, Repr, Inhabited
 
 namespace TimingBasis
@@ -126,9 +132,10 @@ namespace LeakageChannel
 
 /-- Every channel this model knows about.
 
-An exhaustive list matters: `LeakageProfile.Closes` quantifies over it, so a
-channel added later automatically reopens every profile that has not accounted
-for it, rather than silently not being checked. -/
+A profile lists the channels it *establishes* closed, so a channel added to this
+type is closed by no existing profile until someone reviews and adds it — which
+is the reopening `LeakageProfile.closed` describes. `sealed_closes_all` is
+stated over this list, so it stops holding the moment the list grows. -/
 def all : List LeakageChannel := [.operandValue, .dataAddress, .controlFlow]
 
 theorem mem_all (c : LeakageChannel) : c ∈ all := by cases c <;> decide
@@ -136,30 +143,43 @@ theorem mem_all (c : LeakageChannel) : c ∈ all := by cases c <;> decide
 end LeakageChannel
 
 /--
-Which channels an instruction can leak through.
+Which channels a fact establishes are closed.
 
 `docs/INSTRUCTIONS.md` §1: "Missing metadata is rejection, not a default empty
-effect." So the empty set is a *claim* that the instruction leaks through no
-channel, and it needs the citation that `TimingFact` carries. It is not a
-default.
+effect." The empty profile therefore establishes *nothing* and closes no
+channel, which is the honest reading of silence. Claiming a channel closed takes
+an entry, and that entry needs the citation `TimingFact` carries.
 -/
 structure LeakageProfile where
-  /-- The channels this instruction may leak through. -/
-  channels : List LeakageChannel
+  /-- The channels this fact **establishes** are closed.
+
+  This direction, not "channels it leaks through", and the difference is the
+  whole point. With a leaks-through list, a channel nobody considered is absent
+  from it and therefore closed — so adding a fourth `LeakageChannel` tomorrow
+  would silently make every existing profile claim to close it. Listing what is
+  *established* means an unconsidered channel is open until someone accounts for
+  it, which is what `docs/INSTRUCTIONS.md` §1 requires: "Missing metadata is
+  rejection, not a default empty effect." -/
+  closed : List LeakageChannel
 deriving DecidableEq, Repr, Inhabited
 
 namespace LeakageProfile
 
-/-- Leaks through nothing. A strong claim, and only usable with an
-`architectural` basis behind it. -/
-def sealed : LeakageProfile := ⟨[]⟩
+/-- Closes every channel this model currently knows about. A strong claim, and
+only usable with an `architectural` basis behind it.
 
-/-- Leaks only through the addresses it touches — the profile of an ordinary
-load or store whose timing does not depend on the value moved. -/
-def addressOnly : LeakageProfile := ⟨[.dataAddress]⟩
+Written out rather than defined as `⟨LeakageChannel.all⟩`, so that adding a
+channel does *not* silently extend this claim to cover it. A new constructor
+leaves `sealed` open on it until someone reviews and adds it here, which is the
+reopening the header promises. -/
+def sealed : LeakageProfile := ⟨[.operandValue, .dataAddress, .controlFlow]⟩
 
-/-- Whether this profile is silent on a channel. -/
-def closes (p : LeakageProfile) (c : LeakageChannel) : Bool := !p.channels.contains c
+/-- Closes everything except the addresses it touches — the profile of an
+ordinary load or store whose timing does not depend on the value moved. -/
+def addressOnly : LeakageProfile := ⟨[.operandValue, .controlFlow]⟩
+
+/-- Whether this profile establishes that a channel is closed. -/
+def closes (p : LeakageProfile) (c : LeakageChannel) : Bool := p.closed.contains c
 
 /-- The profile closes every channel in the given set. -/
 def Closes (p : LeakageProfile) (cs : List LeakageChannel) : Prop :=
@@ -168,17 +188,26 @@ def Closes (p : LeakageProfile) (cs : List LeakageChannel) : Prop :=
 instance (p : LeakageProfile) (cs : List LeakageChannel) : Decidable (p.Closes cs) :=
   inferInstanceAs (Decidable (∀ _ ∈ _, _))
 
-@[simp] theorem sealed_closes (cs : List LeakageChannel) : sealed.Closes cs := by
-  intro c _; rfl
+/-- `sealed` closes every channel the model knows about today.
 
-/-- The union of two profiles: a sequence leaks through whatever either part
-leaks through. -/
-def union (p q : LeakageProfile) : LeakageProfile := ⟨p.channels ++ q.channels⟩
+Stated over `LeakageChannel.all` rather than over an arbitrary list. The old
+form was provable for *every* list, including channels that did not exist, which
+is what made the default-closed representation look sound. -/
+@[simp] theorem sealed_closes_all : sealed.Closes LeakageChannel.all := by decide
 
-theorem closes_union {p q : LeakageProfile} {c : LeakageChannel}
-    (hp : p.closes c = true) (hq : q.closes c = true) : (p.union q).closes c = true := by
-  simp only [closes, union, List.contains_append, Bool.not_or, Bool.and_eq_true] at *
-  exact ⟨hp, hq⟩
+/-- Running two things in sequence closes only what **both** close.
+
+An intersection, not a union: if either part leaks through a channel, the
+sequence does. -/
+def sequence (p q : LeakageProfile) : LeakageProfile :=
+  ⟨p.closed.filter (fun c => q.closed.contains c)⟩
+
+theorem closes_sequence {p q : LeakageProfile} {c : LeakageChannel}
+    (hp : p.closes c = true) (hq : q.closes c = true) :
+    (p.sequence q).closes c = true := by
+  simp only [closes, sequence, List.contains_eq_mem, decide_eq_true_eq,
+    List.mem_filter] at *
+  exact ⟨hp, by simpa using hq⟩
 
 end LeakageProfile
 
@@ -193,13 +222,21 @@ citation ledger the same way an encoding rule is.
 structure TimingFact where
   /-- The instruction this is about. -/
   subject : Name
-  /-- What it may leak through. -/
+  /-- Which channels this fact establishes are closed. -/
   leakage : LeakageProfile
   /-- What kind of claim this is. -/
   basis : TimingBasis
   /-- Grass's statement of the claim, for review against the anchors. -/
   statement : String
-deriving DecidableEq, Repr, Inhabited
+  /-- Both vendors' anchors for exactly this subject.
+
+  A timing fact carries the same citation burden as an encoding rule, and for
+  the same reason: `docs/DECISIONS.md` 15 makes the common profile the
+  intersection of two contracts, and a data-operand-independent-timing claim is
+  only as good as the two published lists behind it. Without this field the
+  header's whole "why the timing classification is dual-cited" section described
+  an intention rather than a structure. -/
+  citation : DualCitation subject
 
 namespace TimingFact
 
@@ -402,7 +439,7 @@ structure MicroarchProfile where
   basis : TimingBasis
   /-- Where the numbers came from. -/
   citation : Citation
-deriving DecidableEq, Repr, Inhabited
+deriving DecidableEq, Repr
 
 namespace MicroarchProfile
 

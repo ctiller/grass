@@ -179,6 +179,72 @@ def movAx : Probe :=
     isException := false
     note := "16-bit write: bits 63:16 preserved (writeBack.w16_preserves_high)" }
 
+/--
+`48 C7 C0 imm32` — `mov rax, imm32` sign-extended, the 64-bit-destination case.
+
+A reviewer measured that `writeBack .w64` had **zero** probe coverage: mutating
+it to preserve the upper half instead of replacing the register changed no
+corpus row and was caught by no probe. "A 64-bit destination replaces the
+register" is one of the three things `Rules.registerWriteExtension` states, and
+until this row it was the one settled by nothing — not by a probe, not by a
+confirmed anchor.
+
+The immediate is sign-extended to 64 bits, so `0x11223344` gives exactly
+`0x0000000011223344` and a model that preserved the upper half would give
+`0xFFFFFFFF11223344`.
+-/
+def movR64 : Probe :=
+  { label := "48 C7 C0 11223344 (mov rax, imm32 sign-extended -- 64-bit dest)"
+    bytes := [0x48, 0xC7, 0xC0, 0x44, 0x33, 0x22, 0x11]
+    before := initialState
+    after := predictWrite initialState .rax .w64 0x0000000011223344
+    isException := false
+    note := "64-bit write: replaces the register (writeBack.w64_independent)" }
+
+/--
+`0F BC C1` — `bsf eax, ecx` with a zero source.
+
+The third carve-out in `Rules.registerWriteExtension`, and the only one that was
+asserted with no evidence of any kind: no probe, no confirmed anchor, and by the
+rule's own comment the case "where the vendors are reported to differ". Intel
+documents the destination as undefined for a zero source; AMD is reported to
+leave it unmodified.
+
+If the destination is genuinely not written, the 32-bit rule does not reach it
+and bits 63:32 stay set — which is what this probe expects. A processor that
+zero-extended anyway would report `0x00000000ffffffff` and the carve-out would
+be wrong on this part.
+-/
+def bsfZeroSource : Probe :=
+  { label := "0F BC C1 (bsf eax, ecx with ecx = 0 -- undefined destination)"
+    bytes := [0x0F, 0xBC, 0xC1]
+    before := setReg initialState .rcx 0
+    after := setReg initialState .rcx 0
+    isException := true
+    note := "expects RAX entirely unchanged, so no 32-bit write occurred; the "
+              ++ "unqualified rule would predict 0x00000000ffffffff" }
+
+/-- `66 B8` and `B0` cover 16- and 8-bit writes with one row each, which a
+reviewer noted makes a typo and a broken model the same evidence. `movAxOther`
+and `movAlOther` write a second, different value so that a model that happened
+to agree on one constant does not agree on both. -/
+def movAxOther : Probe :=
+  { label := "66 B8 FFFF (mov ax, 0xffff -- 16-bit, all-ones payload)"
+    bytes := [0x66, 0xB8, 0xFF, 0xFF]
+    before := setReg initialState .rax 0
+    after := predictWrite (setReg initialState .rax 0) .rax .w16 0xFFFF
+    isException := false
+    note := "16-bit write into a zeroed register: bits 63:16 stay zero" }
+
+/-- The 8-bit counterpart, also from a zeroed register. -/
+def movAlOther : Probe :=
+  { label := "B0 FF (mov al, 0xff -- 8-bit, all-ones payload)"
+    bytes := [0xB0, 0xFF]
+    before := setReg initialState .rax 0
+    after := predictWrite (setReg initialState .rax 0) .rax .w8 0xFF
+    isException := false
+    note := "8-bit write into a zeroed register: bits 63:8 stay zero" }
+
 /-- The whole corpus.
 
 `movR32` runs over every register, which also exercises the opcode-embedded
@@ -186,7 +252,8 @@ register field and its `REX.B` extension — the third place a register number c
 appear, and one no other corpus covers. -/
 def corpus : List Probe :=
   ((Gpr.all.filter (fun r => r != .rsp)).map movR32)
-    ++ [nopByte, xchgEaxEax, xchgR8dEax, movAh, movAl, movAx]
+    ++ [nopByte, xchgEaxEax, xchgR8dEax, movAh, movAl, movAx,
+        movR64, bsfZeroSource, movAxOther, movAlOther]
 
 end Grass.Tests.ISA.X86.Probe
 

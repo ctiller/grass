@@ -31,11 +31,23 @@ that redirected it would take the process with it.
 
 An instruction under test can fault, and `docs/VALIDATION.md` section 4 requires
 probe processes to be isolated when faults or hangs are possible. Each probe
-therefore runs in a child process. Windows sets a crashed child's exit code to
-the NTSTATUS, so a fault is *reported with its class* rather than lost: an
-illegal instruction comes back as 0xC000001D, an access violation as
-0xC0000005. That makes a faulting probe data rather than a crash, which is what
-the fault-declaration facet of `docs/INSTRUCTIONS.md` section 3 will need.
+runs in a child process, and the child installs a vectored exception handler
+that terminates with the fault's own NTSTATUS the moment a hardware fault
+arrives.
+
+That handler is not decoration. Without it every fault reported 0xC0000005:
+ctypes wraps the foreign call in SEH, and the wrapper faults with nine unpopped
+pushes and callee-saved registers full of test values, so unwinding dies on the
+corrupted stack with a *second*, genuine access violation -- and that is the
+code the parent saw. A reviewer measured UD2, HLT and INT3 all reporting
+0xC0000005, which made three entries of the table below unreachable. A vectored
+handler runs before any unwinding, so the original code survives: UD2 reports
+0xC000001D, HLT 0xC0000096, INT3 0x80000003. The handler passes anything outside
+the hardware-fault set through, so it cannot swallow the interpreter's own
+exception handling.
+
+That makes a faulting probe data rather than a crash, which is what the
+fault-declaration facet of `docs/INSTRUCTIONS.md` section 3 will need.
 
 A timeout guards against a probe that does not return at all.
 
@@ -64,7 +76,7 @@ RSP = 4  # never loaded or compared: it is the harness's own stack
 
 # How many probes Tests/ISA/X86/MachineProbes.lean generates. Without this the
 # runner reports success on a truncated corpus.
-EXPECTED_ROWS = 21
+EXPECTED_ROWS = 25
 
 PROBE_TIMEOUT_SECONDS = 30
 
@@ -132,6 +144,53 @@ import ctypes, ctypes.wintypes as wt, sys
 k32 = ctypes.WinDLL('kernel32', use_last_error=True)
 k32.VirtualAlloc.restype = ctypes.c_void_p
 k32.VirtualAlloc.argtypes = [ctypes.c_void_p, ctypes.c_size_t, wt.DWORD, wt.DWORD]
+
+
+class EXCEPTION_RECORD(ctypes.Structure):
+    pass
+
+
+EXCEPTION_RECORD._fields_ = [
+    ("ExceptionCode", wt.DWORD), ("ExceptionFlags", wt.DWORD),
+    ("ExceptionRecord", ctypes.POINTER(EXCEPTION_RECORD)),
+    ("ExceptionAddress", ctypes.c_void_p), ("NumberParameters", wt.DWORD),
+    ("ExceptionInformation", ctypes.c_ulonglong * 15)]
+
+
+class EXCEPTION_POINTERS(ctypes.Structure):
+    _fields_ = [("ExceptionRecord", ctypes.POINTER(EXCEPTION_RECORD)),
+                ("ContextRecord", ctypes.c_void_p)]
+
+
+HANDLER = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.POINTER(EXCEPTION_POINTERS))
+
+# Hardware faults a probe can raise. Anything else -- a Python-level exception,
+# a C++ throw inside the interpreter -- is passed through, so this handler
+# cannot swallow the interpreter's own exception handling.
+PROBE_FAULTS = {0xC0000005, 0xC000001D, 0xC0000094, 0xC0000096, 0xC000008C,
+                0xC0000090, 0xC0000091, 0xC0000093, 0xC00000FD, 0x80000003}
+
+
+@HANDLER
+def veh(info):
+    code = info.contents.ExceptionRecord.contents.ExceptionCode
+    if code in PROBE_FAULTS:
+        # Terminate now, before any unwinding. The wrapper faulted with unpopped
+        # pushes, so letting SEH unwind produces a second access violation that
+        # would be reported instead of this one.
+        k32.TerminateProcess(k32.GetCurrentProcess(), code)
+    return 0  # EXCEPTION_CONTINUE_SEARCH
+
+
+# argtypes matter: without them the 64-bit callback pointer is truncated and the
+# handler is never installed, which is how this looked like it did not work.
+k32.AddVectoredExceptionHandler.restype = ctypes.c_void_p
+k32.AddVectoredExceptionHandler.argtypes = [ctypes.c_ulong, HANDLER]
+k32.GetCurrentProcess.restype = ctypes.c_void_p
+k32.TerminateProcess.argtypes = [ctypes.c_void_p, wt.UINT]
+if not k32.AddVectoredExceptionHandler(1, veh):
+    sys.exit("AddVectoredExceptionHandler failed")
+
 code = open(sys.argv[1], 'rb').read()
 addr = k32.VirtualAlloc(None, len(code), 0x3000, 0x40)
 if not addr:
@@ -165,6 +224,8 @@ def run_probe(worker: Path, binary: Path, before: list[int]) -> tuple[str, list[
             0xC0000094: "STATUS_INTEGER_DIVIDE_BY_ZERO",
             0xC000008C: "STATUS_ARRAY_BOUNDS_EXCEEDED",
             0xC0000096: "STATUS_PRIVILEGED_INSTRUCTION",
+            0x80000003: "STATUS_BREAKPOINT",
+            0xC00000FD: "STATUS_STACK_OVERFLOW",
         }
         name = known.get(code, "")
         detail = f"{code:#010x}" + (f" ({name})" if name else "")

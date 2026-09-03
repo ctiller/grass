@@ -124,10 +124,13 @@ def registerWriteExtension : CommonRule :=
       "outside the rule."
     -- Not `.agreed`: `CommonBasis.agreed` asserts that both manuals state the
     -- same guarantee, and the AMD manual is currently unretrievable
-    -- (`Sources.lean`). The two carve-outs named in the statement were settled
-    -- on hardware instead -- `Tests/ISA/X86/MachineProbes.lean` confirms both
-    -- on an Intel i9-13900H -- and the BSF/BSR case is where the vendors are
-    -- reported to differ, which is exactly why this cannot claim agreement yet.
+    -- (`Sources.lean`). All three carve-outs named in the statement were
+    -- settled on hardware instead: `Tests/ISA/X86/MachineProbes.lean` confirms
+    -- each on an Intel i9-13900H, including BSF with a zero source leaving the
+    -- destination entirely unwritten. That is one part from one vendor, which
+    -- is why this stays `weakerCommon`: the BSF/BSR case is exactly where the
+    -- vendors are reported to differ, and a single Intel measurement cannot
+    -- establish what AMD guarantees.
     basis := .weakerCommon
       ("clears bits 63:32 on a 32-bit destination write; BSF/BSR with a zero " ++
        "source leave the destination undefined")
