@@ -678,14 +678,30 @@ representation relation.
 
 ## 5. M3 — Cancellation and lifecycle
 
-**Status: seven modules written, unmerged, unratified.** `coord1:6` ruled the
+**Status: eight of eight modules written, unmerged, unratified.** `coord1:6` ruled the
 canonical scoped cancellation form while M2 was in progress, so
 `Cancellation/Identity.lean` and `Cancellation/Policy.lean` were built out of
 order to discharge that disposition. `Cancellation/Compose.lean` follows, and it
 discharges the first two thirds of the exit criterion below. `Termination.lean`
 carries the safety half of the termination contract, `Facet.lean` the
-termination facets, and `ByteFlow/Ingress.lean` and `ByteFlow/Egress.lean` both
-conservation theorems. Only `ByteFlow/Rechunk.lean` has not started.
+termination facets, `ByteFlow/Ingress.lean` and `ByteFlow/Egress.lean` both
+conservation theorems, and `ByteFlow/Rechunk.lean` the chunking laws. Every
+module in the table is written and every part of the exit criterion below is
+discharged.
+
+`Rechunk.lean` is the one place §2.1's `List`-for-`Vec` substitution actually
+bites, and the module says how: `Vec` carries its length in the type, so a
+capacity bound could be a type-level fact rather than a proof obligation on
+every chunk. With `List` it is `splitForCapacity_fits`, which constrains what
+this splitter produces rather than what a chunk can be. That is the named exit
+item, and it is narrower than it looked before the module was written.
+
+The scoping is the substance of the chunking law, and it is a hypothesis rather
+than a theorem: `ChunkExtensional` says a reader's result depends only on the
+concatenation, and `counting_chunks_is_not_extensional` exhibits an ordinary
+reader that fails it. A law that assumed every parser were chunk-blind would be
+false of any parser that treats a chunk edge as a record separator, which is a
+real thing to write.
 
 ```text
 Grass/Process/Cancellation/Identity.lean masks, point/call/region ids, CancelReason
