@@ -1,3 +1,4 @@
+import Grass.Process.Network.Initial
 import Grass.Process.Network.WellFormedness
 import Tests.Process.LifecycleStepFixtures
 import Tests.Process.RerouteFixtures
@@ -235,5 +236,66 @@ theorem the_rerouted_payload_lands :
       (fun destination arrival =>
         arrival ∈ (Grass.Process.Tests.Reroute.afterReroute.inFlight () destination).created) :=
   afterReroute_is_wellFormed.reroutesLand () wire
+
+/-! ## And a start at a plan with something in it
+
+§10.88: `ExactInitialNetwork` had one witness in the corpus,
+`Tests/Process/FrontierFixtures.lean`'s `waiting_is_a_start`, at a plan whose
+demand, observation, fault, violation, terminal-result, region and channel types
+are all `PEmpty` and whose kinds and slots are all `Unit`. Fifteen of its sixteen
+fields are `rfl`, `trivial` or `.elim`.
+
+`serverPlan` is the other fixture plan: two roles, a channel edge, a real
+observation type, `Nat`-indexed connection slots and a shared region. It had no
+start. `Tests/Process/WorldFixtures.lean`'s `withRoot` is one — a listener
+holding the root parentage, its generation allocated — and nothing had said so.
+-/
+
+/--
+**A start at the plan with channels and slots in it.**
+
+Every field discharged at `withRoot`. What is *not* vacuous here and is at
+`waitingPlan`: `nothingInFlight` and `sessionsFresh` quantify over a real edge
+with a real `ChannelId` type rather than over `PEmpty`, `onlyTheRoot` has a
+second role to exclude and an infinite slot type to exclude it at, and
+`rootAllocated` is a membership in a one-element history rather than in an empty
+one.
+-/
+def withRoot_is_a_start :
+    serverPlan.ExactInitialNetwork ⟨0⟩ World.withRoot where
+  rootSlot := ()
+  root := World.rootListener
+  rootPresent := rfl
+  rootKind := rfl
+  rootEmitted := []
+  rootInitial := ⟨rfl, rfl, rfl⟩
+  pendingProjected := rfl
+  nothingCommitted := rfl
+  rootRequest := rfl
+  rootRunning := rfl
+  rootParentage := trivial
+  rootAllocated := List.mem_cons_self
+  onlyTheRoot := by
+    intro kind slot incarnation found
+    cases kind with
+    | listener => exact ⟨rfl, rfl⟩
+    | connection => exact absurd found (by intro equal; cases equal)
+  nothingInFlight := fun _ _ => rfl
+  sessionsFresh := fun _ _ => rfl
+  historyFromEmpty :=
+    NominalHistory.Reaches.extend (.refl _) LifecycleStep.theGeneration
+      (by intro _ _; exact List.not_mem_nil)
+
+/-- And a start is well formed, which at this plan says something about a real
+instance rather than about an empty world. -/
+theorem withRoot_is_wellFormed : World.withRoot.WellFormed :=
+  withRoot_is_a_start.initial_is_wellformed (by
+    intro kind slot incarnation found
+    cases kind with
+    | listener =>
+      have same : some incarnation = some World.rootListener := found.symm
+      cases same
+      exact ⟨rfl, rfl⟩
+    | connection => exact absurd found (by intro equal; cases equal))
 
 end Grass.Process.Tests.Preservation
