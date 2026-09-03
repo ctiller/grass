@@ -836,27 +836,27 @@ declared here, in the state, because whether two allocations name the same bytes
 is a fact about the machine and not about provenance. -/
 def allocations₀ : List (AllocId × AllocationRecord) :=
   [ (bufferAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-                    source := .virtualAlloc
+                    source := .virtualAlloc, owners := [engine₀, thread₀]
                     permission := .readWrite, live := true
                     bytes := zeroed64, base := some 0x1000 })
   , (viewAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-                  source := .mappedFile
+                  source := .mappedFile, owners := [engine₀, thread₀]
                   permission := .readWrite, live := true
                   bytes := zeroed64, base := some 0x1000 })
   , (constAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-                   source := .imageMapping
+                   source := .imageMapping, owners := [thread₀]
                    permission := .readOnly, live := true
                    bytes := zeroed64, base := some 0x2000 })
   , (stackAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-                   source := .stack
+                   source := .stack, owners := [engine₀, thread₀]
                    permission := .readWrite, live := true, bytes := zeroed64
                    base := some 0x3000 })
   , (borrowedAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-                      source := .virtualAlloc
+                      source := .virtualAlloc, owners := [engine₀, thread₀]
                       permission := .readWrite, live := true, bytes := zeroed64
                       base := some 0x4000 })
   , (chainedAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
-                     source := .mappedFile
+                     source := .mappedFile, owners := [thread₀]
                      permission := .readWrite, live := true, bytes := zeroed64
                      base := some 0x1000 }) ]
 
@@ -2661,7 +2661,8 @@ theorem a_non_holder_may_not_split :
 half `the_forged_lend_is_refused` cannot show: through `step` the actor is fixed by
 the descriptor, so only a map-level fixture can vary it. Review pointed out that the
 audit guarding the doors does not guard this function, and that a caller free to
-choose the actor defeats the rule — `Tools/DoorAudit.py` now covers it. -/
+choose the actor defeats the rule — `Tools/DoorAudit.py` now covers it.
+ -/
 theorem the_forged_lend_is_refused_on_the_map :
     state₀.memory.applyAuthorityDelta? thread₀
       (.issue lentSlot { declaredLoan with lender := engine₀ }) = Option.none ∧

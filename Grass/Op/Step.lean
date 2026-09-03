@@ -855,7 +855,9 @@ def refusalOf (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor
         -- asks the question that sees the other holder.
         some .authorityUnavailable
       else if state.memory.AnyGrantOver d.provenance d.range ∧
-              ¬ state.memory.Granted d.context d.provenance d.range d.intent then
+              ¬ state.memory.Granted d.context d.provenance d.range d.intent ∧
+              ¬ (state.memory.OwnedBy d.context d.provenance ∧
+                  ¬ state.memory.HeldBySelf d.context d.provenance d.range) then
         -- §3's loan rule, asked by the transition rather than by a provider a
         -- profile may or may not have listed. It used to live only in
         -- `AuthorityProvider.loan`, and `StepPolicy.authorities` defaults to `[]` --
@@ -868,6 +870,24 @@ def refusalOf (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor
         --
         -- Providers remain, for authority the *profile* adds -- a frame rule, a
         -- device rule -- and they may only add refusals. They cannot remove this one.
+        --
+        -- An owner holding no grant of its own is exempt, and this clause
+        -- over-refused until it could say so. The clause above already asked
+        -- `authorityOf ... PermitsIntent`, so an owner reaching here has an authority
+        -- state that permits what it is doing: `sharedImmutable` for a read while the
+        -- read loans it granted are outstanding, which §3 allows. Without the
+        -- exemption the lender of a read loan was refused its own read alongside a
+        -- stranger, because the two were the same context to a rule that could not
+        -- see who owned the bytes.
+        --
+        -- `HeldBySelf` is the second half and is not decoration: this conjunct is
+        -- also what bounds an owner that took a *narrower* grant over its own bytes.
+        -- `Tests/Op/StandardLoan.lean`'s `a_self_loan_bounds_its_holder` has a thread
+        -- holding a read-only loan over storage it owns; `authorityOf` calls that
+        -- `exclusive`, because the only grant is its own, so nothing above this line
+        -- refuses its write. A bare owner exemption let that write commit. Taking a
+        -- grant over your own bytes is a bound you chose; holding none leaves you the
+        -- owner. A stranger fails the ownership conjunct either way.
         some .authorityUnavailable
       else
         match policy.authorities.find? (fun provider => provider.refuses state.memory d) with
@@ -903,12 +923,14 @@ theorem refusalOf_refuses_the_unauthorized {policy : StepPolicy} {state : Machin
     (hstate : (state.memory.authorityOf d.context d.provenance d.range).PermitsIntent
       d.intent)
     (hheld : state.memory.AnyGrantOver d.provenance d.range)
-    (hnot : ¬ state.memory.Granted d.context d.provenance d.range d.intent) :
+    (hnot : ¬ state.memory.Granted d.context d.provenance d.range d.intent)
+    (howns : ¬ (state.memory.OwnedBy d.context d.provenance ∧
+      ¬ state.memory.HeldBySelf d.context d.provenance d.range)) :
     refusalOf policy state d prospective = some .authorityUnavailable := by
   unfold refusalOf
   rw [hclean, if_neg (by simpa using hledger),
     if_neg (by simpa [Option.isNone_iff_eq_none, Option.isSome_iff_ne_none] using hauth),
-    if_neg (by simpa using hstate), if_pos ⟨hheld, hnot⟩]
+    if_neg (by simpa using hstate), if_pos ⟨hheld, hnot, howns⟩]
 
 /-- And it does not fire where nothing is held, which is what stops it refusing every
 access under a policy with no providers. -/

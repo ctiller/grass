@@ -62,7 +62,7 @@ def frameGrant : AuthorityGrant :=
 def unlent : MemoryState :=
   (MemoryState.empty.allocate? buffer
     { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
-      source := .virtualAlloc
+      source := .virtualAlloc, owners := [owner]
       permission := .readWrite, live := true, bytes := .empty
       base := some 0x1000 }).getD .empty
 
@@ -70,7 +70,7 @@ def unlent : MemoryState :=
 theorem the_allocation_succeeds :
     (MemoryState.empty.allocate? buffer
       { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
-        source := .virtualAlloc
+        source := .virtualAlloc, owners := [owner]
         permission := .readWrite, live := true, bytes := .empty
         base := some 0x1000 }).isSome := by decide
 
@@ -360,7 +360,7 @@ whatever provenance is presented. -/
 def freed : MemoryState :=
   (MemoryState.empty.allocate? buffer
     { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
-      source := .virtualAlloc
+      source := .virtualAlloc, owners := [owner]
       permission := .readWrite, live := false, bytes := .empty
       base := some 0x1000 }).getD .empty
 
@@ -463,7 +463,7 @@ theorem only_shared_immutable_distinguishes_reads :
 /-- The buffer, freed: same epoch, no longer live. -/
 def freedRecord : AllocationRecord :=
   { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
-    source := .virtualAlloc
+    source := .virtualAlloc, owners := [owner]
     permission := .readWrite, live := false, bytes := .empty, base := some 0x1000 }
 
 /-- A second allocation over the same storage, declared an alias of the buffer. -/
@@ -476,7 +476,7 @@ def viewProv : Provenance := { bufferProv with root := view }
 def aliasedPair : MemoryState :=
   ((unlent.allocate? view
       { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
-        source := .virtualAlloc
+        source := .virtualAlloc, owners := [owner]
         permission := .readWrite, live := true, bytes := .empty
         base := some 0x1000 }).getD unlent).alias buffer view
 
@@ -486,7 +486,7 @@ def viewLoan : AuthorityGrant := { loanOfHead with provenance := viewProv }
 /-- The buffer, freed and re-allocated at the same identity in a new epoch. -/
 def reusedRecord : AllocationRecord :=
   { extent := ⟨0, 64⟩, epoch := laterEpoch, space := .cpuVirtual
-    source := .virtualAlloc
+    source := .virtualAlloc, owners := [owner]
     permission := .readWrite, live := true, bytes := .empty, base := some 0x1000 }
 
 /-- A state holding it. `bufferProv` names the *old* epoch. -/
@@ -804,7 +804,7 @@ def ghostAlloc : AllocId := allocs.fresh.2.fresh.2.fresh.2.fresh.1
 def arena : MemoryState :=
   (unlent.allocate? scratch
     { extent := ⟨0, 16⟩, epoch := epoch, space := .cpuVirtual
-      source := .bumpAllocator
+      source := .bumpAllocator, owners := [owner]
       permission := .readWrite, live := true, bytes := .empty
       base := some 0x2000 }).getD unlent
 

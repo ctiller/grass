@@ -1469,6 +1469,51 @@ with what it used to say.
   frame" — is discharged for the block evaluator and, for the transition, only its
   framing half.
 
+- ~~**`AllocationRecord` records no owner**, so nothing can distinguish a legitimate
+  first loan from a seizure, or a lender's read of its own lent bytes from a
+  stranger's.~~ This was the layer's largest open gap and both halves are closed.
+
+  `AllocationRecord.owners : List ContextId` is what §3's "exclusive read/write
+  ownership" needed to name. A list, because §3's shared states and §7.4 both want
+  storage several contexts own outright; empty is legal and means storage reachable
+  only through grants. Not in `AllocationRecord.Metadata`, deliberately: `denialOf`
+  does not read it and must not, ownership being an authority question, and
+  `denialOf_congr_of_agrees` is that claim proved.
+
+  *Lending.* `MayLend`'s unlent disjunct now also requires the lender to own the
+  storage. Its third disjunct — "every grant outstanding was lent by this lender" —
+  gained a non-emptiness conjunct in the same change, because `List.all` on the empty
+  list is `true` and without it that disjunct readmitted every stranger the first had
+  just refused. Evidence:
+  `Tests/Op/StandardLoan.lean`'s `the_stranger_may_not_seize_unheld_bytes` against
+  `an_owner_may_lend_the_same_unheld_bytes` — one state, two grants differing only in
+  the lender. The first of those replaces a theorem named
+  "the stranger refusal is the lender rule", which asserted the *opposite* -- that the
+  same seizure over unheld bytes was accepted -- and was true.
+
+  *Accessing.* `refusalOf`'s "something is held and you are not granted" clause
+  exempts an owner that holds no grant of its own, which is the over-refusal
+  `AnyGrantOver`'s docstring recorded: the lender of a read loan was refused its own
+  read alongside a stranger. `MemoryState.HeldBySelf` is the second half of the
+  exemption and is not decoration — a bare owner exemption was tried and
+  `a_self_loan_bounds_its_holder` flipped, because an owner holding a *narrower*
+  grant over its own bytes reaches that clause with `authorityOf` reporting
+  `exclusive`. Evidence, each a pair over one state:
+  `a_read_against_shared_immutable_access_is_refused` (a stranger, refused) against
+  `the_owner_may_read_what_it_lent_read_only`; and
+  `a_stranger_may_not_join_the_atomic_protocol` against
+  `an_owner_may_join_its_own_atomic_protocol`.
+
+  Both stranger fixtures had to move from `step` to `refusalOf` and from `thread₀` to
+  `engine₁`: `step` fixes the acting context and the facets name it, and `thread₀`
+  stood in for "a context holding nothing" only while lender and stranger were
+  indistinguishable. That substitution is the same defect class as the source gap — a
+  fixture whose subject was chosen when the distinction did not exist.
+
+  Still open: `MemoryState.HeldBySelf` is a *predicate over the range*, so an owner
+  holding a grant over one byte of a range is bound over all of it. That is the
+  conservative direction and is stated here rather than fixed.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Three consecutive review rounds found the same shape and it is worth naming as a

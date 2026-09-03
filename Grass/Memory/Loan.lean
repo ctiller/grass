@@ -336,6 +336,32 @@ instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
     (range : ByteRange) : Decidable (state.HeldByAnother context provenance range) :=
   inferInstanceAs (Decidable (_ = _))
 
+/--
+`state.HeldBySelf context provenance range` holds when the context itself holds a
+grant over the bytes.
+
+The complement of `HeldByAnother` in subject, not in truth value: both may hold at
+once, which is what `sharedImmutable` is. It exists for one question that neither
+`HeldByAnother` nor `Granted` can answer -- has this context *taken* a grant over
+these bytes, whatever that grant permits. `Granted` asks whether some grant permits
+the intent and answers `false` both for a context holding a read loan that wants to
+write and for a context holding nothing at all; `Grass/Op/Step.lean`'s owner
+exemption has to tell those two apart.
+
+**Not the deleted `LoanHeldBySelf`.** That predicate was an *authority* test -- it
+stood where "does this context have the right" was asked, and answering it by
+self-holding let a context holding nothing join an atomic protocol. This is not an
+authority test and nothing decides an access on it alone: it narrows an exemption,
+so being wrong here can only refuse more.
+-/
+def HeldBySelf (state : MemoryState) (context : ContextId) (provenance : Provenance)
+    (range : ByteRange) : Prop :=
+  (state.grantsOver provenance range).any (fun entry => entry.2.holder = context) = true
+
+instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
+    (range : ByteRange) : Decidable (state.HeldBySelf context provenance range) :=
+  inferInstanceAs (Decidable (_ = _))
+
 /-- Nothing held means nothing outstanding for anybody. -/
 theorem not_heldByAnother_of_not_anyGrantOver {state : MemoryState} {context : ContextId}
     {provenance : Provenance} {range : ByteRange}

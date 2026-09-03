@@ -321,6 +321,19 @@ theorem Disjoint.not_covers {r s : ByteRange} (h : r.Disjoint s) {offset : Nat}
 @[simp] theorem disjoint_empty_right (r : ByteRange) (start : Nat) :
     r.Disjoint (empty start) := .inr (.inl rfl)
 
+/-- **A container of a non-empty range meets it.** The bridge between the two
+relations, in the one direction that holds: `Contains` compares extents and `Meets`
+asks about positions, so it needs the contained range to have a position to offer.
+Without the hypothesis it is false -- `⟨0,4⟩.Contains (empty 4)` while
+`¬ ⟨0,4⟩.Meets (empty 4)`, which is `not_meets_stop`. -/
+theorem meets_of_contains {r s : ByteRange} (hc : r.Contains s) (hne : ¬ s.IsEmpty) :
+    r.Meets s := by
+  refine meets_of_not_disjoint ?_
+  obtain ⟨hs, hst⟩ := hc
+  have hsize : 0 < s.size := Nat.pos_of_ne_zero (by simpa [IsEmpty] using hne)
+  intro hdisj
+  rcases hdisj with h | h <;> simp [ByteRange.stop] at * <;> omega
+
 theorem Contains.refl (r : ByteRange) : r.Contains r := ⟨Nat.le_refl _, Nat.le_refl _⟩
 
 theorem Contains.trans {r s t : ByteRange} (h₁ : r.Contains s) (h₂ : s.Contains t) :

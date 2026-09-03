@@ -58,6 +58,23 @@ structure AllocationRecord where
   No default, for the same reason `base` has none: a profile says where an
   allocation came from. -/
   source : AllocationSourceId
+  /-- The contexts that hold the allocation's own authority.
+
+  `docs/MEMORY_MODEL.md` §3 lists "exclusive read/write ownership" among the
+  canonical authority states, and until this field existed the layer could not say
+  whose. `MayLend`'s unlent disjunct -- the one a first loan needs -- was therefore
+  the same rule a stranger's first loan needed, so a context could lend out bytes it
+  had no relation to; `MayLend`'s own docstring named that as what it could not stop.
+  Ownership is the missing half.
+
+  A list, not a single context: §3's shared states and §7.4's synchronization both
+  need storage several contexts own outright, and a profile that means one owner
+  writes one. Empty is legal and means *no* context owns it -- storage reachable only
+  through grants issued when it was made.
+
+  Not a right and not a loan. Owning storage does not say what the permission
+  allows, and `Permission.Grants` is still the question `denialOf` asks. -/
+  owners : List ContextId
   /-- The permission its storage carries. -/
   permission : Permission
   /-- Whether it is live. A dead allocation authorizes nothing, whatever
@@ -90,7 +107,13 @@ structure AllocationRecord where
 deriving DecidableEq, Repr
 
 /--
-Everything about an allocation except its bytes.
+The fields a denial decision depends on.
+
+Not "everything except the bytes", which is what this said before `owners` existed:
+`denialOf` does not read `owners` and must not, because ownership is an authority
+question and `Grass/Memory/Loan.lean` is where it is asked. Leaving it out is the
+claim that adding an owner cannot change whether an access is *denied* -- only
+whether it is *authorized* -- and `denialOf_congr_of_agrees` is that claim proved.
 
 `denialOf` reads exactly these seven fields plus initialization, so this is the
 view a decision depends on. Naming it lets a framing argument say "the metadata
@@ -495,10 +518,15 @@ while the state half did not, so two grants identical but for `kind` gave opposi
 answers about whether their holder may write.
 
 So: if anything is held over these bytes, an accessor needs authority of its own.
-The cost is that the lender's read of its own shared-immutably-lent bytes is refused
-along with a stranger's — `AllocationRecord` records no owner, so the two are
-indistinguishable here, and permitting one permits both.
-`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records that. -/
+
+That over-refused, and the cost was stated here for two milestones: the lender's read
+of its own shared-immutably-lent bytes was refused along with a stranger's, because
+nothing recorded who owned an allocation and the two were indistinguishable to the
+rule. `AllocationRecord.owners` distinguishes them, and `Grass/Op/Step.lean`'s clause
+exempts an owner that holds no grant of its own -- `HeldBySelf` being the second half,
+since an owner that took a narrower grant over its own bytes is bound by it. The
+predicate here is unchanged and still asks only what is outstanding; the exemption is
+where the refusal is narrowed, which is the layer that knows who is accessing. -/
 def AnyGrantOver (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
     Prop := state.grantsOver provenance range ≠ []
 
@@ -560,6 +588,27 @@ instance (state : MemoryState) (a b : AuthorityGrant) :
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /--
+`state.OwnedBy context provenance` holds when the context is one of the contexts the
+provenance's root allocation was declared to belong to.
+
+Reads the allocation table and not the grant map, which is the point: ownership is
+not a grant, so it leaves no entry, and a rule that asked only the map could not
+distinguish an owner with nothing lent from a stranger. Absent storage is owned by
+nobody -- `List.any` on a missing lookup is `false` -- so this is not a door onto the
+empty state.
+
+Says nothing about liveness or epoch on purpose. `Live` is a separate question that
+`authorityOf` asks first, and folding it in here would hide which of the two refused.
+-/
+def OwnedBy (state : MemoryState) (context : ContextId) (provenance : Provenance) : Prop :=
+  (state.allocations.lookup provenance.root).any
+    (fun record => record.owners.contains context) = true
+
+instance (state : MemoryState) (context : ContextId) (provenance : Provenance) :
+    Decidable (state.OwnedBy context provenance) :=
+  inferInstanceAs (Decidable (_ = _))
+
+/--
 `state.MayLend grant` holds when the grant's lender has the authority it is lending.
 
 **You cannot lend what you do not have**, which `issue?_eq_none_of_nothing_to_lend`
@@ -576,40 +625,47 @@ authority over bytes the lender retains".
 
 Three ways to have it, and the third is the one that took thinking about.
 
-Nothing is held over the bytes at all — the unlent case, which is how a first grant is
-ever issued, and which matches the access-time rule's reading that unheld
-bytes are not this rule's business. Or the lender holds a grant covering the range
-with rights that supply what is being lent, which is `Permission.Grants` at the
+Nothing is held over the bytes *and the lender owns the allocation* — the unlent case,
+which is how a first grant is ever issued. Or the lender holds a grant covering the
+range with rights that supply what is being lent, which is `Permission.Grants` at the
 authority layer. Or every grant outstanding over the bytes was lent *by this lender* —
-whoever put them out may put more out.
+whoever put them out may put more out — and there must *be* some, because `List.all`
+on the empty list is `true` and without that conjunct this disjunct readmitted every
+stranger the first one had just refused. The ownership conjunct below is only worth
+having if this one is here too.
 
 Without the third, an owner who lends once can never lend again, because it holds
-nothing itself: `AllocationRecord` records no owner, so a lender's claim on unheld
-bytes leaves no trace except in the grants it issued. Two read loans from one owner is
+nothing itself: ownership is recorded on the allocation, not as a grant, so a lender's
+claim on unlent bytes leaves no trace in the map. Two read loans from one owner is
 `sharedImmutable`'s whole point, and the first two disjuncts alone refuse the second
 of them.
 
-**What this does not stop**, and cannot: seizing bytes nothing is held over. That is
-the first disjunct, and it is the same rule a legitimate owner's first loan needs — so
-with no owner in `AllocationRecord`, the model cannot tell the two apart. What it does
-stop is stealing from a lender: once a context has lent bytes out, no other context can
-issue a grant over them, which is what closed review's permanent-seizure state. The
-residue is the missing-owner gap `Grass/Op/Step.lean`'s `refusalOf` records from the other
-side and `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records as owed.
+**The ownership conjunct is what this could not say before `AllocationRecord.owners`
+existed.** Seizing bytes nothing is held over used to be the first disjunct exactly as
+a legitimate owner's first loan was, so the model could not tell the two apart, and
+this docstring said so for two milestones. It can now: a stranger's first loan fails
+the conjunct, an owner's passes it, and `Grass/Op/Step.lean`'s `refusalOf` no longer
+carries the residue alone.
+
+Stealing from a lender was closed earlier and separately: once a context has lent
+bytes out, no other context can issue a grant over them, which is what ended review's
+permanent-seizure state.
 -/
 def MayLend (state : MemoryState) (grant : AuthorityGrant) : Prop :=
-  ¬ state.AnyGrantOver grant.provenance grant.range ∨
+  (¬ state.AnyGrantOver grant.provenance grant.range ∧
+      state.OwnedBy grant.lender grant.provenance) ∨
     state.grantEntries.any (fun entry =>
       entry.2.holder = grant.lender &&
         decide (state.SharesBytes entry.2.provenance.root grant.provenance.root) &&
         decide (state.CurrentEpoch entry.2.provenance) &&
         decide (entry.2.range.Contains grant.range) &&
         decide (entry.2.rights.Grants grant.rights)) = true ∨
-    (state.grantsOver grant.provenance grant.range).all
-      (fun entry => entry.2.lender = grant.lender) = true
+    (state.AnyGrantOver grant.provenance grant.range ∧
+      (state.grantsOver grant.provenance grant.range).all
+        (fun entry => entry.2.lender = grant.lender) = true)
 
 instance (state : MemoryState) (grant : AuthorityGrant) : Decidable (state.MayLend grant) :=
-  inferInstanceAs (Decidable (¬ _ ∨ _ = _ ∨ _ = _))
+  inferInstanceAs (Decidable ((¬ _ ∧ _) ∨ _ = _ ∨ (_ ∧ _ = _)))
 
 /--
 Issue a grant, or refuse.
@@ -696,11 +752,36 @@ theorem issue?_eq_none_of_nothing_to_lend (state : MemoryState) (id : GrantId)
         · rw [if_pos (by simpa using hnest)]
       · rw [if_pos (by simpa using hlive)]
 
-/-- Over bytes nothing is held on, anyone may lend. That is how a first grant is ever
-issued, and it is the claim `MayLend`'s docstring says is not a transfer. -/
-theorem mayLend_of_unheld {state : MemoryState} {grant : AuthorityGrant}
-    (h : ¬ state.AnyGrantOver grant.provenance grant.range) : state.MayLend grant :=
-  Or.inl h
+/-- **An owner may lend bytes nothing is held on.** That is how a first grant is ever
+issued. The ownership hypothesis is the half this theorem did not have: it used to
+read "over bytes nothing is held on, *anyone* may lend", which was true of the code
+and was the gap. -/
+theorem mayLend_of_unheld_of_owned {state : MemoryState} {grant : AuthorityGrant}
+    (h : ¬ state.AnyGrantOver grant.provenance grant.range)
+    (howns : state.OwnedBy grant.lender grant.provenance) : state.MayLend grant :=
+  Or.inl ⟨h, howns⟩
+
+/-- **A stranger may not lend bytes nothing is held on.** The falsifying half of the
+theorem above, and the one that would have failed before `AllocationRecord.owners`
+existed. Stated over an arbitrary state: a fixture could not distinguish this from a
+state where the refusal came from somewhere else. -/
+theorem not_mayLend_of_unheld_of_unowned {state : MemoryState} {grant : AuthorityGrant}
+    (h : ¬ state.AnyGrantOver grant.provenance grant.range)
+    (howns : ¬ state.OwnedBy grant.lender grant.provenance)
+    (hne : ¬ grant.range.IsEmpty) : ¬ state.MayLend grant := by
+  rintro (⟨_, howned⟩ | hheld | ⟨hany, _⟩)
+  · exact howns howned
+  · -- The lender holding a covering grant *is* a grant over the bytes, so the
+    -- second disjunct implies the first is false. `Contains` needs the range to be
+    -- non-empty before it implies `Meets`; `issue?` refuses empty ranges anyway.
+    refine h ?_
+    obtain ⟨entry, hmem, hcond⟩ := List.any_eq_true.1 hheld
+    simp only [Bool.and_eq_true, decide_eq_true_eq] at hcond
+    obtain ⟨⟨⟨⟨_, hshare⟩, _⟩, hcontains⟩, _⟩ := hcond
+    refine List.ne_nil_of_mem (a := entry) ?_
+    refine List.mem_filter.2 ⟨hmem, ?_⟩
+    simpa using ⟨hshare, ByteRange.meets_of_contains hcontains hne⟩
+  · exact h hany
 
 /-- **A grant over no bytes is refused.** It would conflict at issue with a live one
 — `LoanConflicts` tries `Meets` in both directions — and freeze nobody once

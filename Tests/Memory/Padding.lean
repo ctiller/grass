@@ -61,8 +61,17 @@ def epoch : EpochId := (FreshSupply.initial (Tag := EpochTag)).fresh.1
 /-- An eight-byte allocation holding nothing. Every byte starts uninitialized,
 which is the state a fresh allocation is actually in — `docs/MEMORY_MODEL.md` §4
 does not hand out zeros. -/
+private def contexts : FreshSupply ContextTag := .initial
+
+/-- The context the frame belongs to. Nothing here turns on who it is; the field has
+no default, so this file says whose storage it is rather than leaving it unowned by
+accident. -/
+def frameOwner : ContextId := contexts.fresh.1
+
+/-- An eight-byte allocation holding nothing. -/
 def stackRecord₀ : AllocationRecord :=
   { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual, source := .stack
+    owners := [frameOwner]
     permission := .readWrite, live := true, bytes := .empty
     base := some 0x1000 }
 

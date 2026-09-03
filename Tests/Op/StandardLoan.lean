@@ -351,9 +351,13 @@ def readLentToEngine : MachineState :=
       { kind := .loan, holder := engine₀, lender := thread₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readOnly }).getD state₀.memory }
 
+/-- The same load, described by a context that owns nothing and holds nothing. -/
+def strangerLoad : AccessDescriptor :=
+  acc bufferProv ⟨0, 8⟩ 0x1000 .read .readWrite true false [] false engine₁
+
 /--
-**A read against shared immutable access is refused to a context holding nothing**,
-and this fixture has now asserted both answers.
+**A read against shared immutable access is refused to a context holding nothing and
+owning nothing**, and this fixture has now asserted three answers.
 
 The holder test was `Exclusive` — the loan map empty of everyone's loans — and this
 was refused. It became `LoanHeldBySelf`, asking only what *this* context held, and
@@ -363,21 +367,43 @@ about oneself costs: with atomic-only grants outstanding, `authorityOf` reports
 `atomicShared`, and a context holding *nothing* could join the protocol atomically —
 two contexts atomically writing the same live bytes, one of them never let in.
 
-So the test asks whether anything is held at all, and this read is refused again. It
-is an over-refusal and it is stated as one: the lender of the read loan is refused
-alongside a stranger, because `AllocationRecord` records no owner and the two are the
-same context to this rule. Permitting one permits both, and permitting both is the
-hole. §4.4.1 records it.
+So the test asked whether anything was held at all, and refused this read again — an
+over-refusal, and this docstring said so: the lender of the read loan was refused
+alongside a stranger, because nothing recorded who owned the allocation and the two
+were the same context to the rule. `AllocationRecord.owners` separates them. The
+stranger, `engine₁`, is still refused; the owner is not, which is the theorem below.
+
+Stated against `refusalOf`, because `step` fixes the acting context to `thread₀` and
+the facets name it in their descriptors.
 -/
 theorem a_read_against_shared_immutable_access_is_refused :
     (state₀.memory.issue? bufferLoan
       { kind := .loan, holder := engine₀, lender := thread₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readOnly }).isSome ∧
+    readLentToEngine.memory.authorityOf engine₁ bufferProv ⟨0, 8⟩ =
+      AuthorityState.sharedImmutable ∧
+    ¬ readLentToEngine.memory.OwnedBy engine₁ bufferProv ∧
+    Grass.Op.refusalOf policy readLentToEngine strangerLoad Option.none =
+      some .authorityUnavailable := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/--
+**And the owner's own read of the bytes it lent read-only commits.**
+
+The over-refusal this file recorded as owed. `thread₀` lent `[0, 8)` read-only and
+holds nothing itself; §3's `sharedImmutable` is exactly the state in which reading is
+allowed, and the only thing refusing it was a clause that could not tell the lender
+from `engine₁` above. The two conjuncts before the step are the reason it is exempt
+and not a coincidence: it owns the storage, and it took no grant of its own that
+would bound it. -/
+theorem the_owner_may_read_what_it_lent_read_only :
+    readLentToEngine.memory.OwnedBy thread₀ bufferProv ∧
+    ¬ readLentToEngine.memory.HeldBySelf thread₀ bufferProv ⟨0, 8⟩ ∧
     readLentToEngine.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ =
       AuthorityState.sharedImmutable ∧
     ∀ s, (step readLentToEngine .load).state? = some s →
-      s.events = [] ∧ s.violations.recordCount = 1 := by
-  refine ⟨by decide, by decide, ?_⟩
+      s.events.length = 1 ∧ s.violations.IsEmpty := by
+  refine ⟨by decide, by decide, by decide, ?_⟩
   intro s hs
   cases hs
   exact ⟨by decide, by decide⟩
@@ -436,6 +462,12 @@ def atomicLentToEngine : MachineState :=
       { kind := .loan, holder := engine₀, lender := thread₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .atomicReadWrite }).getD state₀.memory }
 
+/-- The same atomic add, described by a context that owns nothing and holds nothing.
+`engine₁` is `Tests/Op/FakeIsa.lean`'s context defined for exactly this: it appears in
+no allocation's `owners` and holds no grant. -/
+def strangerAtomicAdd : AccessDescriptor :=
+  acc bufferProv ⟨0, 8⟩ 0x1000 .readWrite .readWrite true true [] true engine₁
+
 /--
 **A context holding nothing may not join an atomic protocol.**
 
@@ -446,15 +478,43 @@ that asked only what *this* context held, a context holding no grant at all was
 un-refused, and two contexts could atomically write the same live bytes with one of
 them never let in. §7.3's conflict is overlapping live bytes, distinct contexts, a
 writer, and this was all three.
--/
+
+**The stranger is `engine₁` and used to be `thread₀`.** That was sound while nothing
+recorded who owned an allocation: `thread₀` held no grant, so it stood in for a
+context holding nothing. `AllocationRecord.owners` separates the two, `thread₀` owns
+the buffer, and the theorem below says an owner *may* join. Leaving `thread₀` here
+would have made this fixture claim the opposite of that one about the same state.
+
+Stated against `refusalOf` rather than `step` because `step` fixes the acting context
+to `thread₀` and the facets name it in their descriptors; varying the actor is what
+this fixture is for, so it varies it where it can be varied. -/
 theorem a_stranger_may_not_join_the_atomic_protocol :
     (state₀.memory.issue? bufferLoan
       { kind := .loan, holder := engine₀, lender := thread₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .atomicReadWrite }).isSome ∧
-    atomicLentToEngine.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ =
+    atomicLentToEngine.memory.authorityOf engine₁ bufferProv ⟨0, 8⟩ =
       AuthorityState.atomicShared ∧
+    ¬ atomicLentToEngine.memory.OwnedBy engine₁ bufferProv ∧
+    Grass.Op.refusalOf policy atomicLentToEngine strangerAtomicAdd Option.none =
+      some .authorityUnavailable := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/--
+**But the owner may.** §3's atomic shared access is a protocol with participants, and
+the context that lent the atomic rights is one by right: `authorityOf` calls its state
+`atomicShared`, which permits the intent, and there is no further rule to refuse it.
+
+This is the case the theorem above used to assert the opposite of, with `thread₀`
+standing in for a stranger because nothing could tell the two apart. It is not a
+weakening of §7.3: two atomic accesses are the exception that section's race carves
+out, and the owner is refused an *ordinary* write by
+`a_write_against_shared_immutable_access_is_refused`'s sibling reasoning — the
+authority state, not this clause. -/
+theorem an_owner_may_join_its_own_atomic_protocol :
+    atomicLentToEngine.memory.OwnedBy thread₀ bufferProv ∧
+    ¬ atomicLentToEngine.memory.HeldBySelf thread₀ bufferProv ⟨0, 8⟩ ∧
     ∀ s, (step atomicLentToEngine .atomicAdd).state? = some s →
-      s.events = [] ∧ s.violations.recordCount = 1 := by
+      s.events.length = 1 ∧ s.violations.IsEmpty := by
   refine ⟨by decide, by decide, ?_⟩
   intro s hs
   cases hs
@@ -572,22 +632,44 @@ refused as conflicting, it could not return a grant it neither held nor lent, an
 could not free or re-epoch the allocation because a grant was outstanding. Permanent
 seizure, in one accepted call.
 
-**What this does not stop is seizing bytes nothing is held over**, because that is the
-same rule a legitimate owner's first loan needs and `AllocationRecord` records no
-owner. `MemoryState.MayLend`'s docstring says so and §4.4.1 records it.
+**Seizing bytes nothing is held over** was the residue this could not stop, because it
+was the same rule a legitimate owner's first loan needed and `AllocationRecord`
+recorded no owner. `AllocationRecord.owners` is that missing half and the theorem
+below is the case that flipped.
 -/
 theorem a_stranger_may_not_lend_what_another_lent :
     lentToEngine.memory.issue? secondBufferLoan strangerSeizure = Option.none ∧
     ¬ lentToEngine.memory.MayLend strangerSeizure := by
   exact ⟨by decide, by decide⟩
 
-/-- And the refusal is `MayLend` rather than the conflict rule underneath it: the same
-seizure over bytes *nothing* is held on is accepted, which is §4.4.1's open gap and
-not this rule's business. -/
-theorem the_stranger_refusal_is_the_lender_rule :
-    (state₀.memory.issue? secondBufferLoan strangerSeizure).isSome ∧
-    state₀.memory.MayLend strangerSeizure := by
-  exact ⟨by decide, MemoryState.mayLend_of_unheld (by decide)⟩
+/-- **And the same seizure over bytes nothing is held on is refused too.**
+
+This theorem asserted the opposite until `AllocationRecord.owners` existed: it read
+"the same seizure over bytes *nothing* is held on is accepted, which is §4.4.1's open
+gap", and it was true. A context that neither held nor lent nor owned the buffer could
+mint itself a whole-range write loan over it in one accepted call, and every later rule
+then read a map in which the seizure was legitimate authority.
+
+The three conjuncts separate the rule from its inputs: the door refuses, `MayLend` is
+what refuses it, and the reason `MayLend` gives is that `engine₁` does not own the
+storage -- not that something is held over it, which is the other disjunct and is
+false here. -/
+theorem the_stranger_may_not_seize_unheld_bytes :
+    state₀.memory.issue? secondBufferLoan strangerSeizure = Option.none ∧
+    ¬ state₀.memory.MayLend strangerSeizure ∧
+    ¬ state₀.memory.OwnedBy engine₁ bufferProv ∧
+    ¬ state₀.memory.AnyGrantOver bufferProv ⟨0, 8⟩ := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-- The positive control, and the reason the theorem above is about ownership rather
+than about `issue?` refusing every first grant: the identical seizure by an *owner*
+of the same bytes, in the same state, is accepted. `thread₀` owns `bufferAlloc`;
+`engine₁` does not, and that is the only difference between the two grants. -/
+theorem an_owner_may_lend_the_same_unheld_bytes :
+    (state₀.memory.issue? secondBufferLoan
+      { strangerSeizure with holder := engine₁, lender := thread₀ }).isSome ∧
+    state₀.memory.OwnedBy thread₀ bufferProv := by
+  exact ⟨by decide, by decide⟩
 
 /-- The thread holding a read loan of the buffer's head, lent by the engine. The
 `readWrite` state above cannot exercise sublending, because any second grant to a

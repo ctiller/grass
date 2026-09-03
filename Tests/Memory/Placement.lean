@@ -38,10 +38,17 @@ def unplaced : AllocId := allocs.fresh.2.fresh.1
 
 private def epoch : EpochId := (FreshSupply.initial (Tag := EpochTag)).fresh.1
 
+private def contexts : FreshSupply ContextTag := .initial
+
+/-- The context these allocations belong to, and the one every descriptor below runs
+in. The theorems here are not about who accesses; the field has no default, so this
+file says whose storage it is rather than leaving it unowned by accident. -/
+def someContext : ContextId := contexts.fresh.1
+
 /-- Four kilobytes based at `0x1000`. -/
 def placedRecord : AllocationRecord :=
   { extent := ⟨0, 4096⟩, epoch := epoch, space := .cpuVirtual
-    source := .virtualAlloc
+    source := .virtualAlloc, owners := [someContext]
     permission := .readWrite, live := true, bytes := .empty, base := some 0x1000 }
 
 /-- The same shape, with nowhere to be. -/
@@ -129,11 +136,6 @@ second, unrelated live allocation — with `SharesBytes` false between the two, 
 is not §4.4.1b's same-base case. These are that state, refused.
 -/
 
-private def contexts : FreshSupply ContextTag := .initial
-
-/-- Some context; the theorems below are not about who accesses. -/
-def someContext : ContextId := contexts.fresh.1
-
 /-- A third allocation, whose extent starts at 200 and ends at 250. -/
 def offsetAlloc : AllocId := allocs.fresh.2.fresh.2.fresh.1
 
@@ -141,7 +143,7 @@ def offsetAlloc : AllocId := allocs.fresh.2.fresh.2.fresh.1
 which fits; its *stop* is 250, which does not. -/
 def offsetRecord : AllocationRecord :=
   { extent := ⟨200, 50⟩, epoch := epoch, space := .cpuVirtual
-    source := .virtualAlloc
+    source := .virtualAlloc, owners := [someContext]
     permission := .readWrite, live := true, bytes := .empty
     base := some (0 - 100) }
 

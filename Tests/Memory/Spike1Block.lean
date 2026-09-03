@@ -61,6 +61,7 @@ zeros, and starting from `ByteStore.empty` is what keeps `mov transferred, 0`
 being the thing that initializes the slot. -/
 def stackRecord : AllocationRecord :=
   { extent := ⟨0, 4096⟩, epoch := epoch₀, space := .cpuVirtual, source := .stack
+    owners := [mainThread]
     permission := .readWrite, live := true, bytes := .empty
     base := some 0x1000 }
 
@@ -68,7 +69,7 @@ def stackRecord : AllocationRecord :=
 the only part of the image this block reads. -/
 def imageRecord : AllocationRecord :=
   { extent := ⟨0, 8192⟩, epoch := epoch₀, space := .cpuVirtual
-    source := .imageMapping
+    source := .imageMapping, owners := [mainThread]
     permission := .readOnly, live := true
     bytes := ByteStore.empty.write 2048 (List.replicate 8 0x40) true
     base := some 0x2800 }

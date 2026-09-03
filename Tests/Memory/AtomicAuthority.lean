@@ -64,7 +64,7 @@ def counterProv : Provenance :=
 def owned : MemoryState :=
   (MemoryState.empty.allocate? counter
     { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
-      source := .virtualAlloc
+      source := .virtualAlloc, owners := [stranger]
       permission := .readWrite, live := true, bytes := .empty
       base := some 0x2000 }).getD .empty
 
@@ -72,7 +72,7 @@ def owned : MemoryState :=
 theorem the_allocation_succeeds :
     (MemoryState.empty.allocate? counter
       { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
-        source := .virtualAlloc
+        source := .virtualAlloc, owners := [stranger]
         permission := .readWrite, live := true, bytes := .empty
         base := some 0x2000 }).isSome := by decide
 
@@ -259,7 +259,7 @@ def atomicPageProv : Provenance :=
 def pagedAtomically : MemoryState :=
   (owned.allocate? atomicPage
     { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
-      source := .virtualAlloc
+      source := .virtualAlloc, owners := [stranger]
       permission := .atomicReadWrite, live := true, bytes := .empty
       base := some 0x3000 }).getD owned
 
