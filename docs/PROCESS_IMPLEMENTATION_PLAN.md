@@ -2336,8 +2336,8 @@ resolve it `.rerouted`, and point it at a session it never touched — breaking
 ### What the review rounds actually converged on
 
 Six rounds of local adversarial review, each attacking the previous round's
-repairs. Code findings per round: 4, 5, 5, 3, 4, 3, 5. That is not a sequence
-heading to zero, and the shape of it matters more than the count.
+repairs. Code findings per round: 4, 5, 5, 3, 4, 3, 5, 4. That is not a sequence heading
+to zero, and the shape of it matters more than the count.
 
 Rounds 2 and 3 found defects **in the repairs** — §10.90, §10.92, §10.93,
 §10.95, §10.96. Round 5 was the first to report that the previous round's repairs
@@ -4615,6 +4615,99 @@ Both are the shape §10.87, §10.91, §10.97 and §10.103 share: **a thing the c
 declares and no law spends.** That is now four closed instances and three open
 ones, which is enough of a pattern to state as a standing check rather than
 rediscovering it each round.
+
+### 10.117 A death that named a death only in its docstring
+
+§10.114's field asked `¬ incarnation.Live`, and its docstring said "**an endpoint
+death is a death of that endpoint**". Those are different claims.
+`ProcessLifecycle.Live` is `running` and nothing else, so `¬ Live` is satisfied by
+`.terminated` — a process that *finished its protocol* — and by `.cancelled`,
+`.interrupted`, `.faulted` and `.violated`. `ProcessDeathReason` is documented as
+why a process stopped "**without finishing**", and
+`Grass/Process/Network/Death.lean` is explicit that a terminated process did not
+die.
+
+A reviewer compiled the well-formed world asserting both — "the sender died,
+supervised" in the ledger and "the sender terminated with this result" in the
+instance — wrapped in a `NetworkStep` that `wellFormed_preserved` waves through.
+Two further gaps in the same field:
+
+* the bound `reason` appeared nowhere in the conclusion, so `.senderDied
+  .providerLost` could be recorded against an incarnation that died
+  `.supervised`, and decision 129's stored classification is readable off network
+  state only if the two agree;
+* it read the **slot** and never compared generations, so a restarted incarnation
+  satisfied a death recorded against its predecessor's reference — also compiled.
+  `ProcessRef` splits `instanceId` from `generation` exactly so a stale reference
+  fails, and `EndsInstance.identityPreserved` and `Spawns.slotAgrees` are the
+  siblings that already check it.
+
+**Closed**: the field says it died, for this reason, and this incarnation.
+`a_terminated_sender_did_not_die` and `a_stale_reference_cannot_die` are the
+refusals.
+
+**And §10.110's rule had been half-run.** The field's *receiver* conjunct was
+discharged `cases isDeath` — vacuously — at every site in the corpus, because no
+`receiverDeath` had ever been built. `the_receiver_death` is the first.
+
+**Fifth instance of the same thing.** §10.100, §10.111, §10.115 and now this: the
+docstring stated the property, the field stated something weaker, and the gap
+between them was the defect. It is worth stating as flatly as possible — **when a
+field's docstring and its type disagree, the docstring is a bug report.**
+
+### 10.118 `.coalesced` is a same-payload relation, and that is a ruling
+
+§10.113's `carrierCarriesTheMessage` is stated *per source*: `carrier.1 =
+occurrence.1`. So two sources naming one carrier force the two sources to carry
+the same message — a reviewer proved it generically, at any plan and any pair of
+worlds. A merge of two *different* payloads into one carrier is unconstructible.
+
+That may be right. `docs/PROCESS.md` §3 names "buffering/coalescing", and
+coalescing equal payloads — collapsing repeated identical notifications — is the
+ordinary meaning. It is certainly all this layer can *state*: `plan.message edge`
+is an arbitrary type with no combining operation, so equality is the only payload
+relation expressible, and a merge that genuinely combined two payloads would need
+a law `ProcessPlan` does not have.
+
+But it was not a decision, it was a consequence of copying a conjunct from
+`Reroutes.arrives` — where it is right because a reroute *moves* one payload. A
+coalesce merges N into one. **Needs a ruling**: either §3's coalescing is
+same-payload and this should be said in `ChannelResolution.coalesced`'s docstring
+(which currently says "along with its fellow sources" and implies nothing about
+payloads), or it is not and the field is the wrong shape.
+
+The reviewer confirmed the multi-source merge *is* constructible when the payloads
+coincide, so §10.104's decomposition survives — and also that
+`Tests/Process/CloseFixtures.lean`'s `a_second_source_may_name_the_same_carrier`
+restates the field rather than taking the second step. **§10.113's own new rule —
+a new field needs a witness of each thing the specification says it must permit —
+was stated and not run on itself.** That witness is owed.
+
+### 10.119 A dead sender can still send
+
+`ResolvesEscrow`'s scope is the escrow ledger alone, so `senderDeath` cannot move
+the session status, and `ChannelContract.sendOnOpenSession` asks only that the
+*session* be open. Starting from the world `Tests/Process/ChannelStepFixtures.lean`'s
+`the_sender_death` reaches — sender present and dead, its death recorded against
+the session, session `.open` — a reviewer built an ordinary `SendsEscrow` of a
+second occurrence on that session.
+
+§10.114's own write-up named this ("with the session still open to further
+sends") and `endpointDeathIsEarned` does not close it. Two shapes of fix, and the
+choice is a ruling:
+
+* `SendsEscrow` gains a `senderIsLive` field. Small to state, and it changes the
+  most-used fixture in the corpus: `quiet` and `sent` hold no listener
+  incarnation at all, so every send fixture would need a world that does.
+* or `senderDeath` and `receiverDeath` get their own structure with the session
+  in scope, as `ClosesSession` and `KillsSession` have — which is the same repair
+  §10.90 made for a close, and would let an endpoint death close the session it
+  belongs to.
+
+The second is more faithful to §3, which treats endpoint death as a session-level
+event, and it would also address §10.116's "no clause of `WellFormed` mentions
+`sessions`". Recorded rather than done, because it is a design decision about
+where endpoint death lives and not a missing conjunct.
 
 ### 10.89 A spawn can satisfy every field it has and not be a step
 
