@@ -1414,11 +1414,39 @@ refuses everything.
   operation.** `MemoryState.allocate?` refuses one reallocation at a time; a profile
   tearing an arena down has to walk its allocations itself, and nothing checks that it
   walked all of them.
-- **Transferred authority.** §3's fifth entry is "transferred or unavailable";
+- ~~**Transferred authority.** §3's fifth entry is "transferred or unavailable";
   `unavailable` derives from liveness and epoch and nothing represents a transfer.
   §7.4 makes transfer real ("acquire operations may transfer protected memory
   authority") and M3's own scope table in §5 lists `transfer` as a loan-map
-  operation.
+  operation.~~ `MemoryState.transferGrant?` is the door.
+
+  **The identity is kept, unlike a split's**, because §6 has the lender consuming the
+  identity it lent on a conforming return: a transfer that reissued under a fresh
+  identity would strand the lender's return. `the_transfer_keeps_the_lender` checks
+  the lender can still return it afterwards. A split consumes its source precisely
+  because what comes out is not the same authority.
+
+  **Only the holder may transfer**, which is what the `actor` parameter is for. The
+  lender's power over an outstanding grant is `returnGrant?`; nothing in §3 or §6
+  lets a lender redirect a live loan to a third party.
+
+  **The conflict re-check is the clause with content.** `LoanConflicts` requires
+  distinct holders, so one context may hold two write grants over the same bytes and
+  `issue?` is right to accept the second — a context does not conflict with itself.
+  Transfer either to a third context and that legal pair becomes a §7.3 conflict, so
+  a door that only asked whether the actor held the grant would create one.
+  `transferGrant?_leaves_no_conflict` is the guard read back out, and
+  `transferring_into_a_conflict_is_refused` is the state, with a companion showing
+  the same transfer out of a singly-held state is accepted.
+
+  What this does *not* add is an `AuthorityState` constructor. "Transferred" is not a
+  state of the bytes — after a transfer the bytes are lent exactly as before, to
+  somebody else — and a constructor for it would be a second encoding of the holder
+  field. `authorityOf` already answers "who holds this" from the map.
+  `transferGrant?_creates_no_authority` says a context that is not the recipient
+  gains nothing; it deliberately does not say the old holder *lost* the bytes, since
+  it may hold other grants over them, and `Tests/Memory/Loans.lean` has the concrete
+  case where it holds none and the authority really is gone.
 - **`LoanConflicts` is a second encoding of §7.3.** `MemoryEvent.Conflicts` is §7.3's
   sentence with the atomic clause as a `compatible` parameter, and `step` consumes it
   through `ConflictsWithHistory`. Two Lean encodings of one corpus sentence in one

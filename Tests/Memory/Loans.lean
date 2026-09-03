@@ -718,6 +718,74 @@ theorem the_matching_pair_joins :
     ((loneLowHalf.issue? secondLoan { loanOfHead with range := ⟨4, 4⟩ }).getD
       loneLowHalf).joinGrants? firstLoan secondLoan joinedLoan |>.isSome := by decide
 
+/-! ## Transferring a loan
+
+§3's fifth authority state is "transferred or unavailable" and §7.4 has acquire
+operations transferring authority. `MemoryState.transferGrant?` is the door; these
+are the cases it must accept and refuse.
+-/
+
+/-- The head loan, handed on by the borrower to the stranger. -/
+def transferredHead : MemoryState :=
+  (lentHead.transferGrant? borrower firstLoan stranger).getD lentHead
+
+/-- **A transfer moves the authority and keeps the identity.** The identity matters:
+§6 has the lender consuming the identity it lent on return, so a transfer that
+reissued under a fresh identity would strand the lender. -/
+theorem the_transfer_moves_the_authority :
+    (lentHead.transferGrant? borrower firstLoan stranger).isSome ∧
+    transferredHead.grantAt? firstLoan = some { loanOfHead with holder := stranger } ∧
+    transferredHead.Granted stranger bufferProv ⟨0, 8⟩ AccessIntent.readWrite ∧
+    ¬ transferredHead.Granted borrower bufferProv ⟨0, 8⟩ AccessIntent.read := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-- And the owner is still frozen out and can still return it, so the transfer moved
+the holder and nothing else. -/
+theorem the_transfer_keeps_the_lender :
+    transferredHead.authorityOf owner bufferProv ⟨0, 8⟩ = AuthorityState.frozen ∧
+    (transferredHead.returnGrant? owner firstLoan).isSome := by
+  exact ⟨by decide, by decide⟩
+
+/-- **Only the holder may transfer.** The owner is the *lender* here, and its power
+over an outstanding grant is `returnGrant?`. -/
+theorem only_the_holder_may_transfer :
+    lentHead.transferGrant? owner firstLoan stranger = Option.none ∧
+    lentHead.transferGrant? stranger firstLoan owner = Option.none := by
+  exact ⟨by decide, by decide⟩
+
+/-- **A self-transfer is refused**, and an unknown identity too. -/
+theorem the_degenerate_transfers_are_refused :
+    lentHead.transferGrant? borrower firstLoan borrower = Option.none ∧
+    unlent.transferGrant? borrower firstLoan stranger = Option.none := by
+  exact ⟨by decide, by decide⟩
+
+/-- One context holding two write grants over the same bytes. `LoanConflicts` needs
+distinct holders, so `issue?` is right to accept the second: a context does not
+conflict with itself. -/
+def doublyHeldHead : MemoryState :=
+  (lentHead.issue? secondLoan loanOfHead).getD lentHead
+
+/-- The pair really is outstanding, which is what makes the refusal below about the
+transfer. -/
+theorem the_doubly_held_pair_is_outstanding :
+    (lentHead.issue? secondLoan loanOfHead).isSome ∧
+    doublyHeldHead.grantAt? firstLoan = some loanOfHead ∧
+    doublyHeldHead.grantAt? secondLoan = some loanOfHead := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **Transferring into a conflict is refused.** Moving either grant to a third
+context turns a legal pair into a §7.3 conflict, and a door that only asked whether
+the actor held the grant would have created it. -/
+theorem transferring_into_a_conflict_is_refused :
+    doublyHeldHead.transferGrant? borrower firstLoan stranger = Option.none ∧
+    doublyHeldHead.transferGrant? borrower secondLoan stranger = Option.none := by
+  exact ⟨by decide, by decide⟩
+
+/-- And the same transfer out of a state holding *one* grant is accepted, so the
+refusal above is the conflict and not the transfer rule. -/
+theorem the_single_grant_transfers :
+    (lentHead.transferGrant? borrower firstLoan stranger).isSome := by decide
+
 /-! ## The negatives, composed, over a state nobody built
 
 Every fixture above is concrete, and `decide` settles a concrete state. Review's point

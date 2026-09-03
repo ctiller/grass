@@ -1177,6 +1177,145 @@ theorem joinGrants?_yields_the_join {state next : MemoryState} {low high into : 
     unfold joinMap
     rw [FiniteMap.lookup_insert_ne _ (Ne.symm hintohigh), FiniteMap.lookup_erase_self]
 
+/--
+Hand a grant on to another context.
+
+`docs/MEMORY_MODEL.md` §3's fifth authority state is "transferred or unavailable", and
+§7.4 makes transfer real: "acquire operations may transfer protected memory
+authority". Until now `unavailable` derived from liveness and epoch and *nothing*
+represented a transfer, which `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 recorded as
+owed.
+
+**The identity is kept, unlike a split's.** §6 has the lender "consume the same loan
+identities to reconstruct local authority on a conforming return", so the identity a
+lender lent must still be the identity it returns; a transfer that reissued under a
+fresh identity would strand the lender's return. A split consumes its source
+precisely because it is *not* the same authority afterwards.
+
+**Only the holder may transfer**, which is what `actor` is for. The lender's power
+over an outstanding grant is `returnGrant?`, and nothing in §3 or §6 gives a lender
+the power to redirect a loan to a third party while it is out.
+
+**Conflict is re-checked, and this is the check with teeth.** `LoanConflicts` needs
+*distinct* holders, so one context may hold two write grants over the same bytes —
+`issue?` accepts the second, correctly, because a context does not conflict with
+itself. Transfer one of them to a third context and that pair becomes a conflicting
+pair, which is the §7.3 violation a door that only checked authorization would
+create. `Tests/Memory/Loans.lean`'s `transferring_into_a_conflict_is_refused` is that
+state.
+
+**A self-transfer is refused** rather than treated as a no-op: it changes nothing, so
+a caller asking for one has made a mistake, and [FOUNDATION.md](../docs/FOUNDATION.md)
+law 8 says reject rather than approximate.
+-/
+def transferGrant? (state : MemoryState) (actor : ContextId) (id : GrantId)
+    (recipient : ContextId) : Option MemoryState :=
+  (state.grants.lookup id).bind fun grant =>
+    if grant.holder ≠ actor then Option.none
+    else if recipient = actor then Option.none
+    else if state.grantEntries.any (fun entry =>
+        entry.1 ≠ id && decide (state.LoanConflicts entry.2 { grant with holder := recipient }))
+      then Option.none
+    else some { state with grants := state.grants.insert id { grant with holder := recipient } }
+
+/-- **A context that does not hold it may not transfer it**, and that includes the
+lender, whose power over an outstanding grant is `returnGrant?`. -/
+theorem transferGrant?_eq_none_of_not_holder {state : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId} {grant : AuthorityGrant}
+    (hat : state.grantAt? id = some grant) (h : grant.holder ≠ actor) :
+    state.transferGrant? actor id recipient = Option.none := by
+  have hat' : state.grants.lookup id = some grant := hat
+  unfold transferGrant?
+  rw [hat', Option.bind_some, if_pos h]
+
+/-- **An unknown identity cannot be transferred**, which `transferGrant?` refuses in
+the `bind` before any check runs. -/
+theorem transferGrant?_eq_none_of_unknown {state : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId} (h : state.grantAt? id = Option.none) :
+    state.transferGrant? actor id recipient = Option.none := by
+  have h' : state.grants.lookup id = Option.none := h
+  unfold transferGrant?
+  rw [h', Option.bind_none]
+
+/-- **A self-transfer is refused**, because it changes nothing. -/
+theorem transferGrant?_eq_none_of_self {state : MemoryState} {actor : ContextId}
+    {id : GrantId} {grant : AuthorityGrant} (hat : state.grantAt? id = some grant)
+    (hholder : grant.holder = actor) :
+    state.transferGrant? actor id actor = Option.none := by
+  have hat' : state.grants.lookup id = some grant := hat
+  unfold transferGrant?
+  rw [hat', Option.bind_some, if_neg (by simpa using hholder), if_pos rfl]
+
+/-- What a successful transfer produced, and the three facts its guards
+established. -/
+private theorem transferGrant?_eq {state next : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId} {grant : AuthorityGrant}
+    (h : state.transferGrant? actor id recipient = some next)
+    (hat : state.grantAt? id = some grant) :
+    next = { state with grants := state.grants.insert id { grant with holder := recipient } } ∧
+      grant.holder = actor ∧ recipient ≠ actor ∧
+      state.grantEntries.any (fun entry =>
+        entry.1 ≠ id && decide (state.LoanConflicts entry.2
+          { grant with holder := recipient })) = false := by
+  have hat' : state.grants.lookup id = some grant := hat
+  unfold transferGrant? at h
+  rw [hat', Option.bind_some] at h
+  split at h
+  · exact absurd h (by simp)
+  · next hholder =>
+    split at h
+    · exact absurd h (by simp)
+    · next hself =>
+      split at h
+      · exact absurd h (by simp)
+      · next hconflict =>
+        injection h with h
+        exact ⟨h.symm, by simpa using hholder, by simpa using hself,
+          by simpa using hconflict⟩
+
+/-- **A transfer moves the grant to the recipient, under the identity it had.** -/
+theorem transferGrant?_yields_the_transfer {state next : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId} {grant : AuthorityGrant}
+    (h : state.transferGrant? actor id recipient = some next)
+    (hat : state.grantAt? id = some grant) :
+    next.grantAt? id = some { grant with holder := recipient } := by
+  obtain ⟨hnext, _, _, _⟩ := transferGrant?_eq h hat
+  subst hnext
+  show (state.grants.insert id { grant with holder := recipient }).lookup id = _
+  rw [FiniteMap.lookup_insert_self]
+
+/--
+**A transfer leaves no conflicting pair.**
+
+§7.3's issuance rule holding across a transfer as well as an issue, and the reason
+the guard is more than a formality: `LoanConflicts` needs distinct holders, so a
+context may hold two write grants over one range and `issue?` is right to accept the
+second. Moving either to a third context turns that pair into the conflict this
+refuses.
+-/
+theorem transferGrant?_leaves_no_conflict {state next : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId} {grant : AuthorityGrant}
+    {entry : GrantId × AuthorityGrant}
+    (h : state.transferGrant? actor id recipient = some next)
+    (hat : state.grantAt? id = some grant) (hmem : entry ∈ state.grantEntries)
+    (hid : entry.1 ≠ id) :
+    ¬ state.LoanConflicts entry.2 { grant with holder := recipient } := by
+  obtain ⟨_, _, _, hconflict⟩ := transferGrant?_eq h hat
+  have := List.any_eq_false.mp hconflict entry hmem
+  simpa [hid] using this
+
+/-- A transfer leaves every other identity alone. -/
+theorem transferGrant?_other {state next : MemoryState} {actor : ContextId}
+    {id other : GrantId} {recipient : ContextId} {grant : AuthorityGrant}
+    (h : state.transferGrant? actor id recipient = some next)
+    (hat : state.grantAt? id = some grant) (hne : other ≠ id) :
+    next.grantAt? other = state.grantAt? other := by
+  obtain ⟨hnext, _, _, _⟩ := transferGrant?_eq h hat
+  subst hnext
+  show (state.grants.insert id { grant with holder := recipient }).lookup other = _
+  rw [FiniteMap.lookup_insert_ne _ hne]
+  rfl
+
 @[simp] theorem grantAt?_eq_lookup (state : MemoryState) (id : GrantId) :
     state.grantAt? id = state.grants.lookup id := rfl
 
@@ -1736,6 +1875,76 @@ theorem joinGrants?_creates_no_authority {state next : MemoryState}
       · show highGrant.rights.Permits intent
         rw [← show lowGrant.rights = highGrant.rights from by rw [hmatch]]
         exact hrights
+  · exact ⟨entry, hcase, hholder, hshares', hgrantepoch', haccess', hcovers, hrights⟩
+
+/--
+**A transfer gives the recipient exactly what the holder had.**
+
+The hypotheses are `granted_of_grantAt`'s over the *transferred* grant, which differs
+from the source only in its holder, so this is the source's authority now standing in
+the recipient's name.
+-/
+theorem transferGrant?_grants_the_recipient {state next : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId} {grant : AuthorityGrant}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    (h : state.transferGrant? actor id recipient = some next)
+    (hat : state.grantAt? id = some grant)
+    (hcover : grant.range.Contains range)
+    (hshares : state.SharesBytes grant.provenance.root provenance.root)
+    (hgrant : state.CurrentEpoch grant.provenance)
+    (haccess : state.CurrentEpoch provenance) (hrights : grant.rights.Permits intent) :
+    next.Granted recipient provenance range intent := by
+  have hmoved := transferGrant?_yields_the_transfer h hat
+  obtain ⟨hnext, _, _, _⟩ := transferGrant?_eq h hat
+  have hshares' : next.SharesBytes grant.provenance.root provenance.root := by
+    subst hnext
+    exact (sharesBytes_grants state _ _ _).mpr hshares
+  have hgrant' : next.CurrentEpoch grant.provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mpr hgrant
+  have haccess' : next.CurrentEpoch provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mpr haccess
+  exact granted_of_grantAt hmoved hcover rfl hshares' hgrant' haccess' hrights
+
+/--
+**A transfer creates no authority for anyone but the recipient.**
+
+The safety half. Every entry of the transferred state is the moved grant or an entry
+the state already had, and the moved grant is held by the recipient, so a context
+that is not the recipient is authorized by exactly what authorized it before. What
+this deliberately does *not* say is that the old holder lost the bytes: it may hold
+other grants over them, and `Tests/Memory/Loans.lean` shows the concrete case where
+it holds none and the authority really is gone.
+-/
+theorem transferGrant?_creates_no_authority {state next : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId} {grant : AuthorityGrant} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    (h : state.transferGrant? actor id recipient = some next)
+    (hat : state.grantAt? id = some grant) (hne : context ≠ recipient)
+    (hgranted : next.Granted context provenance range intent) :
+    state.Granted context provenance range intent := by
+  obtain ⟨hnext, _, _, _⟩ := transferGrant?_eq h hat
+  intro i hi
+  obtain ⟨entry, hmem, hauth⟩ := hgranted i hi
+  have hmem' : entry = (id, { grant with holder := recipient }) ∨
+      entry ∈ state.grantEntries := by
+    have hlist : entry ∈ (state.grants.insert id { grant with holder := recipient }).entries := by
+      subst hnext; exact hmem
+    exact Grass.Std.Logical.FiniteMap.mem_entries_insert hlist
+  obtain ⟨hholder, hshares, hgrantepoch, haccess, hcovers, hrights⟩ := hauth
+  have hshares' : state.SharesBytes entry.2.provenance.root provenance.root := by
+    subst hnext
+    exact (sharesBytes_grants state _ _ _).mp hshares
+  have hgrantepoch' : state.CurrentEpoch entry.2.provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mp hgrantepoch
+  have haccess' : state.CurrentEpoch provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mp haccess
+  rcases hmem' with hcase | hcase
+  · subst hcase
+    exact absurd (show recipient = context from hholder) (Ne.symm hne)
   · exact ⟨entry, hcase, hholder, hshares', hgrantepoch', haccess', hcovers, hrights⟩
 
 /-- `state.GrantedOfKind` additionally requires the authorizing grant to be of a
