@@ -301,6 +301,30 @@ theorem a_reroute_to_the_same_session_is_refused
     (rerouted : serverPlan.Reroutes sent afterReroute () wire escrowed wire) : False :=
   rerouted.elsewhere rfl
 
+/--
+**And a reroute whose destination gains nothing is refused, however full that
+destination already is.**
+
+`Reroutes.arrives` was strengthened after review built a reroute that delivers
+nothing — the first version said only that the destination's ledger is non-empty
+afterwards, which "a destination that was already non-empty satisfied with its
+ledger bit-for-bit unchanged". At `the_reroute` the destination starts empty, so
+the strengthened field and the weak one are indistinguishable there and a
+reviewer said so.
+
+This is the general statement, which does not depend on the fixture at all: if
+the destination's `created` is unchanged, no arrival is new, and `arrives` has no
+witness. The scenario the strengthening exists for is exactly the hypothesis.
+-/
+theorem a_reroute_must_deliver
+    {before after : ServerWorld} {destination : serverTopology.ChannelId ()}
+    (unchanged : (after.inFlight () destination).created
+      = (before.inFlight () destination).created)
+    (rerouted : serverPlan.Reroutes before after () wire escrowed destination) : False := by
+  obtain ⟨arrival, fresh, arrived, _⟩ := rerouted.arrives
+  rw [unchanged] at arrived
+  exact fresh arrived
+
 /-! ## And the step that strands one -/
 
 /--

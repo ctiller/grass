@@ -32,6 +32,25 @@ spawn installing a **root**. At this topology that is not what stops it:
 typecheck for a `.connection` at all. The reachable attack is the *orphan*, which
 is what the negative test above uses. The field is right; its stated
 justification is one case wider than the type permits.
+
+## What these two fixtures do not test
+
+A reviewer mutated every field of both and each mutation killed exactly one, so
+the fields are load-bearing. Three things they cannot reach, at this topology:
+
+* `Joins.wasTerminated` says the child ended "with exactly this result", and
+  `TerminalResult` here is `ULift Unit` — any two results are equal, so that half
+  cannot be falsified. It needs a protocol with two terminal results.
+* `emittedIsProjected` and `producesPending` are checked only at the empty
+  segment, where they hold for *every* `observeAt`. A spawn that emits would
+  exercise them.
+* There is no parent incarnation in either world. "A parent may spawn a child" is
+  the shape of the step, not a fact about a listener that exists — the listener
+  slot is empty in `quiet` and in `holding newborn` alike.
+
+And see `Tests/Process/PreservationFixtures.lean`: `the_spawn`'s after-world does
+not record the generation it allocates, so it fails `NominalsAllocated` and no
+`NetworkStep` wraps it. §10.89.
 -/
 
 namespace Grass.Process.Tests.LifecycleStep
@@ -177,9 +196,13 @@ def orphan : ProcessInstance serverTopology where
 /--
 **A spawn may not install a parentless incarnation.**
 
-`spawnsAChild`, refusing. Without it `authorized` was vacuous at exactly this
-incarnation: it reads the permitted-parent law off `knownParent`, and a detached
-child's authority is gone even though the parent it knew remains.
+`spawnsAChild`, refusing. `authorized` does not catch this — and, a reviewer
+noted, not because it is *vacuous* here: `.detached .listener listenerZero` has
+`knownParent = some ⟨.listener, listenerZero⟩`, so `authorized` is satisfied,
+non-vacuously, and the mutant confirms it elaborates. The point is that
+`authorized` reads `knownParent`, which a detachment does not change, so it
+cannot see that the authority is gone. `spawnsAChild` reads `currentParent`,
+which is what detachment empties.
 -/
 theorem a_spawn_may_not_install_an_orphan :
     ¬ serverPlan.Spawns quiet (holding orphan) .connection slot theGeneration [] [] := by
