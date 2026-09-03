@@ -2,6 +2,8 @@ import Lean.Elab.Command
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.Decode
 import Grass.ISA.X86.Profile
+import Grass.ABI.Win64.UnwindBytes
+import Grass.Platform.Win32.Console
 
 /-!
 # Ledger coverage gate
@@ -21,6 +23,16 @@ citations.
 
 ## The obligation comes from the environment
 
+`auditedModules` is a hand-written list, and for most of this file's life it
+named only the five x86 encoding modules — so the whole Win64 ABI and Win32 API
+surface, 58 behaviour-modelling declarations, was outside the citation
+obligation entirely while `docs/VALIDATION.md` §1 names "API, ABI rule, binary
+structure" explicitly. A reviewer injected two false uncited ABI facts into
+`Grass/ABI/Win64/Convention.lean` and the summary line came back byte-identical.
+The list now covers all three trees this profile owns. It is still a list rather
+than a disk walk, which is the hazard `Tools/AxiomAudit.lean` solves properly;
+closing that here is an open obligation.
+
 `modeledDeclarations` enumerates the declarations of the audited modules. The
 ledger cannot shrink it. A new `def` in `Grass/ISA/X86/Addressing.lean` is
 uncovered the moment it is written, and the author must cite it, waive it, or
@@ -35,9 +47,17 @@ appears in one of two explicit lists:
   convenience list, an internal predicate. This is a *permanent* claim and every
   entry states why.
 - `owed` — genuinely needs a citation and does not have one yet. Not a waiver:
-  it is printed on every run and must only shrink. `docs/VALIDATION.md` §7's
-  ratchet discipline is the model — "Removing the resulting gate requires review
-  explaining why the original finding can no longer recur."
+  it is printed on every run and must only shrink, which `owedBaseline` now
+  enforces. It did not before: a reviewer added a name and every gate stayed
+  green, and that was the escape hatch that let a poisoned `opcodeTable` past
+  the whole suite. `docs/VALIDATION.md` §7's ratchet discipline is the model —
+  "Removing the resulting gate requires review explaining why the original
+  finding can no longer recur."
+
+The three are disjoint and their sizes add to the number of modeled
+declarations. That is checked, because the summary line used to read as a
+partition and was not — a reviewer found 6 + 48 + 35 against 88 modeled
+declarations, `decodeMem` being counted as cited *and* listed as debt.
 
 Collapsing those two into one list is what would make this gate decorative. The
 distinction is the difference between "this needs no citation" and "this needs a
@@ -66,7 +86,23 @@ The citation machinery itself is not modeled behaviour and is not audited: a
 `Citation` record makes no claim about a processor. -/
 def auditedModules : List Name :=
   [`Grass.ISA.X86.Register, `Grass.ISA.X86.Encoding,
-   `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.Decode]
+   `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.Decode,
+   `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.Unwind,
+   `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console]
+
+/--
+The number of entries `owed` was last reviewed at.
+
+The header has always said the debt "must only shrink", citing
+`docs/VALIDATION.md` section 7's ratchet. Nothing enforced it, and a reviewer
+demonstrated the consequence twice over: adding one name kept every gate green,
+and that was the escape hatch that let a poisoned `opcodeTable` through -- the
+ledger objected to the new declaration, the reviewer added the one line the
+ledger's own rules prescribe, and it went quiet.
+
+Raising this is a reviewed edit, which is the visibility the ratchet is for.
+-/
+def owedBaseline : Nat := 93
 
 /-- Compiler-generated names that are not authored declarations. -/
 def generatedSuffixes : List Name :=
@@ -90,7 +126,29 @@ A permanent claim, one line of reasoning each. Anything here is asserting that a
 reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
-  [ -- Enumerations of Grass's own types. `Gpr.all` is a list of Grass
+  [
+    -- Win64 and Win32: Grass's own constructions over the ABI types. The
+    -- external content they are built from is in `owed` below.
+    `Grass.ABI.Win64.Ascends, `Grass.ABI.Win64.ascends,
+    `Grass.ABI.Win64.PdataSection.Separated,
+    `Grass.ABI.Win64.PdataSection.separated,
+    `Grass.ABI.Win64.Layout.WellFormed, `Grass.ABI.Win64.Layout.codeBytes,
+    `Grass.ABI.Win64.Layout.offsets, `Grass.ABI.Win64.Layout.prologue,
+    `Grass.ABI.Win64.UnwindInfo.mk?, `Grass.ABI.Win64.SearchablePdata.mk?,
+    `Grass.ABI.Win64.Prologue.Encodable, `Grass.ABI.Win64.Prologue.slots,
+    `Grass.ABI.Win64.Prologue.stackDelta,
+    `Grass.ABI.Win64.Prologue.establishesFramePointer,
+    `Grass.ABI.Win64.Prologue.frameSpecIs,
+    `Grass.ABI.Win64.RuntimeFunction.Nonempty,
+    `Grass.ABI.Win64.volatileRegisters, `Grass.ABI.Win64.nonvolatileRegisters,
+    `Grass.ABI.Win64.rspAfterPrologue,
+    -- Fixtures: Spike 1's prologue and a frame-pointer example, which are
+    -- values this corpus chose rather than facts about Windows.
+    `Grass.ABI.Win64.spike1Prologue, `Grass.ABI.Win64.spike1Layout,
+    `Grass.ABI.Win64.spike1UnwindInfo, `Grass.ABI.Win64.framePointerLayout,
+    `Grass.Platform.Win32.GetStdHandleResult.WellFormed,
+    `Grass.Platform.Win32.ExcessWriteCount,
+ -- Enumerations of Grass's own types. `Gpr.all` is a list of Grass
     -- constructors; the architectural fact is the numbering, which
     -- `Gpr.index` carries and which is cited.
     `Grass.ISA.X86.Gpr.all, `Grass.ISA.X86.Width.all,
@@ -98,12 +156,10 @@ def notBehaviour : List Name :=
     -- projection of a cited fact, not a separate claim about the machine.
     `Grass.ISA.X86.Gpr.ofIndex, `Grass.ISA.X86.Gpr.lowBits,
     `Grass.ISA.X86.Gpr.ofBits, `Grass.ISA.X86.Gpr.rexBitV,
-    `Grass.ISA.X86.Rex.of, `Grass.ISA.X86.Rex.promotesTo64,
-    `Grass.ISA.X86.Rex.extendsReg, `Grass.ISA.X86.Rex.extendsIndex,
-    `Grass.ISA.X86.Rex.extendsBase,
+    `Grass.ISA.X86.Rex.of,
     `Grass.ISA.X86.Displacement.kind, `Grass.ISA.X86.Displacement.size,
     `Grass.ISA.X86.Immediate.size, `Grass.ISA.X86.Immediate.sizeOf,
-    `Grass.ISA.X86.InsnEncoding.size, `Grass.ISA.X86.InsnEncoding.escapeByte,
+    `Grass.ISA.X86.InsnEncoding.size,
     `Grass.ISA.X86.RegField.bits, `Grass.ISA.X86.RegField.extended,
     -- One-line adapters that lift an already-cited byte layout to "this field's
     -- bytes, or none". Whether the field is *present* is a vendor fact, and it
@@ -119,8 +175,7 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.MemOperand.indexRegister,
     `Grass.ISA.X86.RmEncoding.needsRex, `Grass.ISA.X86.RmEncoding.modrm,
     `Grass.ISA.X86.RmEncoding.rex,
-    `Grass.ISA.X86.ByteReg.highCapable, `Grass.ISA.X86.ByteReg.requiresRex,
-    `Grass.ISA.X86.ByteReg.encodingNumber ]
+    ]
 
 /--
 Declarations that genuinely model external behaviour and have no citation yet.
@@ -137,7 +192,56 @@ ModR/M layout rule really is about `ModRm.modDisp8` as much as about
 constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
-  [ `Grass.ISA.X86.Gpr.index, `Grass.ISA.X86.Gpr.encodingBits,
+  [
+    -- Architectural facts that were in `notBehaviour` and should not have been.
+    -- A reviewer pointed at the sharpest case: `ByteReg.Encodable` is one of the
+    -- six cited declarations and is *defined from* `highCapable` and
+    -- `requiresRex`, so the ledger cited the derived predicate while
+    -- permanently waiving the two constants carrying its content. Which
+    -- registers have a legacy high-byte form, which low-byte forms need a REX
+    -- prefix, that a high-byte register's number is base+4, what each REX bit
+    -- extends, and that the two-byte escape is 0F -- every one is a statement
+    -- about the processor, not a choice this corpus made. `notBehaviour` is a
+    -- permanent waiver, which makes misfiling worse than owing.
+    `Grass.ISA.X86.ByteReg.highCapable, `Grass.ISA.X86.ByteReg.requiresRex,
+    `Grass.ISA.X86.ByteReg.encodingNumber,
+    `Grass.ISA.X86.Rex.promotesTo64, `Grass.ISA.X86.Rex.extendsReg,
+    `Grass.ISA.X86.Rex.extendsIndex, `Grass.ISA.X86.Rex.extendsBase,
+    `Grass.ISA.X86.InsnEncoding.escapeByte,
+    -- Win64 ABI. `docs/DECISIONS.md` 16 fixes the baseline at Win32 x64 and
+    -- `docs/VALIDATION.md` section 1 names "API, ABI rule, binary structure"
+    -- explicitly, so these owe citations exactly as the instruction encodings
+    -- do. None carries one: `Grass.ISA.X86.DualCitation` is closed over
+    -- intel | amd, so there is no citation type for a Microsoft document and
+    -- no Microsoft `SourceDocument` is registered. That is the debt.
+    `Grass.ABI.Win64.volatility, `Grass.ABI.Win64.argumentRegister,
+    `Grass.ABI.Win64.argumentRegisters,
+    `Grass.ABI.Win64.registerArgumentCount,
+    `Grass.ABI.Win64.shadowSpaceBytes, `Grass.ABI.Win64.stackAlignment,
+    `Grass.ABI.Win64.entryMisalignment, `Grass.ABI.Win64.AlignedForCall,
+    `Grass.ABI.Win64.regNibble,
+    `Grass.ABI.Win64.UnwindOp.opcode, `Grass.ABI.Win64.UnwindOp.opInfo,
+    `Grass.ABI.Win64.UnwindOp.slots, `Grass.ABI.Win64.UnwindOp.stackDelta,
+    `Grass.ABI.Win64.UnwindOp.Encodable,
+    `Grass.ABI.Win64.UnwindOp.SmallAllocEncodable,
+    `Grass.ABI.Win64.UnwindOp.LargeAllocEncodable,
+    `Grass.ABI.Win64.Prologue.codes, `Grass.ABI.Win64.Prologue.countOfCodes,
+    `Grass.ABI.Win64.Prologue.arraySlots,
+    `Grass.ABI.Win64.Layout.padding, `Grass.ABI.Win64.FrameSpec.declared,
+    `Grass.ABI.Win64.UnwindInfo.version, `Grass.ABI.Win64.UnwindInfo.toBytes,
+    `Grass.ABI.Win64.UnwindTail.flags, `Grass.ABI.Win64.UnwindTail.handlerRva,
+    `Grass.ABI.Win64.UnwindTail.toBytes, `Grass.ABI.Win64.PlacedOp.toBytes,
+    `Grass.ABI.Win64.RuntimeFunction.toBytes,
+    `Grass.ABI.Win64.PdataSection.WellFormed,
+    `Grass.ABI.Win64.PdataSection.toBytes,
+    `Grass.ABI.Win64.SearchablePdata.toBytes,
+    -- Win32 console API.
+    `Grass.Platform.Win32.StdHandleId.value,
+    `Grass.Platform.Win32.GetStdHandleResult.invalidHandleValue,
+    `Grass.Platform.Win32.GetStdHandleResult.returnValue,
+    `Grass.Platform.Win32.Allowed, `Grass.Platform.Win32.successStatus,
+    `Grass.Platform.Win32.failureStatus,
+    `Grass.ISA.X86.Gpr.index, `Grass.ISA.X86.Gpr.encodingBits,
     `Grass.ISA.X86.Gpr.isExtended, `Grass.ISA.X86.Gpr.rexBit,
     `Grass.ISA.X86.Width.bits, `Grass.ISA.X86.Width.default64BitMode,
     `Grass.ISA.X86.ModRm.modRegisterDirect, `Grass.ISA.X86.ModRm.modNoDisplacement,
@@ -155,7 +259,7 @@ def owed : List Name :=
     `Grass.ISA.X86.dispKindFor,
     `Grass.ISA.X86.RmEncoding.WellFormed,
     `Grass.ISA.X86.Displacement.value,
-    `Grass.ISA.X86.encodeMem, `Grass.ISA.X86.decodeMem,
+    `Grass.ISA.X86.encodeMem,
     `Grass.ISA.X86.le32, `Grass.ISA.X86.le16,
     `Grass.ISA.X86.Displacement.toBytes, `Grass.ISA.X86.Immediate.toBytes,
     `Grass.ISA.X86.InsnEncoding.toBytes, `Grass.ISA.X86.InsnEncoding.WellFormed,
@@ -258,6 +362,28 @@ review."
   for d in owed do
     unless modeled.contains d do
       logError m!"owed lists {d}, which is not a modeled declaration"
+
+  -- The three buckets must partition, or the summary line is arithmetic that
+  -- does not add up. It did not: a reviewer noticed 6 + 48 + 35 = 89 against 88
+  -- modeled declarations, because `decodeMem` was counted as cited *and* listed
+  -- as debt. A summary that reads as a partition and is not is the same class
+  -- of defect as the subtraction this gate replaced.
+  for d in owed do
+    if notBehaviour.contains d then
+      logError m!"{d} is in both owed and notBehaviour; a declaration owes a \
+citation or is reviewed as owing none, not both"
+  for d in (owed ++ notBehaviour) do
+    if accountedBy env subjects d then
+      logError m!"{d} carries a citation but is also listed as owed or \
+notBehaviour; remove it from that list"
+
+  -- The debt may shrink and must not grow silently. `docs/VALIDATION.md`
+  -- section 7's ratchet, which the header claimed and nothing enforced: a
+  -- reviewer added one name to `owed` and every gate stayed green.
+  if owed.length > owedBaseline then
+    logError m!"owed has {owed.length} entries, above the reviewed baseline of \
+{owedBaseline}. Debt may only shrink; if a genuinely new modeled declaration \
+owes a citation, raise owedBaseline in the same reviewed edit."
 
   -- Gate C: a work list, not a violation. `CommonBasis.agreed` can no longer be
   -- written without confirmed anchors, so what is left here is which rules are
