@@ -1,4 +1,5 @@
 mod apply;
+mod audit_main;
 mod bootstrap;
 mod canon;
 mod cli;

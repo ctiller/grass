@@ -96,6 +96,27 @@ pub enum Command {
     /// AGENT_REVIEW.md section 7 step 1); prints the exact candidate object
     /// id to push on success.
     MergeReady(MergeReadyArgs),
+    /// AGENT_REVIEW.md sections 9/11/12 (fixture 10): a read-only
+    /// correlation-and-report audit over post-bootstrap first-parent `main`
+    /// history, from the bus's own `product_review_from` through `--to`
+    /// (default `refs/heads/main`). For each merge commit it confirms: the
+    /// commit is a genuine two-parent merge whose first parent is the prior
+    /// audited commit; it carries exactly one `Agent-Bus-Reviewer` trailer
+    /// naming a real, currently-a-reviewer identity who authored none of the
+    /// commits actually introduced; a `review.merge_authorized` event exists
+    /// whose recorded `candidate`/`previous_main`/`reviewed_commit` exactly
+    /// match this real commit; and a `review.merged` or `review.merge_
+    /// reconciled` receipt exists naming this exact commit. This is the
+    /// mechanism section 1 refers to ("a missing or mismatched receipt is
+    /// detected by `audit-main`") and the only way to catch a hand-pushed or
+    /// otherwise out-of-protocol commit *after* it has already landed --
+    /// nothing can refuse such a push server-side without a receive hook
+    /// (section 9). A commit that landed on `main` before this repository
+    /// ever adopted the protocol (i.e. before `product_review_from`'s first
+    /// real reviewed merge) will also be flagged; that is the known,
+    /// accepted one-time bootstrap-adoption gap documented in `audit_main`'s
+    /// own module doc, not a live regression.
+    AuditMain(AuditMainArgs),
 }
 
 #[derive(clap::Args)]
@@ -260,6 +281,18 @@ pub struct MergeReadyArgs {
     authorization: String,
 }
 
+#[derive(clap::Args)]
+pub struct AuditMainArgs {
+    /// End of the audited range (exclusive of nothing -- the commit itself
+    /// is included). Defaults to `refs/heads/main`.
+    #[arg(long)]
+    to: Option<String>,
+    /// Print the full findings array as JSON instead of one line per
+    /// finding (or `audit-main: clean`).
+    #[arg(long)]
+    json: bool,
+}
+
 struct RepoPaths {
     repo: PathBuf,
     common_dir: PathBuf,
@@ -419,6 +452,7 @@ pub fn run(cli: Cli) -> AbResult<()> {
         Command::Outbox(args) => outbox(args),
         Command::PrepareMerge(args) => prepare_merge(args),
         Command::MergeReady(args) => merge_ready(args),
+        Command::AuditMain(args) => audit_main(args),
     }
 }
 
@@ -964,5 +998,33 @@ fn merge_ready(args: MergeReadyArgs) -> AbResult<()> {
         "ready": true,
         "candidate": candidate.as_str(),
     }));
+    Ok(())
+}
+
+/// AGENT_REVIEW.md sections 9/11/12 (see `Command::AuditMain`'s own doc for
+/// the full rationale). A thin CLI wrapper -- arg parsing, snapshot load,
+/// plain-or-JSON output -- around `audit_main::audit_main_findings`, which
+/// holds the actual correlation walk (and its own extensive test suite)
+/// mirroring `cli::merge_ready`'s identical relationship to `merge_ready::
+/// check_merge_ready`. Reads local bus/git state as-is: like `merge_ready`,
+/// this is a read-only diagnostic, not a publication, and the caller is
+/// expected to have already fetched both the bus and `refs/heads/main`
+/// themselves if a current-as-of-remote-probe answer matters -- nothing here
+/// performs a network round trip on its own.
+fn audit_main(args: AuditMainArgs) -> AbResult<()> {
+    let paths = resolve_paths()?;
+    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?;
+    let findings =
+        crate::audit_main::audit_main_findings(&paths.repo, &snapshot.state, args.to.as_deref())?;
+
+    if args.json {
+        print_json(&serde_json::json!(findings));
+    } else if findings.is_empty() {
+        println!("audit-main: clean");
+    } else {
+        for f in &findings {
+            println!("{f}");
+        }
+    }
     Ok(())
 }
