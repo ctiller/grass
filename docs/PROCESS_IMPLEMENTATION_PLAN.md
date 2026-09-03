@@ -678,13 +678,14 @@ representation relation.
 
 ## 5. M3 — Cancellation and lifecycle
 
-**Status: five modules written, unmerged, unratified.** `coord1:6` ruled the
+**Status: seven modules written, unmerged, unratified.** `coord1:6` ruled the
 canonical scoped cancellation form while M2 was in progress, so
 `Cancellation/Identity.lean` and `Cancellation/Policy.lean` were built out of
 order to discharge that disposition. `Cancellation/Compose.lean` follows, and it
 discharges the first two thirds of the exit criterion below. `Termination.lean`
-carries the safety half of the termination contract and `Facet.lean` the
-termination facets. All of byte flow has not started.
+carries the safety half of the termination contract, `Facet.lean` the
+termination facets, and `ByteFlow/Ingress.lean` and `ByteFlow/Egress.lean` both
+conservation theorems. Only `ByteFlow/Rechunk.lean` has not started.
 
 ```text
 Grass/Process/Cancellation/Identity.lean masks, point/call/region ids, CancelReason
@@ -695,6 +696,9 @@ Grass/Process/Termination.lean           modes, contracts, dispositions (safety 
 Grass/Process/Facet.lean                 TerminationFacet, and the two §3 claims it keeps
 Grass/Process/ByteFlow/Ingress.lean      phases, resolutions, conservation
 Grass/Process/ByteFlow/Egress.lean       offered/committed/queued, suffix retention
+                                         (both parameterized over the absent loan
+                                          type, per §2.1; instantiation is an
+                                          M3 exit item)
 Grass/Process/ByteFlow/Rechunk.lean      functional and capacity-aware rechunking
 ```
 
@@ -719,8 +723,12 @@ Exit criterion, in three parts:
   because a composite is a list of regions rather than a tree, so the two
   bracketings are not merely equivalent but the same object. No transport is
   needed, which is why this reads more simply than the criterion anticipated.
-- **Not started.** Both byte-flow conservation theorems over their full
-  transition families.
+- **Discharged.** Both byte-flow conservation theorems over their full
+  transition families — `ByteIngressTransition.preserves_conservation` and
+  `ByteEgressTransition.preserves_conservation`, each by cases over every
+  constructor, with the invariant a *predicate* rather than a field. §10.19
+  records why that distinction is the whole difference between a theorem and a
+  projection.
 
 `Termination.lean` carries `docs/PROCESS.md` §3's typed-termination principle
 and the field that makes it one: `noArbitraryDeath`, which says a permitted stop
