@@ -332,6 +332,17 @@ pub struct InboxArgs {
     pub agent: String,
     #[arg(long)]
     pub json: bool,
+    /// Block until the inbox changes from its state right now -- a new item
+    /// appears, an existing one clears, or new bus activity lands on an
+    /// already-listed item (e.g. a review response) -- fetching from
+    /// origin, when configured, on each poll. Does not return immediately
+    /// just because the inbox is already non-empty; use `inbox` without
+    /// --wait for that.
+    #[arg(long)]
+    pub wait: bool,
+    /// Seconds to wait before giving up; only meaningful with --wait.
+    #[arg(long)]
+    pub timeout: Option<u64>,
 }
 
 #[derive(Subcommand)]

@@ -110,6 +110,25 @@ ALLOWED = {
     # --- "this is fine": it is the record that someone read the plan and decided,
     # --- and the reason differs per entry.
     #
+    # Requirement vocabulary from another owner's modules, which arrived here by
+    # merging main. `RequirementKind` declares ten constructors and nothing in the
+    # tree builds one; `DemandFamily.kind`'s own docstring calls it "exact metadata
+    # only", so unbuilt is consistent with its intent -- a demand provider supplies
+    # the kind, and no provider exists yet. Listed rather than silenced, and
+    # reported to that owner: whether a ten-name closed vocabulary with no producer
+    # and no consumer is the right shape is their decision, not this branch's.
+    "RequirementKind.functional",
+    "RequirementKind.safety",
+    "RequirementKind.concurrency",
+    "RequirementKind.progress",
+    "RequirementKind.termination",
+    "RequirementKind.resource",
+    "RequirementKind.obligation",
+    "RequirementKind.diagnostic",
+    "RequirementKind.applicability",
+    "RequirementKind.extension",
+    "RequirementOrigin.prior",
+    "RequirementOrigin.external",
     # `docs/MEMORY_MODEL.md` section 7.1 makes control events part of the event
     # vocabulary; nothing in this layer mints one, because control flow is the ISA
     # owner's and the causal graph is M8's.

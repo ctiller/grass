@@ -156,6 +156,11 @@ ALLOWED = {
     # Names another owner declares, or has not yet: `Grass/Std` is the stdlib
     # agent's, and `Grass.Core.Id` is prose about a name deliberately not used.
     "Std.Owned", "Grass.Core.Id",
+    # Lean *attribute* names, which have the shape of a declaration and are not
+    # one. `Grass/Trust/Audit.lean` cites `implemented_by` because rejecting an
+    # unverified `@[implemented_by]` replacement is what that module does; this
+    # tool matches names lexically and cannot tell an attribute from a definition.
+    "implemented_by",
     # Paths and file names, which happen to match the identifier shape.
     "lean-toolchain", "lakefile.toml",
     # Prose about a name that was deleted, quoted so the reason survives. Each must

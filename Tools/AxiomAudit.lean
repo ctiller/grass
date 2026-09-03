@@ -1,8 +1,11 @@
 import Lean
 import Grass.Core.Context
+import Grass.Core.Demand
 import Grass.Core.Generational
+import Grass.Core.Identifiers
 import Grass.Core.Name
 import Grass.Core.Uid
+import Grass.Certificate
 import Grass.Memory.Access
 import Grass.Memory.AddressSpace
 import Grass.Memory.Addressing
@@ -28,8 +31,13 @@ import Grass.Op.LoanAuthority
 import Grass.Op.Step
 import Grass.Resource.Algebra
 import Grass.Resource.Axis
+import Grass.Semantics.Execution
+import Grass.Semantics.Observation
+import Grass.Semantics.SpecProcess
 import Grass.Std.Logical.Byte
 import Grass.Std.Logical.FiniteMap
+import Grass.Trust.Audit
+import Grass.Verify.VerifiedProgram
 
 /-!
 # Axiom audit

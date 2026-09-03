@@ -145,6 +145,18 @@ ALLOWED = {
     "limit",
     "exhaustion",
     "lifecycle",
+    # Proof obligations on structures a *provider* supplies, from modules this
+    # branch does not own -- Grass/Core/Demand.lean and Grass/Certificate.lean,
+    # which arrived here by merging main. They do work unprojected, because a
+    # provider cannot construct the structure without discharging them, which is
+    # the same reason `readsFull` and `vocabularyWellFormed` are above. Listed
+    # rather than silenced: this audit is the memory branch's, the modules are
+    # another owner's, and whether anything downstream *uses* exactness or
+    # injectivity is that owner's question, reported to them and not decided here.
+    "complete",
+    "unique",
+    "identityInjective",
+    "parseExact",
 }
 
 BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
