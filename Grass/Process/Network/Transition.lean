@@ -755,6 +755,27 @@ structure Restarts (before after : plan.LogicalProcessNetwork)
   could install a role claiming a parent the graph forbids. Local adversarial
   review built one and proved the network after it fails `ParentageValid`.
   -/
+  restartsAChild : ∀ incarnation, after.instances kind slot = some incarnation →
+    incarnation.parentage.currentParent ≠ none
+  /--
+  **Whose parent the topology permits** — and it has one.
+
+  `restartsAChild` above is `Spawns.spawnsAChild`, for the same reason and with
+  the same consequence. `authorized` is vacuous for an incarnation recording no
+  parent, so without it a restart could install a **root**, and
+  `LogicalProcessNetworkCore.RootUnique` is a well-formedness law a second root
+  breaks.
+
+  Restarting the root is not a network step under any reading: a supervisor
+  restarts a child, and a root has no supervisor. If a root ends the program is
+  over, and starting again is a new run — `ExactInitialNetwork`, not a
+  transition.
+
+  Found by working `well_formedness_is_preserved` clause by clause and asking
+  which constructor could break each. `Spawns` was fixed in the same pass and
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.72 recorded this half as needing a
+  ruling; the `RootUnique` argument is what settled it.
+  -/
   authorized : ∀ incarnation, after.instances kind slot = some incarnation →
     ∀ parentKind parent, incarnation.parentage.knownParent = some ⟨parentKind, parent⟩ →
       plan.topology.maySpawn parentKind incarnation.kind

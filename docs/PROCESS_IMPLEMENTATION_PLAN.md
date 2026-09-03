@@ -2267,8 +2267,8 @@ was found by reading.
 
 The exit criterion §10.54 proposed — every named record has a positive witness
 before the layer is nominated — turned out to be the most productive rule in this
-milestone. Five records were inhabited for the first time, and each was empty for
-a *different* reason that reading had not found:
+milestone. Six records were inhabited for the first time, and each was empty for a
+*different* reason that reading had not found:
 
 | Record | Why it was empty | Witness |
 |---|---|---|
@@ -2277,8 +2277,9 @@ a *different* reason that reading had not found:
 | `ExactInitialNetwork` | nothing; it had never been built, and had absorbed two new fields with no proof breaking | `Tests/Process/FrontierFixtures.lean` |
 | `EndsInstance` | nothing; it had absorbed three | `Tests/Process/EndingFixtures.lean` |
 | `Spawns` | nothing | `Tests/Process/FrontierFixtures.lean` |
+| `Restarts` | nothing | `Tests/Process/RestartFixtures.lean` |
 
-The pattern is worth stating because it held five times out of five: **a record
+The pattern is worth stating because it held six times out of six: **a record
 that absorbs a new field without a single proof breaking is a record nothing
 inhabits.** That is a cheap check and it is now the first one to run after any
 structural change.
@@ -3291,8 +3292,16 @@ exactly this defect: it spawned the root to model the program starting. It now
 uses a detach instead, which is a real network step, and `emptyWorld` becomes a
 network nothing can move — which is §10.71.
 
-**`Restarts` has the same hole and is not fixed.** Its `authorized` is the same
-shape, so a restart may install a root into a slot whose previous incarnation had
-ended. That is arguably right — a supervisor restarting a root is a program
-restarting itself — and arguably not, for the same reason a spawn of one is
-wrong. Needs a ruling.
+**`Restarts` had the same hole**, and working the capstone's `RootUnique` clause
+settled it rather than leaving it to a ruling: a restart installing a root into a
+slot whose previous incarnation had ended breaks that law exactly as a spawn does,
+and a supervisor restarting a *root* is not a step under any reading — a root has
+no supervisor, and if it ends the program is over. `Restarts.restartsAChild` is
+the field.
+
+`Restarts` was the sixth record with no witness, and it was found the same way as
+the other five: the field went in and not one proof broke.
+`Tests/Process/RestartFixtures.lean` is the witness — connection 7 dies and its
+supervisor starts a fresh incarnation at a new generation — with the two
+refusals the structure is for: reusing the dead incarnation's generation (law
+22, refused by `NetworkStep.admissible`) and installing a root.
