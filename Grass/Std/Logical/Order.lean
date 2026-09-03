@@ -211,15 +211,42 @@ theorem Pairwise.drop {R : α → α → Prop} {v : Vec α} (h : Pairwise R v) (
 /-!
 ## Search by position
 
-One operation, not two. `Spikes/2_Sort/Spec.lean` writes `output.findIdx? input[i]`
-and passes an *element* where a predicate would go, so the operation its
-specification means is `idxOf?`. An earlier version of this module supplied a
-predicate-taking `findIdx?` alongside it "under accurate names rather than one
-being bent to fit the call" -- but nothing demands the predicate version, and
-`docs/STDLIB_IMPLEMENTATION_PLAN.md` §1 band 3 is explicit that an undemanded
-structure "gets nothing -- not a stub, not a signature, not a placeholder". It was
-removed rather than kept for symmetry.
+Two operations, distinguished by what they take, and the history of that is worth
+recording because it is a band-3 judgement got wrong.
+
+`Spikes/2_Sort/Spec.lean` writes `output.findIdx? input[i]` and passes an
+*element* where a predicate would go, so the operation its specification means is
+`idxOf?`. On that basis a previous version of this module withdrew the
+predicate-taking `findIdx?` under band 3 — "nothing demands the predicate
+version" — and that was false. The consumer review that had built five client
+modules against this library then reported that its `insertSorted` needed exactly
+it: "the index of the first identifier greater than `a`" is a predicate search
+and `idxOf?` cannot express it. It was demanded, by the only consumer this
+library had, and the withdrawal read the spike corpus as if it were the whole
+population of consumers.
+
+Both are supplied, under accurate names.
 -/
+
+/-- The position of the first element satisfying `p`. -/
+def findIdx? (p : α → Bool) (v : Vec α) : Option Nat := v.toList.findIdx? p
+
+@[simp] theorem findIdx?_empty (p : α → Bool) : findIdx? p (empty : Vec α) = none := rfl
+
+/-- A found position is in range, satisfies the predicate, and is the first that
+does — the same three conjuncts `Vec.idxOf?_eq_some` carries, and for the same
+reason: "first" is the whole content of the name. -/
+theorem findIdx?_eq_some {p : α → Bool} {v : Vec α} {i : Nat} (h : findIdx? p v = some i) :
+    (∃ hi : i < v.length, p (v.get i hi) = true) ∧
+      ∀ j b, j < i → v.get? j = some b → p b = false := by
+  rw [findIdx?, List.findIdx?_eq_some_iff_getElem] at h
+  obtain ⟨hi, hp, hfirst⟩ := h
+  refine ⟨⟨hi, hp⟩, fun j b hj hget => ?_⟩
+  have hjlt : j < v.toList.length := Nat.lt_trans hj hi
+  rw [get?, List.getElem?_eq_getElem hjlt] at hget
+  have hb := hfirst j hj
+  rw [Option.some.inj hget] at hb
+  simpa using hb
 
 /-- The position of the first occurrence of `a`. -/
 def idxOf? [BEq α] (v : Vec α) (a : α) : Option Nat := v.toList.idxOf? a
