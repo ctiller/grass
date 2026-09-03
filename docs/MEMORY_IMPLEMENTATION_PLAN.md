@@ -1673,11 +1673,28 @@ refuses everything.
   policy listing no providers at all: a store to lent bytes refused, a grant minted by
   one operation enforced against the next, and an unlent store still committing.
 
-  What this leaves is `AuthorityProvider.loan`, whose refusal condition is now a
-  strict subset of the transition's own — two encodings of one rule, which
-  [FOUNDATION.md](FOUNDATION.md) law 11 forbids. Deleting it means rewriting eighteen
-  citations across five modules, and it is the next thing to do here rather than a
-  thing done under the same commit as the fix.
+  **The first version of this fix carried only half the rule, and the commit message
+  claimed it carried all of it.** It moved the holder question — is anything held
+  here that you are not authorized for — and said `AuthorityProvider.loan` was now "a
+  strict subset of the transition's own refusal". That was wrong, and the case that
+  breaks it is one this document already describes: two grants that did not conflict
+  when issued, made to conflict by an alias declared afterwards. In that state each
+  holder is `Granted` by its own grant, so the holder clause passes for both. Only
+  `authorityOf` sees the other holder, and it reports `frozen`. A probe written while
+  closing the *next* finding stepped `aliasedAfterIssue` under a policy with no
+  providers and watched the thread's write commit over bytes the engine held.
+
+  Both halves are in `refusalOf` now, in the provider's own order, and
+  `an_alias_declared_after_issue_is_refused_without_a_provider` is that state with the
+  second half in place. The lesson is the one this branch keeps relearning: a repair
+  that builds is not a repair, and a claim that one check subsumes another is a
+  theorem, not an observation — stated as an observation, it was false within the
+  hour.
+
+  `AuthorityProvider.loan` is now genuinely redundant: both its clauses are in
+  `refusalOf` verbatim, ahead of the provider search. Two encodings of one rule is
+  what [FOUNDATION.md](FOUNDATION.md) law 11 forbids, and deleting it means rewriting
+  eighteen citations across five modules. That is the next thing to do here.
 
   The deeper half of review's finding stands and is not closed: `AuthorityProvider` is
   `refuses : MachineState → AccessDescriptor → Bool` with no locality, monotonicity or

@@ -1,3 +1,4 @@
+import Grass.Memory.Loan
 import Grass.Memory.Apply
 import Grass.Memory.State
 import Grass.Op.Facets
@@ -717,6 +718,20 @@ def refusalOf (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor
         some .obligationNotAuthorized
       else if (state.memory.applyAuthorityEffect? d.context d.authorityEffect).isNone then
         some .authorityEffectRefused
+      else if ¬ (state.memory.authorityOf d.context d.provenance d.range).PermitsIntent
+                d.intent then
+        -- §3's authority states, asked of *this* context: `frozen` while another
+        -- holds the bytes, `sharedImmutable` while they are read-shared.
+        --
+        -- Both halves of the loan rule are here, and the second is not enough on its
+        -- own. Two grants that did not conflict when issued are made to conflict by
+        -- an alias declared afterwards, and in that state each holder is `Granted` by
+        -- its own grant -- so the holder clause below passes for both, and the
+        -- previous commit's claim that it subsumed the provider was wrong. A probe
+        -- stepped exactly that: `aliasedAfterIssue` with no providers listed, and the
+        -- thread's write committed over bytes the engine also held. `authorityOf`
+        -- asks the question that sees the other holder.
+        some .authorityUnavailable
       else if state.memory.AnyGrantOver d.provenance d.range ∧
               ¬ state.memory.Granted d.context d.provenance d.range d.intent then
         -- §3's loan rule, asked by the transition rather than by a provider a
@@ -763,13 +778,15 @@ theorem refusalOf_refuses_the_unauthorized {policy : StepPolicy} {state : Machin
     (hledger : LedgerEffectApplicable state.obligations state.contexts.domain d.context
       d.ledgerEffect)
     (hauth : (state.memory.applyAuthorityEffect? d.context d.authorityEffect).isSome)
+    (hstate : (state.memory.authorityOf d.context d.provenance d.range).PermitsIntent
+      d.intent)
     (hheld : state.memory.AnyGrantOver d.provenance d.range)
     (hnot : ¬ state.memory.Granted d.context d.provenance d.range d.intent) :
     refusalOf policy state d prospective = some .authorityUnavailable := by
   unfold refusalOf
   rw [hclean, if_neg (by simpa using hledger),
     if_neg (by simpa [Option.isNone_iff_eq_none, Option.isSome_iff_ne_none] using hauth),
-    if_pos ⟨hheld, hnot⟩]
+    if_neg (by simpa using hstate), if_pos ⟨hheld, hnot⟩]
 
 /-- And it does not fire where nothing is held, which is what stops it refusing every
 access under a policy with no providers. -/
@@ -779,6 +796,8 @@ theorem refusalOf_allows_the_unheld {policy : StepPolicy} {state : MachineState}
     (hledger : LedgerEffectApplicable state.obligations state.contexts.domain d.context
       d.ledgerEffect)
     (hauth : (state.memory.applyAuthorityEffect? d.context d.authorityEffect).isSome)
+    (hstate : (state.memory.authorityOf d.context d.provenance d.range).PermitsIntent
+      d.intent)
     (hunheld : ¬ state.memory.AnyGrantOver d.provenance d.range) :
     refusalOf policy state d prospective =
       match policy.authorities.find? (fun provider => provider.refuses state d) with
@@ -793,7 +812,7 @@ theorem refusalOf_allows_the_unheld {policy : StepPolicy} {state : MachineState}
   unfold refusalOf
   rw [hclean, if_neg (by simpa using hledger),
     if_neg (by simpa [Option.isNone_iff_eq_none, Option.isSome_iff_ne_none] using hauth),
-    if_neg (fun h => hunheld h.1)]
+    if_neg (by simpa using hstate), if_neg (fun h => hunheld h.1)]
 
 /-- Every class `denialOf` can return is one the transition declares. -/
 theorem denialOf_mem_emittedByTransition {state : MemoryState} {d : AccessDescriptor}
@@ -842,18 +861,23 @@ theorem refusalOf_mem_emittedClasses {policy : StepPolicy} {state : MachineState
           exact AuthorityProvider.mem_emittedClasses_of_transition
             (by simp [AuditViolationClass.emittedByTransition])
         · split at h
-          · rename_i provider hfind
-            injection h with h
+          · injection h with h
             subst h
-            exact AuthorityProvider.mem_emittedClasses_of_provider
-              (List.mem_of_find?_eq_some hfind)
-          · repeat' split at h
-            all_goals
-              first
-                | (injection h with h; subst h
-                   exact AuthorityProvider.mem_emittedClasses_of_transition
-                     (by simp [AuditViolationClass.emittedByTransition]))
-                | exact absurd h (by simp)
+            exact AuthorityProvider.mem_emittedClasses_of_transition
+              (by simp [AuditViolationClass.emittedByTransition])
+          · split at h
+            · rename_i provider hfind
+              injection h with h
+              subst h
+              exact AuthorityProvider.mem_emittedClasses_of_provider
+                (List.mem_of_find?_eq_some hfind)
+            · repeat' split at h
+              all_goals
+                first
+                  | (injection h with h; subst h
+                     exact AuthorityProvider.mem_emittedClasses_of_transition
+                       (by simp [AuditViolationClass.emittedByTransition]))
+                  | exact absurd h (by simp)
 
 /--
 **Nothing refusing the access means the declared ledger changes apply.**

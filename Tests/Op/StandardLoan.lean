@@ -327,6 +327,26 @@ theorem an_alias_declared_after_issue_is_refused :
   cases hs
   exact ⟨by decide, by decide⟩
 
+/-- **And it is refused with no provider listed**, which is the case the holder
+clause alone does not cover.
+
+Each of the two grants covers its own holder, so `Granted` is *true* for the thread
+and the transition's "is anything held here that you are not authorized for" clause
+passes. What sees the other holder is `authorityOf`, which reports `frozen`. A probe
+written while closing the previous finding stepped exactly this state under a policy
+with no providers and watched the write commit; both halves of §3's rule are in
+`refusalOf` now, and this is that state with the second half in place. -/
+theorem an_alias_declared_after_issue_is_refused_without_a_provider :
+    aliasedAfterIssue.memory.Granted thread₀ bufferProv ⟨0, 8⟩ AccessIntent.write ∧
+    aliasedAfterIssue.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ =
+      AuthorityState.frozen ∧
+    ∀ s, (nakedStep aliasedAfterIssue .store).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 := by
+  refine ⟨by decide, by decide, ?_⟩
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
 /-- The engine holds a *read* loan over the head. -/
 def readLentToEngine : MachineState :=
   { state₀ with
