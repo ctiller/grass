@@ -36,7 +36,12 @@ pub fn stream_ref(agent: &Agent) -> Branch {
 #[serde(deny_unknown_fields)]
 pub struct StreamHeader {
     pub agent: Agent,
-    pub activation_event: EventId,
+    /// The version-one bus event that activated version two, for an
+    /// identity migrated from an existing v1 fleet. `None` for a stream
+    /// created directly under a v2-native genesis with no v1 history to
+    /// activate from (e.g. a fresh deployment, or this crate's own tests).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activation_event: Option<EventId>,
     pub registration_authority: EventId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub final_v1_seq: Option<u64>,
@@ -310,7 +315,7 @@ mod tests {
     fn header(agent: &Agent) -> StreamHeader {
         StreamHeader {
             agent: agent.clone(),
-            activation_event: EventId::new(&a("coord1"), 0),
+            activation_event: Some(EventId::new(&a("coord1"), 0)),
             registration_authority: EventId::new(agent, 0),
             final_v1_seq: None,
             object_format: "sha1".to_string(),
