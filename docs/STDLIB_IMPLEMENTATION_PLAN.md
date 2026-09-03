@@ -450,7 +450,44 @@ either a coercion this library argues against, or a different spelling —
 authored surface [SPIKE_AUTHORING.md](SPIKE_AUTHORING.md) owns, not a gap this
 plan can close alone.
 
-### 3.10 Exit criteria
+### 3.10 Permutation, order, and search by position
+
+`Grass/Std/Logical/Order.lean` supplies `Vec.Permutation`, `Vec.Pairwise`,
+`Vec.findIdx?`, and `Vec.idxOf?`, with the laws a sort's caller uses and
+`Decidable` instances for both predicates.
+
+`Spikes/2_Sort/Spec.lean` is the reason, and it is a stronger reason than the
+other spike evidence in §3.4. It is the only place in the corpus where a
+*milestone's specification* is written directly over `Vec`, which makes it the
+sharpest statement of what this library owes an application author, and its
+`stableSorted` uses three `Vec` operations that did not exist.
+
+The division of labour is worth stating because it is easy to get backwards.
+[SPIKE_PROOF_BURDEN.md](SPIKE_PROOF_BURDEN.md) makes `stableSortModelCorrect` an
+`authority-model` entry and `stable_merge_pass` an `authored-proof/library-instance`
+one; neither is this library's. But the vocabulary the specification is *written
+in* is, and a sort that shipped its own notion of "same elements rearranged"
+would be proving a theorem about itself. [STDLIB.md](STDLIB.md) §5 names the same
+vocabulary from the other side, requiring whole-element transfers to "derive
+occurrence, permutation, and initialization transport from the proved physical
+copy".
+
+The `Decidable` instances are not decoration. `Tests/Std/StableSort.lean`
+restates `stableSorted` over a stand-in and discharges it against a concrete
+input and output, which needs `decide`; a specification predicate no program can
+evaluate is one no fixture can exercise and no implementation can test itself
+against. This is the same lesson as §3.6 in a different place, and the fixture is
+what found it rather than the design.
+
+**A correction to §3.4.** That section reported the spike corpus as calling five
+`Vec` operations, from a survey that matched `Vec.<method>` and therefore saw
+only qualified calls. `output.Permutation input` and `output.Pairwise
+Occurrence.le` are dot notation on values and were missed entirely. The survey
+was rerun over every dot-notation call in `Spikes/`, which is how this section
+exists. The lesson is recorded rather than quietly fixed: a grep that matches a
+qualified name will miss the idiomatic way the same function is called.
+
+### 3.11 Exit criteria
 
 S1 is complete when all of the following hold. The first four hold today.
 
@@ -465,7 +502,7 @@ S1 is complete when all of the following hold. The first four hold today.
 5. A reviewer distinct from this agent has merged it, per
    [AGENT_REVIEW.md](AGENT_REVIEW.md).
 
-### 3.11 Open: the `ByteArray` name collides with Lean's
+### 3.12 Open: the `ByteArray` name collides with Lean's
 
 [STDLIB.md](STDLIB.md) §1 fixes the name `ByteArray` for `Vec Byte`. Lean's
 prelude already has `_root_.ByteArray`. A module that opens `Grass.Std.Logical`
@@ -605,7 +642,7 @@ realization.
 **The `ByteArray` name is settled late.** Consumers written against a qualified
 `Grass.Std.Logical.ByteArray` before a rename would need editing after one. The
 mitigation is that there are no such consumers yet, which is the argument for
-ruling on §3.11 soon rather than at leisure.
+ruling on §3.12 soon rather than at leisure.
 
 ## 8. Decisions and open items
 
@@ -653,7 +690,7 @@ own docstring, which reads better anyway.
 Open, with the owner each is with:
 
 1. **The `ByteArray` name collision**, with the owner of
-   [STDLIB.md](STDLIB.md). §3.11. Twice sharper than when it was first raised.
+   [STDLIB.md](STDLIB.md). §3.12. Twice sharper than when it was first raised.
    The authored spike sources write bare `ByteArray` in four of the five spikes,
    so "keep the name and qualify at the use site" is a change to the author
    surface and not only to library-internal code. And it is no longer
@@ -675,14 +712,21 @@ Open, with the owner each is with:
 5. **UTF-8 decoding has no round-trip law**, so it is unbuilt. Closing it means
    proving UTF-8 correctness against a specification rather than writing a
    function, and no consumer has asked. §3.9.
-6. **The `Bag` representation**, inherited undecided from `c-process:28` and
+6. **`Spikes/2_Sort/Spec.lean`'s `stableSorted` does not typecheck**, in two
+   further ways beyond the previous items, and both are about totality rather
+   than naming. `input[i]` carries no proof that `i` is in range and its binder
+   supplies none, and `(output.findIdx? input[i]).get!` panics exactly when the
+   substantive claim fails, so the specification is silent about the case a
+   wrong sort would hit. `Tests/Std/StableSort.lean` shows the same statement
+   written totally. Owner as for the other authored-surface items. §3.10.
+7. **The `Bag` representation**, inherited undecided from `c-process:28` and
    genuinely blocked on the repository-wide mathlib dependency question rather
    than on a container judgement. §4.2.
-7. **`Grass.Effect`, `Grass.Grammar`, and `Grass.CFG` have no owner**, which
+8. **`Grass.Effect`, `Grass.Grammar`, and `Grass.CFG` have no owner**, which
    blocks `mapM`/`traverse`, the parser combinators, and the worklists
    respectively. Raised with the coordinator when one becomes a blocker. §3.4,
    §5.
-8. **The `ByteSeq` retirement**, which is an edit to `Grass/Memory/**` and
+9. **The `ByteSeq` retirement**, which is an edit to `Grass/Memory/**` and
    therefore `c-mem`'s to make. §4.1.
 
 Items 1, 2, and 3 were all sharpened or found by reading the spike corpus for
