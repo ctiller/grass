@@ -155,6 +155,21 @@ instead of composing.
   show _ = (x.data.toList.map Byte.ofUInt8) ++ (y.data.toList.map Byte.ofUInt8)
   rw [← List.map_append, _root_.ByteArray.data_append, Array.toList_append]
 
+/--
+The other direction, without which the previous law is a regression.
+
+`Vec.ofHostBytes_append` was added as `@[simp]` and fires innermost-first, so
+`(ofHostBytes x ++ ofHostBytes y).toHostBytes = x ++ y` — a goal that `simp`
+closed before it existed — was left stranded with nothing to finish the rewrite.
+Adversarial review caught it. Adding a law can break a proof, and a one-sided
+`@[simp]` homomorphism is the ordinary way.
+-/
+@[simp] theorem toHostBytes_append (a b : Vec Byte) :
+    toHostBytes (a ++ b) = toHostBytes a ++ toHostBytes b := by
+  apply congrArg _root_.ByteArray.mk
+  apply Array.ext'
+  simp [toHostBytes]
+
 /-- `Vec.toHostBytes` loses nothing, so two Grass byte arrays that cross to the
 same host value were equal. -/
 theorem toHostBytes_injective {a b : Vec Byte}

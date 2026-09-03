@@ -95,6 +95,40 @@ lands at output position 2. -/
 example : output.idxOf? ⟨0, 2⟩ = some 1 := by decide
 example : output.idxOf? ⟨2, 2⟩ = some 2 := by decide
 
+/-! ## Two things this fixture did not do, and one is a defect in the corpus
+
+Adversarial review found that `StableSorted` appeared here only ever as a
+*hypothesis*: it was never proved of `input`/`output` and never refuted of
+`unstableOutput`, so the third conjunct — the entire subject — was unexercised in
+both directions. A `StableSorted` whose third conjunct is literally `False`
+satisfies every example that followed. `unstable_is_rejected` below closes the
+refutation direction, which is the one that catches a wrong sort.
+
+The second finding is not about this fixture. **`stableSorted` is unsatisfiable
+whenever the input contains two identical occurrences**, and
+`Spikes/2_Sort/Spec.lean` has the same defect, because both index the output by
+*element*: `idxOf?` returns one position for equal values, so `p < q` becomes
+`p < p`. `no_sort_can_satisfy_repeated` proves it. The specification therefore
+needs a well-formedness hypothesis it does not state — occurrences carry an
+`ordinal` precisely so that a parser makes them distinct, and nothing says so —
+or it needs to index by position rather than by element. Raised as an open item
+against the spike surface rather than patched here.
+-/
+
+/-- Two occurrences identical in both fields: a degenerate input a real parser
+never produces, because `ordinal` is a source position. -/
+def repeated : Vec Occurrence := Vec.fromList [⟨0, 5⟩, ⟨0, 5⟩]
+
+/-- No output whatsoever satisfies the specification for that input. -/
+theorem no_sort_can_satisfy_repeated (out : Vec Occurrence) :
+    ¬ StableSorted repeated out := by
+  rintro ⟨hperm, -, hstable⟩
+  have hmem : (⟨0, 5⟩ : Occurrence) ∈ out :=
+    hperm.mem_iff.mpr (by simp [repeated, Vec.mem_iff_mem_toList])
+  obtain ⟨k, hk⟩ := Option.isSome_iff_exists.mp (Vec.idxOf?_isSome_of_mem hmem)
+  exact absurd (hstable 0 1 (by decide) (by decide) (by decide) rfl k k hk hk)
+    (Nat.lt_irrefl k)
+
 /-- An unstable sort would swap those two, and this is the value that would then
 fail. Recorded so the fixture is not only positive. -/
 def unstableOutput : Vec Occurrence :=
@@ -108,6 +142,21 @@ example : unstableOutput.Pairwise Occurrence.le := by decide
 /-- But it reverses the two equal-valued occurrences. -/
 example : unstableOutput.idxOf? ⟨0, 2⟩ = some 2 := by decide
 example : unstableOutput.idxOf? ⟨2, 2⟩ = some 1 := by decide
+
+/--
+The unstable output is rejected by the specification.
+
+This is the direction that catches a wrong sort, and its absence was the reason a
+`StableSorted` with a `False` third conjunct satisfied everything this fixture
+asserted. The witness is the pair of equal-valued occurrences: input positions 0
+and 2 both hold value 2, and the unstable output places the one from position 0
+*after* the one from position 2.
+-/
+theorem unstable_is_rejected : ¬ StableSorted input unstableOutput := by
+  rintro ⟨-, -, hstable⟩
+  exact absurd
+    (hstable 0 2 (by decide) (by decide) (by decide) (by decide) 2 1 (by decide) (by decide))
+    (by decide)
 
 /-! ## The laws a sort's caller actually uses -/
 
