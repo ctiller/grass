@@ -189,6 +189,26 @@ mod tests {
         })
     }
 
+    /// Golden snapshot of the full envelope wrapper shape -- not just the
+    /// `data` payload (see events.rs's `golden_json_shape_of_every_event_
+    /// kind`), but `v`/`id`/`agent`/`seq`/`time`/`observed`/`kind`/`refs`
+    /// around it, for both a bare sparse frontier and a cross-agent
+    /// reference with a populated frontier entry. This is the literal byte
+    /// shape written to an immutable, append-only stream line; an
+    /// unintentional change to field names or nesting here would break
+    /// every already-published line the next time it's parsed. `time` is
+    /// redacted since `Timestamp::now_utc()` makes it non-deterministic.
+    #[test]
+    fn golden_json_shape_of_the_envelope_wrapper() {
+        let alice = a("alice");
+        let bob_prev = EventId::new(&a("bob"), 2);
+        let data = resumed_data(&bob_prev);
+        let e = Envelope::new(&alice, 4, frontier_seeing(&bob_prev, 7), &data, []);
+        insta::assert_json_snapshot!("envelope_wrapper_shape", &e, {
+            ".time" => "[timestamp]",
+        });
+    }
+
     #[test]
     fn parse_line_accepts_a_canonical_line() {
         let alice = a("alice");

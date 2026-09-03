@@ -778,14 +778,13 @@ mod tests {
         assert!(LifecycleStatus::Abandoned.deactivates());
     }
 
-    /// Every declared kind must round-trip through `to_value` /
-    /// `from_kind_and_value` and report the matching `kind()` string --
-    /// proves the macro-generated dispatch table is complete and self
-    /// -consistent, not just individually testable per variant.
-    #[test]
-    fn dispatch_kind_all_kinds_and_value_roundtrip() {
+    /// One representative sample of every declared `EventData` kind --
+    /// shared by the round-trip test below and by the golden JSON-encoding
+    /// snapshot test, so the two can never silently drift out of sync with
+    /// each other or with `all_kinds()`.
+    fn all_kind_samples() -> Vec<EventData> {
         let previous = eid("alice", 0);
-        let samples: Vec<EventData> = vec![
+        vec![
             EventData::AgentRegistered(AgentRegistered {
                 display_name: short("Alice"),
                 primary_role: Role::Implementor,
@@ -1080,8 +1079,16 @@ mod tests {
             EventData::BroadcastSeen(BroadcastSeen {
                 broadcasts: StringSet::from_iter([previous.clone()]),
             }),
-        ];
+        ]
+    }
 
+    /// Every declared kind must round-trip through `to_value` /
+    /// `from_kind_and_value` and report the matching `kind()` string --
+    /// proves the macro-generated dispatch table is complete and self
+    /// -consistent, not just individually testable per variant.
+    #[test]
+    fn dispatch_kind_all_kinds_and_value_roundtrip() {
+        let samples = all_kind_samples();
         let all_kinds: BTreeSet<&str> = EventData::all_kinds().into_iter().collect();
         let mut seen_kinds = BTreeSet::new();
         for sample in &samples {
@@ -1097,6 +1104,29 @@ mod tests {
             seen_kinds, all_kinds,
             "every declared kind must have a sample exercising its round trip"
         );
+    }
+
+    /// Golden snapshot of every event kind's canonical JSON payload shape
+    /// (field names, nesting, key order -- `to_value()` routes through a
+    /// `BTreeMap`-backed `serde_json::Map`, so keys sort deterministically).
+    /// Streams are append-only and immutable forever, so an *unintentional*
+    /// change here -- a renamed field, a reordered enum, a dropped optional
+    /// -- would silently break every already-published event of that kind
+    /// on the next parse; `dispatch_kind_all_kinds_and_value_roundtrip`
+    /// above proves internal consistency (to_value/from_kind_and_value
+    /// agree with each other) but says nothing about whether the *shape*
+    /// itself is still what earlier commits wrote. A deliberate schema
+    /// change updates this snapshot in the same commit as the code change,
+    /// making the wire-format impact visible in review rather than
+    /// discovered later against real published data.
+    #[test]
+    fn golden_json_shape_of_every_event_kind() {
+        let shapes: std::collections::BTreeMap<&'static str, serde_json::Value> =
+            all_kind_samples()
+                .iter()
+                .map(|sample| (sample.kind(), sample.to_value()))
+                .collect();
+        insta::assert_json_snapshot!("event_kind_json_shapes", &shapes);
     }
 
     #[test]
