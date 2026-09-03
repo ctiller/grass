@@ -50,6 +50,14 @@ pub enum Command {
     /// own host (section 2.3, gate 19). Refused unless the caller is
     /// `--target`'s pre-authorized standby or an existing coordinator.
     Succeed(SucceedArgs),
+    /// Prints `--agent`'s local outbox state: every candidate still
+    /// pending (in urgent-first drain order) and every one a coordinator
+    /// has rejected, with the durable reason. Purely local -- no network
+    /// round trip -- so this is what "the last local receipt and
+    /// coordinator health" (section 2.3) means concretely: whether an
+    /// urgent candidate is still waiting is always answerable here even
+    /// when no coordinator has run at all (gate 18).
+    Outbox(OutboxArgs),
 }
 
 #[derive(clap::Args)]
@@ -114,6 +122,13 @@ pub struct SubmitArgs {
     /// each.
     #[arg(long = "observes")]
     observes: Vec<String>,
+    /// Requests an urgent flush (section 2.3/2.4): a priority signal for
+    /// the coordinator's batching policy, not a liveness guarantee -- an
+    /// urgent candidate is drained ahead of ordinary ones once a
+    /// coordinator does run, but remains just as locally pending as any
+    /// other candidate until one does.
+    #[arg(long)]
+    urgent: bool,
     #[arg(long)]
     client_id: Option<String>,
 }
@@ -168,6 +183,12 @@ pub struct SucceedArgs {
     host: String,
     #[arg(long, default_value = "origin")]
     remote: String,
+}
+
+#[derive(clap::Args)]
+pub struct OutboxArgs {
+    #[arg(long)]
+    agent: String,
 }
 
 struct RepoPaths {
@@ -236,6 +257,7 @@ pub fn run(cli: Cli) -> AbResult<()> {
         Command::Tail(args) => tail(args),
         Command::Status(args) => status(args),
         Command::Succeed(args) => succeed(args),
+        Command::Outbox(args) => outbox(args),
     }
 }
 
@@ -374,11 +396,15 @@ fn submit(args: SubmitArgs) -> AbResult<()> {
         .into_iter()
         .map(EventId::parse)
         .collect::<AbResult<_>>()?;
-    let candidate = Candidate::new(&agent, &data, extra_refs);
+    let mut candidate = Candidate::new(&agent, &data, extra_refs);
+    if args.urgent {
+        candidate = candidate.urgent();
+    }
     let client_id = args.client_id.unwrap_or_else(default_client_id);
     let path = crate::outbox::submit(&paths.common_dir, &client_id, &candidate)?;
     print_json(&serde_json::json!({
         "client_id": client_id,
+        "urgent": candidate.urgent,
         "outbox_path": path.display().to_string(),
     }));
     Ok(())
@@ -519,6 +545,52 @@ fn succeed(args: SucceedArgs) -> AbResult<()> {
         "registry_published": registry_receipt.published,
         "resumed_events": resumed.published.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
         "stream_published": stream_receipt.published,
+    }));
+    Ok(())
+}
+
+fn outbox(args: OutboxArgs) -> AbResult<()> {
+    let paths = resolve_paths()?;
+    let agent = parse_agent(&args.agent)?;
+
+    let pending = crate::outbox::list_pending(&paths.common_dir, &agent)?;
+    let pending_json: Vec<serde_json::Value> = pending
+        .into_iter()
+        .map(|(path, candidate)| {
+            serde_json::json!({
+                "kind": candidate.kind,
+                "urgent": candidate.urgent,
+                "outbox_path": path.display().to_string(),
+            })
+        })
+        .collect();
+
+    let rejected_dir = crate::outbox::outbox_dir(&paths.common_dir, &agent).join("rejected");
+    let mut rejected_json = Vec::new();
+    if rejected_dir.is_dir() {
+        let mut entries: Vec<_> = std::fs::read_dir(&rejected_dir)
+            .map_err(|e| AbError::Io {
+                path: rejected_dir.display().to_string(),
+                source: e,
+            })?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
+            .collect();
+        entries.sort_by_key(|e| e.file_name());
+        for entry in entries {
+            let bytes = std::fs::read(entry.path()).map_err(|e| AbError::Io {
+                path: entry.path().display().to_string(),
+                source: e,
+            })?;
+            let receipt: serde_json::Value = serde_json::from_slice(&bytes)?;
+            rejected_json.push(receipt);
+        }
+    }
+
+    print_json(&serde_json::json!({
+        "agent": agent.as_str(),
+        "pending": pending_json,
+        "rejected": rejected_json,
     }));
     Ok(())
 }

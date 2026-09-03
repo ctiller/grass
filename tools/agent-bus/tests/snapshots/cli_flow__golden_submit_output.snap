@@ -4,5 +4,6 @@ expression: out
 ---
 {
   "client_id": "golden-submit-1",
-  "outbox_path": "[outbox_path]"
+  "outbox_path": "[outbox_path]",
+  "urgent": false
 }

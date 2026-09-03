@@ -28,6 +28,17 @@ pub struct Candidate {
     pub kind: String,
     pub data: serde_json::Value,
     pub extra_refs: Vec<EventId>,
+    /// Section 2.3/2.4's urgent-flush request: "Correctness issues, review
+    /// transitions, ownership changes, and urgent broadcasts request an
+    /// urgent flush." A priority signal for the coordinator's batching
+    /// policy, not a liveness guarantee -- `list_pending` orders urgent
+    /// candidates first so a coordinator draining a mixed outbox processes
+    /// (and therefore publishes) them ahead of ordinary work, but an urgent
+    /// candidate that no coordinator ever drains is exactly as pending as
+    /// any other (gate 18: "remains visibly pending while its coordinator
+    /// is stopped").
+    #[serde(default)]
+    pub urgent: bool,
 }
 
 impl Candidate {
@@ -37,7 +48,15 @@ impl Candidate {
             kind: data.kind().to_string(),
             data: data.to_value(),
             extra_refs,
+            urgent: false,
         }
+    }
+
+    /// Marks this candidate as urgent (see the `urgent` field's doc).
+    /// Chainable: `Candidate::new(...).urgent()`.
+    pub fn urgent(mut self) -> Candidate {
+        self.urgent = true;
+        self
     }
 
     pub fn typed_data(&self) -> AbResult<EventData> {
@@ -83,9 +102,11 @@ pub fn submit(git_common_dir: &Path, client_id: &str, candidate: &Candidate) -> 
     Ok(path)
 }
 
-/// Lists every pending candidate for `agent`, oldest first by filesystem
-/// modified time -- the order the coordinator should offer them to the
-/// batch builder in, though the coordinator remains free to reorder for
+/// Lists every pending candidate for `agent`, urgent candidates first
+/// (section 2.3/2.4's urgent-flush request -- "priority input to that
+/// policy," ties broken oldest-first by filesystem modified time within
+/// each tier) -- the order the coordinator should offer them to the batch
+/// builder in, though the coordinator remains free to reorder for
 /// dependency closure.
 pub fn list_pending(git_common_dir: &Path, agent: &Agent) -> AbResult<Vec<(PathBuf, Candidate)>> {
     let dir = outbox_dir(git_common_dir, agent);
@@ -128,6 +149,10 @@ pub fn list_pending(git_common_dir: &Path, agent: &Agent) -> AbResult<Vec<(PathB
         }
         out.push((path, candidate));
     }
+    // Stable sort: within the already-established mtime order, urgent
+    // candidates move to the front without disturbing relative order among
+    // candidates of the same urgency.
+    out.sort_by_key(|(_, c)| !c.urgent);
     Ok(out)
 }
 
@@ -241,5 +266,69 @@ mod tests {
     fn remove_is_a_noop_for_a_missing_file() {
         let dir = tempfile::tempdir().unwrap();
         assert!(remove(&dir.path().join("nonexistent.json")).is_ok());
+    }
+
+    #[test]
+    fn candidate_new_defaults_to_not_urgent() {
+        let alice = a("alice");
+        assert!(!status_candidate(&alice).urgent);
+    }
+
+    #[test]
+    fn urgent_marks_the_candidate() {
+        let alice = a("alice");
+        assert!(status_candidate(&alice).urgent().urgent);
+    }
+
+    /// Gate 18's ordering half: an urgent candidate submitted *after* two
+    /// ordinary ones still comes first -- urgency, not submission time, is
+    /// the primary sort key.
+    #[test]
+    fn list_pending_puts_urgent_candidates_first_regardless_of_submission_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let alice = a("alice");
+        submit(dir.path(), "first", &status_candidate(&alice)).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        submit(dir.path(), "second", &status_candidate(&alice)).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        submit(
+            dir.path(),
+            "third-urgent",
+            &status_candidate(&alice).urgent(),
+        )
+        .unwrap();
+
+        let pending = list_pending(dir.path(), &alice).unwrap();
+        assert_eq!(pending.len(), 3);
+        assert!(
+            pending[0].0.ends_with("third-urgent.json"),
+            "{:?}",
+            pending[0].0
+        );
+        assert!(pending[0].1.urgent);
+        // Ties within a tier keep mtime order: neither ordinary candidate
+        // was reordered relative to the other.
+        assert!(pending[1].0.ends_with("first.json"), "{:?}", pending[1].0);
+        assert!(pending[2].0.ends_with("second.json"), "{:?}", pending[2].0);
+    }
+
+    /// Two urgent candidates among ordinary ones: both urgent ones sort
+    /// ahead of every ordinary one, still oldest-urgent-first between them.
+    #[test]
+    fn list_pending_keeps_multiple_urgent_candidates_ordered_among_themselves() {
+        let dir = tempfile::tempdir().unwrap();
+        let alice = a("alice");
+        submit(dir.path(), "urgent-a", &status_candidate(&alice).urgent()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        submit(dir.path(), "ordinary", &status_candidate(&alice)).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        submit(dir.path(), "urgent-b", &status_candidate(&alice).urgent()).unwrap();
+
+        let pending = list_pending(dir.path(), &alice).unwrap();
+        let kinds: Vec<&str> = pending
+            .iter()
+            .map(|(p, _)| p.file_stem().unwrap().to_str().unwrap())
+            .collect();
+        assert_eq!(kinds, vec!["urgent-a", "urgent-b", "ordinary"]);
     }
 }

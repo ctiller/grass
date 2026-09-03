@@ -565,6 +565,68 @@ mod tests {
         assert_eq!(log.len(), 3); // genesis registration + the two status events
     }
 
+    /// Gate 18, end to end through the real coordinator path: an urgent
+    /// candidate submitted *after* an ordinary one still gets the earlier
+    /// sequence number and lands first in the published stream --
+    /// `list_pending`'s urgent-first ordering (outbox.rs) actually reaches
+    /// drain_outbox's sequencing, not just a unit-level property of the
+    /// outbox listing in isolation.
+    #[test]
+    fn drain_outbox_publishes_urgent_candidates_before_ordinary_ones_submitted_earlier() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+            &repo.path().join("_genesis_wt"),
+        )
+        .unwrap();
+
+        crate::outbox::submit(
+            repo.path(),
+            "ordinary",
+            &status_candidate(&coord1, "ordinary, submitted first"),
+        )
+        .unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "urgent",
+            &status_candidate(&coord1, "urgent, submitted second").urgent(),
+        )
+        .unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            &repo.path().join("_wt"),
+        )
+        .unwrap();
+        assert!(drained.rejected.is_empty());
+
+        let reads_dir = repo.path().join("_reads");
+        let (_header, log) = crate::stream::read_stream(repo.path(), &coord1, &reads_dir).unwrap();
+        // log[0] is the genesis registration; log[1] must be the urgent
+        // candidate despite having been submitted second.
+        assert_eq!(log[1].kind, "agent.status");
+        assert_eq!(
+            log[1].data.get("note").and_then(|v| v.as_str()),
+            Some("urgent, submitted second")
+        );
+        assert_eq!(
+            log[2].data.get("note").and_then(|v| v.as_str()),
+            Some("ordinary, submitted first")
+        );
+    }
+
     /// Adversarial-review regression (Critical): before this fix, nothing
     /// validated a candidate before committing it to the append-only
     /// stream -- a semantically invalid one (e.g. acknowledging an issue
