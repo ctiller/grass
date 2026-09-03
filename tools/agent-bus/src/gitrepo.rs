@@ -155,6 +155,29 @@ pub fn push(dir: &Path, remote: &str, refspec: &str) -> AbResult<GitOutput> {
     run(dir, &["push", remote, refspec])
 }
 
+/// Push one or more explicit `<sha>:<refname>` refspecs, optionally as one
+/// `--atomic` transaction. Without `--force`, each ref update is a real
+/// remote-side compare-and-swap: the receiving `git` rejects any refspec
+/// whose new value is not a fast-forward of what it currently holds (or,
+/// for a ref that does not yet exist there, always accepts it -- the same
+/// CAS the coordinator needs is therefore already the plain push behavior,
+/// with no separate `--force-with-lease` bookkeeping required).
+pub fn push_refspecs(
+    dir: &Path,
+    remote: &str,
+    atomic: bool,
+    refspecs: &[String],
+) -> AbResult<GitOutput> {
+    let mut args: Vec<String> = vec!["push".to_string()];
+    if atomic {
+        args.push("--atomic".to_string());
+    }
+    args.push(remote.to_string());
+    args.extend(refspecs.iter().cloned());
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run(dir, &arg_refs)
+}
+
 /// Ensure a detached worktree checked out at `origin/agent-bus` exists at
 /// `worktree_path`, creating it if necessary (AGENT_BUS.md section 2: "Multiple
 /// agents sharing one clone use detached worktrees").

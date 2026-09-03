@@ -10,6 +10,7 @@ mod exclusive;
 mod frontier;
 mod gitrepo;
 mod outbox;
+mod publish;
 mod registry;
 mod scalars;
 mod state;
