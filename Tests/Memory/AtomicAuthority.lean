@@ -16,7 +16,7 @@ coverage without being any, so both were deleted.
 The reasoning offered for the deletion went one step too far. It said the rule had
 nothing to constrain, and review pointed out that this is false: `Permission.Permits`
 is the sole rights gate on the chain `MemoryState.AuthorizedAt` →
-`MemoryState.Granted` → `AuthorityProvider.loan.refuses` → `Grass/Op/Step.lean`,
+`MemoryState.Granted` → `Grass/Op/Step.lean`'s `refusalOf`,
 and it had no clause about atomicity. (The chain was named as the deleted `Authorizes` function and
 `MemoryState.GrantedOfKind` until review checked: the first was deleted, and the
 second has no caller under `Grass/` — the provider calls `Granted`, which is
@@ -103,7 +103,7 @@ theorem the_lends_succeed :
 **The holder of atomic authority may not perform an ordinary write.**
 
 §3's sentence, at the gate. `GrantedOfKind` is what
-`Grass/Op/LoanAuthority.lean`'s holder test consults, so this is the transition's
+the transition's holder test consults, so this is the transition's
 own question asked of the map.
 -/
 theorem an_atomic_grant_does_not_authorize_an_ordinary_write :

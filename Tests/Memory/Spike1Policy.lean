@@ -1,5 +1,5 @@
+import Grass.Op.Step
 import Tests.Memory.Spike1Block
-import Grass.Op.LoanAuthority
 
 /-!
 # The Spike 1 reference set, stepped
@@ -95,12 +95,12 @@ def indeterminateByte : MachineState → (d : AccessDescriptor) → Nat → Byte
   fun _ _ _ => 0x00
 
 /-- The policy. It adopts the standard loan rule rather than writing one, which is
-what `Grass/Op/LoanAuthority.lean` exists for. -/
+what `Grass/Op/Step.lean`'s `refusalOf` does for every profile. -/
 def policy : StepPolicy :=
   { profile := profile
     requiredFacets := [.memoryEffects, .faults, .restartability, .ordering]
     oracle := .ofMemory storedBytes indeterminateByte
-    authorities := [AuthorityProvider.loan]
+    authorities := []
     violationClassesDeclared := by decide
     vocabularyWellFormed := by decide }
 

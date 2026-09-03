@@ -235,7 +235,7 @@ theorem a_conflicting_write_loan_is_refused :
 /-- **A second loan to the same holder is not a conflict.** §7.3's rule is about
 distinct concurrent contexts, and without the holder clause a context could not
 hold two grants over its own bytes — which is the idiom
-`Grass/Op/LoanAuthority.lean` endorses for "the owner may still read", and which
+the access-time rule endorses for "the owner may still read", and which
 was therefore mutually exclusive with any other grant on those bytes. -/
 theorem a_second_loan_to_the_same_holder_is_accepted :
     (lentHead.issue? secondLoan loanOfHead).isSome := by decide

@@ -205,6 +205,9 @@ ALLOWED = {
     "AllocationRecord.initialized",
     "not_permitsOrdinaryWrite_of_not_exclusive",
     "loan_refuses_only_the_frozen",
+    # Deleted with `AuthorityProvider.loan` itself, when §3's rule moved into the
+    # transition. Cited only as history, in a sentence that says it is gone.
+    "loan_refuses_the_frozen",
     "MemoryState.grant",
     "faultPointOutOfRange",
 }

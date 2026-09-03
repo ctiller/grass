@@ -409,7 +409,7 @@ applied at issue time.
 
 **Distinct holders.** §7.3's rule is about distinct contexts, and without the
 clause a context could not hold two grants over its own bytes — which is the
-idiom `Grass/Op/LoanAuthority.lean` endorses for "the owner may still read", and
+idiom the access-time rule endorses for "the owner may still read", and
 which was therefore mutually exclusive with any other grant on those bytes.
 
 **`Meets` in both directions**, because `Meets` is asymmetric and neither grant is
@@ -434,11 +434,11 @@ door, and review used it twice — once through a `grant` function and once thro
 public field that function was deleted in favour of. `issue?` is the only way in now
 and `MemoryState.mk` is private.
 
-The other is not closable at issue time, and `Grass/Op/LoanAuthority.lean`'s
+The other is not closable at issue time, and `Grass/Op/Step.lean`'s `refusalOf`
 access-time rule is what covers it. Declaring an alias *after* two
 non-conflicting grants are issued makes them conflict, with nothing re-examined, and
 §7.5 makes declaring one a real transition. The pair that must never *act* is stopped
-at access time by `Grass/Op/LoanAuthority.lean`, which is where the guarantee lives;
+at access time by `Grass/Op/Step.lean`'s `refusalOf`, which is where the guarantee lives;
 this is the cheaper check that stops the honest caller earlier.
 -/
 def LoanConflicts (state : MemoryState) (a b : AuthorityGrant) : Prop :=
@@ -470,7 +470,7 @@ authority over bytes the lender retains".
 Three ways to have it, and the third is the one that took thinking about.
 
 Nothing is held over the bytes at all — the unlent case, which is how a first grant is
-ever issued, and which matches `Grass/Op/LoanAuthority.lean`'s reading that unheld
+ever issued, and which matches the access-time rule's reading that unheld
 bytes are not this rule's business. Or the lender holds a grant covering the range
 with rights that supply what is being lent, which is `Permission.Grants` at the
 authority layer. Or every grant outstanding over the bytes was lent *by this lender* —
@@ -487,7 +487,7 @@ the first disjunct, and it is the same rule a legitimate owner's first loan need
 with no owner in `AllocationRecord`, the model cannot tell the two apart. What it does
 stop is stealing from a lender: once a context has lent bytes out, no other context can
 issue a grant over them, which is what closed review's permanent-seizure state. The
-residue is the missing-owner gap `Grass/Op/LoanAuthority.lean` records from the other
+residue is the missing-owner gap `Grass/Op/Step.lean`'s `refusalOf` records from the other
 side and `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records as owed.
 -/
 def MayLend (state : MemoryState) (grant : AuthorityGrant) : Prop :=
@@ -540,7 +540,7 @@ its own provenance claims.
 
 What this is **not** is the guarantee that no conflicting pair can act. Declaring an
 alias after two non-conflicting grants are issued makes them conflict with nothing
-re-examined, and §7.5 makes that a real transition. `Grass/Op/LoanAuthority.lean`
+re-examined, and §7.5 makes that a real transition. `Grass/Op/Step.lean`'s `refusalOf`
 reads the map it finds; this is the cheaper check that stops the honest caller
 earlier.
 

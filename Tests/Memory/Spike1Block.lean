@@ -239,7 +239,7 @@ theorem the_agents_count_is_not_the_stored_zero :
 
 /-- The agent's write is not refused: the slot is live, in bounds, writable, and the
 agent's own context is not something `denialOf` reads — authority is the loan rule's
-question and `Grass/Op/LoanAuthority.lean` answers it. -/
+question and `Grass/Op/Step.lean`'s `refusalOf` answers it. -/
 theorem the_agent_write_is_not_refused :
     denialOf stateAtCall agentWrite = Option.none := by decide
 

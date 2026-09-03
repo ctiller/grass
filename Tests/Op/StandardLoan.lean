@@ -1,30 +1,30 @@
-import Grass.Op.LoanAuthority
 import Tests.Op.FakeIsa
 
 /-!
-# A profile adopting the standard loan provider
+# A profile with no authority providers at all
 
-`Tests/Op/FakeIsa.lean` writes its own loan provider, which was the right thing to
-do when the point was to demonstrate that the seam accepts one. It is not the right
-thing for every profile to do, and `Grass/Op/LoanAuthority.lean` exists so it need
-not be.
+`Tests/Op/FakeIsa.lean` writes its own providers, which was the right thing to do
+when the point was to demonstrate that the seam accepts one. This file used to adopt
+a *standard* loan provider, `Grass/Op/LoanAuthority.lean`, so that a profile need not
+reinvent §3's rule — and review then showed what that shape costs:
+`StepPolicy.authorities` defaults to `[]`, so a profile that declared no providers
+got no authority enforcement at all, and an operation could mint a grant through
+`step` and the next ordinary store could walk over it.
 
-This drives the standard provider end to end: a policy that differs from the seam
-fixture's only in which authority providers it carries, stepping the same
-operations. What it checks is that the loan rule holds *through `step`* — the
-`Loan.lean` theorems are about the map, and a rule proved about a map that the
-transition does not consult would be the defect this branch has found repeatedly.
+§3's rule is `Grass/Op/Step.lean`'s `refusalOf` now, ahead of the provider search,
+and the provider is deleted. So this file's policy is the seam fixture's with *no*
+providers, and every theorem below holds under it — which is the demonstration: the
+loan rule holds through `step` for a profile that asked for nothing.
 -/
 
 namespace Tests.Op.StandardLoan
 
 open Grass.Core Grass.Memory Grass.Op Grass.Tests.FakeIsa
 
-/-- The seam fixture's profile, with the standard loan rule in place of its
-hand-written providers. -/
+/-- The seam fixture's profile with its hand-written providers removed. -/
 def policy : StepPolicy :=
   { Grass.Tests.FakeIsa.policy with
-    authorities := [AuthorityProvider.loan]
+    authorities := []
     violationClassesDeclared := by decide }
 
 /-- Step an `Alpha` operation under it. -/
@@ -70,10 +70,7 @@ because the grant map was consulted by one optional provider and by nothing else
 Every law in `Grass/Memory/Loan.lean` was conditioned on a policy field. The rule is
 `refusalOf`'s now, so this policy enforces it too, and the theorems below are the
 demonstration. -/
-def nakedPolicy : StepPolicy :=
-  { Grass.Tests.FakeIsa.policy with
-    authorities := []
-    violationClassesDeclared := by decide }
+def nakedPolicy : StepPolicy := policy
 
 /-- Step an `Alpha` operation with no providers listed. -/
 def nakedStep (state : MachineState) (op : Alpha) : StepOutcome :=

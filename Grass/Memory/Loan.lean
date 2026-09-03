@@ -42,7 +42,7 @@ deleted, because a vacuous theorem reads as coverage.
 The reasoning offered for that deletion went one step too far, and review caught it:
 it said the rule had nothing to constrain. `Permission.Permits` is the sole rights
 gate on the chain `MemoryState.AuthorizedAt` → `MemoryState.Granted` →
-`Grass/Op/LoanAuthority.lean` → `step`, and it had no clause about atomicity, (The chain was named as the deleted `Authorizes` function and
+`Grass/Op/Step.lean`'s `refusalOf` → `step`, and it had no clause about atomicity, (The chain was named as the deleted `Authorizes` function and
 `MemoryState.GrantedOfKind` until review checked: the first was deleted, and the
 second has no caller under `Grass/` — the provider calls `Granted`, which is
 kind-blind on purpose, because `Grass/Op/Step.lean` composes providers conjunctively
@@ -96,7 +96,7 @@ authority — all above.
 
 ## What consumes `AuthorityState`
 
-`Grass/Op/LoanAuthority.lean`'s provider, on every access. It was theorems and
+`Grass/Op/Step.lean`'s `refusalOf`, on every access. It was theorems and
 nothing else for a round, defended on the grounds that
 `loan_refuses_only_the_frozen` bridged the summary to the transition — and that
 theorem mentioned neither `authorityOf` nor `frozen`, and the "the two agree" it was
@@ -154,7 +154,7 @@ inductive AuthorityState where
   Weaker than §3's sentence about exclusive authority, which is about the loan map
   being empty and is `MemoryState.Exclusive`. A context holding the only grant gets
   this state while that map is non-empty. The two are different questions and
-  `Grass/Op/LoanAuthority.lean` asks both. -/
+  `Grass/Op/Step.lean`'s `refusalOf` asks both. -/
   | exclusive
   /-- Atomic shared access: every outstanding grant held by another context conveys
   atomic access only, and at least one of them may write.
@@ -435,7 +435,7 @@ while loans exist"; and otherwise every outstanding grant is read-only, which is
 §3's shared immutable access.
 
 **It takes the context, and an earlier version did not.** Without it a context that
-lent to itself was reported frozen while `Grass/Op/LoanAuthority.lean` let its
+lent to itself was reported frozen while the access-time rule let its
 write through — the two halves of the model contradicting each other, which review
 demonstrated. A loan you hold yourself does not freeze you out of your own bytes;
 that is what holding it means.
@@ -444,7 +444,7 @@ that is what holding it means.
 only when the relevant map is empty, and `Exclusive` is that sentence. This is
 weaker: a context holding the only grant over the bytes gets `exclusive` while the
 map is non-empty. The two are deliberately different questions — one is about the
-map, one is about what this context may do — and `Grass/Op/LoanAuthority.lean`
+map, one is about what this context may do — and `Grass/Op/Step.lean`'s `refusalOf`
 consults both, so neither substitutes for the other.
 
 Like `outstandingLoans` it is a function of the state, so lending freezes,

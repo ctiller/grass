@@ -1329,7 +1329,10 @@ earlier version of this section cited `loan_refuses_only_the_frozen` as the brid
 between the two; that theorem's statement mentioned neither `authorityOf` nor
 `frozen`, its proof was a projection of the provider's own definition, and the
 "exactly" was false in both directions. Three independent reviewers found it.
-`loan_refuses_the_frozen` is the direction that carries the guarantee, stated.
+`loan_refuses_the_frozen` was the direction that carries the guarantee, stated — and
+it is deleted with the provider it was about. The guarantee is `refusalOf`'s own
+`authorityOf` clause now, and `refusalOf_refuses_the_unauthorized` is the theorem,
+quantified over the policy.
 
 `returnLoan?` refuses a return by a context that does not hold the loan. §3 says
 which loan a return consumes, not who may return it, and the unchecked version let
@@ -1737,10 +1740,17 @@ refuses everything.
   theorem, not an observation — stated as an observation, it was false within the
   hour.
 
-  `AuthorityProvider.loan` is now genuinely redundant: both its clauses are in
-  `refusalOf` verbatim, ahead of the provider search. Two encodings of one rule is
-  what [FOUNDATION.md](FOUNDATION.md) law 11 forbids, and deleting it means rewriting
-  eighteen citations across five modules. That is the next thing to do here.
+  `AuthorityProvider.loan` is deleted, with `Grass/Op/LoanAuthority.lean`. Both its
+  clauses were in `refusalOf` verbatim, which is two encodings of one rule and
+  [FOUNDATION.md](FOUNDATION.md) law 11 forbids it; nineteen citations across eight
+  files are repointed at `refusalOf`, and `Tests/Op/StandardLoan.lean` — which existed
+  to drive the standard provider — now drives a policy with *no* providers, which is
+  a better demonstration than the one it replaced: every theorem in it holds for a
+  profile that asked for nothing.
+
+  Its seven theorems went with it. They were about a provider's `refuses` returning
+  `true`; what replaced them is `refusalOf_refuses_the_unauthorized`, which is
+  quantified over the policy and so says something the seven could not.
 
   The deeper half of review's finding stands and is not closed: `AuthorityProvider` is
   `refuses : MachineState → AccessDescriptor → Bool` with no locality, monotonicity or
