@@ -2306,3 +2306,38 @@ is a `processGeneration`. Nothing ever allocates a `restartIncarnation`.
 Either the kind is redundant with `processGeneration` — in which case §3's list
 names one thing twice — or a restart owes a second identity that this layer does
 not allocate. Needs a ruling. Low weight: no theorem depends on it either way.
+
+### 10.40 §4's lookup uniqueness is derivable, if spec equality is transitive
+
+`docs/PROCESS.md` §4 gives `StandardRealizerRegistry` a `unique` field — one
+specification, one key — and gives `ExactStandardRealizerLookup` a second
+`unique` of its own, over every entry matching the specification being looked
+up.
+
+`Grass/Process/Sequential/Standard.lean`'s `lookupUniquenessIsRedundant` derives
+the second from the first, using symmetry and transitivity of the spec equality
+and nothing else. So one of the two fields is noise — *if*
+`DefinitionalOrCanonicalSpecEquality` is an equivalence.
+
+It is named for a disjunction, and a disjunction of two equivalences need not be
+transitive: "definitionally equal, or canonically equal" can relate `a` to `b`
+one way and `b` to `c` the other with nothing relating `a` to `c`. If that is
+the intended reading the two fields are independent and §4 is right to state
+both. Needs a ruling on which.
+
+### 10.41 §4's registry law is about keys, not about programs
+
+The same registry's `unique` says two entries for one specification share a
+*key*. It does not say they are the same entry, so two entries may share a key,
+share a specification, and register different realizations — and §4's stated
+law holds.
+
+`Tests/Process/StandardFixtures.lean`'s
+`section_four_uniqueness_alone_permits_two_realizations` is that list.
+`ProcessRealization.standard (lookupExact spec)` would then be one expression
+denoting whichever of two programs the lookup returned, which is exactly what §4
+introduces the registry to prevent.
+
+`StandardRealizerRegistry.keysDistinct` is added here and is not in §4's
+declaration. Needs ratification, or an argument that key uniqueness is meant to
+be enforced by whatever produces the keys.
