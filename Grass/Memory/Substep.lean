@@ -98,8 +98,10 @@ end FaultVisibility
 One step of an operation.
 
 `compute` covers a step that can fault without accessing memory. It carries the
-faults it may raise, because a compute step that cannot fail does nothing
-observable and has no reason to be in the sequence.
+faults it may raise: a compute step with no faults would do nothing observable
+and have no reason to be in the sequence. That is an intended invariant of how
+`Substep.compute` is used rather than something the type rules out — an empty
+fault list is representable.
 -/
 inductive Substep where
   /-- The step performs this memory access. -/

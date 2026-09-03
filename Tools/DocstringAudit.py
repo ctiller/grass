@@ -2,9 +2,15 @@
 """Check that strong implementation-comment claims name their enforcement.
 
 Scope: module comments and the docstrings of definitions, structures, classes,
-and inductives. A theorem's own docstring is exempt, because the theorem beneath
-it *is* the enforcement -- restating a proved statement in English is not drift.
-Unbacked prose hides where there is no adjacent proof.
+inductives -- and theorems. A theorem's own docstring was meant to be exempt, on
+the grounds that the theorem beneath it *is* the enforcement, and this file said
+so for a long time while never implementing it: the `SELF_NAMING` pattern was
+defined and never used. A reviewer found the dead constant.
+
+The exemption is not reinstated. It would be the wrong direction: a theorem's
+docstring routinely claims more than its statement proves -- that is how
+`decodeInsn_toBytes` came to be described as evidence about x86 -- and the
+check is cheap. The docstring now describes what the code does.
 
 docs/MEMORY_IMPLEMENTATION_PLAN.md section 3.10:
 
@@ -72,10 +78,31 @@ HEDGES = (
     "cannot be erased or masked",
 )
 
-# A declaration whose docstring makes the claim *is* the enforcement, so a
-# theorem's own comment naming its own statement is not drift. Definitions,
-# structures, and module comments are where unbacked prose hides.
-SELF_NAMING = re.compile(r"^\s*(@\[[^\]]*\]\s*)?(private\s+)?(theorem|instance|example)")
+# Hedges match as whole words. As bare substrings they matched inside ordinary
+# x86 vocabulary: "M8" inside `imm8`, "M3" inside `imm32`, "M6" inside `imm64`,
+# and "owed" inside `Allowed`. A reviewer found three real sentences exempted
+# for no reason but the letters in an operand size -- in an x86 tree that was
+# only going to grow.
+# Hedges match as whole words, not as bare substrings.
+#
+# As substrings they matched inside ordinary vocabulary: "owed" inside
+# `Allowed`, and the milestone labels "M3", "M6" and "M8" inside `imm32`,
+# `imm64` and `imm8`. A reviewer found three sentences exempted for no reason
+# but the letters in an operand size, which in an x86 tree was only going to
+# get worse.
+#
+# The milestone labels stay. They refer to the milestones of
+# `docs/MEMORY_IMPLEMENTATION_PLAN.md`, so a sentence naming one is describing
+# work that is not built yet -- which is a hedge in exactly the sense this list
+# means. The reviewer read them as review scratch and this file briefly agreed;
+# both were wrong, and removing them would have suppressed a legitimate
+# exemption in `Grass/Memory/Event.lean`.
+HEDGE_RE = re.compile(
+    "|".join(
+        r"\b" + re.escape(h.lower()).replace(r"\ ", " ") + r"\b"
+        for h in HEDGES
+    )
+)
 
 # A backticked identifier is the "names the enforcing type or theorem" part.
 IDENT = re.compile(r"`([A-Za-z_][A-Za-z0-9_.?!']*)`")
@@ -143,7 +170,7 @@ def check(path: Path, known: set[str]) -> list[str]:
             lowered = sentence.lower()
             if not any(word in lowered for word in CLAIM_WORDS):
                 continue
-            if any(hedge.lower() in lowered for hedge in HEDGES):
+            if HEDGE_RE.search(lowered):
                 continue
             # A passage quoted from a normative document is that document's
             # claim, not this module's. It is cited, which is the point.

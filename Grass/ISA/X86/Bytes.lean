@@ -60,8 +60,8 @@ def le32 (v : BitVec 32) : ByteSeq :=
 /-- A 64-bit value as eight little-endian bytes.
 
 Only `mov r64, imm64` needs this: it is the one form in this profile whose
-immediate is eight bytes, and it is reached only when `REX.W` is set on a
-`B8+rd` opcode. See `Grass.ISA.X86.OpcodeSpec.immSizeFor`. -/
+immediate is eight bytes, and `Grass.ISA.X86.OpcodeSpec.immSizeFor` is what
+selects it, from the opcode's promotion flag and the prefix's `W` bit. See `Grass.ISA.X86.OpcodeSpec.immSizeFor`. -/
 def le64 (v : BitVec 64) : ByteSeq :=
   [BitVec.extractLsb' 0 8 v, BitVec.extractLsb' 8 8 v,
    BitVec.extractLsb' 16 8 v, BitVec.extractLsb' 24 8 v,
