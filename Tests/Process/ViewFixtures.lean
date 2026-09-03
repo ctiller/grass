@@ -4,10 +4,16 @@ import Tests.Process.M1CorrectFixtures
 # A process that has a view
 
 `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.56: `ProcessSpec.view` is `none` in
-every specification in the repository — `view := some` had zero occurrences — so
-`ProcessCorrect.viewAccepts` is discharged by `absurd hasView` in all five
-correctness fixtures and `ProcessAcceptance.ViewAccepts` is `fun _ _ => True` in
-all five. `ViewFacet` was constructed nowhere. `docs/PROCESS.md` §2's "an
+every specification the build elaborates, so `ProcessCorrect.viewAccepts` is
+discharged by `absurd hasView` in all five correctness fixtures and
+`ProcessAcceptance.ViewAccepts` is `fun _ _ => True` in all five. `ViewFacet` was
+constructed nowhere.
+
+(An earlier version of this note said `view := some` "had zero occurrences".
+`Spikes/4_Web_Server/Process.lean` and `Spikes/5_Spinning_Cube/Process.lean` both
+write it — `Spikes` is not a `lakefile.toml` target, so none of it elaborates.
+A reviewer caught the overstatement; the claim is about the build, not the
+repository.) `docs/PROCESS.md` §2's "an
 optional view facet is pure — it may be evaluated, duplicated, coalesced or
 discarded" had no witness that it can be any of those.
 
@@ -20,14 +26,29 @@ same two-state process, projecting how many steps of work remain. Nothing about
 the process changed, which is the point — the view facet is *pure*, and a process
 that acquires one is the same process.
 
-## What makes the acceptance non-vacuous
+## What makes the obligation falsifiable
 
 `ViewAccepts := fun _ _ => True` is what the five existing fixtures use, and it
-asks nothing. Here it is the **image of the render**: a rendered view is
-acceptable exactly when some state renders to it. That is stateable for any
-facet, it is what `viewAccepts` can always discharge, and it genuinely refuses
-things — `remaining` renders into `{0, 1}` and
-`a_view_no_state_renders_is_refused` is `2` being turned away.
+asks nothing.
+
+The first version of this file used the **image of the render** — acceptable
+exactly when some state renders to it — and a reviewer showed that is no better
+for the *obligation*: `viewAccepts` is asked for
+`ViewAccepts facet (facet.render state)`, and `⟨state, rfl⟩` discharges it for
+any facet, any render, any spec. The reviewer compiled a bogus facet the spec
+does not carry and had it accepted, and mutated `render` to a constant without
+breaking anything. The predicate refused `2`; the *obligation* could not fail.
+
+What is here now is a **bound**: at the facet this specification carries, a
+rendered view is at most one step of remaining work. It is falsifiable in the
+way that matters — mutate `render` and `gaugeCorrect.viewAccepts` stops
+elaborating, which the image formulation did not.
+
+It is stated as `∀ same : facet = remaining, …` because `ViewAccepts` is given a
+facet and a value and nothing else, so a bound on *this* specification's view has
+to name the facet to say anything about the value's type. At any other facet it
+asks nothing, and `the_bound_is_only_about_this_facet` says so rather than
+leaving a reader to find out.
 -/
 
 namespace Grass.Process.Tests.View
@@ -75,18 +96,19 @@ theorem gauge_has_a_view : gauge.view = some remaining := rfl
   TerminalRemainderLaw.strict gauge
 
 /--
-An acceptance whose view clause is the image of the render.
+An acceptance whose view clause bounds the rendered value.
 
 `fun _ _ => True` is what the five view-less fixtures use and it asks nothing.
-This asks that an acceptable view is one the process can actually be in — which
-is exactly what `ProcessCorrect.viewAccepts` promises, and which refuses every
-value outside the render's range.
+This asks that a view of `gauge` reports at most one step of remaining work,
+which is a fact about `remaining.render` and therefore something
+`ProcessCorrect.viewAccepts` can fail to establish.
 -/
 @[reducible] def gaugeAcceptance : ProcessAcceptance gauge where
   TerminalAccepts := fun _ _ => True
   TraceAccepts := fun _ => True
   DemandsWellFormed := fun _ => True
-  ViewAccepts := fun facet value => ∃ state, facet.render state = value
+  ViewAccepts := fun facet value =>
+    ∀ same : facet = remaining, (same ▸ value : remaining.View) ≤ 1
   Demanded := fun _ => False
   terminalRemainder := gaugeRemainder
 
@@ -149,20 +171,47 @@ def gaugeCorrect : ProcessCorrect gauge gaugeAcceptance where
     rw [isTerminal ()] at working
     exact absurd working (by decide)
   viewAccepts := by
-    intro facet _ state _
-    exact ⟨state, rfl⟩
+    intro facet _ state _ same
+    subst same
+    show remaining.render state ≤ 1
+    cases state <;> decide
   observationsAccept := by intros; trivial
   progress := gaugeProgress
 
 /--
 The obligation, spent at the facet the specification actually carries.
 
-`gauge_has_a_view` is what makes this a use of the field rather than a use of its
-vacuity: the five existing correctness fixtures cannot state this theorem at all.
+`gauge_has_a_view` is what picks that facet out; the five existing correctness
+fixtures cannot state this theorem at all, because there is no facet to state it
+about.
 -/
 theorem the_render_is_accepted (state : Bool) :
     gaugeAcceptance.ViewAccepts remaining (remaining.render state) :=
   gaugeCorrect.viewAccepts remaining gauge_has_a_view state trivial
+
+/--
+**And what it says is a bound the render has to satisfy.**
+
+The whole chain, ending in a fact about `remaining.render` rather than in an
+`∃` witnessed by its own argument. Change `render` and this stops being true, and
+`gaugeCorrect` stops elaborating with it.
+-/
+theorem the_bound_is_real (state : Bool) : remaining.render state ≤ 1 :=
+  the_render_is_accepted state rfl
+
+/--
+And the honest limit of it: at a facet `gauge` does not carry, this acceptance
+asks nothing at all.
+
+`ViewAccepts` receives a facet and a value of *that facet's* view type, so a
+bound on a particular view has to name the facet before it can mention the value.
+Saying so is better than a heading claiming more than the clause delivers, which
+is what the first version of this file did.
+-/
+theorem the_bound_is_only_about_this_facet
+    (facet : ViewFacet Bool) (different : facet ≠ remaining) (value : facet.View) :
+    gaugeAcceptance.ViewAccepts facet value :=
+  fun same => absurd same different
 
 /-- Working renders to one step remaining. -/
 theorem working_renders_one : remaining.render false = 1 := rfl
@@ -171,15 +220,14 @@ theorem working_renders_one : remaining.render false = 1 := rfl
 theorem finished_renders_zero : remaining.render true = 0 := rfl
 
 /--
-**And a view no state renders is refused.**
+**And a view reporting two steps of work is refused.**
 
-What `ViewAccepts := fun _ _ => True` cannot say. `remaining` renders into
-`{0, 1}`, so a claim that this process has two steps of work left is not an
-acceptable view of it — and the acceptance says so rather than shrugging.
+What `ViewAccepts := fun _ _ => True` cannot say: this process is never two steps
+from finishing, so a view claiming it is is not an acceptable view of it.
 -/
 theorem a_view_no_state_renders_is_refused :
     ¬ gaugeAcceptance.ViewAccepts remaining 2 := by
-  rintro ⟨state, rendered⟩
-  cases state <;> exact absurd rendered (by decide)
+  intro accepted
+  exact absurd (accepted rfl) (by decide)
 
 end Grass.Process.Tests.View

@@ -24,8 +24,13 @@ field now says the destination *gained* an occurrence carrying this message.
 `the_reroute_lands` is the cross-ledger obligation
 `Grass/Process/Network/Escrow.lean` records and cannot discharge, discharged.
 
-`a_reroute_to_the_same_session_is_refused` is the other half: `elsewhere` is what
-stops a "reroute" that names its own session and therefore moves nothing.
+`a_reroute_to_the_same_session_is_refused` is the other half — and it is a
+*theorem* of the structure rather than a field of it. `Reroutes.elsewhere` used
+to be a field claiming that without it "resolving an occurrence as `.rerouted` to
+the session it is already on would satisfy `arrives` from the ledger it is
+leaving". Local adversarial review derived it instead, from `wasOutstanding`,
+`nowResolved` and `destinationResolvesNothing`: the claim stopped being true when
+that last field went in, and nothing noticed. §10.92.
 
 ## And what building it found
 
@@ -63,7 +68,7 @@ def sidewire : serverTopology.ChannelId () where
   epoch := ⟨.channelEpoch, 1⟩
   isEpoch := rfl
 
-/-- And it is a different session, which is what `Reroutes.elsewhere` wants. -/
+/-- And it is a different session, which is what `Reroutes.elsewhere` concludes. -/
 theorem sidewire_ne_wire : sidewire ≠ wire := by
   intro same
   have epochs := congrArg (fun session => session.epoch.carrier) same
@@ -220,7 +225,6 @@ theorem the_reroute : serverPlan.Reroutes sent afterReroute () wire escrowed sid
         cancelRequestMonotone := by
           intro occurrence requested
           exact absurd requested (by simp [pendingLedger]) }
-  elsewhere := sidewire_ne_wire
   arrives := by
     refine ⟨arrival, ?_, ?_, arrival_carries_the_message⟩
     · show arrival ∉ (ledgerAt false sidewire).created
@@ -286,10 +290,12 @@ theorem the_reroute_lands :
 /--
 **And a reroute that names its own session is refused.**
 
-`elsewhere` is the field that makes a reroute a movement. Without it, resolving
-an occurrence as `.rerouted` to the session it is already on would satisfy
-`arrives` from the ledger it is leaving, and `ReroutesLand` would hold with
-nothing having moved anywhere.
+By `Reroutes.elsewhere`, which is a theorem: a reroute to its own session would
+need the occurrence unresolved there (`destinationResolvesNothing` carries
+`wasOutstanding` forward) and resolved there (`nowResolved`) at once. Stated at
+these worlds because a refusal nothing can be stated at is not a refusal — but
+the theorem holds at every plan and every pair of worlds, which is the stronger
+fact.
 -/
 theorem a_reroute_to_the_same_session_is_refused
     (rerouted : serverPlan.Reroutes sent afterReroute () wire escrowed wire) : False :=

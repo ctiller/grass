@@ -1004,8 +1004,6 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
   the destination. -/
   createsNothing : CreatesNothing
     (before.inFlight edge session) (after.inFlight edge session)
-  /-- A reroute goes somewhere else. -/
-  elsewhere : destination ≠ session
   /--
   **And the payload arrives at the destination.**
 
@@ -1046,6 +1044,38 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
   /-- Both sessions' escrow, and nothing else. -/
   scope : plan.TouchesOnly before after
     (fun fragment => fragment = .escrow edge session ∨ fragment = .escrow edge destination)
+
+namespace Reroutes
+
+variable {plan}
+
+/--
+**A reroute goes somewhere else.**
+
+This was a field, `elsewhere`, and local adversarial review showed it is a
+theorem: `wasOutstanding` says the occurrence is unresolved here,
+`destinationResolvesNothing` says the destination's ledger resolves nothing this
+step, and `nowResolved` says it *is* resolved here afterwards. A reroute to its
+own session would need all three at once.
+
+The field's docstring claimed something else — that without it "resolving an
+occurrence as `.rerouted` to the session it is already on would satisfy `arrives`
+from the ledger it is leaving". That was true of an earlier `Reroutes`; it stopped
+being true when `destinationResolvesNothing` went in, and nothing noticed.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.92.
+-/
+theorem elsewhere {before after edge session occurrence destination}
+    (rerouted : plan.Reroutes before after edge session occurrence destination) :
+    destination ≠ session := by
+  intro same
+  subst same
+  have unresolved : (after.inFlight edge destination).resolution occurrence = none := by
+    rw [rerouted.destinationResolvesNothing occurrence]
+    exact rerouted.wasOutstanding.2
+  rw [rerouted.nowResolved] at unresolved
+  exact absurd unresolved (by intro equal; cases equal)
+
+end Reroutes
 
 /--
 A channel dies, taking its session with it.
