@@ -58,16 +58,24 @@ pub struct DrainResult {
 /// dropped and not left stuck in the outbox blocking every later candidate
 /// from that agent's contiguous sequence.
 ///
-/// This validates only against what is already *locally* known, not a
-/// fresh remote probe -- a real, disclosed limitation: a candidate that is
-/// actually valid but looks invalid only because this host's local view is
-/// stale will be rejected and must be resubmitted, rather than the
-/// coordinator silently fetching first. `sync::synced_snapshot` composed in
-/// front of this call is how a caller avoids that.
+/// This validates against what is already *locally* known by default, not a
+/// fresh remote probe -- ordinarily a real, disclosed limitation: a
+/// candidate that is actually valid but looks invalid only because this
+/// host's local view is stale will be rejected and must be resubmitted,
+/// rather than the coordinator silently fetching first. Gate 17 carves out
+/// an exception for currency-sensitive kinds (`requires_synced_snapshot`:
+/// merge authorization, schema/merge-engine activation, an all-active or
+/// required-ack broadcast audience, or a reassignment) -- for those, this
+/// function fetches from `remote` first and validates the *entire* batch
+/// against that freshly-synced state (a fresher view never hurts an
+/// ordinary candidate either), and fails any currency-sensitive candidate
+/// closed with the fetch's own error if that fetch itself fails, rather
+/// than silently falling back to a stale cached cut for just those.
 ///
 /// `host`/`coordinator_custody_epoch` identify the caller's own claimed
 /// custody, checked against the current registry epoch before anything is
 /// written (gate 6/7's precondition, via `registry::authorize_stream_write`).
+#[allow(clippy::too_many_arguments)]
 pub fn drain_outbox(
     repo: &Path,
     git_common_dir: &Path,
@@ -75,10 +83,27 @@ pub fn drain_outbox(
     host: &Short,
     coordinator_custody_epoch: u64,
     worktrees_dir: &Path,
+    remote: &str,
 ) -> AbResult<DrainResult> {
     let pending = crate::outbox::list_pending(git_common_dir, agent)?;
     if pending.is_empty() {
         return Ok(DrainResult::default());
+    }
+
+    // Fetch first, before reading anything else, when the batch needs it --
+    // so `epoch` below (and `state`) reflect the same freshly-synced cut
+    // consistently, rather than mixing a fresh `state` with a registry
+    // epoch read moments earlier from a possibly-older local tip.
+    let needs_fresh = pending
+        .iter()
+        .any(|(_, c)| c.typed_data().is_ok_and(|d| requires_synced_snapshot(&d)));
+    let mut fresh_sync_err: Option<String> = None;
+    let mut fresh_state = None;
+    if needs_fresh {
+        match crate::sync::synced_snapshot(repo, remote, &worktrees_dir.join("_validate_synced")) {
+            Ok(snap) => fresh_state = Some(snap.state),
+            Err(e) => fresh_sync_err = Some(e.to_string()),
+        }
     }
 
     let registry_tip = crate::registry::read_registry_tip(repo)?
@@ -86,7 +111,10 @@ pub fn drain_outbox(
     let epoch = crate::registry::read_epoch(repo, &registry_tip, &worktrees_dir.join("_epoch"))?;
     crate::registry::authorize_stream_write(&epoch, agent, host, coordinator_custody_epoch)?;
 
-    let mut state = crate::sync::cached_snapshot(repo, &worktrees_dir.join("_validate"))?.state;
+    let mut state = match fresh_state {
+        Some(s) => s,
+        None => crate::sync::cached_snapshot(repo, &worktrees_dir.join("_validate"))?.state,
+    };
 
     let existing_tip = crate::stream::read_stream_tip(repo, agent)?;
     let mut next_seq = if let Some(tip) = &existing_tip {
@@ -107,6 +135,25 @@ pub fn drain_outbox(
     let mut rejected = Vec::new();
     for (path, candidate) in &pending {
         let data = candidate.typed_data()?;
+        // Gate 17: fail closed rather than validate a currency-sensitive
+        // candidate against a stale cached cut just because the fresh probe
+        // above failed -- reject it outright, with the fetch's own error,
+        // instead of silently falling back the way an ordinary candidate
+        // does.
+        if let Some(fetch_err) = &fresh_sync_err {
+            if requires_synced_snapshot(&data) {
+                let reason = format!(
+                    "requires a current-as-of-remote-probe view (gate 17) but the fetch failed: \
+                     {fetch_err}"
+                );
+                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+                rejected.push(RejectedCandidate {
+                    kind: candidate.kind.clone(),
+                    reason,
+                });
+                continue;
+            }
+        }
         let observed = build_frontier(
             repo,
             &epoch,
@@ -263,6 +310,7 @@ pub fn drain_and_publish(
         host,
         coordinator_custody_epoch,
         worktrees_dir,
+        remote,
     )?;
     let receipt = publish_stream(repo, remote, agent)?;
     Ok((drained, receipt))
@@ -324,6 +372,29 @@ fn requires_complete_frontier(data: &crate::events::EventData) -> bool {
         | crate::events::EventData::ReviewMergeAuthorized(_) => true,
         _ => false,
     }
+}
+
+/// Gate 17 (AGENT_COORDINATION_EVOLUTION.md section 2.4): "merge readiness,
+/// reassignment, schema activation, all-active audience construction...
+/// require a current-as-of-remote-probe receipt and fail closed rather than
+/// silently using a cached cut." Every complete-frontier kind already
+/// qualifies (merge authorization, schema/merge-engine activation, an
+/// all-active or required-ack broadcast audience) since a stale local view
+/// could under-report the active set or the currently selected epoch;
+/// reassignment additionally qualifies even though it needs only a sparse
+/// frontier, since validating it against a stale cached view of the
+/// existing assignment can accept a reassignment that is actually already
+/// stale -- the identical failure mode a fresh cut is meant to close, just
+/// on a different validation path.
+fn requires_synced_snapshot(data: &crate::events::EventData) -> bool {
+    use crate::events::EventData;
+    requires_complete_frontier(data)
+        || matches!(
+            data,
+            EventData::IssueReassigned(_)
+                | EventData::DependencyReassigned(_)
+                | EventData::ReviewReassigned(_)
+        )
 }
 
 /// Every active member's current stream position, exactly (`ObservedFrontier
@@ -440,6 +511,7 @@ mod tests {
             &short("host1"),
             0,
             &repo.path().join("_wt"),
+            "origin",
         )
         .unwrap();
         assert!(drained.published.is_empty());
@@ -510,6 +582,7 @@ mod tests {
             &short("host1"),
             0,
             &repo.path().join("_wt"),
+            "origin",
         )
         .unwrap();
         assert_eq!(drained.published.len(), 1);
@@ -556,6 +629,7 @@ mod tests {
             &short("host1"),
             0,
             &repo.path().join("_wt"),
+            "origin",
         )
         .unwrap();
         assert_eq!(
@@ -612,6 +686,7 @@ mod tests {
             &short("host1"),
             0,
             &repo.path().join("_wt"),
+            "origin",
         )
         .unwrap();
         assert!(drained.rejected.is_empty());
@@ -680,6 +755,7 @@ mod tests {
             &short("host1"),
             0,
             &repo.path().join("_wt"),
+            "origin",
         )
         .unwrap();
 
@@ -712,6 +788,64 @@ mod tests {
         assert_eq!(snap.state.agents[&coord1].next_seq, 3);
     }
 
+    /// Gate 17 (AGENT_COORDINATION_EVOLUTION.md section 2.4): a
+    /// currency-sensitive candidate (here, `schema.activated`) must be
+    /// refused, not validated against a stale cached cut, when the fresh
+    /// remote probe itself fails -- while an ordinary candidate in the same
+    /// batch is unaffected, since only the currency-sensitive one actually
+    /// needs that fresher view.
+    #[test]
+    fn drain_outbox_fails_closed_on_a_currency_sensitive_candidate_when_the_fetch_fails() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+            &repo.path().join("_genesis_wt"),
+        )
+        .unwrap();
+
+        crate::outbox::submit(repo.path(), "ordinary", &status_candidate(&coord1, "hi")).unwrap();
+        let schema_activate = crate::outbox::Candidate::new(
+            &coord1,
+            &EventData::SchemaActivated(crate::events::SchemaActivated {
+                version: 2,
+                design_commit: ObjectId::parse("a".repeat(40)).unwrap(),
+                helper_commit: ObjectId::parse("b".repeat(40)).unwrap(),
+            }),
+            vec![],
+        );
+        crate::outbox::submit(repo.path(), "schema", &schema_activate).unwrap();
+
+        // No "origin" remote exists in this repo at all, so the gate-17
+        // fetch is guaranteed to fail.
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            &repo.path().join("_wt"),
+            "origin",
+        )
+        .unwrap();
+
+        assert_eq!(drained.published, vec![EventId::new(&coord1, 1)]);
+        assert_eq!(drained.rejected.len(), 1);
+        assert_eq!(drained.rejected[0].kind, "schema.activated");
+        assert!(
+            drained.rejected[0].reason.contains("gate 17"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
     #[test]
     fn drain_outbox_rejects_an_agent_not_in_the_current_epoch() {
         let repo = init_repo();
@@ -738,6 +872,7 @@ mod tests {
             &short("host1"),
             0,
             &repo.path().join("_wt"),
+            "origin",
         )
         .unwrap_err();
         assert!(err.to_string().contains("not an active member"), "{err}");
@@ -859,6 +994,8 @@ mod tests {
     #[test]
     fn drain_outbox_publishes_an_all_active_broadcast_with_a_real_complete_frontier() {
         let repo = init_repo();
+        let origin = init_bare_origin();
+        let remote = origin.path().to_string_lossy().to_string();
         let coord1 = a("coord1");
         let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
         let (_config, epoch, _commit) = crate::bootstrap::genesis(
@@ -916,6 +1053,36 @@ mod tests {
             &short("host1"),
             0,
             &repo.path().join("_wt_alice"),
+            &remote,
+        )
+        .unwrap();
+
+        // Gate 17: constructing a complete/all-active frontier is
+        // currency-sensitive, so `drain_outbox` below will fetch `remote`
+        // first -- push everything built so far (the registry transition
+        // and both agents' streams) there now, exactly as a real
+        // coordinator would before authorizing something currency
+        // -sensitive.
+        let coord1_tip = crate::stream::read_stream_tip(repo.path(), &coord1)
+            .unwrap()
+            .unwrap();
+        let alice_tip = crate::stream::read_stream_tip(repo.path(), &alice)
+            .unwrap()
+            .unwrap();
+        crate::publish::publish(
+            repo.path(),
+            &remote,
+            &[
+                crate::publish::RefUpdate::new(crate::registry::REGISTRY_REF, new_epoch.id.clone()),
+                crate::publish::RefUpdate::new(
+                    crate::stream::stream_ref(&coord1).into_string(),
+                    coord1_tip,
+                ),
+                crate::publish::RefUpdate::new(
+                    crate::stream::stream_ref(&alice).into_string(),
+                    alice_tip,
+                ),
+            ],
         )
         .unwrap();
 
@@ -955,6 +1122,7 @@ mod tests {
             &short("host1"),
             0,
             &repo.path().join("_wt_coord1"),
+            &remote,
         )
         .unwrap();
         assert!(

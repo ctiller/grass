@@ -361,6 +361,7 @@ fn register(args: RegisterArgs) -> AbResult<()> {
         &host,
         args.custody_epoch,
         &paths.worktrees,
+        &args.remote,
     )?;
     let new_stream_tip = crate::stream::read_stream_tip(&paths.repo, &new_agent)?
         .ok_or_else(|| invalid("just-drained agent has no stream tip"))?;
