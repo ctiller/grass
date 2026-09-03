@@ -291,7 +291,8 @@ fn register(args: RegisterArgs) -> AbResult<()> {
     )?;
     if epoch.is_active_member(&new_agent) {
         return Err(invalid(format!(
-            "{new_agent} is already an active member of roster epoch {}",
+            "{new_agent} is already an active member of roster epoch {} -- pick a different \
+             agent name; changing an existing agent's binding is not what `register` does",
             epoch.id
         )));
     }

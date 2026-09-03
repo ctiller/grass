@@ -1,0 +1,15 @@
+---
+source: tests/cli_flow.rs
+expression: out
+---
+{
+  "not_attempted": [],
+  "outbox_rejected": [],
+  "published": {
+    "refs/heads/agent-events/coord1": "[hash]"
+  },
+  "published_events": [
+    "coord1:1"
+  ],
+  "rejected": []
+}

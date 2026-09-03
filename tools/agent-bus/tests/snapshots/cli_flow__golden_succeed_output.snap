@@ -1,0 +1,15 @@
+---
+source: tests/cli_flow.rs
+expression: out
+---
+{
+  "new_custody_epoch": 1,
+  "registry_epoch": "[hash]",
+  "registry_published": {
+    "refs/heads/agent-registry": "[hash]"
+  },
+  "resumed_events": [],
+  "stream_published": {
+    "refs/heads/agent-events/alice": "[hash]"
+  }
+}

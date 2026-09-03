@@ -62,7 +62,10 @@ impl Agent {
     pub fn parse(s: String) -> AbResult<Self> {
         let re = regex::Regex::new(r"^[a-z][a-z0-9-]{0,47}$").unwrap();
         if !re.is_match(&s) {
-            return Err(invalid(format!("invalid agent name: {s:?}")));
+            return Err(invalid(format!(
+                "invalid agent name: {s:?} (must match [a-z][a-z0-9-]{{0,47}}: lowercase, \
+                 starting with a letter, letters/digits/hyphens only)"
+            )));
         }
         Ok(Agent(s))
     }

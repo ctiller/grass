@@ -1,0 +1,19 @@
+---
+source: tests/cli_flow.rs
+expression: out
+---
+{
+  "agents": [
+    {
+      "agent": "coord1",
+      "coordinator_custody_epoch": 0,
+      "host": "host1",
+      "next_seq": 1,
+      "role": "coordinator",
+      "status": "active",
+      "stream_tip": "[hash]"
+    }
+  ],
+  "freshness": "cached",
+  "roster_epoch": "[hash]"
+}

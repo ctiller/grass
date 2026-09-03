@@ -103,7 +103,10 @@ pub fn create_root(
     worktree: &Path,
 ) -> AbResult<RosterEpoch> {
     if read_registry_tip(repo)?.is_some() {
-        return Err(invalid("the agent-registry already has a root epoch"));
+        return Err(invalid(
+            "the agent-registry already has a root epoch -- this bus is already activated; \
+             use `register` to add a further agent instead of `genesis`",
+        ));
     }
     std::fs::create_dir_all(worktree).map_err(|e| AbError::Io {
         path: worktree.display().to_string(),
@@ -208,7 +211,8 @@ pub fn propose_custody_succession(
 ) -> AbResult<RosterEpoch> {
     let binding = expected_parent.active_members.get(target).ok_or_else(|| {
         invalid(format!(
-            "{target} is not an active member of roster epoch {}",
+            "{target} is not an active member of roster epoch {} -- check the agent name is \
+             correct, or register it first if it genuinely doesn't exist yet",
             expected_parent.id
         ))
     })?;
@@ -309,7 +313,8 @@ pub fn authorize_stream_write(
 ) -> AbResult<()> {
     let binding = epoch.active_members.get(agent).ok_or_else(|| {
         invalid(format!(
-            "{agent} is not an active member of roster epoch {}",
+            "{agent} is not an active member of roster epoch {} -- register it first, or \
+             re-read the current registry epoch if this one may be stale",
             epoch.id
         ))
     })?;

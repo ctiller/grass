@@ -1,0 +1,16 @@
+---
+source: tests/cli_flow.rs
+expression: out
+---
+{
+  "outbox_rejected": [],
+  "published": {
+    "refs/heads/agent-events/bob": "[hash]",
+    "refs/heads/agent-registry": "[hash]"
+  },
+  "published_events": [
+    "bob:0"
+  ],
+  "registry_epoch": "[hash]",
+  "rejected": []
+}

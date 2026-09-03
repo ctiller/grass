@@ -93,8 +93,13 @@ pub fn read_stream(
     agent: &Agent,
     worktrees_dir: &Path,
 ) -> AbResult<(StreamHeader, Vec<Envelope>)> {
-    let tip =
-        read_stream_tip(repo, agent)?.ok_or_else(|| invalid(format!("{agent} has no stream")))?;
+    let tip = read_stream_tip(repo, agent)?.ok_or_else(|| {
+        invalid(format!(
+            "{agent} has no stream -- either it was never registered, or it is registered but \
+             has not yet published its first event; if newly registered, run `coordinate` for \
+             it first"
+        ))
+    })?;
     let worktree = worktrees_dir.join(format!("stream-read-{agent}"));
     crate::gitrepo::ensure_bus_worktree(repo, &worktree, tip.as_str())?;
     let header = read_header(&worktree)?;

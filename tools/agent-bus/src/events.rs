@@ -589,7 +589,10 @@ macro_rules! event_data {
                     $( $kind => Ok(EventData::$variant(
                         serde_json::from_value(value).map_err(|e| invalid(format!("malformed {kind} data: {e}")))?,
                     )), )+
-                    other => Err(invalid(format!("unknown event kind: {other}"))),
+                    other => Err(invalid(format!(
+                        "unknown event kind: {other}; valid kinds are: {}",
+                        Self::all_kinds().join(", ")
+                    ))),
                 }
             }
 
