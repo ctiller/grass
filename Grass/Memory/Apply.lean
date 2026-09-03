@@ -430,13 +430,15 @@ Read the conclusion precisely: it is about the resulting *state*, not about the
 is concluded — `denialOf_applyAccess_of_disjoint` is needed because without it one
 order could refuse what the other committed and no fact about bytes would rescue
 that, but the theorem does not itself state that neither order refuses.
-`observedBytes_congr` is the piece a caller needs to carry an observation across;
-result-level commutation is not proved here and is recorded as owed in
-`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2.
+`observedBytes_congr` is the piece a caller needs to carry an observation across,
+and `applyAccess_result_comm` below is the result-level statement — which this
+paragraph said was not proved here, seventy lines above the proof, until review
+caught it.
 
-Both accesses must lie in one allocation, which `hroot` requires. Two accesses in
-*different* allocations also commute, and `denialOf_write_of_other_allocation` is
-the decision half of that, but the theorem is not stated.
+Both accesses must lie in one allocation, which `hroot` requires.
+`applyAccess_comm_of_other_allocation` and
+`applyAccess_result_comm_of_other_allocation` are the cross-allocation pair, where
+disjointness is free because distinct `AllocId`s are distinct storage.
 -/
 theorem applyAccess_comm (state : MemoryState) (dA dB : AccessDescriptor)
     (writeA writeB : ByteSeq) (indetA indetB : Nat → Byte)

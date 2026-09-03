@@ -92,6 +92,26 @@ range is contained only where it actually sits, one-past-the-end included.
 def Contains (r s : ByteRange) : Prop := r.start ≤ s.start ∧ s.stop ≤ r.stop
 
 /--
+`r.Meets s` holds when `s` is not wholly outside `r`.
+
+Overlap, plus the case `Overlaps` is deliberately blind to. An empty range covers
+no offset, so `⟨0,8⟩.Overlaps (empty 4)` is false although offset 4 is squarely
+inside `[0,8)` — and a consumer asking "what is outstanding over this position"
+with an empty range got the answer "nothing". Review demonstrated that against the
+loan map, where it read as exclusive authority over a borrowed byte.
+
+Asymmetric on purpose, and the argument order is load-bearing. `r` is the extent
+that owns bytes; `s` is the query. An empty `r` meets nothing, because a range
+covering no bytes constrains no position — so an empty grant does not freeze a
+live one.
+
+A position one past the end of `r` is *not* met, which `not_meets_stop` states.
+`docs/MEMORY_MODEL.md` §5.1 keeps that position meaningful and non-dereferenceable,
+and it is not a byte of `r`.
+-/
+def Meets (r s : ByteRange) : Prop := ¬ r.Disjoint s ∨ (s.IsEmpty ∧ r.Covers s.start)
+
+/--
 `r.WithinBound limit` holds when `r` does not reach past `limit`.
 
 Every range used against a real allocation must satisfy this for that
@@ -151,6 +171,9 @@ instance (r : ByteRange) : Decidable r.IsEmpty :=
 instance (r : ByteRange) (limit : Nat) : Decidable (r.WithinBound limit) :=
   decidable_of_iff _ (withinBound_def r limit).symm
 
+instance (r s : ByteRange) : Decidable (r.Meets s) :=
+  inferInstanceAs (Decidable (¬ _ ∨ (_ ∧ _)))
+
 @[simp] theorem stop_mk (start size : Nat) :
     (ByteRange.mk start size).stop = start + size := rfl
 
@@ -183,6 +206,54 @@ theorem isEmpty_iff_no_cover {r : ByteRange} : r.IsEmpty ↔ ∀ offset, ¬ r.Co
     have hs := h r.start
     rw [covers_def] at hs
     rw [isEmpty_def]
+    omega
+
+/-! ### Meeting a position
+
+`Meets` exists because `Disjoint` answers the wrong question about an empty range.
+These four are what a consumer reasons through, and the last two are the shape of
+the defect that motivated it.
+-/
+
+/-- Anything that overlaps, meets. -/
+theorem meets_of_not_disjoint {r s : ByteRange} (h : ¬ r.Disjoint s) : r.Meets s :=
+  Or.inl h
+
+/-- **A position meets exactly the ranges that cover it.** -/
+@[simp] theorem meets_empty_iff (r : ByteRange) (offset : Nat) :
+    r.Meets (empty offset) ↔ r.Covers offset := by
+  constructor
+  · rintro (hnd | ⟨-, hc⟩)
+    · exact absurd (Or.inr (Or.inl rfl)) hnd
+    · exact hc
+  · intro hc
+    exact Or.inr ⟨rfl, hc⟩
+
+/-- **A position inside a range meets it, though it does not overlap it.** The
+concrete case review used: offset 4 inside `[0, 8)`. -/
+theorem meets_interior_position : (ByteRange.mk 0 8).Meets (empty 4) := by
+  simp [covers_def]
+
+/-- And the same pair is `Disjoint`, which is why `Meets` had to be written rather
+than the loan map reusing `Disjoint`. -/
+theorem disjoint_interior_position : (ByteRange.mk 0 8).Disjoint (empty 4) :=
+  Or.inr (Or.inl rfl)
+
+/-- **One past the end is not met.** `docs/MEMORY_MODEL.md` §5.1 keeps that
+position meaningful and non-dereferenceable; it is not a byte of `r`, and treating
+it as one would freeze the byte after every loan. -/
+@[simp] theorem not_meets_stop (r : ByteRange) : ¬ r.Meets (empty r.stop) := by
+  simp [covers_def, stop]
+
+/-- **An empty range meets nothing**, whatever `s` is. A grant over no bytes
+therefore constrains no position, which is what stops `Meets` turning a zero-byte
+grant into a way to freeze live storage — `Tests/Memory/Loans.lean`'s
+`a_loan_of_no_bytes_freezes_nothing` is that consequence at the loan map. -/
+theorem not_meets_of_isEmpty {r s : ByteRange} (h : r.IsEmpty) : ¬ r.Meets s := by
+  rw [isEmpty_def] at h
+  rintro (hnd | ⟨-, hc⟩)
+  · exact hnd (Or.inl h)
+  · rw [covers_def] at hc
     omega
 
 theorem disjoint_iff_not_overlaps {r s : ByteRange} : r.Disjoint s ↔ ¬ r.Overlaps s := by

@@ -36,6 +36,9 @@ def firstLoan : GrantId := grants.fresh.1
 /-- The second. -/
 def secondLoan : GrantId := grants.fresh.2.fresh.1
 
+/-- A third, so a fixture can add a loan to a state that already holds two. -/
+def thirdLoan : GrantId := grants.fresh.2.fresh.2.fresh.1
+
 private def epoch : EpochId := epochs.fresh.1
 
 /-- Provenance of the whole buffer. -/
@@ -49,14 +52,48 @@ def unlent : MemoryState :=
     { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
       permission := .readWrite, live := true, bytes := .empty, base := some 0x1000 }
 
-/-- A loan of the first eight bytes to the borrower. -/
+/-- A write loan of the first eight bytes to the borrower. -/
 def loanOfHead : AuthorityGrant :=
   { kind := .loan, holder := borrower, provenance := bufferProv
     range := ⟨0, 8⟩, rights := .readWrite }
 
+/-- A *read* loan of the same bytes. Two of these may coexist, which is
+`AuthorityState.sharedImmutable` being a real state rather than a name, and is what
+lets the identity theorems below hold two loans at once now that overlapping write
+loans are refused at issue. -/
+def readLoanOfHead : AuthorityGrant :=
+  { loanOfHead with rights := .readOnly }
+
 /-- A loan of a disjoint eight bytes. -/
 def loanOfTail : AuthorityGrant :=
   { loanOfHead with range := ⟨8, 8⟩ }
+
+/-- A loan over no bytes at all, which is a grant of nothing and must freeze
+nothing. -/
+def emptyLoan : AuthorityGrant :=
+  { loanOfHead with range := ByteRange.empty 4 }
+
+/-- Lending the head. `lend?` refuses a reissued identity or a conflicting loan, so
+a fixture has to say which state it means; `the_lends_succeed` checks these are the
+lends that happened rather than silent fallbacks. -/
+def lentHead : MemoryState := (unlent.lend? firstLoan loanOfHead).getD unlent
+
+/-- Lending the disjoint tail. -/
+def lentTail : MemoryState := (unlent.lend? secondLoan loanOfTail).getD unlent
+
+/-- Two *read* loans over the same bytes, under distinct identities. -/
+def lentTwice : MemoryState :=
+  ((unlent.lend? firstLoan readLoanOfHead).getD unlent).lend? secondLoan readLoanOfHead
+    |>.getD unlent
+
+/-- Each lend above actually succeeded, so `getD` never fell back and the theorems
+below are about lent states rather than about `unlent`. -/
+theorem the_lends_succeed :
+    (unlent.lend? firstLoan loanOfHead).isSome ∧
+    (unlent.lend? secondLoan loanOfTail).isSome ∧
+    (((unlent.lend? firstLoan readLoanOfHead).getD unlent).lend?
+      secondLoan readLoanOfHead).isSome := by
+  exact ⟨by decide, by decide, by decide⟩
 
 /-! ## Exclusivity is the empty map, not a count -/
 
@@ -65,22 +102,22 @@ theorem unlent_is_exclusive : unlent.Exclusive bufferProv ⟨0, 8⟩ := by decid
 
 /-- Lending ends it, and the derived count agrees. -/
 theorem lending_ends_exclusivity :
-    ¬ (unlent.lend firstLoan loanOfHead).Exclusive bufferProv ⟨0, 8⟩ ∧
-    (unlent.lend firstLoan loanOfHead).outstandingLoans bufferProv ⟨0, 8⟩ = 1 := by
+    ¬ (lentHead).Exclusive bufferProv ⟨0, 8⟩ ∧
+    (lentHead).outstandingLoans bufferProv ⟨0, 8⟩ = 1 := by
   exact ⟨by decide, by decide⟩
 
 /-- A loan of disjoint bytes does not end exclusivity over the head. §3's "relevant
 map" is the loans over *those* bytes, not every loan in the state. -/
 theorem a_disjoint_loan_leaves_the_head_exclusive :
-    (unlent.lend secondLoan loanOfTail).Exclusive bufferProv ⟨0, 8⟩ ∧
-    ¬ (unlent.lend secondLoan loanOfTail).Exclusive bufferProv ⟨8, 8⟩ := by
+    (lentTail).Exclusive bufferProv ⟨0, 8⟩ ∧
+    ¬ (lentTail).Exclusive bufferProv ⟨8, 8⟩ := by
   exact ⟨by decide, by decide⟩
 
 /-! ## A return consumes the identity it names -/
 
 /-- Returning the loan restores exclusivity. -/
 theorem returning_restores_exclusivity :
-    ((unlent.lend firstLoan loanOfHead).returnLoan firstLoan).Exclusive
+    ((lentHead).returnLoan firstLoan).Exclusive
       bufferProv ⟨0, 8⟩ := by decide
 
 /--
@@ -92,61 +129,204 @@ restored. A map keyed by shape rather than by identity would get this wrong, whi
 is why §3 says a return consumes that exact identity.
 -/
 theorem returning_one_of_two_leaves_the_other :
-    ¬ (((unlent.lend firstLoan loanOfHead).lend secondLoan loanOfHead).returnLoan
+    ¬ ((lentTwice).returnLoan
         firstLoan).Exclusive bufferProv ⟨0, 8⟩ ∧
-    (((unlent.lend firstLoan loanOfHead).lend secondLoan loanOfHead).returnLoan
+    ((lentTwice).returnLoan
         firstLoan).outstandingLoans bufferProv ⟨0, 8⟩ = 1 := by
   exact ⟨by decide, by decide⟩
 
 /-- Returning both does restore it, so the theorem above is about identity rather
 than about returns never working. -/
 theorem returning_both_restores_exclusivity :
-    (((unlent.lend firstLoan loanOfHead).lend secondLoan loanOfHead).returnLoan
+    ((lentTwice).returnLoan
         firstLoan).returnLoan secondLoan |>.Exclusive bufferProv ⟨0, 8⟩ := by decide
 
-/-- The two loans really are identical apart from identity, so nothing else
-distinguishes them. -/
+/-- The two loans really are identical apart from identity.
+
+An earlier version of this theorem asserted `loanOfHead = loanOfHead`, which is one
+term compared to itself and carries no information — review pointed out it could
+never have failed. This reads the two grants back out of the map and compares
+*those*, so it would fail if `lend?` stored anything but what it was handed. -/
 theorem the_two_loans_differ_only_in_identity :
-    loanOfHead = loanOfHead ∧ firstLoan ≠ secondLoan := by
-  exact ⟨rfl, by decide⟩
+    lentTwice.grants.lookup firstLoan = lentTwice.grants.lookup secondLoan ∧
+    firstLoan ≠ secondLoan := by
+  exact ⟨by decide, by decide⟩
 
-/-! ## Lending freezes the owner's fragment
+/-! ## A loan cannot be issued twice, nor conflict with a live one
 
-§3 lists "frozen owner fragments while loans exist" among the canonical authority
-states. `ownerAuthority` is what puts an owner into one, and it is a function of
-the map: lending freezes, returning thaws, and no field has to be kept in step. -/
+Both refusals were absent and both were silent. `lend` was `grants.insert`, and
+`FiniteMap.insert` erases any existing binding, so a reissued identity returned a
+loan nobody returned. And nothing stopped two overlapping write loans coexisting,
+though §7.3 says unique loans prevent conflicting authority from being *issued*. -/
 
-/-- Owning and lending nothing is exclusive, and an ordinary write is permitted. -/
+/-- **A reissued identity is refused**, rather than silently returning the loan
+that identity already names. -/
+theorem a_reissued_identity_is_refused :
+    lentHead.lend? firstLoan loanOfTail = Option.none := by decide
+
+/-- A *different* identity for the same tail is accepted, so the refusal is about
+reissue and not about the tail. -/
+theorem a_fresh_identity_for_the_tail_is_accepted :
+    (lentHead.lend? secondLoan loanOfTail).isSome := by decide
+
+/-- **A conflicting loan is refused at issue.** Two write loans over the same bytes
+are conflicting authority, and §7.3 says unique loans prevent it being issued. -/
+theorem a_conflicting_write_loan_is_refused :
+    lentHead.lend? secondLoan loanOfHead = Option.none := by decide
+
+/-- Two *read* loans over the same bytes are not conflicting, so they are accepted.
+Without this the theorem above would be consistent with refusing every overlapping
+loan, and `sharedImmutable` would be a name for nothing. -/
+theorem two_read_loans_over_one_range_are_accepted :
+    (((unlent.lend? firstLoan readLoanOfHead).getD unlent).lend?
+      secondLoan readLoanOfHead).isSome := by decide
+
+/-! ## Lending freezes the lender's fragment, not the holder's
+
+§3 lists "frozen owner fragments while loans exist" among the canonical states.
+`authorityOf` is what puts a context into one, and it takes the context: a loan you
+hold yourself does not freeze you out of your own bytes. An earlier version did not
+take it, and reported a context that had lent to itself as frozen while the
+transition let its write through — the two halves of the model contradicting each
+other. -/
+
+/-- With nothing lent, the owner may write. -/
 theorem an_unlent_owner_may_write :
-    unlent.ownerAuthority bufferProv ⟨0, 8⟩ = .exclusive ∧
-    (unlent.ownerAuthority bufferProv ⟨0, 8⟩).PermitsOrdinaryWrite := by
+    unlent.authorityOf owner bufferProv ⟨0, 8⟩ = AuthorityState.exclusive ∧
+    (unlent.authorityOf owner bufferProv ⟨0, 8⟩).PermitsOrdinaryWrite := by
   exact ⟨by decide, by decide⟩
 
-/-- **Lending freezes the owner, and a frozen owner may not write.** The borrow
-discipline: the bytes are lent out, so the owner does not have them. -/
+/-- **Lending to another context freezes the lender, and a frozen context may not
+write.** -/
 theorem a_lending_owner_may_not_write :
-    (unlent.lend firstLoan loanOfHead).ownerAuthority bufferProv ⟨0, 8⟩ = .frozen ∧
-    ¬ ((unlent.lend firstLoan loanOfHead).ownerAuthority bufferProv ⟨0, 8⟩).PermitsOrdinaryWrite := by
+    lentHead.authorityOf owner bufferProv ⟨0, 8⟩ = AuthorityState.frozen ∧
+    ¬ (lentHead.authorityOf owner bufferProv ⟨0, 8⟩).PermitsOrdinaryWrite := by
   exact ⟨by decide, by decide⟩
 
-/-- Returning thaws it, so the freeze is not a one-way door. -/
-theorem returning_thaws_the_owner :
-    ((unlent.lend firstLoan loanOfHead).returnLoan firstLoan).ownerAuthority
-      bufferProv ⟨0, 8⟩ = .exclusive := by decide
+/-- **The borrower is not frozen by its own loan.** This is the case that made the
+model contradict itself: `Exclusive` is false here, because a loan exists, and the
+holder may still write — which is what holding a write loan means. -/
+theorem the_borrower_is_not_frozen_by_its_own_loan :
+    ¬ lentHead.Exclusive bufferProv ⟨0, 8⟩ ∧
+    lentHead.authorityOf borrower bufferProv ⟨0, 8⟩ = AuthorityState.exclusive := by
+  exact ⟨by decide, by decide⟩
 
-/-- The owner keeps bytes it did not lend. A loan of the head does not freeze the
+/-- Returning thaws the lender, so the freeze is not a one-way door. -/
+theorem returning_thaws_the_owner :
+    (lentHead.returnLoan firstLoan).authorityOf owner bufferProv ⟨0, 8⟩ =
+      AuthorityState.exclusive := by decide
+
+/-- The lender keeps bytes it did not lend. A loan of the head does not freeze the
 tail, which is what makes "frozen *fragments*" fragments. -/
 theorem lending_the_head_leaves_the_tail_writable :
-    (unlent.lend firstLoan loanOfHead).ownerAuthority bufferProv ⟨8, 8⟩ = .exclusive := by
+    lentHead.authorityOf owner bufferProv ⟨8, 8⟩ = AuthorityState.exclusive := by decide
+
+/-! ## Read loans are shared immutable access, not a freeze
+
+§3 lists shared immutable access as a state of its own and §7.3 makes a conflict
+require a writer. A read loan leaves the bytes immutable for as long as it is held,
+which is not the same situation as a frozen fragment — and until `authorityOf`
+distinguished them, `AuthorityState.sharedImmutable` was a constructor nothing
+built and every theorem about it was vacuous. -/
+
+/-- **Read loans put the lender into shared immutable access, not frozen.** -/
+theorem read_loans_are_shared_immutable :
+    lentTwice.authorityOf owner bufferProv ⟨0, 8⟩ = AuthorityState.sharedImmutable := by
   decide
 
-/-! ## Atomic authority is not ordinary authority -/
+/-- And shared immutable access does not permit the lender to write, so the
+distinction from `frozen` is about which state it is, not about permission. §7.3
+makes a write against an outstanding read a conflict. -/
+theorem a_shared_immutable_lender_may_not_write :
+    ¬ (lentTwice.authorityOf owner bufferProv ⟨0, 8⟩).PermitsOrdinaryWrite := by decide
 
-/-- §3: "Atomics do not grant ordinary non-atomic access." -/
-theorem atomic_is_not_ordinary (ordering : OrderingDemand) :
-    ¬ (AuthorityState.atomicShared ordering).PermitsOrdinaryWrite ∧
+/-- One write loan among the read loans is a freeze, so the state above is about
+the rights on the loans rather than about their number. -/
+theorem one_write_loan_freezes :
+    ((lentTwice.lend? thirdLoan loanOfTail).getD lentTwice).authorityOf
+      owner bufferProv ⟨8, 8⟩ = AuthorityState.frozen := by decide
+
+/-! ## Dead storage is not exclusively owned, it is unavailable
+
+`Exclusive` says the loan map is empty over those bytes. Reading that as permission
+is the mistake `authorityOf` made: it reported the *empty state* as exclusively
+owned by whoever asked, and `AuthorityState.unavailable` was built by nothing.
+`AllocationRecord.live`'s own docstring says a dead allocation authorizes nothing
+whatever provenance is presented. -/
+
+/-- The same buffer, freed. -/
+def freed : MemoryState :=
+  MemoryState.empty.allocate buffer
+    { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
+      permission := .readWrite, live := false, bytes := .empty, base := some 0x1000 }
+
+/-- **A freed allocation is exclusive and unwritable.** Both halves matter: the
+loan map really is empty, and that really is not authority. -/
+theorem a_freed_allocation_is_exclusive_and_unavailable :
+    freed.Exclusive bufferProv ⟨0, 8⟩ ∧
+    freed.authorityOf owner bufferProv ⟨0, 8⟩ = AuthorityState.unavailable ∧
+    ¬ (freed.authorityOf owner bufferProv ⟨0, 8⟩).PermitsOrdinaryWrite := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **An allocation that never existed is unavailable too**, which is the case that
+made this visible: the empty state has an empty loan map. -/
+theorem an_unallocated_root_is_unavailable :
+    MemoryState.empty.Exclusive bufferProv ⟨0, 8⟩ ∧
+    MemoryState.empty.authorityOf owner bufferProv ⟨0, 8⟩ = AuthorityState.unavailable := by
+  exact ⟨by decide, by decide⟩
+
+/-! ## A position inside a loan is inside it
+
+`ByteRange.Disjoint` is blind to where an empty range sits, because an empty range
+covers no offset — so `⟨0,8⟩.Disjoint (empty 4)` is true. `loansOver` filtered on
+that, and answering "what authority do I hold over offset 4" while `[0, 8)` was
+lent for writing returned exclusive, with an ordinary write permitted.
+`docs/MEMORY_MODEL.md` §5.1 makes positions meaningful, so a query about one has to
+be answered about one. `ByteRange.Meets` is the predicate that does. -/
+
+/-- **A position inside a lent range is frozen.** Offset 4, inside `[0, 8)`. -/
+theorem a_position_inside_a_loan_is_frozen :
+    lentHead.authorityOf owner bufferProv (ByteRange.empty 4) = AuthorityState.frozen := by
+  decide
+
+/-- And the pair the old filter looked at really is `Disjoint`, so the fixture above
+would have passed under it for the wrong reason had it asked about `⟨4, 0⟩`
+differently. This pins the fact that made the defect. -/
+theorem the_position_is_disjoint_from_the_loan :
+    loanOfHead.range.Disjoint (ByteRange.empty 4) := by decide
+
+/-- **One past the end is not frozen.** §5.1 keeps that position meaningful and
+non-dereferenceable; it is not a byte of the loan, and freezing it would freeze the
+byte after every loan in the state. -/
+theorem one_past_the_end_of_a_loan_is_not_frozen :
+    lentHead.authorityOf owner bufferProv (ByteRange.empty 8) = AuthorityState.exclusive := by
+  decide
+
+/-- A loan over *no* bytes freezes nothing, so `Meets` did not turn every zero-byte
+grant into a way to freeze live storage. -/
+theorem a_loan_of_no_bytes_freezes_nothing :
+    (unlent.lend? firstLoan emptyLoan).isSome ∧
+    ((unlent.lend? firstLoan emptyLoan).getD unlent).authorityOf owner bufferProv ⟨0, 8⟩ =
+      AuthorityState.exclusive := by
+  exact ⟨by decide, by decide⟩
+
+/-! ## Only exclusive authority permits an ordinary write
+
+There is no atomic case here and no `AuthorityState.atomicShared`. §3 lists atomic
+shared access among the canonical states and says atomics do not grant ordinary
+non-atomic access, but nothing in this layer carries an ordering — `AuthorityGrant`
+has `kind`, `holder`, `provenance`, `range` and `rights` — so the constructor was
+built by nothing and the theorem about it held of an unreachable case. A vacuous
+theorem reads as coverage, so both were deleted and
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records the law as owed against M8. -/
+
+/-- Every state, and what each permits. Stated over all four constructors so that
+adding one cannot slip past unnoticed. -/
+theorem only_exclusive_permits_an_ordinary_write :
+    AuthorityState.exclusive.PermitsOrdinaryWrite ∧
+    ¬ AuthorityState.sharedImmutable.PermitsOrdinaryWrite ∧
     ¬ AuthorityState.frozen.PermitsOrdinaryWrite ∧
-    AuthorityState.exclusive.PermitsOrdinaryWrite :=
-  ⟨fun h => h, fun h => h, trivial⟩
+    ¬ AuthorityState.unavailable.PermitsOrdinaryWrite :=
+  ⟨trivial, fun h => h, fun h => h, fun h => h⟩
 
 end Tests.Memory.Loans

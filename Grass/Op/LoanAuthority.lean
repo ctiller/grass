@@ -19,18 +19,23 @@ target.
 the bytes an access names, that access is refused unless the accessor holds a loan
 covering it with sufficient rights.
 
-That is `MemoryState.ownerAuthority`'s freeze made operational. `Loan.lean` proves
-an owner holds `AuthorityState.frozen` while a loan exists and that `frozen`
-permits no ordinary write; this refuses the access that would otherwise perform
-one.
+This is a **holder test**, and saying it is `authorityOf`'s freeze "made
+operational" would be claiming more than it does — an earlier version of this
+comment did, and review pointed out the provider never mentions `AuthorityState` at
+all. The two agree, which is a fact worth having and is
+`loan_refuses_only_the_frozen` below; they are not the same mechanism.
+
+The agreement is not free. It failed once: `authorityOf` did not take a context, so
+a context that had lent to itself was reported frozen while this provider let its
+write through. Fixing that is what made the two halves consistent.
 
 ## What it deliberately does not decide
 
 Who the owner is. `AllocationRecord` records no owner, and this rule does not need
 one: it says lent bytes are reachable only through a loan, which is a statement
 about the loan map and the accessor. A profile that wants "the owner may still
-read" declares a loan to itself, which is the same fact written where the model
-can see it.
+read" declares a loan to itself — and `authorityOf` agrees, because a loan you hold
+does not freeze you.
 -/
 
 namespace Grass.Op
@@ -69,15 +74,32 @@ bytes reachable, which is the whole point of lending them. -/
 /--
 **An access to lent bytes without a loan is refused.**
 
-The freeze, operational. `Loan.lean`'s `not_permitsOrdinaryWrite_of_not_exclusive`
-says an owner holding a frozen fragment may not write it; this is the transition
-declining to let it.
+The freeze, operational. `Loan.lean`'s `not_permitsOrdinaryWrite_of_lentToAnother`
+says a context may not write bytes another context holds a loan over; this is the
+transition declining to let it.
 -/
 theorem loan_refuses_the_unauthorized (state : MachineState) (d : AccessDescriptor)
     (hlent : ¬ state.memory.Exclusive d.provenance d.range)
     (hno : ¬ state.memory.GrantedOfKind .loan d.context d.provenance d.range d.intent) :
     AuthorityProvider.loan.refuses state d = true := by
   simp [AuthorityProvider.loan, hlent, hno]
+
+/--
+**The provider refuses exactly the accesses `authorityOf` calls frozen**, on the
+write side.
+
+The bridge between the two halves of the loan model. `Loan.lean` reasons about
+`AuthorityState`; this file decides accesses; and without a theorem relating them a
+reader has to take on trust that they agree. They did not agree until
+`authorityOf` was made context-aware, which is why this is stated rather than
+assumed.
+-/
+theorem loan_refuses_only_the_frozen (state : MachineState) (d : AccessDescriptor)
+    (h : AuthorityProvider.loan.refuses state d = true) :
+    ¬ state.memory.Exclusive d.provenance d.range := by
+  unfold AuthorityProvider.loan at h
+  simp only [Bool.and_eq_true, Bool.not_eq_true', decide_eq_false_iff_not] at h
+  exact h.1
 
 /-- Its class is one every profile already declares, so a policy adopting it needs
 no new vocabulary. -/

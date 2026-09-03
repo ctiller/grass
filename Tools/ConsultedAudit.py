@@ -49,20 +49,21 @@ DECLARED_IN = sorted((ROOT / "Grass").rglob("*.lean"))
 # and excluding them made AuditViolation.class_ look inert when Tests/ reads it.
 READERS_IN = DECLARED_IN + sorted((ROOT / "Tests").rglob("*.lean"))
 
-# A field is *read* by a projection `.name`, by pattern-matching `name := x` in a
-# `with`-update or destructuring, or by `open`ed dot-notation. Construction sites
-# (`name := value` inside a structure literal) are writes, not reads, and are the
-# thing a decorative field has plenty of.
+# Only `structure` declarations are scanned. `class` fields and inductive
+# constructor parameters are not, so an allowlist entry naming one of those records
+# a judgement about something this tool could never report -- three such entries
+# existed and are removed. Extending the scan to classes would be a real change,
+# not a regex tweak, because a class field is consumed through instance resolution
+# that a text scan cannot see.
 DECL = re.compile(r"^\s{2,}(?:private\s+)?([a-z][A-Za-z0-9_']*)\s*:\s*[^=]")
 STRUCTURE = re.compile(r"^\s*(?:private\s+)?structure\s+([A-Za-z_][A-Za-z0-9_.']*)")
-ENDBLOCK = re.compile(r"^\S|^\s*(?:deriving|/-)")
 
 # Fields deliberately carried without a reader. Every entry states why, and the
 # entry is the record that the decision was made.
 # A structure whose fields are propositions bundles proof obligations. Not reading
 # such a field is the normal case -- its purpose is that a constructor had to
 # discharge it -- so these are skipped by structure rather than field.
-PROOF_BUNDLES = ("WellFormed", "Recognized", "Laws", "Holds", "Admits")
+PROOF_BUNDLES = ("WellFormed", "Recognized", "Laws")
 
 ALLOWED = {
     # Diagnostic identity: carried so a report or rejection can name which one,
@@ -90,7 +91,6 @@ ALLOWED = {
     # them. Recorded as owed in section 4.2.
     "observations",       # section 7.5 device observation labels; no reader at all
     "restartability",     # section 7.4 retry rules have no mechanism
-    "justification",      # transactional and permitsUninitialized name nothing
     "scope",              # ordering scope, with no registry to check it against
     "vocabularyVersion",  # one version exists, so nothing to compare against yet
     #
@@ -101,7 +101,7 @@ ALLOWED = {
     "package",            # section 10 gates VerifiedProgram, not this transition
     "issuer",             # its docstring records this as M10 profile closure
     "obligation",         # TerminalOutcome awaits terminal accounting
-    "disposition",
+    "disposition",   # TerminalOutcome, likewise
     # Proof obligations: their purpose is that a constructor had to discharge
     # them, so nothing projects them. The structure-suffix rule above misses these
     # because they sit on structures with other names.
@@ -119,9 +119,7 @@ ALLOWED = {
     "zero",
     "le",
     "laws",
-    "axis",
     "limit",
-    "carrier",
     "exhaustion",
     "lifecycle",
 }
@@ -215,8 +213,15 @@ def self_test() -> int:
     cases = [
         ("bare declaration", {"a.lean": decl}, True),
         ("real projection", {"a.lean": decl, "b.lean": "def f (p : Probe) := p.quarry\n"}, False),
+        # Multi-line and not beginning with `--`, so the line-comment rule cannot
+        # strip it. The single-line `/-- ... -/` case this replaced *began* with
+        # `--`, so LINE stripped it and the case passed with BLOCK deleted
+        # outright -- a self-test that could not fail for the thing it named.
+        # Every module comment under Grass/ is exactly this shape.
         ("block comment mentioning .quarry",
-         {"a.lean": decl, "b.lean": "/-- see .quarry for details -/\ndef f := 1\n"}, True),
+         {"a.lean": decl,
+          "b.lean": "/-!\nA module comment about .quarry\nspanning lines.\n-/\ndef f := 1\n"},
+         True),
         ("line comment mentioning .quarry",
          {"a.lean": decl, "b.lean": "-- reads .quarry eventually\ndef f := 1\n"}, True),
         ("string literal mentioning .quarry",
@@ -224,9 +229,27 @@ def self_test() -> int:
         ("construction only",
          {"a.lean": decl, "b.lean": "def p : Probe := { quarry := 3 }\n"}, True),
     ]
+    # The reader corpus is a separate parameter and no case above exercises it:
+    # each passes one dict, so `main` dropping the Tests/ readers would go
+    # unnoticed -- which the file's own comment calls out as a fixed false
+    # positive.
+    reader_cases = [
+        ("reader only in the reader corpus",
+         {"a.lean": decl},
+         {"a.lean": decl, "t.lean": "def f (p : Probe) := p.quarry\n"}, False),
+        ("no reader in either corpus",
+         {"a.lean": decl}, {"a.lean": decl}, True),
+    ]
     failures = 0
     for label, sources, should_report in cases:
         reported = any("Probe.quarry" in line for line in analyse(sources))
+        if reported != should_report:
+            want = "reported" if should_report else "not reported"
+            print(f"  SELF-TEST FAILED [{label}]: expected {want}")
+            failures += 1
+
+    for label, declared, readers, should_report in reader_cases:
+        reported = any("Probe.quarry" in line for line in analyse(declared, readers))
         if reported != should_report:
             want = "reported" if should_report else "not reported"
             print(f"  SELF-TEST FAILED [{label}]: expected {want}")

@@ -666,9 +666,15 @@ def addressAt? (state : MemoryState) (id : AllocId) (offset : Nat) :
     Option MachineAddress :=
   (state.allocations.lookup id).bind (fun record => record.base.map (addressOf · offset))
 
-/-- `state.PlacedWithoutWrap id` holds when `id` is placed and its own bytes do not
-wrap the address space. The hypothesis every bridge lemma needs, and the one a
-profile owes for each allocation it places. -/
+/-- `state.PlacedWithoutWrap id` holds when `id`'s bytes do not wrap the address
+space **if it is placed at all**.
+
+Both binders are `Option` membership, so this is vacuously true of an unplaced
+allocation and of one that does not exist. That is the right shape for a
+hypothesis — `addressAt?_ne_of_disjoint` takes `record.base = some base` separately
+and only then uses this — but an earlier docstring read it as asserting placement,
+which it does not, and `Tests/Memory/Placement.lean`'s deliberately unplaced
+allocation satisfies it. -/
 def PlacedWithoutWrap (state : MemoryState) (id : AllocId) : Prop :=
   ∀ record ∈ state.allocations.lookup id, ∀ base ∈ record.base,
     FitsAllocation base record.extent.size

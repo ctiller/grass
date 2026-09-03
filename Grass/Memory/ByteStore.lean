@@ -23,13 +23,33 @@ does not cover this offset, so the lookup skips it", which is a one-line case
 split rather than an argument about maintained sortedness.
 
 The cost is that a read scans runs, so a long-running program's reads degrade.
-What makes that acceptable is that the representation does not escape: `runs`,
-`Run`, and every lemma mentioning either are `private`, so the exported surface is
-`cellAt?`, `byteAt?`, `InitializedAt`, `Initialized`, `empty`, `write`, `compact`,
-and theorems over those. A store agreeing pointwise satisfies every exported
+What makes that acceptable is that the *named* surface is `cellAt?`, `byteAt?`,
+`InitializedAt`, `Initialized`, `empty`, `write`, `compact`, and theorems over
+those: `runs`, `Run`, and every lemma mentioning either are `private`, so a
+consumer cannot name a run. A store agreeing pointwise satisfies every exported
 theorem unchanged, and `docs/OLEAN_SHARDING.md` §1 asks for exactly that — facts
 crossing the boundary as exported theorems rather than as a representation
 consumers unfold.
+
+**That is a convention, not a seal, and the difference was found the hard way.**
+`ByteStore.rec` is generated with the type's own visibility and is not private, and
+unification supplies `Run` without the caller ever naming it — so a consumer can
+recurse to the list and count it. Review wrote
+
+    noncomputable def runCount (s : ByteStore) : Nat :=
+      ByteStore.rec (motive := fun _ => Nat) (fun rs => rs.length) s
+
+outside this module, and it compiles. Two stores that `cellAt?_compact` proves
+agree at every offset have different run counts, so compaction *is* observable
+through an exported name. An earlier version of this comment said nothing outside
+the module could mention a run and that a consumer could not count them; both were
+false.
+
+What survives is the claim that matters and no more: every exported *theorem* here
+is stated over `cellAt?` or its projections, so a compacting store satisfies them
+unchanged. Structural observation — `=`, `DecidableEq`, `Repr`, and now the
+recursor — sees the journal, and nothing in the memory layer's reasoning depends on
+it.
 
 `compact` is that argument discharged rather than promised: `cellAt?_compact`
 proves the compacted store answers every offset identically, so it is a drop-in by
@@ -49,19 +69,19 @@ qualification. It was not true of the theorems when first written: `cellAt?_writ
 and three `Run` lemmas were public and stated over the representation, so a
 compacting store could not have satisfied them. They are private now.
 
-It is still not true of the derived `DecidableEq` and `Repr` instances, and
-review demonstrated that with a machine-checked pair: `empty.write 0 [7] true` and
+The same goes for the derived `DecidableEq` and `Repr` instances, and review
+demonstrated that with a machine-checked pair: `empty.write 0 [7] true` and
 `(empty.write 0 [7] true).write 0 [7] true` agree at every offset and are provably
 distinct, using only exported names. `Repr` prints the runs. So structural
 equality on `ByteStore` observes the journal, and a compacting store would be a
 drop-in for every theorem here and *not* for `=`.
 
 That is a real limit and it is stated rather than argued away. The instances exist
-because `AllocationRecord` and `MemoryState` derive `DecidableEq`, which is what
-lets fixtures close concrete goals by `decide`. Nothing in the memory layer's
-reasoning depends on `ByteStore` equality meaning agreement — the framing and
-commutation laws are all stated over `AgreesOn` or `cellAt?` precisely because it
-does not.
+because `AllocationRecord` derives `DecidableEq`, which is what lets fixtures close
+concrete goals by `decide` — `MemoryState` does not derive it, which an earlier
+version of this sentence claimed. Nothing in the memory layer's reasoning depends
+on `ByteStore` equality meaning agreement: the framing and commutation laws are all
+stated over `AgreesOn` or `cellAt?` precisely because it does not.
 
 The exported lemmas are stated over `cellAt?` rather than `byteAt?`, and that
 matters: framing over values alone would let a non-initializing write outside a
@@ -94,10 +114,10 @@ open Grass.Std.Logical
 
 /-- One contiguous run of bytes at an offset.
 
-Representation. `ByteStore.runs` is private and every lemma about `Run` below is
-private, so nothing outside this module can mention a run — which is what makes
-the module comment's claim about a compacting store true by construction rather
-than by discipline. -/
+Representation. `ByteStore.runs` and every lemma about `Run` below are private, so
+no consumer can *name* a run — but see the module comment: `ByteStore.rec` is not
+private and reaches the list anyway, so this is a strong convention rather than a
+seal. -/
 private structure Run where
   /-- The offset of the run's first byte. -/
   start : Nat

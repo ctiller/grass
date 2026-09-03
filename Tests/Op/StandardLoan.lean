@@ -44,15 +44,21 @@ theorem an_unlent_store_commits :
 /-- A loan of the buffer's head to the device engine. -/
 def lentToEngine : MachineState :=
   { state₀ with
-    memory := state₀.memory.lend bufferLoan
+    memory := (state₀.memory.lend? bufferLoan
       { kind := .loan, holder := engine₀, provenance := bufferProv
-        range := ⟨0, 8⟩, rights := .readWrite } }
+        range := ⟨0, 8⟩, rights := .readWrite }).getD state₀.memory }
+
+/-- The lend succeeded, so `getD` did not fall back to the unlent state. -/
+theorem the_engine_lend_succeeds :
+    (state₀.memory.lend? bufferLoan
+      { kind := .loan, holder := engine₀, provenance := bufferProv
+        range := ⟨0, 8⟩, rights := .readWrite }).isSome := by decide
 
 /-- The lend really did freeze those bytes, so the refusal below is about lending
 rather than about the state being odd. -/
 theorem the_lend_freezes_the_head :
     ¬ lentToEngine.memory.Exclusive bufferProv ⟨0, 8⟩ ∧
-    lentToEngine.memory.ownerAuthority bufferProv ⟨0, 8⟩ = .frozen := by
+    lentToEngine.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ = AuthorityState.frozen := by
   exact ⟨by decide, by decide⟩
 
 /--
@@ -69,6 +75,34 @@ theorem a_store_to_lent_bytes_is_refused :
   intro s hs
   cases hs
   exact ⟨by decide, by decide, by decide⟩
+
+/--
+**A loan cannot be bypassed through an aliasing allocation.**
+
+The regression for the worst defect local review found in this module. `loansOver`
+decided "the relevant map" with `Provenance.SameStorage`, which is not the
+same-bytes relation — this layer had already learned that once, which is why
+`MemoryState.SharesBytes` exists and why `ConflictsWithHistory` consults it. So a
+loan over `bufferAlloc` left `viewAlloc` looking exclusive, and a thread's store
+through the mapped view committed with no violation while the engine held the
+bytes. That is the §7.5 mapped-file and host-visible-device-buffer shape exactly.
+-/
+theorem a_loan_cannot_be_bypassed_through_an_alias :
+    ¬ lentToEngine.memory.Exclusive viewProv ⟨0, 8⟩ ∧
+    ∀ s, (step lentToEngine .storeThroughView).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 := by
+  refine ⟨by decide, ?_⟩
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- The alias really is one: the two provenances name different storage by
+`SameStorage` and the same bytes by `SharesBytes`, which is what made the bypass
+possible and what closes it. -/
+theorem the_view_aliases_the_buffer :
+    ¬ bufferProv.SameStorage viewProv ∧
+    state₀.memory.SharesBytes bufferAlloc viewAlloc := by
+  exact ⟨by decide, by decide⟩
 
 /-- Returning the loan restores the thread's access, so the refusal tracks the
 loan rather than being permanent. -/
@@ -98,9 +132,9 @@ theorem a_read_of_lent_bytes_is_also_refused :
 /-- A loan of the buffer's *tail*, which no `Alpha` operation touches. -/
 def tailLentToEngine : MachineState :=
   { state₀ with
-    memory := state₀.memory.lend bufferLoan
+    memory := (state₀.memory.lend? bufferLoan
       { kind := .loan, holder := engine₀, provenance := bufferProv
-        range := ⟨8, 8⟩, rights := .readWrite } }
+        range := ⟨8, 8⟩, rights := .readWrite }).getD state₀.memory }
 
 /--
 **The freeze is per-fragment, and `step` sees that.**
