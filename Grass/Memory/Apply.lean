@@ -130,6 +130,36 @@ def denialOf (state : MemoryState) (d : AccessDescriptor) : Option AuditViolatio
         some .uninitializedRead
       else Option.none
 
+/--
+**The bounds clause above cannot fire on the transition path**, which is what
+`the_bounds_clause_cannot_fire` below states. It looked like a state-time check for
+two milestones.
+
+`step` admits nothing until `Substep.WellFormedIn` holds, which supplies
+`provenanceNested` and `rangeInProvenance`; `denialOf`'s own extent clause, two lines
+earlier, forces the allocation's extent to equal the provenance's declared root
+extent. The three compose, so `record.extent.Contains d.range` is already true by the
+time the bounds clause is asked. Review found it by deleting the clause and rebuilding
+the tree green, then proving the reason rather than leaving it as an observation --
+which is the standing rule here, after a "one check subsumes another" claim on this
+branch turned out to be false within the hour.
+
+Two things follow and neither is settled here. `AuditViolationClass.outOfBounds` is in
+`emittedByTransition`, so every profile must declare a class the transition cannot
+emit, and `denialOf`'s own docstring rejects that shape for alignment: an unreachable
+branch that looks like a check is worse than no branch. And the clause is not dead in
+general -- `applyAccess` calls `denialOf` without any well-formedness hypothesis --
+but `applyAccess` has no application anywhere under `Grass/` or `Tests/`.
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records both.
+-/
+theorem the_bounds_clause_cannot_fire {d : AccessDescriptor} {space : AddressSpace}
+    {record : AllocationRecord} (hwf : d.WellFormedIn space)
+    (hext : record.extent = d.provenance.rootExtent) :
+    record.extent.Contains d.range := by
+  rw [hext]
+  exact ByteRange.Contains.trans
+    (Provenance.extent_within_root hwf.provenanceNested) hwf.rangeInProvenance
+
 /-- What an access observed, or why it was refused. -/
 structure AccessResult where
   /-- The bytes observed, if the access read and was not refused. -/

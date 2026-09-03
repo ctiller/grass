@@ -659,6 +659,13 @@ inductive Beta where
   | dmaDischargesTheThreadsDuty
   /-- An operation that declares no memory effects at all. -/
   | undeclared
+  /-- An operation that declares memory effects and faults but not restartability.
+
+  `undeclared` cannot discriminate the closure gate: it is missing `memoryEffects`,
+  and the branch immediately after the gate returns that same rejection for the same
+  operation, so the gate could be switched off entirely with the fixture still green.
+  This one is missing a facet no later branch asks about. -/
+  | unrestartable
 deriving DecidableEq, Repr
 
 instance : HasOperationFacets Beta where
@@ -686,6 +693,13 @@ instance : HasOperationFacets Beta where
           faults := some [.pageFault, .deviceFault], restartability := some .notRestartable
           ordering := some .plain }
     | .undeclared => {}
+    | .unrestartable =>
+        { memoryEffects := some (.single
+            { acc viewProv ⟨0, 8⟩ 0x1000 .write .readWrite false true
+                (context := engine₀) with
+              intent := { reads := false, writes := true } })
+          faults := some [.pageFault, .deviceFault]
+          ordering := some .plain }
 
 /-! ## The profile and the starting state -/
 
@@ -814,15 +828,42 @@ def policy : StepPolicy :=
     violationClassesDeclared := by decide
     vocabularyWellFormed := by decide }
 
-/-- A vocabulary that declares one address-space identity twice, with different
-representations, is not well formed — so no `StepPolicy` can be built from it.
-`find?` returns the first match, so without this check which version an access was
-validated against would depend on list order. -/
+/-- A vocabulary that declares one address-space identity twice is not well formed —
+so no `StepPolicy` can be built from it. `find?` returns the first match, so without
+this check which version an access was validated against would depend on list order.
+
+**The two entries differ in width and not in representation**, and they used to differ
+in representation: the second was `repr := .symbolic`, which is now ill formed on its
+own by `AddressSpace.RepresentationMatchesIdentity`, so the fixture would have been
+refused for a reason that has nothing to do with duplication. Review found the same
+value written down here and refused as a duplicate while the real defect — one such
+entry, declared alone — went through. Both entries here are well formed apart. -/
 theorem duplicate_space_vocabulary_is_rejected :
     ¬ ({ vocabulary with
-          addressSpaces := ⟨[ { id := .cpuVirtual, repr := .symbolic
+          addressSpaces := ⟨[ { id := .cpuVirtual, repr := .numeric 32
                                 memoryType := .writeBack, coherence := .hostCoherent }
                             , AddressSpace.cpuVirtual64 ]⟩ } :
+        AdmittedVocabulary).WellFormed := by decide
+
+/-- And each of those entries is well formed on its own, so the refusal above is the
+duplication. -/
+theorem each_duplicate_entry_is_well_formed_apart :
+    ({ id := .cpuVirtual, repr := .numeric 32
+       memoryType := .writeBack, coherence := .hostCoherent } :
+      AddressSpace).WellFormed ∧
+    AddressSpace.cpuVirtual64.WellFormed := by
+  exact ⟨by decide, by decide⟩
+
+/-- **A vocabulary declaring `cpu.virtual` as symbolically addressed is not well
+formed either**, which is the defect the duplicate fixture stood in front of. Declared
+alone it passed, and against it `AccessDescriptor.WellFormedIn`'s alignment and
+range-width clauses are both vacuous — review stepped a store of more than `2^64`
+bytes at a symbolic address with a 4096-byte alignment demand. -/
+theorem a_symbolic_cpu_space_vocabulary_is_rejected :
+    ¬ ({ vocabulary with
+          addressSpaces := ⟨[ { id := .cpuVirtual, repr := .symbolic
+                                memoryType := .writeBack
+                                coherence := .hostCoherent } ]⟩ } :
         AdmittedVocabulary).WellFormed := by decide
 
 /-- Sixty-four initialized zero bytes: the starting contents of every allocation
@@ -1663,6 +1704,147 @@ theorem a_join_onto_a_fresh_identity_is_applicable :
       [.join bufferProtocol bufferAuthority [releaseObligationId]
         { secondReleaseObligation with id := fabricatedObligationId }] := by decide
 
+/-! ## The six ledger clauses a mutation sweep found unguarded
+
+Review replaced each clause of `LedgerDelta.Applicable` and `LedgerDelta.WellFormed`
+with a vacuous equivalent, one at a time, and rebuilt. Six survived: `create`'s
+protocol agreement, `split`'s owner and freshness clauses, `join`'s owner clause, and
+both `Nodup` conditions. The controls in the same sweep were caught, so the sweep was
+discriminating and these six were the gap.
+
+`docs/OBLIGATIONS.md` §2 is what each of them holds: "Dropping, duplicating, or
+fabricating obligations is forbidden." Without `split`'s owner clause the engine can
+step a split of the thread's live duty into duties it owns itself, which is §2's
+transfer under another name with no violation recorded. Without either `Nodup` a
+single duty is counted as two -- the duplication half -- and `applyDelta`'s fold then
+collapses the pair back into one row.
+
+Each pair below varies one thing. Where the varying thing is ownership the *source*
+changes rather than the actor, because an output's owner must equal the actor too, so
+varying the actor would move two clauses at once. -/
+
+/-- The same duty shape, owned by the engine, so an ownership pair can hold the actor
+fixed. -/
+def engineObligation : Obligation :=
+  { id := ghostObligationId₂, kind := .releaseAllocation
+    protocol := bufferProtocol, owner := engine₀ }
+
+/-- Both thread duties and the engine's, all live. -/
+private def ledger₃ : FiniteMap ObligationId Obligation :=
+  ledger₂.insert ghostObligationId₂ engineObligation
+
+/-- The three sources this section splits and joins are live and differ in owner
+alone, so the refusals below are the owner clauses and not liveness. -/
+theorem the_ledger_three_sources_are_live :
+    (ledger₃.lookup releaseObligationId).map Obligation.owner = some thread₀ ∧
+    (ledger₃.lookup ghostObligationId₂).map Obligation.owner = some engine₀ ∧
+    (ledger₃.lookup releaseObligationId).map Obligation.kind =
+      (ledger₃.lookup ghostObligationId₂).map Obligation.kind ∧
+    (ledger₃.lookup releaseObligationId).map Obligation.protocol =
+      (ledger₃.lookup ghostObligationId₂).map Obligation.protocol := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-- **A create whose duty names another protocol is refused.** §2 gives a protocol
+authority over its own obligations and no others; without this clause a step holding
+`bufferAuthority` could mint a duty governed by `fake.other` and no protocol theorem
+would ever be asked about it. -/
+theorem a_create_under_another_protocol_is_refused :
+    ¬ Grass.Op.LedgerEffectApplicable ledger₁ [thread₀, engine₀] thread₀
+      [.create bufferProtocol bufferAuthority
+        { id := fabricatedObligationId, kind := .releaseAllocation
+          protocol := otherProtocol, owner := thread₀ }] := by decide
+
+/-- The same create under its own protocol is applicable, so the refusal is the
+protocol clause. -/
+theorem the_same_create_under_its_own_protocol_is_applicable :
+    Grass.Op.LedgerEffectApplicable ledger₁ [thread₀, engine₀] thread₀
+      [.create bufferProtocol bufferAuthority
+        { id := fabricatedObligationId, kind := .releaseAllocation
+          protocol := bufferProtocol, owner := thread₀ }] := by decide
+
+/-- The outputs both split fixtures below produce: fresh, of the source's kind, owned
+by the engine. -/
+def engineSplitOutput : Obligation :=
+  { id := fabricatedObligationId, kind := .releaseAllocation
+    protocol := bufferProtocol, owner := engine₀ }
+
+/-- **The engine may not split a duty the thread owns.** §1 makes an obligation a duty
+of its holder, and this is the clause that says so for `split`. Without it the engine
+steps this and walks away owning both halves of somebody else's duty. -/
+theorem a_split_of_another_contexts_duty_is_refused :
+    ¬ Grass.Op.LedgerEffectApplicable ledger₃ [thread₀, engine₀] engine₀
+      [.split bufferProtocol bufferAuthority releaseObligationId
+        [engineSplitOutput]] := by decide
+
+/-- The same split of the engine's own duty is applicable. One field of the delta
+changes -- the source identity -- and the two sources are live, of one kind and one
+protocol, by `the_ledger_three_sources_are_live`. -/
+theorem the_same_split_of_its_own_duty_is_applicable :
+    Grass.Op.LedgerEffectApplicable ledger₃ [thread₀, engine₀] engine₀
+      [.split bufferProtocol bufferAuthority ghostObligationId₂
+        [engineSplitOutput]] := by decide
+
+/-- **A split onto a live identity is refused** -- the freshness half, and the twin
+that `a_join_onto_a_live_identity_is_refused`'s docstring claimed was already
+fixtured. It was not: the two relabelling fixtures above give their outputs a kind the
+source does not have, so the kind clause refuses them and the freshness clause could
+be deleted with the tree green. Here the kind matches. -/
+theorem a_split_onto_a_live_identity_is_refused :
+    ¬ Grass.Op.LedgerEffectApplicable ledger₂ [thread₀, engine₀] thread₀
+      [.split bufferProtocol bufferAuthority releaseObligationId
+        [secondReleaseObligation]] := by decide
+
+/-- And onto a fresh identity it is applicable, so the refusal is freshness. -/
+theorem the_same_split_onto_a_fresh_identity_is_applicable :
+    Grass.Op.LedgerEffectApplicable ledger₂ [thread₀, engine₀] thread₀
+      [.split bufferProtocol bufferAuthority releaseObligationId
+        [{ secondReleaseObligation with id := fabricatedObligationId }]] := by decide
+
+/-- **The engine may not join a duty the thread owns**, for the same reason as
+`split`. -/
+theorem a_join_of_another_contexts_duty_is_refused :
+    ¬ Grass.Op.LedgerEffectApplicable ledger₃ [thread₀, engine₀] engine₀
+      [.join bufferProtocol bufferAuthority [releaseObligationId]
+        engineSplitOutput] := by decide
+
+/-- The same join of the engine's own duty is applicable. -/
+theorem the_same_join_of_its_own_duty_is_applicable :
+    Grass.Op.LedgerEffectApplicable ledger₃ [thread₀, engine₀] engine₀
+      [.join bufferProtocol bufferAuthority [ghostObligationId₂]
+        engineSplitOutput] := by decide
+
+/-! ### Shape, which `StepPolicy.Admits` checks and `LedgerEffectApplicable` does not
+
+`LedgerDelta.WellFormed` is the other half and the two `Nodup` conditions live there,
+so these four are stated over it directly rather than through the transition. -/
+
+/-- **A split producing one identity twice is not well formed.** §2's "duplicating":
+`applyDelta` folds the outputs in, so the second insert overwrites the first and a
+duty claimed as two becomes one row. -/
+theorem a_split_producing_one_identity_twice_is_ill_formed :
+    ¬ (LedgerDelta.split bufferProtocol bufferAuthority releaseObligationId
+      [engineSplitOutput, engineSplitOutput]).WellFormed := by decide
+
+/-- Two distinct outputs are well formed, so the refusal is the duplication and not
+the count. -/
+theorem a_split_producing_two_identities_is_well_formed :
+    (LedgerDelta.split bufferProtocol bufferAuthority releaseObligationId
+      [engineSplitOutput,
+       { engineSplitOutput with id := ghostObligationId₂ }]).WellFormed := by decide
+
+/-- **A join consuming one identity twice is not well formed**, which is the same
+sentence read from the other side: one duty counted as two sources. -/
+theorem a_join_consuming_one_identity_twice_is_ill_formed :
+    ¬ (LedgerDelta.join bufferProtocol bufferAuthority
+      [releaseObligationId, releaseObligationId] engineSplitOutput).WellFormed := by
+  decide
+
+/-- Two distinct sources are well formed. -/
+theorem a_join_consuming_two_identities_is_well_formed :
+    (LedgerDelta.join bufferProtocol bufferAuthority
+      [releaseObligationId, ghostObligationId] engineSplitOutput).WellFormed := by
+  decide
+
 /-- **And here is what a join of two independent duties does**, which is a gap rather
 than a guard.
 
@@ -2319,6 +2501,54 @@ theorem partially_faulted_rmw_records_its_prefix :
   cases hs
   exact ⟨_, rfl, by decide, by decide⟩
 
+/-! ## The fault plan's commit counts are bounded by what the substep can commit
+
+`AuditViolationClass.faultCommitOutOfRange` appeared nowhere under `Tests/`. Review
+restored the pre-repair form of the bound -- the symmetric one whose asymmetry the
+`faultCommitOutOfRange` docstring records finding, which refused an impossible count
+on a compute substep while approximating one on an access -- and the tree stayed
+green; disabling the clause outright likewise.
+
+Nothing becomes unsound without it, because `Committed.truncate` clamps by
+`List.take` and `observedAbsent` forces a write-only access's read count to zero. That
+is exactly the objection: an impossible machine report is silently rewritten into a
+possible one, and `docs/FOUNDATION.md` law 8 says reject rather than approximate. The
+fault plan is external entropy under law 5, so the gate is where the machine's answer
+is checked rather than believed. -/
+
+/-- **A read count on an access that reads nothing is refused.** `store` writes eight
+bytes and reads none, so a plan claiming one committed read byte describes something
+the substep cannot have done. -/
+theorem a_read_count_on_a_write_only_access_is_refused :
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
+      ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 1 0
+        else .none)).rejection? = some .faultCommitOutOfRange := by decide
+
+/-- The same plan with the read count zero runs, so the refusal is the count and not
+the plan. -/
+theorem the_same_plan_without_the_read_runs :
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
+      ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 0
+        else .none)).Ran := by decide
+
+/-- **And a non-zero count on a substep that touches no memory is refused.** This is
+the half the pre-repair bound got right; it is here so that the asymmetry cannot come
+back unnoticed in either direction. `divide`'s second substep is a `.compute`. -/
+theorem a_commit_count_on_a_compute_substep_is_refused :
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) thread₀ .thread
+      ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 1 < seq.substeps.length then .before ⟨1, h⟩ divideError 0 1
+        else .none)).rejection? = some .faultCommitOutOfRange := by decide
+
+/-- The same plan with both counts zero runs. -/
+theorem the_same_compute_plan_without_the_count_runs :
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) thread₀ .thread
+      ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 1 < seq.substeps.length then .before ⟨1, h⟩ divideError 0 0
+        else .none)).Ran := by decide
+
 /-! ## 9: a second family coexists -/
 
 /-- The device family steps through the same relation, with no shared type. -/
@@ -2331,6 +2561,26 @@ having none. This is `docs/FOUNDATION.md` law 8 at the seam. -/
 theorem undeclared_is_rejected :
     (stepBeta state₀ .undeclared).rejection? = some (.facetsNotClosed .memoryEffects) := by
   decide
+
+/-- **And an operation missing a facet no later branch asks about is rejected by the
+closure gate itself.**
+
+`undeclared_is_rejected` above cannot say this. It is missing `memoryEffects`, and the
+branch after the gate returns `.facetsNotClosed .memoryEffects` for the same operation,
+so review switched the gate off entirely -- replacing its predicate so it never
+rejects -- and the whole tree stayed green. `restartability` is required by both
+fixture policies and nothing downstream reads it, so this rejection can only be the
+gate. -/
+theorem a_missing_restartability_facet_is_rejected :
+    (stepBeta state₀ .unrestartable).rejection? =
+      some (.facetsNotClosed .restartability) := by decide
+
+/-- And the gate's answer is `OperationFacets.Closes`'s answer, by
+`closes_iff_no_missing`: this operation fails closure and `dmaWrite` satisfies it. -/
+theorem the_closure_gate_agrees_with_closes :
+    ¬ (HasOperationFacets.facets Beta.unrestartable).Closes policy.requiredFacets ∧
+    (HasOperationFacets.facets Beta.dmaWrite).Closes policy.requiredFacets := by
+  exact ⟨by decide, by decide⟩
 
 /-- Both families reach the same transition relation, and neither type appears in
 the other's definition. -/
@@ -2844,6 +3094,26 @@ guarantee. `AdmittedVocabulary.WellFormed` requires the three to be pairwise dis
 now, and `StepPolicy.vocabularyWellFormed` makes that a construction obligation. -/
 theorem a_confused_vocabulary_is_not_well_formed :
     ¬ confusedVocabulary.WellFormed ∧ vocabulary.WellFormed := by
+  exact ⟨by decide, by decide⟩
+
+/-- The same confusion between initialization and atomicity. -/
+def confusedInitAtomicity : AdmittedVocabulary :=
+  { vocabulary with
+    atomicityJustifications := ⟨[⟨"fake.zeroedByLoader"⟩]⟩ }
+
+/-- And between initialization and fault visibility. -/
+def confusedInitVisibility : AdmittedVocabulary :=
+  { vocabulary with
+    faultVisibilityRules := ⟨[⟨"fake.zeroedByLoader"⟩]⟩ }
+
+/-- **The other two pairs are refused too.** Disjointness is three conditions and only
+the atomicity/fault-visibility pair had a fixture: review replaced each of the other
+two with `True` and the tree stayed green. A rule that permits an uninitialized read is
+not a proof that a two-substep store is all-or-nothing, and it is not a fault-visibility
+rule either; the registries are separate so that one name cannot answer another's
+question, and two thirds of that was a convention rather than a guarantee. -/
+theorem the_other_two_confusions_are_refused :
+    ¬ confusedInitAtomicity.WellFormed ∧ ¬ confusedInitVisibility.WellFormed := by
   exact ⟨by decide, by decide⟩
 
 /-- **A protocol the profile never declared is not admitted.**

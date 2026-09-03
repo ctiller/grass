@@ -188,4 +188,40 @@ theorem an_offset_allocation_that_fits_is_admitted :
         producesInitialized := true } = Option.none := by
   exact ⟨by decide, by decide⟩
 
+/-! ## The address a descriptor declares must be the one its placement gives
+
+`AuditViolationClass.addressDisagreesWithPlacement` repairs a demonstrated defect --
+its docstring records that every address in the Spike 1 fixtures contradicted the
+placement the same fixture built, and that six of `Tests/Op/FakeIsa.lean`'s own
+descriptors named an address belonging to a different allocation. Nothing tested it:
+review deleted the clause and the whole tree stayed green, so the repair could have
+been undone invisibly. -/
+
+/-- The `fitting` allocation accessed at the address a *different* live allocation is
+based at. Every other clause of `denialOf` passes: the allocation is live, in the
+right epoch and space, its extent agrees with the provenance, the range is inside it,
+the placement does not wrap and the permission covers the intent. -/
+theorem an_address_from_another_allocation_is_refused :
+    denialOf fitting
+      { context := someContext, address := .numeric 0x1000, space := .cpuVirtual
+        provenance :=
+          { space := .cpuVirtual, root := offsetAlloc, epoch := epoch
+            source := .virtualAlloc, rootExtent := ⟨200, 50⟩, path := [] }
+        range := ⟨200, 8⟩, intent := .write, requiredPermission := .readWrite
+        alignment := 1, initialization := .readsNothing
+        producesInitialized := true } =
+      some AuditViolationClass.addressDisagreesWithPlacement := by
+  decide
+
+/-- `0x1000` is not an arbitrary wrong address: it is where `placed` sits, so the
+refusal above is about *which* allocation the address belongs to rather than about an
+address belonging to none. `an_offset_allocation_that_fits_is_admitted` is the
+positive control -- the same descriptor at the address `fitting`'s own placement gives
+is denied nothing. -/
+theorem the_wrong_address_is_another_allocations_base :
+    (fitting.allocations.lookup placed).map AllocationRecord.base = some (some 0x1000) ∧
+    (fitting.allocations.lookup offsetAlloc).map AllocationRecord.base =
+      some (some 0x2000) := by
+  exact ⟨by decide, by decide⟩
+
 end Tests.Memory.Placement

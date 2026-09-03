@@ -217,6 +217,15 @@ transition never applies it to a hand-made space: `Substep.WellFormedIn` resolve
 through the profile's table, and `StepPolicy.vocabularyWellFormed` rules out a
 table that answers ambiguously.
 
+**And that was not enough, for a milestone.** Resolution and the ambiguity check close
+the hand-made space and the duplicate; neither closes a table that declares the
+pairing this paragraph names *once*, which is well formed on its own. Review built
+such a table, discharged `vocabularyWellFormed` against it, and stepped a store of
+more than `2^64` bytes at a symbolic address with a 4096-byte alignment demand. The
+fixture that was supposed to be about this wrote the value down and refused it as a
+`Nodup` duplicate. `AddressSpace.RepresentationMatchesIdentity` is the missing half:
+`cpu.virtual` is numerically addressed by its identity, not by a profile's choice.
+
 The remaining conditions are checkable from the descriptor alone. Whether the
 provenance is live, whether the named bytes are actually initialized, and whether
 the address really is the allocation base plus `range.start` are facts about a

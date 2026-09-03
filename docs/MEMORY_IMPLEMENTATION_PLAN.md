@@ -1567,15 +1567,136 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   define.**~~ It told the reader to add the module to "ALLOWED_CALLERS"; the structure
   is the door table. This is the second finding of that shape in the same file.
 
+- ~~**Six clauses of the obligation ledger were vacuous-safe**, and one of them was
+  recorded here as fixtured.~~ Review replaced each clause of `LedgerDelta.Applicable`
+  and `LedgerDelta.WellFormed` with a vacuous equivalent, one at a time, and rebuilt.
+  Six survived green: `create`'s protocol agreement, `split`'s owner and freshness
+  clauses, `join`'s owner clause, and both `Nodup` conditions. The controls in the
+  same sweep were caught — `discharge`'s three clauses, `create`'s freshness and
+  owner, both `kind` clauses, `join`'s freshness, `transfer`'s context clause and both
+  non-empty conditions — so the sweep discriminated and these six were the gap.
+
+  What each buys, in `docs/OBLIGATIONS.md` §2's words ("Dropping, duplicating, or
+  fabricating obligations is forbidden"): without `split`'s owner clause the engine
+  steps a split of the thread's live duty into duties it owns itself, which is §2's
+  transfer under another name with no violation; without either `Nodup` one duty is
+  claimed as two and `applyDelta`'s fold collapses it back to one row; without
+  `create`'s protocol clause a step holding one protocol's authority mints a duty
+  governed by another, which no protocol theorem is ever asked about.
+
+  Six pairs close them, each varying one thing. Where the varying thing is ownership
+  the *source* changes and the actor is held fixed, because an output's owner must
+  equal the actor too and varying the actor would move two clauses at once;
+  `the_ledger_three_sources_are_live` pins that the two sources differ in owner alone.
+- ~~**`denialOf`'s `addressDisagreesWithPlacement` clause had no fixture.**~~ It is
+  live and it repairs a demonstrated defect — its own docstring records that every
+  address in the Spike 1 fixtures contradicted the placement the same fixture built,
+  and that six of `Tests/Op/FakeIsa.lean`'s descriptors named an address belonging to
+  a different allocation. Deleting it left the tree green, so that repair could be
+  undone invisibly. `Tests/Memory/Placement.lean` has the pair now: the fixtures' own
+  placed allocation, accessed at the address its placement gives, and accessed at the
+  base of a different live allocation.
+- **`denialOf`'s bounds clause cannot fire on the transition path**, which is not the
+  same as being untested. `step` requires `Substep.WellFormedIn`, which supplies
+  `provenanceNested` and `rangeInProvenance`, and `denialOf`'s own earlier clause
+  forces `record.extent = d.provenance.rootExtent`; the three compose to
+  `record.extent.Contains d.range`. Review proved it in Lean and it is stated beside
+  the clause as `the_bounds_clause_cannot_fire`, so the fact is compiled rather than
+  argued.
+
+  Two consequences are open. `AuditViolationClass.outOfBounds` is in
+  `emittedByTransition`, so every profile must declare a class the transition cannot
+  emit — and `denialOf`'s own docstring rejects exactly that shape for alignment: "an
+  unreachable branch that looks like a check is worse than no branch". And the clause
+  survives for `applyAccess`, which has no application anywhere under `Grass/` or
+  `Tests/`. Removing either needs a decision about whether the block evaluator is a
+  supported entry point, which is not this document's to take alone.
+- ~~**`step`'s fault-plan commit-count gate was entirely untested**, including the
+  regression its own docstring records.~~ `AuditViolationClass.faultCommitOutOfRange`
+  appeared nowhere under `Tests/`. Review restored the pre-repair form of the bound —
+  the symmetric one that, in the docstring's words, "refused an impossible count on a
+  compute substep while approximating an impossible count on an access" — and the tree
+  stayed green; disabling the clause outright likewise. Nothing became unsound,
+  because `Committed.truncate` clamps by `List.take`, which is the point: an
+  impossible machine report was silently rewritten into a possible one, and
+  `docs/FOUNDATION.md` law 8 says reject rather than approximate.
+- ~~**`step`'s `requiredFacets` gate was untested and its one fixture could not
+  discriminate it.**~~ `docs/INSTRUCTIONS.md`: "All reachable operations must close
+  every facet required by their selected profile. Missing metadata is rejection, not a
+  default empty effect." Replacing the gate's predicate so it never rejects left the
+  tree green, because the fixture that reaches it asserts `.facetsNotClosed
+  .memoryEffects` and the *next* branch returns that identical value for the same
+  operation. The two other facets both fixture policies require were never exercised
+  as missing.
+- ~~**`OperationFacets.Closes` had no application under `Grass/`**, and two docstrings
+  in two modules named it as the check `step` performs.~~ This was the
+  `MemoryProfile.Admits` shape again, in the place §4.4.1 says no gate can see it: a
+  `def` under `Grass/` that nothing uses falls between `ConsultedAudit` and
+  `ReachabilityAudit`. `closes_iff_no_missing` is the missing step -- `step` uses
+  `find?` to *name* the failing facet, and the theorem says the answer `find?` gives is
+  `Closes`'s answer, so the two docstrings are claims about a theorem rather than about
+  a resemblance.
+- ~~**Two of `AdmittedVocabulary.WellFormed`'s three disjointness clauses were
+  unguarded.**~~ The pairwise-disjointness requirement is load-bearing because
+  `StepPolicy.vocabularyWellFormed` makes it a construction obligation, and only the
+  atomicity/fault-visibility pair had a fixture. The other two have siblings now.
+- ~~**`AddressSpace.repr` is a profile input that can only remove refusals**~~, and it
+  was the one input missing from §4.4.1a's table. A table declaring `cpu.virtual` paired
+  with `repr := .symbolic` — once, not as a duplicate — is well formed, so
+  `StepPolicy.vocabularyWellFormed` is dischargeable and the policy constructible.
+  Against that space a store of more than 2^64 bytes at a symbolic address with a 4096
+  alignment demand satisfies `AccessDescriptor.WellFormedIn` and `Substep.WellFormedIn`
+  both: `RangeFitsSpace` and `AlignmentSatisfied` are vacuous for a symbolic
+  representation. With `AllocationRecord.base = none`, itself a supported case, the two
+  `denialOf` placement clauses also skip, so a steppable profile runs with three
+  declaration-time guards off.
+
+  `AccessDescriptor.WellFormedIn`'s docstring names this attack and claims the seal:
+  the transition resolves the space through the profile's table and
+  `vocabularyWellFormed` rules out a table that answers ambiguously. That covers the
+  descriptor and the duplicate; it does not cover a table declaring the pairing once.
+  The tree's own fixture writes the value down and refuses it for the wrong reason —
+  `duplicate_space_vocabulary_is_rejected` refuses it as a `Nodup` duplicate.
+
+  Closed by `AddressSpaceId.requiredRepresentation` and
+  `AddressSpace.RepresentationMatchesIdentity`, which constrain the representations of
+  the identities this layer *names* — `cpu.virtual`, `cpu.physical`, the two device
+  identities and the four SPIR-V ones — and say nothing about any other. Kind only,
+  never width: how wide a CPU space is stays a profile's answer under the existing
+  64-bit bound, and `a_narrow_numeric_cpu_space_is_well_formed` pins that.
+
+  The fixture that stood in front of this had to change too.
+  `duplicate_space_vocabulary_is_rejected` wrote the hostile value down and refused it
+  as a `Nodup` duplicate; its two entries now differ in width rather than
+  representation, `each_duplicate_entry_is_well_formed_apart` says both are well formed
+  alone, and `a_symbolic_cpu_space_vocabulary_is_rejected` is the case that was
+  actually open. That is the third fixture this round whose subject was chosen when the
+  distinction did not exist.
+
+- **`EventCause.origin` is an open nominal with no registry**, and it reaches every
+  minted event as one of §7.1's required fields. Every other open nominal in this layer
+  that reaches an operation acquired a registry when review asked why it had none;
+  this one has an allowlist entry in `Tools/ConsultedAudit.py` instead, and nothing
+  relates it to the `SomeOperation` being stepped. Recorded rather than repaired,
+  because the corpus asks only that the event carry the cause, which it does. Review
+  raised it and judged it short of a finding; it is written down here so the next
+  reviewer does not have to rediscover the judgement.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
-Three consecutive review rounds found the same shape and it is worth naming as a
-shape rather than as three incidents: **a field a profile fills in that makes a rule
-of the corpus not run.** Round ten found `StepPolicy.authorities`, which defaulted to
-the empty list and carried §3's whole loan rule. Round twelve found
-`StepPolicy.compatible`, which could exempt every pair from §7.3. Both are closed
-above, and both were closed the same way: the rule moved into the transition, and what
-the profile supplies can now only *add* refusals.
+Four review rounds found the same shape and it is worth naming as a shape rather than
+as four incidents: **a field a profile fills in that makes a rule of the corpus not
+run.** Round ten found `StepPolicy.authorities`, which defaulted to the empty list and
+carried §3's whole loan rule. Round twelve found `StepPolicy.compatible`, which could
+exempt every pair from §7.3. Round fifteen found `AddressSpace.repr`, which could make
+both numeric clauses of the declaration-time seal vacuous for a space named
+`cpu.virtual`. All three are closed above, and all three the same way: the rule moved
+to where a profile cannot reach it, and what the profile supplies can now only *add*
+refusals.
+
+Round fifteen is the one to learn from, because the table below already existed and
+did not have a row for `repr`. Two of the entries it does have were written by reading
+the code; the input that turned out to be open was the one nobody thought to list.
 
 So here is every input a profile or a caller supplies, and what stops each from
 weakening a rule. The next reviewer should attack this table rather than rediscover
@@ -1586,10 +1707,12 @@ its entries one at a time.
 | `StepPolicy.authorities` | adds refusals only | `AuthorityProvider.refuses` is consulted *after* the transition's own clauses and cannot remove one; `refusalOf_refuses_the_unauthorized` is quantified over the policy |
 | `AuthorityProvider.refuses` | adds refusals only | takes a `MemoryState`, not a `MachineState`, so refusal cannot depend on execution history — monotonicity and locality in the range are still open |
 | `StepPolicy.compatible` | can remove a §7.3 refusal | `compatibleIsAtomic` and `compatibleSymm` are proof fields; `conflicts_of_not_atomic` is quantified over the policy |
-| `AdmittedVocabulary`'s eleven registries | admit more names | a larger registry admits more, which is the profile's own claim about its target; a *smaller* one refuses more, which is the safe direction |
-| `AdmittedVocabulary.WellFormed` | — | the address-space table is checked and the three justification registries are pairwise disjoint; the other eight have no coherence condition and need none |
-| `StepPolicy.oracle` | can only fail | `Oracle.answer` returns a proof-carrying `CompleteCommitted` or `none`, and `none` records `machineAnswerIncomplete`; it cannot claim a commit it cannot witness |
-| `StepPolicy.requiredFacets` | demands more | a facet a profile requires and an operation does not supply is a rejection |
+| `AddressSpace.repr` | **could remove two refusals** | `AccessDescriptor.WellFormedIn`'s `aligned` and `rangeFitsSpace` are both vacuous for a symbolic representation. `AddressSpace.RepresentationMatchesIdentity` now fixes the *kind* for every identity this layer names, so a table cannot call `cpu.virtual` symbolically addressed; width stays the profile's, bounded at 64 bits |
+| `AddressSpace.memoryType`, `coherence`, `owner` | — | nothing reads them; §4.2 lists them among the facts the model carries and nothing consults |
+| `AdmittedVocabulary`'s twelve registries | admit more names | a larger registry admits more, which is the profile's own claim about its target; a *smaller* one refuses more, which is the safe direction |
+| `AdmittedVocabulary.WellFormed` | — | the address-space table is checked and the three justification registries are pairwise disjoint; the other nine have no coherence condition and need none |
+| `StepPolicy.oracle` | can only fail *about commits* | `Oracle.answer` returns a proof-carrying `CompleteCommitted` or `none`, and `none` records `machineAnswerIncomplete`; it cannot claim a commit it cannot witness. "Can only fail" was an overclaim and review said so: it also supplies the bytes that land in memory and the values that reach the trace, and it takes a whole `MachineState` where `AuthorityProvider.refuses` was deliberately narrowed to a `MemoryState`. No repair is proposed because `writeData` has nowhere else to come from today |
+| `StepPolicy.requiredFacets` | demands more | a facet a profile requires and an operation does not supply is a rejection, and `closes_iff_no_missing` says the gate deciding that is `OperationFacets.Closes`. A profile requiring *nothing* still cannot step an operation with no memory-effect facet, because the branch after the gate refuses it |
 | `MemoryProfile.package` | **removes nothing today, and gates everything tomorrow** | eleven bare `Prop`s the profile chooses, so `True` eleven times closes §10. This is the one input on this table with no constraint at all, and it is the last gate before `VerifiedProgram` |
 | `faultAt`, the fault plan | adds paths | a `step` argument rather than a profile field; every plan it can name is checked against the sequence's own declarations |
 

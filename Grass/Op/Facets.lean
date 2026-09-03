@@ -123,6 +123,31 @@ theorem not_closes_of_missing {facets : OperationFacets} {required : List FacetN
     {facet : FacetName} (hr : facet ∈ required) (hs : facet ∉ facets.supplied) :
     ¬ facets.Closes required := fun h => hs (h facet hr)
 
+/--
+**Closure is exactly what `Grass/Op/Step.lean`'s first gate decides.**
+
+Two docstrings -- this module's above and `Grass/Memory/Fault.lean`'s -- said `step`
+refuses an operation that fails `Closes`, and `step` refuses on a `List.find?` over
+the same list, which is not the same sentence. Review pointed out that nothing under
+`Grass/` applied `Closes` at all: it was a `def` two modules named as the check, which
+is the shape `MemoryProfile.Admits` had before it was deleted, and the shape
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records as falling between two audits.
+
+This is the missing step. `step` uses `find?` to *name* the failing facet, and this
+says the answer `find?` gives is `Closes`'s answer, so the docstrings above are now
+claims about a theorem rather than about a resemblance.
+-/
+theorem closes_iff_no_missing (facets : OperationFacets) (required : List FacetName) :
+    facets.Closes required ↔
+      required.find? (fun facet => !facets.supplied.contains facet) = Option.none := by
+  constructor
+  · intro h
+    refine List.find?_eq_none.2 (fun facet hmem => ?_)
+    simpa using List.elem_eq_true_of_mem (h facet hmem)
+  · intro h facet hmem
+    have := List.find?_eq_none.1 h facet hmem
+    simpa using this
+
 end OperationFacets
 
 /--
