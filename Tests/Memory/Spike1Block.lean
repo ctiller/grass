@@ -15,11 +15,11 @@ descriptors `Tests/Memory/Spike1Reference.lean` declares for
 executor over `applyAccess`. It does not run `Grass.Op.step`, and
 `Spike1Reference.lean` wraps these same descriptors in `SubstepSequence`s for
 `step` rather than as the list used here. The two write memory through the same
-`MemoryState.commit`, and `Op.runAccesses_frames_untouched` is the same law
-stated for `runAccesses`; but the sequence executed below is not literally the one
-the machine executes, and there is no `step`-level framing theorem to appeal to.
-Two review rounds corrected this paragraph, first for claiming it ran the real
-mix and then for claiming the law was stated for `step`.
+`MemoryState.commit`, and `Op.step_frames_untouched` is the framing law for a
+whole operation; but the sequence executed below is not literally the one the
+machine executes. Two review rounds corrected this paragraph, first for claiming it
+ran the real mix and then for claiming a `step`-level law existed when it did
+not — it does now.
 
 The block is the one the spike's correctness argument turns on:
 

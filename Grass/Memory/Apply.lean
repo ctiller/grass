@@ -24,14 +24,11 @@ through it. So the framing results here are results about the transition, and
 `Op.performAccess_frames_untouched` and `Op.runAccesses_frames_untouched` are
 those results stated for `performAccess` and `runAccesses` directly.
 
-**Not for `step`.** There is no `step`-level framing theorem, and an earlier
-version of this comment said there was. It matters: `runStep`'s faulting branch
-runs `runAccesses` over `visibleEffects?`, which *excludes* the faulting substep,
-and then performs that substep's access separately. So framing established over
-the survivor list says nothing about the byte the faulting access writes.
-`performAccess_frames_untouched` covers that access individually, so the
-`step`-level theorem is derivable; it is not derived.
-`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records it as owed.
+`Op.step_frames_untouched` carries it to a whole operation. That theorem was
+missing for several rounds while four documents claimed it existed, which mattered:
+`runStep`'s faulting branch frames over `visibleEffects?`, which *excludes* the
+faulting substep, so the survivor-list law is not a law about the step. It
+quantifies over `sequence.accesses` instead, which contains both.
 
 This is spelled out because an earlier version of this comment claimed
 `applyAccess` had been *factored out of* `performAccess` when it had been written

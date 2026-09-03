@@ -275,6 +275,28 @@ transition rather than only of the prefix. -/
     (SubstepSequence.mk substeps (.profileSpecific name)).visibleEffects? failedAt =
       Option.none := rfl
 
+/-- A substep's descriptor is one of the sequence's accesses. -/
+theorem mem_accesses_of_descriptor? {seq : SubstepSequence} {sub : Substep}
+    {d : AccessDescriptor} (hmem : sub ∈ seq.substeps) (hd : sub.descriptor? = some d) :
+    d ∈ seq.accesses :=
+  List.mem_filterMap.mpr ⟨sub, hmem, hd⟩
+
+/-- **Every surviving access is one of the sequence's own.** A framing argument
+about the whole sequence therefore covers the survivor list, whichever visibility
+rule produced it — which is what lets a `step`-level framing theorem be built from
+`runAccesses`, over a list `visibleEffects?` chose rather than one the caller
+supplied. -/
+theorem mem_accesses_of_visibleEffects? {seq : SubstepSequence} {failedAt : Nat}
+    {survivors : List AccessDescriptor} (h : seq.visibleEffects? failedAt = some survivors)
+    {d : AccessDescriptor} (hd : d ∈ survivors) : d ∈ seq.accesses := by
+  unfold visibleEffects? at h
+  split at h
+  · cases h
+    obtain ⟨sub, hsub, hdesc⟩ := List.mem_filterMap.mp hd
+    exact mem_accesses_of_descriptor? (List.mem_of_mem_take hsub) hdesc
+  · cases h; exact absurd hd (by simp)
+  · exact absurd h (by simp)
+
 /-- Failure at the first step exposes nothing, whatever the visibility rule
 answers. -/
 theorem visibleEffects?_zero (seq : SubstepSequence) :

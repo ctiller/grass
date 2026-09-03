@@ -1211,14 +1211,15 @@ transition. These theorems state that for `performAccess` and `runAccesses`, and
 they exist because review found the earlier arrangement — two write paths, framing
 proved about one of them, and prose claiming it covered both.
 
-**They do not cover `step`.** `runStep`'s faulting branch runs `runAccesses` over
-the survivors, which exclude the faulting substep, and then performs that
-substep's access itself. `runAccesses_frames_untouched` applied to the survivors
-is therefore not a framing law for the whole step, and a second review round
-found the earlier comment here claiming it was.
-`performAccess_frames_untouched` covers the faulting access individually, so the
-missing theorem is derivable rather than false; it is recorded as owed in
-`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2. -/
+`runStep_frames_untouched` and `step_frames_untouched` carry this to the whole
+operation, and they are not `runAccesses_frames_untouched` restated. `runStep`'s
+faulting branch runs the survivors, which `visibleEffects?` chose and which
+*exclude* the faulting substep, and then performs that substep's access itself — so
+framing over the survivor list alone says nothing about the byte that access
+writes. A second review round found an earlier comment here claiming otherwise, and
+a consumer following it would have had an unsound argument. The hypothesis
+quantifies over `sequence.accesses`, which `mem_accesses_of_visibleEffects?` shows
+contains every survivor and which contains the faulting substep's descriptor. -/
 
 /--
 **Performing an access frames every cell it did not declare.**
@@ -1286,6 +1287,90 @@ theorem runAccesses_frames_untouched (policy : StepPolicy) {id : AllocId} {offse
           (fun x hx => hall x (List.mem_cons_of_mem _ hx))]
         exact hhead
       · exact hhead
+
+/--
+**A whole step frames every cell no access it declares touches.**
+
+The `step`-level theorem `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 recorded as
+owed, and which four documents had claimed already existed before review corrected
+them.
+
+Why it is not just `runAccesses_frames_untouched`. `runStep`'s faulting branch runs
+the survivors, which `visibleEffects?` chose and which *exclude* the faulting
+substep, and then performs that substep's own access separately. Framing
+established over the survivor list therefore says nothing about the byte the
+faulting access writes, and a consumer following the old prose to
+`runAccesses_frames_untouched` would have had an unsound argument. The hypothesis
+here quantifies over `sequence.accesses`, which
+`SubstepSequence.mem_accesses_of_visibleEffects?` shows contains every survivor and
+which contains the faulting substep's descriptor too.
+-/
+theorem runStep_frames_untouched (policy : StepPolicy) (state : MachineState)
+    (sequence : SubstepSequence) (context : ContextId) (contextKind : ContextKind)
+    (cause : EventCause) (plan : FaultPlan sequence) {id : AllocId} {offset : Nat}
+    (hall : ∀ d ∈ sequence.accesses, ¬ (d.provenance.root = id ∧ d.range.Covers offset)) :
+    (runStep policy state sequence context contextKind cause plan).memory.cellAt? id offset =
+      state.memory.cellAt? id offset := by
+  unfold runStep
+  split
+  · exact runAccesses_frames_untouched policy _ _ _ _ hall
+  · rename_i index fault reads writes
+    split
+    · rfl
+    · rename_i survivors hvisible
+      have hsurv : ∀ d ∈ survivors, ¬ (d.provenance.root = id ∧ d.range.Covers offset) :=
+        fun d hd => hall d (SubstepSequence.mem_accesses_of_visibleEffects? hvisible hd)
+      have hrun := runAccesses_frames_untouched policy survivors state contextKind cause hsurv
+      dsimp only
+      split
+      · exact hrun
+      · split
+        · rename_i d hsub
+          have hmem : Substep.access d ∈ sequence.substeps := by
+            obtain ⟨hlt, heq⟩ := List.getElem?_eq_some_iff.mp hsub
+            exact heq ▸ List.getElem_mem hlt
+          have hd : d ∈ sequence.accesses :=
+            SubstepSequence.mem_accesses_of_descriptor? hmem rfl
+          split
+          · split
+            · exact hrun
+            · rw [performAccess_frames_untouched policy _ d _ contextKind cause (hall d hd)]
+              exact hrun
+          · exact hrun
+        · exact hrun
+
+/--
+**A whole `step` frames every cell no access it declares touches.**
+
+The form a consumer wants: `step` rather than `runStep`, so the rejection paths are
+included and a caller reasons about the operation it actually ran. A rejected step
+produces no state at all, so there is nothing to frame; a step that ran frames
+through `runStep_frames_untouched`.
+-/
+theorem step_frames_untouched (policy : StepPolicy) (state : MachineState)
+    (operation : SomeOperation) (context : ContextId) (contextKind : ContextKind)
+    (cause : EventCause)
+    (faultAt : (sequence : SubstepSequence) → FaultPlan sequence) (final : MachineState)
+    {id : AllocId} {offset : Nat}
+    (h : step policy state operation context contextKind cause faultAt = .ran final)
+    (hall : ∀ sequence, operation.facets.substeps? = some sequence →
+      ∀ d ∈ sequence.accesses, ¬ (d.provenance.root = id ∧ d.range.Covers offset)) :
+    final.memory.cellAt? id offset = state.memory.cellAt? id offset := by
+  unfold step at h
+  split at h
+  · exact absurd h (by simp)
+  · rename_i hfacets
+    split at h
+    · exact absurd h (by simp)
+    · rename_i sequence hseq
+      have hacc := hall sequence hseq
+      -- Every rejection branch is `.rejected _ = .ran final`, which `cases`
+      -- discharges outright; what survives is the branch that ran.
+      repeat' split at h
+      all_goals cases h
+      all_goals
+        rw [runStep_frames_untouched policy _ sequence context contextKind cause _ hacc,
+          MachineState.noteContext_memory]
 
 /-- Performing an access does not touch the fault record: a fault is raised by a
 substep, and `performAccess` runs one access. -/

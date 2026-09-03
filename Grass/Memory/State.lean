@@ -645,6 +645,11 @@ def noteContext (state : MachineState) (context : ContextId) (kind : ContextKind
     MachineState :=
   { state with contexts := state.contexts.insert context kind }
 
+/-- Recording a context's kind touches nothing else, so a framing argument passes
+straight through it. -/
+@[simp] theorem noteContext_memory (state : MachineState) (context : ContextId)
+    (kind : ContextKind) : (state.noteContext context kind).memory = state.memory := rfl
+
 /-- Recording a pairing makes it agree, and makes every other kind disagree. -/
 @[simp] theorem kindAgrees_noteContext (state : MachineState) (context : ContextId)
     (kind : ContextKind) : (state.noteContext context kind).KindAgrees context kind :=

@@ -515,8 +515,12 @@ It is not what `Grass/Op/Step.lean` calls — `performAccess` remains the
 transition's own path — but both write memory through `MemoryState.commit` and
 nothing else, so the framing results are results about the transition.
 `Op.performAccess_frames_untouched` and `Op.runAccesses_frames_untouched` state
-them for `performAccess` and `runAccesses`. **Not for `step`** — §4.2 records why
-that gap is real and why it is derivable rather than false. An earlier version of this section said `applyAccess`
+them for `performAccess` and `runAccesses`, and `Op.runStep_frames_untouched` and
+`Op.step_frames_untouched` for a whole operation. The last two were owed for
+several rounds while four documents claimed they existed; they quantify over
+`sequence.accesses` rather than the survivor list, because `visibleEffects?`
+excludes the faulting substep and framing over survivors alone would miss the byte
+that substep writes. An earlier version of this section said `applyAccess`
 had been factored out of `performAccess`; it had been written alongside it, with
 two write paths and framing proved about one. Review found it and `commit` is the
 repair.
@@ -644,14 +648,6 @@ one outright defect that had already merged — see §3.11's denial row.
   `MemoryState.commit`. Nothing proves they agree on the recorded trace, so a
   straight-line argument over `runBlock` is an argument about memory and not about
   what a program's event log says.
-- **A `step`-level framing theorem.** `Op.runAccesses_frames_untouched` covers the
-  access list. `runStep`'s faulting branch runs it over `visibleEffects?`, which
-  *excludes* the faulting substep, and then performs that substep's access
-  separately — so the survivor-list framing says nothing about the byte that
-  access writes. `Op.performAccess_frames_untouched` covers it individually, so the
-  theorem is derivable rather than false. Until it exists, a consumer following the
-  prose to `runAccesses_frames_untouched` over the survivors would have an unsound
-  framing argument, which is how review found it.
 - **`MemoryProfile.vocabularyVersion` is never checked.** A profile states which
   vocabulary version it assumes and nothing compares that to what the transition
   implements. There is one version and no migration theorems, so there is nothing
