@@ -2333,6 +2333,25 @@ resolve it `.rerouted`, and point it at a session it never touched — breaking
 `ReroutesLand` with every field it had discharged. Six reworkings of
 `Transition.lean` had not found it. Trying to prove one theorem did.
 
+### What the review rounds actually converged on
+
+Six rounds of local adversarial review, each attacking the previous round's
+repairs. Code findings per round: 4, 5, 5, 3, 4, 3. That is not a sequence
+heading to zero, and the shape of it matters more than the count.
+
+Rounds 2 and 3 found defects **in the repairs** — §10.90, §10.92, §10.93,
+§10.95, §10.96. Round 5 was the first to report that the previous round's repairs
+held, and rounds 5 and 6 found things *elsewhere*: pre-existing holes the earlier
+rounds had not reached (§10.109, §10.111) and structural observations about the
+corpus (§10.102, §10.103, §10.110).
+
+So the loop converged on the thing it was pointed at, and kept finding other
+things. **A round with no findings is not evidence that none remain**; what these
+rounds establish is that the *repairs* stopped being defective, which is a
+narrower and more checkable claim. §10.102, §10.103 and §10.104 are open and
+recorded, and the review notes above list the checks a later round should run
+rather than pretending they were exhausted.
+
 ### The rule this milestone ends on: attack the repair
 
 §10.90, §10.91, §10.92 and §10.93 are four entries in a row about *repairs that
@@ -4405,6 +4424,65 @@ The general rule, which §12's witness discipline should have caught and did not
 **a new field needs a witness in the same change, not only a refutation.** A
 refusal shows the field forbids something; only a witness shows it does not
 forbid everything.
+
+### 10.111 A coalesce could launder a payload into a delivered message
+
+`ResolvesEscrow.createsOnlyTheCarrier` bounds what a step *creates*. It never
+says the carrier *is* created — and the docstring beside it asserted that it is,
+"a fresh occurrence, per `NominalKind.coalescedReplacement`".
+`EscrowLedger.coalesceCarrierLater` asks for membership in this ledger and a
+later rank, and a **previously delivered** occurrence satisfies both.
+
+A reviewer built the four-step program from `quiet`: send, send, deliver the
+second, coalesce the first into it. Every field of `ResolvesEscrow` at
+`.coalesced` discharged, §10.100's `carrierOnItsSession` included, the transition
+wrapped in a `NetworkStep`, and `wellFormed_preserved` waved the after-world
+through.
+
+What it costs, all compiled: afterwards the first payload is neither in flight
+nor delivered. No close, death, drop or delivery can name it;
+`ChannelResolution.coalesced` is not `IsTerminal`, because it *passes the payload
+on*; and what it passed to had been consumed a step earlier. The ledger's
+accounting says everything is settled and a message is gone.
+
+**Closed** by `carrierIsFresh`. The reviewer also proved the field buys the
+intended reading outright: a fresh carrier is necessarily `Outstanding` after the
+step, so the sources' payload is somewhere.
+
+**§10.100's twin from the other side.** That was a payload in flight forever;
+this is a payload silently lost. Both are `coalesce`, both are one missing
+conjunct, and both were sitting behind a docstring that described the conjunct as
+though it were enforced. **A docstring asserting a property the fields do not
+carry is not documentation, it is an unrecorded defect** — and this is the third
+time on this branch that reading one has been the fastest route to finding the
+hole.
+
+### 10.112 Two consequences of the seventh clause
+
+Housekeeping from §10.109's round, recorded because each is an instance of a rule
+this milestone has been collecting.
+
+**`ReroutesLand`'s third conjunct became derivable.** §10.94 added "and the
+arrival is on the destination session" to the sixth clause, and §10.109's
+`OccurrencesOnTheirSession` then said that of every occurrence in every ledger. A
+reviewer proved the two clauses equivalent for a well-formed network. One hole,
+two mechanisms — §10.107's shape — so the conjunct is gone from `ReroutesLand`
+and `WellFormed.rerouted_arrival_is_on_its_destination` recovers it. The
+corresponding conjunct in `Reroutes.arrives` stays and is load-bearing: the
+arrival is *fresh*, so the before-network's clause says nothing about it, and
+`occurrencesOnTheirSession_preserved`'s reroute case is what spends it.
+
+**And §10.110's witness had not been put through §10.89's check.**
+`the_coalesce` landed in the same commit as the section stating "every transition
+in the corpus is a step", and was not one of them. A transition with no
+`NetworkStep` is exactly the weaker witness §10.89 exists to warn about, and the
+gap was one commit wide. `theCoalesceStep` and `afterCoalesce_is_wellFormed`
+close it.
+
+The rule both of these are: **a check this document states is not run by stating
+it.** Nothing in the build applies §10.89, or the delete-the-field check, or the
+witness-not-only-a-refutation rule. They are review prompts, and they only fire
+when a round is asked to run them.
 
 ### 10.89 A spawn can satisfy every field it has and not be a step
 
