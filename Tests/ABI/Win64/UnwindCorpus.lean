@@ -103,7 +103,7 @@ to 128 bytes, which is exactly `UnwindOp.SmallAllocEncodable`'s range. -/
 def op : Step → UnwindOp
   | .push r => .pushNonvolatile r
   | .alloc n => if n ≤ 128 then .allocSmall n else .allocLarge n
-  | .setFrame r _ => .setFramePointer r
+  | .setFrame r off => .setFramePointer r off
 
 /-- The header nibbles this step establishes, if any. `FrameOffset` is scaled by
 sixteen. -/

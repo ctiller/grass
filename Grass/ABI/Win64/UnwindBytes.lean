@@ -132,7 +132,7 @@ unwinder would read whatever follows `.xdata` as unwind codes.
   | ⟨.allocLarge _, _⟩ => simp [toBytes, UnwindOp.slots, le16]
   | ⟨.pushNonvolatile _, _⟩ => simp [toBytes, UnwindOp.slots]
   | ⟨.allocSmall _, _⟩ => simp [toBytes, UnwindOp.slots]
-  | ⟨.setFramePointer _, _⟩ => simp [toBytes, UnwindOp.slots]
+  | ⟨.setFramePointer _ _, _⟩ => simp [toBytes, UnwindOp.slots]
 
 /-- The first byte written is the code offset. -/
 theorem toBytes_head (p : PlacedOp) : p.toBytes.head? = some p.codeOffset := by
@@ -140,7 +140,7 @@ theorem toBytes_head (p : PlacedOp) : p.toBytes.head? = some p.codeOffset := by
   | ⟨.allocLarge _, _⟩ => rfl
   | ⟨.pushNonvolatile _, _⟩ => rfl
   | ⟨.allocSmall _, _⟩ => rfl
-  | ⟨.setFramePointer _, _⟩ => rfl
+  | ⟨.setFramePointer _ _, _⟩ => rfl
 
 end PlacedOp
 
@@ -370,7 +370,11 @@ end UnwindTail
 
 `reg = 0` means the function has no frame pointer. Register 0 is `RAX`, so a
 frame pointer in `RAX` is not expressible -- an ABI quirk, not an omission
-here. -/
+here; `framePointer_not_rax` derives it.
+
+Both nibbles are pinned to the prologue by `UnwindInfo.framePointerAgrees`.
+`offset` was unconstrained until a reviewer built an `UnwindInfo` declaring a
+240-byte frame offset for a frame established at `RSP + 0`. -/
 structure FrameSpec where
   /-- `FrameRegister`: a four-bit register number, 0 for none. -/
   reg : BitVec 4
@@ -387,27 +391,30 @@ instance (f : FrameSpec) : Decidable f.declared :=
 /--
 An `UNWIND_INFO` that the Windows unwinder will read as intended.
 
-The three proof fields are the point. Each rules out a state that is
+The proof fields are the point. Each rules out a state that is
 representable in the C struct, produces no error from any tool, and unwinds
 wrongly:
 
 * `layoutWellFormed` -- the offsets ascend and stay inside the prologue.
-* `framePointerAgrees` -- *every* `UWOP_SET_FPREG` in the prologue names the
-  register the header declares. Quantified over the operations rather than
-  checked against the first one, because a prologue holding two of them that
-  name different registers would otherwise agree with the header on one and
-  disagree on the other.
+* `framePointerAgrees` -- *every* `UWOP_SET_FPREG` in the prologue matches
+  both of the header's frame nibbles, register and offset. Quantified over the
+  operations rather than checked against the first one, because a prologue
+  holding two of them that disagree would otherwise match the header on one and
+  diverge on the other.
 * `framePointerDeclared` -- a nonzero `FrameRegister` and the presence of
   `UWOP_SET_FPREG` imply each other. The operation without the field leaves the
   unwinder computing the frame from `RSP` after the prologue moved it; the field
   without the operation points it at a register that was never established.
   Neither is detectable from the bytes alone, which is why both are hypotheses
   here rather than checks later.
+* `noFrameOffsetWithoutFrame` -- with no frame pointer, `FrameOffset` is zero
+  rather than arbitrary. The field is meaningless in that case, so nothing reads
+  it; writing garbage there simply differs from what `ml64` emits.
 * `countFits` -- `CountOfCodes` is one byte. A prologue needing 256 or more
   slots cannot be described, and truncating the count is the failure mode, so
   the field `countFits` is what a caller must discharge instead.
 
-The middle two have a consequence worth naming: `RAX` cannot be a frame
+Two of them together have a consequence worth naming: `RAX` cannot be a frame
 register, because its number is 0 and 0 is how the header spells "none". That is
 `framePointer_not_rax`, derived rather than stated.
 
@@ -423,11 +430,15 @@ structure UnwindInfo where
   tail : UnwindTail
   /-- The layout is one the unwinder will read correctly. -/
   layoutWellFormed : layout.WellFormed
-  /-- Every establishing operation names the register the header declares. -/
-  framePointerAgrees : layout.prologue.framePointerIs frame.reg = true
+  /-- Every establishing operation matches both of the header's frame nibbles. -/
+  framePointerAgrees :
+    layout.prologue.frameSpecIs frame.reg frame.offset = true
   /-- A frame register is declared exactly when the prologue establishes one. -/
   framePointerDeclared :
     frame.declared ↔ layout.prologue.establishesFramePointer = true
+  /-- With no frame pointer, `FrameOffset` is zero rather than arbitrary. -/
+  noFrameOffsetWithoutFrame :
+    layout.prologue.establishesFramePointer = false → frame.offset = 0#4
   /-- The slot count fits the one byte that reports it. -/
   countFits : layout.prologue.countOfCodes < 256
 
@@ -436,9 +447,9 @@ namespace UnwindInfo
 /--
 Build an `UNWIND_INFO`, or refuse.
 
-The three proof fields make bad metadata unrepresentable, which is only useful
+The proof fields rule out metadata the unwinder would misread, which is only useful
 if well-formed metadata can still be built without writing proofs by hand. All
-three conditions are decidable, so this discharges them and returns `none` when
+conditions are decidable, so this discharges them and returns `none` when
 they fail -- the same shape as the encoders in `Grass.ISA.X86.Bytes`, where
 refusal is the answer for an operand the encoding cannot express.
 
@@ -447,30 +458,34 @@ metadata for a prologue this returns `none` for has to change the prologue.
 -/
 def mk? (l : Layout) (f : FrameSpec) (t : UnwindTail) : Option UnwindInfo :=
   if hl : l.WellFormed then
-    if ha : l.prologue.framePointerIs f.reg = true then
+    if ha : l.prologue.frameSpecIs f.reg f.offset = true then
       if hf : f.declared ↔ l.prologue.establishesFramePointer = true then
-        if hc : l.prologue.countOfCodes < 256 then
-          some { layout := l, frame := f, tail := t
-                 layoutWellFormed := hl, framePointerAgrees := ha
-                 framePointerDeclared := hf, countFits := hc }
+        if hz : l.prologue.establishesFramePointer = false → f.offset = 0#4 then
+          if hc : l.prologue.countOfCodes < 256 then
+            some { layout := l, frame := f, tail := t
+                   layoutWellFormed := hl, framePointerAgrees := ha
+                   framePointerDeclared := hf, noFrameOffsetWithoutFrame := hz
+                   countFits := hc }
+          else none
         else none
       else none
     else none
   else none
 
-/-- `mk?` succeeds exactly when the three conditions hold, so a `none` is
+/-- `mk?` succeeds exactly when every condition holds, so a `none` is
 informative rather than a signal that something else went wrong. -/
 theorem mk?_isSome_iff (l : Layout) (f : FrameSpec) (t : UnwindTail) :
     (mk? l f t).isSome ↔
-      l.WellFormed ∧ l.prologue.framePointerIs f.reg = true ∧
+      l.WellFormed ∧ l.prologue.frameSpecIs f.reg f.offset = true ∧
         (f.declared ↔ l.prologue.establishesFramePointer = true) ∧
-          l.prologue.countOfCodes < 256 := by
+          (l.prologue.establishesFramePointer = false → f.offset = 0#4) ∧
+            l.prologue.countOfCodes < 256 := by
   unfold mk?
   by_cases hl : l.WellFormed
   case neg => rw [dif_neg hl]; simp [hl]
   case pos =>
     rw [dif_pos hl]
-    by_cases ha : l.prologue.framePointerIs f.reg = true
+    by_cases ha : l.prologue.frameSpecIs f.reg f.offset = true
     case neg => rw [dif_neg ha]; simp [ha]
     case pos =>
       rw [dif_pos ha]
@@ -478,9 +493,16 @@ theorem mk?_isSome_iff (l : Layout) (f : FrameSpec) (t : UnwindTail) :
       case neg => rw [dif_neg hf]; simp [hf]
       case pos =>
         rw [dif_pos hf]
-        by_cases hc : l.prologue.countOfCodes < 256
-        case neg => rw [dif_neg hc]; simp [hc]
-        case pos => rw [dif_pos hc]; simp [hl, ha, hf, hc]
+        by_cases hz : l.prologue.establishesFramePointer = false → f.offset = 0#4
+        case neg => rw [dif_neg hz]; simp [hz]
+        case pos =>
+          rw [dif_pos hz]
+          by_cases hc : l.prologue.countOfCodes < 256
+          case neg => rw [dif_neg hc]; simp [hc]
+          case pos =>
+            rw [dif_pos hc]
+            simp only [Option.isSome_some, true_iff]
+            exact ⟨hl, ha, hf, hz, hc⟩
 
 /-- `mk?` keeps what it was given, so the bytes it produces describe the layout
 the caller asked about and not some adjusted version of it. -/
@@ -491,7 +513,7 @@ theorem mk?_eq_some {l : Layout} {f : FrameSpec} {t : UnwindTail} {u : UnwindInf
   case neg => rw [dif_neg hl] at h; exact absurd h (by simp)
   case pos =>
     rw [dif_pos hl] at h
-    by_cases ha : l.prologue.framePointerIs f.reg = true
+    by_cases ha : l.prologue.frameSpecIs f.reg f.offset = true
     case neg => rw [dif_neg ha] at h; exact absurd h (by simp)
     case pos =>
       rw [dif_pos ha] at h
@@ -499,12 +521,16 @@ theorem mk?_eq_some {l : Layout} {f : FrameSpec} {t : UnwindTail} {u : UnwindInf
       case neg => rw [dif_neg hf] at h; exact absurd h (by simp)
       case pos =>
         rw [dif_pos hf] at h
-        by_cases hc : l.prologue.countOfCodes < 256
-        case neg => rw [dif_neg hc] at h; exact absurd h (by simp)
+        by_cases hz : l.prologue.establishesFramePointer = false → f.offset = 0#4
+        case neg => rw [dif_neg hz] at h; exact absurd h (by simp)
         case pos =>
-          rw [dif_pos hc] at h
-          obtain rfl := Option.some.inj h
-          exact ⟨rfl, rfl, rfl⟩
+          rw [dif_pos hz] at h
+          by_cases hc : l.prologue.countOfCodes < 256
+          case neg => rw [dif_neg hc] at h; exact absurd h (by simp)
+          case pos =>
+            rw [dif_pos hc] at h
+            obtain rfl := Option.some.inj h
+            exact ⟨rfl, rfl, rfl⟩
 
 /-- The `Version` field. Fixed: this module writes version 1 only. -/
 def version : BitVec 3 := 1
@@ -559,16 +585,28 @@ pointer in `RAX`.
 to the same exclusion, which is why this is worth stating rather than leaving
 implicit: if either route were removed the other would still hold.
 -/
-theorem framePointer_not_rax (u : UnwindInfo) {r : Gpr}
-    (h : UnwindOp.setFramePointer r ∈ u.layout.prologue.ops) : r ≠ .rax := by
+theorem framePointer_not_rax (u : UnwindInfo) {r : Gpr} {off : Nat}
+    (h : UnwindOp.setFramePointer r off ∈ u.layout.prologue.ops) : r ≠ .rax := by
   intro hrax
   subst hrax
   have hagree : u.frame.reg = regNibble .rax :=
-    (Prologue.framePointerIs_iff _ _).mp u.framePointerAgrees _ h
+    ((Prologue.frameSpecIs_iff _ _ _).mp u.framePointerAgrees _ _ h).1
   have hest : u.layout.prologue.establishesFramePointer = true := by
     simp only [Prologue.establishesFramePointer, List.any_eq_true]
     exact ⟨_, h, rfl⟩
   exact u.framePointerDeclared.mpr hest (hagree.trans (by decide))
+
+/--
+**The header's frame offset is the one the prologue establishes.**
+
+The consequence of `framePointerAgrees` that `FrameOffset` previously lacked
+entirely: a declared offset must be the establishing operation's, scaled by
+sixteen, and not an arbitrary nibble.
+-/
+theorem frameOffset_agrees (u : UnwindInfo) {r : Gpr} {off : Nat}
+    (h : UnwindOp.setFramePointer r off ∈ u.layout.prologue.ops) :
+    u.frame.offset = BitVec.ofNat 4 (off / 16) :=
+  ((Prologue.frameSpecIs_iff _ _ _).mp u.framePointerAgrees _ _ h).2
 
 /-- The version this module writes. -/
 theorem version_eq_one : version = 1 := rfl
@@ -724,7 +762,44 @@ def spike1UnwindInfo : UnwindInfo :=
     layoutWellFormed := spike1Layout_wellFormed
     framePointerAgrees := by decide
     framePointerDeclared := by decide
+    noFrameOffsetWithoutFrame := by decide
     countFits := by decide }
+
+/-!
+### A frame-pointer layout, and the metadata it refuses
+
+`spike1Layout` establishes no frame pointer, so it exercises none of the frame
+invariants. These do.
+-/
+
+/-- `push r13`, then establish `r13` as the frame register at `RSP + 0`. -/
+def framePointerLayout : Layout :=
+  { placed := [⟨.pushNonvolatile .r13, 2⟩, ⟨.setFramePointer .r13 0, 5⟩]
+    sizeOfProlog := 5 }
+
+/-- Declaring `r13` at offset 0, which is what the prologue does, is accepted. -/
+theorem framePointerLayout_accepted :
+    (UnwindInfo.mk? framePointerLayout ⟨regNibble .r13, 0⟩ .noHandler).isSome := by
+  decide
+
+/--
+A frame offset the prologue does not establish is refused.
+
+The reviewer's counterexample, kept as a theorem. `FrameOffset = 15` claims the
+frame sits 240 bytes above the establishing `RSP`, for a prologue that
+established it at `RSP + 0`; the unwinder would compute every restore location
+240 bytes off. Before `setFramePointer` carried its offset there was nothing in
+the model for this to contradict, and `mk?` returned `some`.
+-/
+theorem bogus_frameOffset_refused :
+    UnwindInfo.mk? framePointerLayout ⟨regNibble .r13, 15⟩ .noHandler = none := by
+  decide
+
+/-- A frame register the prologue does not establish is refused too, which was
+already true and stays true. -/
+theorem bogus_frameRegister_refused :
+    UnwindInfo.mk? framePointerLayout ⟨regNibble .r14, 0⟩ .noHandler = none := by
+  decide
 
 /--
 The exact `.xdata` bytes for Spike 1.

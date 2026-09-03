@@ -83,7 +83,7 @@ inductive UnwindOp where
   holding the register in the operation is what lets
   `Grass.ABI.Win64.UnwindInfo.framePointerAgrees` demand that the header field
   and every establishing instruction name the same register. -/
-  | setFramePointer (r : Gpr)
+  | setFramePointer (r : Gpr) (offset : Nat)
 deriving DecidableEq, Repr, Inhabited
 
 namespace UnwindOp
@@ -93,7 +93,7 @@ def opcode : UnwindOp → BitVec 4
   | .pushNonvolatile _ => 0
   | .allocLarge _ => 1
   | .allocSmall _ => 2
-  | .setFramePointer _ => 3
+  | .setFramePointer _ _ => 3
 
 /--
 How many two-byte slots this operation occupies in the `UNWIND_CODE` array.
@@ -107,7 +107,7 @@ def slots : UnwindOp → Nat
   | .pushNonvolatile _ => 1
   | .allocSmall _ => 1
   | .allocLarge _ => 2
-  | .setFramePointer _ => 1
+  | .setFramePointer _ _ => 1
 
 /-- Every operation occupies at least one slot. -/
 theorem slots_pos (op : UnwindOp) : 0 < op.slots := by
@@ -118,7 +118,7 @@ def stackDelta : UnwindOp → Nat
   | .pushNonvolatile _ => 8
   | .allocSmall n => n
   | .allocLarge n => n
-  | .setFramePointer _ => 0
+  | .setFramePointer _ _ => 0
 
 /-- The `OpInfo` nibble.
 
@@ -141,7 +141,7 @@ def opInfo : UnwindOp → BitVec 4
   | .pushNonvolatile r => regNibble r
   | .allocSmall n => BitVec.ofNat 4 (n / 8 - 1)
   | .allocLarge _ => 0
-  | .setFramePointer r => regNibble r
+  | .setFramePointer r _ => regNibble r
 
 /--
 The allocation sizes `allocSmall` can encode: multiples of 8 from 8 to 128.
@@ -167,7 +167,8 @@ def Encodable : UnwindOp → Prop
   | .pushNonvolatile r => volatility r = .nonvolatile
   | .allocSmall n => SmallAllocEncodable n
   | .allocLarge n => LargeAllocEncodable n
-  | .setFramePointer r => volatility r = .nonvolatile ∧ r ≠ .rsp
+  | .setFramePointer r off =>
+      volatility r = .nonvolatile ∧ r ≠ .rsp ∧ off % 16 = 0 ∧ off ≤ 240
 
 instance (op : UnwindOp) : Decidable op.Encodable := by
   cases op <;> unfold Encodable <;> infer_instance
@@ -300,41 +301,66 @@ theorem arraySlots_le_countOfCodes_succ (p : Prologue) :
 /-- Whether the prologue establishes a frame pointer at all. -/
 def establishesFramePointer (p : Prologue) : Bool :=
   p.ops.any fun op => match op with
-    | .setFramePointer _ => true
+    | .setFramePointer _ _ => true
     | _ => false
 
 /--
-Whether every `setFramePointer` in the prologue names `reg`.
+Whether every `setFramePointer` in the prologue matches the header's two
+nibbles.
+
+Both nibbles, not just the register. `FrameOffset` was outside every invariant
+until a reviewer pointed out that `UNWIND_INFO` could declare a frame at
+`FrameReg - 240` for a frame actually established at `RSP + 0`, and that nothing
+in the model contradicted it because the operation carried no offset to
+contradict it *with*. `setFramePointer` now carries the offset, and this is
+where the header has to agree with it.
 
 Quantified over the operations rather than looking up the first one. A lookup
-would accept a prologue holding two `setFramePointer` operations that name
-different registers -- agreeing with the header on the first and silently
-disagreeing on the second. Quantifying rules that out, and as a side effect
-forces any two establishing operations to name the same register as each other.
+would accept a prologue holding two `setFramePointer` operations that disagree
+with each other -- matching the header on the first and silently diverging on
+the second. Quantifying rules that out, and as a side effect forces any two
+establishing operations to agree with each other.
+
+`FrameOffset` is scaled by sixteen, which is why `UnwindOp.Encodable` requires
+the offset to be a multiple of sixteen: an unscalable offset has no encoding
+rather than a rounded one.
 -/
-def framePointerIs (p : Prologue) (reg : BitVec 4) : Bool :=
+def frameSpecIs (p : Prologue) (reg offset : BitVec 4) : Bool :=
   p.ops.all fun op => match op with
-    | .setFramePointer r => reg == regNibble r
+    | .setFramePointer r off => reg == regNibble r && offset == BitVec.ofNat 4 (off / 16)
     | _ => true
 
-/-- `framePointerIs` is the membership-quantified statement it is meant to be.
+/-- `frameSpecIs` is the membership-quantified statement it is meant to be.
 
 Stated so that the invariant is legible where it is used as a hypothesis rather
-than merely computable, and so a reader can see that it really is a `forall`
-over every establishing operation. -/
-theorem framePointerIs_iff (p : Prologue) (reg : BitVec 4) :
-    p.framePointerIs reg = true <->
-      forall r, UnwindOp.setFramePointer r ∈ p.ops → reg = regNibble r := by
-  simp only [framePointerIs, List.all_eq_true]
+than merely computable, and so a reader can see it really is a `forall` over
+every establishing operation rather than a check of one of them. -/
+theorem frameSpecIs_iff (p : Prologue) (reg offset : BitVec 4) :
+    p.frameSpecIs reg offset = true ↔
+      ∀ r off, UnwindOp.setFramePointer r off ∈ p.ops →
+        reg = regNibble r ∧ offset = BitVec.ofNat 4 (off / 16) := by
+  simp only [frameSpecIs, List.all_eq_true]
   constructor
-  · intro h r hmem
-    simpa using h _ hmem
+  · intro h r off hmem
+    have := h _ hmem
+    simp only [Bool.and_eq_true, beq_iff_eq] at this
+    exact this
   · intro h op hmem
     match op with
-    | .setFramePointer r => simpa using h r hmem
+    | .setFramePointer r off =>
+        have := h r off hmem
+        simp only [Bool.and_eq_true, beq_iff_eq]
+        exact this
     | .pushNonvolatile _ => rfl
     | .allocSmall _ => rfl
     | .allocLarge _ => rfl
+
+/-- A register other than `RAX` has a nonzero four-bit number. `RAX` is 0, and 0
+is how `UNWIND_INFO.FrameRegister` spells "no frame pointer". -/
+theorem regNibble_ne_zero (r : Gpr) (h : r ≠ .rax) : regNibble r ≠ 0 := by
+  cases r
+  case rax => exact absurd rfl h
+  all_goals decide
 
 end Prologue
 
