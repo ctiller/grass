@@ -204,6 +204,108 @@ fn succeed(repo: &Path, proposer: &str, target: &str, host: &str) -> Value {
     ]))
 }
 
+fn prepare_merge(repo: &Path, agent: &str, nomination: &str, reviewed_commit: &str) -> Value {
+    run_json(bin().current_dir(repo).args([
+        "prepare-merge",
+        "--agent",
+        agent,
+        "--nomination",
+        nomination,
+        "--reviewed-commit",
+        reviewed_commit,
+    ]))
+}
+
+/// Commits `feature.txt` on top of the repo's current `main`, with an
+/// `Agent-Bus-Agent: <trailer_agent>` trailer, and returns `(previous_main,
+/// feature_commit)`. Leaves the repo checked out on `main` afterward.
+fn commit_feature_with_trailer(repo: &Path, trailer_agent: &str) -> (String, String) {
+    let previous_main = crate_rev_parse(repo, "main");
+    git(repo, &["checkout", "--quiet", "--detach", &previous_main]);
+    std::fs::write(repo.join("feature.txt"), "feature content\n").unwrap();
+    git(repo, &["add", "."]);
+    git(
+        repo,
+        &[
+            "commit",
+            "-q",
+            "-m",
+            &format!("add feature\n\nAgent-Bus-Agent: {trailer_agent}"),
+        ],
+    );
+    let feature_commit = crate_rev_parse(repo, "HEAD");
+    git(repo, &["checkout", "--quiet", "main"]);
+    (previous_main, feature_commit)
+}
+
+/// Registers `zoe` (implementor) and `aiden` (reviewer), nominates+accepts
+/// a review of `feature.txt` naming `aiden` as reviewer, and returns
+/// `(nomination_id, previous_main, feature_commit)`. The reviewer's name
+/// ("aiden") is deliberately chosen to sort before the author's ("zoe") --
+/// see `coordinator.rs`'s own `ReviewFixture` doc comment in the unit test
+/// suite for why: `apply.rs`'s cold-reduction ordering does not track a
+/// `review.nominated` event's `reviewer` field as a dependency, so a
+/// reviewer name that sorts *after* the author's can make a fresh
+/// `coordinate` call spuriously fail with "unregistered agent" even though
+/// the reviewer really is registered -- a real, separate, pre-existing gap
+/// this task does not fix.
+fn nominated_and_accepted_review(repo: &Path) -> (String, String, String) {
+    register(repo, "aiden", "reviewer", "host2");
+    register(repo, "zoe", "implementor", "host2");
+    let (previous_main, feature_commit) = commit_feature_with_trailer(repo, "zoe");
+
+    let nominate_data = serde_json::json!({
+        "authors": ["zoe"],
+        "product_branch": "refs/heads/agent/zoe/feature",
+        "reviewer": "aiden",
+        "required_checks": ["build"],
+        "review_scope": ["feature.txt"],
+        "summary": "add feature",
+        "target_branch": "refs/heads/main",
+        "evidence": [],
+    });
+    submit(
+        repo,
+        "zoe",
+        "review.nominated",
+        &nominate_data.to_string(),
+        "nominate",
+    );
+    let coordinated = coordinate(repo, "zoe", "host2", 0);
+    assert_eq!(
+        coordinated["outbox_rejected"],
+        serde_json::json!([]),
+        "{coordinated}"
+    );
+    let nomination = coordinated["published_events"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let accept_data = serde_json::json!({"nomination": nomination, "note": "ok"});
+    run_json(bin().current_dir(repo).args([
+        "submit",
+        "--agent",
+        "aiden",
+        "--kind",
+        "review.nomination_accepted",
+        "--data",
+        &accept_data.to_string(),
+        "--client-id",
+        "accept",
+        "--observes",
+        &nomination,
+    ]));
+    let accept_coordinated = coordinate(repo, "aiden", "host2", 0);
+    assert_eq!(
+        accept_coordinated["outbox_rejected"],
+        serde_json::json!([]),
+        "{accept_coordinated}"
+    );
+
+    (nomination, previous_main, feature_commit)
+}
+
 fn status_agent<'a>(status_value: &'a Value, agent: &str) -> &'a Value {
     status_value["agents"]
         .as_array()
@@ -1224,6 +1326,264 @@ fn tail_of_an_unregistered_agent_fails_cleanly() {
         .stderr(predicate::str::contains("has no stream"));
 }
 
+/// AGENT_REVIEW.md section 7 step 4: `prepare-merge` reconstructs the exact
+/// no-conflict candidate, tags it `agent-candidate/<reviewer>/<candidate>`,
+/// and pushes that tag to `origin` -- confirmed here not just by the CLI's
+/// own JSON but by an independent `git ls-remote` against the bare origin
+/// repo, so a bug that tagged locally but silently skipped (or malformed)
+/// the push would still be caught even if the printed JSON looked right.
+#[test]
+fn prepare_merge_constructs_and_pushes_the_candidate_tag() {
+    let (origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+
+    let out = prepare_merge(repo.path(), "aiden", &nomination, &feature_commit);
+    assert_eq!(out["previous_main"], previous_main);
+    let candidate = out["candidate"].as_str().expect("candidate is a string");
+    assert!(is_object_hash(candidate), "{candidate}");
+    // No `merge_engine.activated` event exists in this fixture -- a real,
+    // separate, pre-existing gap in this bus with no production path that
+    // can ever populate `current_merge_engine_epoch` at all (see this
+    // task's final report) -- so this is honestly `null`, not a bug in
+    // `prepare-merge` itself.
+    assert_eq!(out["merge_engine_epoch"], Value::Null);
+
+    let tag_ref = format!("refs/tags/agent-candidate/aiden/{candidate}");
+    let remote_listing = StdCommand::new("git")
+        .args(["ls-remote", "--tags", &path_str(origin.path()), &tag_ref])
+        .output()
+        .unwrap();
+    assert!(remote_listing.status.success());
+    let remote_listing = String::from_utf8_lossy(&remote_listing.stdout);
+    assert!(
+        remote_listing.contains(candidate),
+        "candidate tag did not reach origin: {remote_listing}"
+    );
+}
+
+/// A reviewer who never accepted (or was never nominated at all) must be
+/// refused outright -- `prepare-merge` must not construct or tag anything
+/// on their behalf.
+#[test]
+fn prepare_merge_rejects_a_reviewer_who_never_accepted_the_nomination() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, _previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    register(repo.path(), "mallory", "reviewer", "host3");
+
+    bin()
+        .current_dir(repo.path())
+        .args([
+            "prepare-merge",
+            "--agent",
+            "mallory",
+            "--nomination",
+            &nomination,
+            "--reviewed-commit",
+            &feature_commit,
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "only the accepting reviewer may prepare a merge",
+        ));
+}
+
+/// `verify_authorship`'s falsifying path reached through the real CLI: a
+/// `reviewed_commit` whose introduced content carries no `Agent-Bus-Agent`
+/// trailer at all must be refused, not silently accepted as if authorship
+/// were unconstrained.
+#[test]
+fn prepare_merge_rejects_a_reviewed_commit_missing_the_author_trailer() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register(repo.path(), "aiden", "reviewer", "host2");
+    register(repo.path(), "zoe", "implementor", "host2");
+
+    // A commit with no trailer, so it cannot be nominated/authored the
+    // normal way -- built directly, then a nomination is submitted whose
+    // own bookkeeping doesn't care what the branch actually contains.
+    let previous_main = crate_rev_parse(repo.path(), "main");
+    git(
+        repo.path(),
+        &["checkout", "--quiet", "--detach", &previous_main],
+    );
+    std::fs::write(repo.path().join("feature.txt"), "feature content\n").unwrap();
+    git(repo.path(), &["add", "."]);
+    git(
+        repo.path(),
+        &["commit", "-q", "-m", "add feature, no trailer"],
+    );
+    let feature_commit = crate_rev_parse(repo.path(), "HEAD");
+    git(repo.path(), &["checkout", "--quiet", "main"]);
+
+    let nominate_data = serde_json::json!({
+        "authors": ["zoe"],
+        "product_branch": "refs/heads/agent/zoe/feature",
+        "reviewer": "aiden",
+        "required_checks": ["build"],
+        "review_scope": ["feature.txt"],
+        "summary": "add feature",
+        "target_branch": "refs/heads/main",
+        "evidence": [],
+    });
+    submit(
+        repo.path(),
+        "zoe",
+        "review.nominated",
+        &nominate_data.to_string(),
+        "nominate",
+    );
+    let coordinated = coordinate(repo.path(), "zoe", "host2", 0);
+    let nomination = coordinated["published_events"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let accept_data = serde_json::json!({"nomination": nomination, "note": "ok"});
+    run_json(bin().current_dir(repo.path()).args([
+        "submit",
+        "--agent",
+        "aiden",
+        "--kind",
+        "review.nomination_accepted",
+        "--data",
+        &accept_data.to_string(),
+        "--client-id",
+        "accept",
+        "--observes",
+        &nomination,
+    ]));
+    coordinate(repo.path(), "aiden", "host2", 0);
+
+    bin()
+        .current_dir(repo.path())
+        .args([
+            "prepare-merge",
+            "--agent",
+            "aiden",
+            "--nomination",
+            &nomination,
+            "--reviewed-commit",
+            &feature_commit,
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("has no Agent-Bus-Agent trailer"));
+}
+
+/// A nomination that exists and names the right reviewer, but was never
+/// accepted, must still be refused -- distinct from the "wrong reviewer
+/// entirely" case above (`chain.current_request.reviewer != reviewer`):
+/// this exercises `!chain.accepted()` specifically.
+#[test]
+fn prepare_merge_rejects_before_the_nomination_is_accepted() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register(repo.path(), "aiden", "reviewer", "host2");
+    register(repo.path(), "zoe", "implementor", "host2");
+    let (_previous_main, feature_commit) = commit_feature_with_trailer(repo.path(), "zoe");
+
+    let nominate_data = serde_json::json!({
+        "authors": ["zoe"],
+        "product_branch": "refs/heads/agent/zoe/feature",
+        "reviewer": "aiden",
+        "required_checks": ["build"],
+        "review_scope": ["feature.txt"],
+        "summary": "add feature",
+        "target_branch": "refs/heads/main",
+        "evidence": [],
+    });
+    submit(
+        repo.path(),
+        "zoe",
+        "review.nominated",
+        &nominate_data.to_string(),
+        "nominate",
+    );
+    let coordinated = coordinate(repo.path(), "zoe", "host2", 0);
+    let nomination = coordinated["published_events"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // Deliberately no `review.nomination_accepted` here.
+
+    bin()
+        .current_dir(repo.path())
+        .args([
+            "prepare-merge",
+            "--agent",
+            "aiden",
+            "--nomination",
+            &nomination,
+            "--reviewed-commit",
+            &feature_commit,
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "only the accepting reviewer may prepare a merge",
+        ));
+}
+
+/// A nomination id that names an unknown event entirely (never published at
+/// all) must fail with a clear, nomination-specific message.
+#[test]
+fn prepare_merge_rejects_an_unknown_nomination() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register(repo.path(), "aiden", "reviewer", "host2");
+
+    bin()
+        .current_dir(repo.path())
+        .args([
+            "prepare-merge",
+            "--agent",
+            "aiden",
+            "--nomination",
+            "aiden:99",
+            "--reviewed-commit",
+            &"a".repeat(40),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown nomination"));
+}
+
+// `prepare_merge`'s `chain.current_nomination != nomination` branch
+// ("nomination is no longer current") is deliberately left without a CLI-
+// level test here. The only way to reach it is a confirmed `review.
+// reassigned` moving the chain past an old nomination link, and `review.
+// reassigned` is gate-17 currency-sensitive -- while investigating a test
+// for exactly this, that fetch was found to trigger a real, separate,
+// severe, pre-existing bug in this crate's local ref plumbing (see this
+// task's final report): `stream.rs`/`registry.rs` update every local
+// stream/registry ref via `git branch -f <already-fully-qualified-ref>`
+// (e.g. `git branch -f refs/heads/agent-events/zoe <commit>`), which real
+// `git` does not treat as already-qualified -- it creates `refs/heads/
+// refs/heads/agent-events/zoe` instead (confirmed empirically). Every
+// ordinary read still resolves correctly only by accident, via `git rev-
+// parse`'s ref-disambiguation fallback chain finding the doubly-prefixed
+// ref. But `sync::synced_snapshot`'s own fetch (gate 17's currency probe,
+// or `--sync`) uses an explicit `<remote-ref>:<local-ref>` refspec that
+// *does* create the correctly-named exact ref as a byproduct -- and once
+// that exact ref exists, `rev-parse`'s disambiguation prefers it (its first
+// rule is a literal path match) over the doubly-prefixed one *forever*,
+// permanently shadowing that agent's real, advancing tip with whatever
+// commit the remote happened to have at that one fetch moment. Reassigning
+// as the same agent whose own reassignment is the currency-sensitive event
+// hits this immediately: gate 17's fetch (for that very candidate) pins the
+// exact ref to the pre-reassignment tip, the reassignment still commits
+// onto the doubly-prefixed ref locally, but `publish_stream`'s own `read_
+// stream_tip` afterward reads the now-shadowed, stale exact ref -- so the
+// event is reported published (it *is* a real local commit) while the
+// actual push silently reuses the old tip, never reaching the remote.
+// Fixing this is real, separate work (`stream.rs`/`registry.rs`'s ref-
+// update calls, used by every stream and the registry root, well outside
+// this task's git-linked-review-checks scope) -- flagged, not fixed, here.
+
+// ================================================================ golden tests
+
 // ================================================================ golden tests
 //
 // One snapshot per distinct JSON *shape*, not per test case above -- the
@@ -1358,6 +1718,18 @@ fn golden_succeed_output() {
         ".roster_epoch" => insta::dynamic_redaction(redact_noise),
         ".snapshot_receipt.*" => insta::dynamic_redaction(redact_noise),
         ".causal_frontier.*" => insta::dynamic_redaction(redact_noise),
+    });
+}
+
+#[test]
+fn golden_prepare_merge_output() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, _previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    let out = prepare_merge(repo.path(), "aiden", &nomination, &feature_commit);
+    insta::assert_json_snapshot!(out, {
+        ".candidate" => insta::dynamic_redaction(redact_noise),
+        ".previous_main" => insta::dynamic_redaction(redact_noise),
     });
 }
 

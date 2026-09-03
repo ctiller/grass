@@ -1,0 +1,10 @@
+---
+source: tests/cli_flow.rs
+assertion_line: 1405
+expression: out
+---
+{
+  "candidate": "[hash]",
+  "merge_engine_epoch": null,
+  "previous_main": "[hash]"
+}
