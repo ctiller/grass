@@ -302,9 +302,9 @@ theorem droppedLedger_resolves_nothing_else :
   rw [if_neg notIt]
 
 /-- A cancellation request resolves nothing at all: it records and does not end. -/
-theorem requestedLedger_resolves_nothing_else :
-    ResolvesNothingElse pendingLedger requestedLedger escrowed :=
-  fun _ _ => rfl
+theorem requestedLedger_resolves_nothing :
+    ResolvesNothing pendingLedger requestedLedger :=
+  fun _ => rfl
 
 /-! ## The four steps -/
 
@@ -387,9 +387,9 @@ theorem the_request : serverPlan.RequestsCancel sent afterRequesting () wire esc
   stillOutstanding := by
     rw [afterRequesting_wire]
     exact ⟨List.mem_cons_self, rfl⟩
-  resolvesNothingElse := by
+  resolvesNothing := by
     rw [sent_wire, afterRequesting_wire]
-    exact requestedLedger_resolves_nothing_else
+    exact requestedLedger_resolves_nothing
   ledgerExtends := by
     rw [sent_wire, afterRequesting_wire]
     exact pending_extends_to requestedLedger rfl (by simp [pendingLedger])

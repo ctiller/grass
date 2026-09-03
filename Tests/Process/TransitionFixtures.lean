@@ -218,8 +218,8 @@ theorem receive_resolves_nothing_else :
   fun _ notIt => settled_resolution_off notIt
 
 /-- And a send resolves nothing at all: both ledgers are silent. -/
-theorem send_resolves_nothing : ResolvesNothingElse EscrowLedger.empty pendingLedger escrowed :=
-  fun _ _ => rfl
+theorem send_resolves_nothing : ResolvesNothing EscrowLedger.empty pendingLedger :=
+  fun _ => rfl
 
 /-! ## The step -/
 
@@ -491,8 +491,8 @@ theorem the_send : serverPlan.SendsEscrow quiet sent () payload occurrenceOf whe
     show (sent.inFlight () wire).Outstanding escrowed
     rw [sent_wire]
     exact ⟨List.mem_cons_self, rfl⟩
-  resolvesNothingElse := by
-    show ResolvesNothingElse (quiet.inFlight () wire) (sent.inFlight () wire) escrowed
+  resolvesNothing := by
+    show ResolvesNothing (quiet.inFlight () wire) (sent.inFlight () wire)
     rw [quiet_holds_nothing, sent_wire]
     exact send_resolves_nothing
   ledgerExtends := by

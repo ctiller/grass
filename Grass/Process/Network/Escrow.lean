@@ -445,6 +445,26 @@ def ResolvesNothingElse {Occurrence : Type u} {Session : Type s}
   ∀ other, other ≠ occurrence → later.resolution other = earlier.resolution other
 
 /--
+**One step ended nothing at all.**
+
+The stronger form, for the constructors that genuinely resolve nothing: a send
+escrows, a cancellation request records, and a reroute's *destination* receives.
+Stated separately rather than as `ResolvesNothingElse` at some occurrence,
+because "nothing else than this one" and "nothing" are different claims and the
+second is the true one here.
+-/
+def ResolvesNothing {Occurrence : Type u} {Session : Type s}
+    (earlier later : EscrowLedger Occurrence Session) : Prop :=
+  ∀ occurrence, later.resolution occurrence = earlier.resolution occurrence
+
+/-- Which is a special case of the other. -/
+theorem ResolvesNothing.resolvesNothingElse {Occurrence : Type u} {Session : Type s}
+    {earlier later : EscrowLedger Occurrence Session}
+    (nothing : ResolvesNothing earlier later) (occurrence : Occurrence) :
+    ResolvesNothingElse earlier later occurrence :=
+  fun other _ => nothing other
+
+/--
 A step that touches no ledger resolves nothing else in it.
 
 The shape every off-session discharge takes: the two ledgers are equal, so every

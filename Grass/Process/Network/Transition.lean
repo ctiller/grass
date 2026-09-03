@@ -349,9 +349,8 @@ structure SendsEscrow (before after : plan.LogicalProcessNetwork)
     LedgerExtends (before.inFlight edge occurrence.1) (after.inFlight edge occurrence.1)
   /-- **And it resolves nothing at all**; a send escrows, it does not end
   anything. See `ResolvesEscrow.resolvesNothingElse`. -/
-  resolvesNothingElse : ResolvesNothingElse
+  resolvesNothing : ResolvesNothing
     (before.inFlight edge occurrence.1) (after.inFlight edge occurrence.1)
-      ⟨message, occurrence⟩
   /-- And nothing outside this session's escrow changed. -/
   scope : plan.TouchesOnly before after
     (fun fragment => fragment = .escrow edge occurrence.1)
@@ -974,8 +973,8 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
     LedgerExtends (before.inFlight edge destination) (after.inFlight edge destination)
   /-- **And it resolves nothing at the destination**: the arrival lands in
   flight, not already ended. See `ResolvesEscrow.resolvesNothingElse`. -/
-  destinationResolvesNothing : ResolvesNothingElse
-    (before.inFlight edge destination) (after.inFlight edge destination) occurrence
+  destinationResolvesNothing : ResolvesNothing
+    (before.inFlight edge destination) (after.inFlight edge destination)
   /-- Both sessions' escrow, and nothing else. -/
   scope : plan.TouchesOnly before after
     (fun fragment => fragment = .escrow edge session ∨ fragment = .escrow edge destination)
@@ -1071,10 +1070,10 @@ structure RequestsCancel (before after : plan.LogicalProcessNetwork)
   docstring calls that law 7.
   -/
   ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
-  /-- **And it resolves nothing else in this ledger**; see
-  `ResolvesEscrow.resolvesNothingElse` for what that field refuses. -/
-  resolvesNothingElse : ResolvesNothingElse
-    (before.inFlight edge session) (after.inFlight edge session) occurrence
+  /-- **And it resolves nothing at all**: a request records, it does not end.
+  See `ResolvesEscrow.resolvesNothingElse`. -/
+  resolvesNothing : ResolvesNothing
+    (before.inFlight edge session) (after.inFlight edge session)
   /-- That session's escrow, and nothing else. -/
   scope : plan.TouchesOnly before after (fun fragment => fragment = .escrow edge session)
 

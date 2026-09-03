@@ -190,9 +190,9 @@ theorem the_reroute : serverPlan.Reroutes sent afterReroute () wire escrowed sid
     rw [sent_wire, reroutedAt_wire]
     exact fun _ notIt => reroutedLedger_resolution_off notIt
   destinationResolvesNothing := by
-    show ResolvesNothingElse (ledgerAt false sidewire) (reroutedAt sidewire) escrowed
+    show ResolvesNothing (ledgerAt false sidewire) (reroutedAt sidewire)
     rw [ledgerAt_off_wire_empty sidewire_ne_wire, reroutedAt_sidewire]
-    exact fun _ _ => rfl
+    exact fun _ => rfl
   ledgerExtends := by
     show LedgerExtends (sent.inFlight () wire) (reroutedAt wire)
     rw [sent_wire, reroutedAt_wire]

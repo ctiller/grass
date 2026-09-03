@@ -10,13 +10,25 @@ well-formed one**.
 
 It is the capstone of the transition family in the sense that it consumes the
 fields five review rounds added to it, and it earned its keep before it was
-finished: working it clause by clause found two defects that no amount of reading
-had. `Spawns.authorized` and `Restarts.authorized` read the permitted-parent law
-off the new incarnation's own `knownParent`, so an incarnation recording *no*
-parent discharged them vacuously — and a spawn or a restart could install a
-**root**, which `LogicalProcessNetworkCore.RootUnique` forbids a second of.
-`spawnsAChild` and `restartsAChild` are the fields, and
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.72 is the entry.
+finished: working it clause by clause found three defects that no amount of
+reading had.
+
+* `Spawns.authorized` and `Restarts.authorized` read the permitted-parent law off
+  the new incarnation's own `knownParent`, so an incarnation recording *no*
+  parent discharged them vacuously — and a spawn or a restart could install a
+  **root**, which `LogicalProcessNetworkCore.RootUnique` forbids a second of.
+  `spawnsAChild` and `restartsAChild` are the fields.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.72.
+* No escrow constructor bounded which occurrences *other* than its own it may
+  resolve, so a `drop` could append an unrelated occurrence, resolve it
+  `.rerouted`, and point it at a session it never touched — breaking
+  `ReroutesLand` with every field it had discharged. `ResolvesNothingElse` and
+  `ResolvesNothing` are the fields. §10.87.
+* And `declared_slot_outcome`'s first payload dropped both the current parent and
+  the lifecycle, so two of the six clauses could not be proved from it at all.
+  Local adversarial review found that one by exhibiting the root that passes and
+  the pair of incarnations that agree on everything reported while disagreeing on
+  what the clause asks.
 
 ## How it is proved, and why that shape
 
@@ -37,9 +49,15 @@ the bridge it needs is `ProcessParentage.isRoot_of_knownParent_none`: root-ness
 is visible in `knownParent`, which is what a carried incarnation agrees on.
 
 The sixth clause, `ReroutesLand`, is about ledgers rather than instances and is
-proved separately. It turns on one fact: every constructor that touches an escrow
-ledger carries `LedgerExtends`, so `created` only ever grows, and an arrival that
-had landed stays landed.
+proved separately, from two facts. `ledgers_extend` is the easy one: every
+constructor that touches an escrow ledger carries `LedgerExtends`, so `created`
+only grows and an arrival that had landed stays landed.
+`rerouting_stood_or_is_this_step` is the other, and it did not hold when this
+module was started. A `.rerouted` resolution standing after a step had a third
+possible origin — a step that resolved an occurrence it never mentioned, because
+`LedgerExtends` forbids *erasing* and says nothing about *adding*.
+`Tests/Process/RerouteFixtures.lean` builds the `drop` that does it, and
+`ResolvesNothingElse` is the field that closes it. §10.87.
 -/
 
 namespace Grass.Process
@@ -554,6 +572,296 @@ theorem rootUnique_preserved (transition : plan.NetworkTransition before after)
     root_was_there transition foundRight rightRoot
   exact unique leftSlot rightSlot leftEarlier rightEarlier foundLeftEarlier foundRightEarlier
     leftEarlierRoot rightEarlierRoot
+
+/-! ## Reroutes land, which is about ledgers rather than slots -/
+
+/-- Two escrow fragments are the same fragment only when they name the same
+session of the same edge. -/
+theorem escrowFragment_inj {edge edge' : plan.topology.ChannelKind}
+    {session : plan.topology.ChannelId edge} {session' : plan.topology.ChannelId edge'}
+    (equal : (NetworkFragment.escrow edge session : NetworkFragment plan.topology)
+      = .escrow edge' session') :
+    ∃ same : edge = edge', same ▸ session = session' := by
+  cases equal
+  exact ⟨rfl, rfl⟩
+
+/-- A session whose escrow a step did not declare holds exactly what it held. -/
+theorem ledger_unchanged (transition : plan.NetworkTransition before after)
+    {edge : plan.topology.ChannelKind} {session : plan.topology.ChannelId edge}
+    (outside : ¬ transition.scope (.escrow edge session)) :
+    before.inFlight edge session = after.inFlight edge session :=
+  transition.touchesOnly (.escrow edge session) outside
+
+/--
+**Every session's escrow ledger only moves forward across a step.**
+
+`LedgerExtends` is a per-ledger law each escrow-touching constructor carries for
+the session it declares. This is the whole-network form: a session the step did
+not declare is unchanged, and a session it did declare carries the law. It is
+what lets `reroutesLand_preserved` say an arrival that had landed stays landed —
+the destination is generally *not* the session the step is about, so nothing in
+that step's own fields mentions it.
+-/
+theorem ledgers_extend (transition : plan.NetworkTransition before after)
+    (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge) :
+    LedgerExtends (before.inFlight edge session) (after.inFlight edge session) := by
+  by_cases declared : transition.scope (.escrow edge session)
+  · cases transition with
+    | send _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact step.ledgerExtends
+    | receive _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj
+        (by rcases declared with h | h
+            · exact h
+            · exact absurd h (by intro equal; cases equal))
+      cases same; cases sameSession
+      exact step.ledgerExtends
+    | requestCancel _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact step.ledgerExtends
+    | acknowledgeCancel _ _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact step.ledgerExtends
+    | timeout _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact step.ledgerExtends
+    | senderDeath _ _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact step.ledgerExtends
+    | receiverDeath _ _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact step.ledgerExtends
+    | drop _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact step.ledgerExtends
+    | coalesce _ _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact step.ledgerExtends
+    | channelClose _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj
+        (by rcases declared with h | h
+            · exact h
+            · exact absurd h (by intro equal; cases equal))
+      cases same; cases sameSession
+      exact step.ledgerExtends
+    | channelDeath _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj
+        (by rcases declared with h | h
+            · exact h
+            · exact absurd h (by intro equal; cases equal))
+      cases same; cases sameSession
+      exact step.ledgerExtends
+    | reroute _ _ _ _ step =>
+      rcases declared with h | h
+      · obtain ⟨same, sameSession⟩ := escrowFragment_inj h
+        cases same; cases sameSession
+        exact step.ledgerExtends
+      · obtain ⟨same, sameSession⟩ := escrowFragment_inj h
+        cases same; cases sameSession
+        exact step.destinationExtends
+    | processStep _ _ _ _ _ _ _ =>
+      exact absurd declared (by rintro (h | ⟨_, h⟩ | ⟨_, _, h⟩) <;> cases h)
+    | spawn _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
+    | restart _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
+    | join _ _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | detach _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | interrupt _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | fault _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | environmentViolation _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | childCancelled _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | childDied _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | processTermination _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | commit _ _ =>
+      rcases declared.2 with h | h <;> exact absurd h (by intro equal; cases equal)
+  · exact ledger_unchanged transition declared ▸ LedgerExtends.refl _
+
+/--
+**A `.rerouted` resolution standing after a step either stood before it, or is
+the reroute that wrote it.**
+
+The other half of the sixth clause, and the half that did not exist until a
+construction forced it. `ResolvesNothingElse` is what makes the disjunction
+exhaustive: without it a step could resolve an occurrence it never mentioned, and
+there was a third case — a `.rerouted` resolution belonging to no constructor,
+pointing at a session nothing had touched. `Tests/Process/RerouteFixtures.lean`
+builds that step and `the_stranding_drop_is_refused` is it being refused.
+-/
+theorem rerouting_stood_or_is_this_step (transition : plan.NetworkTransition before after)
+    {edge : plan.topology.ChannelKind} {session : plan.topology.ChannelId edge}
+    {occurrence : EdgeOccurrence plan.topology plan.message edge}
+    {destination : plan.topology.ChannelId edge}
+    (resolved : (after.inFlight edge session).resolution occurrence
+      = some (.rerouted destination)) :
+    (before.inFlight edge session).resolution occurrence = some (.rerouted destination)
+    ∨ ∃ arrival, arrival ∈ (after.inFlight edge destination).created := by
+  by_cases declared : transition.scope (.escrow edge session)
+  · cases transition with
+    | reroute _ session' occurrence' destination' step =>
+      rcases declared with h | h
+      · obtain ⟨same, sameSession⟩ := escrowFragment_inj h
+        cases same; cases sameSession
+        by_cases isIt : occurrence = occurrence'
+        · subst isIt
+          obtain ⟨arrival, _, arrived, _⟩ := step.arrives
+          have sameDestination : destination' = destination := by
+            rw [step.nowResolved] at resolved
+            cases resolved
+            rfl
+          subst sameDestination
+          exact Or.inr ⟨arrival, arrived⟩
+        · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+      · obtain ⟨same, sameSession⟩ := escrowFragment_inj h
+        cases same; cases sameSession
+        exact Or.inl (step.destinationResolvesNothing occurrence ▸ resolved)
+    | send _ _ occurrence' step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact Or.inl (step.resolvesNothing occurrence ▸ resolved)
+    | requestCancel _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact Or.inl (step.resolvesNothing occurrence ▸ resolved)
+    | receive _ _ occurrence' step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj
+        (by rcases declared with h | h
+            · exact h
+            · exact absurd h (by intro equal; cases equal))
+      cases same; cases sameSession
+      by_cases isIt : occurrence = occurrence'
+      · subst isIt
+        rw [step.nowResolved] at resolved
+        exact absurd resolved (by intro equal; cases equal)
+      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+    | channelClose _ _ occurrence' step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj
+        (by rcases declared with h | h
+            · exact h
+            · exact absurd h (by intro equal; cases equal))
+      cases same; cases sameSession
+      by_cases isIt : occurrence = occurrence'
+      · subst isIt
+        rw [step.nowResolved] at resolved
+        exact absurd resolved (by intro equal; cases equal)
+      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+    | channelDeath _ _ occurrence' step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj
+        (by rcases declared with h | h
+            · exact h
+            · exact absurd h (by intro equal; cases equal))
+      cases same; cases sameSession
+      by_cases isIt : occurrence = occurrence'
+      · subst isIt
+        rw [step.nowResolved] at resolved
+        exact absurd resolved (by intro equal; cases equal)
+      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+    | acknowledgeCancel _ _ occurrence' _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      by_cases isIt : occurrence = occurrence'
+      · subst isIt
+        rw [step.nowResolved] at resolved
+        exact absurd resolved (by intro equal; cases equal)
+      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+    | timeout _ _ occurrence' step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      by_cases isIt : occurrence = occurrence'
+      · subst isIt
+        rw [step.nowResolved] at resolved
+        exact absurd resolved (by intro equal; cases equal)
+      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+    | senderDeath _ _ occurrence' _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      by_cases isIt : occurrence = occurrence'
+      · subst isIt
+        rw [step.nowResolved] at resolved
+        exact absurd resolved (by intro equal; cases equal)
+      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+    | receiverDeath _ _ occurrence' _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      by_cases isIt : occurrence = occurrence'
+      · subst isIt
+        rw [step.nowResolved] at resolved
+        exact absurd resolved (by intro equal; cases equal)
+      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+    | drop _ _ occurrence' step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      by_cases isIt : occurrence = occurrence'
+      · subst isIt
+        rw [step.nowResolved] at resolved
+        exact absurd resolved (by intro equal; cases equal)
+      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+    | coalesce _ _ occurrence' _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      by_cases isIt : occurrence = occurrence'
+      · subst isIt
+        rw [step.nowResolved] at resolved
+        exact absurd resolved (by intro equal; cases equal)
+      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+    | processStep _ _ _ _ _ _ _ =>
+      exact absurd declared (by rintro (h | ⟨_, h⟩ | ⟨_, _, h⟩) <;> cases h)
+    | spawn _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
+    | restart _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
+    | join _ _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | detach _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | interrupt _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | fault _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | environmentViolation _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | childCancelled _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | childDied _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | processTermination _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | commit _ _ =>
+      rcases declared.2 with h | h <;> exact absurd h (by intro equal; cases equal)
+  · exact Or.inl (ledger_unchanged transition declared ▸ resolved)
+
+/--
+**A step preserves the landing of every rerouted occurrence.**
+
+`WellFormed`'s sixth clause, and the one that is about ledgers rather than slots.
+A `.rerouted` resolution standing afterwards either stood before — and the
+before-network found it an arrival, which `ledgers_extend` says is still there —
+or is this step's own, and `Reroutes.arrives` is the arrival.
+-/
+theorem reroutesLand_preserved (transition : plan.NetworkTransition before after)
+    (lands : before.ReroutesLand) : after.ReroutesLand := by
+  intro edge session occurrence destination resolved
+  rcases rerouting_stood_or_is_this_step transition resolved with stood | ⟨arrival, arrived⟩
+  · obtain ⟨arrival, arrived⟩ := lands edge session occurrence destination stood
+    exact ⟨arrival, (ledgers_extend transition edge destination).created_preserved arrived⟩
+  · exact ⟨arrival, arrived⟩
+
+/-! ## The capstone -/
+
+/--
+**A step of a well-formed network reaches a well-formed one.**
+
+`docs/PROCESS.md` §3's obligation, and the theorem this module exists for. Stated
+over `NetworkStep` rather than `NetworkTransition` because one clause genuinely
+needs the step: `usedNominals` moves by `historyExact`, which is a field of the
+step, and a spawn *transition* alone may install a generation and record nothing.
+-/
+theorem wellFormed_preserved (step : plan.NetworkStep before after)
+    (wellFormed : before.WellFormed) : after.WellFormed where
+  slotsAgree := slotsAgree_preserved step.transition wellFormed.slotsAgree
+  lifecyclesWitnessed :=
+    lifecyclesWitnessed_preserved step.transition wellFormed.lifecyclesWitnessed
+  rootUnique := rootUnique_preserved step.transition wellFormed.rootUnique
+  parentageValid := parentageValid_preserved step.transition wellFormed.parentageValid
+  nominalsAllocated := nominalsAllocated_preserved step wellFormed.nominalsAllocated
+  reroutesLand := reroutesLand_preserved step.transition wellFormed.reroutesLand
 
 end ProcessPlan
 
