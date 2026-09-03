@@ -127,6 +127,19 @@ example (i o : Vec Occurrence) (h : StableSorted i o) (x : Occurrence) (hx : x �
     (o.idxOf? x).isSome :=
   Vec.idxOf?_isSome_of_mem (h.1.mem_iff.mpr hx)
 
+/-- Multiplicity is preserved, which is what stops a "sort" from duplicating one
+line and dropping another. Every other Permutation law is satisfied by a relation
+that allows exactly that; adversarial review exhibited one. -/
+example (i o : Vec Occurrence) (h : StableSorted i o) (x : Occurrence) :
+    o.count x = i.count x :=
+  h.1.count_eq x
+
+/-- A found position is the *first* one, which is what stability is a claim
+about. -/
+example (o : Vec Occurrence) (x : Occurrence) (k : Nat) (h : o.idxOf? x = some k) :
+    ∀ j, j < k → o.get? j ≠ some x :=
+  (Vec.idxOf?_eq_some h).2.2
+
 /-- Order by index, which is the form a merge proof discharges. -/
 example (i o : Vec Occurrence) (h : StableSorted i o)
     (a b : Nat) (ha : a < o.length) (hb : b < o.length) (hab : a < b) :
