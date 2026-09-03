@@ -66,8 +66,8 @@ recorded debt whose citation misses is not recorded.
 
 And three laws:
 
-- a return consumes that exact identity — `MemoryState.lookup_returnLoan_self`
-  with `MemoryState.lookup_returnLoan_ne`;
+- a return consumes that exact identity — `MemoryState.lookup_returnLoan?_self`
+  with `MemoryState.lookup_returnLoan?_ne`;
 - exclusive authority is restored only when the relevant map is empty —
   `MemoryState.Exclusive` is defined as that emptiness, and
   `MemoryState.exclusive_iff_no_outstanding` relates it to the count;

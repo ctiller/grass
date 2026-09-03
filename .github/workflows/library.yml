@@ -19,6 +19,12 @@ name: Library build
 # closed; its own docstring lists what it cannot see. Run it with --self-test after
 # changing the scanner. Tools/DocstringAudit.py requires a strong claim in
 # a definition or module comment to name the type or theorem enforcing it.
+# Tools/CitationAudit.py closes the gap those two leave: a docstring may name an
+# enforcing theorem that no longer exists, and a debt may be "recorded in section
+# 4.2" of a document whose section 4.2 is about something else. Three review rounds
+# found both. It is lexical too -- it matches short names and cannot tell a
+# still-resolving citation from an accurate one -- and its own docstring lists what
+# it does not see.
 
 on:
   push:
@@ -63,3 +69,9 @@ jobs:
 
       - name: Audit declared field names never projected
         run: python3 Tools/ConsultedAudit.py
+
+      - name: Self-test the citation audit
+        run: python3 Tools/CitationAudit.py --self-test
+
+      - name: Audit citations of declarations and document sections
+        run: python3 Tools/CitationAudit.py
