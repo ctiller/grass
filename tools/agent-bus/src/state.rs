@@ -1,9 +1,9 @@
 //! Reduced bus state (AGENT_BUS.md section 7) plus the bookkeeping needed to
 //! detect the concurrent/causal cases in section 10.
 
-//! Several fields here (`ReviewChain::root`, `AgentState::registered_commit_index`,
-//! full `FindingState` detail, ...) round out the data model for future query
-//! commands (e.g. `review show`) beyond what today's CLI surface reads back.
+//! Several fields here (`ReviewChain::root`, full `FindingState` detail, ...)
+//! round out the data model for future query commands (e.g. `review show`)
+//! beyond what today's CLI surface reads back.
 #![allow(dead_code)]
 
 use crate::bootstrap::BusJson;
@@ -146,20 +146,12 @@ pub struct AgentState {
     pub plan: Option<PlanSet>,
     pub progress_tail: Vec<ProgressReported>,
     pub next_seq: u64,
-    pub registered_commit_index: usize,
 }
 
 impl AgentState {
     pub fn active(&self) -> bool {
         !self.retired && !self.status.deactivates()
     }
-}
-
-/// A pending concurrent exclusive-transition set, keyed by predecessor.
-#[derive(Debug, Clone, Default)]
-pub struct ExclusiveTracker {
-    pub transitions: Vec<(EventId, usize)>, // (transition event id, commit index)
-    pub resolved: Option<EventId>,
 }
 
 #[derive(Clone)]
@@ -173,9 +165,10 @@ pub struct BusState {
     /// reassignment event id resolves back to its chain.
     pub review_chain_by_nomination: BTreeMap<EventId, EventId>,
     pub reviews: BTreeMap<EventId, ReviewChain>,
-    pub exclusive: BTreeMap<String, ExclusiveTracker>,
-    pub commit_index_of: BTreeMap<String, usize>,
-    pub commit_index_of_event: BTreeMap<EventId, usize>,
+    /// Order-independent exclusive-transition resolution (gates 3/15/16) --
+    /// see `exclusive.rs`. Replaces v1's commit-index-ordered tracker: there
+    /// is no longer one canonical commit order to break ties with.
+    pub exclusive: crate::exclusive::ExclusiveTracker,
     pub kind_of_event: BTreeMap<EventId, String>,
     pub events: BTreeMap<EventId, crate::envelope::Envelope>,
     /// The currently selected merge-engine epoch (a bootstrap coordinator
@@ -208,9 +201,7 @@ impl BusState {
             handoffs: BTreeMap::new(),
             review_chain_by_nomination: BTreeMap::new(),
             reviews: BTreeMap::new(),
-            exclusive: BTreeMap::new(),
-            commit_index_of: BTreeMap::new(),
-            commit_index_of_event: BTreeMap::new(),
+            exclusive: crate::exclusive::ExclusiveTracker::default(),
             kind_of_event: BTreeMap::new(),
             events: BTreeMap::new(),
             current_merge_engine_epoch: epoch,
