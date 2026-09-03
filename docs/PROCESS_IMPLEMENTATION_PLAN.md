@@ -2275,6 +2275,27 @@ outstanding bag), §10.35 (no channel step touches either endpoint's slot), and
 §10.27 (one global observation trace makes §7's congruence trivial). The rest
 are recorded and none blocks building.
 
+### Integrity
+
+`#print axioms` on the twelve headline theorems of this branch reports only
+`propext`, `Classical.choice` and `Quot.sound`, and five of the twelve depend on
+no axioms at all: `no_infinite_descent`, `SerialFunctionRealizes.post_is_determined`,
+`SerialFunctionSource.exit_is_unique`,
+`ExactStandardRealizerLookup.selection_is_determined` and
+`DisjointWeave.routing_is_forced`. No `sorryAx`, no custom axiom, no
+`native_decide`. `lakefile.toml`'s `warningAsError` already fails the build on a
+`sorry`, but that check is about *warnings*; this one is about the kernel.
+
+### One open question about the facade
+
+`Grass/Process.lean` is decision 134's bounded facade and imports four modules.
+`Grass/Process/Sequential/Standard.lean` is author-facing by §4's own
+description — "one expression at the application process boundary" — and is not
+in it, so an author selecting a registered realizer needs a second import.
+Widening the facade breaks `Tests/Process/FacadeFixtures.lean`'s guards
+deliberately, which is the point of the design, so it is a ruling rather than a
+change I should make. Recorded here rather than done.
+
 Nine ledger entries — §10.20 through §10.42 — were opened by writing fixtures
 rather than by reading, and four defects in `Transition.lean` were found by
 consumers of its scope discipline rather than by its own tests. That is the
