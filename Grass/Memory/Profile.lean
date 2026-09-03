@@ -222,12 +222,31 @@ declare `cpu.virtual` twice — once honestly and once with `repr := .symbolic` 
 and `AddressSpaceTable.find?` returns the first match, so which version an access
 was checked against depended on list order. Resolving a descriptor's space
 through the profile is only a guarantee if the profile's own table is checked.
+
+**And the three justification registries are pairwise disjoint**, which
+`StepPolicy.vocabularyWellFormed` makes a construction obligation. `AdmittedVocabulary` keeps them
+separate so that one name cannot satisfy another's claim: a rule permitting an
+uninitialized read is not a proof that a two-substep store is all-or-nothing, and
+§7.1's fault-visibility rules are a third thing again. Review
+pointed out that nothing stopped a vocabulary listing one name in two of them, which
+re-created at the profile level exactly the collapse the split was built to prevent —
+the split was a convention, not a guarantee. It is a guarantee here, and it is
+load-bearing because `StepPolicy.vocabularyWellFormed` makes it a construction
+obligation: a profile that conflates two claims under one name cannot form a policy
+at all.
 -/
 def WellFormed (vocabulary : AdmittedVocabulary) : Prop :=
-  vocabulary.addressSpaces.WellFormed
+  vocabulary.addressSpaces.WellFormed ∧
+  vocabulary.atomicityJustifications.recognized.all
+    (fun name => !decide (name ∈ vocabulary.faultVisibilityRules.recognized)) = true ∧
+  vocabulary.initializationJustifications.recognized.all
+    (fun name => !decide (name ∈ vocabulary.atomicityJustifications.recognized)) = true ∧
+  vocabulary.initializationJustifications.recognized.all
+    (fun name => !decide (name ∈ vocabulary.faultVisibilityRules.recognized)) = true
 
-instance (vocabulary : AdmittedVocabulary) : Decidable vocabulary.WellFormed :=
-  inferInstanceAs (Decidable (_ ∧ _))
+instance (vocabulary : AdmittedVocabulary) : Decidable vocabulary.WellFormed := by
+  unfold AdmittedVocabulary.WellFormed AddressSpaceTable.WellFormed
+  infer_instance
 
 /--
 `vocabulary.AdmitsOrder order` holds when the access may request that ordering.

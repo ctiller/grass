@@ -1695,13 +1695,20 @@ refuses everything.
   `Obligation.owner`, which is the same-name blind spot its own docstring documents.
   Kept rather than deleted because §7.5's distinction is real and a device authority
   will need it.
-- **`AdmittedVocabulary.WellFormed` constrains the address-space table and nothing
-  else.** Eleven registries, no coherence condition between them. The two
-  justification registries are split so that one name cannot satisfy the other's
-  claim, and nothing stops a well-formed vocabulary listing one name in both, which
-  re-creates the collapse at the profile level. Minor — a profile listing a name in
-  both is arguably making two honest claims — but it means the split is a convention
-  rather than a guarantee.
+- ~~**`AdmittedVocabulary.WellFormed` constrains the address-space table and nothing
+  else.**~~ The three justification registries are pairwise disjoint now. They are
+  split so that one name cannot satisfy another's claim — a rule permitting an
+  uninitialized read is not a proof that a two-substep store is all-or-nothing — and
+  nothing stopped a vocabulary listing one name in two of them, which re-created the
+  collapse at the profile level and made the split a convention rather than a
+  guarantee. It is load-bearing because `StepPolicy.vocabularyWellFormed` makes it a
+  construction obligation: a profile that conflates two claims under one name cannot
+  form a policy at all, and `a_confused_vocabulary_is_not_well_formed` is that
+  vocabulary refused.
+
+  Eight registries still have no coherence condition between them, and that is not a
+  gap of the same kind: nothing says a fault class and an allocation source may not
+  share a name, because nothing would go wrong if they did.
 - ~~**The loan rule was a provider a profile could decline to list.**~~ The largest
   finding of round ten, and the same shape as the round before it one level up.
   `StepPolicy.authorities` defaults to `[]`; the grant map was read by

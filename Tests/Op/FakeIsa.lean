@@ -2585,6 +2585,26 @@ theorem a_duty_may_be_handed_to_a_known_context :
   cases hu
   exact ⟨by decide, by decide⟩
 
+/-- A vocabulary that lists one name as both an atomicity justification and a
+fault-visibility rule. Well typed, and refused. -/
+def confusedVocabulary : AdmittedVocabulary :=
+  { vocabulary with
+    atomicityJustifications := ⟨[⟨"fake.splitStore"⟩]⟩ }
+
+/-- **A vocabulary that conflates two claims under one name is not well formed**, so
+no `StepPolicy` can carry it.
+
+The three justification registries are separate precisely so that one name cannot
+satisfy another's claim — a rule permitting an uninitialized read is not a proof that
+a two-substep store is all-or-nothing. Review pointed out that nothing stopped a
+vocabulary listing one name in two of them, which re-created at the profile level the
+collapse the split was built to prevent: the split was a convention rather than a
+guarantee. `AdmittedVocabulary.WellFormed` requires the three to be pairwise disjoint
+now, and `StepPolicy.vocabularyWellFormed` makes that a construction obligation. -/
+theorem a_confused_vocabulary_is_not_well_formed :
+    ¬ confusedVocabulary.WellFormed ∧ vocabulary.WellFormed := by
+  exact ⟨by decide, by decide⟩
+
 /-- **A grant kind the profile never declared is not admitted.**
 
 `GrantKind` was an open nominal name with no registry, which did not matter while
