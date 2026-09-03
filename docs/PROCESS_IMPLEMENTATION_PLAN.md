@@ -1978,8 +1978,8 @@ the framing and it was right to.
 
 §7 asks for a congruence under which reordering independent steps preserves the
 observed trace. This layer obtains it by making every pair that could reorder
-two emissions *non-independent*, because `.observations` is a single global
-fragment and `NetworkTransition.Independent` is scope disjointness. The
+two emissions *non-independent*, because `NetworkTransition.Independent` is scope
+disjointness and one fragment carries every emission. The
 obligation has been moved rather than discharged: a plan that wants two
 subsystems to emit concurrently and to reason about the interleaving has no
 statement available, and would need either a per-subsystem trace or an explicit
@@ -1989,6 +1989,13 @@ The same shape reaches `Grass/Process/Weave/Lens.lean`: two `Disjoint` lenses
 cannot both own the trace, so at most one refinement in a weave may change what
 the program observes. That is sound and it excludes §8's own graphics-and-disk
 example if both refinements emit.
+
+**The trace split did not change this.** `NetworkFragment.pending` and
+`.observations` are now two fragments, and it is `.pending` that every emitting
+constructor declares — so "one global fragment carries every emission" is still
+true, of a different fragment. The narrowing is unchanged and this entry stays
+open. What the split *did* change is that a commit now has provenance, which is
+§10.60's story and not this one.
 
 Needs a ruling on whether the corpus intends one global observation trace. If it
 does, §7's observation-reordering congruence is trivial and should be recorded
@@ -2243,17 +2250,36 @@ and a reader needs to know which of them are open.
 | `Sequential/Adapter.lean` | §4's elaboration, with `Pending` derived from occurrences |
 | `Sequential/Standard.lean` | §4's realizer registry, and that selection is forced |
 | `Function/Serial.lean` | §3's serial contract, with the collapse carrying its own frontier argument |
-| `Network/Progress.lean` | §7's progress theorem, as a no-infinite-silent-run law |
+| `Network/Progress.lean` | §7's progress theorem, as a no-infinite-silent-run law, over what a run can reach |
 | `Network/Initial.lean` | §3's `ExactInitialNetwork`, and `initial_is_wellformed` |
+| `Progress.lean` | the per-process livelock theorem: no silent cycle, no infinite silent run |
 
-`Grass/Process/Network/Transition.lean` was reworked four times over the same
+`Grass/Process/Network/Transition.lean` was reworked six times over the same
 period and is where most of the defects were: the scope discipline it exports is
-consumed by three of the modules above, and every one of them found something
+consumed by four of the modules above, and every one of them found something
 wrong with it.
 
 Each has a fixture file, and each fixture found at least one defect in the
 module it was written against. That is the pattern worth keeping: nothing here
 was found by reading.
+
+### The three records that had no witness, and now do
+
+The exit criterion §10.54 proposed — every named record has a positive witness
+before the layer is nominated — turned out to be the most productive rule in this
+milestone. Three records were inhabited for the first time, and each was empty
+for a *different* reason that reading had not found:
+
+| Record | Why it was empty | Witness |
+|---|---|---|
+| `ProcessCorrect` | `handlesEveryEvent` and `terminalNoStep` contradicted each other | `Tests/Process/M1CorrectFixtures.lean`, then `CountdownCorrectFixtures` and `PrefixFixtures` |
+| `NetworkProgressMeasure` | `Commits` had no provenance, so no network could be at a frontier | `Tests/Process/FrontierFixtures.lean` |
+| `ExactInitialNetwork` | nothing; it had simply never been built, and had absorbed two new fields with no proof breaking | `Tests/Process/FrontierFixtures.lean` |
+
+And two records were shown *not* to be inhabited by things that should not
+inhabit them, which is the other half of the same discipline:
+`Tests/Process/SpinFixtures.lean` and `Tests/Process/OscillateFixtures.lean` are
+livelocks that each had a full `ProcessCorrect` for one commit.
 
 ### Still owed for M4 exit
 
@@ -2272,19 +2298,39 @@ was found by reading.
 §10.42 (no silent step) is the heaviest and blocks three deliverables. After it:
 §10.33's second half (an ending does not dispose of the ended instance's
 outstanding bag), §10.35 (no channel step touches either endpoint's slot), and
-§10.27 (one global observation trace makes §7's congruence trivial). The rest
-are recorded and none blocks building.
+§10.51 (an ending does not have to be witnessed by the protocol). The rest are
+recorded and none blocks building.
+
+§10.27 is **partly closed**: the one global observation trace is now two, and
+`NetworkFragment.pending` is where a process's emissions go. §7's congruence is
+still obtained by making every pair that could reorder two emissions
+non-independent rather than by proving they commute, which is what that entry is
+really about; the trace split did not change that and the entry is updated to say
+so.
+
+Three retractions are worth counting separately, because they are the same
+mistake: §10.46, §10.53 and part of §10.60 each recorded a defect that a later
+reviewer refuted by *building* the thing the entry described. All three were filed
+from a reading of a repair, describing what the repair did not yet cover, without
+constructing it. §10.54 is the method note.
 
 ### Integrity
 
-`#print axioms` on the twelve headline theorems of this branch reports only
-`propext`, `Classical.choice` and `Quot.sound`, and five of the twelve depend on
-no axioms at all: `no_infinite_descent`, `SerialFunctionRealizes.post_is_determined`,
-`SerialFunctionSource.exit_is_unique`,
-`ExactStandardRealizerLookup.selection_is_determined` and
-`DisjointWeave.routing_is_forced`. No `sorryAx`, no custom axiom, no
+`#print axioms` on this branch's headline theorems reports only `propext`,
+`Classical.choice` and `Quot.sound`. No `sorryAx`, no custom axiom, no
 `native_decide`. `lakefile.toml`'s `warningAsError` already fails the build on a
 `sorry`, but that check is about *warnings*; this one is about the kernel.
+
+Several depend on no choice at all, which is worth naming because they are the
+ones a livelock argument rests on: `MeetsProcessProgress.no_infinite_silent_run`,
+`MeetsProcessProgress.no_silent_two_cycle`,
+`ProcessPlan.NetworkProgressMeasure.no_infinite_descent`,
+`SerialFunctionRealizes.post_is_determined`,
+`SerialFunctionSource.exit_is_unique`,
+`ExactStandardRealizerLookup.selection_is_determined`,
+`DisjointWeave.routing_is_forced`, and the two fixture refutations
+`Tests/Process/SpinFixtures.lean`'s `spin_is_not_correct` and
+`Tests/Process/OscillateFixtures.lean`'s `osc_is_not_correct`.
 
 ### One open question about the facade
 
