@@ -76,7 +76,7 @@ REGS = ("rax rcx rdx rbx rsp rbp rsi rdi "
 RSP = 4  # never loaded or compared: it is the harness's own stack
 
 # The corpus this tool was last reviewed against. See corpus_digest.
-EXPECTED_DIGEST = "985e0209048fd6c3ca5670c0f12ec27a1dd18c71c2ccb53aaaf1c8bc3f125105"
+EXPECTED_DIGEST = "2657182b0661e3e476e02c2111e5adac8beb3f43818d242da97e3834b75200c1"
 # The coverage this tool was reviewed at. Shrinking the corpus must be a
 # deliberate, reviewed edit rather than a side effect of regenerating it.
 #
@@ -93,20 +93,38 @@ PROBE_TIMEOUT_SECONDS = 30
 
 
 
+COVERAGE_LINE = chr(10)
+
+
+def coverage_of(line: str) -> str:
+    """The probe's label, its register inputs, and the rule it checks. The
+    encoded bytes and the expected register outputs are what the processor
+    judges."""
+    fields = line.split(chr(9))
+    if len(fields) < 8:
+        return line
+    return chr(9).join([fields[0], fields[2], fields[4], fields[5], fields[6]])
+
+
 def corpus_digest(text: str) -> str:
-    """A digest of the corpus content, line endings normalised.
+    """A digest of the corpus's *coverage*, line endings normalised.
 
-    The row count was the only binding between this tool and the Lean
-    generator, and a reviewer defeated it twice: a corpus of one row reported
-    success, and so did a corpus whose every row was a copy of the first, since
-    the count was still right. A digest binds content, so substituting a
-    same-length corpus fails.
+    Hashes the columns that say what is exercised and not the columns holding
+    what Grass emitted. That distinction was missing and it mattered: a reviewer
+    mutated `encodeMem`, and this tool's entire output was the digest error
+    telling them to update the constant. Following it, the real check reported
+    60 mismatches -- so the guard fired first on precisely the change it adds
+    nothing to, and its own remedy was to silence it. That is the shape of the
+    row-count weakness described below, one column over.
 
-    Changing the corpus therefore requires updating EXPECTED_DIGEST here, which
-    is the reviewed edit `docs/VALIDATION.md` section 7 asks for rather than a
-    silent change to what is being checked."""
-    normalised = "\n".join(
-        line.rstrip("\r") for line in text.splitlines() if line.strip())
+    Hashing coverage keeps what the guard is for. A corpus that drops rows,
+    duplicates them, or swaps hard cases for easy ones still changes this
+    digest; a corpus whose byte column changed because the encoder changed does
+    not, and goes straight to the oracle that can judge it.
+    """
+    normalised = COVERAGE_LINE.join(
+        coverage_of(line.rstrip("\r"))
+        for line in text.splitlines() if line.strip())
     return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 

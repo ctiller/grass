@@ -56,7 +56,7 @@ from pathlib import Path
 # The corpus this tool was reviewed against, as a digest of its content. A row
 # count is not enough: a truncated or duplicated corpus keeps a plausible count
 # and checks nothing. See the same guard in the other x86 differentials.
-EXPECTED_DIGEST = "4a8d5b5e6df83bd8bca5e40079ac361ef268146430c1914e47b088a10dff3ba7"
+EXPECTED_DIGEST = "9ac7a927b227758adeabb508806d7d1bc291e715ce635478bc7cb5d929177c75"
 # The coverage this tool was reviewed at. Shrinking the corpus must be a
 # deliberate, reviewed edit rather than a side effect of regenerating it.
 #
@@ -92,10 +92,36 @@ def is_refusal(text: str) -> bool:
     return text.startswith("db ") or bool(PREFIX_ONLY.fullmatch(text))
 
 
+COVERAGE_LINE = chr(10)
+
+
+def coverage_of(line: str) -> str:
+    """The window's label, which names the opcode row, prefix and operand
+    bytes. The other columns are the window Grass built and the length it
+    reported -- both under test."""
+    fields = line.split(chr(9))
+    return fields[2] if len(fields) > 2 else line
+
+
 def corpus_digest(text: str) -> str:
-    """A digest of the corpus content, line endings normalised."""
-    normalised = "\n".join(
-        line.rstrip("\r") for line in text.splitlines() if line.strip())
+    """A digest of the corpus's *coverage*, line endings normalised.
+
+    Hashes the columns that say what is exercised and not the columns holding
+    what Grass emitted. That distinction was missing and it mattered: a reviewer
+    mutated `encodeMem`, and this tool's entire output was the digest error
+    telling them to update the constant. Following it, the real check reported
+    60 mismatches -- so the guard fired first on precisely the change it adds
+    nothing to, and its own remedy was to silence it. That is the shape of the
+    row-count weakness described below, one column over.
+
+    Hashing coverage keeps what the guard is for. A corpus that drops rows,
+    duplicates them, or swaps hard cases for easy ones still changes this
+    digest; a corpus whose byte column changed because the encoder changed does
+    not, and goes straight to the oracle that can judge it.
+    """
+    normalised = COVERAGE_LINE.join(
+        coverage_of(line.rstrip("\r"))
+        for line in text.splitlines() if line.strip())
     return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 

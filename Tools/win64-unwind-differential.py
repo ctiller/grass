@@ -53,7 +53,7 @@ from pathlib import Path
 # means substituting a same-length corpus fails. Changing the corpus requires
 # updating this constant, which is the reviewed edit `docs/VALIDATION.md`
 # section 7 asks for rather than a silent change to what is being checked.
-EXPECTED_DIGEST = "22e38844c9c90b41a24fe622687e1c5ef233fca312c660affa5ec1455d33c433"
+EXPECTED_DIGEST = "a9009d55a935a81f1ca90da712f308d2a5d34722dfa0bbe8fb7f331858755447"
 # The coverage this tool was reviewed at. Shrinking the corpus must be a
 # deliberate, reviewed edit rather than a side effect of regenerating it.
 #
@@ -79,10 +79,35 @@ END
 """
 
 
+COVERAGE_LINE = chr(10)
+
+
+def coverage_of(line: str) -> str:
+    """The prologue's name and its MASM text. The first column is the .xdata
+    Grass predicted."""
+    fields = line.split(chr(9))
+    return chr(9).join(fields[1:]) if len(fields) > 1 else line
+
+
 def corpus_digest(text: str) -> str:
-    """A digest of the corpus content, line endings normalised."""
-    normalised = "\n".join(
-        line.rstrip("\r") for line in text.splitlines() if line.strip())
+    """A digest of the corpus's *coverage*, line endings normalised.
+
+    Hashes the columns that say what is exercised and not the columns holding
+    what Grass emitted. That distinction was missing and it mattered: a reviewer
+    mutated `encodeMem`, and this tool's entire output was the digest error
+    telling them to update the constant. Following it, the real check reported
+    60 mismatches -- so the guard fired first on precisely the change it adds
+    nothing to, and its own remedy was to silence it. That is the shape of the
+    row-count weakness described below, one column over.
+
+    Hashing coverage keeps what the guard is for. A corpus that drops rows,
+    duplicates them, or swaps hard cases for easy ones still changes this
+    digest; a corpus whose byte column changed because the encoder changed does
+    not, and goes straight to the oracle that can judge it.
+    """
+    normalised = COVERAGE_LINE.join(
+        coverage_of(line.rstrip("\r"))
+        for line in text.splitlines() if line.strip())
     return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 
