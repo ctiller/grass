@@ -22,6 +22,14 @@ about records nothing in this corpus inhabited. `Tests/Process/CountdownCorrectF
 is the positive fixture that was missing, and building it is what checked the
 fixes. A corpus of negatives cannot notice that the thing it is negative about
 is empty.
+
+Nor can a positive fixture built from one process notice what that process
+cannot express. `countdown.Terminal` ignores its request and every `countdown`
+event is entropy or a settlement, so it exercises neither the request-dependent
+terminal law nor the well-founded measure;
+`Tests/Process/PrefixFixtures.lean` and `Tests/Process/M1CorrectFixtures.lean`
+are where those live, and `Tests/Process/SpinFixtures.lean` is the negative that
+guards the progress condition.
 -/
 
 namespace Grass.Process.Tests

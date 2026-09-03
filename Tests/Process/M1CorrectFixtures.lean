@@ -117,7 +117,7 @@ def oneShotProgress (request : Unit) :
       exact TerminalDemandClassification.empty oneShotRemainder request true ()
         ⟨rfl, rfl, rfl⟩
   productive := by
-    rintro state after _ _ _ _ ⟨working, finished, _, _⟩
+    rintro _ state _ _ after _ _ _ _ _ _ ⟨working, finished, _, _⟩
     subst working; subst finished
     refine Or.inr (Or.inr (Or.inr ?_))
     show (0 : Nat) < 1

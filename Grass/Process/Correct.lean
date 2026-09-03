@@ -34,11 +34,28 @@ keep working, and a terminal-state theorem would say nothing about what the
 process actually does there.
 
 It is stated over states terminal for *every* request, not for some, because
-`p.Step` does not take a request. An earlier version took the existential form
-and was refutable for every request-parameterised process — including this
-module's own `countdown`, which stepped on `.external .wake` at its terminal
-state. Both the field and the fixture were wrong, in different ways, and each
-hid the other.
+`p.Step` does not take a request. An earlier version took the existential form,
+which is refutable for every process whose `Terminal` *depends on* the request:
+`Tests/Process/PrefixFixtures.lean`'s `upto` reads items until it has `request`
+of them, so state 3 is finished for a run of three and must keep counting for a
+run of four, and `upto_refutes_the_existential_terminal_law` states that against
+the old field verbatim.
+
+Two corrections to how that used to be written here. The refuted class is
+processes whose `Terminal` reads the request, not every process carrying a
+`Request` parameter — `countdown` has one and satisfies the old field perfectly
+well. And `countdown` is in `Tests/Process/M1Fixtures.lean`, not in this module;
+it failed the old field for the unrelated reason that it stepped on
+`.external .wake` at its own terminal state, which was a defect in the fixture
+and is fixed there.
+
+What the weakening costs is visible in the same fixture and nowhere else:
+`upto_is_never_universally_terminal` shows that no state of `upto` is terminal
+for every request, so the field is discharged *vacuously* for the class it was
+weakened to accommodate. A driver holding a specific request and a state
+terminal only for it gets nothing from it.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.45 proposes the real repair — index
+`p.Step` by the request — and it is a `ProcessSpec` change.
 
 ## Acceptance is a parameter
 

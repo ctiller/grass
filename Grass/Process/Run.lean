@@ -31,7 +31,13 @@ but the invariant a reader may infer from the word, that a result strictly
 reduces its demand's multiplicity, is false: `issued` may contain the demand
 just consumed, so a `.result` step can leave the run state bit-for-bit
 identical. `Grass/Process/Progress.lean` is what stops such a step counting as
-progress, not this table.
+progress, not this table — its `StepProgresses` requires a settling step to
+issue nothing, which is exactly this case excluded.
+
+That sentence was false for one commit, and `Tests/Process/SpinFixtures.lean` is
+the process that made it false: it takes this very step forever and had a full
+`ProcessCorrect`. The table's qualification is only worth as much as the module
+it defers to, so the two are worth reading together.
 
 ## Two constructors, five derived rules
 

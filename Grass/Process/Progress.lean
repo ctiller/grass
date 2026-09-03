@@ -22,7 +22,7 @@ This module owns the first statement only. The network theorem is M4 work in
 `docs/PROCESS_IMPLEMENTATION_PLAN.md`, and nothing here should be mistaken for
 it.
 
-## Reading the three disjuncts at this layer
+## Reading the four disjuncts at this layer
 
 Every `ProcessRunTransition` consumes an event, so a single process never takes
 an internal step of its own accord; the internal work §7 refers to happens
@@ -39,11 +39,23 @@ process failing, not the environment speaking — `Grass/Process/Vocabulary.lean
 lists them as separate constructors for exactly that reason — so only
 `.external` counts as waiting.
 
-So `StepProgresses` is: environment entropy arrived, **or** the transition
+So `StepProgresses` is: environment entropy arrived, **or** an outstanding
+demand was answered and no new one issued in its place, **or** the transition
 emitted an observation the specification demanded, **or** a well-founded measure
-strictly decreased. A server's accept loop satisfies the second disjunct on
-every connection. A silent demand-issuing spin satisfies none, and so does a
-silent fault loop.
+strictly decreased. A server's accept loop satisfies the third disjunct on every
+connection. A silent fault loop satisfies none, and neither does a silent
+demand-*reissuing* spin — `reissuing_step_decreases` is the theorem that says so.
+
+The second disjunct's `issued` condition is the whole of its content, and it went
+in without one. §7's "demand-result frontier" reads as though answering a
+demand is progress on its own, and it is not: a step that consumes one occurrence
+and issues another leaves the outstanding bag the same size, and if the state and
+the trace are also unchanged the run has returned to where it started. Local
+adversarial review built exactly that process — one demand, one step, an empty
+`ExternalEvent` so it could not even use the entropy escape below — and gave it a
+full `ProcessCorrect` with a constant measure.
+`Tests/Process/SpinFixtures.lean` keeps it, and keeps the proof that it is now
+excluded.
 
 Two honest limits. First, this layer has no way to say which frontiers are
 *law-bearing* in §7's sense: `ProcessAcceptance` carries no frontier
@@ -100,6 +112,16 @@ specification author, so a process can route its own internal work through a
 self-delivered tick, satisfy the entropy disjunct forever, never terminate,
 never emit, and never decrease its measure. A total livelock of that shape has a
 `ProcessCorrect`.
+
+**And the demand disjunct's escape is one step further out.** `issued.card = 0`
+kills a one-demand spin, and a *two*-demand cycle evades it: `d`'s result issues
+`e`, `e`'s result issues `d`, each step answering something and each issuing
+something, the bag never growing, the state never moving. Excluding that needs a
+well-founded order on the outstanding bag, which the bag's own cardinality cannot
+supply because it is constant along the cycle. Nothing here can build one: the
+demands are the specification's and their dependency structure is not declared.
+Named rather than left implied; `docs/PROCESS_IMPLEMENTATION_PLAN.md` §6
+carries it with the entropy escape.
 
 Excluding it needs a frontier declaration — a statement that a given external
 event is genuinely produced by the environment and not by the program — which
@@ -170,12 +192,24 @@ An earlier version had only the external half, and the demand-result half is not
 cosmetic — a `.result` or `.interrupted` step consumes an outstanding occurrence
 and may leave `p.State` untouched, which is real progress that
 `ProcessMeasure.rank : p.State → Rank` structurally cannot see, because the
-outstanding bag lives in `ProcessRunState` and not in the state. Local
-adversarial review proved the consequence: **no** silent state-preserving
-non-entropy step could progress under any measure, acceptance or invariant, and
-`countdown` — this corpus's own primary fixture, whose `.result .log` case
-issues a fresh `tick` without moving the state — therefore had no
-`MeetsProcessProgress` at all.
+outstanding bag lives in `ProcessRunState` and not in the state.
+
+**`issued.card = 0` is that disjunct's whole content**, and the first version of
+it did not have the condition. Without it the disjunct fires on the event's label
+alone: a step that consumes an occurrence and *reissues* one leaves the state, the
+bag and the trace bit-for-bit identical and was "progress" forever. Local
+adversarial review built that process — one demand, one step, an empty
+`ExternalEvent` so it could not fall back on the entropy escape — and gave it a
+full `ProcessCorrect` and a `MeetsProcessProgress` with a constant measure. The
+condition says what the disjunct was always meant to say: an occurrence left the
+outstanding bag and nothing took its place, so the bag is strictly smaller, which
+is a descent the state rank cannot see and this can. `reissuing_step_decreases`
+is the exported form and `Tests/Process/SpinFixtures.lean` is the witness.
+
+`issued` is the transition's own output rather than the run's bag, which is why
+this is statable here at all — `StepProgresses` is a per-step predicate and has
+no run state. That is also its limit: see the module note for the two-demand
+cycle it does not exclude.
 
 See the module note for why the first disjunct is environment entropy rather
 than "settled nothing"; that argument is about `.fault` and
@@ -183,19 +217,35 @@ than "settled nothing"; that argument is about `.fault` and
 -/
 def StepProgresses {p : ProcessSpec.{u, w}} (accept : ProcessAcceptance p)
     (measure : ProcessMeasure p) (before after : p.State) (event : p.Event)
-    (emitted : p.Segment) : Prop :=
+    (issued : Bag p.Demand) (emitted : p.Segment) : Prop :=
   (∃ entropy, event.externalEntropy = some entropy) ∨
-    (∃ demand, event.settles = some demand) ∨
+    (∃ demand, event.settles = some demand ∧ issued.card = 0) ∨
     accept.SegmentIsDemanded emitted ∨
     measure.Decreases before after
 
 /--
 A process meets its progress contract.
 
-`productive` is quantified over states satisfying an invariant supplied by the
-caller; the two responsiveness fields are quantified over reachable run states,
-because a claim about a state and an outstanding bag that no execution reaches
-together is neither needed nor provable.
+**All three fields are quantified over reachable run states**, because a claim
+about a state and an outstanding bag that no execution reaches together is
+neither needed nor provable. The two responsiveness fields were moved there
+first; `productive` followed, and the reason is the same one in the other
+direction.
+
+`productive` used to quantify over every step from an invariant-satisfying
+state. An `Invariant : p.State → Prop` sees the state and not the bag, so it
+cannot say "this demand is never outstanding" — and a process is then obliged to
+prove progress for results to demands it never issues. `countdown`'s `.result
+.log` case is exactly that step: it answers a demand that is never in the bag,
+leaves the state alone and reissues, so it progresses under no measure at all.
+The first response to that was to widen `StepProgresses` until the unreachable
+step passed, which let a genuinely spinning process through; see that
+definition's docstring. The right response was to stop asking about it.
+
+`Invariant` is kept beside the reachability hypothesis rather than replaced by
+it. Reachability is about the run and cannot be strengthened by the caller;
+`Invariant` is the caller's own, and a process whose measure descends only under
+a state predicate it separately maintains needs somewhere to say so.
 -/
 structure MeetsProcessProgress (p : ProcessSpec.{u, w})
     (accept : ProcessAcceptance p) (Invariant : p.State → Prop)
@@ -237,11 +287,23 @@ structure MeetsProcessProgress (p : ProcessSpec.{u, w})
         result outstanding)) ∨
     (∃ event, EventDeliverable outstanding event ∧
       ∃ after issued emitted, p.Step state event after issued emitted)
-  /-- Every step from an invariant-satisfying state progresses. -/
-  productive : ∀ (state after : p.State) (event : p.Event)
+  /--
+  Every step a run can actually take progresses.
+
+  Reachability and deliverability together are what make this an obligation
+  about the process rather than about its type signature. See the structure's
+  docstring.
+  -/
+  productive : ∀ (segmented : Segmented p.Observation) (state : p.State)
+      (outstanding : Bag p.Demand) (observations : Trace p.Observation)
+      (after : p.State) (event : p.Event)
       (issued : Bag p.Demand) (emitted : p.Segment),
-    Invariant state → p.Step state event after issued emitted →
-    StepProgresses accept measure state after event emitted
+    Reachable accept.terminalRemainder request segmented
+      (.running state outstanding observations) →
+    Invariant state →
+    EventDeliverable outstanding event →
+    p.Step state event after issued emitted →
+    StepProgresses accept measure state after event issued emitted
 
 namespace MeetsProcessProgress
 
@@ -278,33 +340,112 @@ theorem exists_transition (progress : MeetsProcessProgress p accept Invariant re
       exact ⟨_, .settle settlesCase consume stepped⟩
 
 /--
-A step that is not environment entropy and emits nothing demanded must decrease
-the measure.
+A step that is not environment entropy, settles nothing, and emits nothing
+demanded must decrease the measure.
 
 The contrapositive that makes `StepProgresses` bite, and the form a livelock
 argument uses: if the program's own activity comes back and nothing the
 specification asked for was produced, the state got strictly smaller, and by
 well-foundedness that cannot go on forever.
 
-Stated for an event that is neither entropy nor a settlement, so it covers
-faults and environment violations — which is the point of the change from
-`settles` to `externalEntropy`, kept as a hypothesis now that `StepProgresses`
-has both halves of §7's external/demand-result frontier.
+The `settlesNothing` hypothesis is named in the headline because a hover shows
+only the first sentence and an earlier version of that sentence omitted it. It
+covers faults and environment violations — which is the point of the change from
+`settles` to `externalEntropy` in the *first* disjunct. For the settling case see
+`reissuing_step_decreases`, which needs only the weaker hypothesis that the step
+reissued something.
 -/
 theorem silent_nonentropy_step_decreases
     (progress : MeetsProcessProgress p accept Invariant request)
-    {state after : p.State} {event : p.Event}
-    {issued : Bag p.Demand} {emitted : p.Segment}
+    {segmented : Segmented p.Observation} {state after : p.State}
+    {outstanding : Bag p.Demand} {observations : Trace p.Observation}
+    {event : p.Event} {issued : Bag p.Demand} {emitted : p.Segment}
+    (reached : Reachable accept.terminalRemainder request segmented
+      (.running state outstanding observations))
     (invariant : Invariant state)
     (transition : p.Step state event after issued emitted)
     (notEntropy : event.externalEntropy = none)
     (settlesNothing : event.settles = none)
     (silent : ¬ accept.SegmentIsDemanded emitted) :
     progress.measure.Decreases state after := by
-  rcases progress.productive state after event issued emitted invariant transition with
-    ⟨_, isEntropy⟩ | ⟨_, settles⟩ | demanded | decreases
+  rcases progress.productive segmented state outstanding observations after event issued
+    emitted reached invariant (eventDeliverable_of_settles_none settlesNothing)
+    transition with
+    ⟨_, isEntropy⟩ | ⟨_, settles, _⟩ | demanded | decreases
   · exact absurd (notEntropy ▸ isEntropy) (by simp)
   · exact absurd (settlesNothing ▸ settles) (by simp)
+  · exact absurd demanded silent
+  · exact decreases
+
+/--
+**And a transition for the event you were handed**, not merely for some event.
+
+`exists_transition` above uses `notStuck` alone, so `handlesEveryEvent` — the
+field documented as "law 5 made checkable" — was consumed by nothing. Local
+adversarial review found that and observed the fix is four lines: the same
+`settles` case split, over the successor `handlesEveryEvent` supplies.
+
+The difference matters to a driver. `exists_transition` says a reachable run can
+continue; this says it can continue *with the result that just arrived*, which
+is what `docs/FOUNDATION.md` law 5 is about — an admitted result being handled
+rather than some other transition being available instead.
+
+The non-terminality hypothesis is `handlesEveryEvent`'s own and cannot be
+dropped: at a terminal state `ProcessCorrect.terminalNoStep` forbids the step,
+and the obligation there is to terminate, which is `exists_transition`'s left
+branch.
+-/
+theorem transition_for_event (progress : MeetsProcessProgress p accept Invariant request)
+    {segmented : Segmented p.Observation} {state : p.State}
+    {outstanding : Bag p.Demand} {observations : Trace p.Observation} {event : p.Event}
+    (reached : Reachable accept.terminalRemainder request segmented
+      (.running state outstanding observations))
+    (notTerminal : ¬ (∃ result, p.Terminal request state result))
+    (deliverable : EventDeliverable outstanding event) :
+    ∃ after, ProcessRunTransition accept.terminalRemainder request
+      (.running state outstanding observations) after := by
+  obtain ⟨after, issued, emitted, stepped⟩ :=
+    progress.handlesEveryEvent segmented state outstanding observations event reached
+      notTerminal deliverable
+  match settlesCase : event.settles with
+  | none => exact ⟨_, .step settlesCase stepped⟩
+  | some demand =>
+    obtain ⟨remainder, consume⟩ :=
+      Bag.consume_iff_mem.mpr (deliverable demand settlesCase)
+    exact ⟨_, .settle settlesCase consume stepped⟩
+
+/--
+**A step that answers a demand and issues another does not progress for free.**
+
+The theorem that excludes a demand-reissuing spin, and the reason
+`StepProgresses`'s second disjunct carries `issued.card = 0`. Consuming one
+occurrence and putting another in its place leaves the outstanding bag the same
+size; if the step is not entropy and emits nothing demanded, the state rank is all
+that is left, and it must descend.
+
+Note what is *not* required: the reissued demand need not be the one that was
+answered. A cycle through two demands is excluded one step at a time by this
+theorem and not excluded as a cycle — see the module note.
+-/
+theorem reissuing_step_decreases
+    (progress : MeetsProcessProgress p accept Invariant request)
+    {segmented : Segmented p.Observation} {state after : p.State}
+    {outstanding : Bag p.Demand} {observations : Trace p.Observation}
+    {event : p.Event} {issued : Bag p.Demand} {emitted : p.Segment}
+    (reached : Reachable accept.terminalRemainder request segmented
+      (.running state outstanding observations))
+    (invariant : Invariant state)
+    (deliverable : EventDeliverable outstanding event)
+    (transition : p.Step state event after issued emitted)
+    (notEntropy : event.externalEntropy = none)
+    (reissues : issued.card ≠ 0)
+    (silent : ¬ accept.SegmentIsDemanded emitted) :
+    progress.measure.Decreases state after := by
+  rcases progress.productive segmented state outstanding observations after event issued
+    emitted reached invariant deliverable transition with
+    ⟨_, isEntropy⟩ | ⟨_, _, noneIssued⟩ | demanded | decreases
+  · exact absurd (notEntropy ▸ isEntropy) (by simp)
+  · exact absurd noneIssued reissues
   · exact absurd demanded silent
   · exact decreases
 
@@ -316,13 +457,17 @@ named corollary so a reviewer can check it directly.
 -/
 theorem silent_fault_decreases
     (progress : MeetsProcessProgress p accept Invariant request)
-    {state after : p.State} {fault : p.LogicalFault}
-    {issued : Bag p.Demand} {emitted : p.Segment}
+    {segmented : Segmented p.Observation} {state after : p.State}
+    {outstanding : Bag p.Demand} {observations : Trace p.Observation}
+    {fault : p.LogicalFault} {issued : Bag p.Demand} {emitted : p.Segment}
+    (reached : Reachable accept.terminalRemainder request segmented
+      (.running state outstanding observations))
     (invariant : Invariant state)
     (transition : p.Step state (.fault fault) after issued emitted)
     (silent : ¬ accept.SegmentIsDemanded emitted) :
     progress.measure.Decreases state after :=
-  progress.silent_nonentropy_step_decreases invariant transition (by simp) (by simp) silent
+  progress.silent_nonentropy_step_decreases reached invariant transition
+    (by simp) (by simp) silent
 
 /--
 There is no infinite silent descent.

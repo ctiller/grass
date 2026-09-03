@@ -2495,20 +2495,31 @@ relation, the network transition family, and every fixture. Needs a ruling.
 Related to §10.42 — both are places where `ProcessSpec`'s transition relation is
 missing an index it needs.
 
-### 10.46 `countdownRemainder` makes `countdown` stuck
+### 10.46 ~~`countdownRemainder` makes `countdown` stuck~~ — **withdrawn**
 
-`countdown.Initial` issues `replicate request tick`, and `countdownRemainder`
-permits at most two pending ticks. A run started with three reaches state 0
-holding three ticks, where it can neither terminate — the law refuses the
-partition — nor step, because a terminal state does not step. So
-`MeetsProcessProgress.notStuck` is unsatisfiable at that state.
+The claim was that `countdown.Initial` issues `replicate request tick`, that
+`countdownRemainder` permits at most two pending ticks, and that a run started
+with three therefore reaches state 0 holding three ticks where it can neither
+terminate nor step.
 
-This is a fact about the fixture's *specification law*, not about the process
-layer: the specification demands a bound the process cannot meet, and the right
-answer is that such a pair has no correctness proof. Recorded because
-`Tests/Process/M1Fixtures.lean` presents `countdownRemainder` as the interesting
-law and `Tests/Process/CountdownCorrectFixtures.lean` had to use
-`TerminalRemainderLaw.unconstrained` instead, which is worth a reader knowing.
+**It cannot reach that state.** A second review pass proved the run invariant:
+`countdown` consumes exactly one occurrence per settling step and decrements the
+state on the same step, `log` is never issued into the bag, and `.external
+.wake` moves neither — so `outstanding.card = state` along every reachable run,
+and at state 0 the bag is empty and the law grants the empty partition.
+
+`Tests/Process/CountdownCorrectFixtures.lean` now carries that invariant as
+`linked` and is built on `countdownRemainder` rather than
+`TerminalRemainderLaw.unconstrained`. Until it was, the corpus proved `countdown`
+correct under an acceptance *different from* the one all its linearity fixtures
+use, so the headline "`countdown` is correct" was scoped to a law that permitted
+everything — and `notStuck`'s terminal branch was discharged by `trivial` where
+it could have been discharging the real bound.
+
+Kept rather than deleted because the mistake has a shape worth remembering: an
+entry was filed against the *specification's* law on the strength of a reading
+of the process, with no run invariant proved and no counterexample built. The
+reading was plausible and the invariant that refutes it takes twenty lines.
 
 ### 10.47 `DeterministicProcess` is unusable for any process that terminates
 
@@ -2530,14 +2541,21 @@ a small change and a visible one.
 Found in the same pass, none of them unsound, all of them costs paid for no
 exported consequence:
 
-* `MeetsProcessProgress.handlesEveryEvent` — documented as "law 5 made
-  checkable", and no theorem anywhere derives anything from it. `exists_transition`
-  uses `notStuck` alone.
+* ~~`MeetsProcessProgress.handlesEveryEvent`~~ — **closed.** It is now spent by
+  `MeetsProcessProgress.transition_for_event`, which produces a run transition
+  for *the event that arrived* rather than for some event `notStuck` happened to
+  find. Four lines, reusing `exists_transition`'s `settles` case split.
 * `ProcessAcceptance.DemandsWellFormed` — its own docstring's example is "at most
   one outstanding write per handle", and "outstanding" is a property of the run's
   bag. It is applied in exactly two places, both to a *per-transition* `issued`
   bag, and nothing derives well-formedness of an outstanding bag from them — it
-  does not follow, since `outstanding` accumulates.
+  does not follow, since `outstanding` accumulates. Confirmed constructively: a
+  process satisfying both fields against `DemandsWellFormed := card ≤ 1` reaches a
+  run state whose bag has card 2, so the field's own motivating example is outside
+  its expressive range rather than merely unproved. Making it load-bearing needs a
+  closure law — `well-formed a → well-formed b → well-formed (a + b)`, plus
+  downward closure under `ConsumeExactlyOneMatching` — which is a change to
+  `ProcessAcceptance`, not a theorem about it.
 * `ProcessTopologyCore.spawnAuthority` — exists to refine `maySpawn` to
   instances, "which stops connection 3 from spawning a stream belonging to
   connection 5", and neither `Spawns.authorized` nor `WellFormed.ParentageValid`
@@ -2561,6 +2579,15 @@ it, because a standalone protocol supplies its own acceptance: one author on
 both sides of the implication. Needs a ruling on what constrains `Demanded` —
 the network's answer was to tie the analogous predicate to something the
 transition family already decides, and there may be no such thing here.
+
+Two additions from the second pass. **Every acceptance in this repository sets
+`Demanded := fun _ => False`** — `ProcessAcceptance.trivial`, `oneShotAcceptance`,
+`countdownAcceptance`, `spinAcceptance`, `uptoAcceptance` — so the third disjunct
+is not merely under-constrained, it has never been exercised in either direction
+by any fixture. And the degeneracy does *not* extend to the first disjunct:
+`ProcessEvent.externalEntropy` is structural rather than author-chosen, so the
+entropy escape recorded in §6 is about which events an author declares external,
+which is a weaker freedom than choosing the predicate outright.
 
 ### 10.50 A weave's result renaming is unconstrained and unconsumed
 
@@ -2621,3 +2648,62 @@ preservation on four structures, `slotAgrees`, `Restarts.authorized`,
 `Spawns.startsInitial`, `allocatesTheGeneration`, `Reroutes.arrives` — and each
 clause it fails is a field that is missing. Two have been found that way already
 (§10.43 and this one), before a line of the theorem was written.
+
+### 10.52 `ReachesSafePointObligation` is free in two directions and cannot be made otherwise here
+
+`Grass/Process/Termination.lean` states it over an author-supplied `Eventually`
+and an author-supplied `Premises`, so `Eventually := fun _ _ => True` or
+`Premises := fun _ _ => False` discharges it. Nothing in that module can
+constrain `Eventually` to be a liveness modality, because this layer has no
+fairness model — which is why it is a named obligation rather than a field.
+
+A third freedom was a defect and is fixed: `outstanding` was bound *outside*
+`Eventually`, so the obligation demanded a later state permitted while holding
+*every* bag, which is unsatisfiable for the module's own contract. It is now
+bound inside and existentially, which is weaker than the claim a reader wants —
+the bag the process is actually holding when it gets there lives in
+`Grass/Process/Run.lean`'s run state, not in `p.State`.
+
+Needs a ruling on whether the termination contract should be restated over run
+states, which would make the exact claim expressible and would move the module
+below `Run.lean` in the import order.
+
+### 10.53 `StepProgresses`'s demand disjunct does not exclude a two-demand cycle
+
+`Grass/Process/Progress.lean`'s second disjunct now requires a settling step to
+issue nothing, which excludes a one-demand spin —
+`Tests/Process/SpinFixtures.lean` is the process it excludes, and it had a full
+`ProcessCorrect` for one commit.
+
+A cycle through two demands evades it: `d`'s result issues `e`, `e`'s result
+issues `d`, each step answering something and each issuing something, the bag
+never growing and the state never moving. Excluding that needs a well-founded
+order on the outstanding bag, and the bag's cardinality cannot supply one because
+it is constant along the cycle.
+
+Nothing at this layer can build such an order: the demands are the
+specification's and their dependency structure is not declared. Carried with the
+entropy escape in §6 rather than treated as a defect to fix here.
+
+### 10.54 A note on how three of this milestone's defects were found
+
+All three of `ProcessCorrect`'s uninhabitability, the `StepProgresses`
+regression, and the `countdownRemainder` retraction were found the same way: by
+*building* the record for a small process, not by reading the definitions.
+
+* Reading found none of them. `ProcessCorrect` had been reviewed five times
+  before a reviewer tried to inhabit it for `countdown` and found that no
+  terminating process could.
+* The first repair of a defect found this way widened a definition until the
+  unreachable case passed, which admitted a genuine livelock. The second repair
+  narrowed the *quantifier* instead — `productive` moved to reachable, deliverable
+  steps, matching the two fields already there — and both cases came out right.
+* A negative-fixture corpus cannot notice that the record it is negative about is
+  empty, and a positive fixture built from one process cannot notice what that
+  process does not express. `countdown` exercises neither the request-dependent
+  terminal law nor the well-founded measure; `Tests/Process/PrefixFixtures.lean`
+  and `Tests/Process/M1CorrectFixtures.lean` are where those are checked.
+
+Recorded as a method note rather than a defect. The exit criterion it suggests
+for the remaining layers is that every named record have at least one *positive*
+witness before the layer is nominated.
