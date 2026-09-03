@@ -542,8 +542,8 @@ supplied by the profile owner, so a `MemoryProfile` value cannot be constructed 
 one missing.
 
 **That is weaker than it reads**, and an earlier version of this paragraph called it
-"the mechanical content of" §10's gate. What is enforced is that eleven propositions
-are *named*. Nothing relates a field to the profile, to its admitted operations, or
+"the mechanical content of" §10's gate. All the elaborator asks is that eleven
+propositions be *named*, which `RequiredProofPackage`'s own field list is. Nothing relates a field to the profile, to its admitted operations, or
 to any theorem in the tree, so a profile supplying `True` eleven times closes §10 and
 `Holds` is proved by `trivial`. `Tests/Op/FakeIsa.lean` does exactly that and says
 so — but that honesty is the fixture's, not the type's. This is the last gate between
