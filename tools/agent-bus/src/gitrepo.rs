@@ -600,7 +600,19 @@ pub fn remote_tag_matches(dir: &Path, remote: &str, name: &str, target: &str) ->
     let refspec = format!("refs/tags/{name}");
     let out = run(dir, &["ls-remote", "--tags", remote, &refspec])?;
     if !out.success {
-        return Ok(false);
+        // `ls-remote` exits 0 with empty stdout when the refspec simply
+        // matches nothing (that case is handled below, by `sha == None`) --
+        // a nonzero exit here means the remote itself couldn't be reached
+        // or queried at all, a materially different problem from "no such
+        // tag" that deserves its own loud error rather than collapsing into
+        // a plain `false` (round-7 adversarial review: the caller's own
+        // rejection message, "candidate tag ... is not fetchable from
+        // {remote}", pointed a caller at re-tagging when the real cause was
+        // connectivity).
+        return Err(AbError::Git(format!(
+            "git ls-remote {remote} {refspec} failed: {}",
+            out.stderr
+        )));
     }
     // Lightweight tags (the only kind this crate creates) list the target
     // commit's own sha directly, one "<sha>\t<ref>" line per match.
@@ -1610,6 +1622,23 @@ mod outer_tests {
         assert!(!remote_tag_matches(repo.path(), &origin_url, "v1", &second).unwrap());
         assert!(!remote_tag_matches(repo.path(), &origin_url, "no-such-tag", &head).unwrap());
         assert!(!remote_tag_matches(repo.path(), &origin_url, "local-only", &second).unwrap());
+    }
+
+    /// Round-7 adversarial review: a genuinely unreachable remote must be a
+    /// hard `Err`, distinct from an ordinary "no such tag" negative --
+    /// `ls-remote` itself only ever exits nonzero for a real connectivity/
+    /// access failure (an unmatched refspec pattern is a normal, zero-exit,
+    /// empty-stdout result, already covered by the "no-such-tag" case
+    /// above), so collapsing a nonzero exit into a plain `false` here would
+    /// misdirect a caller into thinking the tag itself is the problem.
+    #[test]
+    fn remote_tag_matches_reports_a_genuine_connectivity_failure_as_an_error() {
+        let repo = init_repo();
+        let head = rev_parse(repo.path(), "HEAD").unwrap();
+        let bogus_remote = repo.path().join("no-such-remote-at-all");
+        let err = remote_tag_matches(repo.path(), &bogus_remote.to_string_lossy(), "v1", &head)
+            .unwrap_err();
+        assert!(err.to_string().contains("ls-remote"), "{err}");
     }
 
     /// A merge commit's first-parent history must list the mainline

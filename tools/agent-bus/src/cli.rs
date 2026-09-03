@@ -294,10 +294,21 @@ pub struct AuditMainArgs {
     /// is included). Defaults to `refs/heads/main`.
     #[arg(long)]
     to: Option<String>,
-    /// Print the full findings array as JSON instead of one line per
-    /// finding (or `audit-main: clean`).
+    /// Print the findings as a JSON object (`{"findings": [...], ...
+    /// freshness envelope}`) instead of one line per finding (or
+    /// `audit-main: clean`).
     #[arg(long)]
     json: bool,
+    #[arg(long, default_value = "origin")]
+    remote: String,
+    /// Refuse a cached snapshot; always probe the remote first. A stale
+    /// local bus state can otherwise report a false compliance violation --
+    /// a commit whose `review.merged` receipt genuinely reached the remote,
+    /// but hasn't reached this checkout yet, reads as "missing" (round-7
+    /// adversarial review). Currency-sensitive callers should set this
+    /// (AGENT_COORDINATION_EVOLUTION.md section 2.4).
+    #[arg(long)]
+    sync: bool,
 }
 
 struct RepoPaths {
@@ -1027,19 +1038,40 @@ fn merge_ready(args: MergeReadyArgs) -> AbResult<()> {
 /// plain-or-JSON output -- around `audit_main::audit_main_findings`, which
 /// holds the actual correlation walk (and its own extensive test suite)
 /// mirroring `cli::merge_ready`'s identical relationship to `merge_ready::
-/// check_merge_ready`. Reads local bus/git state as-is: like `merge_ready`,
-/// this is a read-only diagnostic, not a publication, and the caller is
-/// expected to have already fetched both the bus and `refs/heads/main`
-/// themselves if a current-as-of-remote-probe answer matters -- nothing here
-/// performs a network round trip on its own.
+/// check_merge_ready`. `--sync` forces a fresh remote probe for the *bus*
+/// half (the same `sync::synced_snapshot`/`cached_snapshot` choice `status`
+/// offers), rather than defaulting to it, since a full audit walk is
+/// comparatively expensive -- but without it, a checkout whose local bus
+/// state lags the remote can report a false compliance violation (a
+/// genuinely-receipted commit reading as unreceipted, round-7 adversarial
+/// review), and `--json` output now always states which it got via the
+/// ordinary freshness envelope. `refs/heads/main` itself is still read as
+/// this checkout's own local ref either way -- like `merge_ready` used to
+/// before its own fix, this is deliberately not yet closed for the
+/// live-Git half, since (unlike a single candidate) auditing arbitrary
+/// history ranges has no single natural remote ref to fetch beyond `main`
+/// itself, which the caller is expected to have fetched themselves if a
+/// current-as-of-remote-probe answer for it specifically matters.
 fn audit_main(args: AuditMainArgs) -> AbResult<()> {
     let paths = resolve_paths()?;
-    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?;
+    let snapshot = if args.sync {
+        crate::sync::synced_snapshot(
+            &paths.repo,
+            &paths.common_dir,
+            &args.remote,
+            &paths.worktrees,
+        )?
+    } else {
+        crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?
+    };
     let findings =
         crate::audit_main::audit_main_findings(&paths.repo, &snapshot.state, args.to.as_deref())?;
 
     if args.json {
-        print_json(&serde_json::json!(findings));
+        print_json(&with_freshness(
+            serde_json::json!({ "findings": findings }),
+            freshness_envelope(&snapshot),
+        ));
     } else if findings.is_empty() {
         println!("audit-main: clean");
     } else {

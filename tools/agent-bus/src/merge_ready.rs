@@ -165,6 +165,34 @@ pub(crate) fn check_merge_ready(
             auth.previous_main
         )));
     }
+    // The candidate commit itself may not be in this checkout's object
+    // database at all -- unlike `main`, nothing above fetches it, and this
+    // checkout may not be the one that ran `prepare-merge`. Fetch its
+    // deterministic candidate tag from `remote` on demand (best-effort: the
+    // object may already be present locally with no fetch needed at all,
+    // e.g. this genuinely is the same checkout that ran `prepare-merge`,
+    // and a missing tag on `remote` isn't necessarily fatal by itself --
+    // what matters is whether the object resolves after trying). If it's
+    // still unresolvable afterward, fail with a message that actually says
+    // what to do, rather than the raw "bad object" a downstream git command
+    // would otherwise surface first (round-7 adversarial review).
+    let candidate_tag =
+        crate::merge_candidate::candidate_tag_name(reviewer, auth.candidate.as_str());
+    let _ = crate::gitrepo::fetch_refspecs(
+        repo,
+        remote,
+        &[format!(
+            "refs/tags/{candidate_tag}:refs/tags/{candidate_tag}"
+        )],
+    );
+    if crate::gitrepo::rev_parse_opt(repo, auth.candidate.as_str())?.is_none() {
+        return Err(invalid(format!(
+            "candidate {} is not fetchable in this checkout, even after trying to fetch \
+             refs/tags/{candidate_tag} from {remote} -- has `prepare-merge` been run and its \
+             candidate tag actually reached {remote}?",
+            auth.candidate
+        )));
+    }
     let parents = crate::gitrepo::parents_of(repo, auth.candidate.as_str())?;
     if parents
         != vec![
@@ -844,6 +872,73 @@ mod tests {
                 .contains("has advanced past authorized previous_main"),
             "{err}"
         );
+    }
+
+    /// Round-7 adversarial review: a checkout that never itself ran
+    /// `prepare-merge` -- so `auth.candidate` was never constructed there,
+    /// and doesn't exist in its object database at all -- must still be able
+    /// to run `merge-ready` successfully, by fetching the candidate's
+    /// deterministic tag from `remote` on demand, exactly like `coordinator
+    /// ::verify_review_merge_authorized` already does for the identical
+    /// checkout-independence reason.
+    #[test]
+    fn accepts_when_the_candidate_was_never_locally_constructed_by_this_checkout() {
+        let author = a("zoe");
+        let reviewer = a("aiden");
+        let (dir, _origin, remote, previous_main, feature_commit, candidate) =
+            git_fixture(&author, &reviewer);
+        let tag = crate::merge_candidate::candidate_tag_name(&reviewer, &candidate);
+        crate::gitrepo::tag_lightweight(dir.path(), &tag, &candidate).unwrap();
+        let push = crate::gitrepo::run(dir.path(), &["push", &remote, &format!("refs/tags/{tag}")])
+            .unwrap();
+        assert!(push.success, "{push:?}");
+        let (state, auth_id) = state_with_authorization(
+            &author,
+            &reviewer,
+            &previous_main,
+            &feature_commit,
+            &candidate,
+            &["feature.txt"],
+        );
+
+        // A second checkout that only ever fetches `main` -- never runs
+        // `prepare-merge`, never sees `feature_commit` or `candidate` at
+        // all. Deliberately *not* a `git clone` (which would pull in every
+        // reachable tag, including the one just pushed, defeating the
+        // point of this test): a real second agent-bus checkout only ever
+        // fetches the specific refspecs it actually needs.
+        let second_checkout = tempfile::tempdir().unwrap();
+        git(second_checkout.path(), &["init", "--quiet", "-b", "main"]);
+        git(
+            second_checkout.path(),
+            &["remote", "add", "origin", &remote],
+        );
+        // Can't fetch directly into `refs/heads/main` while it's the
+        // checked-out branch -- fetch into a scratch ref, then point `main`
+        // at it, same net effect.
+        git(
+            second_checkout.path(),
+            &[
+                "fetch",
+                "--quiet",
+                "origin",
+                "refs/heads/main:refs/agent-bus/tmp-main",
+            ],
+        );
+        git(
+            second_checkout.path(),
+            &["update-ref", "refs/heads/main", "refs/agent-bus/tmp-main"],
+        );
+        assert!(
+            crate::gitrepo::rev_parse_opt(second_checkout.path(), &candidate)
+                .unwrap()
+                .is_none(),
+            "test setup: candidate must genuinely be absent from the second checkout"
+        );
+
+        let got = check_merge_ready(second_checkout.path(), &remote, &state, &reviewer, &auth_id)
+            .expect("must fetch the candidate tag on demand and succeed");
+        assert_eq!(got.as_str(), candidate);
     }
 
     /// The exact scenario `check_merge_ready`'s own doc comment describes:

@@ -226,20 +226,21 @@ fn merge_ready(repo: &Path, agent: &str, authorization: &str) -> Value {
     ]))
 }
 
-/// `--json` always parses as a top-level JSON array (possibly empty) of
-/// findings -- unlike every other command here, `audit-main`'s plain-mode
-/// output is deliberately not one-object-per-line JSON at all (`audit-main:
-/// clean`, or one `Display`-formatted finding per line), so this helper
-/// (unlike `run_json`) always passes `--json` rather than trying to make
-/// `run_json`'s "stdout is exactly one JSON value" assumption cover both
-/// output modes.
+/// Returns just the `findings` array from `--json`'s output object (which
+/// also carries the ordinary freshness envelope, round-7 review) -- unlike
+/// every other command here, `audit-main`'s plain-mode output is
+/// deliberately not one-object-per-line JSON at all (`audit-main: clean`,
+/// or one `Display`-formatted finding per line), so this helper (unlike
+/// `run_json`) always passes `--json` rather than trying to make `run_
+/// json`'s "stdout is exactly one JSON value" assumption cover both output
+/// modes.
 fn audit_main_json(repo: &Path, to: Option<&str>) -> Value {
     let mut args = vec!["audit-main", "--json"];
     if let Some(t) = to {
         args.push("--to");
         args.push(t);
     }
-    run_json(bin().current_dir(repo).args(args))
+    run_json(bin().current_dir(repo).args(args))["findings"].clone()
 }
 
 /// Activates the merge engine as `coordinator` (a bootstrap coordinator),
@@ -2034,6 +2035,40 @@ fn merge_ready_rejects_a_changed_path_outside_reviewed_scope() {
 // candidate to `main` (AGENT_REVIEW.md section 7 step 10 is the reviewer's
 // own `git push`, outside this helper), so every test that wants a
 // "genuinely landed" commit to audit has to perform that push itself.
+
+/// Round-7 adversarial review: `audit-main` used to carry no freshness
+/// signal at all, unlike every other snapshot-backed command -- an
+/// autonomous caller had no way to tell a genuine compliance violation from
+/// this checkout's own local bus staleness. `--json`'s output must now
+/// state it, and `--sync` must actually force a fresh remote probe (not
+/// just a `Cached` one) for the bus half of the walk.
+#[test]
+fn audit_main_json_states_its_own_freshness() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+
+    let cached = run_json(
+        bin()
+            .current_dir(repo.path())
+            .args(["audit-main", "--json"]),
+    );
+    assert_eq!(cached["freshness"], "cached", "{cached}");
+    assert!(cached["findings"].is_array(), "{cached}");
+    assert!(cached["roster_epoch"].is_string(), "{cached}");
+    assert!(cached["snapshot_receipt"].is_object(), "{cached}");
+    assert!(cached["causal_frontier"].is_object(), "{cached}");
+
+    let synced = run_json(
+        bin()
+            .current_dir(repo.path())
+            .args(["audit-main", "--json", "--sync"]),
+    );
+    assert_eq!(
+        synced["freshness"], "current-as-of-remote-probe",
+        "{synced}"
+    );
+    assert!(synced["last_synced"].is_string(), "{synced}");
+}
 
 /// The fully valid path: authorize, advance `main` to the exact candidate,
 /// publish `review.merged`, and `audit-main` reports it clean.

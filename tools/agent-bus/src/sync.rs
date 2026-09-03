@@ -584,10 +584,22 @@ mod tests {
     /// fetch failure would be silently swallowed, and this host's *stale*
     /// local state would be reduced and reported as `Freshness::
     /// CurrentAsOfRemoteProbe` with a freshly-recorded `last_synced`, exactly
-    /// as if the probe had actually succeeded. Reproduced here: `host_b`
-    /// syncs once successfully, `origin` then advances further, and a second
-    /// sync attempt against an unreachable remote must hard-fail rather than
-    /// silently re-report the now-stale first snapshot as current.
+    /// as if the probe had actually succeeded.
+    ///
+    /// Round-7 test-attacking review found this test's own `bogus_remote`
+    /// (a nonexistent local path) actually failed at the *earlier*
+    /// `remote_refs_existing` (`ls-remote`) existence check, never reaching
+    /// either `fetch_refspecs_ok` call this test is meant to guard -- proven
+    /// by mutation: reverting either call site back to plain `fetch_
+    /// refspecs` (discarding `.success`, i.e. reinstating the exact
+    /// pre-round-6 bug) still passed this test. Rewritten to force a
+    /// *genuine* non-fast-forward rejection instead: the registry ref
+    /// genuinely exists on `remote` (so the existence check passes and the
+    /// first `fetch_refspecs_ok` call is actually reached), but `origin`
+    /// force-rewrites it to a completely unrelated commit first -- an
+    /// unexpected remote history rewrite, exactly what a non-force fetch
+    /// must reject (AGENT_COORDINATION_EVOLUTION.md section 1: "force
+    /// pushes... are prohibited").
     #[test]
     fn synced_snapshot_fails_closed_when_the_fetch_itself_is_rejected_rather_than_reporting_stale_state_as_current(
     ) {
@@ -637,33 +649,33 @@ mod tests {
         assert_eq!(first.state.agents.get(&coord1).unwrap().next_seq, 1);
         let first_last_synced = first.last_synced.clone().unwrap();
 
-        // `origin` genuinely advances further, unseen by `host_b` yet.
-        crate::outbox::submit(
+        // `origin`'s registry ref is force-rewritten to a completely
+        // unrelated commit -- still genuinely present on `remote` (the
+        // existence check must pass), but not a descendant of what `host_b`
+        // already fetched, so a plain, non-force fetch must reject it.
+        git(host_a.path(), &["checkout", "-q", "--orphan", "unrelated"]);
+        git(host_a.path(), &["rm", "-rf", "-q", "."]);
+        std::fs::write(host_a.path().join("unrelated.txt"), "x").unwrap();
+        git(host_a.path(), &["add", "unrelated.txt"]);
+        git(host_a.path(), &["commit", "-q", "-m", "unrelated root"]);
+        let unrelated = crate::gitrepo::rev_parse(host_a.path(), "HEAD").unwrap();
+        git(
             host_a.path(),
-            "client-1",
-            &status_candidate(&coord1, "advanced"),
-        )
-        .unwrap();
-        crate::coordinator::drain_and_publish(
-            host_a.path(),
-            host_a.path(),
-            &coord1,
-            &short("host1"),
-            0,
-            &host_a.path().join("_wt_advance"),
-            &remote,
-        )
-        .unwrap();
+            &[
+                "push",
+                "--force",
+                &remote,
+                &format!("{unrelated}:{}", crate::registry::REGISTRY_REF),
+            ],
+        );
 
-        // A second sync attempt against a remote that cannot actually be
-        // fetched from (not a genuine git repository at all) must hard-fail,
-        // not silently re-report `host_b`'s now-stale first snapshot as
-        // `CurrentAsOfRemoteProbe`.
-        let bogus_remote = host_b.path().join("no-such-remote");
+        // A second sync attempt must hard-fail on the genuinely rejected
+        // fetch, not silently re-report `host_b`'s now-stale first snapshot
+        // as `CurrentAsOfRemoteProbe`.
         let err = synced_snapshot(
             host_b.path(),
             host_b.path(),
-            &bogus_remote.to_string_lossy(),
+            &remote,
             &host_b.path().join("_wt2"),
         )
         .unwrap_err();
