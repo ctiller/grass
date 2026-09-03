@@ -972,3 +972,75 @@ fn golden_succeed_output() {
         ".stream_published.*" => insta::dynamic_redaction(redact_noise),
     });
 }
+
+#[test]
+fn register_rejects_a_syntactically_invalid_role() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+
+    bin()
+        .current_dir(repo.path())
+        .args([
+            "register",
+            "--agent",
+            "alice",
+            "--display-name",
+            "Alice",
+            "--role",
+            "wizard",
+            "--purpose",
+            "x",
+            "--host",
+            "host1",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid role"));
+}
+
+/// `register` before any `genesis` has ever run must fail with a clear,
+/// actionable message, not a confusing lower-level error (e.g. "no
+/// registry root" surfacing as a raw git failure).
+#[test]
+fn register_before_genesis_fails_cleanly() {
+    let origin = init_bare_origin();
+    let repo = init_repo(origin.path());
+    bin()
+        .current_dir(repo.path())
+        .args([
+            "register",
+            "--agent",
+            "alice",
+            "--display-name",
+            "Alice",
+            "--role",
+            "implementor",
+            "--purpose",
+            "x",
+            "--host",
+            "host1",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("run `genesis` first"));
+}
+
+#[test]
+fn succeed_before_genesis_fails_cleanly() {
+    let origin = init_bare_origin();
+    let repo = init_repo(origin.path());
+    bin()
+        .current_dir(repo.path())
+        .args([
+            "succeed",
+            "--proposer",
+            "alice",
+            "--target",
+            "bob",
+            "--host",
+            "host1",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("run `genesis` first"));
+}
