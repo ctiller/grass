@@ -36,6 +36,18 @@ corrected for advertising a stronger reading:
   lines may be counted as a construction — a false negative and a false positive
   respectively. The `|`-with-no-`=>` refinement is not cosmetic: without it, a
   constructor built on the value side of an arm was reported as unbuilt.
+- **A constructor named in a theorem's own statement counts as built.** `theorem t
+  (h : a.kind = .fence) : …` reads exactly like a construction, and it is one — the
+  term `.fence` is built, to be compared against. What the tool cannot tell is
+  whether anything *reachable* produces it. That is the shape it was written to
+  catch, so this is the blind spot that matters most: review found
+  `MemoryEvent.EventKind.fence` unconstructible by any producer, with its only
+  occurrence inside a theorem about it, and this tool silent. Reaching further needs
+  elaboration, not a regex.
+- It cannot see a constructor of an inductive whose constructors are written flush
+  left (`inductive T where` then `| a` at column zero, which is legal). That shape
+  does not occur in `Grass/` today; it is one reformat away, and the scanner treats
+  the `|` line as the end of the declaration.
 
 So a clean run means every constructor's name appears somewhere that looks like a
 construction. It is one cheap net over a defect this layer has hit three times in one
@@ -64,25 +76,36 @@ BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
 LINE = re.compile(r"--.*?$", re.MULTILINE)
 STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
 
-# Constructors carried without a builder. Every entry says why.
+# Constructors carried without a builder, as `Inductive.constructor` pairs. Every
+# entry says why.
+#
+# **Pairs, not bare names.** The first version was a set of bare constructor names, so
+# an entry exempted *any* constructor of that name on *any* inductive — a second
+# namespace-blindness, distinct from the one the scan has and worse, because it grows
+# silently as the tree does. Review demonstrated a fresh unbuilt constructor going
+# unreported because an unrelated type had a constructor of the same name, and found
+# eight of the twenty-one entries inert.
 ALLOWED = {
     # Vocabulary an ISA or profile supplies, which this tree declares and does not
     # itself instantiate. A memory model that only named the address widths it uses
     # would be a memory model for one target.
-    "symbolic",
-    "profileSpecific",
+    "Address.symbolic",
+    "AddressRepr.symbolic",
+    "MemoryOrder.profileSpecific",
+    "MemoryScope.profileSpecific",
+    "FaultVisibility.profileSpecific",
     # Portable ordering and scope names section 7.1 fixes. A profile picks the ones
     # its target has; the model owes all of them.
-    "acquire",
-    "release",
-    "sequentiallyConsistent",
-    "process",
-    "device",
-    "system",
-    "nonAtomic",
+    "MemoryOrder.acquire",
+    "MemoryOrder.release",
+    "MemoryOrder.sequentiallyConsistent",
+    "MemoryScope.process",
+    "MemoryScope.device",
+    "MemoryScope.system",
+    "Atomicity.nonAtomic",
     # Terminal and lifecycle vocabulary whose consumers are later milestones.
-    "notRestartable",
-    "restartable",
+    "Restartability.notRestartable",
+    "Restartability.restartable",
     # --- Declared ahead of the milestone that builds them. Being listed here is not
     # --- "this is fine": it is the record that someone read the plan and decided,
     # --- and the reason differs per entry.
@@ -90,21 +113,27 @@ ALLOWED = {
     # `docs/MEMORY_MODEL.md` section 7.1 makes control events part of the event
     # vocabulary; nothing in this layer mints one, because control flow is the ISA
     # owner's and the causal graph is M8's.
-    "control",
+    "EventKind.control",
+    # §7.1 requires a fence event kind and nothing can mint one: `kindOf` yields only
+    # `read`, `write` and `readModifyWrite`, and `AccessIntent` has no fence form —
+    # an intent that neither reads nor writes is refused by `WellFormedIn.notInert`.
+    # So §7.4's "release establishes the profile's causal edge" has no event to carry
+    # it. Recorded in `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2.
+    "EventKind.fence",
     # `docs/OBLIGATIONS.md` section 3 requires every obligation at a terminal edge to
     # receive a disposition. M5 owns terminal accounting and does not exist, so these
     # two are named and unbuilt; `Spikes/1_Hello_World` needs both.
-    "transferred",
-    "teardownAdopted",
+    "Disposition.transferred",
+    "Disposition.teardownAdopted",
     # The resource layer is built ahead of its consumers, which arrive at M7 and M9.
     # `Tools/ConsultedAudit.py` records the same thing about its fields.
-    "affineTransfer",
-    "sharedOnce",
-    "phaseExclusive",
-    "scopedRelease",
-    "reject",
-    "backpressure",
-    "fail",
+    "ResourceLifecyclePolicy.affineTransfer",
+    "ResourceLifecyclePolicy.sharedOnce",
+    "ResourceLifecyclePolicy.phaseExclusive",
+    "ResourceLifecyclePolicy.scopedRelease",
+    "ResourceExhaustionPolicy.reject",
+    "ResourceExhaustionPolicy.backpressure",
+    "ResourceExhaustionPolicy.fail",
 }
 
 
@@ -138,12 +167,15 @@ def constructors_in(text: str) -> list[tuple[str, str, int]]:
             continue
         if current is None:
             continue
-        if stripped.startswith("deriving") or (stripped and not line.startswith(" ")):
-            current = None
-            continue
         found = CONSTRUCTOR.match(line)
         if found:
             out.append((current, found.group(1), number))
+            continue
+        # A constructor line ends nothing. Testing for the end *first* meant an
+        # inductive whose constructors are flush left — legal Lean — had every one of
+        # them skipped and the tool printed a clean run.
+        if stripped.startswith("deriving") or (stripped and not line.startswith(" ")):
+            current = None
     return out
 
 
@@ -181,7 +213,7 @@ def analyse(raw: dict[str, str], builders: dict[str, str] | None = None) -> list
     for name, text in raw.items():
         declaring = scannable(text)
         for inductive, constructor, line in constructors_in(text):
-            if constructor in ALLOWED:
+            if f"{inductive.split('.')[-1]}.{constructor}" in ALLOWED:
                 continue
             found = False
             for other, body in corpus.items():
@@ -225,6 +257,16 @@ def self_test() -> int:
          True),
         ("string literal mentioning it",
          {"a.lean": decl, "b.lean": 'def f := "Probe.quarry"\n'}, True),
+        # Flush-left constructors are a declaration the scanner must still see.
+        ("flush-left constructors",
+         {"a.lean": "inductive Probe where\n| quarry\n| decoy\n"}, True),
+        # Documented blind spot, asserted: a constructor named in a theorem's own
+        # statement reads as a construction, which is how `EventKind.fence` stayed
+        # unreported while nothing could mint one.
+        ("named only in a theorem about it",
+         {"a.lean": decl,
+          "b.lean": "theorem t (p : Probe) (h : p = Probe.quarry) : True := trivial\n"},
+         False),
     ]
     failures = 0
     for label, sources, should_report in cases:
@@ -240,6 +282,17 @@ def self_test() -> int:
     if any("Probe.quarry" in line for line in analyse(builder_only, builders)):
         print("  SELF-TEST FAILED [builder corpus]: expected not reported")
         failures += 1
+
+    # An allowlist entry must not exempt another inductive's constructor of the same
+    # name. This was the first version's behaviour and it grew silently.
+    global ALLOWED
+    saved = ALLOWED
+    ALLOWED = {"Decoy.quarry"}
+    if not any("Probe.quarry" in line for line in analyse({"a.lean": decl})):
+        print("  SELF-TEST FAILED [allowlist keying]: an entry for another inductive "
+              "exempted this one")
+        failures += 1
+    ALLOWED = saved
 
     # Documented blind spot: namespace-blind, so another inductive's constructor of
     # the same name satisfies this one. Asserted so it cannot become silent coverage.

@@ -109,11 +109,19 @@ deriving DecidableEq, Repr
 Evidence that its holder may act under `protocol`.
 
 `docs/OBLIGATIONS.md` §2 permits the ledger to change "only through the owning
-protocol theorem". A ledger delta that merely *named* a protocol satisfied nothing
-— comparing `ObligationProtocolId` values is comparing strings, and any caller
-could write down any name. `ProtocolAuthority` is indexed by the protocol instead: the type of an authority
-for one protocol differs from the type of an authority for another, so the
-elaborator rejects presenting one where the other is required.
+protocol theorem". A ledger delta that merely *named* a protocol satisfied nothing —
+comparing `ObligationProtocolId` values is comparing strings, and any caller could
+write down any name. Indexing by the protocol stops one authority being *carried* to
+another protocol: the type of an authority for one differs from the type for another,
+and the elaborator rejects the substitution.
+
+**Indexing alone stops nothing, and an earlier version of this docstring implied it
+did.** The structure had a public constructor, so `⟨⟨"attacker.profile"⟩⟩` inhabited
+it at every index — the criticism levelled at the nominal design applied verbatim to
+its replacement, and the elaborator only stopped a caller *reusing* an existing value,
+which no caller needs to do. Review demonstrated it in three lines. `mk` is private
+now and `mintedBy` below is the one door, which is not a capability but is auditable:
+there is a single place to look, and it records who minted.
 
 That is the type-level half. The state-level half is in `LedgerDelta.Applicable`,
 which checks that the protocol a delta claims authority under is the protocol the
@@ -121,15 +129,33 @@ live obligation actually has. Neither half suffices alone: typing stops authorit
 being carried across protocols, and applicability stops it being claimed over an
 obligation it does not govern.
 
-What this does **not** establish is that the holder legitimately obtained the
-authority. `issuer` records which profile minted it, and a profile that hands out
-authority it should not is a profile defect; nothing in this module can detect
-that. This is an open obligation for the profile-closure work of M10.
+What this still does **not** establish is that the holder legitimately obtained the
+authority. `mintedBy` is callable by anyone who can name a profile, and no rule says
+which profile may mint for which protocol; `issuer` records the claim so a §10
+package has something to check. This is an open obligation for M10's profile closure,
+and it is a smaller one than it was, because there is now exactly one place authority
+enters.
 -/
 structure ProtocolAuthority (protocol : ObligationProtocolId) where
+  private mk ::
   /-- The profile that minted this authority. -/
   issuer : Name
 deriving DecidableEq, Repr
+
+namespace ProtocolAuthority
+
+/-- Mint authority for `protocol`, recording which profile did so.
+
+The one door. Not a capability check — nothing here can perform one — but a single
+auditable site, where before there were as many as there were callers of the
+anonymous constructor. -/
+def mintedBy (protocol : ObligationProtocolId) (issuer : Name) :
+    ProtocolAuthority protocol := ⟨issuer⟩
+
+@[simp] theorem issuer_mintedBy (protocol : ObligationProtocolId) (issuer : Name) :
+    (mintedBy protocol issuer).issuer = issuer := rfl
+
+end ProtocolAuthority
 
 /--
 An obligation: a linear ghost resource with an owner and a governing protocol.

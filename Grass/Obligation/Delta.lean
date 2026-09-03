@@ -21,6 +21,17 @@ The M5 ledger law is stated over these projections: no identity is consumed
 twice, no identity is produced that was already live, and no live identity
 vanishes without appearing in some `consumes`. This module supplies the
 vocabulary and the projections, not those theorems.
+
+**The second of those was false of deltas `Applicable` accepted**, and review found
+it. `split`'s clause was `∀ o ∈ into, o.id ∉ live ∨ o.id = source` and `join`'s was
+`into.id ∉ live ∨ into.id ∈ sources`, so an output could reuse an input's identity —
+and a one-element split onto the source's own id, with a *different* `kind`, was
+legal: one duty in, one duty out, same identity, relabelled, with the terminal
+disposition theorem then reporting against the wrong duty. `Applicable` pinned the
+output's protocol and owner and not its kind.
+
+Outputs must now be fresh. §3 does not ask for identity reuse, identities come from a
+supply that never reissues, and the law above is a law again.
 -/
 
 namespace Grass.Obligation
@@ -254,14 +265,14 @@ def Applicable (live : List ObligationId)
   | .split claimed _ source into =>
       source ∈ live ∧ protocolOf source = some claimed ∧
       ownerOf source = some actor ∧
-      (∀ o ∈ into, o.id ∉ live ∨ o.id = source) ∧
+      (∀ o ∈ into, o.id ∉ live) ∧
       (∀ o ∈ into, o.protocol = claimed) ∧
       (∀ o ∈ into, o.owner = actor)
   | .join claimed _ sources into =>
       (∀ id ∈ sources, id ∈ live) ∧
       (∀ id ∈ sources, protocolOf id = some claimed) ∧
       (∀ id ∈ sources, ownerOf id = some actor) ∧
-      (into.id ∉ live ∨ into.id ∈ sources) ∧
+      into.id ∉ live ∧
       into.protocol = claimed ∧ into.owner = actor
   | .transfer claimed _ id _ =>
       id ∈ live ∧ protocolOf id = some claimed ∧ ownerOf id = some actor

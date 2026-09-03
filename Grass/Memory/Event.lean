@@ -301,14 +301,20 @@ theorem not_conflicts_of_different_space {sharesBytes : AllocId → AllocId → 
     ¬ Conflicts sharesBytes compatible a b :=
   fun hc => h hc.2.2.1
 
-/-- A fence conflicts with nothing, because it touches no bytes. -/
-theorem not_conflicts_fence_left {sharesBytes : AllocId → AllocId → Prop}
+/-- **An event that touches no bytes conflicts with nothing.**
+
+Stated over `touchesMemory` and not over `EventKind.fence`, which is the correction.
+It was `(h : a.kind = .fence)`, and nothing in the model can mint an event of that
+kind: `kindOf` yields only `read`, `write` and `readModifyWrite`, and `ofOutcome` is
+the only producer of a `ValidMemoryEvent`. So the theorem held of a term no state
+could reach — the shape `AuthorityState.atomicShared` and its theorem were deleted
+for, standing in a file no review round had read until the seventh. Over
+`touchesMemory` it is a real statement about a real hypothesis, and it is what the
+fence case would have used had there been one. -/
+theorem not_conflicts_of_untouched {sharesBytes : AllocId → AllocId → Prop}
     {compatible : MemoryEvent → MemoryEvent → Prop}
-    {a b : MemoryEvent} (h : a.kind = .fence) :
-    ¬ Conflicts sharesBytes compatible a b := by
-  rintro ⟨ht, _⟩
-  rw [h] at ht
-  simp [EventKind.touchesMemory] at ht
+    {a b : MemoryEvent} (h : a.kind.touchesMemory ≠ true) :
+    ¬ Conflicts sharesBytes compatible a b := fun hc => h hc.1
 
 end MemoryEvent
 

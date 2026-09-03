@@ -240,14 +240,16 @@ M10 obligation. -/
 def bufferProtocol : ObligationProtocolId := ⟨⟨"fake.buffer"⟩⟩
 
 /-- Authority to act under `bufferProtocol`. -/
-def bufferAuthority : ProtocolAuthority bufferProtocol := ⟨⟨"fake.isa"⟩⟩
+def bufferAuthority : ProtocolAuthority bufferProtocol :=
+  .mintedBy bufferProtocol ⟨"fake.isa"⟩
 
 /-- A different protocol, and authority under it. Used to show that authority for
 one protocol does not authorize a duty governed by another. -/
 def otherProtocol : ObligationProtocolId := ⟨⟨"fake.other"⟩⟩
 
 /-- Authority to act under `otherProtocol`, which governs nothing here. -/
-def otherAuthority : ProtocolAuthority otherProtocol := ⟨⟨"fake.isa"⟩⟩
+def otherAuthority : ProtocolAuthority otherProtocol :=
+  .mintedBy otherProtocol ⟨"fake.isa"⟩
 
 /-- Two duties sharing one identity, distinguishable by kind. A single effect
 creating both is the collision `LedgerEffectApplicable` must catch. -/
@@ -1340,6 +1342,23 @@ theorem the_honest_permission_commits :
   intro s hs
   cases hs
   exact ⟨by decide, by decide⟩
+
+/-! ## A split may not relabel a live duty
+
+`LedgerDelta.Applicable`'s split clause pinned each output's protocol and owner and
+not its `kind`, and allowed an output to reuse the source's identity. So a
+one-element split onto the source's own id, with a different kind, was legal: one duty
+in, one duty out, same identity, relabelled — and `docs/OBLIGATIONS.md` §3's terminal
+disposition theorem would then report against the wrong duty. It also made this
+module's own statement of the M5 law ("no identity is produced that was already live")
+false of deltas the checker accepted. Outputs must be fresh now. -/
+
+/-- **A split onto the source's own identity is refused.** -/
+theorem a_relabelling_split_is_refused :
+    ¬ Grass.Op.LedgerEffectApplicable state₀.obligations thread₀
+      [.split bufferProtocol bufferAuthority releaseObligationId
+        [{ id := releaseObligationId, kind := .closeHandle
+           protocol := bufferProtocol, owner := thread₀ }]] := by decide
 
 /-! ## A provenance that lies about its root's extent
 
