@@ -375,6 +375,18 @@ theorem get?_drop (v : Vec α) (n i : Nat) : (v.drop n).get? i = v.get? (n + i) 
 /-- Apply `f` to every element, preserving order: `Vec.get?_map`. -/
 def map (f : α → β) (v : Vec α) : Vec β := ⟨v.toList.map f⟩
 
+/--
+Apply `f` to every element together with its index, preserving order:
+`Vec.get?_mapIdx`.
+
+Demanded by the authored spike surface rather than by this plan:
+`Spikes/5_Spinning_Cube/Macros.lean` writes `arguments.mapIdx fun index argument
+=> ...` to pair call arguments with their Win64 argument locations, which is the
+operation's characteristic use — an index-dependent map where the index is a
+position in a calling convention.
+-/
+def mapIdx (f : Nat → α → β) (v : Vec α) : Vec β := ⟨v.toList.mapIdx f⟩
+
 /-- Left fold, in index order. -/
 def foldl (f : β → α → β) (init : β) (v : Vec α) : β := v.toList.foldl f init
 
@@ -395,6 +407,21 @@ def zipWith (f : α → β → γ) (v : Vec α) (w : Vec β) : Vec γ :=
   simp [get?, map]
 
 @[simp] theorem map_empty (f : α → β) : (empty : Vec α).map f = empty := rfl
+
+@[simp] theorem length_mapIdx (f : Nat → α → β) (v : Vec α) :
+    (v.mapIdx f).length = v.length := by
+  simp [length, mapIdx]
+
+/-- `mapIdx` preserves position, and the index it passes is that position. -/
+@[simp] theorem get?_mapIdx (f : Nat → α → β) (v : Vec α) (i : Nat) :
+    (v.mapIdx f).get? i = (v.get? i).map (f i) := by
+  simp [get?, mapIdx]
+
+/-- `map` is the index-ignoring case of `mapIdx`. -/
+theorem mapIdx_const (f : α → β) (v : Vec α) : (v.mapIdx fun _ a => f a) = v.map f := by
+  apply ext_of_get?
+  intro i
+  simp
 
 /-- The composition half of `docs/STDLIB.md` §5's fusion laws. -/
 theorem map_map (g : β → γ) (f : α → β) (v : Vec α) :
