@@ -2241,9 +2241,15 @@ and a reader needs to know which of them are open.
 | `Trace/Independence.lean` | scope-disjointness independence; the diamond named, not assumed |
 | `Trace/Linearization.lean` | the trace only grows; two independent steps never both emit |
 | `Sequential/Adapter.lean` | §4's elaboration, with `Pending` derived from occurrences |
+| `Sequential/Standard.lean` | §4's realizer registry, and that selection is forced |
 | `Function/Serial.lean` | §3's serial contract, with the collapse carrying its own frontier argument |
-| `Network/Progress.lean` | §7's progress theorem, as the cycle law a rank forbids |
+| `Network/Progress.lean` | §7's progress theorem, as a no-infinite-silent-run law |
 | `Network/Initial.lean` | §3's `ExactInitialNetwork`, and `initial_is_wellformed` |
+
+`Grass/Process/Network/Transition.lean` was reworked four times over the same
+period and is where most of the defects were: the scope discipline it exports is
+consumed by three of the modules above, and every one of them found something
+wrong with it.
 
 Each has a fixture file, and each fixture found at least one defect in the
 module it was written against. That is the pattern worth keeping: nothing here
@@ -2251,12 +2257,11 @@ was found by reading.
 
 ### Still owed for M4 exit
 
-* **`flatten_sequential_roundtrip`** — blocked. `ProcessRealization.flatten`
-  produces a `ProcessSpec` whose `Step` consumes an event per transition, and a
-  network's internal steps correspond to no external event. Either the
-  flattened spec's `ExternalEvent` gains a scheduling event or flattening is a
-  different relation; §7 does not say which. Needs a ruling before it can be
-  built.
+* **`flatten_sequential_roundtrip`** — blocked on §10.42, which is the same
+  gap stated properly: a `ProcessSpec` cannot take a silent step, and a
+  network's internal transitions are silent. Needs a ruling before it can be
+  built, and the same ruling unblocks the serial export and repairs the
+  waiting-versus-spinning distinction both progress modules rely on.
 * **`serialize_refines_flatten`** — downstream of the above.
 * **The proof-economics acceptance rule** — not started.
 * **`DirectProgramRealizes` transport** — §4 asks the adapter for it; the
@@ -2264,11 +2269,17 @@ was found by reading.
 
 ### Open findings by weight
 
+§10.42 (no silent step) is the heaviest and blocks three deliverables. After it:
 §10.33's second half (an ending does not dispose of the ended instance's
 outstanding bag), §10.35 (no channel step touches either endpoint's slot), and
-§10.27 (one global observation trace makes §7's congruence trivial) are the
-three that a ruling would most change. The rest are recorded and none blocks
-building.
+§10.27 (one global observation trace makes §7's congruence trivial). The rest
+are recorded and none blocks building.
+
+Nine ledger entries — §10.20 through §10.42 — were opened by writing fixtures
+rather than by reading, and four defects in `Transition.lean` were found by
+consumers of its scope discipline rather than by its own tests. That is the
+pattern this layer should keep: a module's own fixtures check what its author
+already believed.
 
 ### 10.37 Only a terminated child can free its slot
 
@@ -2341,3 +2352,41 @@ introduces the registry to prevent.
 `StandardRealizerRegistry.keysDistinct` is added here and is not in §4's
 declaration. Needs ratification, or an argument that key uniqueness is meant to
 be enforced by whatever produces the keys.
+
+### 10.42 A `ProcessSpec` cannot take a silent step, and three things need one
+
+`ProcessSpec.Step : State → ProcessEvent vocabulary → State → Bag Demand →
+ObservationSegment → Prop` consumes an event on every transition, and
+`ProcessEvent` has five constructors — external entropy, a demand result, an
+interruption, a fault, an environment violation. Every one of them is something
+the *outside* did. There is no constructor for a process computing.
+
+Three things want one, and all three are stuck on it.
+
+**Flattening.** `docs/PROCESS.md` §7: "The flattened process's private state is
+`LogicalProcessNetwork r.plan`; one logical step is one exact
+`NetworkTransition`." A network's internal steps — a send between two children,
+a spawn, a join — correspond to no external event, so the flattened
+`ProcessSpec.Step` has no event to consume for them. This is why
+`flatten_sequential_roundtrip` is not built: §12 records it as needing a ruling
+and this is the ruling it needs.
+
+**Serial export.** §3: "A flattened process may also export a serial callable
+contract when its serialization theorem proves a terminating, frontier-free
+invocation for the selected request." `Grass/Process/Function/Serial.lean`'s
+`SerialFunctionSource.decide` takes a machine state and no event, precisely
+because a serial function computes. A `ProcessSpec` that computes has no
+transition to offer it.
+
+**Progress.** `Grass/Process/Progress.lean` and
+`Grass/Process/Network/Progress.lean` both separate a process *waiting* from a
+process *spinning* using `ProcessEvent.externalEntropy`. A computing process has
+only one way to express itself today — `.external` over a `Unit` external event
+— and it then looks exactly like a process waiting on the environment. Every
+progress argument built on that predicate is defeated by the workaround the
+absence forces.
+
+The fix is a sixth `ProcessEvent` constructor, or a separate silent-step
+relation beside `Step`. Which is a question about `ProcessVocabulary`, which is
+mine, and about `SEMANTICS.md`'s execution model, which is not. Needs a ruling.
+This is the largest open item on this layer, ahead of §10.33.
