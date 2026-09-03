@@ -111,7 +111,34 @@ def zeros : ByteSeq := [0, 0, 0, 0]
 the point — the block holds for any return address. -/
 def returnAddress : ByteSeq := List.replicate 8 0x7F
 
-/-- Everything between the store and the reload. -/
+/-- The API agent's write to the slot it was lent.
+
+**The block was wrong without this, and the way it was wrong is worth recording.**
+`betweenStoreAndReload` held the import read and the return-address write and
+nothing else, so the block proved `mov eax, transferred` reads **zero** — the value
+`mov transferred, 0` left. In `Spikes/1_Hello_World/Program.lean` the reload reads
+the byte count `WriteFile` wrote, and the loop's correctness turns on it: it is
+tested for zero at `exit_no_progress`, compared against `r14d` at
+`provider_violation`, and used to advance the cursor. So the one instruction whose
+result matters was modelled as observing a value that means "no progress", and the
+exit criterion "a straight-line Spike 1 block discharges" was met about a block that
+is not Spike 1's. Review found it.
+
+The agent's write is a *different context* — `ContextKind.externalAgent` — and that
+is exactly why it appears here and not in a `Grass.Op.step` fixture:
+`ConflictsWithHistory` refuses every cross-context conflict pending M8's
+happens-before, which §4.2 records as making M8 a prerequisite for the first
+acceptance program rather than the fourth. `runBlock` is the `applyAccess`-level
+executor and asks no such question, so this block can say what the program does while
+the transition cannot yet admit it. -/
+def agentWrite : AccessDescriptor :=
+  { access transferredProvenance ⟨32, 4⟩ 0x1020 .write .readWrite 4 false true with
+    context := apiAgent }
+
+/-- The thirteen bytes `WriteFile` reports having written. -/
+def transferredCount : ByteSeq := [13, 0, 0, 0]
+
+/-- The `call`'s own two accesses, in order. -/
 def betweenStoreAndReload : List (AccessDescriptor × ByteSeq) :=
   [(importRead, []), (returnAddressWrite, returnAddress)]
 
@@ -121,18 +148,27 @@ The state the reload runs against.
 Written with a fixed `indeterminate` because the final state does not depend on
 one: `Grass.Memory.applyAccess_state_indep` says what an indeterminate read would
 have observed stays in the observation and never reaches memory.
-`stateAtReload_eq` is that fact for this block.
+`stateAtCall_eq` is that fact for this block.
 -/
-def stateAtReload : MemoryState :=
+def stateAtCall : MemoryState :=
   (runBlock (applyAccess state₀ transferredWrite zeros (fun _ => 0)).2 (fun _ => 0)
     betweenStoreAndReload).2
 
 /-- Any choice of `indeterminate` leaves the same state. -/
-theorem stateAtReload_eq (indeterminate : Nat → Byte) :
+theorem stateAtCall_eq (indeterminate : Nat → Byte) :
     (runBlock (applyAccess state₀ transferredWrite zeros indeterminate).2 indeterminate
-      betweenStoreAndReload).2 = stateAtReload := by
-  rw [stateAtReload, runBlock_state_indep indeterminate (fun _ => 0),
+      betweenStoreAndReload).2 = stateAtCall := by
+  rw [stateAtCall, runBlock_state_indep indeterminate (fun _ => 0),
     applyAccess_state_indep state₀ transferredWrite zeros indeterminate (fun _ => 0)]
+
+/-- The state the reload runs against: after the agent has written the count.
+
+The agent's write is applied separately rather than folded into the block above,
+because the order matters and this is the order: the program stores zero, the `call`
+transfers control, the agent writes through the pointer it was lent, and only then
+does the program reload. -/
+def stateAtReload : MemoryState :=
+  (applyAccess stateAtCall agentWrite transferredCount (fun _ => 0)).2
 
 /-! ## The side conditions a front end decides -/
 
@@ -140,8 +176,10 @@ theorem stateAtReload_eq (indeterminate : Nat → Byte) :
 bounds, and the permission allows a write. -/
 theorem the_store_is_not_refused : denialOf state₀ transferredWrite = Option.none := by decide
 
-/-- Neither intervening step's declared range covers the slot. The import read is
-in a different allocation; the return-address write is eight bytes wide at offset 24. -/
+/-- Neither of the `call`'s steps touches the slot. The import read is in a
+different allocation; the return-address write is eight bytes wide at offset 24. The
+agent's write *does* touch it, which is the point, and it is applied after this
+block rather than inside it. -/
 theorem nothing_between_touches_the_slot :
     ∀ i < 4, ∀ step ∈ betweenStoreAndReload, ¬ Touches step stackAlloc (32 + i) := by decide
 
@@ -161,14 +199,14 @@ different allocation and writes a disjoint part of this one, and neither fact
 needed anything beyond its declared range.
 -/
 theorem the_slot_survives_the_call (indeterminate : Nat → Byte) (i : Nat) (hi : i < 4) :
-    stateAtReload.byteAt? stackAlloc (32 + i) = some 0 := by
+    stateAtCall.byteAt? stackAlloc (32 + i) = some 0 := by
   have hfound : state₀.allocations.lookup transferredWrite.provenance.root =
       some stackRecord := by decide
   have hmain := byteAt?_write_survives_block state₀ transferredWrite zeros indeterminate
     betweenStoreAndReload hfound the_store_is_not_refused (by decide)
     (the_slot_is_inside_the_store i hi)
     (nothing_between_touches_the_slot i hi)
-  rw [stateAtReload_eq indeterminate,
+  rw [stateAtCall_eq indeterminate,
     show transferredWrite.provenance.root = stackAlloc from rfl] at hmain
   rw [hmain]
   have hidx : 32 + i - transferredWrite.range.start = i := by
@@ -179,6 +217,33 @@ theorem the_slot_survives_the_call (indeterminate : Nat → Byte) (i : Nat) (hi 
   exact hz i hi
 
 /--
+**And the reload observes what the *agent* wrote, not what the program stored.**
+
+This is Spike 1's data flow, and the fixture asserted the opposite for as long as it
+existed: `the_slot_survives_the_call` was the whole discharge, so the block proved
+`mov eax, transferred` reads zero — the value that means "no progress" — while in
+the program it reads the byte count `WriteFile` wrote and the loop's correctness
+turns on it. Review found it by reading `Program.lean` beside the fixture.
+-/
+theorem the_reload_observes_the_agents_count (i : Nat) (hi : i < 4) :
+    stateAtReload.byteAt? stackAlloc (32 + i) = transferredCount[i]? := by
+  have h : ∀ j < 4, stateAtReload.byteAt? stackAlloc (32 + j) = transferredCount[j]? := by
+    decide
+  exact h i hi
+
+/-- And the count is not zero, so the theorem above distinguishes the agent's write
+from the program's store. Without this it would hold of a block in which the agent
+wrote zeros and nothing would have been shown. -/
+theorem the_agents_count_is_not_the_stored_zero :
+    stateAtReload.byteAt? stackAlloc 32 ≠ stateAtCall.byteAt? stackAlloc 32 := by decide
+
+/-- The agent's write is not refused: the slot is live, in bounds, writable, and the
+agent's own context is not something `denialOf` reads — authority is the loan rule's
+question and `Grass/Op/LoanAuthority.lean` answers it. -/
+theorem the_agent_write_is_not_refused :
+    denialOf stateAtCall agentWrite = Option.none := by decide
+
+/--
 The reload is not refused either, which is the other half of "the program works":
 the slot is initialized because the store initialized it, so
 `AccessDescriptor.initialization`'s `.allBytesInitialized` demand is met rather
@@ -186,6 +251,17 @@ than merely not checked.
 -/
 theorem the_reload_is_not_refused :
     denialOf stateAtReload transferredRead = Option.none := by decide
+
+/-- **And the initialization the reload demands came from the agent, not from the
+program.** `Spike1Reference.lean`'s `movEaxTransferred` says its
+`allBytesInitialized` demand is met by what `WriteFile` wrote — and until the agent's
+write was in this block, the only thing that had initialized the slot was the
+program's own store, so the declared justification and the discharged one were
+different facts. Review found that too. -/
+theorem the_initialization_came_from_the_agent :
+    stateAtReload.RangeInitialized stackAlloc ⟨32, 4⟩ ∧
+    stateAtReload.byteAt? stackAlloc 32 = some 13 := by
+  exact ⟨by decide, by decide⟩
 
 /--
 Before the store, the same reload *is* refused, as an uninitialized read.

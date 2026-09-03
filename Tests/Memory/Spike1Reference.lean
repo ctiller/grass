@@ -64,6 +64,11 @@ private def contextSupply₀ : FreshSupply ContextTag := FreshSupply.initial
 /-- The single thread Spike 1 runs on. -/
 def mainThread : ContextId := contextSupply₀.fresh.1
 
+/-- The external API agent `WriteFile` runs as. `docs/MEMORY_MODEL.md` §7.1 lists
+"external API agent" among the execution context kinds, and Spike 1's whole point is
+that one writes a slot the program lent it. -/
+def apiAgent : ContextId := contextSupply₀.fresh.2.fresh.1
+
 /-! ## Provenance
 
 Two roots: the stack reservation, and the loaded image. The frame and its slots

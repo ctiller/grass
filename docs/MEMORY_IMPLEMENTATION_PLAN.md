@@ -735,15 +735,18 @@ one outright defect that had already merged — see §3.11's denial row.
   end to end is `Tests/Op/FakeIsa.lean`, which is explicitly a fake. Five of the
   eight reference cases are executed by nothing. Review wrote the missing policy in
   about forty lines, so this is an absent fixture rather than an inexpressible one.
-- **`Tests/Memory/Spike1Block.lean` proves the wrong data flow.** The block is
-  `mov transferred, 0` / `call` / `mov eax, transferred`, and it proves the reload
-  reads **zero**. In the program the reload reads the byte count `WriteFile` wrote,
-  and the loop's correctness turns on it. The intervening block contains only the
-  import read and the return-address write; the API agent's effects are absent
-  entirely. So the "a straight-line Spike 1 block discharges" criterion is met about
-  a block that is not Spike 1's, and `movEaxTransferred`'s declared justification
-  ("produced by `WriteFile`, not by this program") is discharged by the program's own
-  store.
+- ~~**`Tests/Memory/Spike1Block.lean` proves the wrong data flow.**~~ Fixed. The
+  block now applies the API agent's write to the slot it was lent, between the `call`
+  and the reload, and `the_reload_observes_the_agents_count` is Spike 1's actual data
+  flow: `mov eax, transferred` reads the byte count `WriteFile` wrote, not the zero
+  the program stored. `the_agents_count_is_not_the_stored_zero` is the control, and
+  `the_initialization_came_from_the_agent` discharges `movEaxTransferred`'s declared
+  justification with the fact it declares rather than with the program's own store.
+
+  The agent's write appears in a `runBlock` fixture and not in a `Grass.Op.step` one,
+  and that is the M8 problem above rather than a choice: `runBlock` is the
+  `applyAccess`-level executor and asks no cross-context question, so it can say what
+  the program does while the transition cannot yet admit it.
 - ~~**`MEMORY_VOCABULARY.md` does not exist**~~ It does now, and it says what M1's
   exit criterion asks: declaration by declaration, which shapes are frozen and which
   are provisional. It reads "frozen" narrowly — a shape a consumer may depend on, not
