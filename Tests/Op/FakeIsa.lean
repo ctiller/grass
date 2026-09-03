@@ -1,3 +1,4 @@
+import Grass.Memory.Loan
 import Grass.Op.Step
 
 /-!
@@ -676,11 +677,24 @@ def secondBufferLoan : GrantId := grants₀.fresh.2.fresh.2.fresh.1
 def stateWithAuthority : MachineState :=
   { state₀ with
     memory :=
-      (state₀.memory.grant bufferLoan
+      (((state₀.memory.issue? bufferLoan
         { kind := .loan, holder := thread₀, provenance := borrowedProv
-          range := ⟨0, 64⟩, rights := .readWrite }).grant liveFrame
+          range := ⟨0, 64⟩, rights := .readWrite }).getD state₀.memory).issue? liveFrame
         { kind := .frame, holder := thread₀, provenance := frameProv
-          range := ⟨0, 64⟩, rights := .readWrite } }
+          range := ⟨0, 64⟩, rights := .readWrite }).getD state₀.memory }
+
+/-- Both issues succeeded, so `getD` never fell back and the theorems below are
+about a state that holds both grants. -/
+theorem the_authority_issues_succeed :
+    (state₀.memory.issue? bufferLoan
+      { kind := .loan, holder := thread₀, provenance := borrowedProv
+        range := ⟨0, 64⟩, rights := .readWrite }).isSome ∧
+    (((state₀.memory.issue? bufferLoan
+        { kind := .loan, holder := thread₀, provenance := borrowedProv
+          range := ⟨0, 64⟩, rights := .readWrite }).getD state₀.memory).issue? liveFrame
+        { kind := .frame, holder := thread₀, provenance := frameProv
+          range := ⟨0, 64⟩, rights := .readWrite }).isSome := by
+  exact ⟨by decide, by decide⟩
 
 /-- Step one `Alpha` operation. -/
 def stepAlpha (state : MachineState) (op : Alpha) : StepOutcome :=

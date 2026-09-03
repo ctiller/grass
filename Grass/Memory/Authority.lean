@@ -90,50 +90,14 @@ structure AuthorityGrant where
   rights : Permission
 deriving DecidableEq, Repr
 
-namespace AuthorityGrant
+/-! Whether a grant authorizes an access is **not** decided here.
 
-/--
-`grant.Authorizes context provenance range intent` holds when this grant lets
-`context` perform that access.
-
-Same storage, covering range, sufficient rights, and the holder is the context
-performing the access. `Provenance.SameStorage` rather than provenance equality,
-because a grant over an object authorizes access to a field of it — the path
-descends, the storage does not change.
+It was: `AuthorityGrant.Authorizes` lived in this namespace and matched provenances
+with `Provenance.SameStorage`. Whether two allocations name the same bytes is a fact
+about the machine state — `MemoryState.aliases` and its transitive closure — and a
+pure function on provenances cannot see it, so a holder reaching its own lent bytes
+through a declared alias was authorized by nothing while being frozen by its own
+loan. `MemoryState.AuthorizedBy` is the test, and it takes the state.
 -/
-def Authorizes (grant : AuthorityGrant) (context : ContextId) (provenance : Provenance)
-    (range : ByteRange) (intent : AccessIntent) : Prop :=
-  grant.holder = context ∧
-  grant.provenance.SameStorage provenance ∧
-  grant.range.Contains range ∧
-  grant.rights.Permits intent
-
-instance (grant : AuthorityGrant) (context : ContextId) (provenance : Provenance)
-    (range : ByteRange) (intent : AccessIntent) :
-    Decidable (grant.Authorizes context provenance range intent) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
-
-/-- A grant held by one context authorizes nothing for another. Authority is not
-ambient: `docs/FOUNDATION.md` law 6 forbids ambient provider choice, and the same
-reading applies to authority a context did not receive. -/
-theorem not_authorizes_of_other_holder {grant : AuthorityGrant} {context : ContextId}
-    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
-    (h : grant.holder ≠ context) :
-    ¬ grant.Authorizes context provenance range intent := fun ha => h ha.1
-
-/-- A grant over one allocation authorizes nothing over another, however their
-offsets compare (`docs/MEMORY_MODEL.md` §7.5). -/
-theorem not_authorizes_of_other_storage {grant : AuthorityGrant} {context : ContextId}
-    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
-    (h : ¬ grant.provenance.SameStorage provenance) :
-    ¬ grant.Authorizes context provenance range intent := fun ha => h ha.2.1
-
-/-- A read-only grant does not authorize a write. -/
-theorem not_authorizes_of_insufficient_rights {grant : AuthorityGrant}
-    {context : ContextId} {provenance : Provenance} {range : ByteRange}
-    {intent : AccessIntent} (h : ¬ grant.rights.Permits intent) :
-    ¬ grant.Authorizes context provenance range intent := fun ha => h ha.2.2.2
-
-end AuthorityGrant
 
 end Grass.Memory

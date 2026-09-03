@@ -147,6 +147,8 @@ ALLOWED = {
     "AllocationRecord.initialized",
     "not_permitsOrdinaryWrite_of_not_exclusive",
     "loan_refuses_only_the_frozen",
+    "AuthorityGrant.Authorizes",
+    "MemoryState.grant",
     "faultPointOutOfRange",
     "atomicsAreNever_",
 }

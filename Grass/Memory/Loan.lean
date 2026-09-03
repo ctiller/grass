@@ -104,12 +104,12 @@ write grants installed through `MemoryState.grant`, which checks nothing, and tw
 non-conflicting grants made to conflict by an alias declared afterwards. Both are
 facts about what *another* context holds, which is what `HeldByAnother` and
 `WritableByAnother` ask and a holder test does not;
-`Tests/Op/StandardLoan.lean`'s `a_grant_installed_conflict_is_refused` and
+`Tests/Op/StandardLoan.lean`'s `the_identity_cannot_be_stolen` and
 `an_alias_declared_after_issue_is_refused` are those two states, stepped.
 
 Refusal is still strictly wider than `frozen` — the provider also refuses an access
 to lent bytes by a context holding no covering loan, which `authorityOf` may call
-`exclusive` or `sharedImmutable` — and `loan_refusal_is_wider_than_frozen` in
+`exclusive` or `sharedImmutable` — and `a_self_loan_bounds_its_holder` in
 `Tests/Op/StandardLoan.lean` exhibits that rather than leaving it to be assumed.
 -/
 
@@ -282,54 +282,6 @@ end AuthorityState
 namespace MemoryState
 
 /--
-`state.CurrentEpoch provenance` holds when the root allocation exists and is in the
-epoch this provenance names.
-
-`docs/MEMORY_MODEL.md` §2: address reuse never revives old pointers, and §5: same-
-address objects in a new epoch have new provenance. `AllocationRecord.Metadata`
-already carried the epoch and nothing here compared it, so a provenance minted
-before a free-and-reallocate was treated as naming the storage that replaced it.
--/
-def CurrentEpoch (state : MemoryState) (provenance : Provenance) : Prop :=
-  (state.MetadataAt provenance.root).any
-    (fun record => decide (record.epoch = provenance.epoch)) = true
-
-instance (state : MemoryState) (provenance : Provenance) :
-    Decidable (state.CurrentEpoch provenance) :=
-  inferInstanceAs (Decidable (_ = _))
-
-/--
-`state.Live provenance` holds when the root allocation exists, is live, and is in
-the epoch this provenance names.
-
-Authority over storage that is gone is not weak authority, it is none — which is
-`AllocationRecord.live`'s own rule ("a dead allocation authorizes nothing, whatever
-provenance is presented") read at this layer. Without it `authorityOf` reported the
-empty state as exclusively owned by anybody who asked, and
-`AuthorityState.unavailable` was a constructor nothing built. The epoch conjunct
-arrived a round later, when review pointed out that a stale pointer into re-used
-storage was reported live and writable.
--/
-def Live (state : MemoryState) (provenance : Provenance) : Prop :=
-  (state.MetadataAt provenance.root).any
-    (fun record => record.live && decide (record.epoch = provenance.epoch)) = true
-
-instance (state : MemoryState) (provenance : Provenance) : Decidable (state.Live provenance) :=
-  inferInstanceAs (Decidable (_ = _))
-
-/-- Live storage is current-epoch storage. -/
-theorem currentEpoch_of_live {state : MemoryState} {provenance : Provenance}
-    (h : state.Live provenance) : state.CurrentEpoch provenance := by
-  unfold Live at h
-  unfold CurrentEpoch
-  cases hm : state.MetadataAt provenance.root with
-  | none => rw [hm] at h; simp at h
-  | some record =>
-      rw [hm] at h
-      simp only [Option.any_some] at *
-      exact ((Bool.and_eq_true _ _).mp h).2
-
-/--
 The grants outstanding over the same *bytes* as `provenance`, meeting `range`, in
 the epoch that provenance names.
 
@@ -353,15 +305,27 @@ nominal to allow — carried write authority that froze nobody and conflicted wi
 nothing. `loansOver` below is this list narrowed to loans, for §3's laws, which
 really are about loans.
 
-And the epoch clause is §2's: "address reuse never revives old pointers". A grant
-whose provenance names a defunct epoch is over storage that no longer exists, so it
-constrains nothing; without the clause it froze the live epoch permanently.
+**And no epoch clause.** There was one, on the grant's own provenance, and it was
+wrong in the unsafe direction: review re-epoched one member of an alias set and the
+grant over it vanished from this list while the other member stayed live, so the
+freeze lifted and an unauthorized store committed. A grant that names a defunct
+epoch is also unable to *authorize* anything — `MemoryState.AuthorizedBy` checks
+both provenances — so dropping it here means a stale grant freezes without
+authorizing, which is the refuse-both-ways answer `docs/FOUNDATION.md` law 8 asks
+for. §5.1 requires live use loans to be returned before reallocation, so a stale
+grant that still freezes is a profile that skipped a step, not a case to be
+accommodated.
+
+It also restores agreement with `LoanConflicts`, which has no epoch clause either.
+The epoch filter had made the two disagree about which grants exist, and review used
+exactly that gap: a context could not *obtain* a loan (the conflict test saw the
+stale grant) and did not need one (this list did not), so the write proceeded
+unauthorized.
 -/
 def grantsOver (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
     List (GrantId × AuthorityGrant) :=
   state.grants.entries.filter fun entry =>
     decide (state.SharesBytes entry.2.provenance.root provenance.root) &&
-      decide (state.CurrentEpoch entry.2.provenance) &&
       decide (entry.2.range.Meets range)
 
 /-- The loans among them. §3's laws — exclusivity, counts, return by identity — are
@@ -421,6 +385,25 @@ instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
     (range : ByteRange) : Decidable (state.HeldByAnother context provenance range) :=
   inferInstanceAs (Decidable (_ = _))
 
+/-- `state.LoanHeldBySelf context provenance range` holds when this context holds a
+loan over those bytes.
+
+What bounds a context by its own loan's rights. The transition's holder test used
+`Exclusive` — the loan map being empty of *everyone's* loans — and that is a
+different question with two wrong answers. A lender that had lent read-only could
+not read its own bytes, though `authorityOf` calls that state `sharedImmutable` and
+§7.3's conflict requires a writer. And a context following this layer's own
+"declare a loan to yourself" idiom with a read-only self-loan could not write those
+bytes even after every other loan was returned, which contradicts
+`permitsOrdinaryWrite_of_unheld` one module up. -/
+def LoanHeldBySelf (state : MemoryState) (context : ContextId) (provenance : Provenance)
+    (range : ByteRange) : Prop :=
+  (state.loansOver provenance range).any (fun entry => entry.2.holder = context) = true
+
+instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
+    (range : ByteRange) : Decidable (state.LoanHeldBySelf context provenance range) :=
+  inferInstanceAs (Decidable (_ = _))
+
 /-- `state.WritableByAnother context provenance range` holds when some other
 context's grant covers those bytes **and may modify them**.
 
@@ -453,8 +436,8 @@ conveys atomic access only, then an atomic accessor is participating in exactly 
 protocol they are — which is what atomics are for. One ordinary participant among
 them and the situation is an ordinary race, so the state is `frozen` and nothing
 proceeds. This is deliberately decided on the grants that are actually there rather
-than on `lend?` having refused the mixture, because `MemoryState.grant` installs
-grants `lend?` never saw. -/
+than on `issue?` having refused the mixture, because `MemoryState.grant` installs
+grants `issue?` never saw. -/
 def NonAtomicHeldByAnother (state : MemoryState) (context : ContextId)
     (provenance : Provenance) (range : ByteRange) : Prop :=
   (state.grantsOver provenance range).any
@@ -712,7 +695,7 @@ Two read-only grants over one range do not conflict, which is `sharedImmutable`
 being a real state rather than a name. Nor do two **atomic-only** grants, which is
 `atomicShared` being one: §7.3's issuance sentence is "unique loans prevent
 *ordinary* conflicting authority from being issued", and this had no
-ordinary/atomic distinction, so `lend?` prevented all conflicting authority and two
+ordinary/atomic distinction, so `issue?` prevented all conflicting authority and two
 contexts could not share a word atomically at all.
 
 The write probe is `rights.write`, the capability, not `rights.Permits .write`.
@@ -740,55 +723,110 @@ instance (state : MemoryState) (a b : AuthorityGrant) :
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /--
-Issue a loan, or refuse.
+Issue a grant, or refuse.
 
-`Option`, because both ways of getting this wrong are silent otherwise, and review
-found both.
+`Option`, because every way of getting this wrong is silent otherwise, and review
+found four of them.
 
 **Reissue.** An earlier version was `grants.insert`, and `FiniteMap.insert` erases
-any existing binding — so lending twice under one identity returned the first loan
-with no return, and exclusivity came back for bytes still borrowed. §3 says a
-return consumes that exact identity; a reissue is a return nobody asked for.
+any existing binding — so issuing twice under one identity returned the first grant
+with no return, and exclusivity came back for bytes still borrowed. §3 says a return
+consumes that exact identity; a reissue is a return nobody asked for. Worse, there
+was a second, wholly unchecked door (`MemoryState.grant`) with the same erasing
+behaviour, so one context could delete another's grant and write the bytes. That
+door is gone: this is the only way a grant enters the map.
 
 **Conflict.** §7.3 says unique loans prevent conflicting authority from being
-issued. Nothing prevented issuing two overlapping write loans to different holders,
-and each satisfied the access rule, so both could write the same bytes.
+issued. Nothing prevented issuing two overlapping write grants to different holders,
+and each satisfied the access rule, so both could write the same bytes. The scan
+covers **every kind of grant**: a `.frame` or profile-invented write grant is
+conflicting authority on §7.3's terms, and scanning only loans applied
+`LoanConflicts` — which has no kind clause of its own — to a strict subset of the
+pairs it describes.
 
-The conflict scan covers **every kind of grant**, not only loans: a `.frame` or
-profile-invented write grant is conflicting authority on §7.3's terms, and scanning
-only loans applied `LoanConflicts` — which has no kind clause of its own — to a
-strict subset of the pairs it describes.
+**A grant over nothing.** A grant whose range is empty conflicts at issue (both
+`Meets` directions are tried there) and freezes nobody once installed, because an
+empty extent meets no position. It is decoration with a refusal attached, so it is
+refused instead — the same rule `AccessDescriptor.WellFormedIn.rangeNonEmpty`
+applies to accesses.
+
+**A grant over storage that is not there.** Review lent a write loan over a
+provenance whose root the allocation table does not hold, aliased to a live one:
+`issue?` accepted it, `grantsOver` did not see it, and the store committed. A grant
+must be over live current-epoch storage, and its range must lie within the extent
+its own provenance claims.
+
+What this is **not** is the guarantee that no conflicting pair can act. Declaring an
+alias after two non-conflicting grants are issued makes them conflict with nothing
+re-examined, and §7.5 makes that a real transition. `Grass/Op/LoanAuthority.lean`
+reads the map it finds; this is the cheaper check that stops the honest caller
+earlier.
 
 Refusing rather than overwriting or ignoring is `docs/FOUNDATION.md` law 8's
-direction, and `lend?_eq_none_of_reissued` and `lend?_eq_none_of_conflict` are the
-two refusals stated, so a caller that cannot lend finds out. This is **not** the
-guarantee that no conflicting pair can act — see `LoanConflicts` above.
+direction. Four of the five refusals are stated —  `issue?_eq_none_of_reissued`,
+`issue?_eq_none_of_empty`, `issue?_eq_none_of_not_live` and
+`issue?_eq_none_of_conflict` — so a caller that cannot issue finds out which rule
+stopped it. The extent clause has no theorem of its own; it is checked and not
+stated.
 -/
-def lend? (state : MemoryState) (id : GrantId) (grant : AuthorityGrant) :
+def issue? (state : MemoryState) (id : GrantId) (grant : AuthorityGrant) :
     Option MemoryState :=
   if (state.grants.lookup id).isSome then Option.none
+  else if grant.range.IsEmpty then Option.none
+  else if ¬ state.Live grant.provenance then Option.none
+  else if ¬ grant.provenance.extent.Contains grant.range then Option.none
   else if state.grants.entries.any
       (fun entry => decide (state.LoanConflicts entry.2 grant))
     then Option.none
   else some { state with grants := state.grants.insert id grant }
 
 /-- **A reissued identity is refused.** -/
-theorem lend?_eq_none_of_reissued (state : MemoryState) {id : GrantId}
+theorem issue?_eq_none_of_reissued (state : MemoryState) {id : GrantId}
     (grant : AuthorityGrant) (h : (state.grants.lookup id).isSome) :
-    state.lend? id grant = Option.none := by
-  unfold lend?
+    state.issue? id grant = Option.none := by
+  unfold issue?
   rw [if_pos h]
 
-/-- **Conflicting authority is refused at issue.** -/
-theorem lend?_eq_none_of_conflict (state : MemoryState) (id : GrantId)
-    (grant : AuthorityGrant)
-    (h : state.grants.entries.any
-      (fun entry => decide (state.LoanConflicts entry.2 grant)) = true) :
-    state.lend? id grant = Option.none := by
-  unfold lend?
+/-- **A grant over no bytes is refused.** -/
+theorem issue?_eq_none_of_empty (state : MemoryState) (id : GrantId)
+    (grant : AuthorityGrant) (h : grant.range.IsEmpty) :
+    state.issue? id grant = Option.none := by
+  unfold issue?
   by_cases hfresh : (state.grants.lookup id).isSome = true
   · rw [if_pos hfresh]
   · rw [if_neg hfresh, if_pos h]
+
+/-- **A grant over dead, absent or stale-epoch storage is refused.** -/
+theorem issue?_eq_none_of_not_live (state : MemoryState) (id : GrantId)
+    (grant : AuthorityGrant) (h : ¬ state.Live grant.provenance) :
+    state.issue? id grant = Option.none := by
+  unfold issue?
+  by_cases hfresh : (state.grants.lookup id).isSome = true
+  · rw [if_pos hfresh]
+  · rw [if_neg hfresh]
+    by_cases hempty : grant.range.IsEmpty
+    · rw [if_pos hempty]
+    · rw [if_neg hempty, if_pos (by simpa using h)]
+
+/-- **Conflicting authority is refused at issue.** -/
+theorem issue?_eq_none_of_conflict (state : MemoryState) (id : GrantId)
+    (grant : AuthorityGrant)
+    (h : state.grants.entries.any
+      (fun entry => decide (state.LoanConflicts entry.2 grant)) = true) :
+    state.issue? id grant = Option.none := by
+  unfold issue?
+  by_cases hfresh : (state.grants.lookup id).isSome = true
+  · rw [if_pos hfresh]
+  · rw [if_neg hfresh]
+    by_cases hempty : grant.range.IsEmpty
+    · rw [if_pos hempty]
+    · rw [if_neg hempty]
+      by_cases hlive : state.Live grant.provenance
+      · rw [if_neg (by simpa using hlive)]
+        by_cases hin : grant.provenance.extent.Contains grant.range
+        · rw [if_neg (by simpa using hin), if_pos h]
+        · rw [if_pos (by simpa using hin)]
+      · rw [if_pos (by simpa using hlive)]
 
 /--
 Return the loan with **that exact identity**, if this context holds it.
@@ -857,18 +895,24 @@ theorem returnLoan?_eq_none_of_absent {state : MemoryState} {context : ContextId
   unfold returnLoan?
   rw [h]
 
-/-- A successful lend records the loan under the identity it names. -/
-theorem lookup_lend?_self {state lent : MemoryState} {id : GrantId}
-    {grant : AuthorityGrant} (h : state.lend? id grant = some lent) :
-    lent.grants.lookup id = some grant := by
-  unfold lend? at h
+/-- A successful issue records the grant under the identity it names. -/
+theorem lookup_issue?_self {state issued : MemoryState} {id : GrantId}
+    {grant : AuthorityGrant} (h : state.issue? id grant = some issued) :
+    issued.grants.lookup id = some grant := by
+  unfold issue? at h
   split at h
   · exact absurd h (by simp)
-  · split at h
-    · exact absurd h (by simp)
-    · injection h with h
-      subst h
-      exact FiniteMap.lookup_insert_self _ _ _
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  injection h with h
+  subst h
+  exact FiniteMap.lookup_insert_self _ _ _
 
 /-- A state with no grants is exclusive everywhere: nothing is lent, so nothing is
 outstanding.
@@ -882,19 +926,21 @@ Reading `Exclusive` as permission is the mistake `authorityOf` used to make. -/
 
 /-- The empty state is not live anywhere, so its exclusivity grants nothing. -/
 @[simp] theorem not_live_empty (provenance : Provenance) : ¬ empty.Live provenance := by
-  simp [Live, MetadataAt, empty, FiniteMap.empty, FiniteMap.lookup]
+  simp [Live, empty, FiniteMap.empty, FiniteMap.lookup]
 
-/-- **Nothing outside this module may install a loan through `MemoryState.grant`
-and expect it to be safe.** `grant` inserts with no checks — no identity check, no
-conflict check — and review installed two overlapping write loans through it and
-watched both commit. `lend?` is the checked door; `grant` remains because providers
-of other kinds use it, and what stops the unchecked pair is
-`Grass/Op/LoanAuthority.lean`'s access-time refusal, which reads the map it finds
-rather than trusting how the map was built. -/
-theorem grant_does_not_check (state : MemoryState) (id : GrantId)
-    (record : AuthorityGrant) :
-    (state.grant id record).grants.lookup id = some record :=
-  FiniteMap.lookup_insert_self _ _ _
+/-- **There is no second door.** `MemoryState.grant` was one — `grants.insert`, no
+checks — kept on the argument that the access-time rule reads whatever map it finds.
+Review broke that in one move: `FiniteMap.insert` erases, so installing a grant
+under an identity another context held deleted that grant, and the map the
+access-time rule then found no longer contained it. `issue?` is the only way in, and
+this is the statement that its identity rule is the map's identity rule. -/
+theorem issued_identity_is_fresh {state issued : MemoryState} {id : GrantId}
+    {grant : AuthorityGrant} (h : state.issue? id grant = some issued) :
+    state.grants.lookup id = Option.none := by
+  unfold issue? at h
+  split at h
+  · exact absurd h (by simp)
+  · next hfresh => simpa using hfresh
 
 end MemoryState
 

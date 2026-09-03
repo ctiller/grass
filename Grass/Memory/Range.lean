@@ -268,7 +268,8 @@ zero-size access. -/
 /-- **An empty range meets nothing**, whatever `s` is. A grant over no bytes
 therefore constrains no position, which is what stops `Meets` turning a zero-byte
 grant into a way to freeze live storage — `Tests/Memory/Loans.lean`'s
-`a_loan_of_no_bytes_freezes_nothing` is that consequence at the loan map. -/
+`a_grant_of_no_bytes_is_refused` is the stronger consequence: such a grant is
+refused at issue, because a grant that freezes nothing is decoration. -/
 theorem not_meets_of_isEmpty {r s : ByteRange} (h : r.IsEmpty) : ¬ r.Meets s := by
   rw [isEmpty_def] at h
   rintro (hnd | ⟨-, hc⟩)

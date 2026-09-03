@@ -72,16 +72,16 @@ def ordinaryGrant : AuthorityGrant :=
   { atomicGrant with rights := .readWrite }
 
 /-- The state holding the atomic grant. -/
-def lentAtomically : MemoryState := (owned.lend? atomicLoan atomicGrant).getD owned
+def lentAtomically : MemoryState := (owned.issue? atomicLoan atomicGrant).getD owned
 
 /-- And the one holding the ordinary grant. -/
-def lentOrdinarily : MemoryState := (owned.lend? atomicLoan ordinaryGrant).getD owned
+def lentOrdinarily : MemoryState := (owned.issue? atomicLoan ordinaryGrant).getD owned
 
 /-- Both lends succeeded, so neither `getD` fell back to `owned` and the theorems
 below are about lent states. -/
 theorem the_lends_succeed :
-    (owned.lend? atomicLoan atomicGrant).isSome ∧
-    (owned.lend? atomicLoan ordinaryGrant).isSome := by
+    (owned.issue? atomicLoan atomicGrant).isSome ∧
+    (owned.issue? atomicLoan ordinaryGrant).isSome := by
   exact ⟨by decide, by decide⟩
 
 /-! ## The grant does not authorize an ordinary access -/
@@ -172,7 +172,7 @@ theorem the_ordinary_grant_freezes :
 /-! ## Two contexts may share a word atomically, and only atomically
 
 §7.3's issuance sentence is "unique loans prevent **ordinary** conflicting authority
-from being issued". `LoanConflicts` had no ordinary/atomic distinction, so `lend?`
+from being issued". `LoanConflicts` had no ordinary/atomic distinction, so `issue?`
 prevented *all* conflicting authority and two contexts could not share a word
 atomically at all — which is `atomicShared` being unreachable by construction as
 well as underived. -/
@@ -186,18 +186,18 @@ def secondLoan : GrantId := grants.fresh.2.fresh.1
 
 /-- **Two atomic grants over one word coexist.** -/
 theorem two_atomic_grants_are_accepted :
-    (lentAtomically.lend? secondLoan strangersAtomicGrant).isSome := by decide
+    (lentAtomically.issue? secondLoan strangersAtomicGrant).isSome := by decide
 
 /-- An ordinary grant alongside the atomic one is still refused: one ordinary
 participant makes it an ordinary race. -/
 theorem an_ordinary_grant_alongside_an_atomic_one_is_refused :
-    lentAtomically.lend? secondLoan { ordinaryGrant with holder := stranger } =
+    lentAtomically.issue? secondLoan { ordinaryGrant with holder := stranger } =
       Option.none := by decide
 
 /-- And once both atomic grants are outstanding, a third context sees
 `atomicShared` rather than a freeze. -/
 theorem both_holders_see_atomic_shared :
-    ((lentAtomically.lend? secondLoan strangersAtomicGrant).getD lentAtomically).authorityOf
+    ((lentAtomically.issue? secondLoan strangersAtomicGrant).getD lentAtomically).authorityOf
       holder counterProv ⟨0, 8⟩ = AuthorityState.atomicShared := by decide
 
 /-- And it still counts as an outstanding loan, so §3's exclusivity sees it. -/

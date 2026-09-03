@@ -91,25 +91,25 @@ nothing. -/
 def emptyLoan : AuthorityGrant :=
   { loanOfHead with range := ByteRange.empty 4 }
 
-/-- Lending the head. `lend?` refuses a reissued identity or a conflicting loan, so
+/-- Lending the head. `issue?` refuses a reissued identity or a conflicting loan, so
 a fixture has to say which state it means; `the_lends_succeed` checks these are the
 lends that happened rather than silent fallbacks. -/
-def lentHead : MemoryState := (unlent.lend? firstLoan loanOfHead).getD unlent
+def lentHead : MemoryState := (unlent.issue? firstLoan loanOfHead).getD unlent
 
 /-- Lending the disjoint tail. -/
-def lentTail : MemoryState := (unlent.lend? secondLoan loanOfTail).getD unlent
+def lentTail : MemoryState := (unlent.issue? secondLoan loanOfTail).getD unlent
 
 /-- Two *read* loans over the same bytes, under distinct identities. -/
 def lentTwice : MemoryState :=
-  ((unlent.lend? firstLoan readLoanOfHead).getD unlent).lend? secondLoan readLoanOfHead
+  ((unlent.issue? firstLoan readLoanOfHead).getD unlent).issue? secondLoan readLoanOfHead
     |>.getD unlent
 
 /-- Each lend above actually succeeded, so `getD` never fell back and the theorems
 below are about lent states rather than about `unlent`. -/
 theorem the_lends_succeed :
-    (unlent.lend? firstLoan loanOfHead).isSome ∧
-    (unlent.lend? secondLoan loanOfTail).isSome ∧
-    (((unlent.lend? firstLoan readLoanOfHead).getD unlent).lend?
+    (unlent.issue? firstLoan loanOfHead).isSome ∧
+    (unlent.issue? secondLoan loanOfTail).isSome ∧
+    (((unlent.issue? firstLoan readLoanOfHead).getD unlent).issue?
       secondLoan readLoanOfHead).isSome := by
   exact ⟨by decide, by decide, by decide⟩
 
@@ -181,9 +181,9 @@ theorem returning_both_restores_exclusivity :
 An earlier version asserted `loanOfHead = loanOfHead`, one term compared to itself,
 which could never have failed. Its replacement compared the two entries against
 *each other*, which is better but still weak: both lends are handed the same grant,
-so any uniform mangling `lend?` applied would give `f g = f g` and pass — storing
+so any uniform mangling `issue?` applied would give `f g = f g` and pass — storing
 nothing at all included, in which case both sides are `none`. Review pointed that
-out too. This names the grant, so it fails if `lend?` stores anything but what it
+out too. This names the grant, so it fails if `issue?` stores anything but what it
 was handed. -/
 theorem the_two_loans_differ_only_in_identity :
     lentTwice.grants.lookup firstLoan = some readLoanOfHead ∧
@@ -201,18 +201,18 @@ though §7.3 says unique loans prevent conflicting authority from being *issued*
 /-- **A reissued identity is refused**, rather than silently returning the loan
 that identity already names. -/
 theorem a_reissued_identity_is_refused :
-    lentHead.lend? firstLoan loanOfTail = Option.none := by decide
+    lentHead.issue? firstLoan loanOfTail = Option.none := by decide
 
 /-- A *different* identity for the same tail is accepted, so the refusal is about
 reissue and not about the tail. -/
 theorem a_fresh_identity_for_the_tail_is_accepted :
-    (lentHead.lend? secondLoan loanOfTail).isSome := by decide
+    (lentHead.issue? secondLoan loanOfTail).isSome := by decide
 
 /-- **A conflicting loan is refused at issue.** Two write loans over the same bytes
 held by *different* contexts are conflicting authority, and §7.3 says unique loans
 prevent it being issued. -/
 theorem a_conflicting_write_loan_is_refused :
-    lentHead.lend? secondLoan loanOfHeadToOwner = Option.none := by decide
+    lentHead.issue? secondLoan loanOfHeadToOwner = Option.none := by decide
 
 /-- **A second loan to the same holder is not a conflict.** §7.3's rule is about
 distinct concurrent contexts, and without the holder clause a context could not
@@ -220,13 +220,13 @@ hold two grants over its own bytes — which is the idiom
 `Grass/Op/LoanAuthority.lean` endorses for "the owner may still read", and which
 was therefore mutually exclusive with any other grant on those bytes. -/
 theorem a_second_loan_to_the_same_holder_is_accepted :
-    (lentHead.lend? secondLoan loanOfHead).isSome := by decide
+    (lentHead.issue? secondLoan loanOfHead).isSome := by decide
 
 /-- Two *read* loans over the same bytes are not conflicting, so they are accepted.
 Without this the theorem above would be consistent with refusing every overlapping
 loan, and `sharedImmutable` would be a name for nothing. -/
 theorem two_read_loans_over_one_range_are_accepted :
-    (((unlent.lend? firstLoan readLoanOfHead).getD unlent).lend?
+    (((unlent.issue? firstLoan readLoanOfHead).getD unlent).issue?
       secondLoan readLoanOfHead).isSome := by decide
 
 /-! ## Lending freezes the lender's fragment, not the holder's
@@ -294,11 +294,11 @@ The two ranges are disjoint and deliberately so. An earlier caption said this wa
 "one write loan among the read loans", which it is not — the read loans are over
 `[0, 8)` and this query is over `[8, 16)`, so they play no part. The
 distinguishing case, a write loan overlapping the read loans, cannot be built:
-`lend?` refuses it, which is `a_conflicting_write_loan_is_refused`. -/
+`issue?` refuses it, which is `a_conflicting_write_loan_is_refused`. -/
 theorem a_write_loan_freezes :
-    ((lentTwice.lend? thirdLoan loanOfTail).getD lentTwice).authorityOf
+    ((lentTwice.issue? thirdLoan loanOfTail).getD lentTwice).authorityOf
       owner bufferProv ⟨8, 8⟩ = AuthorityState.frozen ∧
-    (lentTwice.lend? thirdLoan loanOfTail).isSome := by
+    (lentTwice.issue? thirdLoan loanOfTail).isSome := by
   exact ⟨by decide, by decide⟩
 
 /-! ## Dead storage is not exclusively owned, it is unavailable
@@ -358,13 +358,22 @@ theorem one_past_the_end_of_a_loan_is_not_frozen :
     lentHead.authorityOf owner bufferProv (ByteRange.empty 8) = AuthorityState.exclusive := by
   decide
 
-/-- A loan over *no* bytes freezes nothing, so `Meets` did not turn every zero-byte
-grant into a way to freeze live storage. -/
-theorem a_loan_of_no_bytes_freezes_nothing :
-    (unlent.lend? firstLoan emptyLoan).isSome ∧
-    ((unlent.lend? firstLoan emptyLoan).getD unlent).authorityOf owner bufferProv ⟨0, 8⟩ =
-      AuthorityState.exclusive := by
+/-- **A grant over no bytes is refused at issue.**
+
+It was issuable, and it was decoration with a refusal attached: `LoanConflicts`
+tries `Meets` in both directions so an empty grant *conflicted* with a live one and
+could not be issued alongside it, while installed on its own it froze nobody,
+because an empty extent meets no position. `AccessDescriptor.WellFormedIn` refuses
+an empty access for the same reason and `issue?` now refuses an empty grant. -/
+theorem a_grant_of_no_bytes_is_refused :
+    unlent.issue? firstLoan emptyLoan = Option.none ∧
+    emptyLoan.range.IsEmpty := by
   exact ⟨by decide, by decide⟩
+
+/-- And the same grant with a non-empty range is accepted, so the refusal is about
+the empty range rather than about the grant. -/
+theorem the_same_grant_with_bytes_is_accepted :
+    (unlent.issue? firstLoan { emptyLoan with range := ⟨4, 4⟩ }).isSome := by decide
 
 /-! ## Only exclusive authority permits an ordinary write
 
@@ -410,6 +419,10 @@ def reusedRecord : AllocationRecord :=
 /-- A state holding it. `bufferProv` names the *old* epoch. -/
 def reused : MemoryState := MemoryState.empty.allocate buffer reusedRecord
 
+/-- The buffer lent while live, then reallocated under it. -/
+def lentThenReused : MemoryState :=
+  { lentHead with allocations := lentHead.allocations.insert buffer reusedRecord }
+
 /-- **A stale pointer into re-used storage holds no authority.**
 `docs/MEMORY_MODEL.md` §2: address reuse never revives old pointers. Before `Live`
 compared epochs this reported `exclusive`, with an ordinary write permitted. -/
@@ -418,25 +431,49 @@ theorem a_stale_provenance_is_unavailable :
     reused.authorityOf owner bufferProv ⟨0, 8⟩ = AuthorityState.unavailable := by
   exact ⟨by decide, by decide⟩
 
-/-- And a loan issued under the defunct epoch freezes nobody in the new one. The
-same blindness ran both ways: without the epoch clause in `grantsOver`, a stale
-loan froze the live epoch permanently. -/
-theorem a_stale_loan_does_not_freeze_the_live_epoch :
-    ((reused.grant firstLoan loanOfHead).authorityOf owner currentProv ⟨0, 8⟩) =
-      AuthorityState.exclusive := by decide
+/-- **A loan issued under a defunct epoch still freezes, and authorizes nothing.**
+
+The refuse-both-ways answer, and it took two rounds to arrive at. `grantsOver` first
+had no epoch clause, so a stale loan froze the live epoch permanently and a stale
+pointer was reported exclusive. Adding a clause on the *grant's* provenance fixed
+the second and broke the first in the unsafe direction: review re-epoched one member
+of an alias set, watched the grant vanish from `grantsOver` while the other member
+stayed live, and committed an unauthorized store. So the clause is gone from
+`grantsOver` and lives in `Live` and `MemoryState.AuthorizedBy` instead — the two
+places that decide *permission*. A stale grant freezes; it does not authorize.
+`docs/MEMORY_MODEL.md` §5.1 requires live use loans to be returned before
+reallocation, so this state is a profile that skipped a step. -/
+theorem a_stale_loan_still_freezes :
+    lentThenReused.authorityOf owner currentProv ⟨0, 8⟩ = AuthorityState.frozen ∧
+    ¬ lentThenReused.GrantedOfKind .loan borrower currentProv ⟨0, 8⟩
+        AccessIntent.write ∧
+    ¬ lentThenReused.GrantedOfKind .loan borrower bufferProv ⟨0, 8⟩
+        AccessIntent.write := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- A grant cannot be *issued* over stale storage in the first place: `issue?`
+requires the grant's own provenance to be live and current. The state above is
+reached by lending first and reallocating after, which §5.1 says a profile must not
+do without returning the loan. -/
+theorem a_stale_grant_cannot_be_issued :
+    reused.issue? firstLoan loanOfHead = Option.none ∧
+    ¬ reused.Live bufferProv := by
+  exact ⟨by decide, by decide⟩
 
 /-- **A grant of another kind freezes too.** §7.3's conflict is about authority,
 not about one kind of it, and `grantsOver` filtered to `GrantKind.loan` — so a
 `.frame` grant, or one of a kind a profile invented, carried write authority that
 froze nobody. -/
 theorem a_frame_grant_freezes :
-    (unlent.grant firstLoan frameGrant).authorityOf owner bufferProv ⟨0, 8⟩ =
+    ((unlent.issue? firstLoan frameGrant).getD unlent).authorityOf owner bufferProv ⟨0, 8⟩ =
       AuthorityState.frozen := by decide
 
 /-- But it is still not a *loan*, so §3's exclusivity — which is about the loan map
 — is untouched. The two questions are deliberately different, and reading
 `Exclusive` as permission is what let the frame grant through. -/
 theorem a_frame_grant_is_not_a_loan :
-    (unlent.grant firstLoan frameGrant).Exclusive bufferProv ⟨0, 8⟩ := by decide
+    ((unlent.issue? firstLoan frameGrant).getD unlent).Exclusive bufferProv ⟨0, 8⟩ ∧
+    (unlent.issue? firstLoan frameGrant).isSome := by
+  exact ⟨by decide, by decide⟩
 
 end Tests.Memory.Loans

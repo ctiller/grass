@@ -44,13 +44,13 @@ theorem an_unlent_store_commits :
 /-- A loan of the buffer's head to the device engine. -/
 def lentToEngine : MachineState :=
   { state₀ with
-    memory := (state₀.memory.lend? bufferLoan
+    memory := (state₀.memory.issue? bufferLoan
       { kind := .loan, holder := engine₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readWrite }).getD state₀.memory }
 
 /-- The lend succeeded, so `getD` did not fall back to the unlent state. -/
 theorem the_engine_lend_succeeds :
-    (state₀.memory.lend? bufferLoan
+    (state₀.memory.issue? bufferLoan
       { kind := .loan, holder := engine₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readWrite }).isSome := by decide
 
@@ -141,7 +141,7 @@ theorem a_read_of_lent_bytes_is_also_refused :
 /-- A loan of the buffer's *tail*, which no `Alpha` operation touches. -/
 def tailLentToEngine : MachineState :=
   { state₀ with
-    memory := (state₀.memory.lend? bufferLoan
+    memory := (state₀.memory.issue? bufferLoan
       { kind := .loan, holder := engine₀, provenance := bufferProv
         range := ⟨8, 8⟩, rights := .readWrite }).getD state₀.memory }
 
@@ -162,60 +162,56 @@ theorem lending_the_tail_leaves_the_head_reachable :
 
 /-! ## The rule does not depend on how the map was built
 
-`MemoryState.lend?` refuses to *issue* conflicting authority, and for a while the
+`MemoryState.issue?` refuses to *issue* conflicting authority, and for a while the
 provider was a pure holder test that relied on it: if the accessor holds a covering
-loan, proceed. Review found two ways to reach a state `lend?` would have refused,
+loan, proceed. Review found two ways to reach a state `issue?` would have refused,
 and in both the write committed with no violation recorded.
 
 A rule that holds only because of how a state was constructed is not a rule about
 the state. The provider now reads `MemoryState.authorityOf` on the map it is
 handed. -/
 
-/-- Two write loans over the same bytes, to two contexts, installed through
-`MemoryState.grant` — which inserts with no checks at all. -/
-def doublyGranted : MachineState :=
-  { state₀ with
-    memory := (state₀.memory.grant bufferLoan
-        { kind := .loan, holder := thread₀, provenance := bufferProv
-          range := ⟨0, 8⟩, rights := .readWrite }).grant secondBufferLoan
-        { kind := .loan, holder := engine₀, provenance := bufferProv
-          range := ⟨0, 8⟩, rights := .readWrite } }
+/-- The thread holds a write loan over the buffer's head. -/
+def lentToThread : MemoryState :=
+  (state₀.memory.issue? bufferLoan
+    { kind := .loan, holder := thread₀, provenance := bufferProv
+      range := ⟨0, 8⟩, rights := .readWrite }).getD state₀.memory
 
-/-- `lend?` really would have refused this pair, so the state below is the one
-§7.3 says cannot be issued rather than an ordinary one. -/
-theorem lend_would_have_refused_the_pair :
-    ((state₀.memory.grant bufferLoan
-        { kind := .loan, holder := thread₀, provenance := bufferProv
-          range := ⟨0, 8⟩, rights := .readWrite }).lend? secondBufferLoan
-        { kind := .loan, holder := engine₀, provenance := bufferProv
-          range := ⟨0, 8⟩, rights := .readWrite }) = Option.none := by decide
-
-/-- **And the thread's store is refused even though the thread holds a covering
-write loan.** Under the holder test it committed: `GrantedOfKind` succeeded, and
-nothing asked what anyone else held. -/
-theorem a_grant_installed_conflict_is_refused :
-    ∀ s, (step doublyGranted .store).state? = some s →
-      s.events = [] ∧ s.violations.recordCount = 1 := by
-  intro s hs
-  cases hs
+/-- **The conflicting pair cannot be issued.** §7.3's rule at the door, which is
+where a caller doing the right thing finds out. -/
+theorem the_conflicting_pair_cannot_be_issued :
+    (state₀.memory.issue? bufferLoan
+      { kind := .loan, holder := thread₀, provenance := bufferProv
+        range := ⟨0, 8⟩, rights := .readWrite }).isSome ∧
+    lentToThread.issue? secondBufferLoan
+      { kind := .loan, holder := engine₀, provenance := bufferProv
+        range := ⟨0, 8⟩, rights := .readWrite } = Option.none := by
   exact ⟨by decide, by decide⟩
 
-/-- The state really is the frozen one, so the refusal above is the rule biting
-rather than something else in the fixture. -/
-theorem the_granted_pair_freezes_both :
-    doublyGranted.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ = AuthorityState.frozen ∧
-    doublyGranted.memory.authorityOf engine₀ bufferProv ⟨0, 8⟩ = AuthorityState.frozen := by
+/--
+**And the identity cannot be stolen.**
+
+This was the second door. `MemoryState.grant` inserted with no checks at all, and
+`FiniteMap.insert` *erases* — so installing a grant under an identity another
+context held deleted that grant, and the access-time rule then read a map the
+victim's loan was no longer in. Review did exactly that and the write committed with
+no violation. `grant` is gone; `issue?` refuses a reissued identity, which is §3's
+"a return consumes that exact identity" read from the other side.
+-/
+theorem the_identity_cannot_be_stolen :
+    lentToThread.issue? bufferLoan
+      { kind := .loan, holder := engine₀, provenance := bufferProv
+        range := ⟨0, 8⟩, rights := .readWrite } = Option.none ∧
+    (lentToThread.grants.lookup bufferLoan).isSome := by
   exact ⟨by decide, by decide⟩
 
 /-- Two loans that do **not** conflict when issued: `[0, 8)` of the buffer to the
 thread, `[0, 8)` of `borrowedAlloc` to the engine. Different allocations, so
-`lend?` is right to accept them. -/
+`issue?` is right to accept them. -/
 def separatelyLent : MemoryState :=
-  ((state₀.memory.lend? bufferLoan
-      { kind := .loan, holder := thread₀, provenance := bufferProv
-        range := ⟨0, 8⟩, rights := .readWrite }).getD state₀.memory).lend? secondBufferLoan
+  (lentToThread.issue? secondBufferLoan
       { kind := .loan, holder := engine₀, provenance := borrowedProv
-        range := ⟨0, 8⟩, rights := .readWrite } |>.getD state₀.memory
+        range := ⟨0, 8⟩, rights := .readWrite }).getD lentToThread
 
 /-- Then the profile declares the mapping. `docs/MEMORY_MODEL.md` §7.5 makes that a
 real transition, and nothing re-examines the grants already issued. -/
@@ -223,17 +219,17 @@ def aliasedAfterIssue : MachineState :=
   { state₀ with memory := separatelyLent.alias bufferAlloc borrowedAlloc }
 
 /-- Both lends succeeded, and they became conflicting only once the alias was
-declared: issued in the other order, `lend?` refuses the second. -/
+declared: issued in the other order, `issue?` refuses the second. -/
 theorem the_conflict_appears_after_issue :
     (separatelyLent.grants.lookup bufferLoan).isSome ∧
     (separatelyLent.grants.lookup secondBufferLoan).isSome ∧
-    ((state₀.memory.alias bufferAlloc borrowedAlloc).lend? bufferLoan
+    ((state₀.memory.alias bufferAlloc borrowedAlloc).issue? bufferLoan
         { kind := .loan, holder := thread₀, provenance := bufferProv
           range := ⟨0, 8⟩, rights := .readWrite }).isSome := by
   exact ⟨by decide, by decide, by decide⟩
 
 /-- **And the thread's store is refused**, though it holds a covering write loan
-and `lend?` was never given the chance to refuse anything. This is the case no
+and `issue?` was never given the chance to refuse anything. This is the case no
 issue-time check can catch. -/
 theorem an_alias_declared_after_issue_is_refused :
     aliasedAfterIssue.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ = AuthorityState.frozen ∧
@@ -244,25 +240,81 @@ theorem an_alias_declared_after_issue_is_refused :
   cases hs
   exact ⟨by decide, by decide⟩
 
-/-- **Refusal is wider than `frozen`.** The engine holds a *read* loan; the thread
-holds none, so its read is refused by the holder half while `authorityOf` calls the
-state `sharedImmutable` and permits reads. Pinned because three reviewers found
-prose claiming the provider refuses exactly the frozen accesses. -/
+/-- The engine holds a *read* loan over the head. -/
 def readLentToEngine : MachineState :=
   { state₀ with
-    memory := (state₀.memory.lend? bufferLoan
+    memory := (state₀.memory.issue? bufferLoan
       { kind := .loan, holder := engine₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readOnly }).getD state₀.memory }
 
-theorem loan_refusal_is_wider_than_frozen :
-    (state₀.memory.lend? bufferLoan
+/--
+**A read against shared immutable access commits.**
+
+This fixture asserted the opposite for one round, and pinned it as a feature: the
+holder test was `MemoryState.Exclusive`, the loan map being empty of *everyone's*
+loans, so a context holding no loan at all was refused a read of bytes another
+context held only a read loan over. §3's sentence about the map being empty is about
+*exclusive authority*; §7.3's conflict needs a writer; and `authorityOf` calls this
+state `sharedImmutable` and permits reads. The transition contradicted its own
+summary, and `AuthorityState.sharedImmutable` was reachable at the transition for
+co-borrowers and never for anyone else.
+-/
+theorem a_read_against_shared_immutable_access_commits :
+    (state₀.memory.issue? bufferLoan
       { kind := .loan, holder := engine₀, provenance := bufferProv
         range := ⟨0, 8⟩, rights := .readOnly }).isSome ∧
     readLentToEngine.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ =
       AuthorityState.sharedImmutable ∧
     ∀ s, (step readLentToEngine .load).state? = some s →
+      s.events.length = 1 ∧ s.violations.IsEmpty := by
+  refine ⟨by decide, by decide, ?_⟩
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- **But a write against it is still refused**, so the change above is about reads
+and not about the state having become permissive. -/
+theorem a_write_against_shared_immutable_access_is_refused :
+    ∀ s, (step readLentToEngine .store).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- The thread holds a *read-only* loan over the head — this layer's own "declare a
+loan to yourself" idiom for "the owner may still read". -/
+def selfReadLoan : MachineState :=
+  { state₀ with
+    memory := (state₀.memory.issue? bufferLoan
+      { kind := .loan, holder := thread₀, provenance := bufferProv
+        range := ⟨0, 8⟩, rights := .readOnly }).getD state₀.memory }
+
+/--
+**A self-loan bounds its holder**, and that is the holder half's whole job.
+
+The thread holds the only loan over these bytes, so `authorityOf` calls its state
+`exclusive` and `MemoryState.permitsOrdinaryWrite_of_unheld` says it may write. The
+transition refuses the write anyway, because the loan the thread holds is read-only.
+Refusal is therefore wider than `frozen` — but for this reason and not the one this
+file used to give.
+-/
+theorem a_self_loan_bounds_its_holder :
+    (state₀.memory.issue? bufferLoan
+      { kind := .loan, holder := thread₀, provenance := bufferProv
+        range := ⟨0, 8⟩, rights := .readOnly }).isSome ∧
+    selfReadLoan.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ = AuthorityState.exclusive ∧
+    ∀ s, (step selfReadLoan .store).state? = some s →
       s.events = [] ∧ s.violations.recordCount = 1 := by
   refine ⟨by decide, by decide, ?_⟩
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- And its *read* commits, so the self-loan is a bound and not a lockout. Under the
+old holder test this was refused too, which made the endorsed idiom unusable. -/
+theorem a_self_loan_permits_the_read_it_grants :
+    ∀ s, (step selfReadLoan .load).state? = some s →
+      s.events.length = 1 ∧ s.violations.IsEmpty := by
   intro s hs
   cases hs
   exact ⟨by decide, by decide⟩

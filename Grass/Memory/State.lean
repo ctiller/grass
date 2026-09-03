@@ -123,47 +123,20 @@ namespace MemoryState
 /-- The state with nothing allocated. -/
 def empty : MemoryState := { allocations := .empty, aliases := [], grants := .empty }
 
-/-- Record a grant of authority. -/
-def grant (state : MemoryState) (id : GrantId) (record : AuthorityGrant) : MemoryState :=
-  { state with grants := state.grants.insert id record }
+/-! Grants are recorded by `MemoryState.issue?` in `Grass/Memory/Loan.lean`, and by
+nothing else.
 
-/--
-`state.Granted context provenance range intent` holds when some live grant
-authorizes that access.
+There was a `grant` here — `grants.insert`, no checks — described as the door
+providers of kinds other than `loan` use, with a theorem arguing it was safe because
+the access-time rule reads whatever map it finds. Review broke that argument in one
+move: `FiniteMap.insert` *erases* any existing binding, so installing a grant under
+an identity another context already holds deletes that context's grant, and the map
+the access-time rule then finds no longer contains the victim. A write to bytes
+another context had lent committed with no violation, and the thief could then
+return the identity, since it now held it.
 
-Existentially quantified over the grant, because an access does not name the one
-it relies on; see `Grass/Memory/Authority.lean`. Decidable because the grant table
-is finite.
+`issue?` refuses a reissued identity. One door, one identity rule.
 -/
-def Granted (state : MemoryState) (context : ContextId) (provenance : Provenance)
-    (range : ByteRange) (intent : AccessIntent) : Prop :=
-  ∃ entry ∈ state.grants.entries,
-    entry.2.Authorizes context provenance range intent
-
-instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
-    (range : ByteRange) (intent : AccessIntent) :
-    Decidable (state.Granted context provenance range intent) :=
-  inferInstanceAs (Decidable (∃ _ ∈ _, _))
-
-/-- `state.GrantedOfKind` additionally requires the authorizing grant to be of a
-particular kind, which is how one provider distinguishes itself from another over
-the same table. -/
-def GrantedOfKind (state : MemoryState) (kind : GrantKind) (context : ContextId)
-    (provenance : Provenance) (range : ByteRange) (intent : AccessIntent) : Prop :=
-  ∃ entry ∈ state.grants.entries,
-    entry.2.kind = kind ∧ entry.2.Authorizes context provenance range intent
-
-instance (state : MemoryState) (kind : GrantKind) (context : ContextId)
-    (provenance : Provenance) (range : ByteRange) (intent : AccessIntent) :
-    Decidable (state.GrantedOfKind kind context provenance range intent) :=
-  inferInstanceAs (Decidable (∃ _ ∈ _, _))
-
-/-- A state with no grants authorizes nothing. Authority is held, not assumed. -/
-theorem not_granted_empty (context : ContextId) (provenance : Provenance)
-    (range : ByteRange) (intent : AccessIntent) :
-    ¬ empty.Granted context provenance range intent := by
-  rintro ⟨entry, hmem, -⟩
-  simp [empty, FiniteMap.empty] at hmem
 
 /-- One declared aliasing hop, in either direction. Aliasing is symmetric by
 convention and this is where the convention is discharged. -/
@@ -228,6 +201,159 @@ theorem sharesBytes_of_hop {state : MemoryState} {a b : AllocId}
   cases hn : state.aliases.length with
   | zero => omega
   | succ m => exact .inr ⟨b, hb, hhop, sharesAfter_zero_of_eq rfl⟩
+
+/--
+`state.CurrentEpoch provenance` holds when the root allocation exists and is in the
+epoch this provenance names.
+
+`docs/MEMORY_MODEL.md` §2: address reuse never revives old pointers, and §5:
+same-address objects in a new epoch have new provenance. `AllocationRecord` carried
+the epoch and nothing compared it, so a provenance minted before a
+free-and-reallocate was treated as naming the storage that replaced it.
+-/
+def CurrentEpoch (state : MemoryState) (provenance : Provenance) : Prop :=
+  (state.allocations.lookup provenance.root).any
+    (fun record => decide (record.epoch = provenance.epoch)) = true
+
+instance (state : MemoryState) (provenance : Provenance) :
+    Decidable (state.CurrentEpoch provenance) :=
+  inferInstanceAs (Decidable (_ = _))
+
+/--
+`state.Live provenance` holds when the root allocation exists, is live, and is in
+the epoch this provenance names.
+
+Authority over storage that is gone is not weak authority, it is none — which is
+`AllocationRecord.live`'s own rule ("a dead allocation authorizes nothing, whatever
+provenance is presented") read at this layer.
+-/
+def Live (state : MemoryState) (provenance : Provenance) : Prop :=
+  (state.allocations.lookup provenance.root).any
+    (fun record => record.live && decide (record.epoch = provenance.epoch)) = true
+
+instance (state : MemoryState) (provenance : Provenance) : Decidable (state.Live provenance) :=
+  inferInstanceAs (Decidable (_ = _))
+
+/-- Live storage is current-epoch storage. -/
+theorem currentEpoch_of_live {state : MemoryState} {provenance : Provenance}
+    (h : state.Live provenance) : state.CurrentEpoch provenance := by
+  unfold Live at h
+  unfold CurrentEpoch
+  cases hm : state.allocations.lookup provenance.root with
+  | none => rw [hm] at h; simp at h
+  | some record =>
+      rw [hm] at h
+      simp only [Option.any_some] at *
+      exact ((Bool.and_eq_true _ _).mp h).2
+
+/--
+`state.AuthorizedBy grant context provenance range intent` holds when this grant
+lets `context` perform that access, in this state.
+
+Six clauses: the holder is the context performing the access, the grant is over the
+same *bytes*, both provenances are current, the grant's range covers the access's,
+and the rights permit the intent.
+
+**On the state, and using `SharesBytes`.** This was `AuthorityGrant.Authorizes`, a
+pure function on provenances using `Provenance.SameStorage` — equal `space`, `root`
+and `epoch`. That is the relation this layer has now moved off twice for being
+wrong in the unsafe direction, and leaving it here made it wrong in the *other*
+direction: `MemoryState.grantsOver` sees aliases and this did not, so a holder
+reaching its own lent bytes through a declared alias was frozen by its own loan and
+authorized by nothing. §7.5's mapped file and host-visible device buffer are exactly
+that shape. Whether two allocations name the same bytes is a fact about the state,
+so this takes the state.
+
+The `space` conjunct is gone with `SameStorage` and is not replaced. An access is
+checked against its own allocation's space by `AccessDescriptor.WellFormedIn` and by
+`denialOf`; requiring the *grant* to name the same space as well would refuse a
+device engine's grant over a host-visible buffer, which is the case §7.5 exists to
+describe.
+
+`Contains` compares offsets relative to a root, and aliased allocations are assumed
+to agree offset for offset — `MemoryState.aliases` records no offset mapping.
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records that.
+-/
+def AuthorizedBy (state : MemoryState) (grant : AuthorityGrant) (context : ContextId)
+    (provenance : Provenance) (range : ByteRange) (intent : AccessIntent) : Prop :=
+  grant.holder = context ∧
+  state.SharesBytes grant.provenance.root provenance.root ∧
+  state.CurrentEpoch grant.provenance ∧
+  state.CurrentEpoch provenance ∧
+  grant.range.Contains range ∧
+  grant.rights.Permits intent
+
+instance (state : MemoryState) (grant : AuthorityGrant) (context : ContextId)
+    (provenance : Provenance) (range : ByteRange) (intent : AccessIntent) :
+    Decidable (state.AuthorizedBy grant context provenance range intent) :=
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+
+/-- A grant held by one context authorizes nothing for another. Authority is not
+ambient: `docs/FOUNDATION.md` law 6 forbids ambient provider choice, and the same
+reading applies to authority a context did not receive. -/
+theorem not_authorizedBy_of_other_holder {state : MemoryState} {grant : AuthorityGrant}
+    {context : ContextId} {provenance : Provenance} {range : ByteRange}
+    {intent : AccessIntent} (h : grant.holder ≠ context) :
+    ¬ state.AuthorizedBy grant context provenance range intent := fun ha => h ha.1
+
+/-- A grant over storage that does not share bytes with the access authorizes
+nothing, however their offsets compare (`docs/MEMORY_MODEL.md` §7.5). -/
+theorem not_authorizedBy_of_other_storage {state : MemoryState} {grant : AuthorityGrant}
+    {context : ContextId} {provenance : Provenance} {range : ByteRange}
+    {intent : AccessIntent}
+    (h : ¬ state.SharesBytes grant.provenance.root provenance.root) :
+    ¬ state.AuthorizedBy grant context provenance range intent := fun ha => h ha.2.1
+
+/-- A read-only grant does not authorize a write. -/
+theorem not_authorizedBy_of_insufficient_rights {state : MemoryState}
+    {grant : AuthorityGrant} {context : ContextId} {provenance : Provenance}
+    {range : ByteRange} {intent : AccessIntent} (h : ¬ grant.rights.Permits intent) :
+    ¬ state.AuthorizedBy grant context provenance range intent := fun ha => h ha.2.2.2.2.2
+
+/-- A grant over a defunct epoch authorizes nothing, and neither does any grant to a
+stale pointer. §2's reuse rule, at the authority gate. -/
+theorem not_authorizedBy_of_stale_epoch {state : MemoryState} {grant : AuthorityGrant}
+    {context : ContextId} {provenance : Provenance} {range : ByteRange}
+    {intent : AccessIntent} (h : ¬ state.CurrentEpoch provenance) :
+    ¬ state.AuthorizedBy grant context provenance range intent := fun ha => h ha.2.2.2.1
+
+/--
+`state.Granted context provenance range intent` holds when some live grant
+authorizes that access.
+
+Existentially quantified over the grant, because an access does not name the one
+it relies on; see `Grass/Memory/Authority.lean`. Decidable because the grant table
+is finite.
+-/
+def Granted (state : MemoryState) (context : ContextId) (provenance : Provenance)
+    (range : ByteRange) (intent : AccessIntent) : Prop :=
+  ∃ entry ∈ state.grants.entries,
+    state.AuthorizedBy entry.2 context provenance range intent
+
+instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
+    (range : ByteRange) (intent : AccessIntent) :
+    Decidable (state.Granted context provenance range intent) :=
+  inferInstanceAs (Decidable (∃ _ ∈ _, _))
+
+/-- `state.GrantedOfKind` additionally requires the authorizing grant to be of a
+particular kind, which is how one provider distinguishes itself from another over
+the same table. -/
+def GrantedOfKind (state : MemoryState) (kind : GrantKind) (context : ContextId)
+    (provenance : Provenance) (range : ByteRange) (intent : AccessIntent) : Prop :=
+  ∃ entry ∈ state.grants.entries,
+    entry.2.kind = kind ∧ state.AuthorizedBy entry.2 context provenance range intent
+
+instance (state : MemoryState) (kind : GrantKind) (context : ContextId)
+    (provenance : Provenance) (range : ByteRange) (intent : AccessIntent) :
+    Decidable (state.GrantedOfKind kind context provenance range intent) :=
+  inferInstanceAs (Decidable (∃ _ ∈ _, _))
+
+/-- A state with no grants authorizes nothing. Authority is held, not assumed. -/
+theorem not_granted_empty (context : ContextId) (provenance : Provenance)
+    (range : ByteRange) (intent : AccessIntent) :
+    ¬ empty.Granted context provenance range intent := by
+  rintro ⟨entry, hmem, -⟩
+  simp [empty, FiniteMap.empty] at hmem
 
 /-- Record a new allocation. -/
 def allocate (state : MemoryState) (id : AllocId) (record : AllocationRecord) :
