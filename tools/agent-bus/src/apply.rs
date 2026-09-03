@@ -513,7 +513,7 @@ fn apply_issue_opened(state: &mut BusState, env: &Envelope, d: &IssueOpened) -> 
             current_target: d.target.clone(),
             current_assignment: env.id.clone(),
             assignment_target: [(env.id.clone(), d.target.clone())].into(),
-            acknowledged: false,
+            acknowledged_assignments: BTreeSet::new(),
             status: ItemStatus::Open,
             resolution_summary: None,
             reassignment_chain: vec![],
@@ -544,10 +544,10 @@ fn apply_issue_ack(state: &mut BusState, env: &Envelope, d: &IssueAcknowledged) 
         )));
     }
     let issue = state.issues.get_mut(&d.issue).expect("just checked");
-    if issue.acknowledged {
+    if issue.acknowledged() {
         return Err(invalid(format!("{}: issue already acknowledged", env.id)));
     }
-    issue.acknowledged = true;
+    issue.acknowledged_assignments.insert(d.assignment.clone());
     Ok(())
 }
 
@@ -627,6 +627,19 @@ fn reset_issue_to_conflict(
     if let Some(issue) = state.issues.get_mut(issue_id) {
         issue.status = ItemStatus::LifecycleConflict;
         issue.resolution_summary = None;
+        if issue.current_assignment != *assignment {
+            // A provisional reassignment already ran before this conflict
+            // was detected (exclusive::winner() gives a lone candidate the
+            // group's effect until a second member arrives) -- retract
+            // exactly what it added, not just the derived `status`/
+            // `current_*` fields. Any later member of the same group
+            // observes current_assignment already at baseline and takes
+            // this branch as a no-op, so this fires at most once per race
+            // regardless of group size or processing order (gates 15/16).
+            let provisional = issue.current_assignment.clone();
+            issue.assignment_target.remove(&provisional);
+            issue.reassignment_chain.retain(|id| id != &provisional);
+        }
         issue.current_assignment = assignment.clone();
         issue.current_target = target.clone();
     }
@@ -687,7 +700,9 @@ fn issue_reassign_effect(state: &mut BusState, env_id: &EventId, d: &IssueReassi
     if let Some(issue) = state.issues.get_mut(&d.issue) {
         issue.current_target = d.new_target.clone();
         issue.current_assignment = env_id.clone();
-        issue.acknowledged = false;
+        // No `acknowledged` reset needed: `env_id` is a brand-new assignment
+        // id that has never been inserted into `acknowledged_assignments`,
+        // so `issue.acknowledged()` is automatically false for it.
         issue
             .assignment_target
             .insert(env_id.clone(), d.new_target.clone());
@@ -718,7 +733,7 @@ fn apply_dependency_requested(
             current_target: d.target.clone(),
             current_assignment: env.id.clone(),
             assignment_target: [(env.id.clone(), d.target.clone())].into(),
-            acknowledged: false,
+            acknowledged_assignments: BTreeSet::new(),
             status: ItemStatus::Open,
             reassignment_chain: vec![],
         },
@@ -752,13 +767,13 @@ fn apply_dependency_ack(
         )));
     }
     let dep = state.dependencies.get_mut(&d.dependency).expect("just checked");
-    if dep.acknowledged {
+    if dep.acknowledged() {
         return Err(invalid(format!(
             "{}: dependency already acknowledged",
             env.id
         )));
     }
-    dep.acknowledged = true;
+    dep.acknowledged_assignments.insert(d.assignment.clone());
     Ok(())
 }
 
@@ -817,8 +832,9 @@ fn dependency_terminal_effect(
 }
 
 /// See `reset_issue_to_conflict`'s doc comment -- same rationale (including
-/// undoing every field a provisionally-applied reassignment may have
-/// changed, not just `status`), applied to dependencies.
+/// retracting exactly the `assignment_target`/`reassignment_chain` entry a
+/// provisionally-applied reassignment may have added, not just `status`),
+/// applied to dependencies.
 fn reset_dependency_to_conflict(
     state: &mut BusState,
     dependency_id: &EventId,
@@ -827,6 +843,11 @@ fn reset_dependency_to_conflict(
 ) {
     if let Some(dep) = state.dependencies.get_mut(dependency_id) {
         dep.status = ItemStatus::LifecycleConflict;
+        if dep.current_assignment != *assignment {
+            let provisional = dep.current_assignment.clone();
+            dep.assignment_target.remove(&provisional);
+            dep.reassignment_chain.retain(|id| id != &provisional);
+        }
         dep.current_assignment = assignment.clone();
         dep.current_target = target.clone();
     }
@@ -890,7 +911,8 @@ fn dependency_reassign_effect(state: &mut BusState, env_id: &EventId, d: &Depend
     if let Some(dep) = state.dependencies.get_mut(&d.dependency) {
         dep.current_target = d.new_target.clone();
         dep.current_assignment = env_id.clone();
-        dep.acknowledged = false;
+        // See issue_reassign_effect: no `acknowledged` reset needed, since
+        // `env_id` is a brand-new assignment id never yet acknowledged.
         dep.assignment_target
             .insert(env_id.clone(), d.new_target.clone());
         dep.reassignment_chain.push(env_id.clone());
@@ -2113,6 +2135,286 @@ mod tests {
         assert_eq!(
             forward.issues[&issue_env.id].current_target,
             reverse.issues[&issue_env.id].current_target
+        );
+    }
+
+    /// Adversarial-review regression: two racing `IssueReassigned` events
+    /// (not `IssueResolved` vs `IssueReassigned` -- the only combination
+    /// `issue_race_converges_to_the_same_state_regardless_of_reduction_order`
+    /// exercises, which never touches `reassignment_chain`/
+    /// `assignment_target` since `apply_issue_terminal_effect` doesn't
+    /// mutate either). This is the one code path that can leave a
+    /// provisionally-applied reassignment's bookkeeping stuck if
+    /// `reset_issue_to_conflict` only reverts `status`/`current_*`.
+    #[test]
+    fn two_racing_issue_reassignments_converge_with_no_stale_chain_entry() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        let dave = a("dave");
+
+        let issue_data = EventData::IssueOpened(IssueOpened {
+            target: bob.clone(),
+            issue_kind: IssueKind::Bug,
+            severity: Priority::Normal,
+            summary: text("s"),
+            code_commit: None,
+            locations: vec![],
+            expected: None,
+            observed_behavior: None,
+            reproduction: vec![],
+            blocks: StringSet::default(),
+            evidence: StringSet::default(),
+        });
+        let issue_env = Envelope::new(&alice, 1, no_frontier(), &issue_data, []);
+
+        let to_carol = EventData::IssueReassigned(IssueReassigned {
+            issue: issue_env.id.clone(),
+            previous_assignment: issue_env.id.clone(),
+            previous_target: bob.clone(),
+            new_target: carol.clone(),
+            reason: text("r1"),
+        });
+        let to_carol_env = Envelope::new(&alice, 2, no_frontier(), &to_carol, [issue_env.id.clone()]);
+        // Authored by a *different* agent than `to_carol_env` -- same-agent
+        // events are always causally ordered by stream position (the
+        // exclusive tracker treats any two events from the same author as
+        // observing each other), so a genuine race needs two agents.
+        // coord1 stands in for the bootstrap coordinator, the other agent
+        // `apply_issue_reassigned` allows to reassign a non-owned issue.
+        let coord1 = a("coord1");
+        let to_dave = EventData::IssueReassigned(IssueReassigned {
+            issue: issue_env.id.clone(),
+            previous_assignment: issue_env.id.clone(),
+            previous_target: bob.clone(),
+            new_target: dave.clone(),
+            reason: text("r2"),
+        });
+        let to_dave_env = Envelope::new(&coord1, 1, no_frontier(), &to_dave, [issue_env.id.clone()]);
+
+        let run = |order: &[&Envelope]| {
+            let mut state = empty_state(&[
+                ("alice", Role::Implementor),
+                ("bob", Role::Implementor),
+                ("carol", Role::Implementor),
+                ("dave", Role::Implementor),
+                ("coord1", Role::Coordinator),
+            ]);
+            apply_ok(&mut state, &register(&alice, Role::Implementor));
+            apply_ok(&mut state, &register(&bob, Role::Implementor));
+            apply_ok(&mut state, &register(&carol, Role::Implementor));
+            apply_ok(&mut state, &register(&dave, Role::Implementor));
+            apply_ok(&mut state, &register(&a("coord1"), Role::Coordinator));
+            apply_ok(&mut state, &issue_env);
+            for env in order {
+                apply_ok(&mut state, env);
+            }
+            state
+        };
+
+        let forward = run(&[&to_carol_env, &to_dave_env]);
+        let reverse = run(&[&to_dave_env, &to_carol_env]);
+
+        for state in [&forward, &reverse] {
+            let issue = &state.issues[&issue_env.id];
+            assert_eq!(issue.status, ItemStatus::LifecycleConflict);
+            assert_eq!(issue.current_assignment, issue_env.id);
+            assert_eq!(issue.current_target, bob);
+            assert!(
+                issue.reassignment_chain.is_empty(),
+                "both racing candidates' provisional chain entries must be fully retracted: {:?}",
+                issue.reassignment_chain
+            );
+            assert_eq!(
+                issue.assignment_target.len(),
+                1,
+                "only the issue's own opening assignment id should remain: {:?}",
+                issue.assignment_target
+            );
+        }
+        assert_eq!(
+            forward.issues[&issue_env.id].reassignment_chain,
+            reverse.issues[&issue_env.id].reassignment_chain
+        );
+
+        // Resolving to the winner must append it exactly once -- not twice
+        // (the already-provisionally-applied case) and not alongside the
+        // loser's now-stale id (the never-retracted case).
+        let mut state = forward;
+        let resolved_data = EventData::LifecycleConflictResolved(LifecycleConflictResolved {
+            root: to_carol_env.id.clone(),
+            competing: StringSet::from_iter([to_carol_env.id.clone(), to_dave_env.id.clone()]),
+            selected: to_carol_env.id.clone(),
+            reason: text("user said so"),
+            user_authority: text("the user"),
+        });
+        let resolved_env = Envelope::new(
+            &a("coord1"),
+            2, // coord1:1 is to_dave_env, already applied to `forward`
+            frontier_seeing(&[&to_carol_env.id, &to_dave_env.id]),
+            &resolved_data,
+            [to_carol_env.id.clone(), to_dave_env.id.clone()],
+        );
+        apply_ok(&mut state, &resolved_env);
+        let issue = &state.issues[&issue_env.id];
+        assert_eq!(issue.reassignment_chain, vec![to_carol_env.id.clone()]);
+        assert_eq!(issue.current_target, carol);
+        assert_eq!(issue.assignment_target.len(), 2);
+    }
+
+    /// Adversarial-review regression: `acknowledged_assignments` (unlike a
+    /// flat bool) survives a reassignment race intact -- if the *baseline*
+    /// assignment had been acknowledged before the race began, resetting
+    /// back to that baseline after a lost race must still report it as
+    /// acknowledged, not silently lose that fact because a provisional
+    /// effect overwrote it in between.
+    #[test]
+    fn acknowledged_status_survives_a_reassignment_race_reset() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        let coord1 = a("coord1");
+
+        let issue_data = EventData::IssueOpened(IssueOpened {
+            target: bob.clone(),
+            issue_kind: IssueKind::Bug,
+            severity: Priority::Normal,
+            summary: text("s"),
+            code_commit: None,
+            locations: vec![],
+            expected: None,
+            observed_behavior: None,
+            reproduction: vec![],
+            blocks: StringSet::default(),
+            evidence: StringSet::default(),
+        });
+        let issue_env = Envelope::new(&alice, 1, no_frontier(), &issue_data, []);
+
+        let mut state = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Implementor),
+            ("carol", Role::Implementor),
+            ("coord1", Role::Coordinator),
+        ]);
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        apply_ok(&mut state, &register(&carol, Role::Implementor));
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        apply_ok(&mut state, &issue_env);
+
+        let ack_data = EventData::IssueAcknowledged(IssueAcknowledged {
+            issue: issue_env.id.clone(),
+            assignment: issue_env.id.clone(),
+            note: text(""),
+        });
+        let ack_env = Envelope::new(&bob, 1, no_frontier(), &ack_data, [issue_env.id.clone()]);
+        apply_ok(&mut state, &ack_env);
+        assert!(state.issues[&issue_env.id].acknowledged());
+
+        // Two racing reassignments off the (acknowledged) baseline.
+        let to_carol = EventData::IssueReassigned(IssueReassigned {
+            issue: issue_env.id.clone(),
+            previous_assignment: issue_env.id.clone(),
+            previous_target: bob.clone(),
+            new_target: carol.clone(),
+            reason: text("r1"),
+        });
+        let to_carol_env = Envelope::new(&alice, 2, no_frontier(), &to_carol, [issue_env.id.clone()]);
+        apply_ok(&mut state, &to_carol_env);
+        // Sole candidate so far: provisionally applied, so acknowledged
+        // resets to false for the *new* assignment -- expected, not yet a
+        // conflict.
+        assert!(!state.issues[&issue_env.id].acknowledged());
+
+        let to_dave = EventData::IssueReassigned(IssueReassigned {
+            issue: issue_env.id.clone(),
+            previous_assignment: issue_env.id.clone(),
+            previous_target: bob.clone(),
+            new_target: a("dave"),
+            reason: text("r2"),
+        });
+        let to_dave_env = Envelope::new(&coord1, 1, no_frontier(), &to_dave, [issue_env.id.clone()]);
+        apply_ok(&mut state, &to_dave_env);
+
+        let issue = &state.issues[&issue_env.id];
+        assert_eq!(issue.status, ItemStatus::LifecycleConflict);
+        assert_eq!(issue.current_assignment, issue_env.id);
+        assert!(
+            issue.acknowledged(),
+            "resetting back to the baseline assignment must recover its true acknowledged status"
+        );
+    }
+
+    /// The dependency-side twin of
+    /// `two_racing_issue_reassignments_converge_with_no_stale_chain_entry`
+    /// -- `reset_dependency_to_conflict` had the identical incomplete-
+    /// rollback gap as its issue counterpart.
+    #[test]
+    fn two_racing_dependency_reassignments_converge_with_no_stale_chain_entry() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        let coord1 = a("coord1");
+
+        let dep_data = EventData::DependencyRequested(DependencyRequested {
+            target: bob.clone(),
+            interface: short("x"),
+            needed_by: text("soon"),
+            blocking: false,
+            summary: text("s"),
+            evidence: StringSet::default(),
+        });
+        let dep_env = Envelope::new(&alice, 1, no_frontier(), &dep_data, []);
+
+        let to_carol = EventData::DependencyReassigned(DependencyReassigned {
+            dependency: dep_env.id.clone(),
+            previous_assignment: dep_env.id.clone(),
+            previous_target: bob.clone(),
+            new_target: carol.clone(),
+            reason: text("r1"),
+        });
+        let to_carol_env = Envelope::new(&alice, 2, no_frontier(), &to_carol, [dep_env.id.clone()]);
+        let to_dave = EventData::DependencyReassigned(DependencyReassigned {
+            dependency: dep_env.id.clone(),
+            previous_assignment: dep_env.id.clone(),
+            previous_target: bob.clone(),
+            new_target: a("dave"),
+            reason: text("r2"),
+        });
+        let to_dave_env = Envelope::new(&coord1, 1, no_frontier(), &to_dave, [dep_env.id.clone()]);
+
+        let run = |order: &[&Envelope]| {
+            let mut state = empty_state(&[
+                ("alice", Role::Implementor),
+                ("bob", Role::Implementor),
+                ("carol", Role::Implementor),
+                ("dave", Role::Implementor),
+                ("coord1", Role::Coordinator),
+            ]);
+            apply_ok(&mut state, &register(&alice, Role::Implementor));
+            apply_ok(&mut state, &register(&bob, Role::Implementor));
+            apply_ok(&mut state, &register(&carol, Role::Implementor));
+            apply_ok(&mut state, &register(&a("dave"), Role::Implementor));
+            apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+            apply_ok(&mut state, &dep_env);
+            for env in order {
+                apply_ok(&mut state, env);
+            }
+            state
+        };
+
+        let forward = run(&[&to_carol_env, &to_dave_env]);
+        let reverse = run(&[&to_dave_env, &to_carol_env]);
+        for state in [&forward, &reverse] {
+            let dep = &state.dependencies[&dep_env.id];
+            assert_eq!(dep.status, ItemStatus::LifecycleConflict);
+            assert_eq!(dep.current_assignment, dep_env.id);
+            assert!(dep.reassignment_chain.is_empty(), "{:?}", dep.reassignment_chain);
+            assert_eq!(dep.assignment_target.len(), 1);
+        }
+        assert_eq!(
+            forward.dependencies[&dep_env.id].reassignment_chain,
+            reverse.dependencies[&dep_env.id].reassignment_chain
         );
     }
 

@@ -36,10 +36,24 @@ pub struct IssueState {
     /// racing on the same assignment be recognized as concurrent instead of
     /// one hard-failing.
     pub assignment_target: BTreeMap<EventId, Agent>,
-    pub acknowledged: bool,
+    /// Every assignment id ever acknowledged by its target -- membership,
+    /// not a flat flag, so "was assignment X acknowledged" is a pure
+    /// function of history that a reassignment race's rollback
+    /// (`apply::reset_issue_to_conflict`) never needs to separately thread
+    /// a "baseline" value through: querying it for whichever assignment id
+    /// `current_assignment` gets reset back to always gives the right
+    /// answer, since an old assignment id's entry here is never touched
+    /// once written.
+    pub acknowledged_assignments: BTreeSet<EventId>,
     pub status: ItemStatus,
     pub resolution_summary: Option<Text>,
     pub reassignment_chain: Vec<EventId>,
+}
+
+impl IssueState {
+    pub fn acknowledged(&self) -> bool {
+        self.acknowledged_assignments.contains(&self.current_assignment)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -50,9 +64,16 @@ pub struct DependencyState {
     pub current_target: Agent,
     pub current_assignment: EventId,
     pub assignment_target: BTreeMap<EventId, Agent>,
-    pub acknowledged: bool,
+    /// See `IssueState::acknowledged_assignments`.
+    pub acknowledged_assignments: BTreeSet<EventId>,
     pub status: ItemStatus,
     pub reassignment_chain: Vec<EventId>,
+}
+
+impl DependencyState {
+    pub fn acknowledged(&self) -> bool {
+        self.acknowledged_assignments.contains(&self.current_assignment)
+    }
 }
 
 #[derive(Debug, Clone)]
