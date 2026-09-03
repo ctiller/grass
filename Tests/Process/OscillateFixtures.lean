@@ -24,8 +24,16 @@ exhibits the two steps returning the run state bit-for-bit, and `osc` had a full
 
 Everything else about it is strict, so nothing else can be blamed:
 `ExternalEvent := PEmpty` (no entropy escape), `Demanded := fun _ => False` (no
-emission disjunct), `TerminalResult := PEmpty` (it never terminates),
-`TerminalRemainderLaw.strict`.
+emission disjunct), `TerminalResult := PEmpty` (it never terminates). The
+`TerminalRemainderLaw.strict` in `oscAcceptance` is inert rather than strict —
+with an empty `TerminalResult` the law is never consulted — and saying so is the
+point of this paragraph.
+
+And `osc` is excluded by `productive` alone, not by being stuck:
+`osc_responds` and `osc_is_never_stuck` say so. That separation is what
+`Tests/Process/SpinFixtures.lean` calls for and what an earlier version of this
+file did not have — refuting the record as a whole leaves a reader guessing which
+field did the work.
 
 ## The repair, and why it is the definition rather than a fixture
 
@@ -155,6 +163,38 @@ theorem osc_cycles (observations : Trace osc.Observation) :
     (demand := ()) (remainder := one) rfl (show two = Bag.cons () one from rfl) osc_contract
   simpa using stepped
 
+/-! ## What it still satisfies -/
+
+/-- Every event it could be handed has a transition. -/
+theorem osc_responds (state : osc.State) (event : osc.Event) :
+    ∃ after issued emitted, osc.Step state event after issued emitted := by
+  cases event with
+  | external e => exact e.elim
+  | result _ _ =>
+    cases state with
+    | false => exact ⟨true, two, [], rfl, rfl, rfl⟩
+    | true => exact ⟨false, 0, [], rfl, rfl, rfl⟩
+  | interrupted _ reason => exact reason.elim
+  | fault f => exact f.elim
+  | environmentViolation v => exact v.elim
+
+/--
+And neither configuration of the cycle is stuck.
+
+Stated at the two configurations the cycle visits, which are the ones
+`osc_has_no_progress_record` is about. A `.result` is deliverable at each because
+each holds at least one occurrence.
+-/
+theorem osc_is_never_stuck :
+    (∃ event, EventDeliverable one event ∧
+        ∃ after issued emitted, osc.Step false event after issued emitted) ∧
+      (∃ event, EventDeliverable two event ∧
+        ∃ after issued emitted, osc.Step true event after issued emitted) := by
+  refine ⟨⟨.result () (), ?_, true, two, [], rfl, rfl, rfl⟩,
+    ⟨.result () (), ?_, false, 0, [], rfl, rfl, rfl⟩⟩
+  · exact eventDeliverable_of_successorBag osc_expand_bag
+  · exact eventDeliverable_of_successorBag osc_contract_bag
+
 /-! ## Why it is excluded -/
 
 /-- Nothing `osc` emits is demanded. -/
@@ -163,13 +203,26 @@ theorem osc_never_observes (segment : osc.Segment) :
   rintro ⟨_, _, demanded⟩
   exact demanded
 
+/-- The expanding step is silent: no entropy in the vocabulary, nothing emitted. -/
+theorem osc_expands_silently : SilentStep oscAcceptance false one true two :=
+  ⟨.result () (), two, [], osc_expand, osc_expand_bag, rfl, osc_never_observes _⟩
+
+/-- And so is the contracting one. -/
+theorem osc_contracts_silently : SilentStep oscAcceptance true two false one :=
+  ⟨.result () (), 0, [], osc_contract, osc_contract_bag, rfl, osc_never_observes _⟩
+
 /--
 **`osc` has no progress record, whatever measure or invariant is offered.**
 
-Both steps are reachable and neither can use the entropy or emission disjunct,
-so `productive` must supply a measure descent across each. Those two descents run
-in opposite directions between the same pair of running configurations, which
-`ProcessMeasure.not_decreases_both_ways` forbids.
+An instance of `MeetsProcessProgress.no_silent_two_cycle` rather than an argument
+of its own — which is the point of having that theorem. Both steps are reachable
+and silent, and two silent descents between the same pair of running
+configurations run in opposite directions, which a well-founded order forbids.
+
+An earlier version of this proof did the case analysis inline, over the four
+disjuncts `StepProgresses` then had. That version would have kept compiling
+across a re-widening that admitted a *different* cycle; this one is the same
+theorem the module now states for every process.
 
 The invariant is the caller's, so the statement takes an arbitrary one and asks
 only that it hold at the two states the cycle visits — which `ProcessCorrect`
@@ -180,17 +233,8 @@ theorem osc_has_no_progress_record (Invariant : osc.State → Prop)
     (atFalse : Invariant false) (atTrue : Invariant true) :
     ¬ Nonempty (MeetsProcessProgress osc oscAcceptance Invariant ()) := by
   rintro ⟨progress⟩
-  have out := progress.productive _ false one [] true two (.result () ()) two []
-    osc_start_reachable atFalse osc_expand_bag osc_expand
-  have back := progress.productive _ true two [] false one (.result () ()) 0 []
-    osc_expanded_reachable atTrue osc_contract_bag osc_contract
-  rcases out with ⟨entropy, _⟩ | demanded | descends
-  · exact entropy.elim
-  · exact osc_never_observes _ demanded
-  rcases back with ⟨entropy, _⟩ | demanded | climbs
-  · exact entropy.elim
-  · exact osc_never_observes _ demanded
-  exact progress.measure.not_decreases_both_ways descends climbs
+  exact progress.no_silent_two_cycle osc_start_reachable osc_expanded_reachable
+    atFalse atTrue osc_expands_silently osc_contracts_silently
 
 /--
 **And therefore no correctness record either.**

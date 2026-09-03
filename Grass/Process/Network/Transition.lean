@@ -1170,17 +1170,37 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
       (custody : Bag (plan.topology.protocol kind).Demand →
         Obligations → Obligations → Prop)
       (step : plan.EndsInstance before after kind slot (.violated violation) custody)
-  /-- A child acknowledged a cancellation, at this point. -/
+  /--
+  A **child** acknowledged a cancellation, at this point.
+
+  `wasChild` is the same field `Joins` carries and for the same reason. Without
+  it the name is decoration: local adversarial review cancelled the *root*
+  through this constructor while building a minimal plan, which is a program
+  being stopped by a supervisor it does not have. It also made the frontier
+  question unanswerable — any live network could be ended by a step that is not
+  entropy-driven, so nothing could be waiting on anything.
+  -/
   | childCancelled (kind slot) (reason : CancelReason)
       (custody : Bag (plan.topology.protocol kind).Demand →
         Obligations → Obligations → Prop)
+      (wasChild : ∀ incarnation, before.instances kind slot = some incarnation →
+        ¬ incarnation.IsRoot)
       (step : plan.EndsInstance before after kind slot (.cancelled reason) custody)
-  /-- A child stopped existing without finishing. -/
+  /-- A **child** stopped existing without finishing. `wasChild` as above. -/
   | childDied (kind slot) (reason : ProcessDeathReason)
       (custody : Bag (plan.topology.protocol kind).Demand →
         Obligations → Obligations → Prop)
+      (wasChild : ∀ incarnation, before.instances kind slot = some incarnation →
+        ¬ incarnation.IsRoot)
       (step : plan.EndsInstance before after kind slot (.died reason) custody)
-  /-- A non-child instance terminated. -/
+  /--
+  An instance reached a terminal state of its protocol.
+
+  Unrestricted, and the docstring used to say "a non-child instance" — which is
+  wrong, because `Joins.wasTerminated` requires a child to be *already*
+  terminated and nothing else can terminate one. A child terminates here and is
+  then collected by `join`; the root terminates here and is collected by nobody.
+  -/
   | processTermination (kind slot)
       (result : (plan.topology.protocol kind).TerminalResult)
       (custody : Bag (plan.topology.protocol kind).Demand →
@@ -1271,10 +1291,10 @@ def scope : plan.NetworkTransition before after → NetworkFragment plan.topolog
   | .environmentViolation kind slot _ _ _ =>
       fun fragment => fragment = .instanceState kind slot ∨
         (before.obligations ≠ after.obligations ∧ fragment = .obligations)
-  | .childCancelled kind slot _ _ _ =>
+  | .childCancelled kind slot _ _ _ _ =>
       fun fragment => fragment = .instanceState kind slot ∨
         (before.obligations ≠ after.obligations ∧ fragment = .obligations)
-  | .childDied kind slot _ _ _ =>
+  | .childDied kind slot _ _ _ _ =>
       fun fragment => fragment = .instanceState kind slot ∨
         (before.obligations ≠ after.obligations ∧ fragment = .obligations)
   | .processTermination kind slot _ _ _ =>
@@ -1374,8 +1394,8 @@ theorem touchesOnly (transition : plan.NetworkTransition before after) :
   | interrupt _ _ _ _ step => exact step.scope
   | fault _ _ _ _ step => exact step.scope
   | environmentViolation _ _ _ _ step => exact step.scope
-  | childCancelled _ _ _ _ step => exact step.scope
-  | childDied _ _ _ _ step => exact step.scope
+  | childCancelled _ _ _ _ _ step => exact step.scope
+  | childDied _ _ _ _ _ step => exact step.scope
   | processTermination _ _ _ _ step => exact step.scope
   | join _ _ _ step => exact step.scope
   | detach _ _ step => exact step.onlyThatSlot.scope
@@ -1423,9 +1443,9 @@ theorem moving_the_ledger_ends_an_instance (transition : plan.NetworkTransition 
     exact ⟨kind, slot, _, custody, step, step.notRunning⟩
   | environmentViolation kind slot _ custody step =>
     exact ⟨kind, slot, _, custody, step, step.notRunning⟩
-  | childCancelled kind slot _ custody step =>
+  | childCancelled kind slot _ custody _ step =>
     exact ⟨kind, slot, _, custody, step, step.notRunning⟩
-  | childDied kind slot _ custody step =>
+  | childDied kind slot _ custody _ step =>
     exact ⟨kind, slot, _, custody, step, step.notRunning⟩
   | processTermination kind slot _ custody step =>
     exact ⟨kind, slot, _, custody, step, step.notRunning⟩

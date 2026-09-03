@@ -7,8 +7,14 @@ import Tests.Process.M1Fixtures
 `Tests/Process/M1Fixtures.lean` exercises the run relation. Nothing there builds
 a `ProcessCorrect` or a `MeetsProcessProgress`, and that gap let a real defect
 survive three review rounds: `handlesEveryEvent` and `terminalNoStep`
-contradicted each other for every process that terminates, so `ProcessCorrect`
-was uninhabited and no fixture noticed.
+contradicted each other, so `ProcessCorrect` was uninhabited and no fixture
+noticed.
+
+"For every process that terminates" is how this used to read, and it is wrong.
+The class is processes with a reachable running state terminal for *every*
+request — `oneShot` and `countdown`. `Tests/Process/PrefixFixtures.lean`'s
+`upto` terminates and inhabits the record with the guard deleted, which a
+reviewer checked by building it.
 
 So this module inhabits them. `oneShot` is the smallest process that terminates
 after doing something: it starts working, one event finishes it, and no

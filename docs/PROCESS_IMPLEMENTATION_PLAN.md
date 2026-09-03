@@ -2835,3 +2835,50 @@ channels, an empty boundary observation type, a protocol that never terminates �
 at which a network waiting on external entropy really is at a frontier and a
 measure exists. Until that lands, §10.54's exit criterion is unmet for this
 record.
+
+### 10.61 `childCancelled` and `childDied` did not require a child
+
+Both constructors take an `EndsInstance` and a reason, and neither required the
+instance to be a child — so a *root* could be cancelled or killed through a
+constructor whose name and docstring say "a child". `Joins.wasChild` had been
+added for exactly this on the neighbouring constructor.
+
+Fixed: both now carry `wasChild`. Found while building a minimal single-role
+plan, where it had a second consequence — any live network could be ended by a
+step that is not entropy-driven, so no network could be waiting on anything and
+the frontier question was unanswerable.
+
+`processTermination`'s docstring said "a non-child instance terminated", which is
+also wrong and is corrected rather than enforced: `Joins.wasTerminated` requires
+a child to be *already* terminated and nothing else can terminate one, so a child
+terminates through that constructor and is then collected by `join`.
+
+### 10.62 Five of nine `ProcessCorrect` fields have no non-vacuous instance
+
+Confirmed by a fourth review pass, by inspection of every `ProcessAcceptance` in
+the repository. `TraceAccepts`, `DemandsWellFormed`, `TerminalAccepts` and
+`ViewAccepts` are `fun _ => True` everywhere, so `initialDemands`,
+`demandsWellFormed`, `terminal`, `observationsAccept` and `viewAccepts` are
+discharged by `trivial` or `absurd` in all five correctness fixtures.
+
+`TerminalDemandClassification.transferred` is `0` at all six of its construction
+sites: the middle label of §2's three-way partition has never been non-empty in
+this corpus. And `silent_fault_decreases` has no applicable process — every
+specification here has `LogicalFault := PEmpty` and
+`EnvironmentViolation := PEmpty`, so the module note's motivating case ("a
+process that faults in a loop") has no fixture in either direction.
+
+Separate from §10.49 and §10.56, which are about predicates that *cannot* be
+constrained. These are predicates nobody has yet chosen to constrain, which is a
+corpus gap and is cheaper to close: a fixture with a real trace acceptance, a
+real fault, and a transferred remainder would close all three.
+
+### 10.63 `transition_for_event` and `accessible` have no consumers
+
+`transition_for_event` is `handlesEveryEvent`'s only consumer and has none of its
+own; `accessible` had none until `no_infinite_silent_run` was stated. Both are
+"law 5 / §7 made checkable" rather than used.
+
+Not a defect — a driver is the consumer and no driver exists at this milestone —
+but worth the entry, because §10.48 was closed by adding a one-link chain and a
+one-link chain is what a reviewer will find next time.

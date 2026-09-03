@@ -31,13 +31,19 @@ but the invariant a reader may infer from the word, that a result strictly
 reduces its demand's multiplicity, is false: `issued` may contain the demand
 just consumed, so a `.result` step can leave the run state bit-for-bit
 identical. `Grass/Process/Progress.lean` is what stops such a step counting as
-progress, not this table — its `StepProgresses` requires a settling step to
-issue nothing, which is exactly this case excluded.
+progress, not this table — its measure ranks the state *and the outstanding bag*
+together, and a well-founded order is irreflexive, so a step that moves neither
+cannot descend it.
 
-That sentence was false for one commit, and `Tests/Process/SpinFixtures.lean` is
-the process that made it false: it takes this very step forever and had a full
-`ProcessCorrect`. The table's qualification is only worth as much as the module
-it defers to, so the two are worth reading together.
+The mechanism named here has been wrong twice, in the same sentence, and both
+times a reviewer caught it by building the step rather than by reading. First it
+named a `StepProgresses` disjunct that fired on the event's label
+(`Tests/Process/SpinFixtures.lean` is the process that exploited it). Then it
+named the `issued.card = 0` condition that replaced it, which had itself been
+replaced by the measure taking the bag
+(`Tests/Process/OscillateFixtures.lean` is why). A cross-module claim about
+another module's definition is worth exactly as much as the last time someone
+checked it.
 
 ## Two constructors, five derived rules
 

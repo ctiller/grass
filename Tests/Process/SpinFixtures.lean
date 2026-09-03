@@ -202,8 +202,20 @@ theorem spin_is_never_stuck {segmented : Segmented spin.Observation}
 issue one back. -/
 theorem spin_successor_bag :
     SuccessorBag (p := spin) (Bag.ofList [()]) (.result () ()) (Bag.ofList [()])
-      (0 + Bag.ofList [()]) :=
-  ⟨0, rfl, rfl⟩
+      (Bag.ofList [()]) :=
+  ⟨0, rfl, by simp⟩
+
+/-- Nothing `spin` emits is demanded. -/
+theorem spin_never_observes (segment : spin.Segment) :
+    ¬ spinAcceptance.SegmentIsDemanded segment := by
+  rintro ⟨_, _, demanded⟩
+  exact demanded
+
+/-- So the loop step is a silent step that changes nothing. -/
+theorem spin_steps_silently :
+    SilentStep spinAcceptance () (Bag.ofList [()]) () (Bag.ofList [()]) :=
+  ⟨.result () (), Bag.ofList [()], [], ⟨rfl, rfl, rfl⟩, spin_successor_bag, rfl,
+    spin_never_observes _⟩
 
 /--
 **The loop step progresses under no measure at all.**
@@ -221,11 +233,11 @@ of a case analysis on the event.
 -/
 theorem spin_step_does_not_progress (measure : ProcessMeasure spin) :
     ¬ StepProgresses spinAcceptance measure () (Bag.ofList [()]) ()
-      (0 + Bag.ofList [()]) (.result () ()) [] := by
+      (Bag.ofList [()]) (.result () ()) [] := by
   rintro (⟨entropy, _⟩ | ⟨_, _, demanded⟩ | decreases)
   · exact entropy.elim
   · exact demanded
-  · exact measure.not_decreases_self () (Bag.ofList [()]) (by simpa using decreases)
+  · exact measure.not_decreases_self () (Bag.ofList [()]) decreases
 
 /--
 **So `spin` has no progress record, whatever measure or invariant is offered.**
@@ -241,10 +253,8 @@ theorem spin_has_no_progress_record (Invariant : spin.State → Prop)
     (holds : Invariant ()) :
     ¬ Nonempty (MeetsProcessProgress spin spinAcceptance Invariant ()) := by
   rintro ⟨progress⟩
-  exact spin_step_does_not_progress progress.measure
-    (progress.productive _ () (Bag.ofList [()]) [] () (0 + Bag.ofList [()])
-      (.result () ()) (Bag.ofList [()]) [] spin_loop_is_reachable holds
-      spin_successor_bag ⟨rfl, rfl, rfl⟩)
+  exact progress.measure.not_decreases_self () (Bag.ofList [()])
+    (progress.silent_step_descends spin_loop_is_reachable holds spin_steps_silently)
 
 /--
 **And therefore no correctness record either.**

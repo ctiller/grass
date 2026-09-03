@@ -326,10 +326,15 @@ def StepProgresses {p : ProcessSpec.{u, w}} (accept : ProcessAcceptance p)
 A process meets its progress contract.
 
 **All three fields are quantified over reachable run states**, because a claim
-about a state and an outstanding bag that no execution reaches together is
-neither needed nor provable. The two responsiveness fields were moved there
-first; `productive` followed, and the reason is the same one in the other
-direction.
+about a state and an outstanding bag that no execution reaches together is not
+needed. The two responsiveness fields were moved there first; `productive`
+followed, and the reason is the same one in the other direction.
+
+It is not that such a claim is *unprovable* — an earlier version of this
+paragraph said so and a reviewer refuted it in one file, by discharging
+`handlesEveryEvent` for `upto` with no reachability hypothesis at all. It is that
+requiring it costs a correct process its record, which is what happened to
+`countdown`.
 
 `productive` used to quantify over every step from an invariant-satisfying
 state. An `Invariant : p.State → Prop` sees the state and not the bag, so it
@@ -359,8 +364,13 @@ structure MeetsProcessProgress (p : ProcessSpec.{u, w})
   results they expect and leave the rest, because every event that could arrive
   while the process is still working must have a transition.
 
-  The non-terminality guard is not a weakening; without it this record is
-  uninhabitable. See the module note.
+  The non-terminality guard is a weakening for some processes and a necessity
+  for others, and the module note says which. It is *not* true that the record
+  is uninhabitable without it — `Tests/Process/PrefixFixtures.lean`'s `upto`
+  terminates and satisfies the unguarded field, which a reviewer checked by
+  building it. What is true is that `oneShot` and `countdown` do not, because
+  each has a reachable running state terminal for every request, where
+  `ProcessCorrect.terminalNoStep` forbids the step this field would demand.
   -/
   handlesEveryEvent : ∀ (segmented : Segmented p.Observation) (state : p.State)
       (outstanding : Bag p.Demand) (observations : Trace p.Observation)
@@ -547,16 +557,123 @@ theorem silent_fault_decreases
     (successorBag_of_settles_none (by simp)) transition (by simp) silent
 
 /--
-There is no infinite silent descent.
+The accessibility of the measure's rank at a running configuration.
 
-The accessibility of the measure's rank at a state is what a coinductive
-argument over maximal executions consumes at M4. Stating it here keeps the
-well-foundedness obligation next to the definition that needs it.
+What the two livelock theorems below run on, and what a coinductive argument
+over maximal executions consumes at M4.
 -/
 theorem accessible (progress : MeetsProcessProgress p accept Invariant request)
     (state : p.State) (outstanding : Bag p.Demand) :
     Acc progress.measure.lt (progress.measure.rank state outstanding) :=
   progress.measure.wellFounded.apply _
+
+end MeetsProcessProgress
+
+/-! ## No silent livelock -/
+
+/--
+One silent step of a run: not environment entropy, and emitting nothing the
+specification demanded.
+
+The shape a livelock is made of. `SuccessorBag` is what makes it a step of a
+*run* rather than of the transition relation alone — it carries the bag the run
+holds afterwards, which is half of what the measure ranks.
+-/
+def SilentStep {p : ProcessSpec.{u, w}} (accept : ProcessAcceptance p)
+    (before : p.State) (beforeOutstanding : Bag p.Demand)
+    (after : p.State) (afterOutstanding : Bag p.Demand) : Prop :=
+  ∃ (event : p.Event) (issued : Bag p.Demand) (emitted : p.Segment),
+    p.Step before event after issued emitted ∧
+    SuccessorBag beforeOutstanding event issued afterOutstanding ∧
+    event.externalEntropy = none ∧
+    ¬ accept.SegmentIsDemanded emitted
+
+namespace MeetsProcessProgress
+
+variable {p : ProcessSpec.{u, w}} {accept : ProcessAcceptance p}
+  {Invariant : p.State → Prop} {request : p.Request}
+
+/-- A silent step from a reachable, invariant-satisfying configuration descends
+the measure. -/
+theorem silent_step_descends (progress : MeetsProcessProgress p accept Invariant request)
+    {segmented : Segmented p.Observation} {state after : p.State}
+    {outstanding afterOutstanding : Bag p.Demand} {observations : Trace p.Observation}
+    (reached : Reachable accept.terminalRemainder request segmented
+      (.running state outstanding observations))
+    (invariant : Invariant state)
+    (silent : SilentStep accept state outstanding after afterOutstanding) :
+    progress.measure.Decreases state outstanding after afterOutstanding := by
+  obtain ⟨_, _, _, stepped, successor, notEntropy, undemanded⟩ := silent
+  exact progress.silent_nonentropy_step_decreases reached invariant successor stepped
+    notEntropy undemanded
+
+/--
+**A run cannot take two silent steps and be back where it started.**
+
+`Tests/Process/OscillateFixtures.lean` lifted off its fixture. That process
+descended the outstanding bag on one step and a state rank on the next, and
+returned the run state bit-for-bit; this is the statement that no process can,
+whatever its measure.
+
+Two steps rather than one because a *one*-step silent cycle is
+`ProcessMeasure.not_decreases_self`, and the two-step case is the one the
+four-disjunct `StepProgresses` admitted.
+-/
+theorem no_silent_two_cycle (progress : MeetsProcessProgress p accept Invariant request)
+    {segmentedA segmentedB : Segmented p.Observation} {stateA stateB : p.State}
+    {bagA bagB : Bag p.Demand} {observationsA observationsB : Trace p.Observation}
+    (reachedA : Reachable accept.terminalRemainder request segmentedA
+      (.running stateA bagA observationsA))
+    (reachedB : Reachable accept.terminalRemainder request segmentedB
+      (.running stateB bagB observationsB))
+    (invariantA : Invariant stateA) (invariantB : Invariant stateB)
+    (there : SilentStep accept stateA bagA stateB bagB)
+    (back : SilentStep accept stateB bagB stateA bagA) : False :=
+  progress.measure.not_decreases_both_ways
+    (progress.silent_step_descends reachedA invariantA there)
+    (progress.silent_step_descends reachedB invariantB back)
+
+/--
+**And there is no infinite silent run at all.**
+
+The theorem the whole module is for, and it was left to M4 for one round too
+many. `docs/PROCESS.md` §7's livelock exclusion, at the per-process layer: an
+execution whose every step is non-entropy and emits nothing demanded gives an
+infinite descending chain in a well-founded order, which is a contradiction.
+
+Stating it here rather than only in fixtures is what makes a future re-widening
+of `StepProgresses` fail loudly. `Tests/Process/SpinFixtures.lean` and
+`Tests/Process/OscillateFixtures.lean` each catch one shape; this catches every
+shape, so a re-widening that admits any silent cycle at all goes red here
+instead of going unnoticed until someone builds the right counterexample.
+
+The three escapes it does not close are the three the module note discloses:
+environment entropy (an author's own choice of `ExternalEvent`), a permissive
+`Demanded`, and a specification with no initial state at all —
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §6, §10.49 and §10.55.
+-/
+theorem no_infinite_silent_run (progress : MeetsProcessProgress p accept Invariant request)
+    (states : Nat → p.State) (bags : Nat → Bag p.Demand)
+    (observations : Nat → Trace p.Observation) (segmented : Nat → Segmented p.Observation)
+    (reached : ∀ index, Reachable accept.terminalRemainder request (segmented index)
+      (.running (states index) (bags index) (observations index)))
+    (invariant : ∀ index, Invariant (states index))
+    (silent : ∀ index,
+      SilentStep accept (states index) (bags index) (states (index + 1)) (bags (index + 1))) :
+    False := by
+  have descends : ∀ index, progress.measure.lt
+      (progress.measure.rank (states (index + 1)) (bags (index + 1)))
+      (progress.measure.rank (states index) (bags index)) :=
+    fun index =>
+      progress.silent_step_descends (reached index) (invariant index) (silent index)
+  have noChain : ∀ rank, ∀ index,
+      progress.measure.rank (states index) (bags index) ≠ rank := by
+    intro rank
+    induction rank using progress.measure.wellFounded.induction with
+    | _ current ih =>
+      intro index isCurrent
+      exact ih _ (isCurrent ▸ descends index) (index + 1) rfl
+  exact noChain _ 0 rfl
 
 end MeetsProcessProgress
 
