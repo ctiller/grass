@@ -111,6 +111,21 @@ def Live : ProcessLifecycle protocol → Prop
   | .running => True
   | _ => False
 
+/--
+Transporting a lifecycle across an equation of kinds does not change whether it
+is live.
+
+The `Live` counterpart of `ProcessParentage.knownParent_cast`, and needed for
+the same reason: `Grass/Process/Network/Transition.lean` compares two
+incarnations of one slot, and an incarnation carries its own `kind`.
+-/
+theorem live_cast {registry : ProtocolRegistry.{u, w, v}} {boundary : DriverBoundary.{u}}
+    {topology : ProcessTopologyCore.{u, w, v, r} registry boundary}
+    {left right : topology.ProcessKind} (sameKind : left = right)
+    (lifecycle : ProcessLifecycle (topology.protocol left)) :
+    (sameKind ▸ lifecycle : ProcessLifecycle (topology.protocol right)).Live ↔ lifecycle.Live := by
+  cases sameKind; exact Iff.rfl
+
 /-- Exactly one state is live, which makes `Live` a decision and not a hint. -/
 theorem live_iff_running {lifecycle : ProcessLifecycle protocol} :
     lifecycle.Live ↔ lifecycle = .running := by
@@ -229,6 +244,51 @@ theorem detach_preserves_reference (parentKind : topology.ProcessKind)
     (parent : topology.ProcessRef parentKind) :
     (ProcessParentage.attached (kind := kind) parentKind parent).detach.knownParent
       = some ⟨parentKind, parent⟩ := rfl
+
+/--
+**Detaching anything keeps whatever reference it had.**
+
+`detach_preserves_reference` says it for the case that moves; this says it for
+all three, which is the form a transition consumes.
+`Grass/Process/Network/Transition.lean`'s `Detaches` uses it to say the
+*recorded former parent is the one it was attached to* — a claim its earlier
+`knownParent ≠ none` field did not make, and which local adversarial review
+exploited by building a detach that reparented a child onto a fabricated
+ancestor.
+-/
+theorem detach_preserves_knownParent (parentage : ProcessParentage topology kind) :
+    parentage.detach.knownParent = parentage.knownParent := by
+  cases parentage <;> rfl
+
+/--
+Transporting a parentage across an equation of kinds does not change which
+parent it remembers.
+
+`knownParent`'s result type does not mention the kind, so the transport is
+inert. Needed because `Grass/Process/Network/Transition.lean` states its
+instance-identity fields over transported values — an instance carries its own
+`kind` field, so two incarnations in one slot are only comparable after both are
+carried to that slot's kind.
+-/
+theorem knownParent_cast {left right : topology.ProcessKind} (sameKind : left = right)
+    (parentage : ProcessParentage topology left) :
+    (sameKind ▸ parentage : ProcessParentage topology right).knownParent
+      = parentage.knownParent := by
+  cases sameKind; rfl
+
+/--
+**And detaching something that had authority produces a detached parentage.**
+
+The other half `Detaches` needs. Without it `IsDetached` had to be asserted as a
+separate field, and a separate field can be satisfied by a *different*
+detachment than the one the structure's own `wasAttached` found.
+-/
+theorem detach_isDetached {parentage : ProcessParentage topology kind}
+    (hadAuthority : parentage.currentParent ≠ none) : parentage.detach.IsDetached := by
+  cases parentage with
+  | root => exact absurd rfl hadAuthority
+  | attached _ _ => trivial
+  | detached _ _ => exact absurd rfl hadAuthority
 
 /--
 **A root and a detached child are distinguishable.**

@@ -896,19 +896,39 @@ structure Detaches (before after : plan.LogicalProcessNetwork)
   /-- It had a parent with authority. -/
   wasAttached : ∃ incarnation, before.instances kind slot = some incarnation ∧
     incarnation.parentage.currentParent ≠ none
-  /-- It no longer does, and remembers which. -/
-  nowDetached : ∃ incarnation, after.instances kind slot = some incarnation ∧
-    incarnation.IsDetached ∧ incarnation.parentage.knownParent ≠ none
   /--
-  **And nothing but the parentage moved.**
+  **And afterwards it is exactly the detachment of what it was, and nothing else
+  about it moved.**
 
-  A detach removes authority; it is not a place to change generation, request or
-  private state. Without this it was, for the same reason `EndsInstance` was.
+  A detach removes authority; it is not a place to change generation, request,
+  private state, *which parent is remembered*, or *whether the process is still
+  alive*.
+
+  Three earlier versions of this were wrong and each was found the same way, by
+  building the attack rather than by reading. The first let generation, request
+  and state move. The second pinned those and stated the parentage as a separate
+  `nowDetached` field — "some detached incarnation with some remembered parent" —
+  which is satisfied by a *different* detachment than the one `wasAttached`
+  found: local adversarial review built a step that reparented a child onto a
+  fabricated ancestor, taking a `ParentageValid` network to one that is not, and
+  making `Grass/Process/Network/Child.lean`'s `NonReturningReason.detached`
+  checkable against a forged history. The third omitted `lifecycle` from the
+  seven `ProcessInstance` fields, and the same attack ended a live incarnation
+  with no `EndsInstance`, no custody partition and no stored classification — the
+  unclassified death §3 forbids, in the constructor next to the one
+  `Joins.wasTerminated` was added to protect.
+
+  Stating it as `parentage.detach` rather than as a predicate is what closes all
+  three at once: `Grass/Process/Network/Instance.lean` already defines the
+  transition §3 describes — "changes only `.attached parent` to `.detached
+  parent`, proves the references identical" — and it was used by nothing.
   -/
   identityPreserved : ∃ (fromInstance toInstance : ProcessInstance plan.topology)
       (fromKind : fromInstance.kind = kind) (toKind : toInstance.kind = kind),
     before.instances kind slot = some fromInstance ∧
     after.instances kind slot = some toInstance ∧
+    toKind ▸ toInstance.parentage = (fromKind ▸ fromInstance.parentage).detach ∧
+    toKind ▸ toInstance.lifecycle = fromKind ▸ fromInstance.lifecycle ∧
     toKind ▸ toInstance.ref = fromKind ▸ fromInstance.ref ∧
     toKind ▸ toInstance.request = fromKind ▸ fromInstance.request ∧
     toKind ▸ toInstance.localState = fromKind ▸ fromInstance.localState ∧
@@ -920,14 +940,82 @@ namespace Detaches
 
 variable {plan}
 
-/-- A detached child keeps a recorded former parent, which is what makes
-`Grass/Process/Network/Child.lean`'s `NonReturningReason.detached` checkable. -/
-theorem former_parent_is_recorded {before after kind slot}
+/--
+**It really is detached afterwards.**
+
+Was a field; is now a consequence, because `wasAttached` says the parentage had
+authority and `identityPreserved` says the new one is that parentage's `detach`.
+
+Worth the change rather than the redundancy. The old field's second conjunct,
+`knownParent ≠ none`, was implied by its first — `IsDetached` means
+`.detached _ _`, whose `knownParent` is `some` by definition — so the structure
+paid for a projection of a redundancy and did not buy the claim a reader takes
+from "remembers which". That claim is the next theorem.
+-/
+theorem is_detached_afterwards {before after kind slot}
     (detached : plan.Detaches before after kind slot) :
-    ∃ incarnation, after.instances kind slot = some incarnation ∧
-      incarnation.parentage.knownParent ≠ none := by
-  obtain ⟨incarnation, found, _, remembered⟩ := detached.nowDetached
-  exact ⟨incarnation, found, remembered⟩
+    ∃ (incarnation : ProcessInstance plan.topology) (isKind : incarnation.kind = kind),
+      after.instances kind slot = some incarnation ∧
+        (isKind ▸ incarnation.parentage : ProcessParentage plan.topology kind).IsDetached := by
+  obtain ⟨was, foundWas, hadAuthority⟩ := detached.wasAttached
+  obtain ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter,
+    isDetach, _⟩ := detached.identityPreserved
+  refine ⟨toInstance, toKind, foundAfter, ?_⟩
+  rw [isDetach]
+  refine ProcessParentage.detach_isDetached ?_
+  have same : was = fromInstance := Option.some.inj (foundWas ▸ foundBefore)
+  subst same
+  cases fromKind
+  exact hadAuthority
+
+/--
+**And it is still whatever it was — running, if it was running.**
+
+`identityPreserved`'s `lifecycle` component, in the form a consumer wants. A
+detach removes authority and is not an ending; the two are separate constructors
+because §3 requires an ending to carry a custody partition and a stored
+classification, and this one carries neither.
+
+Local adversarial review built the step this refutes: a "detach" that leaves the
+child `.died .parentDied`. Every field of the structure held, because `lifecycle`
+was one of the three `ProcessInstance` fields `identityPreserved` did not
+mention. `Tests/Process/DetachFixtures.lean`'s `a_detach_may_not_kill` is the
+attack, kept.
+-/
+theorem the_child_survives {before after kind slot}
+    (detached : plan.Detaches before after kind slot) :
+    ∃ (fromInstance toInstance : ProcessInstance plan.topology),
+      before.instances kind slot = some fromInstance ∧
+        after.instances kind slot = some toInstance ∧
+        (toInstance.Live ↔ fromInstance.Live) := by
+  obtain ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter,
+    _, sameLifecycle, _⟩ := detached.identityPreserved
+  refine ⟨fromInstance, toInstance, foundBefore, foundAfter, ?_⟩
+  show toInstance.lifecycle.Live ↔ fromInstance.lifecycle.Live
+  rw [← ProcessLifecycle.live_cast toKind toInstance.lifecycle,
+    ← ProcessLifecycle.live_cast fromKind fromInstance.lifecycle, sameLifecycle]
+
+/--
+**And the parent it remembers is the one it was attached to.**
+
+`docs/PROCESS.md` §3: the detach "proves the references identical". The old
+field said only that *some* reference was recorded, and local adversarial review
+built the step that records a different one — a forged ancestor, against which
+`Grass/Process/Network/Child.lean`'s `NonReturningReason.detached` would then
+check out.
+-/
+theorem former_parent_is_the_one_it_had {before after kind slot}
+    (detached : plan.Detaches before after kind slot) :
+    ∃ (fromInstance toInstance : ProcessInstance plan.topology),
+      before.instances kind slot = some fromInstance ∧
+        after.instances kind slot = some toInstance ∧
+        toInstance.parentage.knownParent = fromInstance.parentage.knownParent := by
+  obtain ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter,
+    isDetach, _⟩ := detached.identityPreserved
+  refine ⟨fromInstance, toInstance, foundBefore, foundAfter, ?_⟩
+  rw [← ProcessParentage.knownParent_cast toKind toInstance.parentage,
+    ← ProcessParentage.knownParent_cast fromKind fromInstance.parentage, isDetach,
+    ProcessParentage.detach_preserves_knownParent]
 
 end Detaches
 
