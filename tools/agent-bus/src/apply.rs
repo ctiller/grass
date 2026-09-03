@@ -1658,27 +1658,42 @@ fn apply_review_merge_authorized(
     // authorization." A resolved/rejected (Terminal) issue never blocks,
     // even if its `blocks` set still names a chain event -- disposition is
     // permanent, so there is nothing left to re-check once it fires.
-    for issue in state.issues.values() {
-        if matches!(issue.status, ItemStatus::Terminal(_)) {
-            continue;
-        }
-        if let Some(blocked) = issue
-            .data
-            .blocks
-            .iter()
-            .find(|b| chain.nomination_events.contains(b))
-        {
-            return Err(invalid(format!(
-                "{}: unresolved issue {} blocks authorization via nomination-chain event {blocked}",
-                env.id, issue.id
-            )));
-        }
+    if let Some(blocking) = blocking_issue_for_chain(state, chain) {
+        return Err(invalid(format!(
+            "{}: unresolved issue {blocking} blocks authorization via nomination-chain event",
+            env.id
+        )));
     }
     let chain_mut = state
         .review_chain_mut(&d.nomination)
         .expect("checked above");
     chain_mut.authorizations.push(env.id.clone());
     Ok(())
+}
+
+/// AGENT_BUS_SCHEMA.md section 10: the first unresolved issue (not
+/// `ItemStatus::Terminal`) whose `blocks` set names any event in `chain`'s
+/// nomination chain, if any. Shared by `apply_review_merge_authorized` (the
+/// publication-time gate above) and `merge_ready::check_merge_ready`
+/// (AGENT_REVIEW.md section 8's pre-merge gate) so the two never drift:
+/// ported from the shipped version-one helper's identically-named
+/// `review_cmds`/`apply` helper.
+pub(crate) fn blocking_issue_for_chain(state: &BusState, chain: &ReviewChain) -> Option<EventId> {
+    let chain_members: BTreeSet<&EventId> = chain.nomination_events.iter().collect();
+    for issue in state.issues.values() {
+        // "Unresolved" means not yet terminally resolved/rejected -- an issue
+        // sitting in `LifecycleConflict` (a race whose winner hasn't been
+        // picked yet) is still unresolved and must still block, not just a
+        // plain `Open` one.
+        if !matches!(issue.status, ItemStatus::Terminal(_)) {
+            for b in issue.data.blocks.iter() {
+                if chain_members.contains(b) {
+                    return Some(issue.id.clone());
+                }
+            }
+        }
+    }
+    None
 }
 
 fn apply_review_merged(state: &mut BusState, env: &Envelope, d: &ReviewMerged) -> AbResult<()> {
