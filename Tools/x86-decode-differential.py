@@ -57,6 +57,17 @@ from pathlib import Path
 # count is not enough: a truncated or duplicated corpus keeps a plausible count
 # and checks nothing. See the same guard in the other x86 differentials.
 EXPECTED_DIGEST = "4a8d5b5e6df83bd8bca5e40079ac361ef268146430c1914e47b088a10dff3ba7"
+# The coverage this tool was reviewed at. Shrinking the corpus must be a
+# deliberate, reviewed edit rather than a side effect of regenerating it.
+#
+# The digest above detects a substituted corpus but not a smaller one: an author
+# who shrinks the generator gets a digest mismatch, is told to update the
+# constant, updates it, and the tool passes over the smaller corpus. A reviewer
+# demonstrated it -- one `.take 1` plus a digest update turned 1085 encodings
+# into 1 and still reported no disagreement. `docs/VALIDATION.md` section 7's
+# ratchet is meant to prevent exactly that, and this is it applied to corpora.
+EXPECTED_ROWS = 57440
+
 
 # Must match `Grass.Tests.ISA.X86.DecodeC.windowBytes`. The tool checks this
 # against the corpus rather than trusting it.
@@ -161,6 +172,14 @@ def main() -> int:
         rows.append((raw, int(fields[1]), fields[2]))
     if not rows:
         print("corpus is empty", file=sys.stderr)
+        return 1
+    if len(rows) < EXPECTED_ROWS:
+        print(
+            f"corpus has {len(rows)} rows, fewer than the {EXPECTED_ROWS} this "
+            "tool was reviewed against. Coverage may only grow; if the "
+            "reduction is deliberate, lower EXPECTED_ROWS in the same reviewed "
+            "edit that shrinks the corpus.",
+            file=sys.stderr)
         return 1
 
     ndisasm = find_tool("ndisasm")

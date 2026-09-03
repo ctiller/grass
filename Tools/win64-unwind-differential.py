@@ -54,6 +54,17 @@ from pathlib import Path
 # updating this constant, which is the reviewed edit `docs/VALIDATION.md`
 # section 7 asks for rather than a silent change to what is being checked.
 EXPECTED_DIGEST = "27e2270a847b9a70479b5498669f6b911d5c7e8ec1bc1a6f1685e2d423e6be21"
+# The coverage this tool was reviewed at. Shrinking the corpus must be a
+# deliberate, reviewed edit rather than a side effect of regenerating it.
+#
+# The digest above detects a substituted corpus but not a smaller one: an author
+# who shrinks the generator gets a digest mismatch, is told to update the
+# constant, updates it, and the tool passes over the smaller corpus. A reviewer
+# demonstrated it -- one `.take 1` plus a digest update turned 1085 encodings
+# into 1 and still reported no disagreement. `docs/VALIDATION.md` section 7's
+# ratchet is meant to prevent exactly that, and this is it applied to corpora.
+EXPECTED_ROWS = 50
+
 
 TEMPLATE = """\
 .CODE
@@ -186,6 +197,14 @@ def main() -> int:
         rows.append(tuple(fields))
     if not rows:
         print("corpus is empty", file=sys.stderr)
+        return 1
+    if len(rows) < EXPECTED_ROWS:
+        print(
+            f"corpus has {len(rows)} rows, fewer than the {EXPECTED_ROWS} this "
+            "tool was reviewed against. Coverage may only grow; if the "
+            "reduction is deliberate, lower EXPECTED_ROWS in the same reviewed "
+            "edit that shrinks the corpus.",
+            file=sys.stderr)
         return 1
 
     ml64 = find_tool("ml64.exe")

@@ -77,6 +77,17 @@ RSP = 4  # never loaded or compared: it is the harness's own stack
 
 # The corpus this tool was last reviewed against. See corpus_digest.
 EXPECTED_DIGEST = "985e0209048fd6c3ca5670c0f12ec27a1dd18c71c2ccb53aaaf1c8bc3f125105"
+# The coverage this tool was reviewed at. Shrinking the corpus must be a
+# deliberate, reviewed edit rather than a side effect of regenerating it.
+#
+# The digest above detects a substituted corpus but not a smaller one: an author
+# who shrinks the generator gets a digest mismatch, is told to update the
+# constant, updates it, and the tool passes over the smaller corpus. A reviewer
+# demonstrated it -- one `.take 1` plus a digest update turned 1085 encodings
+# into 1 and still reported no disagreement. `docs/VALIDATION.md` section 7's
+# ratchet is meant to prevent exactly that, and this is it applied to corpora.
+EXPECTED_ROWS = 27
+
 
 PROBE_TIMEOUT_SECONDS = 30
 
@@ -352,6 +363,13 @@ def main() -> int:
                      [int(v, 16) for v in after.split(",")],
                      kind, note,
                      None if flags_out == "-" else int(flags_out, 16)))
+
+    if len(rows) < EXPECTED_ROWS:
+        sys.exit(
+            f"corpus has {len(rows)} rows, fewer than the {EXPECTED_ROWS} this "
+            "tool was reviewed against. Coverage may only grow; if the "
+            "reduction is deliberate, lower EXPECTED_ROWS in the same reviewed "
+            "edit that shrinks the corpus.")
 
     actual_digest = corpus_digest(
         Path(sys.argv[1]).read_text(encoding="utf-8"))

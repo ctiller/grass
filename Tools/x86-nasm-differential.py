@@ -82,6 +82,17 @@ PROLOGUE = ["BITS 64", "DEFAULT ABS"]
 
 # The corpus this tool was last reviewed against. See corpus_digest.
 EXPECTED_DIGEST = "08ce1b23377b5cd3c1624a05684af37235536b93de33293e0c0b09d1cafb2b7b"
+# The coverage this tool was reviewed at. Shrinking the corpus must be a
+# deliberate, reviewed edit rather than a side effect of regenerating it.
+#
+# The digest above detects a substituted corpus but not a smaller one: an author
+# who shrinks the generator gets a digest mismatch, is told to update the
+# constant, updates it, and the tool passes over the smaller corpus. A reviewer
+# demonstrated it -- one `.take 1` plus a digest update turned 1085 encodings
+# into 1 and still reported no disagreement. `docs/VALIDATION.md` section 7's
+# ratchet is meant to prevent exactly that, and this is it applied to corpora.
+EXPECTED_ROWS = 1085
+
 
 # Disagreements that were investigated and found to be NASM canonicalising an
 # address rather than Grass encoding it wrongly. `docs/VALIDATION.md` section 2
@@ -154,6 +165,12 @@ def main() -> int:
 
     if not rows:
         sys.exit("corpus is empty; did the Lean generator run?")
+    if len(rows) < EXPECTED_ROWS:
+        sys.exit(
+            f"corpus has {len(rows)} rows, fewer than the {EXPECTED_ROWS} this "
+            "tool was reviewed against. Coverage may only grow; if the "
+            "reduction is deliberate, lower EXPECTED_ROWS in the same reviewed "
+            "edit that shrinks the corpus.")
 
     actual_digest = corpus_digest(
         Path(sys.argv[1]).read_text(encoding="utf-8"))
