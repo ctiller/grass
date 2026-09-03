@@ -336,6 +336,10 @@ theorem the_close : serverPlan.ClosesSession sent afterClosing () wire escrowed 
   resolvesOnlyAs := by
     rw [sent_wire, afterClosing_wire]
     exact closedLedger_resolves_nothing_else.resolvesOnlyAs closedLedger_resolution
+  createsNothing := by
+    show CreatesNothing (sent.inFlight () wire) (afterClosing.inFlight () wire)
+    rw [sent_wire, afterClosing_wire]
+    rfl
   ledgerExtends := by
     rw [sent_wire, afterClosing_wire]
     exact pending_extends_to closedLedger rfl (by simp [pendingLedger])
@@ -372,6 +376,10 @@ theorem the_death : serverPlan.KillsSession sent afterDying () wire escrowed whe
   resolvesOnlyAs := by
     rw [sent_wire, afterDying_wire]
     exact diedLedger_resolves_nothing_else.resolvesOnlyAs diedLedger_resolution
+  createsNothing := by
+    show CreatesNothing (sent.inFlight () wire) (afterDying.inFlight () wire)
+    rw [sent_wire, afterDying_wire]
+    rfl
   ledgerExtends := by
     rw [sent_wire, afterDying_wire]
     exact pending_extends_to diedLedger rfl (by simp [pendingLedger])
@@ -407,6 +415,10 @@ theorem the_request : serverPlan.RequestsCancel sent afterRequesting () wire esc
   resolvesNothing := by
     rw [sent_wire, afterRequesting_wire]
     exact requestedLedger_resolves_nothing
+  createsNothing := by
+    show CreatesNothing (sent.inFlight () wire) (afterRequesting.inFlight () wire)
+    rw [sent_wire, afterRequesting_wire]
+    rfl
   ledgerExtends := by
     rw [sent_wire, afterRequesting_wire]
     exact pending_extends_to requestedLedger rfl (by simp [pendingLedger])
@@ -428,6 +440,9 @@ theorem the_drop : serverPlan.ResolvesEscrow sent afterDropping () wire escrowed
   resolvesOnlyAs := by
     rw [sent_wire, afterDropping_wire]
     exact droppedLedger_resolves_nothing_else.resolvesOnlyAs droppedLedger_resolution
+  createsOnlyTheCarrier := by
+    intro other held fresh
+    exact absurd (by rw [sent_wire]; rw [afterDropping_wire] at held; exact held) fresh
   ledgerExtends := by
     rw [sent_wire, afterDropping_wire]
     exact pending_extends_to droppedLedger rfl (by simp [pendingLedger])

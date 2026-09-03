@@ -172,6 +172,24 @@ structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
   -/
   resolvesOnlyAs : ResolvesOnlyAs
     (before.inFlight edge session) (after.inFlight edge session) resolution
+  /--
+  **And the only occurrence it escrows is a coalesce's carrier.**
+
+  `ledgerExtends` forbids erasing and `resolvesOnlyAs` bounds what is *ended*.
+  Neither bounds what is *created*, and `LedgerExtends.createdPrefix` positively
+  permits appending — so a `drop` could conjure an unrelated occurrence into
+  flight in the same move. Local adversarial review built one and proved what
+  makes it serious: at its after-world the edge contract's `Escrow` assertion
+  holds of a message nothing sent, and `docs/PROCESS.md` §3 gives only a send
+  that power. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.91.
+
+  The exception is `ChannelResolution.coalesced`, whose carrier
+  `coalesceCarrierLater` requires to be in this ledger and strictly later — a
+  fresh occurrence, per `NominalKind.coalescedReplacement`. Every other
+  resolution creates nothing, and the disjunction says which.
+  -/
+  createsOnlyTheCarrier : ∀ other, other ∈ (after.inFlight edge session).created →
+    other ∉ (before.inFlight edge session).created → resolution = .coalesced other
   /-- And nothing outside this session's escrow changed. -/
   scope : plan.TouchesOnly before after (fun fragment => fragment = .escrow edge session)
 
@@ -233,6 +251,9 @@ structure Delivers (before after : plan.LogicalProcessNetwork)
   -/
   resolvesNothingElse : ResolvesNothingElse
     (before.inFlight edge session) (after.inFlight edge session) occurrence
+  /-- **And it escrows nothing new**: a delivery consumes, it does not send. -/
+  createsNothing : CreatesNothing
+    (before.inFlight edge session) (after.inFlight edge session)
   /-- **The receiver's cursor advances by exactly one.** -/
   cursorAdvances : (after.sessions edge session).delivered =
     (before.sessions edge session).delivered + 1
@@ -302,6 +323,9 @@ structure ClosesSession (before after : plan.LogicalProcessNetwork)
   /-- **And every occurrence it ends, it ends as a closure**; see `ResolvesEscrow.resolvesOnlyAs`. -/
   resolvesOnlyAs : ResolvesOnlyAs
     (before.inFlight edge session) (after.inFlight edge session) .channelClosed
+  /-- **And it escrows nothing new**: a close ends, it does not send. -/
+  createsNothing : CreatesNothing
+    (before.inFlight edge session) (after.inFlight edge session)
   /-- It was open; a channel is not closed twice, and not un-died. -/
   wasOpen : (before.sessions edge session).status = .open
   /-- **And the session is closed.** -/
@@ -375,6 +399,13 @@ structure SendsEscrow (before after : plan.LogicalProcessNetwork)
   anything. See `ResolvesEscrow.resolvesOnlyAs`. -/
   resolvesNothing : ResolvesNothing
     (before.inFlight edge occurrence.1) (after.inFlight edge occurrence.1)
+  /--
+  **And it escrows nothing but the message it is sending.**
+
+  The one constructor that may create, bounded to what it names. See `ResolvesEscrow.createsOnlyTheCarrier` and `CreatesNothing`.
+  -/
+  createsOnlyTheMessage : ∀ other, other ∈ (after.inFlight edge occurrence.1).created →
+    other ∉ (before.inFlight edge occurrence.1).created → other = ⟨message, occurrence⟩
   /-- And nothing outside this session's escrow changed. -/
   scope : plan.TouchesOnly before after
     (fun fragment => fragment = .escrow edge occurrence.1)
@@ -969,6 +1000,10 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
   `ResolvesEscrow.resolvesOnlyAs`. -/
   resolvesOnlyAs : ResolvesOnlyAs
     (before.inFlight edge session) (after.inFlight edge session) (.rerouted destination)
+  /-- **And it escrows nothing new here**: what a reroute creates, it creates at
+  the destination. -/
+  createsNothing : CreatesNothing
+    (before.inFlight edge session) (after.inFlight edge session)
   /-- A reroute goes somewhere else. -/
   elsewhere : destination ≠ session
   /--
@@ -999,6 +1034,15 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
   flight, not already ended. See `ResolvesEscrow.resolvesOnlyAs`. -/
   destinationResolvesNothing : ResolvesNothing
     (before.inFlight edge destination) (after.inFlight edge destination)
+  /--
+  **And what the destination gains carries this occurrence's message.**
+
+  `arrives` says the destination gained *an* arrival carrying it. This says it
+  gained nothing else: without it a reroute is also a send of anything it likes
+  onto a session it merely names. See `ResolvesEscrow.createsOnlyTheCarrier` and `CreatesNothing`.
+  -/
+  destinationCreatesOnlyArrivals : ∀ other, other ∈ (after.inFlight edge destination).created →
+    other ∉ (before.inFlight edge destination).created → other.1 = occurrence.1
   /-- Both sessions' escrow, and nothing else. -/
   scope : plan.TouchesOnly before after
     (fun fragment => fragment = .escrow edge session ∨ fragment = .escrow edge destination)
@@ -1038,6 +1082,9 @@ structure KillsSession (before after : plan.LogicalProcessNetwork)
   /-- **And every occurrence it ends, it ends as a death**; see `ResolvesEscrow.resolvesOnlyAs`. -/
   resolvesOnlyAs : ResolvesOnlyAs
     (before.inFlight edge session) (after.inFlight edge session) .channelDied
+  /-- **And it escrows nothing new**: a death ends, it does not send. -/
+  createsNothing : CreatesNothing
+    (before.inFlight edge session) (after.inFlight edge session)
   /-- It was open; a dead channel is not re-killed, and a closed one not un-closed. -/
   wasOpen : (before.sessions edge session).status = .open
   /-- **And the session is dead.** -/
@@ -1103,6 +1150,9 @@ structure RequestsCancel (before after : plan.LogicalProcessNetwork)
   /-- **And it resolves nothing at all**: a request records, it does not end.
   See `ResolvesEscrow.resolvesOnlyAs`. -/
   resolvesNothing : ResolvesNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /-- **And it escrows nothing new**: a request records, it does not send. -/
+  createsNothing : CreatesNothing
     (before.inFlight edge session) (after.inFlight edge session)
   /-- That session's escrow, and nothing else. -/
   scope : plan.TouchesOnly before after (fun fragment => fragment = .escrow edge session)

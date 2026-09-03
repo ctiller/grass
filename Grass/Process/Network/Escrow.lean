@@ -445,6 +445,25 @@ def ResolvesNothingElse {Occurrence : Type u} {Session : Type s}
   ∀ other, other ≠ occurrence → later.resolution other = earlier.resolution other
 
 /--
+**One step escrowed nothing new here.**
+
+The create-side twin of `ResolvesOnlyAs`, and it was missing for the same reason
+that one was: `LedgerExtends.createdPrefix` says occurrences are only *appended*,
+and appending is exactly the hole. Local adversarial review built a `drop`
+discharging every field `ProcessPlan.ResolvesEscrow` had, which conjures an
+unrelated occurrence into flight in the same move — and then proved the thing
+that makes it serious: at the after-world the edge contract's `Escrow` assertion
+*holds* of a message nothing sent. `docs/PROCESS.md` §3 gives only a send that
+power, and `SendsEscrow.contractual` is the only field that ties a step to a
+plan's own `Send` relation.
+
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.91.
+-/
+def CreatesNothing {Occurrence : Type u} {Session : Type s}
+    (earlier later : EscrowLedger Occurrence Session) : Prop :=
+  later.created = earlier.created
+
+/--
 **One step ended nothing except as it declared.**
 
 The repair to `ResolvesNothingElse`, which was too strong wherever a step

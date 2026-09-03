@@ -77,6 +77,7 @@ theorem receiving_after_the_beep :
   wasOutstanding := Transition.receiving_resolves_the_escrow.wasOutstanding
   nowResolved := Transition.receiving_resolves_the_escrow.nowResolved
   resolvesNothingElse := Transition.receiving_resolves_the_escrow.resolvesNothingElse
+  createsNothing := Transition.receiving_resolves_the_escrow.createsNothing
   ledgerExtends := Transition.receiving_resolves_the_escrow.ledgerExtends
   cursorAdvances := Transition.receiving_resolves_the_escrow.cursorAdvances
   statusUnchanged := Transition.receiving_resolves_the_escrow.statusUnchanged

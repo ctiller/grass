@@ -198,6 +198,17 @@ theorem the_reroute : serverPlan.Reroutes sent afterReroute () wire escrowed sid
     show ResolvesNothing (ledgerAt false sidewire) (reroutedAt sidewire)
     rw [ledgerAt_off_wire_empty sidewire_ne_wire, reroutedAt_sidewire]
     exact fun _ => rfl
+  destinationCreatesOnlyArrivals := by
+    intro other held _
+    have inList : other ∈ (reroutedAt sidewire).created := held
+    rw [reroutedAt_sidewire] at inList
+    have single : other ∈ [arrival] := inList
+    rw [List.mem_singleton.mp single]
+    exact arrival_carries_the_message
+  createsNothing := by
+    show CreatesNothing (sent.inFlight () wire) (reroutedAt wire)
+    rw [sent_wire, reroutedAt_wire]
+    rfl
   ledgerExtends := by
     show LedgerExtends (sent.inFlight () wire) (reroutedAt wire)
     rw [sent_wire, reroutedAt_wire]

@@ -106,6 +106,19 @@ theorem the_second_send : serverPlan.SendsEscrow sent sent2 () payload strandedO
     show ResolvesNothing (sent.inFlight () wire) (sent2.inFlight () wire)
     rw [sent_wire, sent2_wire]
     exact fun _ => rfl
+  createsOnlyTheMessage := by
+    intro other held fresh
+    show other = stranded
+    have onWire : other ∈ (sent2.inFlight () wire).created := held
+    rw [sent2_wire] at onWire
+    have inList : other ∈ [escrowed, stranded] := onWire
+    rcases List.mem_cons.mp inList with isFirst | rest
+    · subst isFirst
+      refine absurd ?_ fresh
+      show escrowed ∈ (sent.inFlight () wire).created
+      rw [sent_wire]
+      exact List.mem_cons_self
+    · exact List.mem_singleton.mp rest
   ledgerExtends := by
     show LedgerExtends (sent.inFlight () wire) (sent2.inFlight () wire)
     rw [sent_wire, sent2_wire]
@@ -254,6 +267,10 @@ theorem the_full_close : serverPlan.ClosesSession sent2 afterFullClose () wire e
         cancelRequestMonotone := by
           intro occurrence requested
           exact absurd requested (by intro equal; cases equal) }
+  createsNothing := by
+    show CreatesNothing (sent2.inFlight () wire) (afterFullClose.inFlight () wire)
+    rw [sent2_wire, afterFullClose_wire]
+    rfl
   resolvesOnlyAs := by
     rw [sent2_wire, afterFullClose_wire]
     intro occurrence moved
@@ -354,5 +371,95 @@ theorem the_strand_is_real :
   refine ⟨?_, by simp [afterPartialClose]⟩
   rw [afterPartialClose_wire]
   exact ⟨List.mem_cons_of_mem _ List.mem_cons_self, onlyOneClosed_second⟩
+
+/-! ## And the drop that sends -/
+
+open Classical in
+/--
+The wire's ledger after a drop that also conjures the second message into flight.
+
+`created` gains `stranded`, unresolved. `LedgerExtends.createdPrefix` permits it —
+occurrences are only appended — and `ResolvesOnlyAs` says nothing, because
+nothing was *resolved* about it.
+-/
+noncomputable def fabricated :
+    EscrowLedger (EdgeOccurrence serverTopology World.serverMessage ())
+      (serverTopology.ChannelId ()) where
+  created := [escrowed, stranded]
+  rank := fun occurrence => occurrence.2.2.id.carrier
+  rankOrdersCreated := by decide
+  resolution := fun occurrence => if occurrence = escrowed then some .dropped else none
+  noFabrication := by
+    intro occurrence resolved
+    by_cases isFirst : occurrence = escrowed
+    · simp [isFirst]
+    · simp [isFirst] at resolved
+  coalesceCarrierLater := by
+    intro occurrence carrier merged
+    by_cases isFirst : occurrence = escrowed
+    · simp [isFirst] at merged
+    · simp [isFirst] at merged
+  cancelRequested := fun _ => false
+  acknowledgedWasRequested := by
+    intro occurrence reason acknowledged
+    by_cases isFirst : occurrence = escrowed
+    · simp [isFirst] at acknowledged
+    · simp [isFirst] at acknowledged
+
+open Classical in
+theorem fabricated_second : fabricated.resolution stranded = none := by
+  show (if stranded = escrowed then some ChannelResolution.dropped else none) = none
+  rw [if_neg stranded_ne_escrowed]
+
+open Classical in
+/-- The world after it. -/
+noncomputable def afterFabricate : ServerWorld :=
+  { quiet with
+      inFlight := fun _ session => if session = wire then fabricated else EscrowLedger.empty }
+
+open Classical in
+theorem afterFabricate_wire : afterFabricate.inFlight () wire = fabricated := by
+  show (if wire = wire then fabricated else EscrowLedger.empty) = fabricated
+  rw [if_pos rfl]
+
+/--
+**A drop that escrows a message nothing sent is refused.**
+
+`createsOnlyTheCarrier`, biting. Before it, `ledgerExtends` permitted the append
+and `resolvesOnlyAs` said nothing about an occurrence that gains no resolution —
+so a drop could put a message in flight. Local adversarial review built it and
+proved what makes it more than untidy: at the after-world the edge contract's
+escrow assertion *holds* of that message, and `docs/PROCESS.md` §3 gives only a
+send that power. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.91.
+-/
+theorem a_drop_that_conjures_a_message_is_refused :
+    ¬ serverPlan.ResolvesEscrow sent afterFabricate () wire escrowed .dropped := by
+  intro drops
+  have onlyCarrier := drops.createsOnlyTheCarrier stranded (by
+    show stranded ∈ (afterFabricate.inFlight () wire).created
+    rw [afterFabricate_wire]
+    exact List.mem_cons_of_mem _ List.mem_cons_self) (by
+    show stranded ∉ (sent.inFlight () wire).created
+    rw [sent_wire]
+    intro held
+    have inList : stranded ∈ [escrowed] := held
+    exact stranded_ne_escrowed (List.mem_singleton.mp inList))
+  exact absurd onlyCarrier (by intro equal; cases equal)
+
+/--
+And what it would have escrowed is a message that really was not in flight
+before the step and really is after it — so the refusal is not about a
+distinction without a difference.
+-/
+theorem the_conjured_message_would_be_in_flight :
+    ¬ (sent.inFlight () wire).Outstanding stranded ∧
+      (afterFabricate.inFlight () wire).Outstanding stranded := by
+  constructor
+  · intro outstanding
+    rw [sent_wire] at outstanding
+    have inList : stranded ∈ [escrowed] := outstanding.1
+    exact stranded_ne_escrowed (List.mem_singleton.mp inList)
+  · rw [afterFabricate_wire]
+    exact ⟨List.mem_cons_of_mem _ List.mem_cons_self, fabricated_second⟩
 
 end Grass.Process.Tests.Close
