@@ -2809,3 +2809,29 @@ says every named record needs a positive witness before the layer is nominated;
 this is the one that does not have one.
 
 Not a defect in the record as far as anyone can tell — which is the problem.
+
+### 10.60 No `NetworkProgressMeasure` exists at the M2 fixture plan, and that is the plan's fault
+
+Local adversarial review proved `AtFrontier` empty for every measure at
+`serverPlan`, from `Commits` having no provenance. That cause is fixed
+(`NetworkFragment.pending`), and `frontierIsExternal` has been weakened from "a
+frontier is left only by entropy" to §7's actual claim — "by entropy **or** by a
+step that descends the rank", which is what §7's own progress list ("process
+steps, spawn, retry, cancellation, death, join, and restart") says of the steps
+it names.
+
+A measure still does not exist at `serverPlan`, and the remaining reason is about
+that plan rather than about the definition: its connection population is
+unbounded, so a spawn into a fresh slot is enabled at almost every network, is
+not entropy-driven, and cannot descend a well-founded rank indefinitely. A plan
+that can create unboundedly many children with no external event has no progress
+measure, and should not.
+
+What this costs today is that `Grass/Process/Network/Progress.lean`'s theorems
+are checked against a class the corpus cannot inhabit.
+`Tests/Process/ProgressFixtures.lean` states what every measure must pay and does
+not exhibit one. The fixture owed is a *minimal* plan — one role, one slot, no
+channels, an empty boundary observation type, a protocol that never terminates —
+at which a network waiting on external entropy really is at a frontier and a
+measure exists. Until that lands, §10.54's exit criterion is unmet for this
+record.

@@ -147,21 +147,38 @@ structure NetworkProgressMeasure (plan : ProcessPlan.{u, w, v, r, m, o} registry
   /-- Which networks are sitting at a declared external frontier. -/
   AtFrontier : plan.LogicalProcessNetwork → Prop
   /--
-  **And a network at a frontier is only left by external entropy.**
+  **And a network at a frontier is left only by external entropy, or by finite
+  work.**
 
   Without this, `AtFrontier := fun _ => True` discharges `descendsOrProduces`
   with no rank at all and every theorem below is about an empty class. `Useful`
   named that degeneracy and did not exclude it — a measure can satisfy `Useful`
-  at one network and pause everything else.
+  at one network and pause everything else. This field excludes it: a measure
+  that pauses everything must show every step of the plan is entropy-driven or
+  descends, which is *stronger* than `descendsOrProduces`, not weaker.
 
   This is the distinction `Grass/Process/Progress.lean` makes per process with
   `ProcessEvent.externalEntropy`: a process *waiting* on the environment is at a
-  frontier and a process *spinning* is not, and nothing else in this layer can
-  tell them apart.
+  frontier and a process *spinning* is not.
+
+  **The second disjunct is not a hedge, and an earlier version without it made
+  `AtFrontier` empty for every measure.** Local adversarial review proved that at
+  the M2 fixture plan, from two directions at once: `Commits` had no provenance,
+  so a commit was enabled at every network and is not entropy-driven; and even
+  with that fixed, a spawn into an empty slot is enabled at almost every network
+  and is not entropy-driven either. So no network could be declared at a frontier,
+  §7's "remain at a declared external frontier" escape was unreachable, and every
+  theorem in this module was vacuous.
+
+  §7 is explicit about what the second disjunct covers: its progress list is
+  "process steps, spawn, retry, cancellation, death, join, and restart", and a
+  rank is what those are meant to descend. A network waiting on the environment
+  may still be joined by its supervisor or lose a child; those are finite work,
+  not a reason the network is not waiting.
   -/
   frontierIsExternal : ∀ {before after : plan.LogicalProcessNetwork},
     AtFrontier before → (step : plan.NetworkStep before after) →
-    step.transition.DrivenByEntropy
+    step.transition.DrivenByEntropy ∨ rankLt (rank after) (rank before)
   /--
   **§7's disjunction: every step descends, produces, or was paused.**
 

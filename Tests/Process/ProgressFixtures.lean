@@ -9,7 +9,7 @@ off-frontier steps exists. That theorem is about the class of `SilentRun`s, and
 the obvious way to make the class empty is to declare every network at a
 frontier.
 
-`frontierIsExternal` is what stops that, and this file is the check. A network a
+`frontierIsExternal` is what charges for that, and this file is the check. A network a
 non-entropy step can leave is not at a frontier, so at the M2 fixture plan
 `beforeReceive` is provably running under *every* measure — the degenerate
 measure is not merely bad practice, it is unconstructible.
@@ -65,56 +65,64 @@ world has to act, and nothing outside has to act for this receive to happen.
 theorem the_receive_is_not_entropy : ¬ receiveStep.DrivenByEntropy := id
 
 /--
-**So no measure can declare `beforeReceive` at a frontier.**
+**So a measure that pauses `beforeReceive` pays for the receive out of its rank.**
 
-`frontierIsExternal` at a concrete network, and the reason the all-paused
-measure is gone from this file: a measure that paused everything would have to
-claim the outside world was needed for a receive between two processes of the
-program.
+`frontierIsExternal` at a concrete network: a receive between two processes of
+the program is not the outside world acting, so the only way to call
+`beforeReceive` paused is to show the rank descends across it anyway.
+
+An earlier version of this file concluded `¬ measure.AtFrontier beforeReceive`,
+from a `frontierIsExternal` with no rank disjunct. That was true and vacuous:
+local adversarial review proved the same argument applies to a *commit*, which
+was then enabled at every network of every plan, so `AtFrontier` was empty for
+every measure and every theorem in the progress module was about nothing.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.60 records what remains.
 
 Quantified over every measure, which is the form that matters — this is not a
 fact about one badly chosen measure but about the type.
 -/
-theorem nothing_pauses_beforeReceive (measure : serverPlan.NetworkProgressMeasure) :
-    ¬ measure.AtFrontier beforeReceive :=
-  fun paused => the_receive_is_not_entropy (measure.frontierIsExternal paused receiveAsStep)
-
-/-- **And so every measure is `Useful`**, rather than being asked to be. -/
-theorem every_measure_is_useful (measure : serverPlan.NetworkProgressMeasure) :
-    measure.Useful :=
-  ⟨beforeReceive, nothing_pauses_beforeReceive measure⟩
+theorem pausing_beforeReceive_costs_rank (measure : serverPlan.NetworkProgressMeasure)
+    (paused : measure.AtFrontier beforeReceive) :
+    measure.rankLt (measure.rank afterReceive) (measure.rank beforeReceive) :=
+  (measure.frontierIsExternal paused receiveAsStep).elim
+    (fun entropy => absurd entropy the_receive_is_not_entropy) id
 
 /-! ## What that costs a measure -/
 
 /--
-**The receive is a silent run, under any measure at all.**
+**The receive is a silent run of any measure that does not pause it.**
 
 Half the non-vacuity: `no_infinite_silent_run` is about a class this plan can
 put something in. What it cannot put in is an *infinite* sequence of them, which
 is the theorem.
+
+The `¬ AtFrontier` hypothesis was a theorem here until `frontierIsExternal`
+gained its rank disjunct, and it was a theorem about an empty class — see
+`pausing_beforeReceive_costs_rank`.
 -/
-theorem the_receive_is_a_silent_run (measure : serverPlan.NetworkProgressMeasure) :
+theorem the_receive_is_a_silent_run (measure : serverPlan.NetworkProgressMeasure)
+    (running : ¬ measure.AtFrontier beforeReceive) :
     ProcessPlan.NetworkProgressMeasure.SilentRun measure beforeReceive afterReceive :=
   .one receiveAsStep
     (fun emitted observation appended _ present => by
       rw [the_receive_emits_nothing emitted appended] at present
       exact absurd present (by simp))
-    (nothing_pauses_beforeReceive measure)
+    running
 
 /--
-**And therefore every measure must pay for it.**
+**And every measure pays for it either way.**
 
-`descendsOrProduces` with two of its three disjuncts closed by theorems rather
-than by hypotheses: the receive produces nothing, and no measure may call
-`beforeReceive` paused. So the rank descends across it, under every measure,
-with no hypothesis left for a measure to wriggle out through.
-
-An earlier version took `¬ measure.AtFrontier beforeReceive` as a hypothesis,
-and the review's question was whether any measure could satisfy it. It is now a
-theorem.
+The theorem the two branches converge on, and the one that does not depend on
+whether a measure pauses this network. Paused, `pausing_beforeReceive_costs_rank`
+charges the rank because a receive is not entropy. Not paused,
+`descendsOrProduces` has two of its three disjuncts closed — the receive produces
+nothing — so the rank descends. There is no hypothesis left for a measure to
+wriggle out through.
 -/
 theorem every_measure_pays_for_the_receive (measure : serverPlan.NetworkProgressMeasure) :
-    measure.rankLt (measure.rank afterReceive) (measure.rank beforeReceive) :=
-  measure.silent_run_descends (the_receive_is_a_silent_run measure)
+    measure.rankLt (measure.rank afterReceive) (measure.rank beforeReceive) := by
+  by_cases paused : measure.AtFrontier beforeReceive
+  · exact pausing_beforeReceive_costs_rank measure paused
+  · exact measure.silent_run_descends (the_receive_is_a_silent_run measure paused)
 
 end Grass.Process.Tests.Progress
