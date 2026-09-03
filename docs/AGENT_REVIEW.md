@@ -313,6 +313,19 @@ proof or test of the higher-level property. Deleting an obsolete realization may
 delete its private regression fixture only after the surviving semantic ratchet
 is identified or the property is shown not to apply to the replacement.
 
+Proof strength is not free. Before adding a proof demand, review its authoring
+burden, required annotations and invariants, diagnostic quality, solver or kernel
+cost, and semantic and elaboration rebuild cones. Place the theorem at the
+narrowest reusable owner and bank the difficult argument in a library, type,
+constructor, or composition law when many realizations share it. Callers should
+supply only facts genuinely specific to their implementation. Do not make every
+assembly author re-prove a global algorithm, protocol, or memory lemma merely
+because a proof would have caught one escape. If the only available theorem has
+disproportionate recurring burden, record that limitation and consider a cheaper
+type restriction, audit, test, or validation layer while designing the reusable
+proof boundary. Economy may change *where and how* a property is proved; it may
+not silently waive a normative safety or correctness demand.
+
 - If existing review evidence should reasonably have exposed the defect, amend
   the relevant review question, checklist, or reviewer guidance and include a
   concrete example of the missed reasoning.
