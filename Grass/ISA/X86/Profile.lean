@@ -69,11 +69,6 @@ def noIndex : Name := ⟨"Grass.ISA.X86.decodeMem.noIndex"⟩
 /-- `base=101` with `mod=00` means no base register. -/
 def noBase : Name := ⟨"Grass.ISA.X86.decodeMem.noBase"⟩
 
-/-- Every rule this profile currently models. -/
-def modeled : List Name :=
-  [writeExtension, rexLayout, rexByteRegisters, modRmLayout, sibLayout,
-   ripRelative, sibEscape, noIndex, noBase]
-
 end Subject
 
 open Subject
@@ -365,12 +360,24 @@ def commonProfileLedger : Ledger :=
 /-- The ledger does not contradict itself. See `Ledger.Coherent`. -/
 theorem commonProfileLedger_coherent : commonProfileLedger.Coherent := by decide
 
-/-- Every rule this profile models is accounted for.
+/-!
+### Coverage is not proved here
 
-The obligation `docs/DECISIONS.md` 21 imposes, discharged by decision rather
-than by inspection. Adding a modeled rule without a citation fails here. -/
-theorem commonProfileLedger_covers :
-    commonProfileLedger.Covers Rules.Subject.modeled := by decide
+There was a `commonProfileLedger_covers` theorem in this position, discharging
+`Covers` against a hand-written `Rules.Subject.modeled` list. It was circular:
+`modeled` and `commonProfileLedger.commonSubjects` were built from the same nine
+constants in this file and were equal by `rfl`, so the theorem said
+`∀ x ∈ L, x ∈ L` and could only fail if someone edited one list and not the
+other. Its docstring claimed "adding a modeled rule without a citation fails
+here", which was false — adding a `def` to `Addressing.lean` changed nothing.
+
+`Ledger.lean` names that failure mode and this file committed it by a different
+route. The obligation now comes from the Lean environment in
+`Tests/ISA/X86/LedgerAudit.lean`, which enumerates the declarations of the
+modeled modules and holds the ledger to them. Nothing in this file can shrink
+it, and the honest current figure is that 6 of 73 modeled declarations carry a
+citation.
+-/
 
 /-! ## Open citation work
 

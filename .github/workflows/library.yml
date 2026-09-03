@@ -62,6 +62,9 @@ jobs:
       - name: Audit docstring claims
         run: python3 Tools/DocstringAudit.py
 
+      - name: Report ledger coverage
+        run: lake env lean Tests/ISA/X86/LedgerAudit.lean
+
       - name: Install NASM
         run: sudo apt-get update && sudo apt-get install -y nasm
 
