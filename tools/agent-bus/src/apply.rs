@@ -417,6 +417,16 @@ fn apply_merge_engine_activated(
     );
     if state.exclusive.winner(&key).as_ref() == Some(&env.id) {
         state.current_merge_engine_epoch = Some(env.id.clone());
+    } else {
+        // A second, genuinely concurrent candidate turned this group
+        // contested -- unwind `current_merge_engine_epoch` back to the
+        // shared pre-race baseline every candidate in this group agrees on
+        // (`d.previous_epoch`), the same "provisional apply, then reset on
+        // conflict" pattern `reset_issue_to_conflict`/`reset_dependency_to_
+        // conflict` use. Idempotent: a third+ candidate in an already-
+        // contested group finds this already at baseline and just resets
+        // it to the same value again.
+        state.current_merge_engine_epoch = Some(d.previous_epoch.clone());
     }
     Ok(())
 }
@@ -1412,6 +1422,15 @@ fn apply_review_merge_authorized(
         return Err(invalid(format!(
             "{}: reviewed_scope must equal the nomination's review_scope exactly",
             env.id
+        )));
+    }
+    // AGENT_BUS_SCHEMA.md: "merge_engine_epoch is the selected engine epoch
+    // visible in the authorization's observed state" -- not merely some
+    // historically-known activation, but the one currently selected.
+    if Some(&d.merge_engine_epoch) != state.current_merge_engine_epoch.as_ref() {
+        return Err(invalid(format!(
+            "{}: merge_engine_epoch {} is not the currently selected merge engine epoch",
+            env.id, d.merge_engine_epoch
         )));
     }
     for check in &d.checks {
@@ -2627,13 +2646,23 @@ mod tests {
         apply_ok(&mut state, &accept_env);
         assert!(state.review_chain(&nominate_env.id).unwrap().accepted());
 
+        let engine_epoch = EventId::new(&a("coord1"), 0);
+        state.merge_engine_info.insert(
+            engine_epoch.clone(),
+            (
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+            ),
+        );
+        state.current_merge_engine_epoch = Some(engine_epoch.clone());
+
         let authorize_data = EventData::ReviewMergeAuthorized(ReviewMergeAuthorized {
             nomination: nominate_env.id.clone(),
             product_branch: request.product_branch.clone(),
             previous_main: hash(2),
             reviewed_commit: hash(3),
             candidate: hash(4),
-            merge_engine_epoch: EventId::new(&a("coord1"), 0),
+            merge_engine_epoch: engine_epoch,
             checks: vec![crate::common::CheckResult {
                 command: text("build"),
                 result: crate::common::CheckOutcome::Passed,
@@ -2714,13 +2743,23 @@ mod tests {
         );
         apply_ok(&mut state, &accept_env);
 
+        let engine_epoch = EventId::new(&a("coord1"), 0);
+        state.merge_engine_info.insert(
+            engine_epoch.clone(),
+            (
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+            ),
+        );
+        state.current_merge_engine_epoch = Some(engine_epoch.clone());
+
         let authorize_data = EventData::ReviewMergeAuthorized(ReviewMergeAuthorized {
             nomination: nominate_env.id.clone(),
             product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
             previous_main: hash(2),
             reviewed_commit: hash(3),
             candidate: hash(4),
-            merge_engine_epoch: EventId::new(&a("coord1"), 0),
+            merge_engine_epoch: engine_epoch,
             checks: vec![crate::common::CheckResult {
                 command: text("build"),
                 result: crate::common::CheckOutcome::Passed,
@@ -4034,16 +4073,16 @@ mod tests {
         );
     }
 
-    /// Adversarial-review note: unlike the issue/dependency/handoff/review
-    /// terminal handlers, `apply_merge_engine_activated` has no `reset_*_
-    /// to_conflict` counterpart for `current_merge_engine_epoch` -- a
-    /// candidate that already won provisionally (as the sole member so far)
-    /// is never unwound back to a neutral value once a second, genuinely
-    /// concurrent candidate arrives and turns its group contested. This
-    /// pins down that actual asymmetry as a baseline; it is not a statement
-    /// that the current behavior is correct.
+    /// A second, genuinely concurrent `merge_engine.activated` candidate
+    /// must reset `current_merge_engine_epoch` back to the shared pre-race
+    /// baseline (`previous_epoch`), not leave it stuck at whichever
+    /// candidate happened to be recorded first -- the same "provisional
+    /// apply, then reset on conflict" rule issue/dependency reassignment
+    /// races already follow. Both candidates end up contested, and the
+    /// group's convergence must not depend on which one was applied first
+    /// (gates 15/16).
     #[test]
-    fn merge_engine_race_leaves_current_epoch_stuck_at_the_first_provisional_winner() {
+    fn merge_engine_race_resets_current_epoch_to_the_pre_race_baseline() {
         let mut state =
             empty_state(&[("coord1", Role::Coordinator), ("coord2", Role::Coordinator)]);
         let coord1 = a("coord1");
@@ -4075,7 +4114,44 @@ mod tests {
         apply_ok(&mut state, &candidate_b);
         assert!(state.exclusive.is_contested(&candidate_a.id));
         assert!(state.exclusive.is_contested(&candidate_b.id));
-        assert_eq!(state.current_merge_engine_epoch, Some(candidate_a.id));
+        assert_eq!(state.current_merge_engine_epoch, Some(genesis));
+    }
+
+    /// The reverse-order twin: the same final state regardless of which
+    /// candidate was recorded first.
+    #[test]
+    fn merge_engine_race_converges_regardless_of_order() {
+        let run = |first: &Agent, second: &Agent| {
+            let mut state =
+                empty_state(&[("coord1", Role::Coordinator), ("coord2", Role::Coordinator)]);
+            apply_ok(&mut state, &register(&a("coord1"), Role::Coordinator));
+            apply_ok(&mut state, &register(&a("coord2"), Role::Coordinator));
+            let genesis = seed_merge_engine_genesis(&mut state);
+            apply_ok(
+                &mut state,
+                &Envelope::new(
+                    first,
+                    1,
+                    no_frontier(),
+                    &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
+                    [],
+                ),
+            );
+            apply_ok(
+                &mut state,
+                &Envelope::new(
+                    second,
+                    1,
+                    no_frontier(),
+                    &EventData::MergeEngineActivated(merge_engine_activated(&genesis)),
+                    [],
+                ),
+            );
+            state.current_merge_engine_epoch
+        };
+        let forward = run(&a("coord1"), &a("coord2"));
+        let reverse = run(&a("coord2"), &a("coord1"));
+        assert_eq!(forward, reverse);
     }
 
     // ------------------------------------------------ dependency lifecycle
@@ -4477,6 +4553,16 @@ mod tests {
     /// for the merge-authorization/merged/reconciled/finding-disposition
     /// tests below, all of which need an accepted chain before they can
     /// exercise their own specific rejection branch.
+    /// The merge-engine epoch id `merge_authorized()` defaults to. Seeded
+    /// as the current selection by `nominate_and_accept` (below) so every
+    /// existing merge-authorization test's baseline stays valid without
+    /// each one separately wiring up `apply_merge_engine_activated` --
+    /// `apply_review_merge_authorized` now requires `merge_engine_epoch` to
+    /// equal `state.current_merge_engine_epoch` exactly.
+    fn default_merge_engine_epoch() -> EventId {
+        EventId::new(&a("coord1"), 0)
+    }
+
     fn nominate_and_accept(
         state: &mut BusState,
         author: &Agent,
@@ -4484,6 +4570,18 @@ mod tests {
         reviewer: &Agent,
         reviewer_seq: u64,
     ) -> (Envelope, Envelope) {
+        let engine_epoch = default_merge_engine_epoch();
+        state
+            .merge_engine_info
+            .entry(engine_epoch.clone())
+            .or_insert_with(|| {
+                (
+                    short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                    short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                )
+            });
+        state.current_merge_engine_epoch.get_or_insert(engine_epoch);
+
         let request = review_request(&[author], reviewer);
         let nominate_env = Envelope::new(
             author,
@@ -4518,7 +4616,7 @@ mod tests {
             previous_main: hash(2),
             reviewed_commit: hash(3),
             candidate: hash(4),
-            merge_engine_epoch: EventId::new(&a("coord1"), 0),
+            merge_engine_epoch: default_merge_engine_epoch(),
             checks: required_checks
                 .iter()
                 .map(|c| crate::common::CheckResult {
@@ -4825,16 +4923,13 @@ mod tests {
         );
     }
 
-    /// Adversarial-review note: `ReviewMergeAuthorized.merge_engine_epoch`
-    /// is carried and referenced, but `apply_review_merge_authorized` never
-    /// checks it against `state.current_merge_engine_epoch` (or even that it
-    /// names a known `merge_engine.activated`-equivalent event) -- a stale
-    /// or never-activated epoch id is accepted just as readily as the real
-    /// current one. This pins down that current (likely unintended) gap as
-    /// a baseline; it is not a statement that the current behavior is
-    /// correct.
+    /// `ReviewMergeAuthorized.merge_engine_epoch` must equal the currently
+    /// selected engine epoch (AGENT_BUS_SCHEMA.md: "the selected engine
+    /// epoch visible in the authorization's observed state") -- a stale or
+    /// fabricated epoch id must be refused, not accepted just as readily as
+    /// the real current one.
     #[test]
-    fn review_merge_authorized_does_not_validate_merge_engine_epoch() {
+    fn review_merge_authorized_rejects_a_stale_or_unknown_merge_engine_epoch() {
         let mut state = empty_state(&[]);
         let alice = a("alice");
         let bob = a("bob");
@@ -4843,8 +4938,8 @@ mod tests {
         let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
 
         let mut authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
-        // Never seeded into `state.merge_engine_info` /
-        // `state.current_merge_engine_epoch`.
+        // `nominate_and_accept` seeded `default_merge_engine_epoch()` as the
+        // current selection; this names something else entirely.
         authorize.merge_engine_epoch = EventId::new(&a("nobody"), 7);
         let env = Envelope::new(
             &bob,
@@ -4853,10 +4948,11 @@ mod tests {
             &EventData::ReviewMergeAuthorized(authorize),
             [],
         );
-        apply_ok(&mut state, &env);
-        assert_eq!(
-            state.review_chain(&nominate_env.id).unwrap().authorizations,
-            vec![env.id]
+        let err = apply_event(&mut state, &env).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("is not the currently selected merge engine epoch"),
+            "{err}"
         );
     }
 
