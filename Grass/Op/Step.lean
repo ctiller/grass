@@ -58,7 +58,7 @@ inductive StepRejection where
   profile's address spaces. -/
   | substepsNotWellFormed
   /-- The profile does not admit one of the declared accesses. -/
-  | accessNotAdmitted
+  | accessNotAdmitted (reason : AdmittedVocabulary.AdmissibilityFailure)
   /-- The operation faulted under a visibility rule this relation cannot read.
   The rule belongs to a profile, and guessing which effects survive would be
   worse than refusing. -/
@@ -926,9 +926,10 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
     | some sequence =>
         if ! decide (sequence.WellFormedIn policy.profile.vocabulary.addressSpaces) then
           .rejected .substepsNotWellFormed
-        else if ! sequence.accesses.all (fun d => decide (policy.Admits d)) then
-          .rejected .accessNotAdmitted
-        else
+        else match sequence.accesses.findSome?
+            (fun d => policy.profile.vocabulary.whyNotAdmitted? d) with
+        | some reason => .rejected (.accessNotAdmitted reason)
+        | Option.none =>
           -- Every access must name the context actually running the step. The
           -- event's identity comes from the descriptor and its kind from here, so
           -- without this the two disagree and the race check keys on the

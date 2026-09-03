@@ -310,40 +310,122 @@ theorem isPortable_or_registered_of_admitsScope {vocabulary : AdmittedVocabulary
       exact h
 
 /--
-`vocabulary.Admits d` holds when every open name the access descriptor uses is
-one this vocabulary declared.
+Why an access is not admissible, if it is not.
+
+`Admits` is a conjunction, and a consumer that only learns "false" learns almost
+nothing: an unregistered ordering mode, an unregistered scope and an unregistered
+initialization rule were indistinguishable at the transition, all three reported as
+`Grass.Op.StepRejection.accessNotAdmitted`, and the fixtures pinning them asserted a
+constructor any failure satisfies. `Grass/Op/Step.lean` argues the opposite standard
+for facets — "a rejection says *which* one is missing rather than only that closure
+failed" — and follows it for the three fault checks.
+-/
+inductive AdmissibilityFailure where
+  /-- The vocabulary declares no address space by the name the access gives. -/
+  | spaceNotDeclared (space : AddressSpaceId)
+  /-- The access is not well formed in the vocabulary's version of that space. -/
+  | notWellFormedInSpace (space : AddressSpaceId)
+  /-- The provenance's allocation source is not one the profile models. -/
+  | sourceNotRecognized (source : AllocationSourceId)
+  /-- A provenance step kind is not one the profile models. -/
+  | stepKindNotRecognized (kind : ProvenanceStepKind)
+  /-- An admitted fault class is not one the profile models. -/
+  | faultClassNotRecognized (fault : FaultClassId)
+  /-- The ledger effect would drop or fabricate a duty. -/
+  | ledgerEffectIllFormed
+  /-- An obligation kind the effect creates is not one the profile declares. -/
+  | obligationKindNotRecognized (kind : ObligationKindId)
+  /-- The ordering mode is profile-specific and unregistered. -/
+  | orderNotRegistered (name : Name)
+  /-- The ordering scope is profile-specific and unregistered. -/
+  | scopeNotRegistered (name : Name)
+  /-- The initialization rule the access cites is unregistered. -/
+  | initializationRuleNotRegistered (name : Name)
+deriving DecidableEq, Repr
+
+/--
+Every way this access fails to be admissible, in the order the clauses are stated.
+
+**`Admits` is defined from this list, not beside it.** A reason function written
+beside a predicate is two encodings of one condition, which is the defect this layer
+keeps finding — `AllocationRecord.initialized` and `AccessIntent.isDevice` were both
+that, and a first attempt at this was too. Here the list is the definition and
+`Admits` is its emptiness, so a clause can only be added in one place.
 
 This is applicability, in the sense of `docs/MEMORY_MODEL.md` §9. An access naming
-an address space, allocation source, provenance step kind, or fault class that was
-never declared is rejected here, before any question of whether it would succeed.
+an address space, allocation source, provenance step kind, fault class, obligation
+kind, ordering mode, scope or initialization rule that was never declared fails
+here, before any question of whether it would succeed.
+-/
+def admissibilityFailures (vocabulary : AdmittedVocabulary) (d : AccessDescriptor) :
+    List AdmissibilityFailure :=
+  (match vocabulary.addressSpaces.find? d.space with
+   | Option.none => [.spaceNotDeclared d.space]
+   | some space => if d.WellFormedIn space then [] else [.notWellFormedInSpace d.space]) ++
+  (if vocabulary.allocationSources.Recognizes d.provenance.source then []
+   else [.sourceNotRecognized d.provenance.source]) ++
+  (d.provenance.path.filterMap fun step =>
+    if vocabulary.provenanceStepKinds.Recognizes step.kind then Option.none
+    else some (.stepKindNotRecognized step.kind)) ++
+  (d.admittedFaults.filterMap fun fault =>
+    if vocabulary.faultClasses.Recognizes fault then Option.none
+    else some (.faultClassNotRecognized fault)) ++
+  (if d.ledgerEffect.WellFormed then [] else [.ledgerEffectIllFormed]) ++
+  (d.ledgerEffect.createdKinds.filterMap fun id =>
+    if vocabulary.obligationKinds.Recognizes id then Option.none
+    else some (.obligationKindNotRecognized id)) ++
+  (match d.ordering.order.profileName? with
+   | some name =>
+       if vocabulary.orderingModes.Recognizes name then [] else [.orderNotRegistered name]
+   | Option.none => []) ++
+  (match d.ordering.scope.profileName? with
+   | some name =>
+       if vocabulary.orderingScopes.Recognizes name then [] else [.scopeNotRegistered name]
+   | Option.none => []) ++
+  (match d.initialization.justification? with
+   | some justification =>
+       if vocabulary.initializationJustifications.Recognizes justification then []
+       else [.initializationRuleNotRegistered justification]
+   | Option.none => [])
 
-It is stated on the vocabulary rather than on the whole profile so that
-admissibility can be checked — by a fixture, a report, or a diagnostic — without
-fabricating the §10 proof package. Claiming closure in order to ask a question
-about names would be exactly backwards.
+/--
+`vocabulary.Admits d` holds when every open name the access descriptor uses is one
+this vocabulary declared: nothing failed.
+
+Stated on the vocabulary rather than on the whole profile so that admissibility can
+be checked — by a fixture, a report, or a diagnostic — without fabricating the §10
+proof package. Claiming closure in order to ask a question about names would be
+exactly backwards.
 -/
 def Admits (vocabulary : AdmittedVocabulary) (d : AccessDescriptor) : Prop :=
-  (match vocabulary.addressSpaces.find? d.space with
-   | some space => d.WellFormedIn space
-   | Option.none => False) ∧
-  vocabulary.allocationSources.Recognizes d.provenance.source ∧
-  (∀ step ∈ d.provenance.path, vocabulary.provenanceStepKinds.Recognizes step.kind) ∧
-  (∀ fault ∈ d.admittedFaults, vocabulary.faultClasses.Recognizes fault) ∧
-  d.ledgerEffect.WellFormed ∧
-  (∀ id ∈ d.ledgerEffect.createdKinds, vocabulary.obligationKinds.Recognizes id) ∧
-  vocabulary.AdmitsOrder d.ordering.order ∧
-  vocabulary.AdmitsScope d.ordering.scope ∧
-  (∀ justification ∈ d.initialization.justification?,
-    vocabulary.initializationJustifications.Recognizes justification)
+  vocabulary.admissibilityFailures d = []
 
 instance (vocabulary : AdmittedVocabulary) (d : AccessDescriptor) :
-    Decidable (vocabulary.Admits d) := by
-  unfold Admits
-  have : Decidable (match vocabulary.addressSpaces.find? d.space with
-      | some space => d.WellFormedIn space
-      | Option.none => False) := by
-    cases vocabulary.addressSpaces.find? d.space <;> simp <;> infer_instance
-  infer_instance
+    Decidable (vocabulary.Admits d) :=
+  inferInstanceAs (Decidable (_ = _))
+
+/-- The first reason this access is not admissible, for a rejection to name. -/
+def whyNotAdmitted? (vocabulary : AdmittedVocabulary) (d : AccessDescriptor) :
+    Option AdmissibilityFailure :=
+  (vocabulary.admissibilityFailures d).head?
+
+/-- **The reason and the predicate cannot disagree**: `admits_iff_whyNotAdmitted?_eq_none`
+is that, and it is `Iff` on one list rather than a comparison of two encodings. -/
+theorem admits_iff_whyNotAdmitted?_eq_none (vocabulary : AdmittedVocabulary)
+    (d : AccessDescriptor) :
+    vocabulary.Admits d ↔ vocabulary.whyNotAdmitted? d = Option.none := by
+  unfold Admits whyNotAdmitted?
+  cases vocabulary.admissibilityFailures d <;> simp
+
+/-- Any recorded failure means the access is not admitted. Every clause theorem
+below is this, plus a membership proof. -/
+theorem not_admits_of_failure {vocabulary : AdmittedVocabulary} {d : AccessDescriptor}
+    {failure : AdmissibilityFailure}
+    (h : failure ∈ vocabulary.admissibilityFailures d) : ¬ vocabulary.Admits d := by
+  intro ha
+  unfold Admits at ha
+  rw [ha] at h
+  simp at h
 
 /-- A vocabulary declaring no address spaces admits no access. Rejecting
 everything is the safe failure; admitting everything would be the permissive
@@ -351,29 +433,67 @@ fallback `docs/FOUNDATION.md` law 8 forbids. -/
 theorem not_admits_of_no_address_spaces {vocabulary : AdmittedVocabulary}
     (h : vocabulary.addressSpaces = AddressSpaceTable.empty) (d : AccessDescriptor) :
     ¬ vocabulary.Admits d := by
-  rintro ⟨hspace, -⟩
-  rw [h] at hspace
-  simp at hspace
+  refine not_admits_of_failure (failure := .spaceNotDeclared d.space) ?_
+  unfold admissibilityFailures
+  rw [h]
+  simp only [List.mem_append]
+  refine Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl ?_)))))))
+  simp [AddressSpaceTable.empty, AddressSpaceTable.find?]
 
-/-- An access naming an unrecognized fault class is not admitted. A fault the
-profile never modelled cannot be approximated as one it did;
-`not_admits_of_unrecognized_fault` is the proof. -/
+/--
+A vocabulary never admits an access whose declared space it does not declare, and
+never admits one that is not well formed *in that vocabulary's own version* of the
+space.
+
+A descriptor names its space and `AddressSpaceTable.find?` resolves it, so the space
+its alignment and range checks run against comes from the profile;
+`Grass.Op.StepPolicy.vocabularyWellFormed` is the other half.
+-/
+theorem not_admits_of_undeclared_space {vocabulary : AdmittedVocabulary}
+    {d : AccessDescriptor} (h : ¬ vocabulary.addressSpaces.Declares d.space) :
+    ¬ vocabulary.Admits d := by
+  refine not_admits_of_failure (failure := .spaceNotDeclared d.space) ?_
+  unfold admissibilityFailures
+  simp only [List.mem_append]
+  refine Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inl ?_)))))))
+  cases hfind : vocabulary.addressSpaces.find? d.space with
+  | none => simp
+  | some space => exact absurd (by simp [AddressSpaceTable.Declares, hfind]) h
+
+/-- An access naming an unrecognized fault class is not admitted, so a fault the
+profile never modelled is not approximated as one it did. -/
 theorem not_admits_of_unrecognized_fault {vocabulary : AdmittedVocabulary}
     {d : AccessDescriptor} {fault : FaultClassId} (hmem : fault ∈ d.admittedFaults)
-    (h : ¬ vocabulary.faultClasses.Recognizes fault) : ¬ vocabulary.Admits d :=
-  fun ha => h (ha.2.2.2.1 fault hmem)
+    (h : ¬ vocabulary.faultClasses.Recognizes fault) : ¬ vocabulary.Admits d := by
+  refine not_admits_of_failure (failure := .faultClassNotRecognized fault) ?_
+  unfold admissibilityFailures
+  simp only [List.mem_append, List.mem_filterMap]
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl (Or.inr ⟨fault, hmem, by simp [h]⟩)))))
 
 /--
 An access whose ledger effect would drop or fabricate a duty is not admitted.
 
 This is what makes `LedgerDelta.WellFormed` a mechanism rather than documentation:
-until it was a premise here, `split source []` and `join [] into` were rejected by
-a theorem nothing consumed. `docs/OBLIGATIONS.md` §2 and
-`docs/FOUNDATION.md` law 7.
+until it was a clause here, `split source []` and `join [] into` were rejected by a
+theorem nothing consumed. `docs/OBLIGATIONS.md` §2 and `docs/FOUNDATION.md` law 7.
 -/
 theorem not_admits_of_ill_formed_ledger_effect {vocabulary : AdmittedVocabulary}
-    {d : AccessDescriptor} (h : ¬ d.ledgerEffect.WellFormed) : ¬ vocabulary.Admits d :=
-  fun ha => h ha.2.2.2.2.1
+    {d : AccessDescriptor} (h : ¬ d.ledgerEffect.WellFormed) : ¬ vocabulary.Admits d := by
+  refine not_admits_of_failure (failure := .ledgerEffectIllFormed) ?_
+  unfold admissibilityFailures
+  simp only [List.mem_append]
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inr (by simp [h])))))
+
+/-- An access creating an obligation of a kind the profile never declared is not
+admitted. -/
+theorem not_admits_of_undeclared_obligation_kind {vocabulary : AdmittedVocabulary}
+    {d : AccessDescriptor} {kind : ObligationKindId}
+    (hmem : kind ∈ d.ledgerEffect.createdKinds)
+    (h : ¬ vocabulary.obligationKinds.Recognizes kind) : ¬ vocabulary.Admits d := by
+  refine not_admits_of_failure (failure := .obligationKindNotRecognized kind) ?_
+  unfold admissibilityFailures
+  simp only [List.mem_append, List.mem_filterMap]
+  exact Or.inl (Or.inl (Or.inl (Or.inr ⟨kind, hmem, by simp [h]⟩)))
 
 /-- **An access citing an initialization rule the profile never declared is not
 admitted.** A name no profile claimed is not a rule. This does not rest on
@@ -381,51 +501,36 @@ admitted.** A name no profile claimed is not a rule. This does not rest on
 `initializationJustifications`. -/
 theorem not_admits_of_unregistered_justification {vocabulary : AdmittedVocabulary}
     {d : AccessDescriptor} {justification : Name}
-    (hmem : justification ∈ d.initialization.justification?)
+    (hmem : d.initialization.justification? = some justification)
     (h : ¬ vocabulary.initializationJustifications.Recognizes justification) :
-    ¬ vocabulary.Admits d :=
-  fun ha => h (ha.2.2.2.2.2.2.2.2 justification hmem)
+    ¬ vocabulary.Admits d := by
+  refine not_admits_of_failure (failure := .initializationRuleNotRegistered justification) ?_
+  unfold admissibilityFailures
+  simp only [List.mem_append]
+  exact Or.inr (by rw [hmem]; simp [h])
 
 /-- **An access requesting an ordering mode the profile never declared is not
 admitted.** `docs/MEMORY_MODEL.md` §7.1: an unsupported mapping is rejected. -/
 theorem not_admits_of_unregistered_order {vocabulary : AdmittedVocabulary}
-    {d : AccessDescriptor} (h : ¬ vocabulary.AdmitsOrder d.ordering.order) :
-    ¬ vocabulary.Admits d :=
-  fun ha => h ha.2.2.2.2.2.2.1
+    {d : AccessDescriptor} {name : Name}
+    (hname : d.ordering.order.profileName? = some name)
+    (h : ¬ vocabulary.orderingModes.Recognizes name) : ¬ vocabulary.Admits d := by
+  refine not_admits_of_failure (failure := .orderNotRegistered name) ?_
+  unfold admissibilityFailures
+  simp only [List.mem_append]
+  exact Or.inl (Or.inl (Or.inr (by rw [hname]; simp [h])))
 
 /-- And one claiming a scope the profile never declared is not admitted. A device
 fence claiming a scope nobody defined is not a weaker fence; it is an undefined
 one. -/
 theorem not_admits_of_unregistered_scope {vocabulary : AdmittedVocabulary}
-    {d : AccessDescriptor} (h : ¬ vocabulary.AdmitsScope d.ordering.scope) :
-    ¬ vocabulary.Admits d :=
-  fun ha => h ha.2.2.2.2.2.2.2.1
-
-/-- An access creating an obligation of a kind the profile never declared is not
-admitted. -/
-theorem not_admits_of_undeclared_obligation_kind {vocabulary : AdmittedVocabulary}
-    {d : AccessDescriptor} {kind : ObligationKindId}
-    (hmem : kind ∈ d.ledgerEffect.createdKinds)
-    (h : ¬ vocabulary.obligationKinds.Recognizes kind) : ¬ vocabulary.Admits d :=
-  fun ha => h (ha.2.2.2.2.2.1 kind hmem)
-
-/--
-A vocabulary never admits an access whose declared space it does not declare, and
-never admits one that is not well formed *in that vocabulary's own version* of the
-space.
-
-This is the clause that closes the hole. A descriptor names its space and
-`AddressSpaceTable.find?` resolves it, so the space its alignment and range
-checks run against comes from the profile; `not_admits_of_undeclared_space` and
-`Grass.Op.StepPolicy.vocabularyWellFormed` are the two halves.
--/
-theorem not_admits_of_undeclared_space {vocabulary : AdmittedVocabulary}
-    {d : AccessDescriptor} (h : ¬ vocabulary.addressSpaces.Declares d.space) :
-    ¬ vocabulary.Admits d := by
-  rintro ⟨hspace, -⟩
-  cases hfind : vocabulary.addressSpaces.find? d.space with
-  | none => rw [hfind] at hspace; simp at hspace
-  | some space => exact h (by simp [AddressSpaceTable.Declares, hfind])
+    {d : AccessDescriptor} {name : Name}
+    (hname : d.ordering.scope.profileName? = some name)
+    (h : ¬ vocabulary.orderingScopes.Recognizes name) : ¬ vocabulary.Admits d := by
+  refine not_admits_of_failure (failure := .scopeNotRegistered name) ?_
+  unfold admissibilityFailures
+  simp only [List.mem_append]
+  exact Or.inl (Or.inr (by rw [hname]; simp [h]))
 
 end AdmittedVocabulary
 

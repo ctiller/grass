@@ -808,7 +808,8 @@ theorem staleEpoch_is_denied :
 admitted. This is what makes `LedgerDelta.WellFormed` a mechanism: it is a
 premise of admission, not a theorem with no consumer. -/
 theorem badLedger_is_rejected :
-    (stepAlpha state₀ .badLedger).rejection? = some .accessNotAdmitted := by decide
+    (stepAlpha state₀ .badLedger).rejection? = some (.accessNotAdmitted .ledgerEffectIllFormed) := by
+  decide
 
 /-! ## Obligations cannot be fabricated, dropped, or duplicated
 
@@ -1368,7 +1369,9 @@ theorem the_registries_hold_what_they_should :
 /-- **An uninitialized read under an unregistered rule is not admitted.** -/
 theorem an_unregistered_initialization_rule_is_refused :
     Grass.Op.step policy state₀ (SomeOperation.of Alpha.unregisteredInitRule) thread₀
-      .thread ⟨⟨"alpha"⟩⟩ = .rejected .accessNotAdmitted := rfl
+      .thread ⟨⟨"alpha"⟩⟩ =
+      .rejected (.accessNotAdmitted
+        (.initializationRuleNotRegistered ⟨"fake.neverRegistered"⟩)) := rfl
 
 /-- And the registered rule is admitted, so the refusal is about the registry
 rather than about `permitsUninitialized` being refused outright. -/
@@ -1386,7 +1389,8 @@ stepped and minted an event carrying it. -/
 /-- **An unregistered ordering mode is not admitted.** -/
 theorem an_unregistered_order_is_refused :
     Grass.Op.step policy state₀ (SomeOperation.of Alpha.unregisteredOrder) thread₀
-      .thread ⟨⟨"alpha"⟩⟩ = .rejected .accessNotAdmitted := rfl
+      .thread ⟨⟨"alpha"⟩⟩ =
+      .rejected (.accessNotAdmitted (.orderNotRegistered ⟨"fake.neverRegistered"⟩)) := rfl
 
 /-- **The registered mode is admitted**, so the rejection above is about the
 registry rather than about profile-specific modes being refused outright. Without
@@ -1399,7 +1403,23 @@ theorem the_registered_order_is_admitted :
 scope nobody defined is not a weaker fence; it is an undefined one. -/
 theorem an_unregistered_scope_is_refused :
     Grass.Op.step policy state₀ (SomeOperation.of Alpha.unregisteredScope) thread₀
-      .thread ⟨⟨"alpha"⟩⟩ = .rejected .accessNotAdmitted := rfl
+      .thread ⟨⟨"alpha"⟩⟩ =
+      .rejected (.accessNotAdmitted (.scopeNotRegistered ⟨"fake.neverRegistered"⟩)) := rfl
+
+/-- **The three name a different clause each**, which is the point of reporting a
+reason: an unregistered ordering mode, an unregistered scope and an unregistered
+initialization rule were one indistinguishable `accessNotAdmitted`, and the three
+theorems above asserted a constructor any admissibility failure satisfies. -/
+theorem the_three_refusals_are_distinguishable :
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.unregisteredOrder) thread₀
+      .thread ⟨⟨"alpha"⟩⟩).rejection? ≠
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.unregisteredScope) thread₀
+      .thread ⟨⟨"alpha"⟩⟩).rejection? ∧
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.unregisteredScope) thread₀
+      .thread ⟨⟨"alpha"⟩⟩).rejection? ≠
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.unregisteredInitRule) thread₀
+      .thread ⟨⟨"alpha"⟩⟩).rejection? := by
+  exact ⟨by decide, by decide⟩
 
 /-- **A portable mode needs no registration**, exercised on a mode that is not
 `relaxed`: `atomicAdd` requests `acquireRelease` and the profile registers only
