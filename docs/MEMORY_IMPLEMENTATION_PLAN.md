@@ -937,6 +937,21 @@ freezes and returning thaws without a field to keep in step, and
 `lending_the_head_leaves_the_tail_writable` shows the freeze is per-fragment rather
 than per-allocation.
 
+`Grass/Op/LoanAuthority.lean` is the rule as a provider a profile adopts rather
+than reinvents: lent bytes are reachable only through a loan.
+`Tests/Op/StandardLoan.lean` drives it through `step`, which is the part that
+matters — a rule proved about a map the transition does not consult is the defect
+this branch has found repeatedly, so the fixture checks refusal and restoration
+end to end rather than at the map.
+
+Three of its cases exist because the obvious provider gets them wrong. A *read* of
+lent bytes is refused, not only a write, since "lending stops the owner writing" is
+the intuitive half and a provider enforcing only that would pass everything else.
+Lending the tail leaves the head reachable, so the freeze is per-fragment rather
+than per-allocation — without it, lending one field of a struct would lock the
+struct. And an unlent store commits, so the refusals are not a provider that
+refuses everything.
+
 ### 4.4.1 What M3 still owes
 
 - **Split and join of loans**, which §3 requires and which the identity discipline
@@ -945,9 +960,6 @@ than per-allocation.
   `AuthorityGrant` does not. Adding fields nothing consults is the shape this layer
   has been bitten by three times, so they wait for M4's frames, where a bounded
   lifetime has something to mean.
-- **Wiring the loan map into a reusable `AuthorityProvider`.** `Tests/Op/FakeIsa.lean`
-  has an ad-hoc one; a profile should be able to take a standard loan provider
-  rather than write its own, and the freeze law above is what it would enforce.
 
 ## 5. M3–M5 — The Spike 1 acceptance path
 
