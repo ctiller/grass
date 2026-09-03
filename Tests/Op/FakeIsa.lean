@@ -1451,7 +1451,7 @@ theorem a_fresh_context_may_take_any_kind :
 
 /-! ## A compute substep's fault classes are checked too
 
-`MemoryProfile.Admits` closes this for an access, quantifying over
+`AdmittedVocabulary.Admits` closes this for an access, quantifying over
 `admittedFaults`. A compute substep has no descriptor, so `sequence.accesses`
 never contains it and `Admits` never saw it: the only thing checked about one was
 that its fault list is non-empty. `faultClassNotDeclared` then validated a plan
@@ -1826,7 +1826,7 @@ unchecked input is not rejected, it is modelled. -/
 
 /-- A fault class no substep declares is refused, not recorded.
 
-`Substep.faults` has always said what a step may raise and `MemoryProfile.Admits`
+`Substep.faults` has always said what a step may raise and `AdmittedVocabulary.Admits`
 has always required an access's `admittedFaults` to be recognized. Nothing
 consulted either, so a `FaultPlan` could name a class no registry admitted and the
 transition recorded it -- into `RaisedFault`, and into a `ValidMemoryEvent`'s

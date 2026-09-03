@@ -66,7 +66,7 @@ inductive StepRejection where
   /-- The machine reported a fault class the faulting substep does not declare.
 
   `Substep.faults` is what an access or a compute step says it may raise, and
-  `MemoryProfile.Admits` already requires an access's `admittedFaults` to be
+  `AdmittedVocabulary.Admits` already requires an access's `admittedFaults` to be
   recognized by the vocabulary. Nothing consulted either, so a `FaultPlan` could
   name a class no registry admitted and the transition would record it — into
   `RaisedFault` and into a `ValidMemoryEvent`'s status, since
@@ -127,7 +127,7 @@ inductive StepRejection where
   /-- A compute substep declares a fault class the profile's vocabulary does not
   recognize.
 
-  `MemoryProfile.Admits` closes this for an access, because it quantifies over
+  `AdmittedVocabulary.Admits` closes this for an access, because it quantifies over
   `admittedFaults`. A compute substep has no descriptor, so `sequence.accesses`
   never contains it and `Admits` never sees it — the only thing checked about one
   was that its fault list is non-empty. `faultClassNotDeclared` then validated a
@@ -171,7 +171,7 @@ inductive StepRejection where
   /-- The operation declares a fault class the profile's vocabulary does not
   recognize.
 
-  `MemoryProfile.Admits` closes this for an access's `admittedFaults` and
+  `AdmittedVocabulary.Admits` closes this for an access's `admittedFaults` and
   `computeFaultNotRecognized` closes it for a compute substep. The operation-level
   list was the third place a fault class could be named, and the only one no
   registry saw. `Grass/Memory/Profile.lean` requires every registry to be

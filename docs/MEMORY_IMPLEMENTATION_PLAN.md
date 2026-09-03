@@ -1399,9 +1399,13 @@ refuses everything.
   of an unreachable case. Both were deleted — right, because a vacuous theorem reads
   as coverage. The reasoning given for the deletion was wrong: it said the rule had
   nothing to constrain, and `Permission.Permits` is the sole rights gate on the
-  chain the deleted `Authorizes` function → `MemoryState.GrantedOfKind` →
-  `AuthorityProvider.loan.refuses` → `step`, so the rule had a gate and no clause
-  there. `Permission.atomicOnly` is that clause, and `authorityOf` derives
+  chain `MemoryState.AuthorizedAt` → `MemoryState.Granted` → `refusalOf` → `step`,
+  so the rule had a gate and no clause there. (This sentence named the deleted
+  `Authorizes` function and `MemoryState.GrantedOfKind` until review checked the
+  chain: the first is deleted and the second has no caller under `Grass/` at all —
+  the transition's clause asks kind-blind `Granted`, deliberately, because *any*
+  authority over the bytes freezes them and the kind distinction is a provider's
+  business. `Grass/Memory/Rights.lean` had already been corrected; this had not.) `Permission.atomicOnly` is that clause, and `authorityOf` derives
   `atomicShared` from it. The constructor carries no ordering: that was a second
   place to say what `AccessDescriptor.ordering` says.
 
@@ -1621,6 +1625,34 @@ refuses everything.
   bytes *nothing* is held over is indistinguishable from a legitimate owner's first
   loan, and stays so until `AllocationRecord` records an owner, which is the same gap
   the bullet below records from the other side.
+- ~~**`MemoryProfile.Admits` was dead and wrong about itself.**~~ Deleted. Its
+  docstring called it "deliberately not decidable" and the body was a list-emptiness
+  test with a `Decidable` instance three definitions above — review wrote the instance
+  in one line and decided a real case with it. It had no call site either: everything
+  that checks admissibility goes through `AdmittedVocabulary.whyNotAdmitted?` or
+  `StepPolicy.Admits`. Six docstrings across four modules named it as the thing that
+  enforces a rule, which is the part that bites: a reader auditing "who checks the
+  fault classes" was sent to a dead function that could drift from whatever actually
+  checks them. All six now name `AdmittedVocabulary.Admits`.
+
+  A `def` under `Grass/` that nothing uses falls between two gates —
+  `Tools/FixtureAudit.py` scans `Tests/` only and `Tools/ReachabilityAudit.py` looks
+  at inductive constructors — which is worth knowing and is not closed here.
+- **`AddressSpace.owner` is carried and unread**, and its docstring claimed the owner
+  is "part of the space's identity", which is false: `AddressSpaceTable.find?` matches
+  on `id` and `WellFormed` requires the ids to be `Nodup`, so two externally owned
+  buffers with different owners and one id are indistinguishable. Corrected in place.
+  `Tools/ConsultedAudit.py` could not have found it — `owner` is projected freely as
+  `Obligation.owner`, which is the same-name blind spot its own docstring documents.
+  Kept rather than deleted because §7.5's distinction is real and a device authority
+  will need it.
+- **`AdmittedVocabulary.WellFormed` constrains the address-space table and nothing
+  else.** Eleven registries, no coherence condition between them. The two
+  justification registries are split so that one name cannot satisfy the other's
+  claim, and nothing stops a well-formed vocabulary listing one name in both, which
+  re-creates the collapse at the profile level. Minor — a profile listing a name in
+  both is arguably making two honest claims — but it means the split is a convention
+  rather than a guarantee.
 - ~~**The loan rule was a provider a profile could decline to list.**~~ The largest
   finding of round ten, and the same shape as the round before it one level up.
   `StepPolicy.authorities` defaults to `[]`; the grant map was read by

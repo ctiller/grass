@@ -145,6 +145,11 @@ ALLOWED = {
     "limit",
     "exhaustion",
     "lifecycle",
+    # `AddressSpace.owner`, a genuine gap with no consumer, listed here only because
+    # this tool cannot see it anyway: `owner` is projected as `Obligation.owner`, so
+    # the same-name blind spot hides it whatever this list says. Recorded in section
+    # 4.2 of the plan, where the other carried-and-unread facts are.
+    "owner",
     # Proof obligations on structures a *provider* supplies, from modules this
     # branch does not own -- Grass/Core/Demand.lean and Grass/Certificate.lean,
     # which arrived here by merging main. They do work unprojected, because a

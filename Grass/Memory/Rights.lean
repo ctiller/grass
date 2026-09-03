@@ -28,7 +28,7 @@ mechanisms already carry — conflating them, so neither was recoverable from it
 Who performs an access is `ExecutionContext.kind`, which
 `docs/MEMORY_MODEL.md` §7.1 requires every event to carry and which `Grass/Op/Step.lean`
 checks against `MachineState.contexts`. What an access targets is its
-`AddressSpaceId`, which `denialOf` checks and `MemoryProfile.Admits` requires the
+`AddressSpaceId`, which `denialOf` checks and `AdmittedVocabulary.Admits` requires the
 profile to declare; §7.5 makes those spaces non-interchangeable precisely so the
 identity carries the fact. The `Bool` was read by nothing, which is how it was
 found.
@@ -120,7 +120,7 @@ structure Permission where
   theorem held of an unreachable case and was deleted — and the reasoning offered
   for the deletion, that the rule had nothing to constrain, was wrong. `Permits` is
   the sole rights gate on the chain `MemoryState.AuthorizedAt` →
-  `MemoryState.Granted` → `AuthorityProvider.loan.refuses` → `Grass/Op/Step.lean`,
+  `MemoryState.Granted` → `Grass/Op/Step.lean`'s `refusalOf`,
   and it had no clause about atomicity, (The chain was named as the deleted `Authorizes` function and
 `MemoryState.GrantedOfKind` until review checked: the first was deleted, and the
 second has no caller under `Grass/` — the provider calls `Granted`, which is

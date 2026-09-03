@@ -173,9 +173,22 @@ structure AddressSpace where
   /-- Whether host visibility needs an explicit operation. -/
   coherence : Coherence
   /-- The agent that owns this storage, for externally owned buffers. `none`
-  means the program's own address space. `docs/MEMORY_MODEL.md` §7.5 treats
-  externally owned buffers as a distinct space, so the owner is part of the
-  space's identity rather than a property of individual allocations. -/
+  means the program's own address space, and `docs/MEMORY_MODEL.md` §7.5 treats
+  externally owned buffers as a distinct space.
+
+  **Carried and unread.** Nothing projects it. An earlier version of this docstring
+  said the owner is "part of the space's identity rather than a property of
+  individual allocations", and that is false in any operational sense:
+  `AddressSpaceTable.find?` matches on `space.id`, `WellFormed` requires
+  `(spaces.map AddressSpace.id).Nodup`, and two externally owned buffers with
+  different owners and one id cannot be told apart. Review found it, and found why no
+  gate did: `Tools/ConsultedAudit.py` keys on the field *name*, and `owner` is
+  projected freely elsewhere as `Obligation.owner`, which is the same-name blind spot
+  that tool's own docstring documents.
+
+  It is kept rather than deleted because §7.5's distinction is real and a device
+  authority will need it; `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 lists it with the
+  other facts the model carries and nothing consults. -/
   owner : Option ContextId := none
 deriving DecidableEq, Repr
 

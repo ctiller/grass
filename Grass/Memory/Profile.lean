@@ -664,18 +664,22 @@ structure MemoryProfile where
 
 namespace MemoryProfile
 
-/--
-`profile.Admits d` holds when the profile declares everything the access names and
-the access is well formed in the profile's own version of its address space.
+/-!
+`MemoryProfile.Admits` used to be here, as `profile.vocabulary.Admits d`, and it is
+deleted.
 
-Deliberately not decidable. An earlier version was, and that was a symptom rather
-than a feature: it was decidable because well-formedness was not part of
-admission, so the check amounted to comparing names. Resolving the space through
-the profile is what makes the guards real, and it brings the descriptor's
-universally quantified clauses with it.
+Its docstring said it was "deliberately not decidable", which was false: the body was
+a list-emptiness test with a `Decidable` instance three definitions above, and review
+wrote the instance in one line and decided a real case with it. It had no call site
+either — everything that checks admissibility goes through
+`AdmittedVocabulary.whyNotAdmitted?` or `StepPolicy.Admits` — while six docstrings
+across four modules named it as the thing that enforces a rule. A dead function with a
+false claim about itself, cited as the enforcer, is worse than no function: a reader
+auditing "who checks the fault classes" was sent to something that could drift from
+whatever actually checks them.
+
+`AdmittedVocabulary.Admits` is the real predicate and it is where the clauses live.
 -/
-def Admits (profile : MemoryProfile) (d : AccessDescriptor) : Prop :=
-  profile.vocabulary.Admits d
 
 end MemoryProfile
 
