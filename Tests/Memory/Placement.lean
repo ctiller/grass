@@ -89,9 +89,23 @@ theorem the_addresses_are_where_expected :
 case a mandatory base would have forced a profile to invent. -/
 theorem unplaced_has_no_address : state.addressAt? unplaced 0 = Option.none := by decide
 
-/-- Placement is not authority: the unplaced allocation is live, readable and
-writable exactly as the placed one is. Nothing in `denialOf` reads a base. -/
+/-- **Placement is not authority**, in the sense that matters: the unplaced
+allocation is live, readable and writable exactly as the placed one is, and the two
+records differ in nothing but where they sit.
+
+`MetadataAt` no longer compares equal, and the change is deliberate.
+`AllocationRecord.base`'s docstring used to say "nothing in `denialOf` reads this",
+which was true and was the problem — an access declared an address and nothing
+compared it to the placement, so every Spike 1 fixture's address contradicted the
+placement the same fixture built. `denialOf` reads the base now, so the base is part
+of the metadata view a decision depends on, and this theorem states the property it
+was written for rather than the equality that happened to hold. -/
 theorem placement_is_not_authority :
-    state.MetadataAt placed = state.MetadataAt unplaced := by decide
+    (state.MetadataAt placed).map (fun m => (m.extent, m.epoch, m.space, m.permission, m.live)) =
+      (state.MetadataAt unplaced).map
+        (fun m => (m.extent, m.epoch, m.space, m.permission, m.live)) ∧
+    (state.MetadataAt placed).bind (fun m => m.base) ≠
+      (state.MetadataAt unplaced).bind (fun m => m.base) := by
+  exact ⟨by decide, by decide⟩
 
 end Tests.Memory.Placement

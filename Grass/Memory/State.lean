@@ -75,7 +75,7 @@ deriving DecidableEq, Repr
 /--
 Everything about an allocation except its bytes.
 
-`denialOf` reads exactly these five fields plus initialization, so this is the
+`denialOf` reads exactly these six fields plus initialization, so this is the
 view a decision depends on. Naming it lets a framing argument say "the metadata
 did not move" without asserting the bytes did not, which is the whole point of a
 write.
@@ -91,11 +91,20 @@ structure AllocationRecord.Metadata where
   permission : Permission
   /-- Whether it is live. -/
   live : Bool
+  /-- Where it sits, if it sits anywhere.
+
+  Added when `denialOf` began checking the access's declared address against the
+  allocation's placement. `AllocationRecord.base`'s docstring said "nothing in
+  `denialOf` reads this", and that was true and was the problem: the address field
+  on a descriptor could say anything. The moment it became a decision input it had
+  to be in this view, or `denialOf_congr_of_agrees` would be false — two states
+  agreeing on metadata and on every byte could refuse differently. -/
+  base : Option MachineAddress
 deriving DecidableEq, Repr
 
 /-- The metadata view of a record. -/
 def AllocationRecord.metadata (record : AllocationRecord) : AllocationRecord.Metadata :=
-  ⟨record.extent, record.epoch, record.space, record.permission, record.live⟩
+  ⟨record.extent, record.epoch, record.space, record.permission, record.live, record.base⟩
 
 /--
 The memory state.
@@ -791,6 +800,30 @@ byte. -/
 def addressAt? (state : MemoryState) (id : AllocId) (offset : Nat) :
     Option MachineAddress :=
   (state.allocations.lookup id).bind (fun record => record.base.map (addressOf · offset))
+
+/--
+`state.AddressAgrees d` holds when the access's declared address is the one its
+allocation's placement gives the offset it names.
+
+`docs/MEMORY_MODEL.md` §2 makes provenance and not address the authority, which is
+why `denialOf` decides on provenance — but an access still *declares* an address,
+`MemoryEvent` carries it, and a declaration nothing checks is a declaration that can
+say anything. It said anything: every Spike 1 fixture's address contradicted the
+placement the same fixture built.
+
+Vacuous where there is nothing to compare — an unplaced allocation, or one that does
+not exist. A logical address space has allocations with no machine address at all,
+which is why `AllocationRecord.base` is an `Option`, and demanding agreement with an
+address that does not exist would force every such profile to invent one.
+-/
+def AddressAgrees (state : MemoryState) (d : AccessDescriptor) : Prop :=
+  match state.addressAt? d.provenance.root d.range.start with
+  | some addr => d.address = .numeric addr
+  | Option.none => True
+
+instance (state : MemoryState) (d : AccessDescriptor) : Decidable (state.AddressAgrees d) := by
+  unfold AddressAgrees
+  split <;> infer_instance
 
 /-- `state.PlacedWithoutWrap id` holds when `id`'s bytes do not wrap the address
 space **if it is placed at all**.

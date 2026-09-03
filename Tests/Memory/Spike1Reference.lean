@@ -49,6 +49,11 @@ def stackAlloc : AllocId := allocSupply₀.fresh.1
 /-- The loaded image mapping holding `.rdata` and the import table. -/
 def imageAlloc : AllocId := allocSupply₁.fresh.1
 
+private def allocSupply₂ : FreshSupply AllocTag := allocSupply₁.fresh.2
+
+/-- A two-page reservation the split-store case straddles. -/
+def pageCrossAlloc : AllocId := allocSupply₂.fresh.1
+
 private def epochSupply₀ : FreshSupply EpochTag := FreshSupply.initial
 
 /-- The first epoch of both allocations; nothing is reused in Spike 1. -/
@@ -78,17 +83,43 @@ offset 32 of the frame. -/
 def transferredStep : ProvenanceStep :=
   { kind := .slot, label := ⟨"transferred"⟩, extent := ⟨32, 4⟩ }
 
-/-- The eight bytes at the top of the frame that `push` and `call` write. -/
-def savedSlotStep : ProvenanceStep :=
-  { kind := .slot, label := ⟨"savedOrReturn"⟩, extent := ⟨0, 8⟩ }
+/-- The eight bytes `push r12` writes.
+
+**One slot per push, and a separate one for the return address.** These were a
+single `savedOrReturn` slot at `⟨0, 8⟩`, shared by `push r12` and by the `call`'s
+return-address write — which on a real stack would put the return address on top of
+a saved nonvolatile register. `Spikes/1_Hello_World/Program.lean` pushes `r12`,
+`r13` and `r14` and then calls, so the return address is the fourth slot down, and
+a theorem below presented the collision as a property of the model rather than a
+defect in it. Review found it. -/
+def savedR12Step : ProvenanceStep :=
+  { kind := .slot, label := ⟨"savedR12"⟩, extent := ⟨0, 8⟩ }
+
+/-- The return address the `call` writes: below the three saved registers. -/
+def returnSlotStep : ProvenanceStep :=
+  { kind := .slot, label := ⟨"returnAddress"⟩, extent := ⟨24, 8⟩ }
 
 /-- Provenance of the `transferred` slot. -/
 def transferredProvenance : Provenance :=
   { stackProvenance with path := [frameStep, transferredStep] }
 
-/-- Provenance of the eight-byte slot `push` and `call` write. -/
-def savedSlotProvenance : Provenance :=
-  { stackProvenance with path := [frameStep, savedSlotStep] }
+/-- Provenance of the slot `push r12` writes. -/
+def savedR12Provenance : Provenance :=
+  { stackProvenance with path := [frameStep, savedR12Step] }
+
+/-- Provenance of the slot the `call` writes the return address into. -/
+def returnSlotProvenance : Provenance :=
+  { stackProvenance with path := [frameStep, returnSlotStep] }
+
+/-- A two-page reservation, so a store can straddle the boundary between them.
+
+Its own allocation, because the split store is not the saved-register slot and the
+one-page stack reservation cannot contain a store at offset 4095 of length 8 — using
+it made the fixture's declared addresses contradict its own offsets, which review
+found once the two were finally compared. -/
+def pageCrossProvenance : Provenance :=
+  { space := .cpuVirtual, root := pageCrossAlloc, epoch := epoch₀
+    source := .virtualAlloc, rootExtent := ⟨0, 8192⟩, path := [] }
 
 /-- Provenance of the loaded image. -/
 def imageProvenance : Provenance :=
@@ -152,7 +183,7 @@ Nothing about the instruction's operands mentions memory; a descriptor that coul
 only describe named operands could not express this.
 -/
 def pushR12 : SubstepSequence :=
-  .single (access savedSlotProvenance ⟨0, 8⟩ 0x1000 .write .readWrite 8 false true)
+  .single (access savedR12Provenance ⟨0, 8⟩ 0x1000 .write .readWrite 8 false true)
 
 /--
 `mov ecx, STD_OUTPUT_HANDLE` — an operation with no memory effect at all.
@@ -211,7 +242,7 @@ permissions.
 def callImportWriteFile : SubstepSequence :=
   { substeps :=
       [ .access (access importProvenance ⟨2048, 8⟩ 0x3000 .read .readOnly 8 true false),
-        .access (access savedSlotProvenance ⟨0, 8⟩ 0x0FF8 .write .readWrite 8 false true) ]
+        .access (access returnSlotProvenance ⟨24, 8⟩ 0x1018 .write .readWrite 8 false true) ]
     onFault := .priorEffectsVisible }
 
 /--
@@ -276,8 +307,8 @@ and this module has no business guessing what the profile says.
 -/
 def splitPageStore : SubstepSequence :=
   { substeps :=
-      [ .access (access savedSlotProvenance ⟨0, 1⟩ 0x1FFF .write .readWrite 1 false true),
-        .access (access savedSlotProvenance ⟨1, 7⟩ 0x2000 .write .readWrite 1 false true) ]
+      [ .access (access pageCrossProvenance ⟨4095, 1⟩ 0x1FFF .write .readWrite 1 false true),
+        .access (access pageCrossProvenance ⟨4096, 7⟩ 0x2000 .write .readWrite 1 false true) ]
     onFault := .profileSpecific ⟨"x86.splitPageStore"⟩ }
 
 /-- The divisor read survives the divide-error fault. -/
@@ -351,7 +382,7 @@ formed again, this file stops building. -/
 
 /-- A store that declares it needs only read-only permission. -/
 def writeThroughReadOnly : AccessDescriptor :=
-  access savedSlotProvenance ⟨0, 8⟩ 0x1000 .write .readOnly 8 false true
+  access savedR12Provenance ⟨0, 8⟩ 0x1000 .write .readOnly 8 false true
 
 /--
 It is not well formed, because `WellFormedIn` now demands
@@ -366,7 +397,7 @@ theorem writeThroughReadOnly_not_wellFormed :
 
 /-- A descriptor naming an address space this profile never declared. -/
 def accessInUndeclaredSpace : AccessDescriptor :=
-  { access savedSlotProvenance ⟨0, 8⟩ 0x1000 .write .readWrite 8 false true with
+  { access savedR12Provenance ⟨0, 8⟩ 0x1000 .write .readWrite 8 false true with
     space := .deviceLocal }
 
 /--
@@ -421,11 +452,19 @@ theorem call_claims_no_atomicity : ¬ callImportWriteFile.ClaimsAtomicity := fun
 /-- Reaching the containment tail discharges nothing. -/
 theorem ud2_discharges_nothing : ud2Containment.substeps = [] := rfl
 
-/-- `push` and `call`'s stack write are the same slot in the same storage, so a
-later proof must relate them rather than framing them apart. -/
+/-- **`push` and `call`'s stack writes are distinct slots in the same storage.**
+
+They were one slot, `savedOrReturn` at `⟨0, 8⟩`, used by both — which puts the
+return address on top of a saved nonvolatile register — and this theorem asserted
+`SameStorage` of a provenance with itself, which is `refl` and says nothing. Review
+found both. What is worth stating is that the two are the same *storage* and
+different *ranges*: a framing argument must separate them by range, and the
+allocation identity will not do it. -/
 theorem push_and_call_share_storage :
-    savedSlotProvenance.SameStorage savedSlotProvenance :=
-  Provenance.SameStorage.refl _
+    savedR12Provenance.SameStorage returnSlotProvenance ∧
+    savedR12Provenance ≠ returnSlotProvenance ∧
+    (ByteRange.mk 0 8).Disjoint ⟨24, 8⟩ := by
+  exact ⟨⟨rfl, rfl, rfl⟩, by decide, by decide⟩
 
 /-- The stack and the image are different allocations, so no offset coincidence
 can make an access to one authorize an access to the other. -/

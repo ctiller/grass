@@ -309,7 +309,7 @@ instance : HasOperationFacets Alpha where
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .badPermission =>
-        { memoryEffects := some (.single (acc constProv ⟨0, 8⟩ 0x1000 .write .readOnly
+        { memoryEffects := some (.single (acc constProv ⟨0, 8⟩ 0x2000 .write .readOnly
             false true))
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
@@ -344,12 +344,12 @@ instance : HasOperationFacets Alpha where
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .writeThroughLoan =>
-        { memoryEffects := some (.single (acc borrowedProv ⟨0, 8⟩ 0x3000 .write .readWrite
+        { memoryEffects := some (.single (acc borrowedProv ⟨0, 8⟩ 0x4000 .write .readWrite
             false true))
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .writeStackSlot =>
-        { memoryEffects := some (.single (acc frameProv ⟨0, 8⟩ 0x2000 .write .readWrite
+        { memoryEffects := some (.single (acc frameProv ⟨0, 8⟩ 0x3000 .write .readWrite
             false true))
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
@@ -382,7 +382,7 @@ instance : HasOperationFacets Alpha where
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .impersonatingDmaWrite =>
-        { memoryEffects := some (.single (acc viewProv ⟨0, 8⟩ 0x2000 .write .readWrite
+        { memoryEffects := some (.single (acc viewProv ⟨0, 8⟩ 0x1000 .write .readWrite
             false true [] false thread₀))
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
@@ -509,14 +509,14 @@ instance : HasOperationFacets Beta where
           ordering := some .plain }
     | .dmaWriteChained =>
         { memoryEffects := some (.single
-            { acc chainedProv ⟨0, 8⟩ 0x4000 .write .readWrite false true
+            { acc chainedProv ⟨0, 8⟩ 0x1000 .write .readWrite false true
                 (context := engine₀) with
               intent := { reads := false, writes := true } })
           faults := some [.pageFault, .deviceFault], restartability := some .notRestartable
           ordering := some .plain }
     | .dmaDischargesTheThreadsDuty =>
         { memoryEffects := some (.single
-            { acc borrowedProv ⟨0, 8⟩ 0x5000 .write .readWrite false true
+            { acc borrowedProv ⟨0, 8⟩ 0x4000 .write .readWrite false true
                 [.discharge bufferProtocol bufferAuthority releaseObligationId]
                 (context := engine₀) with
               intent := { reads := false, writes := true } })

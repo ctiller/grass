@@ -94,6 +94,9 @@ def denialOf (state : MemoryState) (d : AccessDescriptor) : Option AuditViolatio
       else if record.epoch ≠ d.provenance.epoch then some .deadProvenance
       else if record.space ≠ d.provenance.space then some .wrongAddressSpace
       else if record.extent ≠ d.provenance.rootExtent then some .provenanceExtentMismatch
+      else if record.base.any
+                (fun b => d.address != Address.numeric (addressOf b d.range.start)) then
+        some .addressDisagreesWithPlacement
       else if ¬ record.extent.Contains d.range then some .outOfBounds
       else if ¬ record.permission.Permits d.intent then some .permissionDenied
       else if d.initialization = .allBytesInitialized ∧
@@ -367,8 +370,10 @@ theorem denialOf_congr_of_agrees {a b : MemoryState} {d : AccessDescriptor}
         congrArg AllocationRecord.Metadata.permission hmeta
       have hli : ra.live = rb.live :=
         congrArg AllocationRecord.Metadata.live hmeta
+      have hba : ra.base = rb.base :=
+        congrArg AllocationRecord.Metadata.base hmeta
       simp only []
-      rw [he, hep, hsp, hpe, hli]
+      rw [he, hep, hsp, hpe, hli, hba]
 
 /-- A write to another allocation does not change whether `d` is refused. -/
 theorem denialOf_write_of_other_allocation (state : MemoryState) (d : AccessDescriptor)

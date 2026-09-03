@@ -62,7 +62,7 @@ being the thing that initializes the slot. -/
 def stackRecord : AllocationRecord :=
   { extent := ⟨0, 4096⟩, epoch := epoch₀, space := .cpuVirtual
     permission := .readWrite, live := true, bytes := .empty
-    base := some 0x0000 }
+    base := some 0x1000 }
 
 /-- The loaded image. Only the import-table slot is given contents, because it is
 the only part of the image this block reads. -/
@@ -70,7 +70,7 @@ def imageRecord : AllocationRecord :=
   { extent := ⟨0, 8192⟩, epoch := epoch₀, space := .cpuVirtual
     permission := .readOnly, live := true
     bytes := ByteStore.empty.write 2048 (List.replicate 8 0x40) true
-    base := some 0x2000 }
+    base := some 0x2800 }
 
 /-- The state at the top of the block. -/
 def state₀ : MemoryState :=
@@ -92,7 +92,7 @@ def importRead : AccessDescriptor :=
 
 /-- The return-address write inside `call`. -/
 def returnAddressWrite : AccessDescriptor :=
-  access savedSlotProvenance ⟨0, 8⟩ 0x0FF8 .write .readWrite 8 false true
+  access returnSlotProvenance ⟨24, 8⟩ 0x1018 .write .readWrite 8 false true
 
 /-- `mov eax, transferred` — the reload. -/
 def transferredRead : AccessDescriptor :=
@@ -135,7 +135,7 @@ bounds, and the permission allows a write. -/
 theorem the_store_is_not_refused : denialOf state₀ transferredWrite = Option.none := by decide
 
 /-- Neither intervening step's declared range covers the slot. The import read is
-in a different allocation; the return-address write is thirty-two bytes below. -/
+in a different allocation; the return-address write is eight bytes wide at offset 24. -/
 theorem nothing_between_touches_the_slot :
     ∀ i < 4, ∀ step ∈ betweenStoreAndReload, ¬ Touches step stackAlloc (32 + i) := by decide
 

@@ -113,6 +113,25 @@ of the bounds it declared, it declared the wrong bounds. Review found the gap an
 found `rootExtent`'s docstring claiming M2 checked it. -/
 def provenanceExtentMismatch : AuditViolationClass := ⟨⟨"provenanceExtentMismatch"⟩⟩
 
+/-- An access whose declared address is not the address its allocation's placement
+gives that offset.
+
+`AccessDescriptor.address` and `AccessDescriptor.range` were unconnected: the range
+is an offset into the provenance's root and the address is a separate field, and
+nothing compared them even once `AllocationRecord.base` existed to compare against.
+Every address in the Spike 1 fixtures contradicted the placement the same fixture
+built — a slot at offset 32 of an allocation based at `0x0000` declared `0x1020` —
+and six of `Tests/Op/FakeIsa.lean`'s own descriptors named an address belonging to a
+different allocation. Nothing complained, because `denialOf` read the base for
+nothing and `Grass/Memory/Addressing.lean`'s bridge lemmas had no consumer on the
+access path.
+
+Only checked where there is something to check: an unplaced allocation has no
+address, and a symbolic space has none either, so both skip. That is the `Option` in
+`base` doing its job rather than a hole. -/
+def addressDisagreesWithPlacement : AuditViolationClass :=
+  ⟨⟨"addressDisagreesWithPlacement"⟩⟩
+
 /--
 The classes the generic transition relation can emit.
 
@@ -123,7 +142,7 @@ field nothing reads. `StepPolicy` carries the proof.
 def emittedByTransition : List AuditViolationClass :=
   [outOfBounds, deadProvenance, permissionDenied, uninitializedRead, misaligned,
    authorityUnavailable, obligationNotAuthorized, wrongAddressSpace,
-   machineAnswerIncomplete, provenanceExtentMismatch]
+   machineAnswerIncomplete, provenanceExtentMismatch, addressDisagreesWithPlacement]
 
 end AuditViolationClass
 
