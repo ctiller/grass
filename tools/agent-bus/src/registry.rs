@@ -154,7 +154,11 @@ pub fn create_root(
     crate::storage::atomic_write(&worktree.join(CONFIG_FILE), &config.to_canonical_bytes())?;
     crate::gitrepo::add_all(worktree)?;
     let commit = crate::gitrepo::commit(worktree, "agent-registry: root epoch")?;
-    crate::gitrepo::run_ok(repo, &["branch", "-f", REGISTRY_REF, &commit])?;
+    // `update-ref`, not `branch -f`: see `stream::create_root_commit`'s
+    // identical comment -- `REGISTRY_REF` is already fully qualified
+    // (`refs/heads/agent-registry`), and `git branch -f` does not accept
+    // that form as the ref itself.
+    crate::gitrepo::run_ok(repo, &["update-ref", REGISTRY_REF, &commit])?;
     crate::gitrepo::run_ok(
         repo,
         &["worktree", "remove", "--force", &worktree.to_string_lossy()],
@@ -199,7 +203,11 @@ pub fn propose_transition(
             expected_parent.id
         )));
     }
-    crate::gitrepo::run_ok(repo, &["branch", "-f", REGISTRY_REF, &commit])?;
+    // `update-ref`, not `branch -f`: see `stream::create_root_commit`'s
+    // identical comment -- `REGISTRY_REF` is already fully qualified
+    // (`refs/heads/agent-registry`), and `git branch -f` does not accept
+    // that form as the ref itself.
+    crate::gitrepo::run_ok(repo, &["update-ref", REGISTRY_REF, &commit])?;
     Ok(expected_parent.child(ObjectId::parse(commit)?, new_active_members))
 }
 
@@ -503,6 +511,39 @@ mod tests {
         let read_wt = repo.path().join("_wt_read");
         let read_back = read_epoch(repo.path(), &epoch.id, &read_wt).unwrap();
         assert_eq!(read_back, epoch);
+    }
+
+    /// Regression test for a Critical, previously-invisible finding: see
+    /// `stream::create_root_commit_writes_exactly_the_correctly_named_ref`'s
+    /// identical comment. `REGISTRY_REF` is already fully qualified
+    /// (`refs/heads/agent-registry`); an earlier version of this function
+    /// used `git branch -f REGISTRY_REF <commit>`, which silently created a
+    /// double-prefixed `refs/heads/refs/heads/agent-registry` instead --
+    /// invisible to every purely-local round trip via `rev-parse`'s own
+    /// fallback resolution, but permanently shadowed the moment a real
+    /// fetch (e.g. `sync::synced_snapshot`) ever created the correctly
+    /// -named ref.
+    #[test]
+    fn create_root_writes_exactly_the_correctly_named_ref() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let mut members = BTreeMap::new();
+        members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
+        let wt = repo.path().join("_wt_root");
+        create_root(repo.path(), &config, members, &wt).unwrap();
+
+        let out = crate::gitrepo::run(repo.path(), &["for-each-ref", "--format=%(refname)"])
+            .unwrap()
+            .stdout;
+        let refs: Vec<&str> = out.lines().collect();
+        assert!(
+            refs.contains(&REGISTRY_REF),
+            "expected {REGISTRY_REF} among {refs:?}"
+        );
+        assert!(
+            !refs.iter().any(|r| r.contains("refs/heads/refs/heads")),
+            "must never create a double-prefixed ref: {refs:?}"
+        );
     }
 
     #[test]

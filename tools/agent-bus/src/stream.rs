@@ -171,9 +171,23 @@ pub fn create_root_commit(
         worktree,
         &format!("agent-events: {} stream root", header.agent),
     )?;
+    // `update-ref`, not `branch -f`: `stream_ref` returns the fully
+    // -qualified `refs/heads/agent-events/<agent>`, and `git branch -f
+    // <fully-qualified-name> <commit>` does not treat that name as the ref
+    // itself -- it creates a literal, double-prefixed
+    // `refs/heads/refs/heads/agent-events/<agent>` (confirmed empirically),
+    // which `rev-parse`'s own ref-disambiguation fallback then happens to
+    // also resolve when nothing correctly-named exists yet, silently
+    // masking the bug in every purely-local round trip. The moment
+    // anything else (a real `git fetch`, e.g. gate 17's currency probe)
+    // creates the correctly-named ref, `rev-parse`'s exact match takes
+    // priority over that fallback and every *further* local commit here
+    // becomes permanently invisible to `read_stream_tip`, silently
+    // publishing stale content on the next push. `update-ref` takes a
+    // fully-qualified name directly with no such disambiguation.
     crate::gitrepo::run_ok(
         repo,
-        &["branch", "-f", stream_ref(&header.agent).as_str(), &commit],
+        &["update-ref", stream_ref(&header.agent).as_str(), &commit],
     )?;
     crate::gitrepo::run_ok(
         repo,
@@ -255,7 +269,9 @@ pub fn append_to_stream(
         )));
     }
 
-    crate::gitrepo::run_ok(repo, &["branch", "-f", stream_ref(agent).as_str(), &commit])?;
+    // See `create_root_commit`'s identical comment: `update-ref`, not
+    // `branch -f`, for a fully-qualified `refs/heads/...` name.
+    crate::gitrepo::run_ok(repo, &["update-ref", stream_ref(agent).as_str(), &commit])?;
     ObjectId::parse(commit)
 }
 
@@ -383,6 +399,99 @@ mod tests {
         assert_eq!(read_header, header(&alice));
         assert_eq!(log.len(), 1);
         assert_eq!(log[0].kind, "agent.registered");
+    }
+
+    /// Regression test for a Critical, previously-invisible finding: an
+    /// earlier version of this function used `git branch -f
+    /// <fully-qualified-name> <commit>`, which does not treat a name
+    /// starting with `refs/heads/` as the ref itself -- it silently
+    /// creates a literal, double-prefixed `refs/heads/refs/heads/
+    /// agent-events/<agent>` (confirmed empirically against the pinned git
+    /// version). `rev-parse`'s own ref-disambiguation fallback happened to
+    /// also resolve that malformed name whenever nothing correctly-named
+    /// existed yet, which is exactly why every purely-local round trip
+    /// (like the test directly above) passed regardless: reads and writes
+    /// were *consistently* wrong in the same way. The moment anything else
+    /// creates the correctly-named ref (a real `git fetch`, e.g. gate 17's
+    /// currency probe, or another agent's `--sync`), `rev-parse`'s exact
+    /// match takes priority over that fallback, and every local commit
+    /// made through the malformed name becomes permanently invisible --
+    /// silently publishing stale content on the next push. This checks the
+    /// *actual* ref set (`for-each-ref`, not `rev-parse`, which is exactly
+    /// what would paper over the bug) names precisely
+    /// `refs/heads/agent-events/<agent>`, with nothing else present.
+    #[test]
+    fn create_root_commit_writes_exactly_the_correctly_named_ref() {
+        let repo = init_repo();
+        let alice = a("alice");
+        let wt = repo.path().join("_wt_root");
+        create_root_commit(
+            repo.path(),
+            &header(&alice),
+            &registered_envelope(&alice, 0),
+            &wt,
+        )
+        .unwrap();
+
+        let out = crate::gitrepo::run(repo.path(), &["for-each-ref", "--format=%(refname)"])
+            .unwrap()
+            .stdout;
+        let refs: Vec<&str> = out.lines().collect();
+        assert!(
+            refs.contains(&"refs/heads/agent-events/alice"),
+            "expected refs/heads/agent-events/alice among {refs:?}"
+        );
+        assert!(
+            !refs.iter().any(|r| r.contains("refs/heads/refs/heads")),
+            "must never create a double-prefixed ref: {refs:?}"
+        );
+    }
+
+    /// Companion regression test proving the actual failure mode the bug
+    /// above caused: once a *correctly-named* ref for this agent also
+    /// exists (simulating a fetch that landed an older value, exactly as a
+    /// concurrent `--sync` elsewhere would), a *later* local write here
+    /// must still be the one `read_stream_tip` reports -- not silently
+    /// shadowed by the earlier, now-stale fetched value.
+    #[test]
+    fn append_to_stream_is_not_shadowed_by_a_stale_same_named_ref_from_elsewhere() {
+        let repo = init_repo();
+        let alice = a("alice");
+        let wt = repo.path().join("_wt_root");
+        let root = create_root_commit(
+            repo.path(),
+            &header(&alice),
+            &registered_envelope(&alice, 0),
+            &wt,
+        )
+        .unwrap();
+
+        // Simulate a concurrent fetch elsewhere landing the *same* (still
+        // correctly-named, by definition of a real fetch) ref at the
+        // *old* value -- a no-op here since it's already there, but
+        // establishes that the ref genuinely is the plain, correctly
+        // -named one before the real assertion below.
+        crate::gitrepo::run_ok(
+            repo.path(),
+            &["update-ref", "refs/heads/agent-events/alice", root.as_str()],
+        )
+        .unwrap();
+
+        let wt2 = repo.path().join("_wt_append");
+        let advanced = append_to_stream(
+            repo.path(),
+            &alice,
+            &root,
+            &[status_envelope(&alice, 1)],
+            &wt2,
+        )
+        .unwrap();
+
+        assert_eq!(
+            read_stream_tip(repo.path(), &alice).unwrap(),
+            Some(advanced),
+            "the later local write must be visible, not shadowed by the earlier value"
+        );
     }
 
     #[test]
