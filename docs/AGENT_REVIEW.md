@@ -326,6 +326,36 @@ type restriction, audit, test, or validation layer while designing the reusable
 proof boundary. Economy may change *where and how* a property is proved; it may
 not silently waive a normative safety or correctness demand.
 
+#### Proof-demand escalation
+
+Not every new lemma changes the architecture. Review new proof demands at the
+level where they become mandatory:
+
+1. A private lemma or stronger implementation certificate whose exported
+   contract is unchanged receives ordinary product review.
+2. A new obligation on a public subsystem contract, reusable constructor,
+   provider, ABI, ISA profile, or composition boundary requires review by that
+   normative owner, including compatibility and proof-economy analysis.
+3. A new field, theorem family, requirement key, or transitive prerequisite of
+   `VerifiedProgram`, `emitProgram`, ghost erasure, or artifact closure changes
+   the project-wide meaning or cost of verification. It requires explicit design
+   review and a recorded normative decision before implementation may make it a
+   mandatory gate.
+
+The third-level review states the defect or product property being addressed,
+the exact universal proposition, why the final certificate is its proper owner,
+where implementations discharge it, how it composes and shards, expected proof
+and rebuild burden for both ordinary and novel assembly, diagnostics, migration
+for existing programs, and why a narrower contract or reusable derived theorem
+is insufficient. When feasibility or burden is uncertain, introduce and measure
+an optional experimental certificate first; optional status must not be used to
+ship a program missing an already normative guarantee.
+
+Attaching a theorem directly to `VerifiedProgram` is therefore a conclusion of
+design review, not the default response to an escaped defect. Prefer deriving a
+root theorem from local contracts already needed for sound composition when that
+provides the same guarantee without adding application-author ceremony.
+
 - If existing review evidence should reasonably have exposed the defect, amend
   the relevant review question, checklist, or reviewer guidance and include a
   concrete example of the missed reasoning.

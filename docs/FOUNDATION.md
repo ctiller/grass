@@ -167,6 +167,11 @@ point fixtures, checks non-vacuity and connection to their consumers, records
 why the proved statement is sufficient and where it is deliberately weaker,
 and assesses proof economy by reusable abstraction rather than raw line count.
 [AGENT_REVIEW.md](AGENT_REVIEW.md) owns the operational review standard.
+Any new mandatory prerequisite of `VerifiedProgram`, `emitProgram`, or their
+transitive closure changes the public verification contract and requires an
+explicit normative design decision with feasibility, burden, sharding,
+diagnostic, and migration analysis; it may not enter through an incidental
+implementation review.
 
 A clean rebuild checks reproducibility after obsolete machinery is deleted; it
 is not the expected incremental invalidation cone. During ordinary development,
