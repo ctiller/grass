@@ -972,7 +972,7 @@ module deliberately does not use that name.
 
 In Lean, `List.concat` appends *one element* — it is this library's `Vec.push` —
 and flattening is `List.flatten`. §3's word is therefore ambiguous, and taking it
-at face value would put a `Vec.concat` in front of consumers that means the
+at face value would put a `concat` in front of consumers that means the
 opposite of what a Lean author expects, against this plan's own rule that names
 are the expensive thing to change and its own reason for shipping the instances a
 Lean author reaches for without thinking. The operation below is `flatten`; the
