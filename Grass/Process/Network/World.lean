@@ -400,6 +400,29 @@ def ReroutesLand : Prop :=
           arrival.1 = occurrence.1 ∧ arrival.2.1 = destination)
 
 /--
+**Every occurrence in flight belongs to the session whose ledger holds it.**
+
+An `EdgeOccurrence` carries its own `ChannelId`, and until §10.109 nothing said
+that identity agreed with where the occurrence was being held. What that costs is
+not a tidiness matter: every constructor that *ends* an occurrence carries
+`onItsSession`, so an occurrence sitting in the wrong ledger can be ended by
+nothing at all. It is in flight forever, and the session holding it can never be
+closed, because `ClosesSession.closesEverything` must end everything outstanding
+and its own on-session guard excludes exactly that occurrence.
+
+The transition family already forbids *reaching* such a network —
+`ResolvesEscrow.carrierOnItsSession` and `Reroutes.arrives` are §10.100 and
+§10.98 — but a reviewer pointed out that this clause is what a *consumer* of
+`WellFormed` needs, and `WellFormed` did not have it. Every theorem stated over
+`before.WellFormed` admitted the stranded configuration as an input, so the
+transition family's guarantee stopped at the family's own edge.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.109.
+-/
+def OccurrencesOnTheirSession : Prop :=
+  ∀ (edge : topology.ChannelKind) (session : topology.ChannelId edge) occurrence,
+    occurrence ∈ (network.inFlight edge session).created → occurrence.2.1 = session
+
+/--
 **Every instance's stored ending is one its protocol reaches.**
 
 `docs/DECISIONS.md` decision 129 puts this at the network: "Network
@@ -438,6 +461,8 @@ structure WellFormed
   nominalsAllocated : network.NominalsAllocated
   /-- Rerouted occurrences land. -/
   reroutesLand : network.ReroutesLand
+  /-- And every occurrence in flight is on the session holding it. -/
+  occurrencesOnTheirSession : network.OccurrencesOnTheirSession
 
 /-- A terminated instance in a well-formed network yields its exact result. -/
 theorem terminated_result_is_exact

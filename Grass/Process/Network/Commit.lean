@@ -209,6 +209,24 @@ structure CommitsRender (before after : plan.LogicalProcessNetwork)
   /-- The trace grew by exactly the committed render's observations. -/
   appended : after.observations = before.observations ++ coalescing.committed.observations
   /--
+  **And what it published was pending, and only that leaves the pending trace.**
+
+  `Commits.earned`, as a field of this structure rather than a hypothesis of
+  `toCommits`. It was a hypothesis for one round, on the reasoning that
+  `CommitsRender` is about a reconciler's split of pending *renders* while
+  `Commits.earned` is about the world's pending *observation* trace, so this
+  module could not supply the equation.
+
+  That is the argument a field refutes: a field is a *demand on the constructor*,
+  not something the module supplies. A reviewer read the signature — the same
+  tell as §10.106's `initial_is_wellformed` — and compiled the consequence: a
+  `CommitsRender` that publishes the pending observation **and invents two more
+  pending observations nothing emitted**, because `scope` names `.pending` and no
+  field said how `.pending` moved.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.108.
+  -/
+  earned : before.pending = coalescing.committed.observations ++ after.pending
+  /--
   And nothing outside the two observation traces changed — nothing at all if the
   committed render was empty.
 
@@ -239,21 +257,20 @@ appends nothing changes nothing at all, which would make it a one-step silent
 cycle and `Grass/Process/Network/Progress.lean`'s §7 theorem vacuous. A
 reconciler that skipped every render has not committed; it has decided not to.
 
-`earned` is `Commits`'s provenance field, and it is a hypothesis here rather
-than a fact this module can supply. `CommitsRender` is about a reconciler's
-split of pending *renders* into committed and skipped; `Commits.earned` is about
-the network's pending *observation* trace. Nothing in this module relates the
-two, so its caller supplies the equation. That is the honest shape of the gap
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.58 records — the render ledger and the
-world's pending trace are two accounts of the same thing and are not tied.
+`earned` is `Commits`'s provenance field, and it is a *field* of this structure
+since §10.108 — it was a hypothesis of this theorem for one round, and a reviewer
+built the `CommitsRender` that hypothesis permitted.
+
+The gap `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.58 records is still real and
+is narrower than it was: the render ledger and the world's pending trace are two
+accounts of the same thing, and `earned` now ties the *trace* to what was
+published without tying it to the *renders* the reconciler split.
 -/
 theorem toCommits {before after demanded} {coalescing : Coalescing demanded}
     (commit : plan.CommitsRender before after coalescing)
-    (rendered : coalescing.committed.observations ≠ [])
-    (earned : before.pending
-      = coalescing.committed.observations ++ after.pending) :
+    (rendered : coalescing.committed.observations ≠ []) :
     plan.Commits before after coalescing.committed.observations :=
-  { earned := earned, appended := commit.appended,
+  { earned := commit.earned, appended := commit.appended,
     nonempty := rendered, scope := commit.scope }
 
 /--

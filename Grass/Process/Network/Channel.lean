@@ -26,8 +26,11 @@ and on the object at the centre of it:
 them opaque law names — `escrowStable`, `prefixConservation`,
 `atMostOneResolution`, `resolutions`, `transferExact`, `session`, `frame` — each
 typed by a name the corpus declares nowhere.
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` standing risk 2 records a count of fifteen, which is the number before §3's own
-later additions and is not this one; the
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` standing risk 2 records a
+count of fifteen, which matches neither: §3's declaration has had seventeen
+fields in every revision of that document, including the one that wrote the
+standing risk. The plan's count is simply wrong, and this docstring said for two
+rounds that the plan "records the count"; the
 sharper problem is that an opaque field of an undeclared type is a promise
 nothing checks, and an author discharges it by writing anything at all.
 

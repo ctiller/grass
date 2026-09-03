@@ -122,9 +122,12 @@ receive did not compose, which is the one thing a channel fixture is for.
 
 It now says what §3 asks of a send: the session is open, the occurrence was not
 already escrowed here, and it is outstanding afterwards.
-`Tests/Process/TransitionFixtures.lean`'s `the_send` is the `SendsEscrow` that
-reaches `beforeReceive`, and `Tests/Process/TransitionFixtures.lean`'s
-`the_receive_after_the_send` is the pair.
+`Tests/Process/TransitionFixtures.lean`'s `the_send` is the corpus's first
+`SendsEscrow`, and `the_receive_after_the_send` is the delivery that follows it —
+at `sent` and `received`, which are the worlds a send actually reaches.
+`beforeReceive` is *not* one of them and no send can produce it, which is the
+defect this paragraph is about; that file says so at `beforeReceive`'s own
+docstring.
 
 An earlier version of `liveSteps.Send` had `after = quiet` — a send that put
 nothing in flight. It went unnoticed because the contract's `Escrow` assertion

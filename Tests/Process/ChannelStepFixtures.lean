@@ -459,7 +459,6 @@ theorem the_drop : serverPlan.ResolvesEscrow sent afterDropping () wire escrowed
     show RequestsNothing (sent.inFlight () wire) (afterDropping.inFlight () wire)
     rw [sent_wire, afterDropping_wire]
     exact fun _ => rfl
-  acknowledgesARequest := by intro reason isAck; cases isAck
   carrierOnItsSession := by intro carrier isCoalesce; cases isCoalesce
   createsOnlyTheCarrier := by
     intro other held fresh

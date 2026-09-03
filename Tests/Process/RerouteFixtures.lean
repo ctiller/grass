@@ -1,7 +1,7 @@
 import Tests.Process.ChannelStepFixtures
 
 /-!
-# The reroute: the last channel constructor without a witness
+# The reroute, which had no witness at all
 
 `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.79 held `Reroutes` back on the grounds
 that it "needs two sessions on one edge and this topology names one", so building

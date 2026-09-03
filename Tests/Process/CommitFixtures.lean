@@ -112,6 +112,7 @@ The scope is the observation fragment alone, which is what
 theorem beep_is_committed :
     serverPlan.CommitsRender Transition.beforeReceive afterBeep quietRunCoalesces where
   appended := rfl
+  earned := rfl
   scope := by
     intro fragment outside
     cases fragment with

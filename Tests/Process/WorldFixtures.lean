@@ -177,6 +177,9 @@ theorem quiet_is_wellFormed : quiet.WellFormed where
   reroutesLand := by
     intro _ _ _ _ rerouted
     exact absurd rerouted (by simp [quiet, EscrowLedger.empty])
+  occurrencesOnTheirSession := by
+    intro _ _ _ held
+    exact absurd held (by simp [quiet, EscrowLedger.empty])
 
 /-! ### The ways a network fails
 

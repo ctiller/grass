@@ -901,6 +901,7 @@ theorem waiting_is_wellFormed : waiting.WellFormed where
     simp [ProcessTopologyCore.ProcessRef.Allocated, startingHistory,
       theRootsGeneration, NominalHistory.extend]
   reroutesLand := fun edge => edge.elim
+  occurrencesOnTheirSession := fun edge _ _ _ => edge.elim
 
 /-- **So it is sound**, which is what `terminated_result_is_exact` wanted. -/
 theorem waiting_is_sound : waitingPlan.Sound waiting :=

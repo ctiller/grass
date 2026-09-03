@@ -119,7 +119,7 @@ laws can be stated at it. -/
 theorem beep_is_committed_here :
     serverPlan.Commits beforeReceive afterBeep quietRunCoalesces.committed.observations :=
   beep_is_committed.toCommits
-    (by simp [quietRunCoalesces, Grass.Process.Tests.Commit.beeps]) rfl
+    (by simp [quietRunCoalesces, Grass.Process.Tests.Commit.beeps])
 
 /--
 A commit of a `beep`, as a transition.
@@ -130,11 +130,13 @@ it is fed to the `commit` constructor so that both non-trivial cases of
 corpus had ever satisfied `Emits`, and every theorem about emitting steps was
 being checked against an empty case.
 
-`toCommits`'s third argument is `Commits.earned`, the provenance equation: the
-`beep` this publishes is the one `beforeReceive` was already holding as pending,
-and `afterBeep` is not holding it any more. Until `NetworkFragment.pending`
-existed there was nothing to supply, and a commit of an arbitrary observation was
-a step of every network.
+`Commits.earned` is the provenance equation: the `beep` this publishes is the one
+`beforeReceive` was already holding as pending, and `afterBeep` is not holding it
+any more. Until `NetworkFragment.pending` existed there was nothing to supply,
+and a commit of an arbitrary observation was a step of every network. It was an
+*argument* to `toCommits` until §10.108 made it a field of `CommitsRender`, after
+a reviewer built the render that the hypothesis permitted — one that publishes
+what was pending and invents two more pending observations besides.
 -/
 def beepCommit : serverPlan.NetworkTransition beforeReceive afterBeep :=
   .commit quietRunCoalesces.committed.observations beep_is_committed_here

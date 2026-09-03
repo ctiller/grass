@@ -268,6 +268,10 @@ found it by reading the signature: a clause passed in rather than discharged is
 what a missing field looks like from the caller's side.
 -/
 theorem initial_is_wellformed : network.WellFormed where
+  occurrencesOnTheirSession := by
+    intro edge session occurrence held
+    rw [start.nothingInFlight edge session] at held
+    exact absurd held List.not_mem_nil
   slotsAgree := by
     intro kind slot incarnation found
     obtain ⟨sameKind, sameSlot⟩ := start.the_root_is_alone found

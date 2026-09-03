@@ -183,18 +183,6 @@ structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
   requestsNothing : RequestsNothing
     (before.inFlight edge session) (after.inFlight edge session)
   /--
-  **And an acknowledgement acknowledges a request that was already made.**
-
-  `EscrowLedger.acknowledgedWasRequested` is a law of one ledger — an
-  acknowledgement in it needs a request in it — and says nothing about *when* the
-  request arrived. Local adversarial review compiled an `acknowledgeCancel` from
-  a world where nothing was requested at all: the step wrote the request and the
-  acknowledgement together, bypassing `RequestsCancel` entirely.
-  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.97.
-  -/
-  acknowledgesARequest : ∀ reason, resolution = .cancelAcknowledged reason →
-    (before.inFlight edge session).cancelRequested occurrence = true
-  /--
   **And a coalesce's carrier belongs to this session.**
 
   `ChannelResolution.coalesced`'s docstring says the carrier is "this occurrence
@@ -938,7 +926,7 @@ structure Restarts (before after : plan.LogicalProcessNetwork)
   over, and starting again is a new run — `ExactInitialNetwork`, not a
   transition.
 
-  Found by working `well_formedness_is_preserved` clause by clause and asking
+  Found by working `ProcessPlan.wellFormed_preserved` clause by clause and asking
   which constructor could break each. `Spawns` was fixed in the same pass and
   `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.72 recorded this half as needing a
   ruling; the `RootUnique` argument is what settled it.
@@ -1131,6 +1119,36 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
   /-- Both sessions' escrow, and nothing else. -/
   scope : plan.TouchesOnly before after
     (fun fragment => fragment = .escrow edge session ∨ fragment = .escrow edge destination)
+
+namespace ResolvesEscrow
+
+variable {plan}
+
+/--
+**And an acknowledgement acknowledges a request that was already made.**
+
+`EscrowLedger.acknowledgedWasRequested` is a law of one ledger — an
+acknowledgement in it needs a request in it — and says nothing about *when* the
+request arrived. Local adversarial review compiled an `acknowledgeCancel` from a
+world where nothing was requested at all: the step wrote the request and the
+acknowledgement together, bypassing `RequestsCancel` entirely.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.97.
+
+**This was a field for one round, and did not need to be.** §10.97 closed the
+hole with two mechanisms — this and `requestsNothing` — and `requestsNothing`
+alone is enough: it carries the after-ledger's own `acknowledgedWasRequested`
+back across the step. A reviewer deleted the field and rebuilt it in three lines.
+§10.107.
+-/
+theorem acknowledgesARequest {before after edge session occurrence reason}
+    (acknowledged : plan.ResolvesEscrow before after edge session occurrence
+      (.cancelAcknowledged reason)) :
+    (before.inFlight edge session).cancelRequested occurrence = true := by
+  rw [← acknowledged.requestsNothing occurrence]
+  exact (after.inFlight edge session).acknowledgedWasRequested occurrence reason
+    acknowledged.nowResolved
+
+end ResolvesEscrow
 
 namespace ClosesSession
 

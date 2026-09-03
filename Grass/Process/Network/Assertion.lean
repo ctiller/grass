@@ -92,8 +92,9 @@ two observation traces where §3 declares one — with the four index-carrying o
 refined to a single index: one instance rather than the whole instance map, one
 region rather than all shared state, one session's escrow rather than the whole
 ledger, one session's cursor rather than every session's. (An earlier version of
-this paragraph said seven and three, and predates both the split and the
-`session` fragment the next paragraph argues for.) The list is closed: an assertion
+this paragraph said seven and three. It predates the trace split; it does *not*
+predate the `session` fragment, which arrived in the same commit as the paragraph
+— a claims audit checked, after an earlier correction guessed.) The list is closed: an assertion
 cannot depend on something with no name here, which is what keeps the language
 from growing.
 

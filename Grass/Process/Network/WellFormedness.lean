@@ -842,6 +842,144 @@ theorem reroutesLand_preserved (transition : plan.NetworkTransition before after
       (ledgers_extend transition edge destination).created_preserved arrived, carries, onSession⟩
   · exact ⟨arrival, landed⟩
 
+/--
+**Every occurrence in flight belongs to the session holding it, across a step.**
+
+`LogicalProcessNetworkCore.OccurrencesOnTheirSession`, preserved. The clause a
+reviewer showed `WellFormed` needed and did not have: the transition family
+forbids *reaching* a network where an occurrence sits in a foreign ledger, and
+until this was a clause the forbidding stopped at the family's own edge — every
+theorem over `before.WellFormed` still admitted one as an input.
+
+Every route into a ledger's `created` is bounded by a field, and this is the
+enumeration: `send` by `createsOnlyTheMessage` (the sent occurrence's own session
+*is* the ledger's index), `coalesce` by `createsOnlyTheCarrier` together with
+§10.100's `carrierOnItsSession`, a reroute's destination by `arrives`, every other
+escrow constructor by `CreatesNothing`, and everything else by `ledger_unchanged`.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.109.
+-/
+theorem occurrencesOnTheirSession_preserved (transition : plan.NetworkTransition before after)
+    (holds : before.OccurrencesOnTheirSession) : after.OccurrencesOnTheirSession := by
+  intro edge session occurrence held
+  by_cases declared : transition.scope (.escrow edge session)
+  · cases transition with
+    | send _ _ occurrence' step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      by_cases fresh : occurrence ∈ (before.inFlight edge occurrence'.1).created
+      · exact holds edge occurrence'.1 occurrence fresh
+      · rw [step.createsOnlyTheMessage occurrence held fresh]
+    | coalesce _ _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      by_cases fresh : occurrence ∈ (before.inFlight edge session).created
+      · exact holds edge session occurrence fresh
+      · exact step.carrierOnItsSession occurrence
+          (step.createsOnlyTheCarrier occurrence held fresh)
+    | acknowledgeCancel _ _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      by_cases fresh : occurrence ∈ (before.inFlight edge session).created
+      · exact holds edge session occurrence fresh
+      · exact absurd (step.createsOnlyTheCarrier occurrence held fresh)
+          (by intro equal; cases equal)
+    | timeout _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      by_cases fresh : occurrence ∈ (before.inFlight edge session).created
+      · exact holds edge session occurrence fresh
+      · exact absurd (step.createsOnlyTheCarrier occurrence held fresh)
+          (by intro equal; cases equal)
+    | senderDeath _ _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      by_cases fresh : occurrence ∈ (before.inFlight edge session).created
+      · exact holds edge session occurrence fresh
+      · exact absurd (step.createsOnlyTheCarrier occurrence held fresh)
+          (by intro equal; cases equal)
+    | receiverDeath _ _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      by_cases fresh : occurrence ∈ (before.inFlight edge session).created
+      · exact holds edge session occurrence fresh
+      · exact absurd (step.createsOnlyTheCarrier occurrence held fresh)
+          (by intro equal; cases equal)
+    | drop _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      by_cases fresh : occurrence ∈ (before.inFlight edge session).created
+      · exact holds edge session occurrence fresh
+      · exact absurd (step.createsOnlyTheCarrier occurrence held fresh)
+          (by intro equal; cases equal)
+    | requestCancel _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      by_cases fresh : occurrence ∈ (before.inFlight edge session).created
+      · exact holds edge session occurrence fresh
+      · exact absurd (step.createsNothing ▸ held) fresh
+    | receive _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj
+        (by rcases declared with h | h
+            · exact h
+            · exact absurd h (by intro equal; cases equal))
+      cases same; cases sameSession
+      by_cases fresh : occurrence ∈ (before.inFlight edge session).created
+      · exact holds edge session occurrence fresh
+      · exact absurd (step.createsNothing ▸ held) fresh
+    | channelClose _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj
+        (by rcases declared with h | h
+            · exact h
+            · exact absurd h (by intro equal; cases equal))
+      cases same; cases sameSession
+      by_cases fresh : occurrence ∈ (before.inFlight edge session).created
+      · exact holds edge session occurrence fresh
+      · exact absurd (step.createsNothing ▸ held) fresh
+    | channelDeath _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj
+        (by rcases declared with h | h
+            · exact h
+            · exact absurd h (by intro equal; cases equal))
+      cases same; cases sameSession
+      by_cases fresh : occurrence ∈ (before.inFlight edge session).created
+      · exact holds edge session occurrence fresh
+      · exact absurd (step.createsNothing ▸ held) fresh
+    | reroute _ _ _ _ step =>
+      rcases declared with h | h
+      · obtain ⟨same, sameSession⟩ := escrowFragment_inj h
+        cases same; cases sameSession
+        by_cases fresh : occurrence ∈ (before.inFlight edge session).created
+        · exact holds edge session occurrence fresh
+        · refine absurd ?_ fresh
+          have same : (after.inFlight edge session).created
+              = (before.inFlight edge session).created := step.createsNothing
+          rw [same] at held
+          exact held
+      · obtain ⟨same, sameSession⟩ := escrowFragment_inj h
+        cases same; cases sameSession
+        by_cases fresh : occurrence ∈ (before.inFlight edge session).created
+        · exact holds edge session occurrence fresh
+        · obtain ⟨_, _, _, _, onSession, unique⟩ := step.arrives
+          rw [unique occurrence held fresh]
+          exact onSession
+    | processStep _ _ _ _ _ _ _ =>
+      exact absurd declared (by rintro (h | ⟨_, h⟩ | ⟨_, _, h⟩) <;> cases h)
+    | spawn _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
+    | restart _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
+    | join _ _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | detach _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | interrupt _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | fault _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | environmentViolation _ _ _ _ _ =>
+      exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | childCancelled _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | childDied _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | processTermination _ _ _ _ _ =>
+      exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | commit _ _ =>
+      rcases declared.2 with h | h <;> exact absurd h (by intro equal; cases equal)
+  · exact holds edge session occurrence (ledger_unchanged transition declared ▸ held)
+
 /-! ## The capstone -/
 
 /--
@@ -861,6 +999,8 @@ theorem wellFormed_preserved (step : plan.NetworkStep before after)
   parentageValid := parentageValid_preserved step.transition wellFormed.parentageValid
   nominalsAllocated := nominalsAllocated_preserved step wellFormed.nominalsAllocated
   reroutesLand := reroutesLand_preserved step.transition wellFormed.reroutesLand
+  occurrencesOnTheirSession :=
+    occurrencesOnTheirSession_preserved step.transition wellFormed.occurrencesOnTheirSession
 
 end ProcessPlan
 
