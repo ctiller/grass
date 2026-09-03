@@ -101,26 +101,28 @@ theorem forall_roles {motive : network.RoleSchema → Prop}
   onListed schema (network.schemasComplete schema)
 
 /--
-A composition law over a structural network.
-
-Separate from the network rather than a field of it, because the network is
-*shape* and a law is a claim about it. `docs/SEMANTICS.md` had `composition :
-AbstractNetworkCompositionLaw protocol instances` as a field; splitting it means
-a caller states the laws their realization actually needs, and a network with no
-law attached is honestly a network with no law attached rather than one carrying
-an unexamined field.
--/
-structure CompositionLaw where
-  /-- The claim, over the network's roles and instances. -/
-  holds : Prop
-
-/--
 The population is nonempty at every role: each role has at least one instance.
 
-The commonest such law, provided because a realization that needs it should not
-have to spell it. A role with no instances is usually a modelling error — it is
-a protocol nothing speaks — though it is legitimate for a role that only appears
-under a resource policy, which is why this is a law and not a field.
+**A composition law is a `Prop`, and this is one.** An earlier revision wrapped
+laws in `structure CompositionLaw where holds : Prop` — one field, none of them
+a proof — on the reasoning that "a network with no law attached is honestly a
+network with no law attached". That reasoning is sound and the wrapper did not
+serve it: a network *with* a `CompositionLaw` was also a network with no law
+attached, because `⟨False⟩` inhabits it and nothing anywhere required `holds`.
+An emptiness sweep found the structure constructed nowhere in the corpus, which
+is what a contentless record looks like from the outside.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.84.
+
+`docs/SEMANTICS.md` had `composition : AbstractNetworkCompositionLaw protocol
+instances` as a *field* of the network, and splitting it out remains right: a
+caller states the laws their realization actually needs. They state them as
+propositions.
+
+This is the commonest such law, provided because a realization that needs it
+should not have to spell it. A role with no instances is usually a modelling
+error — it is a protocol nothing speaks — though it is legitimate for a role that
+only appears under a resource policy, which is why this is a law rather than a
+field.
 -/
 def EveryRolePopulated : Prop :=
   ∀ schema : network.RoleSchema, Nonempty (network.Instance schema)
