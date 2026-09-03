@@ -1205,7 +1205,7 @@ create. `Tests/Memory/Loans.lean`'s `transferring_into_a_conflict_is_refused` is
 state.
 
 **A self-transfer is refused** rather than treated as a no-op: it changes nothing, so
-a caller asking for one has made a mistake, and [FOUNDATION.md](../docs/FOUNDATION.md)
+a caller asking for one has made a mistake, and [FOUNDATION.md](../../docs/FOUNDATION.md)
 law 8 says reject rather than approximate.
 -/
 def transferGrant? (state : MemoryState) (actor : ContextId) (id : GrantId)
@@ -2270,6 +2270,36 @@ def allocateAll? (state : MemoryState) :
   | [] => some state
   | (id, record) :: rest => (state.allocate? id record).bind (·.allocateAll? rest)
 
+/-- What an allocation ends up as: `allocate?` writes the record it was given. -/
+theorem allocate?_lookup_self {state next : MemoryState} {id : AllocId}
+    {record : AllocationRecord} (h : state.allocate? id record = some next) :
+    next.allocations.lookup id = some record := by
+  unfold allocate? at h
+  split at h
+  · split at h
+    · exact absurd h (by simp)
+    · injection h with h
+      subst h
+      exact FiniteMap.lookup_insert_self _ _ _
+  · injection h with h
+    subst h
+    exact FiniteMap.lookup_insert_self _ _ _
+
+/-- And it leaves every other allocation alone. -/
+theorem allocate?_lookup_ne {state next : MemoryState} {id other : AllocId}
+    {record : AllocationRecord} (h : state.allocate? id record = some next)
+    (hne : other ≠ id) : next.allocations.lookup other = state.allocations.lookup other := by
+  unfold allocate? at h
+  split at h
+  · split at h
+    · exact absurd h (by simp)
+    · injection h with h
+      subst h
+      exact FiniteMap.lookup_insert_ne _ hne _
+  · injection h with h
+    subst h
+    exact FiniteMap.lookup_insert_ne _ hne _
+
 /-- **A fresh identity is always allocatable.** -/
 theorem allocate?_isSome_of_fresh (state : MemoryState) (id : AllocId)
     (record : AllocationRecord) (h : state.allocations.lookup id = Option.none) :
@@ -2304,6 +2334,128 @@ theorem allocate?_isSome_of_same_metadata {state : MemoryState} {id : AllocId}
   simp only []
   rw [if_neg (fun h => h.1 hsame)]
   rfl
+
+/--
+Tear down several allocations at once, or refuse.
+
+§5's arena reset "requires returning all live use loans", and `allocate?` refuses one
+reallocation at a time, so a profile resetting an arena walked its allocations itself
+and nothing made the walk all-or-nothing: a walk that stopped halfway left some
+storage dead and some live, with no record that it had stopped. This is the bulk
+operation. Every named allocation ends dead, or `Option.none` and the state is
+untouched.
+
+**An identity the table does not hold is refused** rather than treated as already
+gone. A caller naming an allocation that was never allocated has lost track of its
+arena, and [FOUNDATION.md](../../docs/FOUNDATION.md) law 8 says say so rather than
+carry on.
+
+**The grant check is `allocate?`'s**, which is the point of routing through it: a
+teardown is a metadata change, so every outstanding grant over the storage refuses
+it, alias-aware, and §5's precondition is the refusal it already was for one
+allocation.
+
+**What is still owed is the arena itself.** The list comes from the caller, so
+nothing here knows it names *every* allocation of the arena being reset — a caller
+that forgets one tears down the rest and leaves it live, and this operation cannot
+tell. Closing that needs an arena identity on `AllocationRecord`, which §5's model
+owes; `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records it.
+-/
+def tearDown? (state : MemoryState) : List AllocId → Option MemoryState
+  | [] => some state
+  | id :: rest =>
+      (state.allocations.lookup id).bind fun record =>
+        (state.allocate? id { record with live := false }).bind (·.tearDown? rest)
+
+/-- Tearing down nothing changes nothing. -/
+@[simp] theorem tearDown?_nil (state : MemoryState) : state.tearDown? [] = some state := rfl
+
+/-- **An identity the table does not hold refuses the whole teardown.** -/
+theorem tearDown?_eq_none_of_absent {state : MemoryState} {id : AllocId}
+    {rest : List AllocId} (h : state.allocations.lookup id = Option.none) :
+    state.tearDown? (id :: rest) = Option.none := by
+  unfold tearDown?
+  rw [h, Option.bind_none]
+
+/-- **An outstanding grant refuses it**, through `allocate?`. -/
+theorem tearDown?_eq_none_of_outstanding {state : MemoryState} {id : AllocId}
+    {record : AllocationRecord} {rest : List AllocId}
+    (hlook : state.allocations.lookup id = some record) (hlive : record.live = true)
+    (hgrants : state.grantEntries.any
+      (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) = true) :
+    state.tearDown? (id :: rest) = Option.none := by
+  unfold tearDown?
+  rw [hlook, Option.bind_some]
+  have hmeta : record.metadata ≠ ({ record with live := false } : AllocationRecord).metadata := by
+    intro hcontra
+    have : record.live = false :=
+      congrArg AllocationRecord.Metadata.live hcontra
+    rw [hlive] at this
+    exact absurd this (by simp)
+  rw [allocate?_eq_none_of_outstanding hlook hmeta hgrants, Option.bind_none]
+
+/-- A teardown leaves every identity it does not name alone, which is what makes the
+law below about the names rather than about the whole table. -/
+theorem tearDown?_lookup_of_not_mem {state : MemoryState} :
+    ∀ {ids : List AllocId} {next : MemoryState}, state.tearDown? ids = some next →
+      ∀ {id : AllocId}, id ∉ ids →
+        next.allocations.lookup id = state.allocations.lookup id := by
+  intro ids
+  induction ids generalizing state with
+  | nil =>
+    intro next h id _
+    injection h with h
+    subst h
+    rfl
+  | cons head rest ih =>
+    intro next h id hmem
+    unfold tearDown? at h
+    cases hlook : state.allocations.lookup head with
+    | none => rw [hlook, Option.bind_none] at h; exact absurd h (by simp)
+    | some record =>
+      rw [hlook, Option.bind_some] at h
+      cases hstep : state.allocate? head { record with live := false } with
+      | none => rw [hstep, Option.bind_none] at h; exact absurd h (by simp)
+      | some stepped =>
+        rw [hstep, Option.bind_some] at h
+        have hne : id ≠ head := fun hid => hmem (hid ▸ List.mem_cons_self)
+        have hrest : id ∉ rest := fun hin => hmem (List.mem_cons_of_mem _ hin)
+        rw [ih h hrest, allocate?_lookup_ne hstep hne]
+
+/--
+**Everything named is dead afterwards.**
+
+The law the bulk operation exists for, and the one a hand-written walk could not
+state: not "each call succeeded" but "every allocation in the list is dead in the
+state that came out". Duplicates in the list are harmless — the second teardown of an
+identity finds it already dead and `allocate?` accepts a record it already holds.
+-/
+theorem tearDown?_kills_every_name {state : MemoryState} :
+    ∀ {ids : List AllocId} {next : MemoryState}, state.tearDown? ids = some next →
+      ∀ id ∈ ids, (next.allocations.lookup id).any (fun record => !record.live) = true := by
+  intro ids
+  induction ids generalizing state with
+  | nil => intro next _ id hmem; exact absurd hmem (by simp)
+  | cons head rest ih =>
+    intro next h id hmem
+    unfold tearDown? at h
+    cases hlook : state.allocations.lookup head with
+    | none => rw [hlook, Option.bind_none] at h; exact absurd h (by simp)
+    | some record =>
+      rw [hlook, Option.bind_some] at h
+      cases hstep : state.allocate? head { record with live := false } with
+      | none => rw [hstep, Option.bind_none] at h; exact absurd h (by simp)
+      | some stepped =>
+        rw [hstep, Option.bind_some] at h
+        rcases List.mem_cons.mp hmem with hcase | hcase
+        · subst hcase
+          by_cases hlater : id ∈ rest
+          · exact ih h id hlater
+          · have hkept : next.allocations.lookup id = stepped.allocations.lookup id :=
+              tearDown?_lookup_of_not_mem h hlater
+            rw [hkept, allocate?_lookup_self hstep]
+            rfl
+        · exact ih h id hcase
 
 /-- Declare that two allocations name the same storage. -/
 def alias (state : MemoryState) (a b : AllocId) : MemoryState :=

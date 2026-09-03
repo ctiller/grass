@@ -786,6 +786,86 @@ refusal above is the conflict and not the transfer rule. -/
 theorem the_single_grant_transfers :
     (lentHead.transferGrant? borrower firstLoan stranger).isSome := by decide
 
+/-! ## Tearing an arena down
+
+§5's arena reset "requires returning all live use loans", and `allocate?` refuses one
+reallocation at a time — so a profile resetting an arena walked its allocations itself
+and nothing made the walk all-or-nothing. `MemoryState.tearDown?` is the bulk
+operation; these are the cases that show it is one operation rather than a loop with a
+tidy name.
+-/
+
+/-- A third allocation, in no way related to the buffer. -/
+def scratch : AllocId := allocs.fresh.2.fresh.2.fresh.1
+
+/-- An identity nothing ever allocated. -/
+def ghostAlloc : AllocId := allocs.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- The buffer and a scratch block, both live, nothing lent. -/
+def arena : MemoryState :=
+  (unlent.allocate? scratch
+    { extent := ⟨0, 16⟩, epoch := epoch, space := .cpuVirtual
+      permission := .readWrite, live := true, bytes := .empty
+      base := some 0x2000 }).getD unlent
+
+/-- The same arena with the buffer's head lent out. -/
+def arenaWithLoan : MemoryState := (arena.issue? firstLoan loanOfHead).getD arena
+
+/-- Both states are what they are named for, so the refusals below are about the
+teardown. -/
+theorem the_arena_fixtures_are_real :
+    (arena.allocations.lookup buffer).any (fun r => r.live) ∧
+    (arena.allocations.lookup scratch).any (fun r => r.live) ∧
+    arena.allocations.lookup ghostAlloc = Option.none ∧
+    (arenaWithLoan.grantAt? firstLoan).isSome := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-- **An unlent arena tears down**, and everything named ends dead. -/
+theorem the_unlent_arena_tears_down :
+    ∀ s, arena.tearDown? [buffer, scratch] = some s →
+      (s.allocations.lookup buffer).any (fun r => !r.live) ∧
+      (s.allocations.lookup scratch).any (fun r => !r.live) ∧
+      ¬ s.Live bufferProv := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- The teardown really happened rather than being refused, which is what makes the
+theorem above about a state. -/
+theorem the_teardown_succeeds : (arena.tearDown? [buffer, scratch]).isSome := by decide
+
+/-- **A live loan refuses the whole teardown**, and this is the all-or-nothing part:
+the loan is over the *buffer*, the scratch block is named first, and the scratch
+block is still live afterwards because there is no afterwards — the operation
+returned nothing. A hand-written walk over `allocate?` would have torn the scratch
+block down and then failed. -/
+theorem a_lent_arena_does_not_tear_down :
+    arenaWithLoan.tearDown? [scratch, buffer] = Option.none ∧
+    (arenaWithLoan.allocations.lookup scratch).any (fun r => r.live) := by
+  exact ⟨by decide, by decide⟩
+
+/-- And with the loan returned it goes through, so the refusal is §5's precondition
+and not something else about the state. -/
+theorem the_returned_arena_tears_down :
+    ∀ s, arenaWithLoan.returnGrant? borrower firstLoan = some s →
+      (s.tearDown? [scratch, buffer]).isSome := by
+  intro s hs
+  cases hs
+  decide
+
+/-- **An identity the table does not hold refuses it too**, rather than being treated
+as already gone: a caller naming an allocation that was never allocated has lost
+track of its arena. -/
+theorem a_ghost_name_refuses_the_teardown :
+    arena.tearDown? [buffer, ghostAlloc] = Option.none ∧
+    (arena.allocations.lookup buffer).any (fun r => r.live) := by
+  exact ⟨by decide, by decide⟩
+
+/-- **Naming the same allocation twice is harmless**, because the second teardown
+finds a record `allocate?` already holds. -/
+theorem a_repeated_name_is_harmless :
+    (arena.tearDown? [buffer, buffer]).isSome := by decide
+
 /-! ## The negatives, composed, over a state nobody built
 
 Every fixture above is concrete, and `decide` settles a concrete state. Review's point

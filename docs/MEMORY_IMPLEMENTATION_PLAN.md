@@ -1504,10 +1504,28 @@ refuses everything.
   step is *rejected* — a trap this branch fell into once already.
   `the_authority_effect_steps_run` asserts all eleven stepped states exist, which
   closes the class rather than one instance.
-- **§5's arena reset requires returning all live use loans, and there is no bulk
-  operation.** `MemoryState.allocate?` refuses one reallocation at a time; a profile
-  tearing an arena down has to walk its allocations itself, and nothing checks that it
-  walked all of them.
+- ~~**§5's arena reset requires returning all live use loans, and there is no bulk
+  operation.**~~ `MemoryState.tearDown?` is the bulk operation, and the reason it is
+  one operation rather than a loop with a tidy name is the all-or-nothing fixture: a
+  loan over the buffer refuses a teardown that names the scratch block *first*, and
+  the scratch block is still live afterwards, because there is no afterwards. A
+  hand-written walk over `allocate?` would have torn the scratch block down and then
+  failed, leaving an arena half dead with no record that it had stopped.
+
+  The grant check is `allocate?`'s, which is the point of routing through it: a
+  teardown is a metadata change, so §5.1's precondition is the refusal it already
+  was. `tearDown?_kills_every_name` is the law a walk could not state — not "each
+  call succeeded" but "every allocation named is dead in the state that came out" —
+  and it needed `allocate?_lookup_self`, `allocate?_lookup_ne` and
+  `tearDown?_lookup_of_not_mem`, which are framing lemmas the layer lacked. An
+  identity the table does not hold refuses the teardown rather than counting as
+  already gone, and a repeated name is harmless.
+
+  **What is still owed is the arena itself.** The list comes from the caller, so
+  nothing knows it names *every* allocation of the arena being reset: a caller that
+  forgets one tears down the rest and leaves it live, and this operation cannot tell.
+  That needs an arena identity on `AllocationRecord`, and §5's model owes it. The
+  bulk operation does not close that gap and does not claim to.
 - ~~**Transferred authority.** §3's fifth entry is "transferred or unavailable";
   `unavailable` derives from liveness and epoch and nothing represents a transfer.
   §7.4 makes transfer real ("acquire operations may transfer protected memory

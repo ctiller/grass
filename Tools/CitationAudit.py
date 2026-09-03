@@ -36,6 +36,14 @@ because it reads as a pointer.
 2. **Section citations.** Every `§N` or `§N.M` that follows a document name in the
    same sentence is checked against that document's headings.
 
+3. **Relative markdown links in Lean comments.** `check-doc-links.ps1` walks Markdown
+   files, so a broken relative link inside a Lean docstring is outside every gate
+   there is. There were three such links in the tree and one was wrong:
+   `Grass/Memory/State.lean` is two directories deep and pointed at
+   `../docs/FOUNDATION.md`, which is `Grass/docs/FOUNDATION.md`. Check 2 would have
+   caught a bad *section* in that link and said nothing about the path. Only relative
+   targets are resolved; an absolute URL is not this tool's business.
+
 **What it does not check**, stated because an earlier tool in this directory
 advertised a stronger reading and review corrected it:
 
@@ -268,6 +276,35 @@ def check_sections(prose: dict[str, str], sections: dict[str, set[str]]) -> list
     return out
 
 
+RELATIVE_LINK = re.compile(r"\]\((\.{1,2}/[^)]+)\)")
+
+
+def check_links(sources: dict[str, str]) -> list[str]:
+    """Report every relative markdown link in a Lean comment that resolves to nothing.
+
+    `check-doc-links.ps1` walks Markdown files, so a broken relative link inside a
+    Lean docstring is outside every gate there is. There were three such links and
+    one of them was wrong: `Grass/Memory/State.lean` is two directories deep and
+    pointed at `../docs/FOUNDATION.md`, which is `Grass/docs/FOUNDATION.md`. The
+    citation half of this tool would have caught a bad *section* in that link and
+    said nothing about the path.
+    """
+    out: list[str] = []
+    for where, text in sources.items():
+        base = (ROOT / where).parent
+        for number, line in enumerate(text.splitlines(), 1):
+            for target in RELATIVE_LINK.findall(line):
+                path = target.split("#", 1)[0]
+                if not path:
+                    continue
+                if not (base / path).resolve().exists():
+                    out.append(
+                        f"  {where}:{number}: links to {target}, which does not exist "
+                        f"relative to {Path(where).parent.as_posix()}"
+                    )
+    return out
+
+
 def self_test() -> int:
     """Seed each class this file claims to catch.
 
@@ -330,6 +367,29 @@ def self_test() -> int:
               "update the module docstring, which documents it as unhandled")
         failures += 1
 
+    broken = {"Grass/Memory/State.lean": "-- see [F](../docs/FOUNDATION.md)"}
+    if not check_links(broken):
+        print("  SELF-TEST FAILED: a relative link that resolves to nothing is not "
+              "reported")
+        failures += 1
+
+    good = {"Grass/Memory/State.lean": "-- see [F](../../docs/FOUNDATION.md)"}
+    if check_links(good):
+        print("  SELF-TEST FAILED: a relative link that resolves is reported")
+        failures += 1
+
+    anchored = {"Grass/Memory/State.lean":
+                "-- see [F](../../docs/FOUNDATION.md#law-8)"}
+    if check_links(anchored):
+        print("  SELF-TEST FAILED: a link with a fragment is reported")
+        failures += 1
+
+    absolute = {"Grass/Memory/State.lean": "-- see [F](https://example.invalid/x.md)"}
+    if check_links(absolute):
+        print("  SELF-TEST FAILED: an absolute URL is reported; only relative links "
+              "are resolvable here")
+        failures += 1
+
     if failures:
         print(f"citation audit self-test: {failures} failure(s)")
         return 1
@@ -369,7 +429,8 @@ def main() -> int:
     problems = (check_declarations(prose, names)
                 + check_declarations(lean_facing, names)
                 + check_sections(joined, sections)
-                + check_sections(documents, sections))
+                + check_sections(documents, sections)
+                + check_links(prose))
     if problems:
         print("\n".join(sorted(problems)))
         print("\ncitation audit: prose naming something that does not exist\n")
@@ -379,7 +440,8 @@ def main() -> int:
         )
         return 1
     print(
-        "citation audit: every cited declaration and document section exists "
+        "citation audit: every cited declaration, document section and relative link "
+        "resolves "
         "(a lexical check; see the module docstring for what it does not cover)"
     )
     return 0
