@@ -121,7 +121,8 @@ def staleProv : Provenance := { bufferProv with epoch := epochs₀.fresh.2.fresh
 def acc (prov : Provenance) (range : ByteRange) (addr : Nat) (intent : AccessIntent)
     (perm : Permission) (readsInit : Bool) (writesInit : Bool)
     (effect : LedgerEffect := []) (atomic : Bool := false)
-    (context : ContextId := thread₀) : AccessDescriptor :=
+    (context : ContextId := thread₀) (authority : AuthorityEffect := []) :
+    AccessDescriptor :=
   { context := context, address := .numeric (BitVec.ofNat 64 addr), space := .cpuVirtual
     provenance := prov, range := range
     intent := { intent with isAtomic := atomic }
@@ -129,7 +130,8 @@ def acc (prov : Provenance) (range : ByteRange) (addr : Nat) (intent : AccessInt
     initialization := if readsInit then .allBytesInitialized else .readsNothing
     producesInitialized := writesInit
     ordering := if atomic then { atomicity := .atomic } else .plain
-    admittedFaults := [.pageFault], ledgerEffect := effect }
+    admittedFaults := [.pageFault], ledgerEffect := effect
+    authorityEffect := authority }
 
 /-! ## Family one: a small load/store machine
 
@@ -226,6 +228,18 @@ inductive Alpha where
   with distinguishable payloads. Each delta is individually applicable against
   the ledger as it stands before the effect runs. -/
   | createTwice
+  /-- A store that also lends the buffer's head to the device engine. The first
+  operation in this fixture that changes the authority map. -/
+  | lendSlot
+  /-- The same lend, naming the *engine* as lender while the program thread
+  performs it: a context lending bytes it does not hold. -/
+  | forgedLend
+  /-- Two lends of the same identity in one effect, the second checked against the
+  map the first left. -/
+  | lendTwice
+  /-- A store that also splits the loan the acting context holds. Stepped from a
+  state where another context holds it, the same operation is the non-holder case. -/
+  | splitLoan
 deriving DecidableEq, Repr
 
 /-- The divide-error fault this family can raise. Named so the fixtures can
@@ -272,6 +286,32 @@ def fabricatedObligation : Obligation :=
 def releaseObligation : Obligation :=
   { id := releaseObligationId, kind := .releaseAllocation
     protocol := bufferProtocol, owner := thread₀ }
+
+private def grants₀ : FreshSupply GrantTag := .initial
+
+/-- A loan over the buffer, held by the program thread. -/
+def bufferLoan : GrantId := grants₀.fresh.1
+
+/-- A live call frame over the stack reservation. -/
+def liveFrame : GrantId := grants₀.fresh.2.fresh.1
+
+/-- A third identity, so a fixture can install two grants over one range. -/
+def secondBufferLoan : GrantId := grants₀.fresh.2.fresh.2.fresh.1
+
+/-- The identity an operation's declared lend uses. -/
+def lentSlot : GrantId := grants₀.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- The low half of a declared split. -/
+def lowSlot : GrantId := grants₀.fresh.2.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- The high half. -/
+def highSlot : GrantId := grants₀.fresh.2.fresh.2.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- The grant an operation declares lending: the buffer's head, read-only, to the
+device engine, lent by the program thread. -/
+def declaredLoan : AuthorityGrant :=
+  { kind := .loan, holder := engine₀, lender := thread₀, provenance := bufferProv
+    range := ⟨0, 8⟩, rights := .readOnly }
 
 /-- The first family's facet declaration. This is the whole of what a family
 supplies; nothing else in the tree changes. -/
@@ -366,6 +406,28 @@ instance : HasOperationFacets Alpha where
             false true
             [ .create bufferProtocol bufferAuthority collidingFirst
             , .create bufferProtocol bufferAuthority collidingSecond ]))
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .lendSlot =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true [] false thread₀ [.issue lentSlot declaredLoan]))
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .forgedLend =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true [] false thread₀
+            [.issue lentSlot { declaredLoan with lender := engine₀ }]))
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .lendTwice =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true [] false thread₀
+            [.issue lentSlot declaredLoan, .issue lentSlot declaredLoan]))
+          faults := some [.pageFault], restartability := some .notRestartable
+          ordering := some .plain }
+    | .splitLoan =>
+        { memoryEffects := some (.single (acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite
+            false true [] false thread₀ [.split bufferLoan lowSlot highSlot 32]))
           faults := some [.pageFault], restartability := some .notRestartable
           ordering := some .plain }
     | .dischargeWithWrongAuthority =>
@@ -720,17 +782,6 @@ def memory₁ : MemoryState := memory₀.alias viewAlloc chainedAlloc
 /-- The starting machine state: allocations exist, but no authority is held. -/
 def state₀ : MachineState := .initial memory₁
 
-private def grants₀ : FreshSupply GrantTag := .initial
-
-/-- A loan over the buffer, held by the program thread. -/
-def bufferLoan : GrantId := grants₀.fresh.1
-
-/-- A live call frame over the stack reservation. -/
-def liveFrame : GrantId := grants₀.fresh.2.fresh.1
-
-/-- A third identity, so a fixture can install two grants over one range. -/
-def secondBufferLoan : GrantId := grants₀.fresh.2.fresh.2.fresh.1
-
 /-- The same state with both grants live. -/
 def stateWithAuthority : MachineState :=
   { state₀ with
@@ -752,6 +803,25 @@ theorem the_authority_issues_succeed :
           range := ⟨0, 64⟩, rights := .readWrite }).getD state₀.memory).issue? liveFrame
         { kind := .frame, holder := thread₀, lender := engine₀, provenance := frameProv
           range := ⟨0, 64⟩, rights := .readWrite }).isSome := by
+  exact ⟨by decide, by decide⟩
+
+/-- The same state with the *engine* holding the buffer loan, so a fixture can ask
+what a context that is not the holder may re-describe. -/
+def stateWithEngineAuthority : MachineState :=
+  { state₀ with
+    memory := (state₀.memory.issue? bufferLoan
+      { kind := .loan, holder := engine₀, lender := thread₀, provenance := borrowedProv
+        range := ⟨0, 64⟩, rights := .readWrite }).getD state₀.memory }
+
+/-- That issue succeeded, so the refusal below is the actor rule and not an empty
+map. -/
+theorem the_engine_authority_issue_succeeds :
+    (state₀.memory.issue? bufferLoan
+      { kind := .loan, holder := engine₀, lender := thread₀, provenance := borrowedProv
+        range := ⟨0, 64⟩, rights := .readWrite }).isSome ∧
+    stateWithEngineAuthority.memory.grantAt? bufferLoan =
+      some { kind := .loan, holder := engine₀, lender := thread₀, provenance := borrowedProv
+             range := ⟨0, 64⟩, rights := .readWrite } := by
   exact ⟨by decide, by decide⟩
 
 /-- Step one `Alpha` operation. -/
@@ -2147,6 +2217,89 @@ theorem profile_visibility_rule_is_refused :
       ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
         if h : 1 < seq.substeps.length then .before ⟨1, h⟩ .pageFault 0 0
         else .none)).rejection? = some .visibilityRuleUnknown := by decide
+
+/-! ## The authority map, changed by an operation
+
+Until `AuthorityDelta` existed, `Grass/Op/Step.lean` read the authority map through
+`AuthorityProvider` and never wrote it, so every mutator in
+`Grass/Memory/State.lean` — `issue?`, `returnGrant?`, `splitGrant?`, `joinGrants?`,
+`transferGrant?` — had no caller but a fixture. A rule proved about a map the
+transition does not mutate is this branch's recurring defect, found in its own layer.
+These step the doors through `step`.
+-/
+
+/-- **An operation lends, and the map afterwards holds the grant.** The first
+transition in this branch to change the authority map. -/
+theorem the_declared_lend_lands :
+    ∀ s, (stepAlpha state₀ .lendSlot).state? = some s →
+      s.events.length = 1 ∧ s.violations.IsEmpty ∧
+      s.memory.grantAt? lentSlot = some declaredLoan := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- And the lend takes effect *after* this access: the store commits because the map
+as it stood authorized it, which is §1's every-check-against-the-pre-access-state
+reading. Afterwards the same store would be refused, since the engine now holds the
+bytes read-only — so this is not a state a second identical operation could reach. -/
+theorem the_lending_store_is_authorized_against_the_old_map :
+    ∀ s, (stepAlpha state₀ .lendSlot).state? = some s →
+      s.memory.byteAt? bufferAlloc 0 = some 0xab ∧
+      ¬ s.memory.Exclusive bufferProv ⟨0, 8⟩ := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- **A forged lender is refused**, and the refusal is recorded rather than silent.
+The program thread declared a loan whose lender is the device engine: `MayLend`
+bounds what the *named* lender can lend, so this conjures nothing out of nothing;
+what it would do is let one context strip another's exclusivity by lending that
+other's bytes. -/
+theorem the_forged_lend_is_refused :
+    ∀ s, (stepAlpha state₀ .forgedLend).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 ∧
+      s.violations.records?.any (fun r => r.class_ = .authorityEffectRefused) ∧
+      s.memory.grantAt? lentSlot = Option.none := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-- **Two lends of one identity in a single effect are refused**, because the second
+is checked against the map the first left — the whole-effect check
+`Grass/Obligation/Delta.lean` needed for the ledger, holding here by construction
+since the applier threads the state through. -/
+theorem the_repeated_lend_is_refused :
+    ∀ s, (stepAlpha state₀ .lendTwice).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 ∧
+      s.memory.grantAt? lentSlot = Option.none := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **An operation splits the loan it holds.** The source identity is consumed and
+both halves are in the map, through `step`. -/
+theorem the_declared_split_lands :
+    ∀ s, (stepAlpha stateWithAuthority .splitLoan).state? = some s →
+      s.violations.IsEmpty ∧
+      s.memory.grantAt? bufferLoan = Option.none ∧
+      (s.memory.grantAt? lowSlot).isSome ∧ (s.memory.grantAt? highSlot).isSome := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-- **And the same operation is refused when another context holds the grant.** The
+map would accept the split — it is a re-description of authority either way — so this
+is the actor rule in `applyAuthorityDelta?` and nothing the doors check. The grant is
+untouched afterwards. -/
+theorem the_non_holder_split_is_refused :
+    ∀ s, (stepAlpha stateWithEngineAuthority .splitLoan).state? = some s →
+      s.events = [] ∧ s.violations.recordCount = 1 ∧
+      s.violations.records?.any (fun r => r.class_ = .authorityEffectRefused) ∧
+      (s.memory.grantAt? bufferLoan).isSome ∧
+      s.memory.grantAt? lowSlot = Option.none := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide, by decide, by decide, by decide⟩
 
 end Grass.Tests.FakeIsa
 

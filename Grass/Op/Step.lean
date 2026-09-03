@@ -623,6 +623,8 @@ def refusalOf (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor
   | Option.none =>
       if ¬ LedgerEffectApplicable state.obligations d.context d.ledgerEffect then
         some .obligationNotAuthorized
+      else if (state.memory.applyAuthorityEffect? d.context d.authorityEffect).isNone then
+        some .authorityEffectRefused
       else
         match policy.authorities.find? (fun provider => provider.refuses state d) with
         | some provider => some provider.violationClass
@@ -670,18 +672,46 @@ theorem refusalOf_mem_emittedClasses {policy : StepPolicy} {state : MachineState
       exact AuthorityProvider.mem_emittedClasses_of_transition
         (by simp [AuditViolationClass.emittedByTransition])
     · split at h
-      · rename_i provider hfind
-        injection h with h
+      · injection h with h
         subst h
-        exact AuthorityProvider.mem_emittedClasses_of_provider
-          (List.mem_of_find?_eq_some hfind)
-      · repeat' split at h
-        all_goals
-          first
-            | (injection h with h; subst h
-               exact AuthorityProvider.mem_emittedClasses_of_transition
-                 (by simp [AuditViolationClass.emittedByTransition]))
-            | exact absurd h (by simp)
+        exact AuthorityProvider.mem_emittedClasses_of_transition
+          (by simp [AuditViolationClass.emittedByTransition])
+      · split at h
+        · rename_i provider hfind
+          injection h with h
+          subst h
+          exact AuthorityProvider.mem_emittedClasses_of_provider
+            (List.mem_of_find?_eq_some hfind)
+        · repeat' split at h
+          all_goals
+            first
+              | (injection h with h; subst h
+                 exact AuthorityProvider.mem_emittedClasses_of_transition
+                   (by simp [AuditViolationClass.emittedByTransition]))
+              | exact absurd h (by simp)
+
+/--
+**Nothing refusing the access means the declared authority changes apply.**
+
+`performAccess` has a branch for the applier returning `none` on the committing
+path, which this rules out: `refusalOf`'s authority clause runs the same function
+against the same map, so the branch is unreachable. It records a violation rather
+than falling back to the unchanged map, because a fallback there would commit an
+access whose declared lend silently did not happen — the permissive default
+[FOUNDATION.md](../../docs/FOUNDATION.md) law 8 forbids.
+-/
+theorem authority_effect_applies_when_nothing_refuses {policy : StepPolicy}
+    {state : MachineState} {d : AccessDescriptor} {prospective : Option MemoryEvent}
+    (h : refusalOf policy state d prospective = Option.none) :
+    (state.memory.applyAuthorityEffect? d.context d.authorityEffect).isSome := by
+  unfold refusalOf at h
+  split at h
+  · exact absurd h (by simp)
+  · split at h
+    · exact absurd h (by simp)
+    · split at h
+      · exact absurd h (by simp)
+      · next hnone => simpa [Option.isNone_iff_eq_none, Option.isSome_iff_ne_none] using hnone
 
 /--
 **Every violation class the transition records is one the profile declared.**
@@ -728,6 +758,18 @@ def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescri
           | some class_ =>
               { state with violations := state.violations.append (violationOf d class_) }
           | Option.none =>
+            match state.memory.applyAuthorityEffect? d.context d.authorityEffect with
+            | Option.none =>
+                -- Unreachable: `refusalOf` returned `none`, and its authority clause
+                -- runs this same function against this same state, which
+                -- `authority_effect_applies_when_nothing_refuses` is the proof of.
+                -- Recorded rather than silently falling back to the unchanged map,
+                -- because a fallback here would commit an access whose declared
+                -- lend did not happen.
+                { state with
+                  violations :=
+                    state.violations.append (violationOf d .authorityEffectRefused) }
+            | some lent =>
               { state with
                 eventSupply := state.eventSupply.fresh.2
                 events := state.events ++ [valid]
@@ -743,8 +785,12 @@ def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescri
                 -- only to the bytes a write completes. `producesInitialized`
                 -- rides along rather than gating the write, because a
                 -- non-initializing write still changes the values it wrote.
-                memory :=
-                  state.memory.commit d (outcome.committed?.bind Committed.written)
+                -- The declared authority changes land on the pre-access map, which
+                -- is the map `refusalOf` checked them against, and the bytes are
+                -- written on top. `MemoryState.commit` touches bytes only, so the
+                -- two commute; doing it the other way would check a lend against
+                -- one map and apply it to another.
+                memory := lent.commit d (outcome.committed?.bind Committed.written)
                 obligations := applyLedgerEffect state.obligations d.ledgerEffect }
 
 /--
@@ -1324,7 +1370,9 @@ theorem performAccess_extends_violations (policy : StepPolicy) (state : MachineS
       · exact AuditViolationLedger.Extends.refl _
     · split
       · exact AuditViolationLedger.extends_append _ _
-      · exact AuditViolationLedger.Extends.refl _
+      · split
+        · exact AuditViolationLedger.extends_append _ _
+        · exact AuditViolationLedger.Extends.refl _
 
 /-- Running a list of accesses extends the violation ledger, including when it
 stops early at a refusal. Built from the per-access form above. -/
@@ -1402,19 +1450,23 @@ theorem performAccess_frames_untouched (policy : StepPolicy) (state : MachineSta
     (h : ¬ (d.provenance.root = id ∧ d.range.Covers offset)) :
     (performAccess policy state d outcome contextKind cause).memory.cellAt? id offset =
       state.memory.cellAt? id offset := by
+  have hfits : Grass.Memory.WrittenFits d (outcome.committed?.bind Committed.written) :=
+    fun bytes hb => by
+      cases hc : outcome.committed? with
+      | none => rw [hc] at hb; exact absurd hb (by simp)
+      | some c =>
+        rw [hc] at hb
+        simp only [Option.bind_some] at hb
+        exact c.writtenFits bytes hb
   unfold performAccess
   repeat' split
   all_goals
     first
       | rfl
-      | exact Grass.Memory.cellAt?_commit_of_untouched state.memory d
-          (fun bytes hb => by
-            cases hc : outcome.committed? with
-            | none => rw [hc] at hb; exact absurd hb (by simp)
-            | some c =>
-              rw [hc] at hb
-              simp only [Option.bind_some] at hb
-              exact c.writtenFits bytes hb) h
+      | (rename_i hlent
+         exact (Grass.Memory.cellAt?_commit_of_untouched _ d hfits h).trans
+           (MemoryState.cellAt?_applyAuthorityEffect? hlent id offset))
+      | exact Grass.Memory.cellAt?_commit_of_untouched state.memory d hfits h
 
 /--
 **A whole run of accesses frames every cell none of them declared.**

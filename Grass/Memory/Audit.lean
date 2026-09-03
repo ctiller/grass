@@ -86,6 +86,15 @@ producing an identity that already is, or splitting into obligations governed by
 a different protocol. -/
 def obligationNotAuthorized : AuditViolationClass := ⟨⟨"obligationNotAuthorized"⟩⟩
 
+/-- An access declared a change to the authority map that the map refuses: lending
+under an identity already in use, lending bytes the named lender does not hold,
+returning a grant the acting context neither holds nor lent, splitting or joining
+another context's authority, or a transfer that would leave a conflicting pair.
+
+Distinct from `authorityUnavailable`, which is about an access *reading* bytes it
+lacks authority over. This one is about an access *changing* who holds what. -/
+def authorityEffectRefused : AuditViolationClass := ⟨⟨"authorityEffectRefused"⟩⟩
+
 /-- An access to storage in an address space other than the one its provenance
 names. `docs/MEMORY_MODEL.md` §7.5 makes this a distinct failure from a bounds
 error: the spaces are not interchangeable, so reporting it as `outOfBounds` would
@@ -156,7 +165,7 @@ def emittedByTransition : List AuditViolationClass :=
   [outOfBounds, deadProvenance, permissionDenied, uninitializedRead, misaligned,
    authorityUnavailable, obligationNotAuthorized, wrongAddressSpace,
    machineAnswerIncomplete, provenanceExtentMismatch, addressDisagreesWithPlacement,
-   placementWraps]
+   placementWraps, authorityEffectRefused]
 
 end AuditViolationClass
 

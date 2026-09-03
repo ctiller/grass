@@ -1410,6 +1410,45 @@ refuses everything.
   ordering model". Nothing relates a grant to `AccessDescriptor.ordering`, and
   nothing here can — that needs §7.1's refinement theorem, which an ISA owner owes,
   and the strength relation M8's `ConsistencyProfile` induces.
+- ~~**The transition reads the authority map and never writes it.**~~ Closed by
+  `AuthorityDelta`, and this was the largest instance of this branch's own recurring
+  defect: `issue?`, `returnGrant?`, `splitGrant?`, `joinGrants?` and `transferGrant?`
+  were five checked doors whose only callers were fixtures, so every law proved about
+  them was a law about a map no transition changed. §6's ABI call lends buffer and
+  slot authorities and consumes the same identities on return, and §7.4's acquire
+  operations transfer authority; both are things an *operation* does, and nothing an
+  operation carried could do them.
+
+  An `AccessDescriptor` now carries an `authorityEffect` beside its `ledgerEffect`,
+  `refusalOf` refuses an access whose declared changes the map will not accept, and
+  the committing branch applies them. `Tests/Op/FakeIsa.lean` steps five of them,
+  including the pair that separates the two rules: the same `splitLoan` operation
+  lands from a state where the acting context holds the grant and is refused from one
+  where another context does.
+
+  **One function, not a predicate and an applier.** `applyAuthorityEffect?` returns
+  `Option`, and `refusalOf` decides applicability by running the very function the
+  commit branch runs. The obligation ledger is the other shape —
+  `LedgerDelta.Applicable` is a `Prop` and `applyDelta` is a separate function, with
+  nothing tying them together — and two sources of truth is how a clause gets added
+  to one and forgotten in the other. Unifying the ledger the same way is owed and is
+  not done here.
+
+  **Authority is not data**, which the transition's framing law needs: the effect is
+  applied to the pre-access map and the bytes are written on top, so
+  `allocations_applyAuthorityEffect?` and `cellAt?_applyAuthorityEffect?` are what
+  keep `performAccess_frames_untouched` true. Every door changes `grants` and nothing
+  else, and now there is a theorem saying so rather than an inspection.
+
+  **The actor rules and the invariant checks are in different places, and that is the
+  cost.** `issue?` reads the lender from the grant it is given and has no actor, so
+  "the acting context must be the lender it names" lives in `applyAuthorityDelta?`,
+  as does "only the holder may split or join". A caller reaching `issue?` directly
+  can therefore still name any lender — `MayLend` bounds what that named lender can
+  lend, so nothing is conjured, but one context could strip another's exclusivity by
+  lending that other's bytes to itself. Closing it means an `actor` parameter on
+  `issue?` and ninety-odd call sites; it is the next thing to do here, deliberately
+  rather than as a side effect of the commit that found it.
 - **§5's arena reset requires returning all live use loans, and there is no bulk
   operation.** `MemoryState.allocate?` refuses one reallocation at a time; a profile
   tearing an arena down has to walk its allocations itself, and nothing checks that it

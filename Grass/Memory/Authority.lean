@@ -110,6 +110,38 @@ structure AuthorityGrant where
   rights : Permission
 deriving DecidableEq, Repr
 
+/--
+One change to the authority map an operation declares.
+
+`docs/MEMORY_MODEL.md` §6 has an ABI call lending "the exact buffer/slot authorities
+to the environment" and consuming the same identities on a conforming return, and
+§7.4 has acquire operations transferring authority. Both are things an *operation*
+does, and until this type existed nothing an operation carried could do them:
+`Grass/Op/Step.lean` read the authority map through `AuthorityProvider` and never
+wrote it, so every mutator in `Grass/Memory/State.lean` — `issue?`, `returnGrant?`,
+`splitGrant?`, `joinGrants?`, `transferGrant?` — was a facility whose only callers
+were fixtures. A rule proved about a map the transition does not mutate is the defect
+class this branch has found in its own layer four times.
+
+Modelled on `LedgerDelta` deliberately: an operation declares its effect on the
+authority map the way it declares its effect on the obligation ledger.
+-/
+inductive AuthorityDelta where
+  /-- Lend authority the acting context holds or lent, under a fresh identity. -/
+  | issue (id : GrantId) (grant : AuthorityGrant)
+  /-- Consume an identity, which §6 lets the holder or the lender do. -/
+  | returnGrant (id : GrantId)
+  /-- Divide one grant at an offset, consuming it. -/
+  | split (id low high : GrantId) (boundary : Nat)
+  /-- Reunite two adjacent grants, consuming both. -/
+  | join (low high into : GrantId)
+  /-- Hand a grant on, keeping its identity. -/
+  | transfer (id : GrantId) (recipient : ContextId)
+deriving DecidableEq, Repr
+
+/-- The authority changes one access declares, applied in order. -/
+abbrev AuthorityEffect := List AuthorityDelta
+
 /-! Whether a grant authorizes an access is **not** decided here.
 
 It was: the deleted `Authorizes` function lived in this namespace and matched provenances

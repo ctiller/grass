@@ -1316,6 +1316,249 @@ theorem transferGrant?_other {state next : MemoryState} {actor : ContextId}
   rw [FiniteMap.lookup_insert_ne _ hne]
   rfl
 
+/-!
+## The authority changes an operation declares
+
+`AuthorityDelta` is the operation-level vocabulary; this is where a declared change
+meets the doors above. `Grass/Op/Step.lean` consults it in `refusalOf` and applies it
+on the committing branch, which is what gives the five doors a caller that is not a
+fixture.
+
+**One function, not a predicate and an applier.** `Grass/Obligation/Delta.lean` and
+`Grass/Op/Step.lean` do the obligation ledger the other way: `LedgerDelta.Applicable`
+is a `Prop` saying a delta may be applied and `applyDelta` is a separate function
+that applies it, with nothing tying the two together — two sources of truth, and a
+clause added to one and forgotten in the other is a silent divergence. An
+`Option`-returning applier cannot diverge from itself. `docs/MEMORY_IMPLEMENTATION_PLAN.md`
+§4.4.1 records unifying the ledger the same way as owed.
+-/
+
+/--
+Apply one declared authority change, or refuse.
+
+**The actor is the access's context**, and this is where a delta is *authorized* as
+opposed to merely accepted by the map. Two of the five doors take no actor —
+`issue?` reads the lender from the grant it is given, and `splitGrant?` and
+`joinGrants?` are re-descriptions the map alone can check — so their actor rules are
+here:
+
+- an `issue` must name the acting context as its **lender**. Without this a context
+  could lend bytes another context holds. `MayLend` bounds what the *named* lender
+  can lend, so the forgery conjures no authority out of nothing; what it does is let
+  one context strip another's exclusivity by lending that other's bytes to itself,
+  which is the seizure `MayLend` closed reached by a different route.
+- a `split` or a `join` must be performed by the **holder**, because it is that
+  context's authority being re-described and a stranger re-describing it changes
+  which identities the holder must return. An unknown identity falls through to the
+  door, which refuses it and says so.
+- `returnGrant?` and `transferGrant?` already take a context and check it, so they
+  are passed the actor and nothing is added here.
+
+Splitting the actor rules from the invariant checks has a cost and it is recorded
+rather than hidden: a caller reaching `issue?` directly can still name any lender.
+Closing it means an `actor` parameter on `issue?` and ninety-odd call sites, worth
+doing deliberately rather than as a side effect of this commit;
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 has it.
+-/
+def applyAuthorityDelta? (state : MemoryState) (actor : ContextId) :
+    AuthorityDelta → Option MemoryState
+  | .issue id grant =>
+      if grant.lender ≠ actor then Option.none else state.issue? id grant
+  | .returnGrant id => state.returnGrant? actor id
+  | .split id low high boundary =>
+      if (state.grantAt? id).all (fun grant => decide (grant.holder = actor)) then
+        state.splitGrant? id low high boundary
+      else Option.none
+  | .join low high into =>
+      if (state.grantAt? low).all (fun grant => decide (grant.holder = actor)) then
+        state.joinGrants? low high into
+      else Option.none
+  | .transfer id recipient => state.transferGrant? actor id recipient
+
+/-- Apply every declared change, in order, refusing if any is refused. -/
+def applyAuthorityEffect? (state : MemoryState) (actor : ContextId) :
+    AuthorityEffect → Option MemoryState
+  | [] => some state
+  | delta :: rest =>
+      (state.applyAuthorityDelta? actor delta).bind fun next =>
+        next.applyAuthorityEffect? actor rest
+
+/-- Declaring nothing changes nothing, which is why the field can default to `[]`
+without every access having to think about it. -/
+@[simp] theorem applyAuthorityEffect?_nil (state : MemoryState) (actor : ContextId) :
+    state.applyAuthorityEffect? actor [] = some state := rfl
+
+/-- An accepted effect is the doors' work and nothing else: this is the equation a
+caller reasons with, and it is the reason `refusalOf` can decide applicability by
+running the same function the commit branch runs. -/
+theorem applyAuthorityEffect?_cons (state : MemoryState) (actor : ContextId)
+    (delta : AuthorityDelta) (rest : AuthorityEffect) :
+    state.applyAuthorityEffect? actor (delta :: rest) =
+      (state.applyAuthorityDelta? actor delta).bind fun next =>
+        next.applyAuthorityEffect? actor rest := rfl
+
+/-- **A forged lender is refused.** A context may declare a loan of what it holds or
+lent; it may not declare a loan on another context's behalf. -/
+theorem applyAuthorityDelta?_eq_none_of_forged_lender {state : MemoryState}
+    {actor : ContextId} {id : GrantId} {grant : AuthorityGrant}
+    (h : grant.lender ≠ actor) :
+    state.applyAuthorityDelta? actor (.issue id grant) = Option.none := by
+  show (if grant.lender ≠ actor then Option.none else state.issue? id grant) = Option.none
+  rw [if_pos h]
+
+/-- **A stranger may not split another context's grant.** -/
+theorem applyAuthorityDelta?_eq_none_of_stranger_split {state : MemoryState}
+    {actor : ContextId} {id low high : GrantId} {boundary : Nat} {grant : AuthorityGrant}
+    (hat : state.grantAt? id = some grant) (h : grant.holder ≠ actor) :
+    state.applyAuthorityDelta? actor (.split id low high boundary) = Option.none := by
+  show (if (state.grantAt? id).all (fun grant => decide (grant.holder = actor)) then
+      state.splitGrant? id low high boundary else Option.none) = Option.none
+  rw [if_neg (by simp [hat, h])]
+
+/-- **Nor join it.** -/
+theorem applyAuthorityDelta?_eq_none_of_stranger_join {state : MemoryState}
+    {actor : ContextId} {low high into : GrantId} {grant : AuthorityGrant}
+    (hat : state.grantAt? low = some grant) (h : grant.holder ≠ actor) :
+    state.applyAuthorityDelta? actor (.join low high into) = Option.none := by
+  show (if (state.grantAt? low).all (fun grant => decide (grant.holder = actor)) then
+      state.joinGrants? low high into else Option.none) = Option.none
+  rw [if_neg (by simp [hat, h])]
+
+/-!
+### Authority is not data
+
+Every door above changes the `grants` field and nothing else, so a declared
+authority change moves no bytes. `Grass/Op/Step.lean` needs that: the transition
+applies the effect and then writes the access's bytes on top, and its framing law
+— every cell the access did not declare is unchanged — would be false if a lend
+could touch a cell.
+
+Stated through `allocations`, because that is the field `cellAt?` and `byteAt?` read
+and it is public, so the fact is available to a caller who cannot see `grants`.
+-/
+
+/-- An issue changes the grant map only. -/
+theorem allocations_issue? {state issued : MemoryState} {id : GrantId}
+    {grant : AuthorityGrant} (h : state.issue? id grant = some issued) :
+    issued.allocations = state.allocations := by
+  unfold issue? at h
+  repeat' split at h
+  all_goals
+    first
+      | (injection h with h; subst h; rfl)
+      | exact absurd h (by simp)
+
+/-- A return changes the grant map only. -/
+theorem allocations_returnGrant? {state returned : MemoryState} {context : ContextId}
+    {id : GrantId} (h : state.returnGrant? context id = some returned) :
+    returned.allocations = state.allocations := by
+  unfold returnGrant? at h
+  repeat' split at h
+  all_goals
+    first
+      | (injection h with h; subst h; rfl)
+      | exact absurd h (by simp)
+
+/-- A split changes the grant map only. -/
+theorem allocations_splitGrant? {state next : MemoryState} {id low high : GrantId}
+    {boundary : Nat} (h : state.splitGrant? id low high boundary = some next) :
+    next.allocations = state.allocations := by
+  unfold splitGrant? at h
+  cases hlook : state.grants.lookup id with
+  | none => rw [hlook, Option.bind_none] at h; exact absurd h (by simp)
+  | some grant =>
+    rw [hlook, Option.bind_some] at h
+    repeat' split at h
+    all_goals
+      first
+        | (injection h with h; subst h; rfl)
+        | exact absurd h (by simp)
+
+/-- A join changes the grant map only. -/
+theorem allocations_joinGrants? {state next : MemoryState} {low high into : GrantId}
+    (h : state.joinGrants? low high into = some next) :
+    next.allocations = state.allocations := by
+  unfold joinGrants? at h
+  cases hlow : state.grants.lookup low with
+  | none => rw [hlow, Option.bind_none] at h; exact absurd h (by simp)
+  | some lowGrant =>
+    rw [hlow, Option.bind_some] at h
+    cases hhigh : state.grants.lookup high with
+    | none => rw [hhigh, Option.bind_none] at h; exact absurd h (by simp)
+    | some highGrant =>
+      rw [hhigh, Option.bind_some] at h
+      repeat' split at h
+      all_goals
+        first
+          | (injection h with h; subst h; rfl)
+          | exact absurd h (by simp)
+
+/-- A transfer changes the grant map only. -/
+theorem allocations_transferGrant? {state next : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId}
+    (h : state.transferGrant? actor id recipient = some next) :
+    next.allocations = state.allocations := by
+  unfold transferGrant? at h
+  cases hlook : state.grants.lookup id with
+  | none => rw [hlook, Option.bind_none] at h; exact absurd h (by simp)
+  | some grant =>
+    rw [hlook, Option.bind_some] at h
+    repeat' split at h
+    all_goals
+      first
+        | (injection h with h; subst h; rfl)
+        | exact absurd h (by simp)
+
+/-- **A declared authority change moves no bytes**, one delta at a time. -/
+theorem allocations_applyAuthorityDelta? {state next : MemoryState} {actor : ContextId}
+    {delta : AuthorityDelta} (h : state.applyAuthorityDelta? actor delta = some next) :
+    next.allocations = state.allocations := by
+  cases delta with
+  | issue id grant =>
+    have h' : (if grant.lender ≠ actor then Option.none else state.issue? id grant)
+        = some next := h
+    split at h'
+    · exact absurd h' (by simp)
+    · exact allocations_issue? h'
+  | returnGrant id =>
+    have h' : state.returnGrant? actor id = some next := h
+    exact allocations_returnGrant? h'
+  | split id low high boundary =>
+    have h' : (if (state.grantAt? id).all (fun grant => decide (grant.holder = actor)) then
+        state.splitGrant? id low high boundary else Option.none) = some next := h
+    split at h'
+    · exact allocations_splitGrant? h'
+    · exact absurd h' (by simp)
+  | join low high into =>
+    have h' : (if (state.grantAt? low).all (fun grant => decide (grant.holder = actor)) then
+        state.joinGrants? low high into else Option.none) = some next := h
+    split at h'
+    · exact allocations_joinGrants? h'
+    · exact absurd h' (by simp)
+  | transfer id recipient =>
+    have h' : state.transferGrant? actor id recipient = some next := h
+    exact allocations_transferGrant? h'
+
+/-- **And a whole declared effect moves no bytes.** -/
+theorem allocations_applyAuthorityEffect? {state next : MemoryState} {actor : ContextId} :
+    ∀ {effect : AuthorityEffect}, state.applyAuthorityEffect? actor effect = some next →
+      next.allocations = state.allocations := by
+  intro effect
+  induction effect generalizing state with
+  | nil =>
+    intro h
+    injection h with h
+    subst h
+    rfl
+  | cons delta rest ih =>
+    intro h
+    rw [applyAuthorityEffect?_cons] at h
+    cases hd : state.applyAuthorityDelta? actor delta with
+    | none => rw [hd] at h; exact absurd h (by simp)
+    | some mid =>
+      rw [hd, Option.bind_some] at h
+      exact (ih h).trans (allocations_applyAuthorityDelta? hd)
+
 @[simp] theorem grantAt?_eq_lookup (state : MemoryState) (id : GrantId) :
     state.grantAt? id = state.grants.lookup id := rfl
 
@@ -2092,6 +2335,18 @@ def byteAt? (state : MemoryState) (id : AllocId) (offset : Nat) : Option Byte :=
 initialized. Both from one lookup, for the reason `ByteStore.cellAt?` gives. -/
 def cellAt? (state : MemoryState) (id : AllocId) (offset : Nat) : Option (Byte × Bool) :=
   (state.allocations.lookup id).bind (·.bytes.cellAt? offset)
+
+/-- A cell is a function of the allocation table alone. -/
+theorem cellAt?_of_allocations_eq {a b : MemoryState} (h : a.allocations = b.allocations)
+    (id : AllocId) (offset : Nat) : a.cellAt? id offset = b.cellAt? id offset := by
+  unfold cellAt?
+  rw [h]
+
+/-- The framing form `Grass/Op/Step.lean` uses. -/
+theorem cellAt?_applyAuthorityEffect? {state next : MemoryState} {actor : ContextId}
+    {effect : AuthorityEffect} (h : state.applyAuthorityEffect? actor effect = some next)
+    (id : AllocId) (offset : Nat) : next.cellAt? id offset = state.cellAt? id offset :=
+  cellAt?_of_allocations_eq (allocations_applyAuthorityEffect? h) id offset
 
 /-- The byte is the cell's first component. Both go through one lookup, so a
 framing fact proved for cells is immediately a framing fact for bytes. -/

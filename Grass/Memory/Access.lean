@@ -1,6 +1,7 @@
 import Grass.Core.Context
 import Grass.Memory.AddressSpace
 import Grass.Memory.Audit
+import Grass.Memory.Authority
 import Grass.Memory.Fault
 import Grass.Memory.Ordering
 import Grass.Memory.Provenance
@@ -161,6 +162,9 @@ structure AccessDescriptor where
   observations : List ObservationLabel := []
   /-- How this access changes the obligation ledger. -/
   ledgerEffect : LedgerEffect := []
+  /-- How this access changes the authority map. Defaulted to nothing, because
+  almost no access lends or returns anything, and an access that does says so. -/
+  authorityEffect : AuthorityEffect := []
 deriving DecidableEq, Repr
 
 namespace AccessDescriptor
