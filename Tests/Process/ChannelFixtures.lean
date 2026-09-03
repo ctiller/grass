@@ -113,6 +113,18 @@ the fixture's `Delivers` without ever mentioning `plan.steps`.
 evolving local/session cursor" — and it is a condition the *contract* imposes and
 the family does not.
 
+`liveSteps.Send` is a relation for the same reason `Receive` is, and it became
+one later and for a sharper reason. While it pinned its after-world to
+`afterSend`, **no send of this plan could reach the world its own receive fixture
+starts from** — a reviewer proved it, and the corpus's only delivery therefore
+began at a world the plan's send relation could not produce. The send and the
+receive did not compose, which is the one thing a channel fixture is for.
+
+It now says what §3 asks of a send: the session is open, the occurrence was not
+already escrowed here, and it is outstanding afterwards.
+`Tests/Process/TransitionFixtures.lean`'s `the_send` is the `SendsEscrow` that
+reaches `beforeReceive`, and `the_send_then_the_receive` is the pair.
+
 An earlier version of `liveSteps.Send` had `after = quiet` — a send that put
 nothing in flight. It went unnoticed because the contract's `Escrow` assertion
 was `resolution = none`, which holds at an empty ledger, so the postcondition
@@ -140,7 +152,10 @@ whose relations are empty, or whose send goes nowhere, proves nothing.
 -/
 def liveSteps : ChannelSteps serverTopology () ServerMessage ServerWorld where
   Send := fun message occurrence before after =>
-    occurrence.1 = wire ∧ before = quiet ∧ after = afterSend ⟨message, occurrence⟩
+    occurrence.1 = wire ∧
+      (before.sessions () wire).status = .open ∧
+      ⟨message, occurrence⟩ ∉ (before.inFlight () wire).created ∧
+      (after.inFlight () wire).Outstanding ⟨message, occurrence⟩
   Receive := fun message occurrence before after =>
     occurrence.1 = wire ∧
       (before.inFlight () wire).Outstanding ⟨message, occurrence⟩ ∧
@@ -209,16 +224,16 @@ noncomputable def liveChannel :
   receiverPreLocal := fun _ _ _ inFootprint => Or.inl inFootprint
   sessionLocal := fun _ _ inFootprint => inFootprint
   sendOnOpenSession := by
-    rintro _ occurrence before after ⟨isWire, rfl, _⟩
+    rintro _ occurrence before after ⟨isWire, isOpen, _, _⟩
+    show (before.sessions () occurrence.1).status = .open
     rw [isWire]
-    rfl
+    exact isOpen
   send := by
-    rintro message occurrence before after ⟨isWire, rfl, rfl⟩ _ _
+    rintro message occurrence before after ⟨isWire, _, _, escrowed⟩ _ _
     refine ⟨trivial, ?_⟩
-    show ((afterSend ⟨message, occurrence⟩).inFlight () occurrence.1).Outstanding
-      ⟨message, occurrence⟩
-    rw [isWire, afterSend_wire]
-    exact ⟨List.mem_cons_self, rfl⟩
+    show (after.inFlight () occurrence.1).Outstanding ⟨message, occurrence⟩
+    rw [isWire]
+    exact escrowed
   receive := by
     rintro _ occurrence before after ⟨isWire, _, atZero, advanced⟩ _ _
     show (after.sessions () occurrence.1).delivered = 1

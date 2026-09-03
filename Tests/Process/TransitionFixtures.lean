@@ -136,6 +136,12 @@ theorem ledgerAt_off_wire {session : serverTopology.ChannelId ()}
     (notWire : session ≠ wire) : ledgerAt false session = ledgerAt true session := by
   simp [ledgerAt, notWire]
 
+/-- And off the wire it is the empty ledger, which is what `quiet` holds. -/
+theorem ledgerAt_off_wire_empty {session : serverTopology.ChannelId ()}
+    (notWire : session ≠ wire) (settled : Bool) :
+    ledgerAt settled session = EscrowLedger.empty := by
+  simp [ledgerAt, notWire]
+
 open Classical in
 /--
 The receiver's cursor on each session, before and after.
@@ -417,5 +423,145 @@ theorem nothing_can_be_sent_on_the_shut_wire
     (onWire : occurrence.1 = wire)
     (sent : (serverPlan.steps ()).Send message occurrence afterClose after) : False :=
   serverPlan.no_send_on_a_closed_session sent (by rw [onWire]; exact the_wire_is_shut)
+
+/-! ## A send that the receive can follow -/
+
+/--
+The world one send reaches: the occurrence escrowed on the wire, nothing else
+moved.
+
+`beforeReceive` is not this world — it also holds a pending `beep`, which a send
+does not produce — and that difference is the finding this section exists for.
+A reviewer proved that **no** `SendsEscrow` of this plan could reach
+`beforeReceive`, so the corpus exercised a send and a receive that had nothing to
+do with each other. The chain below is the composition.
+-/
+noncomputable def sent : ServerWorld :=
+  { quiet with inFlight := fun _ => ledgerAt false }
+
+@[simp] theorem sent_wire : sent.inFlight () wire = pendingLedger := by simp [sent]
+
+/-- Nothing was in flight before it. -/
+theorem quiet_holds_nothing (session : serverTopology.ChannelId ()) :
+    quiet.inFlight () session = EscrowLedger.empty := rfl
+
+/--
+**A send: the corpus's first `SendsEscrow`.**
+
+`contractual` is the plan's own send relation, which is what makes this a send of
+*this* program rather than a shape that happens to typecheck — the same field
+`Delivers` waited four review rounds for.
+-/
+theorem the_send : serverPlan.SendsEscrow quiet sent () payload occurrenceOf where
+  contractual :=
+    ⟨rfl, rfl, by rw [quiet_holds_nothing]; exact List.not_mem_nil,
+      by rw [sent_wire]; exact ⟨List.mem_cons_self, rfl⟩⟩
+  wasFresh := by
+    show escrowed ∉ (quiet.inFlight () wire).created
+    rw [quiet_holds_nothing]
+    exact List.not_mem_nil
+  nowEscrowed := by
+    show (sent.inFlight () wire).Outstanding escrowed
+    rw [sent_wire]
+    exact ⟨List.mem_cons_self, rfl⟩
+  ledgerExtends := by
+    show LedgerExtends (quiet.inFlight () wire) (sent.inFlight () wire)
+    rw [quiet_holds_nothing, sent_wire]
+    exact
+      { createdPrefix := List.nil_prefix
+        resolutionPermanent := by
+          intro occurrence resolution ended
+          exact absurd ended (by simp [EscrowLedger.empty])
+        cancelRequestMonotone := by
+          intro occurrence requested
+          exact absurd requested (by simp [EscrowLedger.empty]) }
+  scope := by
+    intro fragment outside
+    cases fragment with
+    | escrow edge session =>
+      have sameEdge : edge = () := rfl
+      subst sameEdge
+      have notWire : ¬ (session = wire) := by
+        intro isWire
+        subst isWire
+        exact outside rfl
+      show quiet.inFlight () session = sent.inFlight () session
+      rw [show sent.inFlight () session = ledgerAt false session from rfl,
+        ledgerAt_off_wire_empty notWire]
+      rfl
+    | _ => rfl
+
+/-- **And it puts the message in flight**, which is `ProcessPlan`'s two tie
+fields composed at a step that actually happened. -/
+theorem the_send_puts_it_in_flight :
+    (sent.inFlight () occurrenceOf.1).Outstanding escrowed :=
+  serverPlan.send_puts_it_in_flight (carried := payload) the_send.contractual trivial
+
+/--
+**And the receive follows it.**
+
+The pair, at the two worlds a run of this plan actually visits. `Delivers`
+requires the receiver's cursor to be at zero, which is `sent`'s — nothing has
+been delivered on the wire — so this is the receive the send set up rather than a
+receive at a world nobody arrived at.
+-/
+noncomputable def received : ServerWorld :=
+  { quiet with inFlight := fun _ => ledgerAt true, sessions := fun _ => cursorAt true }
+
+@[simp] theorem received_wire : received.inFlight () wire = settledLedger := by simp [received]
+
+theorem the_receive_after_the_send :
+    serverPlan.Delivers sent received () wire escrowed where
+  contractual := by
+    refine ⟨rfl, ?_, rfl, ?_⟩
+    · rw [sent_wire]
+      exact ⟨List.mem_cons_self, rfl⟩
+    · simp [sent, received, cursorAt, Grass.Process.Tests.World.quiet]
+  onItsSession := rfl
+  wasOutstanding := by
+    rw [sent_wire]
+    exact ⟨List.mem_cons_self, rfl⟩
+  nowResolved := by
+    rw [received_wire]
+    exact settled_resolution
+  ledgerExtends := by
+    rw [sent_wire, received_wire]
+    exact
+      { createdPrefix := List.prefix_refl _
+        resolutionPermanent := by
+          intro occurrence resolution ended
+          exact absurd ended (by simp [pendingLedger])
+        cancelRequestMonotone := by
+          intro occurrence requested
+          exact absurd requested (by simp [pendingLedger]) }
+  cursorAdvances := by simp [sent, received, cursorAt, Grass.Process.Tests.World.quiet]
+  statusUnchanged := by simp [sent, received, cursorAt]
+  scope := by
+    intro fragment outside
+    cases fragment with
+    | escrow edge session =>
+      have sameEdge : edge = () := rfl
+      subst sameEdge
+      have notWire : ¬ (session = wire) := by
+        intro isWire
+        subst isWire
+        exact outside (Or.inl rfl)
+      show sent.inFlight () session = received.inFlight () session
+      rw [show sent.inFlight () session = ledgerAt false session from rfl,
+        show received.inFlight () session = ledgerAt true session from rfl,
+        ledgerAt_off_wire notWire]
+    | session edge session =>
+      have sameEdge : edge = () := rfl
+      subst sameEdge
+      have notWire : ¬ (session = wire) := by
+        intro isWire
+        subst isWire
+        exact outside (Or.inr rfl)
+      show sent.sessions () session = received.sessions () session
+      rw [show received.sessions () session = cursorAt true session from rfl,
+        cursorAt_off_wire notWire]
+      rfl
+    | _ => rfl
+
 
 end Grass.Process.Tests.Transition

@@ -3439,10 +3439,24 @@ does not exercise them.
 
 Two consequences it found, both worth more than the count:
 
-* **No `SendsEscrow` can reach `beforeReceive`.** `liveSteps.Send` pins its
+* **No `SendsEscrow` could reach `beforeReceive`.** `liveSteps.Send` pinned its
   after-world, and that world's pending trace is empty where `beforeReceive`'s is
-  not. So the corpus's only delivery starts from a world its own plan's send
-  relation cannot produce, and the send/receive pair does not compose.
+  not. So the corpus's only delivery started from a world its own plan's send
+  relation could not produce, and the send/receive pair did not compose.
+
+  **Closed.** `liveSteps.Send` is a relation rather than a world equation — the
+  same repair `Receive` needed for the same reason — saying what §3 asks of a
+  send: the session is open, the occurrence was not already escrowed here, and it
+  is outstanding afterwards. `Tests/Process/TransitionFixtures.lean`'s `the_send`
+  is the corpus's first `SendsEscrow`, `the_send_puts_it_in_flight` is
+  `ProcessPlan`'s two tie fields composed at a step that actually happened, and
+  `the_receive_after_the_send` is the delivery that follows it at the world the
+  send reached.
+
+  `beforeReceive` keeps its pending `beep` and is still a manufactured world, for
+  the same reason `afterClose` is: producing a pending observation needs a live
+  instance, and that world has none. The diamond fixture is stated there and the
+  composed chain is stated at `sent`/`received`.
 * **`afterClose` is unreachable by `channelClose`**, and its docstring said it
   was reachable. It keeps `beforeReceive`'s ledgers, in which nothing is
   resolved, so `ClosesSession.nowResolved` can never hold there. The docstring is
