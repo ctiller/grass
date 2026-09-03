@@ -240,8 +240,8 @@ owning protocol theorem".
 
 That half is now split between the type and this predicate. Every delta carries a
 `ProtocolAuthority claimed` — indexed by the protocol, so authority for one cannot
-be presented for another — and the clauses below check that `claimed` is the
-protocol the live obligation actually has. An earlier version compared
+be presented for another — and the clauses below check that the protocol
+`ProtocolAuthority` is indexed by is the one the live obligation actually has. An earlier version compared
 `ObligationProtocolId` values only, which is comparing strings any caller could
 write down, and carried no authority at all.
 -/

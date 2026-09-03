@@ -431,9 +431,9 @@ wrongly:
   slots cannot be described, and truncating the count is the failure mode, so
   the field `countFits` is what a caller must discharge instead.
 
-Two of them together have a consequence worth naming: `RAX` cannot be a frame
-register, because its number is 0 and 0 is how the header spells "none". That is
-`framePointer_not_rax`, derived rather than stated.
+Two of them together have a consequence `framePointer_not_rax` derives rather
+than states: `RAX` cannot be a frame register, because its register number is 0
+and 0 is how `FrameRegister` spells "none".
 
 `Version` is not a field: it is fixed at 1 by `toBytes`, since version 2
 `UNWIND_INFO` has epilogue codes this module does not write.
@@ -591,7 +591,8 @@ theorem length_toBytes_aligned (u : UnwindInfo) : u.toBytes.length % 4 = 0 := by
 /--
 **`RAX` cannot be a frame register.**
 
-Not a stated rule but a consequence of two of the structure's fields.
+Not a stated rule but a consequence of `framePointerAgrees` and
+`framePointerDeclared` together.
 `FrameRegister` spells "no frame pointer" as 0, and `RAX`'s register number is
 0; `framePointerDeclared` forces the field nonzero whenever the prologue
 establishes a frame pointer, and `framePointerAgrees` forces the field to equal

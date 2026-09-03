@@ -105,8 +105,9 @@ end Gpr
 The REX prefix.
 
 One of the sixteen bytes `0x40`-`0x4F`. In 64-bit mode those encodings no longer
-mean the one-byte `INC`/`DEC` forms they mean in 32-bit mode, so a decoder
-cannot be shared between modes without consulting the mode first.
+mean the one-byte `INC`/`DEC` forms they mean in 32-bit mode, so a decoder cannot
+be shared between modes without consulting the mode first -- `Rex.isRexByte` is
+the 64-bit-mode recogniser and says nothing about the other modes.
 
 The fields are `BitVec 1` rather than `Bool` because the byte is bits and the
 encoding theorems are bitvector facts. `Rex.of` and the four predicates below

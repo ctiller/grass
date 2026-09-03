@@ -82,9 +82,10 @@ theorems were first proved with it. An axiom audit under
    writeBack.w16_preserves_high._native.bv_decide.ax_1_5]
 ```
 
-That generated constant is `verifyBVExpr expr cert = true` asserted as an axiom:
-`bv_decide` ran its LRAT checker natively and admitted the result rather than
-having the kernel reduce it. `docs/DECISIONS.md` 23 prohibits `native_decide`
+That generated constant is `verifyBVExpr expr cert = true` asserted as an
+axiom: the tactic ran its LRAT checker natively and admitted the result rather
+than having the kernel reduce it, so `writeBack.w16_preserves_high` depended on
+something the kernel never checked. `docs/DECISIONS.md` 23 prohibits `native_decide`
 and says "execution is not a proof", and 31 requires "rejection of every
 dependency-defined axiom" — so the tactic's own permission does not survive its
 own audit in this case.

@@ -18,9 +18,19 @@ file whose own comment states this rule. Mechanism-shaped prose reads as
 verification and is not, so the rule needs a checker rather than a convention.
 
 The check is deliberately shallow. It cannot tell whether a named theorem proves
-what the sentence claims; it can tell that the sentence names *something* the
-build knows about, which is the difference between a claim that can be chased and
-one that cannot. A sentence that hedges -- "intended", "not enforced", "owes",
+what the sentence claims; it can tell that the sentence names something the build
+knows about, which is the difference between a claim that can be chased and one
+that cannot.
+
+That second half used to be false. The tool never touched a Lean environment --
+it looked for a backticked identifier and stopped -- so any invented name
+satisfied it. A reviewer passed the audit with a sentence claiming the encoder
+"ensures" and "prevents", backed by
+`encodeMem_is_canonical_and_injective_over_all_addresses`, which does not exist;
+the identical sentence with the backticks removed failed. That is precisely the
+defect this file's own header cites as its reason for existing. Names are now
+checked against `Tools/DeclNames.lean`, which prints every declaration the build
+knows. A sentence that hedges -- "intended", "not enforced", "owes",
 "open obligation", and the like -- is exempt, because saying a property is not yet
 mechanised is exactly the honest alternative the rule asks for.
 
@@ -28,6 +38,7 @@ Exit status is 1 if any claim is unbacked.
 """
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -72,6 +83,43 @@ IDENT = re.compile(r"`([A-Za-z_][A-Za-z0-9_.?!']*)`")
 NOT_IDENT = re.compile(r"^(docs/|§|[a-z]+\s)")
 
 
+def declaration_names() -> set[str]:
+    """Every name the build knows, plus every dotted suffix of one.
+
+    Suffixes because a docstring names a declaration the way a reader would --
+    `writeBack.w32_clears_high`, not
+    `Grass.ISA.X86.writeBack.w32_clears_high` -- and demanding the fully
+    qualified form would push authors towards naming nothing.
+
+    A missing oracle is a failure, not a skip: an audit that passes because it
+    could not obtain the name list is worse than no audit, which is the mistake
+    this function was added to correct.
+    """
+    proc = subprocess.run(
+        ["lake", "env", "lean", "Tools/DeclNames.lean"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if proc.returncode != 0:
+        sys.exit(
+            "could not obtain the declaration list from Tools/DeclNames.lean:\n"
+            + (proc.stdout + proc.stderr).strip()[:2000])
+    known: set[str] = set()
+    for line in proc.stdout.splitlines():
+        name = line.strip()
+        if not name or " " in name:
+            continue
+        parts = name.split(".")
+        for i in range(len(parts)):
+            known.add(".".join(parts[i:]))
+    # Sorts are not constants, so a sentence naming only `Prop` or `Type` would
+    # otherwise be reported as naming nothing.
+    known.update({"Prop", "Type", "Sort"})
+    if len(known) < 1000:
+        sys.exit(
+            f"declaration list has only {len(known)} entries, which cannot be "
+            "right; refusing to report a clean audit against it")
+    return known
+
+
 def sentences(block: str) -> list[str]:
     text = " ".join(line.strip() for line in block.splitlines())
     # Split on sentence ends only. A semicolon joins a claim to the clause that
@@ -87,7 +135,7 @@ def doc_blocks(source: str):
         yield line, match.group(1)
 
 
-def check(path: Path) -> list[str]:
+def check(path: Path, known: set[str]) -> list[str]:
     source = path.read_text(encoding="utf-8")
     findings = []
     for line, block in doc_blocks(source):
@@ -106,7 +154,14 @@ def check(path: Path) -> list[str]:
                 for ident in IDENT.findall(sentence)
                 if not NOT_IDENT.match(ident)
             ]
-            if not named:
+            resolved = [ident for ident in named if ident in known]
+            if named and not resolved:
+                findings.append(
+                    f"{path.as_posix()}:{line}: claim names "
+                    f"{named} but the build knows no such declaration: "
+                    f"{sentence!r}"
+                )
+            elif not named:
                 findings.append(
                     f"{path.as_posix()}:{line}: claim names no enforcing type or "
                     f"theorem: {sentence!r}"
@@ -119,12 +174,13 @@ def main() -> int:
     # is never live"), not mechanisms, and the fixtures are themselves the
     # evidence a claim would point at.
     roots = [Path("Grass")]
+    known = declaration_names()
     findings: list[str] = []
     for root in roots:
         if not root.is_dir():
             continue
         for path in sorted(root.rglob("*.lean")):
-            findings.extend(check(path))
+            findings.extend(check(path, known))
     if findings:
         print("docstring audit: claims that name nothing enforcing them\n")
         for finding in findings:
