@@ -1,4 +1,4 @@
-import Grass.Process.Network.Transition
+import Grass.Process.Network.Initial
 
 /-!
 # Network progress: why a silent loop cannot run forever
@@ -191,6 +191,26 @@ structure NetworkProgressMeasure (plan : ProcessPlan.{u, w, v, r, m, o} registry
   `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.65.
   -/
   Reachable : plan.LogicalProcessNetwork → Prop
+  /--
+  **And the start is a network a run may begin at.**
+
+  Without this a measure could be indexed by a world no execution produces —
+  an empty network, or one whose root carries a generation nothing allocated —
+  and discharge `reachableStart` vacuously, which puts the whole reachability
+  index back where it came from.
+
+  It could not be stated until `Grass/Process/Network/Initial.lean`'s
+  `ExactInitialNetwork` had a witness, because a field demanding an uninhabited
+  record makes *this* record uninhabited too.
+  `Tests/Process/FrontierFixtures.lean`'s `waiting_is_a_start` is that witness
+  and `waitingMeasure` is the measure it unblocked.
+
+  The request is existentially quantified, and that is a choice worth naming: a
+  plan started with two different requests has two different progress arguments,
+  and nothing here says which one a measure is about.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.65 records it.
+  -/
+  startIsInitial : ∃ request, Nonempty (plan.ExactInitialNetwork request start)
   /-- The start is reachable. -/
   reachableStart : Reachable start
   /-- And a step from a reachable network reaches a reachable one. -/

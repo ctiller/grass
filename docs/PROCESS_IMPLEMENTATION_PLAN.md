@@ -2922,7 +2922,7 @@ choice is exactly `plan.StepsTo start`.
 What is not fixed is §10.65: nothing requires `start` to be a network a run may
 actually begin at.
 
-### 10.65 `ExactInitialNetwork` and the network measure are not connected
+### 10.65 ~~`ExactInitialNetwork` and the network measure are not connected~~ — **closed, with one question left**
 
 Following from §10.59 and §10.64: `Grass/Process/Network/Initial.lean` says what a
 start is and `Grass/Process/Network/Progress.lean` says what progress is, and
@@ -2936,8 +2936,13 @@ than through it. `NetworkProgressMeasure` still takes any world as its `start`, 
 a plan may index a measure by a world no run reaches and discharge
 `reachableStart` vacuously.
 
-The fix is a field: `startIsInitial : ∃ request, plan.ExactInitialNetwork request
-start`. It is cheap now that the record has a witness, and it was not statable
-before. Needs a ruling only on whether the request should be an index of the
-measure rather than existentially quantified — a plan started with two different
-requests has two different progress arguments, and nothing here says which.
+`NetworkProgressMeasure.startIsInitial` is now that field, and the order it had
+to land in is the entry's content: a field demanding an uninhabited record makes
+the record demanding it uninhabited too, so §10.59 had to close first. It did,
+and this followed in four lines.
+
+**The question that is left** is the request. `startIsInitial` quantifies it
+existentially, so a measure is about *some* start of the plan rather than a named
+one — and a plan started with two different requests has two different progress
+arguments. Making it an index of the measure is the alternative and it is a
+signature change. Needs a ruling.
