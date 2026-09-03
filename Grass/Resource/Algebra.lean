@@ -4,9 +4,15 @@ import Grass.Resource.Axis
 # The generic resource algebra
 
 `docs/RESOURCES.md` §4: "Both tiers use the open resource algebra." This module
-is that algebra. It is imported by `Semantics`, which cannot state `SpecProcess`
-without it, and instantiated by `Process.Resource`, which builds network
-holdings and capacity credit on top.
+is that algebra. It is *intended* for a semantics layer that cannot state its
+process type without it, and for a process layer that builds network holdings and
+capacity credit on top — and neither exists. An earlier version of this sentence named
+both as present-tense importers; review checked and found the only importer is
+`Tests/Resource/CompositionSplit.lean`. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2
+records the consequence: `compatible` is the *partial* in partial commutative and the
+reason every law here is conditioned, and its only nontrivial instance is consumed by
+nothing, so no proof in this tree has discharged a nontrivial compatibility side
+condition.
 
 ## Reconciling two sketches
 
@@ -365,8 +371,11 @@ theorem laws : OrderedPartialCommutativeResourceLaws compatible combine alternat
   alternativeMonotone := fun a b c _ => by simp only [alternative]; omega
   alternativeLeCombine := fun a b _ => by simp only [alternative, combine]; omega
 
-/-- Two held exclusive resources are incompatible. This is the fact that makes
-`h2.credit.double` fail rather than silently double count. -/
+/-- Two held exclusive resources are incompatible. This is the fact a
+double-counting demand would fail against, and an earlier version of this line named
+a specific corpus obligation as though that obligation consumed it. None does — this
+namespace has no consumer at all, which `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2
+records. -/
 theorem not_compatible_of_both_held {a b : Nat} (ha : a ≠ 0) (hb : b ≠ 0) :
     ¬ compatible a b := by
   rintro (h | h)

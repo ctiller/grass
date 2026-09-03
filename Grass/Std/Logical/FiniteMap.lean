@@ -11,8 +11,11 @@ makes the loan map the authoritative representation of borrowing, and
 almost every proof in the memory layer reduces to "this update did not touch the
 key I am reading".
 
-Equality is extensional, per `docs/STDLIB.md` §1: two maps are `Equiv` when they
-agree at every key. Representations are deliberately not normalized, so
+Equality is extensional here by this module's choice: two maps are `Equiv` when they
+agree at every key. `docs/STDLIB.md` §1 is about `Vec`, and §6's `Map` carries
+"separate equality, ordering/hash, allocator, and complexity profiles" — it
+parameterises equality rather than fixing it. An earlier version of this line cited §1
+as the authority for the choice. Representations are deliberately not normalized, so
 propositional equality of the underlying entry list is finer than `Equiv` and is
 never the right relation to use.
 
@@ -236,10 +239,16 @@ theorem Equiv.mem_domain {m n : FiniteMap K V} (h : m.Equiv n) {key : K}
     (hd : key ∈ m.domain) : key ∈ n.domain :=
   (mem_domain_iff_binds n key).mpr (h.binds ((mem_domain_iff_binds m key).mp hd))
 
-/-- A map with no entries binds nothing. The converse needs `K` to be searchable
-and is not available at this generality. -/
+/-- A map with no entries binds nothing. -/
 theorem isEmpty_of_entries_eq_nil {m : FiniteMap K V} (h : m.entries = []) : m.IsEmpty :=
   fun _ => by simp [lookup, h]
+
+/-- And the converse, which an earlier docstring said needed `K` to be searchable and
+was "not available at this generality". It is available, from
+`domain_eq_nil_of_isEmpty` above, at this generality. -/
+theorem entries_eq_nil_of_isEmpty {m : FiniteMap K V} (h : m.IsEmpty) : m.entries = [] := by
+  have hd := domain_eq_nil_of_isEmpty h
+  simpa [domain] using hd
 
 end FiniteMap
 

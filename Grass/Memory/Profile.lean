@@ -537,11 +537,23 @@ end AdmittedVocabulary
 /--
 The proof package every memory-capable profile must close.
 
-Exactly the eleven items of `docs/MEMORY_MODEL.md` §10, as fields. They are
-`Prop`s supplied by the profile owner, so a `MemoryProfile` value cannot be
-constructed with one missing — which is the mechanical content of "The profile is
-not usable by `VerifiedProgram` until this package closes for all of its admitted
-operations."
+Exactly the eleven items of `docs/MEMORY_MODEL.md` §10, as fields. They are `Prop`s
+supplied by the profile owner, so a `MemoryProfile` value cannot be constructed with
+one missing.
+
+**That is weaker than it reads**, and an earlier version of this paragraph called it
+"the mechanical content of" §10's gate. What is enforced is that eleven propositions
+are *named*. Nothing relates a field to the profile, to its admitted operations, or
+to any theorem in the tree, so a profile supplying `True` eleven times closes §10 and
+`Holds` is proved by `trivial`. `Tests/Op/FakeIsa.lean` does exactly that and says
+so — but that honesty is the fixture's, not the type's. This is the last gate between
+a profile and `VerifiedProgram`, and it is a naming exercise; review found that seven
+rounds had asked who consumes this and none had asked whether its content is
+constrained. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records what closing it would
+take.
+
+§10's sentence is "The profile is not usable by `VerifiedProgram` until this package
+closes for all of its admitted operations."
 
 Most of these are stated abstractly here and are refined as the milestones that
 own them land. That is deliberate: `docs/MEMORY_IMPLEMENTATION_PLAN.md` §3 ships

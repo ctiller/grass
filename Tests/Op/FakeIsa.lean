@@ -1343,6 +1343,38 @@ theorem the_honest_permission_commits :
   cases hs
   exact ⟨by decide, by decide⟩
 
+/-! ## Section 8's second conjunct, at this layer
+
+§8 requires `VerifiedProgram` to prove the ledger empty **and that only spec-allowed
+fault outcomes occur**. The first has `AuditViolationLedger.IsEmpty`; the second had
+no predicate at all — `MachineState.faults` was appended to by `runStep` and read by
+nothing under `Grass/`. `FaultsRecognized` is the half this layer can state. -/
+
+/-- **A step that faults records a fault the profile declared.** -/
+theorem a_raised_fault_is_recognized :
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.load) thread₀ .thread
+        ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 0
+          else .none)).state? = some s →
+      s.faults.length = 1 ∧
+      s.FaultsRecognized vocabulary.faultClasses.recognized := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- And the predicate discriminates: a state carrying a fault the profile never
+declared does not satisfy it. Without this the theorem above would hold of a
+predicate that is true of everything. -/
+theorem an_undeclared_fault_is_not_recognized :
+    ∀ s, (Grass.Op.step policy state₀ (SomeOperation.of Alpha.load) thread₀ .thread
+        ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+          if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 0
+          else .none)).state? = some s →
+      ¬ s.FaultsRecognized [.deviceFault] := by
+  intro s hs
+  cases hs
+  decide
+
 /-! ## A split may not relabel a live duty
 
 `LedgerDelta.Applicable`'s split clause pinned each output's protocol and owner and

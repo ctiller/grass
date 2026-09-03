@@ -711,6 +711,82 @@ one outright defect that had already merged — see §3.11's denial row.
   consults the registries directly rather than through `RequiresJustification`, so
   that predicate's only consumer is `unregisteredOnFaultRule?_priorEffectsVisible`,
   a theorem.
+- **§10's proof package is closable by triviality, and its docstring calls that the
+  mechanism.** `RequiredProofPackage`'s eleven fields are bare `Prop`s the profile
+  owner chooses; nothing relates a field to the profile, to its admitted operations,
+  or to any theorem in the tree. `Holds` is their conjunction, so a profile supplying
+  `True` eleven times *closes* §10 and `Holds` is `trivial` —
+  `Tests/Op/FakeIsa.lean` does exactly that and says so, but the honesty is the
+  fixture's, not the type's. The docstring says a `MemoryProfile` "cannot be
+  constructed with one missing — which is the mechanical content of" §10's gate; what
+  is enforced is that eleven propositions are *named*.
+
+  This is the last gate between a profile and `VerifiedProgram`. Closing it means each
+  field's *statement* mentioning the profile — `accessDescriptorSoundness` quantifying
+  over what the vocabulary admits, and so on — which is corpus work spanning this
+  layer and `VerifiedProgram`'s, and it is a design question rather than a repair.
+  §4.2.1 considered `MemoryProfile.package` and answered a different question: who
+  consumes it. Nobody asked whether its content is constrained.
+- **§8's second conjunct is half-stated.** "`VerifiedProgram` proves the ledger
+  remains empty **and that only spec-allowed fault outcomes occur**."
+  `MachineState.FaultsRecognized` is the half this layer can state — every recorded
+  fault is of a class the profile declared — and it had no predicate at all until
+  review found that `MachineState.faults` was appended to by `runStep` and read by
+  nothing under `Grass/`. What "spec-allowed" means at a given point is
+  `docs/SEMANTICS.md`'s, not this layer's, and no milestone owns the rest.
+- **§7.1's `fence` event kind cannot be minted, and there is no fence intent.**
+  `kindOf` yields only read, write and read-modify-write; `ofOutcome` is the only
+  producer of a `ValidMemoryEvent`; and `AccessIntent` has no fence form, because an
+  intent that neither reads nor writes is refused by `WellFormedIn.notInert`. So
+  §7.4's "release establishes the profile's causal edge" has no event to carry the
+  edge. A theorem stated over `EventKind.fence` was consequently vacuous and is now
+  stated over `touchesMemory`.
+- **`Grass/Core/Generational.lean` is dead, and it makes law 22's second half look
+  discharged.** Nothing imports it; it builds only through the `Grass.+` glob. Every
+  identity in the tree — `AllocId`, `GrantId`, `EpochId`, `EventId`, `ContextId`,
+  `ObligationId` — is a bare `Uid`, never a `Generational`, so the externally-recycled
+  numeric case that module exists for is unaddressed. `ExecutionContext` carrying an
+  OS thread identity is the concrete instance.
+- **`FreshSupply` is fabricable, rewindable and observable through its recursor.**
+  Its docstring claimed the private constructor prevented all three; review compiled
+  all three from outside the module and re-minted an identity a rewound supply had
+  already issued. The docstring is corrected. What actually protects `never_reissued`
+  is its `Reachable` hypothesis, and nothing type-enforces that a caller mints from a
+  forward-reachable supply.
+- **`MemoryState.Exclusive` and `outstandingLoans` are defined on the raw entry
+  list**, which `Grass/Std/Logical/FiniteMap.lean` says is "never the right relation
+  to use" — two `Equiv` maps can differ under a filter. Unexploitable only because
+  `MemoryState.mk` and the `grants` field are private, so the map is only ever built
+  by `insert` and `erase`. That is an invariant holding because no code exercises the
+  case, protected by an unrelated privacy decision in another module with no theorem
+  linking the two.
+- **A duty can be transferred to a context that names no live context**, after which
+  it can never be discharged, since discharge requires the actor to own it.
+  `LedgerDelta.Applicable`'s transfer clause ignores `newOwner` entirely.
+  `Grass/Op/Step.lean` has `MachineState.contexts` and could check it there.
+- **`Grass/Memory/Shape.lean`'s `writeField` is unbounded by the allocation.** It
+  truncates to the field's size and checks nothing about `base + field.range.start`
+  against the extent, and `MemoryState.write` writes into an unbounded journal. Not
+  reachable today — `writeFields` has one caller, a padding fixture, and it is not
+  the access path — which is the point: it is a facility whose only safety is having
+  no users.
+- **`FacetName` is open nominal in shape and closed in effect.** It carries a `Name`,
+  so a profile may name a facet this layer has never heard of; `OperationFacets` is a
+  closed four-field record and `supplied` can only return those four. A profile-invented
+  name in `requiredFacets` therefore makes `Closes` unsatisfiable and rejects every
+  operation of every family. It fails safe, and §3.5's rationale for open nominal
+  names — extension without editing — is not true of this one.
+- **`MemoryState.Granted` is vacuously true on an empty range**, in every state, since
+  it quantifies over the range's bytes. `not_granted_empty` had to gain a
+  `¬ range.IsEmpty` hypothesis to stay true. Safety rests on
+  `AccessDescriptor.WellFormedIn.rangeNonEmpty` two layers up, and the invariant moved
+  out of the predicate without being written into it.
+- **`AdmittedVocabulary.admissibilityFailures` collapses `WellFormedIn`'s fourteen
+  named conditions into one anonymous `notWellFormedInSpace`.** The list exists so a
+  rejection says which clause failed, and `WellFormedIn` is a structure of named
+  fields so a failing condition names itself; the first clause throws both away. A
+  zero-length read and a write that under-declares its permission produce the
+  identical value.
 - **The layer cannot carry Spike 1, and the reason is not a missing convenience.**
   `WriteFile` is a second execution context, and `Grass/Op/Step.lean`'s
   `ConflictsWithHistory` refuses any cross-context access whose event conflicts with

@@ -1506,6 +1506,59 @@ def initial (memory : MemoryState) : MachineState :=
   { memory := memory, obligations := .empty, violations := .empty
     events := [], eventSupply := .initial, faults := [], contexts := .empty }
 
+/--
+`state.FaultsRecognized recognized` holds when every fault the state has recorded is
+of a class the list names.
+
+`docs/MEMORY_MODEL.md` §8: "`VerifiedProgram` proves the ledger remains empty **and
+that only spec-allowed fault outcomes occur**." The first conjunct has
+`AuditViolationLedger.IsEmpty`, `Extends`, and `Grass.Op.step_extends_violations`. The
+second had nothing: `faults` was appended to by `runStep` and read by no predicate
+anywhere under `Grass/`, only by fixture assertions, so there was no analogue of
+`IsEmpty` for a `VerifiedProgram` to prove. Review found it, and found that no
+milestone owned it either.
+
+This is the half of §8's second conjunct this layer can state. "Spec-allowed" is a
+profile's word, and a profile's fault vocabulary is the list it declares — so a fault
+outside it is a fault the profile never modelled, which
+`Grass/Op/Step.lean` refuses at declaration time through `faultClassNotDeclared` and
+`operationFaultNotRecognized`. What this adds is the *state-level* statement those
+refusals make true, so a consumer has something to carry rather than an argument about
+which gates ran.
+
+What it is **not** is the whole conjunct. §8's "spec-allowed" is a claim about which
+outcomes a specification permits at a given point, and that needs the specification —
+`docs/SEMANTICS.md`'s, not this layer's. Recorded in
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2.
+-/
+def FaultsRecognized (state : MachineState) (recognized : List FaultClassId) : Prop :=
+  ∀ raised ∈ state.faults, raised.fault ∈ recognized
+
+instance (state : MachineState) (recognized : List FaultClassId) :
+    Decidable (state.FaultsRecognized recognized) :=
+  inferInstanceAs (Decidable (∀ _ ∈ _, _))
+
+/-- The initial state has recorded no fault, so every list recognises them. -/
+@[simp] theorem faultsRecognized_initial (memory : MemoryState)
+    (recognized : List FaultClassId) :
+    (MachineState.initial memory).FaultsRecognized recognized := by
+  intro raised hmem
+  simp [MachineState.initial] at hmem
+
+/-- Recognition is monotone in the list, so a profile that declares more still
+recognises what a narrower one did. -/
+theorem FaultsRecognized.mono {state : MachineState} {a b : List FaultClassId}
+    (h : state.FaultsRecognized a) (hsub : ∀ f ∈ a, f ∈ b) :
+    state.FaultsRecognized b := fun raised hmem => hsub _ (h raised hmem)
+
+/-- **A state that has recorded a fault outside the list does not satisfy it.** The
+discriminating direction: without it the predicate would hold of every state whose
+`faults` list the checker happened not to look at. -/
+theorem not_faultsRecognized_of_mem {state : MachineState} {recognized : List FaultClassId}
+    {raised : RaisedFault} (hmem : raised ∈ state.faults)
+    (h : raised.fault ∉ recognized) : ¬ state.FaultsRecognized recognized :=
+  fun hr => h (hr raised hmem)
+
 /-- `state.KindAgrees context kind` holds when the state has not already recorded
 a different kind for that identity. A context the state has never seen agrees with
 any kind, and is recorded by `noteContext`. -/
