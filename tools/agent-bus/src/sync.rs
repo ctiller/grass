@@ -95,8 +95,22 @@ pub fn synced_snapshot(
     remote: &str,
     worktrees_dir: &Path,
 ) -> AbResult<Snapshot> {
-    let registry_refspec = format!("{0}:{0}", crate::registry::REGISTRY_REF);
-    crate::gitrepo::fetch_refspecs(repo, remote, &[registry_refspec])?;
+    // Existence checked first, same reasoning as the stream refs below: a
+    // bus that has never been bootstrapped on `remote` yet is an ordinary,
+    // expected state (not a fetch failure) and deserves this function's own
+    // clear message, not `fetch_refspecs_ok`'s generic "couldn't find remote
+    // ref" -- while a remote that genuinely cannot be reached at all must
+    // still hard-fail here, via `remote_refs_existing`'s own `ls-remote`
+    // check, rather than silently falling through to reduce stale local
+    // state (round-6 adversarial review).
+    let registry_ref = crate::registry::REGISTRY_REF.to_string();
+    let registry_exists =
+        crate::gitrepo::remote_refs_existing(repo, remote, std::slice::from_ref(&registry_ref))?
+            .contains(&registry_ref);
+    if !registry_exists {
+        return Err(invalid("no registry root exists on the remote"));
+    }
+    crate::gitrepo::fetch_refspecs_ok(repo, remote, &[format!("{registry_ref}:{registry_ref}")])?;
 
     let registry_tip = crate::registry::read_registry_tip(repo)?
         .ok_or_else(|| invalid("no registry root exists on the remote"))?;
@@ -121,7 +135,7 @@ pub fn synced_snapshot(
         .map(|r| format!("{r}:{r}"))
         .collect();
     if !stream_refspecs.is_empty() {
-        crate::gitrepo::fetch_refspecs(repo, remote, &stream_refspecs)?;
+        crate::gitrepo::fetch_refspecs_ok(repo, remote, &stream_refspecs)?;
     }
 
     let now = Timestamp::now_utc();
@@ -562,6 +576,103 @@ mod tests {
         // ref doesn't even exist on the remote), so nothing was recorded --
         // a failed synchronization must not fabricate a successful one.
         assert!(read_last_synced(repo.path()).unwrap().is_none());
+    }
+
+    /// Round-6 adversarial review: `fetch_refspecs` reports a rejected or
+    /// failed `git fetch` via `success: false`, not an `Err` -- if
+    /// `synced_snapshot` merely `?`-propagated it (as it used to), a genuine
+    /// fetch failure would be silently swallowed, and this host's *stale*
+    /// local state would be reduced and reported as `Freshness::
+    /// CurrentAsOfRemoteProbe` with a freshly-recorded `last_synced`, exactly
+    /// as if the probe had actually succeeded. Reproduced here: `host_b`
+    /// syncs once successfully, `origin` then advances further, and a second
+    /// sync attempt against an unreachable remote must hard-fail rather than
+    /// silently re-report the now-stale first snapshot as current.
+    #[test]
+    fn synced_snapshot_fails_closed_when_the_fetch_itself_is_rejected_rather_than_reporting_stale_state_as_current(
+    ) {
+        let origin = init_bare_origin();
+        let remote = origin.path().to_string_lossy().to_string();
+
+        let host_a = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(host_a.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            host_a.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            crate::scalars::ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+            &host_a.path().join("_genesis_wt"),
+        )
+        .unwrap();
+        let registry_tip = crate::registry::read_registry_tip(host_a.path())
+            .unwrap()
+            .unwrap();
+        crate::publish::publish(
+            host_a.path(),
+            &remote,
+            &[
+                crate::publish::RefUpdate::new(crate::registry::REGISTRY_REF, registry_tip),
+                crate::publish::RefUpdate::new(
+                    crate::stream::stream_ref(&coord1).into_string(),
+                    crate::stream::read_stream_tip(host_a.path(), &coord1)
+                        .unwrap()
+                        .unwrap(),
+                ),
+            ],
+        )
+        .unwrap();
+
+        let host_b = init_repo();
+        let first = synced_snapshot(
+            host_b.path(),
+            host_b.path(),
+            &remote,
+            &host_b.path().join("_wt1"),
+        )
+        .unwrap();
+        assert_eq!(first.state.agents.get(&coord1).unwrap().next_seq, 1);
+        let first_last_synced = first.last_synced.clone().unwrap();
+
+        // `origin` genuinely advances further, unseen by `host_b` yet.
+        crate::outbox::submit(
+            host_a.path(),
+            "client-1",
+            &status_candidate(&coord1, "advanced"),
+        )
+        .unwrap();
+        crate::coordinator::drain_and_publish(
+            host_a.path(),
+            host_a.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            &host_a.path().join("_wt_advance"),
+            &remote,
+        )
+        .unwrap();
+
+        // A second sync attempt against a remote that cannot actually be
+        // fetched from (not a genuine git repository at all) must hard-fail,
+        // not silently re-report `host_b`'s now-stale first snapshot as
+        // `CurrentAsOfRemoteProbe`.
+        let bogus_remote = host_b.path().join("no-such-remote");
+        let err = synced_snapshot(
+            host_b.path(),
+            host_b.path(),
+            &bogus_remote.to_string_lossy(),
+            &host_b.path().join("_wt2"),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("failed"), "{err}");
+        // The failed attempt must not fabricate a newer `last_synced` either.
+        assert_eq!(
+            read_last_synced(host_b.path()).unwrap(),
+            Some(first_last_synced)
+        );
     }
 
     /// If the fetch itself genuinely succeeds but the subsequent local

@@ -181,14 +181,43 @@ pub fn push_refspecs(
 /// Fetch one or more explicit `<remote-ref>:<local-ref>` refspecs. Without
 /// `--force`, this refuses to move a local branch ref except as a fast-
 /// forward -- exactly the property a read-only fetch of another agent's
-/// stream wants: an unexpected rewrite on the remote surfaces as a loud
-/// fetch failure here rather than silently overwriting local history (AGENT_
+/// stream wants: an unexpected rewrite on the remote surfaces as a failed
+/// fetch here rather than silently overwriting local history (AGENT_
 /// COORDINATION_EVOLUTION.md section 1: "force pushes... are prohibited").
+///
+/// Returns the raw `GitOutput` -- a failed fetch (network error, rejected
+/// non-fast-forward, unresolvable refspec) is reported via `success: false`,
+/// *not* an `Err`, exactly like [`run`]. Most callers want a fetch failure to
+/// be a hard error unconditionally; use [`fetch_refspecs_ok`] for that
+/// (round-6 adversarial review: `sync::synced_snapshot` used to `?`-propagate
+/// this function's `Result` directly, which only catches a failure to spawn
+/// `git` at all -- a genuinely rejected fetch was silently swallowed, so a
+/// snapshot reduced from stale local state was reported as `Freshness::
+/// CurrentAsOfRemoteProbe` with a fresh `last_synced`, undermining gate 17's
+/// entire "fail closed on staleness" guarantee for every currency-sensitive
+/// caller). Call this raw form directly only when the caller needs the exact
+/// `GitOutput` for its own error message, or genuinely wants to distinguish
+/// "some refspecs don't exist on the remote" from "network/spawn failure" by
+/// inspecting `stderr` itself.
 pub fn fetch_refspecs(dir: &Path, remote: &str, refspecs: &[String]) -> AbResult<GitOutput> {
     let mut args: Vec<String> = vec!["fetch".to_string(), remote.to_string()];
     args.extend(refspecs.iter().cloned());
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     run(dir, &arg_refs)
+}
+
+/// [`fetch_refspecs`], but a failed fetch (as well as a failure to spawn
+/// `git` at all) is a hard `Err` -- the safe default for the common case
+/// where a caller has no graceful fallback for a rejected or failed fetch.
+pub fn fetch_refspecs_ok(dir: &Path, remote: &str, refspecs: &[String]) -> AbResult<()> {
+    let out = fetch_refspecs(dir, remote, refspecs)?;
+    if !out.success {
+        return Err(AbError::Git(format!(
+            "git fetch {remote} {refspecs:?} failed: {}",
+            out.stderr
+        )));
+    }
+    Ok(())
 }
 
 /// Which of `refnames` actually exist on `remote` right now, checked with
@@ -583,14 +612,27 @@ pub fn remote_tag_matches(dir: &Path, remote: &str, name: &str, target: &str) ->
     Ok(sha == Some(target))
 }
 
+/// `(status, path)` per changed path between `from` and `to`. A rename or
+/// copy line (`R100`/`C75`/...) carries *two* tab-separated path fields (old,
+/// new) rather than one -- `path` here is always the second/final one, the
+/// path that actually exists in `to`'s tree, since every caller cares about
+/// "what changed in the resulting tree," not "what it used to be called."
+/// (Previously mis-parsed via a 2-way split, which folded a rename's two
+/// paths into one string with a literal embedded tab -- round-6 adversarial
+/// review, reproduced directly: `merge_ready::check_merge_ready`'s scope
+/// check rejected every renamed file regardless of whether it was in scope,
+/// even though renames are deliberately supported elsewhere in this exact
+/// crate, `merge.renames=true` pinned for candidate construction.)
 pub fn diff_name_status(dir: &Path, from: &str, to: &str) -> AbResult<Vec<(String, String)>> {
     let out = run_ok(dir, &["diff", "--name-status", &format!("{from}..{to}")])?;
     let mut result = Vec::new();
     for line in out.lines() {
-        let mut parts = line.splitn(2, '\t');
-        if let (Some(status), Some(path)) = (parts.next(), parts.next()) {
-            result.push((status.to_string(), path.to_string()));
-        }
+        let mut parts = line.split('\t');
+        let (Some(status), Some(first_path)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        let path = parts.next().unwrap_or(first_path);
+        result.push((status.to_string(), path.to_string()));
     }
     Ok(result)
 }
@@ -1657,5 +1699,30 @@ mod outer_tests {
         let unrelated_tip = rev_parse(repo.path(), "HEAD").unwrap();
 
         assert!(!is_ancestor(repo.path(), &base, &unrelated_tip).unwrap());
+    }
+
+    /// Round-6 adversarial review, reproduced directly: a rename line from
+    /// `git diff --name-status` carries two tab-separated path fields (old,
+    /// new), which a naive 2-way split folds into one string with a literal
+    /// embedded tab -- `merge_ready::check_merge_ready`'s scope check then
+    /// rejected every renamed file outright, in-scope or not.
+    #[test]
+    fn diff_name_status_reports_the_new_path_for_a_rename_not_a_tab_mangled_string() {
+        let repo = init_repo();
+        commit_file(repo.path(), "old.txt", "unchanged content\n", "add old.txt");
+        let from = rev_parse(repo.path(), "HEAD").unwrap();
+        git(repo.path(), &["mv", "old.txt", "new.txt"]);
+        git(
+            repo.path(),
+            &["commit", "-q", "-m", "rename old.txt to new.txt"],
+        );
+        let to = rev_parse(repo.path(), "HEAD").unwrap();
+
+        let changed = diff_name_status(repo.path(), &from, &to).unwrap();
+        assert_eq!(changed.len(), 1, "{changed:?}");
+        let (status, path) = &changed[0];
+        assert!(status.starts_with('R'), "{status}");
+        assert_eq!(path, "new.txt");
+        assert!(!path.contains('\t'), "{path}");
     }
 }

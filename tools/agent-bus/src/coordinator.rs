@@ -197,7 +197,7 @@ pub fn drain_outbox(
         // like the identical `review.merge_authorized` gate just above (see
         // `verify_review_merge_reconciled`'s own doc comment).
         if let crate::events::EventData::ReviewMergeReconciled(d) = &data {
-            if let Err(e) = verify_review_merge_reconciled(repo, &state, d) {
+            if let Err(e) = verify_review_merge_reconciled(repo, remote, &state, d) {
                 let reason = e.to_string();
                 reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
                 rejected.push(RejectedCandidate {
@@ -547,8 +547,20 @@ fn verify_review_merge_authorized(
 /// id): that is an ordinary, unrelated validation failure `apply::dry_run`
 /// reports moments later via `apply_review_merge_reconciled`'s own clearer,
 /// authorization-specific message, so it is not duplicated here.
+///
+/// Deliberately fetches `refs/heads/main` from `remote` into a scratch ref
+/// rather than trusting this checkout's own local `refs/heads/main`: unlike
+/// the bus's own refs, `main` is a product ref entirely outside `sync::
+/// synced_snapshot`'s fetch (which only ever pulls the registry/agent-event
+/// refs), and `reconcile`'s whole purpose (AGENT_REVIEW.md section 11) is
+/// recovery *by a coordinator other than the one who pushed the merge* --
+/// exactly the case where this checkout's local `main` may never have been
+/// fetched at all (round-6 review: this had the identical checkout
+/// -dependence bug round 5 fixed for `verify_review_merge_authorized`'s
+/// candidate-tag check, see its own doc comment).
 fn verify_review_merge_reconciled(
     repo: &Path,
+    remote: &str,
     state: &crate::state::BusState,
     d: &crate::events::ReviewMergeReconciled,
 ) -> AbResult<()> {
@@ -559,14 +571,26 @@ fn verify_review_merge_reconciled(
         Ok(crate::events::EventData::ReviewMergeAuthorized(_)) => {}
         _ => return Ok(()),
     }
+    const MAIN_PROBE_REF: &str = "refs/agent-bus/reconcile-main-probe";
+    let fetch = crate::gitrepo::fetch_refspecs(
+        repo,
+        remote,
+        &[format!("refs/heads/main:{MAIN_PROBE_REF}")],
+    )?;
+    if !fetch.success {
+        return Err(invalid(format!(
+            "could not fetch refs/heads/main from {remote} to verify this reconciliation: {}",
+            fetch.stderr
+        )));
+    }
     let is_first_parent_of_main =
-        crate::gitrepo::rev_list_first_parent(repo, d.previous_main.as_str(), "refs/heads/main")?
+        crate::gitrepo::rev_list_first_parent(repo, d.previous_main.as_str(), MAIN_PROBE_REF)?
             .iter()
             .any(|c| c == d.main_commit.as_str());
     if !is_first_parent_of_main {
         return Err(invalid(format!(
-            "main_commit {} is not a first-parent successor of previous_main {} on current \
-             main -- reconcile only records a merge that has genuinely already landed",
+            "main_commit {} is not a first-parent successor of previous_main {} on {remote}'s \
+             current main -- reconcile only records a merge that has genuinely already landed",
             d.main_commit, d.previous_main
         )));
     }
@@ -2277,14 +2301,29 @@ mod tests {
         }
     }
 
+    /// Pushes `dir`'s current `main` to a fresh bare origin and returns it
+    /// (caller must keep the `TempDir` alive for as long as `remote` is
+    /// used) -- `verify_review_merge_reconciled` fetches `main` from
+    /// `remote` rather than trusting `dir`'s own local `refs/heads/main`
+    /// (round-6 review), so every test exercising the live-Git branch below
+    /// needs a real remote to fetch from, not just a local ref.
+    fn push_main_to_a_fresh_origin(dir: &Path) -> (tempfile::TempDir, String) {
+        let origin = init_bare_origin();
+        let remote = origin.path().to_string_lossy().to_string();
+        let push = crate::gitrepo::run(dir, &["push", &remote, "refs/heads/main"]).unwrap();
+        assert!(push.success, "{push:?}");
+        (origin, remote)
+    }
+
     #[test]
     fn verify_review_merge_reconciled_rejects_when_main_was_never_advanced() {
         let dir = init_repo();
         let previous_main = crate::gitrepo::rev_parse(dir.path(), "main").unwrap();
         let next = author_commit_for_reconcile(dir.path(), &previous_main, "feature.txt");
+        let (_origin, remote) = push_main_to_a_fresh_origin(dir.path());
         let (state, auth_id) = state_with_bare_authorization(&previous_main, &next, &next);
         let d = reconciled_data(&auth_id, &previous_main, &next, &next);
-        let err = verify_review_merge_reconciled(dir.path(), &state, &d).unwrap_err();
+        let err = verify_review_merge_reconciled(dir.path(), &remote, &state, &d).unwrap_err();
         assert!(
             err.to_string().contains("not a first-parent successor"),
             "{err}"
@@ -2297,9 +2336,52 @@ mod tests {
         let previous_main = crate::gitrepo::rev_parse(dir.path(), "main").unwrap();
         let next = author_commit_for_reconcile(dir.path(), &previous_main, "feature.txt");
         git(dir.path(), &["update-ref", "refs/heads/main", &next]);
+        let (_origin, remote) = push_main_to_a_fresh_origin(dir.path());
         let (state, auth_id) = state_with_bare_authorization(&previous_main, &next, &next);
         let d = reconciled_data(&auth_id, &previous_main, &next, &next);
-        verify_review_merge_reconciled(dir.path(), &state, &d).expect("must accept");
+        verify_review_merge_reconciled(dir.path(), &remote, &state, &d).expect("must accept");
+    }
+
+    /// The exact scenario `verify_review_merge_reconciled`'s doc comment
+    /// describes: `main` genuinely advanced on the shared remote, but *this*
+    /// checkout's own local `refs/heads/main` never moved (as it wouldn't,
+    /// for a bootstrap coordinator recovering after a different reviewer's
+    /// host pushed and went offline). Before this fix this hard-rejected
+    /// with "not a first-parent successor" purely because of stale local
+    /// state -- a real bug in the exact recovery path AGENT_REVIEW.md
+    /// section 11 describes.
+    #[test]
+    fn verify_review_merge_reconciled_accepts_when_only_the_remotes_main_advanced() {
+        let dir = init_repo();
+        let previous_main = crate::gitrepo::rev_parse(dir.path(), "main").unwrap();
+        let (_origin, remote) = push_main_to_a_fresh_origin(dir.path());
+        // `next` is built and pushed directly to the remote, bypassing this
+        // checkout's own `refs/heads/main` entirely -- mirroring a *different*
+        // host having pushed the merge.
+        let origin_wt = tempfile::tempdir().unwrap();
+        git(origin_wt.path(), &["clone", "--quiet", &remote, "."]);
+        git(origin_wt.path(), &["config", "user.email", "t@e.com"]);
+        git(origin_wt.path(), &["config", "user.name", "T"]);
+        std::fs::write(origin_wt.path().join("feature.txt"), "x").unwrap();
+        git(origin_wt.path(), &["add", "feature.txt"]);
+        git(
+            origin_wt.path(),
+            &["commit", "-q", "-m", "add feature\n\nAgent-Bus-Agent: zoe"],
+        );
+        let next = crate::gitrepo::rev_parse(origin_wt.path(), "HEAD").unwrap();
+        let push = crate::gitrepo::run(origin_wt.path(), &["push", &remote, "main"]).unwrap();
+        assert!(push.success, "{push:?}");
+        assert_eq!(
+            crate::gitrepo::rev_parse(dir.path(), "refs/heads/main").unwrap(),
+            previous_main,
+            "this checkout's own local main must genuinely never have moved"
+        );
+
+        let (state, auth_id) = state_with_bare_authorization(&previous_main, &next, &next);
+        let d = reconciled_data(&auth_id, &previous_main, &next, &next);
+        verify_review_merge_reconciled(dir.path(), &remote, &state, &d).expect(
+            "must accept a merge only visible on the remote, not this checkout's stale local main",
+        );
     }
 
     /// An unknown `authorization` id must not be rejected by this gate's own
@@ -2318,7 +2400,10 @@ mod tests {
         let state = crate::state::BusState::new(minimal_config());
         let bogus = EventId::new(&a("aiden"), 99);
         let d = reconciled_data(&bogus, &previous_main, &previous_main, &previous_main);
-        verify_review_merge_reconciled(dir.path(), &state, &d)
+        // No real remote exists at "origin" -- proving this path never
+        // reaches the fetch at all, since a fetch failure would itself be a
+        // hard `Err`, not the `Ok(())` this test expects.
+        verify_review_merge_reconciled(dir.path(), "origin", &state, &d)
             .expect("unknown authorization defers to apply::dry_run, not a hard reject here");
     }
 
@@ -2354,7 +2439,7 @@ mod tests {
             &previous_main,
             &previous_main,
         );
-        verify_review_merge_reconciled(dir.path(), &state, &d)
+        verify_review_merge_reconciled(dir.path(), "origin", &state, &d)
             .expect("wrong-kind authorization defers to apply::dry_run, not a hard reject here");
     }
 
@@ -2402,7 +2487,14 @@ mod tests {
             &Candidate::new(&f.coord1, &EventData::MergeEngineActivated(data), vec![]),
         )
         .unwrap();
-        let drained = drain_outbox(
+        // Must actually reach `f.remote`, not just commit locally: this
+        // fixture's other identities (`f.reviewer`, below) share this exact
+        // repo, and their own later gate-17 syncs fetch coord1's stream FROM
+        // the remote -- a merely-local-only commit here leaves coord1's
+        // local ref ahead of the remote's, which a later fetch then rejects
+        // as non-fast-forward (`drain_outbox` alone never pushes; only
+        // `drain_and_publish` does).
+        let (drained, _receipt) = drain_and_publish(
             f.repo.path(),
             f.repo.path(),
             &f.coord1,
@@ -2491,7 +2583,13 @@ mod tests {
         let f = build_review_fixture(Some("zoe"));
         let (candidate, authorization_id) = authorized_and_published(&f);
         // `main` deliberately left at `previous_main` -- the candidate was
-        // never actually pushed.
+        // never actually pushed. Still needs to exist on `f.remote` at all
+        // (unadvanced) for `verify_review_merge_reconciled`'s own fetch to
+        // succeed, so this test exercises the real "not a first-parent
+        // successor" rejection rather than an unrelated fetch failure.
+        let push =
+            crate::gitrepo::run(f.repo.path(), &["push", &f.remote, "refs/heads/main"]).unwrap();
+        assert!(push.success, "{push:?}");
         let d = reconciled_data(
             &authorization_id,
             &f.previous_main,
@@ -2537,6 +2635,12 @@ mod tests {
             f.repo.path(),
             &["update-ref", "refs/heads/main", &candidate],
         );
+        // `verify_review_merge_reconciled` fetches `main` from `f.remote`,
+        // not this checkout's own local ref (round-6 review) -- so the
+        // advance must actually reach the remote to be visible at all.
+        let push =
+            crate::gitrepo::run(f.repo.path(), &["push", &f.remote, "refs/heads/main"]).unwrap();
+        assert!(push.success, "{push:?}");
 
         let d = reconciled_data(
             &authorization_id,

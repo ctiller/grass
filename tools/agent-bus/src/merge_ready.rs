@@ -42,15 +42,18 @@ pub(crate) fn path_in_claim(path: &str, claim: &PathClaim) -> bool {
 }
 
 /// The full gate (AGENT_REVIEW.md section 8). `state` is an ordinary bus
-/// snapshot -- `cli::merge_ready` passes `sync::cached_snapshot`'s, since
-/// this is a read-only check, not itself a publication, and every bus-state
-/// fact it consults (the nomination chain, findings, blocking issues,
-/// `reviewed_scope`) was already fixed at authorization-publication time by
-/// the earlier gates (`apply::apply_review_merge_authorized`/`coordinator::
-/// verify_review_merge_authorized`); `repo` is read directly and uncached for
-/// the live-Git half below, since that is exactly the part that can
-/// genuinely change *after* publication. Returns the exact candidate object
-/// id to push on success.
+/// snapshot -- `cli::merge_ready` passes `sync::synced_snapshot`'s, a fresh
+/// remote probe, *not* a cached one: `reviewed_scope` and the nomination
+/// chain's own shape are fixed at authorization-publication time, but a
+/// finding can be reopened, or a new blocking issue opened, by a completely
+/// different agent in the real time that elapses between authorization and
+/// this check -- exactly the kind of concurrent change this gate exists to
+/// catch (round-6 adversarial review: a cached snapshot let an unsynced
+/// checkout report `ready: true` past a blocking issue another host had
+/// already published). `repo` is read directly and uncached for the
+/// live-Git half below too, for the identical reason -- that is exactly the
+/// part that can genuinely change *after* publication, like `main` moving.
+/// Returns the exact candidate object id to push on success.
 pub(crate) fn check_merge_ready(
     repo: &Path,
     state: &BusState,
@@ -70,9 +73,10 @@ pub(crate) fn check_merge_ready(
         }
     };
     if auth_env.agent != *reviewer {
-        return Err(invalid(
-            "authorization was not published by the given reviewer",
-        ));
+        return Err(invalid(format!(
+            "authorization {authorization} was published by {}, not the given reviewer {reviewer}",
+            auth_env.agent
+        )));
     }
     let chain = state
         .review_chain(&auth.nomination)
@@ -413,7 +417,7 @@ mod tests {
             check_merge_ready(&PathBuf::from("."), &state, &a("carol"), &auth_id).unwrap_err();
         assert!(
             err.to_string()
-                .contains("was not published by the given reviewer"),
+                .contains("was published by aiden, not the given reviewer carol"),
             "{err}"
         );
     }

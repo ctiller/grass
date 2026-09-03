@@ -176,7 +176,11 @@ pub(crate) fn audit_main_findings(
             }));
         }
 
-        let matching_auth = state.reviews.values().find(|chain| {
+        let mut matching: Option<(
+            &crate::state::ReviewChain,
+            crate::events::ReviewMergeAuthorized,
+        )> = None;
+        'chains: for chain in state.reviews.values() {
             let authors_match = introduced_authors
                 == chain
                     .current_request
@@ -184,25 +188,28 @@ pub(crate) fn audit_main_findings(
                     .iter()
                     .cloned()
                     .collect::<BTreeSet<Agent>>();
-            authors_match
-                && chain.authorizations.iter().any(|a| {
-                    a.agent() == reviewer
-                        && state
-                            .events
-                            .get(a)
-                            .and_then(|e| e.typed_data().ok())
-                            .map(|d| match d {
-                                EventData::ReviewMergeAuthorized(auth) => {
-                                    auth.candidate.as_str() == commit
-                                        && auth.previous_main.as_str() == previous
-                                        && auth.reviewed_commit.as_str() == reviewed_commit
-                                }
-                                _ => false,
-                            })
-                            .unwrap_or(false)
-                })
-        });
-        match matching_auth {
+            if !authors_match {
+                continue;
+            }
+            for a_id in &chain.authorizations {
+                if a_id.agent() != reviewer {
+                    continue;
+                }
+                let Some(EventData::ReviewMergeAuthorized(auth)) =
+                    state.events.get(a_id).and_then(|e| e.typed_data().ok())
+                else {
+                    continue;
+                };
+                if auth.candidate.as_str() == commit
+                    && auth.previous_main.as_str() == previous
+                    && auth.reviewed_commit.as_str() == reviewed_commit
+                {
+                    matching = Some((chain, auth));
+                    break 'chains;
+                }
+            }
+        }
+        match matching {
             None => {
                 findings.push(serde_json::json!({
                     "commit": commit,
@@ -210,7 +217,7 @@ pub(crate) fn audit_main_findings(
                     "reviewer": reviewer_name,
                 }));
             }
-            Some(chain) => {
+            Some((chain, auth)) => {
                 let has_receipt = chain.merged.iter().chain(chain.reconciled.iter()).any(|r| {
                     state
                         .events
@@ -228,6 +235,34 @@ pub(crate) fn audit_main_findings(
                         "commit": commit,
                         "problem": "missing review.merged/review.merge_reconciled receipt for this exact commit",
                         "reviewer": reviewer_name,
+                    }));
+                }
+                // AGENT_REVIEW.md section 12 fixture 6: "a candidate that...
+                // contains unreviewed side content" must be caught here --
+                // the only pre-push check for this (`merge_ready::check_
+                // merge_ready`'s own scope check) is optional and skippable,
+                // so this post-hoc correlation is the sole *authoritative*
+                // place this crate can ever catch it (round-6 adversarial
+                // review, reproduced live: a candidate whose introduced
+                // content touched a file outside `reviewed_scope` audited
+                // clean when `merge-ready` was simply never run).
+                let changed = crate::gitrepo::diff_name_status(repo, &previous, &commit)?;
+                let out_of_scope: Vec<&str> = changed
+                    .iter()
+                    .filter(|(_, path)| {
+                        !auth
+                            .reviewed_scope
+                            .iter()
+                            .any(|claim| crate::merge_ready::path_in_claim(path, claim))
+                    })
+                    .map(|(_, path)| path.as_str())
+                    .collect();
+                if !out_of_scope.is_empty() {
+                    findings.push(serde_json::json!({
+                        "commit": commit,
+                        "problem": "candidate changes paths outside the authorized reviewed_scope",
+                        "reviewer": reviewer_name,
+                        "paths": out_of_scope,
                     }));
                 }
             }
@@ -848,6 +883,55 @@ mod tests {
 
         let findings = audit_main_findings(dir.path(), &state, Some(&candidate)).unwrap();
         assert!(findings.is_empty(), "{findings:?}");
+    }
+
+    /// AGENT_REVIEW.md section 12 fixture 6: "a candidate that... contains
+    /// unreviewed side content" -- round-6 adversarial review, reproduced
+    /// live: everything else about this candidate is genuinely, exactly
+    /// correlated (right authors, right reviewer, right authorization,
+    /// right receipt) except that the reviewed commit introduces
+    /// `sneaky.txt`, entirely outside the authorization's declared
+    /// `reviewed_scope` (`insert_authorization` always authorizes exactly
+    /// `x.txt`). Before this fix `audit-main` reported this fully clean.
+    #[test]
+    fn flags_a_candidate_that_touches_a_path_outside_reviewed_scope() {
+        let dir = init_repo();
+        let root = git(dir.path(), &["rev-parse", "main"]);
+        let second = author_commit(dir.path(), &root, "sneaky.txt", Some("alice"));
+        let candidate = merge_commit(
+            dir.path(),
+            &root,
+            &second,
+            "merge\n\nAgent-Bus-Reviewer: bob",
+        );
+
+        let mut state = base_state(&root);
+        let nomination = insert_chain(&mut state);
+        let auth_id = insert_authorization(&mut state, &nomination, 1, &root, &second, &candidate);
+        insert_merged_receipt(
+            &mut state,
+            &nomination,
+            2,
+            &auth_id,
+            &root,
+            &second,
+            &candidate,
+        );
+
+        let findings = audit_main_findings(dir.path(), &state, Some(&candidate)).unwrap();
+        let scope_finding = findings
+            .iter()
+            .find(|f| {
+                f["problem"]
+                    .as_str()
+                    .is_some_and(|p| p.contains("outside the authorized reviewed_scope"))
+            })
+            .unwrap_or_else(|| panic!("no scope finding among {findings:?}"));
+        assert_eq!(
+            scope_finding["paths"],
+            serde_json::json!(["sneaky.txt"]),
+            "{findings:?}"
+        );
     }
 
     /// The section 11 recovery path -- a `review.merge_reconciled` receipt

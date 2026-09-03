@@ -90,11 +90,16 @@ pub enum Command {
     /// merge_authorized` (the event's own internal bus-state consistency):
     /// neither can catch `main` having moved, or the candidate having been
     /// hand-tampered with, in the real time that elapses between publishing
-    /// the authorization and actually pushing it. Reads local Git/bus state
-    /// as-is rather than fetching first -- like `prepare-merge`, the
-    /// reviewer is expected to have already fetched `main` themselves (per
-    /// AGENT_REVIEW.md section 7 step 1); prints the exact candidate object
-    /// id to push on success.
+    /// the authorization and actually pushing it. Forces a fresh `--remote`
+    /// probe for the bus-state half (a blocking issue or finding published
+    /// by someone else in that same elapsed window is exactly the kind of
+    /// thing this gate exists to catch -- round-6 adversarial review,
+    /// reproduced live: an unsynced checkout reported `ready: true` past a
+    /// blocking issue opened concurrently on another host); the Git half
+    /// still reads `main` as this checkout already has it locally, like
+    /// `prepare-merge` -- the reviewer is expected to have already fetched
+    /// `main` themselves (per AGENT_REVIEW.md section 7 step 1). Prints the
+    /// exact candidate object id to push on success.
     MergeReady(MergeReadyArgs),
     /// AGENT_REVIEW.md sections 9/11/12 (fixture 10): a read-only
     /// correlation-and-report audit over post-bootstrap first-parent `main`
@@ -279,6 +284,8 @@ pub struct MergeReadyArgs {
     /// The `review.merge_authorized` event id to check.
     #[arg(long)]
     authorization: String,
+    #[arg(long, default_value = "origin")]
+    remote: String,
 }
 
 #[derive(clap::Args)]
@@ -918,9 +925,10 @@ fn prepare_merge(args: PrepareMergeArgs) -> AbResult<()> {
         return Err(invalid("nomination is no longer current"));
     }
     if chain.current_request.reviewer != reviewer {
-        return Err(invalid(
-            "only the nomination's reviewer may prepare a merge",
-        ));
+        return Err(invalid(format!(
+            "only {} (this nomination's reviewer) may prepare a merge, not {reviewer}",
+            chain.current_request.reviewer
+        )));
     }
     if !chain.accepted() {
         return Err(invalid(
@@ -990,7 +998,12 @@ fn merge_ready(args: MergeReadyArgs) -> AbResult<()> {
     let reviewer = parse_agent(&args.agent)?;
     let authorization = EventId::parse(args.authorization)?;
 
-    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?;
+    let snapshot = crate::sync::synced_snapshot(
+        &paths.repo,
+        &paths.common_dir,
+        &args.remote,
+        &paths.worktrees,
+    )?;
     let candidate = crate::merge_ready::check_merge_ready(
         &paths.repo,
         &snapshot.state,
@@ -998,10 +1011,13 @@ fn merge_ready(args: MergeReadyArgs) -> AbResult<()> {
         &authorization,
     )?;
 
-    print_json(&serde_json::json!({
-        "ready": true,
-        "candidate": candidate.as_str(),
-    }));
+    print_json(&with_freshness(
+        serde_json::json!({
+            "ready": true,
+            "candidate": candidate.as_str(),
+        }),
+        freshness_envelope(&snapshot),
+    ));
     Ok(())
 }
 

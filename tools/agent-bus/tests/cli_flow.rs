@@ -1574,7 +1574,7 @@ fn prepare_merge_rejects_an_agent_who_is_not_the_nominations_reviewer() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "only the nomination's reviewer may prepare a merge",
+            "only aiden (this nomination's reviewer) may prepare a merge, not mallory",
         ));
 }
 
@@ -1865,7 +1865,7 @@ fn merge_ready_rejects_wrong_authorizer() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "was not published by the given reviewer",
+            "was published by aiden, not the given reviewer mallory",
         ));
 }
 
@@ -2134,6 +2134,10 @@ fn audit_main_reports_clean_after_review_merge_reconciled() {
         &["feature.txt"],
     );
     git(repo.path(), &["update-ref", "refs/heads/main", &candidate]);
+    // `verify_review_merge_reconciled` fetches `main` from `origin`, not
+    // this checkout's own local ref (round-6 review) -- the advance must
+    // actually reach the remote to be visible at all.
+    git(repo.path(), &["push", "origin", "refs/heads/main"]);
 
     let reconciled = submit_review_merge_reconciled(
         repo.path(),
@@ -2188,6 +2192,10 @@ fn reconcile_via_submit_succeeds_when_main_was_genuinely_advanced() {
         &["feature.txt"],
     );
     git(repo.path(), &["update-ref", "refs/heads/main", &candidate]);
+    // `verify_review_merge_reconciled` fetches `main` from `origin`, not
+    // this checkout's own local ref (round-6 review) -- the advance must
+    // actually reach the remote to be visible at all.
+    git(repo.path(), &["push", "origin", "refs/heads/main"]);
 
     let reconciled = submit_review_merge_reconciled(
         repo.path(),
@@ -2238,7 +2246,11 @@ fn reconcile_via_submit_rejects_when_main_was_never_advanced() {
         &["feature.txt"],
     );
     // `main` deliberately left at `previous_main` -- the candidate was never
-    // actually pushed.
+    // actually pushed. Still needs to exist on `origin` at all (unadvanced)
+    // for `verify_review_merge_reconciled`'s own fetch to succeed, so this
+    // test exercises the real "not a first-parent successor" rejection
+    // rather than an unrelated fetch failure.
+    git(repo.path(), &["push", "origin", "refs/heads/main"]);
 
     let reconciled = submit_review_merge_reconciled(
         repo.path(),
@@ -2286,6 +2298,11 @@ fn reconcile_via_submit_rejects_a_non_coordinator_agent() {
         &["feature.txt"],
     );
     git(repo.path(), &["update-ref", "refs/heads/main", &candidate]);
+    // `verify_review_merge_reconciled`'s live-Git fetch runs before the
+    // bootstrap-coordinator check this test means to exercise -- it must
+    // succeed first, or this test would instead observe a fetch-failure
+    // rejection unrelated to what it's actually testing.
+    git(repo.path(), &["push", "origin", "refs/heads/main"]);
 
     let data = serde_json::json!({
         "authorization": authorization_id,
@@ -2492,6 +2509,10 @@ fn golden_merge_ready_output() {
     let out = merge_ready(repo.path(), "aiden", &authorization_id);
     insta::assert_json_snapshot!(out, {
         ".candidate" => insta::dynamic_redaction(redact_noise),
+        ".roster_epoch" => insta::dynamic_redaction(redact_noise),
+        ".snapshot_receipt.*" => insta::dynamic_redaction(redact_noise),
+        ".causal_frontier.*" => insta::dynamic_redaction(redact_noise),
+        ".last_synced" => insta::dynamic_redaction(redact_noise),
     });
 }
 

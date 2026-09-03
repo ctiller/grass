@@ -67,21 +67,43 @@ pub fn reduce_onto(mut state: BusState, new_events: &[Envelope]) -> AbResult<Bus
 /// directly via `Envelope::new` rather than one already read back through
 /// `Envelope::parse_line` (`reduce`/`reduce_onto` only ever see envelopes
 /// `stream::read_stream`/`storage::read_stream_log` already parsed that
-/// way). `parse_line` enforces gate 4 -- every cross-agent id in `refs`
-/// must have frontier coverage in `observed` -- but `apply_event` alone
-/// does not, so gate 4 is re-checked here explicitly. Without this, a
-/// self-inconsistent envelope (its own `refs`, derived by `Envelope::new`
-/// from `data.referenced_ids()`, naming an agent `observed` doesn't cover)
-/// would sail through dry-run, get committed and pushed, and then
-/// permanently fail to reduce for every host that ever fetches it --
-/// round-5 adversarial review, reproduced live across two checkouts: a
-/// `review.nomination_accepted` submitted without the operator remembering
-/// `--observes` for the nomination it names durably corrupted that stream
-/// fleet-wide. (`coordinator::build_frontier` is now fixed to derive
-/// coverage from `data.referenced_ids()` automatically, closing the gap at
-/// its source -- this check is the defense-in-depth backstop for any other
-/// path that might one day construct an envelope the same way.)
+/// way). `parse_line` enforces two structural invariants `apply_event` alone
+/// does not, so both are re-checked here explicitly:
+///
+///  - `refs` must equal *exactly* `data.referenced_ids()` -- not merely a
+///    superset. `Envelope::new` sets `refs` to `data.referenced_ids() ∪
+///    extra_refs`, so a caller passing an `--observes`/`extra_refs` id the
+///    payload doesn't itself reference produces an envelope `parse_line`
+///    will reject on every future read, forever, even though nothing here
+///    stopped it from being committed and pushed first (round-6 adversarial
+///    review, reproduced live: `submit ... --observes <unrelated-id>`
+///    durably corrupted a stream fleet-wide the same way an *omitted*
+///    `--observes` did before the fix below it).
+///  - gate 4: every cross-agent id in `refs` must have frontier coverage in
+///    `observed` (round-5 adversarial review, reproduced live: a `review.
+///    nomination_accepted` submitted without the operator remembering
+///    `--observes` for the nomination it names durably corrupted that
+///    stream fleet-wide the same way). `coordinator::build_frontier` is
+///    fixed to derive coverage from `data.referenced_ids()` automatically,
+///    closing that gap at its source -- this check is the defense-in-depth
+///    backstop for any other path that might one day construct an envelope
+///    the same way.
+///
+/// Without either check, a self-inconsistent envelope would sail through
+/// dry-run, get committed and pushed, and then permanently fail to reduce
+/// for every host that ever fetches it.
 pub fn dry_run(state: &BusState, env: &Envelope) -> AbResult<()> {
+    let data = env.typed_data()?;
+    let expected: BTreeSet<EventId> = data.referenced_ids();
+    let actual: BTreeSet<EventId> = env.refs.iter().cloned().collect();
+    if expected != actual {
+        return Err(invalid(format!(
+            "{}: refs mismatch: envelope has {actual:?}, data references {expected:?} -- \
+             --observes may only repeat an id the event's own payload already references, never \
+             add one beyond it",
+            env.id
+        )));
+    }
     for r in env.refs.iter() {
         if r.agent() != env.agent {
             env.observed
@@ -1627,8 +1649,14 @@ fn apply_review_merge_authorized(
     // historically-known activation, but the one currently selected.
     if Some(&d.merge_engine_epoch) != state.current_merge_engine_epoch.as_ref() {
         return Err(invalid(format!(
-            "{}: merge_engine_epoch {} is not the currently selected merge engine epoch",
-            env.id, d.merge_engine_epoch
+            "{}: merge_engine_epoch {} is not the currently selected merge engine epoch ({})",
+            env.id,
+            d.merge_engine_epoch,
+            state
+                .current_merge_engine_epoch
+                .as_ref()
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "none selected yet".to_string())
         )));
     }
     // Extra checks beyond required are fine; required checks must all be
@@ -2345,6 +2373,44 @@ mod tests {
                 .contains("names an agent absent from the declared frontier"),
             "{err}"
         );
+    }
+
+    /// Round-6 adversarial review, reproduced live: `--observes`/`extra_refs`
+    /// naming an id the event's own payload does not reference at all
+    /// produces an envelope `Envelope::parse_line` would reject on every
+    /// future read (its `refs mismatch` check requires `refs == data.
+    /// referenced_ids()` exactly), even though the frontier itself has real
+    /// coverage for that id -- so gate 4 alone (the previous fix) does not
+    /// catch it. Before this fix a plain `agent.status` submitted with an
+    /// unrelated `--observes` id committed and pushed successfully, then
+    /// permanently corrupted that stream for every future reader.
+    #[test]
+    fn dry_run_rejects_extra_refs_the_payload_does_not_itself_reference() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        let bob_reg = register(&bob, Role::Implementor);
+        apply_ok(&mut state, &bob_reg);
+
+        let status_data = EventData::AgentStatus(AgentStatusEvent {
+            status: LifecycleStatus::Active,
+            note: text("hi"),
+            product_branch: None,
+            product_commit: None,
+        });
+        // A real, existing, in-frontier cross-agent id -- gate 4 alone would
+        // happily accept this -- but `agent.status` doesn't reference
+        // anything at all, so this is still a structural mismatch.
+        let observed = frontier_seeing(&[&bob_reg.id]);
+        let status_env = Envelope::new(&alice, 1, observed, &status_data, [bob_reg.id.clone()]);
+
+        let mut trial = state.clone();
+        apply_event(&mut trial, &status_env)
+            .expect("apply_event alone has no opinion on refs equality");
+
+        let err = dry_run(&state, &status_env).unwrap_err();
+        assert!(err.to_string().contains("refs mismatch"), "{err}");
     }
 
     #[test]
