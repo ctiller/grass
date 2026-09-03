@@ -14,20 +14,36 @@ import Grass.Process.Network.Transition
 > productivity law. Fresh-child restart loops cannot evade the global theorem,
 > and scheduler fairness is used only when named by the specification.
 
-## The shape of the argument, and why it is a cycle law
+## The shape of the argument
 
-"An infinite run must produce or pause" is a statement about infinite objects,
-and this layer has no stream of networks — `NetworkStep` is a relation and an
-execution is an inductive. What it *does* have is exactly what the disjunct's
-`otherwise` clause names: a global well-founded rank that every silent,
-off-frontier step decreases.
+§7's sentence is about infinite runs, and `no_infinite_silent_run` is that
+literally: there is no sequence of networks each of which reaches the next by
+silent, off-frontier steps. It needs no coinduction and no stream type — a
+`Nat`-indexed family and `no_infinite_descent`, which is `WellFounded.apply`
+followed by induction on accessibility.
 
-So the theorem here is the contrapositive at the shape a well-founded rank
-actually forbids: **there is no non-empty silent, off-frontier execution that
-returns to the network it started from** (`no_silent_cycle`). An infinite run in
-a finite state space is a cycle; an infinite run in an infinite one descends
-forever, which the rank forbids directly (`silent_run_descends`, plus
-`WellFounded`). Both halves are here and neither needs a stream.
+**A first draft got this wrong in a way worth recording**, because the wrong
+version looked complete. It proved only `no_silent_cycle` — no silent run
+returns to where it started — and argued that an infinite run in a finite state
+space is a cycle while an infinite run in an infinite one "descends forever,
+which the rank forbids directly". The second half was prose; nothing stated it.
+And the first half applies to no plan in this corpus, because the network state
+space is **append-only on every axis**: `NominalHistory.extend`,
+`LedgerExtends.createdPrefix`, `Commits.appended`, `Delivers.cursorAdvances`.
+
+Local adversarial review then made that sharp, and the result is the reason the
+cycle law had to be replaced rather than supplemented. Both livelocks §7 names
+by hand are provably *not* cycles:
+
+* a fresh-child restart loop allocates a nominal on every restart, and
+  `NetworkStep.allocations_were_fresh` plus `historyExact` make a cycle through
+  an allocation contradictory — so a restart loop is an infinite *non-repeating*
+  run, exactly what a cycle law cannot see;
+* a send-then-receive loop advances the receiver's cursor by one
+  (`Delivers.cursorAdvances`) and the send does not move it back.
+
+So the module's headline theorem excluded neither of the two cases it advertised.
+`no_silent_cycle` survives as a corollary and is stated as one.
 
 ## What "silent" excludes, and what it does not
 
@@ -38,16 +54,15 @@ steps, spawn, retry, cancellation, death, join, and restart") is the whole
 family, so a law that enumerated constructors would be a law that a new
 constructor could evade.
 
-`two_silent_steps_cannot_return` is the shape the exclusions §7 names actually
-take. A self-delivered livelock — a process that sends to itself and receives,
-forever — is two silent steps returning to where they started, and so is the
-smallest fresh-child restart loop. Neither is a special case and neither needs a
-lemma of its own, which is the point of not enumerating constructors.
+A self-delivered livelock and a fresh-child restart loop are both infinite
+silent runs, and `no_infinite_silent_run` excludes them as such — not because
+they repeat a state, which they provably do not, but because each of their steps
+would have to descend a well-founded rank.
 
-That is also where §7's "local progress is necessary but insufficient" bites:
-both processes in a self-delivery loop may have perfectly good local ranks,
-each answering the messages it is sent, while the network revisits a state it
-has already been in.
+That is where §7's "local progress is necessary but insufficient" bites: both
+processes in a self-delivery loop may have perfectly good local ranks, each
+answering the messages it is sent, while the network as a whole makes no
+progress the specification can see.
 
 ## What is supplied and what is derived
 
@@ -63,21 +78,34 @@ and the cycle argument needs it. `rank_is_irreflexive` is derived, not assumed.
 
 ## What a measure still owes, and one thing this found
 
-`Useful` names the degeneracy that would make the whole theorem empty:
-`AtFrontier := fun _ => True` discharges `descendsOrProduces` with no rank at
-all. Supplying a *useful* measure for a real plan is the adequacy obligation
-§7 assigns to `ProcessNetworkAdequate`, and it is not discharged anywhere yet.
+`frontierIsExternal` is what stops a measure declaring everything paused: a
+network at a frontier may only be left by a step driven by entropy from outside
+the program, so `AtFrontier := fun _ => True` is refuted at any plan with a step
+that is not. That is also the distinction the earlier draft's defence of the
+idle `processStep` relied on and could not make — `Grass/Process/Progress.lean`
+separates waiting from spinning with `ProcessEvent.externalEntropy`, and this is
+that predicate lifted to a transition.
 
-Trying to build one at the M2 fixture plan is what found `Commits.nonempty`.
-Without it `commit []` was a transition with an empty scope that changed
-nothing — a one-step silent cycle at every network in every plan, which would
-have forced every measure to declare everything at a frontier and made this
-module's theorem vacuous everywhere.
+Trying to build a measure at the M2 fixture plan is what found two no-op
+transitions, each of which would have forced every measure to declare a network
+at a frontier for no reason: `commit []`, closed by `Commits.nonempty`, and
+`requestCancel` against an already-requested occurrence, closed by
+`RequestsCancel.wasNotRequested`. Neither was caught by
+`self_independent_iff_scopeless`, because both had non-empty scopes.
 
-An idle `processStep` — one whose protocol admits a self-transition on external
-entropy — is *not* the same case and is not a defect: a process waiting on the
-environment is at an external frontier, which is exactly the disjunct §7
-provides for it.
+**What is still owed**, and is not addressed here at all: §7's conditional
+responsiveness and its coherent strategy; "reach a law-bearing external/
+demand-result frontier *in finite internal work*", of which `AtFrontier` carries
+neither the finiteness nor the law-bearing content; long-lived processes'
+productivity, reactivity and conditional quiescence; supervision's restart bound
+or separately demanded productivity law; scheduler fairness being used only when
+named; and any network analogue of `Grass/Process/Progress.lean`'s enabledness
+theorems, without which "maximal execution" has no referent here.
+
+`demanded` and `AtFrontier` are also free predicates chosen by the same author
+who supplies the rank, where §7's obligation is indexed by the `spec`. The
+per-process analogue derives demandedness from `ProcessAcceptance`; this one
+cannot, because a `ProcessPlan` does not hold the specification.
 -/
 
 namespace Grass.Process
@@ -119,6 +147,22 @@ structure NetworkProgressMeasure (plan : ProcessPlan.{u, w, v, r, m, o} registry
   /-- Which networks are sitting at a declared external frontier. -/
   AtFrontier : plan.LogicalProcessNetwork → Prop
   /--
+  **And a network at a frontier is only left by external entropy.**
+
+  Without this, `AtFrontier := fun _ => True` discharges `descendsOrProduces`
+  with no rank at all and every theorem below is about an empty class. `Useful`
+  named that degeneracy and did not exclude it — a measure can satisfy `Useful`
+  at one network and pause everything else.
+
+  This is the distinction `Grass/Process/Progress.lean` makes per process with
+  `ProcessEvent.externalEntropy`: a process *waiting* on the environment is at a
+  frontier and a process *spinning* is not, and nothing else in this layer can
+  tell them apart.
+  -/
+  frontierIsExternal : ∀ {before after : plan.LogicalProcessNetwork},
+    AtFrontier before → (step : plan.NetworkStep before after) →
+    step.transition.DrivenByEntropy
+  /--
   **§7's disjunction: every step descends, produces, or was paused.**
 
   A disjunction rather than an unconditional descent, because §7 permits a step
@@ -147,17 +191,18 @@ namespace NetworkProgressMeasure
 variable (measure : plan.NetworkProgressMeasure)
 
 /--
-**A measure that pauses everything excludes nothing.**
+A measure that declares at least one network running.
 
-`AtFrontier := fun _ => True` discharges `descendsOrProduces` with no rank at
-all, and then no run is a `SilentRun` and `no_silent_cycle` is about an empty
-class. Naming the non-degeneracy is the difference between a theorem and a
-theorem shape.
+Weak, and it was once the module's whole answer to the degenerate measure —
+which local adversarial review showed it is not: a measure can satisfy this at
+one network and pause every other, and every theorem here is still about an
+empty class. `frontierIsExternal` is what actually excludes the degeneracy, by
+making a frontier a claim about which steps are enabled rather than a free
+choice.
 
-`Useful` is deliberately weak — one running network is enough — because what
-makes a measure *good* is a question about the plan, not about this structure.
-`Tests/Process/ProgressFixtures.lean` exhibits the degenerate measure and shows
-it fails this, so the reader can see which side of the line a measure is on.
+Kept because it is the property a consumer wants to *state*, and because
+`Tests/Process/ProgressFixtures.lean` now proves it holds of every measure at
+the M2 plan rather than asking a measure to supply it.
 -/
 def Useful : Prop := ∃ network, ¬ measure.AtFrontier network
 
@@ -196,6 +241,25 @@ inductive SilentRun (measure : plan.NetworkProgressMeasure) :
       (running : ¬ measure.AtFrontier middle) : SilentRun measure first last
 
 /--
+**A well-founded relation has no infinite descending sequence.**
+
+Core has `WellFounded.apply` and accessibility induction and not this, so it is
+four lines here. It is what turns a rank into a statement about *infinite* runs
+without a stream type or a coinductive execution: a `Nat`-indexed family is
+enough.
+-/
+theorem no_infinite_descent {α : Type _} {rank : α → α → Prop} (wellFounded : WellFounded rank)
+    (sequence : Nat → α) (descends : ∀ index, rank (sequence (index + 1)) (sequence index)) :
+    False := by
+  have never : ∀ value, Acc rank value → ∀ index, sequence index ≠ value := by
+    intro value accessible
+    induction accessible with
+    | intro current _ ih =>
+      intro index isCurrent
+      exact ih (sequence (index + 1)) (isCurrent ▸ descends index) (index + 1) rfl
+  exact never (sequence 0) (wellFounded.apply (sequence 0)) 0 rfl
+
+/--
 **Every silent, off-frontier step descends.**
 
 The disjunction resolved: `descendsOrProduces` offers three ways out, and a
@@ -224,20 +288,36 @@ theorem silent_run_descends {before after : plan.LogicalProcessNetwork}
       (measure.silent_step_descends step produced running) earlierDescends
 
 /--
-**So there is no silent cycle.**
+**And no silent cycle**, which is the same rank argument at a run that returns.
 
-`docs/PROCESS.md` §7's theorem at the shape a well-founded rank forbids: a
-network cannot return to where it started by steps that produced no
-specification-demanded observation and never paused at a frontier.
-
-This is where §7's "local progress is necessary but insufficient" bites. Every
-process in the loop may have a perfectly good local rank — each is answering the
-messages it is sent — while the *network* revisits a state it has already been
-in, forever.
+A corollary rather than the headline, and it excludes less than it appears to:
+the network state space is append-only on every axis, so a genuine cycle is
+close to impossible already, and in particular neither of §7's two named
+livelocks is one. See the module note — an earlier version of this module made
+this its main theorem and advertised exactly the two cases it could not see.
 -/
 theorem no_silent_cycle {network : plan.LogicalProcessNetwork}
     (cycle : SilentRun measure network network) : False :=
   measure.rank_is_irreflexive (measure.rank network) (measure.silent_run_descends cycle)
+
+/--
+**There is no infinite silent run.**
+
+`docs/PROCESS.md` §7's theorem, at the shape it is actually about: no sequence
+of networks each of which reaches the next by silent, off-frontier steps. A
+fresh-child restart loop and a self-delivered livelock are both of this shape,
+and neither is a cycle — see the module note for why that distinction sank an
+earlier version of this module.
+
+The proof is `silent_run_descends` at each index and `no_infinite_descent`. No
+coinduction, no stream, and no finiteness assumption about the state space —
+which matters, because the network state space is append-only and therefore
+infinite in every plan that can spawn or commit twice.
+-/
+theorem no_infinite_silent_run (run : Nat → plan.LogicalProcessNetwork)
+    (silent : ∀ index, SilentRun measure (run index) (run (index + 1))) : False :=
+  no_infinite_descent measure.rankWellFounded (fun index => measure.rank (run index))
+    (fun index => measure.silent_run_descends (silent index))
 
 /--
 **Two silent steps cannot return to where they started.**
@@ -262,8 +342,14 @@ theorem two_silent_steps_cannot_return {network middle : plan.LogicalProcessNetw
     (.more (.one out outProduced outRunning) back backProduced backRunning)
 
 /--
-**And no silent run visits a network twice**, which is the same fact stated the
-way an execution consumes it.
+**And two silent runs cannot be composed into a cycle.**
+
+Not a no-revisiting law: the caller must supply the run already split at the
+network it returns to, and `SilentRun` has no inversion at an interior point —
+only `.more` peels a step, and it peels the last one. So a run that revisits a
+network in the middle cannot be brought to this theorem. It is
+`no_silent_cycle` for a concatenation, and an earlier docstring claimed
+otherwise.
 -/
 theorem silent_run_does_not_repeat {first middle last : plan.LogicalProcessNetwork}
     (before : SilentRun measure first middle) (after : SilentRun measure middle last)

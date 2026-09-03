@@ -764,6 +764,20 @@ structure RequestsCancel (before after : plan.LogicalProcessNetwork)
     (occurrence : EdgeOccurrence plan.topology plan.message edge) : Prop where
   /-- It was in flight. -/
   wasOutstanding : (before.inFlight edge session).Outstanding occurrence
+  /--
+  **And no cancellation had been requested against it yet.**
+
+  Without this every field held with `after = before` at any network where a
+  cancellation was already recorded — reachable by one prior `requestCancel` —
+  so `requestCancel` was a step that changed nothing. That is the `commit []`
+  defect one constructor over, and it has the same consequence: a one-step
+  silent cycle forces every `NetworkProgressMeasure` to declare that network at
+  a frontier. Local adversarial review built it.
+
+  Requesting a cancellation twice is not a second transition; `docs/PROCESS.md`
+  §3's summary is that a request is recorded, and it is recorded once.
+  -/
+  wasNotRequested : (before.inFlight edge session).cancelRequested occurrence = false
   /-- The request is recorded. -/
   nowRequested : (after.inFlight edge session).cancelRequested occurrence = true
   /-- **And it is still in flight.** -/
@@ -1015,6 +1029,26 @@ def scope : plan.NetworkTransition before after → NetworkFragment plan.topolog
         (before.obligations ≠ after.obligations ∧ fragment = .obligations)
   | .join kind slot _ _ => fun fragment => fragment = .instanceState kind slot
   | .detach kind slot _ => fun fragment => fragment = .instanceState kind slot
+
+/--
+A step driven by entropy from outside the program.
+
+`ProcessEvent.externalEntropy` lifted to a transition, and the distinction
+`Grass/Process/Network/Progress.lean` needs to tell a network *waiting* on the
+environment from one *spinning*: a frontier is a place only the outside world
+can move you off.
+
+Three constructors qualify. A `processStep` on an `.external` event is the
+per-process notion verbatim. A `timeout` and an `environmentViolation` are the
+environment acting on the network rather than the network acting on itself —
+every other constructor, including the deaths and the channel closings, is
+something a process in the network did.
+-/
+def DrivenByEntropy : plan.NetworkTransition before after → Prop
+  | .processStep _ _ event _ _ _ _ => event.externalEntropy ≠ none
+  | .timeout _ _ _ _ => True
+  | .environmentViolation _ _ _ _ _ => True
+  | _ => False
 
 /--
 **Routing coverage: every step respects the scope it declares.**
