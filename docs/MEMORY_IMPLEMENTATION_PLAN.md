@@ -1352,6 +1352,36 @@ than per-allocation — without it, lending one field of a struct would lock the
 struct. And an unlent store commits, so the refusals are not a provider that
 refuses everything.
 
+### 4.4.1a Which profile inputs can weaken a rule
+
+Three consecutive review rounds found the same shape and it is worth naming as a
+shape rather than as three incidents: **a field a profile fills in that makes a rule
+of the corpus not run.** Round ten found `StepPolicy.authorities`, which defaulted to
+the empty list and carried §3's whole loan rule. Round twelve found
+`StepPolicy.compatible`, which could exempt every pair from §7.3. Both are closed
+above, and both were closed the same way: the rule moved into the transition, and what
+the profile supplies can now only *add* refusals.
+
+So here is every input a profile or a caller supplies, and what stops each from
+weakening a rule. The next reviewer should attack this table rather than rediscover
+its entries one at a time.
+
+| Input | Direction | What constrains it |
+| --- | --- | --- |
+| `StepPolicy.authorities` | adds refusals only | `AuthorityProvider.refuses` is consulted *after* the transition's own clauses and cannot remove one; `refusalOf_refuses_the_unauthorized` is quantified over the policy |
+| `AuthorityProvider.refuses` | adds refusals only | takes a `MemoryState`, not a `MachineState`, so refusal cannot depend on execution history — monotonicity and locality in the range are still open |
+| `StepPolicy.compatible` | can remove a §7.3 refusal | `compatibleIsAtomic` and `compatibleSymm` are proof fields; `conflicts_of_not_atomic` is quantified over the policy |
+| `AdmittedVocabulary`'s eleven registries | admit more names | a larger registry admits more, which is the profile's own claim about its target; a *smaller* one refuses more, which is the safe direction |
+| `AdmittedVocabulary.WellFormed` | — | the address-space table is checked and the three justification registries are pairwise disjoint; the other eight have no coherence condition and need none |
+| `StepPolicy.oracle` | can only fail | `Oracle.answer` returns a proof-carrying `CompleteCommitted` or `none`, and `none` records `machineAnswerIncomplete`; it cannot claim a commit it cannot witness |
+| `StepPolicy.requiredFacets` | demands more | a facet a profile requires and an operation does not supply is a rejection |
+| `MemoryProfile.package` | **removes nothing today, and gates everything tomorrow** | eleven bare `Prop`s the profile chooses, so `True` eleven times closes §10. This is the one input on this table with no constraint at all, and it is the last gate before `VerifiedProgram` |
+| `faultAt`, the fault plan | adds paths | a `step` argument rather than a profile field; every plan it can name is checked against the sequence's own declarations |
+
+The pattern to apply to a new field: if a profile can fill it in so that a sentence of
+`docs/MEMORY_MODEL.md` stops being checked, the sentence belongs in the transition and
+the field belongs beside it as something that can only add.
+
 ### 4.4.1 What M3 still owes
 
 - ~~**Split and join of loans**, which §3 requires and which the identity discipline
