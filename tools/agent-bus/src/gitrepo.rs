@@ -226,16 +226,54 @@ pub fn remote_refs_existing(
     Ok(existing)
 }
 
-/// Ensure a detached worktree checked out at `origin/agent-bus` exists at
-/// `worktree_path`, creating it if necessary (AGENT_BUS.md section 2: "Multiple
-/// agents sharing one clone use detached worktrees").
+/// Ensure a detached worktree checked out at exactly `start_point` exists at
+/// `worktree_path` (AGENT_BUS.md section 2: "Multiple agents sharing one
+/// clone use detached worktrees"). This function's every caller passes a
+/// deterministic path reused across *separate process invocations* as a
+/// cache (e.g. `sync::reduce_local`'s per-agent `_reduce_stream_<agent>`
+/// worktrees, read via plain filesystem access in `storage::read_stream_
+/// log`) -- so an existing directory at `worktree_path` is not proof it is
+/// still at `start_point`: a prior, separate invocation may have checked it
+/// out at an *earlier* commit before more was published, and nothing here
+/// ever refreshed it since. Trusting "exists" alone (as an earlier version
+/// of this function did) silently serves stale on-disk content forever
+/// after the first call for a given path -- a real, confirmed bug: a
+/// `coordinate` call whose dry-run validation needs another agent's
+/// just-published event can spuriously reject it as unknown, purely
+/// because an earlier, unrelated call happened to create that same cache
+/// path first. So: verify before trusting, and refresh if the target has
+/// moved.
 pub fn ensure_bus_worktree(
     repo_dir: &Path,
     worktree_path: &Path,
     start_point: &str,
 ) -> AbResult<()> {
     if worktree_path.exists() {
-        return Ok(());
+        let target = rev_parse(repo_dir, start_point)?;
+        if rev_parse_opt(worktree_path, "HEAD")?.as_deref() == Some(target.as_str()) {
+            return Ok(());
+        }
+        // Stale: remove and fall through to recreate at the right commit.
+        // `worktree remove` fails if git's own metadata already considers
+        // this path gone (e.g. after a manual `rm -rf`) -- best-effort,
+        // then fall back to a plain filesystem removal plus `prune` so a
+        // half-cleaned-up worktree can never wedge every future call.
+        let _ = run(
+            repo_dir,
+            &[
+                "worktree",
+                "remove",
+                "--force",
+                &worktree_path.to_string_lossy(),
+            ],
+        );
+        if worktree_path.exists() {
+            std::fs::remove_dir_all(worktree_path).map_err(|e| AbError::Io {
+                path: worktree_path.display().to_string(),
+                source: e,
+            })?;
+            run_ok(repo_dir, &["worktree", "prune"])?;
+        }
     }
     if let Some(parent) = worktree_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| AbError::Io {
@@ -850,14 +888,69 @@ mod outer_tests {
         assert_eq!(got, "sha256");
     }
 
-    /// An already-existing worktree path is a no-op success — `ensure_bus_worktree`
-    /// must not attempt to recreate (or shell out to git) at all.
+    /// Regression test for a real, confirmed bug: `ensure_bus_worktree`'s
+    /// callers all pass a deterministic path reused across *separate
+    /// process invocations* as a cache (`sync::reduce_local`'s per-agent
+    /// worktrees in particular). Treating "the path exists" as proof it is
+    /// already at `start_point` meant a worktree created once, early, was
+    /// silently stuck there forever -- a later call naming a *newer*
+    /// `start_point` at the same path got the stale content back with no
+    /// error. `storage::read_stream_log` reads these worktrees via plain
+    /// filesystem access, so this directly caused a live failure: a
+    /// `coordinate` dry-run validating an event that referenced another
+    /// agent's just-published event saw that agent's stream frozen at an
+    /// earlier tip and rejected it as unknown.
     #[test]
-    fn ensure_bus_worktree_is_a_noop_when_the_path_already_exists() {
-        let dir = tempfile::tempdir().unwrap();
-        // No MockGit installed at all: if this reached a git call, the mock
-        // seam would panic with "no rule matched" since nothing is registered.
-        ensure_bus_worktree(&PathBuf::from("/unused"), dir.path(), "origin/agent-bus").unwrap();
+    fn ensure_bus_worktree_refreshes_a_worktree_whose_start_point_has_moved() {
+        let repo = init_repo();
+        let worktree = repo.path().join("_shared_cache_path");
+
+        ensure_bus_worktree(repo.path(), &worktree, "HEAD").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("README.md"))
+                .unwrap()
+                .trim_end(),
+            "hello"
+        );
+
+        commit_file(repo.path(), "README.md", "goodbye\n", "second");
+
+        // Same worktree path, but `start_point` (still "HEAD") now names a
+        // different commit -- the cached worktree must be refreshed to it,
+        // not served stale.
+        ensure_bus_worktree(repo.path(), &worktree, "HEAD").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("README.md"))
+                .unwrap()
+                .trim_end(),
+            "goodbye",
+            "the worktree must have been refreshed to the new HEAD, not left stale"
+        );
+    }
+
+    /// The common, unchanged-target case must not pay for a full
+    /// remove-and-recreate: `ensure_bus_worktree` first checks whether the
+    /// existing worktree's HEAD already matches `start_point` via
+    /// `rev-parse`, and only falls through to `worktree remove` + `worktree
+    /// add` if it does not.
+    #[test]
+    fn ensure_bus_worktree_is_a_cheap_noop_when_already_at_start_point() {
+        let repo = init_repo();
+        let worktree = repo.path().join("_shared_cache_path");
+        let head = rev_parse(repo.path(), "HEAD").unwrap();
+
+        ensure_bus_worktree(repo.path(), &worktree, &head).unwrap();
+        let _guard = MockGit::new()
+            .on(&["rev-parse", "--verify", &head], GitOutput::ok(&head))
+            .on(
+                &["rev-parse", "--verify", "--quiet", "HEAD^{object}"],
+                GitOutput::ok(&head),
+            )
+            .install();
+        // With the mock installed, any git call other than the two
+        // `rev-parse`s above would panic with "no rule matched" -- in
+        // particular no `worktree remove`/`worktree add`.
+        ensure_bus_worktree(repo.path(), &worktree, &head).unwrap();
     }
 
     /// When the worktree path's parent cannot be created (here, because a
