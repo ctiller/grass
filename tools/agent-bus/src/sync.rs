@@ -67,13 +67,22 @@ pub fn synced_snapshot(repo: &Path, remote: &str, worktrees_dir: &Path) -> AbRes
     let epoch =
         crate::registry::read_epoch(repo, &registry_tip, &worktrees_dir.join("_sync_epoch"))?;
 
-    let stream_refspecs: Vec<String> = epoch
+    // A member registered in this epoch may not have published its own
+    // stream root yet (reduce_local's own comment: "a real, expected
+    // state"). A single unresolvable refspec fails a multi-ref `git fetch`
+    // in its entirety -- nothing gets fetched, not even the members that DO
+    // have a stream -- so existence is checked first and only refs that
+    // actually exist remotely are fetched.
+    let candidate_refnames: Vec<String> = epoch
         .active_members
         .keys()
-        .map(|agent| {
-            let r = crate::stream::stream_ref(agent).into_string();
-            format!("{r}:{r}")
-        })
+        .map(|agent| crate::stream::stream_ref(agent).into_string())
+        .collect();
+    let existing = crate::gitrepo::remote_refs_existing(repo, remote, &candidate_refnames)?;
+    let stream_refspecs: Vec<String> = candidate_refnames
+        .iter()
+        .filter(|r| existing.contains(*r))
+        .map(|r| format!("{r}:{r}"))
         .collect();
     if !stream_refspecs.is_empty() {
         crate::gitrepo::fetch_refspecs(repo, remote, &stream_refspecs)?;
@@ -122,7 +131,7 @@ fn reduce_local(repo: &Path, worktrees_dir: &Path, freshness: Freshness) -> AbRe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{AgentStatusEvent, EventData, LifecycleStatus};
+    use crate::events::{AgentStatusEvent, EventData, LifecycleStatus, Role};
     use crate::outbox::Candidate;
     use crate::scalars::{Agent, Short, Text};
 
@@ -273,6 +282,89 @@ mod tests {
         assert!(snap.roster_epoch.is_active_member(&coord1));
         let agent_state = snap.state.agents.get(&coord1).unwrap();
         assert_eq!(agent_state.next_seq, 2); // registration + the one status event
+    }
+
+    /// Regression: a registry epoch member who has not yet published their
+    /// own stream root (a real, expected state -- see `reduce_local`'s own
+    /// comment) used to break `synced_snapshot` *entirely*: `git fetch`
+    /// fails a multi-refspec batch in full when even one refspec can't be
+    /// resolved, so before `remote_refs_existing` filtering was added, a
+    /// single not-yet-published member meant nothing was fetched at all,
+    /// not even other members' streams that genuinely exist remotely.
+    #[test]
+    fn synced_snapshot_tolerates_a_registered_member_with_no_published_stream_yet() {
+        let origin = init_bare_origin();
+
+        let host_a = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(host_a.path(), "HEAD").unwrap();
+        let (_config, epoch, _commit) = crate::bootstrap::genesis(
+            host_a.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            crate::scalars::ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+            &host_a.path().join("_genesis_wt"),
+        )
+        .unwrap();
+        crate::coordinator::drain_and_publish(
+            host_a.path(),
+            host_a.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            &host_a.path().join("_wt"),
+            &origin.path().to_string_lossy(),
+        )
+        .unwrap();
+
+        // alice joins the roster epoch but never publishes her own stream
+        // root -- registration and a member's first event are genuinely
+        // two separate publications.
+        let alice = a("alice");
+        let mut members = epoch.active_members.clone();
+        members.insert(
+            alice.clone(),
+            crate::registry::MemberBinding {
+                role: Role::Implementor,
+                host: short("host1"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        let new_epoch = crate::registry::propose_transition(
+            host_a.path(),
+            &epoch,
+            members,
+            &host_a.path().join("_transition_wt"),
+        )
+        .unwrap();
+        crate::publish::publish(
+            host_a.path(),
+            &origin.path().to_string_lossy(),
+            &[crate::publish::RefUpdate::new(
+                crate::registry::REGISTRY_REF,
+                new_epoch.id.clone(),
+            )],
+        )
+        .unwrap();
+
+        let host_b = init_repo();
+        let snap = synced_snapshot(
+            host_b.path(),
+            &origin.path().to_string_lossy(),
+            &host_b.path().join("_sync_wt"),
+        )
+        .unwrap();
+        assert!(snap.roster_epoch.is_active_member(&alice));
+        assert!(snap.roster_epoch.is_active_member(&coord1));
+        // coord1's real stream still reduced successfully...
+        assert!(snap.state.agents.contains_key(&coord1));
+        // ...while alice, registered but streamless, simply isn't in the
+        // reduced agent map yet -- not an error, not a missing coord1 too.
+        assert!(!snap.state.agents.contains_key(&alice));
     }
 
     #[test]

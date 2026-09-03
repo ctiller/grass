@@ -191,6 +191,41 @@ pub fn fetch_refspecs(dir: &Path, remote: &str, refspecs: &[String]) -> AbResult
     run(dir, &arg_refs)
 }
 
+/// Which of `refnames` actually exist on `remote` right now, checked with
+/// one `ls-remote` round trip rather than one call per ref. A single
+/// unresolvable refspec fails a `git fetch` *in its entirety* -- nothing
+/// gets fetched, not even the refs that do exist (verified empirically: a
+/// two-refspec fetch where only one ref is missing exits nonzero and
+/// fetches neither) -- so a caller fetching a set of refs it cannot fully
+/// guarantee all exist (e.g. every currently active roster member, some of
+/// which may be registered but not yet have published a stream) should
+/// filter against this first rather than let the whole fetch fail closed.
+pub fn remote_refs_existing(
+    dir: &Path,
+    remote: &str,
+    refnames: &[String],
+) -> AbResult<std::collections::BTreeSet<String>> {
+    if refnames.is_empty() {
+        return Ok(std::collections::BTreeSet::new());
+    }
+    let mut args: Vec<&str> = vec!["ls-remote", "--heads", remote];
+    args.extend(refnames.iter().map(String::as_str));
+    let out = run(dir, &args)?;
+    if !out.success {
+        return Err(AbError::Git(format!(
+            "git ls-remote failed: {}",
+            out.stderr
+        )));
+    }
+    let mut existing = std::collections::BTreeSet::new();
+    for line in out.stdout.lines() {
+        if let Some((_, refname)) = line.split_once('\t') {
+            existing.insert(refname.to_string());
+        }
+    }
+    Ok(existing)
+}
+
 /// Ensure a detached worktree checked out at `origin/agent-bus` exists at
 /// `worktree_path`, creating it if necessary (AGENT_BUS.md section 2: "Multiple
 /// agents sharing one clone use detached worktrees").
