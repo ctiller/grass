@@ -815,7 +815,7 @@ It is written last in this milestone, after that entry is ratified.
 
 ## 6. M4 — Composition, lowering, and the proof package
 
-**Status: one module written, unmerged, unratified.** `Weave/Mixin.lean` is
+**Status: two modules written, unmerged, unratified.** `Weave/Mixin.lean` is
 taken first, out of the table's order, because it is where M2's two scope
 disciplines were supposed to pay off and the only way to find out was to try.
 
@@ -843,6 +843,23 @@ framed past every step in the program, vacuously and wrongly — and nothing in
 that touches *fewer* fragments satisfies its scope law more easily. `StepsLocally`
 now carries the regions a step wrote and requires write access for each, so
 `ProcessGraph.sharedAccess` decides who touches what.
+
+`Trace/Independence.lean` follows, and it is short for a reason worth recording.
+Independence is scope disjointness — available only because a transition carries
+its scope — and the *usable* content of it turns out not to be the diamond at
+all. What a weave argument consumes is
+`unaffected_by_an_independent_step`: an invariant living inside one step's scope
+is untouched by every step independent of it, whatever the schedule chose. That
+is [FOUNDATION.md](FOUNDATION.md) law 18's requirement, and it needs no
+reordering theorem.
+
+The constructive diamond is named and not proved. Swapping means rebuilding each
+transition at a state it was not built at, and every interesting constructor
+carries a proof about its own before-state — `wasOutstanding`, `wasFresh`,
+`wasLive` — so whether those survive is a lemma per constructor rather than a
+definition. `SwapsWith` records it. A consumer reading only outside both scopes
+never needs it, and one reading inside a scope was not schedule-independent to
+begin with, so its absence costs nothing that this layer exports.
 
 ```text
 Grass/Process/Trace/Independence.lean   Independent, diamonds, swap congruence
