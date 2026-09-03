@@ -2444,3 +2444,107 @@ identity preservation, `Restarts.authorized`, `Spawns.startsInitial`,
 `allocatesTheGeneration`, `Reroutes.arrives` — which is the point of attempting
 it: a theorem that consumes every field is the test of whether the fields are
 the right ones.
+
+### 10.44 `DrivenByEntropy` cannot tell a boundary demand from an internal one
+
+`Grass/Process/Network/Transition.lean`'s `DrivenByEntropy` counts a
+`processStep` on `.result` as driven from outside, because §7's frontier is
+"external/**demand-result**" and a network blocked on a boundary demand must be
+declarable at a frontier or no progress measure exists for a reactive plan.
+
+But a `.result` may answer a demand a *child* satisfied, which is the network
+acting on itself. Distinguishing them needs to know whether the demand is
+boundary-exported, and `rootLocalDemandProjection` exists only for the root's
+protocol — the same per-kind gap `ProcessGraph.observeAt` closed for
+observations. So the predicate is slightly wider than "the outside must act",
+and a plan can park a network at a frontier where a child could have moved it.
+
+The fix is a per-kind demand projection beside `observeAt`. Needs a ruling on
+whether every role's demands get one, or only the root's.
+
+### 10.45 `ProcessSpec.Step` is request-blind, and §4's terminal law needs the request
+
+`Initial` and `Terminal` take the request; `Step` does not. §4's
+`NoProcessStepFromTerminal` therefore cannot be stated at the strength it reads:
+"a state satisfying `p.Terminal request` has no `p.Step`" quantifies the request
+away in the conclusion, and excludes every request-parameterised process — "read
+`request` items, terminal when `state = request`" has no `ProcessCorrect` at all,
+because state 3 being terminal for request 3 forbids it stepping for request 4.
+
+`ProcessCorrect.terminalNoStep` now asks about states terminal for *every*
+request, which is exactly what a request-blind relation can be held to. That is
+a real weakening: a driver holding a specific request and a state terminal only
+for it gets nothing from it.
+
+The fix is to index `Step` by the request, as `Initial` and `Terminal` are. That
+is a `ProcessSpec` change and therefore §2's, with consequences for the run
+relation, the network transition family, and every fixture. Needs a ruling.
+Related to §10.42 — both are places where `ProcessSpec`'s transition relation is
+missing an index it needs.
+
+### 10.46 `countdownRemainder` makes `countdown` stuck
+
+`countdown.Initial` issues `replicate request tick`, and `countdownRemainder`
+permits at most two pending ticks. A run started with three reaches state 0
+holding three ticks, where it can neither terminate — the law refuses the
+partition — nor step, because a terminal state does not step. So
+`MeetsProcessProgress.notStuck` is unsatisfiable at that state.
+
+This is a fact about the fixture's *specification law*, not about the process
+layer: the specification demands a bound the process cannot meet, and the right
+answer is that such a pair has no correctness proof. Recorded because
+`Tests/Process/M1Fixtures.lean` presents `countdownRemainder` as the interesting
+law and `Tests/Process/CountdownCorrectFixtures.lean` had to use
+`TerminalRemainderLaw.unconstrained` instead, which is worth a reader knowing.
+
+### 10.47 `DeterministicProcess` is unusable for any process that terminates
+
+`toProcessSpec` derives `Step` from a total `update`, so the derived relation
+holds by `rfl` at every state and event — including terminal ones. A
+deterministic process that is ever terminal therefore cannot satisfy
+`ProcessCorrect.terminalNoStep`, whatever else it does.
+
+`toProcessSpec` is not faithful: it loses partiality on all three relations, and
+the loss on `Step` is exactly the one that matters. The convenience §2 offers is
+available only to processes that never finish.
+
+The fix is for `update` to be partial — `State → Event → Option (…)` — or for
+`DeterministicProcess` to carry its own terminality guard. Needs a ruling; it is
+a small change and a visible one.
+
+### 10.48 Three fields in the process core that nothing consumes
+
+Found in the same pass, none of them unsound, all of them costs paid for no
+exported consequence:
+
+* `MeetsProcessProgress.handlesEveryEvent` — documented as "law 5 made
+  checkable", and no theorem anywhere derives anything from it. `exists_transition`
+  uses `notStuck` alone.
+* `ProcessAcceptance.DemandsWellFormed` — its own docstring's example is "at most
+  one outstanding write per handle", and "outstanding" is a property of the run's
+  bag. It is applied in exactly two places, both to a *per-transition* `issued`
+  bag, and nothing derives well-formedness of an outstanding bag from them — it
+  does not follow, since `outstanding` accumulates.
+* `ProcessTopologyCore.spawnAuthority` — exists to refine `maySpawn` to
+  instances, "which stops connection 3 from spawning a stream belonging to
+  connection 5", and neither `Spawns.authorized` nor `WellFormed.ParentageValid`
+  reads it.
+
+Each is either a law that should be spent or a field that should go. Needs a
+ruling on which, per field.
+
+### 10.49 `ProcessAcceptance.Demanded` is the free predicate the network fixed
+
+`Grass/Process/Network/Progress.lean` closed its degenerate-measure hole with
+`frontierIsExternal`, which makes a frontier a claim about which steps are
+enabled rather than a predicate the author chooses. The per-process layer has no
+analogue for its *third* disjunct: `ProcessAcceptance.Demanded` is a free
+`p.Observation → Prop`, and `Demanded := fun _ => True` is admissible — which is
+exactly the "every process could satisfy progress by logging" the field's own
+docstring says it exists to prevent.
+
+Moving the predicate from `ProcessSpec` to `ProcessAcceptance` does not prevent
+it, because a standalone protocol supplies its own acceptance: one author on
+both sides of the implication. Needs a ruling on what constrains `Demanded` —
+the network's answer was to tie the analogous predicate to something the
+transition family already decides, and there may be no such thing here.

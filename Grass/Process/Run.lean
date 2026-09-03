@@ -19,11 +19,19 @@ rather than a side condition:
 | Clause | Mechanism |
 |---|---|
 | no fabrication | `settle` requires `outstanding = cons demand remainder` |
-| no replay | the successor's bag is `remainder + issued`, not `outstanding + issued` |
+| no replay | the successor's bag is `remainder + issued`, not `outstanding + issued` — see below |
 | no joint consumption | one equation removes one `cons`, whatever the multiplicity |
 | no silent loss | `remainder` is the whole rest of the bag |
 | every remainder classified | `terminate` carries a bag *partition*, not a predicate |
 | only `running` steps | no constructor has a `terminal` source state |
+
+"No replay" is the one row that needs a qualification. The mechanism is exactly
+as stated — the consumed occurrence is removed before the issued bag is added —
+but the invariant a reader may infer from the word, that a result strictly
+reduces its demand's multiplicity, is false: `issued` may contain the demand
+just consumed, so a `.result` step can leave the run state bit-for-bit
+identical. `Grass/Process/Progress.lean` is what stops such a step counting as
+progress, not this table.
 
 ## Two constructors, five derived rules
 

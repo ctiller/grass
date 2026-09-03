@@ -28,10 +28,17 @@ carries as an index.
 The first *is* a field here, and it is worth saying what it is not.
 `ProcessRunTransition.not_from_terminal` says a run that has taken `terminate`
 does not continue, and that is structural. `terminalNoStep` says something
-independent: a state satisfying `p.Terminal` has no `p.Step` at all. Without it
-a process could sit at a state its specification calls finished and keep
-working, and a terminal-state theorem would say nothing about what the process
-actually does there.
+independent: a state the specification calls finished has no `p.Step` at all.
+Without it a process could sit at a state its specification calls finished and
+keep working, and a terminal-state theorem would say nothing about what the
+process actually does there.
+
+It is stated over states terminal for *every* request, not for some, because
+`p.Step` does not take a request. An earlier version took the existential form
+and was refutable for every request-parameterised process — including this
+module's own `countdown`, which stepped on `.external .wake` at its terminal
+state. Both the field and the fixture were wrong, in different ways, and each
+hid the other.
 
 ## Acceptance is a parameter
 
@@ -79,13 +86,32 @@ structure ProcessCorrect (p : ProcessSpec.{u, w}) (accept : ProcessAcceptance p)
     Invariant state → p.Terminal request state result →
     accept.TerminalAccepts request result
   /--
-  A state the specification calls terminal does not step. See the module note
-  for why this is not implied by `ProcessRunTransition.not_from_terminal`.
+  **A state the specification calls finished, whatever it was started with, does
+  not step.**
+
+  §4's `NoProcessStepFromTerminal`, at the strength a request-blind `Step` can
+  be held to.
+
+  An earlier version quantified the request existentially — *terminal for some
+  request implies no step for any* — and `p.Step` does not take a request, so
+  the conclusion quantified it away. That excluded the most ordinary shape of a
+  request-parameterised process outright: "read `request` items, terminal when
+  `state = request`" has no `ProcessCorrect` at all, because state 3 being
+  terminal for request 3 forbade it stepping for request 4. Local adversarial
+  review refuted the record for it in one line, and refuted it for this
+  module's own `countdown` fixture for the other half of the same field.
+
+  The hypothesis is now "terminal for *every* request", which is exactly what a
+  relation that cannot see the request can be asked about. That is a genuine
+  weakening, and the reason for it — `ProcessSpec.Step` is request-blind where
+  `Initial` and `Terminal` are not — is
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.45.
   -/
-  terminalNoStep : ∀ (request : p.Request) (state after : p.State)
+  terminalNoStep : ∀ (state after : p.State)
       (result : p.TerminalResult) (event : p.Event) (issued : Bag p.Demand)
       (emitted : p.Segment),
-    p.Terminal request state result → ¬ p.Step state event after issued emitted
+    (∀ request, p.Terminal request state result) →
+    ¬ p.Step state event after issued emitted
   /-- If the process has a view, every invariant-satisfying render is accepted. -/
   viewAccepts : ∀ (facet : ViewFacet p.State), p.view = some facet →
     ∀ state : p.State, Invariant state → accept.ViewAccepts facet (facet.render state)
@@ -150,17 +176,25 @@ theorem terminalAccepts_of_reachable (correct : ProcessCorrect p accept)
     (by simpa using correct.invariant_of_reachable reached) isTerminal
 
 /--
-A reachable state that the specification calls terminal cannot step.
+A state the specification calls finished, whatever it was started with, cannot
+step.
 
-The combination of the `terminalNoStep` field with reachability: it is the fact
-a driver needs when it decides whether a dispatch loop may exit.
+The fact a driver needs when it decides whether a dispatch loop may exit. The
+hypothesis is terminality for *every* request rather than for the one in hand,
+because `p.Step` cannot see the request — see the field's own note and
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.45.
+
+A driver holding a specific request and a state terminal only for it gets
+nothing from this, and that is the honest position: nothing in the process's own
+transition relation distinguishes that state, so nothing can be proved about it
+here.
 -/
 theorem no_step_at_terminal (correct : ProcessCorrect p accept)
     {state after : p.State} {result : p.TerminalResult} {event : p.Event}
     {issued : Bag p.Demand} {emitted : p.Segment}
-    (isTerminal : p.Terminal request state result) :
+    (isTerminal : ∀ request, p.Terminal request state result) :
     ¬ p.Step state event after issued emitted :=
-  correct.terminalNoStep request state after result event issued emitted isTerminal
+  correct.terminalNoStep state after result event issued emitted isTerminal
 
 end ProcessCorrect
 

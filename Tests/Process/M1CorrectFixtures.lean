@@ -119,7 +119,7 @@ def oneShotProgress (request : Unit) :
   productive := by
     rintro state after _ _ _ _ ⟨working, finished, _, _⟩
     subst working; subst finished
-    refine Or.inr (Or.inr ?_)
+    refine Or.inr (Or.inr (Or.inr ?_))
     show (0 : Nat) < 1
     omega
 
@@ -142,8 +142,8 @@ def oneShotCorrect : ProcessCorrect oneShot oneShotAcceptance where
   demandsWellFormed := by intros; trivial
   terminal := by intros; trivial
   terminalNoStep := by
-    rintro _ state _ _ _ _ _ isTerminal ⟨working, _⟩
-    rw [isTerminal] at working
+    rintro state _ _ _ _ _ isTerminal ⟨working, _⟩
+    rw [isTerminal ()] at working
     exact absurd working (by decide)
   viewAccepts := by
     intro facet hasView

@@ -98,7 +98,7 @@ matters is `protocolStep`: the listener's private state moves from `remaining`
 to `remaining - 1` because `countdown.Step` says a `tick` result does that, not
 because this fixture asserted it.
 -/
-theorem the_listener_ticks (remaining : Nat)
+theorem the_listener_ticks (remaining : Nat) (running : remaining ≠ 0)
     (answer : countdownVocabulary.Result .tick) :
     serverPlan.StepsLocally (busy remaining) (busyAfter remaining) .listener ()
       (.result .tick answer) [Observation.beep] 0 [Observation.beep] where
@@ -106,7 +106,7 @@ theorem the_listener_ticks (remaining : Nat)
   stillLive := ⟨settled remaining, rfl, trivial⟩
   protocolStep :=
     ⟨awaiting remaining, settled remaining, rfl, rfl, rfl, rfl,
-      ⟨rfl, rfl, rfl⟩, ⟨0, rfl, rfl⟩, rfl, rfl, rfl⟩
+      ⟨running, rfl, rfl, rfl⟩, ⟨0, rfl, rfl⟩, rfl, rfl, rfl⟩
   emittedIsProjected := rfl
   observationsExtend := rfl
   writesPermitted := by
@@ -123,20 +123,22 @@ theorem the_listener_ticks (remaining : Nat)
     | _ => rfl
 
 /-- So it is a transition of the plan, and one that emits. -/
-def tickStep (remaining : Nat) (answer : countdownVocabulary.Result .tick) :
+def tickStep (remaining : Nat) (running : remaining ≠ 0)
+    (answer : countdownVocabulary.Result .tick) :
     serverPlan.NetworkTransition (busy remaining) (busyAfter remaining) :=
   .processStep .listener () (.result .tick answer) [Observation.beep] 0
-    [Observation.beep] (the_listener_ticks remaining answer)
+    [Observation.beep] (the_listener_ticks remaining running answer)
 
 /-- **And it declares the trace, because it really moved it.** -/
-theorem the_tick_emits (remaining : Nat) (answer : countdownVocabulary.Result .tick) :
-    (tickStep remaining answer).scope .observations :=
+theorem the_tick_emits (remaining : Nat) (running : remaining ≠ 0)
+    (answer : countdownVocabulary.Result .tick) :
+    (tickStep remaining running answer).scope .observations :=
   Or.inr (Or.inl ⟨by simp, rfl⟩)
 
 /-- It writes no shared region, so the route-table immutability argument still applies. -/
-theorem the_tick_writes_nothing (remaining : Nat)
+theorem the_tick_writes_nothing (remaining : Nat) (running : remaining ≠ 0)
     (answer : countdownVocabulary.Result .tick) (region : serverTopology.SharedRegion) :
-    ¬ (tickStep remaining answer).scope (.region region) := by
+    ¬ (tickStep remaining running answer).scope (.region region) := by
   rintro (isSlot | ⟨_, isObservations⟩ | ⟨_, moved, _⟩)
   · exact absurd isSlot (by simp)
   · exact absurd isObservations (by simp)
@@ -183,7 +185,7 @@ theorem a_step_that_does_not_tick_is_unconstructible (remaining : Nat)
   injection foundTo with sameTo
   subst sameFrom
   subst sameTo
-  obtain ⟨lowered, _, _⟩ := moved
+  obtain ⟨_, lowered, _, _⟩ := moved
   simp only [awaiting] at lowered
   omega
 
@@ -228,7 +230,7 @@ that step and proved the network after it fails `NominalsAllocated` and
 Read back off the step rather than off the two definitions, so it is the field
 that is being checked and not the fixture's own arithmetic.
 -/
-theorem the_tick_preserves_the_incarnation (remaining : Nat)
+theorem the_tick_preserves_the_incarnation (remaining : Nat) (running : remaining ≠ 0)
     (answer : countdownVocabulary.Result .tick) :
     ∃ (fromInstance toInstance : ProcessInstance serverTopology)
       (fromKind : fromInstance.kind = Role.listener) (toKind : toInstance.kind = Role.listener),
@@ -236,7 +238,7 @@ theorem the_tick_preserves_the_incarnation (remaining : Nat)
       toKind ▸ toInstance.parentage = fromKind ▸ fromInstance.parentage ∧
       toKind ▸ toInstance.request = fromKind ▸ fromInstance.request := by
   obtain ⟨fromInstance, toInstance, fromKind, toKind, _, _, _, _, sameRef, sameParent,
-    sameRequest⟩ := (the_listener_ticks remaining answer).protocolStep
+    sameRequest⟩ := (the_listener_ticks remaining running answer).protocolStep
   exact ⟨fromInstance, toInstance, fromKind, toKind, sameRef, sameParent, sameRequest⟩
 
 end Grass.Process.Tests.ProcessStep

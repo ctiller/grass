@@ -14,6 +14,14 @@ It is that a reviewer can read one small process and check that the linearity
 claims in `Grass/Process/Run.lean` are true of a thing that actually exists —
 in particular the three negative fixtures, which show that a bad claim is not
 merely unproved but unconstructible.
+
+That was not enough, and it is worth saying why. Local adversarial review found
+that `countdown` had neither a `ProcessCorrect` nor a `MeetsProcessProgress`,
+for three independent reasons — so every negative fixture below was negative
+about records nothing in this corpus inhabited. `Tests/Process/CountdownCorrectFixtures.lean`
+is the positive fixture that was missing, and building it is what checked the
+fixes. A corpus of negatives cannot notice that the thing it is negative about
+is empty.
 -/
 
 namespace Grass.Process.Tests
@@ -79,6 +87,7 @@ construction; interruptions are not, because a fixture needs one. -/
       emitted = []
   Terminal := fun _ state _ => state = 0
   Step := fun state event after issued emitted =>
+    state ≠ 0 ∧
     match event with
     | .external .wake => after = state ∧ issued = 0 ∧ emitted = []
     | .result .tick _ => after = state - 1 ∧ issued = 0 ∧ emitted = [Observation.beep]
@@ -109,12 +118,12 @@ An external event that issues nothing and emits nothing is an ordinary
 stuttering transition. It changes neither the outstanding bag nor the trace.
 -/
 
-theorem silent_step (state : Nat) (outstanding : Bag Demand)
+theorem silent_step (state : Nat) (running : state ≠ 0) (outstanding : Bag Demand)
     (observations : Trace Observation) :
     ProcessRunTransition countdownRemainder 3
       (.running state outstanding observations)
       (.running state (outstanding + 0) (observations ++ [])) :=
-  ProcessRunTransition.stepExternal (event := ExternalEvent.wake) ⟨rfl, rfl, rfl⟩
+  ProcessRunTransition.stepExternal (event := ExternalEvent.wake) ⟨running, rfl, rfl, rfl⟩
 
 theorem silent_step_changes_nothing (outstanding : Bag Demand)
     (observations : Trace Observation) :
@@ -149,7 +158,7 @@ theorem settle_one_of_two (observations : Trace Observation) :
       (.running 1 (Bag.ofList [Demand.tick] + 0)
         (observations ++ [Observation.beep])) :=
   ProcessRunTransition.stepResult (result := ())
-    settling_one_tick_leaves_one ⟨rfl, rfl, rfl⟩
+    settling_one_tick_leaves_one ⟨by decide, rfl, rfl, rfl⟩
 
 theorem settle_one_of_two_leaves_one :
     (Bag.ofList [Demand.tick] + (0 : Bag Demand)).card = 1 := by simp
@@ -165,7 +174,7 @@ theorem result_consumes_one_issues_one (observations : Trace Observation) :
     ProcessRunTransition countdownRemainder 1
       (.running 1 (Bag.ofList [Demand.log]) observations)
       (.running 1 (0 + Bag.ofList [Demand.tick]) (observations ++ [])) :=
-  ProcessRunTransition.stepResult (result := true) rfl ⟨rfl, rfl, rfl⟩
+  ProcessRunTransition.stepResult (result := true) rfl ⟨by decide, rfl, rfl, rfl⟩
 
 theorem result_consumes_one_issues_one_exchanges :
     (0 + Bag.ofList [Demand.tick]) ≠ Bag.ofList [Demand.log] := by
@@ -185,7 +194,7 @@ theorem interruption_consumes_without_result (observations : Trace Observation) 
       (.running 2 (Bag.ofList [Demand.tick, Demand.tick]) observations)
       (.running 1 (Bag.ofList [Demand.tick] + 0) (observations ++ [])) :=
   ProcessRunTransition.stepInterrupted (reason := Interrupt.abandoned)
-    settling_one_tick_leaves_one ⟨rfl, rfl, rfl⟩
+    settling_one_tick_leaves_one ⟨by decide, rfl, rfl, rfl⟩
 
 /-! ## Fixture 5 — terminating with a nonempty remainder
 

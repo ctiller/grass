@@ -161,15 +161,31 @@ theorem eventDeliverable_of_settles_none {p : ProcessSpec.{u, w}}
   exact absurd (settlesNothing ▸ settles) (by simp)
 
 /--
-The §7 three-way progress condition, for one transition.
+The §7 progress condition, for one transition.
+
+Four disjuncts where §7 lists three, because §7's first one is two: "reach a
+law-bearing **external/demand-result** frontier in finite internal work".
+
+An earlier version had only the external half, and the demand-result half is not
+cosmetic — a `.result` or `.interrupted` step consumes an outstanding occurrence
+and may leave `p.State` untouched, which is real progress that
+`ProcessMeasure.rank : p.State → Rank` structurally cannot see, because the
+outstanding bag lives in `ProcessRunState` and not in the state. Local
+adversarial review proved the consequence: **no** silent state-preserving
+non-entropy step could progress under any measure, acceptance or invariant, and
+`countdown` — this corpus's own primary fixture, whose `.result .log` case
+issues a fresh `tick` without moving the state — therefore had no
+`MeetsProcessProgress` at all.
 
 See the module note for why the first disjunct is environment entropy rather
-than "settled nothing".
+than "settled nothing"; that argument is about `.fault` and
+`.environmentViolation`, and it is unaffected.
 -/
 def StepProgresses {p : ProcessSpec.{u, w}} (accept : ProcessAcceptance p)
     (measure : ProcessMeasure p) (before after : p.State) (event : p.Event)
     (emitted : p.Segment) : Prop :=
   (∃ entropy, event.externalEntropy = some entropy) ∨
+    (∃ demand, event.settles = some demand) ∨
     accept.SegmentIsDemanded emitted ∨
     measure.Decreases before after
 
@@ -270,9 +286,10 @@ argument uses: if the program's own activity comes back and nothing the
 specification asked for was produced, the state got strictly smaller, and by
 well-foundedness that cannot go on forever.
 
-Stated for any non-entropy event, so it covers faults and environment violations
-as well as results — which is the point of the change from `settles` to
-`externalEntropy`.
+Stated for an event that is neither entropy nor a settlement, so it covers
+faults and environment violations — which is the point of the change from
+`settles` to `externalEntropy`, kept as a hypothesis now that `StepProgresses`
+has both halves of §7's external/demand-result frontier.
 -/
 theorem silent_nonentropy_step_decreases
     (progress : MeetsProcessProgress p accept Invariant request)
@@ -281,11 +298,13 @@ theorem silent_nonentropy_step_decreases
     (invariant : Invariant state)
     (transition : p.Step state event after issued emitted)
     (notEntropy : event.externalEntropy = none)
+    (settlesNothing : event.settles = none)
     (silent : ¬ accept.SegmentIsDemanded emitted) :
     progress.measure.Decreases state after := by
   rcases progress.productive state after event issued emitted invariant transition with
-    ⟨_, isEntropy⟩ | demanded | decreases
+    ⟨_, isEntropy⟩ | ⟨_, settles⟩ | demanded | decreases
   · exact absurd (notEntropy ▸ isEntropy) (by simp)
+  · exact absurd (settlesNothing ▸ settles) (by simp)
   · exact absurd demanded silent
   · exact decreases
 
@@ -303,7 +322,7 @@ theorem silent_fault_decreases
     (transition : p.Step state (.fault fault) after issued emitted)
     (silent : ¬ accept.SegmentIsDemanded emitted) :
     progress.measure.Decreases state after :=
-  progress.silent_nonentropy_step_decreases invariant transition (by simp) silent
+  progress.silent_nonentropy_step_decreases invariant transition (by simp) (by simp) silent
 
 /--
 There is no infinite silent descent.

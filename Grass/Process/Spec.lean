@@ -289,8 +289,16 @@ The deterministic authoring convenience of `docs/PROCESS.md` §2.
 
 `initial`, `terminal`, and `update` are functions; `toProcessSpec` derives the
 relations. This is a constructor, not a second semantics: everything downstream
-consumes the derived `ProcessSpec`, and `deterministic_step_functional` below is
-the only extra fact it buys.
+consumes the derived `ProcessSpec`. `step_functional` below is what it buys,
+together with `initial_functional`
+and `terminal_functional`.
+
+What it costs is partiality: `update` is a total function, so the derived `Step`
+holds by `rfl` at *every* state and event — including states the specification
+calls terminal. A deterministic process that ever finishes therefore cannot
+satisfy `ProcessCorrect.terminalNoStep`, and this constructor is usable only for
+processes that never terminate. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.47
+records it.
 -/
 structure DeterministicProcess (v : ProcessVocabulary.{u}) :
     Type (max (u + 1) (w + 1)) where
