@@ -829,7 +829,7 @@ fn prepare_merge(args: PrepareMergeArgs) -> AbResult<()> {
     let nomination = EventId::parse(args.nomination)?;
     let reviewed_commit = ObjectId::parse(args.reviewed_commit)?;
 
-    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.worktrees)?;
+    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?;
     let state = snapshot.state;
     let chain = state
         .review_chain(&nomination)
