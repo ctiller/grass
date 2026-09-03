@@ -198,6 +198,24 @@ def Allowed (q : WriteRequest) (r : WriteResponse) : Prop :=
 instance (q : WriteRequest) (r : WriteResponse) : Decidable (Allowed q r) := by
   cases r <;> unfold Allowed <;> infer_instance
 
+/-!
+### A note on the failure branch
+
+`Allowed q (.failure _) = True` for every status, including `.failure 0` -- a
+returned zero with `GetLastError` reporting success, which is arguably outside
+the documented contract rather than a lawful failure. The over-approximation is
+in the safe direction: it admits a response the API may never produce, and never
+rejects one it does.
+
+It is worth naming because `writeAdequate` witnesses adequacy with a `.failure`
+response. A reviewer pointed out that the profile therefore proves "some
+response is allowed" using the one response whose lawfulness is least certain.
+Narrowing the branch to statuses the API documents is an open obligation; it
+would strengthen `Allowed` without changing `excess_not_allowed` or
+`success_allowed_or_excess`, which partition the `success` constructor and are
+where the content is.
+-/
+
 /--
 **Response adequacy.** Every well-formed request has at least one allowed
 response.

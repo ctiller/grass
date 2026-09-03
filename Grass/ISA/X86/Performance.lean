@@ -185,7 +185,18 @@ def sealed : LeakageProfile := ⟨true, true, true⟩
 ordinary load or store whose timing does not depend on the value moved. -/
 def addressOnly : LeakageProfile := ⟨true, false, true⟩
 
-/-- Whether this profile establishes that a channel is closed. -/
+/--
+Whether this profile establishes that a channel is closed.
+
+"Establishes" is the profile's own claim, not evidence for it. The one-field-
+per-channel shape does force every construction site to answer for a newly added
+channel -- a reviewer confirmed that `{ p with … }` cannot skip one -- but the
+answers themselves are Bools an author writes, so
+`{ LeakageProfile.addressOnly with dataAddress := true }` claims everything
+`sealed` claims. What makes a claim cost something is
+`TimingFact.SoundFor` together with `JustifiedCostModel.citationsChecked`, which
+require the fact carrying the profile to rest on an architectural basis with two
+retrievable anchors. -/
 def closes (p : LeakageProfile) : LeakageChannel → Bool
   | .operandValue => p.operandValue
   | .dataAddress => p.dataAddress
