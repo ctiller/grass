@@ -39,6 +39,28 @@ example (v : Vec Nat) (h : 0 < v.length) : v[0] = v.get 0 h := rfl
 /-- And the notation is the accessor, not a parallel implementation. -/
 example (v : Vec Nat) (i : Nat) : v[i]? = v.get? i := Vec.getElem?_eq_get? v i
 
+/-! ## Iteration
+
+`docs/STDLIB.md` §3 lists iteration among the observations. `Vec` had no `ForIn`
+until adversarial review found the gap — which this fixture had missed while
+claiming to check "the notation and instances a Lean author reaches for without
+thinking", and `for` is the archetype. Pinned here so the gap cannot reopen.
+-/
+
+example : Id.run (do
+    let mut total := 0
+    for x in digits do
+      total := total + x
+    return total) = 60 := rfl
+
+/-- Iteration is in index order, not some other order. A sum would not detect a
+permutation, so this accumulates asymmetrically. -/
+example : Id.run (do
+    let mut acc : List Nat := []
+    for x in digits do
+      acc := x :: acc
+    return acc) = [30, 20, 10] := rfl
+
 /-! ## Decidable equality -/
 
 example : digits = Vec.fromList [10, 20, 30] := by decide

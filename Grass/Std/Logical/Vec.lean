@@ -141,22 +141,6 @@ def replicate (n : Nat) (a : α) : Vec α := ⟨List.replicate n a⟩
 /-- The number of elements. -/
 def length (v : Vec α) : Nat := v.toList.length
 
-/--
-`docs/STDLIB.md` §3's name for the element count is `length`, and every law in
-this module is stated over it. `size` is the same number under the name the
-authored spike surface actually writes: `Spikes/5_Spinning_Cube/Layout.lean` and
-`Spikes/4_Web_Server/Macros.lean` call `.size` on `Vec`- and `ByteArray`-typed
-values at six sites, while `Spikes/4_Web_Server/Assembly.lean` writes `.length`
-on a `ByteArray` at one. The authored surface is inconsistent with itself, so
-this library supplies both names rather than choosing on its behalf, and
-`docs/STDLIB_IMPLEMENTATION_PLAN.md` raises the inconsistency with the owner of
-the spike sources.
-
-It is an abbreviation, not a second definition, so no law is stated twice and
-`Vec.length` remains the name proofs are written against.
--/
-abbrev size (v : Vec α) : Nat := v.length
-
 /-- Whether the sequence has no elements. See `Vec.isEmpty_iff_length_eq_zero`. -/
 def isEmpty (v : Vec α) : Bool := v.toList.isEmpty
 

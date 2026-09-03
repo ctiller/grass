@@ -90,6 +90,29 @@ theorem Permutation.mem_iff {v w : Vec α} (h : v.Permutation w) {a : α} :
   rw [mem_iff_mem_toList, mem_iff_mem_toList]
   exact List.Perm.mem_iff h
 
+/--
+How many times `a` occurs.
+
+Added because `Vec.Permutation`'s docstring promised "the same multiplicities"
+and no law mentioned multiplicity at all. Adversarial review showed the gap was
+real: a relation defined as "same length and same members" satisfies every one of
+`Permutation`'s other laws and accepts `[1,1,2] ↦ [1,2,2]`, which `Permutation`
+rejects. Without `Vec.Permutation.count_eq` a caller reasoning only from the
+published laws could not rule out a sort that duplicated one line and dropped
+another.
+-/
+def count [BEq α] (v : Vec α) (a : α) : Nat := v.toList.count a
+
+/--
+`Vec.Permutation.count_eq`: rearrangement preserves multiplicity.
+
+This is the law that makes `Vec.Permutation` mean what its name says, and the
+one that distinguishes it from same-length-same-members.
+-/
+theorem Permutation.count_eq [BEq α] {v w : Vec α} (h : v.Permutation w) (a : α) :
+    v.count a = w.count a :=
+  List.Perm.count_eq h a
+
 /-- Equal sequences are trivially rearrangements of each other. -/
 theorem Permutation.of_eq {v w : Vec α} (h : v = w) : v.Permutation w := h ▸ Permutation.refl v
 
@@ -160,39 +183,43 @@ theorem Pairwise.drop {R : α → α → Prop} {v : Vec α} (h : Pairwise R v) (
 /-!
 ## Search by position
 
-Two operations, distinguished by what they take. `Vec.findIdx?` takes a predicate,
-matching Lean's `List.findIdx?`; `Vec.idxOf?` takes an element. The distinction
-matters here because `Spikes/2_Sort/Spec.lean` writes `findIdx?` and passes an
-element, so the operation its specification means is `idxOf?`.
+One operation, not two. `Spikes/2_Sort/Spec.lean` writes `output.findIdx? input[i]`
+and passes an *element* where a predicate would go, so the operation its
+specification means is `idxOf?`. An earlier version of this module supplied a
+predicate-taking `findIdx?` alongside it "under accurate names rather than one
+being bent to fit the call" -- but nothing demands the predicate version, and
+`docs/STDLIB_IMPLEMENTATION_PLAN.md` §1 band 3 is explicit that an undemanded
+structure "gets nothing -- not a stub, not a signature, not a placeholder". It was
+removed rather than kept for symmetry.
 -/
-
-/-- The position of the first element satisfying `p`. -/
-def findIdx? (p : α → Bool) (v : Vec α) : Option Nat := v.toList.findIdx? p
 
 /-- The position of the first occurrence of `a`. -/
 def idxOf? [BEq α] (v : Vec α) (a : α) : Option Nat := v.toList.idxOf? a
 
-@[simp] theorem findIdx?_empty (p : α → Bool) : findIdx? p (empty : Vec α) = none := rfl
-
 @[simp] theorem idxOf?_empty [BEq α] (a : α) : idxOf? (empty : Vec α) a = none := rfl
 
-/-- A found position is in range and its element satisfies the predicate. Without
-this a caller could not use the result as an index at all. -/
-theorem findIdx?_eq_some {p : α → Bool} {v : Vec α} {i : Nat} (h : findIdx? p v = some i) :
-    ∃ hi : i < v.length, p (v.get i hi) = true := by
-  rw [findIdx?, List.findIdx?_eq_some_iff_getElem] at h
-  obtain ⟨hi, hp, _⟩ := h
-  exact ⟨hi, hp⟩
+/--
+A found position is in range, holds the element searched for, and is the *first*
+such position.
 
-/-- A found position holds the element that was searched for. -/
+The third conjunct is the whole content of the name and was missing: adversarial
+review pointed out that a last-occurrence implementation satisfied every law this
+operation carried. It is load-bearing rather than tidy -- stability in
+`Spikes/2_Sort/Spec.lean`'s `stableSorted` is a claim about where the first
+occurrence of a value lands, so a search without it cannot express the
+specification it exists for.
+-/
 theorem idxOf?_eq_some [BEq α] [LawfulBEq α] {v : Vec α} {a : α} {i : Nat}
-    (h : idxOf? v a = some i) : v.get? i = some a := by
+    (h : idxOf? v a = some i) :
+    ∃ hi : i < v.length, v.get i hi = a ∧ ∀ j, j < i → v.get? j ≠ some a := by
   rw [idxOf?, List.idxOf?_eq_some_iff] at h
-  obtain ⟨hi, hget, _⟩ := h
-  rw [get?, List.getElem?_eq_getElem hi, hget]
+  obtain ⟨hi, hget, hfirst⟩ := h
+  refine ⟨hi, hget, fun j hj hcontra => ?_⟩
+  have hjlt : j < v.toList.length := Nat.lt_trans hj hi
+  rw [get?, List.getElem?_eq_getElem hjlt] at hcontra
+  exact hfirst j hj (Option.some.inj hcontra)
 
-/-- An element that occurs has a position. This is the direction a stability
-specification needs, since it indexes into the output by an input element. -/
+
 theorem idxOf?_isSome_of_mem [BEq α] [LawfulBEq α] {v : Vec α} {a : α} (h : a ∈ v) :
     (idxOf? v a).isSome := by
   have hmem : a ∈ v.toList := mem_iff_mem_toList.mp h

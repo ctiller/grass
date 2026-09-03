@@ -145,7 +145,7 @@ spikes, are one shape: `write_all_loop(payload)` in Spike 1,
 describes each as a *standard* partial-write induction or consumer, and that word
 is the demand: it expects one reusable theorem, not three authored proofs.
 
-There are three fixtures. Per `Tests.lean` all three establish expressibility
+There are eight fixtures. Per `Tests.lean` all of them establish expressibility
 rather than a theorem. `Tests/Std/VecVocabulary.lean` covers the type's own
 claims: that a `List Byte` and a host `_root_.ByteArray` are each rejected where
 a Grass `ByteArray` is required, that extensionality is usable in the shape a
@@ -276,20 +276,41 @@ expected author source that [SPIKE_AUTHORING.md](SPIKE_AUTHORING.md) makes the
 reviewed statement of what an author writes, which makes it the closest thing
 this library has to a named consumer. Every `Vec` operation those files call:
 
+This table has been wrong twice and is now the result of an exhaustive scan of
+every declared `Vec`- and `ByteArray`-typed name in `Spikes/`, not of a grep.
+Eleven operations, not five:
+
 | Called by the spike surface | Status |
 |---|---|
 | `Vec.zipWith f v w` (`5_Spinning_Cube/Macros.lean`) | present, at that argument order |
-| `arguments.mapIdx fun index argument => ...` (same file) | **added by this reading**; it was missing |
+| `arguments.mapIdx fun index argument => ...` (same file) | added by the second reading; it was missing |
 | `fields.map fun field => ...` through dot notation | present; dot notation reaches `Vec.map f v` |
 | `++` on instruction fragments | present |
+| `.size` (six sites) and `.length` (one site) | **absent**, and the surface is inconsistent with itself; open item 10 |
+| `output.Permutation input` (`2_Sort/Spec.lean`) | added by the third reading; §3.10 |
+| `output.Pairwise Occurrence.le` (same file) | added by the third reading; §3.10 |
+| `output.findIdx? input[i]`, applied to an *element* | the operation meant is `Vec.idxOf?`; §3.10 |
+| `input[i]` with no bound proof in scope | not expressible; open item 6 |
 | array-literal syntax for `Vec` (seven sites) | **absent**; §3.5 |
 
 `Tests/Std/SpikeSurface.lean` compiles each of the first four in the shape the
 spike writes it, so "the surface supports this" is checked rather than asserted.
-Nothing else in the five spikes calls a `Vec` operation. `List` appears once, in
-`4_Web_Server/Process.lean`, and is left alone: [STDLIB.md](STDLIB.md) §6 lists
-persistent `List` and contiguous `Vec` as separate offerings, so that is a
-choice, not a `Vec` demand.
+`List` appears once, in `4_Web_Server/Process.lean`, and is left alone:
+[STDLIB.md](STDLIB.md) §6 lists persistent `List` and contiguous `Vec` as
+separate offerings, so that is a choice, not a `Vec` demand.
+
+**Two corrections, and the second retracts the first.** An earlier version of
+this section ended "Nothing else in the five spikes calls a `Vec` operation",
+listing five. §3.10 then corrected it to include `Permutation` and `Pairwise`,
+and explained the miss as a survey that "matched `Vec.<method>` and therefore saw
+only qualified calls". That explanation is refuted by this table's own rows:
+`arguments.mapIdx`, `fields.map`, and `++` are unqualified and were found by the
+first survey. The real cause was narrower and less flattering — the first survey
+read `5_Spinning_Cube`'s `Macros.lean` and `Layout.lean` and did not read
+`2_Sort/Spec.lean`, which is the one file in the corpus where a milestone's
+*specification* is written over `Vec`. A post-hoc explanation that this document's
+own table contradicts is a worse error than the miscount it explains, and it is
+recorded rather than quietly replaced.
 
 The spike *sources* are only half the corpus's demand, though, and the weaker
 half: they say which operations get called, not which theorems get instantiated.
@@ -454,28 +475,40 @@ ASCII-only fixture and be wrong.
 states a response-body equation against an encoded literal, which is checkable
 only if the literal's bytes are computable.
 
-**This delegates to Lean's encoder, deliberately.** `Text.utf8` is
-`Vec.ofHostBytes ∘ String.toUTF8`. A second encoder would need either a proof
-that it agrees with Lean's — against a specification neither this library nor
-[STDLIB.md](STDLIB.md) supplies — or two encoders in the trusted base where the
-corpus wants one. The trust boundary is worth stating exactly: `String.toUTF8`
-carries `@[extern "lean_string_to_utf8"]` over the Lean model `String.toByteArray`,
-kernel reduction and every theorem here use the model, and the extern is what
-runs. `length_utf8` is therefore a theorem about the model, and a compiled
-program's bytes matching it rests on the extern agreeing with its model — a
-standard Lean trust assumption already inside the boundary
-[FOUNDATION.md](FOUNDATION.md) §3 draws around the toolchain, not one this module
-widens.
+**This delegates to Lean's encoder, deliberately, and delivers less than
+"law-bearing encoding API" suggests.** `Text.utf8` is
+`Vec.ofHostBytes ∘ String.toUTF8`. Because `String` is byte-backed,
+`String.toUTF8` is a projection rather than an algorithm, so `length_utf8` and
+`utf8_injective` are consequences of that structure and not of any encoder being
+correct — a caller can derive length, injectivity, and validity, and nothing
+about which characters map to which bytes. `Tests/Std/Text.lean` exhibits that by
+reduction, and [FOUNDATION.md](FOUNDATION.md) §3 is explicit that a fixture is
+evidence and never a theorem.
 
-**Absent: decoding.** Core has `String.fromUTF8` with a validity argument but no
-round-trip theorem relating it to `String.toUTF8`, so a `Vec Byte → String` here
-could carry no law worth having. Supplying that law means proving UTF-8
-correctness against a specification, which is a project rather than a function,
-and no consumer has asked — [GZIP.md](GZIP.md) and
-[HTTP2_CONSTRAINTS.md](HTTP2_CONSTRAINTS.md) decode bytes as protocol data rather
-than as text. Encoding-indexed text *views*, §6's own phrase, are absent for the
-same reason: a `Text enc` type should be designed against a consumer with a
-second encoding, and UTF-8 is the only encoding any spike uses.
+The trust boundary is not where an earlier version of this section put it. It
+named `String.toByteArray` as a "model" beneath the extern; in fact
+`String.toByteArray` carries the same `@[extern "lean_string_to_utf8"]`, and
+`Vec.toHostBytes`/`ofHostBytes` add `lean_array_mk` and `lean_array_to_list`, so
+at least three externs sit between these theorems and running bytes.
+`Tools/AxiomAudit.lean` cannot see any of them, since an `@[extern]` is not an
+axiom — so a green audit is not evidence about this boundary, and §3.11's
+criterion 2 must not be read as if it were. Open item 12 raises the missing TCB
+ledger that [FOUNDATION.md](FOUNDATION.md) §3 actually asks for.
+
+**Decoding is supplied, and the reason once given for its absence was false.**
+This section previously said core supplies no round-trip theorem and that
+providing one "means proving UTF-8 correctness against a specification, which is
+a project rather than a function". In this toolchain `String` is a structure over
+its own bytes carrying its own validity proof, so `String.toUTF8` is a projection
+and `String.fromUTF8` is its constructor; both round-trip directions are a few
+lines. `Text.decode`, `Text.decode_utf8`, `Text.utf8_decode`, and
+`Text.isValidUTF8_utf8` exist. `Text.utf8_append` came with them, after a fixture
+was found asserting that the general append law was false. Open item 5 keeps the
+record.
+
+Encoding-indexed text *views*, §6's own phrase, remain absent: a `Text enc` type
+should be designed against a consumer with a second encoding, and UTF-8 is the
+only encoding any spike uses.
 
 **Found while building it.** The spike surface writes `"...".toUTF8` at three
 sites and expects a Grass `ByteArray`. That cannot typecheck: dot notation on a
@@ -503,10 +536,17 @@ The division of labour is worth stating because it is easy to get backwards.
 `authority-model` entry and `stable_merge_pass` an `authored-proof/library-instance`
 one; neither is this library's. But the vocabulary the specification is *written
 in* is, and a sort that shipped its own notion of "same elements rearranged"
-would be proving a theorem about itself. [STDLIB.md](STDLIB.md) §5 names the same
-vocabulary from the other side, requiring whole-element transfers to "derive
-occurrence, permutation, and initialization transport from the proved physical
-copy".
+would be proving a theorem about itself. A note on what does *not* justify this module.
+[STDLIB.md](STDLIB.md) §5's sentence about deriving "occurrence, permutation, and
+initialization transport from the proved physical copy" was cited here in an
+earlier draft; it sits inside the `OwnedVec`/`StructLayout` physical-transfer
+paragraph and is about copy footprints in `Std.Owned`, not about a pure sequence
+predicate. §3's own enumeration is restrictive — "the pure logical `Vec`
+interface includes only sequence operations", with predicates listed as "`all`,
+`any`, `find?`, `contains`, lexicographic comparison" — and names none of these.
+So this module rests on band 2 alone: `Spikes/2_Sort/Spec.lean` is a named
+consumer whose specification does not typecheck without it. That is a strong
+argument and it does not need a borrowed one.
 
 The `Decidable` instances are not decoration. `Tests/Std/StableSort.lean`
 restates `stableSorted` over a stand-in and discharges it against a concrete
@@ -530,11 +570,14 @@ S1 is complete when all of the following hold. The first four hold today.
 1. `lake build` is green with `warningAsError = true`, so no declaration uses
    `sorry`.
 2. `lake env lean Tools/AxiomAudit.lean` reports no axiom outside the
-   [FOUNDATION.md](FOUNDATION.md) §3 allowlist, with `Grass.Std.Logical.Vec` in
-   its coverage set.
+   [FOUNDATION.md](FOUNDATION.md) §3 allowlist, with **every** module this plan
+   owns in its coverage set — `Vec`, `HostBytes`, `Text`, and `Order`. The
+   criterion previously named only `Vec` and stopped tracking the library as it
+   grew. It is also not evidence about the `@[extern]` boundary of §3.9, because
+   an `@[extern]` is not an axiom.
 3. `python Tools/DocstringAudit.py` reports no unbacked claim.
-4. `Tests/Std/VecVocabulary.lean` elaborates, including its `#guard_msgs`
-   rejection cases.
+4. **Every** fixture under `Tests/Std/` elaborates, including all `#guard_msgs`
+   rejection cases. This criterion previously named one of eight.
 5. A reviewer distinct from this agent has merged it, per
    [AGENT_REVIEW.md](AGENT_REVIEW.md).
 
@@ -782,7 +825,14 @@ Open, with the owner each is with:
    respectively. Raised with the coordinator when one becomes a blocker. §3.4,
    §5.
 9. **`Vec.insertAt`, `Vec.eraseAt`, and `Vec.splitAt` are not determined by
-   their laws**, under decision 6's replacement bar. `insertAt` and `eraseAt`
+   their laws**, under decision 6's replacement bar. `Vec.Permutation` and
+   `Vec.idxOf?` were in this list too until adversarial review found them:
+   `Permutation` promised "the same multiplicities" and no law mentioned
+   multiplicity, so a same-length-same-members relation satisfied all eight of its
+   laws; and `idxOf?` promised "first" and no law said so, which a
+   last-occurrence implementation satisfied. Both are now closed by
+   `Permutation.count_eq` and the strengthened `idxOf?_eq_some`. The remaining
+   three are the ones still open. `insertAt` and `eraseAt`
    carry only length laws that a wrong implementation satisfies, and
    `splitAt_eq` is its own definition restated. Either write the index-shifting
    laws or delete the operations until a consumer forces them — which is what
@@ -790,8 +840,14 @@ Open, with the owner each is with:
 10. **The spike surface calls both `.size` and `.length`** on `Vec`- and
    `ByteArray`-typed values — `.size` at six sites, `.length` at one — so it is
    inconsistent with itself and with [STDLIB.md](STDLIB.md) §3, which fixes
-   `length`. `Vec.size` is supplied as an abbreviation so both elaborate, but the
-   inconsistency is the spike owner's to settle. §3.6.
+   `length`. A `Vec.size` abbreviation was briefly supplied so both spellings
+   would elaborate, and then removed. Adversarial review pointed out that this is
+   the same question as §3.5's array literals, §3.7's `concat`, and open item 4's
+   `.toUTF8`, and that this plan had answered those three by declining to
+   accommodate and asking for a ruling — then answered this one the opposite way
+   without noticing. Supplying both spellings also removes all pressure to settle
+   it, since the surface can stay inconsistent forever and still compile. Leaving
+   `.size` unresolved is what forces the ruling.
 11. **[STDLIB.md](STDLIB.md) §3 lists `concat` among the composition
    operations**, and in Lean `List.concat` appends one element while flattening
    is `List.flatten`. This library ships `Vec.flatten` and leaves `concat`
