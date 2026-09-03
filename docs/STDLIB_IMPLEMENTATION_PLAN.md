@@ -246,7 +246,7 @@ this library has to a named consumer. Every `Vec` operation those files call:
 | `arguments.mapIdx fun index argument => ...` (same file) | **added by this reading**; it was missing |
 | `fields.map fun field => ...` through dot notation | present; dot notation reaches `Vec.map f v` |
 | `++` on instruction fragments | present |
-| array-literal syntax for `Vec` (seven sites) | **absent**; §3.7 |
+| array-literal syntax for `Vec` (seven sites) | **absent**; §3.5 |
 
 `Tests/Std/SpikeSurface.lean` compiles each of the first four in the shape the
 spike writes it, so "the surface supports this" is checked rather than asserted.
@@ -305,7 +305,42 @@ this section would be moot — array-literal syntax would work by construction, 
 would `#[]` and `++`. That is the strongest practical argument in that
 direction, and it is why the two are recorded as one decision rather than two.
 
-### 3.6 Exit criteria
+### 3.6 The crossing to Lean's host `ByteArray`
+
+`Grass/Std/Logical/HostBytes.lean` supplies `Vec.toHostBytes` and
+`Vec.ofHostBytes` with the connection theorems [STDLIB.md](STDLIB.md) §1 demands
+of an adapter: length by `size_toHostBytes` and `length_ofHostBytes`, order and
+byte values at every index by `getElem?_toHostBytes` and `get?_ofHostBytes`, and
+losslessness in both directions by `ofHostBytes_toHostBytes` and
+`toHostBytes_ofHostBytes`.
+
+This is not band-3 work waiting for a consumer, and the reason is worth stating
+because it looks like an exception to §1's rule. `Vec.lean` created a seam —
+`Tests/Std/VecVocabulary.lean` pins that a host `_root_.ByteArray` is rejected
+where a Grass one is required — and a seam with no sanctioned crossing is not a
+boundary but a dead end. The first author who has to hand bytes to an operating
+system will cross it regardless; the only question is whether they cross it with
+a proved adapter or with an `Array.map` in a module that does not own the
+question. Having built the wall, this library owes the door.
+
+It stops at the Lean value. An *OS buffer* — a pointer and a length handed to
+`WriteFile` — involves provenance and a pinned loan, which §5 assigns to
+`OwnedVec`'s `PinLoan`, and none of that is here.
+
+Two findings from building it, both recorded because they are about the design
+rather than the code. First, the naming collision of §3.8 stopped being
+hypothetical: `Tests/Std/HostBytes.lean` is the first module in the repository to
+mention both byte arrays at once, and a bare `ByteArray` in it is an ambiguity
+error. It is now the concrete instance of that question rather than an argument
+about one. Second, the crossing lives in the `Vec` namespace and not a
+`ByteArray` one, because `ByteArray` is an `abbrev` and dot notation on it
+resolves in `Vec`. A first draft got this wrong and the fixture caught it: the
+call worked on a value whose declared type was written `ByteArray` and failed on
+the same value reached through a type ascription. An operation that resolves
+depending on how its argument's type was spelled is worse than one with a longer
+name, so the names carry `Bytes`.
+
+### 3.7 Exit criteria
 
 S1 is complete when all of the following hold. The first four hold today.
 
@@ -320,7 +355,7 @@ S1 is complete when all of the following hold. The first four hold today.
 5. A reviewer distinct from this agent has merged it, per
    [AGENT_REVIEW.md](AGENT_REVIEW.md).
 
-### 3.7 Open: the `ByteArray` name collides with Lean's
+### 3.8 Open: the `ByteArray` name collides with Lean's
 
 [STDLIB.md](STDLIB.md) §1 fixes the name `ByteArray` for `Vec Byte`. Lean's
 prelude already has `_root_.ByteArray`. A module that opens `Grass.Std.Logical`
@@ -460,7 +495,7 @@ realization.
 **The `ByteArray` name is settled late.** Consumers written against a qualified
 `Grass.Std.Logical.ByteArray` before a rename would need editing after one. The
 mitigation is that there are no such consumers yet, which is the argument for
-ruling on §3.6 soon rather than at leisure.
+ruling on §3.8 soon rather than at leisure.
 
 ## 8. Decisions and open items
 
@@ -483,14 +518,20 @@ reader will want a reason for:
 6. Every operation carries at least one law. An operation without one does not
    remove the need to reason about it, it relocates that reasoning to
    `Vec.toList` in the consumer, which is the leak §3.2 pays for. §3.1.
+7. The crossing to Lean's host `ByteArray` is named rather than a `Coe`, so it is
+   visible at the use site, and it lives in the `Vec` namespace with `Bytes` in
+   its name because `ByteArray` is an `abbrev` and dot notation on it resolves in
+   `Vec`. §3.6.
 
 Open, with the owner each is with:
 
 1. **The `ByteArray` name collision**, with the owner of
-   [STDLIB.md](STDLIB.md). §3.7. Sharper than when it was first raised: the
-   authored spike sources write bare `ByteArray` in four of the five spikes, so
-   "keep the name and qualify at the use site" is a change to the author surface
-   and not only to library-internal code.
+   [STDLIB.md](STDLIB.md). §3.8. Twice sharper than when it was first raised.
+   The authored spike sources write bare `ByteArray` in four of the five spikes,
+   so "keep the name and qualify at the use site" is a change to the author
+   surface and not only to library-internal code. And it is no longer
+   hypothetical: `Tests/Std/HostBytes.lean` is the first module to mention both
+   byte arrays at once, and a bare `ByteArray` in it is an ambiguity error.
 2. **Whether `Vec α` should be `Array α`**, with this branch's reviewer in the
    first instance. Lean's `Array` is the same one-field structure over `List`,
    and adopting it would delete the restatement cost and settle the literal
