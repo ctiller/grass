@@ -102,7 +102,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 93
+def owedBaseline : Nat := 98
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -126,6 +126,67 @@ acquiring a citation.
 -/
 def notBehaviourBaseline : Nat := 54
 
+/--
+Classes whose instances say how a type is decided, printed or defaulted, rather
+than anything about a processor or an API.
+
+`Meta.isInstance` used to skip *every* instance, and a reviewer put a false
+Win64 ABI constant inside `instance redZoneInstance : HasRedZone Unit := ⟨128⟩`
+in an audited module and watched it disappear. An ABI fact wearing an `instance`
+is still an ABI fact; only these structural classes are exempt, and the list is
+reviewed rather than open-ended.
+-/
+def structuralClasses : List Name :=
+  [``Decidable, ``DecidableEq, ``DecidablePred, ``Repr, ``Inhabited, ``BEq,
+   ``LawfulBEq, ``ToString, ``Hashable, ``Ord, ``Nonempty, ``Subsingleton]
+
+/--
+Modules under the audited roots that model nothing external.
+
+`auditedModules` is a list, and a reviewer added `Grass/ABI/Win64/RedZone.lean`
+with three flagrantly false uncited ABI facts. The axiom audit and
+`Tools/DeclNames.lean` both named the new module -- their disk walks are real --
+but the ledger did not, so after adding the two imports those guards demanded,
+the ledger's summary came back byte-identical to baseline.
+
+The walk below closes that. Every `.lean` file under `Grass/ISA/X86`,
+`Grass/ABI` and `Grass/Platform` must appear in `auditedModules` or here, and a
+new one appears in neither, so it fails until someone decides which it is.
+
+One caveat, because it is the kind that makes a gate quietly useless. This runs
+in a `run_cmd`, and `lake build` caches the result -- adding a file elsewhere in
+the tree replays the cached run and the walk does not happen. `.github/workflows/
+library.yml` invokes this file directly with `lake env lean` rather than through
+`lake build`, which is what makes the check load-bearing; that step is not a
+convenience.
+
+The entries are the citation machinery itself and the profile that records
+citations. None models a processor or an API: a `Citation` record makes no claim
+about hardware, and `Performance.lean` is a framework with no `TimingFact` for a
+real instruction in it.
+-/
+def notModelling : List Name :=
+  [`Grass.ISA.X86.Citation, `Grass.ISA.X86.DualCitation,
+   `Grass.ISA.X86.Sources, `Grass.ISA.X86.Ledger,
+   `Grass.ISA.X86.Profile, `Grass.ISA.X86.Performance]
+
+/--
+Every Lean module found under `root` on disk, as a module name.
+
+The same walk `Tools/AxiomAudit.lean` performs, and for the same reason: a
+hand-written module list is a coverage claim nobody checks.
+-/
+partial def modulesOnDisk (root : System.FilePath) (prefix_ : Name) :
+    IO (Array Name) := do
+  let mut found : Array Name := #[]
+  for entry in (← root.readDir) do
+    let name := entry.fileName
+    if ← entry.path.isDir then
+      found := found ++ (← modulesOnDisk entry.path (prefix_ ++ Name.mkSimple name))
+    else if name.endsWith ".lean" then
+      found := found.push (prefix_ ++ Name.mkSimple (name.dropEnd 5 |>.toString))
+  return found
+
 /-- Compiler-generated names that are not authored declarations. -/
 def generatedSuffixes : List Name :=
   [`rec, `recOn, `casesOn, `below, `brecOn, `ibelow, `binductionOn, `elim,
@@ -133,13 +194,65 @@ def generatedSuffixes : List Name :=
    `ctorElimType, `ofNat, `injEq, `mk,
    `sizeOf_spec, `decEq, `repr, `default, `eq_def, `induct, `fun_cases]
 
-/-- Whether a name was produced by elaboration rather than written. -/
-def isGenerated (n : Name) : Bool :=
-  n.isInternal
-    || generatedSuffixes.any (·.isSuffixOf n)
-    || n.components.any fun c =>
-        let s := c.toString
-        s.startsWith "match_" || s.startsWith "_" || s.startsWith "eq_"
+/--
+The name a declaration is written under, with any `private` mangling removed.
+
+A `private` declaration is stored as `_private.<module>.<n>.<real name>`.
+`Name.isInternal` treats that as internal, so the decoder's five private
+helpers -- `takeByte`, `takeDisp`, `takeImm`, `takeLe32`, `takeLe64` -- were
+never counted as modeled, though each reads instruction bytes and each is
+exactly the kind of declaration this ledger exists to account for.
+
+`Tools/AxiomAudit.lean` had the same defect and the same fix.
+-/
+def userFacing (n : Name) : Name := (privateToUserName? n).getD n
+
+/--
+Whether a name was produced by elaboration rather than written.
+
+One principle, applied twice: **a compiler helper hangs off something**. The
+elaborator names what it generates after the declaration it generated it from,
+so `FrameSpec._sizeOf_1`, `Gpr.default` and `separated._f` all have a parent
+that is itself a constant. An authored declaration does not -- `_redZoneBytes`
+and `redZone.default` sit directly in a namespace, with nothing above them for
+the elaborator to have derived them from.
+
+That replaces two spelling tests a reviewer walked straight through, both in one
+file and both carrying false Win64 ABI facts into an audited module. The suffix
+test was `generatedSuffixes.any (·.isSuffixOf n)`, so `def redZone.default` and
+`def redZone.mk` were skipped for ending in words that `deriving` also uses. And
+`Name.isInternal` treats *any* component beginning with an underscore as
+internal, so `def _redZoneBytes` was skipped for its first character. The
+summary line came back byte-identical to baseline for all three.
+
+Macro scopes are kept as their own test, because those really do mean the
+elaborator made it and carry no parent to consult.
+
+This is still a heuristic about names, and the honest form would ask the
+environment for a declaration's origin. Lean does not expose that; declaration
+ranges point at the `deriving` clause for derived instances, so they do not
+separate them either. Recorded as an open obligation.
+-/
+def isGenerated (n : Name) : MetaM Bool := do
+  if n.hasMacroScopes then return true
+  match n with
+  | .str parent last =>
+      let env ← getEnv
+      let parentIsConstant := (env.find? parent).isSome
+      -- An underscore-prefixed or reserved-suffix name is a helper only when
+      -- there is a constant for it to be a helper *of*.
+      -- `match_1`, `eq_1`, `proof_1` and their `.splitter`s are elaboration
+      -- products of the declaration they hang off, and carry no author-written
+      -- name. Checked over every component, not just the last, because the
+      -- helpers nest: `f.match_1.splitter`.
+      if n.components.any fun c =>
+          ["match_", "eq_", "proof_", "sunfold", "induct_"].any (c.toString.startsWith ·)
+        then return true
+      if last.startsWith "_" || generatedSuffixes.any (·.toString == last) then
+        return parentIsConstant || (← Meta.isInstance parent)
+      return false
+  | _ => return false
+
 
 /--
 Declarations reviewed and found to carry no claim about a processor.
@@ -278,6 +391,12 @@ def owed : List Name :=
     `Grass.ISA.X86.Scale.factor,
     `Grass.ISA.X86.Rex.bare, `Grass.ISA.X86.Rex.isRexByte,
     `Grass.ISA.X86.Rex.ofByte?, `Grass.ISA.X86.rexWSet,
+    -- The decoder's private byte readers. Each says how many bytes a field
+    -- occupies and in what order, which is a statement about the encoding and
+    -- not about Grass. They were invisible until `userFacing` above stopped
+    -- `Name.isInternal` hiding them.
+    `Grass.ISA.X86.takeByte, `Grass.ISA.X86.takeDisp, `Grass.ISA.X86.takeImm,
+    `Grass.ISA.X86.takeLe32, `Grass.ISA.X86.takeLe64,
     `Grass.ISA.X86.le64, `Grass.ISA.X86.OpcodeSpec.immSizeFor,
     `Grass.ISA.X86.RmEncoding.requiredDisp, `Grass.ISA.X86.RmEncoding.requiresSib,
     `Grass.ISA.X86.dispKindFor,
@@ -303,12 +422,17 @@ def modeledDeclarations : MetaM (Array Name) := do
     let some midx := env.getModuleIdxFor? n | continue
     let some mname := env.header.moduleNames[midx.toNat]? | continue
     unless auditedModules.contains mname do continue
-    if isGenerated n then continue
+    if ← isGenerated n then continue
     if ci.isCtor || ci.isInductive || ci.isTheorem then continue
     if ← Meta.isProp ci.type then continue
+    -- An instance of a structural class says how a type is decided or printed.
+    -- An instance of anything else can carry a modeled fact; see
+    -- `structuralClasses`.
+    if ← Meta.isInstance n then
+      let cls ← Meta.isClass? ci.type
+      if cls.any structuralClasses.contains then continue
     if ← isProjectionFn n then continue
-    if ← Meta.isInstance n then continue
-    out := out.push n
+    out := out.push (userFacing n)
   return out.qsort (·.toString < ·.toString)
 
 /-- The declaration a subject is anchored to: its longest prefix that names a
@@ -357,6 +481,15 @@ run_cmd liftTermElabM do
   for m in auditedModules do
     unless env.header.moduleNames.contains m do
       logError m!"ledger audit lists {m} as audited but does not import it, so none of its declarations were checked"
+  -- And every module under the audited roots is classified, so a new file
+  -- cannot be invisible to this gate the way `RedZone.lean` was.
+  for root in [("Grass/ISA/X86", `Grass.ISA.X86), ("Grass/ABI", `Grass.ABI),
+               ("Grass/Platform", `Grass.Platform)] do
+    let onDisk ← modulesOnDisk (System.FilePath.mk root.1) root.2
+    for m in onDisk do
+      unless auditedModules.contains m || notModelling.contains m do
+        logError m!"{m} exists under {root.1} but is in neither auditedModules \
+nor notModelling, so nothing decides whether its declarations owe citations"
   let l := commonProfileLedger
   let subjects :=
     (l.commonSubjects ++ l.refinedSubjects ++ l.excludedSubjects).map
