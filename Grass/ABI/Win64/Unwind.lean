@@ -25,10 +25,41 @@ metadata that unwinds to the wrong place.
 
 The Windows unwind language describes a prologue as a list of operations from a
 fixed vocabulary — push a nonvolatile register, allocate a constant amount,
-establish a frame pointer, save a register at a constant offset. So
+establish a frame pointer, save a register or an XMM register at a constant
+offset, and push a machine frame. `UnwindOp` models the **first three**. So
 `UnwindOp.Encodable` rejects a stack adjustment that is not a constant multiple
 of eight and a push of a volatile register, and a prologue interleaving other
 work between the pushes has no `Prologue` value at all.
+
+## How much of the language that is, measured
+
+An earlier version of this paragraph listed "save a register at a constant
+offset" as part of the vocabulary this module models, and there is no
+constructor for it. A reviewer measured what the omission costs, decoding the
+unwind codes out of `.xdata` for 24 C functions compiled with the MSVC on this
+machine:
+
+* at `/O2`: 89 unwind operations, of which **36 (40%) have no constructor
+  here** — 24 `UWOP_SAVE_XMM128` and 12 `UWOP_SAVE_NONVOL`. **13 of the 24
+  functions (54%) have no `Prologue` value at all.**
+* at `/Od`: 29 operations, all four of them modelled, 1 function of 25 with no
+  `Prologue` value.
+
+`UWOP_SAVE_NONVOL` is not exotic: MSVC's standard optimised idiom is
+`mov [rsp+32], rbx` into the caller's shadow space rather than `push rbx`.
+`UWOP_SAVE_XMM128` appears in any function holding a `double` across a call,
+because XMM6–XMM15 are nonvolatile on Win64 and `Grass/ABI/Win64/Convention.lean`
+models general-purpose registers only.
+
+Also real and unmodelled: `UWOP_ALLOC_LARGE` with `OpInfo = 1`, the three-slot
+form carrying an unscaled 32-bit size. `char buf[600000]` produces it at both
+optimisation levels, and `UnwindOp.LargeAllocEncodable` caps at 524280, so this
+profile refuses it.
+
+None of that is unsoundness — every one of these is a refusal, and refusing is
+what this module is for. It is a statement about *reach*: the four modelled
+operations describe under half of what the platform's own compiler emits at
+`/O2`, and a prologue this profile accepts is a narrow thing.
 
 Those prologues are perfectly legal machine code and run correctly. What they
 cannot have is *derived* unwind data, and `Prologue.Encodable` is the predicate
@@ -127,16 +158,29 @@ encoding and not a register at all: `allocSmall` stores `n/8 - 1`, and
 `allocLarge` stores 0 because its size goes in a following slot.
 
 For `setFramePointer` it is the frame register's number, and that is a recorded
-disagreement rather than a derivation. Microsoft's description of
-`UWOP_SET_FPREG` says the operation info field is reserved and should not be
-used, which reads as licence to write anything, including zero. `ml64` writes
-the register: `.setframe r13, 16` produces the code byte `D3`, not `03`, as
-`Tools/win64-unwind-differential.py` measured on this machine. Grass follows the
-vendor's generator over the vendor's prose, because matching it byte-for-byte
-makes the differential exact -- and `docs/VALIDATION.md` section 2 asks for such
-a conflict to be preserved rather than smoothed over, which is what this
-paragraph is. Nothing rests on the choice: the unwinder takes the register from
-`FrameRegister`. -/
+disagreement rather than a derivation -- a three-way one, which an earlier
+version of this paragraph recorded only two thirds of.
+
+Microsoft's description of `UWOP_SET_FPREG` says the operation info field is
+reserved and should not be used, which reads as licence to write anything.
+Microsoft then ships two generators that write different things. `ml64` writes
+the **register**: `.setframe r13, 16` gives the code byte `D3`. `cl.exe`
+writes the **offset** in the same position `opInfo` puts the register: a
+function whose frame is established by `lea rbp, [rsp+96]` gets frame register
+5 and frame offset 6, and its code byte carries 6 -- decisive, because the two
+differ, so the byte cannot be the register.
+
+`opInfo` below writes the register, so it reproduces one generator and not the
+other. That is the honest scope of
+`Tools/win64-unwind-differential.py`'s exactness, and the earlier claim that
+"matching the vendor's generator makes the differential exact" was true only
+against the generator this corpus happens to use. `docs/VALIDATION.md` section 2
+asks for the disagreement to be preserved rather than smoothed over; preserving
+one half of it and calling the matter settled is what a reviewer caught.
+
+Nothing rests on the choice: the unwinder takes the register from
+`FrameRegister`, which is why two vendor tools can disagree here without either
+being wrong. -/
 def opInfo : UnwindOp → BitVec 4
   | .pushNonvolatile r => regNibble r
   | .allocSmall n => BitVec.ofNat 4 (n / 8 - 1)
