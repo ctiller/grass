@@ -91,15 +91,18 @@ pub enum Command {
     /// neither can catch `main` having moved, or the candidate having been
     /// hand-tampered with, in the real time that elapses between publishing
     /// the authorization and actually pushing it. Forces a fresh `--remote`
-    /// probe for the bus-state half (a blocking issue or finding published
-    /// by someone else in that same elapsed window is exactly the kind of
-    /// thing this gate exists to catch -- round-6 adversarial review,
-    /// reproduced live: an unsynced checkout reported `ready: true` past a
-    /// blocking issue opened concurrently on another host); the Git half
-    /// still reads `main` as this checkout already has it locally, like
-    /// `prepare-merge` -- the reviewer is expected to have already fetched
-    /// `main` themselves (per AGENT_REVIEW.md section 7 step 1). Prints the
-    /// exact candidate object id to push on success.
+    /// probe for both halves: the bus-state half (a blocking issue or
+    /// finding published by someone else in that same elapsed window is
+    /// exactly the kind of thing this gate exists to catch -- round-6
+    /// adversarial review, reproduced live: an unsynced checkout reported
+    /// `ready: true` past a blocking issue opened concurrently on another
+    /// host), and the Git half (`refs/heads/main` is fetched fresh too, and
+    /// the authorized candidate's own tag is fetched on demand if this
+    /// checkout never itself ran `prepare-merge` -- round-7 adversarial
+    /// review: this gate's entire job is catching exactly this kind of
+    /// concurrent change, so trusting stale local state for either half
+    /// defeats it the same way). Prints the exact candidate object id to
+    /// push on success.
     MergeReady(MergeReadyArgs),
     /// AGENT_REVIEW.md sections 9/11/12 (fixture 10): a read-only
     /// correlation-and-report audit over post-bootstrap first-parent `main`
@@ -306,7 +309,11 @@ pub struct AuditMainArgs {
     /// a commit whose `review.merged` receipt genuinely reached the remote,
     /// but hasn't reached this checkout yet, reads as "missing" (round-7
     /// adversarial review). Currency-sensitive callers should set this
-    /// (AGENT_COORDINATION_EVOLUTION.md section 2.4).
+    /// (AGENT_COORDINATION_EVOLUTION.md section 2.4). Only covers the *bus*
+    /// half of the audit: `--to`/`refs/heads/main` is still read from this
+    /// checkout's own local git state either way -- fetch it yourself first
+    /// if a current-as-of-remote-probe answer for the audited range itself
+    /// matters (round-8 adversarial review).
     #[arg(long)]
     sync: bool,
 }

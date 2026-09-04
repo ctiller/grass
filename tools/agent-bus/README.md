@@ -84,6 +84,11 @@ structurally references.
   live Git state (has `main` moved, does the candidate still match, are all
   checks/findings/blocking issues still clear) immediately before actually
   pushing the candidate to `main`.
+- `audit-main` -- AGENT_REVIEW.md sections 9/11/12, the post-hoc bypass
+  detector: walks post-bootstrap first-parent `main` history and reports
+  every commit that doesn't correlate exactly with a real authorization and
+  merge receipt -- the only mechanism that can catch a hand-pushed or
+  otherwise out-of-protocol commit after it has already landed.
 
 Every command whose output depends on a bus snapshot states the freshness
 envelope AGENT_COORDINATION_EVOLUTION.md section 2.4 requires (`snapshot_
@@ -96,8 +101,10 @@ reading a cached local cut.
 Compared to the protocol docs and the shipped v1 tool, the following do not
 exist in v2 yet:
 
-- `audit-main` / `reconcile` -- detecting a `review.merged` receipt whose
-  fields don't actually match what landed on `main`.
+- A dedicated `reconcile` command -- the section 11 recovery path is
+  reachable today only through generic `submit --kind review.merge_
+  reconciled`, gated by `coordinator::verify_review_merge_reconciled`'s
+  live-Git recheck.
 - `validate` -- a standalone structural/semantic validation command
   independent of a live command's own snapshot read.
 - Dedicated `review nominate/take/authorize/merged`, `scope set`,
