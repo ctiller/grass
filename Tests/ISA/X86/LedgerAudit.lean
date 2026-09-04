@@ -104,6 +104,28 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
 def owedBaseline : Nat := 93
 
+/--
+The number of entries `notBehaviour` was last reviewed at.
+
+`owedBaseline` alone ratchets the debt and not the permanent waiver beside it,
+so moving an entry from `owed` to `notBehaviour` satisfies it. A reviewer moved
+all ninety-three -- `opcodeTable`, `decodeInsn`, `le64`, `encodeMem`, every
+Win64 ABI constant -- and this audit reported "0 owed, 145 reviewed as carrying
+no external behaviour" and built green. The whole citation debt discharged to
+zero without a citation, with a summary line reading better than the truth.
+
+The first attempt at a fix ratcheted the *sum* of the two lists, and did not
+work: the sum is exactly invariant under the move it was meant to stop.
+Reclassifying `opcodeTable` still passed. Ratcheting `notBehaviour` on its own
+is what catches it, and it is the obviously right thing in hindsight --
+`notBehaviour` is a *permanent* claim, so it has more reason to be ratcheted
+than `owed` does, not less.
+
+Both lists are now capped separately. A declaration can leave either only by
+acquiring a citation.
+-/
+def notBehaviourBaseline : Nat := 54
+
 /-- Compiler-generated names that are not authored declarations. -/
 def generatedSuffixes : List Name :=
   [`rec, `recOn, `casesOn, `below, `brecOn, `ibelow, `binductionOn, `elim,
@@ -386,6 +408,13 @@ notBehaviour; remove it from that list"
     logError m!"owed has {owed.length} entries, above the reviewed baseline of \
 {owedBaseline}. Debt may only shrink; if a genuinely new modeled declaration \
 owes a citation, raise owedBaseline in the same reviewed edit."
+  if notBehaviour.length > notBehaviourBaseline then
+    logError m!"notBehaviour has {notBehaviour.length} entries, above the \
+reviewed baseline of {notBehaviourBaseline}. This list is a permanent claim \
+that a declaration carries no external behaviour, so it is ratcheted for the \
+same reason owed is and more strongly: reclassifying a declaration out of owed \
+discharges debt without a citation. Raise notBehaviourBaseline in the same \
+reviewed edit if a genuinely new declaration belongs here."
 
   -- Gate C: a work list, not a violation. `CommonBasis.agreed` can no longer be
   -- written without confirmed anchors, so what is left here is which rules are
