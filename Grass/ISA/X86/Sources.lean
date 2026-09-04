@@ -165,7 +165,8 @@ def Vendor.document : Vendor → SourceDocument
 
 The volumes of each manual that this profile cites, as `Anchor.volume` strings.
 Named rather than spelled at each citation so that a typo cannot silently
-produce an anchor into a volume that does not exist.
+produce an anchor into a volume that does not exist: `Anchor.volume` takes a
+`String`, so `Volume.intelBasic` is what makes the spelling checkable.
 -/
 
 namespace Volume

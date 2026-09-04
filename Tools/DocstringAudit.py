@@ -65,11 +65,11 @@ CLAIM_WORDS = (
 # A sentence that says a property is aspirational, absent, or owed elsewhere is
 # not making a mechanised claim, and the rule explicitly permits it.
 HEDGES = (
-    "intended", "not enforced", "does not", "cannot be made", "owes", "owed",
-    "open obligation", "would", "used to", "an earlier", "M2", "M3", "M4", "M5",
+    "intended", "not enforced", "cannot be made", "owes", "owed",
+    "open obligation", "used to", "an earlier", "M2", "M3", "M4", "M5",
     "M6", "M7", "M8", "M9", "M10", "no arrangement", "is not the check",
     "not by itself", "on its own", "nothing here", "cannot tell", "is not that",
-    "not something", "deliberately", "no way to", "unrepresentable",
+    "not something", "no way to", "unrepresentable",
     # "X cannot do Y" is a statement of limitation, which is the honest
     # alternative the rule asks for rather than the drift it targets.
     "cannot state", "cannot be demonstrated", "cannot read", "cannot fault",
@@ -103,6 +103,29 @@ HEDGE_RE = re.compile(
         for h in HEDGES
     )
 )
+
+# Which unresolved names are worth reporting.
+#
+# Requiring *every* backticked identifier to resolve over-fires: `RAX`,
+# `INC`, `REX.X`, `SizeOfProlog`, `UWOP_SAVE_XMM128` and `cl.exe` are correct
+# technical writing, and so are `w.bits` and `d.space`, which name a binder's
+# field. Sixteen such sentences fail that rule and none of them is drift.
+#
+# Requiring only that *something* resolves is what a reviewer defeated: naming
+# the function a sentence is about -- normal, good writing -- masks an invented
+# theorem name in the same sentence. "`encode` ensures every address has one
+# encoding, as proved by `encodeMem_is_canonical_and_injective_over_all_addresses`"
+# passed, while the same sentence without `encode` failed.
+#
+# So this matches the shape of a Lean declaration name rather than the shape of
+# an identifier: lowercase-initial with at least one underscore-separated part,
+# which is the convention every theorem in this repository follows and which
+# none of the false positives above has. It is a heuristic and is stated as one.
+# It does not catch an invented `camelCase` name, and an author who wants to
+# fabricate enforcement can still do it; what it catches is the form that
+# fabrication actually takes, because a fabricated *theorem* is what a claim
+# cites.
+LEAN_STYLE_NAME = re.compile(r"^[a-z][A-Za-z0-9']*(_[A-Za-z0-9'][A-Za-z0-9']*)+$")
 
 # A backticked identifier is the "names the enforcing type or theorem" part.
 IDENT = re.compile(r"`([A-Za-z_][A-Za-z0-9_.?!']*)`")
@@ -182,7 +205,20 @@ def check(path: Path, known: set[str]) -> list[str]:
                 if not NOT_IDENT.match(ident)
             ]
             resolved = [ident for ident in named if ident in known]
-            if named and not resolved:
+            # An unresolved name that *looks like a Lean declaration* is the
+            # attack; an unresolved `RAX` or `INC` is ordinary prose. See
+            # LEAN_STYLE_NAME.
+            invented = [
+                ident for ident in named
+                if ident not in known and LEAN_STYLE_NAME.match(ident)
+            ]
+            if invented:
+                findings.append(
+                    f"{path.as_posix()}:{line}: claim names "
+                    f"{invented}, which look like declarations and are not in "
+                    f"the build: {sentence!r}"
+                )
+            elif named and not resolved:
                 findings.append(
                     f"{path.as_posix()}:{line}: claim names "
                     f"{named} but the build knows no such declaration: "

@@ -261,9 +261,10 @@ deriving DecidableEq, Repr, Inhabited
 The responses the cited contract permits for a request.
 
 A success may report anything from zero up to the requested count inclusive. Any
-failure code is permitted: the documentation does not enumerate the codes
-`WriteFile` may return for an arbitrary handle, so restricting them would be a
-narrowing this profile cannot cite.
+failure code is permitted, which is `Allowed`'s over-approximation on the
+`failure` branch: the documentation does not enumerate the codes the API may
+return for an arbitrary handle, so restricting them would be a narrowing this
+profile cannot cite.
 -/
 def Allowed (q : WriteRequest) (r : WriteResponse) : Prop :=
   match r with
