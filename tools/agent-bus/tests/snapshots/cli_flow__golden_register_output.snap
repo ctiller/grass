@@ -1,0 +1,27 @@
+---
+source: tests/cli_flow.rs
+expression: out
+---
+{
+  "causal_frontier": {
+    "bob": "[hash]",
+    "coord1": "[hash]"
+  },
+  "freshness": "cached",
+  "last_synced": null,
+  "outbox_rejected": [],
+  "published": {
+    "refs/heads/agent-events/bob": "[hash]",
+    "refs/heads/agent-registry": "[hash]"
+  },
+  "published_events": [
+    "bob:0"
+  ],
+  "registry_epoch": "[hash]",
+  "rejected": [],
+  "roster_epoch": "[hash]",
+  "snapshot_receipt": {
+    "bob": "[hash]",
+    "coord1": "[hash]"
+  }
+}

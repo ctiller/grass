@@ -1,0 +1,24 @@
+---
+source: tests/cli_flow.rs
+expression: out
+---
+{
+  "agent": "coord1",
+  "causal_frontier": {
+    "coord1": "[hash]"
+  },
+  "freshness": "cached",
+  "last_synced": null,
+  "pending": [
+    {
+      "kind": "agent.status",
+      "outbox_path": "[outbox_path]",
+      "urgent": false
+    }
+  ],
+  "rejected": [],
+  "roster_epoch": "[hash]",
+  "snapshot_receipt": {
+    "coord1": "[hash]"
+  }
+}

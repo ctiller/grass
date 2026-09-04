@@ -1,0 +1,26 @@
+---
+source: tests/cli_flow.rs
+expression: out
+---
+{
+  "agents": [
+    {
+      "agent": "coord1",
+      "coordinator_custody_epoch": 0,
+      "host": "host1",
+      "next_seq": 1,
+      "role": "coordinator",
+      "status": "active",
+      "stream_tip": "[hash]"
+    }
+  ],
+  "causal_frontier": {
+    "coord1": "[hash]"
+  },
+  "freshness": "cached",
+  "last_synced": null,
+  "roster_epoch": "[hash]",
+  "snapshot_receipt": {
+    "coord1": "[hash]"
+  }
+}
