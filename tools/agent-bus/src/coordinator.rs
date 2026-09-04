@@ -207,6 +207,15 @@ pub fn drain_outbox(
                 continue;
             }
         }
+        if let Err(e) = verify_object_ids_resolve(repo, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
+        }
         let observed = build_frontier(
             repo,
             &epoch,
@@ -593,6 +602,45 @@ fn verify_review_merge_reconciled(
              current main -- reconcile only records a merge that has genuinely already landed",
             d.main_commit, d.previous_main
         )));
+    }
+    Ok(())
+}
+
+/// Rejects a well-formed-but-nonexistent object id in any of the three
+/// fields that carry one as a plain, unvalidated `ObjectId`:
+/// `agent.registered`'s `product_base`, `scope.set`'s `base_code_commit`,
+/// and `issue.opened`'s `code_commit`. `ObjectId::parse` only checks the
+/// 40/64-hex-char *format* -- ported from the shipped version-one helper's
+/// identical `register`/`scope_set`/`issue_open` checks (`gitrepo::
+/// rev_parse_opt`), a parity gap discovered while preparing this crate's
+/// own nomination: v1 gained both checks (`g-design:42`, `c-agent:15`)
+/// after this branch had already forked, and nothing in `apply.rs` can
+/// catch it -- it deliberately never touches git (see its own module doc).
+/// `product_base` is the highest-stakes of the three: `agent.registered` is
+/// sequence zero, immutable, never amendable, so a `product_base` that only
+/// *looks* like a valid object id would be permanently unrecoverable.
+/// `base_code_commit`/`code_commit` are lower-stakes (correctable by a
+/// follow-up `scope.set`, or merely evidence rather than a binding field
+/// respectively) but the same silent-typo failure mode applies to both.
+fn verify_object_ids_resolve(repo: &Path, data: &crate::events::EventData) -> AbResult<()> {
+    let candidates: Vec<(&str, &crate::scalars::ObjectId)> = match data {
+        crate::events::EventData::AgentRegistered(d) => {
+            d.product_base.iter().map(|b| ("product_base", b)).collect()
+        }
+        crate::events::EventData::ScopeSet(d) => {
+            vec![("base_code_commit", &d.base_code_commit)]
+        }
+        crate::events::EventData::IssueOpened(d) => {
+            d.code_commit.iter().map(|c| ("code_commit", c)).collect()
+        }
+        _ => vec![],
+    };
+    for (field, id) in candidates {
+        if crate::gitrepo::rev_parse_opt(repo, id.as_str())?.is_none() {
+            return Err(invalid(format!(
+                "{field} {id} does not resolve to an object in this repository"
+            )));
+        }
     }
     Ok(())
 }
@@ -1028,6 +1076,203 @@ mod tests {
             crate::sync::cached_snapshot(repo.path(), repo.path(), &repo.path().join("_snap"))
                 .unwrap();
         assert_eq!(snap.state.agents[&coord1].next_seq, 3);
+    }
+
+    /// Ported from the shipped version-one helper's identical `register`/
+    /// `scope_set`/`issue_open` checks (`g-design:42`/`c-agent:15` on the
+    /// live bus): a well-formed-but-nonexistent object id in `agent.
+    /// registered.product_base`, `scope.set.base_code_commit`, or `issue.
+    /// opened.code_commit` must be rejected here, since `apply.rs` never
+    /// touches git and so cannot catch it -- v1 gained both checks after
+    /// this v2 branch had already forked, a parity gap discovered while
+    /// preparing this crate's own bus nomination (see `verify_object_ids_
+    /// resolve`'s own doc comment).
+    #[test]
+    fn drain_outbox_rejects_a_well_formed_but_nonexistent_product_base() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        let (_config, epoch, _commit) = crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+            &repo.path().join("_genesis_wt"),
+        )
+        .unwrap();
+        let alice = a("alice");
+        let mut members = epoch.active_members.clone();
+        members.insert(
+            alice.clone(),
+            crate::registry::MemberBinding {
+                role: Role::Implementor,
+                host: short("host1"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        crate::registry::propose_transition(
+            repo.path(),
+            &epoch,
+            members,
+            &repo.path().join("_transition_wt"),
+        )
+        .unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "alice-reg",
+            &Candidate::new(
+                &alice,
+                &EventData::AgentRegistered(crate::events::AgentRegistered {
+                    display_name: short("Alice"),
+                    primary_role: Role::Implementor,
+                    purpose: text("x"),
+                    product_base: Some(ObjectId::parse("f".repeat(40)).unwrap()),
+                    product_branch: None,
+                    provider: None,
+                    model: None,
+                }),
+                vec![],
+            ),
+        )
+        .unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &alice,
+            &short("host1"),
+            0,
+            &repo.path().join("_wt_alice"),
+            "origin",
+        )
+        .unwrap();
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0].reason.contains("product_base")
+                && drained.rejected[0].reason.contains("does not resolve"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    #[test]
+    fn drain_outbox_rejects_a_well_formed_but_nonexistent_base_code_commit() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+            &repo.path().join("_genesis_wt"),
+        )
+        .unwrap();
+
+        crate::outbox::submit(
+            repo.path(),
+            "scope-1",
+            &Candidate::new(
+                &coord1,
+                &EventData::ScopeSet(crate::events::ScopeSet {
+                    base_code_commit: ObjectId::parse("f".repeat(40)).unwrap(),
+                    exclusive: crate::scalars::StringSet::default(),
+                    shared: crate::scalars::StringSet::default(),
+                    exports: crate::scalars::StringSet::default(),
+                    depends_on: vec![],
+                    note: text("x"),
+                }),
+                vec![],
+            ),
+        )
+        .unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            &repo.path().join("_wt"),
+            "origin",
+        )
+        .unwrap();
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0].reason.contains("base_code_commit")
+                && drained.rejected[0].reason.contains("does not resolve"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    #[test]
+    fn drain_outbox_rejects_a_well_formed_but_nonexistent_issue_code_commit() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+            &repo.path().join("_genesis_wt"),
+        )
+        .unwrap();
+
+        crate::outbox::submit(
+            repo.path(),
+            "issue-1",
+            &Candidate::new(
+                &coord1,
+                &EventData::IssueOpened(crate::events::IssueOpened {
+                    target: coord1.clone(),
+                    issue_kind: crate::events::IssueKind::Bug,
+                    severity: crate::common::Priority::Normal,
+                    summary: text("s"),
+                    code_commit: Some(ObjectId::parse("f".repeat(40)).unwrap()),
+                    locations: vec![],
+                    expected: None,
+                    observed_behavior: None,
+                    reproduction: vec![],
+                    blocks: crate::scalars::StringSet::default(),
+                    evidence: crate::scalars::StringSet::default(),
+                }),
+                vec![],
+            ),
+        )
+        .unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            &repo.path().join("_wt"),
+            "origin",
+        )
+        .unwrap();
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0].reason.contains("code_commit")
+                && drained.rejected[0].reason.contains("does not resolve"),
+            "{}",
+            drained.rejected[0].reason
+        );
     }
 
     /// Gate 17 (AGENT_COORDINATION_EVOLUTION.md section 2.4): a
