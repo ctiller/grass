@@ -94,6 +94,24 @@ def volatility : Gpr → Volatility
   | .r14 => .nonvolatile
   | .r15 => .nonvolatile
 
+/-!
+### What this table does not cover
+
+General-purpose registers only. XMM6-XMM15 are nonvolatile on Win64 and MSVC
+saves them in ordinary mixed integer/float code -- a reviewer found 24
+`UWOP_SAVE_XMM128` codes across 24 optimised C functions, and
+`int mixed(int, double, int, double)` emits `movaps [rsp+48], xmm6`. Nothing
+here names the XMM class, `MXCSR`, the x87 control word, or the direction-flag
+rule, and `docs/PLATFORM_ABI.md` section 3's "omitting a permitted behavior is
+unsound" applies to a caller reasoning from this table about a callee that
+touches them.
+
+That is an open obligation rather than a claim of coverage. It is the same gap
+`Grass.ABI.Win64.UnwindOp` measures from the other side: its four constructors
+have no `UWOP_SAVE_XMM128`, and that omission accounts for most of what this
+profile cannot describe.
+-/
+
 /-- The registers a call may destroy. -/
 def volatileRegisters : List Gpr := Gpr.all.filter (fun r => volatility r == .volatile)
 

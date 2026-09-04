@@ -32,7 +32,7 @@ used once by hand while working out the field orders, and the paragraph
 described that session rather than the check. A reviewer caught it.
 
 The distinction matters because it changes what is covered. `UNWIND_INFO` for
-the four operations this profile models is covered, on 50 prologues.
+the four operations this profile models is covered, on 52 prologues.
 `RuntimeFunction.toBytes`, `PdataSection.toBytes`, `SearchablePdata.toBytes`,
 `UnwindTail.flags`, `UnwindTail.handlerRva` and `UnwindTail.toBytes` are covered
 by nothing: every corpus row uses `.noHandler` and none emits `.pdata`. A
@@ -724,6 +724,26 @@ def Nonempty (f : RuntimeFunction) : Prop := f.begin_.ult f.end_ = true
 instance (f : RuntimeFunction) : Decidable f.Nonempty :=
   inferInstanceAs (Decidable (_ = true))
 
+/--
+The entry points somewhere an `UNWIND_INFO` could be.
+
+`unwindInfo` was unconstrained, which a reviewer noted is the critique this
+module makes of the old `PdataSection.WellFormed` applied one level in: a
+condition on the table said nothing about what its entries point at. Both
+excluded values are impossible in a real image rather than merely unlikely.
+
+RVA 0 is the DOS header, so no `UNWIND_INFO` is ever there -- and 0 is what an
+uninitialised or unrelocated field holds, which is the realistic way to get it.
+An RVA inside the function's own range is impossible because `.pdata` and
+`.xdata` are sections distinct from `.text`; an entry pointing there would have
+the unwinder read instruction bytes as a header.
+-/
+def PointsOutside (f : RuntimeFunction) : Prop :=
+  f.unwindInfo ≠ 0 ∧ ¬ (f.begin_.ule f.unwindInfo = true ∧ f.unwindInfo.ult f.end_ = true)
+
+instance (f : RuntimeFunction) : Decidable f.PointsOutside :=
+  inferInstanceAs (Decidable (_ ∧ _))
+
 end RuntimeFunction
 
 /--
@@ -775,10 +795,20 @@ rule out the degenerate entry that matches no address at all. Ascending starts
 follow rather than being assumed -- see `WellFormed.ascends`.
 -/
 def WellFormed (s : PdataSection) : Prop :=
-  Separated s.functions ∧ ∀ f ∈ s.functions, f.Nonempty
+  Separated s.functions ∧ (∀ f ∈ s.functions, f.Nonempty) ∧
+    ∀ f ∈ s.functions, f.PointsOutside
 
 instance (s : PdataSection) : Decidable s.WellFormed :=
-  inferInstanceAs (Decidable (_ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+
+/-- An entry whose unwind information is at RVA 0, or inside the function it
+describes, is refused. Both are the reviewer's cases. -/
+theorem bad_unwindInfo_refused :
+    ¬ (PdataSection.mk
+        [{ begin_ := 0x1000, end_ := 0x1020, unwindInfo := 0 }]).WellFormed ∧
+      ¬ (PdataSection.mk
+        [{ begin_ := 0x1000, end_ := 0x1020, unwindInfo := 0x1008 }]).WellFormed := by
+  constructor <;> decide
 
 private theorem ascends_of_separated :
     ∀ l : List RuntimeFunction, Separated l → (∀ f ∈ l, f.Nonempty) →
@@ -808,7 +838,7 @@ one.
 -/
 theorem WellFormed.ascends {s : PdataSection} (h : s.WellFormed) :
     Ascends (s.functions.map RuntimeFunction.begin_) :=
-  ascends_of_separated s.functions h.1 h.2
+  ascends_of_separated s.functions h.1 h.2.1
 
 /-- The section bytes. -/
 def toBytes (s : PdataSection) : ByteSeq :=
@@ -830,8 +860,9 @@ invariant survives the recursion the search performs. -/
 theorem WellFormed.tail {f : RuntimeFunction} {rest : List RuntimeFunction}
     (h : (PdataSection.mk (f :: rest)).WellFormed) :
     (PdataSection.mk rest).WellFormed := by
-  obtain ⟨hsep, hne⟩ := h
-  refine ⟨?_, fun g hg => hne g (List.mem_cons_of_mem _ hg)⟩
+  obtain ⟨hsep, hne, hpt⟩ := h
+  refine ⟨?_, fun g hg => hne g (List.mem_cons_of_mem _ hg),
+    fun g hg => hpt g (List.mem_cons_of_mem _ hg)⟩
   match rest with
   | [] => exact rfl
   | g :: more =>

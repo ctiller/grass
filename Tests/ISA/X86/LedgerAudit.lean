@@ -140,6 +140,7 @@ def notBehaviour : List Name :=
     `Grass.ABI.Win64.Prologue.establishesFramePointer,
     `Grass.ABI.Win64.Prologue.frameSpecIs,
     `Grass.ABI.Win64.RuntimeFunction.Nonempty,
+    `Grass.ABI.Win64.RuntimeFunction.PointsOutside,
     `Grass.ABI.Win64.volatileRegisters, `Grass.ABI.Win64.nonvolatileRegisters,
     `Grass.ABI.Win64.rspAfterPrologue,
     -- Fixtures: Spike 1's prologue and a frame-pointer example, which are
