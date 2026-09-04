@@ -144,9 +144,84 @@ theorem handle_distinguishable {v : BitVec 64} (h : (handle v).WellFormed) :
       (handle v).returnValue ≠ (invalid : GetStdHandleResult).returnValue :=
   ⟨h.1, h.2⟩
 
+/--
+The three results `handle 0` collides with, kept as theorems.
+
+`WellFormed` was a predicate nobody had to satisfy: `handle 0` is freely
+constructible, `handle_distinguishable` takes well-formedness as a hypothesis,
+and nothing carried it. A reviewer made the point that this is the same defect
+`Grass.ABI.Win64.SearchablePdata` was introduced to fix in the sibling module,
+and that the fix pattern was already in the tree. `UsableHandle` below is it.
+-/
+theorem handle_zero_collides_with_null :
+    (handle 0).returnValue = (null : GetStdHandleResult).returnValue := rfl
+
+/-- And the other sentinel collides the same way. -/
+theorem handle_invalid_collides :
+    (handle invalidHandleValue).returnValue
+      = (invalid : GetStdHandleResult).returnValue := rfl
+
 end GetStdHandleResult
 
-/-! ## WriteFile -/
+/--
+A `GetStdHandle` result carrying the proof that a program can act on it.
+
+`GetStdHandleResult.WellFormed` states the condition and nothing required it, so
+`handle 0` -- indistinguishable from `null` by the only thing assembly can test,
+its return value -- was as constructible as any other result. This is the shape
+`Grass.ABI.Win64.SearchablePdata` uses: the obligation is a field, so the value
+cannot exist without it, and `mk?` discharges it for a caller with a concrete
+return value.
+-/
+structure UsableHandle where
+  /-- The result. -/
+  result : GetStdHandleResult
+  /-- It is distinguishable from both sentinels. -/
+  wellFormed : result.WellFormed
+
+namespace UsableHandle
+
+/-- Build a usable handle from a returned value, or refuse. -/
+def mk? (v : BitVec 64) : Option UsableHandle :=
+  if h : (GetStdHandleResult.handle v).WellFormed then some ⟨_, h⟩ else none
+
+/-- `mk?` succeeds exactly on values distinguishable from both sentinels. -/
+theorem mk?_isSome_iff (v : BitVec 64) :
+    (mk? v).isSome ↔ (GetStdHandleResult.handle v).WellFormed := by
+  unfold mk?
+  by_cases h : (GetStdHandleResult.handle v).WellFormed
+  case pos => rw [dif_pos h]; simp [h]
+  case neg => rw [dif_neg h]; simp [h]
+
+/-- Neither sentinel value yields a usable handle, so a caller that went
+through `mk?` cannot be holding one. -/
+theorem sentinels_refused :
+    mk? 0 = none ∧ mk? GetStdHandleResult.invalidHandleValue = none := by
+  constructor <;> decide
+
+end UsableHandle
+
+/-!
+## What this module does not model
+
+`docs/PLATFORM_ABI.md` §2 asks each API operation to declare which responses are
+permitted, and only `WriteFile` has one here: `Allowed`, with `writeAdequate`
+and `excess_not_allowed` around it. A reviewer pointed out that `GetStdHandle`
+and process exit have no such relation at all -- nothing in this module says
+which results are permitted for which `StdHandleId`, so the too-narrow and
+too-wide analysis performed for `WriteFile` is simply absent for the other two
+thirds of the surface. That is an open obligation, not a claim that any result
+is permitted.
+
+`StdHandleId.value` is likewise pinned only by `value_injective`, which says the
+three identifiers are mutually distinct and nothing about which is which. A
+consistent shift of all three -- input to -11, output to -12, error to -13 --
+satisfies every theorem here and every gate in the tree; the reviewer checked.
+The constants are right, and the reason they are right is that they were read
+off the SDK, not that anything mechanical would notice if they were not.
+
+## WriteFile
+-/
 
 /--
 A `WriteFile` request, in the part of its input domain this profile covers.
