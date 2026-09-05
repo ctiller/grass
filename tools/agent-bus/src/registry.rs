@@ -246,11 +246,7 @@ pub fn propose_custody_succession(
         ))
     })?;
     let proposer_is_standby = binding.standby.as_ref() == Some(proposer);
-    let proposer_is_a_coordinator = expected_parent
-        .active_members
-        .get(proposer)
-        .is_some_and(|b| b.role == Role::Coordinator);
-    if !proposer_is_standby && !proposer_is_a_coordinator {
+    if !proposer_is_standby && !is_coordinator(expected_parent, proposer) {
         return Err(invalid(format!(
             "{proposer} is not authorized to propose succession for {target}: not its \
              pre-authorized standby and not a coordinator in the current epoch"
@@ -266,6 +262,98 @@ pub fn propose_custody_succession(
             standby: binding.standby.clone(),
         },
     );
+    propose_transition(repo, expected_parent, members, worktree)
+}
+
+/// Whether `agent` holds `Role::Coordinator` in `epoch` -- the "an
+/// authorized coordinator" half of section 2.3's authorization vocabulary,
+/// shared by [`propose_custody_succession`] and [`propose_host_rebind`] so
+/// the two can never drift apart into two subtly different notions of
+/// coordinator authority.
+fn is_coordinator(epoch: &RosterEpoch, agent: &Agent) -> bool {
+    epoch
+        .active_members
+        .get(agent)
+        .is_some_and(|b| b.role == Role::Coordinator)
+}
+
+/// Relabels the `host` of one or more active members in a *single* epoch
+/// transition, changing nothing else about any binding.
+///
+/// This exists because [`propose_custody_succession`] is the wrong tool for
+/// a pure relabel, even though it is the only other thing that writes
+/// `host`. Succession deliberately (and correctly, for its own purpose)
+/// bumps `coordinator_custody_epoch`, which durably records a failover
+/// handover in the registry's permanent history; its CLI caller then also
+/// drains and publishes the target's outbox. A caller whose only intent is
+/// "this identity's `host` label was a placeholder, give it the real value"
+/// wants none of that: no fabricated handover in the record, no surprise
+/// publication of whatever happened to be queued, and -- when several
+/// identities are being relabeled at once -- no window in which the fleet is
+/// half-relabeled because one of N sequential epoch transitions failed, or
+/// in which an unrelated concurrent registration invalidates the rest of an
+/// in-progress loop.
+///
+/// So: exactly one `propose_transition` covering every named identity,
+/// all-or-nothing. `role`, `standby`, and `coordinator_custody_epoch` are
+/// carried through verbatim for every binding, and any identity not named in
+/// `new_hosts` is untouched.
+///
+/// Note that a rebind *does* change who may write the rebound identity's
+/// stream, because [`authorize_stream_write`] matches on `(host,
+/// coordinator_custody_epoch)`: after a rebind the custodian must present
+/// the new host label. That is the intended, and unavoidable, consequence of
+/// the binding being the authority -- it is a relabel of where custody
+/// lives, not a transfer of it, which is exactly why the custody epoch must
+/// *not* move.
+///
+/// Authorization is coordinator-only: the proposer must already hold
+/// `Role::Coordinator` in `expected_parent`. Unlike succession, this is not
+/// a per-target operation, so `MemberBinding::standby` -- a pre-authorization
+/// scoped to one specific binding's *custody takeover*, for the case where
+/// "the active coordinator becomes unavailable" (section 2.3) -- has nothing
+/// to say about it: a batch naming five identities has no single target
+/// whose standby could be consulted, and stretching the standby clause to
+/// mean "may also relabel arbitrary other identities' hosts" would widen it
+/// well past what it was reviewed and built for. Fleet-wide roster
+/// administration is coordinator work.
+pub fn propose_host_rebind(
+    repo: &Path,
+    expected_parent: &RosterEpoch,
+    proposer: &Agent,
+    new_hosts: &BTreeMap<Agent, Short>,
+    worktree: &Path,
+) -> AbResult<RosterEpoch> {
+    if new_hosts.is_empty() {
+        return Err(invalid(
+            "no identity was named to rebind -- pass at least one `--set <identity>=<new-host>`",
+        ));
+    }
+    // Checked before membership, unlike `propose_custody_succession`: an
+    // unauthorized proposer is refused on its own terms, rather than the
+    // refusal depending on whether the names it happened to pick exist.
+    if !is_coordinator(expected_parent, proposer) {
+        return Err(invalid(format!(
+            "{proposer} is not authorized to rebind hosts: not a coordinator in roster epoch {} \
+             -- host rebinding is fleet-wide roster administration, so unlike `succeed` it is \
+             not additionally open to a target's pre-authorized standby",
+            expected_parent.id
+        )));
+    }
+    let mut members = expected_parent.active_members.clone();
+    for (target, host) in new_hosts {
+        let binding = members.get_mut(target).ok_or_else(|| {
+            invalid(format!(
+                "{target} is not an active member of roster epoch {} -- check the agent name is \
+                 correct, or register it first if it genuinely doesn't exist yet",
+                expected_parent.id
+            ))
+        })?;
+        // Only `host`. `role`, `coordinator_custody_epoch`, and `standby`
+        // are deliberately left exactly as they were: this is a relabel, not
+        // a reassignment and not a handover.
+        binding.host = host.clone();
+    }
     propose_transition(repo, expected_parent, members, worktree)
 }
 
@@ -795,5 +883,280 @@ mod tests {
         assert!(err.to_string().contains("belongs to host"), "{err}");
         // The new custodian succeeds.
         authorize_stream_write(&new_epoch, &alice, &short("host2"), 1).unwrap();
+    }
+
+    // --------------------------------------------------------- host rebind
+
+    fn rebinds(pairs: &[(&str, &str)]) -> BTreeMap<Agent, Short> {
+        pairs
+            .iter()
+            .map(|(agent, host)| (a(agent), short(host)))
+            .collect()
+    }
+
+    /// The whole point of this primitive existing separately from
+    /// `propose_custody_succession`: `host` moves, and *nothing else* about
+    /// the binding does -- most importantly not `coordinator_custody_epoch`,
+    /// which succession would have bumped, falsely recording a failover
+    /// handover that never happened.
+    #[test]
+    fn rebind_changes_only_the_host_of_the_named_binding() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let coord1 = a("coord1");
+        let alice = a("alice");
+        let alice_standby = a("alice-standby");
+        let mut members = BTreeMap::new();
+        members.insert(coord1.clone(), binding(Role::Coordinator, "host1", 0));
+        members.insert(
+            alice.clone(),
+            binding_with_standby(Role::Implementor, "migration", 7, &alice_standby),
+        );
+        let root = root_with(repo.path(), &config, members);
+
+        let new_epoch = propose_host_rebind(
+            repo.path(),
+            &root,
+            &coord1,
+            &rebinds(&[("alice", "host-a")]),
+            &repo.path().join("_wt_rebind"),
+        )
+        .unwrap();
+
+        let rebound = &new_epoch.active_members[&alice];
+        assert_eq!(rebound.host, short("host-a"));
+        assert_eq!(rebound.coordinator_custody_epoch, 7);
+        assert_eq!(rebound.role, Role::Implementor);
+        assert_eq!(rebound.standby, Some(alice_standby));
+        // Exactly one new epoch, chained to the one it was proposed against.
+        assert_eq!(new_epoch.parent, Some(root.id.clone()));
+        assert_eq!(
+            read_registry_tip(repo.path()).unwrap(),
+            Some(new_epoch.id.clone())
+        );
+        // Everyone not named is byte-identical to before.
+        assert_eq!(
+            new_epoch.active_members[&coord1],
+            root.active_members[&coord1]
+        );
+    }
+
+    /// The batch guarantee: N identities relabeled produce exactly *one*
+    /// child epoch covering all of them, not N chained epochs -- so a
+    /// partial failure can never leave the fleet half-relabeled.
+    #[test]
+    fn rebind_covers_every_named_identity_in_one_epoch() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let coord1 = a("coord1");
+        let mut members = BTreeMap::new();
+        members.insert(coord1.clone(), binding(Role::Coordinator, "migration", 0));
+        members.insert(a("alice"), binding(Role::Implementor, "migration", 2));
+        members.insert(a("bob"), binding(Role::Reviewer, "migration", 0));
+        members.insert(a("carol"), binding(Role::Implementor, "migration", 0));
+        let root = root_with(repo.path(), &config, members);
+
+        let new_epoch = propose_host_rebind(
+            repo.path(),
+            &root,
+            &coord1,
+            &rebinds(&[("alice", "host-a"), ("bob", "host-b"), ("coord1", "host-c")]),
+            &repo.path().join("_wt_rebind"),
+        )
+        .unwrap();
+
+        assert_eq!(new_epoch.active_members[&a("alice")].host, short("host-a"));
+        assert_eq!(new_epoch.active_members[&a("bob")].host, short("host-b"));
+        assert_eq!(new_epoch.active_members[&a("coord1")].host, short("host-c"));
+        // Unnamed: untouched.
+        assert_eq!(
+            new_epoch.active_members[&a("carol")].host,
+            short("migration")
+        );
+        // Custody epochs all carried through verbatim.
+        assert_eq!(
+            new_epoch.active_members[&a("alice")].coordinator_custody_epoch,
+            2
+        );
+        // One epoch, one parent hop -- not three chained transitions.
+        assert_eq!(new_epoch.parent, Some(root.id.clone()));
+        let chain = read_epoch_chain(
+            repo.path(),
+            &new_epoch.id,
+            &repo.path().join("_wt_rebind_chain"),
+        )
+        .unwrap();
+        assert_eq!(chain.len(), 2, "root + exactly one rebind epoch: {chain:?}");
+    }
+
+    #[test]
+    fn rebind_rejects_a_non_coordinator_proposer() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let mallory = a("mallory");
+        let mut members = BTreeMap::new();
+        members.insert(a("coord1"), binding(Role::Coordinator, "host1", 0));
+        members.insert(a("alice"), binding(Role::Implementor, "migration", 0));
+        members.insert(mallory.clone(), binding(Role::Implementor, "host3", 0));
+        let root = root_with(repo.path(), &config, members);
+
+        let err = propose_host_rebind(
+            repo.path(),
+            &root,
+            &mallory,
+            &rebinds(&[("alice", "host-a")]),
+            &repo.path().join("_wt_rebind"),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("is not authorized"), "{err}");
+        // Refused *before* a transition is attempted: the registry did not
+        // move at all.
+        assert_eq!(read_registry_tip(repo.path()).unwrap(), Some(root.id));
+    }
+
+    /// Unlike `succeed`, a target's pre-authorized standby is deliberately
+    /// *not* enough here: `standby` authorizes a custody takeover of one
+    /// specific binding, not fleet-wide host relabeling.
+    #[test]
+    fn rebind_rejects_the_targets_standby() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let alice = a("alice");
+        let alice_standby = a("alice-standby");
+        let mut members = BTreeMap::new();
+        members.insert(a("coord1"), binding(Role::Coordinator, "host1", 0));
+        members.insert(
+            alice.clone(),
+            binding_with_standby(Role::Implementor, "migration", 0, &alice_standby),
+        );
+        members.insert(
+            alice_standby.clone(),
+            binding(Role::Implementor, "host-b", 0),
+        );
+        let root = root_with(repo.path(), &config, members);
+
+        let err = propose_host_rebind(
+            repo.path(),
+            &root,
+            &alice_standby,
+            &rebinds(&[("alice", "host-a")]),
+            &repo.path().join("_wt_rebind"),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("is not authorized"), "{err}");
+        assert!(err.to_string().contains("standby"), "{err}");
+    }
+
+    /// All-or-nothing: one unknown name in a batch refuses the *whole*
+    /// batch, so the identities that did exist are not quietly relabeled
+    /// while the caller's typo goes unmentioned.
+    #[test]
+    fn rebind_rejects_a_target_outside_the_epoch_without_moving_the_registry() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let coord1 = a("coord1");
+        let mut members = BTreeMap::new();
+        members.insert(coord1.clone(), binding(Role::Coordinator, "host1", 0));
+        members.insert(a("alice"), binding(Role::Implementor, "migration", 0));
+        let root = root_with(repo.path(), &config, members);
+
+        let err = propose_host_rebind(
+            repo.path(),
+            &root,
+            &coord1,
+            &rebinds(&[("alice", "host-a"), ("ghost", "host-z")]),
+            &repo.path().join("_wt_rebind"),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("ghost"), "{err}");
+        assert!(err.to_string().contains("not an active member"), "{err}");
+        assert_eq!(
+            read_registry_tip(repo.path()).unwrap(),
+            Some(root.id.clone())
+        );
+        // alice really is still on the placeholder host.
+        let read_back = read_epoch(repo.path(), &root.id, &repo.path().join("_wt_read")).unwrap();
+        assert_eq!(
+            read_back.active_members[&a("alice")].host,
+            short("migration")
+        );
+    }
+
+    #[test]
+    fn rebind_rejects_an_empty_batch() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let coord1 = a("coord1");
+        let mut members = BTreeMap::new();
+        members.insert(coord1.clone(), binding(Role::Coordinator, "host1", 0));
+        let root = root_with(repo.path(), &config, members);
+
+        let err = propose_host_rebind(
+            repo.path(),
+            &root,
+            &coord1,
+            &BTreeMap::new(),
+            &repo.path().join("_wt_rebind"),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("at least one"), "{err}");
+    }
+
+    /// The registry's compare-and-swap applies to a rebind exactly as it
+    /// does to any other transition: a proposal against an already-superseded
+    /// parent is refused, not silently rebased through.
+    #[test]
+    fn rebind_rejects_a_stale_expected_parent() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let coord1 = a("coord1");
+        let mut members = BTreeMap::new();
+        members.insert(coord1.clone(), binding(Role::Coordinator, "host1", 0));
+        members.insert(a("alice"), binding(Role::Implementor, "migration", 0));
+        let root = root_with(repo.path(), &config, members.clone());
+
+        // Somebody else advances the registry first.
+        members.insert(a("bob"), binding(Role::Reviewer, "host2", 0));
+        propose_transition(repo.path(), &root, members, &repo.path().join("_wt_other")).unwrap();
+
+        let err = propose_host_rebind(
+            repo.path(),
+            &root,
+            &coord1,
+            &rebinds(&[("alice", "host-a")]),
+            &repo.path().join("_wt_rebind"),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("has moved"), "{err}");
+    }
+
+    /// A rebind relabels *where* custody lives without moving custody: the
+    /// custody epoch is unchanged, so the same custodian keeps writing --
+    /// but now presenting the new host label, and no longer the old one.
+    /// (Contrast `the_superseded_custodian_can_no_longer_authorize_writes`,
+    /// where the epoch number moves too.)
+    #[test]
+    fn a_rebound_binding_authorizes_the_new_host_at_the_unchanged_custody_epoch() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let coord1 = a("coord1");
+        let alice = a("alice");
+        let mut members = BTreeMap::new();
+        members.insert(coord1.clone(), binding(Role::Coordinator, "host1", 0));
+        members.insert(alice.clone(), binding(Role::Implementor, "migration", 4));
+        let root = root_with(repo.path(), &config, members);
+
+        let new_epoch = propose_host_rebind(
+            repo.path(),
+            &root,
+            &coord1,
+            &rebinds(&[("alice", "host-a")]),
+            &repo.path().join("_wt_rebind"),
+        )
+        .unwrap();
+
+        authorize_stream_write(&new_epoch, &alice, &short("host-a"), 4).unwrap();
+        let stale = authorize_stream_write(&new_epoch, &alice, &short("migration"), 4).unwrap_err();
+        assert!(stale.to_string().contains("belongs to host"), "{stale}");
     }
 }

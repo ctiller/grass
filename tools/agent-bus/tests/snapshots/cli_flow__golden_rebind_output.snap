@@ -1,0 +1,36 @@
+---
+source: tests/cli_flow.rs
+expression: out
+---
+{
+  "causal_frontier": {
+    "alice": "[hash]",
+    "bob": "[hash]",
+    "coord1": "[hash]"
+  },
+  "freshness": "cached",
+  "last_synced": "[time]",
+  "previous_registry_epoch": "[hash]",
+  "rebound": {
+    "alice": {
+      "from": "migration",
+      "to": "host-a"
+    },
+    "bob": {
+      "from": "migration",
+      "to": "host-b"
+    }
+  },
+  "registry_epoch": "[hash]",
+  "registry_not_attempted": [],
+  "registry_published": {
+    "refs/heads/agent-registry": "[hash]"
+  },
+  "registry_rejected": [],
+  "roster_epoch": "[hash]",
+  "snapshot_receipt": {
+    "alice": "[hash]",
+    "bob": "[hash]",
+    "coord1": "[hash]"
+  }
+}

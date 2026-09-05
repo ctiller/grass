@@ -74,6 +74,21 @@ structurally references.
 - `succeed` -- takes over `--target`'s stream custody (gate 19); refused
   unless the caller is `--target`'s pre-authorized standby or an existing
   coordinator.
+- `rebind` -- relabels one or more active identities' `host` binding, and
+  nothing else about any binding, in a single atomic registry epoch
+  transition: `agent-bus rebind --agent coord1 --set alice=host-a --set
+  bob=host-b`. Coordinator-only (a target's pre-authorized standby is
+  deliberately *not* enough here, unlike `succeed`). Probes `--remote` first
+  so the compare-and-swap is against the registry's real current tip,
+  publishes one ref in one push, and restores the local registry ref if that
+  push is rejected. This -- not `succeed` -- is how the v1->v2 migration's
+  placeholder `host: "migration"` values get their real labels: `succeed`
+  bumps `coordinator_custody_epoch` (permanently recording a failover that
+  never happened) and drains the target's outbox as a side effect, and would
+  need one epoch transition, and one push, per identity. Note that the
+  rebound identity's coordinator must pass the *new* `--host` on its next
+  `coordinate` call, since a binding's `(host, custody epoch)` pair is what
+  authorizes a stream write.
 - `outbox` -- prints `--agent`'s local outbox state (pending, urgent-first,
   plus every durable rejection receipt); purely local, no network round trip
   (gate 18).

@@ -204,6 +204,44 @@ fn succeed(repo: &Path, proposer: &str, target: &str, host: &str) -> Value {
     ]))
 }
 
+/// Builds (but does not run) a `rebind` invocation with one `--set` per
+/// `(identity, new_host)` pair, so failure-path tests can assert on stderr
+/// while success-path tests go through [`rebind`] below.
+fn rebind_cmd(repo: &Path, proposer: &str, sets: &[(&str, &str)]) -> Command {
+    let mut cmd = bin();
+    cmd.current_dir(repo).args(["rebind", "--agent", proposer]);
+    for (identity, host) in sets {
+        cmd.args(["--set", &format!("{identity}={host}")]);
+    }
+    cmd
+}
+
+fn rebind(repo: &Path, proposer: &str, sets: &[(&str, &str)]) -> Value {
+    run_json(&mut rebind_cmd(repo, proposer, sets))
+}
+
+/// Like [`register`], but pins a non-zero starting
+/// `coordinator_custody_epoch` -- so a test can prove `rebind` leaves that
+/// number alone rather than accidentally passing because it was 0 either
+/// way.
+fn register_at_custody_epoch(repo: &Path, agent: &str, host: &str, custody_epoch: u64) -> Value {
+    run_json(bin().current_dir(repo).args([
+        "register",
+        "--agent",
+        agent,
+        "--display-name",
+        "Some Agent",
+        "--role",
+        "implementor",
+        "--purpose",
+        "does agent things",
+        "--host",
+        host,
+        "--custody-epoch",
+        &custody_epoch.to_string(),
+    ]))
+}
+
 fn prepare_merge(repo: &Path, agent: &str, nomination: &str, reviewed_commit: &str) -> Value {
     run_json(bin().current_dir(repo).args([
         "prepare-merge",
@@ -639,6 +677,84 @@ fn crate_rev_parse(dir: &Path, rev: &str) -> String {
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
+fn crate_rev_parse_opt(dir: &Path, rev: &str) -> Option<String> {
+    let out = StdCommand::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["rev-parse", "--verify", "--quiet", rev])
+        .output()
+        .unwrap();
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8(out.stdout).unwrap().trim().to_string())
+}
+
+/// The literal `epoch.json` blob stored at a registry epoch commit. Some
+/// binding fields (`standby`) are surfaced by no command's output at all, so
+/// asserting "only `host` changed" honestly means reading the durable record
+/// itself rather than a command's summary of it.
+fn read_epoch_json(dir: &Path, epoch: &str) -> Value {
+    let out = StdCommand::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["show", &format!("{epoch}:epoch.json")])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git show {epoch}:epoch.json failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+/// How many commits `range` (e.g. `a..b`) spans -- "exactly one new registry
+/// epoch, not one per identity".
+fn rev_list_count(dir: &Path, range: &str) -> usize {
+    let out = StdCommand::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["rev-list", "--count", range])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git rev-list --count {range} failed");
+    String::from_utf8(out.stdout)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap()
+}
+
+/// Installs a bare-repo `update` hook on `origin` that refuses every push to
+/// `refs/heads/agent-registry` (and nothing else), simulating from the
+/// pusher's side exactly what a lost registry compare-and-swap looks like: a
+/// remote-rejected registry ref, after the proposer has already advanced its
+/// own local ref. Deterministic, unlike trying to land a real concurrent
+/// registry write inside the millisecond window between one subprocess's
+/// fetch and its push.
+fn deny_registry_pushes(origin: &Path) {
+    let hooks = origin.join("hooks");
+    std::fs::create_dir_all(&hooks).unwrap();
+    std::fs::write(
+        hooks.join("update"),
+        "#!/bin/sh\n\
+         if [ \"$1\" = \"refs/heads/agent-registry\" ]; then\n\
+         \techo \"registry push denied by test hook\" >&2\n\
+         \texit 1\n\
+         fi\n\
+         exit 0\n",
+    )
+    .unwrap();
+}
+
+fn allow_registry_pushes(origin: &Path) {
+    let hook = origin.join("hooks").join("update");
+    if hook.exists() {
+        std::fs::remove_file(hook).unwrap();
+    }
+}
+
 /// Requirement 2: `register` adds a second agent, and a completely separate
 /// fresh checkout (no prior local state, same origin remote) can
 /// `status --sync` and see both agents purely from the remote -- the "no
@@ -1070,6 +1186,594 @@ fn succeed_surfaces_a_rejected_candidate_from_the_resumed_outbox() {
     assert_eq!(succeeded["registry_not_attempted"], serde_json::json!([]));
     assert_eq!(succeeded["stream_rejected"], serde_json::json!([]));
     assert_eq!(succeeded["stream_not_attempted"], serde_json::json!([]));
+}
+
+// ------------------------------------------------------------ rebind tests
+//
+// `rebind` exists because `succeed` -- the only other thing that writes a
+// binding's `host` -- is the wrong tool for relabeling one: it bumps
+// `coordinator_custody_epoch` (recording a failover that never happened),
+// drains and publishes the target's outbox as a side effect, reads a
+// possibly-stale local registry tip, and needs one epoch transition per
+// identity. Each test below pins one of those differences.
+
+/// The core contract: `host` moves, and nothing else in the binding does --
+/// not `coordinator_custody_epoch` (pinned deliberately non-zero here so a
+/// bump would actually show), not `role`, not `standby` -- and the change
+/// lands as exactly one new registry epoch whose parent is the epoch it was
+/// proposed against.
+#[test]
+fn rebind_changes_only_the_host_and_lands_as_one_new_epoch() {
+    let (origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register_with(
+        repo.path(),
+        "alice",
+        "implementor",
+        "migration",
+        Some("alice-standby"),
+    );
+    let before_epoch = status(repo.path(), false)["roster_epoch"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let before_binding = read_epoch_json(repo.path(), &before_epoch)["active_members"]["alice"]
+        .as_object()
+        .unwrap()
+        .clone();
+    assert_eq!(before_binding["host"], "migration");
+
+    let out = rebind(repo.path(), "coord1", &[("alice", "host-a")]);
+
+    assert_eq!(out["previous_registry_epoch"], before_epoch.as_str());
+    assert_eq!(
+        out["rebound"]["alice"],
+        serde_json::json!({"from": "migration", "to": "host-a"})
+    );
+    assert_eq!(out["registry_rejected"], serde_json::json!([]));
+    assert_eq!(out["registry_not_attempted"], serde_json::json!([]));
+
+    let after_epoch = out["registry_epoch"].as_str().unwrap();
+    // Exactly one new registry commit, chained directly to the epoch that
+    // was read -- not a rebase, not a chain of per-identity transitions.
+    assert_eq!(
+        rev_list_count(repo.path(), &format!("{before_epoch}..{after_epoch}")),
+        1
+    );
+    assert_eq!(
+        crate_rev_parse(repo.path(), &format!("{after_epoch}^")),
+        before_epoch
+    );
+
+    // The durable record: every field except `host` is byte-identical.
+    let after_binding = read_epoch_json(repo.path(), after_epoch)["active_members"]["alice"]
+        .as_object()
+        .unwrap()
+        .clone();
+    assert_eq!(after_binding["host"], "host-a");
+    assert_eq!(after_binding["role"], before_binding["role"]);
+    assert_eq!(after_binding["standby"], before_binding["standby"]);
+    assert_eq!(
+        after_binding["coordinator_custody_epoch"],
+        before_binding["coordinator_custody_epoch"]
+    );
+    assert_eq!(
+        after_binding.keys().collect::<Vec<_>>(),
+        before_binding.keys().collect::<Vec<_>>(),
+        "no field was added or dropped"
+    );
+
+    // It really reached the remote: a checkout that has never seen any of
+    // this reads the new host straight from origin.
+    assert_eq!(
+        crate_rev_parse(origin.path(), "refs/heads/agent-registry"),
+        after_epoch
+    );
+    let fresh = init_repo(origin.path());
+    let snap = status(fresh.path(), true);
+    assert_eq!(status_agent(&snap, "alice")["host"], "host-a");
+    assert_eq!(status_agent(&snap, "alice")["role"], "implementor");
+}
+
+/// A non-zero `coordinator_custody_epoch` is carried through untouched --
+/// the single most important thing `succeed` gets wrong for this use case,
+/// where a bump falsely records a handover in the registry's permanent
+/// history.
+#[test]
+fn rebind_does_not_touch_a_non_zero_custody_epoch() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register_at_custody_epoch(repo.path(), "alice", "migration", 3);
+    assert_eq!(
+        status(repo.path(), false)["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["agent"] == "alice")
+            .unwrap()["coordinator_custody_epoch"],
+        3
+    );
+
+    rebind(repo.path(), "coord1", &[("alice", "host-a")]);
+
+    let snap = status(repo.path(), false);
+    assert_eq!(status_agent(&snap, "alice")["coordinator_custody_epoch"], 3);
+    assert_eq!(status_agent(&snap, "alice")["host"], "host-a");
+    // And the unchanged custody epoch is not merely cosmetic: the existing
+    // custodian keeps writing at epoch 3, just under the new host label.
+    submit(
+        repo.path(),
+        "alice",
+        "agent.status",
+        r#"{"status":"active","note":"still me"}"#,
+        "post-rebind",
+    );
+    let out = coordinate(repo.path(), "alice", "host-a", 3);
+    assert_eq!(out["published_events"], serde_json::json!(["alice:1"]));
+}
+
+/// The batch guarantee: N identities relabeled in one call produce exactly
+/// ONE new epoch covering all of them, not one epoch per identity -- so a
+/// partial failure can never leave the fleet half-relabeled, and no
+/// concurrent registration can slip between them.
+#[test]
+fn rebind_relabels_several_identities_in_exactly_one_epoch() {
+    let (origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "migration");
+    register(repo.path(), "alice", "implementor", "migration");
+    register(repo.path(), "bob", "reviewer", "migration");
+    register(repo.path(), "carol", "implementor", "migration");
+    let before_epoch = status(repo.path(), false)["roster_epoch"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let out = rebind(
+        repo.path(),
+        "coord1",
+        &[("alice", "host-a"), ("bob", "host-b"), ("coord1", "host-c")],
+    );
+    let after_epoch = out["registry_epoch"].as_str().unwrap();
+
+    assert_eq!(
+        rev_list_count(repo.path(), &format!("{before_epoch}..{after_epoch}")),
+        1,
+        "three identities must cost exactly one registry epoch, not three"
+    );
+    assert_eq!(
+        out["rebound"],
+        serde_json::json!({
+            "alice": {"from": "migration", "to": "host-a"},
+            "bob": {"from": "migration", "to": "host-b"},
+            "coord1": {"from": "migration", "to": "host-c"},
+        })
+    );
+
+    // One push, so the remote either has all three or none. It has all three
+    // -- and `carol`, who was named by no `--set`, is untouched.
+    let fresh = init_repo(origin.path());
+    let snap = status(fresh.path(), true);
+    assert_eq!(status_agent(&snap, "alice")["host"], "host-a");
+    assert_eq!(status_agent(&snap, "bob")["host"], "host-b");
+    assert_eq!(status_agent(&snap, "coord1")["host"], "host-c");
+    assert_eq!(status_agent(&snap, "carol")["host"], "migration");
+}
+
+/// The key behavioral difference this command exists to provide: a rebind
+/// publishes nothing from any rebound identity's outbox. Proved by
+/// constructing a genuinely non-empty, genuinely drainable outbox -- the
+/// same candidates are then drained by a subsequent `succeed`, so the test
+/// cannot pass merely because there was nothing to publish.
+#[test]
+fn rebind_leaves_a_non_empty_outbox_and_the_stream_untouched() {
+    let (origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register_with(
+        repo.path(),
+        "alice",
+        "implementor",
+        "migration",
+        Some("alice-standby"),
+    );
+    submit(
+        repo.path(),
+        "alice",
+        "agent.status",
+        r#"{"status":"active","note":"queued one"}"#,
+        "queued-1",
+    );
+    submit(
+        repo.path(),
+        "alice",
+        "agent.status",
+        r#"{"status":"active","note":"queued two"}"#,
+        "queued-2",
+    );
+
+    let pending_before = outbox(repo.path(), "alice")["pending"].clone();
+    assert_eq!(pending_before.as_array().unwrap().len(), 2);
+    let stream_before = crate_rev_parse(repo.path(), "refs/heads/agent-events/alice");
+    let origin_stream_before = crate_rev_parse(origin.path(), "refs/heads/agent-events/alice");
+
+    let out = rebind(repo.path(), "coord1", &[("alice", "host-a")]);
+
+    // The registry moved; nothing else did.
+    assert_eq!(out["rebound"]["alice"]["to"], "host-a");
+    assert_eq!(
+        outbox(repo.path(), "alice")["pending"],
+        pending_before,
+        "rebind must not drain the rebound identity's outbox"
+    );
+    assert_eq!(
+        crate_rev_parse(repo.path(), "refs/heads/agent-events/alice"),
+        stream_before,
+        "rebind must not advance the rebound identity's local stream"
+    );
+    assert_eq!(
+        crate_rev_parse(origin.path(), "refs/heads/agent-events/alice"),
+        origin_stream_before,
+        "rebind must not publish the rebound identity's stream"
+    );
+    // `rebind` reports on exactly one ref, and it is the registry.
+    assert_eq!(
+        out["registry_published"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["refs/heads/agent-registry"]
+    );
+    assert!(
+        out.as_object()
+            .unwrap()
+            .keys()
+            .all(|k| !k.contains("stream")
+                && !k.contains("resumed")
+                && !k.contains("published_events")),
+        "rebind's output must not even have a stream/outbox publication half: {out}"
+    );
+
+    // Falsification: those two candidates really were drainable all along --
+    // `succeed`, the command `rebind` exists to avoid, publishes both.
+    let succeeded = succeed(repo.path(), "alice-standby", "alice", "host-b");
+    assert_eq!(
+        succeeded["resumed_events"],
+        serde_json::json!(["alice:1", "alice:2"])
+    );
+}
+
+/// Requirement 3, freshness: `rebind` probes `--remote` before proposing, so
+/// its compare-and-swap is against the registry's real current tip. Here a
+/// second checkout registers a new agent after this one last synced; the
+/// rebind must land on top of that concurrent change (preserving it) rather
+/// than propose against the stale local epoch it happened to be holding.
+#[test]
+fn rebind_proposes_against_the_remote_tip_not_a_stale_local_one() {
+    let origin = init_bare_origin();
+    let repo_a = init_repo(origin.path());
+    genesis(repo_a.path(), "coord1", "host1");
+    register(repo_a.path(), "alice", "implementor", "migration");
+
+    // A second checkout syncs once, then goes quiet.
+    let repo_b = init_repo(origin.path());
+    let stale = status(repo_b.path(), true)["roster_epoch"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        crate_rev_parse(repo_b.path(), "refs/heads/agent-registry"),
+        stale
+    );
+
+    // Meanwhile the registry advances on the remote, out from under B.
+    let concurrent = register(repo_a.path(), "carol", "implementor", "migration")["registry_epoch"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_ne!(concurrent, stale);
+
+    let out = rebind(repo_b.path(), "coord1", &[("alice", "host-a")]);
+
+    // Proposed against what the remote actually had, not B's stale cut.
+    assert_eq!(
+        out["previous_registry_epoch"], concurrent,
+        "the CAS must be against the freshly fetched tip"
+    );
+    assert_eq!(
+        crate_rev_parse(
+            repo_b.path(),
+            &format!("{}^", out["registry_epoch"].as_str().unwrap())
+        ),
+        concurrent
+    );
+    // The concurrent registration survived the rebind untouched.
+    let members = read_epoch_json(repo_b.path(), out["registry_epoch"].as_str().unwrap())
+        ["active_members"]
+        .as_object()
+        .unwrap()
+        .clone();
+    assert!(members.contains_key("carol"), "{members:?}");
+    assert_eq!(members["alice"]["host"], "host-a");
+    assert_eq!(members["carol"]["host"], "migration");
+}
+
+/// A rejected registry push must fail loudly *and* leave nothing behind:
+/// `registry::propose_transition` advances the local ref via `update-ref`
+/// before anything is pushed, so without an explicit rollback this checkout
+/// would be left believing in an epoch no other agent can see -- and every
+/// subsequent rebind in a multi-identity relabeling session would silently
+/// build on that phantom. (`succeed` has exactly this gap; it is the
+/// specific finding this command was built to close.)
+#[test]
+fn rebind_restores_the_local_registry_ref_when_the_push_is_rejected() {
+    let (origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register(repo.path(), "alice", "implementor", "migration");
+    let before = crate_rev_parse(repo.path(), "refs/heads/agent-registry");
+    assert_eq!(
+        crate_rev_parse(origin.path(), "refs/heads/agent-registry"),
+        before
+    );
+
+    deny_registry_pushes(origin.path());
+    rebind_cmd(repo.path(), "coord1", &[("alice", "host-a")])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("rebind did not publish"))
+        .stderr(predicate::str::contains("has been restored"));
+
+    // Neither side moved.
+    assert_eq!(
+        crate_rev_parse(repo.path(), "refs/heads/agent-registry"),
+        before,
+        "the local registry ref must not be left ahead of what was published"
+    );
+    assert_eq!(
+        crate_rev_parse(origin.path(), "refs/heads/agent-registry"),
+        before
+    );
+    let snap = status(repo.path(), false);
+    assert_eq!(status_agent(&snap, "alice")["host"], "migration");
+    assert_eq!(snap["roster_epoch"], before.as_str());
+
+    // ...and the checkout is not wedged: once the remote accepts pushes
+    // again, the very same rebind succeeds, proposed against the same,
+    // still-current parent.
+    allow_registry_pushes(origin.path());
+    let out = rebind(repo.path(), "coord1", &[("alice", "host-a")]);
+    assert_eq!(out["previous_registry_epoch"], before.as_str());
+    assert_eq!(out["rebound"]["alice"]["to"], "host-a");
+    assert_eq!(
+        crate_rev_parse(origin.path(), "refs/heads/agent-registry"),
+        out["registry_epoch"].as_str().unwrap()
+    );
+}
+
+/// `synced_snapshot`'s own fetch is deliberately never forced (a no-force
+/// -push safety property), so it fails outright rather than self-healing if
+/// this checkout's local registry ref is already ahead of the remote --
+/// reachable in practice from an earlier `succeed`/`register` whose own push
+/// was rejected. `rebind` is exactly the command someone reaches for to fix
+/// a fleet's registry state, so it must point at the actual fix rather than
+/// surface a bare non-fast-forward git error.
+#[test]
+fn rebind_explains_how_to_recover_when_the_local_registry_ref_is_already_ahead_of_the_remote() {
+    let (origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register(repo.path(), "alice", "implementor", "migration");
+
+    // Wedge this checkout's local registry ref ahead of origin: `succeed`
+    // advances the local ref via `update-ref` before attempting its push, so
+    // a denied push still leaves it there.
+    deny_registry_pushes(origin.path());
+    succeed(repo.path(), "coord1", "alice", "host-a");
+    allow_registry_pushes(origin.path());
+
+    rebind_cmd(repo.path(), "coord1", &[("alice", "host-b")])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("ahead of the remote"))
+        .stderr(predicate::str::contains("git fetch"))
+        .stderr(predicate::str::contains("--force"));
+}
+
+/// Same rollback guarantee, exercised across a *batch*: a rejected push
+/// leaves none of the several named identities relabeled, locally or
+/// remotely. All-or-nothing has to mean "or nothing" in the local ref too.
+#[test]
+fn a_rejected_batch_rebind_relabels_nobody() {
+    let (origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register(repo.path(), "alice", "implementor", "migration");
+    register(repo.path(), "bob", "reviewer", "migration");
+    let before = crate_rev_parse(repo.path(), "refs/heads/agent-registry");
+
+    deny_registry_pushes(origin.path());
+    rebind_cmd(
+        repo.path(),
+        "coord1",
+        &[("alice", "host-a"), ("bob", "host-b")],
+    )
+    .assert()
+    .failure()
+    .stderr(predicate::str::contains("Nothing changed"));
+
+    assert_eq!(
+        crate_rev_parse(repo.path(), "refs/heads/agent-registry"),
+        before
+    );
+    let snap = status(repo.path(), false);
+    assert_eq!(status_agent(&snap, "alice")["host"], "migration");
+    assert_eq!(status_agent(&snap, "bob")["host"], "migration");
+}
+
+/// Authorization: coordinator-only. Unlike `succeed`, a target's own
+/// pre-authorized standby is deliberately *not* enough -- `standby`
+/// authorizes taking over one specific binding's custody when its
+/// coordinator is unavailable, which says nothing about relabeling hosts
+/// across the roster.
+#[test]
+fn rebind_rejects_an_unauthorized_proposer() {
+    let (origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register_with(
+        repo.path(),
+        "alice",
+        "implementor",
+        "migration",
+        Some("alice-standby"),
+    );
+    register(repo.path(), "alice-standby", "implementor", "host-b");
+    register(repo.path(), "mallory", "implementor", "host-c");
+    let before = crate_rev_parse(repo.path(), "refs/heads/agent-registry");
+
+    for proposer in ["mallory", "alice-standby"] {
+        rebind_cmd(repo.path(), proposer, &[("alice", "host-a")])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("is not authorized to rebind"));
+    }
+
+    // Refused before any transition: the registry never moved, either side.
+    assert_eq!(
+        crate_rev_parse(repo.path(), "refs/heads/agent-registry"),
+        before
+    );
+    assert_eq!(
+        crate_rev_parse(origin.path(), "refs/heads/agent-registry"),
+        before
+    );
+    assert_eq!(
+        status_agent(&status(repo.path(), false), "alice")["host"],
+        "migration"
+    );
+}
+
+/// A name that is not an active member is refused by name, and refuses the
+/// whole batch with it -- the identity that *did* exist is not quietly
+/// relabeled while the caller's typo goes unmentioned.
+#[test]
+fn rebind_rejects_an_identity_that_is_not_an_active_member() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register(repo.path(), "alice", "implementor", "migration");
+    let before = crate_rev_parse(repo.path(), "refs/heads/agent-registry");
+
+    rebind_cmd(
+        repo.path(),
+        "coord1",
+        &[("alice", "host-a"), ("ghost", "host-z")],
+    )
+    .assert()
+    .failure()
+    .stderr(predicate::str::contains("ghost is not an active member"));
+
+    assert_eq!(
+        crate_rev_parse(repo.path(), "refs/heads/agent-registry"),
+        before
+    );
+    assert_eq!(
+        status_agent(&status(repo.path(), false), "alice")["host"],
+        "migration"
+    );
+}
+
+/// A `Short` is 1..256 bytes, so an empty host is the malformed case --
+/// rejected the same way every other `Short`-typed CLI field is, before
+/// anything is proposed.
+#[test]
+fn rebind_rejects_a_malformed_host() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register(repo.path(), "alice", "implementor", "migration");
+    let before = crate_rev_parse(repo.path(), "refs/heads/agent-registry");
+
+    rebind_cmd(repo.path(), "coord1", &[("alice", "")])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Short out of bounds"));
+
+    // A 257-byte host is over the same bound from the other side.
+    let too_long = "h".repeat(257);
+    rebind_cmd(repo.path(), "coord1", &[("alice", &too_long)])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Short out of bounds"));
+
+    assert_eq!(
+        crate_rev_parse(repo.path(), "refs/heads/agent-registry"),
+        before
+    );
+}
+
+/// `--set alice=x --set alice=y` has no defensible single meaning, so it is
+/// refused rather than resolved last-write-wins -- silently picking one
+/// would relabel a live identity to a host the caller may not have meant.
+#[test]
+fn rebind_rejects_the_same_identity_named_twice() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register(repo.path(), "alice", "implementor", "migration");
+
+    rebind_cmd(
+        repo.path(),
+        "coord1",
+        &[("alice", "host-a"), ("alice", "host-b")],
+    )
+    .assert()
+    .failure()
+    .stderr(predicate::str::contains("names alice more than once"));
+
+    assert_eq!(
+        status_agent(&status(repo.path(), false), "alice")["host"],
+        "migration"
+    );
+}
+
+/// A `--set` with no `=` at all, and a syntactically invalid identity, both
+/// fail on their own terms rather than as some later, more confusing error.
+#[test]
+fn rebind_rejects_a_malformed_set_pair() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+
+    bin()
+        .current_dir(repo.path())
+        .args(["rebind", "--agent", "coord1", "--set", "alice"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--set expects"));
+
+    bin()
+        .current_dir(repo.path())
+        .args(["rebind", "--agent", "coord1", "--set", "Alice=host-a"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid agent name"));
+
+    // clap itself enforces "at least one `--set`".
+    bin()
+        .current_dir(repo.path())
+        .args(["rebind", "--agent", "coord1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--set"));
+}
+
+/// `rebind` before any bus exists fails on the remote probe with the same
+/// clear message every other synced command gives, not a raw git error.
+#[test]
+fn rebind_before_genesis_fails_cleanly() {
+    let origin = init_bare_origin();
+    let repo = init_repo(origin.path());
+    rebind_cmd(repo.path(), "coord1", &[("alice", "host-a")])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no registry root exists"));
+    assert_eq!(
+        crate_rev_parse_opt(repo.path(), "refs/heads/agent-registry"),
+        None
+    );
 }
 
 // ------------------------------------------------- freshness envelope tests
@@ -2517,6 +3221,28 @@ fn golden_succeed_output() {
         ".roster_epoch" => insta::dynamic_redaction(redact_noise),
         ".snapshot_receipt.*" => insta::dynamic_redaction(redact_noise),
         ".causal_frontier.*" => insta::dynamic_redaction(redact_noise),
+    });
+}
+
+#[test]
+fn golden_rebind_output() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register(repo.path(), "alice", "implementor", "migration");
+    register(repo.path(), "bob", "reviewer", "migration");
+    let out = rebind(
+        repo.path(),
+        "coord1",
+        &[("alice", "host-a"), ("bob", "host-b")],
+    );
+    insta::assert_json_snapshot!(out, {
+        ".registry_epoch" => insta::dynamic_redaction(redact_noise),
+        ".previous_registry_epoch" => insta::dynamic_redaction(redact_noise),
+        ".registry_published.*" => insta::dynamic_redaction(redact_noise),
+        ".roster_epoch" => insta::dynamic_redaction(redact_noise),
+        ".snapshot_receipt.*" => insta::dynamic_redaction(redact_noise),
+        ".causal_frontier.*" => insta::dynamic_redaction(redact_noise),
+        ".last_synced" => insta::dynamic_redaction(redact_noise),
     });
 }
 

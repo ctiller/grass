@@ -51,6 +51,36 @@ pub enum Command {
     /// own host (section 2.3, gate 19). Refused unless the caller is
     /// `--target`'s pre-authorized standby or an existing coordinator.
     Succeed(SucceedArgs),
+    /// Relabels one or more active identities' `host` binding -- and
+    /// nothing else about any binding -- in a single atomic registry epoch
+    /// transition. The operation the v1->v2 migration's placeholder
+    /// `host: "migration"` values need as real hosts get stood up.
+    ///
+    /// Deliberately *not* `succeed`, which is the only other thing that
+    /// writes `host`: succession bumps `coordinator_custody_epoch`
+    /// (permanently recording a failover handover in the registry that never
+    /// actually happened) and its CLI form goes on to drain and publish
+    /// whatever is sitting in the target's outbox, neither of which a caller
+    /// whose intent is "give this identity its real host label" asked for.
+    /// It also runs one epoch transition per identity, so relabeling N
+    /// identities means N pushes, any of which can lose a compare-and-swap
+    /// race to a concurrent registration and leave the fleet half-relabeled.
+    ///
+    /// This command instead: probes `--remote` first so the compare-and-swap
+    /// is against the registry's real current tip rather than a possibly
+    /// -stale local one; builds one new epoch carrying every `--set`; and
+    /// publishes it as a single push. All of it lands or none of it does --
+    /// a rejected push is a hard failure that also restores the local
+    /// registry ref, so a losing caller is never left believing a relabel
+    /// happened that no other agent can see.
+    ///
+    /// `role`, `standby`, and `coordinator_custody_epoch` are carried
+    /// through verbatim, no stream or outbox is touched, and any identity
+    /// not named by a `--set` is left exactly as it was. Note that the
+    /// rebound identity's coordinator must present the *new* host label on
+    /// its next `coordinate` call, since a binding's `(host, custody epoch)`
+    /// pair is what authorizes a stream write.
+    Rebind(RebindArgs),
     /// Prints `--agent`'s local outbox state: every candidate still
     /// pending (in urgent-first drain order) and every one a coordinator
     /// has rejected, with the durable reason. Purely local -- no network
@@ -253,6 +283,23 @@ pub struct SucceedArgs {
     /// moves to.
     #[arg(long)]
     host: String,
+    #[arg(long, default_value = "origin")]
+    remote: String,
+}
+
+#[derive(clap::Args)]
+pub struct RebindArgs {
+    /// The proposer. Must already hold `coordinator` in the current epoch:
+    /// unlike `succeed`, a target's pre-authorized standby is not enough
+    /// (see `registry::propose_host_rebind`'s own doc for why).
+    #[arg(long)]
+    agent: String,
+    /// One `<identity>=<new-host>` pair; repeat for each identity to
+    /// relabel. Every pair lands in the same registry epoch transition, so
+    /// either all of them take effect or none does. Naming the same identity
+    /// twice is refused as ambiguous.
+    #[arg(long = "set", required = true, value_name = "IDENTITY=HOST")]
+    set: Vec<String>,
     #[arg(long, default_value = "origin")]
     remote: String,
 }
@@ -474,6 +521,7 @@ pub fn run(cli: Cli) -> AbResult<()> {
         Command::Tail(args) => tail(args),
         Command::Status(args) => status(args),
         Command::Succeed(args) => succeed(args),
+        Command::Rebind(args) => rebind(args),
         Command::Outbox(args) => outbox(args),
         Command::PrepareMerge(args) => prepare_merge(args),
         Command::MergeReady(args) => merge_ready(args),
@@ -834,6 +882,215 @@ fn succeed(args: SucceedArgs) -> AbResult<()> {
         }),
         freshness_envelope(&snapshot),
     ));
+    Ok(())
+}
+
+/// Parses `--set` into the `identity -> new host` map
+/// [`crate::registry::propose_host_rebind`] wants, mirroring `submit
+/// --observes`'s repeated-`Vec<String>`-flag style. A duplicate identity is
+/// refused rather than last-write-wins: `--set alice=host-a --set
+/// alice=host-b` has no defensible single meaning, and silently picking one
+/// would relabel a live identity to a host the caller may not have intended.
+fn parse_rebind_sets(sets: &[String]) -> AbResult<BTreeMap<Agent, Short>> {
+    let mut parsed = BTreeMap::new();
+    for entry in sets {
+        // `split_once`, not `split`: a host label is a `Short` (any UTF-8
+        // string of 1..256 bytes), so it may legitimately contain `=`.
+        let (name, host) = entry.split_once('=').ok_or_else(|| {
+            invalid(format!(
+                "--set expects `<identity>=<new-host>`, got {entry:?} (no `=`)"
+            ))
+        })?;
+        let agent = parse_agent(name)?;
+        let host = parse_short(host)?;
+        if let Some(first) = parsed.insert(agent.clone(), host) {
+            return Err(invalid(format!(
+                "--set names {agent} more than once (first as {first}) -- ambiguous intent; \
+                 give exactly one new host per identity"
+            )));
+        }
+    }
+    Ok(parsed)
+}
+
+/// See [`Command::Rebind`]'s doc comment for what this is for and why it is
+/// not `succeed`. The CLI half is: parse `--set`, take a genuinely fresh
+/// remote cut, hand the epoch to `registry::propose_host_rebind` (which owns
+/// authorization and the actual binding edit), publish the one resulting
+/// registry ref, and -- the part `succeed` is missing -- undo the local ref
+/// advance if that push did not land.
+///
+/// The fresh probe is `sync::synced_snapshot`, the same one `status --sync`
+/// and `merge-ready` use, rather than `succeed`'s cached
+/// `read_registry_tip`. `registry::propose_transition` advances the local
+/// `refs/heads/agent-registry` via `update-ref` *before* anything is pushed,
+/// so proposing against a stale local tip that the remote has already moved
+/// past produces a local-only epoch and a rejected push. `succeed` leaves
+/// that local-only epoch in place, which is survivable for a one-shot
+/// failover but corrupting for exactly this command's intended usage:
+/// relabeling several identities, one invocation each, where every later
+/// invocation would then be silently building on a never-published tip.
+/// Both halves are closed here -- read reality first, and restore reality if
+/// the push is refused.
+fn rebind(args: RebindArgs) -> AbResult<()> {
+    let paths = resolve_paths()?;
+    let proposer = parse_agent(&args.agent)?;
+    let new_hosts = parse_rebind_sets(&args.set)?;
+
+    // A fresh remote probe, before proposing anything: the registry
+    // compare-and-swap must be against the tip that actually exists on
+    // `--remote` right now, not whatever this checkout last happened to see.
+    let snapshot = crate::sync::synced_snapshot(
+        &paths.repo,
+        &paths.common_dir,
+        &args.remote,
+        &paths.worktrees,
+    )
+    .map_err(|e| {
+        // The fetch this does is deliberately never forced (no-force-push
+        // safety property, gitrepo.rs), so it fails outright -- rather than
+        // self-healing -- if this checkout's local registry ref is already
+        // ahead of the remote (e.g. a prior `succeed`/`register` advanced it
+        // locally but its own push was rejected, or its rollback failed).
+        // `rebind` is exactly the command someone reaches for to fix a
+        // fleet's registry state, so point at the actual fix instead of
+        // surfacing a bare non-fast-forward git error.
+        if e.to_string().contains("non-fast-forward") || e.to_string().contains("[rejected]") {
+            invalid(format!(
+                "could not fetch a fresh {ref_name} from {remote}: {e}. This checkout's local \
+                 registry ref is likely ahead of the remote (from an earlier command whose own \
+                 push was rejected or whose rollback failed) -- reset it to the remote's tip \
+                 (`git fetch {remote} {ref_name}:{ref_name} --force`) and try again.",
+                ref_name = crate::registry::REGISTRY_REF,
+                remote = args.remote,
+            ))
+        } else {
+            e
+        }
+    })?;
+    let epoch = snapshot.roster_epoch;
+
+    let previous_hosts: BTreeMap<Agent, Short> = new_hosts
+        .keys()
+        .filter_map(|agent| {
+            epoch
+                .active_members
+                .get(agent)
+                .map(|b| (agent.clone(), b.host.clone()))
+        })
+        .collect();
+
+    let new_epoch = crate::registry::propose_host_rebind(
+        &paths.repo,
+        &epoch,
+        &proposer,
+        &new_hosts,
+        &paths.worktrees.join("_rebind_transition"),
+    )?;
+
+    // One ref, one push, all-or-nothing -- no stream or outbox is involved,
+    // so unlike `register`/`succeed` there is nothing else in this batch.
+    let receipt = crate::publish::publish(
+        &paths.repo,
+        &args.remote,
+        &[RefUpdate::new(
+            crate::registry::REGISTRY_REF,
+            new_epoch.id.clone(),
+        )],
+    );
+    let receipt = match receipt {
+        Ok(receipt)
+            if receipt
+                .published
+                .contains_key(crate::registry::REGISTRY_REF) =>
+        {
+            receipt
+        }
+        // Rejected (the registry moved between the probe above and this
+        // push), or `git push` could not be run at all -- either way nothing
+        // reached the remote, and `propose_host_rebind` has already advanced
+        // this checkout's own registry ref to an epoch no one else can see.
+        // Put it back before failing, so a retry re-reads a truthful local
+        // state and a caller relabeling identity after identity never builds
+        // on a phantom epoch.
+        other => {
+            rollback_registry_ref(&paths.repo, &epoch.id, &new_epoch.id)?;
+            let detail = match other {
+                Ok(receipt) => format!("the remote rejected it (rejected: {:?})", receipt.rejected),
+                Err(e) => format!("the push could not be run: {e}"),
+            };
+            return Err(invalid(format!(
+                "rebind did not publish: {detail}. Nothing changed -- the local registry ref has \
+                 been restored to {}. If the registry moved underneath this call, simply retry; \
+                 the rebind is re-proposed against whatever is current then.",
+                epoch.id
+            )));
+        }
+    };
+
+    // See `register`'s identical comment: a local-only reduction of what was
+    // just published, honestly reported as `cached`.
+    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?;
+
+    let rebound = serde_json::Value::Object(
+        new_hosts
+            .iter()
+            .map(|(agent, host)| {
+                (
+                    agent.as_str().to_string(),
+                    serde_json::json!({
+                        "from": previous_hosts.get(agent).map(|h| h.as_str()),
+                        "to": host.as_str(),
+                    }),
+                )
+            })
+            .collect(),
+    );
+
+    print_json(&with_freshness(
+        serde_json::json!({
+            "registry_epoch": new_epoch.id.as_str(),
+            "previous_registry_epoch": epoch.id.as_str(),
+            "rebound": rebound,
+            "registry_published": receipt.published,
+            "registry_rejected": receipt.rejected,
+            "registry_not_attempted": receipt.not_attempted,
+        }),
+        freshness_envelope(&snapshot),
+    ));
+    Ok(())
+}
+
+/// Restores `refs/heads/agent-registry` to `previous` after a rebind's push
+/// failed, but only if it is still exactly the `proposed` value this process
+/// itself wrote -- a plain three-argument `update-ref` compare-and-swap, so
+/// a concurrent local writer that has already moved the ref on to something
+/// else is never clobbered by this cleanup. A failed rollback is surfaced
+/// rather than swallowed: the caller is then genuinely ahead of the remote
+/// and needs to know, which is the entire condition this exists to prevent.
+fn rollback_registry_ref(
+    repo: &std::path::Path,
+    previous: &ObjectId,
+    proposed: &ObjectId,
+) -> AbResult<()> {
+    let out = crate::gitrepo::run(
+        repo,
+        &[
+            "update-ref",
+            crate::registry::REGISTRY_REF,
+            previous.as_str(),
+            proposed.as_str(),
+        ],
+    )?;
+    if !out.success {
+        return Err(invalid(format!(
+            "rebind's push did not land AND the local registry ref could not be restored to \
+             {previous}: {}. This checkout's {} may now be ahead of the remote -- reset it to \
+             the remote's tip before running any further bus command.",
+            out.stderr,
+            crate::registry::REGISTRY_REF
+        )));
+    }
     Ok(())
 }
 
