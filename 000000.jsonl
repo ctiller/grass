@@ -1,0 +1,1 @@
+{"v":2,"id":"coord1:0","agent":"coord1","seq":0,"time":"2026-09-05T05:53:42Z","observed":{"kind":"sparse","roster_epoch":"ecd2bf453113e6958811d6b46be1e9381a53d3f0","entries":{}},"kind":"agent.registered","refs":[],"data":{"display_name":"coord1","primary_role":"coordinator","purpose":"bootstrap coordinator"}}
