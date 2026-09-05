@@ -27,7 +27,8 @@ It also pins the name collision §1 creates with Lean's host `ByteArray`, which 
 why every mention here is qualified.
 
 The second is that extensionality concludes propositional equality here, unlike
-`FiniteMap.Equiv`. `built_two_ways` uses it in the shape a consumer would.
+`FiniteMap.Equiv`. `map_id_symbolic` and `two_routes_to_a_prefix` use it in the
+shape a consumer would, over symbolic sequences rather than literals.
 
 The third is that the framing law is usable in the shape the memory layer
 applies it: an update is visible at its own index and nowhere else.
@@ -90,9 +91,9 @@ Demonstrating that law needs care that an earlier version of this section did no
 take. On a canonical representation every *concrete* pair of equal sequences is
 already equal by `rfl`, so an example over literals exercises reduction and not
 the theorem: adversarial review confirmed that this section's previous
-`built_two_ways`, which invoked `Vec.ext_of_get?` with a `match`, is closed by
-plain `rfl` outright. It demonstrated computation while claiming to demonstrate
-extensionality.
+extensionality demonstration, which invoked `Vec.ext_of_get?` with a `match`, was
+closed by plain `rfl` outright. It demonstrated computation while claiming to
+demonstrate extensionality, and was replaced rather than kept.
 
 The examples below are stated over *symbolic* sequences, where reduction cannot
 close them and the law has to do the work. The concrete one is kept, relabelled
