@@ -136,5 +136,34 @@ jobs:
 
       # Enforces this crate's nominated ≥95% coverage claim (AGENT_REVIEW.md
       # `required_checks`) so a later change can't silently regress it.
+      #
+      # `src/multihost_proptest.rs` is excluded from the measured percentage.
+      # It is still compiled and still run -- by the `Test` step above, and
+      # again here, since this step runs the whole suite to collect the
+      # profile. Only its own lines' contribution to the total is dropped.
+      #
+      # It is a `#[cfg(test)]`-only module (see `main.rs`), so it is test
+      # code rather than product code and its own coverage was never part of
+      # the ≥95% claim. It is also the only file in the crate whose coverage
+      # is not a property of the code at all: it is the crate's sole user of
+      # randomness, and it draws a fresh proptest seed every run on purpose
+      # -- see the `config()` doc comment in that file, which explains that
+      # it leans on being run repeatedly rather than on breadth within any
+      # one run. At four generated cases a run reaches only whichever `Op`
+      # arms that seed produced, leaving the remaining arms of both the
+      # executor and its oracle unexecuted, and its `trace` block sits behind
+      # `AGENT_BUS_PROPTEST_TRACE`, which no ordinary run sets.
+      #
+      # That is enough to decide this gate by itself. Four runs of one
+      # unchanged commit measured this file at 84.70%, 85.36%, 85.46% and
+      # 90.38% of its own lines -- and the run on this runner that first
+      # surfaced the problem measured it at 79.78%. The crate totals for
+      # those four were 94.84%, 94.87%, 94.88% and 95.16%, so the same
+      # source both failed and passed the 95% line gate depending on
+      # nothing but the seed it drew. Everything else is
+      # deterministic -- all four runs missed exactly the same 687 lines
+      # outside this file -- so excluding it makes the gate measure the
+      # product code and return the same answer every time (95.45% lines,
+      # 95.97% regions on all four).
       - name: Coverage threshold
-        run: cargo llvm-cov --locked --all-targets --fail-under-lines 95 --fail-under-regions 95
+        run: cargo llvm-cov --locked --all-targets --ignore-filename-regex 'multihost_proptest\.rs' --fail-under-lines 95 --fail-under-regions 95
