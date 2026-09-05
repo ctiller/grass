@@ -806,9 +806,8 @@ fn materialize_op(
         }
         Op::Sync { host } => {
             let h = &fleet.hosts[*host];
-            let snap =
-                crate::sync::synced_snapshot(h.repo(), &h.common_dir(), "origin", &h.worktrees())
-                    .map_err(|e| fail(&format!("sync on host{host}"), e))?;
+            let snap = crate::sync::synced_snapshot(h.repo(), &h.common_dir(), "origin")
+                .map_err(|e| fail(&format!("sync on host{host}"), e))?;
             prop_assert_eq!(
                 snap.freshness,
                 crate::sync::Freshness::CurrentAsOfRemoteProbe
@@ -852,9 +851,8 @@ fn materialize_op(
             let tip = crate::registry::read_registry_tip(h.repo())
                 .map_err(|e| fail("read registry tip before register", e))?
                 .ok_or_else(|| TestCaseError::fail("register needs a registry root"))?;
-            let epoch =
-                crate::registry::read_epoch(h.repo(), &tip, &h.worktrees().join("_register_epoch"))
-                    .map_err(|e| fail("read epoch before register", e))?;
+            let epoch = crate::registry::read_epoch(h.repo(), &tip)
+                .map_err(|e| fail("read epoch before register", e))?;
             let mut members = epoch.active_members.clone();
             members.insert(
                 name.clone(),
@@ -1135,7 +1133,7 @@ fn check_hosts(
             label
         );
 
-        let snapshot = crate::sync::cached_snapshot(h.repo(), &h.common_dir(), &h.worktrees());
+        let snapshot = crate::sync::cached_snapshot(h.repo(), &h.common_dir());
         let Some(expected) = expected else {
             // A checkout that has never synchronized and never hosted a
             // registry transition genuinely has nothing to reduce; that, and
@@ -1282,9 +1280,8 @@ fn check_convergence(fleet: &Fleet, model: &mut Model) -> Result<(), TestCaseErr
     let mut reference: Option<(usize, String)> = None;
     for i in 0..fleet.hosts.len() {
         let h = &fleet.hosts[i];
-        let snap =
-            crate::sync::synced_snapshot(h.repo(), &h.common_dir(), "origin", &h.worktrees())
-                .map_err(|e| fail(&format!("final sync on host{i}"), e))?;
+        let snap = crate::sync::synced_snapshot(h.repo(), &h.common_dir(), "origin")
+            .map_err(|e| fail(&format!("final sync on host{i}"), e))?;
         model.apply(&Op::Sync { host: i });
         let rendered = format!("{:?}", snap.state);
         match &reference {

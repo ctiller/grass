@@ -61,12 +61,25 @@ pub fn read_registry_tip(repo: &Path) -> AbResult<Option<ObjectId>> {
 /// created, not only the current tip, since an authority event's already
 /// -complete frontier must remain re-validatable forever (gate 5's "a later
 /// registration does not invalidate it").
-pub fn read_epoch(repo: &Path, epoch_id: &ObjectId, worktree: &Path) -> AbResult<RosterEpoch> {
-    crate::gitrepo::ensure_bus_worktree(repo, worktree, epoch_id.as_str())?;
-    crate::gitrepo::checkout_detach(worktree, epoch_id.as_str())?;
-    let bytes = std::fs::read(worktree.join(EPOCH_FILE)).map_err(|e| AbError::Io {
-        path: worktree.join(EPOCH_FILE).display().to_string(),
-        source: e,
+/// Reads the epoch blob straight out of the object database
+/// (`gitobjects.rs`); no worktree is materialized, so this needs no scratch
+/// directory to check out into.
+pub fn read_epoch(repo: &Path, epoch_id: &ObjectId) -> AbResult<RosterEpoch> {
+    let reader = crate::gitobjects::Libgit2Reader::open(repo)?;
+    read_epoch_at(&reader, epoch_id)
+}
+
+/// [`read_epoch`] against an already-open reader, so a caller reading a
+/// whole lineage ([`read_epoch_chain`]) pays one repository open rather
+/// than one per epoch.
+pub fn read_epoch_at(
+    reader: &dyn crate::gitobjects::ObjectReader,
+    epoch_id: &ObjectId,
+) -> AbResult<RosterEpoch> {
+    let bytes = reader.read_blob_at(epoch_id, EPOCH_FILE)?.ok_or_else(|| {
+        invalid(format!(
+            "commit {epoch_id} has no {EPOCH_FILE}; it is not a registry epoch"
+        ))
     })?;
     let file: EpochFile =
         serde_json::from_slice(&bytes).map_err(|e| invalid(format!("malformed epoch: {e}")))?;
@@ -83,15 +96,15 @@ pub fn read_epoch(repo: &Path, epoch_id: &ObjectId, worktree: &Path) -> AbResult
 /// merely the current tip (gate 5: "a later registration does not
 /// invalidate it") -- this is what lets a caller build that full lookup
 /// table once per reduction instead of re-walking history per event.
-pub fn read_epoch_chain(
-    repo: &Path,
-    tip: &ObjectId,
-    worktree: &Path,
-) -> AbResult<BTreeMap<ObjectId, RosterEpoch>> {
+pub fn read_epoch_chain(repo: &Path, tip: &ObjectId) -> AbResult<BTreeMap<ObjectId, RosterEpoch>> {
+    // One reader for the whole walk. This used to check a worktree out at
+    // every epoch in the lineage in turn, so a bus with a long registration
+    // history paid a full `git worktree add` per epoch on every reduction.
+    let reader = crate::gitobjects::Libgit2Reader::open(repo)?;
     let mut chain = BTreeMap::new();
     let mut next = Some(tip.clone());
     while let Some(id) = next {
-        let epoch = read_epoch(repo, &id, worktree)?;
+        let epoch = read_epoch_at(&reader, &id)?;
         next = epoch.parent.clone();
         chain.insert(id, epoch);
     }
@@ -104,12 +117,20 @@ pub fn read_epoch_chain(
 /// before layering its own change on top, so the file reaches every epoch
 /// unchanged without this function needing to walk `parent` back to the
 /// root itself.
-pub fn read_bus_config(repo: &Path, epoch_id: &ObjectId, worktree: &Path) -> AbResult<BusConfig> {
-    crate::gitrepo::ensure_bus_worktree(repo, worktree, epoch_id.as_str())?;
-    crate::gitrepo::checkout_detach(worktree, epoch_id.as_str())?;
-    let bytes = std::fs::read(worktree.join(CONFIG_FILE)).map_err(|e| AbError::Io {
-        path: worktree.join(CONFIG_FILE).display().to_string(),
-        source: e,
+pub fn read_bus_config(repo: &Path, epoch_id: &ObjectId) -> AbResult<BusConfig> {
+    let reader = crate::gitobjects::Libgit2Reader::open(repo)?;
+    read_bus_config_at(&reader, epoch_id)
+}
+
+/// [`read_bus_config`] against an already-open reader.
+pub fn read_bus_config_at(
+    reader: &dyn crate::gitobjects::ObjectReader,
+    epoch_id: &ObjectId,
+) -> AbResult<BusConfig> {
+    let bytes = reader.read_blob_at(epoch_id, CONFIG_FILE)?.ok_or_else(|| {
+        invalid(format!(
+            "commit {epoch_id} has no {CONFIG_FILE}; it is not a registry epoch"
+        ))
     })?;
     BusConfig::parse(&bytes)
 }
@@ -508,8 +529,7 @@ mod tests {
             Some(epoch.id.clone())
         );
 
-        let read_wt = repo.path().join("_wt_read");
-        let read_back = read_epoch(repo.path(), &epoch.id, &read_wt).unwrap();
+        let read_back = read_epoch(repo.path(), &epoch.id).unwrap();
         assert_eq!(read_back, epoch);
     }
 
@@ -580,8 +600,7 @@ mod tests {
             Some(child.id.clone())
         );
 
-        let read_wt = repo.path().join("_wt_read");
-        let read_back = read_epoch(repo.path(), &child.id, &read_wt).unwrap();
+        let read_back = read_epoch(repo.path(), &child.id).unwrap();
         assert_eq!(read_back, child);
     }
 
@@ -599,21 +618,13 @@ mod tests {
         let wt = repo.path().join("_wt_root");
         let root = create_root(repo.path(), &config, members.clone(), &wt).unwrap();
 
-        let root_read_wt = repo.path().join("_wt_config_root");
-        assert_eq!(
-            read_bus_config(repo.path(), &root.id, &root_read_wt).unwrap(),
-            config
-        );
+        assert_eq!(read_bus_config(repo.path(), &root.id).unwrap(), config);
 
         members.insert(a("bob"), binding(Role::Reviewer, "host1", 0));
         let transition_wt = repo.path().join("_wt_transition");
         let child = propose_transition(repo.path(), &root, members, &transition_wt).unwrap();
 
-        let child_read_wt = repo.path().join("_wt_config_child");
-        assert_eq!(
-            read_bus_config(repo.path(), &child.id, &child_read_wt).unwrap(),
-            config
-        );
+        assert_eq!(read_bus_config(repo.path(), &child.id).unwrap(), config);
     }
 
     /// The registry's own compare-and-swap guarantee: a proposal against a
@@ -795,5 +806,98 @@ mod tests {
         assert!(err.to_string().contains("belongs to host"), "{err}");
         // The new custodian succeeds.
         authorize_stream_write(&new_epoch, &alice, &short("host2"), 1).unwrap();
+    }
+
+    // ------------------------ reading an epoch straight out of history
+    //
+    // `read_epoch_at`/`read_bus_config_at`'s own branches, driven by a
+    // `FixtureObjectReader`. The happy paths are already covered end to end
+    // against real commits above (`create_root_then_read_epoch_round_trips`
+    // and friends now go through libgit2); these pin the failure shapes,
+    // which a real `create_root` will never produce.
+
+    fn epoch_blob(parent: Option<ObjectId>) -> Vec<u8> {
+        let mut members = BTreeMap::new();
+        members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
+        EpochFile {
+            parent,
+            active_members: members,
+        }
+        .canonical_bytes()
+    }
+
+    #[test]
+    fn read_epoch_at_reads_a_well_formed_epoch() {
+        let id = hash(7);
+        let r = crate::gitobjects::FixtureObjectReader::new().with_blob(
+            &id,
+            EPOCH_FILE,
+            epoch_blob(Some(hash(6))),
+        );
+        let epoch = read_epoch_at(&r, &id).unwrap();
+        // `id` comes from the caller, never from the blob: a commit cannot
+        // name its own sha inside itself.
+        assert_eq!(epoch.id, id);
+        assert_eq!(epoch.parent, Some(hash(6)));
+        assert!(epoch.is_active_member(&a("alice")));
+    }
+
+    /// A commit that is not a registry epoch at all must say so, rather
+    /// than surfacing a bare missing-file error.
+    #[test]
+    fn read_epoch_at_rejects_a_commit_with_no_epoch_file() {
+        let id = hash(7);
+        let r = crate::gitobjects::FixtureObjectReader::new().with_blob(&id, "other.json", b"{}");
+        let err = read_epoch_at(&r, &id).unwrap_err();
+        assert!(err.to_string().contains("is not a registry epoch"), "{err}");
+        assert!(err.to_string().contains(id.as_str()), "{err}");
+    }
+
+    #[test]
+    fn read_epoch_at_rejects_a_malformed_epoch_file() {
+        let id = hash(7);
+        let r = crate::gitobjects::FixtureObjectReader::new().with_blob(&id, EPOCH_FILE, b"nope");
+        let err = read_epoch_at(&r, &id).unwrap_err();
+        assert!(err.to_string().contains("malformed epoch"), "{err}");
+    }
+
+    #[test]
+    fn read_epoch_at_propagates_an_unresolvable_commit() {
+        let r = crate::gitobjects::FixtureObjectReader::new().with_blob(
+            &hash(7),
+            EPOCH_FILE,
+            epoch_blob(None),
+        );
+        let err = read_epoch_at(&r, &hash(8)).unwrap_err();
+        assert!(matches!(err, AbError::Git(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn read_bus_config_at_rejects_a_commit_with_no_config_file() {
+        let id = hash(7);
+        let r = crate::gitobjects::FixtureObjectReader::new().with_blob(
+            &id,
+            EPOCH_FILE,
+            epoch_blob(None),
+        );
+        let err = read_bus_config_at(&r, &id).unwrap_err();
+        assert!(err.to_string().contains("is not a registry epoch"), "{err}");
+    }
+
+    /// `BusConfig::parse`'s own validation must still run on bytes that
+    /// arrived as a blob -- reading from history is not a way around it.
+    #[test]
+    fn read_bus_config_at_still_applies_bus_config_validation() {
+        let id = hash(7);
+        let r = crate::gitobjects::FixtureObjectReader::new().with_blob(
+            &id,
+            CONFIG_FILE,
+            br#"{"object_format":"sha3","product_review_from":"0000000000000000000000000000000000000000","merge_engine":"git-ort","merge_engine_version":"2.53.0"}"#,
+        );
+        let err = read_bus_config_at(&r, &id).unwrap_err();
+        assert!(
+            err.to_string().contains("unsupported object_format"),
+            "{err}"
+        );
     }
 }

@@ -121,16 +121,8 @@ pub fn genesis(
 
     let epoch = match crate::registry::read_registry_tip(repo)? {
         Some(tip) => {
-            let existing = crate::registry::read_epoch(
-                repo,
-                &tip,
-                &worktrees_dir.join("_registry_root_resume"),
-            )?;
-            let existing_config = crate::registry::read_bus_config(
-                repo,
-                &tip,
-                &worktrees_dir.join("_registry_config_resume"),
-            )?;
+            let existing = crate::registry::read_epoch(repo, &tip)?;
+            let existing_config = crate::registry::read_bus_config(repo, &tip)?;
             let sole_coordinator = existing.active_members.len() == 1
                 && existing
                     .active_members
@@ -172,11 +164,7 @@ pub fn genesis(
         // above only covers the first commit's content, so without this the
         // second commit's content could diverge from the caller's current
         // arguments without ever being noticed.
-        let (_, log) = crate::stream::read_stream(
-            repo,
-            coordinator,
-            &worktrees_dir.join("_stream_resume_check"),
-        )?;
+        let (_, log) = crate::stream::read_stream(repo, coordinator)?;
         let first = log
             .first()
             .ok_or_else(|| invalid(format!("{coordinator}'s stream exists but has no events")))?;
@@ -355,12 +343,7 @@ mod tests {
             Some(epoch.id.clone())
         );
         assert_eq!(
-            crate::registry::read_bus_config(
-                repo.path(),
-                &epoch.id,
-                &repo.path().join("_config_read"),
-            )
-            .unwrap(),
+            crate::registry::read_bus_config(repo.path(), &epoch.id).unwrap(),
             config
         );
         assert_eq!(
@@ -368,8 +351,7 @@ mod tests {
             Some(first_commit)
         );
 
-        let reads_dir = repo.path().join("_reads");
-        let (header, log) = crate::stream::read_stream(repo.path(), &coord1, &reads_dir).unwrap();
+        let (header, log) = crate::stream::read_stream(repo.path(), &coord1).unwrap();
         assert_eq!(
             header.registration_authority,
             crate::scalars::EventId::new(&coord1, 0)
