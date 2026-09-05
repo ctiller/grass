@@ -59,14 +59,6 @@ pub struct PublicationReceipt {
     pub not_attempted: Vec<String>,
 }
 
-impl PublicationReceipt {
-    pub fn is_complete(&self, updates: &[RefUpdate]) -> bool {
-        updates
-            .iter()
-            .all(|u| self.published.get(&u.refname) == Some(&u.new))
-    }
-}
-
 /// Publish `updates`, preferring one atomic transaction and falling back to
 /// dependency-ordered sequential pushes on any atomic failure. Returns the
 /// receipt naming exactly what landed; it never errors on a rejected or
@@ -213,7 +205,9 @@ mod tests {
             RefUpdate::new("refs/heads/agent-events/bob", b.clone()),
         ];
         let receipt = publish(fx.dir(), &fx.remote(), &updates).unwrap();
-        assert!(receipt.is_complete(&updates));
+        assert!(updates
+            .iter()
+            .all(|u| receipt.published.get(&u.refname) == Some(&u.new)));
         assert!(receipt.rejected.is_empty());
         assert!(receipt.not_attempted.is_empty());
         assert_eq!(
@@ -307,6 +301,8 @@ mod tests {
         let a = fx.new_commit("a");
         let updates = vec![RefUpdate::new("refs/heads/agent-events/alice", a.clone())];
         let receipt = publish(fx.dir(), &fx.remote(), &updates).unwrap();
-        assert!(receipt.is_complete(&updates));
+        assert!(updates
+            .iter()
+            .all(|u| receipt.published.get(&u.refname) == Some(&u.new)));
     }
 }

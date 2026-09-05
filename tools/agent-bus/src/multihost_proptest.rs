@@ -840,7 +840,9 @@ fn materialize_op(
             let receipt = crate::publish::publish(h.repo(), "origin", &updates)
                 .map_err(|e| fail("publish genesis", e))?;
             prop_assert!(
-                receipt.is_complete(&updates),
+                updates
+                    .iter()
+                    .all(|u| receipt.published.get(&u.refname) == Some(&u.new)),
                 "genesis publication must land in full, got {:?}",
                 receipt
             );
@@ -897,7 +899,9 @@ fn materialize_op(
             let receipt = crate::publish::publish(h.repo(), "origin", &updates)
                 .map_err(|e| fail("publish registration", e))?;
             prop_assert!(
-                receipt.is_complete(&updates),
+                updates
+                    .iter()
+                    .all(|u| receipt.published.get(&u.refname) == Some(&u.new)),
                 "registration publication must land in full, got {:?}",
                 receipt
             );

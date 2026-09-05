@@ -115,15 +115,6 @@ pub fn common_dir(start: &Path) -> AbResult<PathBuf> {
     }
 }
 
-pub fn object_format(dir: &Path) -> AbResult<String> {
-    let out = run(dir, &["rev-parse", "--show-object-format"])?;
-    if out.success && !out.stdout.is_empty() {
-        Ok(out.stdout)
-    } else {
-        Ok("sha1".to_string())
-    }
-}
-
 pub fn rev_parse(dir: &Path, rev: &str) -> AbResult<String> {
     run_ok(dir, &["rev-parse", "--verify", rev])
 }
@@ -149,10 +140,6 @@ pub fn check_ref_format(refname: &str) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
-}
-
-pub fn push(dir: &Path, remote: &str, refspec: &str) -> AbResult<GitOutput> {
-    run(dir, &["push", remote, refspec])
 }
 
 /// Push one or more explicit `<sha>:<refname>` refspecs, optionally as one
@@ -325,16 +312,35 @@ pub fn ensure_bus_worktree(
             source: e,
         })?;
     }
-    run_ok(
-        repo_dir,
-        &[
-            "worktree",
-            "add",
-            "--detach",
-            &worktree_path.to_string_lossy(),
-            start_point,
-        ],
-    )?;
+    let worktree_path_str = worktree_path.to_string_lossy();
+    let add_args = [
+        "worktree",
+        "add",
+        "--detach",
+        &worktree_path_str,
+        start_point,
+    ];
+    let out = run(repo_dir, &add_args)?;
+    if out.success {
+        return Ok(());
+    }
+    // `git worktree add` refuses to reuse a path it still considers
+    // registered to *another* worktree, even when that worktree's own
+    // working directory is long gone -- e.g. a prior process was killed
+    // mid-`add`, or the directory was removed by a plain filesystem
+    // removal rather than `git worktree remove`, leaving `.git/worktrees/
+    // <name>` behind ("... is a missing but already registered worktree").
+    // The `worktree_path.exists()` branch above only ever runs when the
+    // *directory* is present, so it never observes or cleans up this case
+    // -- confirmed live in the field: two independent users hit exactly
+    // this error on `tail`, succeeding only on manual retry. `git worktree
+    // prune` removes stale admin registrations like this one; it defaults
+    // to a multi-hour grace period before touching anything, so it will
+    // not disturb a concurrent, genuinely-in-progress `add` racing this
+    // same repo for an unrelated path. Retry once after pruning so this
+    // self-heals instead of surfacing to the caller.
+    run_ok(repo_dir, &["worktree", "prune"])?;
+    run_ok(repo_dir, &add_args)?;
     Ok(())
 }
 
@@ -390,25 +396,8 @@ pub fn commit(dir: &Path, message: &str) -> AbResult<String> {
     rev_parse(dir, "HEAD")
 }
 
-pub fn status_porcelain(dir: &Path) -> AbResult<String> {
-    run_ok(dir, &["status", "--porcelain"])
-}
-
 pub fn checkout_detach(dir: &Path, rev: &str) -> AbResult<()> {
     run_ok(dir, &["checkout", "--detach", rev])?;
-    Ok(())
-}
-
-/// Rebase the current (detached) HEAD onto `upstream`. Preserves each
-/// commit's tree/message bytes exactly, only changing its parent — unlike
-/// discarding and reconstructing the commit, this is what lets a retried
-/// publish keep the event's original `observed` value.
-pub fn rebase_onto(dir: &Path, upstream: &str) -> AbResult<GitOutput> {
-    run(dir, &["rebase", upstream])
-}
-
-pub fn rebase_abort(dir: &Path) -> AbResult<()> {
-    let _ = run(dir, &["rebase", "--abort"]);
     Ok(())
 }
 
@@ -670,11 +659,6 @@ pub fn commits_between_first_parent_exclusive(
     let range = format!("{ancestor}..{descendant_second_parent}");
     let out = run_ok(dir, &["rev-list", &range])?;
     Ok(out.lines().map(|s| s.to_string()).collect())
-}
-
-pub fn is_ancestor(dir: &Path, ancestor: &str, descendant: &str) -> AbResult<bool> {
-    let out = run(dir, &["merge-base", "--is-ancestor", ancestor, descendant])?;
-    Ok(out.success)
 }
 
 /// A scriptable stand-in for the real `git` subprocess, installed for the
@@ -969,33 +953,6 @@ mod outer_tests {
         assert_eq!(got, start.join(".git"));
     }
 
-    /// A failed (or empty-stdout) `--show-object-format` invocation must
-    /// default to `"sha1"` rather than propagating an error — old `git`
-    /// versions do not support the flag at all.
-    #[test]
-    fn object_format_defaults_to_sha1_when_the_command_fails() {
-        let _guard = MockGit::new()
-            .on(
-                &["rev-parse", "--show-object-format"],
-                GitOutput::err("unknown option"),
-            )
-            .install();
-        let got = object_format(&PathBuf::from(".")).unwrap();
-        assert_eq!(got, "sha1");
-    }
-
-    #[test]
-    fn object_format_returns_the_reported_format_on_success() {
-        let _guard = MockGit::new()
-            .on(
-                &["rev-parse", "--show-object-format"],
-                GitOutput::ok("sha256"),
-            )
-            .install();
-        let got = object_format(&PathBuf::from(".")).unwrap();
-        assert_eq!(got, "sha256");
-    }
-
     /// Regression test for a real, confirmed bug: `ensure_bus_worktree`'s
     /// callers all pass a deterministic path reused across *separate
     /// process invocations* as a cache (`sync::reduce_local`'s per-agent
@@ -1153,6 +1110,31 @@ mod outer_tests {
         .unwrap();
     }
 
+    #[test]
+    fn ensure_bus_worktree_recovers_from_a_stale_admin_registration_after_a_manual_removal() {
+        let repo = init_repo();
+        let worktree = repo.path().join("_shared_cache_path");
+        let head = rev_parse(repo.path(), "HEAD").unwrap();
+
+        // First call actually creates the worktree and registers it with
+        // git's own `.git/worktrees/<name>` admin metadata.
+        ensure_bus_worktree(repo.path(), &worktree, &head).unwrap();
+        assert!(worktree.exists());
+
+        // Simulate a killed process / manual cleanup: the working directory
+        // is removed via a plain filesystem removal, never through `git
+        // worktree remove`, so git's admin entry for it survives untouched.
+        std::fs::remove_dir_all(&worktree).unwrap();
+        assert!(!worktree.exists());
+
+        // A second call for the identical path/target must still succeed --
+        // not surface git's "missing but already registered worktree" error
+        // to the caller the way the live bug reports describe.
+        ensure_bus_worktree(repo.path(), &worktree, &head).unwrap();
+        assert!(worktree.exists());
+        assert_eq!(rev_parse(&worktree, "HEAD").unwrap(), head);
+    }
+
     /// A failing `git interpret-trailers --parse` invocation must surface as
     /// an error rather than an empty/garbage trailer list.
     #[test]
@@ -1252,148 +1234,6 @@ mod outer_tests {
 
         let parents = run_ok(repo.path(), &["show", "-s", "--format=%P", &commit_id]).unwrap();
         assert_eq!(parents.trim(), parent);
-    }
-
-    /// `push` against a real bare "remote": the pushed refspec must land at
-    /// exactly the local tip.
-    #[test]
-    fn push_updates_a_real_remote_ref() {
-        let origin = init_bare_origin();
-        let repo = init_repo();
-        let origin_url = origin.path().to_string_lossy().to_string();
-
-        let out = push(repo.path(), &origin_url, "HEAD:refs/heads/main").unwrap();
-        assert!(out.success, "{out:?}");
-
-        let local_head = rev_parse(repo.path(), "HEAD").unwrap();
-        let remote_head = run_ok(origin.path(), &["rev-parse", "main"])
-            .unwrap()
-            .trim()
-            .to_string();
-        assert_eq!(remote_head, local_head);
-    }
-
-    /// Without `--force`, a push whose new value is not a fast-forward of
-    /// the remote's current tip must be rejected by the real remote-side
-    /// compare-and-swap, not silently rewrite history (the whole reason
-    /// `push_refspecs`'s own doc comment says a plain push already gives
-    /// the CAS the coordinator needs).
-    #[test]
-    fn push_rejects_a_non_fast_forward_update() {
-        let origin = init_bare_origin();
-        let origin_url = origin.path().to_string_lossy().to_string();
-
-        let repo_a = init_repo();
-        let out_a = push(repo_a.path(), &origin_url, "HEAD:refs/heads/main").unwrap();
-        assert!(out_a.success, "{out_a:?}");
-
-        // repo_b is a wholly separate, unrelated history pushed to the same
-        // branch name -- never a fast-forward of repo_a's tip.
-        let repo_b = init_repo();
-        let out_b = push(repo_b.path(), &origin_url, "HEAD:refs/heads/main").unwrap();
-        assert!(
-            !out_b.success,
-            "expected a non-fast-forward push to be rejected: {out_b:?}"
-        );
-        assert!(
-            out_b.stderr.to_lowercase().contains("rejected"),
-            "{out_b:?}"
-        );
-
-        // and the remote's ref must still be at repo_a's tip, unmodified.
-        let remote_head = run_ok(origin.path(), &["rev-parse", "main"])
-            .unwrap()
-            .trim()
-            .to_string();
-        assert_eq!(remote_head, rev_parse(repo_a.path(), "HEAD").unwrap());
-    }
-
-    /// A clean checkout reports no changes; an untracked file and a
-    /// modified tracked file must both show up in the real `--porcelain`
-    /// output.
-    #[test]
-    fn status_porcelain_reports_untracked_and_modified_files() {
-        let repo = init_repo();
-        let clean = status_porcelain(repo.path()).unwrap();
-        assert_eq!(clean, "");
-
-        std::fs::write(repo.path().join("untracked.txt"), "new\n").unwrap();
-        std::fs::write(repo.path().join("README.md"), "changed\n").unwrap();
-        let dirty = status_porcelain(repo.path()).unwrap();
-        let lines: Vec<String> = dirty.lines().map(|l| l.trim().to_string()).collect();
-        assert!(lines.iter().any(|l| l == "?? untracked.txt"), "{dirty:?}");
-        assert!(lines.iter().any(|l| l == "M README.md"), "{dirty:?}");
-    }
-
-    /// The ordinary path: rebasing a detached feature commit onto a
-    /// diverged (but non-conflicting) `main` succeeds and replays the
-    /// commit on top of the new base.
-    #[test]
-    fn rebase_onto_replays_detached_commits_cleanly() {
-        let repo = init_repo();
-        git(repo.path(), &["checkout", "-q", "-b", "feature"]);
-        commit_file(repo.path(), "feature.txt", "feature\n", "feature work");
-        let feature_tip = rev_parse(repo.path(), "HEAD").unwrap();
-
-        git(repo.path(), &["checkout", "-q", "main"]);
-        commit_file(repo.path(), "main.txt", "main\n", "main work");
-        let main_tip = rev_parse(repo.path(), "HEAD").unwrap();
-
-        checkout_detach(repo.path(), &feature_tip).unwrap();
-        let out = rebase_onto(repo.path(), "main").unwrap();
-        assert!(out.success, "{out:?}");
-
-        assert!(is_ancestor(repo.path(), &main_tip, "HEAD").unwrap());
-        assert!(repo.path().join("feature.txt").exists());
-        assert!(repo.path().join("main.txt").exists());
-    }
-
-    /// A real, unresolvable conflict must fail the rebase (`GitOutput.
-    /// success == false`, not an `Err`) and leave the repository genuinely
-    /// mid-rebase -- exactly the state `rebase_abort` exists to clean up.
-    /// `rebase_abort` must then restore a clean, non-rebasing worktree.
-    #[test]
-    fn rebase_onto_reports_a_real_conflict_and_rebase_abort_cleans_it_up() {
-        let repo = init_repo();
-        git(repo.path(), &["checkout", "-q", "-b", "feature"]);
-        commit_file(
-            repo.path(),
-            "README.md",
-            "feature change\n",
-            "feature edits readme",
-        );
-        let feature_tip = rev_parse(repo.path(), "HEAD").unwrap();
-
-        git(repo.path(), &["checkout", "-q", "main"]);
-        commit_file(
-            repo.path(),
-            "README.md",
-            "main change\n",
-            "main edits readme",
-        );
-
-        checkout_detach(repo.path(), &feature_tip).unwrap();
-        let out = rebase_onto(repo.path(), "main").unwrap();
-        assert!(!out.success, "expected a real conflict: {out:?}");
-
-        let rebase_in_progress = repo.path().join(".git").join("rebase-merge").exists()
-            || repo.path().join(".git").join("rebase-apply").exists();
-        assert!(rebase_in_progress, "expected git to be mid-rebase");
-
-        rebase_abort(repo.path()).unwrap();
-        assert!(!repo.path().join(".git").join("rebase-merge").exists());
-        assert!(!repo.path().join(".git").join("rebase-apply").exists());
-        // aborting must actually restore the pre-rebase detached commit.
-        assert_eq!(rev_parse(repo.path(), "HEAD").unwrap(), feature_tip);
-    }
-
-    /// `rebase_abort` must be a safe no-op (never an `Err`) even when there
-    /// is nothing to abort -- its own body deliberately discards the
-    /// underlying `git rebase --abort` failure for exactly this case.
-    #[test]
-    fn rebase_abort_is_a_safe_noop_when_no_rebase_is_in_progress() {
-        let repo = init_repo();
-        rebase_abort(repo.path()).unwrap();
     }
 
     /// The success path, parsing real `interpret-trailers` output for a
@@ -1612,9 +1452,21 @@ mod outer_tests {
         commit_file(repo.path(), "second.txt", "x\n", "second commit");
         let second = rev_parse(repo.path(), "HEAD").unwrap();
 
-        push(repo.path(), &origin_url, "HEAD:refs/heads/main").unwrap();
+        push_refspecs(
+            repo.path(),
+            &origin_url,
+            false,
+            &["HEAD:refs/heads/main".to_string()],
+        )
+        .unwrap();
         tag_lightweight(repo.path(), "v1", &head).unwrap();
-        push(repo.path(), &origin_url, "refs/tags/v1:refs/tags/v1").unwrap();
+        push_refspecs(
+            repo.path(),
+            &origin_url,
+            false,
+            &["refs/tags/v1:refs/tags/v1".to_string()],
+        )
+        .unwrap();
         // a second, purely local tag that is never pushed at all.
         tag_lightweight(repo.path(), "local-only", &second).unwrap();
 
@@ -1707,27 +1559,6 @@ mod outer_tests {
             subjects,
             vec!["side commit 2".to_string(), "side commit 1".to_string()]
         );
-    }
-
-    /// A real ancestor reports true; the reverse (descendant checked as
-    /// ancestor of its own ancestor) and a genuinely unrelated orphan
-    /// commit both report false -- not an error.
-    #[test]
-    fn is_ancestor_is_true_for_a_real_ancestor_and_false_for_unrelated_history() {
-        let repo = init_repo();
-        let base = rev_parse(repo.path(), "HEAD").unwrap();
-        commit_file(repo.path(), "next.txt", "x\n", "next commit");
-        let tip = rev_parse(repo.path(), "HEAD").unwrap();
-
-        assert!(is_ancestor(repo.path(), &base, &tip).unwrap());
-        assert!(!is_ancestor(repo.path(), &tip, &base).unwrap());
-
-        git(repo.path(), &["checkout", "-q", "--orphan", "unrelated"]);
-        git(repo.path(), &["rm", "-rf", "-q", "."]);
-        commit_file(repo.path(), "other.txt", "other\n", "unrelated root");
-        let unrelated_tip = rev_parse(repo.path(), "HEAD").unwrap();
-
-        assert!(!is_ancestor(repo.path(), &base, &unrelated_tip).unwrap());
     }
 
     /// Round-6 adversarial review, reproduced directly: a rename line from
