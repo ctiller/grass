@@ -66,40 +66,76 @@ authored obligations, which are supposed to be there, with false positives from
 binders and namespace fragments. The first four rows are the ones that matter,
 and they are unowned or unaware.
 
-## 3. The blocking divergence: the drafts and the libraries disagree
+## 3. The divergence, and how it was settled
 
-This is the highest-leverage item in the plan and it is nearly free to fix
-relative to everything else. Library work started before it is resolved is
-built against a surface that will not typecheck.
+This was the plan's blocking item: the drafts and the libraries disagreed about
+`SpecProcess`, about `MeetsAllSpecificationTheorems`, and about the module names
+an author types. It was raised as `c-spike:4` and settled by `g-design:50`,
+adopting **decision 134**, and the ruling went to the drafts rather than to the
+implementations. Recorded here because the plan's whole ordering rested on it.
 
-**`SpecProcess` has two incompatible shapes.** `Spikes/1_Hello_World/Spec.lean`
-writes `SpecProcess resources`, indexed by the selected resource model, and
-builds it with `SpecProcess.ofRelational` and
-`.withLiveness (.terminatesUnder [.environmentResponsive])`.
-`Spikes/2_Sort/Spec.lean` additionally uses `SpecProcess.capture`.
-`Grass/Semantics/SpecProcess.lean` on `agent/g-foundation/execution-dedup`
-declares an unindexed structure with fields `Input`, `AuditEvent`,
-`Observation`, `admits`, `observationProjection`, `accepts` and `requirements`,
-and none of `ofRelational`, `withLiveness` or `capture` exists anywhere. Either
-the resource-indexed constructor layer is built on top of the foundation
-structure, or the drafts change. This is one decision and it should be made
-once, before three agents build against two readings of it.
+**`SpecProcess` keeps the drafted shape.** The public `SpecProcess` is the
+resource-indexed captured `SpecificationSuite` root of `docs/SEMANTICS.md`, as
+`Spikes/1_Hello_World/Spec.lean` writes it. The unindexed record on the
+foundation branch is not an alternate public type. `capture`, `ofRelational`,
+`withLiveness` and the other suite modifiers are therefore **library
+obligations**, not drafting errors -- they must be built, and the spikes that
+name them are correct to.
 
-**`MeetsAllSpecificationTheorems` exists nowhere.** All five drafts state their
-correctness theorem in terms of it. It is the acceptance predicate for a
-specification suite and it has no owner.
+**`MeetsAllSpecificationTheorems` has an owner.** `Grass.Semantics.SpecProcess`
+owns it, as universal satisfaction of the precious independently keyed
+`spec.suite.theorems` family.
 
-**The drafted module names are not the built module paths.** The drafts import
-`Grass.Spec.Console`, `Grass.Spec.Resource`, `Grass.Spec.Grammar`,
-`Grass.Spec.Graphics`, `Grass.Process`, `Grass.Process.Cancellation`,
-`Grass.Process.Blend` and `Grass.Emit`. `docs/MODULES.md` names
-`Specification/`, `Process/…` and no `Emit`; `agent/c-process/process-layer`
-builds `Grass/Process/Spec.lean`, `Grass/Process/Cancellation/Identity.lean` and
-`Grass/Specification/Boundary.lean`, and has no `Grass/Process.lean`, no
-`Blend`, and nothing under `Grass/Spec/`. An import line is authoring surface --
-it is literally what the author types -- so this is a surface decision, not a
-packaging detail, and `docs/OLEAN_SHARDING.md`'s prohibition on a leaf importing
-a whole-program umbrella constrains the answer.
+**The drafted imports are ratified.** The concise spike imports are narrow
+signature-only authoring facades, and a facade module must not import `Impl`,
+`Cert`, or aggregates. `c-process:64` then delivered the first one:
+`Grass.Process` exists as exactly that -- four imports, a closure of 25 modules,
+neither the Lake root nor an aggregate of `Grass/Process/**`, with
+`Tests/Process/FacadeFixtures.lean` authoring against that single import line
+and guarding that seven further modules' vocabulary does *not* resolve through
+it. Widening a facade is now a visible change that breaks a guard rather than a
+quiet one.
+
+That is the outcome this plan wanted and did not assume: the authoring surface
+was held fixed and the libraries took the work. Two consequences for what
+follows. The 41 specification-front-end names in section 2 are confirmed library
+obligations rather than candidates for renegotiation, which is what P3 now
+schedules. And the facade pattern is the mechanism by which section 4's
+economy is defended, so "which facade does this name enter through" becomes a
+real design question per module rather than a packaging afterthought.
+
+### 3.1 Two spike-side import decisions still open
+
+`c-process:64` answered `c-spike:7` and handed back two choices which are
+c-spike's, not c-process's. Both are recorded here rather than in a commit
+because neither can be finalized yet, and the reason is worth keeping.
+
+`Spikes/5_Spinning_Cube/Process.lean` line 2 imports `Grass.Process.Blend`,
+which names nothing and never has; the module is `Grass.Process.Weave.Blend`.
+`Spikes/4_Web_Server/Cancellation.lean` line 1 imports
+`Grass.Process.Cancellation`, which has no umbrella module either -- the leaves
+are `.Identity`, `.Policy` and `.Compose`. For each, the spike may import the
+leaf or leaves directly, or c-process may publish a facade.
+
+The governing principle, from section 4: prefer the direct leaf import, and
+treat a facade as earned only when one coherent authored concern genuinely needs
+several leaves. One extra import line in one spike is cheaper than putting a
+whole subsystem's vocabulary into every author's closure, and `Grass.Process`'s
+own fixtures show what widening costs.
+
+Neither can be settled by that principle alone yet, because the names the spikes
+actually use are not in the modules the repointing would name.
+`Spikes/5_Spinning_Cube/Process.lean` uses `BlendedProcessGraph`,
+`ClosedBlend` and `ProcessRealization.blend`, and none of the three is in
+`Grass/Process/Weave/Blend.lean` at `agent/c-process/m4-weave-and-composition`,
+which holds `VocabularyEmbedding`, `DisjointWeave` and `routing_is_forced`.
+`Spikes/4_Web_Server/Cancellation.lean` uses `CancellationPolicy`, which is in
+`Cancellation/Policy.lean`, but also `CancellationSummary` and
+`CancellationPolicyRealizes`, which are in none of the three leaves. Repointing
+an import at a module that will not contain the name is not a fix; it moves the
+error rather than removing it. The open question to c-process is therefore
+placement -- where these five names will live -- and the import lines follow
+from the answer.
 
 ## 4. Surface economy: the ninety-five block contracts
 
@@ -169,22 +205,23 @@ is actually blocked for want of it.
 
 ## 6. Ordered plan
 
-P0 is the only sequencing constraint on everything else. P2, P3 and P4 have no
-dependencies on each other and should run in parallel across their owning
-agents; the spike order inside P4 is what serializes. P1 follows P2 by
-necessity rather than by choice, since a spike cannot enter a build target
-before it can compile.
+P0 was the only sequencing constraint on everything else and it is settled, so
+P2, P3 and P4 are now unblocked and independent of one another; they should run
+in parallel across their owning agents, and the spike order inside P4 is what
+serializes. P1 follows P2 by necessity rather than by choice, since a spike
+cannot enter a build target before it can compile. The critical path is
+therefore P2, which is also the only phase whose owners are not yet
+registered.
 
-### P0 — Reconcile the surface (blocking)
+### P0 — Reconcile the surface — DONE
 
-Owner: g-design ruling, implemented by g-foundation and c-process.
-
-Resolve section 3: the `SpecProcess` shape, the owner and statement of
-`MeetsAllSpecificationTheorems`, and the public module names the author types.
-
-Exit: every `import` line in `Spikes/*/*.lean` names a module `docs/MODULES.md`
-says will exist, and every specification-side type in Spikes 1 and 2 resolves to
-a decided owner.
+Settled by `g-design:50` as decision 134, section 3 above. The drafts stood and
+the libraries took the work. What it produced is not an empty phase but a
+transfer: `capture`, `ofRelational`, `withLiveness`, the other suite modifiers,
+and `MeetsAllSpecificationTheorems` are now named library obligations against
+`Grass.Semantics.SpecProcess`, and they belong to P3 rather than to a
+reconciliation nobody owes any more. The two residual import questions in
+section 3.1 are c-spike's and are open.
 
 ### P1 — Put the corpus in the build
 
@@ -203,8 +240,21 @@ provide.
 
 ### P2 — The target side (blocking every spike)
 
-Owner: unassigned. This is the single largest block in the plan and the only
-reason no spike can emit a file.
+Owner: routed by `coord1:43`, not yet registered. The user decided this is split
+by layer rather than given to one owner: machine and platform authority
+(`ISA/X86`, `ABI/Win64`, `Platform/Win32`), the construction and lowering
+language (`CFG`, `Construct`, `Unsafe`) consuming the first, and artifact and
+build (`Grammar`, `Artifact/*`, `Build/*`). Registration is deliberately
+deferred until the agent-bus contention work lands, because a bus already taking
+minutes per publish would not survive fifteen concurrent pushers. Two things
+coord1 flagged rather than decided: `Effect` and `Weave` are not target-side at
+all and may belong with g-foundation, and `Programs/` is unassigned on purpose,
+since `HelloWin64` and its siblings are the productionized form of exactly the
+end-to-end demonstrations c-spike owns -- whether that makes them c-spike's is a
+question for the user.
+
+This remains the single largest block in the plan and the only reason no spike
+can emit a file.
 
 `Grass.Assembly.X86` -- `asm_source`, `AsmSource`, `MachineOperand`,
 `AddressOperand`, `VerifiedFragment`, `FragmentConstructorClosure`, `BlockContract`,
@@ -224,7 +274,16 @@ Exit: `Spikes/1_Hello_World/Program.lean` elaborates and emits a PE.
 
 ### P3 — The specification front end
 
-Owner: follows from the P0 ruling.
+Owner: `Grass.Semantics.SpecProcess` and the facade modules are g-foundation's
+by its existing `Grass/Semantics/**` claim; the resource and console contract
+families have no owner yet and are the part of this phase still to route.
+
+Decision 134 converted these from contested to owed. `capture`, `ofRelational`,
+`withLiveness` and the other suite modifiers, plus
+`MeetsAllSpecificationTheorems`, are library obligations against
+`Grass.Semantics.SpecProcess` with the drafted signatures fixed, which is the
+cheapest possible starting position: the interface is already written down and
+already reviewed.
 
 The 41 names behind `Grass.Spec.Resource`, `Grass.Spec.Console`,
 `Grass.Spec.Grammar` and `Grass.Spec.Graphics`: the resource models
