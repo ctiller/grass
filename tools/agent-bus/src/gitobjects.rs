@@ -101,11 +101,14 @@ impl Libgit2Reader {
     }
 
     fn tree_of(&self, commit: &ObjectId) -> AbResult<git2::Tree<'_>> {
-        // An `ObjectId` is already validated as 40 or 64 lowercase hex
-        // digits, so a parse failure here means the repository's own hash
-        // algorithm cannot represent it -- in practice, a sha256 id against
-        // a libgit2 built without its experimental sha256 support. Say so,
-        // rather than reporting it as a missing commit.
+        // `BusConfig::new`/`parse` (bootstrap.rs) already refuse to activate
+        // or read a sha256 bus at all -- the vendored libgit2 this reader
+        // uses only supports sha1 without its experimental sha256 build
+        // flag, and `Repository::discover`/`open` itself fails outright on a
+        // real sha256 repo ("unknown object format 'sha256'") before any
+        // commit is ever looked up. So a parse failure reaching this point
+        // means genuine corruption of the stored id, not a hash-algorithm
+        // mismatch this reader could have anticipated.
         let oid = git2::Oid::from_str(commit.as_str()).map_err(|e| {
             AbError::Git(format!(
                 "{commit} is not an object id this repository's hash algorithm can \
@@ -133,6 +136,19 @@ impl ObjectReader for Libgit2Reader {
                 )))
             }
         };
+        // Git stores a symlink's target text as an ordinary blob object --
+        // only the tree entry's *mode* marks it as a link, not the object's
+        // own kind -- so `object.as_blob()` below would silently succeed and
+        // hand back the link *target string* as if it were the file's real
+        // content. A worktree checkout would instead have followed the link
+        // (possibly outside the tree entirely); neither behavior is "read
+        // this file's content", so reject explicitly rather than accepting
+        // either.
+        if entry.filemode() == i32::from(git2::FileMode::Link) {
+            return Err(invalid(format!(
+                "{path} in commit {commit} is a symlink, not a file; expected file content"
+            )));
+        }
         let object = entry.to_object(&self.repo).map_err(|e| {
             AbError::Git(format!(
                 "cannot read the object at {path} in commit {commit}: {e}"
@@ -412,6 +428,52 @@ mod tests {
         let r = Libgit2Reader::open(repo.path()).unwrap();
         let err = r.read_blob_at(&head, "sub").unwrap_err();
         assert!(err.to_string().contains("is not a file"), "got {err}");
+    }
+
+    /// Git stores a symlink's target text as an ordinary blob object -- only
+    /// the tree entry's mode (120000) marks it as a link -- so a naive
+    /// `object.as_blob()` would silently succeed and hand back the link
+    /// *target string* as if it were real file content. Constructed via raw
+    /// plumbing (`update-index --add --cacheinfo 120000,...`) rather than an
+    /// actual filesystem symlink, since the latter needs elevated privileges
+    /// to create on Windows.
+    #[test]
+    fn libgit2_rejects_reading_a_symlink_as_a_file() {
+        let (repo, _head) = init_repo();
+        let path = repo.path();
+        let blob_hash = {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(path)
+                .args(["hash-object", "-w", "--stdin"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .and_then(|mut child| {
+                    use std::io::Write;
+                    child.stdin.take().unwrap().write_all(b"README.md").unwrap();
+                    child.wait_with_output()
+                })
+                .unwrap();
+            assert!(out.status.success());
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        git(
+            path,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("120000,{blob_hash},link.json"),
+            ],
+        );
+        git(path, &["commit", "-q", "-m", "add a symlink"]);
+        let head = crate::gitrepo::rev_parse(path, "HEAD").unwrap();
+        let head = ObjectId::parse(head).unwrap();
+
+        let r = Libgit2Reader::open(path).unwrap();
+        let err = r.read_blob_at(&head, "link.json").unwrap_err();
+        assert!(err.to_string().contains("symlink"), "got {err}");
     }
 
     #[test]
