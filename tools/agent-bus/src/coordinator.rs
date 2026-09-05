@@ -201,14 +201,7 @@ pub fn drain_outbox(
             });
             continue;
         }
-        let observed = build_frontier(
-            repo,
-            &epoch,
-            &worktrees_dir.join("_frontier"),
-            agent,
-            &candidate.extra_refs,
-            &data,
-        )?;
+        let observed = build_frontier(repo, &epoch, agent, &candidate.extra_refs, &data)?;
         let env = Envelope::new(
             agent,
             next_seq,
@@ -397,7 +390,6 @@ pub fn drain_and_publish(
 fn build_frontier(
     repo: &Path,
     epoch: &crate::registry::RosterEpoch,
-    worktrees_dir: &Path,
     author: &Agent,
     extra_refs: &[EventId],
     data: &crate::events::EventData,
@@ -430,7 +422,9 @@ fn build_frontier(
                 "cannot build a frontier entry for {ref_agent}: it has no stream"
             ))
         })?;
-        let _ = worktrees_dir; // reserved: a future version may need to read the referenced stream's own log to validate `r` actually exists there, not just trust the caller.
+        // TODO: a future version may need to read the referenced stream's
+        // own log (via an `ObjectReader`) to validate `r` actually exists
+        // there, not just trust the caller.
         entries.push(FrontierEntry {
             agent: ref_agent,
             stream_tip: tip,

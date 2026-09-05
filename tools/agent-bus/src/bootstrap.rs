@@ -29,9 +29,12 @@ pub struct BusConfig {
 
 impl BusConfig {
     pub fn new(object_format: String, product_review_from: ObjectId) -> AbResult<BusConfig> {
-        if object_format != "sha1" && object_format != "sha256" {
+        if object_format != "sha1" {
             return Err(invalid(format!(
-                "unsupported object_format: {object_format}"
+                "unsupported object_format: {object_format} -- the vendored libgit2 this crate \
+                 reads objects through (src/gitobjects.rs) only supports sha1 without its \
+                 experimental sha256 build flag; activation refuses to publish a bus no reader \
+                 could ever open"
             )));
         }
         let installed = crate::gitrepo::version()?;
@@ -61,9 +64,11 @@ impl BusConfig {
     pub fn parse(bytes: &[u8]) -> AbResult<BusConfig> {
         let config: BusConfig = serde_json::from_slice(bytes)
             .map_err(|e| invalid(format!("malformed bus config: {e}")))?;
-        if config.object_format != "sha1" && config.object_format != "sha256" {
+        if config.object_format != "sha1" {
             return Err(invalid(format!(
-                "unsupported object_format: {}",
+                "unsupported object_format: {} -- the vendored libgit2 this crate reads objects \
+                 through (src/gitobjects.rs) only supports sha1 without its experimental sha256 \
+                 build flag",
                 config.object_format
             )));
         }
@@ -271,15 +276,47 @@ mod tests {
 
     #[test]
     fn parse_rejects_a_product_review_from_of_the_wrong_length_for_its_object_format() {
+        // `object_format` can only be "sha1" now (`git2`'s vendored libgit2
+        // supports it without an experimental build flag; "sha256" is
+        // rejected outright by `parse`'s own format check, exercised
+        // separately below) -- so a length mismatch is constructed the other
+        // way: a well-formed 64-hex-char id (a valid `ObjectId` on its own,
+        // just the wrong length for sha1's 40) paired with `object_format:
+        // "sha1"`.
+        let sha256_shaped_id = ObjectId::parse("1".repeat(64)).unwrap();
         let value = serde_json::json!({
-            "object_format": "sha256",
-            "product_review_from": oid(1).as_str(), // 40 hex chars, sha256 wants 64
+            "object_format": "sha1",
+            "product_review_from": sha256_shaped_id.as_str(),
             "merge_engine": SUPPORTED_MERGE_ENGINE,
             "merge_engine_version": SUPPORTED_MERGE_ENGINE_VERSION,
         });
         let err = BusConfig::parse(&serde_json::to_vec(&value).unwrap()).unwrap_err();
         assert!(
             err.to_string().contains("product_review_from length"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_rejects_sha256_outright() {
+        let value = serde_json::json!({
+            "object_format": "sha256",
+            "product_review_from": "1".repeat(64),
+            "merge_engine": SUPPORTED_MERGE_ENGINE,
+            "merge_engine_version": SUPPORTED_MERGE_ENGINE_VERSION,
+        });
+        let err = BusConfig::parse(&serde_json::to_vec(&value).unwrap()).unwrap_err();
+        assert!(
+            err.to_string().contains("unsupported object_format"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn new_rejects_sha256_outright() {
+        let err = BusConfig::new("sha256".to_string(), oid(1)).unwrap_err();
+        assert!(
+            err.to_string().contains("unsupported object_format"),
             "{err}"
         );
     }
