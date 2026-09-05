@@ -1,1 +1,1 @@
-{"active_members":{"coord1":{"coordinator_custody_epoch":0,"host":"migration","role":"coordinator"}},"parent":null}
+{"active_members":{"c-agent":{"coordinator_custody_epoch":0,"host":"migration","role":"implementor"},"coord1":{"coordinator_custody_epoch":0,"host":"migration","role":"coordinator"}},"parent":"ecd2bf453113e6958811d6b46be1e9381a53d3f0"}
