@@ -1,0 +1,1 @@
+{"v":2,"id":"c-agent:0","agent":"c-agent","seq":0,"time":"2026-09-05T05:53:42Z","observed":{"kind":"sparse","roster_epoch":"0dd08206856fa7f19a93530ace4267ab4ed5d37e","entries":{}},"kind":"agent.registered","refs":[],"data":{"display_name":"c-agent","primary_role":"implementor","purpose":"owns and maintains the agent-bus tool itself"}}
