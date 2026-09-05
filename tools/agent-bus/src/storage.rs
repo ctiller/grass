@@ -14,6 +14,7 @@
 use crate::envelope::Envelope;
 use crate::error::{invalid, AbResult};
 use crate::scalars::Agent;
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -39,6 +40,10 @@ pub fn segment_path(stream_root: &Path, segment: u64) -> PathBuf {
 
 /// Raw, purely-structural read of one segment file: UTF-8, LF-only,
 /// no BOM/CR, no blank lines, no partial final line, per-line byte cap.
+///
+/// See [`read_stream_segments`] on why the on-disk reader is retained now
+/// that production reads streams out of git history instead.
+#[allow(dead_code)]
 pub fn read_segment_lines(path: &Path) -> AbResult<Vec<String>> {
     let bytes = fs::read(path).map_err(|e| crate::error::AbError::Io {
         path: path.display().to_string(),
@@ -92,6 +97,72 @@ pub struct StreamSegmentFile {
     pub lines: Vec<String>,
 }
 
+/// Classify one entry name found at a stream tree's root.
+///
+/// `Ok(Some(n))` is segment `n`; `Ok(None)` is a name that legitimately
+/// belongs in a stream tree without being a segment; `Err` is junk. `label`
+/// names the entry in error messages -- a full filesystem path for an
+/// on-disk read, a name plus its commit for a read out of git history.
+///
+/// A stream tree is read both as a checked-out worktree and directly out of
+/// the object database (`read_stream_segments` and
+/// `read_stream_segments_at` below), and the two must agree exactly on
+/// which names are segments, which are ignored, and which are rejected --
+/// so the rule lives here once rather than in each reader. `.git` (a
+/// worktree's admin link) and `.gitattributes` (the stream root's `-text`
+/// pin for its own segment files) only ever appear on the worktree side,
+/// but accepting them from either source costs nothing and keeps a single
+/// rule honest.
+fn classify_stream_entry(name: &str, label: &str) -> AbResult<Option<u64>> {
+    if name == "header.json" || name == ".git" || name == ".gitattributes" {
+        return Ok(None);
+    }
+    if !name.ends_with(".jsonl") {
+        return Err(invalid(format!("unexpected file in stream tree: {label}")));
+    }
+    let stem = &name[..name.len() - ".jsonl".len()];
+    if stem.len() != 6 || !stem.chars().all(|c| c.is_ascii_digit()) {
+        return Err(invalid(format!("malformed segment filename: {label}")));
+    }
+    let segment: u64 = stem
+        .parse()
+        .map_err(|_| invalid(format!("malformed segment number: {name}")))?;
+    Ok(Some(segment))
+}
+
+/// Check that the discovered segment numbers form a non-empty, contiguous,
+/// zero-based run, returning the tail (highest) segment number. `source`
+/// names the stream in the "no segments at all" message.
+fn check_segment_run(present: &BTreeSet<u64>, source: &str) -> AbResult<u64> {
+    let Some(&max_segment) = present.iter().next_back() else {
+        return Err(invalid(format!("stream tree has no segments: {source}")));
+    };
+    for i in 0..=max_segment {
+        if !present.contains(&i) {
+            return Err(invalid(format!("segment gap: missing segment {i}")));
+        }
+    }
+    Ok(max_segment)
+}
+
+/// Check one segment's event count against its position in the run: every
+/// closed (non-tail) segment holds exactly `SEGMENT_SIZE` events, and the
+/// tail holds no more than that.
+fn check_segment_size(segment: u64, is_tail: bool, count: usize) -> AbResult<()> {
+    if is_tail {
+        if count as u64 > SEGMENT_SIZE {
+            return Err(invalid(format!(
+                "active segment {segment} exceeds {SEGMENT_SIZE} events"
+            )));
+        }
+    } else if count as u64 != SEGMENT_SIZE {
+        return Err(invalid(format!(
+            "closed segment {segment} has {count} events, expected {SEGMENT_SIZE}"
+        )));
+    }
+    Ok(())
+}
+
 /// Discover and structurally read every segment in one stream's working
 /// tree, enforcing contiguous zero-based segment numbers, closed non-tail
 /// segments with exactly `SEGMENT_SIZE` events, and a non-empty,
@@ -100,6 +171,18 @@ pub struct StreamSegmentFile {
 /// (the stream root's `-text` pin for its own segment files) are present
 /// alongside the header and segments and must be ignored rather than
 /// rejected.
+///
+/// Nothing in production calls this any more: every stream read now goes
+/// through [`read_stream_segments_at`], straight out of the object
+/// database. It is kept, rather than deleted, because it is the
+/// *independent* implementation the git-history reader is differentially
+/// tested against -- `blob_and_worktree_readers_agree_*` writes one stream,
+/// reads it both ways, and asserts the two agree, which only means anything
+/// while both readers exist. (The same reasoning, and the same
+/// `#[allow(dead_code)]`, as `gitrepo::mock::MockGit`: used only from
+/// `#[cfg(test)]` code that a plain non-test build cannot see.) It is also
+/// what the deferred Phase 2 write-path work will read back against.
+#[allow(dead_code)]
 pub fn read_stream_segments(stream_root: &Path) -> AbResult<Vec<StreamSegmentFile>> {
     let mut segments: std::collections::BTreeMap<u64, PathBuf> = std::collections::BTreeMap::new();
     for entry in fs::read_dir(stream_root).map_err(|e| crate::error::AbError::Io {
@@ -113,55 +196,63 @@ pub fn read_stream_segments(stream_root: &Path) -> AbResult<Vec<StreamSegmentFil
         let path = entry.path();
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name == "header.json" || name == ".git" || name == ".gitattributes" {
-            continue;
-        }
-        if !name.ends_with(".jsonl") {
-            return Err(invalid(format!(
-                "unexpected file in stream tree: {}",
-                path.display()
-            )));
-        }
-        let stem = &name[..name.len() - ".jsonl".len()];
-        if stem.len() != 6 || !stem.chars().all(|c| c.is_ascii_digit()) {
-            return Err(invalid(format!(
-                "malformed segment filename: {}",
-                path.display()
-            )));
-        }
-        let segment: u64 = stem
-            .parse()
-            .map_err(|_| invalid(format!("malformed segment number: {name}")))?;
-        segments.insert(segment, path);
-    }
-    if segments.is_empty() {
-        return Err(invalid(format!(
-            "stream tree has no segments: {}",
-            stream_root.display()
-        )));
-    }
-    let max_segment = *segments.keys().max().unwrap();
-    for i in 0..=max_segment {
-        if !segments.contains_key(&i) {
-            return Err(invalid(format!("segment gap: missing segment {i}")));
+        if let Some(segment) = classify_stream_entry(&name, &path.display().to_string())? {
+            segments.insert(segment, path);
         }
     }
+    let present: BTreeSet<u64> = segments.keys().copied().collect();
+    let max_segment = check_segment_run(&present, &stream_root.display().to_string())?;
     let mut out = Vec::new();
     for (segment, path) in segments {
         let lines = read_segment_lines(&path)?;
-        let is_tail = segment == max_segment;
-        if is_tail {
-            if lines.len() as u64 > SEGMENT_SIZE {
-                return Err(invalid(format!(
-                    "active segment {segment} exceeds {SEGMENT_SIZE} events"
-                )));
-            }
-        } else if lines.len() as u64 != SEGMENT_SIZE {
-            return Err(invalid(format!(
-                "closed segment {segment} has {} events, expected {SEGMENT_SIZE}",
-                lines.len()
-            )));
+        check_segment_size(segment, segment == max_segment, lines.len())?;
+        out.push(StreamSegmentFile { segment, lines });
+    }
+    Ok(out)
+}
+
+/// The same discovery and structural validation as [`read_stream_segments`],
+/// but reading the segment blobs straight out of the commit `stream_tip`
+/// instead of a checked-out worktree.
+///
+/// This is the whole point of `gitobjects.rs`: a stream's content is a few
+/// small blobs at known names in a known tree, so materializing a real
+/// worktree just to read them (a `git worktree add`, measured at seconds on
+/// the fleet repo) buys nothing. Every rule applied here is the shared one
+/// above, so a stream read this way is accepted or rejected identically to
+/// the same stream read off disk.
+///
+/// Note that blob bytes arrive exactly as committed, with none of the
+/// `core.autocrlf`/`.gitattributes` line-ending translation a checkout
+/// applies -- which matters, because `read_segment_lines_from_bytes` rejects
+/// CR bytes outright.
+pub fn read_stream_segments_at(
+    reader: &dyn crate::gitobjects::ObjectReader,
+    stream_tip: &crate::scalars::ObjectId,
+) -> AbResult<Vec<StreamSegmentFile>> {
+    let mut present = BTreeSet::new();
+    for name in reader.list_root_entries(stream_tip)? {
+        let label = format!("{name} in commit {stream_tip}");
+        if let Some(segment) = classify_stream_entry(&name, &label)? {
+            present.insert(segment);
         }
+    }
+    let max_segment = check_segment_run(&present, &format!("commit {stream_tip}"))?;
+    let mut out = Vec::new();
+    for segment in present {
+        let name = segment_filename(segment);
+        let label = format!("{name} in commit {stream_tip}");
+        // The name came from this same tree listing a moment ago and the
+        // odb is immutable, so an absent blob here is not a stale race --
+        // it means the entry is a directory or submodule wearing a segment
+        // name, which `read_blob_at` reports as an error rather than
+        // absence. `None` is therefore unreachable in practice; refuse it
+        // explicitly rather than silently treating it as an empty segment.
+        let bytes = reader
+            .read_blob_at(stream_tip, &name)?
+            .ok_or_else(|| invalid(format!("segment listed but unreadable: {label}")))?;
+        let lines = read_segment_lines_from_bytes(&label, &bytes)?;
+        check_segment_size(segment, segment == max_segment, lines.len())?;
         out.push(StreamSegmentFile { segment, lines });
     }
     Ok(out)
@@ -170,8 +261,28 @@ pub fn read_stream_segments(stream_root: &Path) -> AbResult<Vec<StreamSegmentFil
 /// Parse every envelope in one agent's stream, checking each line's derived
 /// position (segment/offset) agrees with its `seq`/`id`, and that the first
 /// event is `agent.registered` at sequence zero.
+///
+/// See [`read_stream_segments`] on why the on-disk reader is retained now
+/// that production reads streams out of git history via
+/// [`read_stream_log_at`] instead.
+#[allow(dead_code)]
 pub fn read_stream_log(stream_root: &Path, agent: &Agent) -> AbResult<Vec<Envelope>> {
-    let files = read_stream_segments(stream_root)?;
+    assemble_stream_log(read_stream_segments(stream_root)?, agent)
+}
+
+/// [`read_stream_log`] over a stream read out of git history rather than a
+/// checked-out worktree.
+pub fn read_stream_log_at(
+    reader: &dyn crate::gitobjects::ObjectReader,
+    stream_tip: &crate::scalars::ObjectId,
+    agent: &Agent,
+) -> AbResult<Vec<Envelope>> {
+    assemble_stream_log(read_stream_segments_at(reader, stream_tip)?, agent)
+}
+
+/// The parsing and position/identity cross-checks both readers share, over
+/// segments already discovered and structurally validated.
+fn assemble_stream_log(files: Vec<StreamSegmentFile>, agent: &Agent) -> AbResult<Vec<Envelope>> {
     let mut out = Vec::new();
     let mut expected_seq: u64 = 0;
     for file in files {
@@ -490,6 +601,251 @@ mod tests {
         assert_eq!(segments.len(), 2);
         assert_eq!(segments[0].lines.len(), 1000);
         assert_eq!(segments[1].lines.len(), 2);
+    }
+
+    // ------------------------- the same table, read out of git history
+    //
+    // Every case above is restated here against `read_stream_segments_at`,
+    // fed by a `FixtureObjectReader` instead of a directory. The point is
+    // not that blob reading works -- `gitobjects.rs` covers that -- but
+    // that the *validation* is genuinely shared: identical content must be
+    // accepted or rejected identically, with the same message, no matter
+    // which side it arrived from. A rule that drifted into only one reader
+    // would show up here as a mismatch.
+
+    fn tip() -> ObjectId {
+        ObjectId::parse("ab".repeat(20)).unwrap()
+    }
+
+    /// A stream tree in git history: the `.gitattributes` pin every real
+    /// stream root carries, plus whatever segments the case needs.
+    fn blob_stream(segments: &[(u64, &str)]) -> crate::gitobjects::FixtureObjectReader {
+        let mut r = crate::gitobjects::FixtureObjectReader::new().with_blob(
+            &tip(),
+            ".gitattributes",
+            b"*.jsonl -text\n",
+        );
+        for (n, body) in segments {
+            r = r.with_blob(&tip(), &segment_filename(*n), body.as_bytes());
+        }
+        r
+    }
+
+    #[test]
+    fn read_stream_segments_at_rejects_unexpected_file() {
+        let r = blob_stream(&[(0, "{}\n")]).with_blob(&tip(), "notes.txt", b"hi");
+        let err = read_stream_segments_at(&r, &tip()).unwrap_err();
+        assert!(err.to_string().contains("unexpected file in stream tree"));
+    }
+
+    #[test]
+    fn read_stream_segments_at_ignores_the_stream_header_and_gitattributes_pin() {
+        let r = blob_stream(&[(0, "{}\n")]).with_blob(&tip(), "header.json", b"{}");
+        assert!(read_stream_segments_at(&r, &tip()).is_ok());
+    }
+
+    #[test]
+    fn read_stream_segments_at_rejects_malformed_filename() {
+        let r = blob_stream(&[]).with_blob(&tip(), "12345.jsonl", b"{}\n");
+        let err = read_stream_segments_at(&r, &tip()).unwrap_err();
+        assert!(err.to_string().contains("malformed segment filename"));
+    }
+
+    #[test]
+    fn read_stream_segments_at_rejects_a_tree_with_no_segments() {
+        let r = blob_stream(&[]);
+        let err = read_stream_segments_at(&r, &tip()).unwrap_err();
+        assert!(err.to_string().contains("has no segments"));
+    }
+
+    #[test]
+    fn read_stream_segments_at_rejects_a_gap() {
+        let r = blob_stream(&[(0, "{}\n"), (2, "{}\n")]);
+        let err = read_stream_segments_at(&r, &tip()).unwrap_err();
+        assert!(err.to_string().contains("segment gap"));
+    }
+
+    #[test]
+    fn read_stream_segments_at_rejects_undersized_closed_segment() {
+        let r = blob_stream(&[(0, "{}\n{}\n"), (1, "{}\n")]);
+        let err = read_stream_segments_at(&r, &tip()).unwrap_err();
+        assert!(err.to_string().contains("has 2 events, expected 1000"));
+    }
+
+    #[test]
+    fn read_stream_segments_at_rejects_oversized_tail_segment() {
+        let body: String = (0..(SEGMENT_SIZE + 1))
+            .map(|i| format!("{{\"n\":{i}}}\n"))
+            .collect();
+        let r = blob_stream(&[(0, &body)]);
+        let err = read_stream_segments_at(&r, &tip()).unwrap_err();
+        assert!(err.to_string().contains("exceeds 1000 events"));
+    }
+
+    #[test]
+    fn read_stream_segments_at_accepts_closed_plus_tail() {
+        let closed: String = (0..SEGMENT_SIZE)
+            .map(|i| format!("{{\"n\":{i}}}\n"))
+            .collect();
+        let r = blob_stream(&[(0, &closed), (1, "{\"n\":1000}\n{\"n\":1001}\n")]);
+        let segments = read_stream_segments_at(&r, &tip()).unwrap();
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].lines.len(), 1000);
+        assert_eq!(segments[1].lines.len(), 2);
+    }
+
+    /// The byte-level structural rules apply to blobs exactly as to files.
+    /// A CR is the one that matters most in practice: a checkout on Windows
+    /// can introduce them, a blob read never can, and this pins that a CR
+    /// committed into history is still rejected.
+    #[test]
+    fn read_stream_segments_at_rejects_a_cr_byte_in_a_segment_blob() {
+        let r = blob_stream(&[(0, "{}\r\n")]);
+        let err = read_stream_segments_at(&r, &tip()).unwrap_err();
+        assert!(err.to_string().contains("CR byte"), "got {err}");
+    }
+
+    #[test]
+    fn read_stream_segments_at_rejects_a_partial_final_line_in_a_segment_blob() {
+        let r = blob_stream(&[(0, "{}")]);
+        let err = read_stream_segments_at(&r, &tip()).unwrap_err();
+        assert!(err.to_string().contains("partial final line"));
+    }
+
+    /// Error labels must name the commit, not a filesystem path that does
+    /// not exist -- otherwise a malformed stream in history reports a
+    /// location nobody can go look at.
+    #[test]
+    fn read_stream_segments_at_labels_errors_with_the_commit() {
+        let r = blob_stream(&[(0, "{}\r\n")]);
+        let err = read_stream_segments_at(&r, &tip()).unwrap_err().to_string();
+        assert!(err.contains("000000.jsonl"), "got {err}");
+        assert!(err.contains(tip().as_str()), "got {err}");
+    }
+
+    /// A directory wearing a segment's name is corruption, and must be
+    /// refused rather than silently read as an absent or empty segment.
+    #[test]
+    fn read_stream_segments_at_rejects_a_directory_named_like_a_segment() {
+        let r = crate::gitobjects::FixtureObjectReader::new()
+            .with_directory(&tip(), &segment_filename(0));
+        let err = read_stream_segments_at(&r, &tip()).unwrap_err();
+        assert!(err.to_string().contains("is not a file"), "got {err}");
+    }
+
+    #[test]
+    fn read_stream_segments_at_propagates_an_unresolvable_commit() {
+        let r = blob_stream(&[(0, "{}\n")]);
+        let other = ObjectId::parse("cd".repeat(20)).unwrap();
+        let err = read_stream_segments_at(&r, &other).unwrap_err();
+        assert!(matches!(err, AbError::Git(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn read_stream_log_at_round_trips_events() {
+        let r = blob_stream(&[(
+            0,
+            &format!(
+                "{}\n{}\n",
+                registered_envelope("alice", 0).to_canonical_line(),
+                status_envelope("alice", 1).to_canonical_line()
+            ),
+        )]);
+        let log = read_stream_log_at(&r, &tip(), &agent("alice")).unwrap();
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0].kind, "agent.registered");
+        assert_eq!(log[1].seq, 1);
+    }
+
+    #[test]
+    fn read_stream_log_at_rejects_agent_field_mismatch() {
+        let r = blob_stream(&[(
+            0,
+            &format!("{}\n", registered_envelope("bob", 0).to_canonical_line()),
+        )]);
+        let err = read_stream_log_at(&r, &tip(), &agent("alice")).unwrap_err();
+        assert!(err.to_string().contains("has agent field bob"));
+    }
+
+    #[test]
+    fn read_stream_log_at_rejects_non_registered_first_event() {
+        let r = blob_stream(&[(
+            0,
+            &format!("{}\n", status_envelope("alice", 0).to_canonical_line()),
+        )]);
+        let err = read_stream_log_at(&r, &tip(), &agent("alice")).unwrap_err();
+        assert!(err.to_string().contains("must be agent.registered"));
+    }
+
+    #[test]
+    fn read_stream_log_at_rejects_seq_position_mismatch() {
+        let r = blob_stream(&[(
+            0,
+            &format!(
+                "{}\n{}\n",
+                registered_envelope("alice", 0).to_canonical_line(),
+                status_envelope("alice", 7).to_canonical_line()
+            ),
+        )]);
+        let err = read_stream_log_at(&r, &tip(), &agent("alice")).unwrap_err();
+        assert!(err.to_string().contains("occupies position 1"));
+    }
+
+    /// The differential check the on-disk reader is retained for: identical
+    /// content, read both ways, must produce identical results -- for
+    /// content that is accepted *and* for content that is rejected.
+    #[test]
+    fn blob_and_worktree_readers_agree_on_accepted_content() {
+        let closed: String = (0..SEGMENT_SIZE)
+            .map(|i| format!("{{\"n\":{i}}}\n"))
+            .collect();
+        let cases: Vec<Vec<(u64, String)>> = vec![
+            vec![(0, "{\"n\":0}\n".to_string())],
+            vec![(0, "{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n".to_string())],
+            vec![(0, closed.clone()), (1, "{\"n\":1000}\n".to_string())],
+        ];
+        for case in cases {
+            let dir = tempfile::tempdir().unwrap();
+            for (n, body) in &case {
+                write_segment(dir.path(), *n, body);
+            }
+            let refs: Vec<(u64, &str)> = case.iter().map(|(n, b)| (*n, b.as_str())).collect();
+            let from_disk = read_stream_segments(dir.path()).unwrap();
+            let from_blobs = read_stream_segments_at(&blob_stream(&refs), &tip()).unwrap();
+            assert_eq!(from_disk.len(), from_blobs.len());
+            for (d, b) in from_disk.iter().zip(&from_blobs) {
+                assert_eq!(d.segment, b.segment);
+                assert_eq!(d.lines, b.lines);
+            }
+        }
+    }
+
+    #[test]
+    fn blob_and_worktree_readers_agree_on_rejected_content() {
+        // (segments, the substring both readers must report)
+        let cases: Vec<(Vec<(u64, String)>, &str)> = vec![
+            (vec![(0, "{}\n".into()), (2, "{}\n".into())], "segment gap"),
+            (
+                vec![(0, "{}\n{}\n".into()), (1, "{}\n".into())],
+                "has 2 events, expected 1000",
+            ),
+            (vec![(0, "{}\r\n".into())], "CR byte"),
+            (vec![(0, "{}".into())], "partial final line"),
+            (vec![(0, "{}\n\n{}\n".into())], "blank line"),
+        ];
+        for (case, needle) in cases {
+            let dir = tempfile::tempdir().unwrap();
+            for (n, body) in &case {
+                write_segment(dir.path(), *n, body);
+            }
+            let refs: Vec<(u64, &str)> = case.iter().map(|(n, b)| (*n, b.as_str())).collect();
+            let disk_err = read_stream_segments(dir.path()).unwrap_err().to_string();
+            let blob_err = read_stream_segments_at(&blob_stream(&refs), &tip())
+                .unwrap_err()
+                .to_string();
+            assert!(disk_err.contains(needle), "on-disk: {disk_err}");
+            assert!(blob_err.contains(needle), "blob: {blob_err}");
+        }
     }
 
     #[test]

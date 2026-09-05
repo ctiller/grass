@@ -10,6 +10,7 @@ mod error;
 mod events;
 mod exclusive;
 mod frontier;
+mod gitobjects;
 mod gitrepo;
 mod merge_candidate;
 mod merge_ready;
