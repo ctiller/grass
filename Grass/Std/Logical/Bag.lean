@@ -25,9 +25,10 @@ the other.
 `ConsumeExactlyOneMatching outstanding demand remainder` is *defined* as
 `outstanding = remainder.cons demand`. This is the whole content of "consumes
 exactly one live matching item". It is not an extra invariant checked alongside
-the transition: the `ProcessRunTransition.settle` constructor cannot be applied
-at all without exhibiting the remainder, and `cons_injective_right` then says
-that remainder is unique. No proof obligation can be discharged by weakening it to
+the transition: the `ProcessRunTransition` constructors that consume a demand --
+`stepResult` and `stepInterrupted` in `docs/PROCESS.md` §2 -- cannot be applied at
+all without exhibiting the remainder, and `cons_injective_right` then says that
+remainder is unique. No proof obligation can be discharged by weakening it to
 membership, because membership is not what the constructor asks for.
 
 ## Custody note
