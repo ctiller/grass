@@ -62,9 +62,41 @@ use envelope::Envelope;
 use error::{invalid, AbResult};
 use events::EventData;
 use frontier::{FrontierEntry, ObservedFrontier};
-use scalars::{Agent, EventId, ObjectId, Short};
+use scalars::{Agent, EventId, ObjectId, Short, StringSet, Timestamp};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+
+/// Identical to `Envelope::new` except it takes an explicit historical
+/// `time` instead of hardcoding `Timestamp::now_utc()` -- `Envelope::new`
+/// has no way to construct a backdated envelope at all (its `time` field
+/// isn't a parameter), which silently collapsed every migrated event's real
+/// v1 authoring timestamp into whatever wall-clock moment this tool
+/// happened to run at. Caught by adversarial review comparing migrated
+/// output against v1's real data. `Envelope`'s fields are all `pub`, so this
+/// constructs the struct directly rather than needing any change to the
+/// reviewed branch.
+fn build_envelope(
+    agent: &Agent,
+    seq: u64,
+    observed: ObservedFrontier,
+    data: &EventData,
+    extra_refs: impl IntoIterator<Item = EventId>,
+    time: Timestamp,
+) -> Envelope {
+    let mut refs: BTreeSet<EventId> = data.referenced_ids();
+    refs.extend(extra_refs);
+    Envelope {
+        v: envelope::SCHEMA_VERSION,
+        id: EventId::new(agent, seq),
+        agent: agent.clone(),
+        seq,
+        time,
+        observed,
+        kind: data.kind().to_string(),
+        refs: StringSet::from_iter(refs),
+        data: data.to_value(),
+    }
+}
 
 /// One event as read back from v1's own `tail --json`, before any v2
 /// construction happens -- `data`/`refs`/`kind` are taken as-is (v1 and v2
@@ -76,6 +108,7 @@ struct V1Event {
     agent: String,
     #[allow(dead_code)]
     seq: u64,
+    time: String,
     kind: String,
     refs: Vec<String>,
     data: serde_json::Value,
@@ -106,6 +139,23 @@ fn v1_agents(v1_repo: &Path) -> AbResult<Vec<Agent>> {
         .filter(|name| !name.is_empty() && *name != "_bus")
         .map(|name| Agent::parse(name.to_string()).map_err(|e| invalid(format!("bad v1 agent name: {e}"))))
         .collect()
+}
+
+/// Reads v1's immutable bootstrap file (`_bus/BUS.json` on
+/// `refs/heads/agent-bus`) directly out of git -- not via the v1 CLI, which
+/// has no command that prints it -- and returns its real
+/// `product_review_from`. A genuine cutover must reuse this exact historical
+/// anchor, not fabricate a stand-in the way this tool's scratch-testing path
+/// once did.
+fn read_v1_product_review_from(v1_repo: &Path) -> AbResult<ObjectId> {
+    let raw = gitrepo::run_ok(v1_repo, &["show", "refs/heads/agent-bus:_bus/BUS.json"])?;
+    let v: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| invalid(format!("v1's _bus/BUS.json did not parse: {e}")))?;
+    let s = v
+        .get("product_review_from")
+        .and_then(|x| x.as_str())
+        .ok_or_else(|| invalid("v1's _bus/BUS.json has no product_review_from field"))?;
+    ObjectId::parse(s.to_string()).map_err(|e| invalid(format!("{e}")))
 }
 
 fn v1_tail(v1_bin: &Path, v1_repo: &Path, agent: &Agent) -> AbResult<Vec<V1Event>> {
@@ -186,24 +236,32 @@ fn remap_event_id(id: &EventId, coordinator_agent: &Agent) -> EventId {
 
 /// Applies `remap_event_id` inside a raw v1 JSON payload, in place, without
 /// needing per-`EventData`-variant field enumeration: walks every string
-/// leaf and rewrites it only if the *entire* string value parses as a
-/// `coordinator_agent:N` (N >= 1) event id -- not a substring match, so free
-/// -text fields (rationale, summary, file:line locations like
-/// `commands.rs:670`) can't collide, since `Agent::parse` rejects anything
-/// that isn't a bare short identifier and a whole-value match against prose
-/// is astronomically unlikely to begin with. Must run BEFORE typed decode
-/// (`EventData::from_kind_and_value`) so every embedded reference --
-/// `nomination`, `evidence`, `merge_engine_epoch`, whatever the kind has --
-/// is already correct by the time `referenced_ids()`/gate-4 sees it.
+/// leaf and rewrites every `\bcoordinator_agent:N\b` (N >= 1) substring it
+/// finds, word-boundary-delimited so `commands.rs:670`-style file:line
+/// mentions or a different agent name's id (`coord10:5`, not a real agent
+/// but illustrative of why the boundary matters) can't collide.
+///
+/// An earlier version of this function only rewrote a string if its ENTIRE
+/// value was exactly one event id -- structured reference fields (already
+/// just a bare id) got fixed, but a free-text field that *mentions* an id
+/// mid-sentence (a finding's rationale citing "coord1:4", a decision
+/// record's prose) did not, silently leaving the same event
+/// self-contradictory: structured refs pointing at the new id, prose next to
+/// them still naming the old one. Caught by adversarial review comparing
+/// migrated output against v1's real data. Since only `coordinator_agent`'s
+/// ids ever shift, and shifted ids only ever appear as this exact
+/// `agent:number` token (never as a natural-language phrase), a substring
+/// match scoped to that one agent name is safe here even though it would be
+/// reckless as a generic technique.
+///
+/// Must run BEFORE typed decode (`EventData::from_kind_and_value`) so every
+/// embedded reference -- `nomination`, `evidence`, `merge_engine_epoch`,
+/// whatever the kind has -- is already correct by the time
+/// `referenced_ids()`/gate-4 sees it.
 fn remap_json_ids(v: &mut serde_json::Value, coordinator_agent: &Agent) {
     match v {
         serde_json::Value::String(s) => {
-            if let Ok(id) = parse_event_id(s) {
-                let remapped = remap_event_id(&id, coordinator_agent);
-                if remapped != id {
-                    *s = remapped.to_string();
-                }
-            }
+            *s = remap_ids_in_text(s, coordinator_agent);
         }
         serde_json::Value::Array(items) => {
             for item in items {
@@ -217,6 +275,20 @@ fn remap_json_ids(v: &mut serde_json::Value, coordinator_agent: &Agent) {
         }
         _ => {}
     }
+}
+
+fn remap_ids_in_text(s: &str, coordinator_agent: &Agent) -> String {
+    let pattern = format!(r"\b{}:(\d+)\b", regex::escape(coordinator_agent.as_str()));
+    let re = regex::Regex::new(&pattern).expect("valid regex: agent name is a bare identifier");
+    re.replace_all(s, |caps: &regex::Captures| {
+        let n: u64 = caps[1].parse().expect("\\d+ always parses as u64");
+        if n >= 1 {
+            format!("{coordinator_agent}:{}", n + 1)
+        } else {
+            caps[0].to_string()
+        }
+    })
+    .into_owned()
 }
 
 /// Kahn's algorithm over the raw v1 id/refs graph: same-agent events in
@@ -393,19 +465,36 @@ fn run() -> AbResult<()> {
     let v1_repo = v1_repo.ok_or_else(|| invalid("--v1-repo is required"))?;
     let out_repo = out_repo.ok_or_else(|| invalid("--out-repo is required"))?;
 
-    // Fresh, empty git repo -- this tool only ever writes here, never to
-    // `v1_repo`, and the caller decides separately whether/when `out_repo`'s
-    // refs are ever pushed anywhere real.
-    std::fs::create_dir_all(&out_repo).ok();
-    gitrepo::run_ok(&out_repo, &["init", "--quiet", "-b", "main"])?;
-    gitrepo::run_ok(&out_repo, &["config", "user.email", "migrate-v1@localhost"])?;
-    gitrepo::run_ok(&out_repo, &["config", "user.name", "migrate-v1"])?;
-    std::fs::write(out_repo.join("README.md"), "migrated v2 bus\n")
-        .map_err(|e| invalid(format!("{e}")))?;
-    gitrepo::run_ok(&out_repo, &["add", "README.md"])?;
-    gitrepo::run_ok(&out_repo, &["commit", "-q", "-m", "root"])?;
-    let product_review_from =
-        ObjectId::parse(gitrepo::rev_parse(&out_repo, "HEAD")?).map_err(|e| invalid(format!("{e}")))?;
+    // `out_repo` may be a fresh scratch directory (testing) or an existing
+    // repo the caller wants the new orphan bus refs written into directly.
+    // Either way, this never touches `HEAD`/`main`/the working tree: every
+    // write below goes through `registry::create_root`/`stream::
+    // create_root_commit`/`append_to_stream`, which orphan-branch via `git
+    // worktree add --orphan` (identical to v1's own `bootstrap-init`), so no
+    // existing ref or checkout state is disturbed.
+    if !out_repo.join(".git").exists() {
+        std::fs::create_dir_all(&out_repo).ok();
+        gitrepo::run_ok(&out_repo, &["init", "--quiet"])?;
+    }
+    if gitrepo::run_ok(&out_repo, &["config", "user.email"]).is_err() {
+        gitrepo::run_ok(&out_repo, &["config", "user.email", "migrate-v1@localhost"])?;
+    }
+    if gitrepo::run_ok(&out_repo, &["config", "user.name"]).is_err() {
+        gitrepo::run_ok(&out_repo, &["config", "user.name", "migrate-v1"])?;
+    }
+
+    // The real, historical bootstrap commit v1 itself was activated from --
+    // read directly from v1's own immutable bootstrap file, never
+    // fabricated.
+    let product_review_from = read_v1_product_review_from(&v1_repo)?;
+    gitrepo::rev_parse_opt(&v1_repo, product_review_from.as_str())?.ok_or_else(|| {
+        invalid(format!(
+            "v1's own bootstrap file names product_review_from {product_review_from}, which does \
+             not resolve as an object in {}",
+            v1_repo.display()
+        ))
+    })?;
+    eprintln!("product_review_from (from v1's real bootstrap file): {product_review_from}");
 
     let agents = v1_agents(&v1_repo)?;
     eprintln!("v1 identities found: {}", agents.len());
@@ -550,7 +639,12 @@ fn run() -> AbResult<()> {
                 helper_commit: product_review_from.clone(),
             });
             let observed = build_complete_frontier_v1(st, &this_id)?;
-            let env = Envelope::new(&coordinator_agent, next_seq, observed, &data, []);
+            // No real v1 event backs this one -- reuses the coordinator's
+            // own registration timestamp (the earliest moment "since
+            // bootstrap" the genesis event conceptually represents) rather
+            // than a fabricated or migration-run-time value.
+            let genesis_time = Timestamp::parse(all_events[&coordinator].time.clone())?;
+            let env = build_envelope(&coordinator_agent, next_seq, observed, &data, [], genesis_time);
             let new_tip = stream::append_to_stream(
                 &out_repo,
                 &coordinator_agent,
@@ -594,6 +688,7 @@ fn run() -> AbResult<()> {
                 &host,
                 &product_review_from,
                 &max_v1_seq,
+                Timestamp::parse(e.time.clone())?,
             )?);
             continue;
         }
@@ -663,7 +758,7 @@ fn run() -> AbResult<()> {
         // rewritten payload's `referenced_ids()`; passing it here would
         // leave a stale extra ref and fail gate 4. `data.referenced_ids()`
         // alone is authoritative and correct in both cases.
-        let env = Envelope::new(&agent, next_seq, observed, &data, []);
+        let env = build_envelope(&agent, next_seq, observed, &data, [], Timestamp::parse(e.time.clone())?);
         let new_tip = stream::append_to_stream(
             &out_repo,
             &agent,
@@ -694,6 +789,7 @@ fn register_identity(
     host: &Short,
     product_review_from: &ObjectId,
     max_v1_seq: &BTreeMap<Agent, u64>,
+    time: Timestamp,
 ) -> AbResult<Converted> {
     // Every registered identity has at least its own `agent.registered`
     // event in `all_events`, so this is always populated for a real
@@ -746,7 +842,7 @@ fn register_identity(
                 schema_fingerprint: bootstrap::SCHEMA_FINGERPRINT.to_string(),
             };
             let observed = ObservedFrontier::sparse(epoch.id.clone(), []);
-            let env = Envelope::new(agent, 0, observed, &EventData::AgentRegistered(d.clone()), []);
+            let env = build_envelope(agent, 0, observed, &EventData::AgentRegistered(d.clone()), [], time);
             let root_commit = stream::create_root_commit(
                 repo,
                 &header,
@@ -793,12 +889,13 @@ fn register_identity(
                 object_format: "sha1".to_string(),
                 schema_fingerprint: bootstrap::SCHEMA_FINGERPRINT.to_string(),
             };
-            let env = Envelope::new(
+            let env = build_envelope(
                 agent,
                 0,
                 ObservedFrontier::sparse(new_epoch.id.clone(), []),
                 &EventData::AgentRegistered(d.clone()),
                 [],
+                time,
             );
             let root_commit = stream::create_root_commit(
                 repo,
