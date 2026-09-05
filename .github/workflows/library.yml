@@ -14,6 +14,14 @@ name: Library build
 # docstring asserting a property the code did not have, including one naming a
 # theorem that did not exist. Tools/DocstringAudit.py requires a strong claim in
 # a definition or module comment to name the type or theorem enforcing it.
+#
+# A fourth check is about laws. docs/STDLIB_IMPLEMENTATION_PLAN.md decision 6
+# requires every Vec-returning operation to carry a law computing its length and
+# a law computing its get?. That rule was stated in prose three times and
+# violated in the same commit that stated it each time - most recently by
+# Vec.sum, on the right-hand side of a law consumers apply. lake build says
+# nothing about it: an operation with no law compiles. Tools/CoverageAudit.lean
+# is what says something.
 
 on:
   push:
@@ -50,5 +58,12 @@ jobs:
       - name: Audit axioms
         run: lake env lean Tools/AxiomAudit.lean
 
+      - name: Audit verified-program trust closure
+        shell: pwsh
+        run: ./audit-trust.ps1
+
       - name: Audit docstring claims
         run: python3 Tools/DocstringAudit.py
+
+      - name: Audit observation coverage
+        run: lake env lean Tools/CoverageAudit.lean

@@ -1,15 +1,14 @@
-//! Canonical-encoding checks (AGENT_BUS_SCHEMA.md section 2).
+//! Canonical-encoding checks.
 //!
-//! serde_json's default (non-`preserve_order`) writer gives us sorted object
+//! `serde_json`'s default (non-`preserve_order`) writer gives sorted object
 //! keys, compact output, and minimal escaping "for free" wherever content
-//! passes through `serde_json::Value` (its `Map` is a `BTreeMap` since this
+//! passes through `serde_json::Value` (its `Map` is a `BTreeMap`, since this
 //! crate does not enable the `preserve_order` feature). Envelope-shaped
-//! top-level structures (the event envelope, `_bus/BUS.json`) instead have a
-//! *fixed*, non-alphabetical field order, so their canonical form is checked
-//! by comparing against `serde_json::to_string` of the typed struct (whose
-//! fields serialize in declaration order) rather than through this module.
-//! What no round-trip catches is Unicode normalization, so that is checked
-//! explicitly here and called on every such structure's content.
+//! top-level structures instead have a *fixed*, non-alphabetical field
+//! order, so their canonical form is checked by comparing against
+//! `serde_json::to_string` of the typed struct (whose fields serialize in
+//! declaration order) rather than through this module. What no round-trip
+//! catches is Unicode normalization, so that is checked explicitly here.
 
 use crate::error::{invalid, AbResult};
 use unicode_normalization::is_nfc;
@@ -57,5 +56,11 @@ mod tests {
     fn nested_non_nfc_is_rejected() {
         let nfd = serde_json::json!({"a": ["ok", "e\u{0301}"]});
         assert!(check_nfc(&nfd).is_err());
+    }
+
+    #[test]
+    fn non_nfc_object_key_is_rejected() {
+        let value: serde_json::Value = serde_json::from_str("{\"e\u{0301}\": \"ok\"}").unwrap();
+        assert!(check_nfc(&value).is_err());
     }
 }
