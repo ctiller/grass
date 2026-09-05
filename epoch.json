@@ -1,1 +1,1 @@
-{"active_members":{"c-agent":{"coordinator_custody_epoch":0,"host":"migration","role":"implementor"},"coord1":{"coordinator_custody_epoch":0,"host":"migration","role":"coordinator"}},"parent":"ecd2bf453113e6958811d6b46be1e9381a53d3f0"}
+{"active_members":{"c-agent":{"coordinator_custody_epoch":0,"host":"migration","role":"implementor"},"c-mem":{"coordinator_custody_epoch":0,"host":"migration","role":"implementor"},"coord1":{"coordinator_custody_epoch":0,"host":"migration","role":"coordinator"}},"parent":"0dd08206856fa7f19a93530ace4267ab4ed5d37e"}
