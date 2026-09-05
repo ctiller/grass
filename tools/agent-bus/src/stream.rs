@@ -75,10 +75,14 @@ pub fn read_stream_tip(repo: &Path, agent: &Agent) -> AbResult<Option<ObjectId>>
     }
 }
 
-fn read_header(worktree: &Path) -> AbResult<StreamHeader> {
-    let bytes = std::fs::read(worktree.join(HEADER_FILE)).map_err(|e| AbError::Io {
-        path: worktree.join(HEADER_FILE).display().to_string(),
-        source: e,
+fn read_header_at(
+    reader: &dyn crate::gitobjects::ObjectReader,
+    tip: &ObjectId,
+) -> AbResult<StreamHeader> {
+    let bytes = reader.read_blob_at(tip, HEADER_FILE)?.ok_or_else(|| {
+        invalid(format!(
+            "stream commit {tip} has no {HEADER_FILE}; it is not a stream commit"
+        ))
     })?;
     StreamHeader::parse(&bytes)
 }
@@ -88,11 +92,11 @@ fn read_header(worktree: &Path) -> AbResult<StreamHeader> {
 /// registry membership, or custody -- see `frontier.rs`/`registry.rs` for
 /// that, applied by the caller once it has the registry epoch this stream's
 /// events claim to observe.
-pub fn read_stream(
-    repo: &Path,
-    agent: &Agent,
-    worktrees_dir: &Path,
-) -> AbResult<(StreamHeader, Vec<Envelope>)> {
+///
+/// Reads the blobs straight out of the object database (`gitobjects.rs`),
+/// so no worktree is materialized -- and therefore no scratch directory to
+/// check one out into is needed or accepted any more.
+pub fn read_stream(repo: &Path, agent: &Agent) -> AbResult<(StreamHeader, Vec<Envelope>)> {
     let tip = read_stream_tip(repo, agent)?.ok_or_else(|| {
         invalid(format!(
             "{agent} has no stream -- either it was never registered, or it is registered but \
@@ -100,16 +104,27 @@ pub fn read_stream(
              it first"
         ))
     })?;
-    let worktree = worktrees_dir.join(format!("stream-read-{agent}"));
-    crate::gitrepo::ensure_bus_worktree(repo, &worktree, tip.as_str())?;
-    let header = read_header(&worktree)?;
+    let reader = crate::gitobjects::Libgit2Reader::open(repo)?;
+    read_stream_at(&reader, &tip, agent)
+}
+
+/// [`read_stream`] against an already-resolved tip and an already-open
+/// reader. Callers reading many streams in one pass (`sync::reduce_local`,
+/// `coordinator::build_complete_frontier`) open one reader and loop over
+/// this rather than paying a repository open per stream.
+pub fn read_stream_at(
+    reader: &dyn crate::gitobjects::ObjectReader,
+    tip: &ObjectId,
+    agent: &Agent,
+) -> AbResult<(StreamHeader, Vec<Envelope>)> {
+    let header = read_header_at(reader, tip)?;
     if header.agent != *agent {
         return Err(invalid(format!(
             "{agent}'s stream header names agent {}",
             header.agent
         )));
     }
-    let log = crate::storage::read_stream_log(&worktree, agent)?;
+    let log = crate::storage::read_stream_log_at(reader, tip, agent)?;
     Ok((header, log))
 }
 
@@ -394,8 +409,7 @@ mod tests {
             Some(commit.clone())
         );
 
-        let reads_dir = repo.path().join("_wt_reads");
-        let (read_header, log) = read_stream(repo.path(), &alice, &reads_dir).unwrap();
+        let (read_header, log) = read_stream(repo.path(), &alice).unwrap();
         assert_eq!(read_header, header(&alice));
         assert_eq!(log.len(), 1);
         assert_eq!(log[0].kind, "agent.registered");
@@ -563,8 +577,7 @@ mod tests {
             vec![root.as_str().to_string()]
         );
 
-        let reads_dir = repo.path().join("_wt_reads");
-        let (_h, log) = read_stream(repo.path(), &alice, &reads_dir).unwrap();
+        let (_h, log) = read_stream(repo.path(), &alice).unwrap();
         assert_eq!(log.len(), 2);
         assert_eq!(log[1].seq, 1);
     }
@@ -654,8 +667,144 @@ mod tests {
     #[test]
     fn read_stream_fails_for_an_agent_with_no_stream() {
         let repo = init_repo();
-        let reads_dir = repo.path().join("_wt_reads");
-        let err = read_stream(repo.path(), &a("nobody"), &reads_dir).unwrap_err();
+        let err = read_stream(repo.path(), &a("nobody")).unwrap_err();
         assert!(err.to_string().contains("has no stream"), "{err}");
+    }
+
+    // ------------------------------------ reading a stream out of history
+    //
+    // `read_stream_at`'s own branches, driven by a `FixtureObjectReader` so
+    // each malformed shape can be stated directly. Building these through
+    // the real write path is not possible -- `create_root_commit` refuses
+    // most of them -- which is exactly why the trait has a test
+    // implementation.
+
+    fn tip() -> ObjectId {
+        ObjectId::parse("ab".repeat(20)).unwrap()
+    }
+
+    fn stream_blobs(agent: &Agent) -> crate::gitobjects::FixtureObjectReader {
+        crate::gitobjects::FixtureObjectReader::new()
+            .with_blob(&tip(), HEADER_FILE, header(agent).to_canonical_bytes())
+            .with_blob(
+                &tip(),
+                "000000.jsonl",
+                format!("{}\n", registered_envelope(agent, 0).to_canonical_line()),
+            )
+    }
+
+    #[test]
+    fn read_stream_at_reads_a_well_formed_stream() {
+        let alice = a("alice");
+        let (h, log) = read_stream_at(&stream_blobs(&alice), &tip(), &alice).unwrap();
+        assert_eq!(h, header(&alice));
+        assert_eq!(log.len(), 1);
+    }
+
+    /// A commit with no `header.json` is not a stream commit at all. It must
+    /// say so, rather than surfacing a bare "missing file" that gives the
+    /// reader nothing to act on.
+    #[test]
+    fn read_stream_at_rejects_a_commit_with_no_header() {
+        let alice = a("alice");
+        let r = crate::gitobjects::FixtureObjectReader::new().with_blob(
+            &tip(),
+            "000000.jsonl",
+            format!("{}\n", registered_envelope(&alice, 0).to_canonical_line()),
+        );
+        let err = read_stream_at(&r, &tip(), &alice).unwrap_err();
+        assert!(err.to_string().contains("is not a stream commit"), "{err}");
+        assert!(err.to_string().contains(tip().as_str()), "{err}");
+    }
+
+    #[test]
+    fn read_stream_at_rejects_a_malformed_header() {
+        let alice = a("alice");
+        let r = stream_blobs(&alice).with_blob(&tip(), HEADER_FILE, b"not json");
+        let err = read_stream_at(&r, &tip(), &alice).unwrap_err();
+        assert!(err.to_string().contains("malformed stream header"), "{err}");
+    }
+
+    /// Reading agent A's ref must not silently accept a tree holding agent
+    /// B's header -- the header is the stream's own claim of ownership.
+    #[test]
+    fn read_stream_at_rejects_a_header_naming_a_different_agent() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let r =
+            stream_blobs(&alice).with_blob(&tip(), HEADER_FILE, header(&bob).to_canonical_bytes());
+        let err = read_stream_at(&r, &tip(), &alice).unwrap_err();
+        assert!(err.to_string().contains("header names agent bob"), "{err}");
+    }
+
+    #[test]
+    fn read_stream_at_rejects_a_stream_with_no_segments() {
+        let alice = a("alice");
+        let r = crate::gitobjects::FixtureObjectReader::new().with_blob(
+            &tip(),
+            HEADER_FILE,
+            header(&alice).to_canonical_bytes(),
+        );
+        let err = read_stream_at(&r, &tip(), &alice).unwrap_err();
+        assert!(err.to_string().contains("has no segments"), "{err}");
+    }
+
+    #[test]
+    fn read_stream_at_propagates_an_unresolvable_commit() {
+        let alice = a("alice");
+        let other = ObjectId::parse("cd".repeat(20)).unwrap();
+        let err = read_stream_at(&stream_blobs(&alice), &other, &alice).unwrap_err();
+        assert!(matches!(err, AbError::Git(_)), "got {err:?}");
+    }
+
+    /// The end-to-end proof that matters: real commits made by the crate's
+    /// own real write path, spanning a segment rollover, read back through
+    /// libgit2 with no worktree materialized. `append_to_stream` rolls over
+    /// at `SEGMENT_SIZE`, so 1001 events means segment `000000.jsonl` closed
+    /// at exactly 1000 plus a `000001.jsonl` tail -- the multi-segment shape
+    /// the old worktree reader used to see as two files on disk.
+    #[test]
+    fn read_stream_reads_a_real_multi_segment_stream_across_a_rollover() {
+        let repo = init_repo();
+        let alice = a("alice");
+        let root = create_root_commit(
+            repo.path(),
+            &header(&alice),
+            &registered_envelope(&alice, 0),
+            &repo.path().join("_wt_root"),
+        )
+        .unwrap();
+
+        let rest: Vec<Envelope> = (1..=crate::storage::SEGMENT_SIZE)
+            .map(|seq| status_envelope(&alice, seq))
+            .collect();
+        append_to_stream(
+            repo.path(),
+            &alice,
+            &root,
+            &rest,
+            &repo.path().join("_wt_append"),
+        )
+        .unwrap();
+
+        let (read_header, log) = read_stream(repo.path(), &alice).unwrap();
+        assert_eq!(read_header, header(&alice));
+        assert_eq!(log.len() as u64, crate::storage::SEGMENT_SIZE + 1);
+        assert_eq!(log[0].kind, "agent.registered");
+        assert_eq!(log[1000].seq, 1000);
+        // Every event, in order, with no gap across the segment boundary.
+        for (i, env) in log.iter().enumerate() {
+            assert_eq!(env.seq, i as u64);
+            assert_eq!(env.agent, alice);
+        }
+
+        // ...and the read genuinely materialized nothing: the only
+        // directories under the repo are the two the write path made.
+        let stray: Vec<String> = std::fs::read_dir(repo.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("stream-read-") || n.starts_with("_reads"))
+            .collect();
+        assert!(stray.is_empty(), "read materialized worktrees: {stray:?}");
     }
 }

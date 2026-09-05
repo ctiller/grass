@@ -100,12 +100,7 @@ pub fn drain_outbox(
     let mut fresh_sync_err: Option<String> = None;
     let mut fresh_state = None;
     if needs_fresh {
-        match crate::sync::synced_snapshot(
-            repo,
-            git_common_dir,
-            remote,
-            &worktrees_dir.join("_validate_synced"),
-        ) {
+        match crate::sync::synced_snapshot(repo, git_common_dir, remote) {
             Ok(snap) => fresh_state = Some(snap.state),
             Err(e) => fresh_sync_err = Some(e.to_string()),
         }
@@ -113,28 +108,18 @@ pub fn drain_outbox(
 
     let registry_tip = crate::registry::read_registry_tip(repo)?
         .ok_or_else(|| invalid("no registry root exists yet"))?;
-    let epoch = crate::registry::read_epoch(repo, &registry_tip, &worktrees_dir.join("_epoch"))?;
+    let epoch = crate::registry::read_epoch(repo, &registry_tip)?;
     crate::registry::authorize_stream_write(&epoch, agent, host, coordinator_custody_epoch)?;
 
     let mut state = match fresh_state {
         Some(s) => s,
-        None => {
-            crate::sync::cached_snapshot(repo, git_common_dir, &worktrees_dir.join("_validate"))?
-                .state
-        }
+        None => crate::sync::cached_snapshot(repo, git_common_dir)?.state,
     };
 
     let existing_tip = crate::stream::read_stream_tip(repo, agent)?;
     let mut next_seq = if let Some(tip) = &existing_tip {
-        let reads_dir = worktrees_dir.join(format!("_read_{agent}"));
-        crate::storage::read_stream_log(
-            &{
-                crate::gitrepo::ensure_bus_worktree(repo, &reads_dir, tip.as_str())?;
-                reads_dir
-            },
-            agent,
-        )?
-        .len() as u64
+        let reader = crate::gitobjects::Libgit2Reader::open(repo)?;
+        crate::storage::read_stream_log_at(&reader, tip, agent)?.len() as u64
     } else {
         0
     };
@@ -418,7 +403,7 @@ fn build_frontier(
     data: &crate::events::EventData,
 ) -> AbResult<ObservedFrontier> {
     if requires_complete_frontier(data) {
-        return build_complete_frontier(repo, epoch, worktrees_dir);
+        return build_complete_frontier(repo, epoch);
     }
     // One entry per cross-agent identity referenced, `through` set to the
     // *furthest* seq referenced for that agent (so gate 4 accepts every
@@ -690,11 +675,15 @@ fn requires_synced_snapshot(data: &crate::events::EventData) -> bool {
 /// set). Fails if any active member has not yet published its own stream
 /// root -- a real, honest failure rather than silently omitting them (which
 /// `ObservedFrontier::complete` would reject anyway).
+///
+/// One reader serves the whole roster: this loop used to check out a fresh
+/// worktree per active member on every call, which is the single largest
+/// contributor to `status --sync`'s cost on the real fleet repo.
 fn build_complete_frontier(
     repo: &Path,
     epoch: &crate::registry::RosterEpoch,
-    worktrees_dir: &Path,
 ) -> AbResult<ObservedFrontier> {
+    let reader = crate::gitobjects::Libgit2Reader::open(repo)?;
     let mut entries = Vec::new();
     for member in epoch.active_members.keys() {
         let tip = crate::stream::read_stream_tip(repo, member)?.ok_or_else(|| {
@@ -702,9 +691,7 @@ fn build_complete_frontier(
                 "cannot build a complete frontier: {member} has not yet published its own stream"
             ))
         })?;
-        let reads_dir = worktrees_dir.join(format!("_complete_{member}"));
-        crate::gitrepo::ensure_bus_worktree(repo, &reads_dir, tip.as_str())?;
-        let log_len = crate::storage::read_stream_log(&reads_dir, member)?.len() as u64;
+        let log_len = crate::storage::read_stream_log_at(&reader, &tip, member)?.len() as u64;
         entries.push(FrontierEntry {
             agent: member.clone(),
             stream_tip: tip,
@@ -926,8 +913,7 @@ mod tests {
         );
         assert!(drained.rejected.is_empty());
 
-        let reads_dir = repo.path().join("_reads");
-        let (_header, log) = crate::stream::read_stream(repo.path(), &coord1, &reads_dir).unwrap();
+        let (_header, log) = crate::stream::read_stream(repo.path(), &coord1).unwrap();
         assert_eq!(log.len(), 3); // genesis registration + the two status events
     }
 
@@ -979,8 +965,7 @@ mod tests {
         .unwrap();
         assert!(drained.rejected.is_empty());
 
-        let reads_dir = repo.path().join("_reads");
-        let (_header, log) = crate::stream::read_stream(repo.path(), &coord1, &reads_dir).unwrap();
+        let (_header, log) = crate::stream::read_stream(repo.path(), &coord1).unwrap();
         // log[0] is the genesis registration; log[1] must be the urgent
         // candidate despite having been submitted second.
         assert_eq!(log[1].kind, "agent.status");
@@ -1072,9 +1057,7 @@ mod tests {
 
         // The stream itself is clean: reduce() must not choke on anything
         // that was never actually published.
-        let snap =
-            crate::sync::cached_snapshot(repo.path(), repo.path(), &repo.path().join("_snap"))
-                .unwrap();
+        let snap = crate::sync::cached_snapshot(repo.path(), repo.path()).unwrap();
         assert_eq!(snap.state.agents[&coord1].next_seq, 3);
     }
 
@@ -1775,9 +1758,7 @@ mod tests {
         // gate-4 check, proving the envelope actually written to disk is
         // self-consistent, not merely that `dry_run` was fooled the same
         // way twice.
-        let (_header, log) =
-            crate::stream::read_stream(repo.path(), &alice, &repo.path().join("_reread_alice"))
-                .unwrap();
+        let (_header, log) = crate::stream::read_stream(repo.path(), &alice).unwrap();
         assert_eq!(log.len(), 2); // registration + acknowledgement
     }
 

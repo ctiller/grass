@@ -19,6 +19,14 @@ regex = "1"
 unicode-normalization = "0.1"
 fs4 = { version = "0.8", features = ["sync"] }
 tempfile = "3"
+# Read-only object-database access for the hot read path (`gitobjects.rs`).
+# `default-features = false` drops the optional HTTPS/SSH transport
+# backends: nothing here talks to a remote -- all transport stays on the
+# `git` subprocess in `gitrepo.rs`, which keeps the user's ambient
+# credential helpers, SSH agent and `.netrc` -- and dropping them removes
+# the OpenSSL/libssh2 system-library build requirements this crate must not
+# acquire. What remains is vendored libgit2, compiled by `cc`.
+git2 = { version = "0.21", default-features = false }
 
 [dev-dependencies]
 assert_cmd = "2"

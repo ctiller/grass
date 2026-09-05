@@ -61,13 +61,9 @@ pub struct Snapshot {
 /// `None` if a synchronization has never yet succeeded here -- never a
 /// fabricated or `now()`-derived value, since a cached read must be able to
 /// report a last-sync time from long before "now".
-pub fn cached_snapshot(
-    repo: &Path,
-    git_common_dir: &Path,
-    worktrees_dir: &Path,
-) -> AbResult<Snapshot> {
+pub fn cached_snapshot(repo: &Path, git_common_dir: &Path) -> AbResult<Snapshot> {
     let last_synced = read_last_synced(git_common_dir)?;
-    let mut snapshot = reduce_local(repo, worktrees_dir, Freshness::Cached)?;
+    let mut snapshot = reduce_local(repo, Freshness::Cached)?;
     snapshot.last_synced = last_synced;
     Ok(snapshot)
 }
@@ -89,12 +85,7 @@ pub fn cached_snapshot(
 /// event). A later `cached_snapshot` (or a `synced_snapshot` whose own
 /// fetch fails) then correctly reports that recorded time rather than
 /// `None`.
-pub fn synced_snapshot(
-    repo: &Path,
-    git_common_dir: &Path,
-    remote: &str,
-    worktrees_dir: &Path,
-) -> AbResult<Snapshot> {
+pub fn synced_snapshot(repo: &Path, git_common_dir: &Path, remote: &str) -> AbResult<Snapshot> {
     // Existence checked first, same reasoning as the stream refs below: a
     // bus that has never been bootstrapped on `remote` yet is an ordinary,
     // expected state (not a fetch failure) and deserves this function's own
@@ -114,8 +105,7 @@ pub fn synced_snapshot(
 
     let registry_tip = crate::registry::read_registry_tip(repo)?
         .ok_or_else(|| invalid("no registry root exists on the remote"))?;
-    let epoch =
-        crate::registry::read_epoch(repo, &registry_tip, &worktrees_dir.join("_sync_epoch"))?;
+    let epoch = crate::registry::read_epoch(repo, &registry_tip)?;
 
     // A member registered in this epoch may not have published its own
     // stream root yet (reduce_local's own comment: "a real, expected
@@ -141,7 +131,7 @@ pub fn synced_snapshot(
     let now = Timestamp::now_utc();
     record_last_synced(git_common_dir, &now)?;
 
-    let mut snapshot = reduce_local(repo, worktrees_dir, Freshness::CurrentAsOfRemoteProbe)?;
+    let mut snapshot = reduce_local(repo, Freshness::CurrentAsOfRemoteProbe)?;
     snapshot.last_synced = Some(now);
     Ok(snapshot)
 }
@@ -191,26 +181,22 @@ fn record_last_synced(git_common_dir: &Path, at: &Timestamp) -> AbResult<()> {
     crate::storage::atomic_write(&path, &serde_json::to_vec_pretty(&record)?)
 }
 
-fn reduce_local(repo: &Path, worktrees_dir: &Path, freshness: Freshness) -> AbResult<Snapshot> {
+fn reduce_local(repo: &Path, freshness: Freshness) -> AbResult<Snapshot> {
     let registry_tip = crate::registry::read_registry_tip(repo)?
         .ok_or_else(|| invalid("no registry root exists locally"))?;
-    let epoch =
-        crate::registry::read_epoch(repo, &registry_tip, &worktrees_dir.join("_reduce_epoch"))?;
+    // A full reduction reads the registry tip, its whole epoch lineage, the
+    // bus config, and every active member's entire stream. Each of those was
+    // a separate `git worktree add`/`remove` cycle before; one reader now
+    // serves all of them straight from the object database.
+    let reader = crate::gitobjects::Libgit2Reader::open(repo)?;
+    let epoch = crate::registry::read_epoch_at(&reader, &registry_tip)?;
     // Every epoch reachable from the tip, not just the current one -- a
     // complete frontier authored against an older epoch must remain
     // re-validatable forever (gate 5), and `apply::require_complete_
     // frontier`/`apply_broadcast_published` look the *named* epoch up here
     // rather than trusting whatever is current at reduction time.
-    let known_epochs = crate::registry::read_epoch_chain(
-        repo,
-        &registry_tip,
-        &worktrees_dir.join("_reduce_epoch_chain"),
-    )?;
-    let config = crate::registry::read_bus_config(
-        repo,
-        &registry_tip,
-        &worktrees_dir.join("_reduce_config"),
-    )?;
+    let known_epochs = crate::registry::read_epoch_chain(repo, &registry_tip)?;
+    let config = crate::registry::read_bus_config_at(&reader, &registry_tip)?;
 
     let mut streams = BTreeMap::new();
     let mut stream_tips = BTreeMap::new();
@@ -223,8 +209,7 @@ fn reduce_local(repo: &Path, worktrees_dir: &Path, freshness: Freshness) -> AbRe
             // first `agent.registered` event are two separate publications.
             None => continue,
         };
-        let reads_dir = worktrees_dir.join(format!("_reduce_stream_{agent}"));
-        let (_header, log) = crate::stream::read_stream(repo, agent, &reads_dir)?;
+        let (_header, log) = crate::stream::read_stream_at(&reader, &tip, agent)?;
         streams.insert(agent.clone(), log);
         stream_tips.insert(agent.clone(), tip);
     }
@@ -355,7 +340,6 @@ mod tests {
             host_b.path(),
             host_b.path(),
             &origin.path().to_string_lossy(),
-            &host_b.path().join("_sync_wt"),
         )
         .unwrap_err();
         assert!(matches!(err, crate::error::AbError::Io { .. }), "{err}");
@@ -367,7 +351,7 @@ mod tests {
     #[test]
     fn cached_snapshot_fails_before_any_registry_exists() {
         let repo = init_repo();
-        let err = cached_snapshot(repo.path(), repo.path(), &repo.path().join("_wt")).unwrap_err();
+        let err = cached_snapshot(repo.path(), repo.path()).unwrap_err();
         assert!(err.to_string().contains("no registry root"), "{err}");
     }
 
@@ -388,8 +372,7 @@ mod tests {
         )
         .unwrap();
 
-        let snap =
-            cached_snapshot(repo.path(), repo.path(), &repo.path().join("_snap_wt")).unwrap();
+        let snap = cached_snapshot(repo.path(), repo.path()).unwrap();
         assert_eq!(snap.freshness, Freshness::Cached);
         assert!(snap.roster_epoch.is_active_member(&coord1));
         assert!(snap.state.agents.contains_key(&coord1));
@@ -462,7 +445,6 @@ mod tests {
             host_b.path(),
             host_b.path(),
             &origin.path().to_string_lossy(),
-            &host_b.path().join("_sync_wt"),
         )
         .unwrap();
         assert_eq!(snap.freshness, Freshness::CurrentAsOfRemoteProbe);
@@ -548,7 +530,6 @@ mod tests {
             host_b.path(),
             host_b.path(),
             &origin.path().to_string_lossy(),
-            &host_b.path().join("_sync_wt"),
         )
         .unwrap();
         assert!(snap.roster_epoch.is_active_member(&alice));
@@ -564,13 +545,8 @@ mod tests {
     fn synced_snapshot_fails_when_the_remote_has_no_registry_yet() {
         let origin = init_bare_origin();
         let repo = init_repo();
-        let err = synced_snapshot(
-            repo.path(),
-            repo.path(),
-            &origin.path().to_string_lossy(),
-            &repo.path().join("_sync_wt"),
-        )
-        .unwrap_err();
+        let err = synced_snapshot(repo.path(), repo.path(), &origin.path().to_string_lossy())
+            .unwrap_err();
         assert!(err.to_string().contains("no registry root"), "{err}");
         // The fetch itself never got far enough to succeed (the registry
         // ref doesn't even exist on the remote), so nothing was recorded --
@@ -639,13 +615,7 @@ mod tests {
         .unwrap();
 
         let host_b = init_repo();
-        let first = synced_snapshot(
-            host_b.path(),
-            host_b.path(),
-            &remote,
-            &host_b.path().join("_wt1"),
-        )
-        .unwrap();
+        let first = synced_snapshot(host_b.path(), host_b.path(), &remote).unwrap();
         assert_eq!(first.state.agents.get(&coord1).unwrap().next_seq, 1);
         let first_last_synced = first.last_synced.clone().unwrap();
 
@@ -672,13 +642,7 @@ mod tests {
         // A second sync attempt must hard-fail on the genuinely rejected
         // fetch, not silently re-report `host_b`'s now-stale first snapshot
         // as `CurrentAsOfRemoteProbe`.
-        let err = synced_snapshot(
-            host_b.path(),
-            host_b.path(),
-            &remote,
-            &host_b.path().join("_wt2"),
-        )
-        .unwrap_err();
+        let err = synced_snapshot(host_b.path(), host_b.path(), &remote).unwrap_err();
         assert!(err.to_string().contains("failed"), "{err}");
         // The failed attempt must not fabricate a newer `last_synced` either.
         assert_eq!(
@@ -766,7 +730,6 @@ mod tests {
             host_b.path(),
             host_b.path(),
             &origin.path().to_string_lossy(),
-            &host_b.path().join("_sync_wt"),
         )
         .unwrap_err();
         // Confirms the failure is genuinely the intended one (the corrupt
