@@ -1,175 +1,265 @@
-//! `_bus/BUS.json`, the immutable bootstrap file (AGENT_BUS.md section 2,
-//! AGENT_BUS_SCHEMA.md section 2).
+//! The bus-wide configuration fixed at version-two activation
+//! (docs/AGENT_COORDINATION_EVOLUTION.md section 2.5): the product object
+//! format, the exact product commit migration started from, and the pinned
+//! merge engine. Unlike version one's single immutable `_bus/BUS.json`, this
+//! is not a standalone commit of its own -- it's established alongside the
+//! registry's root epoch (`registry.rs`), since activation and the first
+//! roster epoch are one atomic act. There is deliberately no `coordinators`
+//! list here: coordinator authority is `Role::Coordinator` membership in the
+//! registry's current epoch, not a separate immutable roster.
 
 use crate::error::{invalid, AbResult};
-use crate::scalars::{Agent, EventId, ObjectId, StringSet};
+use crate::scalars::ObjectId;
 use serde::{Deserialize, Serialize};
 
 pub const SUPPORTED_MERGE_ENGINE: &str = "git-ort";
 /// The exact `git` version this helper was validated against for candidate
-/// construction (`git merge-tree --write-tree`, ORT strategy). Bootstrap
-/// refuses to run against a different version, per AGENT_BUS_SCHEMA.md section 2.
+/// construction (`git merge-tree --write-tree`, ORT strategy). Activation
+/// refuses to run against a different version.
 pub const SUPPORTED_MERGE_ENGINE_VERSION: &str = "2.53.0";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BusJson {
-    pub v: u32,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct BusConfig {
     pub object_format: String,
-    pub coordinators: StringSet<Agent>,
     pub product_review_from: ObjectId,
     pub merge_engine: String,
     pub merge_engine_version: String,
-    pub merge_engine_epoch: EventId,
 }
 
-impl BusJson {
-    pub fn new(
-        object_format: String,
-        coordinators: Vec<Agent>,
-        product_review_from: ObjectId,
-    ) -> AbResult<BusJson> {
+impl BusConfig {
+    pub fn new(object_format: String, product_review_from: ObjectId) -> AbResult<BusConfig> {
         if object_format != "sha1" && object_format != "sha256" {
             return Err(invalid(format!(
                 "unsupported object_format: {object_format}"
             )));
         }
-        if coordinators.is_empty() {
-            return Err(invalid("bootstrap requires at least one coordinator"));
-        }
-        let coordinators = StringSet::from_iter(coordinators);
-        let epoch_agent = coordinators
-            .iter()
-            .next()
-            .expect("checked nonempty above")
-            .clone();
         let installed = crate::gitrepo::version()?;
         if installed != SUPPORTED_MERGE_ENGINE_VERSION {
             return Err(invalid(format!(
-                "installed git {installed} does not match the pinned merge engine version {SUPPORTED_MERGE_ENGINE_VERSION}; bootstrap refuses to run"
+                "installed git {installed} does not match the pinned merge engine version \
+                 {SUPPORTED_MERGE_ENGINE_VERSION}; activation refuses to run"
             )));
         }
-        Ok(BusJson {
-            v: crate::envelope::SCHEMA_VERSION,
+        Ok(BusConfig {
             object_format,
-            coordinators,
             product_review_from,
             merge_engine: SUPPORTED_MERGE_ENGINE.to_string(),
             merge_engine_version: SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
-            merge_engine_epoch: EventId::new(&epoch_agent, 0),
         })
-    }
-
-    pub fn parse(bytes: &[u8]) -> AbResult<BusJson> {
-        let text =
-            std::str::from_utf8(bytes).map_err(|e| invalid(format!("BUS.json not UTF-8: {e}")))?;
-        if !text.ends_with('\n') || text.matches('\n').count() != 1 {
-            return Err(invalid("BUS.json must be exactly one line plus LF"));
-        }
-        let line = &text[..text.len() - 1];
-        let value: serde_json::Value = serde_json::from_str(line)?;
-        let known = [
-            "v",
-            "object_format",
-            "coordinators",
-            "product_review_from",
-            "merge_engine",
-            "merge_engine_version",
-            "merge_engine_epoch",
-        ];
-        if let serde_json::Value::Object(map) = &value {
-            for k in map.keys() {
-                if !known.contains(&k.as_str()) {
-                    return Err(invalid(format!("unknown BUS.json field: {k}")));
-                }
-            }
-        } else {
-            return Err(invalid("BUS.json is not a JSON object"));
-        }
-        crate::canon::check_nfc(&value)?;
-        let bus: BusJson = serde_json::from_value(value)?;
-        if bus.v != crate::envelope::SCHEMA_VERSION {
-            return Err(invalid(format!(
-                "unsupported BUS.json schema version {}",
-                bus.v
-            )));
-        }
-        if bus.object_format != "sha1" && bus.object_format != "sha256" {
-            return Err(invalid(format!(
-                "unsupported object_format: {}",
-                bus.object_format
-            )));
-        }
-        if bus.coordinators.is_empty() {
-            return Err(invalid("coordinators must be nonempty"));
-        }
-        if bus.merge_engine != SUPPORTED_MERGE_ENGINE {
-            return Err(invalid(format!(
-                "unsupported merge_engine: {}",
-                bus.merge_engine
-            )));
-        }
-        if !bus
-            .coordinators
-            .iter()
-            .any(|c| c == &bus.merge_engine_epoch.agent())
-            || bus.merge_engine_epoch.seq() != 0
-        {
-            return Err(invalid(
-                "merge_engine_epoch must name a bootstrap coordinator's sequence-zero registration",
-            ));
-        }
-        let canonical = serde_json::to_string(&bus)?;
-        if canonical != line {
-            return Err(invalid("BUS.json is not canonically encoded"));
-        }
-        if bus.product_review_from.as_str().len() != bus.object_id_len() {
-            return Err(invalid(format!(
-                "product_review_from length does not match object_format {}",
-                bus.object_format
-            )));
-        }
-        Ok(bus)
-    }
-
-    pub fn to_canonical_bytes(&self) -> Vec<u8> {
-        let mut s = serde_json::to_string(self).expect("serializable");
-        s.push('\n');
-        s.into_bytes()
     }
 
     pub fn object_id_len(&self) -> usize {
         ObjectId::expected_len(&self.object_format).unwrap_or(40)
     }
+
+    pub fn to_canonical_bytes(&self) -> Vec<u8> {
+        let value = serde_json::to_value(self).expect("BusConfig always serializable");
+        serde_json::to_vec(&value).expect("BusConfig value always serializable")
+    }
+
+    pub fn parse(bytes: &[u8]) -> AbResult<BusConfig> {
+        let config: BusConfig = serde_json::from_slice(bytes)
+            .map_err(|e| invalid(format!("malformed bus config: {e}")))?;
+        if config.object_format != "sha1" && config.object_format != "sha256" {
+            return Err(invalid(format!(
+                "unsupported object_format: {}",
+                config.object_format
+            )));
+        }
+        if config.merge_engine != SUPPORTED_MERGE_ENGINE {
+            return Err(invalid(format!(
+                "unsupported merge_engine: {}",
+                config.merge_engine
+            )));
+        }
+        if config.product_review_from.as_str().len() != config.object_id_len() {
+            return Err(invalid(format!(
+                "product_review_from length does not match object_format {}",
+                config.object_format
+            )));
+        }
+        Ok(config)
+    }
 }
 
-pub const GITATTRIBUTES_CONTENTS: &str = "*.jsonl -text\n";
+/// Creates a v2-native genesis from nothing: the registry's root epoch,
+/// naming `coordinator` as its sole `Role::Coordinator` member, and that
+/// coordinator's own stream root (its `agent.registered` event, sequence
+/// zero). There is genuinely nothing to observe yet, so that event's
+/// frontier is empty rather than complete -- the v2 analogue of v1's
+/// "`observed` is `null` only for the bootstrap coordinator's first
+/// `agent.registered` event."
+///
+/// This is deliberately the v2-native path only: an actual v1-fleet
+/// migration (docs/AGENT_COORDINATION_EVOLUTION.md section 2.5 --
+/// replaying v1's existing bus history, computing each identity's
+/// `final_v1_seq`, creating every existing agent's stream root as a
+/// continuation) is a distinct, later concern with its own module once this
+/// rewrite is otherwise ready to cut over; nothing here depends on it.
+///
+/// Safely resumable across a crash between its two commits (section 2.5:
+/// "define recovery for a partially created registry or stream set"). If
+/// the registry root already exists, this checks it was created by this
+/// exact call (same config, same sole coordinator member) before treating
+/// it as a resume point -- a genuinely different prior activation, or one
+/// that has already moved past its root epoch, is refused rather than
+/// silently adopted. If the coordinator's own stream root is also already
+/// there, this is a pure idempotent no-op returning the existing commit.
+#[allow(clippy::too_many_arguments)]
+pub fn genesis(
+    repo: &std::path::Path,
+    coordinator: &crate::scalars::Agent,
+    display_name: crate::scalars::Short,
+    purpose: crate::scalars::Text,
+    object_format: String,
+    product_review_from: ObjectId,
+    host: crate::scalars::Short,
+    worktrees_dir: &std::path::Path,
+) -> AbResult<(BusConfig, crate::registry::RosterEpoch, ObjectId)> {
+    let config = BusConfig::new(object_format, product_review_from)?;
+
+    let epoch = match crate::registry::read_registry_tip(repo)? {
+        Some(tip) => {
+            let existing = crate::registry::read_epoch(
+                repo,
+                &tip,
+                &worktrees_dir.join("_registry_root_resume"),
+            )?;
+            let existing_config = crate::registry::read_bus_config(
+                repo,
+                &tip,
+                &worktrees_dir.join("_registry_config_resume"),
+            )?;
+            let sole_coordinator = existing.active_members.len() == 1
+                && existing
+                    .active_members
+                    .get(coordinator)
+                    .is_some_and(|b| b.role == crate::events::Role::Coordinator && b.host == host);
+            if existing.parent.is_some() || existing_config != config || !sole_coordinator {
+                return Err(invalid(
+                    "the agent-registry already has a root epoch that does not match this \
+                     genesis call -- this bus was already activated (possibly differently); \
+                     use `register` to add a further agent instead of `genesis`",
+                ));
+            }
+            existing
+        }
+        None => {
+            let mut members = std::collections::BTreeMap::new();
+            members.insert(
+                coordinator.clone(),
+                crate::registry::MemberBinding {
+                    role: crate::events::Role::Coordinator,
+                    host,
+                    coordinator_custody_epoch: 0,
+                    standby: None,
+                },
+            );
+            crate::registry::create_root(
+                repo,
+                &config,
+                members,
+                &worktrees_dir.join("_registry_root"),
+            )?
+        }
+    };
+
+    if let Some(existing_tip) = crate::stream::read_stream_tip(repo, coordinator)? {
+        // Resuming across a crash between the two commits genesis makes
+        // must not silently accept a *different* display_name/purpose than
+        // what this call would have written -- the epoch-mismatch check
+        // above only covers the first commit's content, so without this the
+        // second commit's content could diverge from the caller's current
+        // arguments without ever being noticed.
+        let (_, log) = crate::stream::read_stream(
+            repo,
+            coordinator,
+            &worktrees_dir.join("_stream_resume_check"),
+        )?;
+        let first = log
+            .first()
+            .ok_or_else(|| invalid(format!("{coordinator}'s stream exists but has no events")))?;
+        let crate::events::EventData::AgentRegistered(existing) = first.typed_data()? else {
+            return Err(invalid(format!(
+                "{coordinator}'s stream root is not an agent.registered event"
+            )));
+        };
+        if existing.display_name != display_name || existing.purpose != purpose {
+            return Err(invalid(
+                "the agent-registry already has a root epoch and this coordinator's stream \
+                 already exists, but with a different display_name/purpose than this genesis \
+                 call -- this bus was already activated (possibly differently); use `register` \
+                 to add a further agent instead of `genesis`",
+            ));
+        }
+        return Ok((config, epoch, existing_tip));
+    }
+
+    let header = crate::stream::StreamHeader {
+        agent: coordinator.clone(),
+        activation_event: None,
+        registration_authority: crate::scalars::EventId::new(coordinator, 0),
+        final_v1_seq: None,
+        object_format: config.object_format.clone(),
+        schema_fingerprint: SCHEMA_FINGERPRINT.to_string(),
+    };
+    let data = crate::events::EventData::AgentRegistered(crate::events::AgentRegistered {
+        display_name,
+        primary_role: crate::events::Role::Coordinator,
+        purpose,
+        product_base: None,
+        product_branch: None,
+        provider: None,
+        model: None,
+    });
+    let observed = crate::frontier::ObservedFrontier::sparse(epoch.id.clone(), []);
+    let first_event = crate::envelope::Envelope::new(coordinator, 0, observed, &data, []);
+    let commit = crate::stream::create_root_commit(
+        repo,
+        &header,
+        &first_event,
+        &worktrees_dir.join(format!("_stream_root_{coordinator}")),
+    )?;
+    Ok((config, epoch, commit))
+}
+
+/// A fingerprint of the v2 schema this build implements, printed by
+/// `agent-bus --version` and carried in every stream header -- a reader can
+/// detect a schema mismatch without fully parsing content built against a
+/// different revision.
+pub const SCHEMA_FINGERPRINT: &str = "agent-bus-v2-schema-1";
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn coord() -> Agent {
-        Agent::parse("coord1".to_string()).unwrap()
+    fn oid(n: u64) -> ObjectId {
+        ObjectId::parse(format!("{n:040x}")).unwrap()
     }
-
-    fn hash(n: u64) -> String {
-        format!("{n:040x}")
-    }
-
-    fn hash256(n: u64) -> String {
-        format!("{n:064x}")
-    }
-
-    // ---------------------------------------------------------------- new()
 
     #[test]
-    fn new_rejects_unsupported_object_format() {
-        let err = BusJson::new(
-            "sha3".to_string(),
-            vec![coord()],
-            ObjectId::parse(hash(1)).unwrap(),
-        )
-        .unwrap_err();
+    fn to_canonical_bytes_round_trips_through_parse() {
+        let config = BusConfig {
+            object_format: "sha1".to_string(),
+            product_review_from: oid(1),
+            merge_engine: SUPPORTED_MERGE_ENGINE.to_string(),
+            merge_engine_version: SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+        };
+        let bytes = config.to_canonical_bytes();
+        let parsed = BusConfig::parse(&bytes).unwrap();
+        assert_eq!(parsed, config);
+    }
+
+    #[test]
+    fn parse_rejects_an_unsupported_object_format() {
+        let value = serde_json::json!({
+            "object_format": "sha512",
+            "product_review_from": oid(1).as_str(),
+            "merge_engine": SUPPORTED_MERGE_ENGINE,
+            "merge_engine_version": SUPPORTED_MERGE_ENGINE_VERSION,
+        });
+        let err = BusConfig::parse(&serde_json::to_vec(&value).unwrap()).unwrap_err();
         assert!(
             err.to_string().contains("unsupported object_format"),
             "{err}"
@@ -177,140 +267,14 @@ mod tests {
     }
 
     #[test]
-    fn new_rejects_empty_coordinators() {
-        let err = BusJson::new(
-            "sha1".to_string(),
-            vec![],
-            ObjectId::parse(hash(1)).unwrap(),
-        )
-        .unwrap_err();
-        assert!(
-            err.to_string().contains("at least one coordinator"),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn new_builds_sha256_bus_json_with_first_coordinator_as_epoch_agent() {
-        // Coordinators are sorted by `StringSet::from_iter`, so "abby" (not the
-        // first argument) ends up first and must own the merge_engine_epoch.
-        let abby = Agent::parse("abby".to_string()).unwrap();
-        let bus = BusJson::new(
-            "sha256".to_string(),
-            vec![coord(), abby.clone()],
-            ObjectId::parse(hash256(1)).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(bus.object_format, "sha256");
-        assert_eq!(bus.merge_engine_epoch, EventId::new(&abby, 0));
-        assert_eq!(bus.object_id_len(), 64);
-    }
-
-    // -------------------------------------------------------------- parse()
-
-    fn valid_bus() -> BusJson {
-        BusJson::new(
-            "sha1".to_string(),
-            vec![coord()],
-            ObjectId::parse(hash(1)).unwrap(),
-        )
-        .unwrap()
-    }
-
-    #[test]
-    fn parse_roundtrips_canonical_bytes() {
-        let bus = valid_bus();
-        let bytes = bus.to_canonical_bytes();
-        let parsed = BusJson::parse(&bytes).unwrap();
-        assert_eq!(parsed.object_format, bus.object_format);
-        assert_eq!(parsed.coordinators.as_slice(), bus.coordinators.as_slice());
-        assert_eq!(parsed.merge_engine_epoch, bus.merge_engine_epoch);
-    }
-
-    #[test]
-    fn parse_rejects_non_utf8() {
-        let err = BusJson::parse(&[0xff, 0xfe, 0xfd]).unwrap_err();
-        assert!(err.to_string().contains("not UTF-8"), "{err}");
-    }
-
-    #[test]
-    fn parse_rejects_missing_trailing_newline() {
-        let bytes = valid_bus().to_canonical_bytes();
-        let mut without_nl = bytes.clone();
-        without_nl.pop();
-        let err = BusJson::parse(&without_nl).unwrap_err();
-        assert!(err.to_string().contains("exactly one line"), "{err}");
-    }
-
-    #[test]
-    fn parse_rejects_multiple_lines() {
-        let mut bytes = valid_bus().to_canonical_bytes();
-        bytes.extend_from_slice(b"trailing garbage\n");
-        let err = BusJson::parse(&bytes).unwrap_err();
-        assert!(err.to_string().contains("exactly one line"), "{err}");
-    }
-
-    #[test]
-    fn parse_rejects_non_object_json() {
-        let err = BusJson::parse(b"[]\n").unwrap_err();
-        assert!(err.to_string().contains("not a JSON object"), "{err}");
-    }
-
-    #[test]
-    fn parse_rejects_unknown_field() {
-        let mut line = serde_json::to_value(valid_bus()).unwrap();
-        line["extra"] = serde_json::json!("nope");
-        let bytes = format!("{}\n", serde_json::to_string(&line).unwrap()).into_bytes();
-        let err = BusJson::parse(&bytes).unwrap_err();
-        assert!(err.to_string().contains("unknown BUS.json field"), "{err}");
-    }
-
-    #[test]
-    fn parse_rejects_wrong_schema_version() {
-        let mut line = serde_json::to_value(valid_bus()).unwrap();
-        line["v"] = serde_json::json!(9999);
-        // Bypass canonical-encoding rejection by keeping keys in the same
-        // serialized order `serde_json::to_string` would produce for a `Value`
-        // built from `to_value` (field order is preserved from the struct).
-        let bytes = format!("{}\n", serde_json::to_string(&line).unwrap()).into_bytes();
-        let err = BusJson::parse(&bytes).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("unsupported BUS.json schema version"),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn parse_rejects_unsupported_object_format() {
-        let mut line = serde_json::to_value(valid_bus()).unwrap();
-        line["object_format"] = serde_json::json!("sha3");
-        let bytes = format!("{}\n", serde_json::to_string(&line).unwrap()).into_bytes();
-        let err = BusJson::parse(&bytes).unwrap_err();
-        assert!(
-            err.to_string().contains("unsupported object_format"),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn parse_rejects_empty_coordinators() {
-        let mut line = serde_json::to_value(valid_bus()).unwrap();
-        line["coordinators"] = serde_json::json!([]);
-        let bytes = format!("{}\n", serde_json::to_string(&line).unwrap()).into_bytes();
-        let err = BusJson::parse(&bytes).unwrap_err();
-        assert!(
-            err.to_string().contains("coordinators must be nonempty"),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn parse_rejects_unsupported_merge_engine() {
-        let mut line = serde_json::to_value(valid_bus()).unwrap();
-        line["merge_engine"] = serde_json::json!("some-other-engine");
-        let bytes = format!("{}\n", serde_json::to_string(&line).unwrap()).into_bytes();
-        let err = BusJson::parse(&bytes).unwrap_err();
+    fn parse_rejects_an_unsupported_merge_engine() {
+        let value = serde_json::json!({
+            "object_format": "sha1",
+            "product_review_from": oid(1).as_str(),
+            "merge_engine": "recursive",
+            "merge_engine_version": SUPPORTED_MERGE_ENGINE_VERSION,
+        });
+        let err = BusConfig::parse(&serde_json::to_vec(&value).unwrap()).unwrap_err();
         assert!(
             err.to_string().contains("unsupported merge_engine"),
             "{err}"
@@ -318,81 +282,280 @@ mod tests {
     }
 
     #[test]
-    fn parse_rejects_epoch_not_naming_a_bootstrap_coordinator() {
-        let mut line = serde_json::to_value(valid_bus()).unwrap();
-        line["merge_engine_epoch"] = serde_json::json!("someone-else:0");
-        let bytes = format!("{}\n", serde_json::to_string(&line).unwrap()).into_bytes();
-        let err = BusJson::parse(&bytes).unwrap_err();
+    fn parse_rejects_a_product_review_from_of_the_wrong_length_for_its_object_format() {
+        let value = serde_json::json!({
+            "object_format": "sha256",
+            "product_review_from": oid(1).as_str(), // 40 hex chars, sha256 wants 64
+            "merge_engine": SUPPORTED_MERGE_ENGINE,
+            "merge_engine_version": SUPPORTED_MERGE_ENGINE_VERSION,
+        });
+        let err = BusConfig::parse(&serde_json::to_vec(&value).unwrap()).unwrap_err();
         assert!(
-            err.to_string()
-                .contains("must name a bootstrap coordinator's sequence-zero registration"),
+            err.to_string().contains("product_review_from length"),
             "{err}"
         );
     }
 
-    #[test]
-    fn parse_rejects_epoch_with_nonzero_seq() {
-        let mut line = serde_json::to_value(valid_bus()).unwrap();
-        line["merge_engine_epoch"] = serde_json::json!("coord1:1");
-        let bytes = format!("{}\n", serde_json::to_string(&line).unwrap()).into_bytes();
-        let err = BusJson::parse(&bytes).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("must name a bootstrap coordinator's sequence-zero registration"),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn parse_rejects_noncanonical_encoding() {
-        // Same fields, different (non-canonical) key order.
-        let bus = valid_bus();
-        let canonical = serde_json::to_string(&bus).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&canonical).unwrap();
-        let obj = value.as_object().unwrap();
-        // Rebuild as a JSON object literal with keys in reverse order.
-        let mut reordered = serde_json::Map::new();
-        for (k, v) in obj.iter().rev() {
-            reordered.insert(k.clone(), v.clone());
+    fn init_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        std::process::Command::new("git")
+            .args(["init", "--quiet", "-b", "main"])
+            .arg(path)
+            .status()
+            .unwrap();
+        for args in [
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(path)
+                .args(args)
+                .status()
+                .unwrap();
         }
-        let line = format!(
-            "{}\n",
-            serde_json::to_string(&serde_json::Value::Object(reordered)).unwrap()
-        );
-        let err = BusJson::parse(line.as_bytes()).unwrap_err();
-        assert!(err.to_string().contains("not canonically encoded"), "{err}");
+        std::fs::write(path.join("README.md"), "hello\n").unwrap();
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(["add", "README.md"])
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(["commit", "-q", "-m", "initial"])
+            .status()
+            .unwrap();
+        dir
     }
 
     #[test]
-    fn parse_rejects_object_id_length_mismatch_for_declared_format() {
-        // The object_id_len check runs only after the canonical-encoding check,
-        // so build this by string-substituting inside an already-canonical
-        // line (rather than mutating a `Value`, whose key order is alphabetic
-        // and would trip the earlier canonical check first): sha1 format
-        // declared, but product_review_from is a sha256-length hex id.
-        let canonical = String::from_utf8(valid_bus().to_canonical_bytes()).unwrap();
-        assert!(canonical.contains(&hash(1)));
-        let line = canonical.replace(&hash(1), &hash256(1));
-        let err = BusJson::parse(line.as_bytes()).unwrap_err();
+    fn genesis_creates_a_registry_root_and_the_coordinators_own_stream() {
+        let repo = init_repo();
+        let coord1 = crate::scalars::Agent::parse("coord1".to_string()).unwrap();
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        let (config, epoch, first_commit) = genesis(
+            repo.path(),
+            &coord1,
+            crate::scalars::Short::parse("Coordinator One".to_string()).unwrap(),
+            crate::scalars::Text::parse("bootstraps the fleet".to_string()).unwrap(),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            crate::scalars::Short::parse("host1".to_string()).unwrap(),
+            &repo.path().join("_worktrees"),
+        )
+        .unwrap();
+
+        assert_eq!(config.object_format, "sha1");
+        assert!(epoch.is_active_member(&coord1));
+        assert_eq!(
+            crate::registry::read_registry_tip(repo.path()).unwrap(),
+            Some(epoch.id.clone())
+        );
+        assert_eq!(
+            crate::registry::read_bus_config(
+                repo.path(),
+                &epoch.id,
+                &repo.path().join("_config_read"),
+            )
+            .unwrap(),
+            config
+        );
+        assert_eq!(
+            crate::stream::read_stream_tip(repo.path(), &coord1).unwrap(),
+            Some(first_commit)
+        );
+
+        let reads_dir = repo.path().join("_reads");
+        let (header, log) = crate::stream::read_stream(repo.path(), &coord1, &reads_dir).unwrap();
+        assert_eq!(
+            header.registration_authority,
+            crate::scalars::EventId::new(&coord1, 0)
+        );
+        assert_eq!(header.activation_event, None);
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].kind, "agent.registered");
+    }
+
+    /// Calling `genesis` again with identical parameters (the "the whole
+    /// call completed, but the caller doesn't know that and retries"
+    /// case, or simply an idempotent double-invocation) must be a pure
+    /// no-op returning the already-created state, not an error.
+    #[test]
+    fn genesis_is_idempotent_when_called_twice_with_identical_parameters() {
+        let repo = init_repo();
+        let coord1 = crate::scalars::Agent::parse("coord1".to_string()).unwrap();
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        let call = || {
+            genesis(
+                repo.path(),
+                &coord1,
+                crate::scalars::Short::parse("Coordinator One".to_string()).unwrap(),
+                crate::scalars::Text::parse("bootstraps the fleet".to_string()).unwrap(),
+                "sha1".to_string(),
+                ObjectId::parse(review_from.clone()).unwrap(),
+                crate::scalars::Short::parse("host1".to_string()).unwrap(),
+                &repo.path().join("_worktrees"),
+            )
+        };
+        let (_config1, epoch1, commit1) = call().unwrap();
+        let (_config2, epoch2, commit2) = call().unwrap();
+        assert_eq!(epoch1.id, epoch2.id);
+        assert_eq!(commit1, commit2);
+    }
+
+    /// The actual crash-recovery scenario (section 2.5: "define recovery
+    /// for a partially created registry or stream set"): the registry root
+    /// commit landed, but a crash happened before the coordinator's own
+    /// stream root did. A resumed `genesis` call with the same parameters
+    /// must complete the missing half rather than refusing outright with
+    /// "already has a root epoch."
+    #[test]
+    fn genesis_resumes_after_a_crash_between_its_two_commits() {
+        let repo = init_repo();
+        let coord1 = crate::scalars::Agent::parse("coord1".to_string()).unwrap();
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        let config = BusConfig::new(
+            "sha1".to_string(),
+            ObjectId::parse(review_from.clone()).unwrap(),
+        )
+        .unwrap();
+        let mut members = std::collections::BTreeMap::new();
+        members.insert(
+            coord1.clone(),
+            crate::registry::MemberBinding {
+                role: crate::events::Role::Coordinator,
+                host: crate::scalars::Short::parse("host1".to_string()).unwrap(),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        // Simulates the crash: only the registry half of genesis ran.
+        crate::registry::create_root(
+            repo.path(),
+            &config,
+            members,
+            &repo.path().join("_registry_root_manual"),
+        )
+        .unwrap();
+        assert_eq!(
+            crate::stream::read_stream_tip(repo.path(), &coord1).unwrap(),
+            None,
+            "the coordinator's stream must not exist yet -- that's the crash this test models"
+        );
+
+        let (_config, epoch, commit) = genesis(
+            repo.path(),
+            &coord1,
+            crate::scalars::Short::parse("Coordinator One".to_string()).unwrap(),
+            crate::scalars::Text::parse("bootstraps the fleet".to_string()).unwrap(),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            crate::scalars::Short::parse("host1".to_string()).unwrap(),
+            &repo.path().join("_worktrees"),
+        )
+        .unwrap();
+        assert!(epoch.is_active_member(&coord1));
+        assert_eq!(
+            crate::stream::read_stream_tip(repo.path(), &coord1).unwrap(),
+            Some(commit)
+        );
+    }
+
+    /// A resumed call with *different* parameters than the original must
+    /// be refused, not silently graft onto someone else's already-
+    /// activated bus.
+    #[test]
+    fn genesis_refuses_to_resume_with_mismatched_parameters() {
+        let repo = init_repo();
+        let coord1 = crate::scalars::Agent::parse("coord1".to_string()).unwrap();
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        genesis(
+            repo.path(),
+            &coord1,
+            crate::scalars::Short::parse("Coordinator One".to_string()).unwrap(),
+            crate::scalars::Text::parse("bootstraps the fleet".to_string()).unwrap(),
+            "sha1".to_string(),
+            ObjectId::parse(review_from.clone()).unwrap(),
+            crate::scalars::Short::parse("host1".to_string()).unwrap(),
+            &repo.path().join("_worktrees"),
+        )
+        .unwrap();
+
+        // A different coordinator name entirely.
+        let err = genesis(
+            repo.path(),
+            &crate::scalars::Agent::parse("coord2".to_string()).unwrap(),
+            crate::scalars::Short::parse("Coordinator Two".to_string()).unwrap(),
+            crate::scalars::Text::parse("bootstraps the fleet".to_string()).unwrap(),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            crate::scalars::Short::parse("host1".to_string()).unwrap(),
+            &repo.path().join("_worktrees2"),
+        )
+        .unwrap_err();
         assert!(
-            err.to_string()
-                .contains("product_review_from length does not match object_format"),
+            err.to_string().contains("does not match this genesis call"),
             "{err}"
         );
     }
 
+    /// Round-2 adversarial review's Significant finding: the resume check
+    /// above (same coordinator, same host/role/config) never compared
+    /// display_name/purpose against what the coordinator's *own stream*
+    /// already recorded -- so once that stream root existed, a second
+    /// genesis call for the same coordinator with a different display_name
+    /// or purpose would silently succeed and return the old commit,
+    /// discarding the caller's new arguments without any error.
     #[test]
-    fn object_id_len_defaults_to_40_for_unrecognized_format() {
-        // `object_id_len` is only reachable with a format `parse`/`new` already
-        // validated as sha1/sha256, but its `unwrap_or(40)` fallback is still
-        // directly exercisable and worth pinning down.
-        let mut bus = valid_bus();
-        bus.object_format = "unknown".to_string();
-        assert_eq!(bus.object_id_len(), 40);
-    }
+    fn genesis_refuses_to_resume_with_a_different_display_name_or_purpose() {
+        let repo = init_repo();
+        let coord1 = crate::scalars::Agent::parse("coord1".to_string()).unwrap();
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        genesis(
+            repo.path(),
+            &coord1,
+            crate::scalars::Short::parse("Coordinator One".to_string()).unwrap(),
+            crate::scalars::Text::parse("bootstraps the fleet".to_string()).unwrap(),
+            "sha1".to_string(),
+            ObjectId::parse(review_from.clone()).unwrap(),
+            crate::scalars::Short::parse("host1".to_string()).unwrap(),
+            &repo.path().join("_worktrees"),
+        )
+        .unwrap();
 
-    #[test]
-    fn gitattributes_contents_is_the_expected_single_line() {
-        assert_eq!(GITATTRIBUTES_CONTENTS, "*.jsonl -text\n");
+        let err = genesis(
+            repo.path(),
+            &coord1,
+            crate::scalars::Short::parse("Coordinator One But Different".to_string()).unwrap(),
+            crate::scalars::Text::parse("bootstraps the fleet".to_string()).unwrap(),
+            "sha1".to_string(),
+            ObjectId::parse(review_from.clone()).unwrap(),
+            crate::scalars::Short::parse("host1".to_string()).unwrap(),
+            &repo.path().join("_worktrees_name"),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("different display_name/purpose"),
+            "{err}"
+        );
+
+        let err = genesis(
+            repo.path(),
+            &coord1,
+            crate::scalars::Short::parse("Coordinator One".to_string()).unwrap(),
+            crate::scalars::Text::parse("a whole different purpose".to_string()).unwrap(),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            crate::scalars::Short::parse("host1".to_string()).unwrap(),
+            &repo.path().join("_worktrees_purpose"),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("different display_name/purpose"),
+            "{err}"
+        );
     }
 }

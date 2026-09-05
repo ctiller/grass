@@ -192,6 +192,57 @@ enough context to judge correctness, scope, and integration.
   emitted artifacts retain their authority connections.
 - Stable names do not hide changed semantic dependencies.
 
+For every material Lean theorem added, changed, or newly relied upon, review is
+about the proposition and its use—not whether a declaration happens to compile.
+The reviewer records a proportionate proof assessment covering the following
+questions. Closely related routine lemmas may be assessed as one family.
+
+1. **Role and adequacy.** What claim does the theorem establish, which root or
+   exported contract consumes it, and why is that claim the right strength for
+   the normative demand? The report also states what the theorem does *not*
+   establish when a plausible stronger reading would be unsafe. A green build,
+   impressive theorem name, or large declaration count is not adequacy evidence.
+2. **Quantification and coverage.** Inputs, API results, schedules, faults,
+   allocation choices, and other admitted entropy are universally quantified at
+   the correct boundary. Concrete evaluations, fuzz cases, examples, and
+   execution traces are fixtures only. They may refute a theorem or validate a
+   model boundary; they never prove domain coverage. `bv_decide` is acceptable
+   when it produces a kernel-checked proof of the universally quantified finite
+   proposition. `native_decide` is not proof authority, and a closed point proof
+   is acceptable only for a genuinely closed point claim.
+3. **Method and trust.** The proof method matches the structure of the claim:
+   induction covers every constructor or recursive descent; extensional proofs
+   compare every observable component; decidability procedures close the stated
+   proposition rather than a sampled surrogate; and imported lemmas have the
+   required hypotheses. The transitive axiom/unsafe audit must satisfy
+   [FOUNDATION.md](FOUNDATION.md). Automation must be a checked certificate
+   producer or consumer with a documented residual-goal boundary, never hidden
+   invariant discovery or admission.
+4. **Non-vacuity and adversarial resistance.** Premises are jointly inhabitable,
+   conclusions discriminate good from bad behavior, and representation or
+   refinement relations actually connect the two intended objects. For each
+   material theorem family the reviewer attempts a proportionate refutation:
+   construct a negative instance, weaken a hypothesis, remove a guard, mutate a
+   relation, or otherwise try to preserve acceptance while violating the claimed
+   property. The report states the attempted refutation and what rejected it, or
+   explains concretely why a meaningful refutation was impractical. Such attacks
+   challenge the statement and connection; they do not replace universal proof.
+5. **Proof economy and generality.** Prefer a small reusable lemma over repeated
+   case splits, and a structural theorem over pointwise enumeration. Concision
+   means that domain structure and reusable library laws carry the argument; it
+   is not raw line minimization, proof-term opacity, or a one-line tactic that
+   conceals unbounded search and brittle residual obligations. Bespoke proof is
+   justified when the implementation is genuinely novel or the theorem is
+   intrinsically local.
+
+The authorization evidence for a Lean-bearing nomination summarizes why the
+important theorem families are adequate, how universal coverage was checked,
+which refutations were attempted and survived, which proof/trust audits ran,
+and any meaningful insufficiency that remains.
+It need not reproduce proofs line by line, but it must be specific enough that a
+later reviewer can distinguish a proved contract from a fixture, convention, or
+aspirational comment.
+
 ### 5.3 Implementation and assembly
 
 - Relevant failure, partial I/O, nondeterminism, faults, cancellation, cleanup,
@@ -210,6 +261,15 @@ enough context to judge correctness, scope, and integration.
 - The reviewer independently runs risk-proportionate checks and records them.
 - Claimed build and `.olean` locality has the required evidence.
 
+Every test, audit, probe, mutation, or negative fixture offered as assurance must
+be shown to discriminate the defect class it claims to exclude. Normally this
+means running a negative control: reintroduce the defect, remove the intended
+guard, or supply a known-invalid specimen and observe the check fail for the
+claimed reason. If a safe negative control is impractical, the review records
+why and what weaker evidence was obtained. A guard that cannot be made to fail
+is not evidence for that exclusion claim, even when it remains a useful positive
+regression test.
+
 ### 5.5 Repository hygiene
 
 - No unrelated, cache, temporary, credential, or review-transcript artifact is
@@ -221,6 +281,125 @@ enough context to judge correctness, scope, and integration.
 The reviewer need not reconstruct every kernel proof by hand. They must verify
 that checked or generated evidence has the claimed shape and no unreviewed
 semantic leap bridges the change.
+
+### 5.6 Monotonic improvement and limitations
+
+A nomination may merge with a non-blocking limitation only when the selected
+snapshot is a monotonic improvement: it preserves every previously claimed
+theorem and trust guarantee, satisfies the present milestone contract, and does
+not make a known counterexample easier to admit. A limitation cannot excuse an
+unsound theorem, missing required case, disconnected certificate, trust-boundary
+expansion, or regression against a normative demand.
+
+Each accepted limitation is recorded in the authorization with its exact scope,
+why it is non-blocking now, and a bus issue or other durable follow-up naming an
+owner and closure condition. “Future work,” proof size, or schedule pressure
+alone is not a disposition. A later milestone that depends on the absent
+property promotes the item to a blocker. Conversely, reviewers should not block
+sound local progress merely because a stronger theorem would be useful but is
+neither currently claimed nor required.
+
+### 5.7 Escaped defects and the rework ratchet
+
+Fixing an escaped defect is not complete until the author and reviewer consider
+which earlier assurance boundary should have rejected its defect class. The aim
+is not to assign blame or mechanically add ceremony after every bug; it is to
+turn observed failures into the cheapest durable prevention or detection rule.
+
+**Rebuild is the verb.** Grass expects obsolete implementations, process weaves,
+proof scripts, layouts, and other replaceable machinery to be deleted and
+rebuilt from stable specifications and interfaces. A ratchet should therefore
+survive that rebuild whenever the property itself survives it. Proof demands
+should name semantic contracts and exported boundaries rather than the old
+implementation's helper lemmas or control shape. Tests should exercise public
+models, interfaces, formats, or emitted behavior rather than private names,
+offsets, schedules, and incidental traces. Property, mutation, conformance, and
+negative tests are preferred when they express the defect class across many
+possible rebuilt realizations.
+
+Some checks are necessarily realization-specific—for example, an x86 encoding
+edge case, ABI stack layout, or exact regression in a selected allocator. Those
+remain legitimate, but must be labeled with the narrow boundary they protect.
+Where practical they accompany, rather than replace, a representation-neutral
+proof or test of the higher-level property. Deleting an obsolete realization may
+delete its private regression fixture only after the surviving semantic ratchet
+is identified or the property is shown not to apply to the replacement.
+
+Proof strength is not free. Before adding a proof demand, review its authoring
+burden, required annotations and invariants, diagnostic quality, solver or kernel
+cost, and semantic and elaboration rebuild cones. Place the theorem at the
+narrowest reusable owner and bank the difficult argument in a library, type,
+constructor, or composition law when many realizations share it. Callers should
+supply only facts genuinely specific to their implementation. Do not make every
+assembly author re-prove a global algorithm, protocol, or memory lemma merely
+because a proof would have caught one escape. If the only available theorem has
+disproportionate recurring burden, record that limitation and consider a cheaper
+type restriction, audit, test, or validation layer while designing the reusable
+proof boundary. Economy may change *where and how* a property is proved; it may
+not silently waive a normative safety or correctness demand.
+
+#### Proof-demand escalation
+
+Not every new lemma changes the architecture. Review new proof demands at the
+level where they become mandatory:
+
+1. A private lemma or stronger implementation certificate whose exported
+   contract is unchanged receives ordinary product review.
+2. A new obligation on a public subsystem contract, reusable constructor,
+   provider, ABI, ISA profile, or composition boundary requires review by that
+   normative owner, including compatibility and proof-economy analysis.
+3. A new field, theorem family, requirement key, or transitive prerequisite of
+   `VerifiedProgram`, `emitProgram`, ghost erasure, or artifact closure changes
+   the project-wide meaning or cost of verification. It requires explicit design
+   review and a recorded normative decision before implementation may make it a
+   mandatory gate.
+
+The third-level review states the defect or product property being addressed,
+the exact universal proposition, why the final certificate is its proper owner,
+where implementations discharge it, how it composes and shards, expected proof
+and rebuild burden for both ordinary and novel assembly, diagnostics, migration
+for existing programs, and why a narrower contract or reusable derived theorem
+is insufficient. When feasibility or burden is uncertain, introduce and measure
+an optional experimental certificate first; optional status must not be used to
+ship a program missing an already normative guarantee.
+
+Attaching a theorem directly to `VerifiedProgram` is therefore a conclusion of
+design review, not the default response to an escaped defect. Prefer deriving a
+root theorem from local contracts already needed for sound composition when that
+provides the same guarantee without adding application-author ceremony.
+
+- If existing review evidence should reasonably have exposed the defect, amend
+  the relevant review question, checklist, or reviewer guidance and include a
+  concrete example of the missed reasoning.
+- If a stronger or better-connected theorem could have excluded the defect,
+  strengthen the normative proof demand or reusable library contract and prove
+  it at the narrowest owning boundary. Do not merely prove that the repaired
+  implementation has the desired point value.
+- If an executable test, negative fixture, mutation, fuzzer, parser corpus, or
+  boundary probe could have exposed the defect economically, add that check and
+  demonstrate that it fails against the defective form for the claimed reason.
+  If a safe demonstration is impractical, record that limitation and do not cite
+  the check as evidence that the defect class is excluded.
+- If a static audit, generated manifest check, elaborator restriction, type
+  interface, or bus/tooling invariant can reject the entire class earlier and
+  more reliably, prefer that mechanized gate over permanent human vigilance.
+- If the specification admitted the behavior but product intent did not, repair
+  specification adequacy and re-review its affected refinement cone; a stronger
+  implementation proof cannot repair a wrong contract.
+- If the formal model disagreed with a vendor/API/ISA/protocol authority or with
+  observed hardware, update the model, citation, correspondence assumption, and
+  validation probe as applicable. Tests against reality remain evidence about
+  the model boundary, not internal proof.
+- If the escape came from ownership, handoff, scope, or merge procedure, amend
+  the coordination rule or helper invariant at its owner rather than relying on
+  folklore.
+
+Several responses may be warranted as defense in depth. Conversely, the review
+must record why a seemingly available ratchet is disproportionate or incapable
+of detecting the class; “fixed locally” is not by itself a disposition. The
+follow-up references the original defect, the repaired artifact, the chosen
+ratchet, and any deliberately rejected layers. This is the operational form of
+FOUNDATION law 10, **No ratchet regression**.
 
 ## 6. Findings and continuing authoring
 

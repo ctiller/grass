@@ -603,6 +603,173 @@ to imitate compiler-selected storage or CFG structure.
 115. `agent.resumed` may transfer exclusive custody from the identity's latest
     own lifecycle event of any status or a coordinator retirement targeting it,
     so silent death while `active` does not strand the identity or its role.
+116. The specification/process boundary forms an acyclic diamond. A neutral
+    `Specification` layer owns `DriverBoundary`, demand/result vocabulary,
+    requirement keys, and other typed junctions imported by both sides.
+    `Semantics` owns precious `SpecProcess` behavior; `Process` owns replaceable
+    structural networks and execution machinery; `Refinement`/`Weave` alone
+    relates a selected network trace to a `SpecProcess`. Neither `Semantics` nor
+    `Process` imports the other merely to state its core objects. This records
+    the ruling carried by agent-bus event `coord1:5`, originating at
+    `c-process:4` and requested as dependency `c-process:17`.
+117. There is one structural abstract process-network declaration. It is owned
+    by `Process`, is generic over its protocol family, preserves the role-schema,
+    instance, protocol, and composition shape used by the spikes, and contains
+    no `BehaviorContract`, denotation, trace-denotation, or exactness field.
+    `Refinement`, which imports both independent dependency arms, instantiates
+    that structure inside the wrapper `ProcessPresentationNetwork`; this is not
+    a second structural declaration. `ProcessPresentation` there selects an
+    explicit trace for that wrapper and proves exact behavior and requirement
+    correspondence. Neither the selected trace nor its exactness theorem is a
+    field of `StructuralProcessNetwork`; `Semantics` does not import `Process`
+    to construct the wrapper. This corrects the original owner wording to obey
+    decision 116's dependency diamond without changing the selected interface.
+    This records `coord1:4`, originating at `c-process:3`, and names the wrapper
+    consumed by the synchronized Spike 4/5 surface under dependency
+    `g-design:23`.
+118. Cancellation coverage is scope-indexed. One core `CancellationPolicy` is
+    indexed by a scoped cancellation-point family and consistently names its
+    discovered `blockingCalls`; `ScopedCancellationCertificate` ties both
+    families exactly to a `ProcessScopeSummary`. Whole-plan coverage is the
+    hierarchical composition of these certificates. A process-root spelling in
+    authored syntax may infer its scope, but is elaborator sugar rather than a
+    second Lean arity. This records `coord1:6`, originating at `c-process:5`.
+119. `ProcessPlan` has only its declared registry and boundary parameters.
+    The undeclared `ProcessNetwork` spelling is deleted. Root-oriented notation
+    may construct or infer those parameters through typed elaboration but never
+    denotes a second `ProcessPlan` type application. This records `coord1:7`,
+    originating at `c-process:6`.
+120. `EffectDemand boundary` abbreviates `boundary.Demand`, and
+    `EffectResult demand` abbreviates `boundary.Result demand`. Protocol-specific
+    operations enter through typed constructors of the open boundary demand
+    family. `SequentialAdapter`, not the precious authoring type, generates
+    occurrence identities, child bindings, and pending multiplicity. This
+    records `coord1:8`, originating at `c-process:7`.
+121. Interruption, logical-fault, and environment-violation classifications are
+    open associated families of a selected `ProcessVocabulary`; Grass rejects a
+    closed whole-program sum and an unclassified `other` fallback. A reusable
+    network or protocol boundary selects the vocabulary once, so ordinary
+    `ProcessSpec` authors do not restate three bespoke type fields. Delivery
+    across different vocabularies requires a total typed classification or
+    translation theorem; an empty receiving class is evidence that the route is
+    unreachable, not permission to discard an event. This resolves
+    `c-process:8` and ratifies the constrained form requested by `c-process:9`
+    under acknowledgements `g-design:3` and `g-design:4`.
+122. Cancellation and supervision are separately imported topology facets, not
+    mandatory fields paid by every process. The weaker graph/population/spawn
+    object is named `ProcessTopologyCore`. `ProcessTopology boundary` contains
+    that core plus exactly the facet family derived from the boundary's selected
+    requirements, with named aggregate theorems recovering every required
+    cancellation and supervision contract. The empty family is supplied
+    automatically. The unqualified `ProcessTopology` name may not denote a
+    weaker value while prose assumes absent lifecycle authority. This resolves
+    `c-process:10` under acknowledgement `g-design:5`.
+123. Normative ratifications are durable product content, not bus-only state.
+    `DECISIONS.md` records each accepted decision using stable numbering and
+    cites the originating and ruling agent-bus event identifiers when applicable.
+    Bus events retain routing, custody, and timing; this file owns the rule that
+    implementations and normative documents must follow. This resolves
+    `coord1:13` under acknowledgement `g-design:6`.
+124. An open nominal metadata axis may use a closed carrier with an exact
+    extension key such as `(owner, kind)` only when the value selects an
+    identity and carries no fallback semantics. Consumers that need laws for an
+    extension must resolve that exact identity through a typed registry and
+    reject an unknown identity. They may not interpret `extension` as `other`,
+    approximate it with default behavior, or use it to hide an unclassified
+    event. This permits `RequirementKind.extension` as an invalidation and
+    diagnostic facet; it does not weaken decision 121, because process faults,
+    interruptions, and environment violations advance semantic state and remain
+    typed per `ProcessVocabulary`. This resolves the classification part of
+    `coord1:16`, raised by comparison of `c-process:8` with `g-foundation:4`,
+    under acknowledgement `g-design:13`.
+125. `Specification` names the neutral dependency layer below both `Semantics`
+    and `Process`; it owns typed junctions, demand/result boundaries, and
+    requirement keys, not precious behavior. The semantic root remains named
+    `SpecProcess` and belongs to `Semantics`. Its defining source/module should
+    therefore use the specific `SpecProcess` name rather than a generic
+    `Semantics.Specification` name that suggests a second owner for the neutral
+    layer. This resolves the terminology part of `coord1:16` under
+    acknowledgement `g-design:13`.
+126. A supplied fault plan selects what happens only if execution reaches the
+    plan's fault-delivery point; it is not itself an architectural-fault
+    occurrence. If an authority denial stops an operation at an earlier
+    substep, or denies the planned faulting substep before fault delivery, the
+    resulting state records the denial and the actually executed prefix but
+    does not append the unreached fault. Retaining that fault would invent an
+    event after the modeled execution had stopped. An observed hardware trace
+    that asserts the later fault despite the earlier modeled denial is instead
+    evidence that the trace and the admitted model/profile disagree; validation
+    must report that discrepancy rather than combining both outcomes in one
+    machine history. A tool may retain the offered plan in a separate attempt or
+    oracle diagnostic, but it is not part of the architectural fault ledger.
+    This resolves `c-mem:21` and makes the provisional M2 behavior normative.
+127. Obligation-ledger transformation is indexed by the exact operation exit
+    and is independent of memory-effect visibility. An operation that can
+    complete, fault, interrupt, cancel, or commit partially declares, through
+    its owning protocol theorem, the exact ledger transformation for every
+    admitted outcome and the linearization point or staged points at which each
+    transformation takes effect. A fault before such a point preserves that
+    obligation fragment; a fault after it applies the declared transformation.
+    Staged transformations require separate substeps or an explicit
+    outcome-indexed relation. Grass may not infer ledger behavior from committed
+    byte counts or from the delta constructor: always applying a discharge can
+    leak a duty, while always preserving it can resurrect a duty whose protocol
+    action already occurred; the analogous create cases are equally
+    protocol-dependent. If a faulting outcome carries a ledger effect but has no
+    declared fault rule, the operation/fault combination is rejected rather
+    than assigned a default. This ratifies M2's
+    `faultWithUndeclaredLedgerEffect` behavior as the fail-closed interim rule
+    and resolves `c-mem:28`; a later outcome-indexed interface may admit the
+    operation only with its complete protocol proof.
+128. A process-network assertion is indexed by both its topology and an explicit
+    world agreement; `NetworkAssertion topology` with no world is not a valid
+    interface. `ProcessPlan` breaks the apparent recursive dependency by
+    declaring its per-edge message family before its contracts. Topology plus
+    that family defines `LogicalProcessNetworkCore`; the plan's channel
+    contracts are then instantiated at the canonical agreement for that full
+    logical world, and the public `LogicalProcessNetwork plan` is an
+    abbreviation of the core. This is one network semantics, not a second
+    topology-level escrow model: the core is only a construction seam. Lower
+    reusable assertion and channel modules may remain polymorphic in an
+    arbitrary `WorldAgreement`, but a completed plan must bind them to its full
+    logical network. This avoids both a self-referential structure and an opaque
+    escrow carrier weaker than `ChannelEscrowLedger`. It resolves
+    `c-process:43` and replaces the unimplementable arity in `PROCESS.md`.
+    Since assertion footprints remain arbitrary predicates, the canonical
+    `agreesGlue` construction may use the reviewed `Classical.choice` constant
+    already allowed by `FOUNDATION.md`; the transitive axiom audit exposes that
+    dependency. Choice is localized to the logical-world supplier, while the
+    generic assertion/framing library remains parametric and does not choose
+    worlds. Grass does not impose decidable or finite footprints solely to
+    remove an already-reviewed foundation constant.
+129. `ProcessLifecycle` is indexed by the instance's `ProcessSpec` and every
+    ending constructor stores the exact outcome it records: terminal result,
+    cancellation reason, interruption reason, logical fault, environment
+    violation, or process-death reason. A payload-free terminal tag is
+    insufficient because `ProcessSpec.Terminal` is relational: one local state
+    may admit multiple terminal results, so network state could not determine
+    what a join returns or what the parent received. The same loss is immediate
+    for fault, violation, interruption, and cancellation classes, which local
+    state does not determine at all. Network well-formedness proves that the
+    stored terminal result satisfies `Terminal request local result`; exact
+    lifecycle transitions prove that the value stored in the child event,
+    parent projection, and resulting instance tag is the same value; a typed
+    death disposition likewise determines the exact stored death reason. This
+    is generated transition bookkeeping, not an additional process-author
+    proof field. It resolves `c-process:46` and supersedes the unindexed
+    lifecycle field reprinted in decision 128's `ProcessInstance` surface.
+130. `ProcessInstance` stores typed three-way `ProcessParentage`, not an optional
+    current parent. The cases are the topology root, an attached child naming
+    its current parent incarnation, and a detached child retaining its exact
+    former parent incarnation. Detachment removes current parent authority but
+    does not erase history. Its exact transition changes `.attached parent` to
+    `.detached parent` and proves the same reference, which lets the resulting
+    network state justify `NonReturningReason.detached` without replaying
+    another process's transition history. The root constructor is indexed at
+    the topology's root kind; network well-formedness separately proves root
+    uniqueness and valid spawn/parent relationships. These laws are not fields
+    an ordinary process author fills. This resolves `c-process:47` and replaces
+    the `Option` field that conflated roots with detached children.
 
 ## Explicitly rejected shortcuts
 

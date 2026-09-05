@@ -1,0 +1,31 @@
+---
+source: src/envelope.rs
+expression: "&e"
+---
+{
+  "v": 2,
+  "id": "alice:4",
+  "agent": "alice",
+  "seq": 4,
+  "time": "[timestamp]",
+  "observed": {
+    "kind": "sparse",
+    "roster_epoch": "0000000000000000000000000000000000000001",
+    "entries": {
+      "bob": {
+        "agent": "bob",
+        "stream_tip": "0000000000000000000000000000000000000007",
+        "through": "bob:2"
+      }
+    }
+  },
+  "kind": "agent.resumed",
+  "refs": [
+    "bob:2"
+  ],
+  "data": {
+    "previous_lifecycle": "bob:2",
+    "reason": "r",
+    "user_authority": "u"
+  }
+}

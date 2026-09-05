@@ -1,7 +1,0 @@
----
-source: src/commands.rs
-expression: "lines.join(\"\\n\")"
----
-{"v":1,"id":"alice:0","agent":"alice","seq":0,"time":"2024-01-01T00:00:00Z","observed":null,"kind":"agent.status","refs":[],"data":{}}
-{"v":1,"id":"alice:1","agent":"alice","seq":1,"time":"2024-01-01T00:00:00Z","observed":null,"kind":"agent.status","refs":[],"data":{}}
-{"v":1,"id":"bob:0","agent":"bob","seq":0,"time":"2024-01-01T00:00:00Z","observed":null,"kind":"agent.status","refs":[],"data":{}}

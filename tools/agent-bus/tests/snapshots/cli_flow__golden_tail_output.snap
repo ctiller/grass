@@ -1,0 +1,38 @@
+---
+source: tests/cli_flow.rs
+expression: out
+---
+{
+  "activation_event": null,
+  "agent": "coord1",
+  "causal_frontier": {
+    "coord1": "[hash]"
+  },
+  "events": [
+    {
+      "agent": "coord1",
+      "data": {
+        "display_name": "Coordinator One",
+        "primary_role": "coordinator",
+        "purpose": "bootstraps the bus"
+      },
+      "id": "coord1:0",
+      "kind": "agent.registered",
+      "observed": {
+        "entries": {},
+        "kind": "sparse",
+        "roster_epoch": "[hash]"
+      },
+      "refs": [],
+      "seq": 0,
+      "time": "[time]",
+      "v": 2
+    }
+  ],
+  "freshness": "cached",
+  "last_synced": null,
+  "roster_epoch": "[hash]",
+  "snapshot_receipt": {
+    "coord1": "[hash]"
+  }
+}

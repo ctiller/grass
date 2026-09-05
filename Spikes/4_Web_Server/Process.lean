@@ -60,7 +60,7 @@ def streamSession (connection : ConnectionId) (stream : Http2StreamId) :
     SpecProcess resources :=
   Http2.abstractRequestStream resources routes behaviorPolicy connection stream
 
-def abstractServer : AbstractSpecificationProcessNetwork resources :=
+def abstractServer : ProcessPresentationNetwork resources :=
   Http2.abstractMemoryServer
     (roleSchema := ServerRoleSchema)
     (instances := ServerRoleSchema.Instance)
@@ -70,8 +70,11 @@ def abstractServer : AbstractSpecificationProcessNetwork resources :=
     (admission := WebServerResources.connectionCapacity resources)
     (custody := .linearPerConnectionAndStream)
 
+/-! The network is replaceable shape. The selected trace is separate, so the
+network itself cannot silently become a second precious behavior specification. -/
 def serverProcessPresentation : ProcessPresentation spec where
   network := abstractServer
+  trace := Http2.abstractMemoryServerTrace
   denotationExact := Http2.abstractMemoryServerDenotesContract
   requirementsExact := Http2.abstractMemoryServerRequirementsExact
 
@@ -102,14 +105,18 @@ inductive StreamCommand
   | reset (error : Http2.ErrorCode)
   | expire
 
+/-! Select the boundary vocabulary once. The HTTP/2 package supplies its
+interruption, logical-fault, and environment-violation classes; ordinary
+process literals do not restate them. -/
+def serverVocabulary : ProcessVocabulary :=
+  Http2.serverVocabulary
+    ServerExternalEvent ServerCommand ServerResponse ServerObservation
+
 def memoryServerProcess : ProcessSpec where
+  vocabulary := serverVocabulary
   Request := Unit
   State := MemoryServerState routes processPolicy
   TerminalResult := ServerOutcome
-  ExternalEvent := ServerExternalEvent
-  Demand := ServerCommand
-  Result := ServerResponse
-  Observation := ServerObservation
   Initial := MemoryServerState.InitialWithDemands
   Terminal := MemoryServerState.Terminal
   Step := MemoryServerState.Step

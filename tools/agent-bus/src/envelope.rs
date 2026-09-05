@@ -1,20 +1,25 @@
-//! The version-1 event envelope (AGENT_BUS.md section 5, AGENT_BUS_SCHEMA.md section 2).
+//! The version-two event envelope
+//! (docs/AGENT_COORDINATION_EVOLUTION.md sections 2.1-2.2).
 //!
-//! Field declaration order below is load-bearing: serde_json serializes a Rust
-//! struct's fields in declaration order (not alphabetically), which is how we
-//! satisfy the fixed envelope field order without a bespoke writer. `data` is
-//! always built via `serde_json::to_value` on a typed payload, which routes
-//! through `serde_json::Map` (a `BTreeMap` since we do not enable the
-//! `preserve_order` feature) and therefore comes out with lexicographically
-//! sorted keys "for free".
+//! Replaces version one's `observed: Option<ObjectId>` (a single whole-bus
+//! branch commit) with a full `ObservedFrontier`: there is no global bus-head
+//! commit in version two, so an event's causal position is a per-agent map
+//! from identity to an exact stream commit and the last event ID consumed
+//! from it. Every other envelope-shaping rule from version one carries
+//! forward unchanged: fixed field declaration order (relied on for the
+//! canonical encoding), `data` built via `serde_json::to_value` (routes
+//! through a `BTreeMap`-backed `serde_json::Map`, so object keys sort "for
+//! free"), and `refs` must equal exactly the event IDs the typed `data`
+//! references.
 
 use crate::error::{invalid, AbResult};
 use crate::events::EventData;
-use crate::scalars::{Agent, EventId, ObjectId, StringSet, Timestamp};
+use crate::frontier::ObservedFrontier;
+use crate::scalars::{Agent, EventId, StringSet, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Envelope {
@@ -23,7 +28,7 @@ pub struct Envelope {
     pub agent: Agent,
     pub seq: u64,
     pub time: Timestamp,
-    pub observed: Option<ObjectId>,
+    pub observed: ObservedFrontier,
     pub kind: String,
     pub refs: StringSet<EventId>,
     pub data: serde_json::Value,
@@ -33,7 +38,7 @@ impl Envelope {
     pub fn new(
         agent: &Agent,
         seq: u64,
-        observed: Option<ObjectId>,
+        observed: ObservedFrontier,
         data: &EventData,
         extra_refs: impl IntoIterator<Item = EventId>,
     ) -> Envelope {
@@ -52,19 +57,15 @@ impl Envelope {
         }
     }
 
-    /// Parse and structurally validate one JSONL line's envelope shape.
-    /// This does NOT perform semantic/authority validation (see `validate.rs`).
+    /// Parse and structurally validate one JSONL line's envelope shape. This
+    /// does NOT perform semantic/authority validation (frontier-vs-registry
+    /// completeness, stream custody, lifecycle rules) -- see `frontier.rs`
+    /// and the (forthcoming) stream/coordinator validation layer for that.
     pub fn parse_line(line: &str) -> AbResult<Envelope> {
         let value: serde_json::Value = serde_json::from_str(line)?;
         let env: Envelope = serde_json::from_value(value.clone())
             .map_err(|e| invalid(format!("malformed envelope: {e}")))?;
 
-        // Canonical form: re-serializing the typed struct reproduces the
-        // fixed top-level field order (declaration order) with the `data`
-        // sub-object already alphabetically sorted (it round-tripped through
-        // `serde_json::Value`, whose `Map` is a `BTreeMap`), compactly, with
-        // minimal escaping. Byte-identity with the original line is exactly
-        // AGENT_BUS_SCHEMA.md section 2's canonical-encoding requirement.
         if env.to_canonical_line() != line {
             return Err(invalid(format!(
                 "{}: line is not canonically encoded",
@@ -73,7 +74,6 @@ impl Envelope {
         }
         crate::canon::check_nfc(&env.data)?;
 
-        // id/agent/seq agreement.
         if env.id.agent() != env.agent {
             return Err(invalid(format!(
                 "id agent {} does not match agent field {}",
@@ -92,7 +92,6 @@ impl Envelope {
             return Err(invalid(format!("unsupported schema version {}", env.v)));
         }
 
-        // Unknown top-level envelope fields.
         if let serde_json::Value::Object(map) = &value {
             let known = [
                 "v", "id", "agent", "seq", "time", "observed", "kind", "refs", "data",
@@ -106,7 +105,6 @@ impl Envelope {
             return Err(invalid("event line is not a JSON object"));
         }
 
-        // Typed data payload + refs agreement.
         let data = EventData::from_kind_and_value(&env.kind, env.data.clone())?;
         let expected: BTreeSet<EventId> = data.referenced_ids();
         let actual: BTreeSet<EventId> = env.refs.iter().cloned().collect();
@@ -115,6 +113,17 @@ impl Envelope {
                 "refs mismatch for {}: envelope has {:?}, data references {:?}",
                 env.id, actual, expected
             )));
+        }
+
+        // Gate 4: every cross-agent reference must occur at or before the
+        // referenced agent's declared frontier position. A same-agent
+        // reference (to the author's own earlier event) needs no frontier
+        // entry -- it is checked against the stream's own contiguous
+        // sequence by the stream-replay layer, not here.
+        for r in env.refs.iter() {
+            if r.agent() != env.agent {
+                env.observed.validate_reference(r)?;
+            }
         }
 
         Ok(env)
@@ -133,7 +142,8 @@ impl Envelope {
 mod tests {
     use super::*;
     use crate::events::{AgentResumed, AgentStatusEvent, LifecycleStatus};
-    use crate::scalars::EventId;
+    use crate::frontier::FrontierEntry;
+    use crate::scalars::{EventId, ObjectId};
 
     fn a(name: &str) -> Agent {
         Agent::parse(name.to_string()).unwrap()
@@ -145,6 +155,21 @@ mod tests {
 
     fn oid(n: u64) -> ObjectId {
         ObjectId::parse(hash(n)).unwrap()
+    }
+
+    fn empty_frontier() -> ObservedFrontier {
+        ObservedFrontier::sparse(oid(1), [])
+    }
+
+    fn frontier_seeing(id: &EventId, tip: u64) -> ObservedFrontier {
+        ObservedFrontier::sparse(
+            oid(1),
+            [FrontierEntry {
+                agent: id.agent(),
+                stream_tip: oid(tip),
+                through: id.clone(),
+            }],
+        )
     }
 
     fn status_data() -> EventData {
@@ -164,25 +189,41 @@ mod tests {
         })
     }
 
-    /// A canonically-encoded line round-trips through `parse_line` cleanly.
+    /// Golden snapshot of the full envelope wrapper shape -- not just the
+    /// `data` payload (see events.rs's `golden_json_shape_of_every_event_
+    /// kind`), but `v`/`id`/`agent`/`seq`/`time`/`observed`/`kind`/`refs`
+    /// around it, for both a bare sparse frontier and a cross-agent
+    /// reference with a populated frontier entry. This is the literal byte
+    /// shape written to an immutable, append-only stream line; an
+    /// unintentional change to field names or nesting here would break
+    /// every already-published line the next time it's parsed. `time` is
+    /// redacted since `Timestamp::now_utc()` makes it non-deterministic.
+    #[test]
+    fn golden_json_shape_of_the_envelope_wrapper() {
+        let alice = a("alice");
+        let bob_prev = EventId::new(&a("bob"), 2);
+        let data = resumed_data(&bob_prev);
+        let e = Envelope::new(&alice, 4, frontier_seeing(&bob_prev, 7), &data, []);
+        insta::assert_json_snapshot!("envelope_wrapper_shape", &e, {
+            ".time" => "[timestamp]",
+        });
+    }
+
     #[test]
     fn parse_line_accepts_a_canonical_line() {
         let alice = a("alice");
         let data = status_data();
-        let e = Envelope::new(&alice, 0, Some(oid(1)), &data, []);
+        let e = Envelope::new(&alice, 0, empty_frontier(), &data, []);
         let line = e.to_canonical_line();
         let parsed = Envelope::parse_line(&line).expect("a canonical line must parse");
         assert_eq!(parsed.id, e.id);
     }
 
-    /// Insignificant whitespace still parses as valid JSON but is not
-    /// byte-identical to the canonical re-serialization, so it must be
-    /// rejected as not canonically encoded (AGENT_BUS_SCHEMA.md section 2).
     #[test]
     fn parse_line_rejects_noncanonical_whitespace() {
         let alice = a("alice");
         let data = status_data();
-        let e = Envelope::new(&alice, 0, Some(oid(1)), &data, []);
+        let e = Envelope::new(&alice, 0, empty_frontier(), &data, []);
         let canonical = e.to_canonical_line();
         let padded = canonical.replacen('{', "{ ", 1);
         assert_ne!(padded, canonical);
@@ -190,12 +231,11 @@ mod tests {
         assert!(err.to_string().contains("not canonically encoded"), "{err}");
     }
 
-    /// `id`'s embedded agent must agree with the top-level `agent` field.
     #[test]
     fn parse_line_rejects_id_agent_mismatch() {
         let alice = a("alice");
         let data = status_data();
-        let e = Envelope::new(&alice, 0, Some(oid(1)), &data, []);
+        let e = Envelope::new(&alice, 0, empty_frontier(), &data, []);
         let canonical = e.to_canonical_line();
         let needle = "\"agent\":\"alice\"";
         assert!(canonical.contains(needle), "{canonical}");
@@ -207,12 +247,11 @@ mod tests {
         );
     }
 
-    /// `id`'s embedded seq must agree with the top-level `seq` field.
     #[test]
     fn parse_line_rejects_id_seq_mismatch() {
         let alice = a("alice");
         let data = status_data();
-        let e = Envelope::new(&alice, 0, Some(oid(1)), &data, []);
+        let e = Envelope::new(&alice, 0, empty_frontier(), &data, []);
         let canonical = e.to_canonical_line();
         let needle = "\"seq\":0,";
         assert!(canonical.contains(needle), "{canonical}");
@@ -224,16 +263,15 @@ mod tests {
         );
     }
 
-    /// Only schema version 1 is currently supported.
     #[test]
     fn parse_line_rejects_unsupported_schema_version() {
         let alice = a("alice");
         let data = status_data();
-        let e = Envelope::new(&alice, 0, Some(oid(1)), &data, []);
+        let e = Envelope::new(&alice, 0, empty_frontier(), &data, []);
         let canonical = e.to_canonical_line();
-        let needle = "\"v\":1,";
+        let needle = "\"v\":2,";
         assert!(canonical.contains(needle), "{canonical}");
-        let tampered = canonical.replacen(needle, "\"v\":2,", 1);
+        let tampered = canonical.replacen(needle, "\"v\":1,", 1);
         let err = Envelope::parse_line(&tampered).unwrap_err();
         assert!(
             err.to_string().contains("unsupported schema version"),
@@ -241,15 +279,12 @@ mod tests {
         );
     }
 
-    /// `refs` must equal exactly the event IDs the typed `data` references
-    /// (AGENT_BUS_SCHEMA.md section 2); a hand-tampered `refs` that drops the
-    /// one id `AgentResumed.previous_lifecycle` requires must be rejected.
     #[test]
     fn parse_line_rejects_refs_mismatch() {
         let alice = a("alice");
         let prev = EventId::new(&alice, 3);
         let data = resumed_data(&prev);
-        let e = Envelope::new(&alice, 4, Some(oid(1)), &data, []);
+        let e = Envelope::new(&alice, 4, frontier_seeing(&prev, 1), &data, []);
         let canonical = e.to_canonical_line();
         let needle = format!("\"refs\":[\"{prev}\"]");
         assert!(canonical.contains(&needle), "{canonical}");
@@ -258,32 +293,65 @@ mod tests {
         assert!(err.to_string().contains("refs mismatch"), "{err}");
     }
 
-    /// Malformed top-level JSON (not even an object) fails at the initial
-    /// typed-deserialize step with a "malformed envelope" error; `parse_line`'s
-    /// own later `else` branch for "not a JSON object" is unreachable through
-    /// this function because `Envelope`'s required fields can only ever
-    /// deserialize successfully from a JSON object in the first place.
     #[test]
     fn parse_line_rejects_non_object_json_at_the_typed_deserialize_step() {
         let err = Envelope::parse_line("[1,2,3]").unwrap_err();
         assert!(err.to_string().contains("malformed envelope"), "{err}");
     }
 
-    /// An unknown top-level field is dropped silently by `Envelope`'s
-    /// `Deserialize` (it has no `deny_unknown_fields`), so the extra bytes
-    /// always desynchronize the canonical-encoding check first; the explicit
-    /// "unknown envelope field" loop later in `parse_line` is consequently
-    /// unreachable through this function today. This test documents that
-    /// actual, observed behavior rather than the field's own (currently dead)
-    /// error message.
     #[test]
     fn parse_line_extra_top_level_field_is_caught_by_the_canonical_check_first() {
         let alice = a("alice");
         let data = status_data();
-        let e = Envelope::new(&alice, 0, Some(oid(1)), &data, []);
+        let e = Envelope::new(&alice, 0, empty_frontier(), &data, []);
         let canonical = e.to_canonical_line();
         let tampered = canonical.replacen('{', "{\"surprise\":true,", 1);
         let err = Envelope::parse_line(&tampered).unwrap_err();
         assert!(err.to_string().contains("not canonically encoded"), "{err}");
+    }
+
+    /// Gate 4, positive case: a cross-agent reference at exactly the
+    /// declared frontier position is accepted.
+    #[test]
+    fn parse_line_accepts_a_cross_agent_reference_within_the_frontier() {
+        let alice = a("alice");
+        let bob_prev = EventId::new(&a("bob"), 2);
+        let data = resumed_data(&bob_prev);
+        let e = Envelope::new(&alice, 0, frontier_seeing(&bob_prev, 7), &data, []);
+        let line = e.to_canonical_line();
+        assert!(Envelope::parse_line(&line).is_ok());
+    }
+
+    /// Gate 4, negative case: a cross-agent reference past the declared
+    /// frontier position must be rejected at parse time, not silently
+    /// accepted because the referenced ID happens to be well-formed.
+    #[test]
+    fn parse_line_rejects_a_cross_agent_reference_outside_the_frontier() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let bob_ahead = EventId::new(&bob, 5);
+        let data = resumed_data(&bob_ahead);
+        // Frontier only knows bob through seq 2, but the event references
+        // bob:5 -- past what was declared observed.
+        let stale_frontier = frontier_seeing(&EventId::new(&bob, 2), 7);
+        let e = Envelope::new(&alice, 0, stale_frontier, &data, []);
+        let line = e.to_canonical_line();
+        let err = Envelope::parse_line(&line).unwrap_err();
+        assert!(err.to_string().contains("occurs after"), "{err}");
+    }
+
+    /// A same-agent self-reference needs no frontier entry at all -- it must
+    /// not be rejected merely because the frontier is silent about the
+    /// author's own stream.
+    #[test]
+    fn parse_line_does_not_require_a_frontier_entry_for_a_same_agent_reference() {
+        let alice = a("alice");
+        let prev = EventId::new(&alice, 3);
+        let data = resumed_data(&prev);
+        // Deliberately empty frontier: same-agent causality follows the
+        // stream's own sequence, not the frontier.
+        let e = Envelope::new(&alice, 4, empty_frontier(), &data, []);
+        let line = e.to_canonical_line();
+        assert!(Envelope::parse_line(&line).is_ok());
     }
 }

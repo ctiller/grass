@@ -51,6 +51,10 @@ No document may override a narrower owner by restating it differently.
 Coordination protocol evolution is drafted separately in
 [AGENT_COORDINATION_EVOLUTION.md](AGENT_COORDINATION_EVOLUTION.md). It is a
 review candidate, not an amendment to the active version-one bus.
+[AGENT_WORKSTREAM_TRANSITION.md](AGENT_WORKSTREAM_TRANSITION.md) separates
+durable provider-neutral responsibilities from model-backed agent identities
+and specifies safe provider exhaustion, replacement, and return. It is likewise
+a review candidate until its protocol support is implemented and activated.
 
 ## Review and delivery
 

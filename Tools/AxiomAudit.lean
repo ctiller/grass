@@ -1,11 +1,14 @@
 import Lean
 import Grass.Core.Context
+import Grass.Core.Demand
 import Grass.Core.Generational
+import Grass.Core.Identifiers
 import Grass.Core.Name
 import Grass.Core.Uid
 import Grass.ABI.Win64.Convention
 import Grass.ABI.Win64.Unwind
 import Grass.ABI.Win64.UnwindBytes
+import Grass.Certificate
 import Grass.ISA.X86.Addressing
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.Citation
@@ -38,8 +41,17 @@ import Grass.Platform.Win32.Console
 import Grass.Op.Step
 import Grass.Resource.Algebra
 import Grass.Resource.Axis
+import Grass.Semantics.Execution
+import Grass.Semantics.Observation
+import Grass.Semantics.SpecProcess
 import Grass.Std.Logical.Byte
 import Grass.Std.Logical.FiniteMap
+import Grass.Std.Logical.HostBytes
+import Grass.Std.Logical.Order
+import Grass.Std.Logical.Text
+import Grass.Std.Logical.Vec
+import Grass.Trust.Audit
+import Grass.Verify.VerifiedProgram
 
 /-!
 # Axiom audit
