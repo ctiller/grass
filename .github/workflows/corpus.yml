@@ -27,15 +27,90 @@ jobs:
 
   agent-bus:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: tools/agent-bus
+    env:
+      # Must equal tools/agent-bus/src/bootstrap.rs
+      # SUPPORTED_MERGE_ENGINE_VERSION; the step below fails the build if it
+      # drifts. The checksum is the kernel.org release tarball for that exact
+      # version, so the two always change together.
+      PINNED_GIT_VERSION: "2.53.0"
+      PINNED_GIT_SHA256: "5818bd7d80b061bbbdfec8a433d609dc8818a05991f731ffc4a561e2ca18c653"
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # agent-bus pins the exact git version its merge engine was validated
+      # against and refuses to activate against any other. That pin is a
+      # fleet-wide invariant, not a local preference: `git merge-tree
+      # --write-tree` (ORT) must produce byte-identical trees on every machine,
+      # or one agent cannot independently reconstruct and verify another
+      # agent's merge candidate, which is the whole basis of the trustless
+      # review boundary in docs/AGENT_REVIEW.md section 7.
+      #
+      # `ubuntu-latest` ships whatever git its image happens to carry (2.55.0
+      # as of this commit) and moves without notice, so CI installs the pinned
+      # version instead. Bumping the crate constant to chase the runner is not
+      # an equivalent fix. It would strand every agent host still on 2.53.0,
+      # and 2.55.0 is simply unvalidated: between v2.53.0 and v2.55.0 upstream
+      # broadened the cached-rename skip condition in merge-ort.c (a cached
+      # rename whose target is already cleanly resolved is now dropped) and
+      # added a re-diff pass to xdl_change_compact() in xdiff/xdiffi.c that
+      # changes how change groups are split. A seven-scenario differential
+      # across both builds found no divergence, but that is well short of the
+      # section 7 acceptance corpus and never reaches the cached-rename path,
+      # so validating a bump remains real work plus a merge_engine epoch.
+      - name: Install the pinned git merge engine
+        run: |
+          set -euo pipefail
+          crate_version="$(sed -n \
+            's/^pub const SUPPORTED_MERGE_ENGINE_VERSION: &str = "\(.*\)";$/\1/p' \
+            src/bootstrap.rs)"
+          if [ -z "$crate_version" ]; then
+            echo "::error::could not read SUPPORTED_MERGE_ENGINE_VERSION from src/bootstrap.rs; the constant moved or changed shape, so this step can no longer tell which git to install"
+            exit 1
+          fi
+          if [ "$crate_version" != "$PINNED_GIT_VERSION" ]; then
+            echo "::error::src/bootstrap.rs pins git $crate_version but this workflow installs $PINNED_GIT_VERSION. Update PINNED_GIT_VERSION and PINNED_GIT_SHA256 (sha256 of https://mirrors.edge.kernel.org/pub/software/scm/git/git-$crate_version.tar.xz) together, and revalidate ORT tree output before changing the crate constant."
+            exit 1
+          fi
+          sudo apt-get update
+          # The standard Debian/Ubuntu build set for git. libexpat1-dev is
+          # required because the build links http-push unless NO_EXPAT=1, and
+          # the runner image does not guarantee it.
+          sudo apt-get install -y --no-install-recommends \
+            build-essential zlib1g-dev libssl-dev libcurl4-openssl-dev \
+            libexpat1-dev
+          workdir="$RUNNER_TEMP/git-build"
+          prefix="$RUNNER_TEMP/git-pinned"
+          mkdir -p "$workdir"
+          cd "$workdir"
+          curl -fsSL -o "git-$PINNED_GIT_VERSION.tar.xz" \
+            "https://mirrors.edge.kernel.org/pub/software/scm/git/git-$PINNED_GIT_VERSION.tar.xz"
+          echo "$PINNED_GIT_SHA256  git-$PINNED_GIT_VERSION.tar.xz" | sha256sum -c -
+          tar -xJf "git-$PINNED_GIT_VERSION.tar.xz"
+          cd "git-$PINNED_GIT_VERSION"
+          make prefix="$prefix" NO_TCLTK=1 NO_GETTEXT=1 -j"$(nproc)" all
+          make prefix="$prefix" NO_TCLTK=1 NO_GETTEXT=1 install
+          echo "$prefix/bin" >> "$GITHUB_PATH"
+
+      # Separate from the install step so it runs with the updated PATH. If the
+      # runner image's git were still winning, every bootstrap::genesis test
+      # would fail later with an opaque activation error; fail here instead,
+      # naming both versions.
+      - name: Verify the pinned git merge engine is active
+        run: |
+          set -euo pipefail
+          actual="$(git --version)"
+          echo "git on PATH: $actual ($(command -v git))"
+          if [ "$actual" != "git version $PINNED_GIT_VERSION" ]; then
+            echo "::error::expected 'git version $PINNED_GIT_VERSION' on PATH but found '$actual'. The pinned build did not take precedence over the runner image's git, so agent-bus activation would refuse to run."
+            exit 1
+          fi
 
       - name: Configure git identity for test fixtures
         run: |
@@ -61,5 +136,34 @@ jobs:
 
       # Enforces this crate's nominated ≥95% coverage claim (AGENT_REVIEW.md
       # `required_checks`) so a later change can't silently regress it.
+      #
+      # `src/multihost_proptest.rs` is excluded from the measured percentage.
+      # It is still compiled and still run -- by the `Test` step above, and
+      # again here, since this step runs the whole suite to collect the
+      # profile. Only its own lines' contribution to the total is dropped.
+      #
+      # It is a `#[cfg(test)]`-only module (see `main.rs`), so it is test
+      # code rather than product code and its own coverage was never part of
+      # the ≥95% claim. It is also the only file in the crate whose coverage
+      # is not a property of the code at all: it is the crate's sole user of
+      # randomness, and it draws a fresh proptest seed every run on purpose
+      # -- see the `config()` doc comment in that file, which explains that
+      # it leans on being run repeatedly rather than on breadth within any
+      # one run. At four generated cases a run reaches only whichever `Op`
+      # arms that seed produced, leaving the remaining arms of both the
+      # executor and its oracle unexecuted, and its `trace` block sits behind
+      # `AGENT_BUS_PROPTEST_TRACE`, which no ordinary run sets.
+      #
+      # That is enough to decide this gate by itself. Four runs of one
+      # unchanged commit measured this file at 84.70%, 85.36%, 85.46% and
+      # 90.38% of its own lines -- and the run on this runner that first
+      # surfaced the problem measured it at 79.78%. The crate totals for
+      # those four were 94.84%, 94.87%, 94.88% and 95.16%, so the same
+      # source both failed and passed the 95% line gate depending on
+      # nothing but the seed it drew. Everything else is
+      # deterministic -- all four runs missed exactly the same 687 lines
+      # outside this file -- so excluding it makes the gate measure the
+      # product code and return the same answer every time (95.45% lines,
+      # 95.97% regions on all four).
       - name: Coverage threshold
-        run: cargo llvm-cov --locked --all-targets --fail-under-lines 95 --fail-under-regions 95
+        run: cargo llvm-cov --locked --all-targets --ignore-filename-regex 'multihost_proptest\.rs' --fail-under-lines 95 --fail-under-regions 95
