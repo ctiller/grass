@@ -1549,6 +1549,34 @@ fn rebind_restores_the_local_registry_ref_when_the_push_is_rejected() {
     );
 }
 
+/// `synced_snapshot`'s own fetch is deliberately never forced (a no-force
+/// -push safety property), so it fails outright rather than self-healing if
+/// this checkout's local registry ref is already ahead of the remote --
+/// reachable in practice from an earlier `succeed`/`register` whose own push
+/// was rejected. `rebind` is exactly the command someone reaches for to fix
+/// a fleet's registry state, so it must point at the actual fix rather than
+/// surface a bare non-fast-forward git error.
+#[test]
+fn rebind_explains_how_to_recover_when_the_local_registry_ref_is_already_ahead_of_the_remote() {
+    let (origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register(repo.path(), "alice", "implementor", "migration");
+
+    // Wedge this checkout's local registry ref ahead of origin: `succeed`
+    // advances the local ref via `update-ref` before attempting its push, so
+    // a denied push still leaves it there.
+    deny_registry_pushes(origin.path());
+    succeed(repo.path(), "coord1", "alice", "host-a");
+    allow_registry_pushes(origin.path());
+
+    rebind_cmd(repo.path(), "coord1", &[("alice", "host-b")])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("ahead of the remote"))
+        .stderr(predicate::str::contains("git fetch"))
+        .stderr(predicate::str::contains("--force"));
+}
+
 /// Same rollback guarantee, exercised across a *batch*: a rejected push
 /// leaves none of the several named identities relabeled, locally or
 /// remotely. All-or-nothing has to mean "or nothing" in the local ref too.

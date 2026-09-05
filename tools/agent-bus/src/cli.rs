@@ -905,7 +905,7 @@ fn parse_rebind_sets(sets: &[String]) -> AbResult<BTreeMap<Agent, Short>> {
         let host = parse_short(host)?;
         if let Some(first) = parsed.insert(agent.clone(), host) {
             return Err(invalid(format!(
-                "--set names {agent} more than once (first as {first:?}) -- ambiguous intent; \
+                "--set names {agent} more than once (first as {first}) -- ambiguous intent; \
                  give exactly one new host per identity"
             )));
         }
@@ -945,7 +945,29 @@ fn rebind(args: RebindArgs) -> AbResult<()> {
         &paths.common_dir,
         &args.remote,
         &paths.worktrees,
-    )?;
+    )
+    .map_err(|e| {
+        // The fetch this does is deliberately never forced (no-force-push
+        // safety property, gitrepo.rs), so it fails outright -- rather than
+        // self-healing -- if this checkout's local registry ref is already
+        // ahead of the remote (e.g. a prior `succeed`/`register` advanced it
+        // locally but its own push was rejected, or its rollback failed).
+        // `rebind` is exactly the command someone reaches for to fix a
+        // fleet's registry state, so point at the actual fix instead of
+        // surfacing a bare non-fast-forward git error.
+        if e.to_string().contains("non-fast-forward") || e.to_string().contains("[rejected]") {
+            invalid(format!(
+                "could not fetch a fresh {ref_name} from {remote}: {e}. This checkout's local \
+                 registry ref is likely ahead of the remote (from an earlier command whose own \
+                 push was rejected or whose rollback failed) -- reset it to the remote's tip \
+                 (`git fetch {remote} {ref_name}:{ref_name} --force`) and try again.",
+                ref_name = crate::registry::REGISTRY_REF,
+                remote = args.remote,
+            ))
+        } else {
+            e
+        }
+    })?;
     let epoch = snapshot.roster_epoch;
 
     let previous_hosts: BTreeMap<Agent, Short> = new_hosts
