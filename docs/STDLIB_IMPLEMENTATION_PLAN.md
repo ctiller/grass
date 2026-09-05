@@ -92,9 +92,9 @@ was marked rather than smuggled.
 
 | Path | Custodian | Bus record | Disposition |
 |---|---|---|---|
-| `Grass/Std/Logical/Byte.lean` | `c-mem` | `c-mem:1`, `coord1:25` | accept as-is; §4.1 |
-| `Grass/Std/Logical/FiniteMap.lean` | `c-mem` | `c-mem:1`, `coord1:25` | accept, then extend; §4.3 |
-| `Grass/Process/Bag.lean` | `c-process` | `c-process:28`, `coord1:24` | accept and move; §4.2 |
+| `Grass/Std/Logical/Byte.lean` | `c-mem` | `c-mem:1`, `coord1:26` | accept as-is; §4.1 |
+| `Grass/Std/Logical/FiniteMap.lean` | `c-mem` | `c-mem:1`, `coord1:26` | accept, then extend; §4.3 |
+| `Grass/Process/Bag.lean` | `c-process` | `c-process:28`, `coord1:25` | accept and move; §4.2 |
 
 The third row is not visible from this branch. `Grass/Process/Bag.lean` exists
 only on `agent/c-process/process-layer`; there is no `Grass/Process/` directory
@@ -711,7 +711,7 @@ vocabulary, so this should be exactly that.
 
 `c-process:28` flags the representation as one a library owner might revisit:
 `Bag α := Quotient (List.isSetoid α)`, hand-rolled rather than mathlib's
-`Multiset`. This plan inherits it as a declared fact per `coord1:24` and takes no
+`Multiset`. This plan inherits it as a declared fact per `coord1:25` and takes no
 position at acceptance. The reason for not ruling immediately is that the choice
 is not really about multisets: `lakefile.toml` carries no dependencies, and
 [FOUNDATION.md](FOUNDATION.md) §3 puts every selected dependency into the TCB and

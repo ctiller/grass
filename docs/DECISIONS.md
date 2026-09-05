@@ -610,7 +610,7 @@ to imitate compiler-selected storage or CFG structure.
     structural networks and execution machinery; `Refinement`/`Weave` alone
     relates a selected network trace to a `SpecProcess`. Neither `Semantics` nor
     `Process` imports the other merely to state its core objects. This records
-    the ruling carried by agent-bus event `coord1:5`, originating at
+    the ruling carried by agent-bus event `coord1:6`, originating at
     `c-process:4` and requested as dependency `c-process:17`.
 117. There is one structural abstract process-network declaration. It is owned
     by `Process`, is generic over its protocol family, preserves the role-schema,
@@ -624,7 +624,7 @@ to imitate compiler-selected storage or CFG structure.
     field of `StructuralProcessNetwork`; `Semantics` does not import `Process`
     to construct the wrapper. This corrects the original owner wording to obey
     decision 116's dependency diamond without changing the selected interface.
-    This records `coord1:4`, originating at `c-process:3`, and names the wrapper
+    This records `coord1:5`, originating at `c-process:3`, and names the wrapper
     consumed by the synchronized Spike 4/5 surface under dependency
     `g-design:23`.
 118. Cancellation coverage is scope-indexed. One core `CancellationPolicy` is
@@ -633,18 +633,18 @@ to imitate compiler-selected storage or CFG structure.
     families exactly to a `ProcessScopeSummary`. Whole-plan coverage is the
     hierarchical composition of these certificates. A process-root spelling in
     authored syntax may infer its scope, but is elaborator sugar rather than a
-    second Lean arity. This records `coord1:6`, originating at `c-process:5`.
+    second Lean arity. This records `coord1:7`, originating at `c-process:5`.
 119. `ProcessPlan` has only its declared registry and boundary parameters.
     The undeclared `ProcessNetwork` spelling is deleted. Root-oriented notation
     may construct or infer those parameters through typed elaboration but never
-    denotes a second `ProcessPlan` type application. This records `coord1:7`,
+    denotes a second `ProcessPlan` type application. This records `coord1:8`,
     originating at `c-process:6`.
 120. `EffectDemand boundary` abbreviates `boundary.Demand`, and
     `EffectResult demand` abbreviates `boundary.Result demand`. Protocol-specific
     operations enter through typed constructors of the open boundary demand
     family. `SequentialAdapter`, not the precious authoring type, generates
     occurrence identities, child bindings, and pending multiplicity. This
-    records `coord1:8`, originating at `c-process:7`.
+    records `coord1:9`, originating at `c-process:7`.
 121. Interruption, logical-fault, and environment-violation classifications are
     open associated families of a selected `ProcessVocabulary`; Grass rejects a
     closed whole-program sum and an unclassified `other` fallback. A reusable
@@ -669,7 +669,7 @@ to imitate compiler-selected storage or CFG structure.
     cites the originating and ruling agent-bus event identifiers when applicable.
     Bus events retain routing, custody, and timing; this file owns the rule that
     implementations and normative documents must follow. This resolves
-    `coord1:13` under acknowledgement `g-design:6`.
+    `coord1:14` under acknowledgement `g-design:6`.
 124. An open nominal metadata axis may use a closed carrier with an exact
     extension key such as `(owner, kind)` only when the value selects an
     identity and carries no fallback semantics. Consumers that need laws for an
@@ -680,7 +680,7 @@ to imitate compiler-selected storage or CFG structure.
     diagnostic facet; it does not weaken decision 121, because process faults,
     interruptions, and environment violations advance semantic state and remain
     typed per `ProcessVocabulary`. This resolves the classification part of
-    `coord1:16`, raised by comparison of `c-process:8` with `g-foundation:4`,
+    `coord1:17`, raised by comparison of `c-process:8` with `g-foundation:4`,
     under acknowledgement `g-design:13`.
 125. `Specification` names the neutral dependency layer below both `Semantics`
     and `Process`; it owns typed junctions, demand/result boundaries, and
@@ -688,7 +688,7 @@ to imitate compiler-selected storage or CFG structure.
     `SpecProcess` and belongs to `Semantics`. Its defining source/module should
     therefore use the specific `SpecProcess` name rather than a generic
     `Semantics.Specification` name that suggests a second owner for the neutral
-    layer. This resolves the terminology part of `coord1:16` under
+    layer. This resolves the terminology part of `coord1:17` under
     acknowledgement `g-design:13`.
 126. A supplied fault plan selects what happens only if execution reaches the
     plan's fault-delivery point; it is not itself an architectural-fault
