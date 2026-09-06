@@ -84,6 +84,24 @@ pub fn drain_outbox(
     coordinator_custody_epoch: u64,
     remote: &str,
 ) -> AbResult<DrainResult> {
+    // Custody is authorized *before* the empty-outbox shortcut, not after.
+    //
+    // Gate 6 requires duplicate custody of one agent stream to fail closed,
+    // and `registry.rs` claims `authorize_stream_write` is "called by every
+    // future `drain_outbox`/`publish_stream`". It was not: the early return
+    // below sat in front of it, so whenever the outbox happened to be empty
+    // this function returned success without checking custody at all, and
+    // `drain_and_publish` went on to push the agent's stream ref. That is
+    // reachable without contrivance -- a coordinator whose earlier drain
+    // committed locally but failed to push has an empty outbox and a local
+    // tip ahead of origin, so after custody moves away it could still
+    // fast-forward the new custodian's ref. No force-push required, which is
+    // exactly the shape gate 6 says must be impossible.
+    let registry_tip = crate::registry::read_registry_tip(repo)?
+        .ok_or_else(|| invalid("no registry root exists yet"))?;
+    let epoch = crate::registry::read_epoch(repo, &registry_tip)?;
+    crate::registry::authorize_stream_write(&epoch, agent, host, coordinator_custody_epoch)?;
+
     let pending = crate::outbox::list_pending(git_common_dir, agent)?;
     if pending.is_empty() {
         return Ok(DrainResult::default());
@@ -104,11 +122,6 @@ pub fn drain_outbox(
             Err(e) => fresh_sync_err = Some(e.to_string()),
         }
     }
-
-    let registry_tip = crate::registry::read_registry_tip(repo)?
-        .ok_or_else(|| invalid("no registry root exists yet"))?;
-    let epoch = crate::registry::read_epoch(repo, &registry_tip)?;
-    crate::registry::authorize_stream_write(&epoch, agent, host, coordinator_custody_epoch)?;
 
     let mut state = match fresh_state {
         Some(s) => s,
@@ -764,14 +777,86 @@ mod tests {
         Candidate::new(agent, &data, vec![])
     }
 
+    /// Gate 6: "duplicate custody of one agent stream fails closed without
+    /// force-push."
+    ///
+    /// The authorization used to sit *after* the empty-outbox shortcut, so a
+    /// custodian the registry had superseded was never checked whenever it
+    /// happened to have nothing pending -- and `drain_and_publish` would then
+    /// push that agent's stream ref anyway. The dangerous case needs no
+    /// contrivance: a coordinator whose earlier drain committed locally but
+    /// failed to push has an empty outbox and a local tip ahead of origin, so
+    /// once custody moves it can still fast-forward the new custodian's ref.
+    ///
+    /// Asserted with an empty outbox specifically, because with a non-empty
+    /// one the check was always reached and the bug was invisible.
+    #[test]
+    fn drain_outbox_refuses_a_wrong_custodian_even_with_nothing_pending() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap()).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        assert!(
+            crate::outbox::list_pending(repo.path(), &coord1)
+                .unwrap()
+                .is_empty(),
+            "fixture must have an empty outbox, or it tests the wrong path"
+        );
+
+        // The rightful custodian is accepted.
+        drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .expect("the registered custodian must be allowed");
+
+        // A different host claiming the same stream is refused.
+        let err = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host2"),
+            0,
+            "origin",
+        )
+        .expect_err("a host that does not hold custody must fail closed");
+        assert!(
+            err.to_string().contains("custody"),
+            "expected a custody refusal, got: {err}"
+        );
+    }
+
     #[test]
     fn drain_outbox_is_a_noop_when_empty() {
         let repo = init_repo();
-        let alice = a("alice");
+        let coord1 = a("coord1");
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap()).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
         let drained = drain_outbox(
             repo.path(),
             repo.path(),
-            &alice,
+            &coord1,
             &short("host1"),
             0,
             "origin",
@@ -1458,11 +1543,21 @@ mod tests {
     fn drain_and_publish_is_a_noop_when_the_outbox_is_empty() {
         let repo = init_repo();
         let origin = init_bare_origin();
-        let alice = a("alice");
+        let coord1 = a("coord1");
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap()).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
         let (drained, receipt) = drain_and_publish(
             repo.path(),
             repo.path(),
-            &alice,
+            &coord1,
             &short("host1"),
             0,
             &origin.path().to_string_lossy(),
@@ -1470,7 +1565,15 @@ mod tests {
         .unwrap();
         assert!(drained.published.is_empty());
         assert!(drained.rejected.is_empty());
-        assert_eq!(receipt, crate::publish::PublicationReceipt::default());
+        // The bus exists now (custody has to be authorizable for the drain to
+        // be reached at all), so the coordinator's own stream root does get
+        // published -- that is the *publish* half doing its job. What this
+        // test is about is the drain half: an empty outbox contributes no new
+        // events, and nothing is rejected.
+        assert!(
+            receipt.rejected.is_empty(),
+            "nothing should be rejected: {receipt:?}"
+        );
     }
 
     /// End-to-end proof that `build_frontier` can actually construct a

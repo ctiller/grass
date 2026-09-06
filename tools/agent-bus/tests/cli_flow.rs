@@ -2888,3 +2888,67 @@ fn transport_still_honors_configuration_injected_through_the_environment() {
         "transport must still honor GIT_CONFIG_* configuration: {injected}"
     );
 }
+
+/// Gate 19: a successor resumes preserved outboxes "exactly once **after
+/// winning** the registry custody transition". Winning is decided by the
+/// remote, and `publish` reports a rejected push in its receipt rather than
+/// as an error -- so `succeed` used to build the successor epoch locally,
+/// watch the push fail, and then drain and publish the target's stream
+/// anyway. Two hosts racing a succession would both resume, which is two
+/// coordinators publishing for one custody epoch (gate 7) with no force-push
+/// anywhere to make it look wrong.
+///
+/// An unreachable remote is the cleanest way to make the push fail
+/// deterministically. The assertion that matters is the second one: the
+/// target's pending work must still be pending afterwards.
+#[test]
+fn succeed_refuses_to_resume_when_the_registry_transition_did_not_reach_the_remote() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register_with(
+        repo.path(),
+        "alice",
+        "implementor",
+        "host-a",
+        Some("alice-standby"),
+    );
+    submit(
+        repo.path(),
+        "alice",
+        "agent.status",
+        r#"{"status":"active","note":"queued before the succession"}"#,
+        "pending-1",
+    );
+
+    bin()
+        .current_dir(repo.path())
+        .args([
+            "succeed",
+            "--proposer",
+            "alice-standby",
+            "--target",
+            "alice",
+            "--host",
+            "host-b",
+            "--remote",
+            "no-such-remote-anywhere",
+        ])
+        .assert()
+        .failure();
+
+    // The queued event must still be queued: nothing may have been resumed
+    // under a custody epoch this host never won.
+    let outbox = repo
+        .path()
+        .join(".git")
+        .join("agent-bus")
+        .join("outbox")
+        .join("alice");
+    let still_pending: Vec<_> = std::fs::read_dir(&outbox)
+        .map(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name()).collect())
+        .unwrap_or_default();
+    assert!(
+        !still_pending.is_empty(),
+        "the target's outbox must be untouched when the succession did not land, found {still_pending:?}"
+    );
+}

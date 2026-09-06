@@ -765,6 +765,30 @@ fn succeed(args: SucceedArgs) -> AbResult<()> {
         )],
     )?;
 
+    // Gate 19 is "a pre-authorized successor resumes preserved outboxes
+    // exactly once **after winning** the registry custody transition", and
+    // winning is decided by the remote, not locally. `propose_custody_
+    // succession` does a *local* compare-and-swap, and `publish` reports a
+    // rejected push in its receipt rather than as an error -- so two hosts
+    // holding the same stale registry could both build the same successor
+    // epoch, one push would win, and the loser would previously go on to
+    // drain and publish `target`'s stream regardless. That is two
+    // coordinators publishing for one custody epoch (gate 7) and a successor
+    // resuming without having won (gate 19), and because the stream push is
+    // an ordinary fast-forward, no force-push is involved to make it look
+    // wrong.
+    //
+    // Refusing here also leaves the loser's local registry ref diverged from
+    // origin, which is the honest state to be in: its next `synced_snapshot`
+    // fails its non-force registry fetch and says so, rather than quietly
+    // reducing a divergent local epoch.
+    if !registry_receipt.rejected.is_empty() || !registry_receipt.not_attempted.is_empty() {
+        return Err(invalid(format!(
+            "the registry custody transition did not reach {}: rejected {:?}, not attempted              {:?}. Another host almost certainly won this succession; re-run after fetching,              and do not resume {target}'s outbox from here -- doing so would publish for a              custody epoch this host does not hold.",
+            args.remote, registry_receipt.rejected, registry_receipt.not_attempted
+        )));
+    }
+
     // Resume whatever was left in `target`'s preserved outbox, now under
     // the new custody -- demonstrating gate 19's "resumes preserved
     // outboxes exactly once" rather than merely asserting it structurally.
