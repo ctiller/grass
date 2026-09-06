@@ -154,6 +154,11 @@ pub fn create_root_commit(
         )));
     }
 
+    // Test-only seam: a competing writer lands here, after the existence
+    // check above and before the root commit is built.
+    #[cfg(test)]
+    crate::gitobjects::fire_competing_writer();
+
     let git = crate::gitobjects::Libgit2Reader::open(repo)?;
 
     // Segments are strict LF-only (`storage.rs`'s structural checks reject a
@@ -297,6 +302,12 @@ pub fn append_to_stream(
             )));
         }
     }
+
+    // Test-only seam: a competing writer lands here, after the staleness
+    // check above and before this append's commit is built. Gate 6 says the
+    // loser stops; this is where a test makes this call the loser.
+    #[cfg(test)]
+    crate::gitobjects::fire_competing_writer();
 
     let git = crate::gitobjects::Libgit2Reader::open(repo)?;
 
@@ -568,6 +579,104 @@ mod tests {
         );
         let rolled = String::from_utf8(edits[1].1.clone()).unwrap();
         assert_eq!(rolled.lines().count(), 1);
+    }
+
+    // ------------------------------------------- the compare-and-swap itself
+    //
+    // Every test below lands a competing writer *inside* the window between
+    // the caller's staleness pre-check and the ref update. Without that,
+    // mutation testing showed the CAS could be defeated at this call site --
+    // passing the ref's current tip as `expected`, or dropping the expected
+    // value entirely -- with the whole suite still green, because the
+    // pre-check alone produced an error whose wording the tests could not
+    // distinguish from the CAS's.
+
+    /// Publish an unrelated commit on `refname`, as another writer would.
+    fn land_competing_writer(repo: &std::path::Path, refname: &str) {
+        let g = crate::gitobjects::Libgit2Reader::open(repo).unwrap();
+        let blob = g.write_blob(b"a competing writer's content").unwrap();
+        let tree = g.write_tree(None, &[("competing.txt", blob)]).unwrap();
+        let commit = g.create_commit(&tree, &[], "competing writer").unwrap();
+        // Through `git`, not `compare_and_set`, so this does not re-enter the
+        // seam it is being fired from.
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["update-ref", refname, commit.as_str()])
+            .status()
+            .unwrap();
+        assert!(status.success(), "the competing writer could not publish");
+    }
+
+    /// Gate 6's real teeth. The staleness check at the top of
+    /// `append_to_stream` reads the tip before any commit is built; a writer
+    /// that lands while the commit is being built passes that check and must
+    /// still be refused.
+    #[test]
+    fn append_to_stream_refuses_a_writer_that_lands_after_the_staleness_check() {
+        let repo = init_repo();
+        let alice = a("alice");
+        create_root_commit(
+            repo.path(),
+            &header(&alice),
+            &registered_envelope(&alice, 0),
+        )
+        .unwrap();
+        let root = read_stream_tip(repo.path(), &alice).unwrap().unwrap();
+
+        let path = repo.path().to_path_buf();
+        let refname = stream_ref(&alice).into_string();
+        crate::gitobjects::arm_competing_writer(move || {
+            land_competing_writer(&path, &refname);
+        });
+
+        let err = append_to_stream(repo.path(), &alice, &root, &[status_envelope(&alice, 1)])
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("changed after this write was prepared"),
+            "expected the compare-and-swap to refuse, got: {err}"
+        );
+    }
+
+    /// The same window for a stream root, where the expected value is "this
+    /// ref must not exist" rather than a commit id.
+    #[test]
+    fn create_root_commit_refuses_a_root_that_lands_after_the_existence_check() {
+        let repo = init_repo();
+        let alice = a("alice");
+
+        let path = repo.path().to_path_buf();
+        let refname = stream_ref(&alice).into_string();
+        crate::gitobjects::arm_competing_writer(move || {
+            land_competing_writer(&path, &refname);
+        });
+
+        let err = create_root_commit(
+            repo.path(),
+            &header(&alice),
+            &registered_envelope(&alice, 0),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("already exists"),
+            "expected create-if-absent to refuse, got: {err}"
+        );
+    }
+
+    /// Falsification of the header guard added with the in-process writer: a
+    /// root event belonging to a different agent than the header describes.
+    #[test]
+    fn create_root_commit_rejects_a_root_event_from_another_agent() {
+        let repo = init_repo();
+        let alice = a("alice");
+        let bob = a("bob");
+        let err = create_root_commit(repo.path(), &header(&alice), &registered_envelope(&bob, 0))
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("but the header describes"),
+            "{err}"
+        );
     }
 
     #[test]

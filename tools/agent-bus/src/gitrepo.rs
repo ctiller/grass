@@ -70,13 +70,26 @@ impl GitOutput {
 /// operation. Override with `AGENT_BUS_GIT_TIMEOUT_SECS` for an unusually
 /// slow link, or to tighten it in a test.
 fn git_timeout() -> std::time::Duration {
+    std::time::Duration::from_secs(parse_timeout_secs(
+        std::env::var("AGENT_BUS_GIT_TIMEOUT_SECS").ok().as_deref(),
+    ))
+}
+
+/// The override's parse rule, separated from reading the environment so a
+/// test can exercise it directly.
+///
+/// A test that re-implements this rule locally and asserts against its own
+/// copy proves nothing about the code that ships -- which is exactly what the
+/// test here used to do.
+///
+/// Zero is treated as absent rather than as "no deadline": a deadline an
+/// environment variable can switch off is not a deadline, and always having
+/// one is the whole point (g-reviewer:29).
+fn parse_timeout_secs(raw: Option<&str>) -> u64 {
     const DEFAULT_SECS: u64 = 120;
-    let secs = std::env::var("AGENT_BUS_GIT_TIMEOUT_SECS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
+    raw.and_then(|v| v.parse::<u64>().ok())
         .filter(|v| *v > 0)
-        .unwrap_or(DEFAULT_SECS);
-    std::time::Duration::from_secs(secs)
+        .unwrap_or(DEFAULT_SECS)
 }
 
 /// Kill `pid` and everything it spawned.
@@ -88,7 +101,16 @@ fn git_timeout() -> std::time::Duration {
 /// prompt reading a terminal that is not there. Killing only the parent
 /// leaves the real culprit running and holding the pipe, so the wait never
 /// ends.
+/// Counts calls to [`kill_process_tree`], so a test can prove the deadline
+/// actually invokes it rather than only that it reports a timeout.
+#[cfg(test)]
+pub(crate) static KILLS_REQUESTED: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 fn kill_process_tree(pid: u32) {
+    #[cfg(test)]
+    KILLS_REQUESTED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
     #[cfg(windows)]
     {
         // `taskkill /T` walks the tree; `/F` is required because a blocked
@@ -175,7 +197,25 @@ fn spawn_and_wait(
     // Removing them makes the explicit path authoritative for both, which is
     // what every caller here means: each passes a repository path it
     // resolved itself.
-    command.env_remove("GIT_DIR").env_remove("GIT_WORK_TREE");
+    //
+    // `GIT_DIR`/`GIT_WORK_TREE` alone do not close it. `git` also honors
+    // `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`,
+    // `GIT_COMMON_DIR`, `GIT_INDEX_FILE` and `GIT_NAMESPACE` over `-C <dir>`,
+    // and `Repository::discover` honors none of them. The object-directory
+    // ones reach exactly the split named above: with `GIT_OBJECT_DIRECTORY`
+    // set, `merge-tree --write-tree` writes its tree into that directory and
+    // the in-process `commit_with_identity` cannot find it.
+    for var in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_INDEX_FILE",
+        "GIT_NAMESPACE",
+    ] {
+        command.env_remove(var);
+    }
 
     #[cfg(unix)]
     {
@@ -340,14 +380,18 @@ pub fn rev_parse_opt(dir: &Path, rev: &str) -> AbResult<Option<String>> {
 
 #[cfg(test)]
 pub fn check_ref_format(refname: &str) -> bool {
-    // Memoized, because this sits on the hot read path and costs a process.
-    // `Branch::parse` runs it, `Branch` deserializes through `parse`, and
-    // every review event names two branches -- so reducing the fleet's own
-    // bus spawned hundreds of `git check-ref-format` processes per command,
-    // measured at 2.5 seconds of a 6-second `status`. The set of distinct
-    // ref names across a whole reduction is tiny (`refs/heads/main` and one
-    // branch per nomination) and git's answer for a given name is a pure
-    // function of that name, so the second and later asks are free.
+    // Test-only, and memoized because the differential corpus asks about the
+    // same handful of names repeatedly.
+    //
+    // This was once on the hot read path: `Branch::parse` called it, `Branch`
+    // deserializes through `parse`, and every review event names two
+    // branches, so reducing the fleet's bus spawned hundreds of these -- 2.5
+    // seconds of a 6-second `status`. `Branch::parse` now decides for itself
+    // and this survives only as the oracle
+    // `branch_parse_agrees_with_real_git_check_ref_format` measures it
+    // against. Note it deliberately does not go through `run`, so it gets
+    // neither the deadline nor the environment strip; nothing in a release
+    // build calls it.
     static SEEN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> =
         std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
@@ -961,27 +1005,68 @@ mod outer_tests {
 
     // ----------------------------------------------- the subprocess deadline
 
-    /// A command that blocks for longer than the deadline: `ping` on Windows
-    /// (which has no `sleep`), `sleep` elsewhere. Neither is `git`, which is
-    /// the point -- the deadline is a property of how this module runs a
-    /// child process, and using a program that reliably hangs makes the
-    /// expiry path deterministic instead of requiring an unreachable remote.
+    /// A command that blocks far longer than any deadline in these tests.
+    /// Neither program is `git`, which is the point: the deadline is a
+    /// property of how this module runs a child, and a program that reliably
+    /// hangs makes the expiry path deterministic instead of needing an
+    /// unreachable remote.
     fn blocking_command() -> Command {
         if cfg!(windows) {
-            let mut c = Command::new("ping");
-            c.args(["-n", "30", "127.0.0.1"]);
+            let mut c = Command::new("cmd");
+            // `ping -n N 127.0.0.1` is the portable Windows sleep.
+            c.args(["/c", "ping -n 30 127.0.0.1 >nul"]);
             c
         } else {
-            let mut c = Command::new("sleep");
-            c.arg("30");
+            let mut c = Command::new("sh");
+            c.args(["-c", "sleep 30"]);
             c
         }
     }
 
-    /// `g-reviewer:29`: an unbounded subprocess can hang every agent-bus
-    /// command. It must instead be killed and reported.
+    /// The killer must actually terminate the process, not merely be called.
+    ///
+    /// This is half of what `g-reviewer:29` needs; the other half (that the
+    /// deadline *invokes* it) is the test below. Splitting them is deliberate:
+    /// an earlier single test asserted only the error text and a bounded wall
+    /// clock, both of which stay true when the kill does nothing at all.
     #[test]
-    fn a_command_that_outruns_its_deadline_is_killed_and_reported() {
+    fn kill_process_tree_actually_terminates_the_child() {
+        let mut child = blocking_command()
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+
+        // It is running, and stays running on its own.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "the fixture exited on its own; it cannot demonstrate a kill"
+        );
+
+        kill_process_tree(child.id());
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the child was still running 10s after kill_process_tree"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    /// `g-reviewer:29`: an unbounded subprocess can hang every agent-bus
+    /// command. On expiry the deadline must report *and* kill -- reporting
+    /// alone leaves the process running and the pipe held.
+    #[test]
+    fn a_command_that_outruns_its_deadline_is_reported_and_its_tree_killed() {
+        let before = KILLS_REQUESTED.load(std::sync::atomic::Ordering::SeqCst);
+
         let mut command = blocking_command();
         command
             .stdin(std::process::Stdio::null())
@@ -1002,11 +1087,17 @@ mod outer_tests {
             err.to_string().contains("did not finish within"),
             "expected a timeout error, got: {err}"
         );
-        // The deadline must actually bound the wait, not merely be reported
-        // after the child finished on its own.
+        // The deadline must bound the wait, not merely be reported after the
+        // child finished on its own.
         assert!(
-            elapsed < std::time::Duration::from_secs(20),
+            elapsed < std::time::Duration::from_secs(15),
             "waited {elapsed:?}, so the deadline did not bound the wait"
+        );
+        // ...and it must have asked for the kill. Without this the test stays
+        // green when the kill is removed entirely.
+        assert!(
+            KILLS_REQUESTED.load(std::sync::atomic::Ordering::SeqCst) > before,
+            "the deadline expired without requesting a process-tree kill"
         );
     }
 
@@ -1048,22 +1139,23 @@ mod outer_tests {
         );
     }
 
-    /// The default is used when the override is absent or unusable; a zero or
-    /// non-numeric value must not disable the deadline entirely.
+    /// The override's parse rule, exercised against the shipped function
+    /// rather than a copy of it re-implemented in the test. The previous
+    /// version defined a local closure with the same logic and asserted
+    /// against that, which proved nothing about the code that ships.
     #[test]
     fn the_deadline_default_is_used_when_the_override_is_unusable() {
-        // Read the default without touching the environment: the parse and
-        // filter logic is what matters, and it is exercised directly.
-        let parse = |v: Option<&str>| -> u64 {
-            v.and_then(|v| v.parse::<u64>().ok())
-                .filter(|v| *v > 0)
-                .unwrap_or(120)
-        };
-        assert_eq!(parse(None), 120);
-        assert_eq!(parse(Some("")), 120);
-        assert_eq!(parse(Some("0")), 120, "zero must not disable the deadline");
-        assert_eq!(parse(Some("not-a-number")), 120);
-        assert_eq!(parse(Some("5")), 5);
+        assert_eq!(parse_timeout_secs(None), 120);
+        assert_eq!(parse_timeout_secs(Some("")), 120);
+        assert_eq!(
+            parse_timeout_secs(Some("0")),
+            120,
+            "zero must not disable the deadline"
+        );
+        assert_eq!(parse_timeout_secs(Some("not-a-number")), 120);
+        assert_eq!(parse_timeout_secs(Some("-5")), 120);
+        assert_eq!(parse_timeout_secs(Some("5")), 5);
+        assert_eq!(parse_timeout_secs(Some("3600")), 3600);
     }
     use super::*;
     use crate::gitrepo::mock::MockGit;

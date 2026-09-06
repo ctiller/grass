@@ -224,7 +224,13 @@ impl Branch {
             // "refs/" prefix already precludes. The differential test below
             // caught this rule being written too strictly.
             || s.contains("@{")
-            || s.chars().any(|c| c.is_control())
+            // git's rule is bytes below 0x20 plus 0x7f -- *not* Rust's
+            // `char::is_control()`, which also covers the C1 block
+            // U+0080..=U+009F. Being stricter than git fails closed rather
+            // than open, but it is still a divergence, and the differential
+            // test below asserts there is none: real `git check-ref-format`
+            // accepts `refs/heads/a\u{80}b` where `is_control()` rejected it.
+            || s.chars().any(|c| (c as u32) < 0x20 || c as u32 == 0x7f)
         {
             return Err(invalid(format!("invalid ref syntax: {s:?}")));
         }
@@ -463,6 +469,17 @@ mod ref_format_tests {
     #[test]
     fn branch_parse_agrees_with_real_git_check_ref_format() {
         let del = format!("refs/heads/a{}b", '\u{7f}');
+        // The C1 block, where `char::is_control()` and git disagree. A
+        // hand-picked corpus missed this entire class, so it is generated.
+        let c1: Vec<String> = [0x80u32, 0x85, 0x9f]
+            .iter()
+            .map(|cp| format!("refs/heads/a{}b", char::from_u32(*cp).unwrap()))
+            .collect();
+        let low: Vec<String> = [0x01u32, 0x1f]
+            .iter()
+            .map(|cp| format!("refs/heads/a{}b", char::from_u32(*cp).unwrap()))
+            .collect();
+        let long = format!("refs/heads/{}", "a".repeat(4096));
         let corpus: Vec<&str> = vec![
             "refs/heads/main",
             "refs/heads/agent-events/c-agent",
@@ -488,7 +505,13 @@ mod ref_format_tests {
             "refs/heads/trailing.",
             "refs/heads/",
             &del,
+            &long,
         ];
+        let corpus: Vec<&str> = corpus
+            .into_iter()
+            .chain(c1.iter().map(|s| s.as_str()))
+            .chain(low.iter().map(|s| s.as_str()))
+            .collect();
         for name in corpus {
             let ours = Branch::parse(name.to_string()).is_ok();
             let theirs = crate::gitrepo::check_ref_format(name);

@@ -147,6 +147,11 @@ pub fn create_root(
              use `register` to add a further agent instead of `genesis`",
         ));
     }
+    // Test-only seam: a competing proposer lands here, after the existence
+    // check above and before the root epoch is built.
+    #[cfg(test)]
+    crate::gitobjects::fire_competing_writer();
+
     let git = crate::gitobjects::Libgit2Reader::open(repo)?;
     let file = EpochFile {
         parent: None,
@@ -189,6 +194,13 @@ pub fn propose_transition(
             expected_parent.id
         )));
     }
+    // Test-only seam: a competing proposer lands here, after the staleness
+    // check above and before this transition's epoch commit is built. The
+    // registry is the fleet's one serializing point, so this is the
+    // compare-and-swap that matters most.
+    #[cfg(test)]
+    crate::gitobjects::fire_competing_writer();
+
     let git = crate::gitobjects::Libgit2Reader::open(repo)?;
     let file = EpochFile {
         parent: Some(expected_parent.id.clone()),
@@ -523,6 +535,68 @@ mod tests {
     /// fallback resolution, but permanently shadowed the moment a real
     /// fetch (e.g. `sync::synced_snapshot`) ever created the correctly
     /// -named ref.
+    /// Publish an unrelated commit on `refname`, as another proposer would.
+    fn land_competing_writer(repo: &Path, refname: &str) {
+        let g = crate::gitobjects::Libgit2Reader::open(repo).unwrap();
+        let blob = g.write_blob(b"a competing proposer's content").unwrap();
+        let tree = g.write_tree(None, &[("competing.txt", blob)]).unwrap();
+        let commit = g.create_commit(&tree, &[], "competing proposer").unwrap();
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["update-ref", refname, commit.as_str()])
+            .status()
+            .unwrap();
+        assert!(status.success(), "the competing proposer could not publish");
+    }
+
+    /// The registry is the fleet's one serializing point (section 2.1), so
+    /// this is the compare-and-swap that matters most. The staleness check at
+    /// the top of `propose_transition` reads the tip before the epoch commit
+    /// is built; a proposer that lands while it is being built passes that
+    /// check and must still be refused.
+    #[test]
+    fn propose_transition_refuses_a_proposer_that_lands_after_the_staleness_check() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let mut members = BTreeMap::new();
+        members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
+        let root = create_root(repo.path(), &config, members.clone()).unwrap();
+
+        let path = repo.path().to_path_buf();
+        crate::gitobjects::arm_competing_writer(move || {
+            land_competing_writer(&path, REGISTRY_REF);
+        });
+
+        let err = propose_transition(repo.path(), &root, members).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("changed after this write was prepared"),
+            "expected the compare-and-swap to refuse, got: {err}"
+        );
+    }
+
+    /// The same window for the registry root, whose expected value is "this
+    /// ref must not exist".
+    #[test]
+    fn create_root_refuses_a_root_that_lands_after_the_existence_check() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let mut members = BTreeMap::new();
+        members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
+
+        let path = repo.path().to_path_buf();
+        crate::gitobjects::arm_competing_writer(move || {
+            land_competing_writer(&path, REGISTRY_REF);
+        });
+
+        let err = create_root(repo.path(), &config, members).unwrap_err();
+        assert!(
+            err.to_string().contains("already exists"),
+            "expected create-if-absent to refuse, got: {err}"
+        );
+    }
+
     #[test]
     fn create_root_writes_exactly_the_correctly_named_ref() {
         let repo = init_repo();

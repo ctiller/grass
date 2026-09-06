@@ -449,9 +449,19 @@ impl RefStore for Libgit2Reader {
                 self.repo
                     .reference_matching(refname, new_oid, false, git2::Oid::ZERO_SHA1, &reason)
                     .map_err(|e| {
+                        // Only `Exists` is the race. A directory/file
+                        // collision (`refs/a` against an existing `refs/a/b`)
+                        // or a `new` that names no object are configuration
+                        // and caller bugs; telling the operator to "retry"
+                        // would invite an unbounded loop against something
+                        // retrying cannot fix.
+                        if e.code() == git2::ErrorCode::Exists {
+                            return invalid(format!(
+                                "{refname} already exists, but was expected not to -- another                                  writer created it first; re-read the current tip and retry: {e}"
+                            ));
+                        }
                         invalid(format!(
-                            "{refname} already exists, but was expected not to -- another writer \
-                             created it first; re-read the current tip and retry: {e}"
+                            "{refname} could not be created, and not because another writer won                              the race -- retrying will not help: {e}"
                         ))
                     })?;
             }
@@ -468,9 +478,16 @@ impl RefStore for Libgit2Reader {
                     ))
                 })?;
                 if actual.id().to_string() != want.as_str() {
+                    // Deliberately worded so it cannot be confused with a
+                    // caller's own staleness pre-check. Those checks read the
+                    // tip *before* building a commit; this one fires for a
+                    // writer that landed in the window between. A test that
+                    // cannot tell the two apart cannot tell whether the
+                    // compare-and-swap is doing anything at all -- which is
+                    // exactly how it went untested at every call site.
                     return Err(invalid(format!(
-                        "{refname} has moved: expected {want}, found {} -- stale or duplicate \
-                         custody, not routine contention; resolve custody before retrying",
+                        "{refname} changed after this write was prepared: expected {want}, found \
+                         {} -- another writer published first; re-read the current tip and retry",
                         actual.id()
                     )));
                 }
@@ -569,12 +586,16 @@ pub trait HistoryReader {
     /// Commits reachable from `to` but not from `from_exclusive`, following
     /// every parent, **newest first**.
     ///
-    /// Precisely: topological order, children before parents. `git rev-list`
-    /// without `--reverse` -- the call this replaced -- defaults to *date*
-    /// order, which agrees with topological order on every history this crate
-    /// builds but can differ where commit dates run backwards. Callers use
-    /// this as a set (`verify_authorship` unions author trailers over it);
-    /// only `audit_main`'s rendering is order-sensitive.
+    /// Precisely: **commit-date** order, which is what `git rev-list`
+    /// without `--reverse` produces and what `Sort::NONE` asks libgit2 for.
+    ///
+    /// Not topological order. The two are *not* interchangeable, and the
+    /// difference is reachable from histories this crate builds: for
+    /// base->l1(t=100)->l2(t=400) and base->r1(t=200)->r2(t=300) merged at M,
+    /// git gives `M l2 r2 r1 l1` while a topological walk gives
+    /// `M r2 r1 l2 l1`. Using `Sort::TOPOLOGICAL` here was a real defect;
+    /// `range_matches_git_rev_list_order_across_a_date_skewed_merge` is built
+    /// on that exact shape and fails if it comes back.
     fn range(&self, from_exclusive: &ObjectId, to: &ObjectId) -> AbResult<Vec<ObjectId>>;
 
     /// Every path that differs between `from`'s tree and `to`'s tree, as
@@ -726,42 +747,83 @@ pub struct ResolvedIdentity {
     pub committer_email: String,
 }
 
+/// Strip the characters git refuses to put in an ident.
+///
+/// `git` removes `<`, `>` and newlines from a name or email before writing a
+/// commit; libgit2 rejects only the angle brackets and will happily write a
+/// newline straight into the ident line, producing a commit object no parser
+/// can read back. Removing them here keeps the in-process writer from
+/// creating an object the subprocess half could never have created.
+fn strip_ident_crud(v: String) -> String {
+    v.chars()
+        .filter(|c| *c != '<' && *c != '>' && !c.is_control())
+        .collect()
+}
+
 /// git's identity precedence, as a pure function of two lookups.
 ///
 /// Split out from [`Libgit2Reader::ambient_identity`] so the rule can be
 /// tested without setting environment variables, which are process-global and
 /// would leak into every other test running in parallel.
 ///
-/// Each field takes the environment first and configuration second, and an
-/// environment variable set to the empty string does not count as set --
-/// matching git, which treats `GIT_AUTHOR_NAME=""` as absent rather than as
-/// an empty name.
+/// The order per field is git's: `GIT_AUTHOR_NAME` / `GIT_COMMITTER_NAME`
+/// then `user.name`; `GIT_AUTHOR_EMAIL` / `GIT_COMMITTER_EMAIL`, then
+/// `user.email`, then the plain **`EMAIL`** variable. `EMAIL` is a documented
+/// git mechanism (git-commit-tree(1)) and omitting it is the same defect as
+/// reading configuration only: a host with `user.name` set and `EMAIL`
+/// exported -- an ordinary container setup -- commits happily under `git` and
+/// would fail every bus write here.
+///
+/// Two deliberate divergences from git, both in the direction of writing a
+/// valid commit rather than refusing or writing a broken one:
+///
+///  - An environment variable set to the *empty string* is treated as absent
+///    and the next source is consulted. Real git instead dies with "empty
+///    ident name" for an empty name, and writes a commit with an empty
+///    `<>` email for an empty email. Neither is useful to a bus writer.
+///  - Characters git strips from an ident are stripped here too (see
+///    [`strip_ident_crud`]); libgit2 would otherwise let a newline through.
 pub fn resolve_identity(
     env: impl Fn(&str) -> Option<String>,
     config: impl Fn(&str) -> Option<String>,
 ) -> AbResult<ResolvedIdentity> {
-    let pick = |env_key: &str, config_key: &str| -> Option<String> {
+    let name = |env_key: &str| -> Option<String> {
         env(env_key)
             .filter(|v| !v.is_empty())
-            .or_else(|| config(config_key))
+            .or_else(|| config("user.name"))
+            .filter(|v| !v.is_empty())
+            .map(strip_ident_crud)
             .filter(|v| !v.is_empty())
     };
-    let missing = |what: &str, env_name: &str, env_email: &str| {
+    let email = |env_key: &str| -> Option<String> {
+        env(env_key)
+            .filter(|v| !v.is_empty())
+            .or_else(|| config("user.email"))
+            .or_else(|| env("EMAIL"))
+            .filter(|v| !v.is_empty())
+            .map(strip_ident_crud)
+            .filter(|v| !v.is_empty())
+    };
+    let missing_name = |what: &str, env_key: &str| {
         AbError::Git(format!(
-            "cannot determine a commit {what} identity: set user.name and user.email, or \
-             {env_name} and {env_email}"
+            "cannot determine a commit {what} name: set user.name, or {env_key}"
+        ))
+    };
+    let missing_email = |what: &str, env_key: &str| {
+        AbError::Git(format!(
+            "cannot determine a commit {what} email: set user.email, or {env_key} or EMAIL"
         ))
     };
 
     Ok(ResolvedIdentity {
-        author_name: pick("GIT_AUTHOR_NAME", "user.name")
-            .ok_or_else(|| missing("author", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL"))?,
-        author_email: pick("GIT_AUTHOR_EMAIL", "user.email")
-            .ok_or_else(|| missing("author", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL"))?,
-        committer_name: pick("GIT_COMMITTER_NAME", "user.name")
-            .ok_or_else(|| missing("committer", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"))?,
-        committer_email: pick("GIT_COMMITTER_EMAIL", "user.email")
-            .ok_or_else(|| missing("committer", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"))?,
+        author_name: name("GIT_AUTHOR_NAME")
+            .ok_or_else(|| missing_name("author", "GIT_AUTHOR_NAME"))?,
+        author_email: email("GIT_AUTHOR_EMAIL")
+            .ok_or_else(|| missing_email("author", "GIT_AUTHOR_EMAIL"))?,
+        committer_name: name("GIT_COMMITTER_NAME")
+            .ok_or_else(|| missing_name("committer", "GIT_COMMITTER_NAME"))?,
+        committer_email: email("GIT_COMMITTER_EMAIL")
+            .ok_or_else(|| missing_email("committer", "GIT_COMMITTER_EMAIL"))?,
     })
 }
 
@@ -977,6 +1039,44 @@ impl HistoryReader for Libgit2Reader {
             out.push((status.to_string(), path.replace('\\', "/")));
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Armed by [`arm_competing_writer`], fired once by the next
+    /// [`fire_competing_writer`] on this thread.
+    static BEFORE_COMPARE_AND_SET: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Arrange for `f` to run once, at the next `fire_competing_writer` point.
+///
+/// The fire points sit in `stream.rs` and `registry.rs` immediately after
+/// each writer's staleness pre-check and *before* it builds its commit --
+/// which is exactly where a real competing writer lands, and the window the
+/// compare-and-swap exists to close.
+///
+/// The placement is load-bearing. Firing this from inside `compare_and_set`
+/// instead would run it after any value the call site reads, so a call site
+/// that defeated the CAS by re-reading the tip and passing *that* as
+/// `expected` would still appear to be refused. Mutation testing found
+/// exactly that defect surviving the whole suite, so the seam has to be
+/// upstream of the call site's own reads.
+///
+/// Firing once, and only once, is what makes it a competing writer rather
+/// than an infinite loop.
+#[cfg(test)]
+pub(crate) fn arm_competing_writer(f: impl FnOnce() + 'static) {
+    BEFORE_COMPARE_AND_SET.with(|h| *h.borrow_mut() = Some(Box::new(f)));
+}
+
+/// Run whatever [`arm_competing_writer`] armed, if anything.
+#[cfg(test)]
+pub(crate) fn fire_competing_writer() {
+    let armed = BEFORE_COMPARE_AND_SET.with(|h| h.borrow_mut().take());
+    if let Some(f) = armed {
+        f();
     }
 }
 
@@ -1512,9 +1612,94 @@ mod tests {
         assert_eq!(got.author_email, "cfg@example.com");
     }
 
-    /// Falsification: an empty environment variable is not a name. git treats
-    /// `GIT_AUTHOR_NAME=""` as absent, and so must this -- otherwise a commit
-    /// would be written with an empty author.
+    /// The `EMAIL` fallback. git resolves an email as
+    /// `GIT_AUTHOR_EMAIL` -> `user.email` -> `EMAIL`, and a host with
+    /// `user.name` configured and `EMAIL` exported is an ordinary container
+    /// setup. Stopping at `user.email` made every bus write fail there --
+    /// the same defect as reading configuration only, via a different
+    /// variable.
+    #[test]
+    fn identity_falls_back_to_the_plain_email_variable() {
+        let got = resolve_identity(
+            |k| (k == "EMAIL").then(|| "envonly@example.com".to_string()),
+            |k| (k == "user.name").then(|| "Only Name".to_string()),
+        )
+        .unwrap();
+        assert_eq!(got.author_email, "envonly@example.com");
+        assert_eq!(got.committer_email, "envonly@example.com");
+        assert_eq!(got.author_name, "Only Name");
+
+        // ...but `user.email` still wins over it.
+        let got = resolve_identity(
+            |k| (k == "EMAIL").then(|| "envonly@example.com".to_string()),
+            |k| match k {
+                "user.name" => Some("Only Name".to_string()),
+                "user.email" => Some("configured@example.com".to_string()),
+                _ => None,
+            },
+        )
+        .unwrap();
+        assert_eq!(got.author_email, "configured@example.com");
+    }
+
+    /// A missing name and a missing email are different problems and must not
+    /// share one message -- the old text told an operator to "set user.name
+    /// and user.email" when `user.name` was already set.
+    #[test]
+    fn identity_errors_name_the_field_that_is_actually_missing() {
+        let err = resolve_identity(|_| None, |k| (k == "user.name").then(|| "N".to_string()))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("email"), "{err}");
+        assert!(
+            err.contains("EMAIL"),
+            "must mention the EMAIL fallback: {err}"
+        );
+        assert!(!err.contains("author name"), "the name is present: {err}");
+
+        let err = resolve_identity(|_| None, |k| (k == "user.email").then(|| "e@x".to_string()))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("name"), "{err}");
+    }
+
+    /// git removes `<`, `>` and newlines from an ident before writing a
+    /// commit; libgit2 rejects only the angle brackets and would write a
+    /// newline straight into the ident line, producing a commit object no
+    /// parser can read back.
+    #[test]
+    fn identity_strips_the_characters_git_strips() {
+        let got = resolve_identity(
+            |k| match k {
+                "GIT_AUTHOR_NAME" => Some(
+                    "Ali
+ce <boss>"
+                        .to_string(),
+                ),
+                "GIT_AUTHOR_EMAIL" => Some(
+                    "a
+@e.com"
+                        .to_string(),
+                ),
+                _ => None,
+            },
+            |k| match k {
+                "user.name" => Some("N".to_string()),
+                "user.email" => Some("e@x".to_string()),
+                _ => None,
+            },
+        )
+        .unwrap();
+        assert_eq!(got.author_name, "Alice boss");
+        assert_eq!(got.author_email, "a@e.com");
+    }
+
+    /// An empty environment variable falls through to the next source.
+    ///
+    /// This is a deliberate divergence, not parity: real git *dies* with
+    /// "empty ident name" for `GIT_AUTHOR_NAME=""`, and writes a commit with
+    /// an empty `<>` email for `GIT_AUTHOR_EMAIL=""`. Neither is useful to a
+    /// bus writer, so both fall through here.
     #[test]
     fn identity_treats_an_empty_environment_variable_as_absent() {
         let got = resolve_identity(
@@ -1897,9 +2082,14 @@ mod tests {
         let err = g
             .compare_and_set("refs/heads/moving", Some(&head), &other)
             .unwrap_err();
-        assert!(err.to_string().contains("has moved"), "{err}");
         assert!(
-            err.to_string().contains("resolve custody"),
+            err.to_string()
+                .contains("changed after this write was prepared"),
+            "{err}"
+        );
+        assert!(
+            err.to_string()
+                .contains("re-read the current tip and retry"),
             "must name the operator action, not just the failure: {err}"
         );
     }
