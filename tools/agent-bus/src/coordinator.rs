@@ -82,7 +82,6 @@ pub fn drain_outbox(
     agent: &Agent,
     host: &Short,
     coordinator_custody_epoch: u64,
-    worktrees_dir: &Path,
     remote: &str,
 ) -> AbResult<DrainResult> {
     let pending = crate::outbox::list_pending(git_common_dir, agent)?;
@@ -239,12 +238,7 @@ pub fn drain_outbox(
             object_format: state.config.object_format.clone(),
             schema_fingerprint: crate::bootstrap::SCHEMA_FINGERPRINT.to_string(),
         };
-        let commit = crate::stream::create_root_commit(
-            repo,
-            &header,
-            &first,
-            &worktrees_dir.join(format!("_stream_root_{agent}")),
-        )?;
+        let commit = crate::stream::create_root_commit(repo, &header, &first)?;
         published.push(first.id);
         new_tip = Some(commit);
     }
@@ -255,7 +249,6 @@ pub fn drain_outbox(
             agent,
             new_tip.as_ref().expect("set above"),
             &remaining,
-            &worktrees_dir.join(format!("_stream_append_{agent}")),
         )?;
         published.extend(remaining.iter().map(|e| e.id.clone()));
         let _ = commit;
@@ -340,7 +333,6 @@ pub fn drain_and_publish(
     agent: &Agent,
     host: &Short,
     coordinator_custody_epoch: u64,
-    worktrees_dir: &Path,
     remote: &str,
 ) -> AbResult<(DrainResult, crate::publish::PublicationReceipt)> {
     let drained = drain_outbox(
@@ -349,7 +341,6 @@ pub fn drain_and_publish(
         agent,
         host,
         coordinator_custody_epoch,
-        worktrees_dir,
         remote,
     )?;
     let receipt = publish_stream(repo, remote, agent)?;
@@ -779,7 +770,6 @@ mod tests {
             &alice,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap();
@@ -800,7 +790,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -821,13 +810,7 @@ mod tests {
                 standby: None,
             },
         );
-        crate::registry::propose_transition(
-            repo.path(),
-            &epoch,
-            members,
-            &repo.path().join("_transition_wt"),
-        )
-        .unwrap();
+        crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
 
         let candidate = Candidate::new(
             &alice,
@@ -850,7 +833,6 @@ mod tests {
             &alice,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap();
@@ -878,7 +860,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -897,7 +878,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap();
@@ -930,7 +910,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -953,7 +932,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap();
@@ -996,7 +974,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1021,7 +998,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap();
@@ -1077,7 +1053,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
         let alice = a("alice");
@@ -1091,13 +1066,7 @@ mod tests {
                 standby: None,
             },
         );
-        crate::registry::propose_transition(
-            repo.path(),
-            &epoch,
-            members,
-            &repo.path().join("_transition_wt"),
-        )
-        .unwrap();
+        crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
         crate::outbox::submit(
             repo.path(),
             "alice-reg",
@@ -1123,7 +1092,6 @@ mod tests {
             &alice,
             &short("host1"),
             0,
-            &repo.path().join("_wt_alice"),
             "origin",
         )
         .unwrap();
@@ -1150,7 +1118,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1178,7 +1145,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap();
@@ -1205,7 +1171,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1238,7 +1203,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap();
@@ -1271,7 +1235,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1295,7 +1258,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap();
@@ -1323,7 +1285,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1335,7 +1296,6 @@ mod tests {
             &mallory,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap_err();
@@ -1366,7 +1326,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1399,7 +1358,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
         crate::outbox::submit(repo.path(), "client-1", &status_candidate(&coord1, "hi")).unwrap();
@@ -1410,7 +1368,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             &origin.path().to_string_lossy(),
         )
         .unwrap();
@@ -1441,7 +1398,6 @@ mod tests {
             &alice,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             &origin.path().to_string_lossy(),
         )
         .unwrap();
@@ -1470,7 +1426,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1485,13 +1440,7 @@ mod tests {
                 standby: None,
             },
         );
-        let new_epoch = crate::registry::propose_transition(
-            repo.path(),
-            &epoch,
-            members,
-            &repo.path().join("_transition_wt"),
-        )
-        .unwrap();
+        let new_epoch = crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
         crate::outbox::submit(
             repo.path(),
             "alice-reg",
@@ -1516,7 +1465,6 @@ mod tests {
             &alice,
             &short("host1"),
             0,
-            &repo.path().join("_wt_alice"),
             &remote,
         )
         .unwrap();
@@ -1585,7 +1533,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt_coord1"),
             &remote,
         )
         .unwrap();
@@ -1629,7 +1576,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1644,13 +1590,7 @@ mod tests {
                 standby: None,
             },
         );
-        crate::registry::propose_transition(
-            repo.path(),
-            &epoch,
-            members,
-            &repo.path().join("_transition_wt"),
-        )
-        .unwrap();
+        crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
         crate::outbox::submit(
             repo.path(),
             "alice-reg",
@@ -1675,7 +1615,6 @@ mod tests {
             &alice,
             &short("host1"),
             0,
-            &repo.path().join("_wt_alice"),
             &remote,
         )
         .unwrap();
@@ -1705,7 +1644,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt_coord1"),
             &remote,
         )
         .unwrap();
@@ -1736,7 +1674,6 @@ mod tests {
             &alice,
             &short("host1"),
             0,
-            &repo.path().join("_wt_alice_ack"),
             &remote,
         )
         .unwrap();
@@ -1844,7 +1781,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1867,13 +1803,7 @@ mod tests {
                 standby: None,
             },
         );
-        let new_epoch = crate::registry::propose_transition(
-            repo.path(),
-            &epoch,
-            members,
-            &repo.path().join("_transition_wt"),
-        )
-        .unwrap();
+        let new_epoch = crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
 
         for (ag, role) in [(&author, Role::Implementor), (&reviewer, Role::Reviewer)] {
             crate::outbox::submit(
@@ -1894,16 +1824,7 @@ mod tests {
                 ),
             )
             .unwrap();
-            drain_outbox(
-                repo.path(),
-                repo.path(),
-                ag,
-                &short("host1"),
-                0,
-                &repo.path().join(format!("_wt_{ag}_reg")),
-                &remote,
-            )
-            .unwrap();
+            drain_outbox(repo.path(), repo.path(), ag, &short("host1"), 0, &remote).unwrap();
         }
 
         let coord1_tip = crate::stream::read_stream_tip(repo.path(), &coord1)
@@ -1975,7 +1896,6 @@ mod tests {
             &author,
             &short("host1"),
             0,
-            &repo.path().join("_wt_nominate"),
             &remote,
         )
         .unwrap();
@@ -2005,7 +1925,6 @@ mod tests {
             &reviewer,
             &short("host1"),
             0,
-            &repo.path().join("_wt_accept"),
             &remote,
         )
         .unwrap();
@@ -2105,7 +2024,6 @@ mod tests {
             &f.reviewer,
             &short("host1"),
             0,
-            &f.repo.path().join("_wt_authorize"),
             &f.remote,
         )
         .unwrap()
@@ -2720,7 +2638,6 @@ mod tests {
             &f.coord1,
             &short("host1"),
             0,
-            &f.repo.path().join("_wt_activate_engine"),
             &f.remote,
         )
         .unwrap();
@@ -2792,7 +2709,6 @@ mod tests {
             &f.coord1,
             &short("host1"),
             0,
-            &f.repo.path().join("_wt_reconcile"),
             &f.remote,
         )
         .unwrap()

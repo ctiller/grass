@@ -1,4 +1,4 @@
-//! Reading committed bus content straight out of the object database.
+//! Reading and writing bus content straight in the object database.
 //!
 //! Everything this crate reads from git history -- a stream's header and
 //! segments, a roster epoch, the bus config -- is a handful of small blobs
@@ -13,11 +13,13 @@
 //! so that cost multiplies: 60-75 seconds for a command whose entire
 //! payload is a few hundred kilobytes already sitting in the odb.
 //!
-//! This module is the read path that skips all of it. [`ObjectReader`] is
-//! the interface the rest of the crate codes against, stated in this
-//! crate's own vocabulary -- "the bytes recorded at this path in this
-//! commit", "the entries at the root of this commit's tree" -- rather than
-//! as `git` argument lists. Two things fall out of that shape:
+//! This module is the path that skips all of it, for reads
+//! ([`ObjectReader`]) and equally for writes ([`ObjectWriter`],
+//! [`RefStore`]). Each trait is stated in this crate's own vocabulary --
+//! "the bytes recorded at this path in this commit", "the entries at the
+//! root of this commit's tree", "point this ref at that commit, but only if
+//! it still points where I last read" -- rather than as `git` argument
+//! lists. Two things fall out of that shape:
 //!
 //!  - The backend is swappable. [`Libgit2Reader`] is the production
 //!    implementation, but nothing above this line knows libgit2 exists.
@@ -27,12 +29,19 @@
 //!    letting `storage`/`stream`/`registry` unit-test their blob-reading
 //!    paths against known content with no repository on disk at all.
 //!
-//! Deliberately read-only, and deliberately partial: writes, merges,
-//! rebases and all remote transport stay on `gitrepo.rs`'s `git`
-//! subprocess. In particular the merge path is pinned to git's own ORT
-//! implementation for byte-identical cross-platform trees (AGENT_REVIEW.md
-//! section 7) and must not be reimplemented against libgit2's separate
-//! merge algorithm.
+//! Deliberately partial. Merges and all remote transport stay on
+//! `gitrepo.rs`'s `git` subprocess, and that split is not incidental:
+//!
+//!  - The merge path is pinned to git's own ORT implementation for
+//!    byte-identical cross-platform trees (AGENT_REVIEW.md section 7) and
+//!    must not be reimplemented against libgit2's separate merge algorithm.
+//!  - `git2` is built with `default-features = false`, which drops its
+//!    HTTPS/SSH transports, so `fetch`/`push` keep going through the user's
+//!    own credential helpers, SSH agent and `.netrc`.
+//!
+//! What is left on the subprocess is therefore exactly the set of calls that
+//! talk to a network or must be byte-reproducible -- and nothing on the
+//! local hot path.
 
 use crate::error::{invalid, AbError, AbResult};
 use crate::scalars::ObjectId;
@@ -182,6 +191,294 @@ impl ObjectReader for Libgit2Reader {
             names.push(name.to_string());
         }
         Ok(names)
+    }
+}
+
+// ------------------------------------------------------------- writing
+
+/// Creating objects in the database, addressed the way this crate thinks
+/// about them -- "a stream tree is its header plus its segment files" --
+/// rather than as an index that gets staged and committed.
+///
+/// The write path this replaces goes through a working tree: check a commit
+/// out, edit files on disk, `git add -A`, `git commit`. That is why
+/// `registry.rs` and `stream.rs` still take a `worktree` argument. The shape
+/// costs a `git worktree add` per write (~4.6s on the fleet repo), takes the
+/// repository index lock, and serializes every concurrent writer on git's
+/// shared `.git/worktrees` registration state -- the collisions `coord1:44`
+/// reports, and the "missing but already registered worktree" failure two
+/// agents hit live. None of it is needed to do what an append actually does,
+/// which is rewrite one known blob at one known path in an otherwise
+/// unchanged tree.
+///
+/// Building the tree directly also turns a retrospective check into a
+/// structural one. `stream::append_to_stream` writes files, commits, and
+/// *then* diffs the result to confirm it touched only segment paths; an
+/// implementation of this trait cannot touch a path the caller did not name,
+/// so there is nothing left to check after the fact.
+pub trait ObjectWriter {
+    /// Writes `content` as a blob, returning its id. Writing the same bytes
+    /// twice is not an error and yields the same id -- git object storage is
+    /// content-addressed, so this is idempotent by construction.
+    fn write_blob(&self, content: &[u8]) -> AbResult<ObjectId>;
+
+    /// Builds a tree from `base`'s tree with `edits` applied at the root,
+    /// returning the new tree's id. `base` is a *commit* (the natural way
+    /// every caller here thinks of it -- "the parent commit's tree, with
+    /// this segment replaced"); `None` starts from an empty tree, which is
+    /// what a stream or registry root commit needs.
+    ///
+    /// Every edit names a root-level file. This deliberately cannot express
+    /// a nested path or a deletion: the bus writes neither, and a trait that
+    /// could express them would need a policy for what happens to entries
+    /// the caller did not mention.
+    fn write_tree(&self, base: Option<&ObjectId>, edits: &[(&str, ObjectId)])
+        -> AbResult<ObjectId>;
+
+    /// Creates a commit with `parents` (empty for a root commit) and returns
+    /// its id. Updates no reference -- publishing the commit is
+    /// [`RefStore::compare_and_set`]'s job, kept separate so a caller can
+    /// build a commit and still refuse to publish it.
+    ///
+    /// Identity comes from the repository's own configuration, matching what
+    /// `git commit` produced here before: real stream commits on this fleet
+    /// carry the operator's `user.name`/`user.email`, not a synthetic one.
+    /// The byte-reproducible identity that merge candidates need is a
+    /// different concern with a different rule (AGENT_REVIEW.md section 7)
+    /// and stays in `gitrepo::commit_tree_deterministic`.
+    fn create_commit(
+        &self,
+        tree: &ObjectId,
+        parents: &[&ObjectId],
+        message: &str,
+    ) -> AbResult<ObjectId>;
+}
+
+/// Reading and moving references.
+///
+/// The compare-and-swap in [`RefStore::compare_and_set`] is the point of
+/// this trait rather than an extra. The write path it replaces ends in a
+/// bare `git update-ref <ref> <commit>`, which overwrites whatever is there;
+/// the staleness check that makes a losing writer stop
+/// (`stream::append_to_stream`'s gate 6 half) happens earlier, against a tip
+/// read before the commit was built. Between that read and that write sits
+/// the whole of building a commit -- a window a second writer can land in.
+/// Naming the expected value closes it in the one place that can actually
+/// enforce it.
+pub trait RefStore {
+    /// The commit `refname` points at, or `None` if it does not exist.
+    /// A reference that exists but does not resolve to a commit is an error,
+    /// not absence.
+    fn resolve(&self, refname: &str) -> AbResult<Option<ObjectId>>;
+
+    /// Every reference whose name starts with `prefix`, as
+    /// `(refname, commit)` pairs sorted by name.
+    ///
+    /// Only `#[cfg(test)]` code calls this today -- it is how the
+    /// ref-shadowing regression tests in `stream.rs`/`registry.rs` inspect
+    /// the *actual* ref set, which is the one question `resolve` cannot
+    /// answer (a lookup that resolves tells you nothing about a
+    /// wrongly-named ref sitting beside it). A plain build cannot see that
+    /// cross-module test usage and reports it dead; the same
+    /// `#[allow(dead_code)]`-with-a-reason treatment `GitOutput::ok`/`err`
+    /// already carry in `gitrepo.rs`.
+    #[allow(dead_code)]
+    fn list(&self, prefix: &str) -> AbResult<Vec<(String, ObjectId)>>;
+
+    /// Points `refname` at `new`, but only if it currently points at
+    /// `expected` -- or, when `expected` is `None`, only if it does not
+    /// exist at all. Fails rather than overwriting, so a caller that loses
+    /// the race stops and resolves custody instead of clobbering the winner
+    /// (AGENT_COORDINATION_EVOLUTION.md section 2.1).
+    fn compare_and_set(
+        &self,
+        refname: &str,
+        expected: Option<&ObjectId>,
+        new: &ObjectId,
+    ) -> AbResult<()>;
+}
+
+impl ObjectWriter for Libgit2Reader {
+    fn write_blob(&self, content: &[u8]) -> AbResult<ObjectId> {
+        let oid = self
+            .repo
+            .blob(content)
+            .map_err(|e| AbError::Git(format!("cannot write a blob: {e}")))?;
+        ObjectId::parse(oid.to_string())
+    }
+
+    fn write_tree(
+        &self,
+        base: Option<&ObjectId>,
+        edits: &[(&str, ObjectId)],
+    ) -> AbResult<ObjectId> {
+        let base_tree = match base {
+            Some(commit) => Some(self.tree_of(commit)?),
+            None => None,
+        };
+        let mut builder = self
+            .repo
+            .treebuilder(base_tree.as_ref())
+            .map_err(|e| AbError::Git(format!("cannot start building a tree: {e}")))?;
+        for (name, blob) in edits {
+            if name.is_empty() || name.contains('/') {
+                return Err(invalid(format!(
+                    "{name} is not a root-level file name; this writer builds flat trees only"
+                )));
+            }
+            let oid = git2::Oid::from_str(blob.as_str())
+                .map_err(|e| AbError::Git(format!("{blob} is not a usable object id: {e}")))?;
+            builder
+                .insert(name, oid, i32::from(git2::FileMode::Blob))
+                .map_err(|e| AbError::Git(format!("cannot place {name} in the tree: {e}")))?;
+        }
+        let oid = builder
+            .write()
+            .map_err(|e| AbError::Git(format!("cannot write the tree: {e}")))?;
+        ObjectId::parse(oid.to_string())
+    }
+
+    fn create_commit(
+        &self,
+        tree: &ObjectId,
+        parents: &[&ObjectId],
+        message: &str,
+    ) -> AbResult<ObjectId> {
+        let tree_oid = git2::Oid::from_str(tree.as_str())
+            .map_err(|e| AbError::Git(format!("{tree} is not a usable object id: {e}")))?;
+        let tree_obj = self
+            .repo
+            .find_tree(tree_oid)
+            .map_err(|e| AbError::Git(format!("{tree} does not resolve to a tree: {e}")))?;
+
+        let mut parent_commits = Vec::with_capacity(parents.len());
+        for p in parents {
+            let oid = git2::Oid::from_str(p.as_str())
+                .map_err(|e| AbError::Git(format!("{p} is not a usable object id: {e}")))?;
+            parent_commits.push(
+                self.repo
+                    .find_commit(oid)
+                    .map_err(|e| AbError::Git(format!("parent {p} does not resolve: {e}")))?,
+            );
+        }
+        let parent_refs: Vec<&git2::Commit<'_>> = parent_commits.iter().collect();
+
+        // `git commit` reads user.name/user.email through the same
+        // configuration search, so this preserves the identity real stream
+        // commits already carry. A repository with neither configured fails
+        // here exactly as `git commit` would, rather than inventing one.
+        let who = self.repo.signature().map_err(|e| {
+            AbError::Git(format!(
+                "cannot determine a commit identity (is user.name/user.email set?): {e}"
+            ))
+        })?;
+
+        let oid = self
+            .repo
+            .commit(None, &who, &who, message, &tree_obj, &parent_refs)
+            .map_err(|e| AbError::Git(format!("cannot create the commit: {e}")))?;
+        ObjectId::parse(oid.to_string())
+    }
+}
+
+impl RefStore for Libgit2Reader {
+    fn resolve(&self, refname: &str) -> AbResult<Option<ObjectId>> {
+        let reference = match self.repo.find_reference(refname) {
+            Ok(r) => r,
+            Err(e) if e.code() == git2::ErrorCode::NotFound => return Ok(None),
+            Err(e) => {
+                return Err(AbError::Git(format!("cannot read {refname}: {e}")));
+            }
+        };
+        let commit = reference.peel_to_commit().map_err(|e| {
+            AbError::Git(format!(
+                "{refname} exists but does not resolve to a commit: {e}"
+            ))
+        })?;
+        Ok(Some(ObjectId::parse(commit.id().to_string())?))
+    }
+
+    fn list(&self, prefix: &str) -> AbResult<Vec<(String, ObjectId)>> {
+        let refs = self
+            .repo
+            .references()
+            .map_err(|e| AbError::Git(format!("cannot enumerate references: {e}")))?;
+        let mut out = Vec::new();
+        for r in refs {
+            let r = r.map_err(|e| AbError::Git(format!("cannot read a reference: {e}")))?;
+            // A name that is not valid UTF-8 is junk in a namespace this
+            // crate wholly controls, but it is not necessarily *this*
+            // namespace's junk -- skipping it keeps an unrelated broken ref
+            // elsewhere in the repository from failing every bus command.
+            let Ok(name) = r.name() else { continue };
+            if !name.starts_with(prefix) {
+                continue;
+            }
+            let commit = r.peel_to_commit().map_err(|e| {
+                AbError::Git(format!(
+                    "{name} exists but does not resolve to a commit: {e}"
+                ))
+            })?;
+            out.push((name.to_string(), ObjectId::parse(commit.id().to_string())?));
+        }
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(out)
+    }
+
+    fn compare_and_set(
+        &self,
+        refname: &str,
+        expected: Option<&ObjectId>,
+        new: &ObjectId,
+    ) -> AbResult<()> {
+        let new_oid = git2::Oid::from_str(new.as_str())
+            .map_err(|e| AbError::Git(format!("{new} is not a usable object id: {e}")))?;
+        let reason = format!("agent-bus: set {refname}");
+
+        match expected {
+            // Creation. `force = false` is what makes this fail rather than
+            // overwrite if another writer created the ref first.
+            None => {
+                self.repo
+                    .reference(refname, new_oid, false, &reason)
+                    .map_err(|e| {
+                        invalid(format!(
+                            "{refname} already exists, but was expected not to -- another writer \
+                             created it first; re-read the current tip and retry: {e}"
+                        ))
+                    })?;
+            }
+            Some(want) => {
+                let mut reference = self.repo.find_reference(refname).map_err(|e| {
+                    invalid(format!(
+                        "{refname} was expected to point at {want} but does not exist -- it was \
+                         deleted since it was read; re-read the current tip and retry: {e}"
+                    ))
+                })?;
+                let actual = reference.peel_to_commit().map_err(|e| {
+                    AbError::Git(format!(
+                        "{refname} exists but does not resolve to a commit: {e}"
+                    ))
+                })?;
+                if actual.id().to_string() != want.as_str() {
+                    return Err(invalid(format!(
+                        "{refname} has moved: expected {want}, found {} -- stale or duplicate \
+                         custody, not routine contention; resolve custody before retrying",
+                        actual.id()
+                    )));
+                }
+                // libgit2 re-checks the old value under its own reference
+                // lock here, so this still fails closed against a writer that
+                // landed between the comparison above and this call.
+                reference.set_target(new_oid, &reason).map_err(|e| {
+                    invalid(format!(
+                        "{refname} moved while it was being updated -- another writer won the \
+                         race; re-read the current tip and retry: {e}"
+                    ))
+                })?;
+            }
+        }
+        Ok(())
     }
 }
 

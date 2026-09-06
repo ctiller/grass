@@ -34,10 +34,6 @@ pub fn segment_filename(segment: u64) -> String {
     format!("{segment:06}.jsonl")
 }
 
-pub fn segment_path(stream_root: &Path, segment: u64) -> PathBuf {
-    stream_root.join(segment_filename(segment))
-}
-
 /// Raw, purely-structural read of one segment file: UTF-8, LF-only,
 /// no BOM/CR, no blank lines, no partial final line, per-line byte cap.
 ///
@@ -321,52 +317,6 @@ fn assemble_stream_log(files: Vec<StreamSegmentFile>, agent: &Agent) -> AbResult
     Ok(out)
 }
 
-/// Append one event to a stream's active segment, atomically. Creates a
-/// fresh segment file on rollover as needed. The caller is responsible for
-/// having derived `env` with the correct next sequence number and for
-/// serializing concurrent appends to the same stream (the coordinator's
-/// single-actor property, not a file lock here -- ordinary local outbox
-/// submission never contends on this).
-pub fn append_event(stream_root: &Path, env: &Envelope) -> AbResult<()> {
-    fs::create_dir_all(stream_root).map_err(|e| crate::error::AbError::Io {
-        path: stream_root.display().to_string(),
-        source: e,
-    })?;
-    let segment = segment_index(env.seq);
-    let offset = segment_offset(env.seq);
-    let path = segment_path(stream_root, segment);
-
-    let mut existing = String::new();
-    if offset != 0 {
-        if !path.exists() {
-            return Err(invalid(format!(
-                "expected existing segment {segment} for {} at offset {offset}",
-                env.agent
-            )));
-        }
-        existing = fs::read_to_string(&path).map_err(|e| crate::error::AbError::Io {
-            path: path.display().to_string(),
-            source: e,
-        })?;
-    } else if path.exists() {
-        return Err(invalid(format!(
-            "segment {segment} for {} already exists but a fresh segment was expected",
-            env.agent
-        )));
-    }
-
-    let line = env.to_canonical_line();
-    if line.len() > MAX_LINE_BYTES {
-        return Err(invalid(format!(
-            "event line exceeds {MAX_LINE_BYTES} bytes"
-        )));
-    }
-    existing.push_str(&line);
-    existing.push('\n');
-
-    atomic_write(&path, existing.as_bytes())
-}
-
 /// Write `contents` to `path` via a same-directory temp file + flush + atomic
 /// rename, so a crash cannot publish a partial line (AGENT_BUS.md section 11).
 pub fn atomic_write(path: &Path, contents: &[u8]) -> AbResult<()> {
@@ -399,7 +349,7 @@ mod tests {
     use crate::error::AbError;
     use crate::events::{AgentRegistered, AgentStatusEvent, EventData, LifecycleStatus, Role};
     use crate::frontier::ObservedFrontier;
-    use crate::scalars::{ObjectId, Short, StringSet, Text};
+    use crate::scalars::{ObjectId, Short, Text};
 
     fn agent(name: &str) -> Agent {
         Agent::parse(name.to_string()).unwrap()
@@ -436,7 +386,7 @@ mod tests {
 
     fn write_segment(stream_root: &Path, segment: u64, body: &str) {
         fs::create_dir_all(stream_root).unwrap();
-        fs::write(segment_path(stream_root, segment), body).unwrap();
+        fs::write(stream_root.join(segment_filename(segment)), body).unwrap();
     }
 
     #[test]
@@ -857,11 +807,20 @@ mod tests {
     }
 
     #[test]
-    fn read_stream_log_round_trips_through_append_event() {
+    fn read_stream_log_round_trips_through_a_written_segment() {
         let dir = tempfile::tempdir().unwrap();
         let ag = agent("alice");
-        append_event(dir.path(), &registered_envelope("alice", 0)).unwrap();
-        append_event(dir.path(), &status_envelope("alice", 1)).unwrap();
+        write_segment(
+            dir.path(),
+            0,
+            &format!(
+                "{}
+{}
+",
+                registered_envelope("alice", 0).to_canonical_line(),
+                status_envelope("alice", 1).to_canonical_line()
+            ),
+        );
         let log = read_stream_log(dir.path(), &ag).unwrap();
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].kind, "agent.registered");
@@ -901,85 +860,6 @@ mod tests {
         assert!(err
             .to_string()
             .contains("must be agent.registered at sequence zero"));
-    }
-
-    #[test]
-    fn append_event_creates_a_fresh_segment() {
-        let dir = tempfile::tempdir().unwrap();
-        let env = registered_envelope("alice", 0);
-        append_event(dir.path(), &env).unwrap();
-        let content = fs::read_to_string(segment_path(dir.path(), 0)).unwrap();
-        assert_eq!(content, format!("{}\n", env.to_canonical_line()));
-    }
-
-    #[test]
-    fn append_event_appends_to_an_existing_segment() {
-        let dir = tempfile::tempdir().unwrap();
-        append_event(dir.path(), &registered_envelope("alice", 0)).unwrap();
-        let second = registered_envelope("alice", 1);
-        append_event(dir.path(), &second).unwrap();
-        let content = fs::read_to_string(segment_path(dir.path(), 0)).unwrap();
-        assert_eq!(content.lines().count(), 2);
-        assert!(content.ends_with(&format!("{}\n", second.to_canonical_line())));
-    }
-
-    #[test]
-    fn append_event_rejects_offset_without_existing_segment() {
-        let dir = tempfile::tempdir().unwrap();
-        let env = registered_envelope("alice", 1);
-        let err = append_event(dir.path(), &env).unwrap_err();
-        assert!(err.to_string().contains("expected existing segment"));
-    }
-
-    #[test]
-    fn append_event_rejects_fresh_segment_that_already_exists() {
-        let dir = tempfile::tempdir().unwrap();
-        write_segment(dir.path(), 0, "{}\n");
-        let env = registered_envelope("alice", 0);
-        let err = append_event(dir.path(), &env).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("already exists but a fresh segment was expected"));
-    }
-
-    #[test]
-    fn append_event_rejects_an_oversized_line() {
-        let dir = tempfile::tempdir().unwrap();
-        let ag = agent("alice");
-        let env = Envelope {
-            v: crate::envelope::SCHEMA_VERSION,
-            id: crate::scalars::EventId::new(&ag, 0),
-            agent: ag.clone(),
-            seq: 0,
-            time: crate::scalars::Timestamp::now_utc(),
-            observed: no_frontier(),
-            kind: "agent.registered".to_string(),
-            refs: StringSet::default(),
-            data: serde_json::json!({ "blob": "x".repeat(MAX_LINE_BYTES + 10) }),
-        };
-        let err = append_event(dir.path(), &env).unwrap_err();
-        assert!(err.to_string().contains("event line exceeds"));
-    }
-
-    #[test]
-    fn append_event_reports_io_error_when_stream_dir_cannot_be_created() {
-        let dir = tempfile::tempdir().unwrap();
-        let blocked = dir.path().join("blocked");
-        fs::write(&blocked, "not a directory").unwrap();
-        let env = registered_envelope("alice", 0);
-        let err = append_event(&blocked, &env).unwrap_err();
-        assert!(matches!(err, AbError::Io { .. }));
-    }
-
-    #[test]
-    fn append_event_reports_io_error_when_existing_segment_is_unreadable() {
-        let dir = tempfile::tempdir().unwrap();
-        // Segment 0 "exists" (as far as `Path::exists` is concerned) but is a
-        // directory, not a file, so reading it as a string fails.
-        fs::create_dir_all(segment_path(dir.path(), 0)).unwrap();
-        let env = registered_envelope("alice", 1);
-        let err = append_event(dir.path(), &env).unwrap_err();
-        assert!(matches!(err, AbError::Io { .. }));
     }
 
     #[test]

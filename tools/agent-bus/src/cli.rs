@@ -321,7 +321,6 @@ pub struct AuditMainArgs {
 struct RepoPaths {
     repo: PathBuf,
     common_dir: PathBuf,
-    worktrees: PathBuf,
 }
 
 fn resolve_paths() -> AbResult<RepoPaths> {
@@ -331,12 +330,7 @@ fn resolve_paths() -> AbResult<RepoPaths> {
     })?;
     let repo = crate::gitrepo::repo_root(&cwd)?;
     let common_dir = crate::gitrepo::common_dir(&cwd)?;
-    let worktrees = common_dir.join("agent-bus").join("wt-v2");
-    Ok(RepoPaths {
-        repo,
-        common_dir,
-        worktrees,
-    })
+    Ok(RepoPaths { repo, common_dir })
 }
 
 fn parse_agent(s: &str) -> AbResult<Agent> {
@@ -500,7 +494,6 @@ fn genesis(args: GenesisArgs) -> AbResult<()> {
         args.object_format,
         ObjectId::parse(review_from)?,
         parse_short(&args.host)?,
-        &paths.worktrees,
     )?;
 
     let updates = vec![
@@ -549,12 +542,7 @@ fn register(args: RegisterArgs) -> AbResult<()> {
             standby: args.standby.map(|s| parse_agent(&s)).transpose()?,
         },
     );
-    let new_epoch = crate::registry::propose_transition(
-        &paths.repo,
-        &epoch,
-        members,
-        &paths.worktrees.join("_register_transition"),
-    )?;
+    let new_epoch = crate::registry::propose_transition(&paths.repo, &epoch, members)?;
 
     let candidate = Candidate::new(
         &new_agent,
@@ -578,7 +566,6 @@ fn register(args: RegisterArgs) -> AbResult<()> {
         &new_agent,
         &host,
         args.custody_epoch,
-        &paths.worktrees,
         &args.remote,
     )?;
     let new_stream_tip = crate::stream::read_stream_tip(&paths.repo, &new_agent)?
@@ -657,7 +644,6 @@ fn coordinate(args: CoordinateArgs) -> AbResult<()> {
         &agent,
         &host,
         args.custody_epoch,
-        &paths.worktrees,
         &args.remote,
     )?;
 
@@ -767,7 +753,6 @@ fn succeed(args: SucceedArgs) -> AbResult<()> {
         &proposer,
         &target,
         new_host.clone(),
-        &paths.worktrees.join("_succeed_transition"),
     )?;
     let new_custody_epoch = new_epoch.active_members[&target].coordinator_custody_epoch;
 
@@ -789,7 +774,6 @@ fn succeed(args: SucceedArgs) -> AbResult<()> {
         &target,
         &new_host,
         new_custody_epoch,
-        &paths.worktrees,
         &args.remote,
     )?;
 

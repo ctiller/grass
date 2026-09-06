@@ -120,7 +120,6 @@ pub fn genesis(
     object_format: String,
     product_review_from: ObjectId,
     host: crate::scalars::Short,
-    worktrees_dir: &std::path::Path,
 ) -> AbResult<(BusConfig, crate::registry::RosterEpoch, ObjectId)> {
     let config = BusConfig::new(object_format, product_review_from)?;
 
@@ -153,12 +152,7 @@ pub fn genesis(
                     standby: None,
                 },
             );
-            crate::registry::create_root(
-                repo,
-                &config,
-                members,
-                &worktrees_dir.join("_registry_root"),
-            )?
+            crate::registry::create_root(repo, &config, members)?
         }
     };
 
@@ -208,12 +202,7 @@ pub fn genesis(
     });
     let observed = crate::frontier::ObservedFrontier::sparse(epoch.id.clone(), []);
     let first_event = crate::envelope::Envelope::new(coordinator, 0, observed, &data, []);
-    let commit = crate::stream::create_root_commit(
-        repo,
-        &header,
-        &first_event,
-        &worktrees_dir.join(format!("_stream_root_{coordinator}")),
-    )?;
+    let commit = crate::stream::create_root_commit(repo, &header, &first_event)?;
     Ok((config, epoch, commit))
 }
 
@@ -369,7 +358,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             crate::scalars::Short::parse("host1".to_string()).unwrap(),
-            &repo.path().join("_worktrees"),
         )
         .unwrap();
 
@@ -416,7 +404,6 @@ mod tests {
                 "sha1".to_string(),
                 ObjectId::parse(review_from.clone()).unwrap(),
                 crate::scalars::Short::parse("host1".to_string()).unwrap(),
-                &repo.path().join("_worktrees"),
             )
         };
         let (_config1, epoch1, commit1) = call().unwrap();
@@ -452,13 +439,7 @@ mod tests {
             },
         );
         // Simulates the crash: only the registry half of genesis ran.
-        crate::registry::create_root(
-            repo.path(),
-            &config,
-            members,
-            &repo.path().join("_registry_root_manual"),
-        )
-        .unwrap();
+        crate::registry::create_root(repo.path(), &config, members).unwrap();
         assert_eq!(
             crate::stream::read_stream_tip(repo.path(), &coord1).unwrap(),
             None,
@@ -473,7 +454,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             crate::scalars::Short::parse("host1".to_string()).unwrap(),
-            &repo.path().join("_worktrees"),
         )
         .unwrap();
         assert!(epoch.is_active_member(&coord1));
@@ -499,7 +479,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from.clone()).unwrap(),
             crate::scalars::Short::parse("host1".to_string()).unwrap(),
-            &repo.path().join("_worktrees"),
         )
         .unwrap();
 
@@ -512,7 +491,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             crate::scalars::Short::parse("host1".to_string()).unwrap(),
-            &repo.path().join("_worktrees2"),
         )
         .unwrap_err();
         assert!(
@@ -541,7 +519,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from.clone()).unwrap(),
             crate::scalars::Short::parse("host1".to_string()).unwrap(),
-            &repo.path().join("_worktrees"),
         )
         .unwrap();
 
@@ -553,7 +530,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from.clone()).unwrap(),
             crate::scalars::Short::parse("host1".to_string()).unwrap(),
-            &repo.path().join("_worktrees_name"),
         )
         .unwrap_err();
         assert!(
@@ -569,7 +545,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             crate::scalars::Short::parse("host1".to_string()).unwrap(),
-            &repo.path().join("_worktrees_purpose"),
         )
         .unwrap_err();
         assert!(

@@ -19,7 +19,8 @@
 //! actually performs the push, not here.
 
 use crate::envelope::Envelope;
-use crate::error::{invalid, AbError, AbResult};
+use crate::error::{invalid, AbResult};
+use crate::gitobjects::{ObjectReader, ObjectWriter, RefStore};
 use crate::scalars::{Agent, Branch, EventId, ObjectId};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -69,10 +70,7 @@ impl StreamHeader {
 /// The current tip of `agent`'s stream, or `None` if it has never been
 /// created.
 pub fn read_stream_tip(repo: &Path, agent: &Agent) -> AbResult<Option<ObjectId>> {
-    match crate::gitrepo::rev_parse_opt(repo, stream_ref(agent).as_str())? {
-        Some(s) => Ok(Some(ObjectId::parse(s)?)),
-        None => Ok(None),
-    }
+    crate::gitobjects::Libgit2Reader::open(repo)?.resolve(stream_ref(agent).as_str())
 }
 
 fn read_header_at(
@@ -137,7 +135,6 @@ pub fn create_root_commit(
     repo: &Path,
     header: &StreamHeader,
     first_event: &Envelope,
-    worktree: &Path,
 ) -> AbResult<ObjectId> {
     if read_stream_tip(repo, &header.agent)?.is_some() {
         return Err(invalid(format!(
@@ -150,66 +147,120 @@ pub fn create_root_commit(
             "a stream's root commit must introduce agent.registered at sequence zero",
         ));
     }
-    std::fs::create_dir_all(worktree).map_err(|e| AbError::Io {
-        path: worktree.display().to_string(),
-        source: e,
-    })?;
-    // An orphan worktree: no start point, so the first commit here has no
-    // parent, matching the design's "each stream is an orphan history."
-    let tmp_branch = format!("_tmp_stream_root_{}", header.agent);
-    crate::gitrepo::run_ok(
-        repo,
+    if first_event.agent != header.agent {
+        return Err(invalid(format!(
+            "the root event belongs to {} but the header describes {}'s stream",
+            first_event.agent, header.agent
+        )));
+    }
+
+    let git = crate::gitobjects::Libgit2Reader::open(repo)?;
+
+    // Segments are strict LF-only (`storage.rs`'s structural checks reject a
+    // CR byte outright). Nothing in this crate checks a stream out any more,
+    // so no `core.autocrlf` rewrite can reach the content on our own read
+    // path -- but a person or another tool inspecting a stream with an
+    // ordinary `git checkout` still can, and this file is already part of
+    // every stream tree published so far. Keeping it costs one blob and
+    // keeps new streams byte-comparable with existing ones.
+    let attributes = git.write_blob(b"*.jsonl -text\nheader.json -text\n")?;
+    let header_blob = git.write_blob(&header.to_canonical_bytes())?;
+    let segment_name = crate::storage::segment_filename(0);
+    let segment_blob = git.write_blob(&segment_bytes(
+        std::slice::from_ref(first_event),
+        Vec::new(),
+    )?)?;
+
+    let tree = git.write_tree(
+        None,
         &[
-            "worktree",
-            "add",
-            "--orphan",
-            "-b",
-            &tmp_branch,
-            &worktree.to_string_lossy(),
+            (".gitattributes", attributes),
+            (HEADER_FILE, header_blob),
+            (segment_name.as_str(), segment_blob),
         ],
     )?;
-    // Segments are strict LF-only (`storage.rs`'s structural checks reject a
-    // CR byte outright), but a checkout on a machine with `core.autocrlf`
-    // enabled (the common Windows default) would otherwise silently rewrite
-    // LF to CRLF when this commit is later checked out by `read_stream`/
-    // `append_to_stream`. Committing `.gitattributes` marking these paths
-    // `-text` once, here in the root commit, governs every later checkout of
-    // this stream regardless of the checking-out machine's own config.
-    crate::storage::atomic_write(
-        &worktree.join(".gitattributes"),
-        b"*.jsonl -text\nheader.json -text\n",
-    )?;
-    crate::storage::atomic_write(&worktree.join(HEADER_FILE), &header.to_canonical_bytes())?;
-    crate::storage::append_event(worktree, first_event)?;
-    crate::gitrepo::add_all(worktree)?;
-    let commit = crate::gitrepo::commit(
-        worktree,
+    let commit = git.create_commit(
+        &tree,
+        &[],
         &format!("agent-events: {} stream root", header.agent),
     )?;
-    // `update-ref`, not `branch -f`: `stream_ref` returns the fully
-    // -qualified `refs/heads/agent-events/<agent>`, and `git branch -f
-    // <fully-qualified-name> <commit>` does not treat that name as the ref
-    // itself -- it creates a literal, double-prefixed
-    // `refs/heads/refs/heads/agent-events/<agent>` (confirmed empirically),
-    // which `rev-parse`'s own ref-disambiguation fallback then happens to
-    // also resolve when nothing correctly-named exists yet, silently
-    // masking the bug in every purely-local round trip. The moment
-    // anything else (a real `git fetch`, e.g. gate 17's currency probe)
-    // creates the correctly-named ref, `rev-parse`'s exact match takes
-    // priority over that fallback and every *further* local commit here
-    // becomes permanently invisible to `read_stream_tip`, silently
-    // publishing stale content on the next push. `update-ref` takes a
-    // fully-qualified name directly with no such disambiguation.
-    crate::gitrepo::run_ok(
-        repo,
-        &["update-ref", stream_ref(&header.agent).as_str(), &commit],
-    )?;
-    crate::gitrepo::run_ok(
-        repo,
-        &["worktree", "remove", "--force", &worktree.to_string_lossy()],
-    )?;
-    crate::gitrepo::run_ok(repo, &["branch", "-D", &tmp_branch])?;
-    ObjectId::parse(commit)
+
+    // `expected = None` means "only if this ref does not exist". The check
+    // at the top of this function read the tip a moment ago; this is what
+    // makes a second writer that registered the same agent in that window
+    // lose rather than silently overwrite the winner's root.
+    git.compare_and_set(stream_ref(&header.agent).as_str(), None, &commit)?;
+    Ok(commit)
+}
+
+/// The bytes of a segment file holding `existing` followed by `events`.
+///
+/// Split out because both the root commit (which starts from nothing) and an
+/// append (which starts from the parent commit's segment blob) need it, and
+/// because it is where the per-line size bound is enforced.
+fn segment_bytes(events: &[Envelope], existing: Vec<u8>) -> AbResult<Vec<u8>> {
+    let mut out = existing;
+    for env in events {
+        let line = env.to_canonical_line();
+        if line.len() > crate::storage::MAX_LINE_BYTES {
+            return Err(invalid(format!(
+                "event line exceeds {} bytes",
+                crate::storage::MAX_LINE_BYTES
+            )));
+        }
+        out.extend_from_slice(line.as_bytes());
+        out.push(b'\n');
+    }
+    Ok(out)
+}
+
+/// The segment-file contents `new_events` imply, given `base`'s tree as the
+/// starting point.
+///
+/// Mirrors what `storage::append_event` enforced when it was writing real
+/// files one at a time: an event at offset zero must start a segment that
+/// does not exist yet, and an event at a non-zero offset must continue one
+/// that does. The difference is that those were `path.exists()` questions
+/// about a checked-out directory, and these are questions about `base`'s
+/// tree -- so a stale or half-written worktree cannot answer them wrongly.
+fn segment_edits(
+    reader: &impl ObjectReader,
+    base: &ObjectId,
+    agent: &Agent,
+    new_events: &[Envelope],
+) -> AbResult<Vec<(String, Vec<u8>)>> {
+    let mut edits: std::collections::BTreeMap<String, Vec<u8>> = std::collections::BTreeMap::new();
+    for env in new_events {
+        let segment = crate::storage::segment_index(env.seq);
+        let offset = crate::storage::segment_offset(env.seq);
+        let name = crate::storage::segment_filename(segment);
+
+        if !edits.contains_key(&name) {
+            let existing = reader.read_blob_at(base, &name)?;
+            let start = match (offset, existing) {
+                (0, None) => Vec::new(),
+                (0, Some(_)) => {
+                    return Err(invalid(format!(
+                        "segment {segment} for {agent} already exists but a fresh segment was \
+                         expected"
+                    )))
+                }
+                (_, Some(bytes)) => bytes,
+                (_, None) => {
+                    return Err(invalid(format!(
+                        "expected existing segment {segment} for {agent} at offset {offset}"
+                    )))
+                }
+            };
+            edits.insert(name.clone(), start);
+        }
+
+        let buf = edits
+            .get_mut(&name)
+            .expect("the segment was just inserted above");
+        *buf = segment_bytes(std::slice::from_ref(env), std::mem::take(buf))?;
+    }
+    Ok(edits.into_iter().collect())
 }
 
 /// Appends `new_events` (already carrying correct, contiguous sequence
@@ -226,7 +277,6 @@ pub fn append_to_stream(
     agent: &Agent,
     expected_parent: &ObjectId,
     new_events: &[Envelope],
-    worktree: &Path,
 ) -> AbResult<ObjectId> {
     let actual_tip = read_stream_tip(repo, agent)?
         .ok_or_else(|| invalid(format!("{agent} has no stream to append to")))?;
@@ -247,14 +297,31 @@ pub fn append_to_stream(
             )));
         }
     }
-    crate::gitrepo::ensure_bus_worktree(repo, worktree, expected_parent.as_str())?;
-    crate::gitrepo::checkout_detach(worktree, expected_parent.as_str())?;
-    for e in new_events {
-        crate::storage::append_event(worktree, e)?;
+
+    let git = crate::gitobjects::Libgit2Reader::open(repo)?;
+
+    // Three properties the previous implementation checked *after* building
+    // a commit -- "the header did not change", "no unexpected path was
+    // touched", "there is exactly one parent, and it is `expected_parent`"
+    // -- are structural here. This edits only the segment names
+    // `segment_edits` derives from the events' own sequence numbers, carries
+    // every other entry of the parent tree through untouched, and names
+    // exactly one parent. There is nothing left to re-check, and no way for
+    // a dirty or stale working tree to introduce a fourth path.
+    let mut edits = Vec::new();
+    for (name, bytes) in segment_edits(&git, expected_parent, agent, new_events)? {
+        edits.push((name, git.write_blob(&bytes)?));
     }
-    crate::gitrepo::add_all(worktree)?;
-    let commit = crate::gitrepo::commit(
-        worktree,
+    let tree = git.write_tree(
+        Some(expected_parent),
+        &edits
+            .iter()
+            .map(|(name, blob)| (name.as_str(), blob.clone()))
+            .collect::<Vec<_>>(),
+    )?;
+    let commit = git.create_commit(
+        &tree,
+        &[expected_parent],
         &format!(
             "agent-events: {agent} +{} event(s) through {}",
             new_events.len(),
@@ -262,32 +329,13 @@ pub fn append_to_stream(
         ),
     )?;
 
-    // Defensive re-check of "changes only its owner's stream paths": every
-    // changed path from expected_parent..commit must be a segment file (the
-    // header never changes after the root commit).
-    for (_, path) in crate::gitrepo::diff_name_status(repo, expected_parent.as_str(), &commit)? {
-        if path == HEADER_FILE {
-            return Err(invalid(
-                "a follow-on stream commit must not modify the stream header",
-            ));
-        }
-        if !path.ends_with(".jsonl") {
-            return Err(invalid(format!(
-                "a stream commit touched an unexpected path: {path}"
-            )));
-        }
-    }
-    let parents = crate::gitrepo::parents_of(repo, &commit)?;
-    if parents != vec![expected_parent.as_str().to_string()] {
-        return Err(invalid(format!(
-            "stream commit {commit} does not have exactly one parent equal to {expected_parent}"
-        )));
-    }
-
-    // See `create_root_commit`'s identical comment: `update-ref`, not
-    // `branch -f`, for a fully-qualified `refs/heads/...` name.
-    crate::gitrepo::run_ok(repo, &["update-ref", stream_ref(agent).as_str(), &commit])?;
-    ObjectId::parse(commit)
+    // The staleness check at the top of this function read the tip before
+    // any of the above ran, and building a commit takes real time. Naming
+    // `expected_parent` here closes that window: a writer that landed in it
+    // wins, and this one is told to resolve custody rather than overwriting
+    // the winner.
+    git.compare_and_set(stream_ref(agent).as_str(), Some(expected_parent), &commit)?;
+    Ok(commit)
 }
 
 #[cfg(test)]
@@ -396,12 +444,10 @@ mod tests {
     fn create_root_commit_then_read_stream_round_trips() {
         let repo = init_repo();
         let alice = a("alice");
-        let wt = repo.path().join("_wt_root");
         let commit = create_root_commit(
             repo.path(),
             &header(&alice),
             &registered_envelope(&alice, 0),
-            &wt,
         )
         .unwrap();
         assert_eq!(
@@ -438,19 +484,20 @@ mod tests {
     fn create_root_commit_writes_exactly_the_correctly_named_ref() {
         let repo = init_repo();
         let alice = a("alice");
-        let wt = repo.path().join("_wt_root");
         create_root_commit(
             repo.path(),
             &header(&alice),
             &registered_envelope(&alice, 0),
-            &wt,
         )
         .unwrap();
 
-        let out = crate::gitrepo::run(repo.path(), &["for-each-ref", "--format=%(refname)"])
+        // The *actual* ref set, not `rev-parse` -- which is exactly what
+        // would paper over the bug this guards.
+        let all = crate::gitobjects::Libgit2Reader::open(repo.path())
             .unwrap()
-            .stdout;
-        let refs: Vec<&str> = out.lines().collect();
+            .list("refs/")
+            .unwrap();
+        let refs: Vec<&str> = all.iter().map(|(name, _)| name.as_str()).collect();
         assert!(
             refs.contains(&"refs/heads/agent-events/alice"),
             "expected refs/heads/agent-events/alice among {refs:?}"
@@ -471,12 +518,10 @@ mod tests {
     fn append_to_stream_is_not_shadowed_by_a_stale_same_named_ref_from_elsewhere() {
         let repo = init_repo();
         let alice = a("alice");
-        let wt = repo.path().join("_wt_root");
         let root = create_root_commit(
             repo.path(),
             &header(&alice),
             &registered_envelope(&alice, 0),
-            &wt,
         )
         .unwrap();
 
@@ -491,15 +536,8 @@ mod tests {
         )
         .unwrap();
 
-        let wt2 = repo.path().join("_wt_append");
-        let advanced = append_to_stream(
-            repo.path(),
-            &alice,
-            &root,
-            &[status_envelope(&alice, 1)],
-            &wt2,
-        )
-        .unwrap();
+        let advanced =
+            append_to_stream(repo.path(), &alice, &root, &[status_envelope(&alice, 1)]).unwrap();
 
         assert_eq!(
             read_stream_tip(repo.path(), &alice).unwrap(),
@@ -512,20 +550,16 @@ mod tests {
     fn create_root_commit_rejects_a_second_root() {
         let repo = init_repo();
         let alice = a("alice");
-        let wt = repo.path().join("_wt_root");
         create_root_commit(
             repo.path(),
             &header(&alice),
             &registered_envelope(&alice, 0),
-            &wt,
         )
         .unwrap();
-        let wt2 = repo.path().join("_wt_root2");
         let err = create_root_commit(
             repo.path(),
             &header(&alice),
             &registered_envelope(&alice, 0),
-            &wt2,
         )
         .unwrap_err();
         assert!(err.to_string().contains("already exists"), "{err}");
@@ -535,14 +569,8 @@ mod tests {
     fn create_root_commit_rejects_a_first_event_that_is_not_agent_registered() {
         let repo = init_repo();
         let alice = a("alice");
-        let wt = repo.path().join("_wt_root");
-        let err = create_root_commit(
-            repo.path(),
-            &header(&alice),
-            &status_envelope(&alice, 0),
-            &wt,
-        )
-        .unwrap_err();
+        let err = create_root_commit(repo.path(), &header(&alice), &status_envelope(&alice, 0))
+            .unwrap_err();
         assert!(err.to_string().contains("agent.registered"), "{err}");
     }
 
@@ -550,24 +578,15 @@ mod tests {
     fn append_to_stream_extends_with_exactly_one_new_commit() {
         let repo = init_repo();
         let alice = a("alice");
-        let wt = repo.path().join("_wt_root");
         let root = create_root_commit(
             repo.path(),
             &header(&alice),
             &registered_envelope(&alice, 0),
-            &wt,
         )
         .unwrap();
 
-        let append_wt = repo.path().join("_wt_append");
-        let new_tip = append_to_stream(
-            repo.path(),
-            &alice,
-            &root,
-            &[status_envelope(&alice, 1)],
-            &append_wt,
-        )
-        .unwrap();
+        let new_tip =
+            append_to_stream(repo.path(), &alice, &root, &[status_envelope(&alice, 1)]).unwrap();
         assert_eq!(
             read_stream_tip(repo.path(), &alice).unwrap(),
             Some(new_tip.clone())
@@ -588,32 +607,20 @@ mod tests {
     fn append_to_stream_rejects_a_stale_expected_parent() {
         let repo = init_repo();
         let alice = a("alice");
-        let wt = repo.path().join("_wt_root");
         let root = create_root_commit(
             repo.path(),
             &header(&alice),
             &registered_envelope(&alice, 0),
-            &wt,
         )
         .unwrap();
         // Advance the stream out from under a caller still holding `root`.
-        let append_wt = repo.path().join("_wt_append1");
-        append_to_stream(
-            repo.path(),
-            &alice,
-            &root,
-            &[status_envelope(&alice, 1)],
-            &append_wt,
-        )
-        .unwrap();
+        append_to_stream(repo.path(), &alice, &root, &[status_envelope(&alice, 1)]).unwrap();
 
-        let stale_wt = repo.path().join("_wt_append2");
         let err = append_to_stream(
             repo.path(),
             &alice,
             &root, // stale: the real tip has already advanced past this
             &[status_envelope(&alice, 1)],
-            &stale_wt,
         )
         .unwrap_err();
         assert!(
@@ -627,23 +634,14 @@ mod tests {
         let repo = init_repo();
         let alice = a("alice");
         let bob = a("bob");
-        let wt = repo.path().join("_wt_root");
         let root = create_root_commit(
             repo.path(),
             &header(&alice),
             &registered_envelope(&alice, 0),
-            &wt,
         )
         .unwrap();
-        let append_wt = repo.path().join("_wt_append");
-        let err = append_to_stream(
-            repo.path(),
-            &alice,
-            &root,
-            &[status_envelope(&bob, 1)],
-            &append_wt,
-        )
-        .unwrap_err();
+        let err =
+            append_to_stream(repo.path(), &alice, &root, &[status_envelope(&bob, 1)]).unwrap_err();
         assert!(err.to_string().contains("does not belong to"), "{err}");
     }
 
@@ -651,16 +649,13 @@ mod tests {
     fn append_to_stream_rejects_an_empty_batch() {
         let repo = init_repo();
         let alice = a("alice");
-        let wt = repo.path().join("_wt_root");
         let root = create_root_commit(
             repo.path(),
             &header(&alice),
             &registered_envelope(&alice, 0),
-            &wt,
         )
         .unwrap();
-        let append_wt = repo.path().join("_wt_append");
-        let err = append_to_stream(repo.path(), &alice, &root, &[], &append_wt).unwrap_err();
+        let err = append_to_stream(repo.path(), &alice, &root, &[]).unwrap_err();
         assert!(err.to_string().contains("at least one event"), "{err}");
     }
 
@@ -754,7 +749,7 @@ mod tests {
         let alice = a("alice");
         let other = ObjectId::parse("cd".repeat(20)).unwrap();
         let err = read_stream_at(&stream_blobs(&alice), &other, &alice).unwrap_err();
-        assert!(matches!(err, AbError::Git(_)), "got {err:?}");
+        assert!(matches!(err, crate::error::AbError::Git(_)), "got {err:?}");
     }
 
     /// The end-to-end proof that matters: real commits made by the crate's
@@ -771,21 +766,13 @@ mod tests {
             repo.path(),
             &header(&alice),
             &registered_envelope(&alice, 0),
-            &repo.path().join("_wt_root"),
         )
         .unwrap();
 
         let rest: Vec<Envelope> = (1..=crate::storage::SEGMENT_SIZE)
             .map(|seq| status_envelope(&alice, seq))
             .collect();
-        append_to_stream(
-            repo.path(),
-            &alice,
-            &root,
-            &rest,
-            &repo.path().join("_wt_append"),
-        )
-        .unwrap();
+        append_to_stream(repo.path(), &alice, &root, &rest).unwrap();
 
         let (read_header, log) = read_stream(repo.path(), &alice).unwrap();
         assert_eq!(read_header, header(&alice));

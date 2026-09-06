@@ -13,8 +13,9 @@
 //! its validation, not the network round trip that publishes one.
 
 use crate::bootstrap::BusConfig;
-use crate::error::{invalid, AbError, AbResult};
+use crate::error::{invalid, AbResult};
 use crate::events::Role;
+use crate::gitobjects::{ObjectWriter, RefStore};
 use crate::scalars::{Agent, ObjectId, Short};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -51,10 +52,7 @@ impl EpochFile {
 /// The current tip of the registry ref, or `None` if it has never been
 /// created.
 pub fn read_registry_tip(repo: &Path) -> AbResult<Option<ObjectId>> {
-    match crate::gitrepo::rev_parse_opt(repo, REGISTRY_REF)? {
-        Some(s) => Ok(Some(ObjectId::parse(s)?)),
-        None => Ok(None),
-    }
+    crate::gitobjects::Libgit2Reader::open(repo)?.resolve(REGISTRY_REF)
 }
 
 /// Reads one named, immutable epoch by its commit id -- any epoch ever
@@ -142,7 +140,6 @@ pub fn create_root(
     repo: &Path,
     config: &BusConfig,
     active_members: BTreeMap<Agent, MemberBinding>,
-    worktree: &Path,
 ) -> AbResult<RosterEpoch> {
     if read_registry_tip(repo)?.is_some() {
         return Err(invalid(
@@ -150,42 +147,27 @@ pub fn create_root(
              use `register` to add a further agent instead of `genesis`",
         ));
     }
-    std::fs::create_dir_all(worktree).map_err(|e| AbError::Io {
-        path: worktree.display().to_string(),
-        source: e,
-    })?;
-    let tmp_branch = "_tmp_registry_root";
-    crate::gitrepo::run_ok(
-        repo,
-        &[
-            "worktree",
-            "add",
-            "--orphan",
-            "-b",
-            tmp_branch,
-            &worktree.to_string_lossy(),
-        ],
-    )?;
-    crate::storage::atomic_write(&worktree.join(".gitattributes"), b"*.json -text\n")?;
+    let git = crate::gitobjects::Libgit2Reader::open(repo)?;
     let file = EpochFile {
         parent: None,
         active_members: active_members.clone(),
     };
-    crate::storage::atomic_write(&worktree.join(EPOCH_FILE), &file.canonical_bytes())?;
-    crate::storage::atomic_write(&worktree.join(CONFIG_FILE), &config.to_canonical_bytes())?;
-    crate::gitrepo::add_all(worktree)?;
-    let commit = crate::gitrepo::commit(worktree, "agent-registry: root epoch")?;
-    // `update-ref`, not `branch -f`: see `stream::create_root_commit`'s
-    // identical comment -- `REGISTRY_REF` is already fully qualified
-    // (`refs/heads/agent-registry`), and `git branch -f` does not accept
-    // that form as the ref itself.
-    crate::gitrepo::run_ok(repo, &["update-ref", REGISTRY_REF, &commit])?;
-    crate::gitrepo::run_ok(
-        repo,
-        &["worktree", "remove", "--force", &worktree.to_string_lossy()],
+    // See `stream::create_root_commit` for why `.gitattributes` is still
+    // written even though nothing checks a registry commit out any more.
+    let attributes = git.write_blob(b"*.json -text\n")?;
+    let epoch = git.write_blob(&file.canonical_bytes())?;
+    let cfg = git.write_blob(&config.to_canonical_bytes())?;
+    let tree = git.write_tree(
+        None,
+        &[
+            (".gitattributes", attributes),
+            (EPOCH_FILE, epoch),
+            (CONFIG_FILE, cfg),
+        ],
     )?;
-    crate::gitrepo::run_ok(repo, &["branch", "-D", tmp_branch])?;
-    Ok(RosterEpoch::root(ObjectId::parse(commit)?, active_members))
+    let commit = git.create_commit(&tree, &[], "agent-registry: root epoch")?;
+    git.compare_and_set(REGISTRY_REF, None, &commit)?;
+    Ok(RosterEpoch::root(commit, active_members))
 }
 
 /// Proposes the next epoch as a child of `expected_parent`: registration,
@@ -197,7 +179,6 @@ pub fn propose_transition(
     repo: &Path,
     expected_parent: &RosterEpoch,
     new_active_members: BTreeMap<Agent, MemberBinding>,
-    worktree: &Path,
 ) -> AbResult<RosterEpoch> {
     let actual_tip = read_registry_tip(repo)?
         .ok_or_else(|| invalid("the agent-registry has no root epoch yet"))?;
@@ -208,28 +189,29 @@ pub fn propose_transition(
             expected_parent.id
         )));
     }
-    crate::gitrepo::ensure_bus_worktree(repo, worktree, expected_parent.id.as_str())?;
-    crate::gitrepo::checkout_detach(worktree, expected_parent.id.as_str())?;
+    let git = crate::gitobjects::Libgit2Reader::open(repo)?;
     let file = EpochFile {
         parent: Some(expected_parent.id.clone()),
         active_members: new_active_members.clone(),
     };
-    crate::storage::atomic_write(&worktree.join(EPOCH_FILE), &file.canonical_bytes())?;
-    crate::gitrepo::add_all(worktree)?;
-    let commit = crate::gitrepo::commit(worktree, "agent-registry: epoch transition")?;
-    let parents = crate::gitrepo::parents_of(repo, &commit)?;
-    if parents != vec![expected_parent.id.as_str().to_string()] {
-        return Err(invalid(format!(
-            "registry commit {commit} does not have exactly one parent equal to {}",
-            expected_parent.id
-        )));
-    }
-    // `update-ref`, not `branch -f`: see `stream::create_root_commit`'s
-    // identical comment -- `REGISTRY_REF` is already fully qualified
-    // (`refs/heads/agent-registry`), and `git branch -f` does not accept
-    // that form as the ref itself.
-    crate::gitrepo::run_ok(repo, &["update-ref", REGISTRY_REF, &commit])?;
-    Ok(expected_parent.child(ObjectId::parse(commit)?, new_active_members))
+    // Only `epoch.json` is named, so `.gitattributes` and `bus_config.json`
+    // carry through from the parent tree untouched. The bus config is
+    // deliberately not rewritten here: a transition changes membership, and
+    // an epoch that silently restated the config would let a stale in-memory
+    // copy overwrite an activation this proposer never observed.
+    let epoch = git.write_blob(&file.canonical_bytes())?;
+    let tree = git.write_tree(Some(&expected_parent.id), &[(EPOCH_FILE, epoch)])?;
+    let commit = git.create_commit(
+        &tree,
+        &[&expected_parent.id],
+        "agent-registry: epoch transition",
+    )?;
+    // The registry is the fleet's one serializing point (section 2.1), so
+    // this is the compare-and-swap that matters most: naming the expected
+    // parent means a proposer that lost the race is told to re-read rather
+    // than overwriting the epoch that won.
+    git.compare_and_set(REGISTRY_REF, Some(&expected_parent.id), &commit)?;
+    Ok(expected_parent.child(commit, new_active_members))
 }
 
 /// Proposes coordinator succession for `target`'s stream custody (section
@@ -257,7 +239,6 @@ pub fn propose_custody_succession(
     proposer: &Agent,
     target: &Agent,
     new_host: Short,
-    worktree: &Path,
 ) -> AbResult<RosterEpoch> {
     let binding = expected_parent.active_members.get(target).ok_or_else(|| {
         invalid(format!(
@@ -287,7 +268,7 @@ pub fn propose_custody_succession(
             standby: binding.standby.clone(),
         },
     );
-    propose_transition(repo, expected_parent, members, worktree)
+    propose_transition(repo, expected_parent, members)
 }
 
 /// One active identity's binding within a `RosterEpoch`: which host its
@@ -520,8 +501,7 @@ mod tests {
         let config = test_config(repo.path());
         let mut members = BTreeMap::new();
         members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
-        let wt = repo.path().join("_wt_root");
-        let epoch = create_root(repo.path(), &config, members.clone(), &wt).unwrap();
+        let epoch = create_root(repo.path(), &config, members.clone()).unwrap();
         assert_eq!(epoch.parent, None);
         assert_eq!(epoch.active_members, members);
         assert_eq!(
@@ -549,13 +529,15 @@ mod tests {
         let config = test_config(repo.path());
         let mut members = BTreeMap::new();
         members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
-        let wt = repo.path().join("_wt_root");
-        create_root(repo.path(), &config, members, &wt).unwrap();
+        create_root(repo.path(), &config, members).unwrap();
 
-        let out = crate::gitrepo::run(repo.path(), &["for-each-ref", "--format=%(refname)"])
+        // The *actual* ref set, not `rev-parse` -- which is exactly what
+        // would paper over the bug this guards.
+        let all = crate::gitobjects::Libgit2Reader::open(repo.path())
             .unwrap()
-            .stdout;
-        let refs: Vec<&str> = out.lines().collect();
+            .list("refs/")
+            .unwrap();
+        let refs: Vec<&str> = all.iter().map(|(name, _)| name.as_str()).collect();
         assert!(
             refs.contains(&REGISTRY_REF),
             "expected {REGISTRY_REF} among {refs:?}"
@@ -570,10 +552,8 @@ mod tests {
     fn create_root_rejects_a_second_root() {
         let repo = init_repo();
         let config = test_config(repo.path());
-        let wt = repo.path().join("_wt_root");
-        create_root(repo.path(), &config, BTreeMap::new(), &wt).unwrap();
-        let wt2 = repo.path().join("_wt_root2");
-        let err = create_root(repo.path(), &config, BTreeMap::new(), &wt2).unwrap_err();
+        create_root(repo.path(), &config, BTreeMap::new()).unwrap();
+        let err = create_root(repo.path(), &config, BTreeMap::new()).unwrap_err();
         assert!(
             err.to_string().contains("already has a root epoch"),
             "{err}"
@@ -586,13 +566,10 @@ mod tests {
         let config = test_config(repo.path());
         let mut members = BTreeMap::new();
         members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
-        let wt = repo.path().join("_wt_root");
-        let root = create_root(repo.path(), &config, members.clone(), &wt).unwrap();
+        let root = create_root(repo.path(), &config, members.clone()).unwrap();
 
         members.insert(a("bob"), binding(Role::Reviewer, "host1", 0));
-        let transition_wt = repo.path().join("_wt_transition");
-        let child =
-            propose_transition(repo.path(), &root, members.clone(), &transition_wt).unwrap();
+        let child = propose_transition(repo.path(), &root, members.clone()).unwrap();
         assert_eq!(child.parent, Some(root.id.clone()));
         assert_eq!(child.active_members, members);
         assert_eq!(
@@ -615,14 +592,12 @@ mod tests {
         let config = test_config(repo.path());
         let mut members = BTreeMap::new();
         members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
-        let wt = repo.path().join("_wt_root");
-        let root = create_root(repo.path(), &config, members.clone(), &wt).unwrap();
+        let root = create_root(repo.path(), &config, members.clone()).unwrap();
 
         assert_eq!(read_bus_config(repo.path(), &root.id).unwrap(), config);
 
         members.insert(a("bob"), binding(Role::Reviewer, "host1", 0));
-        let transition_wt = repo.path().join("_wt_transition");
-        let child = propose_transition(repo.path(), &root, members, &transition_wt).unwrap();
+        let child = propose_transition(repo.path(), &root, members).unwrap();
 
         assert_eq!(read_bus_config(repo.path(), &child.id).unwrap(), config);
     }
@@ -634,17 +609,14 @@ mod tests {
     fn propose_transition_rejects_a_stale_expected_parent() {
         let repo = init_repo();
         let config = test_config(repo.path());
-        let wt = repo.path().join("_wt_root");
-        let root = create_root(repo.path(), &config, BTreeMap::new(), &wt).unwrap();
+        let root = create_root(repo.path(), &config, BTreeMap::new()).unwrap();
 
         let mut members = BTreeMap::new();
         members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
-        let t1 = repo.path().join("_wt_t1");
-        propose_transition(repo.path(), &root, members.clone(), &t1).unwrap();
+        propose_transition(repo.path(), &root, members.clone()).unwrap();
 
         // `root` is now stale: the registry has already advanced past it.
-        let t2 = repo.path().join("_wt_t2");
-        let err = propose_transition(repo.path(), &root, members, &t2).unwrap_err();
+        let err = propose_transition(repo.path(), &root, members).unwrap_err();
         assert!(err.to_string().contains("has moved"), "{err}");
     }
 
@@ -652,8 +624,7 @@ mod tests {
     fn propose_transition_fails_before_any_root_exists() {
         let repo = init_repo();
         let phantom_root = RosterEpoch::root(hash(1), BTreeMap::new());
-        let wt = repo.path().join("_wt_transition");
-        let err = propose_transition(repo.path(), &phantom_root, BTreeMap::new(), &wt).unwrap_err();
+        let err = propose_transition(repo.path(), &phantom_root, BTreeMap::new()).unwrap_err();
         assert!(err.to_string().contains("no root epoch yet"), "{err}");
     }
 
@@ -664,7 +635,7 @@ mod tests {
         config: &BusConfig,
         members: BTreeMap<Agent, MemberBinding>,
     ) -> RosterEpoch {
-        create_root(repo, config, members, &repo.join("_wt_succession_root")).unwrap()
+        create_root(repo, config, members).unwrap()
     }
 
     /// Gate 19's authorization precondition: the pre-authorized standby may
@@ -683,15 +654,9 @@ mod tests {
         );
         let root = root_with(repo.path(), &config, members);
 
-        let new_epoch = propose_custody_succession(
-            repo.path(),
-            &root,
-            &alice_standby,
-            &alice,
-            short("host2"),
-            &repo.path().join("_wt_succeed"),
-        )
-        .unwrap();
+        let new_epoch =
+            propose_custody_succession(repo.path(), &root, &alice_standby, &alice, short("host2"))
+                .unwrap();
         let new_binding = &new_epoch.active_members[&alice];
         assert_eq!(new_binding.host, short("host2"));
         assert_eq!(new_binding.coordinator_custody_epoch, 4);
@@ -713,15 +678,9 @@ mod tests {
         members.insert(coord2.clone(), binding(Role::Coordinator, "host2", 0));
         let root = root_with(repo.path(), &config, members);
 
-        let new_epoch = propose_custody_succession(
-            repo.path(),
-            &root,
-            &coord2,
-            &alice,
-            short("host2"),
-            &repo.path().join("_wt_succeed"),
-        )
-        .unwrap();
+        let new_epoch =
+            propose_custody_succession(repo.path(), &root, &coord2, &alice, short("host2"))
+                .unwrap();
         assert_eq!(new_epoch.active_members[&alice].host, short("host2"));
     }
 
@@ -738,15 +697,8 @@ mod tests {
         members.insert(mallory.clone(), binding(Role::Implementor, "host3", 0));
         let root = root_with(repo.path(), &config, members);
 
-        let err = propose_custody_succession(
-            repo.path(),
-            &root,
-            &mallory,
-            &alice,
-            short("host3"),
-            &repo.path().join("_wt_succeed"),
-        )
-        .unwrap_err();
+        let err = propose_custody_succession(repo.path(), &root, &mallory, &alice, short("host3"))
+            .unwrap_err();
         assert!(err.to_string().contains("is not authorized"), "{err}");
     }
 
@@ -760,15 +712,8 @@ mod tests {
         members.insert(coord1.clone(), binding(Role::Coordinator, "host1", 0));
         let root = root_with(repo.path(), &config, members);
 
-        let err = propose_custody_succession(
-            repo.path(),
-            &root,
-            &coord1,
-            &ghost,
-            short("host2"),
-            &repo.path().join("_wt_succeed"),
-        )
-        .unwrap_err();
+        let err = propose_custody_succession(repo.path(), &root, &coord1, &ghost, short("host2"))
+            .unwrap_err();
         assert!(err.to_string().contains("not an active member"), "{err}");
     }
 
@@ -789,15 +734,9 @@ mod tests {
         );
         let root = root_with(repo.path(), &config, members);
 
-        let new_epoch = propose_custody_succession(
-            repo.path(),
-            &root,
-            &alice_standby,
-            &alice,
-            short("host2"),
-            &repo.path().join("_wt_succeed"),
-        )
-        .unwrap();
+        let new_epoch =
+            propose_custody_succession(repo.path(), &root, &alice_standby, &alice, short("host2"))
+                .unwrap();
 
         // The old custodian (host1, custody epoch 0) still believes it can
         // write -- authorize_stream_write must refuse it against the new
@@ -869,7 +808,7 @@ mod tests {
             epoch_blob(None),
         );
         let err = read_epoch_at(&r, &hash(8)).unwrap_err();
-        assert!(matches!(err, AbError::Git(_)), "got {err:?}");
+        assert!(matches!(err, crate::error::AbError::Git(_)), "got {err:?}");
     }
 
     #[test]

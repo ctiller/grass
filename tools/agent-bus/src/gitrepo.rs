@@ -134,12 +134,33 @@ pub fn rev_parse_opt(dir: &Path, rev: &str) -> AbResult<Option<String>> {
     }
 }
 
+#[cfg(test)]
 pub fn check_ref_format(refname: &str) -> bool {
-    Command::new("git")
+    // Memoized, because this sits on the hot read path and costs a process.
+    // `Branch::parse` runs it, `Branch` deserializes through `parse`, and
+    // every review event names two branches -- so reducing the fleet's own
+    // bus spawned hundreds of `git check-ref-format` processes per command,
+    // measured at 2.5 seconds of a 6-second `status`. The set of distinct
+    // ref names across a whole reduction is tiny (`refs/heads/main` and one
+    // branch per nomination) and git's answer for a given name is a pure
+    // function of that name, so the second and later asks are free.
+    static SEEN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+    // A poisoned lock means another thread panicked mid-insert. The map is
+    // a pure cache, so recovering the guard and carrying on is correct --
+    // there is no invariant a panic could have left half-established.
+    let mut cache = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(known) = cache.get(refname) {
+        return *known;
+    }
+    let answer = Command::new("git")
         .args(["check-ref-format", refname])
         .status()
         .map(|s| s.success())
-        .unwrap_or(false)
+        .unwrap_or(false);
+    cache.insert(refname.to_string(), answer);
+    answer
 }
 
 /// Push one or more explicit `<sha>:<refname>` refspecs, optionally as one
@@ -240,165 +261,6 @@ pub fn remote_refs_existing(
         }
     }
     Ok(existing)
-}
-
-/// Ensure a detached worktree checked out at exactly `start_point` exists at
-/// `worktree_path` (AGENT_BUS.md section 2: "Multiple agents sharing one
-/// clone use detached worktrees"). This function's every caller passes a
-/// deterministic path reused across *separate process invocations* as a
-/// cache (e.g. `sync::reduce_local`'s per-agent `_reduce_stream_<agent>`
-/// worktrees, read via plain filesystem access in `storage::read_stream_
-/// log`) -- so an existing directory at `worktree_path` is not proof it is
-/// still at `start_point`: a prior, separate invocation may have checked it
-/// out at an *earlier* commit before more was published, and nothing here
-/// ever refreshed it since. Trusting "exists" alone (as an earlier version
-/// of this function did) silently serves stale on-disk content forever
-/// after the first call for a given path -- a real, confirmed bug: a
-/// `coordinate` call whose dry-run validation needs another agent's
-/// just-published event can spuriously reject it as unknown, purely
-/// because an earlier, unrelated call happened to create that same cache
-/// path first. So: verify before trusting, and refresh if the target has
-/// moved.
-pub fn ensure_bus_worktree(
-    repo_dir: &Path,
-    worktree_path: &Path,
-    start_point: &str,
-) -> AbResult<()> {
-    // AGENT_BUS.md section 2 explicitly supports "multiple agents sharing
-    // one clone" via these same deterministic cache paths -- so two
-    // concurrent processes can enter this function for the identical
-    // `worktree_path` at the same time. Without serialization, both could
-    // observe staleness and both race `worktree remove`/`worktree add` for
-    // the same path: one process's remove can delete files mid-read by the
-    // other, one process's add can be clobbered by the other's concurrent
-    // add, and git's own `.git/worktrees/<name>` metadata can end up
-    // half-referencing a path neither process can then re-add to cleanly.
-    // An OS advisory lock on a sibling lock file (released automatically
-    // when this guard drops, *and* automatically by the OS if this process
-    // crashes while holding it -- no manual staleness/timeout logic needed)
-    // makes the whole exists-check/refresh/create sequence atomic across
-    // processes.
-    let _guard = lock_worktree_path(worktree_path)?;
-    if worktree_path.exists() {
-        let target = rev_parse(repo_dir, start_point)?;
-        if rev_parse_opt(worktree_path, "HEAD")?.as_deref() == Some(target.as_str()) {
-            return Ok(());
-        }
-        // Stale: remove and fall through to recreate at the right commit.
-        // `worktree remove` fails if git's own metadata already considers
-        // this path gone (e.g. after a manual `rm -rf`) -- best-effort,
-        // then fall back to a plain filesystem removal plus `prune` so a
-        // half-cleaned-up worktree can never wedge every future call.
-        let _ = run(
-            repo_dir,
-            &[
-                "worktree",
-                "remove",
-                "--force",
-                &worktree_path.to_string_lossy(),
-            ],
-        );
-        if worktree_path.exists() {
-            std::fs::remove_dir_all(worktree_path).map_err(|e| AbError::Io {
-                path: worktree_path.display().to_string(),
-                source: e,
-            })?;
-            run_ok(repo_dir, &["worktree", "prune"])?;
-        }
-    }
-    if let Some(parent) = worktree_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| AbError::Io {
-            path: parent.display().to_string(),
-            source: e,
-        })?;
-    }
-    let worktree_path_str = worktree_path.to_string_lossy();
-    let add_args = [
-        "worktree",
-        "add",
-        "--detach",
-        &worktree_path_str,
-        start_point,
-    ];
-    let out = run(repo_dir, &add_args)?;
-    if out.success {
-        return Ok(());
-    }
-    // `git worktree add` refuses to reuse a path it still considers
-    // registered to *another* worktree, even when that worktree's own
-    // working directory is long gone -- e.g. a prior process was killed
-    // mid-`add`, or the directory was removed by a plain filesystem
-    // removal rather than `git worktree remove`, leaving `.git/worktrees/
-    // <name>` behind ("... is a missing but already registered worktree").
-    // The `worktree_path.exists()` branch above only ever runs when the
-    // *directory* is present, so it never observes or cleans up this case
-    // -- confirmed live in the field: two independent users hit exactly
-    // this error on `tail`, succeeding only on manual retry. `git worktree
-    // prune` removes stale admin registrations like this one; it defaults
-    // to a multi-hour grace period before touching anything, so it will
-    // not disturb a concurrent, genuinely-in-progress `add` racing this
-    // same repo for an unrelated path. Retry once after pruning so this
-    // self-heals instead of surfacing to the caller.
-    run_ok(repo_dir, &["worktree", "prune"])?;
-    run_ok(repo_dir, &add_args)?;
-    Ok(())
-}
-
-/// The sibling lock-file path guarding `worktree_path`: same parent
-/// directory, a dot-prefixed `.<name>.lock` name so it never collides with
-/// (or gets swept up by) anything that lists the parent directory looking
-/// for actual worktree entries.
-fn worktree_lock_path(worktree_path: &Path) -> PathBuf {
-    let name = worktree_path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    worktree_path.with_file_name(format!(".{name}.lock"))
-}
-
-/// Opens (creating if necessary) and exclusively locks `worktree_path`'s
-/// sibling lock file, blocking until any other process's lock on it is
-/// released. The returned `File` must be kept alive for exactly as long as
-/// the critical section it protects -- dropping it releases the lock.
-fn lock_worktree_path(worktree_path: &Path) -> AbResult<std::fs::File> {
-    use fs4::FileExt;
-    let lock_path = worktree_lock_path(worktree_path);
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| AbError::Io {
-            path: parent.display().to_string(),
-            source: e,
-        })?;
-    }
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&lock_path)
-        .map_err(|e| AbError::Io {
-            path: lock_path.display().to_string(),
-            source: e,
-        })?;
-    file.lock_exclusive().map_err(|e| AbError::Io {
-        path: lock_path.display().to_string(),
-        source: e,
-    })?;
-    Ok(file)
-}
-
-pub fn add_all(dir: &Path) -> AbResult<()> {
-    run_ok(dir, &["add", "-A"])?;
-    Ok(())
-}
-
-pub fn commit(dir: &Path, message: &str) -> AbResult<String> {
-    run_ok(dir, &["commit", "-m", message])?;
-    rev_parse(dir, "HEAD")
-}
-
-pub fn checkout_detach(dir: &Path, rev: &str) -> AbResult<()> {
-    run_ok(dir, &["checkout", "--detach", rev])?;
-    Ok(())
 }
 
 pub fn commit_message_trailers(dir: &Path, rev: &str) -> AbResult<Vec<(String, String)>> {
@@ -951,188 +813,6 @@ mod outer_tests {
         let start = PathBuf::from("/repo/checkout");
         let got = common_dir(&start).unwrap();
         assert_eq!(got, start.join(".git"));
-    }
-
-    /// Regression test for a real, confirmed bug: `ensure_bus_worktree`'s
-    /// callers all pass a deterministic path reused across *separate
-    /// process invocations* as a cache (`sync::reduce_local`'s per-agent
-    /// worktrees in particular). Treating "the path exists" as proof it is
-    /// already at `start_point` meant a worktree created once, early, was
-    /// silently stuck there forever -- a later call naming a *newer*
-    /// `start_point` at the same path got the stale content back with no
-    /// error. `storage::read_stream_log` reads these worktrees via plain
-    /// filesystem access, so this directly caused a live failure: a
-    /// `coordinate` dry-run validating an event that referenced another
-    /// agent's just-published event saw that agent's stream frozen at an
-    /// earlier tip and rejected it as unknown.
-    #[test]
-    fn ensure_bus_worktree_refreshes_a_worktree_whose_start_point_has_moved() {
-        let repo = init_repo();
-        let worktree = repo.path().join("_shared_cache_path");
-
-        ensure_bus_worktree(repo.path(), &worktree, "HEAD").unwrap();
-        assert_eq!(
-            std::fs::read_to_string(worktree.join("README.md"))
-                .unwrap()
-                .trim_end(),
-            "hello"
-        );
-
-        commit_file(repo.path(), "README.md", "goodbye\n", "second");
-
-        // Same worktree path, but `start_point` (still "HEAD") now names a
-        // different commit -- the cached worktree must be refreshed to it,
-        // not served stale.
-        ensure_bus_worktree(repo.path(), &worktree, "HEAD").unwrap();
-        assert_eq!(
-            std::fs::read_to_string(worktree.join("README.md"))
-                .unwrap()
-                .trim_end(),
-            "goodbye",
-            "the worktree must have been refreshed to the new HEAD, not left stale"
-        );
-    }
-
-    /// The common, unchanged-target case must not pay for a full
-    /// remove-and-recreate: `ensure_bus_worktree` first checks whether the
-    /// existing worktree's HEAD already matches `start_point` via
-    /// `rev-parse`, and only falls through to `worktree remove` + `worktree
-    /// add` if it does not.
-    #[test]
-    fn ensure_bus_worktree_is_a_cheap_noop_when_already_at_start_point() {
-        let repo = init_repo();
-        let worktree = repo.path().join("_shared_cache_path");
-        let head = rev_parse(repo.path(), "HEAD").unwrap();
-
-        ensure_bus_worktree(repo.path(), &worktree, &head).unwrap();
-        let _guard = MockGit::new()
-            .on(&["rev-parse", "--verify", &head], GitOutput::ok(&head))
-            .on(
-                &["rev-parse", "--verify", "--quiet", "HEAD^{object}"],
-                GitOutput::ok(&head),
-            )
-            .install();
-        // With the mock installed, any git call other than the two
-        // `rev-parse`s above would panic with "no rule matched" -- in
-        // particular no `worktree remove`/`worktree add`.
-        ensure_bus_worktree(repo.path(), &worktree, &head).unwrap();
-    }
-
-    /// Round-4 review, Significant finding: the staleness fix above
-    /// introduced a new hazard of its own -- AGENT_BUS.md section 2
-    /// explicitly supports "multiple agents sharing one clone" via these
-    /// same deterministic cache paths, so two concurrent processes can
-    /// legitimately race to refresh the identical `worktree_path` at once.
-    /// Without serialization, one caller's `worktree remove` could delete
-    /// files mid-read by another, or two concurrent `worktree add`s for the
-    /// same path could corrupt git's own worktree metadata. Proves the
-    /// exclusive-lock fix: many threads hammering `ensure_bus_worktree` for
-    /// the *same* path with a *moving* target, concurrently, all succeed
-    /// (no error, no panic), and every one observes the worktree correctly
-    /// checked out at some real, valid commit afterward -- never a
-    /// half-removed or half-added state.
-    #[test]
-    fn ensure_bus_worktree_is_safe_under_concurrent_callers_racing_the_same_path() {
-        let repo = init_repo();
-        let worktree = repo.path().join("_shared_cache_path");
-        let repo_path = repo.path().to_path_buf();
-
-        // Two real commits, so `start_point` genuinely differs across
-        // concurrent calls, not just a no-op every time.
-        let first = rev_parse(&repo_path, "HEAD").unwrap();
-        commit_file(&repo_path, "README.md", "second\n", "second");
-        let second = rev_parse(&repo_path, "HEAD").unwrap();
-        let targets = [first.clone(), second.clone()];
-
-        let handles: Vec<_> = (0..8)
-            .map(|i| {
-                let repo_path = repo_path.clone();
-                let worktree = worktree.clone();
-                let target = targets[i % targets.len()].clone();
-                std::thread::spawn(move || ensure_bus_worktree(&repo_path, &worktree, &target))
-            })
-            .collect();
-        for h in handles {
-            h.join()
-                .expect("thread must not panic")
-                .expect("ensure_bus_worktree must not error under concurrent callers");
-        }
-
-        // The worktree must be left in a fully valid state: checked out at
-        // *one* of the two real commits, never a torn/partial mix.
-        let final_head = rev_parse(&worktree, "HEAD").unwrap();
-        assert!(
-            final_head == first || final_head == second,
-            "worktree ended up at an unexpected commit: {final_head}"
-        );
-        let content = std::fs::read_to_string(worktree.join("README.md"))
-            .unwrap()
-            .trim_end()
-            .to_string();
-        assert!(
-            content == "hello" || content == "second",
-            "worktree content is inconsistent with its own HEAD: {content:?}"
-        );
-    }
-
-    /// When the worktree path's parent cannot be created (here, because a
-    /// path component is an ordinary file, not a directory), the IO error
-    /// must be surfaced as `AbError::Io`, not panic or silently proceed.
-    #[test]
-    fn ensure_bus_worktree_reports_io_error_when_parent_cannot_be_created() {
-        let dir = tempfile::tempdir().unwrap();
-        let blocking_file = dir.path().join("not_a_dir");
-        std::fs::write(&blocking_file, "x").unwrap();
-        let worktree_path = blocking_file.join("nested").join("wt");
-        let err = ensure_bus_worktree(
-            &PathBuf::from("/unused"),
-            &worktree_path,
-            "origin/agent-bus",
-        )
-        .unwrap_err();
-        assert!(matches!(err, AbError::Io { .. }), "{err:?}");
-    }
-
-    /// The ordinary path: the worktree does not yet exist, its parent can be
-    /// created, and `git worktree add --detach <path> <start>` succeeds.
-    #[test]
-    fn ensure_bus_worktree_creates_a_new_worktree() {
-        let dir = tempfile::tempdir().unwrap();
-        let worktree_path = dir.path().join("nested").join("wt");
-        let _guard = MockGit::new()
-            .on_prefix(&["worktree", "add", "--detach"], GitOutput::ok(""))
-            .install();
-        ensure_bus_worktree(
-            &PathBuf::from("/unused"),
-            &worktree_path,
-            "origin/agent-bus",
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn ensure_bus_worktree_recovers_from_a_stale_admin_registration_after_a_manual_removal() {
-        let repo = init_repo();
-        let worktree = repo.path().join("_shared_cache_path");
-        let head = rev_parse(repo.path(), "HEAD").unwrap();
-
-        // First call actually creates the worktree and registers it with
-        // git's own `.git/worktrees/<name>` admin metadata.
-        ensure_bus_worktree(repo.path(), &worktree, &head).unwrap();
-        assert!(worktree.exists());
-
-        // Simulate a killed process / manual cleanup: the working directory
-        // is removed via a plain filesystem removal, never through `git
-        // worktree remove`, so git's admin entry for it survives untouched.
-        std::fs::remove_dir_all(&worktree).unwrap();
-        assert!(!worktree.exists());
-
-        // A second call for the identical path/target must still succeed --
-        // not surface git's "missing but already registered worktree" error
-        // to the caller the way the live bug reports describe.
-        ensure_bus_worktree(repo.path(), &worktree, &head).unwrap();
-        assert!(worktree.exists());
-        assert_eq!(rev_parse(&worktree, "HEAD").unwrap(), head);
     }
 
     /// A failing `git interpret-trailers --parse` invocation must surface as

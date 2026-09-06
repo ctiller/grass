@@ -318,7 +318,6 @@ mod tests {
             "sha1".to_string(),
             crate::scalars::ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &host_a.path().join("_genesis_wt"),
         )
         .unwrap();
         let registry_tip = crate::registry::read_registry_tip(host_a.path())
@@ -368,7 +367,6 @@ mod tests {
             "sha1".to_string(),
             crate::scalars::ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -403,7 +401,6 @@ mod tests {
             "sha1".to_string(),
             crate::scalars::ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &host_a.path().join("_genesis_wt"),
         )
         .unwrap();
         crate::outbox::submit(
@@ -418,7 +415,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &host_a.path().join("_wt"),
             &origin.path().to_string_lossy(),
         )
         .unwrap();
@@ -480,7 +476,6 @@ mod tests {
             "sha1".to_string(),
             crate::scalars::ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &host_a.path().join("_genesis_wt"),
         )
         .unwrap();
         crate::coordinator::drain_and_publish(
@@ -489,7 +484,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &host_a.path().join("_wt"),
             &origin.path().to_string_lossy(),
         )
         .unwrap();
@@ -508,13 +502,8 @@ mod tests {
                 standby: None,
             },
         );
-        let new_epoch = crate::registry::propose_transition(
-            host_a.path(),
-            &epoch,
-            members,
-            &host_a.path().join("_transition_wt"),
-        )
-        .unwrap();
+        let new_epoch =
+            crate::registry::propose_transition(host_a.path(), &epoch, members).unwrap();
         crate::publish::publish(
             host_a.path(),
             &origin.path().to_string_lossy(),
@@ -593,7 +582,6 @@ mod tests {
             "sha1".to_string(),
             crate::scalars::ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &host_a.path().join("_genesis_wt"),
         )
         .unwrap();
         let registry_tip = crate::registry::read_registry_tip(host_a.path())
@@ -676,7 +664,6 @@ mod tests {
             "sha1".to_string(),
             crate::scalars::ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &host_a.path().join("_genesis_wt"),
         )
         .unwrap();
         let registry_tip = crate::registry::read_registry_tip(host_a.path())

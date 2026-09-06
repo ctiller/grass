@@ -719,10 +719,6 @@ impl HostRepo {
     fn common_dir(&self) -> PathBuf {
         self.dir.path().join(".git")
     }
-
-    fn worktrees(&self) -> PathBuf {
-        self.common_dir().join("agent-bus").join("wt-v2")
-    }
 }
 
 /// One bare origin plus every checkout pointed at it.
@@ -829,7 +825,6 @@ fn materialize_op(
                 "sha1".to_string(),
                 ObjectId::parse(review_from).map_err(|e| fail("parse HEAD object id", e))?,
                 h.name.clone(),
-                &h.worktrees(),
             )
             .map_err(|e| fail("genesis", e))?;
             let updates = vec![
@@ -863,13 +858,8 @@ fn materialize_op(
                     standby: None,
                 },
             );
-            let new_epoch = crate::registry::propose_transition(
-                h.repo(),
-                &epoch,
-                members,
-                &h.worktrees().join("_register_transition"),
-            )
-            .map_err(|e| fail("propose registration transition", e))?;
+            let new_epoch = crate::registry::propose_transition(h.repo(), &epoch, members)
+                .map_err(|e| fail("propose registration transition", e))?;
 
             let candidate = Candidate::new(
                 name,
@@ -1024,7 +1014,6 @@ fn drain_one(
         name,
         &h.name,
         0,
-        &h.worktrees(),
         "origin",
     )
     .map_err(|e| fail(&format!("drain_and_publish {what}"), e))?;
