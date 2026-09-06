@@ -525,6 +525,24 @@ impl RefStore for Libgit2Reader {
                              point straight at a commit -- repoint or remove it: {e}"
                         ));
                     }
+                    // The mirror of the create branch classification, and
+                    // for the same reason: only codes that actually mean
+                    // "someone else got there first" may advise a retry.
+                    // libgit2 signals a lost race under the lock as
+                    // `Modified`, and a vanished ref as `NotFound`; anything
+                    // else -- a bad name, a broken object store, an I/O
+                    // error -- is not a race, and telling the operator to
+                    // re-read and retry would invite an unbounded loop
+                    // against something retrying cannot fix.
+                    if !matches!(
+                        e.code(),
+                        git2::ErrorCode::Modified | git2::ErrorCode::NotFound
+                    ) {
+                        return invalid(format!(
+                            "{refname} could not be updated, and not because another writer \
+                             won the race -- retrying will not help: {e}"
+                        ));
+                    }
                     invalid(format!(
                         "{refname} moved while it was being updated -- another writer won the \
                          race; re-read the current tip and retry: {e}"
@@ -648,6 +666,38 @@ impl Libgit2Reader {
     /// The repository's single shared git directory, equivalent to `git
     /// rev-parse --git-common-dir`: the *main* checkout's git directory even
     /// when called from a linked worktree.
+    /// Whether this repository is a partial clone -- one that fetches
+    /// missing objects on demand from a promisor remote.
+    ///
+    /// It matters to candidate construction specifically: `merge-tree` reads
+    /// blob content, and on a partial clone reading a blob it does not have
+    /// makes git run a *fetch* underneath. That fetch inherits whatever
+    /// environment the merge was given, and candidate construction is
+    /// deliberately hermetic, so it would run with no credential helper, no
+    /// `url.<base>.insteadOf` and no proxy -- and with stdin closed, so a
+    /// prompt cannot be answered either. Against a private remote it fails,
+    /// and the failure is reported as "could not cleanly merge", which is a
+    /// confident wrong diagnosis.
+    pub fn is_partial_clone(&self) -> bool {
+        let Ok(cfg) = self.repo.config().and_then(|mut c| c.snapshot()) else {
+            return false;
+        };
+        if cfg.get_str("extensions.partialclone").is_ok() {
+            return true;
+        }
+        cfg.entries(Some("remote.*.promisor"))
+            .map(|entries| {
+                let mut found = false;
+                let _ = entries.for_each(|e| {
+                    if e.value() == Ok("true") {
+                        found = true;
+                    }
+                });
+                found
+            })
+            .unwrap_or(false)
+    }
+
     pub fn common_dir(&self) -> PathBuf {
         self.repo.commondir().to_path_buf()
     }
@@ -1714,6 +1764,14 @@ mod tests {
 
     /// The companion differential for the *other* load-bearing order.
     ///
+    /// Named for what it actually pins. The date-skewed side is excluded from
+    /// a first-parent walk by construction, and the merge's committer time is
+    /// `max(parents) + 1`, so the walked set here is a strictly ascending
+    /// chain -- no date-versus-topological subtlety is exercised, and calling
+    /// it "date-skewed" would have overclaimed. What it does pin, against the
+    /// real binary rather than against the comments: `--reverse`, and the
+    /// first-parent restriction.
+    ///
     /// `range` had a real comparison against `git rev-list` on a date-skewed
     /// merge; `first_parent_range` -- the one carrying `--reverse`, consumed
     /// by `audit_main`, whose output is an insta golden -- had only a
@@ -1722,7 +1780,7 @@ mod tests {
     /// interchangeable, so both are now pinned against the real binary
     /// rather than against the reasoning in the comments.
     #[test]
-    fn first_parent_range_matches_git_rev_list_order_across_a_date_skewed_merge() {
+    fn first_parent_range_reverses_and_follows_only_first_parents_like_git_rev_list() {
         let (repo, _head) = init_repo();
 
         let commit_at = |name: &str, ts: i64| -> String {

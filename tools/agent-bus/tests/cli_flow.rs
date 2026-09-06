@@ -1880,36 +1880,24 @@ fn prepare_merge_rejects_an_unknown_nomination() {
 }
 
 // `prepare_merge`'s `chain.current_nomination != nomination` branch
-// ("nomination is no longer current") is deliberately left without a CLI-
-// level test here. The only way to reach it is a confirmed `review.
-// reassigned` moving the chain past an old nomination link, and `review.
-// reassigned` is gate-17 currency-sensitive -- while investigating a test
-// for exactly this, that fetch was found to trigger a real, separate,
-// severe, pre-existing bug in this crate's local ref plumbing (see this
-// task's final report): `stream.rs`/`registry.rs` update every local
-// stream/registry ref via `git branch -f <already-fully-qualified-ref>`
-// (e.g. `git branch -f refs/heads/agent-events/zoe <commit>`), which real
-// `git` does not treat as already-qualified -- it creates `refs/heads/
-// refs/heads/agent-events/zoe` instead (confirmed empirically). Every
-// ordinary read still resolves correctly only by accident, via `git rev-
-// parse`'s ref-disambiguation fallback chain finding the doubly-prefixed
-// ref. But `sync::synced_snapshot`'s own fetch (gate 17's currency probe,
-// or `--sync`) uses an explicit `<remote-ref>:<local-ref>` refspec that
-// *does* create the correctly-named exact ref as a byproduct -- and once
-// that exact ref exists, `rev-parse`'s disambiguation prefers it (its first
-// rule is a literal path match) over the doubly-prefixed one *forever*,
-// permanently shadowing that agent's real, advancing tip with whatever
-// commit the remote happened to have at that one fetch moment. Reassigning
-// as the same agent whose own reassignment is the currency-sensitive event
-// hits this immediately: gate 17's fetch (for that very candidate) pins the
-// exact ref to the pre-reassignment tip, the reassignment still commits
-// onto the doubly-prefixed ref locally, but `publish_stream`'s own `read_
-// stream_tip` afterward reads the now-shadowed, stale exact ref -- so the
-// event is reported published (it *is* a real local commit) while the
-// actual push silently reuses the old tip, never reaching the remote.
-// Fixing this is real, separate work (`stream.rs`/`registry.rs`'s ref-
-// update calls, used by every stream and the registry root, well outside
-// this task's git-linked-review-checks scope) -- flagged, not fixed, here.
+// ("nomination is no longer current") still has no CLI-level test.
+//
+// The long justification that used to stand here is obsolete and has been
+// removed rather than left to mislead: it described `stream.rs`/`registry.rs`
+// updating local refs through `git branch -f <already-qualified-ref>`, which
+// created a doubly-prefixed `refs/heads/refs/heads/...` and could permanently
+// shadow an agent's real tip. Both now use `update-ref`, and every other
+// mention of that bug in this crate is in the past tense. Keeping a
+// present-tense description of a fixed severe bug as the reason for a
+// coverage gap is worse than the gap.
+//
+// What remains true is only that reaching the branch needs a confirmed
+// `review.reassigned` moving the chain past an old nomination link, which is
+// several published events away in a CLI test. The equivalent rule on the
+// *merge-ready* side -- an authorization the chain never accepted -- is
+// covered at unit level by `merge_ready::tests::rejects_an_authorization_the_
+// chain_never_accepted_after_a_reassignment`, which is where the security
+// consequence actually lived.
 
 // ======================================================= merge-ready (gate 8)
 //

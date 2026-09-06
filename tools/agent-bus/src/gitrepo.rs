@@ -738,7 +738,11 @@ pub fn commit_message_trailers(dir: &Path, rev: &str) -> AbResult<Vec<(String, S
     Ok(trailers)
 }
 
-pub fn run_stdin(dir: &Path, args: &[&str], stdin: &str) -> AbResult<GitOutput> {
+/// Runs a git subcommand with `stdin`, **hermetically** -- see
+/// [`ConfigPolicy::Hermetic`]. The name says `stdin`, so the policy is said
+/// here instead: a caller that needs the operator's configuration (anything
+/// touching a remote) must not reach for this one.
+pub(crate) fn run_stdin(dir: &Path, args: &[&str], stdin: &str) -> AbResult<GitOutput> {
     if let Some(out) = mock::intercept(dir, args, Some(stdin)) {
         return out;
     }
@@ -812,6 +816,25 @@ fn pinned_merge_config_args() -> Vec<&'static str> {
 /// and the coordinator would then reject the reviewer's honest authorization
 /// with a mismatch it cannot explain.
 fn refuse_ambient_attributes(dir: &Path) -> AbResult<()> {
+    // Measured with `GIT_TRACE=1`: on a partial clone, `merge-tree` reading a
+    // blob it does not have runs a fetch underneath -- object count went up
+    // mid-merge. That fetch inherits this command's environment, and
+    // candidate construction is deliberately hermetic, so it runs with no
+    // credential helper, no `url.<base>.insteadOf`, no proxy, and with stdin
+    // closed so no prompt can be answered. Against a private remote it fails
+    // and surfaces as "could not cleanly merge", blaming the merge for a
+    // credentials problem.
+    //
+    // Refused rather than papered over. Making the merge inherit
+    // configuration would reopen the reproducibility hole this policy exists
+    // to close, and pre-hydrating the objects is real work with its own
+    // failure modes; neither belongs behind a silent fallback.
+    if crate::gitobjects::Libgit2Reader::open(dir)?.is_partial_clone() {
+        return Err(invalid(
+            "this repository is a partial clone, and candidate construction refuses to run in              one: the merge reads blob content, which makes git fetch missing objects              mid-merge, and that fetch cannot authenticate because construction is              deliberately insulated from the operator's git configuration. Use a full clone              for the host that prepares merges, or hydrate it first with `git fetch              --refetch --filter=`."
+                .to_string(),
+        ));
+    }
     let path = common_dir(dir)?.join("info").join("attributes");
     if path.exists() {
         return Err(invalid(format!(
@@ -936,12 +959,42 @@ pub fn tag_lightweight(dir: &Path, name: &str, target: &str) -> AbResult<()> {
         .map_err(|e| invalid(format!("{name} is not a usable tag name: {e}")))?;
     let g = crate::gitobjects::Libgit2Reader::open(dir)?;
     let target = resolve_required(&g, target)?;
+    // Re-tagging the *same* target is a no-op, not a violation.
+    //
+    // AGENT_REVIEW.md section 7 makes the candidate tag immutable, and
+    // `compare_and_set(.., None, ..)` enforces that -- but it also made
+    // `prepare-merge` non-idempotent, and both the tag name and the target
+    // are deterministic functions of `(previous_main, reviewed_commit,
+    // reviewer)`. So a reviewer whose tag was created locally and whose push
+    // then failed (network, credentials) could never retry: the second run
+    // died at this call with "already exists ... another writer created it
+    // first; re-read the current tip and retry", which is false -- it was
+    // themselves -- and unactionable, since retrying cannot help. Meanwhile
+    // the authorization stays unverifiable forever, because the tag never
+    // reached the remote. Recovery required a manual `git tag -d`.
+    //
+    // Immutability is unaffected: a *different* target under the same name is
+    // still refused below, which is the case the rule is actually about.
+    if let Some(existing) = crate::gitobjects::RefStore::resolve(&g, refname.as_str())? {
+        if existing == target {
+            return Ok(());
+        }
+    }
     crate::gitobjects::RefStore::compare_and_set(&g, refname.as_str(), None, &target)
 }
 
 /// Whether `remote` actually has a tag named `name` pointing at `target` --
 /// a real `ls-remote` network round trip, not a check against anything
-/// already fetched into the local repository. A local-only existence check
+/// already fetched into the local repository.
+///
+/// One limit worth stating, because a caller could otherwise over-trust this:
+/// the remote spec is resolved by `git`, under the operator's configuration,
+/// which transport deliberately inherits. A host with a `url.<base>.insteadOf`
+/// rule can therefore have `remote` resolve somewhere other than where the
+/// name suggests. That is inherent to letting transport keep its
+/// configuration -- the same rule is what makes credentialed pushes work at
+/// all -- so this answers "the tag is fetchable from the remote this host
+/// resolves that name to", not "from the remote everyone else means". A local-only existence check
 /// alone cannot tell the difference between "this tag reached origin" and
 /// "this tag only ever existed in the reviewer's own clone" (AGENT_BUS_
 /// SCHEMA.md's linked validation, and every other agent, need the former) --
@@ -2183,6 +2236,40 @@ Agent-Bus-Agent: alice
         );
     }
 
+    /// A partial clone is refused, with the real thing: an actual
+    /// `--filter=blob:none` clone, not a hand-written config key, so the test
+    /// fails if git ever stops recording the promisor remote the way this
+    /// detection expects.
+    #[test]
+    fn candidate_construction_refuses_a_partial_clone() {
+        let (source, ours, theirs) = cleanly_mergeable_repo();
+        merge_tree_write_tree(source.path(), &ours, &theirs)
+            .expect("the full clone must merge cleanly");
+
+        let dest = tempfile::tempdir().unwrap();
+        let target = dest.path().join("partial");
+        let status = std::process::Command::new("git")
+            .args(["clone", "--quiet", "--filter=blob:none", "--no-checkout"])
+            .arg(source.path())
+            .arg(&target)
+            .status()
+            .unwrap();
+        assert!(status.success(), "fixture clone failed");
+
+        let g = crate::gitobjects::Libgit2Reader::open(&target).unwrap();
+        assert!(
+            g.is_partial_clone(),
+            "fixture proves nothing unless git actually recorded a promisor remote"
+        );
+
+        let err = merge_tree_write_tree(&target, &ours, &theirs)
+            .expect_err("a partial clone must be refused, not silently merged");
+        assert!(
+            err.to_string().contains("partial clone"),
+            "expected the partial-clone refusal, got: {err}"
+        );
+    }
+
     #[test]
     fn merge_tree_write_tree_produces_a_real_clean_merge() {
         let repo = init_repo();
@@ -2307,8 +2394,50 @@ Agent-Bus-Agent: alice
         );
     }
 
+    /// `prepare-merge` must be retryable after a failed push, and must still
+    /// refuse to move an existing candidate tag.
+    ///
+    /// The tag name and target are both deterministic functions of
+    /// `(previous_main, reviewed_commit, reviewer)`, so re-running the same
+    /// `prepare-merge` asks for the identical tag. Before this, the second
+    /// run died claiming another writer had created it -- false, and
+    /// unactionable -- while the candidate stayed unverifiable forever
+    /// because the tag had never reached the remote.
     /// The ordinary path: a lightweight tag must resolve back to exactly
     /// the target it was created at.
+    #[test]
+    fn retagging_the_same_candidate_is_idempotent_but_moving_it_is_still_refused() {
+        let repo = init_repo();
+        let first = rev_parse(repo.path(), "HEAD").unwrap();
+        commit_file(
+            repo.path(),
+            "other.txt",
+            "other
+",
+            "another commit",
+        );
+        let second = rev_parse(repo.path(), "HEAD").unwrap();
+        assert_ne!(first, second);
+
+        tag_lightweight(repo.path(), "agent-candidate/bob/x", &first).unwrap();
+        // The retry after a failed push: same name, same target.
+        tag_lightweight(repo.path(), "agent-candidate/bob/x", &first)
+            .expect("re-tagging the same target must be a no-op, not a conflict");
+        assert_eq!(
+            rev_parse(repo.path(), "refs/tags/agent-candidate/bob/x").unwrap(),
+            first,
+            "the tag must still point where it did"
+        );
+
+        // Immutability is untouched: a different target is still refused.
+        let err = tag_lightweight(repo.path(), "agent-candidate/bob/x", &second)
+            .expect_err("moving an existing candidate tag must be refused");
+        assert!(
+            err.to_string().contains("already exists"),
+            "unexpected error: {err}"
+        );
+    }
+
     #[test]
     fn tag_lightweight_creates_a_real_tag_pointing_at_the_target() {
         let repo = init_repo();

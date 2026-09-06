@@ -2725,6 +2725,14 @@ mod tests {
         let frontier = build_complete_frontier(dir.path(), &epoch).unwrap();
 
         let reader = crate::gitobjects::Libgit2Reader::open(dir.path()).unwrap();
+        // Explicit, so the loop below cannot become vacuous by the frontier
+        // turning up empty. `ObservedFrontier::complete` would reject that
+        // today, which makes this indirect rather than absent -- and indirect
+        // protection is the kind that quietly stops holding.
+        assert!(
+            !frontier.entries.is_empty(),
+            "a complete frontier must name at least the coordinator"
+        );
         for entry in frontier.entries.values() {
             let stream_tip = crate::stream::read_stream_tip(dir.path(), &entry.agent)
                 .unwrap()
