@@ -2814,3 +2814,77 @@ fn succeed_before_genesis_fails_cleanly() {
         .failure()
         .stderr(predicate::str::contains("run `genesis` first"));
 }
+
+/// M1 regression. `spawn_and_wait` strips repository-*location* variables
+/// from every git subprocess; an earlier revision also stripped every
+/// `GIT_CONFIG_*` variable, which silently broke pushing on any host that
+/// supplies its remote configuration that way -- `GIT_CONFIG_COUNT` carrying
+/// `credential.helper` or `http.<url>.extraheader` is how CI injects a token,
+/// and publication is the coordinator's sole job, so a host that cannot push
+/// stalls the bus (AGENT_COORDINATION_EVOLUTION.md section 2.3).
+///
+/// The remote here is an alias that resolves *only* through an `insteadOf`
+/// rule injected the same way. The second half of the test is the control:
+/// without the injection the same command must fail, so a pass cannot come
+/// from the alias being reachable by some other means.
+#[test]
+fn transport_still_honors_configuration_injected_through_the_environment() {
+    let (origin, repo) = fresh_bus();
+    let alias = "agentbus-alias:";
+    let insteadof_key = format!("url.{}.insteadOf", path_str(origin.path()));
+
+    // Control: without the injected rule the alias resolves to nothing, so
+    // every ref is rejected. (`genesis` reports an unreachable remote in its
+    // receipt rather than as a nonzero exit, so the assertion is on
+    // `rejected`, not on the exit status.)
+    let control = run_json(bin().current_dir(repo.path()).args([
+        "genesis",
+        "--agent",
+        "coord1",
+        "--display-name",
+        "Coordinator One",
+        "--purpose",
+        "bootstraps the bus",
+        "--host",
+        "host1",
+        "--remote",
+        alias,
+    ]));
+    assert!(
+        !control["rejected"].as_array().unwrap().is_empty(),
+        "fixture is not proving anything unless the bare alias fails: {control}"
+    );
+    let _ = insteadof_key;
+
+    // Same command, same alias, with the `insteadOf` rule supplied the way CI
+    // supplies credentials. This must now publish.
+    let (origin2, repo2) = fresh_bus();
+    let injected = run_json(
+        bin()
+            .current_dir(repo2.path())
+            .args([
+                "genesis",
+                "--agent",
+                "coord1",
+                "--display-name",
+                "Coordinator One",
+                "--purpose",
+                "bootstraps the bus",
+                "--host",
+                "host1",
+                "--remote",
+                alias,
+            ])
+            .env("GIT_CONFIG_COUNT", "1")
+            .env(
+                "GIT_CONFIG_KEY_0",
+                format!("url.{}.insteadOf", path_str(origin2.path())),
+            )
+            .env("GIT_CONFIG_VALUE_0", alias),
+    );
+    assert!(
+        injected["rejected"].as_array().unwrap().is_empty()
+            && !injected["published"].as_object().unwrap().is_empty(),
+        "transport must still honor GIT_CONFIG_* configuration: {injected}"
+    );
+}

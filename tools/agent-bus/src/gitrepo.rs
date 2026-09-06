@@ -175,17 +175,82 @@ extern "C" {
 /// failing if it outruns [`git_timeout`].
 ///
 /// The wait happens on a separate thread rather than by polling
+/// Which ambient git configuration a subprocess is allowed to see.
+///
+/// The distinction is load-bearing, and an earlier revision of this function
+/// got it wrong in the permissive-looking direction: it stripped every
+/// `GIT_CONFIG_*` variable for *all* subprocesses, which silently disarmed
+/// the standard mechanisms for giving a push its credentials --
+/// `GIT_CONFIG_COUNT` carrying `credential.helper` or `http.*.extraheader`
+/// (how CI injects a token) and `GIT_CONFIG_GLOBAL` pointing at a config
+/// outside an unwritable `$HOME`. Publication is the coordinator's sole job
+/// (AGENT_COORDINATION_EVOLUTION.md section 2.3), so a host that cannot push
+/// stalls the whole bus.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ConfigPolicy {
+    /// The operator's configuration is *wanted*: credential helpers,
+    /// `url.<base>.insteadOf`, proxies, `http.*`. Everything transport needs
+    /// to reach a remote at all.
+    Inherit,
+    /// The operator's configuration is a *hazard*, because the command's
+    /// output must depend only on its inputs: AGENT_REVIEW.md section 7
+    /// requires a merge candidate to be byte-identically reconstructible on
+    /// another host, and `interpret-trailers --parse` decides which commits
+    /// carry an `Agent-Bus-Agent` trailer at all.
+    ///
+    /// Removing the variables is not sufficient, which is why this forces
+    /// values rather than only unsetting: the ambient `~/.gitconfig` is read
+    /// precisely when `GIT_CONFIG_GLOBAL` is *absent*. Measured against a
+    /// global config defining a `merge.<driver>.driver` and a
+    /// `core.attributesFile` selecting it, removal alone still produced a
+    /// different tree for the same two commits; forcing produced the clean
+    /// one.
+    Hermetic,
+}
+
+impl ConfigPolicy {
+    fn apply(self, command: &mut Command) {
+        match self {
+            ConfigPolicy::Inherit => {}
+            ConfigPolicy::Hermetic => {
+                // Injection at `-c` precedence, which libgit2 never sees.
+                // Dropping `GIT_CONFIG_COUNT` neutralizes the indexed
+                // `_KEY_<n>`/`_VALUE_<n>` pairs, which git reads only
+                // through it. This half is not redundant with the forcing
+                // below: with the count still set, an injected
+                // `trailer.separators` was measured to survive
+                // `GIT_CONFIG_GLOBAL=/dev/null` and make every trailer in a
+                // commit message vanish from `--parse`.
+                command.env_remove("GIT_CONFIG_PARAMETERS");
+                command.env_remove("GIT_CONFIG_COUNT");
+                // `/dev/null` is git's own documented spelling of "no such
+                // config file", honored by git-for-windows too.
+                command.env("GIT_CONFIG_GLOBAL", "/dev/null");
+                command.env("GIT_CONFIG_SYSTEM", "/dev/null");
+                command.env("GIT_CONFIG_NOSYSTEM", "1");
+                // The system *attributes* file is reachable through no
+                // `GIT_CONFIG_*` variable at all and needs its own switch.
+                command.env("GIT_ATTR_NOSYSTEM", "1");
+            }
+        }
+    }
+}
+
 /// `try_wait` in a loop. Polling costs either latency (a sleep between
 /// checks, paid by every fast call) or CPU (a tight spin); a blocking wait
 /// on a thread costs neither, and `recv_timeout` gives the deadline for
 /// free. That matters here because these are the calls left on the hot
 /// publication path.
-fn run_with_deadline(mut command: Command, what: &str) -> AbResult<GitOutput> {
+fn run_with_deadline(
+    mut command: Command,
+    what: &str,
+    policy: ConfigPolicy,
+) -> AbResult<GitOutput> {
     command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    spawn_and_wait(command, what, None, git_timeout())
+    spawn_and_wait(command, what, None, git_timeout(), policy)
 }
 
 /// [`run_with_deadline`], but writing `stdin_text` to the child first.
@@ -193,12 +258,13 @@ fn run_with_deadline_stdin(
     mut command: Command,
     what: &str,
     stdin_text: &str,
+    policy: ConfigPolicy,
 ) -> AbResult<GitOutput> {
     command
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    spawn_and_wait(command, what, Some(stdin_text), git_timeout())
+    spawn_and_wait(command, what, Some(stdin_text), git_timeout(), policy)
 }
 
 /// `timeout` is a parameter rather than read from [`git_timeout`] here so a
@@ -210,6 +276,7 @@ fn spawn_and_wait(
     what: &str,
     stdin_text: Option<&str>,
     timeout: std::time::Duration,
+    policy: ConfigPolicy,
 ) -> AbResult<GitOutput> {
     // The two halves of this crate must agree on which repository they are
     // talking about. `git` honors `GIT_DIR`/`GIT_WORK_TREE` in preference to
@@ -232,22 +299,17 @@ fn spawn_and_wait(
     // set, `merge-tree --write-tree` writes its tree into that directory and
     // the in-process `commit_with_identity` cannot find it.
     //
-    // The configuration variables matter for a different reason. `git` honors
-    // `GIT_CONFIG_PARAMETERS` and the `GIT_CONFIG_COUNT`/`_KEY_<n>`/`_VALUE_
-    // <n>` trio at the same precedence as `-c`, and libgit2 honors none of
-    // them -- so an agent-bus invoked from inside a `git -c ...` process or a
-    // git alias would run `merge-tree` under configuration the in-process half
-    // never sees. That is a reproducibility hazard for the *pinned* ORT merge
-    // specifically, where AGENT_REVIEW.md section 7 requires every host to
-    // produce a byte-identical tree from the same inputs. The subprocess this
-    // replaced already removed `GIT_CONFIG_COUNT` by hand for exactly that
-    // reason; this generalizes it rather than inventing it.
+    // Repository *location* is stripped unconditionally, for every caller:
+    // it is the one class where the two halves of this crate would disagree
+    // about which repository they are talking about. Ambient *configuration*
+    // is not a single question with a single answer -- see [`ConfigPolicy`],
+    // applied below -- because transport needs the operator's configuration
+    // and candidate construction must be insulated from it.
     //
-    // Everything transport needs is deliberately left alone --
-    // `GIT_SSH_COMMAND`, `GIT_ASKPASS`, `GIT_TERMINAL_PROMPT`, `GIT_SSL_*`,
-    // `GIT_PROXY_COMMAND` and the credential-helper configuration all survive.
+    // Nothing transport needs is touched here: `GIT_SSH_COMMAND`,
+    // `GIT_ASKPASS`, `GIT_TERMINAL_PROMPT`, `GIT_SSL_*`, `GIT_PROXY_COMMAND`
+    // and the credential-helper configuration all survive both policies.
     for var in [
-        // Repository location.
         "GIT_DIR",
         "GIT_WORK_TREE",
         "GIT_COMMON_DIR",
@@ -257,17 +319,11 @@ fn spawn_and_wait(
         "GIT_NAMESPACE",
         "GIT_CEILING_DIRECTORIES",
         "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-        // Configuration injected at `-c` precedence. Removing `GIT_CONFIG_
-        // COUNT` neutralizes the indexed `_KEY_<n>`/`_VALUE_<n>` pairs, which
-        // git only consults through it.
-        "GIT_CONFIG_PARAMETERS",
-        "GIT_CONFIG_COUNT",
-        "GIT_CONFIG_GLOBAL",
-        "GIT_CONFIG_SYSTEM",
-        "GIT_CONFIG_NOSYSTEM",
     ] {
         command.env_remove(var);
     }
+
+    policy.apply(&mut command);
 
     #[cfg(unix)]
     {
@@ -340,7 +396,21 @@ pub fn run(dir: &Path, args: &[&str]) -> AbResult<GitOutput> {
     }
     let mut command = Command::new("git");
     command.arg("-C").arg(dir).args(args);
-    run_with_deadline(command, &format!("{args:?}"))
+    run_with_deadline(command, &format!("{args:?}"), ConfigPolicy::Inherit)
+}
+
+/// [`run`], but insulated from the operator's git configuration.
+///
+/// Only for commands whose output must depend on nothing but their inputs.
+/// Using this for transport would break pushing on any host that supplies
+/// credentials through configuration, which is most CI.
+fn run_hermetic(dir: &Path, args: &[&str]) -> AbResult<GitOutput> {
+    if let Some(out) = mock::intercept(dir, args, None) {
+        return out;
+    }
+    let mut command = Command::new("git");
+    command.arg("-C").arg(dir).args(args);
+    run_with_deadline(command, &format!("{args:?}"), ConfigPolicy::Hermetic)
 }
 
 /// Run a git command and turn a nonzero exit into an error.
@@ -360,7 +430,7 @@ pub fn run_ok(dir: &Path, args: &[&str]) -> AbResult<String> {
 pub fn version() -> AbResult<String> {
     let mut command = Command::new("git");
     command.arg("--version");
-    let out = run_with_deadline(command, "--version")?;
+    let out = run_with_deadline(command, "--version", ConfigPolicy::Inherit)?;
     let s = out.stdout.trim().to_string();
     // "git version 2.53.0.windows.1" -> "2.53.0"
     let ver = s
@@ -618,7 +688,12 @@ pub fn run_stdin(dir: &Path, args: &[&str], stdin: &str) -> AbResult<GitOutput> 
     }
     let mut command = Command::new("git");
     command.arg("-C").arg(dir).args(args);
-    run_with_deadline_stdin(command, &format!("{args:?}"), stdin)
+    // Hermetic: the sole production caller is `interpret-trailers --parse`,
+    // which decides which commits carry an `Agent-Bus-Agent` trailer and so
+    // gates merge authorization. An ambient `trailer.separators` was measured
+    // to make every trailer in a well-formed message vanish from `--parse`,
+    // which would report a properly-attributed commit as unattributed.
+    run_with_deadline_stdin(command, &format!("{args:?}"), stdin, ConfigPolicy::Hermetic)
 }
 
 /// `git merge-tree --write-tree` a no-conflict ORT merge of `theirs` into
@@ -643,13 +718,24 @@ fn pinned_merge_config_args() -> Vec<&'static str> {
         "merge.renames=true",
         "-c",
         "diff.renameLimit=0",
+        // Measured, not assumed. `core.attributesFile` *defaults* to
+        // `$XDG_CONFIG_HOME/git/attributes`, which git reads when the key is
+        // unset -- so it is reached through neither `GIT_CONFIG_GLOBAL` nor
+        // `GIT_CONFIG_COUNT` and survives every neutralization in
+        // [`ConfigPolicy::Hermetic`]. With a `* merge=<driver>` line in that
+        // file, `merge-tree` produced a different tree for the same two
+        // commits; pinning the key produced the clean one. Without this,
+        // section 7's "Windows and Linux must produce the same tree" is
+        // contingent on the operator's home directory.
+        "-c",
+        "core.attributesFile=/dev/null",
     ]
 }
 
 pub fn merge_tree_write_tree(dir: &Path, ours: &str, theirs: &str) -> AbResult<String> {
     let mut args = pinned_merge_config_args();
     args.extend(["merge-tree", "--write-tree", "--name-only", ours, theirs]);
-    let out = run(dir, &args)?;
+    let out = run_hermetic(dir, &args)?;
     if !out.success {
         return Err(invalid(format!(
             "merge-tree could not cleanly merge {theirs} into {ours}: {}",
@@ -1131,6 +1217,7 @@ mod outer_tests {
             "test-hang",
             None,
             std::time::Duration::from_millis(300),
+            ConfigPolicy::Inherit,
         )
         .unwrap_err();
         let elapsed = started.elapsed();
@@ -1167,6 +1254,7 @@ mod outer_tests {
             "test-hang",
             None,
             std::time::Duration::from_millis(300),
+            ConfigPolicy::Inherit,
         )
         .unwrap_err()
         .to_string();
@@ -1243,6 +1331,151 @@ mod outer_tests {
     use super::*;
     use crate::gitrepo::mock::MockGit;
     use std::path::PathBuf;
+
+    // ------------------------------------------- ambient configuration
+
+    /// The mechanism, asserted exactly: `Hermetic` must both *remove* the
+    /// `-c`-precedence injection variables and *force* the file-location
+    /// ones. Removing alone is insufficient -- git reads the operator's
+    /// `~/.gitconfig` precisely when `GIT_CONFIG_GLOBAL` is absent -- and
+    /// forcing alone is insufficient, because `GIT_CONFIG_COUNT` injection
+    /// is honored independently of it. Both halves were measured against
+    /// real git before being written down here.
+    #[test]
+    fn the_hermetic_policy_both_removes_and_forces_the_configuration_channels() {
+        let mut command = Command::new("git");
+        ConfigPolicy::Hermetic.apply(&mut command);
+        let seen: std::collections::BTreeMap<String, Option<String>> = command
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+
+        // Removed (`None` == `env_remove`).
+        assert_eq!(seen.get("GIT_CONFIG_PARAMETERS"), Some(&None));
+        assert_eq!(seen.get("GIT_CONFIG_COUNT"), Some(&None));
+        // Forced.
+        assert_eq!(
+            seen.get("GIT_CONFIG_GLOBAL"),
+            Some(&Some("/dev/null".to_string()))
+        );
+        assert_eq!(
+            seen.get("GIT_CONFIG_SYSTEM"),
+            Some(&Some("/dev/null".to_string()))
+        );
+        assert_eq!(
+            seen.get("GIT_CONFIG_NOSYSTEM"),
+            Some(&Some("1".to_string()))
+        );
+        assert_eq!(seen.get("GIT_ATTR_NOSYSTEM"), Some(&Some("1".to_string())));
+    }
+
+    /// The other half of the contract, and the one whose absence broke
+    /// pushing: transport must see the operator's configuration untouched.
+    #[test]
+    fn the_inherit_policy_changes_no_configuration_at_all() {
+        let mut command = Command::new("git");
+        ConfigPolicy::Inherit.apply(&mut command);
+        assert_eq!(
+            command.get_envs().count(),
+            0,
+            "Inherit must not add, remove or override any environment variable"
+        );
+    }
+
+    /// `core.attributesFile` needs its own pin because its *default* --
+    /// `$XDG_CONFIG_HOME/git/attributes` -- is read when the key is unset,
+    /// and is therefore reachable through no `GIT_CONFIG_*` variable at all.
+    ///
+    /// This drives real `git merge-tree` three ways over the same two
+    /// commits: with a hostile attributes file plus the driver it names,
+    /// unpinned (the tree changes); pinned (the tree is the clean one); and
+    /// with no hostile configuration at all (establishing what "clean"
+    /// means). Without the middle case a reader cannot tell whether the pin
+    /// does anything, and without the first the test would pass even if the
+    /// channel did not exist.
+    #[test]
+    fn the_attributes_file_pin_closes_a_channel_no_environment_variable_reaches() {
+        let repo = init_repo();
+        let path = repo.path();
+        std::fs::write(path.join("f.txt"), "line1\nline2\n").unwrap();
+        git(path, &["add", "f.txt"]);
+        git(path, &["commit", "-q", "-m", "base"]);
+        git(path, &["checkout", "-q", "-b", "left"]);
+        commit_file(path, "f.txt", "LEFT\nline2\n", "left");
+        git(path, &["checkout", "-q", "main"]);
+        git(path, &["checkout", "-q", "-b", "right"]);
+        commit_file(path, "f.txt", "RIGHT\nline2\n", "right");
+
+        // A hostile "home": an attributes file selecting a merge driver that
+        // resolves the conflict instead of leaving markers.
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join("git")).unwrap();
+        std::fs::write(home.path().join("git/attributes"), "* merge=takeours\n").unwrap();
+
+        let merge = |pin_attrs: bool, hostile: bool| -> String {
+            let mut c = Command::new("git");
+            c.arg("-C").arg(path);
+            for a in [
+                "-c",
+                "merge.conflictStyle=merge",
+                "-c",
+                "core.autocrlf=false",
+            ] {
+                c.arg(a);
+            }
+            if pin_attrs {
+                c.args(["-c", "core.attributesFile=/dev/null"]);
+            }
+            if hostile {
+                c.env("XDG_CONFIG_HOME", home.path());
+                // The driver definition itself may arrive by any route; what
+                // matters is that the *attributes* half is unreachable by
+                // environment.
+                c.env("GIT_CONFIG_COUNT", "1");
+                c.env("GIT_CONFIG_KEY_0", "merge.takeours.driver");
+                c.env("GIT_CONFIG_VALUE_0", "cp %B %A");
+            } else {
+                c.env("GIT_CONFIG_GLOBAL", "/dev/null");
+                c.env("GIT_CONFIG_NOSYSTEM", "1");
+            }
+            c.args(["merge-tree", "--write-tree", "--name-only", "left", "right"]);
+            let out = c.output().unwrap();
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_string()
+        };
+
+        let clean = merge(false, false);
+        assert!(
+            !clean.is_empty(),
+            "fixture: the clean merge must produce a tree"
+        );
+        assert_ne!(
+            merge(false, true),
+            clean,
+            "fixture is not proving anything unless the ambient attributes file \
+             actually changes the merge result"
+        );
+        assert_eq!(
+            merge(true, true),
+            clean,
+            "pinning core.attributesFile must make the merge independent of the \
+             operator's home directory (AGENT_REVIEW.md section 7)"
+        );
+        assert!(
+            pinned_merge_config_args()
+                .windows(2)
+                .any(|w| { w[0] == "-c" && w[1] == "core.attributesFile=/dev/null" }),
+            "the pin this test justifies must actually be in the pinned set"
+        );
+    }
 
     /// Run a real `git` subcommand and assert it succeeded -- for test setup
     /// only, never for the behavior under test itself. Mirrors the pattern
