@@ -187,7 +187,7 @@ extern "C" {
 /// (AGENT_COORDINATION_EVOLUTION.md section 2.3), so a host that cannot push
 /// stalls the whole bus.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum ConfigPolicy {
+pub(crate) enum ConfigPolicy {
     /// The operator's configuration is *wanted*: credential helpers,
     /// `url.<base>.insteadOf`, proxies, `http.*`. Everything transport needs
     /// to reach a remote at all.
@@ -208,8 +208,34 @@ enum ConfigPolicy {
     Hermetic,
 }
 
+// The policy the most recent `spawn_and_wait` on *this thread* ran under.
+//
+// A test seam, for a gap unit tests could not otherwise reach: asserting what
+// `ConfigPolicy::Hermetic` does proves nothing about whether a given call
+// site uses it, and mutation testing showed exactly that -- switching
+// `merge_tree_write_tree` back to the inheriting `run` left the whole suite
+// green. Observing it directly is the only honest alternative to setting a
+// hostile `XDG_CONFIG_HOME` in the test process, which is global to every
+// test running beside it.
+//
+// Thread-local rather than global for that same reason: the call under test
+// and the assertion happen on one thread, so a sibling test cannot satisfy
+// or clobber it.
+#[cfg(test)]
+thread_local! {
+    static LAST_POLICY: std::cell::Cell<Option<ConfigPolicy>> =
+        const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn last_config_policy() -> Option<ConfigPolicy> {
+    LAST_POLICY.with(|p| p.get())
+}
+
 impl ConfigPolicy {
     fn apply(self, command: &mut Command) {
+        #[cfg(test)]
+        LAST_POLICY.with(|p| p.set(Some(self)));
         match self {
             ConfigPolicy::Inherit => {}
             ConfigPolicy::Hermetic => {
@@ -1730,9 +1756,88 @@ mod outer_tests {
         assert!(!out.stderr.is_empty(), "{out:?}");
     }
 
+    /// The *wiring*, not the mechanism.
+    ///
+    /// `the_hermetic_policy_both_removes_and_forces_the_configuration_channels`
+    /// proves what `ConfigPolicy::Hermetic` does; it says nothing about
+    /// whether candidate construction uses it. Mutation testing showed the
+    /// difference mattered: switching this call back to the inheriting `run`
+    /// left all 549 tests green, which would have silently reopened
+    /// AGENT_REVIEW.md section 7's reproducibility requirement.
+    ///
+    /// Transport is asserted in the same test, because the two halves of the
+    /// split only mean anything together -- an implementation that made
+    /// everything hermetic would satisfy the first assertion alone.
     /// The success path: a real, cleanly-mergeable pair of branches must
     /// produce a real, resolvable tree object containing both sides'
     /// changes.
+    #[test]
+    fn candidate_construction_runs_hermetic_while_transport_still_inherits() {
+        let repo = init_repo();
+        git(repo.path(), &["checkout", "-q", "-b", "theirs"]);
+        commit_file(
+            repo.path(),
+            "theirs.txt",
+            "theirs
+",
+            "add theirs.txt",
+        );
+        let theirs_tip = rev_parse(repo.path(), "HEAD").unwrap();
+        git(repo.path(), &["checkout", "-q", "main"]);
+        commit_file(
+            repo.path(),
+            "ours.txt",
+            "ours
+",
+            "add ours.txt",
+        );
+        let ours_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        merge_tree_write_tree(repo.path(), &ours_tip, &theirs_tip).unwrap();
+        assert_eq!(
+            last_config_policy(),
+            Some(ConfigPolicy::Hermetic),
+            "merge-tree must not see the operator's configuration"
+        );
+
+        // A remote operation, which must keep it.
+        let origin = init_bare_origin();
+        let remote = origin.path().display().to_string();
+        let _ = remote_refs_existing(repo.path(), &remote, &["refs/heads/main".to_string()]);
+        assert_eq!(
+            last_config_policy(),
+            Some(ConfigPolicy::Inherit),
+            "transport must still see credential helpers and url rewrites"
+        );
+    }
+
+    /// The trailer parse decides which commits carry an `Agent-Bus-Agent`
+    /// trailer, so it gates merge authorization; an ambient
+    /// `trailer.separators` was measured to make every trailer in a
+    /// well-formed message vanish from `--parse`.
+    #[test]
+    fn the_trailer_parse_runs_hermetic() {
+        let repo = init_repo();
+        commit_file(
+            repo.path(),
+            "x.txt",
+            "x
+",
+            "subject
+
+Agent-Bus-Agent: alice",
+        );
+        let head = rev_parse(repo.path(), "HEAD").unwrap();
+        let trailers = commit_message_trailers(repo.path(), &head).unwrap();
+        assert!(
+            trailers
+                .iter()
+                .any(|(k, v)| k == "Agent-Bus-Agent" && v == "alice"),
+            "fixture must produce a real trailer: {trailers:?}"
+        );
+        assert_eq!(last_config_policy(), Some(ConfigPolicy::Hermetic));
+    }
+
     #[test]
     fn merge_tree_write_tree_produces_a_real_clean_merge() {
         let repo = init_repo();

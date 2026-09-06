@@ -97,6 +97,34 @@ pub(crate) fn check_merge_ready(
             "reviewer is not the accepted eligible reviewer for this nomination",
         ));
     }
+    // The authorization must be one the chain actually *accepted*, not merely
+    // an event that exists.
+    //
+    // Without this, every check in this function is reachable around rather
+    // than through. `apply_review_merge_authorized` treats an authorization
+    // naming a superseded nomination link as a deliberate no-op (it returns
+    // `Ok(())` early rather than `Err`, so one inapplicable event cannot make
+    // a whole stream unreducible), and `coordinator::verify_review_merge_
+    // authorized` returns early on the same condition. Both are right on
+    // their own terms -- but the event still lands in `state.events`, and
+    // `state.review_chain` maps *any* nomination link to the chain root, so
+    // looking it up here found it anyway. After an ordinary reassignment
+    // round trip that leaves the same reviewer current, an authorization
+    // citing the stale link had passed *no* checks at all -- not
+    // `verify_authorship`, not `reconstruct_candidate`, not the candidate-tag
+    // fetchability probe, not `reviewed_scope` equality -- and this gate
+    // still reported it ready to push.
+    //
+    // `chain.authorizations` is exactly the right witness: `apply` appends to
+    // it only after all of those checks have passed, so membership means
+    // "survived reduction", which is the property section 8 is asking about
+    // when it says the authorization must be "published on the fetched bus".
+    if !chain.authorizations.contains(authorization) {
+        return Err(invalid(format!(
+            "authorization {authorization} is not one this nomination chain accepted -- it              names nomination {} while the chain is now at {}, so it was reduced as a no-op              and none of the merge checks ever ran against it",
+            auth.nomination, chain.current_nomination
+        )));
+    }
     for f in chain.findings.values() {
         if f.disposition == FindingDisposition::Open {
             return Err(invalid(format!(
@@ -388,6 +416,15 @@ mod tests {
         );
         let auth_id = auth_env.id.clone();
         state.events.insert(auth_id.clone(), auth_env);
+        // What `apply_review_merge_authorized` does once its own checks pass.
+        // Without this the fixture would be exercising `check_merge_ready`
+        // against an authorization reduction never accepted -- which is
+        // precisely the bypass this module now refuses.
+        state
+            .review_chain_mut(&nomination)
+            .unwrap()
+            .authorizations
+            .push(auth_id.clone());
 
         (state, nomination, auth_id)
     }
@@ -797,6 +834,12 @@ mod tests {
         );
         let auth_id = auth_env.id.clone();
         state.events.insert(auth_id.clone(), auth_env);
+        // As above: mirror what reduction does once its checks pass.
+        state
+            .review_chain_mut(&nomination)
+            .unwrap()
+            .authorizations
+            .push(auth_id.clone());
         (state, auth_id)
     }
 
@@ -823,6 +866,84 @@ mod tests {
             .unwrap()
             .trim()
             .to_string()
+    }
+
+    /// The stale-nomination bypass, in full.
+    ///
+    /// `apply_review_merge_authorized` and
+    /// `coordinator::verify_review_merge_authorized` both treat an
+    /// authorization naming a superseded nomination link as a *no-op* rather
+    /// than an error -- deliberately, so one inapplicable event cannot make a
+    /// whole agent stream unreducible. The consequence nobody had covered is
+    /// that such an event still exists in `state.events`, and
+    /// `state.review_chain` resolves *any* nomination link to the chain root,
+    /// so this gate used to find it and run its own checks against a chain
+    /// that had never accepted it.
+    ///
+    /// That was a complete bypass, not a narrow one. Everything that actually
+    /// validates a candidate -- `verify_authorship`, `reconstruct_candidate`,
+    /// the candidate-tag fetchability probe, `reviewed_scope` equality,
+    /// finding dispositions -- lives behind those two early returns. A
+    /// reviewer who is legitimately current (after a reassignment round trip
+    /// that returns to them) could therefore authorize a candidate they built
+    /// themselves, over commits they authored themselves, with no candidate
+    /// tag ever pushed, and this gate would answer `ready`.
+    ///
+    /// The fixture is that round trip: the chain has moved to a newer
+    /// nomination link, the reviewer is still the current one, and the
+    /// authorization names the old link.
+    #[test]
+    fn rejects_an_authorization_the_chain_never_accepted_after_a_reassignment() {
+        let author = a("zoe");
+        let reviewer = a("aiden");
+        let (dir, _origin, remote, previous_main, feature_commit, candidate) =
+            git_fixture(&author, &reviewer);
+        let (mut state, auth_id) = state_with_authorization(
+            &author,
+            &reviewer,
+            &previous_main,
+            &feature_commit,
+            &candidate,
+            &["feature.txt"],
+        );
+
+        // Sanity: this exact authorization is accepted before the chain moves.
+        check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+            .expect("fixture must be valid before the reassignment");
+
+        // The chain moves on to a newer nomination link naming the same
+        // reviewer, and reduction drops the old authorization (a no-op), so
+        // it is no longer among the chain's accepted authorizations.
+        let root = state.review_chain(&auth_id).map(|c| c.root.clone());
+        let nomination = state
+            .review_chain_by_nomination
+            .keys()
+            .next()
+            .cloned()
+            .expect("fixture has one chain");
+        let newer = EventId::new(&author, 99);
+        {
+            let chain = state.review_chain_mut(&nomination).unwrap();
+            chain.nomination_events.push(newer.clone());
+            chain.current_nomination = newer.clone();
+            chain
+                .nomination_reviewer
+                .insert(newer.clone(), reviewer.clone());
+            chain.accepted_nominations.insert(newer.clone());
+            chain.authorizations.clear();
+        }
+        state
+            .review_chain_by_nomination
+            .insert(newer.clone(), nomination.clone());
+        let _ = root;
+
+        let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+            .expect_err("an authorization the chain never accepted must be refused");
+        assert!(
+            err.to_string()
+                .contains("not one this nomination chain accepted"),
+            "expected the never-accepted refusal, got: {err}"
+        );
     }
 
     #[test]

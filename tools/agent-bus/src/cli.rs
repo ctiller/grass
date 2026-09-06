@@ -918,7 +918,7 @@ fn prepare_merge(args: PrepareMergeArgs) -> AbResult<()> {
     // Before anything is constructed: this host's git must be the engine
     // version the bus pins, or the candidate it builds is unverifiable
     // everywhere else (AGENT_REVIEW.md section 7).
-    state.config.require_pinned_merge_engine()?;
+    crate::bootstrap::require_pinned_merge_engine(&state)?;
 
     let previous_main = crate::gitrepo::rev_parse(&paths.repo, "refs/heads/main")?;
     let expected_authors: BTreeSet<Agent> = chain.current_request.authors.iter().cloned().collect();

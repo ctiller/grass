@@ -464,7 +464,7 @@ fn verify_review_merge_authorized(
     // The verifying host must also be on the pinned engine: reconstructing
     // the candidate below with a different ORT version would disagree with a
     // perfectly honest reviewer and reject a valid authorization.
-    state.config.require_pinned_merge_engine()?;
+    crate::bootstrap::require_pinned_merge_engine(state)?;
     let expected_authors: std::collections::BTreeSet<Agent> =
         chain.current_request.authors.iter().cloned().collect();
     crate::merge_candidate::verify_authorship(
@@ -2205,6 +2205,55 @@ mod tests {
             drained.rejected[0].reason.contains("is not fetchable from"),
             "{}",
             drained.rejected[0].reason
+        );
+    }
+
+    /// The pinned-engine gate's *call site*, not the predicate.
+    ///
+    /// `bootstrap::pinned_engine_tests` proves what
+    /// `require_pinned_merge_engine` decides; it cannot see whether this
+    /// function calls it. Mutation testing showed that gap was real --
+    /// deleting the call from here left every suite green, because the test
+    /// host happens to run the pinned version, so the check was invisible
+    /// either way. Pinning a version nobody runs makes the call observable.
+    #[test]
+    fn the_authorization_gate_refuses_a_host_that_is_not_on_the_selected_engine() {
+        let f = build_review_fixture(Some("zoe"));
+        let candidate = crate::merge_candidate::reconstruct_candidate(
+            f.repo.path(),
+            &f.previous_main,
+            &f.feature_commit,
+            &f.reviewer,
+        )
+        .unwrap();
+
+        // A reduced state for this fixture, with the bus's selected engine
+        // moved to a version this host does not have.
+        let snapshot =
+            crate::sync::cached_snapshot(f.repo.path(), f.repo.path()).expect("reduce fixture");
+        let mut state = snapshot.state;
+        let epoch = EventId::new(&f.coord1, 987);
+        state.merge_engine_info.insert(
+            epoch.clone(),
+            (
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                short("0.0.0-not-a-real-git"),
+            ),
+        );
+        state.current_merge_engine_epoch = Some(epoch);
+
+        let d = match merge_authorized_candidate(&f, &candidate)
+            .typed_data()
+            .unwrap()
+        {
+            EventData::ReviewMergeAuthorized(d) => d,
+            other => panic!("fixture built the wrong event: {other:?}"),
+        };
+        let err = verify_review_merge_authorized(f.repo.path(), &f.remote, &state, &f.reviewer, &d)
+            .expect_err("a host off the selected engine must not verify a candidate");
+        assert!(
+            err.to_string().contains("0.0.0-not-a-real-git"),
+            "expected the selected-engine refusal, got: {err}"
         );
     }
 
