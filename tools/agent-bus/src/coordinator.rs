@@ -461,6 +461,10 @@ fn verify_review_merge_authorized(
     if chain.current_nomination != d.nomination {
         return Ok(());
     }
+    // The verifying host must also be on the pinned engine: reconstructing
+    // the candidate below with a different ORT version would disagree with a
+    // perfectly honest reviewer and reject a valid authorization.
+    state.config.require_pinned_merge_engine()?;
     let expected_authors: std::collections::BTreeSet<Agent> =
         chain.current_request.authors.iter().cloned().collect();
     crate::merge_candidate::verify_authorship(

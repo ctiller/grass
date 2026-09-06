@@ -52,6 +52,43 @@ impl BusConfig {
         })
     }
 
+    /// AGENT_REVIEW.md section 7 requires candidate construction to use "the
+    /// merge engine and exact version pinned in immutable `BUS.json` or the
+    /// currently selected `merge_engine.activated` epoch", and section 12's
+    /// fixture 13 requires rejecting "candidate construction with an unpinned
+    /// merge engine or helper options".
+    ///
+    /// [`BusConfig::new`] enforces this at *activation*, on whichever host
+    /// activated, and [`BusConfig::parse`] checks only the engine name -- so
+    /// every host afterwards could build candidates with whatever `git` it
+    /// happened to have. That is not hypothetical here: this repository's CI
+    /// runs a newer git than the pin, and ORT's cached-rename skip condition
+    /// and `xdl_change_compact()` both changed between the two. A reviewer on
+    /// the newer git publishes a candidate no other host can reconstruct, and
+    /// the mismatch surfaces on the coordinator as an unexplainable
+    /// verification failure rather than as this message.
+    ///
+    /// Checked against `self.merge_engine_version` rather than the
+    /// compile-time [`SUPPORTED_MERGE_ENGINE_VERSION`]: the authority is the
+    /// bus's own pin, so a bus activated against an older git keeps rejecting
+    /// a newer host even when this binary was built expecting the newer one.
+    pub fn require_pinned_merge_engine(&self) -> AbResult<()> {
+        if self.merge_engine != SUPPORTED_MERGE_ENGINE {
+            return Err(invalid(format!(
+                "this bus pins merge engine {}, which this helper cannot run",
+                self.merge_engine
+            )));
+        }
+        let installed = crate::gitrepo::version()?;
+        if installed != self.merge_engine_version {
+            return Err(invalid(format!(
+                "installed git {installed} is not the merge engine version this bus pins                  ({}); candidate construction refuses to run, because a tree built by a                  different engine version cannot be reconstructed by the hosts that must                  verify it",
+                self.merge_engine_version
+            )));
+        }
+        Ok(())
+    }
+
     pub fn object_id_len(&self) -> usize {
         ObjectId::expected_len(&self.object_format).unwrap_or(40)
     }
@@ -550,6 +587,61 @@ mod tests {
         assert!(
             err.to_string().contains("different display_name/purpose"),
             "{err}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod pinned_engine_tests {
+    use super::*;
+    use crate::scalars::ObjectId;
+
+    fn config_pinning(version: &str) -> BusConfig {
+        BusConfig {
+            object_format: "sha1".to_string(),
+            product_review_from: ObjectId::parse("0".repeat(40)).unwrap(),
+            merge_engine: SUPPORTED_MERGE_ENGINE.to_string(),
+            merge_engine_version: version.to_string(),
+        }
+    }
+
+    /// The host actually running the tests is on the pinned version (CI
+    /// installs it deliberately), so this is the accepting case.
+    #[test]
+    fn a_host_on_the_pinned_engine_version_may_construct_candidates() {
+        let installed = crate::gitrepo::version().unwrap();
+        config_pinning(&installed)
+            .require_pinned_merge_engine()
+            .unwrap();
+    }
+
+    /// AGENT_REVIEW.md section 12, fixture 13. The version compared against
+    /// is the *bus's* pin, not this binary's compile-time constant, so the
+    /// fixture pins a version nobody is running rather than mutating the
+    /// constant.
+    #[test]
+    fn a_host_on_a_different_engine_version_is_refused() {
+        let err = config_pinning("0.0.0-not-a-real-git")
+            .require_pinned_merge_engine()
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("0.0.0-not-a-real-git") && err.contains("candidate construction"),
+            "the error must name the pin it failed against: {err}"
+        );
+    }
+
+    #[test]
+    fn an_engine_this_helper_cannot_run_is_refused_before_git_is_consulted() {
+        let mut config = config_pinning("irrelevant");
+        config.merge_engine = "some-other-merge-engine".to_string();
+        let err = config
+            .require_pinned_merge_engine()
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("some-other-merge-engine"),
+            "expected the engine name to be refused, got: {err}"
         );
     }
 }

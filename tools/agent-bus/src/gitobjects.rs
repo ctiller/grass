@@ -449,13 +449,31 @@ impl RefStore for Libgit2Reader {
                 self.repo
                     .reference_matching(refname, new_oid, false, git2::Oid::ZERO_SHA1, &reason)
                     .map_err(|e| {
-                        // Only `Exists` is the race. A directory/file
-                        // collision (`refs/a` against an existing `refs/a/b`)
-                        // or a `new` that names no object are configuration
-                        // and caller bugs; telling the operator to "retry"
-                        // would invite an unbounded loop against something
-                        // retrying cannot fix.
-                        if e.code() == git2::ErrorCode::Exists {
+                        // Two distinct codes are both "another writer won",
+                        // and reading only the first was wrong in exactly the
+                        // case this branch exists for. libgit2's filesystem
+                        // backend checks `reference_path_available` *before*
+                        // taking the loose-ref lock and returns `Exists` from
+                        // there, so `Exists` is the writer that finished
+                        // before this one started. The writer that lands
+                        // inside the lock window -- the genuine sub-lock
+                        // race, and the reason this uses
+                        // `reference_matching` rather than `Repository::
+                        // reference` at all -- fails later, when the expected
+                        // old value is compared under the lock, and that
+                        // surfaces as `Modified`. Classifying `Modified` as
+                        // "retrying will not help" told the operator to give
+                        // up on precisely the retryable case.
+                        //
+                        // Everything else stays non-retryable: a
+                        // directory/file collision (`refs/a` against an
+                        // existing `refs/a/b`) or a `new` naming no object
+                        // are configuration and caller bugs, and inviting a
+                        // retry loop against those would spin forever.
+                        if matches!(
+                            e.code(),
+                            git2::ErrorCode::Exists | git2::ErrorCode::Modified
+                        ) {
                             return invalid(format!(
                                 "{refname} already exists, but was expected not to -- another                                  writer created it first; re-read the current tip and retry: {e}"
                             ));
@@ -709,7 +727,23 @@ impl Libgit2Reader {
         // sides have interleaved committer dates: for base->l1(t=100)->
         // l2(t=400) and base->r1(t=200)->r2(t=300) merged at M(t=500), git
         // gives `M l2 r2 r1 l1` and a topological walk gives `M r2 r1 l2 l1`.
-        // `Sort::NONE` is libgit2's spelling of that same date ordering.
+        // `Sort::NONE` is *not* libgit2's spelling of date ordering, and it
+        // is worth being precise about why it nevertheless produces it here:
+        // `git_revwalk_sorting` maps `GIT_SORT_NONE` to an explicitly
+        // unspecified order, and only `GIT_SORT_TIME` selects the time
+        // priority queue. Date order emerges because every walk built here
+        // calls `hide()`, which puts the walk in its limited mode, and that
+        // mode assembles its output through a date-ordered commit list --
+        // the same construction git itself uses.
+        //
+        // The dependency is therefore on `hide()`, not on `Sort::NONE`. A
+        // future method that walks without hiding anything (say, "everything
+        // reachable from this tip") would get libgit2's documented-arbitrary
+        // order while this trait's contract still promised `git rev-list`
+        // order, and no existing test would notice. Hence
+        // `range_matches_git_rev_list_order_across_a_date_skewed_merge` and
+        // `first_parent_range_matches_git_rev_list_order_...`, which compare
+        // against the real binary rather than against this reasoning.
         let mut sorting = git2::Sort::NONE;
         if oldest_first {
             sorting |= git2::Sort::REVERSE;
@@ -1675,6 +1709,96 @@ mod tests {
         assert_eq!(
             ours, theirs,
             "range must reproduce `git rev-list` order on a date-skewed merge"
+        );
+    }
+
+    /// The companion differential for the *other* load-bearing order.
+    ///
+    /// `range` had a real comparison against `git rev-list` on a date-skewed
+    /// merge; `first_parent_range` -- the one carrying `--reverse`, consumed
+    /// by `audit_main`, whose output is an insta golden -- had only a
+    /// membership test on a shape where the order was trivially forced. The
+    /// module contract says both orders are load-bearing and not
+    /// interchangeable, so both are now pinned against the real binary
+    /// rather than against the reasoning in the comments.
+    #[test]
+    fn first_parent_range_matches_git_rev_list_order_across_a_date_skewed_merge() {
+        let (repo, _head) = init_repo();
+
+        let commit_at = |name: &str, ts: i64| -> String {
+            std::fs::write(repo.path().join(format!("{name}.txt")), name).unwrap();
+            git(repo.path(), &["add", "-A"]);
+            let date = format!("@{ts} +0000");
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(repo.path())
+                .args(["commit", "-q", "-m", name])
+                .env("GIT_AUTHOR_DATE", &date)
+                .env("GIT_COMMITTER_DATE", &date)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git commit failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap()
+        };
+
+        let base = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        git(repo.path(), &["checkout", "-q", "-b", "left"]);
+        commit_at("l1", 1_700_000_100);
+        let l2 = commit_at("l2", 1_700_000_400);
+        git(repo.path(), &["checkout", "-q", "-b", "right", &base]);
+        commit_at("r1", 1_700_000_200);
+        let r2 = commit_at("r2", 1_700_000_300);
+
+        // First parent is the left side; the right side must not appear.
+        let tree = crate::gitrepo::rev_parse(repo.path(), &format!("{l2}^{{tree}}")).unwrap();
+        let merge = crate::gitrepo::commit_tree_deterministic(
+            repo.path(),
+            &tree,
+            &[l2.as_str(), r2.as_str()],
+            "merge",
+        )
+        .unwrap();
+
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        let ours: Vec<String> = g
+            .first_parent_range(
+                &ObjectId::parse(base.clone()).unwrap(),
+                &ObjectId::parse(merge.clone()).unwrap(),
+            )
+            .unwrap()
+            .into_iter()
+            .map(|id| id.into_string())
+            .collect();
+
+        let theirs: Vec<String> = crate::gitrepo::run_ok(
+            repo.path(),
+            &[
+                "rev-list",
+                "--first-parent",
+                "--reverse",
+                &format!("{base}..{merge}"),
+            ],
+        )
+        .unwrap()
+        .lines()
+        .map(|l| l.to_string())
+        .collect();
+
+        assert_eq!(
+            ours, theirs,
+            "first_parent_range must reproduce `git rev-list --first-parent --reverse` order"
+        );
+        assert!(
+            !ours.contains(&r2),
+            "the second parent's side must not appear in a first-parent walk"
+        );
+        assert!(
+            ours.len() >= 3,
+            "fixture must exercise a real range, got {ours:?}"
         );
     }
 
