@@ -536,6 +536,19 @@ mod tests {
         assert!(Agent::parse("2alice".into()).is_err());
         assert!(Agent::parse("_reserved".into()).is_err());
         assert!(Agent::is_reserved("_reserved"));
+
+        // The length bound, at the boundary. An agent name becomes a ref
+        // path component (`refs/heads/agent-events/<agent>`), so the bound is
+        // protocol-relevant rather than cosmetic -- and widening it by one
+        // was invisible to every test until now.
+        assert!(
+            Agent::parse("a".repeat(48)).is_ok(),
+            "48 characters is the documented maximum"
+        );
+        assert!(
+            Agent::parse("a".repeat(49)).is_err(),
+            "49 characters must be refused"
+        );
     }
 
     #[test]

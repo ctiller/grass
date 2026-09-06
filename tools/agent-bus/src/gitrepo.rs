@@ -457,6 +457,21 @@ pub fn version() -> AbResult<String> {
     let mut command = Command::new("git");
     command.arg("--version");
     let out = run_with_deadline(command, "--version", ConfigPolicy::Inherit)?;
+    // A nonzero exit here is not a version. A malformed `~/.gitconfig` makes
+    // `git --version` die with an empty stdout, and returning `Ok("")` sent
+    // that straight into the pinned-engine comparison, which then reported
+    // "installed git  is not the merge engine version this bus selects" --
+    // a confident, wrong diagnosis for a broken config file.
+    if !out.success {
+        return Err(AbError::Git(format!(
+            "git --version failed: {}",
+            if out.stderr.trim().is_empty() {
+                "(no output)"
+            } else {
+                out.stderr.trim()
+            }
+        )));
+    }
     let s = out.stdout.trim().to_string();
     // "git version 2.53.0.windows.1" -> "2.53.0"
     let ver = s
@@ -689,7 +704,22 @@ pub fn remote_refs_existing(
 pub fn commit_message_trailers(dir: &Path, rev: &str) -> AbResult<Vec<(String, String)>> {
     let g = crate::gitobjects::Libgit2Reader::open(dir)?;
     let body = crate::gitobjects::HistoryReader::commit_message(&g, &resolve_required(&g, rev)?)?;
-    let out = run_stdin(dir, &["interpret-trailers", "--parse"], &body)?;
+    // `trailer.separators` is repository-local configuration that
+    // `ConfigPolicy::Hermetic` does not reach, and it decides what counts as
+    // a trailer at all: measured, `separators=%` makes every trailer in a
+    // well-formed message vanish from `--parse`, which would report a
+    // properly attributed commit as unattributed and refuse an honest merge.
+    // Pinned to git's default, so behavior is unchanged where nobody set it.
+    let out = run_stdin(
+        dir,
+        &[
+            "-c",
+            "trailer.separators=:",
+            "interpret-trailers",
+            "--parse",
+        ],
+        &body,
+    )?;
     if !out.success {
         return Err(AbError::Git(format!(
             "interpret-trailers failed: {}",
@@ -744,6 +774,15 @@ fn pinned_merge_config_args() -> Vec<&'static str> {
         "merge.renames=true",
         "-c",
         "diff.renameLimit=0",
+        // Measured: same two commits, a directory renamed on one side and a
+        // file added into the old directory on the other, produced three
+        // different answers -- unset conflicts, `false` and `true` each
+        // yield a *different* clean tree. It is per-clone `.git/config`, so
+        // unlike a committed `.gitattributes` it is not repository content
+        // every host shares. Pinned to git's own default so behavior is
+        // unchanged where nobody set it.
+        "-c",
+        "merge.directoryRenames=conflict",
         // Measured, not assumed. `core.attributesFile` *defaults* to
         // `$XDG_CONFIG_HOME/git/attributes`, which git reads when the key is
         // unset -- so it is reached through neither `GIT_CONFIG_GLOBAL` nor
@@ -758,8 +797,44 @@ fn pinned_merge_config_args() -> Vec<&'static str> {
     ]
 }
 
+/// Refuse to construct a candidate in a repository carrying an
+/// `info/attributes` file.
+///
+/// `--attr-source` overrides the working tree and the index, and
+/// `core.attributesFile` is pinned, but `$GIT_COMMON_DIR/info/attributes` is
+/// consulted regardless of all three -- measured, and there is no git switch
+/// that suppresses it. It is also per-clone rather than repository content,
+/// so a candidate built under it is one no other host can reproduce, which is
+/// exactly what section 7 forbids.
+///
+/// Failing closed is the only honest option: the alternative is to build a
+/// tree that looks fine locally and cannot be reconstructed anywhere else,
+/// and the coordinator would then reject the reviewer's honest authorization
+/// with a mismatch it cannot explain.
+fn refuse_ambient_attributes(dir: &Path) -> AbResult<()> {
+    let path = common_dir(dir)?.join("info").join("attributes");
+    if path.exists() {
+        return Err(invalid(format!(
+            "{} exists; candidate construction refuses to run because git consults it no matter what this helper pins, so the resulting tree would depend on this clone rather than only on the commits being merged (AGENT_REVIEW.md section 7). Move the file aside, or commit those attributes so every host shares them.",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
 pub fn merge_tree_write_tree(dir: &Path, ours: &str, theirs: &str) -> AbResult<String> {
+    // AGENT_REVIEW.md section 7 asks for "repository attributes from
+    // `previous_main`", and without this the merge read them from whatever
+    // happens to be checked out. Measured: an *untracked* `.gitattributes` in
+    // the working tree changed the resulting tree for the same two commits.
+    // `ConfigPolicy::Hermetic` cannot reach this -- the file is repository
+    // content, not configuration -- and in the deployment AGENT_BUS.md
+    // specifies, many agents share one clone, so one stray file would move
+    // every candidate built on that host.
+    refuse_ambient_attributes(dir)?;
+    let attr_source = format!("--attr-source={ours}");
     let mut args = pinned_merge_config_args();
+    args.push(&attr_source);
     args.extend(["merge-tree", "--write-tree", "--name-only", ours, theirs]);
     let out = run_hermetic(dir, &args)?;
     if !out.success {
@@ -1590,7 +1665,12 @@ mod outer_tests {
         let repo = init_repo();
         let _guard = MockGit::new()
             .on(
-                &["interpret-trailers", "--parse"],
+                &[
+                    "-c",
+                    "trailer.separators=:",
+                    "interpret-trailers",
+                    "--parse",
+                ],
                 GitOutput::err("bad format"),
             )
             .install();
@@ -1727,7 +1807,12 @@ mod outer_tests {
         let repo = init_repo();
         let out = run_stdin(
             repo.path(),
-            &["interpret-trailers", "--parse"],
+            &[
+                "-c",
+                "trailer.separators=:",
+                "interpret-trailers",
+                "--parse",
+            ],
             "subject\n\nSigned-off-by: Alice <alice@example.com>",
         )
         .unwrap();
@@ -1836,6 +1921,266 @@ Agent-Bus-Agent: alice",
             "fixture must produce a real trailer: {trailers:?}"
         );
         assert_eq!(last_config_policy(), Some(ConfigPolicy::Hermetic));
+    }
+
+    /// Builds two branches that merge cleanly, and returns `(repo, ours,
+    /// theirs)`. They touch opposite ends of one file, so a merge driver or
+    /// an `-merge` attribute changes the result while an honest merge does
+    /// not -- which is what makes the attribute tests below falsifiable.
+    fn cleanly_mergeable_repo() -> (tempfile::TempDir, String, String) {
+        let repo = init_repo();
+        let p = repo.path();
+        std::fs::write(
+            p.join("f.txt"),
+            "l1
+l2
+l3
+l4
+l5
+",
+        )
+        .unwrap();
+        git(p, &["add", "f.txt"]);
+        git(p, &["commit", "-q", "-m", "base"]);
+        git(p, &["checkout", "-q", "-b", "ours"]);
+        commit_file(
+            p,
+            "f.txt",
+            "OURS
+l2
+l3
+l4
+l5
+",
+            "ours",
+        );
+        let ours = rev_parse(p, "HEAD").unwrap();
+        git(p, &["checkout", "-q", "main"]);
+        git(p, &["checkout", "-q", "-b", "theirs"]);
+        commit_file(
+            p,
+            "f.txt",
+            "l1
+l2
+l3
+l4
+THEIRS
+",
+            "theirs",
+        );
+        let theirs = rev_parse(p, "HEAD").unwrap();
+        git(p, &["checkout", "-q", "main"]);
+        (repo, ours, theirs)
+    }
+
+    /// AGENT_REVIEW.md section 7: "repository attributes from
+    /// `previous_main`". Before `--attr-source`, the merge read them from
+    /// whatever was checked out -- so an *untracked* file, which is not
+    /// repository content at all and which no other host has, moved the
+    /// candidate.
+    ///
+    /// Non-vacuous by construction: the same poison is shown to change the
+    /// answer when the attribute source is the working tree, so the test
+    /// fails both if the poison stops working and if the pin stops working.
+    #[test]
+    fn candidate_attributes_come_from_previous_main_not_the_working_tree() {
+        let (repo, ours, theirs) = cleanly_mergeable_repo();
+        let clean = merge_tree_write_tree(repo.path(), &ours, &theirs).unwrap();
+
+        std::fs::write(
+            repo.path().join(".gitattributes"),
+            "* -merge
+",
+        )
+        .unwrap();
+
+        // The poison is real: pointed at the working tree, git refuses the
+        // same merge outright.
+        let poisoned = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(pinned_merge_config_args())
+            .args(["merge-tree", "--write-tree", "--name-only", &ours, &theirs])
+            .output()
+            .unwrap();
+        assert!(
+            !poisoned.status.success(),
+            "fixture proves nothing unless the untracked file changes the merge"
+        );
+
+        // Taken from `previous_main`, it is invisible.
+        let with_pin = merge_tree_write_tree(repo.path(), &ours, &theirs).unwrap();
+        assert_eq!(
+            with_pin, clean,
+            "an untracked .gitattributes must not move the candidate"
+        );
+    }
+
+    /// The one attribute channel no git switch closes: `--attr-source`
+    /// overrides the worktree and index, `core.attributesFile` is pinned, and
+    /// `$GIT_COMMON_DIR/info/attributes` is still consulted over all three.
+    /// It is per-clone, so a candidate built under it is one no other host
+    /// can reproduce -- refused rather than silently host-dependent.
+    #[test]
+    fn candidate_construction_refuses_a_clone_carrying_info_attributes() {
+        let (repo, ours, theirs) = cleanly_mergeable_repo();
+        merge_tree_write_tree(repo.path(), &ours, &theirs)
+            .expect("fixture must merge cleanly before the file exists");
+
+        let info = common_dir(repo.path()).unwrap().join("info");
+        std::fs::create_dir_all(&info).unwrap();
+        std::fs::write(
+            info.join("attributes"),
+            "* -merge
+",
+        )
+        .unwrap();
+
+        let err = merge_tree_write_tree(repo.path(), &ours, &theirs)
+            .expect_err("info/attributes must be refused, not silently honored");
+        assert!(
+            err.to_string()
+                .contains("candidate construction refuses to run"),
+            "expected the ambient-attributes refusal, got: {err}"
+        );
+    }
+
+    /// `trailer.separators` is repository-local configuration, which the
+    /// hermetic policy does not reach, and it decides what counts as a
+    /// trailer at all -- so an unpinned parse would report a properly
+    /// attributed commit as unattributed and refuse an honest merge.
+    #[test]
+    fn the_trailer_parse_is_pinned_against_repository_local_configuration() {
+        let repo = init_repo();
+        commit_file(
+            repo.path(),
+            "x.txt",
+            "x
+",
+            "subject
+
+Agent-Bus-Agent: alice",
+        );
+        let head = rev_parse(repo.path(), "HEAD").unwrap();
+
+        // The poison is real: unpinned, this suppresses every trailer.
+        git(repo.path(), &["config", "trailer.separators", "%"]);
+        let unpinned = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["interpret-trailers", "--parse"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut c| {
+                use std::io::Write;
+                c.stdin.take().unwrap().write_all(
+                    b"subject
+
+Agent-Bus-Agent: alice
+",
+                )?;
+                c.wait_with_output()
+            })
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&unpinned.stdout).trim().is_empty(),
+            "fixture proves nothing unless the local config suppresses trailers"
+        );
+
+        let trailers = commit_message_trailers(repo.path(), &head).unwrap();
+        assert!(
+            trailers
+                .iter()
+                .any(|(k, v)| k == "Agent-Bus-Agent" && v == "alice"),
+            "the pinned parse must still see the trailer: {trailers:?}"
+        );
+    }
+
+    /// `merge.directoryRenames` is repository-local configuration, which the
+    /// hermetic policy does not reach, and it genuinely moves the answer:
+    /// with a directory renamed on one side and a file added into the old
+    /// directory on the other, `false` produces a *different clean tree* from
+    /// git's default. Per-clone configuration deciding candidate content is
+    /// exactly what section 7's "Windows and Linux must produce the same
+    /// tree" forbids, so it is pinned to the default.
+    #[test]
+    fn candidate_construction_is_pinned_against_local_directory_rename_configuration() {
+        let repo = init_repo();
+        let p = repo.path();
+        std::fs::create_dir_all(p.join("old")).unwrap();
+        for i in 0..5 {
+            std::fs::write(
+                p.join("old").join(format!("f{i}.txt")),
+                format!(
+                    "c{i}
+"
+                ),
+            )
+            .unwrap();
+        }
+        git(p, &["add", "-A"]);
+        git(p, &["commit", "-q", "-m", "base"]);
+        git(p, &["checkout", "-q", "-b", "ours"]);
+        git(p, &["mv", "old", "new"]);
+        git(p, &["commit", "-q", "-m", "rename the directory"]);
+        git(p, &["checkout", "-q", "main"]);
+        git(p, &["checkout", "-q", "-b", "theirs"]);
+        std::fs::write(
+            p.join("old").join("added.txt"),
+            "added
+",
+        )
+        .unwrap();
+        git(p, &["add", "-A"]);
+        git(p, &["commit", "-q", "-m", "add into the old directory"]);
+        git(p, &["checkout", "-q", "main"]);
+        let ours = rev_parse(p, "ours").unwrap();
+        let theirs = rev_parse(p, "theirs").unwrap();
+
+        // Pinned to git's default, this is a genuine conflict: content was
+        // added into a directory the other side renamed, and only a human
+        // can say where it belongs.
+        let err = merge_tree_write_tree(p, &ours, &theirs)
+            .expect_err("the default treats this as a conflict");
+        assert!(
+            err.to_string().contains("could not cleanly merge"),
+            "unexpected error: {err}"
+        );
+
+        // The poison is real, and it is the dangerous direction: local
+        // configuration turns that refusal into a silent clean merge that
+        // relocates the file.
+        git(p, &["config", "merge.directoryRenames", "false"]);
+        let unpinned = std::process::Command::new("git")
+            .arg("-C")
+            .arg(p)
+            .args([
+                "-c",
+                "core.autocrlf=false",
+                "-c",
+                "merge.conflictStyle=merge",
+                "-c",
+                "merge.renames=true",
+                "-c",
+                "diff.renameLimit=0",
+            ])
+            .args(["merge-tree", "--write-tree", "--name-only", &ours, &theirs])
+            .output()
+            .unwrap();
+        assert!(
+            unpinned.status.success(),
+            "fixture proves nothing unless local configuration makes this merge cleanly"
+        );
+
+        // Pinned, the same local configuration is invisible and the merge is
+        // still refused.
+        let still = merge_tree_write_tree(p, &ours, &theirs)
+            .expect_err("merge.directoryRenames must be pinned, not taken from this clone");
+        assert!(
+            still.to_string().contains("could not cleanly merge"),
+            "unexpected error: {still}"
+        );
     }
 
     #[test]

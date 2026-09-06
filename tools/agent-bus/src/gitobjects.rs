@@ -475,11 +475,11 @@ impl RefStore for Libgit2Reader {
                             git2::ErrorCode::Exists | git2::ErrorCode::Modified
                         ) {
                             return invalid(format!(
-                                "{refname} already exists, but was expected not to -- another                                  writer created it first; re-read the current tip and retry: {e}"
+                                "{refname} already exists, but was expected not to -- another writer created it first; re-read the current tip and retry: {e}"
                             ));
                         }
                         invalid(format!(
-                            "{refname} could not be created, and not because another writer won                              the race -- retrying will not help: {e}"
+                            "{refname} could not be created, and not because another writer won the race -- retrying will not help: {e}"
                         ))
                     })?;
             }

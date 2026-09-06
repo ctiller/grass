@@ -129,7 +129,7 @@ pub(crate) fn require_pinned_merge_engine(state: &crate::state::BusState) -> AbR
     let installed = crate::gitrepo::version()?;
     if installed != version {
         return Err(invalid(format!(
-            "installed git {installed} is not the merge engine version this bus selects              ({version}); candidate construction refuses to run, because a tree built by a              different engine version cannot be reconstructed by the hosts that must verify it"
+            "installed git {installed} is not the merge engine version this bus selects ({version}); candidate construction refuses to run, because a tree built by a different engine version cannot be reconstructed by the hosts that must verify it"
         )));
     }
     Ok(())

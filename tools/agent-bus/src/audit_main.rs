@@ -1198,10 +1198,11 @@ Agent-Bus-Reviewer: bob",
         let findings = audit_main_findings(dir.path(), &state, Some(&backwards)).unwrap();
 
         // Asserted against *this* commit, not merely against the message.
-        // The first-parent walk also visits the non-merge commit `second`,
-        // which reports the very same problem -- so a bare message search
-        // passes even with the first-parent clause deleted, which is exactly
-        // how the first version of this test managed to be vacuous.
+        // An earlier version of this test searched only for the message, and
+        // was vacuous: its fixture's walk also contained a non-merge commit
+        // reporting the identical problem, so it passed with the
+        // first-parent clause deleted. This fixture's walk is the single
+        // commit below, and the assertion names it.
         let flagged_backwards = findings.iter().any(|f| {
             f["commit"].as_str() == Some(backwards.as_str())
                 && f["problem"]
