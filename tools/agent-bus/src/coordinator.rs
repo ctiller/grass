@@ -661,9 +661,9 @@ fn requires_synced_snapshot(data: &crate::events::EventData) -> bool {
 /// root -- a real, honest failure rather than silently omitting them (which
 /// `ObservedFrontier::complete` would reject anyway).
 ///
-/// One reader serves the whole roster: this loop used to check out a fresh
-/// worktree per active member on every call, which is the single largest
-/// contributor to `status --sync`'s cost on the real fleet repo.
+/// One reader serves the whole roster. This loop used to check out a fresh
+/// worktree per active member on every call; that machinery is gone, and a
+/// single open of the object database now serves every member.
 fn build_complete_frontier(
     repo: &Path,
     epoch: &crate::registry::RosterEpoch,

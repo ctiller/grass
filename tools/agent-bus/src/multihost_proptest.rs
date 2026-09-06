@@ -12,7 +12,10 @@
 //!
 //!  1. `gitrepo::ensure_bus_worktree` served permanently stale cached content
 //!     once a second process invocation reused the same deterministic cache
-//!     path.
+//!     path. (That function has since been deleted outright -- the bus reads
+//!     and writes the object database directly -- so this one is now
+//!     structurally impossible rather than merely tested for. The harness is
+//!     kept because bugs 2 and 3 are not.)
 //!  2. `git branch -f <fully-qualified-ref>` silently created a
 //!     double-prefixed `refs/heads/refs/heads/...` ref that `rev-parse`'s own
 //!     disambiguation fallback resolved *around* -- until a real `git fetch`

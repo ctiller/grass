@@ -426,6 +426,150 @@ mod tests {
         Envelope::new(agent, seq, no_frontier(), &data, [])
     }
 
+    // ---------------------------------------------- segment construction
+    //
+    // These are the rules `storage::append_event` used to enforce against a
+    // checked-out directory, now enforced against the parent commit's tree.
+    // Each is stated as a falsification: the violating input, and the
+    // specific rejection it must produce.
+
+    fn seg0() -> String {
+        crate::storage::segment_filename(0)
+    }
+
+    #[test]
+    fn segment_edits_starts_a_fresh_segment_at_offset_zero() {
+        let alice = a("alice");
+        let base = hash(7);
+        let reader = crate::gitobjects::FixtureObjectReader::new().with_blob(
+            &base,
+            HEADER_FILE,
+            header(&alice).to_canonical_bytes(),
+        );
+        let env = registered_envelope(&alice, 0);
+        let edits = segment_edits(&reader, &base, &alice, std::slice::from_ref(&env)).unwrap();
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].0, seg0());
+        assert_eq!(
+            String::from_utf8(edits[0].1.clone()).unwrap(),
+            format!(
+                "{}
+",
+                env.to_canonical_line()
+            )
+        );
+    }
+
+    #[test]
+    fn segment_edits_appends_after_the_existing_content() {
+        let alice = a("alice");
+        let base = hash(7);
+        let first = registered_envelope(&alice, 0);
+        let reader = crate::gitobjects::FixtureObjectReader::new().with_blob(
+            &base,
+            &seg0(),
+            format!(
+                "{}
+",
+                first.to_canonical_line()
+            ),
+        );
+        let second = status_envelope(&alice, 1);
+        let edits = segment_edits(&reader, &base, &alice, std::slice::from_ref(&second)).unwrap();
+        let body = String::from_utf8(edits[0].1.clone()).unwrap();
+        assert_eq!(body.lines().count(), 2, "must keep the existing line");
+        assert!(body.ends_with(&format!(
+            "{}
+",
+            second.to_canonical_line()
+        )));
+    }
+
+    /// Falsification: an event at a non-zero offset whose segment does not
+    /// exist in the parent tree means the stream is not contiguous.
+    #[test]
+    fn segment_edits_rejects_an_offset_with_no_existing_segment() {
+        let alice = a("alice");
+        let base = hash(7);
+        let reader = crate::gitobjects::FixtureObjectReader::new().with_blob(
+            &base,
+            HEADER_FILE,
+            header(&alice).to_canonical_bytes(),
+        );
+        let env = status_envelope(&alice, 1);
+        let err = segment_edits(&reader, &base, &alice, std::slice::from_ref(&env)).unwrap_err();
+        assert!(
+            err.to_string().contains("expected existing segment"),
+            "{err}"
+        );
+    }
+
+    /// Falsification: an event at offset zero whose segment already exists
+    /// would silently overwrite published events.
+    #[test]
+    fn segment_edits_rejects_a_fresh_segment_that_already_exists() {
+        let alice = a("alice");
+        let base = hash(7);
+        let reader = crate::gitobjects::FixtureObjectReader::new().with_blob(
+            &base,
+            &seg0(),
+            "{}
+",
+        );
+        let env = registered_envelope(&alice, 0);
+        let err = segment_edits(&reader, &base, &alice, std::slice::from_ref(&env)).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("already exists but a fresh segment was expected"),
+            "{err}"
+        );
+    }
+
+    /// Falsification: the per-line size bound `storage::MAX_LINE_BYTES` sets.
+    #[test]
+    fn segment_bytes_rejects_an_oversized_line() {
+        let alice = a("alice");
+        let mut env = registered_envelope(&alice, 0);
+        env.data = serde_json::json!({
+            "blob": "x".repeat(crate::storage::MAX_LINE_BYTES + 10)
+        });
+        let err = segment_bytes(std::slice::from_ref(&env), Vec::new()).unwrap_err();
+        assert!(err.to_string().contains("event line exceeds"), "{err}");
+    }
+
+    /// A batch that crosses the segment boundary must open the next segment
+    /// rather than growing the current one past `SEGMENT_SIZE`.
+    #[test]
+    fn segment_edits_rolls_over_to_the_next_segment() {
+        let alice = a("alice");
+        let base = hash(7);
+        let last = crate::storage::SEGMENT_SIZE - 1;
+        let existing: String = (0..last)
+            .map(|i| {
+                format!(
+                    "{}
+",
+                    status_envelope(&alice, i).to_canonical_line()
+                )
+            })
+            .collect();
+        let reader =
+            crate::gitobjects::FixtureObjectReader::new().with_blob(&base, &seg0(), existing);
+        let batch = [
+            status_envelope(&alice, last),
+            status_envelope(&alice, crate::storage::SEGMENT_SIZE),
+        ];
+        let edits = segment_edits(&reader, &base, &alice, &batch).unwrap();
+        let names: Vec<&str> = edits.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![seg0(), crate::storage::segment_filename(1)],
+            "the boundary-crossing event must open segment 1"
+        );
+        let rolled = String::from_utf8(edits[1].1.clone()).unwrap();
+        assert_eq!(rolled.lines().count(), 1);
+    }
+
     #[test]
     fn stream_ref_names_the_expected_ref() {
         assert_eq!(

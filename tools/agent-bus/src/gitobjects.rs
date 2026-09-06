@@ -662,6 +662,195 @@ mod tests {
         (dir, ObjectId::parse(head).unwrap())
     }
 
+    // ------------------------------------------- writing and moving refs
+
+    /// The round trip the whole write path rests on: bytes in, a tree built
+    /// from them, a commit naming that tree, a ref pointing at the commit --
+    /// then read straight back through the read half of the same trait set.
+    #[test]
+    fn libgit2_writes_a_root_commit_and_reads_it_back() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+
+        let blob = g.write_blob(b"{}\n").unwrap();
+        let tree = g.write_tree(None, &[("header.json", blob)]).unwrap();
+        let commit = g.create_commit(&tree, &[], "test: root").unwrap();
+
+        assert_eq!(
+            g.read_blob_at(&commit, "header.json").unwrap(),
+            Some(b"{}\n".to_vec())
+        );
+        assert_eq!(g.list_root_entries(&commit).unwrap(), vec!["header.json"]);
+    }
+
+    /// Building on a parent must carry every entry the caller did *not*
+    /// name through untouched. This is what makes `append_to_stream`'s
+    /// "changes only its own segment paths" structural rather than a
+    /// retrospective diff.
+    #[test]
+    fn libgit2_write_tree_carries_unnamed_entries_through() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+
+        let header = g.write_blob(b"header-v1").unwrap();
+        let seg = g.write_blob(b"line\n").unwrap();
+        let base_tree = g
+            .write_tree(None, &[("header.json", header), ("000000.jsonl", seg)])
+            .unwrap();
+        let base = g.create_commit(&base_tree, &[], "test: base").unwrap();
+
+        // Name only the segment.
+        let seg2 = g.write_blob(b"line\nline2\n").unwrap();
+        let next_tree = g
+            .write_tree(Some(&base), &[("000000.jsonl", seg2)])
+            .unwrap();
+        let next = g
+            .create_commit(&next_tree, &[&base], "test: append")
+            .unwrap();
+
+        assert_eq!(
+            g.read_blob_at(&next, "header.json").unwrap(),
+            Some(b"header-v1".to_vec()),
+            "an entry the caller did not name must survive unchanged"
+        );
+        assert_eq!(
+            g.read_blob_at(&next, "000000.jsonl").unwrap(),
+            Some(b"line\nline2\n".to_vec())
+        );
+    }
+
+    /// Falsification: the trait builds flat trees only, so a nested path is
+    /// a programming error rather than something silently accepted.
+    #[test]
+    fn libgit2_write_tree_rejects_a_nested_name() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        let blob = g.write_blob(b"x").unwrap();
+        let err = g.write_tree(None, &[("sub/deep.json", blob)]).unwrap_err();
+        assert!(err.to_string().contains("root-level file name"), "{err}");
+    }
+
+    #[test]
+    fn libgit2_write_tree_rejects_an_empty_name() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        let blob = g.write_blob(b"x").unwrap();
+        let err = g.write_tree(None, &[("", blob)]).unwrap_err();
+        assert!(err.to_string().contains("root-level file name"), "{err}");
+    }
+
+    /// Falsification: a blob id that names nothing in this repository.
+    #[test]
+    fn libgit2_write_tree_rejects_an_unresolvable_blob() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        let err = g.write_tree(None, &[("a.json", oid(0xab))]).unwrap_err();
+        assert!(matches!(err, AbError::Git(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn libgit2_create_commit_rejects_an_unresolvable_tree() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        let err = g.create_commit(&oid(0xcd), &[], "test").unwrap_err();
+        assert!(
+            err.to_string().contains("does not resolve to a tree"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn libgit2_create_commit_rejects_an_unresolvable_parent() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        let blob = g.write_blob(b"x").unwrap();
+        let tree = g.write_tree(None, &[("a.json", blob)]).unwrap();
+        let err = g.create_commit(&tree, &[&oid(0xef)], "test").unwrap_err();
+        assert!(err.to_string().contains("parent"), "{err}");
+    }
+
+    #[test]
+    fn libgit2_resolve_reports_an_absent_ref_as_none() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        assert_eq!(g.resolve("refs/heads/nope").unwrap(), None);
+    }
+
+    #[test]
+    fn libgit2_list_returns_only_the_requested_prefix_sorted() {
+        let (repo, head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        g.compare_and_set("refs/heads/agent-events/b", None, &head)
+            .unwrap();
+        g.compare_and_set("refs/heads/agent-events/a", None, &head)
+            .unwrap();
+
+        let got = g.list("refs/heads/agent-events/").unwrap();
+        let names: Vec<&str> = got.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["refs/heads/agent-events/a", "refs/heads/agent-events/b"],
+            "sorted by name, and refs/heads/main excluded by the prefix"
+        );
+        assert!(got.iter().all(|(_, c)| *c == head));
+    }
+
+    /// Falsification of the creation case: `expected = None` means "only if
+    /// this ref does not exist", so a second creation must lose rather than
+    /// overwrite the first.
+    #[test]
+    fn libgit2_compare_and_set_refuses_to_create_over_an_existing_ref() {
+        let (repo, head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        g.compare_and_set("refs/heads/once", None, &head).unwrap();
+        let err = g
+            .compare_and_set("refs/heads/once", None, &head)
+            .unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
+        assert!(
+            err.to_string().contains("re-read"),
+            "the message must tell the loser what to do next: {err}"
+        );
+    }
+
+    /// Falsification of the update case: the whole point of naming the
+    /// expected old value is that a writer whose read is stale is refused.
+    #[test]
+    fn libgit2_compare_and_set_refuses_when_the_ref_has_moved() {
+        let (repo, head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+
+        let blob = g.write_blob(b"x").unwrap();
+        let tree = g.write_tree(None, &[("a.json", blob)]).unwrap();
+        let other = g.create_commit(&tree, &[], "test: other").unwrap();
+
+        g.compare_and_set("refs/heads/moving", None, &head).unwrap();
+        // Someone else advanced it.
+        g.compare_and_set("refs/heads/moving", Some(&head), &other)
+            .unwrap();
+        // Our stale view still names the old value.
+        let err = g
+            .compare_and_set("refs/heads/moving", Some(&head), &other)
+            .unwrap_err();
+        assert!(err.to_string().contains("has moved"), "{err}");
+        assert!(
+            err.to_string().contains("resolve custody"),
+            "must name the operator action, not just the failure: {err}"
+        );
+    }
+
+    /// Falsification: expecting a value on a ref that does not exist at all
+    /// is a different failure from expecting the wrong value, and must say so.
+    #[test]
+    fn libgit2_compare_and_set_refuses_when_the_ref_was_deleted() {
+        let (repo, head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        let err = g
+            .compare_and_set("refs/heads/gone", Some(&head), &head)
+            .unwrap_err();
+        assert!(err.to_string().contains("does not exist"), "{err}");
+    }
+
     #[test]
     fn libgit2_reads_a_blob_at_the_tree_root() {
         let (repo, head) = init_repo();

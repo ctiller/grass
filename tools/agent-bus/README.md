@@ -119,6 +119,45 @@ exist in v2 yet:
   reachable today -- see `apply::apply_merge_engine_activated`'s doc
   comment).
 
+## Storage substrate and cost
+
+Every local operation reads and writes the git object database in-process
+(`gitobjects.rs`), through three traits stated in this crate's own
+vocabulary: `ObjectReader` (the bytes at a path in a commit), `ObjectWriter`
+(blobs, trees, commits) and `RefStore` (resolve, enumerate, and
+compare-and-swap a ref). Nothing above those traits knows libgit2 exists, and
+`FixtureObjectReader` substitutes for the real thing in unit tests.
+
+What deliberately stays on the `git` subprocess is exactly what must:
+
+- `fetch` and `push`, so the user's own credential helpers, SSH agent and
+  `.netrc` keep working (`git2` is built with `default-features = false`,
+  which drops its own transports); and
+- `merge-tree --write-tree`, pinned to git's ORT implementation because
+  AGENT_REVIEW.md section 7 requires byte-identical trees across hosts.
+
+There is no staging worktree and no file lock. An earlier design checked a
+worktree out per read and per write, which cost roughly 4.6s per cycle,
+serialized concurrent agents on git's shared `.git/worktrees` registration
+state, and took the repository index lock. Measured on the real fleet repo
+(432 events across 11 streams, warm):
+
+| command  | worktree substrate | in-process |
+| -------- | ------------------ | ---------- |
+| `status` | 24.7s              | 0.12s      |
+| `tail`   | 14.5s              | 0.13s      |
+| `outbox` | 12.0s              | 0.12s      |
+
+Two costs found alongside it are worth knowing about, because both are easy
+to reintroduce. Validating scalars (`Agent`, `Timestamp`, `Topic`) must not
+rebuild a regex per call -- reduction validates one `Agent` per event *plus*
+one per member of that event's observed frontier. And `Branch::parse` must
+not shell out: `Branch` deserializes through `parse`, and every review event
+names two branches, so a subprocess there costs one process per branch field
+of every event read. The cross-check against real `git check-ref-format` now
+runs once, in `branch_parse_agrees_with_real_git_check_ref_format`, rather
+than on every read.
+
 ## Design notes / known simplifications
 
 - **Causality**: no global bus-head commit exists in v2. An event's causal
