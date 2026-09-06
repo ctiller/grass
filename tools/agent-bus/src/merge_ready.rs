@@ -97,6 +97,16 @@ pub(crate) fn check_merge_ready(
             "reviewer is not the accepted eligible reviewer for this nomination",
         ));
     }
+    // AGENT_REVIEW.md section 3: a reviewer is eligible "only if the reviewer
+    // is a registered active agent with immutable primary role `reviewer`",
+    // and section 8 requires this gate's author to be the accepted *eligible*
+    // reviewer. Eligibility was checked when the nomination was published and
+    // never again, so a reviewer who has since published `agent.status`
+    // `done` -- or whom a coordinator has retired after a silence -- stayed
+    // merge-eligible indefinitely. Section 11 says an unavailable reviewer is
+    // *explicitly reassigned*; without this check the roster could declare
+    // them unavailable while they went on merging.
+    crate::apply::require_active_role(state, reviewer, crate::events::Role::Reviewer)?;
     // The authorization must be one the chain actually *accepted*, not merely
     // an event that exists.
     //
@@ -381,6 +391,8 @@ mod tests {
             reconciled: vec![],
         };
         state.reviews.insert(nomination.clone(), chain);
+        register_active(&mut state, reviewer, crate::events::Role::Reviewer);
+        register_active(&mut state, author, crate::events::Role::Implementor);
         state
             .review_chain_by_nomination
             .insert(nomination.clone(), nomination.clone());
@@ -427,6 +439,38 @@ mod tests {
             .push(auth_id.clone());
 
         (state, nomination, auth_id)
+    }
+
+    /// Registers `agent` as an active member with `role`.
+    ///
+    /// The fixtures below previously populated no `state.agents` at all,
+    /// which is why a retired or deactivated reviewer sailing through the
+    /// merge gate went unnoticed: there was no roster for the check to
+    /// consult. A fixture that omits the roster cannot observe a rule about
+    /// the roster.
+    fn register_active(state: &mut BusState, agent: &Agent, role: crate::events::Role) {
+        state.agents.insert(
+            agent.clone(),
+            crate::state::AgentState {
+                agent: agent.clone(),
+                display_name: crate::scalars::Short::parse(agent.as_str().to_string()).unwrap(),
+                primary_role: role,
+                purpose: text("x"),
+                provider: None,
+                model: None,
+                status: crate::events::LifecycleStatus::Active,
+                status_note: text(""),
+                product_branch: None,
+                product_commit: None,
+                last_lifecycle_event: EventId::new(agent, 0),
+                retired: false,
+                scope: None,
+                plan: None,
+                progress_tail: vec![],
+                next_seq: 1,
+                subscribed_topics: crate::scalars::StringSet::default(),
+            },
+        );
     }
 
     fn issue_blocking(id: &EventId, target: &Agent, blocks: &EventId) -> IssueState {
@@ -803,6 +847,8 @@ mod tests {
             reconciled: vec![],
         };
         state.reviews.insert(nomination.clone(), chain);
+        register_active(&mut state, reviewer, crate::events::Role::Reviewer);
+        register_active(&mut state, author, crate::events::Role::Implementor);
         state
             .review_chain_by_nomination
             .insert(nomination.clone(), nomination.clone());
@@ -944,6 +990,48 @@ mod tests {
                 .contains("not one this nomination chain accepted"),
             "expected the never-accepted refusal, got: {err}"
         );
+    }
+
+    /// AGENT_REVIEW.md section 3 ("a registered **active** agent") and
+    /// section 11 ("an unavailable reviewer is explicitly reassigned").
+    /// Eligibility used to be checked only when the nomination was
+    /// published, so a reviewer who later went unavailable kept merging.
+    ///
+    /// Both directions of "unavailable" are covered: retirement by a
+    /// coordinator, and the reviewer deactivating themselves via
+    /// `agent.status`.
+    #[test]
+    fn a_reviewer_who_is_no_longer_active_may_not_merge() {
+        let author = a("zoe");
+        let reviewer = a("aiden");
+
+        for make_unavailable in [
+            (|s: &mut crate::state::AgentState| s.retired = true) as fn(&mut _),
+            |s: &mut crate::state::AgentState| {
+                s.status = crate::events::LifecycleStatus::Done;
+            },
+        ] {
+            let (dir, _origin, remote, previous_main, feature_commit, candidate) =
+                git_fixture(&author, &reviewer);
+            let (mut state, auth_id) = state_with_authorization(
+                &author,
+                &reviewer,
+                &previous_main,
+                &feature_commit,
+                &candidate,
+                &["feature.txt"],
+            );
+            check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+                .expect("fixture must be ready while the reviewer is active");
+
+            make_unavailable(state.agents.get_mut(&reviewer).unwrap());
+            let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+                .expect_err("an unavailable reviewer must not merge");
+            assert!(
+                err.to_string().contains("is not active"),
+                "expected an activity refusal, got: {err}"
+            );
+        }
     }
 
     #[test]

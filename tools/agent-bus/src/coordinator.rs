@@ -1220,12 +1220,75 @@ mod tests {
         );
     }
 
+    /// Gate 17 at the *call site*, for the clause that only reassignments
+    /// reach.
+    ///
+    /// `reassignments_require_a_synced_snapshot_...` pins the predicate's
+    /// truth table; mutation testing showed that was not enough. Replacing
+    /// either `requires_synced_snapshot` call in `drain_outbox` with
+    /// `requires_complete_frontier` -- the same weakening as deleting the
+    /// clause -- left every suite green, so a reassignment could silently
+    /// stop demanding a fresh cut.
+    ///
+    /// The assertion is on the *reason*, not merely on rejection: with the
+    /// clause gone the candidate is still rejected, but for an unrelated
+    /// downstream cause, and only the gate-17 wording distinguishes the two.
     /// Gate 17 (AGENT_COORDINATION_EVOLUTION.md section 2.4): a
     /// currency-sensitive candidate (here, `schema.activated`) must be
     /// refused, not validated against a stale cached cut, when the fresh
     /// remote probe itself fails -- while an ordinary candidate in the same
     /// batch is unaffected, since only the currency-sensitive one actually
     /// needs that fresher view.
+    #[test]
+    fn drain_outbox_fails_closed_on_a_reassignment_when_the_fetch_fails() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        let reassign = crate::outbox::Candidate::new(
+            &coord1,
+            &EventData::IssueReassigned(crate::events::IssueReassigned {
+                issue: EventId::new(&a("alice"), 1),
+                previous_assignment: EventId::new(&a("alice"), 2),
+                previous_target: a("bob"),
+                new_target: a("carol"),
+                reason: text("bob went quiet"),
+            }),
+            vec![],
+        );
+        crate::outbox::submit(repo.path(), "reassign", &reassign).unwrap();
+
+        // No "origin" remote exists, so the currency probe cannot succeed.
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .unwrap();
+
+        assert!(drained.published.is_empty(), "{drained:?}");
+        assert_eq!(drained.rejected.len(), 1);
+        assert_eq!(drained.rejected[0].kind, "issue.reassigned");
+        assert!(
+            drained.rejected[0].reason.contains("gate 17"),
+            "a reassignment must fail closed on the currency probe, not on some              later check: {}",
+            drained.rejected[0].reason
+        );
+    }
+
     #[test]
     fn drain_outbox_fails_closed_on_a_currency_sensitive_candidate_when_the_fetch_fails() {
         let repo = init_repo();
