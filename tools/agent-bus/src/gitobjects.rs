@@ -1093,6 +1093,63 @@ mod tests {
         }
     }
 
+    /// AGENT_REVIEW.md section 7 admits "no optional encoding, signature, or
+    /// mergetag headers". The byte-identity test above passes git an explicit
+    /// `-c commit.gpgsign=false`, which proves the two agree when signing is
+    /// off but says nothing about ambient configuration. This pins the
+    /// stronger property: with `commit.gpgsign = true` set in the repository,
+    /// our object id is unchanged, so a signed-by-default host cannot produce
+    /// a candidate no other agent can reconstruct.
+    #[test]
+    fn commit_with_identity_ignores_ambient_gpgsign_configuration() {
+        let (repo, head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        let blob = g.write_blob(b"payload\n").unwrap();
+        let tree = g.write_tree(None, &[("a.txt", blob)]).unwrap();
+        let ts = 1_700_000_000_i64;
+
+        let before = g
+            .commit_with_identity(
+                &tree,
+                &[&head],
+                "candidate",
+                crate::gitrepo::DETERMINISTIC_COMMIT_NAME,
+                crate::gitrepo::DETERMINISTIC_COMMIT_EMAIL,
+                ts,
+            )
+            .unwrap();
+
+        git(repo.path(), &["config", "commit.gpgsign", "true"]);
+        git(repo.path(), &["config", "user.signingkey", "DEADBEEF"]);
+
+        let after = g
+            .commit_with_identity(
+                &tree,
+                &[&head],
+                "candidate",
+                crate::gitrepo::DETERMINISTIC_COMMIT_NAME,
+                crate::gitrepo::DETERMINISTIC_COMMIT_EMAIL,
+                ts,
+            )
+            .unwrap();
+
+        assert_eq!(
+            before, after,
+            "ambient commit.gpgsign must not change the candidate's object id"
+        );
+        // And the object really carries no signature header.
+        let raw = git2::Repository::open(repo.path()).unwrap();
+        let odb = raw.odb().unwrap();
+        let obj = odb
+            .read(git2::Oid::from_str(after.as_str()).unwrap())
+            .unwrap();
+        let body = String::from_utf8_lossy(obj.data()).to_string();
+        assert!(
+            !body.contains("gpgsig"),
+            "commit carries a signature: {body}"
+        );
+    }
+
     /// Rename detection stays off, so a rename is reported as both the path
     /// it left and the path it arrived at. `merge_ready` and `audit_main`
     /// scope-check every path this returns, and a rename *into* a reviewed

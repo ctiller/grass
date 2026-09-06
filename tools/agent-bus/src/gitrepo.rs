@@ -93,11 +93,19 @@ fn kill_process_tree(pid: u32) {
     {
         // `taskkill /T` walks the tree; `/F` is required because a blocked
         // child will not process a polite close request.
+        //
+        // Spawned and deliberately not waited on. Waiting here would put an
+        // unbounded wait on the error path of the very mechanism that exists
+        // to bound waits -- a hung `taskkill` would wedge the caller exactly
+        // as the hung `git` did. The OS reaps the tree whether or not we
+        // watch, and the caller needs the timeout error more than it needs
+        // confirmation that the kill completed.
         let _ = Command::new("taskkill")
             .args(["/T", "/F", "/PID", &pid.to_string()])
+            .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .status();
+            .spawn();
     }
     #[cfg(unix)]
     {
