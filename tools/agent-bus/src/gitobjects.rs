@@ -45,7 +45,7 @@
 
 use crate::error::{invalid, AbError, AbResult};
 use crate::scalars::ObjectId;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Read-only access to content recorded in git history, addressed by commit
 /// and path.
@@ -482,6 +482,351 @@ impl RefStore for Libgit2Reader {
     }
 }
 
+// ------------------------------------------------------------- history
+
+/// Reading commit history: resolving revisions, walking ancestry, comparing
+/// trees, and reading a commit's own metadata.
+///
+/// Separate from [`ObjectReader`] because the questions are different in
+/// kind -- that trait answers "what bytes are recorded at this path", this
+/// one answers "how do these commits relate" -- and separate from
+/// [`ObjectWriter`] because every method here is read-only.
+///
+/// [`Libgit2Reader`] is the only implementation. Unlike the blob-reading
+/// traits, there is no fixture counterpart: every consumer of this trait
+/// (`merge_candidate.rs`, `merge_ready.rs`, `audit_main.rs`) is testing a
+/// property of real git history -- that a candidate has exactly one merge
+/// base, that a range of commits carries the right trailers, that a diff
+/// stays inside a reviewed scope -- and a hand-written fixture asserting
+/// those against invented data would be testing the fixture. Those modules
+/// build real repositories in their tests, and should.
+pub trait HistoryReader {
+    /// Resolve a git revision expression (`HEAD`, a branch, a raw object id,
+    /// `<rev>^{tree}`) to the object it names, or `None` if it names
+    /// nothing. Anything that resolves to a non-commit -- a tree, a blob --
+    /// still resolves here; callers that require a commit say so themselves.
+    fn resolve_rev(&self, spec: &str) -> AbResult<Option<ObjectId>>;
+
+    /// `commit`'s parents, in order. Empty for a root commit.
+    fn parents_of(&self, commit: &ObjectId) -> AbResult<Vec<ObjectId>>;
+
+    /// `commit`'s committer-date unix timestamp in seconds. Deliberately the
+    /// *committer* date, not the author date: `commit_tree_deterministic`
+    /// derives a candidate's timestamp from its parents' committer dates.
+    fn committer_timestamp(&self, commit: &ObjectId) -> AbResult<i64>;
+
+    /// `commit`'s full message, exactly as recorded.
+    fn commit_message(&self, commit: &ObjectId) -> AbResult<String>;
+
+    /// How many merge bases `a` and `b` have. AGENT_REVIEW.md section 7
+    /// requires exactly one, so the count -- not merely "is there one" -- is
+    /// the answer callers need.
+    fn merge_base_count(&self, a: &ObjectId, b: &ObjectId) -> AbResult<usize>;
+
+    /// Commits reachable from `to` but not from `from_exclusive`, oldest
+    /// first, following only first parents.
+    fn first_parent_range(
+        &self,
+        from_exclusive: &ObjectId,
+        to: &ObjectId,
+    ) -> AbResult<Vec<ObjectId>>;
+
+    /// Commits reachable from `to` but not from `from_exclusive`, following
+    /// every parent, **newest first** -- `git rev-list`'s default order, which
+    /// is what the call this replaced produced and what `audit_main`'s golden
+    /// output records.
+    fn range(&self, from_exclusive: &ObjectId, to: &ObjectId) -> AbResult<Vec<ObjectId>>;
+
+    /// Every path that differs between `from`'s tree and `to`'s tree, as
+    /// `(status, path)`.
+    ///
+    /// Rename detection is deliberately **off**. `git diff --name-status`
+    /// with detection on collapses a rename to one `R<score> old new` line,
+    /// and this crate's two consumers -- `merge_ready::check_merge_ready`
+    /// and `audit_main`'s post-hoc scope correlation -- read only the path
+    /// and check it against a reviewed scope. Under detection, a file
+    /// renamed *into* the reviewed scope from outside it reports only the
+    /// new (in-scope) path, and the out-of-scope path it came from is never
+    /// checked. With detection off the same change is a delete plus an add,
+    /// so both paths are reported and both are scope-checked. Strictly more
+    /// paths, never fewer, is the only safe direction for a gate whose job
+    /// is to catch a change outside what was reviewed.
+    fn diff_name_status(&self, from: &ObjectId, to: &ObjectId) -> AbResult<Vec<(String, String)>>;
+}
+
+impl Libgit2Reader {
+    /// The working directory of the repository this reader opened.
+    ///
+    /// Equivalent to `git rev-parse --show-toplevel`, including from a
+    /// linked worktree, where it is that worktree's own root.
+    pub fn workdir(&self) -> AbResult<PathBuf> {
+        self.repo
+            .workdir()
+            .map(|p| p.to_path_buf())
+            .ok_or_else(|| AbError::Git("this repository has no working directory".into()))
+    }
+
+    /// The repository's single shared git directory, equivalent to `git
+    /// rev-parse --git-common-dir`: the *main* checkout's git directory even
+    /// when called from a linked worktree.
+    pub fn common_dir(&self) -> PathBuf {
+        self.repo.commondir().to_path_buf()
+    }
+
+    fn commit_at(&self, commit: &ObjectId) -> AbResult<git2::Commit<'_>> {
+        let oid = git2::Oid::from_str(commit.as_str())
+            .map_err(|e| AbError::Git(format!("{commit} is not a usable object id: {e}")))?;
+        self.repo
+            .find_commit(oid)
+            .map_err(|e| AbError::Git(format!("commit {commit} does not resolve to a commit: {e}")))
+    }
+
+    fn walk(
+        &self,
+        from_exclusive: &ObjectId,
+        to: &ObjectId,
+        first_parent_only: bool,
+        oldest_first: bool,
+    ) -> AbResult<Vec<ObjectId>> {
+        let from = git2::Oid::from_str(from_exclusive.as_str()).map_err(|e| {
+            AbError::Git(format!("{from_exclusive} is not a usable object id: {e}"))
+        })?;
+        let to_oid = git2::Oid::from_str(to.as_str())
+            .map_err(|e| AbError::Git(format!("{to} is not a usable object id: {e}")))?;
+        // `git rev-list a..b` errors when either endpoint is unknown rather
+        // than silently walking nothing, so resolve both first.
+        self.commit_at(from_exclusive)?;
+        self.commit_at(to)?;
+
+        let mut walk = self
+            .repo
+            .revwalk()
+            .map_err(|e| AbError::Git(format!("cannot start a revision walk: {e}")))?;
+        // `git rev-list` is newest-first by default and oldest-first with
+        // `--reverse`. Both orders are load-bearing here and they are not
+        // interchangeable: `rev_list_first_parent` replaced a call that
+        // passed `--reverse`, `range` replaced one that did not, and
+        // `audit_main` renders the result into golden output.
+        let mut sorting = git2::Sort::TOPOLOGICAL;
+        if oldest_first {
+            sorting |= git2::Sort::REVERSE;
+        }
+        walk.set_sorting(sorting)
+            .map_err(|e| AbError::Git(format!("cannot set revision walk order: {e}")))?;
+        if first_parent_only {
+            walk.simplify_first_parent().map_err(|e| {
+                AbError::Git(format!("cannot restrict the walk to first parents: {e}"))
+            })?;
+        }
+        walk.push(to_oid)
+            .map_err(|e| AbError::Git(format!("cannot walk from {to}: {e}")))?;
+        walk.hide(from).map_err(|e| {
+            AbError::Git(format!(
+                "cannot exclude {from_exclusive} from the walk: {e}"
+            ))
+        })?;
+
+        let mut out = Vec::new();
+        for step in walk {
+            let oid = step.map_err(|e| AbError::Git(format!("revision walk failed: {e}")))?;
+            out.push(ObjectId::parse(oid.to_string())?);
+        }
+        Ok(out)
+    }
+}
+
+impl Libgit2Reader {
+    /// A commit whose identity and timestamp the caller fixes, rather than
+    /// taking them from repository configuration and the clock.
+    ///
+    /// This is what makes a merge candidate reproducible: AGENT_REVIEW.md
+    /// section 7 requires any agent to be able to reconstruct another
+    /// agent's candidate and get the same object id, which is only true if
+    /// every byte of the commit object is a function of its inputs. It
+    /// produces exactly the bytes `git commit-tree` produces for the same
+    /// inputs, including git's rule that a message not ending in a newline
+    /// gains one -- asserted directly by
+    /// `commit_with_identity_matches_git_commit_tree_byte_for_byte`, which
+    /// builds the same commit both ways and compares the two object ids.
+    ///
+    /// No signature is ever written, regardless of ambient `commit.gpgsign`
+    /// configuration: section 7 admits "no optional encoding, signature, or
+    /// mergetag headers". libgit2 signs only when explicitly asked, so this
+    /// needs no equivalent of the subprocess version's `-c
+    /// commit.gpgsign=false`.
+    pub fn commit_with_identity(
+        &self,
+        tree: &ObjectId,
+        parents: &[&ObjectId],
+        message: &str,
+        name: &str,
+        email: &str,
+        unix_seconds: i64,
+    ) -> AbResult<ObjectId> {
+        let tree_oid = git2::Oid::from_str(tree.as_str())
+            .map_err(|e| AbError::Git(format!("{tree} is not a usable object id: {e}")))?;
+        let tree_obj = self
+            .repo
+            .find_tree(tree_oid)
+            .map_err(|e| AbError::Git(format!("{tree} does not resolve to a tree: {e}")))?;
+
+        let mut parent_commits = Vec::with_capacity(parents.len());
+        for p in parents {
+            parent_commits.push(self.commit_at(p)?);
+        }
+        let parent_refs: Vec<&git2::Commit<'_>> = parent_commits.iter().collect();
+
+        // Offset zero: the subprocess version passed "<ts> +0000".
+        let when = git2::Time::new(unix_seconds, 0);
+        let who = git2::Signature::new(name, email, &when)
+            .map_err(|e| AbError::Git(format!("cannot build the fixed commit identity: {e}")))?;
+
+        // `git commit-tree` terminates the message with a newline; libgit2
+        // writes exactly what it is given. Matching git here is the whole
+        // point -- a missing byte changes the object id.
+        let message = if message.ends_with('\n') {
+            message.to_string()
+        } else {
+            format!("{message}\n")
+        };
+
+        let oid = self
+            .repo
+            .commit(None, &who, &who, &message, &tree_obj, &parent_refs)
+            .map_err(|e| AbError::Git(format!("cannot create the deterministic commit: {e}")))?;
+        ObjectId::parse(oid.to_string())
+    }
+}
+
+impl HistoryReader for Libgit2Reader {
+    fn resolve_rev(&self, spec: &str) -> AbResult<Option<ObjectId>> {
+        match self.repo.revparse_single(spec) {
+            Ok(obj) => Ok(Some(ObjectId::parse(obj.id().to_string())?)),
+            // Both "no such ref" and "no such object" are ordinary absence
+            // here, matching `rev-parse --verify --quiet <rev>^{object}`,
+            // whose whole purpose is to distinguish those from a malformed
+            // expression. `InvalidSpec` stays an error: a caller that hands
+            // this an unparseable expression has a bug, and silently
+            // reporting "not found" would hide it.
+            Err(e)
+                if e.code() == git2::ErrorCode::NotFound
+                    || e.class() == git2::ErrorClass::Reference =>
+            {
+                Ok(None)
+            }
+            Err(e) => Err(AbError::Git(format!("cannot resolve {spec:?}: {e}"))),
+        }
+    }
+
+    fn parents_of(&self, commit: &ObjectId) -> AbResult<Vec<ObjectId>> {
+        let c = self.commit_at(commit)?;
+        c.parent_ids()
+            .map(|id| ObjectId::parse(id.to_string()))
+            .collect()
+    }
+
+    fn committer_timestamp(&self, commit: &ObjectId) -> AbResult<i64> {
+        Ok(self.commit_at(commit)?.committer().when().seconds())
+    }
+
+    fn commit_message(&self, commit: &ObjectId) -> AbResult<String> {
+        let c = self.commit_at(commit)?;
+        // A message that is not valid UTF-8 is content this crate cannot
+        // reason about (every trailer it looks for is ASCII), and silently
+        // lossy-converting it could invent a trailer that is not there.
+        std::str::from_utf8(c.message_bytes())
+            .map(|s| s.to_string())
+            .map_err(|e| {
+                invalid(format!(
+                    "commit {commit} has a message that is not valid UTF-8: {e}"
+                ))
+            })
+    }
+
+    fn merge_base_count(&self, a: &ObjectId, b: &ObjectId) -> AbResult<usize> {
+        let a_oid = git2::Oid::from_str(a.as_str())
+            .map_err(|e| AbError::Git(format!("{a} is not a usable object id: {e}")))?;
+        let b_oid = git2::Oid::from_str(b.as_str())
+            .map_err(|e| AbError::Git(format!("{b} is not a usable object id: {e}")))?;
+        match self.repo.merge_bases(a_oid, b_oid) {
+            Ok(bases) => Ok(bases.len()),
+            // `git merge-base --all` exits non-zero with no output when the
+            // two commits share no history at all; that is zero bases, not a
+            // failure to compute them.
+            Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(0),
+            Err(e) => Err(AbError::Git(format!(
+                "cannot compute merge bases of {a} and {b}: {e}"
+            ))),
+        }
+    }
+
+    fn first_parent_range(
+        &self,
+        from_exclusive: &ObjectId,
+        to: &ObjectId,
+    ) -> AbResult<Vec<ObjectId>> {
+        // The call this replaced passed `--reverse`.
+        self.walk(from_exclusive, to, true, true)
+    }
+
+    fn range(&self, from_exclusive: &ObjectId, to: &ObjectId) -> AbResult<Vec<ObjectId>> {
+        // The call this replaced did *not* pass `--reverse`, so this stays
+        // newest-first.
+        self.walk(from_exclusive, to, false, false)
+    }
+
+    fn diff_name_status(&self, from: &ObjectId, to: &ObjectId) -> AbResult<Vec<(String, String)>> {
+        let from_tree = self.tree_of(from)?;
+        let to_tree = self.tree_of(to)?;
+        // No `find_similar` call: see the trait method's doc for why rename
+        // detection stays off.
+        let diff = self
+            .repo
+            .diff_tree_to_tree(Some(&from_tree), Some(&to_tree), None)
+            .map_err(|e| AbError::Git(format!("cannot diff {from}..{to}: {e}")))?;
+
+        let mut out = Vec::new();
+        for delta in diff.deltas() {
+            // The status letters `git diff --name-status` prints, so a
+            // caller (and a golden test) sees the same vocabulary as before.
+            let status = match delta.status() {
+                git2::Delta::Added => "A",
+                git2::Delta::Deleted => "D",
+                git2::Delta::Modified => "M",
+                git2::Delta::Renamed => "R",
+                git2::Delta::Copied => "C",
+                git2::Delta::Typechange => "T",
+                other => {
+                    return Err(AbError::Git(format!(
+                        "unexpected diff status {other:?} between {from} and {to}"
+                    )))
+                }
+            };
+            // A delete has no new path and an add has no old one; take
+            // whichever side exists, preferring the new path so a
+            // modification reports its current name.
+            let path = delta
+                .new_file()
+                .path()
+                .or_else(|| delta.old_file().path())
+                .ok_or_else(|| {
+                    AbError::Git(format!("a change between {from} and {to} names no path"))
+                })?;
+            let path = path.to_str().ok_or_else(|| {
+                invalid(format!(
+                    "a path changed between {from} and {to} is not valid UTF-8"
+                ))
+            })?;
+            // Git records paths with forward slashes regardless of platform;
+            // `Path::to_str` on Windows preserves them, but normalize
+            // defensively so scope claims (which are always slash-separated)
+            // compare correctly.
+            out.push((status.to_string(), path.replace('\\', "/")));
+        }
+        Ok(out)
+    }
+}
+
 /// An in-memory [`ObjectReader`] over content supplied directly, for unit
 /// tests of everything layered on the trait.
 ///
@@ -660,6 +1005,181 @@ mod tests {
         git(path, &["commit", "-q", "-m", "initial"]);
         let head = crate::gitrepo::rev_parse(path, "HEAD").unwrap();
         (dir, ObjectId::parse(head).unwrap())
+    }
+
+    // ------------------------------------------------- history and identity
+
+    /// The claim `commit_with_identity` exists to make: for the same tree,
+    /// parents, message, identity and timestamp, libgit2 writes byte-for-byte
+    /// the commit object `git commit-tree` writes -- so the object id matches.
+    ///
+    /// This is load-bearing, not decorative. AGENT_REVIEW.md section 7 lets
+    /// any agent reconstruct another agent's merge candidate and compare ids;
+    /// if these two disagreed by a single byte, every candidate built before
+    /// this change would become unreproducible after it.
+    #[test]
+    fn commit_with_identity_matches_git_commit_tree_byte_for_byte() {
+        let (repo, head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+
+        let tree = {
+            let blob = g.write_blob(b"payload\n").unwrap();
+            g.write_tree(None, &[("a.txt", blob)]).unwrap()
+        };
+
+        // Messages chosen to exercise git's own normalization: one without a
+        // trailing newline (git appends one), one with, and one with a
+        // trailer block, which is what real candidates carry.
+        for message in [
+            "candidate: no trailing newline",
+            "candidate: trailing newline\n",
+            "candidate: with trailers\n\nAgent-Bus-Agent: c-agent\nCo-Authored-By: X <x@y>\n",
+        ] {
+            let ts = 1_700_000_000_i64;
+            let ours = g
+                .commit_with_identity(
+                    &tree,
+                    &[&head],
+                    message,
+                    crate::gitrepo::DETERMINISTIC_COMMIT_NAME,
+                    crate::gitrepo::DETERMINISTIC_COMMIT_EMAIL,
+                    ts,
+                )
+                .unwrap();
+
+            let date = format!("{ts} +0000");
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(repo.path())
+                .args(["-c", "commit.gpgsign=false"])
+                .args([
+                    "commit-tree",
+                    tree.as_str(),
+                    "-p",
+                    head.as_str(),
+                    "-m",
+                    message,
+                ])
+                .env("GIT_AUTHOR_NAME", crate::gitrepo::DETERMINISTIC_COMMIT_NAME)
+                .env(
+                    "GIT_AUTHOR_EMAIL",
+                    crate::gitrepo::DETERMINISTIC_COMMIT_EMAIL,
+                )
+                .env("GIT_AUTHOR_DATE", &date)
+                .env(
+                    "GIT_COMMITTER_NAME",
+                    crate::gitrepo::DETERMINISTIC_COMMIT_NAME,
+                )
+                .env(
+                    "GIT_COMMITTER_EMAIL",
+                    crate::gitrepo::DETERMINISTIC_COMMIT_EMAIL,
+                )
+                .env("GIT_COMMITTER_DATE", &date)
+                .env_remove("GIT_CONFIG_COUNT")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git commit-tree failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let theirs = String::from_utf8_lossy(&out.stdout).trim().to_string();
+
+            assert_eq!(
+                ours.as_str(),
+                theirs,
+                "libgit2 and git commit-tree disagree for message {message:?}"
+            );
+        }
+    }
+
+    /// Rename detection stays off, so a rename is reported as both the path
+    /// it left and the path it arrived at. `merge_ready` and `audit_main`
+    /// scope-check every path this returns, and a rename *into* a reviewed
+    /// scope must not hide the out-of-scope path it came from.
+    #[test]
+    fn diff_name_status_reports_both_sides_of_a_rename() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+
+        let blob = g.write_blob(b"same content, moved\n").unwrap();
+        let before_tree = g
+            .write_tree(None, &[("outside.txt", blob.clone())])
+            .unwrap();
+        let before = g.create_commit(&before_tree, &[], "before").unwrap();
+        let after_tree = g.write_tree(None, &[("inside.txt", blob)]).unwrap();
+        let after = g.create_commit(&after_tree, &[&before], "after").unwrap();
+
+        let changed = g.diff_name_status(&before, &after).unwrap();
+        let mut paths: Vec<&str> = changed.iter().map(|(_, p)| p.as_str()).collect();
+        paths.sort_unstable();
+        assert_eq!(
+            paths,
+            vec!["inside.txt", "outside.txt"],
+            "both sides of a rename must be reported so both get scope-checked"
+        );
+    }
+
+    #[test]
+    fn history_walks_agree_with_the_shape_of_the_graph() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+
+        let blob = g.write_blob(b"x").unwrap();
+        let tree = g.write_tree(None, &[("a.txt", blob)]).unwrap();
+        let root = g.create_commit(&tree, &[], "root").unwrap();
+        let mid = g.create_commit(&tree, &[&root], "mid").unwrap();
+        let tip = g.create_commit(&tree, &[&mid], "tip").unwrap();
+
+        assert_eq!(g.parents_of(&tip).unwrap(), vec![mid.clone()]);
+        assert!(g.parents_of(&root).unwrap().is_empty());
+        assert_eq!(
+            g.first_parent_range(&root, &tip).unwrap(),
+            vec![mid.clone(), tip.clone()],
+            "oldest first, exclusive of the start point"
+        );
+        assert_eq!(g.range(&root, &tip).unwrap().len(), 2);
+        assert_eq!(g.merge_base_count(&mid, &tip).unwrap(), 1);
+    }
+
+    /// Two commits with no shared history have zero merge bases -- the state
+    /// `git merge-base --all` signals by exiting non-zero with no output, and
+    /// which `merge_candidate` treats as "not exactly one" rather than as an
+    /// error to propagate.
+    #[test]
+    fn merge_base_count_is_zero_for_unrelated_histories() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        let blob = g.write_blob(b"x").unwrap();
+        let tree = g.write_tree(None, &[("a.txt", blob)]).unwrap();
+        let a = g.create_commit(&tree, &[], "orphan a").unwrap();
+        let b = g.create_commit(&tree, &[], "orphan b").unwrap();
+        // Distinct commits (different messages), sharing no ancestry.
+        assert_ne!(a, b);
+        assert_eq!(g.merge_base_count(&a, &b).unwrap(), 0);
+    }
+
+    #[test]
+    fn resolve_rev_handles_refs_ids_and_peel_suffixes() {
+        let (repo, head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+
+        assert_eq!(g.resolve_rev("HEAD").unwrap(), Some(head.clone()));
+        assert_eq!(g.resolve_rev(head.as_str()).unwrap(), Some(head.clone()));
+        assert!(g.resolve_rev("refs/heads/main").unwrap().is_some());
+        // A peel suffix resolves to a different object than the commit.
+        let tree = g.resolve_rev(&format!("{head}^{{tree}}")).unwrap().unwrap();
+        assert_ne!(tree, head);
+    }
+
+    /// Falsification: a well-formed id that names nothing, and a ref that
+    /// does not exist, are both absence -- not errors.
+    #[test]
+    fn resolve_rev_reports_unknown_objects_and_refs_as_none() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        assert_eq!(g.resolve_rev(oid(0x5a).as_str()).unwrap(), None);
+        assert_eq!(g.resolve_rev("refs/heads/never-existed").unwrap(), None);
     }
 
     // ------------------------------------------- writing and moving refs

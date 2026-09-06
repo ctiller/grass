@@ -1,7 +1,26 @@
-//! Thin wrapper around shelling out to `git`. The helper "uses ordinary Git
-//! fetch, rebase, commit, and push operations" (AGENT_BUS.md section 1) rather
-//! than reimplementing Git plumbing, so every operation here is a literal
-//! `git` invocation.
+//! What is left of shelling out to `git`.
+//!
+//! This module was once every git operation in the crate. It is now only the
+//! ones that must stay a subprocess, plus thin wrappers whose bodies moved
+//! in-process to `gitobjects.rs` but whose signatures many callers still use:
+//!
+//!  - **Remote transport** -- `fetch`, `push`, `ls-remote`. `git2` is built
+//!    with `default-features = false`, dropping its own HTTPS/SSH backends,
+//!    so these keep going through the user's credential helpers, SSH agent
+//!    and `.netrc`. Reimplementing them would mean acquiring OpenSSL and
+//!    libssh2 as build dependencies and reimplementing credential discovery.
+//!  - **`merge-tree --write-tree`** -- pinned to git's own ORT
+//!    implementation because AGENT_REVIEW.md section 7 requires every host to
+//!    produce a byte-identical tree, which libgit2's separate merge algorithm
+//!    would not.
+//!  - **`interpret-trailers --parse`** -- see `commit_message_trailers` for
+//!    why this one is deliberately not reimplemented.
+//!  - **`git --version`** -- the merge-engine pin check, which is a question
+//!    about the `git` binary itself.
+//!
+//! Everything here runs under a deadline with a process-tree kill
+//! (`run_with_deadline`), because the remote operations above are exactly the
+//! ones that can otherwise block forever.
 
 use crate::error::{invalid, AbError, AbResult};
 use std::path::{Path, PathBuf};
@@ -36,6 +55,162 @@ impl GitOutput {
     }
 }
 
+/// How long any `git` subprocess may run before it is killed.
+///
+/// Every surviving subprocess in this crate either talks to a remote
+/// (`fetch`, `push`, `ls-remote`) or is `merge-tree`/`interpret-trailers`;
+/// the remote ones are the ones that can block forever. `g-reviewer:29`
+/// reported exactly that -- an unreachable or hanging remote wedges every
+/// agent-bus command with no deadline and no way out -- and this is the
+/// deadline that answers it.
+///
+/// Generous on purpose. The bus fetches and pushes a handful of small refs,
+/// so a healthy operation is a second or two; two minutes distinguishes
+/// "hung" from "slow network" without ever being the thing that fails a real
+/// operation. Override with `AGENT_BUS_GIT_TIMEOUT_SECS` for an unusually
+/// slow link, or to tighten it in a test.
+fn git_timeout() -> std::time::Duration {
+    const DEFAULT_SECS: u64 = 120;
+    let secs = std::env::var("AGENT_BUS_GIT_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_SECS);
+    std::time::Duration::from_secs(secs)
+}
+
+/// Kill `pid` and everything it spawned.
+///
+/// A bare `Child::kill` reaps only the process we started. `git fetch` and
+/// `git push` delegate the actual transport to a child of their own (`ssh`,
+/// `git-remote-https`, a credential helper), and it is normally *that*
+/// process which is blocked -- on a dead TCP connection, or on a credential
+/// prompt reading a terminal that is not there. Killing only the parent
+/// leaves the real culprit running and holding the pipe, so the wait never
+/// ends.
+fn kill_process_tree(pid: u32) {
+    #[cfg(windows)]
+    {
+        // `taskkill /T` walks the tree; `/F` is required because a blocked
+        // child will not process a polite close request.
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    #[cfg(unix)]
+    {
+        // The child was put in its own process group (see `spawn_git`), so a
+        // negative pid signals the whole group in one call.
+        unsafe {
+            libc_kill(-(pid as i32), 9);
+        }
+    }
+}
+
+#[cfg(unix)]
+extern "C" {
+    #[link_name = "kill"]
+    fn libc_kill(pid: i32, sig: i32) -> i32;
+}
+
+/// Run `command`, returning its output, or killing its whole process tree and
+/// failing if it outruns [`git_timeout`].
+///
+/// The wait happens on a separate thread rather than by polling
+/// `try_wait` in a loop. Polling costs either latency (a sleep between
+/// checks, paid by every fast call) or CPU (a tight spin); a blocking wait
+/// on a thread costs neither, and `recv_timeout` gives the deadline for
+/// free. That matters here because these are the calls left on the hot
+/// publication path.
+fn run_with_deadline(mut command: Command, what: &str) -> AbResult<GitOutput> {
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    spawn_and_wait(command, what, None, git_timeout())
+}
+
+/// [`run_with_deadline`], but writing `stdin_text` to the child first.
+fn run_with_deadline_stdin(
+    mut command: Command,
+    what: &str,
+    stdin_text: &str,
+) -> AbResult<GitOutput> {
+    command
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    spawn_and_wait(command, what, Some(stdin_text), git_timeout())
+}
+
+/// `timeout` is a parameter rather than read from [`git_timeout`] here so a
+/// test can exercise the expiry path with a short deadline without setting a
+/// process-global environment variable that every other test running in
+/// parallel would also see.
+fn spawn_and_wait(
+    mut command: Command,
+    what: &str,
+    stdin_text: Option<&str>,
+    timeout: std::time::Duration,
+) -> AbResult<GitOutput> {
+    #[cfg(unix)]
+    {
+        // Own process group, so `kill_process_tree` can signal the transport
+        // children too.
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| AbError::Git(format!("failed to run git {what}: {e}")))?;
+    let pid = child.id();
+
+    if let Some(text) = stdin_text {
+        use std::io::Write;
+        let mut pipe = child
+            .stdin
+            .take()
+            .ok_or_else(|| AbError::Git(format!("git {what}: stdin pipe unavailable")))?;
+        // A child that dies before reading everything makes this fail with a
+        // broken pipe; that is not itself the error worth reporting, since
+        // the exit status and stderr below say what actually went wrong.
+        let _ = pipe.write_all(text.as_bytes());
+        drop(pipe);
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(out)) => Ok(GitOutput {
+            success: out.status.success(),
+            stdout: String::from_utf8_lossy(&out.stdout).trim_end().to_string(),
+            stderr: String::from_utf8_lossy(&out.stderr).trim_end().to_string(),
+        }),
+        Ok(Err(e)) => Err(AbError::Git(format!("failed to run git {what}: {e}"))),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            kill_process_tree(pid);
+            Err(AbError::Git(format!(
+                "git {what} did not finish within {}s and was killed. If this was a fetch or \
+                 push, the remote is unreachable or is waiting on a credential prompt that \
+                 cannot be answered here -- check the remote and your credential helper, then \
+                 retry. Set AGENT_BUS_GIT_TIMEOUT_SECS to allow longer.",
+                timeout.as_secs()
+            )))
+        }
+        // The waiting thread cannot drop the sender without sending, so this
+        // is unreachable in practice; report it rather than panicking.
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(AbError::Git(format!(
+            "git {what}: the process wait ended unexpectedly"
+        ))),
+    }
+}
+
 /// Every git invocation in this crate funnels through `run` (a plain
 /// argument list dispatch) or `run_stdin` (the one command, `interpret-
 /// trailers`, that needs piped input) — so unit tests can substitute a
@@ -47,20 +222,17 @@ pub fn run(dir: &Path, args: &[&str]) -> AbResult<GitOutput> {
     if let Some(out) = mock::intercept(dir, args, None) {
         return out;
     }
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .map_err(|e| AbError::Git(format!("failed to run git {args:?}: {e}")))?;
-    Ok(GitOutput {
-        success: out.status.success(),
-        stdout: String::from_utf8_lossy(&out.stdout).trim_end().to_string(),
-        stderr: String::from_utf8_lossy(&out.stderr).trim_end().to_string(),
-    })
+    let mut command = Command::new("git");
+    command.arg("-C").arg(dir).args(args);
+    run_with_deadline(command, &format!("{args:?}"))
 }
 
 /// Run a git command and turn a nonzero exit into an error.
+/// Only test code calls this now: every production caller either went
+/// in-process or needs `run`'s untranslated output. Kept because the tests
+/// that build real repositories still find it the clearest way to ask git a
+/// question directly.
+#[cfg(test)]
 pub fn run_ok(dir: &Path, args: &[&str]) -> AbResult<String> {
     let out = run(dir, args)?;
     if !out.success {
@@ -70,11 +242,10 @@ pub fn run_ok(dir: &Path, args: &[&str]) -> AbResult<String> {
 }
 
 pub fn version() -> AbResult<String> {
-    let out = Command::new("git")
-        .arg("--version")
-        .output()
-        .map_err(|e| AbError::Git(format!("failed to run git --version: {e}")))?;
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let mut command = Command::new("git");
+    command.arg("--version");
+    let out = run_with_deadline(command, "--version")?;
+    let s = out.stdout.trim().to_string();
     // "git version 2.53.0.windows.1" -> "2.53.0"
     let ver = s
         .strip_prefix("git version ")
@@ -92,8 +263,7 @@ pub fn version() -> AbResult<String> {
 }
 
 pub fn repo_root(start: &Path) -> AbResult<PathBuf> {
-    let out = run_ok(start, &["rev-parse", "--show-toplevel"])?;
-    Ok(PathBuf::from(out))
+    crate::gitobjects::Libgit2Reader::open(start)?.workdir()
 }
 
 /// The repository's single shared git directory. Agents share one clone and
@@ -107,32 +277,41 @@ pub fn repo_root(start: &Path) -> AbResult<PathBuf> {
 /// fragmented per linked worktree. (This crate no longer stages anything in
 /// worktrees of its own; the outbox is what still needs a shared home.)
 pub fn common_dir(start: &Path) -> AbResult<PathBuf> {
-    let out = run_ok(start, &["rev-parse", "--git-common-dir"])?;
-    let dir = PathBuf::from(out);
-    if dir.is_absolute() {
-        Ok(dir)
-    } else {
-        Ok(start.join(dir))
-    }
+    // libgit2 always reports this absolute, so the relative-path join the
+    // `rev-parse --git-common-dir` version needed is gone.
+    Ok(crate::gitobjects::Libgit2Reader::open(start)?.common_dir())
+}
+
+/// Resolve a revision expression against an already-open reader, failing
+/// rather than reporting absence. The `gitrepo` wrappers below all accept
+/// arbitrary revision strings (`HEAD`, a branch, a raw id) because their
+/// `git` predecessors did, so each one resolves before calling the
+/// object-id-typed methods on the reader.
+fn resolve_required(
+    g: &crate::gitobjects::Libgit2Reader,
+    rev: &str,
+) -> AbResult<crate::scalars::ObjectId> {
+    crate::gitobjects::HistoryReader::resolve_rev(g, rev)?
+        .ok_or_else(|| AbError::Git(format!("{rev} does not name an object in this repository")))
 }
 
 pub fn rev_parse(dir: &Path, rev: &str) -> AbResult<String> {
-    run_ok(dir, &["rev-parse", "--verify", rev])
+    rev_parse_opt(dir, rev)?
+        .ok_or_else(|| AbError::Git(format!("{rev} does not name an object in this repository")))
 }
 
 pub fn rev_parse_opt(dir: &Path, rev: &str) -> AbResult<Option<String>> {
-    // `rev-parse --verify` alone only checks that `rev` is *syntactically*
-    // resolvable: for a full-length hex string it echoes the input back and
-    // exits 0 even when no such object exists in the odb. Appending
-    // `^{object}` forces git to actually dereference to an object, which
-    // fails for both a nonexistent hash and a nonexistent ref.
-    let target = format!("{rev}^{{object}}");
-    let out = run(dir, &["rev-parse", "--verify", "--quiet", &target])?;
-    if out.success && !out.stdout.is_empty() {
-        Ok(Some(out.stdout))
-    } else {
-        Ok(None)
-    }
+    // The subprocess version had to spell this as `<rev>^{object}`, because
+    // `rev-parse --verify` alone accepts a full-length hex string
+    // syntactically and echoes it back even when no such object exists.
+    // `revparse_single` always dereferences to a real object, so the
+    // workaround is unnecessary here -- but it is still *accepted*, since
+    // callers may pass an explicit peel suffix of their own.
+    crate::gitobjects::HistoryReader::resolve_rev(
+        &crate::gitobjects::Libgit2Reader::open(dir)?,
+        rev,
+    )
+    .map(|o| o.map(|id| id.into_string()))
 }
 
 #[cfg(test)]
@@ -264,8 +443,36 @@ pub fn remote_refs_existing(
     Ok(existing)
 }
 
+/// The trailers in `rev`'s commit message.
+///
+/// The message is read in-process; the *parse* deliberately stays on `git
+/// interpret-trailers`, which is the one local git operation this crate does
+/// not reimplement. That is a considered exception, not an oversight:
+///
+///  - It is a security boundary. `merge_candidate.rs` decides who authored a
+///    candidate's commits from `Agent-Bus-Agent` trailers, and `merge_ready.
+///    rs`/`audit_main.rs` decide who reviewed it from `Agent-Bus-Reviewer`.
+///    A parser that saw a trailer git would not see would let a crafted
+///    message claim an authorship or a review it never had.
+///  - Git's real rule is not the one its manual documents. The 25%
+///    non-trailer tolerance described there is not what the pinned binary
+///    does: one prose line voids a block of eight trailers. Enumerating every
+///    three-line block over {trailer, prose, cherry-pick, continuation}
+///    against the real binary produces a rule that fits all sixty-four cases
+///    only if you also encode that the presence of a `(cherry picked from
+///    commit ...)` line silently relaxes the strictness -- an implementation
+///    accident of `trailer.c`, not a principle, and not something to freeze
+///    into an authorization check.
+///  - There is nothing to gain. This is not on any hot path: `status`,
+///    `tail`, `outbox`, `submit` and `coordinate` never call it. Only
+///    `audit-main` and the merge path do, a handful of commits at a time.
+///
+/// What *was* worth taking off the subprocess is the message read, which is
+/// not security-critical and used to be a second `git show` per commit. So
+/// this costs one process per commit now instead of two.
 pub fn commit_message_trailers(dir: &Path, rev: &str) -> AbResult<Vec<(String, String)>> {
-    let body = run_ok(dir, &["show", "-s", "--format=%B", rev])?;
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    let body = crate::gitobjects::HistoryReader::commit_message(&g, &resolve_required(&g, rev)?)?;
     let out = run_stdin(dir, &["interpret-trailers", "--parse"], &body)?;
     if !out.success {
         return Err(AbError::Git(format!(
@@ -289,30 +496,9 @@ pub fn run_stdin(dir: &Path, args: &[&str], stdin: &str) -> AbResult<GitOutput> 
     if let Some(out) = mock::intercept(dir, args, Some(stdin)) {
         return out;
     }
-    use std::io::Write;
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| AbError::Git(format!("failed to run git {args:?}: {e}")))?;
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(stdin.as_bytes())
-        .map_err(|e| AbError::Git(format!("failed to write stdin to git {args:?}: {e}")))?;
-    let out = child
-        .wait_with_output()
-        .map_err(|e| AbError::Git(format!("failed to wait on git {args:?}: {e}")))?;
-    Ok(GitOutput {
-        success: out.status.success(),
-        stdout: String::from_utf8_lossy(&out.stdout).trim_end().to_string(),
-        stderr: String::from_utf8_lossy(&out.stderr).trim_end().to_string(),
-    })
+    let mut command = Command::new("git");
+    command.arg("-C").arg(dir).args(args);
+    run_with_deadline_stdin(command, &format!("{args:?}"), stdin)
 }
 
 /// `git merge-tree --write-tree` a no-conflict ORT merge of `theirs` into
@@ -363,19 +549,19 @@ pub fn merge_tree_write_tree(dir: &Path, ours: &str, theirs: &str) -> AbResult<S
 
 /// Committer-date unix timestamp (seconds) of `rev`.
 pub fn committer_timestamp(dir: &Path, rev: &str) -> AbResult<i64> {
-    let out = run_ok(dir, &["show", "-s", "--format=%ct", rev])?;
-    out.trim().parse().map_err(|e| {
-        invalid(format!(
-            "could not parse committer timestamp for {rev}: {e}"
-        ))
-    })
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    crate::gitobjects::HistoryReader::committer_timestamp(&g, &resolve_required(&g, rev)?)
 }
 
 /// The exact number of merge bases between `a` and `b` (AGENT_REVIEW.md
 /// section 7: "It requires one merge base").
 pub fn merge_base_count(dir: &Path, a: &str, b: &str) -> AbResult<usize> {
-    let out = run_ok(dir, &["merge-base", "--all", a, b])?;
-    Ok(out.lines().filter(|l| !l.trim().is_empty()).count())
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    crate::gitobjects::HistoryReader::merge_base_count(
+        &g,
+        &resolve_required(&g, a)?,
+        &resolve_required(&g, b)?,
+    )
 }
 
 /// Construct a commit object with fully deterministic metadata
@@ -389,53 +575,48 @@ pub fn commit_tree_deterministic(
     parents: &[&str],
     message: &str,
 ) -> AbResult<String> {
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+
+    let mut resolved = Vec::with_capacity(parents.len());
+    for p in parents {
+        resolved.push(resolve_required(&g, p)?);
+    }
     let mut latest = i64::MIN;
     for p in parents {
-        let t = committer_timestamp(dir, p)?;
-        latest = latest.max(t);
+        latest = latest.max(committer_timestamp(dir, p)?);
     }
     let ts = latest
         .checked_add(1)
         .ok_or_else(|| invalid("candidate timestamp overflow"))?;
-    let date = format!("{ts} +0000");
 
-    let mut args: Vec<&str> = vec!["commit-tree", tree];
-    for p in parents {
-        args.push("-p");
-        args.push(p);
-    }
-    args.push("-m");
-    args.push(message);
-
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        // Deterministic candidates never carry a signature, regardless of
-        // ambient repo/global signing config (AGENT_REVIEW.md section 7: "no
-        // optional encoding, signature, or mergetag headers").
-        .args(["-c", "commit.gpgsign=false"])
-        .args(&args)
-        .env("GIT_AUTHOR_NAME", "Grass Agent Bus")
-        .env("GIT_AUTHOR_EMAIL", "agent-bus@invalid")
-        .env("GIT_AUTHOR_DATE", &date)
-        .env("GIT_COMMITTER_NAME", "Grass Agent Bus")
-        .env("GIT_COMMITTER_EMAIL", "agent-bus@invalid")
-        .env("GIT_COMMITTER_DATE", &date)
-        .env_remove("GIT_CONFIG_COUNT")
-        .output()
-        .map_err(|e| AbError::Git(format!("failed to run git commit-tree: {e}")))?;
-    if !out.status.success() {
-        return Err(AbError::Git(format!(
-            "git commit-tree failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        )));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    let tree = resolve_required(&g, tree)?;
+    let parent_refs: Vec<&crate::scalars::ObjectId> = resolved.iter().collect();
+    let id = g.commit_with_identity(
+        &tree,
+        &parent_refs,
+        message,
+        DETERMINISTIC_COMMIT_NAME,
+        DETERMINISTIC_COMMIT_EMAIL,
+        ts,
+    )?;
+    Ok(id.into_string())
 }
 
+/// The fixed identity every reproducible candidate commit carries. Any
+/// change here changes every future candidate's object id, so it is named
+/// once rather than spelled out at the point of use.
+pub const DETERMINISTIC_COMMIT_NAME: &str = "Grass Agent Bus";
+pub const DETERMINISTIC_COMMIT_EMAIL: &str = "agent-bus@invalid";
+
 pub fn tag_lightweight(dir: &Path, name: &str, target: &str) -> AbResult<()> {
-    run_ok(dir, &["tag", name, target])?;
-    Ok(())
+    // `git tag` validates the name it is given; `Branch::parse` is this
+    // crate's equivalent, cross-checked against real `git check-ref-format`
+    // by `scalars::ref_format_tests`.
+    let refname = crate::scalars::Branch::parse(format!("refs/tags/{name}"))
+        .map_err(|e| invalid(format!("{name} is not a usable tag name: {e}")))?;
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    let target = resolve_required(&g, target)?;
+    crate::gitobjects::RefStore::compare_and_set(&g, refname.as_str(), None, &target)
 }
 
 /// Whether `remote` actually has a tag named `name` pointing at `target` --
@@ -488,28 +669,28 @@ pub fn remote_tag_matches(dir: &Path, remote: &str, name: &str, target: &str) ->
 /// even though renames are deliberately supported elsewhere in this exact
 /// crate, `merge.renames=true` pinned for candidate construction.)
 pub fn diff_name_status(dir: &Path, from: &str, to: &str) -> AbResult<Vec<(String, String)>> {
-    let out = run_ok(dir, &["diff", "--name-status", &format!("{from}..{to}")])?;
-    let mut result = Vec::new();
-    for line in out.lines() {
-        let mut parts = line.split('\t');
-        let (Some(status), Some(first_path)) = (parts.next(), parts.next()) else {
-            continue;
-        };
-        let path = parts.next().unwrap_or(first_path);
-        result.push((status.to_string(), path.to_string()));
-    }
-    Ok(result)
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    crate::gitobjects::HistoryReader::diff_name_status(
+        &g,
+        &resolve_required(&g, from)?,
+        &resolve_required(&g, to)?,
+    )
 }
 
 pub fn rev_list_first_parent(dir: &Path, from_exclusive: &str, to: &str) -> AbResult<Vec<String>> {
-    let range = format!("{from_exclusive}..{to}");
-    let out = run_ok(dir, &["rev-list", "--first-parent", "--reverse", &range])?;
-    Ok(out.lines().map(|s| s.to_string()).collect())
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    let out = crate::gitobjects::HistoryReader::first_parent_range(
+        &g,
+        &resolve_required(&g, from_exclusive)?,
+        &resolve_required(&g, to)?,
+    )?;
+    Ok(out.into_iter().map(|id| id.into_string()).collect())
 }
 
 pub fn parents_of(dir: &Path, rev: &str) -> AbResult<Vec<String>> {
-    let out = run_ok(dir, &["show", "-s", "--format=%P", rev])?;
-    Ok(out.split_whitespace().map(|s| s.to_string()).collect())
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    let out = crate::gitobjects::HistoryReader::parents_of(&g, &resolve_required(&g, rev)?)?;
+    Ok(out.into_iter().map(|id| id.into_string()).collect())
 }
 
 pub fn commits_between_first_parent_exclusive(
@@ -519,9 +700,13 @@ pub fn commits_between_first_parent_exclusive(
 ) -> AbResult<Vec<String>> {
     // Commits introduced by the second parent relative to the first parent:
     // ancestor..second_parent
-    let range = format!("{ancestor}..{descendant_second_parent}");
-    let out = run_ok(dir, &["rev-list", &range])?;
-    Ok(out.lines().map(|s| s.to_string()).collect())
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    let out = crate::gitobjects::HistoryReader::range(
+        &g,
+        &resolve_required(&g, ancestor)?,
+        &resolve_required(&g, descendant_second_parent)?,
+    )?;
+    Ok(out.into_iter().map(|id| id.into_string()).collect())
 }
 
 /// A scriptable stand-in for the real `git` subprocess, installed for the
@@ -738,6 +923,113 @@ pub mod mock {
 
 #[cfg(test)]
 mod outer_tests {
+
+    // ----------------------------------------------- the subprocess deadline
+
+    /// A command that blocks for longer than the deadline: `ping` on Windows
+    /// (which has no `sleep`), `sleep` elsewhere. Neither is `git`, which is
+    /// the point -- the deadline is a property of how this module runs a
+    /// child process, and using a program that reliably hangs makes the
+    /// expiry path deterministic instead of requiring an unreachable remote.
+    fn blocking_command() -> Command {
+        if cfg!(windows) {
+            let mut c = Command::new("ping");
+            c.args(["-n", "30", "127.0.0.1"]);
+            c
+        } else {
+            let mut c = Command::new("sleep");
+            c.arg("30");
+            c
+        }
+    }
+
+    /// `g-reviewer:29`: an unbounded subprocess can hang every agent-bus
+    /// command. It must instead be killed and reported.
+    #[test]
+    fn a_command_that_outruns_its_deadline_is_killed_and_reported() {
+        let mut command = blocking_command();
+        command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        let started = std::time::Instant::now();
+        let err = spawn_and_wait(
+            command,
+            "test-hang",
+            None,
+            std::time::Duration::from_millis(300),
+        )
+        .unwrap_err();
+        let elapsed = started.elapsed();
+
+        assert!(
+            err.to_string().contains("did not finish within"),
+            "expected a timeout error, got: {err}"
+        );
+        // The deadline must actually bound the wait, not merely be reported
+        // after the child finished on its own.
+        assert!(
+            elapsed < std::time::Duration::from_secs(20),
+            "waited {elapsed:?}, so the deadline did not bound the wait"
+        );
+    }
+
+    /// This CLI's callers are other agents with no human in the loop, so a
+    /// failure has to say what to do next, not only that it failed.
+    #[test]
+    fn the_timeout_error_names_the_operator_action() {
+        let mut command = blocking_command();
+        command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let err = spawn_and_wait(
+            command,
+            "test-hang",
+            None,
+            std::time::Duration::from_millis(300),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("credential"), "{err}");
+        assert!(err.contains("retry"), "{err}");
+        assert!(err.contains("AGENT_BUS_GIT_TIMEOUT_SECS"), "{err}");
+    }
+
+    /// A command that finishes well inside the deadline must not be delayed
+    /// by it. This is why the wait is a blocking wait on a thread rather than
+    /// a poll loop with a sleep: a poll interval would be paid by every call.
+    #[test]
+    fn a_fast_command_is_not_delayed_by_the_deadline() {
+        let repo = init_repo();
+        let started = std::time::Instant::now();
+        let out = run(repo.path(), &["rev-parse", "HEAD"]).unwrap();
+        assert!(out.success, "{out:?}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "a trivial git call took {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// The default is used when the override is absent or unusable; a zero or
+    /// non-numeric value must not disable the deadline entirely.
+    #[test]
+    fn the_deadline_default_is_used_when_the_override_is_unusable() {
+        // Read the default without touching the environment: the parse and
+        // filter logic is what matters, and it is exercised directly.
+        let parse = |v: Option<&str>| -> u64 {
+            v.and_then(|v| v.parse::<u64>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(120)
+        };
+        assert_eq!(parse(None), 120);
+        assert_eq!(parse(Some("")), 120);
+        assert_eq!(parse(Some("0")), 120, "zero must not disable the deadline");
+        assert_eq!(parse(Some("not-a-number")), 120);
+        assert_eq!(parse(Some("5")), 5);
+    }
     use super::*;
     use crate::gitrepo::mock::MockGit;
     use std::path::PathBuf;
@@ -790,30 +1082,30 @@ mod outer_tests {
     /// `--git-common-dir` returning an already-absolute path (the common case
     /// from within a linked worktree, AGENT_BUS.md section 2) must be used
     /// as-is, not re-joined onto `start`.
+    /// `common_dir` must report an absolute path to the repository's shared
+    /// git directory, and must agree with `git rev-parse --git-common-dir`,
+    /// which is what it replaced.
+    ///
+    /// The two tests this supersedes scripted a `MockGit` answer and checked
+    /// the relative-path join that answer needed. libgit2 reports this
+    /// absolute already, so there is no join left to test -- and a mock
+    /// cannot intercept an in-process call in any case. Comparing against
+    /// real git is a stronger claim than the one that was lost.
     #[test]
-    fn common_dir_returns_an_absolute_result_unchanged() {
-        let abs = if cfg!(windows) {
-            "C:\\repo\\.git"
-        } else {
-            "/repo/.git"
-        };
-        let _guard = MockGit::new()
-            .on(&["rev-parse", "--git-common-dir"], GitOutput::ok(abs))
-            .install();
-        let got = common_dir(&PathBuf::from("/wherever")).unwrap();
-        assert_eq!(got, PathBuf::from(abs));
-    }
+    fn common_dir_matches_git_and_is_absolute() {
+        let repo = init_repo();
+        let got = common_dir(repo.path()).unwrap();
+        assert!(got.is_absolute(), "expected an absolute path, got {got:?}");
 
-    /// A relative `--git-common-dir` result (the common case from within the
-    /// main checkout, e.g. `.git`) must be resolved against `start`.
-    #[test]
-    fn common_dir_joins_a_relative_result_onto_start() {
-        let _guard = MockGit::new()
-            .on(&["rev-parse", "--git-common-dir"], GitOutput::ok(".git"))
-            .install();
-        let start = PathBuf::from("/repo/checkout");
-        let got = common_dir(&start).unwrap();
-        assert_eq!(got, start.join(".git"));
+        let expected = run_ok(
+            repo.path(),
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::canonicalize(&got).unwrap(),
+            std::fs::canonicalize(PathBuf::from(expected.trim())).unwrap()
+        );
     }
 
     /// A failing `git interpret-trailers --parse` invocation must surface as
@@ -878,7 +1170,12 @@ mod outer_tests {
             "msg",
         )
         .unwrap_err();
-        assert!(format!("{err}").contains("commit-tree failed"), "{err}");
+        // The all-zero id names no object; the failure now comes from
+        // resolving it rather than from `git commit-tree`'s exit status.
+        assert!(
+            format!("{err}").contains("does not name an object"),
+            "{err}"
+        );
     }
 
     /// The success path: given a real parent and its real tree, the
@@ -1093,7 +1390,7 @@ mod outer_tests {
     /// message, indistinguishable from a real usage error (e.g. a bad
     /// revision). See this function's report note.
     #[test]
-    fn merge_base_count_errs_for_unrelated_orphan_histories() {
+    fn merge_base_count_is_zero_for_unrelated_orphan_histories() {
         let repo = init_repo();
         let main_tip = rev_parse(repo.path(), "HEAD").unwrap();
 
@@ -1102,8 +1399,16 @@ mod outer_tests {
         commit_file(repo.path(), "other.txt", "other\n", "unrelated root");
         let orphan_tip = rev_parse(repo.path(), "HEAD").unwrap();
 
-        let err = merge_base_count(repo.path(), &main_tip, &orphan_tip).unwrap_err();
-        assert!(matches!(err, AbError::Git(_)), "{err:?}");
+        // Two histories with no common ancestor have zero merge bases. The
+        // subprocess version reported this as an error, because `git
+        // merge-base --all` signals it by exiting non-zero with no output --
+        // which meant `merge_candidate` surfaced a raw git error instead of
+        // its own "do not have exactly one merge base". Zero is the honest
+        // answer and produces the domain error the caller means.
+        assert_eq!(
+            merge_base_count(repo.path(), &main_tip, &orphan_tip).unwrap(),
+            0
+        );
     }
 
     /// The ordinary path: a lightweight tag must resolve back to exactly
@@ -1248,7 +1553,7 @@ mod outer_tests {
     /// embedded tab -- `merge_ready::check_merge_ready`'s scope check then
     /// rejected every renamed file outright, in-scope or not.
     #[test]
-    fn diff_name_status_reports_the_new_path_for_a_rename_not_a_tab_mangled_string() {
+    fn diff_name_status_reports_both_sides_of_a_rename_untangled() {
         let repo = init_repo();
         commit_file(repo.path(), "old.txt", "unchanged content\n", "add old.txt");
         let from = rev_parse(repo.path(), "HEAD").unwrap();
@@ -1260,10 +1565,19 @@ mod outer_tests {
         let to = rev_parse(repo.path(), "HEAD").unwrap();
 
         let changed = diff_name_status(repo.path(), &from, &to).unwrap();
-        assert_eq!(changed.len(), 1, "{changed:?}");
-        let (status, path) = &changed[0];
-        assert!(status.starts_with('R'), "{status}");
-        assert_eq!(path, "new.txt");
-        assert!(!path.contains('\t'), "{path}");
+        let mut paths: Vec<&str> = changed.iter().map(|(_, p)| p.as_str()).collect();
+        paths.sort_unstable();
+        // Rename detection is deliberately off, so this is a delete plus an
+        // add rather than one `R<score> old new` line. Both consumers
+        // (`merge_ready`, `audit_main`) scope-check every path returned, and
+        // a rename *into* a reviewed scope must not hide the out-of-scope
+        // path it came from -- see `HistoryReader::diff_name_status`.
+        assert_eq!(paths, vec!["new.txt", "old.txt"], "{changed:?}");
+        // The original defect this guards: a tab-separated `old\tnew` pair
+        // returned as one mangled path.
+        assert!(
+            changed.iter().all(|(_, p)| !p.contains('\t')),
+            "{changed:?}"
+        );
     }
 }

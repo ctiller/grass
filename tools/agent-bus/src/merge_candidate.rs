@@ -120,9 +120,6 @@ pub(crate) fn candidate_tag_name(reviewer: &Agent, candidate: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gitrepo::mock::{MockGit, MockGuard};
-    use crate::gitrepo::GitOutput;
-    use std::path::PathBuf;
 
     fn a(name: &str) -> Agent {
         Agent::parse(name.to_string()).unwrap()
@@ -132,88 +129,76 @@ mod tests {
         format!("{n:040x}")
     }
 
-    /// Installs a `MockGit` that answers `rev-list <previous_main>..
-    /// <reviewed_commit>` with `commits`, and `show -s --format=%B <c>` /
-    /// `interpret-trailers --parse` for each with the `Agent-Bus-Agent`
-    /// trailers named in `trailer_agents` (mirrors v1's own
-    /// `mock_authorship` test helper).
-    fn mock_authorship(
-        previous_main: &str,
-        reviewed_commit: &str,
-        commits: &[&str],
-        trailer_agents: std::collections::BTreeMap<&str, Vec<&str>>,
-    ) -> MockGuard {
-        let range = format!("{previous_main}..{reviewed_commit}");
-        let commits_out = commits.join("\n");
-        let trailer_agents: std::collections::BTreeMap<String, Vec<String>> = trailer_agents
-            .into_iter()
-            .map(|(k, v)| {
-                (
-                    k.to_string(),
-                    v.into_iter().map(|s| s.to_string()).collect(),
-                )
-            })
-            .collect();
-        MockGit::new()
-            .on(&["rev-list", &range], GitOutput::ok(commits_out))
-            .on_with(
-                |_, a: &[&str], _| a.first() == Some(&"show") && a.get(1) == Some(&"-s"),
-                move |_, a: &[&str], _| {
-                    let c = *a.last().unwrap();
-                    let body = trailer_agents
-                        .get(c)
-                        .map(|agents| {
-                            agents
-                                .iter()
-                                .map(|ag| format!("Agent-Bus-Agent: {ag}"))
-                                .collect::<Vec<_>>()
-                                .join("\n")
-                        })
-                        .unwrap_or_default();
-                    Ok(GitOutput::ok(format!("msg\n\n{body}")))
-                },
-            )
-            .on_with(
-                |_, a: &[&str], _| a == ["interpret-trailers", "--parse"],
-                |_, _, stdin: Option<&str>| {
-                    let body = stdin.unwrap_or("");
-                    let lines: Vec<&str> = body.lines().filter(|l| l.contains(": ")).collect();
-                    Ok(GitOutput::ok(lines.join("\n")))
-                },
-            )
-            .install()
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    /// A real repository with a base commit followed by one commit per entry
+    /// in `authors`, each carrying an `Agent-Bus-Agent` trailer per name.
+    ///
+    /// This replaces a `MockGit` helper that scripted `rev-list`, `show` and
+    /// `interpret-trailers`. Two reasons it is better rather than merely
+    /// different: the mocked `interpret-trailers` accepted any line
+    /// containing `": "`, which is far more permissive than git's real
+    /// trailer rules, so the tests were validating against a parser that does
+    /// not exist; and `commits_between_first_parent_exclusive` now walks the
+    /// object database in-process, which a subprocess mock cannot intercept
+    /// at all.
+    ///
+    /// Returns the repository, the base commit, the tip, and the commits
+    /// introduced between them in order.
+    fn repo_with_authored_chain(
+        authors: &[&[&str]],
+    ) -> (tempfile::TempDir, String, String, Vec<String>) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        git(path, &["init", "--quiet", "-b", "main"]);
+        git(path, &["config", "user.email", "test@example.com"]);
+        git(path, &["config", "user.name", "Test"]);
+        std::fs::write(path.join("base.txt"), "base\n").unwrap();
+        git(path, &["add", "-A"]);
+        git(path, &["commit", "-q", "-m", "base"]);
+        let base = crate::gitrepo::rev_parse(path, "HEAD").unwrap();
+
+        let mut introduced = Vec::new();
+        for (n, names) in authors.iter().enumerate() {
+            std::fs::write(path.join(format!("f{n}.txt")), format!("content {n}\n")).unwrap();
+            git(path, &["add", "-A"]);
+            // A subject paragraph, a blank line, then a contiguous trailer
+            // block -- the shape git actually recognizes.
+            let mut message = format!("change {n}\n\n");
+            for name in names.iter() {
+                message.push_str(&format!("Agent-Bus-Agent: {name}\n"));
+            }
+            git(path, &["commit", "-q", "-m", &message]);
+            introduced.push(crate::gitrepo::rev_parse(path, "HEAD").unwrap());
+        }
+        let tip = crate::gitrepo::rev_parse(path, "HEAD").unwrap();
+        (dir, base, tip, introduced)
     }
 
     #[test]
     fn verify_authorship_rejects_empty_introduced_range() {
-        let (prev, reviewed) = (hash(1), hash(2));
-        let _guard = mock_authorship(&prev, &reviewed, &[], Default::default());
+        let (repo, base, _tip, _c) = repo_with_authored_chain(&[]);
         let bob = a("bob");
-        let err = verify_authorship(
-            &PathBuf::from("."),
-            &bob,
-            &BTreeSet::new(),
-            &prev,
-            &reviewed,
-        )
-        .unwrap_err();
+        // base..base introduces nothing.
+        let err = verify_authorship(repo.path(), &bob, &BTreeSet::new(), &base, &base).unwrap_err();
         assert!(err.to_string().contains("introduces no content"), "{err}");
     }
 
     #[test]
     fn verify_authorship_rejects_missing_author_trailer() {
-        let (prev, reviewed) = (hash(1), hash(2));
-        let c = hash(3);
-        let _guard = mock_authorship(&prev, &reviewed, &[&c], Default::default());
+        let (repo, base, tip, _c) = repo_with_authored_chain(&[&[]]);
         let bob = a("bob");
-        let err = verify_authorship(
-            &PathBuf::from("."),
-            &bob,
-            &BTreeSet::new(),
-            &prev,
-            &reviewed,
-        )
-        .unwrap_err();
+        let err = verify_authorship(repo.path(), &bob, &BTreeSet::new(), &base, &tip).unwrap_err();
         assert!(
             err.to_string().contains("has no Agent-Bus-Agent trailer"),
             "{err}"
@@ -222,31 +207,19 @@ mod tests {
 
     #[test]
     fn verify_authorship_rejects_reviewer_authored_commit() {
-        let (prev, reviewed) = (hash(1), hash(2));
-        let c = hash(3);
-        let mut trailers = std::collections::BTreeMap::new();
-        trailers.insert(c.as_str(), vec!["bob"]);
-        let _guard = mock_authorship(&prev, &reviewed, &[&c], trailers);
+        let (repo, base, tip, _c) = repo_with_authored_chain(&[&["bob"]]);
         let bob = a("bob");
-        let mut expected = BTreeSet::new();
-        expected.insert(bob.clone());
-        let err =
-            verify_authorship(&PathBuf::from("."), &bob, &expected, &prev, &reviewed).unwrap_err();
+        let expected: BTreeSet<Agent> = [bob.clone()].into_iter().collect();
+        let err = verify_authorship(repo.path(), &bob, &expected, &base, &tip).unwrap_err();
         assert!(err.to_string().contains("ineligible to merge"), "{err}");
     }
 
     #[test]
     fn verify_authorship_rejects_author_mismatch() {
-        let (prev, reviewed) = (hash(1), hash(2));
-        let c = hash(3);
-        let mut trailers = std::collections::BTreeMap::new();
-        trailers.insert(c.as_str(), vec!["carol"]);
-        let _guard = mock_authorship(&prev, &reviewed, &[&c], trailers);
+        let (repo, base, tip, _c) = repo_with_authored_chain(&[&["carol"]]);
         let bob = a("bob");
-        let mut expected = BTreeSet::new();
-        expected.insert(a("alice"));
-        let err =
-            verify_authorship(&PathBuf::from("."), &bob, &expected, &prev, &reviewed).unwrap_err();
+        let expected: BTreeSet<Agent> = [a("alice")].into_iter().collect();
+        let err = verify_authorship(repo.path(), &bob, &expected, &base, &tip).unwrap_err();
         assert!(
             err.to_string().contains("do not match nomination authors"),
             "{err}"
@@ -255,46 +228,41 @@ mod tests {
 
     #[test]
     fn verify_authorship_succeeds_and_returns_introduced_commits() {
-        let (prev, reviewed) = (hash(1), hash(2));
-        let (c1, c2) = (hash(3), hash(4));
-        let mut trailers = std::collections::BTreeMap::new();
-        trailers.insert(c1.as_str(), vec!["alice"]);
-        trailers.insert(c2.as_str(), vec!["alice"]);
-        let _guard = mock_authorship(&prev, &reviewed, &[&c1, &c2], trailers);
+        let (repo, base, tip, commits) = repo_with_authored_chain(&[&["alice"], &["alice"]]);
         let bob = a("bob");
-        let mut expected = BTreeSet::new();
-        expected.insert(a("alice"));
-        let introduced =
-            verify_authorship(&PathBuf::from("."), &bob, &expected, &prev, &reviewed).unwrap();
-        assert_eq!(introduced, vec![c1, c2]);
+        let expected: BTreeSet<Agent> = [a("alice")].into_iter().collect();
+        let introduced = verify_authorship(repo.path(), &bob, &expected, &base, &tip).unwrap();
+        let newest_first: Vec<String> = commits.iter().rev().cloned().collect();
+        assert_eq!(
+            introduced, newest_first,
+            "`git rev-list` order: newest first, exclusive of the base"
+        );
     }
 
     #[test]
     fn verify_authorship_accepts_multiple_authors_across_commits() {
-        let (prev, reviewed) = (hash(1), hash(2));
-        let (c1, c2) = (hash(3), hash(4));
-        let mut trailers = std::collections::BTreeMap::new();
-        trailers.insert(c1.as_str(), vec!["alice"]);
-        trailers.insert(c2.as_str(), vec!["carol"]);
-        let _guard = mock_authorship(&prev, &reviewed, &[&c1, &c2], trailers);
+        let (repo, base, tip, commits) = repo_with_authored_chain(&[&["alice"], &["carol"]]);
         let bob = a("bob");
         let expected: BTreeSet<Agent> = [a("alice"), a("carol")].into_iter().collect();
-        let introduced =
-            verify_authorship(&PathBuf::from("."), &bob, &expected, &prev, &reviewed).unwrap();
-        assert_eq!(introduced, vec![c1, c2]);
+        let introduced = verify_authorship(repo.path(), &bob, &expected, &base, &tip).unwrap();
+        let newest_first: Vec<String> = commits.iter().rev().cloned().collect();
+        assert_eq!(introduced, newest_first);
     }
 
+    /// Two roots in one repository share no history, so they have zero merge
+    /// bases -- the other side of "exactly one" from the ordinary case.
     #[test]
-    fn reconstruct_candidate_rejects_multiple_merge_bases() {
-        let (prev, reviewed) = (hash(1), hash(2));
+    fn reconstruct_candidate_rejects_zero_merge_bases_between_unrelated_roots() {
+        let (repo, base, _tip, _c) = repo_with_authored_chain(&[&["alice"]]);
         let bob = a("bob");
-        let _guard = MockGit::new()
-            .on(
-                &["merge-base", "--all", &prev, &reviewed],
-                GitOutput::ok(format!("{}\n{}", hash(5), hash(6))),
-            )
-            .install();
-        let err = reconstruct_candidate(&PathBuf::from("."), &prev, &reviewed, &bob).unwrap_err();
+        // A second, unrelated root commit in the same repository.
+        git(repo.path(), &["checkout", "--quiet", "--orphan", "other"]);
+        std::fs::write(repo.path().join("other.txt"), "other\n").unwrap();
+        git(repo.path(), &["add", "-A"]);
+        git(repo.path(), &["commit", "-q", "-m", "unrelated root"]);
+        let other = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+
+        let err = reconstruct_candidate(repo.path(), &base, &other, &bob).unwrap_err();
         assert!(
             err.to_string()
                 .contains("do not have exactly one merge base"),
@@ -302,22 +270,14 @@ mod tests {
         );
     }
 
+    /// A revision that names no object must fail loudly rather than being
+    /// treated as an empty history.
     #[test]
-    fn reconstruct_candidate_rejects_zero_merge_bases() {
-        let (prev, reviewed) = (hash(1), hash(2));
+    fn reconstruct_candidate_rejects_an_unknown_revision() {
+        let (repo, base, _tip, _c) = repo_with_authored_chain(&[&["alice"]]);
         let bob = a("bob");
-        let _guard = MockGit::new()
-            .on(
-                &["merge-base", "--all", &prev, &reviewed],
-                GitOutput::ok(""),
-            )
-            .install();
-        let err = reconstruct_candidate(&PathBuf::from("."), &prev, &reviewed, &bob).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("do not have exactly one merge base"),
-            "{err}"
-        );
+        let err = reconstruct_candidate(repo.path(), &base, &hash(9), &bob).unwrap_err();
+        assert!(err.to_string().contains("does not name an object"), "{err}");
     }
 
     #[test]
