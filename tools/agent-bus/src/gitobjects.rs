@@ -1456,6 +1456,56 @@ mod tests {
         );
     }
 
+    /// Parent order is part of the candidate's identity, and part of its
+    /// meaning.
+    ///
+    /// `merge_candidate` builds a candidate with parents
+    /// `[previous_main, reviewed_commit]`. Reversing them changes the object
+    /// id, so every other agent's reconstruction stops matching -- and it
+    /// changes which chain is the *first* parent, which is the chain
+    /// `audit_main` walks to correlate `main`'s history. Reversing the loop
+    /// left the whole suite green, because the byte-identity test uses a
+    /// single parent and nothing else looked.
+    #[test]
+    fn commit_with_identity_preserves_parent_order() {
+        let (repo, head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        let blob = g.write_blob(b"x").unwrap();
+        let tree = g.write_tree(None, &[("a.txt", blob)]).unwrap();
+
+        let other = g.create_commit(&tree, &[], "an unrelated root").unwrap();
+        assert_ne!(other, head);
+
+        let merge = g
+            .commit_with_identity(
+                &tree,
+                &[&head, &other],
+                "candidate",
+                crate::gitrepo::DETERMINISTIC_COMMIT_NAME,
+                crate::gitrepo::DETERMINISTIC_COMMIT_EMAIL,
+                1_700_000_000,
+            )
+            .unwrap();
+        assert_eq!(
+            g.parents_of(&merge).unwrap(),
+            vec![head.clone(), other.clone()],
+            "parents must appear in the order given"
+        );
+
+        // ...and the other order is a different commit entirely.
+        let swapped = g
+            .commit_with_identity(
+                &tree,
+                &[&other, &head],
+                "candidate",
+                crate::gitrepo::DETERMINISTIC_COMMIT_NAME,
+                crate::gitrepo::DETERMINISTIC_COMMIT_EMAIL,
+                1_700_000_000,
+            )
+            .unwrap();
+        assert_ne!(merge, swapped, "parent order must change the object id");
+    }
+
     /// Rename detection stays off, so a rename is reported as both the path
     /// it left and the path it arrived at. `merge_ready` and `audit_main`
     /// scope-check every path this returns, and a rename *into* a reviewed

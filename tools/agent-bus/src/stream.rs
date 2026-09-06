@@ -536,6 +536,43 @@ mod tests {
         );
     }
 
+    /// The size bound is inclusive at its limit: a line of exactly
+    /// `MAX_LINE_BYTES` is accepted, one byte more is not.
+    ///
+    /// Both halves are needed. `segment_bytes_rejects_an_oversized_line`
+    /// alone uses `MAX_LINE_BYTES + 10`, so mutating the comparison from `>`
+    /// to `>=` -- rejecting a line that is exactly at the limit -- left the
+    /// suite green.
+    #[test]
+    fn segment_bytes_accepts_a_line_of_exactly_the_maximum() {
+        let alice = a("alice");
+        let mut env = registered_envelope(&alice, 0);
+        // Converge on a payload whose *encoded line* is exactly at the bound.
+        // Setting `data` changes the envelope's length, so the padding cannot
+        // be computed in one step from the original.
+        let mut pad = crate::storage::MAX_LINE_BYTES;
+        for _ in 0..8 {
+            env.data = serde_json::json!({ "blob": "x".repeat(pad) });
+            let len = env.to_canonical_line().len();
+            if len == crate::storage::MAX_LINE_BYTES {
+                break;
+            }
+            pad = (pad + crate::storage::MAX_LINE_BYTES).saturating_sub(len);
+        }
+        let line = env.to_canonical_line();
+        assert_eq!(
+            line.len(),
+            crate::storage::MAX_LINE_BYTES,
+            "fixture must sit exactly on the bound, not near it"
+        );
+        assert!(segment_bytes(std::slice::from_ref(&env), Vec::new()).is_ok());
+
+        // One byte over is refused.
+        env.data = serde_json::json!({ "blob": "x".repeat(pad + 1) });
+        let err = segment_bytes(std::slice::from_ref(&env), Vec::new()).unwrap_err();
+        assert!(err.to_string().contains("event line exceeds"), "{err}");
+    }
+
     /// Falsification: the per-line size bound `storage::MAX_LINE_BYTES` sets.
     #[test]
     fn segment_bytes_rejects_an_oversized_line() {
