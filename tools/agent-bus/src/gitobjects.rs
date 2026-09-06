@@ -299,6 +299,32 @@ pub trait RefStore {
     ) -> AbResult<()>;
 }
 
+/// Whether a failed ref update means "someone else got there first", and so
+/// whether the operator should re-read and retry.
+///
+/// A free function rather than two inline conditions because the rule is not
+/// observable any other way: provoking a genuine non-race `set_target`
+/// failure from a test would mean corrupting an object store, so the
+/// classification could only ever be asserted directly. Both branches of
+/// `compare_and_set` route through here, so they cannot drift apart -- which
+/// they had: the create branch distinguished the cases while the update
+/// branch called every failure a lost race.
+///
+/// `Exists` is the writer that finished before this one started -- libgit2's
+/// filesystem backend returns it from `reference_path_available`, before the
+/// loose-ref lock. `Modified` is the writer that landed *inside* the lock
+/// window, which is the genuine sub-lock race and the reason
+/// `reference_matching` is used at all. `NotFound` is a ref deleted between
+/// reading it and writing it. Everything else -- a malformed name, a broken
+/// object store, an I/O error -- is not a race, and advising a retry would
+/// invite an unbounded loop against something retrying cannot fix.
+fn ref_update_lost_a_race(code: git2::ErrorCode) -> bool {
+    matches!(
+        code,
+        git2::ErrorCode::Exists | git2::ErrorCode::Modified | git2::ErrorCode::NotFound
+    )
+}
+
 impl ObjectWriter for Libgit2Reader {
     fn write_blob(&self, content: &[u8]) -> AbResult<ObjectId> {
         let oid = self
@@ -470,10 +496,7 @@ impl RefStore for Libgit2Reader {
                         // existing `refs/a/b`) or a `new` naming no object
                         // are configuration and caller bugs, and inviting a
                         // retry loop against those would spin forever.
-                        if matches!(
-                            e.code(),
-                            git2::ErrorCode::Exists | git2::ErrorCode::Modified
-                        ) {
+                        if ref_update_lost_a_race(e.code()) {
                             return invalid(format!(
                                 "{refname} already exists, but was expected not to -- another writer created it first; re-read the current tip and retry: {e}"
                             ));
@@ -534,10 +557,7 @@ impl RefStore for Libgit2Reader {
                     // error -- is not a race, and telling the operator to
                     // re-read and retry would invite an unbounded loop
                     // against something retrying cannot fix.
-                    if !matches!(
-                        e.code(),
-                        git2::ErrorCode::Modified | git2::ErrorCode::NotFound
-                    ) {
+                    if !ref_update_lost_a_race(e.code()) {
                         return invalid(format!(
                             "{refname} could not be updated, and not because another writer \
                              won the race -- retrying will not help: {e}"
@@ -1762,6 +1782,13 @@ mod tests {
         );
     }
 
+    /// The retryability rule, asserted directly.
+    ///
+    /// Both `compare_and_set` branches decide whether to tell the operator to
+    /// re-read and retry, and mutation testing showed the update branch's
+    /// version could be inverted with the whole suite still green -- a real
+    /// non-race `set_target` failure cannot be provoked from a test without
+    /// corrupting an object store, so nothing observed it.
     /// The companion differential for the *other* load-bearing order.
     ///
     /// Named for what it actually pins. The date-skewed side is excluded from
@@ -1779,6 +1806,32 @@ mod tests {
     /// module contract says both orders are load-bearing and not
     /// interchangeable, so both are now pinned against the real binary
     /// rather than against the reasoning in the comments.
+    #[test]
+    fn only_genuine_races_advise_a_retry() {
+        for code in [
+            git2::ErrorCode::Exists,
+            git2::ErrorCode::Modified,
+            git2::ErrorCode::NotFound,
+        ] {
+            assert!(
+                ref_update_lost_a_race(code),
+                "{code:?} means another writer got there first"
+            );
+        }
+        for code in [
+            git2::ErrorCode::InvalidSpec,
+            git2::ErrorCode::Locked,
+            git2::ErrorCode::Auth,
+            git2::ErrorCode::GenericError,
+            git2::ErrorCode::Directory,
+        ] {
+            assert!(
+                !ref_update_lost_a_race(code),
+                "{code:?} is not a race, and retrying cannot fix it"
+            );
+        }
+    }
+
     #[test]
     fn first_parent_range_reverses_and_follows_only_first_parents_like_git_rev_list() {
         let (repo, _head) = init_repo();

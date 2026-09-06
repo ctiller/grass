@@ -112,7 +112,12 @@ pub(crate) fn audit_main_findings(
 
     let mut findings = Vec::new();
     let mut previous = state.config.product_review_from.as_str().to_string();
+    // Every commit this audit will vouch for, so the receipt check below can
+    // ask the *converse* question afterwards.
+    let mut audited: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    audited.insert(previous.clone());
     for commit in commits {
+        audited.insert(commit.clone());
         let parents = crate::gitrepo::parents_of(repo, &commit)?;
         if parents.len() != 2 || parents[0] != previous {
             findings.push(serde_json::json!({
@@ -312,7 +317,51 @@ pub(crate) fn audit_main_findings(
         previous = commit;
     }
 
+    findings.extend(receipts_without_a_matching_commit(state, &audited));
     Ok(findings)
+}
+
+/// AGENT_REVIEW.md section 12, fixture 10: "a merge receipt not matching
+/// product Git history".
+///
+/// The walk above asks, for each commit actually on `main`, whether the bus
+/// authorized it. That is only half of fixture 10. Nothing asked the converse
+/// -- whether every *receipt* names a commit that is really there -- and the
+/// asymmetry was backwards: `review.merge_reconciled`, the recovery receipt
+/// published by a third-party coordinator, is verified against live remote
+/// `main` at publication time, while `review.merged`, the primary receipt on
+/// which a reviewer's release from this chain hangs, was checked only for
+/// field equality against its own authorization.
+///
+/// So a reviewer whose push lost a race could publish `review.merged` anyway.
+/// Both gates accept it, and the audit stayed silent because the commit it
+/// names is not on `main` and therefore never walked. The bus would durably
+/// record a merge that never happened.
+fn receipts_without_a_matching_commit(
+    state: &BusState,
+    audited: &std::collections::BTreeSet<String>,
+) -> Vec<Value> {
+    let mut findings = Vec::new();
+    for chain in state.reviews.values() {
+        for receipt in chain.merged.iter().chain(chain.reconciled.iter()) {
+            let Some(env) = state.events.get(receipt) else {
+                continue;
+            };
+            let named = match env.typed_data() {
+                Ok(EventData::ReviewMerged(m)) => m.main_commit.as_str().to_string(),
+                Ok(EventData::ReviewMergeReconciled(m)) => m.main_commit.as_str().to_string(),
+                _ => continue,
+            };
+            if !audited.contains(&named) {
+                findings.push(serde_json::json!({
+                    "commit": named,
+                    "problem": "a merge receipt names a commit that is not on the audited main history",
+                    "receipt": receipt.as_str(),
+                }));
+            }
+        }
+    }
+    findings
 }
 
 #[cfg(test)]
@@ -1216,10 +1265,107 @@ Agent-Bus-Reviewer: bob",
         );
     }
 
+    /// AGENT_REVIEW.md section 12 fixture 10, the direction that was missing:
+    /// a receipt naming a commit that never reached `main`.
+    ///
+    /// The realistic path is a lost push race -- the reviewer's
+    /// `git push <candidate>:refs/heads/main` is rejected because `main`
+    /// advanced, and they publish `review.merged` regardless. Both the
+    /// coordinator gate and reduction accept it (they compare it against its
+    /// own authorization, not against git), and the walk never sees it
+    /// because the commit is not on `main`.
     /// A receipt naming a *different* `main_commit` than the one actually
     /// under audit must not satisfy this commit's own correlation -- proves
     /// `has_receipt`'s equality check is load-bearing, not merely "some
     /// receipt exists somewhere on the chain".
+    #[test]
+    fn flags_a_merge_receipt_naming_a_commit_that_is_not_on_main() {
+        let dir = init_repo();
+        let root = git(dir.path(), &["rev-parse", "main"]);
+        let second = author_commit(dir.path(), &root, "x.txt", Some("alice"));
+        let candidate = merge_commit(
+            dir.path(),
+            &root,
+            &second,
+            "merge
+
+Agent-Bus-Reviewer: bob",
+        );
+        // A candidate that was built but never landed: `main` stays at root.
+        let never_pushed = merge_commit(
+            dir.path(),
+            &root,
+            &second,
+            "a candidate that lost the push race
+
+Agent-Bus-Reviewer: bob",
+        );
+        assert_ne!(candidate, never_pushed);
+
+        let mut state = base_state(&root);
+        let nomination = insert_chain(&mut state);
+        let auth_id =
+            insert_authorization(&mut state, &nomination, 1, &root, &second, &never_pushed);
+        insert_merged_receipt(
+            &mut state,
+            &nomination,
+            2,
+            &auth_id,
+            &root,
+            &second,
+            &never_pushed,
+        );
+
+        // Audit `main`, which never moved.
+        let findings = audit_main_findings(dir.path(), &state, Some(&root)).unwrap();
+        let problems = problems(&findings);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("names a commit that is not on the audited main history")),
+            "a receipt for a commit that never landed must be flagged: {problems:?}"
+        );
+    }
+
+    /// The companion: an honest receipt for a commit that *is* on `main` must
+    /// not be flagged, or the check above would fire on every healthy bus.
+    #[test]
+    fn does_not_flag_a_merge_receipt_for_a_commit_that_is_on_main() {
+        let dir = init_repo();
+        let root = git(dir.path(), &["rev-parse", "main"]);
+        let second = author_commit(dir.path(), &root, "x.txt", Some("alice"));
+        let candidate = merge_commit(
+            dir.path(),
+            &root,
+            &second,
+            "merge
+
+Agent-Bus-Reviewer: bob",
+        );
+
+        let mut state = base_state(&root);
+        let nomination = insert_chain(&mut state);
+        let auth_id = insert_authorization(&mut state, &nomination, 1, &root, &second, &candidate);
+        insert_merged_receipt(
+            &mut state,
+            &nomination,
+            2,
+            &auth_id,
+            &root,
+            &second,
+            &candidate,
+        );
+
+        let findings = audit_main_findings(dir.path(), &state, Some(&candidate)).unwrap();
+        let problems = problems(&findings);
+        assert!(
+            !problems
+                .iter()
+                .any(|p| p.contains("names a commit that is not on the audited main history")),
+            "an honest receipt must not be flagged: {problems:?}"
+        );
+    }
+
     #[test]
     fn a_receipt_for_a_different_commit_does_not_clear_this_ones_missing_receipt_finding() {
         let dir = init_repo();
