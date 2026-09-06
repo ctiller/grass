@@ -27,7 +27,12 @@ jobs:
 
   agent-bus:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # This job builds three things from source before it can assert anything:
+    # the pinned git merge engine, libgit2 (vendored by `libgit2-sys`, since
+    # the crate reads and writes the object database in-process), and
+    # `cargo-llvm-cov` for the coverage gate. 25 minutes was sized before
+    # libgit2 was in that list.
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: tools/agent-bus

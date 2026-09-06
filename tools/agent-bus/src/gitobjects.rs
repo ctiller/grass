@@ -1182,6 +1182,169 @@ mod tests {
         assert_eq!(g.resolve_rev("refs/heads/never-existed").unwrap(), None);
     }
 
+    // --------------------------------- history: statuses and error paths
+
+    /// `diff_name_status` had test coverage for additions and deletions only.
+    /// Modification and typechange are both reachable, and both feed the same
+    /// scope gate in `merge_ready`/`audit_main`, so both need pinning.
+    #[test]
+    fn diff_name_status_reports_modification_and_typechange() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+
+        let before_blob = g.write_blob(b"one\n").unwrap();
+        let before_tree = g.write_tree(None, &[("f.txt", before_blob)]).unwrap();
+        let before = g.create_commit(&before_tree, &[], "before").unwrap();
+
+        // Modified: same path, different content.
+        let after_blob = g.write_blob(b"two\n").unwrap();
+        let after_tree = g
+            .write_tree(None, &[("f.txt", after_blob.clone())])
+            .unwrap();
+        let after = g.create_commit(&after_tree, &[&before], "after").unwrap();
+        assert_eq!(
+            g.diff_name_status(&before, &after).unwrap(),
+            vec![("M".to_string(), "f.txt".to_string())]
+        );
+
+        // Typechange: same path and content, different file mode. Built with
+        // git2 directly because `ObjectWriter::write_tree` deliberately only
+        // ever writes a regular-file mode.
+        let raw = git2::Repository::open(repo.path()).unwrap();
+        let exec_tree = {
+            let mut b = raw.treebuilder(None).unwrap();
+            b.insert(
+                "f.txt",
+                git2::Oid::from_str(after_blob.as_str()).unwrap(),
+                i32::from(git2::FileMode::BlobExecutable),
+            )
+            .unwrap();
+            ObjectId::parse(b.write().unwrap().to_string()).unwrap()
+        };
+        let exec = g.create_commit(&exec_tree, &[&after], "chmod").unwrap();
+        let changed = g.diff_name_status(&after, &exec).unwrap();
+        assert_eq!(changed.len(), 1, "{changed:?}");
+        assert_eq!(changed[0].1, "f.txt");
+        // git reports a mode-only change as a modification; either letter is
+        // a real answer, but it must not be silently dropped.
+        assert!(
+            changed[0].0 == "T" || changed[0].0 == "M",
+            "unexpected status {:?}",
+            changed[0].0
+        );
+    }
+
+    /// Falsification: a commit message that is not valid UTF-8 must be
+    /// rejected rather than lossily converted. A lossy conversion could
+    /// invent or destroy a trailer, and trailers are the input to merge
+    /// authorization.
+    #[test]
+    fn commit_message_rejects_a_message_that_is_not_valid_utf8() {
+        let (repo, head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        let raw = git2::Repository::open(repo.path()).unwrap();
+
+        // Hand-build a commit object so the message can hold bytes `git2`'s
+        // safe API (which takes &str) could never produce.
+        let tree = raw
+            .find_commit(git2::Oid::from_str(head.as_str()).unwrap())
+            .unwrap()
+            .tree_id();
+        let mut body = Vec::new();
+        body.extend_from_slice(format!("tree {tree}\n").as_bytes());
+        body.extend_from_slice(b"author T <t@e> 1700000000 +0000\n");
+        body.extend_from_slice(b"committer T <t@e> 1700000000 +0000\n\n");
+        body.extend_from_slice(b"subject \xff\xfe not utf8\n");
+        let oid = raw
+            .odb()
+            .unwrap()
+            .write(git2::ObjectType::Commit, &body)
+            .unwrap();
+        let id = ObjectId::parse(oid.to_string()).unwrap();
+
+        let err = g.commit_message(&id).unwrap_err();
+        assert!(err.to_string().contains("not valid UTF-8"), "{err}");
+    }
+
+    /// The endpoint checks in the walk: `git rev-list a..b` fails when either
+    /// end names nothing, rather than quietly walking an empty range, and so
+    /// must this.
+    #[test]
+    fn history_walks_reject_endpoints_that_name_nothing() {
+        let (repo, head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        let missing = oid(0x7c);
+
+        assert!(g.range(&missing, &head).is_err(), "unknown start accepted");
+        assert!(g.range(&head, &missing).is_err(), "unknown end accepted");
+        assert!(g.first_parent_range(&missing, &head).is_err());
+        assert!(g.first_parent_range(&head, &missing).is_err());
+        assert!(g.parents_of(&missing).is_err());
+        assert!(g.committer_timestamp(&missing).is_err());
+        assert!(g.commit_message(&missing).is_err());
+        assert!(g.diff_name_status(&missing, &head).is_err());
+    }
+
+    /// `first_parent_range` must follow only first parents, which is the
+    /// difference between "what this merge brought to main" and "every commit
+    /// reachable from it". `range` follows both.
+    #[test]
+    fn first_parent_range_skips_the_second_parents_commits() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        let blob = g.write_blob(b"x").unwrap();
+        let tree = g.write_tree(None, &[("a.txt", blob)]).unwrap();
+
+        let base = g.create_commit(&tree, &[], "base").unwrap();
+        let side = g.create_commit(&tree, &[&base], "side").unwrap();
+        let main = g.create_commit(&tree, &[&base], "main").unwrap();
+        let merge = g.create_commit(&tree, &[&main, &side], "merge").unwrap();
+
+        let first_parent = g.first_parent_range(&base, &merge).unwrap();
+        assert_eq!(
+            first_parent,
+            vec![main.clone(), merge.clone()],
+            "the second parent's commit must not appear"
+        );
+
+        let mut all = g.range(&base, &merge).unwrap();
+        all.sort();
+        let mut expected = vec![main, side, merge];
+        expected.sort();
+        assert_eq!(all, expected, "every parent is followed here");
+    }
+
+    /// A merge base count above one is what AGENT_REVIEW.md section 7's
+    /// "requires one merge base" exists to reject, and it is not reachable
+    /// from a linear history.
+    #[test]
+    fn merge_base_count_counts_multiple_bases() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        let blob = g.write_blob(b"x").unwrap();
+        let tree = g.write_tree(None, &[("a.txt", blob)]).unwrap();
+
+        // A criss-cross: two roots, then two merges of both, giving the pair
+        // of merges two independent merge bases.
+        let a = g.create_commit(&tree, &[], "root a").unwrap();
+        let b = g.create_commit(&tree, &[], "root b").unwrap();
+        let m1 = g.create_commit(&tree, &[&a, &b], "merge one").unwrap();
+        let m2 = g.create_commit(&tree, &[&b, &a], "merge two").unwrap();
+
+        assert_eq!(g.merge_base_count(&m1, &m2).unwrap(), 2);
+        assert_eq!(g.merge_base_count(&a, &m1).unwrap(), 1);
+    }
+
+    /// A syntactically impossible revision expression is a caller bug, not
+    /// absence, and must not be reported as `None`.
+    #[test]
+    fn resolve_rev_errors_on_an_unparseable_expression() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        let err = g.resolve_rev("HEAD^{bogus-peel-type}").unwrap_err();
+        assert!(matches!(err, AbError::Git(_)), "{err:?}");
+    }
+
     // ------------------------------------------- writing and moving refs
 
     /// The round trip the whole write path rests on: bytes in, a tree built
