@@ -240,9 +240,10 @@ pub trait ObjectWriter {
     /// [`RefStore::compare_and_set`]'s job, kept separate so a caller can
     /// build a commit and still refuse to publish it.
     ///
-    /// Identity comes from the repository's own configuration, matching what
-    /// `git commit` produced here before: real stream commits on this fleet
-    /// carry the operator's `user.name`/`user.email`, not a synthetic one.
+    /// Identity is resolved exactly as `git commit` resolves it --
+    /// environment first, then configuration; see
+    /// [`Libgit2Reader::ambient_identity`]. Real stream commits on this fleet
+    /// carry the operator's own name and email, not a synthetic one.
     /// The byte-reproducible identity that merge candidates need is a
     /// different concern with a different rule (AGENT_REVIEW.md section 7)
     /// and stays in `gitrepo::commit_tree_deterministic`.
@@ -363,19 +364,11 @@ impl ObjectWriter for Libgit2Reader {
         }
         let parent_refs: Vec<&git2::Commit<'_>> = parent_commits.iter().collect();
 
-        // `git commit` reads user.name/user.email through the same
-        // configuration search, so this preserves the identity real stream
-        // commits already carry. A repository with neither configured fails
-        // here exactly as `git commit` would, rather than inventing one.
-        let who = self.repo.signature().map_err(|e| {
-            AbError::Git(format!(
-                "cannot determine a commit identity (is user.name/user.email set?): {e}"
-            ))
-        })?;
+        let (author, committer) = self.ambient_identity()?;
 
         let oid = self
             .repo
-            .commit(None, &who, &who, message, &tree_obj, &parent_refs)
+            .commit(None, &author, &committer, message, &tree_obj, &parent_refs)
             .map_err(|e| AbError::Git(format!("cannot create the commit: {e}")))?;
         ObjectId::parse(oid.to_string())
     }
@@ -436,11 +429,25 @@ impl RefStore for Libgit2Reader {
         let reason = format!("agent-bus: set {refname}");
 
         match expected {
-            // Creation. `force = false` is what makes this fail rather than
-            // overwrite if another writer created the ref first.
+            // Creation, as an atomic create-if-absent.
+            //
+            // `Repository::reference(.., force = false, ..)` is NOT that, and
+            // the difference is a real race rather than a theoretical one:
+            // it calls `git_reference_create` with `old_id = NULL`, and
+            // libgit2's `cmp_old_ref` treats NULL as "matches anything", so
+            // the only existence check is `reference_path_available` --
+            // which runs *before* the loose-ref lock is taken. Two writers
+            // can both pass that check, serialize on the lock, and the loser
+            // silently overwrites the winner.
+            //
+            // `reference_matching` with the zero oid expresses "must not
+            // exist" as the expected *old value*, which libgit2 evaluates
+            // under the lock, so the loser is refused. This is what makes
+            // two hosts racing a stream root or the registry root resolve to
+            // one winner (gates 6 and 19) rather than to whoever wrote last.
             None => {
                 self.repo
-                    .reference(refname, new_oid, false, &reason)
+                    .reference_matching(refname, new_oid, false, git2::Oid::ZERO_SHA1, &reason)
                     .map_err(|e| {
                         invalid(format!(
                             "{refname} already exists, but was expected not to -- another writer \
@@ -471,6 +478,18 @@ impl RefStore for Libgit2Reader {
                 // lock here, so this still fails closed against a writer that
                 // landed between the comparison above and this call.
                 reference.set_target(new_oid, &reason).map_err(|e| {
+                    // A symbolic ref fails here too, and it is not a race:
+                    // `git update-ref` would have followed the symref and
+                    // moved its target instead. Refusing is right -- a bus ref
+                    // must be direct -- but saying "another writer won" would
+                    // send the operator after a race that never happened.
+                    if e.code() == git2::ErrorCode::InvalidSpec || e.message().contains("symbolic")
+                    {
+                        return invalid(format!(
+                            "{refname} is a symbolic reference, not a direct one; a bus ref must \
+                             point straight at a commit -- repoint or remove it: {e}"
+                        ));
+                    }
                     invalid(format!(
                         "{refname} moved while it was being updated -- another writer won the \
                          race; re-read the current tip and retry: {e}"
@@ -515,7 +534,23 @@ pub trait HistoryReader {
     /// derives a candidate's timestamp from its parents' committer dates.
     fn committer_timestamp(&self, commit: &ObjectId) -> AbResult<i64>;
 
-    /// `commit`'s full message, exactly as recorded.
+    /// `commit`'s message.
+    ///
+    /// Two documented differences from `git show -s --format=%B`, both of
+    /// which lose trailers rather than inventing them:
+    ///
+    ///  - libgit2 skips leading newlines; `%B` preserves them. A message that
+    ///    begins with a blank line therefore has a *different* first
+    ///    paragraph here, and since the trailer block can never be the first
+    ///    paragraph, this can only ever make a trailer block disappear.
+    ///  - `%B` transcodes through the commit's `encoding` header into UTF-8;
+    ///    this returns the recorded bytes and rejects them if they are not
+    ///    already UTF-8 (see below).
+    ///
+    /// Brute-forcing 375 message shapes through the real
+    /// `git interpret-trailers` found 84 shapes where this path sees fewer
+    /// trailers and none where it sees more, so every consumer
+    /// (`verify_authorship`, `merge_ready`, `audit_main`) fails closed.
     fn commit_message(&self, commit: &ObjectId) -> AbResult<String>;
 
     /// How many merge bases `a` and `b` have. AGENT_REVIEW.md section 7
@@ -532,9 +567,14 @@ pub trait HistoryReader {
     ) -> AbResult<Vec<ObjectId>>;
 
     /// Commits reachable from `to` but not from `from_exclusive`, following
-    /// every parent, **newest first** -- `git rev-list`'s default order, which
-    /// is what the call this replaced produced and what `audit_main`'s golden
-    /// output records.
+    /// every parent, **newest first**.
+    ///
+    /// Precisely: topological order, children before parents. `git rev-list`
+    /// without `--reverse` -- the call this replaced -- defaults to *date*
+    /// order, which agrees with topological order on every history this crate
+    /// builds but can differ where commit dates run backwards. Callers use
+    /// this as a set (`verify_authorship` unions author trailers over it);
+    /// only `audit_main`'s rendering is order-sensitive.
     fn range(&self, from_exclusive: &ObjectId, to: &ObjectId) -> AbResult<Vec<ObjectId>>;
 
     /// Every path that differs between `from`'s tree and `to`'s tree, as
@@ -573,6 +613,41 @@ impl Libgit2Reader {
         self.repo.commondir().to_path_buf()
     }
 
+    /// The author and committer `git commit` would use here.
+    ///
+    /// `Repository::signature` alone is not that. It reads *configuration
+    /// only*, while git resolves each field from the environment first:
+    /// `GIT_AUTHOR_NAME`/`GIT_AUTHOR_EMAIL` for the author,
+    /// `GIT_COMMITTER_NAME`/`GIT_COMMITTER_EMAIL` for the committer, each
+    /// falling back to `user.name`/`user.email`. Hosts that supply identity
+    /// purely through the environment are ordinary -- CI containers, git
+    /// hooks, anything invoked under `env` -- and on those, using
+    /// configuration alone turns every bus write into a hard "cannot
+    /// determine a commit identity" failure where `git commit` succeeded.
+    ///
+    /// `GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE` are deliberately *not* honored:
+    /// a stream or registry commit is timestamped when it is written, and the
+    /// one place a caller-chosen timestamp matters --- a reproducible merge
+    /// candidate --- takes its identity and time explicitly through
+    /// [`Libgit2Reader::commit_with_identity`] instead.
+    fn ambient_identity(&self) -> AbResult<(git2::Signature<'_>, git2::Signature<'_>)> {
+        let cfg = self.repo.config().and_then(|mut c| c.snapshot());
+        let resolved = resolve_identity(
+            |k| std::env::var(k).ok(),
+            |k| {
+                cfg.as_ref()
+                    .ok()
+                    .and_then(|c| c.get_str(k).ok().map(|v| v.to_string()))
+            },
+        )?;
+        let author = git2::Signature::now(&resolved.author_name, &resolved.author_email)
+            .map_err(|e| AbError::Git(format!("cannot build the author identity: {e}")))?;
+        let committer =
+            git2::Signature::now(&resolved.committer_name, &resolved.committer_email)
+                .map_err(|e| AbError::Git(format!("cannot build the committer identity: {e}")))?;
+        Ok((author, committer))
+    }
+
     fn commit_at(&self, commit: &ObjectId) -> AbResult<git2::Commit<'_>> {
         let oid = git2::Oid::from_str(commit.as_str())
             .map_err(|e| AbError::Git(format!("{commit} is not a usable object id: {e}")))?;
@@ -607,7 +682,14 @@ impl Libgit2Reader {
         // interchangeable: `rev_list_first_parent` replaced a call that
         // passed `--reverse`, `range` replaced one that did not, and
         // `audit_main` renders the result into golden output.
-        let mut sorting = git2::Sort::TOPOLOGICAL;
+        //
+        // `Sort::NONE`, not `Sort::TOPOLOGICAL`. git's default is *commit
+        // date* order, and the two differ on any range spanning a merge whose
+        // sides have interleaved committer dates: for base->l1(t=100)->
+        // l2(t=400) and base->r1(t=200)->r2(t=300) merged at M(t=500), git
+        // gives `M l2 r2 r1 l1` and a topological walk gives `M r2 r1 l2 l1`.
+        // `Sort::NONE` is libgit2's spelling of that same date ordering.
+        let mut sorting = git2::Sort::NONE;
         if oldest_first {
             sorting |= git2::Sort::REVERSE;
         }
@@ -633,6 +715,54 @@ impl Libgit2Reader {
         }
         Ok(out)
     }
+}
+
+/// The four fields `git commit` resolves before writing a commit.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ResolvedIdentity {
+    pub author_name: String,
+    pub author_email: String,
+    pub committer_name: String,
+    pub committer_email: String,
+}
+
+/// git's identity precedence, as a pure function of two lookups.
+///
+/// Split out from [`Libgit2Reader::ambient_identity`] so the rule can be
+/// tested without setting environment variables, which are process-global and
+/// would leak into every other test running in parallel.
+///
+/// Each field takes the environment first and configuration second, and an
+/// environment variable set to the empty string does not count as set --
+/// matching git, which treats `GIT_AUTHOR_NAME=""` as absent rather than as
+/// an empty name.
+pub fn resolve_identity(
+    env: impl Fn(&str) -> Option<String>,
+    config: impl Fn(&str) -> Option<String>,
+) -> AbResult<ResolvedIdentity> {
+    let pick = |env_key: &str, config_key: &str| -> Option<String> {
+        env(env_key)
+            .filter(|v| !v.is_empty())
+            .or_else(|| config(config_key))
+            .filter(|v| !v.is_empty())
+    };
+    let missing = |what: &str, env_name: &str, env_email: &str| {
+        AbError::Git(format!(
+            "cannot determine a commit {what} identity: set user.name and user.email, or \
+             {env_name} and {env_email}"
+        ))
+    };
+
+    Ok(ResolvedIdentity {
+        author_name: pick("GIT_AUTHOR_NAME", "user.name")
+            .ok_or_else(|| missing("author", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL"))?,
+        author_email: pick("GIT_AUTHOR_EMAIL", "user.email")
+            .ok_or_else(|| missing("author", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL"))?,
+        committer_name: pick("GIT_COMMITTER_NAME", "user.name")
+            .ok_or_else(|| missing("committer", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"))?,
+        committer_email: pick("GIT_COMMITTER_EMAIL", "user.email")
+            .ok_or_else(|| missing("committer", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"))?,
+    })
 }
 
 impl Libgit2Reader {
@@ -681,10 +811,12 @@ impl Libgit2Reader {
         let who = git2::Signature::new(name, email, &when)
             .map_err(|e| AbError::Git(format!("cannot build the fixed commit identity: {e}")))?;
 
-        // `git commit-tree` terminates the message with a newline; libgit2
+        // `git commit-tree` terminates a message with a newline; libgit2
         // writes exactly what it is given. Matching git here is the whole
-        // point -- a missing byte changes the object id.
-        let message = if message.ends_with('\n') {
+        // point -- a missing byte changes the object id. An *empty* message
+        // is the exception: `git commit-tree -m ""` writes no body at all, so
+        // adding a newline there would make the two disagree by one byte.
+        let message = if message.is_empty() || message.ends_with('\n') {
             message.to_string()
         } else {
             format!("{message}\n")
@@ -732,8 +864,15 @@ impl HistoryReader for Libgit2Reader {
     fn commit_message(&self, commit: &ObjectId) -> AbResult<String> {
         let c = self.commit_at(commit)?;
         // A message that is not valid UTF-8 is content this crate cannot
-        // reason about (every trailer it looks for is ASCII), and silently
-        // lossy-converting it could invent a trailer that is not there.
+        // reason about; every trailer it looks for is ASCII.
+        //
+        // Note this is genuinely stricter than the `git show -s --format=%B`
+        // it replaced, which *transcodes* through the commit's `encoding`
+        // header rather than converting lossily -- a commit declaring
+        // `encoding ISO-8859-1` used to read back as valid UTF-8 and now
+        // errors here. Callers must therefore treat this as a finding about
+        // one commit, not as a reason to abandon a whole history walk; see
+        // `audit_main`, which does.
         std::str::from_utf8(c.message_bytes())
             .map(|s| s.to_string())
             .map_err(|e| {
@@ -795,6 +934,12 @@ impl HistoryReader for Libgit2Reader {
                 git2::Delta::Modified => "M",
                 git2::Delta::Renamed => "R",
                 git2::Delta::Copied => "C",
+                // Unreachable in practice: without
+                // `GIT_DIFF_INCLUDE_TYPECHANGE`, libgit2 splits a typechange
+                // into a delete plus an add of the same path rather than
+                // emitting this. Kept so the arm exists if that option is
+                // ever set, and because dropping it would make the catch-all
+                // below reject a status git can name.
                 git2::Delta::Typechange => "T",
                 other => {
                     return Err(AbError::Git(format!(
@@ -821,6 +966,14 @@ impl HistoryReader for Libgit2Reader {
             // `Path::to_str` on Windows preserves them, but normalize
             // defensively so scope claims (which are always slash-separated)
             // compare correctly.
+            //
+            // Note these paths are *unquoted*. `git diff --name-status`
+            // applies `core.quotePath`, which is on by default, so the old
+            // subprocess returned the literal 16 characters `"caf\303\251.txt"`
+            // for `café.txt` -- a form no `PathClaim` could ever match, so
+            // every non-ASCII path silently failed the reviewed-scope check
+            // instead of being checked. Reporting the real path is what makes
+            // that gate work on non-ASCII trees at all.
             out.push((status.to_string(), path.replace('\\', "/")));
         }
         Ok(out)
@@ -1237,6 +1390,178 @@ mod tests {
         let g = Libgit2Reader::open(repo.path()).unwrap();
         assert_eq!(g.resolve_rev(oid(0x5a).as_str()).unwrap(), None);
         assert_eq!(g.resolve_rev("refs/heads/never-existed").unwrap(), None);
+    }
+
+    // --------------------------------- regressions from adversarial review
+
+    /// `range` must reproduce `git rev-list`'s order, which is *commit date*
+    /// order, not topological order. The two agree on every linear history --
+    /// which is exactly why the earlier guard test, built on a linear side
+    /// branch, could not falsify the claim it existed to pin.
+    ///
+    /// This builds the shape where they diverge: a merge whose two sides have
+    /// interleaved committer dates. With `Sort::TOPOLOGICAL` the walk returns
+    /// one side entirely before the other; git interleaves them by date.
+    #[test]
+    fn range_matches_git_rev_list_order_across_a_date_skewed_merge() {
+        let (repo, _head) = init_repo();
+
+        // Commit at an exact committer date so the skew is deterministic.
+        // git needs the `@<unix>` raw form here; a bare number is rejected.
+        let commit_at = |name: &str, ts: i64| -> String {
+            std::fs::write(repo.path().join(format!("{name}.txt")), name).unwrap();
+            git(repo.path(), &["add", "-A"]);
+            let date = format!("@{ts} +0000");
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(repo.path())
+                .args(["commit", "-q", "-m", name])
+                .env("GIT_AUTHOR_DATE", &date)
+                .env("GIT_COMMITTER_DATE", &date)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git commit failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap()
+        };
+
+        let base = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+
+        // Left side: dates 100 then 400 (relative to a fixed epoch).
+        git(repo.path(), &["checkout", "-q", "-b", "left"]);
+        commit_at("l1", 1_700_000_100);
+        let l2 = commit_at("l2", 1_700_000_400);
+
+        // Right side off base: dates 200 then 300 -- interleaved with the
+        // left side, which is the whole point.
+        git(repo.path(), &["checkout", "-q", "-b", "right", &base]);
+        commit_at("r1", 1_700_000_200);
+        let r2 = commit_at("r2", 1_700_000_300);
+
+        // Merge them without a working-tree merge.
+        let tree = crate::gitrepo::rev_parse(repo.path(), &format!("{r2}^{{tree}}")).unwrap();
+        let merge = crate::gitrepo::commit_tree_deterministic(
+            repo.path(),
+            &tree,
+            &[l2.as_str(), r2.as_str()],
+            "merge",
+        )
+        .unwrap();
+
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+        let ours: Vec<String> = g
+            .range(
+                &ObjectId::parse(base.clone()).unwrap(),
+                &ObjectId::parse(merge.clone()).unwrap(),
+            )
+            .unwrap()
+            .into_iter()
+            .map(|id| id.into_string())
+            .collect();
+
+        let theirs: Vec<String> =
+            crate::gitrepo::run_ok(repo.path(), &["rev-list", &format!("{base}..{merge}")])
+                .unwrap()
+                .lines()
+                .map(|l| l.to_string())
+                .collect();
+
+        assert_eq!(
+            ours, theirs,
+            "range must reproduce `git rev-list` order on a date-skewed merge"
+        );
+    }
+
+    /// `git commit` resolves identity from the environment before
+    /// configuration. A host that supplies only `GIT_AUTHOR_*`/
+    /// `GIT_COMMITTER_*` -- a CI container, a git hook, anything under `env`
+    /// -- is ordinary, and reading configuration alone turned every bus write
+    /// on such a host into a hard failure.
+    ///
+    /// Tested through the pure rule rather than by setting real environment
+    /// variables, which are process-global and would leak into every other
+    /// test running in parallel.
+    #[test]
+    fn identity_takes_the_environment_before_configuration() {
+        let env_only = |k: &str| match k {
+            "GIT_AUTHOR_NAME" => Some("CI Bot".to_string()),
+            "GIT_AUTHOR_EMAIL" => Some("ci@example.com".to_string()),
+            "GIT_COMMITTER_NAME" => Some("CI Bot".to_string()),
+            "GIT_COMMITTER_EMAIL" => Some("ci@example.com".to_string()),
+            _ => None,
+        };
+        let got = resolve_identity(env_only, |_| None).unwrap();
+        assert_eq!(got.author_name, "CI Bot");
+        assert_eq!(got.committer_email, "ci@example.com");
+
+        // Environment wins over configuration, per field.
+        let got = resolve_identity(
+            |k| (k == "GIT_COMMITTER_NAME").then(|| "Committer".to_string()),
+            |k| match k {
+                "user.name" => Some("Configured".to_string()),
+                "user.email" => Some("cfg@example.com".to_string()),
+                _ => None,
+            },
+        )
+        .unwrap();
+        assert_eq!(got.author_name, "Configured", "no GIT_AUTHOR_NAME set");
+        assert_eq!(got.committer_name, "Committer", "environment wins");
+        assert_eq!(got.author_email, "cfg@example.com");
+    }
+
+    /// Falsification: an empty environment variable is not a name. git treats
+    /// `GIT_AUTHOR_NAME=""` as absent, and so must this -- otherwise a commit
+    /// would be written with an empty author.
+    #[test]
+    fn identity_treats_an_empty_environment_variable_as_absent() {
+        let got = resolve_identity(
+            |_| Some(String::new()),
+            |k| match k {
+                "user.name" => Some("Configured".to_string()),
+                "user.email" => Some("cfg@example.com".to_string()),
+                _ => None,
+            },
+        )
+        .unwrap();
+        assert_eq!(got.author_name, "Configured");
+
+        // And with nothing anywhere, a clear failure naming both routes.
+        let err = resolve_identity(|_| None, |_| None).unwrap_err();
+        assert!(err.to_string().contains("user.name"), "{err}");
+        assert!(err.to_string().contains("GIT_AUTHOR_NAME"), "{err}");
+    }
+
+    /// `git diff --name-status` applies `core.quotePath`, so the subprocess
+    /// this replaced returned `"caf\303\251.txt"` -- a form no slash-separated
+    /// `PathClaim` could ever match, meaning every non-ASCII path silently
+    /// failed the reviewed-scope check instead of being checked. Reporting the
+    /// real path is what makes that gate work on a non-ASCII tree.
+    #[test]
+    fn diff_name_status_reports_non_ascii_paths_unquoted() {
+        let (repo, _head) = init_repo();
+        let g = Libgit2Reader::open(repo.path()).unwrap();
+
+        let blob = g.write_blob(b"content\n").unwrap();
+        let before = g
+            .create_commit(&g.write_tree(None, &[]).unwrap(), &[], "empty")
+            .unwrap();
+        let after_tree = g.write_tree(None, &[("café.txt", blob)]).unwrap();
+        let after = g.create_commit(&after_tree, &[&before], "add").unwrap();
+
+        let changed = g.diff_name_status(&before, &after).unwrap();
+        assert_eq!(
+            changed,
+            vec![("A".to_string(), "café.txt".to_string())],
+            "the path must be the real one, not a quoted escape sequence"
+        );
+        assert!(
+            !changed[0].1.contains('\\'),
+            "no octal escaping: {:?}",
+            changed[0].1
+        );
     }
 
     // --------------------------------- history: statuses and error paths

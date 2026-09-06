@@ -124,7 +124,27 @@ pub(crate) fn audit_main_findings(
         }
         let reviewed_commit = parents[1].clone();
 
-        let trailers = crate::gitrepo::commit_message_trailers(repo, &commit)?;
+        // A finding, not a `?`. One unreadable commit message anywhere in
+        // post-bootstrap `main` must not abandon the whole audit: this is the
+        // *only* authoritative place a bypass can be caught (sections 9/11/12),
+        // so aborting would hide every later commit rather than reporting one.
+        // The sibling call at `commit_authors_only`'s site below already
+        // handles its error this way; this one did not, which was an
+        // asymmetry rather than a decision. Reachable in practice because
+        // `commit_message` reads the recorded bytes where `git show
+        // --format=%B` transcoded through the commit's `encoding` header, so a
+        // legacy commit declaring a non-UTF-8 encoding now errors here.
+        let trailers = match crate::gitrepo::commit_message_trailers(repo, &commit) {
+            Ok(t) => t,
+            Err(e) => {
+                findings.push(serde_json::json!({
+                    "commit": commit,
+                    "problem": format!("commit message could not be read for trailers: {e}"),
+                }));
+                previous = commit;
+                continue;
+            }
+        };
         let reviewer_trailers: Vec<&(String, String)> = trailers
             .iter()
             .filter(|(k, _)| k == "Agent-Bus-Reviewer")
@@ -823,6 +843,58 @@ mod tests {
             problems.iter().any(|p| p.contains(
                 "no review.merge_authorized matches this exact candidate/previous_main/reviewed_commit"
             )),
+            "{problems:?}"
+        );
+    }
+
+    /// A commit whose message this crate cannot read must produce a finding,
+    /// not abandon the audit.
+    ///
+    /// This is reachable rather than theoretical: the message is now read
+    /// from the object database, where `git show -s --format=%B` used to
+    /// transcode through the commit's `encoding` header. A legacy commit
+    /// declaring a non-UTF-8 encoding therefore errors where it once
+    /// succeeded -- and `audit_main` is the *only* authoritative place a
+    /// bypass can be caught (sections 9/11/12), so aborting on one commit
+    /// would hide every commit after it.
+    #[test]
+    fn reports_an_unreadable_commit_message_as_a_finding_rather_than_aborting() {
+        let dir = init_repo();
+        let root = git(dir.path(), &["rev-parse", "main"]);
+        let second = author_commit(dir.path(), &root, "x.txt", Some("alice"));
+        let tree = git(dir.path(), &["rev-parse", &format!("{second}^{{tree}}")]);
+
+        // Hand-build the commit object: git's porcelain will not write a
+        // message it cannot encode, and that is exactly the shape under test.
+        let mut body = Vec::new();
+        body.extend_from_slice(format!("tree {tree}\n").as_bytes());
+        body.extend_from_slice(format!("parent {root}\n").as_bytes());
+        body.extend_from_slice(format!("parent {second}\n").as_bytes());
+        body.extend_from_slice(b"author T <t@e> 1700000000 +0000\n");
+        body.extend_from_slice(b"committer T <t@e> 1700000000 +0000\n");
+        body.extend_from_slice(b"encoding ISO-8859-1\n\n");
+        // 0xe9 is `e`-acute in Latin-1 and invalid on its own in UTF-8.
+        body.extend_from_slice(b"sujet accentu\xe9\n\nAgent-Bus-Reviewer: bob\n");
+
+        let raw = dir.path().join("raw-commit");
+        std::fs::write(&raw, &body).unwrap();
+        let candidate = git(
+            dir.path(),
+            &["hash-object", "-t", "commit", "-w", &raw.to_string_lossy()],
+        );
+        std::fs::remove_file(&raw).unwrap();
+
+        let mut state = base_state(&root);
+        let nomination = insert_chain(&mut state);
+        insert_authorization(&mut state, &nomination, 1, &root, &second, &candidate);
+
+        let findings = audit_main_findings(dir.path(), &state, Some(&candidate))
+            .expect("one unreadable message must not abort the audit");
+        let problems = problems(&findings);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("commit message could not be read for trailers")),
             "{problems:?}"
         );
     }

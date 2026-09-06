@@ -270,6 +270,42 @@ mod tests {
         );
     }
 
+    /// The *other* side of "exactly one merge base". A criss-cross history
+    /// gives two, and this branch of the guard at `merge_candidate.rs`'s
+    /// `merge_base_count(...) != 1` was left untested when the mock-based
+    /// test that covered it was replaced with a zero-base one.
+    #[test]
+    fn reconstruct_candidate_rejects_multiple_merge_bases() {
+        let (repo, _base, _tip, _c) = repo_with_authored_chain(&[&["alice"]]);
+        let bob = a("bob");
+
+        use crate::gitobjects::{ObjectWriter, RefStore};
+        let g = crate::gitobjects::Libgit2Reader::open(repo.path()).unwrap();
+        let blob = g.write_blob(b"x").unwrap();
+        let tree = g.write_tree(None, &[("x.txt", blob)]).unwrap();
+
+        // Two independent roots, then two merges of both, in opposite parent
+        // order: the pair of merges has two distinct merge bases.
+        let r1 = g.create_commit(&tree, &[], "root one").unwrap();
+        let r2 = g.create_commit(&tree, &[], "root two").unwrap();
+        let m1 = g.create_commit(&tree, &[&r1, &r2], "merge one").unwrap();
+        let m2 = g.create_commit(&tree, &[&r2, &r1], "merge two").unwrap();
+        let _ = &g as &dyn RefStore;
+
+        assert_eq!(
+            crate::gitrepo::merge_base_count(repo.path(), m1.as_str(), m2.as_str()).unwrap(),
+            2,
+            "fixture must actually produce two merge bases"
+        );
+
+        let err = reconstruct_candidate(repo.path(), m1.as_str(), m2.as_str(), &bob).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("do not have exactly one merge base"),
+            "{err}"
+        );
+    }
+
     /// A revision that names no object must fail loudly rather than being
     /// treated as an empty history.
     #[test]

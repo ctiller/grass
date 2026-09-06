@@ -163,6 +163,20 @@ fn spawn_and_wait(
     stdin_text: Option<&str>,
     timeout: std::time::Duration,
 ) -> AbResult<GitOutput> {
+    // The two halves of this crate must agree on which repository they are
+    // talking about. `git` honors `GIT_DIR`/`GIT_WORK_TREE` in preference to
+    // the `-C <dir>` we pass; libgit2's `Repository::discover` ignores them
+    // entirely and uses the path. With one of those set to another
+    // repository the halves diverge -- `merge_tree_write_tree` would write a
+    // tree into one object database while `commit_tree_deterministic` looked
+    // for it in another, and a push would run against the wrong repository.
+    // Before the in-process move there was only one half and no such split.
+    //
+    // Removing them makes the explicit path authoritative for both, which is
+    // what every caller here means: each passes a repository path it
+    // resolved itself.
+    command.env_remove("GIT_DIR").env_remove("GIT_WORK_TREE");
+
     #[cfg(unix)]
     {
         // Own process group, so `kill_process_tree` can signal the transport
@@ -219,13 +233,15 @@ fn spawn_and_wait(
     }
 }
 
-/// Every git invocation in this crate funnels through `run` (a plain
-/// argument list dispatch) or `run_stdin` (the one command, `interpret-
-/// trailers`, that needs piped input) — so unit tests can substitute a
-/// scripted [`mock::MockGit`] for the real `git` subprocess at exactly this
-/// seam and exercise error/retry paths in `commands.rs`/`bus.rs`/
-/// `review_cmds.rs`/`validate_cmd.rs`/`history.rs` without spawning real
-/// processes or building real repositories. See the `mock` submodule.
+/// Dispatch for a `git` subprocess that takes no stdin, with
+/// [`mock::MockGit`] able to intercept it.
+///
+/// This used to be the seam through which *every* git operation in the crate
+/// passed. It is not any more, and a test that assumes otherwise will mock a
+/// call nobody makes: the whole local surface moved in-process to
+/// `gitobjects.rs`, and `version` and `check_ref_format` spawn directly
+/// without consulting the mock. What still arrives here is remote transport
+/// (`fetch`, `push`, `ls-remote`) and `merge-tree`.
 pub fn run(dir: &Path, args: &[&str]) -> AbResult<GitOutput> {
     if let Some(out) = mock::intercept(dir, args, None) {
         return out;
@@ -620,6 +636,19 @@ pub fn tag_lightweight(dir: &Path, name: &str, target: &str) -> AbResult<()> {
     // `git tag` validates the name it is given; `Branch::parse` is this
     // crate's equivalent, cross-checked against real `git check-ref-format`
     // by `scalars::ref_format_tests`.
+    //
+    // `git tag` refuses two names `check-ref-format` accepts, so
+    // `Branch::parse` cannot know about them: a tag literally named `HEAD`,
+    // and one starting with `-` (which would be read as an option). Neither
+    // is reachable from `candidate_tag_name`, but a tag name is caller input
+    // and this function should not be the place that stops matching `git
+    // tag`.
+    if name == "HEAD" || name.starts_with('-') {
+        return Err(invalid(format!(
+            "{name} is not a usable tag name: git refuses a tag named HEAD or one starting with \
+             a hyphen"
+        )));
+    }
     let refname = crate::scalars::Branch::parse(format!("refs/tags/{name}"))
         .map_err(|e| invalid(format!("{name} is not a usable tag name: {e}")))?;
     let g = crate::gitobjects::Libgit2Reader::open(dir)?;
@@ -665,17 +694,15 @@ pub fn remote_tag_matches(dir: &Path, remote: &str, name: &str, target: &str) ->
     Ok(sha == Some(target))
 }
 
-/// `(status, path)` per changed path between `from` and `to`. A rename or
-/// copy line (`R100`/`C75`/...) carries *two* tab-separated path fields (old,
-/// new) rather than one -- `path` here is always the second/final one, the
-/// path that actually exists in `to`'s tree, since every caller cares about
-/// "what changed in the resulting tree," not "what it used to be called."
-/// (Previously mis-parsed via a 2-way split, which folded a rename's two
-/// paths into one string with a literal embedded tab -- round-6 adversarial
-/// review, reproduced directly: `merge_ready::check_merge_ready`'s scope
-/// check rejected every renamed file regardless of whether it was in scope,
-/// even though renames are deliberately supported elsewhere in this exact
-/// crate, `merge.renames=true` pinned for candidate construction.)
+/// Every path that differs between `from` and `to`, as `(status, path)`.
+///
+/// Rename detection is off, so a rename is reported as a delete of the old
+/// path plus an add of the new one rather than as a single `R<score>` entry
+/// naming only the destination. Both consumers -- `merge_ready::
+/// check_merge_ready` and `audit_main`'s post-hoc correlation -- check every
+/// path returned against a reviewed scope, and reporting both sides is what
+/// stops a rename *into* the reviewed scope from hiding the out-of-scope path
+/// it came from. See `gitobjects::HistoryReader::diff_name_status`.
 pub fn diff_name_status(dir: &Path, from: &str, to: &str) -> AbResult<Vec<(String, String)>> {
     let g = crate::gitobjects::Libgit2Reader::open(dir)?;
     crate::gitobjects::HistoryReader::diff_name_status(
@@ -1120,17 +1147,20 @@ mod outer_tests {
     /// an error rather than an empty/garbage trailer list.
     #[test]
     fn commit_message_trailers_reports_interpret_trailers_failure() {
+        // A real repository, not `PathBuf::from(".")`. The message is now
+        // read in-process, so the old `show -s --format=%B` mock rule is
+        // never consulted and the call needs a repository it can actually
+        // open -- relying on the process working directory happening to be
+        // one is exactly the accidental coupling this avoids. Only the
+        // `interpret-trailers` rule still intercepts anything.
+        let repo = init_repo();
         let _guard = MockGit::new()
-            .on_prefix(
-                &["show", "-s", "--format=%B"],
-                GitOutput::ok("subject\n\nAgent-Bus-Agent: alice"),
-            )
             .on(
                 &["interpret-trailers", "--parse"],
                 GitOutput::err("bad format"),
             )
             .install();
-        let err = commit_message_trailers(&PathBuf::from("."), "HEAD").unwrap_err();
+        let err = commit_message_trailers(repo.path(), "HEAD").unwrap_err();
         assert!(
             format!("{err}").contains("interpret-trailers failed"),
             "{err}"
