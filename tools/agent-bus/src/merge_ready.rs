@@ -252,6 +252,38 @@ pub(crate) fn check_merge_ready(
             "candidate must have exactly one matching Agent-Bus-Reviewer trailer",
         ));
     }
+    // Section 8 lists two more checks by name that lived only in the
+    // coordinator's publication gate: "selected commit authors match trailers
+    // and exclude that reviewer", and the candidate having a "conflict-free
+    // tree". Doing them here as well is deliberate defence in depth rather
+    // than duplication -- this gate runs on the reviewer's own host,
+    // immediately before the push, and is the last thing that looks at the
+    // candidate before it becomes `main`. It is also the check that survives
+    // if the publication gate is ever bypassed again, which is exactly what
+    // the stale-nomination hole above turned out to be.
+    let expected_authors: std::collections::BTreeSet<Agent> =
+        chain.current_request.authors.iter().cloned().collect();
+    crate::merge_candidate::verify_authorship(
+        repo,
+        reviewer,
+        &expected_authors,
+        auth.previous_main.as_str(),
+        auth.reviewed_commit.as_str(),
+    )?;
+    crate::bootstrap::require_pinned_merge_engine(state)?;
+    let reconstructed = crate::merge_candidate::reconstruct_candidate(
+        repo,
+        auth.previous_main.as_str(),
+        auth.reviewed_commit.as_str(),
+        reviewer,
+    )?;
+    if reconstructed != auth.candidate.as_str() {
+        return Err(invalid(format!(
+            "candidate {} is not the deterministic clean merge of {} into {} -- this host              reconstructs {reconstructed}. A candidate that is not that merge carries content              no reviewer authorized.",
+            auth.candidate, auth.reviewed_commit, auth.previous_main
+        )));
+    }
+
     let changed = crate::gitrepo::diff_name_status(repo, &current_main, auth.candidate.as_str())?;
     for (_, path) in &changed {
         if !auth.reviewed_scope.iter().any(|p| path_in_claim(path, p)) {
@@ -1034,6 +1066,45 @@ mod tests {
         }
     }
 
+    /// AGENT_REVIEW.md section 8 names two checks this gate did not make:
+    /// "selected commit authors match trailers and exclude that reviewer",
+    /// and a "conflict-free tree". Both lived only in the coordinator's
+    /// publication gate, which the stale-nomination hole showed can be
+    /// routed around -- so this gate, the last thing to look at a candidate
+    /// before it becomes `main`, now makes them too.
+    ///
+    /// Driven through a candidate whose second parent introduces a commit
+    /// the reviewer authored: authorship is section 3's rule, and it is
+    /// invisible to the parent-shape and trailer checks that were already
+    /// here.
+    #[test]
+    fn rejects_a_candidate_whose_introduced_commit_the_reviewer_authored() {
+        let author = a("zoe");
+        let reviewer = a("aiden");
+        // The introduced commit carries the *reviewer* as its author.
+        let (dir, _origin, remote, previous_main, feature_commit, candidate) =
+            git_fixture(&reviewer, &reviewer);
+        // The roster is honest -- zoe implements, aiden reviews. Only the
+        // candidate is wrong: the commit it introduces was authored by the
+        // reviewer.
+        let (state, auth_id) = state_with_authorization(
+            &author,
+            &reviewer,
+            &previous_main,
+            &feature_commit,
+            &candidate,
+            &["feature.txt"],
+        );
+
+        let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+            .expect_err("a reviewer may not merge their own work");
+        assert!(
+            err.to_string().contains("ineligible to merge")
+                || err.to_string().contains("do not match nomination authors"),
+            "expected an authorship refusal, got: {err}"
+        );
+    }
+
     #[test]
     fn accepts_a_genuinely_valid_authorization_and_returns_the_candidate() {
         let author = a("zoe");
@@ -1196,6 +1267,53 @@ mod tests {
             err.to_string()
                 .contains("has advanced past authorized previous_main"),
             "{err}"
+        );
+    }
+
+    /// The section 7 fixture "a candidate differing from the one authorized",
+    /// at this gate rather than at the coordinator's.
+    ///
+    /// This is the forged candidate that gets *past* the shape checks: right
+    /// parents, in the right order, with exactly one correct
+    /// `Agent-Bus-Reviewer` trailer. It still is not the candidate, because
+    /// `reconstruct_candidate` fixes the identity, the timestamp and the
+    /// message, and a hand-run `commit-tree` matches none of them. Only the
+    /// reconstruction comparison can tell the difference, which is why the
+    /// three sibling tests above -- all of which fail earlier, on shape --
+    /// could not catch its removal.
+    #[test]
+    fn rejects_a_hand_pushed_candidate_that_is_not_the_deterministic_reconstruction() {
+        let author = a("zoe");
+        let reviewer = a("aiden");
+        let (dir, _origin, remote, previous_main, feature_commit, real_candidate) =
+            git_fixture(&author, &reviewer);
+        let forged = commit_tree_with(
+            dir.path(),
+            &feature_commit,
+            &[&previous_main, &feature_commit],
+            "agent-bus candidate
+
+Agent-Bus-Reviewer: aiden",
+        );
+        assert_ne!(
+            forged, real_candidate,
+            "fixture must differ from the real candidate"
+        );
+
+        let (state, auth_id) = state_with_authorization(
+            &author,
+            &reviewer,
+            &previous_main,
+            &feature_commit,
+            &forged,
+            &["feature.txt"],
+        );
+        let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+            .expect_err("a candidate that is not the deterministic merge must be refused");
+        assert!(
+            err.to_string()
+                .contains("is not the deterministic clean merge"),
+            "expected the reconstruction refusal, got: {err}"
         );
     }
 
