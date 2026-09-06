@@ -1751,11 +1751,16 @@ ce <boss>"
 
     // --------------------------------- history: statuses and error paths
 
-    /// `diff_name_status` had test coverage for additions and deletions only.
-    /// Modification and typechange are both reachable, and both feed the same
-    /// scope gate in `merge_ready`/`audit_main`, so both need pinning.
+    /// Modification, and what libgit2 actually does with a mode change.
+    ///
+    /// The name of this test used to promise typechange coverage it could not
+    /// deliver: without `GIT_DIFF_INCLUDE_TYPECHANGE` libgit2 never emits
+    /// `Delta::Typechange`, so the `"T"` arm was dead and only `"M"` was ever
+    /// asserted. What matters to the reviewed-scope gate is that a mode-only
+    /// change is *reported at all* rather than silently dropped, so that is
+    /// what this pins.
     #[test]
-    fn diff_name_status_reports_modification_and_typechange() {
+    fn diff_name_status_reports_modification_and_a_mode_only_change() {
         let (repo, _head) = init_repo();
         let g = Libgit2Reader::open(repo.path()).unwrap();
 
@@ -1790,14 +1795,10 @@ ce <boss>"
         };
         let exec = g.create_commit(&exec_tree, &[&after], "chmod").unwrap();
         let changed = g.diff_name_status(&after, &exec).unwrap();
-        assert_eq!(changed.len(), 1, "{changed:?}");
-        assert_eq!(changed[0].1, "f.txt");
-        // git reports a mode-only change as a modification; either letter is
-        // a real answer, but it must not be silently dropped.
-        assert!(
-            changed[0].0 == "T" || changed[0].0 == "M",
-            "unexpected status {:?}",
-            changed[0].0
+        assert_eq!(
+            changed,
+            vec![("M".to_string(), "f.txt".to_string())],
+            "a mode-only change must be reported, and libgit2 reports it as a modification"
         );
     }
 
@@ -1842,14 +1843,28 @@ ce <boss>"
         let g = Libgit2Reader::open(repo.path()).unwrap();
         let missing = oid(0x7c);
 
-        assert!(g.range(&missing, &head).is_err(), "unknown start accepted");
-        assert!(g.range(&head, &missing).is_err(), "unknown end accepted");
-        assert!(g.first_parent_range(&missing, &head).is_err());
-        assert!(g.first_parent_range(&head, &missing).is_err());
-        assert!(g.parents_of(&missing).is_err());
-        assert!(g.committer_timestamp(&missing).is_err());
-        assert!(g.commit_message(&missing).is_err());
-        assert!(g.diff_name_status(&missing, &head).is_err());
+        // Each must say *which* commit did not resolve, not merely fail:
+        // these all funnel through `commit_at`/`tree_of`, so a bare
+        // `is_err()` would still pass if one started failing for an unrelated
+        // reason (an unopenable repository, say).
+        // Takes the error rather than the Result: the calls below return
+        // different success types, so one closure cannot accept them all.
+        let says_unresolved = |e: AbError| {
+            let text = e.to_string();
+            assert!(
+                text.contains(missing.as_str()) && text.contains("does not resolve"),
+                "expected the message to name the unresolvable commit, got: {text}"
+            );
+        };
+        let unresolved = "an endpoint that names nothing must fail";
+        says_unresolved(g.range(&missing, &head).expect_err(unresolved));
+        says_unresolved(g.range(&head, &missing).expect_err(unresolved));
+        says_unresolved(g.first_parent_range(&missing, &head).expect_err(unresolved));
+        says_unresolved(g.first_parent_range(&head, &missing).expect_err(unresolved));
+        says_unresolved(g.parents_of(&missing).expect_err(unresolved));
+        says_unresolved(g.committer_timestamp(&missing).expect_err(unresolved));
+        says_unresolved(g.commit_message(&missing).expect_err(unresolved));
+        says_unresolved(g.diff_name_status(&missing, &head).expect_err(unresolved));
     }
 
     /// `first_parent_range` must follow only first parents, which is the

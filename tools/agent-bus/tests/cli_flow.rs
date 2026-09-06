@@ -36,6 +36,24 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(status.success(), "git {args:?} failed in {}", dir.display());
 }
 
+/// `git`, but returning its trimmed stdout, for the few tests that ask git a
+/// question rather than telling it to do something.
+fn git_out(dir: &Path, args: &[&str]) -> String {
+    let out = StdCommand::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .expect("git must be on PATH");
+    assert!(
+        out.status.success(),
+        "git {args:?} failed in {}: {}",
+        dir.display(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
 /// A forward-slash path string, since a `\`-separated Windows path is not
 /// what we want embedded as a git remote path.
 fn path_str(p: &Path) -> String {
@@ -549,6 +567,125 @@ fn redact_noise(value: Content, _path: ContentPath<'_>) -> Content {
 /// Requirement 1: `genesis` succeeds and its JSON has the expected
 /// registry_epoch/stream_commit/published fields, and those refs actually
 /// landed on the remote.
+/// `git commit` resolves identity from the environment before configuration,
+/// and the in-process writer must too.
+///
+/// This runs the real binary as a child process on purpose. The rule itself
+/// is unit-tested through `resolve_identity`, but that test injects both
+/// lookups -- so mutating the *wiring* (`ambient_identity` passing a lookup
+/// that always returns `None`) restored the original config-only bug with the
+/// whole suite still green. Only a test that sets real environment variables
+/// covers that seam, and environment variables are process-global, so it has
+/// to be a separate process rather than a unit test running beside others.
+///
+/// Author and committer are deliberately different people here: with both set
+/// to the same identity, swapping the two arguments at the call site is
+/// unobservable.
+#[test]
+fn a_published_commit_takes_its_identity_from_the_environment() {
+    let (_origin, repo) = fresh_bus();
+
+    let out = bin()
+        .current_dir(repo.path())
+        .args([
+            "genesis",
+            "--agent",
+            "coord1",
+            "--display-name",
+            "Coordinator One",
+            "--purpose",
+            "bootstraps the bus",
+            "--host",
+            "host1",
+        ])
+        .env("GIT_AUTHOR_NAME", "Env Author")
+        .env("GIT_AUTHOR_EMAIL", "env-author@example.com")
+        .env("GIT_COMMITTER_NAME", "Env Committer")
+        .env("GIT_COMMITTER_EMAIL", "env-committer@example.com")
+        .assert()
+        .success();
+    let _ = out;
+
+    // The repository's own config says `Test <test@example.com>`; the
+    // environment must win over it.
+    let ident = git_out(
+        repo.path(),
+        &[
+            "log",
+            "-1",
+            "--format=%an|%ae|%cn|%ce",
+            "refs/heads/agent-events/coord1",
+        ],
+    );
+    assert_eq!(
+        ident.trim(),
+        "Env Author|env-author@example.com|Env Committer|env-committer@example.com",
+        "the environment must take precedence over user.name/user.email, and the author must \
+         not be swapped with the committer"
+    );
+
+    // The registry root is written through the same path.
+    let registry_ident = git_out(
+        repo.path(),
+        &["log", "-1", "--format=%an|%ce", "refs/heads/agent-registry"],
+    );
+    assert_eq!(
+        registry_ident.trim(),
+        "Env Author|env-committer@example.com"
+    );
+}
+
+/// The `EMAIL` variable is git's last resort for an email, after
+/// `GIT_AUTHOR_EMAIL` and `user.email`. A host with `user.name` configured
+/// and `EMAIL` exported is an ordinary container setup, and it must be able
+/// to write to the bus.
+#[test]
+fn a_published_commit_falls_back_to_the_plain_email_variable() {
+    let (_origin, repo) = fresh_bus();
+    // Remove the repository's own email, and point the global/system config
+    // search somewhere empty, so `EMAIL` is genuinely the only source left.
+    // `user.email` outranks `EMAIL` in git's order, so leaving the developer's
+    // own global config visible would make this test assert nothing.
+    git(repo.path(), &["config", "--unset", "user.email"]);
+    let empty_home = tempfile::tempdir().unwrap();
+
+    bin()
+        .current_dir(repo.path())
+        .args([
+            "genesis",
+            "--agent",
+            "coord1",
+            "--display-name",
+            "Coordinator One",
+            "--purpose",
+            "bootstraps the bus",
+            "--host",
+            "host1",
+        ])
+        .env_remove("GIT_AUTHOR_EMAIL")
+        .env_remove("GIT_COMMITTER_EMAIL")
+        .env("HOME", empty_home.path())
+        .env("USERPROFILE", empty_home.path())
+        .env("XDG_CONFIG_HOME", empty_home.path())
+        .env("HOMEDRIVE", "")
+        .env("HOMEPATH", empty_home.path())
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("EMAIL", "fallback@example.com")
+        .assert()
+        .success();
+
+    let ident = git_out(
+        repo.path(),
+        &[
+            "log",
+            "-1",
+            "--format=%ae|%ce",
+            "refs/heads/agent-events/coord1",
+        ],
+    );
+    assert_eq!(ident.trim(), "fallback@example.com|fallback@example.com");
+}
+
 #[test]
 fn genesis_reports_expected_fields_and_publishes_both_refs() {
     let (origin, repo) = fresh_bus();

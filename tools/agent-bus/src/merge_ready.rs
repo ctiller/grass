@@ -1131,6 +1131,76 @@ mod tests {
         );
     }
 
+    /// The other half of the scope gate, and the half nothing tested: a
+    /// candidate that *deletes* a file outside `reviewed_scope`.
+    ///
+    /// Every existing scope test adds a file. Dropping deleted deltas from
+    /// `diff_name_status` therefore left the whole suite green while a
+    /// candidate could remove any file in the tree, and this is the gate that
+    /// is supposed to stop it. It is also the concrete shape of the bypass
+    /// that rename detection used to hide: under `--name-status` with
+    /// detection on, a file renamed out of the tree reported only its
+    /// destination.
+    #[test]
+    fn rejects_a_deleted_path_outside_reviewed_scope() {
+        let author = a("zoe");
+        let reviewer = a("aiden");
+        let dir = init_repo();
+        let path = dir.path();
+        let origin = init_bare_origin();
+        let remote = origin.path().to_string_lossy().to_string();
+
+        // An out-of-scope file that exists on `main` before the candidate.
+        std::fs::write(path.join("elsewhere.txt"), "load-bearing\n").unwrap();
+        git(path, &["add", "."]);
+        git(path, &["commit", "-q", "-m", "add elsewhere.txt"]);
+        push_main(path, &remote);
+        let previous_main = rev_parse(path, "main");
+
+        git(path, &["checkout", "--quiet", "--detach", &previous_main]);
+        // In scope: add feature.txt. Out of scope: delete elsewhere.txt.
+        std::fs::write(path.join("feature.txt"), "feature content\n").unwrap();
+        git(path, &["rm", "-q", "elsewhere.txt"]);
+        git(path, &["add", "."]);
+        git(
+            path,
+            &[
+                "commit",
+                "-q",
+                "-m",
+                &format!("add feature, drop elsewhere\n\nAgent-Bus-Agent: {author}"),
+            ],
+        );
+        let feature_commit = rev_parse(path, "HEAD");
+        git(path, &["checkout", "--quiet", "main"]);
+        let candidate = crate::merge_candidate::reconstruct_candidate(
+            path,
+            &previous_main,
+            &feature_commit,
+            &reviewer,
+        )
+        .unwrap();
+
+        let (state, auth_id) = state_with_authorization(
+            &author,
+            &reviewer,
+            &previous_main,
+            &feature_commit,
+            &candidate,
+            &["feature.txt"],
+        );
+
+        let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id).unwrap_err();
+        assert!(
+            err.to_string().contains("is outside reviewed_scope"),
+            "a deletion outside the reviewed scope must be refused: {err}"
+        );
+        assert!(
+            err.to_string().contains("elsewhere.txt"),
+            "the message must name the deleted path: {err}"
+        );
+    }
+
     // ------------------------------------------------------------ path_in_claim
 
     #[test]

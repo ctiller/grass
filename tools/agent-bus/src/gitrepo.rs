@@ -92,6 +92,22 @@ fn parse_timeout_secs(raw: Option<&str>) -> u64 {
         .unwrap_or(DEFAULT_SECS)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Counts calls to [`kill_process_tree`] *on this thread*, so a test can
+    /// prove the deadline invoked it rather than only that it reported a
+    /// timeout.
+    ///
+    /// Thread-local, not a process-global atomic. `cargo test` runs tests in
+    /// parallel threads, and a shared counter would let a *sibling* test's
+    /// kill satisfy this test's assertion while its own deadline never fired
+    /// -- a green test proving nothing, which is the exact class of defect
+    /// this counter exists to rule out. `kill_process_tree` is called from
+    /// the timing-out caller's own thread, so a thread-local is both correct
+    /// and isolated.
+    pub(crate) static KILLS_REQUESTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Kill `pid` and everything it spawned.
 ///
 /// A bare `Child::kill` reaps only the process we started. `git fetch` and
@@ -101,15 +117,9 @@ fn parse_timeout_secs(raw: Option<&str>) -> u64 {
 /// prompt reading a terminal that is not there. Killing only the parent
 /// leaves the real culprit running and holding the pipe, so the wait never
 /// ends.
-/// Counts calls to [`kill_process_tree`], so a test can prove the deadline
-/// actually invokes it rather than only that it reports a timeout.
-#[cfg(test)]
-pub(crate) static KILLS_REQUESTED: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
-
 fn kill_process_tree(pid: u32) {
     #[cfg(test)]
-    KILLS_REQUESTED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    KILLS_REQUESTED.with(|c| c.set(c.get() + 1));
 
     #[cfg(windows)]
     {
@@ -1065,7 +1075,7 @@ mod outer_tests {
     /// alone leaves the process running and the pipe held.
     #[test]
     fn a_command_that_outruns_its_deadline_is_reported_and_its_tree_killed() {
-        let before = KILLS_REQUESTED.load(std::sync::atomic::Ordering::SeqCst);
+        let before = KILLS_REQUESTED.with(|c| c.get());
 
         let mut command = blocking_command();
         command
@@ -1096,7 +1106,7 @@ mod outer_tests {
         // ...and it must have asked for the kill. Without this the test stays
         // green when the kill is removed entirely.
         assert!(
-            KILLS_REQUESTED.load(std::sync::atomic::Ordering::SeqCst) > before,
+            KILLS_REQUESTED.with(|c| c.get()) > before,
             "the deadline expired without requesting a process-tree kill"
         );
     }
