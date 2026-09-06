@@ -1062,6 +1062,159 @@ mod tests {
         assert!(findings.is_empty(), "{findings:?}");
     }
 
+    /// AGENT_REVIEW.md sections 9/11: the authorization that clears a merge
+    /// must be published by *that merge's own* reviewer, named in its
+    /// `Agent-Bus-Reviewer` trailer. Deleting the `a_id.agent() != reviewer`
+    /// guard let any reviewer's authorization clear any merge, and no test
+    /// noticed, because every existing fixture used `bob` for both.
+    #[test]
+    fn an_authorization_published_by_a_different_reviewer_does_not_clear_a_merge() {
+        let dir = init_repo();
+        let root = git(dir.path(), &["rev-parse", "main"]);
+        let second = author_commit(dir.path(), &root, "x.txt", Some("alice"));
+        // The merge names `carol` as its reviewer ...
+        let candidate = merge_commit(
+            dir.path(),
+            &root,
+            &second,
+            "merge
+
+Agent-Bus-Reviewer: carol",
+        );
+
+        let mut state = base_state(&root);
+        let nomination = insert_chain(&mut state);
+        // ... but the only authorization on record was published by `bob`,
+        // and otherwise matches this candidate exactly.
+        insert_authorization(&mut state, &nomination, 1, &root, &second, &candidate);
+
+        let findings = audit_main_findings(dir.path(), &state, Some(&candidate)).unwrap();
+        let problems = problems(&findings);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("no review.merge_authorized matches")),
+            "an authorization by another reviewer must not clear this merge: {problems:?}"
+        );
+    }
+
+    /// The chain is matched by the exact author set of the introduced
+    /// commits (sections 3/7). A chain whose nomination names different
+    /// authors is a different piece of work and must not supply the
+    /// authorization for this one.
+    #[test]
+    fn a_chain_whose_authors_differ_does_not_supply_the_authorization() {
+        let dir = init_repo();
+        let root = git(dir.path(), &["rev-parse", "main"]);
+        // Introduced content authored by `dave`; the only chain on record
+        // names `alice`.
+        let second = author_commit(dir.path(), &root, "x.txt", Some("dave"));
+        let candidate = merge_commit(
+            dir.path(),
+            &root,
+            &second,
+            "merge
+
+Agent-Bus-Reviewer: bob",
+        );
+
+        let mut state = base_state(&root);
+        let nomination = insert_chain(&mut state);
+        insert_authorization(&mut state, &nomination, 1, &root, &second, &candidate);
+
+        let findings = audit_main_findings(dir.path(), &state, Some(&candidate)).unwrap();
+        let problems = problems(&findings);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("no review.merge_authorized matches")),
+            "a chain with a different author set must not match: {problems:?}"
+        );
+    }
+
+    /// All three of `candidate`, `previous_main` and `reviewed_commit` must
+    /// agree. Matching on the candidate alone would accept an authorization
+    /// issued against a different base -- the reviewer approved merging that
+    /// work onto *some other* main, which is not what happened here.
+    #[test]
+    fn an_authorization_naming_a_different_previous_main_does_not_match() {
+        let dir = init_repo();
+        let root = git(dir.path(), &["rev-parse", "main"]);
+        let second = author_commit(dir.path(), &root, "x.txt", Some("alice"));
+        let candidate = merge_commit(
+            dir.path(),
+            &root,
+            &second,
+            "merge
+
+Agent-Bus-Reviewer: bob",
+        );
+        let elsewhere = author_commit(dir.path(), &root, "unrelated.txt", Some("alice"));
+        assert_ne!(elsewhere, root);
+
+        let mut state = base_state(&root);
+        let nomination = insert_chain(&mut state);
+        // Right candidate, right reviewed_commit, wrong previous_main.
+        insert_authorization(&mut state, &nomination, 1, &elsewhere, &second, &candidate);
+
+        let findings = audit_main_findings(dir.path(), &state, Some(&candidate)).unwrap();
+        let problems = problems(&findings);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("no review.merge_authorized matches")),
+            "a near-miss authorization must not clear the merge: {problems:?}"
+        );
+    }
+
+    /// The audited history must be a first-parent chain: each merge's *first*
+    /// parent is the commit audited before it. A two-parent merge whose
+    /// parents are the other way round would otherwise pass the arity check
+    /// and then be read with `parents[1]` as the reviewed commit -- naming
+    /// the previous main as the reviewed work.
+    #[test]
+    fn a_merge_whose_first_parent_is_not_the_prior_main_commit_is_flagged() {
+        let dir = init_repo();
+        let root = git(dir.path(), &["rev-parse", "main"]);
+        // The audit starts from `start`; `sidestep` is a sibling of it, so
+        // the merge below rejoins the history *beside* the audited base
+        // rather than on top of it. Simply reversing a merge's parents does
+        // not express this: the walk follows first parents, so `previous`
+        // advances to whatever the first parent was and the check passes.
+        // The violation only exists at the first audited commit, where
+        // `previous` is `product_review_from` itself.
+        let start = author_commit(dir.path(), &root, "start.txt", Some("alice"));
+        let sidestep = author_commit(dir.path(), &root, "side.txt", Some("alice"));
+        let backwards = merge_commit(
+            dir.path(),
+            &root,
+            &sidestep,
+            "merge
+
+Agent-Bus-Reviewer: bob",
+        );
+
+        let state = base_state(&start);
+        let findings = audit_main_findings(dir.path(), &state, Some(&backwards)).unwrap();
+
+        // Asserted against *this* commit, not merely against the message.
+        // The first-parent walk also visits the non-merge commit `second`,
+        // which reports the very same problem -- so a bare message search
+        // passes even with the first-parent clause deleted, which is exactly
+        // how the first version of this test managed to be vacuous.
+        let flagged_backwards = findings.iter().any(|f| {
+            f["commit"].as_str() == Some(backwards.as_str())
+                && f["problem"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("not a two-parent merge whose first parent is the prior audited main")
+        });
+        assert!(
+            flagged_backwards,
+            "the reversed-parent merge itself must be flagged: {findings:?}"
+        );
+    }
+
     /// A receipt naming a *different* `main_commit` than the one actually
     /// under audit must not satisfy this commit's own correlation -- proves
     /// `has_receipt`'s equality check is load-bearing, not merely "some

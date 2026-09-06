@@ -2457,6 +2457,106 @@ mod tests {
         (origin, remote)
     }
 
+    /// AGENT_COORDINATION_EVOLUTION.md's currency rule (gate 17): a
+    /// reassignment must be published against a *freshly synced* snapshot,
+    /// because it moves work between agents and a stale read can hand the
+    /// same item to two of them. That is a strictly wider set than the
+    /// events needing a *complete frontier*, and the second clause of
+    /// `requires_synced_snapshot` is the only thing expressing it -- deleting
+    /// it left the whole suite green.
+    #[test]
+    fn reassignments_require_a_synced_snapshot_even_though_they_need_no_complete_frontier() {
+        let reassign = crate::events::EventData::IssueReassigned(crate::events::IssueReassigned {
+            issue: EventId::new(&a("alice"), 1),
+            previous_assignment: EventId::new(&a("alice"), 2),
+            previous_target: a("bob"),
+            new_target: a("carol"),
+            reason: text("moving it"),
+        });
+        assert!(
+            requires_synced_snapshot(&reassign),
+            "a reassignment must demand a fresh cut"
+        );
+        assert!(
+            !requires_complete_frontier(&reassign),
+            "fixture: if this ever needs a complete frontier, the first clause              would satisfy the assertion above and it would stop testing anything"
+        );
+    }
+
+    /// `through` names the last sequence a member has actually published,
+    /// which for a log of `n` events is `n - 1`. Off-by-one here would make
+    /// every complete frontier claim an event that does not exist yet, and
+    /// no test asserted the value -- only that a frontier could be built.
+    #[test]
+    fn a_complete_frontier_names_the_last_published_sequence_not_the_next_one() {
+        let dir = init_repo();
+        let coord = a("coord1");
+        crate::bootstrap::genesis(
+            dir.path(),
+            &coord,
+            crate::scalars::Short::parse("Coordinator One".to_string()).unwrap(),
+            crate::scalars::Text::parse("bootstraps the fleet".to_string()).unwrap(),
+            "sha1".to_string(),
+            crate::scalars::ObjectId::parse(crate::gitrepo::rev_parse(dir.path(), "HEAD").unwrap())
+                .unwrap(),
+            crate::scalars::Short::parse("host1".to_string()).unwrap(),
+        )
+        .unwrap();
+
+        let tip = crate::registry::read_registry_tip(dir.path())
+            .unwrap()
+            .unwrap();
+        let epoch = crate::registry::read_epoch(dir.path(), &tip).unwrap();
+        let frontier = build_complete_frontier(dir.path(), &epoch).unwrap();
+
+        let reader = crate::gitobjects::Libgit2Reader::open(dir.path()).unwrap();
+        for entry in frontier.entries.values() {
+            let stream_tip = crate::stream::read_stream_tip(dir.path(), &entry.agent)
+                .unwrap()
+                .unwrap();
+            let published =
+                crate::storage::read_stream_log_at(&reader, &stream_tip, &entry.agent).unwrap();
+            assert_eq!(
+                entry.through.seq(),
+                published.len() as u64 - 1,
+                "through must name the last published sequence for {}",
+                entry.agent
+            );
+            assert!(
+                published.iter().any(|e| e.id == entry.through),
+                "through must name an event that actually exists"
+            );
+        }
+    }
+
+    /// A reconciliation is verified against `main` *as the remote has it*.
+    /// If that fetch cannot run, the check has no ground truth and must fail
+    /// closed -- accepting on an unreachable remote would let a reconciliation
+    /// claiming any `main_commit` through unverified.
+    #[test]
+    fn verify_review_merge_reconciled_fails_closed_when_main_cannot_be_fetched() {
+        let dir = init_repo();
+        let previous_main = crate::gitrepo::rev_parse(dir.path(), "main").unwrap();
+        let next = author_commit_for_reconcile(dir.path(), &previous_main, "feature.txt");
+        git(dir.path(), &["update-ref", "refs/heads/main", &next]);
+        let (state, auth_id) = state_with_bare_authorization(&previous_main, &next, &next);
+        let d = reconciled_data(&auth_id, &previous_main, &next, &next);
+
+        // A remote that cannot be contacted at all.
+        let unreachable = dir.path().join("no-such-origin.git");
+        let err = verify_review_merge_reconciled(
+            dir.path(),
+            &unreachable.display().to_string(),
+            &state,
+            &d,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("could not fetch refs/heads/main"),
+            "an unreachable remote must fail closed, got: {err}"
+        );
+    }
+
     #[test]
     fn verify_review_merge_reconciled_rejects_when_main_was_never_advanced() {
         let dir = init_repo();

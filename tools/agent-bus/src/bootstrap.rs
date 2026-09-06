@@ -500,6 +500,39 @@ mod tests {
         );
     }
 
+    /// The resume check compares the existing root epoch's coordinator
+    /// binding field by field, and `host` is one of those fields: a second
+    /// `genesis` for the same coordinator from a *different* host is a
+    /// different activation claim, not a resume. Every existing resume test
+    /// varied the agent, the display name or the purpose, so dropping the
+    /// host comparison changed nothing any of them could see.
+    #[test]
+    fn genesis_refuses_to_resume_from_a_different_host() {
+        let repo = init_repo();
+        let coord1 = crate::scalars::Agent::parse("coord1".to_string()).unwrap();
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        let call = |host: &str| {
+            genesis(
+                repo.path(),
+                &coord1,
+                crate::scalars::Short::parse("Coordinator One".to_string()).unwrap(),
+                crate::scalars::Text::parse("bootstraps the fleet".to_string()).unwrap(),
+                "sha1".to_string(),
+                ObjectId::parse(review_from.clone()).unwrap(),
+                crate::scalars::Short::parse(host.to_string()).unwrap(),
+            )
+        };
+        call("host1").unwrap();
+        // Same coordinator, same everything else, different host.
+        let err = call("host2").unwrap_err();
+        assert!(
+            err.to_string().contains("does not match this genesis call"),
+            "{err}"
+        );
+        // The original activation is still intact and still resumable.
+        call("host1").unwrap();
+    }
+
     /// A resumed call with *different* parameters than the original must
     /// be refused, not silently graft onto someone else's already-
     /// activated bus.
