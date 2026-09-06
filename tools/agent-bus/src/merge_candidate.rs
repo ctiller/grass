@@ -226,6 +226,38 @@ mod tests {
         );
     }
 
+    /// AGENT_REVIEW.md sections 3/7 require the trailer union to equal the
+    /// nomination's authors *exactly* -- not merely to overlap them.
+    ///
+    /// Both directions matter and neither was pinned: relaxing `!=` to a
+    /// disjointness test left the suite green, because the one mismatch test
+    /// used author sets that were completely disjoint. A candidate naming
+    /// fewer authors than the nomination claims, or more, is a different
+    /// change from the one that was reviewed.
+    #[test]
+    fn verify_authorship_rejects_authors_that_are_a_subset_of_the_nomination() {
+        let (repo, base, tip, _c) = repo_with_authored_chain(&[&["alice"]]);
+        let bob = a("bob");
+        let expected: BTreeSet<Agent> = [a("alice"), a("carol")].into_iter().collect();
+        let err = verify_authorship(repo.path(), &bob, &expected, &base, &tip).unwrap_err();
+        assert!(
+            err.to_string().contains("do not match nomination authors"),
+            "a candidate naming fewer authors than the nomination must be refused: {err}"
+        );
+    }
+
+    #[test]
+    fn verify_authorship_rejects_authors_beyond_the_nomination() {
+        let (repo, base, tip, _c) = repo_with_authored_chain(&[&["alice"], &["carol"]]);
+        let bob = a("bob");
+        let expected: BTreeSet<Agent> = [a("alice")].into_iter().collect();
+        let err = verify_authorship(repo.path(), &bob, &expected, &base, &tip).unwrap_err();
+        assert!(
+            err.to_string().contains("do not match nomination authors"),
+            "a candidate naming an author the nomination does not must be refused: {err}"
+        );
+    }
+
     #[test]
     fn verify_authorship_succeeds_and_returns_introduced_commits() {
         let (repo, base, tip, commits) = repo_with_authored_chain(&[&["alice"], &["alice"]]);
