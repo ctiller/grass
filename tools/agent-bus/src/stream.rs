@@ -626,7 +626,7 @@ mod tests {
 
         let path = repo.path().to_path_buf();
         let refname = stream_ref(&alice).into_string();
-        crate::gitobjects::arm_competing_writer(move || {
+        let _armed = crate::gitobjects::arm_competing_writer(move || {
             land_competing_writer(&path, &refname);
         });
 
@@ -648,7 +648,7 @@ mod tests {
 
         let path = repo.path().to_path_buf();
         let refname = stream_ref(&alice).into_string();
-        crate::gitobjects::arm_competing_writer(move || {
+        let _armed = crate::gitobjects::arm_competing_writer(move || {
             land_competing_writer(&path, &refname);
         });
 

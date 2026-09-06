@@ -266,7 +266,29 @@ pub(crate) fn audit_main_findings(
                 // review, reproduced live: a candidate whose introduced
                 // content touched a file outside `reviewed_scope` audited
                 // clean when `merge-ready` was simply never run).
-                let changed = crate::gitrepo::diff_name_status(repo, &previous, &commit)?;
+                // A finding, not a `?`, for the same reason the trailer
+                // read above is: this out-of-scope check is the sole
+                // authoritative catch for section 12's fixture 6, so aborting
+                // here would report *no* findings at all for the whole
+                // history -- including ones already collected -- and a
+                // candidate could hide behind that.
+                //
+                // Reachable for the same reason too: `diff_name_status` now
+                // rejects a path that is not valid UTF-8, where the subprocess
+                // it replaced returned `core.quotePath`'s ASCII-quoted form
+                // instead. One Latin-1-named file used to be a quoted path and
+                // is now a hard error.
+                let changed = match crate::gitrepo::diff_name_status(repo, &previous, &commit) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        findings.push(serde_json::json!({
+                            "commit": commit,
+                            "problem": format!("changed paths could not be read: {e}"),
+                        }));
+                        previous = commit;
+                        continue;
+                    }
+                };
                 let out_of_scope: Vec<&str> = changed
                     .iter()
                     .filter(|(_, path)| {

@@ -69,10 +69,26 @@ impl GitOutput {
 /// "hung" from "slow network" without ever being the thing that fails a real
 /// operation. Override with `AGENT_BUS_GIT_TIMEOUT_SECS` for an unusually
 /// slow link, or to tighten it in a test.
+/// The one place this variable's name is written.
+///
+/// Both the lookup and the timeout error message derive from it, so the
+/// failure mode a mutation exposed -- the message telling an operator to set
+/// a variable the code no longer reads -- cannot recur by drift.
+pub(crate) const TIMEOUT_VAR: &str = "AGENT_BUS_GIT_TIMEOUT_SECS";
+
 fn git_timeout() -> std::time::Duration {
-    std::time::Duration::from_secs(parse_timeout_secs(
-        std::env::var("AGENT_BUS_GIT_TIMEOUT_SECS").ok().as_deref(),
-    ))
+    git_timeout_from(|k| std::env::var(k).ok())
+}
+
+/// [`git_timeout`] against a supplied lookup.
+///
+/// Parameterized for the same reason `gitobjects::resolve_identity` is:
+/// testing only the parse rule leaves the *wiring* -- that anything reads
+/// [`TIMEOUT_VAR`] at all -- unproven, and mutation testing showed exactly
+/// that gap here. Environment variables are process-global, so a test cannot
+/// set one without leaking into every test running beside it.
+fn git_timeout_from(env: impl Fn(&str) -> Option<String>) -> std::time::Duration {
+    std::time::Duration::from_secs(parse_timeout_secs(env(TIMEOUT_VAR).as_deref()))
 }
 
 /// The override's parse rule, separated from reading the environment so a
@@ -215,7 +231,23 @@ fn spawn_and_wait(
     // ones reach exactly the split named above: with `GIT_OBJECT_DIRECTORY`
     // set, `merge-tree --write-tree` writes its tree into that directory and
     // the in-process `commit_with_identity` cannot find it.
+    //
+    // The configuration variables matter for a different reason. `git` honors
+    // `GIT_CONFIG_PARAMETERS` and the `GIT_CONFIG_COUNT`/`_KEY_<n>`/`_VALUE_
+    // <n>` trio at the same precedence as `-c`, and libgit2 honors none of
+    // them -- so an agent-bus invoked from inside a `git -c ...` process or a
+    // git alias would run `merge-tree` under configuration the in-process half
+    // never sees. That is a reproducibility hazard for the *pinned* ORT merge
+    // specifically, where AGENT_REVIEW.md section 7 requires every host to
+    // produce a byte-identical tree from the same inputs. The subprocess this
+    // replaced already removed `GIT_CONFIG_COUNT` by hand for exactly that
+    // reason; this generalizes it rather than inventing it.
+    //
+    // Everything transport needs is deliberately left alone --
+    // `GIT_SSH_COMMAND`, `GIT_ASKPASS`, `GIT_TERMINAL_PROMPT`, `GIT_SSL_*`,
+    // `GIT_PROXY_COMMAND` and the credential-helper configuration all survive.
     for var in [
+        // Repository location.
         "GIT_DIR",
         "GIT_WORK_TREE",
         "GIT_COMMON_DIR",
@@ -223,6 +255,16 @@ fn spawn_and_wait(
         "GIT_ALTERNATE_OBJECT_DIRECTORIES",
         "GIT_INDEX_FILE",
         "GIT_NAMESPACE",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        // Configuration injected at `-c` precedence. Removing `GIT_CONFIG_
+        // COUNT` neutralizes the indexed `_KEY_<n>`/`_VALUE_<n>` pairs, which
+        // git only consults through it.
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_CONFIG_NOSYSTEM",
     ] {
         command.env_remove(var);
     }
@@ -271,7 +313,7 @@ fn spawn_and_wait(
                 "git {what} did not finish within {}s and was killed. If this was a fetch or \
                  push, the remote is unreachable or is waiting on a credential prompt that \
                  cannot be answered here -- check the remote and your credential helper, then \
-                 retry. Set AGENT_BUS_GIT_TIMEOUT_SECS to allow longer.",
+                 retry. Set {TIMEOUT_VAR} to allow longer.",
                 timeout.as_secs()
             )))
         }
@@ -1153,6 +1195,37 @@ mod outer_tests {
     /// rather than a copy of it re-implemented in the test. The previous
     /// version defined a local closure with the same logic and asserted
     /// against that, which proved nothing about the code that ships.
+    /// The wiring, not only the rule: something must actually read
+    /// [`TIMEOUT_VAR`], and it must be that name.
+    ///
+    /// Mutating `git_timeout` to read a variable that is never set left the
+    /// whole suite green, because every other test either calls
+    /// `parse_timeout_secs` directly or passes `spawn_and_wait` an explicit
+    /// duration. The escape hatch the error message advertises was therefore
+    /// unreachable and nothing noticed.
+    #[test]
+    fn the_deadline_reads_the_documented_environment_variable() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let got = git_timeout_from(|k| {
+            seen.borrow_mut().push(k.to_string());
+            (k == "AGENT_BUS_GIT_TIMEOUT_SECS").then(|| "7".to_string())
+        });
+        assert_eq!(got, std::time::Duration::from_secs(7));
+        assert_eq!(
+            seen.into_inner(),
+            vec!["AGENT_BUS_GIT_TIMEOUT_SECS".to_string()],
+            "the lookup must ask for exactly the documented variable"
+        );
+
+        // Unset falls back to the default.
+        assert_eq!(
+            git_timeout_from(|_| None),
+            std::time::Duration::from_secs(120)
+        );
+        // And the constant the message advertises is the one that is read.
+        assert_eq!(TIMEOUT_VAR, "AGENT_BUS_GIT_TIMEOUT_SECS");
+    }
+
     #[test]
     fn the_deadline_default_is_used_when_the_override_is_unusable() {
         assert_eq!(parse_timeout_secs(None), 120);

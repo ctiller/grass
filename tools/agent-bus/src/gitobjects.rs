@@ -747,17 +747,35 @@ pub struct ResolvedIdentity {
     pub committer_email: String,
 }
 
-/// Strip the characters git refuses to put in an ident.
+/// Normalize a name or email the way git does before writing an ident.
 ///
-/// `git` removes `<`, `>` and newlines from a name or email before writing a
-/// commit; libgit2 rejects only the angle brackets and will happily write a
-/// newline straight into the ident line, producing a commit object no parser
-/// can read back. Removing them here keeps the in-process writer from
-/// creating an object the subprocess half could never have created.
+/// Two separate rules, and getting them confused produces an ident git would
+/// never have written:
+///
+///  - `<`, `>` and newlines are removed from *anywhere*. git does this, and
+///    it is not optional here: libgit2 rejects the angle brackets but would
+///    write an internal newline straight into the ident line, producing a
+///    commit object no parser can read back.
+///  - "crud" -- anything `<= 0x20` plus ``, : ; " \ '`` -- is trimmed from
+///    *each end only*. Both git and libgit2 do this, so libgit2 would apply
+///    it anyway; doing it here as well is what lets a name that is nothing
+///    but crud reduce to empty and reach this crate's own "cannot determine
+///    a commit author name" message instead of libgit2's opaque "Signature
+///    cannot have an empty name or email".
+///
+/// Note what is deliberately *not* stripped: an internal tab or carriage
+/// return. git keeps those, and removing them would make a commit written
+/// here differ from the one `git commit-tree` writes for the same inputs --
+/// breaking the reproducibility AGENT_REVIEW.md section 7 requires of merge
+/// candidates. An earlier version stripped every control character and did
+/// break it.
 fn strip_ident_crud(v: String) -> String {
-    v.chars()
-        .filter(|c| *c != '<' && *c != '>' && !c.is_control())
-        .collect()
+    let without: String = v
+        .chars()
+        .filter(|c| !matches!(c, '<' | '>' | '\n'))
+        .collect();
+    let is_crud = |c: char| (c as u32) <= 0x20 || matches!(c, ',' | ':' | ';' | '"' | '\\' | '\'');
+    without.trim_matches(is_crud).to_string()
 }
 
 /// git's identity precedence, as a pure function of two lookups.
@@ -777,12 +795,14 @@ fn strip_ident_crud(v: String) -> String {
 /// Two deliberate divergences from git, both in the direction of writing a
 /// valid commit rather than refusing or writing a broken one:
 ///
-///  - An environment variable set to the *empty string* is treated as absent
-///    and the next source is consulted. Real git instead dies with "empty
-///    ident name" for an empty name, and writes a commit with an empty
-///    `<>` email for an empty email. Neither is useful to a bus writer.
-///  - Characters git strips from an ident are stripped here too (see
-///    [`strip_ident_crud`]); libgit2 would otherwise let a newline through.
+///  - A source set to the *empty string* -- environment variable or
+///    configuration alike -- is treated as absent and the next is consulted.
+///    Real git instead dies with "empty ident name" for an empty name, and
+///    writes a commit with an empty `<>` email for an empty email. Neither is
+///    useful to a bus writer.
+///  - Names and emails are normalized the way git normalizes them (see
+///    [`strip_ident_crud`]); libgit2 would otherwise let an internal newline
+///    through and corrupt the ident line.
 pub fn resolve_identity(
     env: impl Fn(&str) -> Option<String>,
     config: impl Fn(&str) -> Option<String>,
@@ -790,17 +810,21 @@ pub fn resolve_identity(
     let name = |env_key: &str| -> Option<String> {
         env(env_key)
             .filter(|v| !v.is_empty())
-            .or_else(|| config("user.name"))
-            .filter(|v| !v.is_empty())
+            .or_else(|| config("user.name").filter(|v| !v.is_empty()))
             .map(strip_ident_crud)
             .filter(|v| !v.is_empty())
     };
     let email = |env_key: &str| -> Option<String> {
+        // Every source is filtered for emptiness *before* the next is
+        // considered. Filtering only at the end would let a `user.email` set
+        // to the empty string satisfy `or_else` and shadow `EMAIL`, so the
+        // configured-but-blank case would fail instead of falling through --
+        // the opposite of how an empty environment variable is treated three
+        // lines up, and undocumented either way.
         env(env_key)
             .filter(|v| !v.is_empty())
-            .or_else(|| config("user.email"))
-            .or_else(|| env("EMAIL"))
-            .filter(|v| !v.is_empty())
+            .or_else(|| config("user.email").filter(|v| !v.is_empty()))
+            .or_else(|| env("EMAIL").filter(|v| !v.is_empty()))
             .map(strip_ident_crud)
             .filter(|v| !v.is_empty())
     };
@@ -1067,8 +1091,37 @@ thread_local! {
 /// Firing once, and only once, is what makes it a competing writer rather
 /// than an infinite loop.
 #[cfg(test)]
-pub(crate) fn arm_competing_writer(f: impl FnOnce() + 'static) {
+#[must_use = "hold the guard until the armed writer has had its chance to fire"]
+pub(crate) fn arm_competing_writer(f: impl FnOnce() + 'static) -> ArmedWriter {
     BEFORE_COMPARE_AND_SET.with(|h| *h.borrow_mut() = Some(Box::new(f)));
+    ArmedWriter
+}
+
+/// Guard returned by [`arm_competing_writer`], asserting on drop that the
+/// armed writer actually fired.
+///
+/// Without this an arm that is never reached -- a test whose call returns at
+/// an earlier validation check -- survives in the thread-local and fires
+/// inside some *later* test instead. libtest runs tests on the main thread
+/// under `--test-threads=1`, so that is not hypothetical, and the resulting
+/// failure would appear in an unrelated test with no way to trace it back.
+/// Failing loudly in the test that armed it keeps the blame local.
+#[cfg(test)]
+pub(crate) struct ArmedWriter;
+
+#[cfg(test)]
+impl Drop for ArmedWriter {
+    fn drop(&mut self) {
+        let leaked = BEFORE_COMPARE_AND_SET.with(|h| h.borrow_mut().take().is_some());
+        // Only assert when the test is otherwise passing: a test already
+        // failing has a better story to tell than this one.
+        if leaked && !std::thread::panicking() {
+            panic!(
+                "a competing writer was armed but never fired -- the call under test returned \
+                 before reaching its seam, and the hook would have leaked into a later test"
+            );
+        }
+    }
 }
 
 /// Run whatever [`arm_competing_writer`] armed, if anything.
@@ -1663,10 +1716,77 @@ mod tests {
         assert!(err.contains("name"), "{err}");
     }
 
-    /// git removes `<`, `>` and newlines from an ident before writing a
-    /// commit; libgit2 rejects only the angle brackets and would write a
-    /// newline straight into the ident line, producing a commit object no
-    /// parser can read back.
+    /// Names and emails are normalized the way git normalizes them: `<`, `>`
+    /// and newlines removed anywhere, crud trimmed from each end -- and an
+    /// internal tab or carriage return *kept*, because git keeps them and a
+    /// merge candidate must be byte-reproducible.
+    #[test]
+    fn identity_normalizes_idents_the_way_git_does() {
+        // Internal tab and CR survive: stripping them would make a commit
+        // written here differ from `git commit-tree`'s for the same inputs.
+        let got = resolve_identity(
+            |k| (k == "GIT_AUTHOR_NAME").then(|| "A\tB\rC".to_string()),
+            |k| match k {
+                "user.name" => Some("N".to_string()),
+                "user.email" => Some("e@x".to_string()),
+                _ => None,
+            },
+        )
+        .unwrap();
+        assert_eq!(got.author_name, "A\tB\rC");
+
+        // Crud is trimmed from the ends only.
+        let got = resolve_identity(
+            |k| (k == "GIT_AUTHOR_NAME").then(|| "  ,Craig  Tiller;  ".to_string()),
+            |k| match k {
+                "user.name" => Some("N".to_string()),
+                "user.email" => Some("e@x".to_string()),
+                _ => None,
+            },
+        )
+        .unwrap();
+        assert_eq!(got.author_name, "Craig  Tiller");
+
+        // A name that is nothing but crud reduces to empty, so this crate's
+        // own message is what the operator sees rather than libgit2's
+        // "Signature cannot have an empty name or email".
+        let err = resolve_identity(
+            |_| None,
+            |k| match k {
+                "user.name" => Some("   ".to_string()),
+                "user.email" => Some("e@x".to_string()),
+                _ => None,
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("cannot determine a commit author name"),
+            "{err}"
+        );
+    }
+
+    /// An empty `user.email` in configuration must not shadow `EMAIL`.
+    ///
+    /// git in that configuration writes `author N <>` and succeeds; refusing
+    /// every bus write there would defeat the reason `EMAIL` was consulted at
+    /// all.
+    #[test]
+    fn identity_falls_through_an_empty_configured_email() {
+        let got = resolve_identity(
+            |k| (k == "EMAIL").then(|| "fallback@example.com".to_string()),
+            |k| match k {
+                "user.name" => Some("N".to_string()),
+                "user.email" => Some(String::new()),
+                _ => None,
+            },
+        )
+        .unwrap();
+        assert_eq!(got.author_email, "fallback@example.com");
+    }
+
+    /// The `<`, `>` and newline removals, which are the ones libgit2 would
+    /// otherwise let corrupt the ident line.
     #[test]
     fn identity_strips_the_characters_git_strips() {
         let got = resolve_identity(

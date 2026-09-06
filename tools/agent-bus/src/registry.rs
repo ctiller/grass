@@ -564,7 +564,7 @@ mod tests {
         let root = create_root(repo.path(), &config, members.clone()).unwrap();
 
         let path = repo.path().to_path_buf();
-        crate::gitobjects::arm_competing_writer(move || {
+        let _armed = crate::gitobjects::arm_competing_writer(move || {
             land_competing_writer(&path, REGISTRY_REF);
         });
 
@@ -586,7 +586,7 @@ mod tests {
         members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
 
         let path = repo.path().to_path_buf();
-        crate::gitobjects::arm_competing_writer(move || {
+        let _armed = crate::gitobjects::arm_competing_writer(move || {
             land_competing_writer(&path, REGISTRY_REF);
         });
 
