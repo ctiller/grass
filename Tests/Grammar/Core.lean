@@ -37,4 +37,12 @@ example (byte : Byte) (rest suffix : Std.Logical.ByteArray)
       ((Vec.singleton byte ++ rest) ++ suffix) byte (rest ++ suffix) :=
   derivation.appendSuffix suffix
 
+example (first second : Byte) (suffix : Std.Logical.ByteArray) :
+    Derives (.seq (.byte fun _ => True) (fun _ => .byte fun _ => True))
+      ((Vec.singleton first) ++ (Vec.singleton second ++ suffix))
+      (first, second) suffix := by
+  exact Derives.seqAppend
+    (Derives.byte (fun _ => True) first Vec.empty trivial)
+    (Derives.byte (fun _ => True) second suffix trivial)
+
 end Grass.Tests.Grammar
