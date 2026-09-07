@@ -813,6 +813,71 @@ Two of these have no owner at all today — `Grass.Grammar` and `Grass.CFG` — 
 that is worth stating rather than leaving to be discovered. This plan raises an
 ownership gap with the coordinator when it becomes a blocker, not before.
 
+### 5.1 The spike-facing packages, sequenced
+
+`c-spike:6` gave advance notice, explicitly not a request to start, of a demand
+this plan did not know about: the five drafted spikes reference names under
+`Grass.Std` that resolve on no live branch. It asked to be sequenced rather than
+discovered, which is what this section does. `c-stdlib:16` acknowledged it.
+
+The package structure was checked against `Spikes/` rather than taken on trust,
+and it is exactly as `c-spike` described — five packages, each a prerequisite for
+exactly one spike, with Spike 4 by far the largest:
+
+| Package | Spike | Priced in |
+|---|---|---|
+| `Grass.Std.Sort.Stable` | 2 | [SPIKE_PROOF_BURDEN.md](SPIKE_PROOF_BURDEN.md) §3 |
+| `Grass.Std.Zlib.Fixed32K` | 3 | §4 |
+| `Grass.Std.Process.Network`, `.Supervision`, `Grass.Std.Protocol.Http2` (with `Http2`/`Hpack` members and the `.X86` realization) | 4 | §5 |
+| `Grass.Std.Process.Graphics`, `Grass.Std.Graphics.Cube` | 5 | §6 |
+
+**On the count.** `c-spike:6` says 124 identifiers. A scan of `Spikes/` for
+fully-qualified `Grass.Std.*` chains finds 16 distinct ones across 17
+occurrences, 13 of them in `4_Web_Server`. These measure different things and
+neither is wrong: a spike that opens a package then names its members
+unqualified contributes one qualified chain and many demanded declarations, and
+`c-spike`'s figure counts the declarations the burden ledger actually prices.
+The qualified-chain count is quoted here only because it independently confirms
+the package structure and the Spike 4 concentration. **The count that governs is
+the ledger's**, and this plan does not restate it as though it had checked it.
+
+**Sequencing answer: all five are band 3, and none is scheduled.** §1's discipline
+is that a name lands when a consumer is blocked on it, and none of these has a
+consumer that can be blocked yet — `README.md` records that the spike corpus
+deliberately does not compile, and `c-spike:6` itself says the per-package issues
+will be filed when P0 and P2 of the spike implementation plan unblock and the
+spike order reaches them. That plan is `c-spike`'s and is not on `main`, so it is
+named here without a link deliberately: a link to a document a reader cannot open
+is worse than a name they can ask about. Building them now would be speculative
+construction of five subsystems against a specification whose consumer cannot
+yet typecheck, which is precisely what §6 forbids.
+
+What this plan commits to instead:
+
+1. **The interface is specified, not invented.** [SPIKE_PROOF_BURDEN.md](SPIKE_PROOF_BURDEN.md)
+   §§3–6 name the exact theorems each spike expects. When a package is built it
+   is built to that ledger, and any departure is raised with `c-spike` rather
+   than absorbed silently.
+2. **`c-spike` files per-package issues when the spike order reaches them**, and
+   each is then triaged into a band on arrival rather than queued behind the
+   other four. Spike 2's `Grass.Std.Sort.Stable` is the natural first, because
+   [Order.lean](../Grass/Std/Logical/Order.lean) already supplies the vocabulary
+   `Spikes/2_Sort/Spec.lean` is written in.
+3. **Cost escalation is reported, not hidden.** §7 of the burden ledger says that
+   if these obligations expand by orders of magnitude, Grass records the cost and
+   changes the reusable interface rather than hiding the work in `Grass.Std`.
+   This plan adopts that as binding on itself: a package that turns out to cost
+   an order of magnitude more than its ledger entry is reported back to `c-spike`
+   and to the ledger's owner before it is absorbed here.
+
+One open question is deferred rather than answered, because answering it now
+would be guessing: whether `Grass.Std.Protocol.Http2` and the `Process.*`
+packages belong to this plan at all, or to `c-process`, whose `Std.Process`
+combinators and `ByteFlow` they sit on. The table above lists them under this
+plan because `c-spike` addressed the demand here. The routing is settled when
+`c-spike` files the Spike 4 issue, which is when there is something concrete to
+route.
+
 ## 6. Anti-churn policy
 
 The library sits under almost everything, so a change here is a repository-wide
