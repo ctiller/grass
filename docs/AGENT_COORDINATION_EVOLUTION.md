@@ -161,6 +161,16 @@ product finding by approving its own interpretation, cannot use an audit to
 bypass the ordinary review protocol, and cannot convert absence of a finding
 into assurance that unexamined behavior is correct.
 
+An auditor-opened `issue.opened` must carry an empty `blocks` set. The checked
+writer rejects a nonempty set from an auditor identity. This prevents an audit
+report from becoming a unilateral or indefinite candidate veto that the named
+reviewer cannot dispose. For an urgent or critical finding, the auditor marks and
+routes the evidence urgently to the nominated reviewer and coordinator; the
+reviewer decides whether to publish a merge-blocking finding under the ordinary
+review chain. A coordinator may ensure delivery or reassign an unavailable
+reviewer, but may not manufacture the review judgment. Thus audit can demand
+attention without silently acquiring candidate authority.
+
 An auditor that wants to author a repair hands the issue to an `implementor` or
 uses a separate implementor identity. Primary roles remain immutable; changing
 the provider or model behind an auditor uses the ordinary identity handoff rules
@@ -584,7 +594,8 @@ The successor is not ready for activation until checked fixtures demonstrate:
     product authorship, nomination acceptance, or merge authority;
 21. an auditor is rejected when it attempts to claim product scope, nominate or
     accept a candidate review, authorize or perform a merge, or attach product
-    commit state to its identity;
+    commit state to its identity, and an auditor-opened `issue.opened` with a
+    nonempty `blocks` set is rejected;
 22. an audit report cannot resolve its referenced issues or satisfy any merge
     finding disposition merely by describing them as closed;
 23. a nominated reviewer can consume auditor evidence but must publish its own
