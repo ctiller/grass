@@ -467,14 +467,20 @@ That the before-worlds are unreached is worth saying rather than leaving
 implicit. It is the same distinction §10.88 drew between inhabited and exercised,
 one level down: a step from an unreachable world is a real step, and it is not a
 step of any run.
+
+**§10.132 ran that down, and the four are not one case.** Three are reachable and
+the section after this one reaches them. The fourth is not, and not because
+nobody built the chain: `sentWithDeadSender` holds the *root* listener dead, and
+`NetworkTransition.dying_was_supervised` says no step of any plan puts a root in
+that state. `a_dead_root_is_reached_by_no_step` is that here.
 -/
 
 open Grass.Process.Tests.ChannelStep
   (sentWithDeadSender afterSenderDeath sentWithDeadReceiver afterReceiverDeath
-   the_sender_death the_receiver_death)
+   the_sender_death the_receiver_death deadConnection sentWithDeadReceiver_slot)
 open Grass.Process.Tests.Ending (holding settling waitingOnATick
   an_honest_termination an_honest_interruption)
-open Grass.Process.Tests.Instances (finished)
+open Grass.Process.Tests.Instances (finished counting)
 
 /-- A sender's death is a step. -/
 def theSenderDeathStep : serverPlan.NetworkStep sentWithDeadSender afterSenderDeath where
@@ -503,6 +509,236 @@ def theInterruptionStep (reason : Interrupt) :
       (holding { waitingOnATick with lifecycle := .interrupted Demand.tick reason }) where
   transition := .interrupt Role.connection Ending.slot Demand.tick reason
     (fun _ _ _ => True) (an_honest_interruption reason)
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+
+/-! ### And which of the four before-worlds a step can reach
+
+§10.129 left "reaching those before-worlds by steps is owed" and guessed the job
+was four `processStep`s. Three of the four, near enough; the fourth is a theorem
+in the other direction. §10.132.
+-/
+
+/-- The wire's receiver before it died: the same incarnation, running. -/
+def liveConnection : ProcessInstance serverTopology :=
+  { deadConnection with lifecycle := .running }
+
+/-- The sent world with that receiver alive, which is `sentWithDeadReceiver` one
+step earlier. -/
+noncomputable def sentWithLiveReceiver : ServerWorld :=
+  { sent with
+      instances := fun kind current =>
+        match kind, current with
+        | .listener, _ => none
+        | .connection, n => if n = 7 then some liveConnection else none }
+
+theorem sentWithLiveReceiver_slot :
+    sentWithLiveReceiver.instances .connection wire.receiver.instanceId
+      = some liveConnection := rfl
+
+/--
+**The receiver's death is earned by a step**, so `theReceiverDeathStep`'s
+before-world is one an execution reaches.
+
+`childDied` is the only constructor that writes `.died`, and it carries
+`wasChild` — which `liveConnection` satisfies, being `.attached .listener`. That
+is what separates this case from the sender's below.
+-/
+theorem the_receiver_is_killed :
+    serverPlan.EndsInstance sentWithLiveReceiver sentWithDeadReceiver .connection
+      wire.receiver.instanceId (.died .providerLost) (fun _ _ _ => True) where
+  notRunning := by intro equal; cases equal
+  wasLive := ⟨liveConnection, sentWithLiveReceiver_slot, trivial⟩
+  nowEnded := ⟨deadConnection, sentWithDeadReceiver_slot, rfl, rfl⟩
+  identityPreserved :=
+    ⟨liveConnection, deadConnection, rfl, rfl, sentWithLiveReceiver_slot,
+      sentWithDeadReceiver_slot, rfl, rfl, rfl, rfl⟩
+  endingIsEarned := by
+    refine ⟨liveConnection, rfl, sentWithLiveReceiver_slot, ?_, ?_⟩
+    · intro result isTerminated
+      exact absurd isTerminated (by intro equal; cases equal)
+    · intro demand reason isInterrupted
+      exact absurd isInterrupted (by intro equal; cases equal)
+  custodyDeclared :=
+    ⟨liveConnection, sentWithLiveReceiver_slot, rfl, trivial, fun other _ => by cases other; rfl⟩
+  scope := by
+    intro fragment outside
+    cases fragment with
+    | instanceState kind current =>
+      cases kind with
+      | listener => rfl
+      | connection =>
+        show sentWithLiveReceiver.instances .connection current
+          = sentWithDeadReceiver.instances .connection current
+        simp only [sentWithLiveReceiver, sentWithDeadReceiver]
+        split
+        · rename_i isSeven
+          exact absurd (Or.inl (by rw [isSeven]; rfl)) outside
+        · rfl
+    | _ => rfl
+
+/-- And it really is somebody's child, which is what `childDied` asks and what the
+sender below cannot supply. -/
+theorem the_live_receiver_is_a_child : ∀ incarnation,
+    sentWithLiveReceiver.instances .connection wire.receiver.instanceId = some incarnation →
+    incarnation.parentage.currentParent ≠ none := by
+  intro incarnation found
+  rw [sentWithLiveReceiver_slot] at found
+  injection found with same
+  rw [← same]
+  intro empty
+  cases empty
+
+/-- And it is a step, which is what makes `sentWithDeadReceiver` a world of a run. -/
+def theReceiverIsKilledStep :
+    serverPlan.NetworkStep sentWithLiveReceiver sentWithDeadReceiver where
+  transition := .childDied .connection wire.receiver.instanceId .providerLost
+    (fun _ _ _ => True) the_live_receiver_is_a_child the_receiver_is_killed
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/--
+**And the sender's death is not, at this plan or any other.**
+
+`sentWithDeadSender` holds the wire's sender — `World.rootListener`, whose
+parentage is `.root` — in the `.died` state.
+`NetworkTransition.dying_was_supervised` says a step that leaves an instance dead
+found it with a current parent, and the root has none. So no transition of any
+plan reaches this world from one in which that slot holds a live root, which is
+strictly more than "nobody built the chain": there is no chain.
+
+`theSenderDeathStep` is therefore a step of no run, and §10.89's check is
+satisfied by it while §10.88's exercised-versus-inhabited distinction is not.
+Both halves are true at once and this is where they come apart.
+-/
+theorem a_dead_root_is_reached_by_no_step
+    {before : ServerWorld} {was : ProcessInstance serverTopology}
+    (found : before.instances .listener () = some was) (live : was.Live)
+    (isRoot : was.parentage.currentParent = none)
+    (transition : serverPlan.NetworkTransition before sentWithDeadSender) : False :=
+  transition.dying_was_supervised found live rfl rfl rfl isRoot
+
+/-- And the world the corpus actually has really does hold a live root at that
+slot, so the hypotheses above are not idle. -/
+theorem sent_holds_a_live_root :
+    sent.instances .listener () = some World.rootListener ∧ World.rootListener.Live ∧
+      World.rootListener.parentage.currentParent = none :=
+  ⟨rfl, trivial, rfl⟩
+
+
+/-! #### And the two instance endings
+
+Both before-worlds are `holding` an incarnation of the connection, and both are
+one `processStep` from another such world. Neither step emits, which is what
+makes the after-world `holding` something rather than `holding` something with a
+`beep` on its pending trace — `countdown`'s only emitting event is a settled
+`tick`, and neither of these is one.
+-/
+
+/-- The connection holding a `log` it has not answered. -/
+def countingOnALog : ProcessInstance serverTopology :=
+  { counting with outstanding := Bag.ofList [Demand.log] }
+
+/--
+**Answering the `log` issues the `tick`**, and reaches `waitingOnATick` exactly.
+
+`countdown`'s `log` case is the one that "consumes one occurrence and issues
+another" — `Tests/Process/M1Fixtures.lean` says so — so the outstanding bag ends
+holding a `tick` the instance really issued rather than one a fixture wrote down.
+That is what `an_honest_interruption`'s before-world needed and did not have.
+-/
+theorem the_log_is_answered (answer : countdownVocabulary.Result .log) :
+    serverPlan.StepsLocally (holding countingOnALog) (holding waitingOnATick) .connection slot
+      (.result .log answer) [] (Bag.ofList [Demand.tick]) [] where
+  from' := ⟨countingOnALog, holding_slot countingOnALog, trivial, rfl⟩
+  stillLive := ⟨waitingOnATick, holding_slot waitingOnATick, trivial⟩
+  protocolStep :=
+    ⟨countingOnALog, waitingOnATick, rfl, rfl, holding_slot countingOnALog,
+      holding_slot waitingOnATick, ⟨by decide, rfl, rfl, rfl⟩, ⟨0, rfl, rfl⟩, rfl, rfl, rfl⟩
+  emittedIsProjected := rfl
+  producesPending := rfl
+  writesPermitted := by
+    intro region moved
+    exact absurd rfl moved
+  sharedWritesAdmitted := by
+    intro region moved
+    exact absurd rfl moved
+  scope := by
+    intro fragment outside
+    cases fragment with
+    | instanceState kind current =>
+      cases kind with
+      | listener => rfl
+      | connection =>
+        simp only [LogicalProcessNetworkCore.Agrees, holding]
+        split
+        · rename_i isSlot
+          exact absurd (Or.inl (by rw [isSlot])) outside
+        · rfl
+    | _ => rfl
+
+/-- So `an_honest_interruption`'s before-world is a world of a run. -/
+def theLogStep (answer : countdownVocabulary.Result .log) :
+    serverPlan.NetworkStep (holding countingOnALog) (holding waitingOnATick) where
+  transition := .processStep .connection slot (.result .log answer) []
+    (Bag.ofList [Demand.tick]) [] (the_log_is_answered answer)
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-- The connection one tick from the end, holding that tick. -/
+def oneToGo : ProcessInstance serverTopology :=
+  { counting with localState := ⟨1⟩, outstanding := Bag.ofList [Demand.tick] }
+
+/--
+**And abandoning that last tick reaches `settling`.**
+
+`countdown`'s `.interrupted` case decrements and emits nothing, so this lands on
+state zero — the state `countdown.Terminal` calls finished, which is exactly what
+`an_honest_termination` reads off its before-world.
+
+The event is an interruption *of the run relation* and not a
+`NetworkTransition.interrupt`: the instance handles it and stays running, which
+is why this is a `processStep`. A settled `tick` would reach the same state and
+emit a `beep`, so the after-world would be `holding settling` with a pending
+trace and not `holding settling`; the interruption is the event that reaches this
+world on the nose.
+-/
+theorem the_last_tick_is_abandoned (reason : Interrupt) :
+    serverPlan.StepsLocally (holding oneToGo) (holding settling) .connection slot
+      (.interrupted Demand.tick reason) [] 0 [] where
+  from' := ⟨oneToGo, holding_slot oneToGo, trivial, rfl⟩
+  stillLive := ⟨settling, holding_slot settling, trivial⟩
+  protocolStep :=
+    ⟨oneToGo, settling, rfl, rfl, holding_slot oneToGo, holding_slot settling,
+      ⟨by decide, rfl, rfl, rfl⟩, ⟨0, rfl, rfl⟩, rfl, rfl, rfl⟩
+  emittedIsProjected := rfl
+  producesPending := rfl
+  writesPermitted := by
+    intro region moved
+    exact absurd rfl moved
+  sharedWritesAdmitted := by
+    intro region moved
+    exact absurd rfl moved
+  scope := by
+    intro fragment outside
+    cases fragment with
+    | instanceState kind current =>
+      cases kind with
+      | listener => rfl
+      | connection =>
+        simp only [LogicalProcessNetworkCore.Agrees, holding]
+        split
+        · rename_i isSlot
+          exact absurd (Or.inl (by rw [isSlot])) outside
+        · rfl
+    | _ => rfl
+
+/-- So `an_honest_termination`'s before-world is one too. -/
+def theLastTickStep (reason : Interrupt) :
+    serverPlan.NetworkStep (holding oneToGo) (holding settling) where
+  transition := .processStep .connection slot (.interrupted Demand.tick reason) [] 0 []
+    (the_last_tick_is_abandoned reason)
   admissible := by intro _ nothing; cases nothing
   historyExact := rfl
 

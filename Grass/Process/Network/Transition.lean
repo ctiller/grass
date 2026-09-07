@@ -2190,6 +2190,220 @@ theorem moving_the_ledger_ends_an_instance (transition : plan.NetworkTransition 
   | detach _ _ step => exact absurd (step.onlyThatSlot.scope .obligations (by simp)) moved
 
 /--
+`ProcessLifecycle.live_cast` is why a live instance that a step leaves dead
+cannot have been the same instance.
+
+The off-scope half of `dying_was_supervised`, factored out because every
+constructor whose scope does not name this slot discharges its case with it.
+-/
+private theorem not_dead_where_nothing_moved
+    {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
+    {was now : ProcessInstance plan.topology} {reason : ProcessDeathReason}
+    (agrees : before.instances kind slot = after.instances kind slot)
+    (foundBefore : before.instances kind slot = some was) (live : was.Live)
+    (foundAfter : after.instances kind slot = some now)
+    (sameKind : now.kind = kind)
+    (dead : (sameKind ▸ now.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
+      = .died reason) : False := by
+  rw [foundBefore, foundAfter] at agrees
+  injection agrees with same
+  subst same
+  have transported := (ProcessLifecycle.live_cast sameKind was.lifecycle).mpr live
+  rw [dead] at transported
+  exact transported
+
+/--
+**A live instance that a step leaves dead was somebody's child.**
+
+`docs/PROCESS.md` §3's supervision half, stated over the whole family rather than
+over one constructor: `.died` is written by `childDied` alone, `childDied`
+carries `wasChild`, and so a **root** — an incarnation whose parentage names no
+current parent — is not reachable in the dead state by any step of any plan.
+
+`moving_the_ledger_ends_an_instance` is the sibling and the proof has its shape.
+Where that one splits on a fragment no constructor but an ending names, this one
+splits on `.instanceState kind slot`, which eleven constructors can name — so the
+split is on the transition's own `scope` at that fragment, and the negative
+branch is `touchesOnly` handing back `not_dead_where_nothing_moved`.
+
+**What it costs to state honestly.** A *detached* child's `currentParent` is also
+`none`, so this theorem says an orphan cannot die either, and that is not an
+accident of the proof: `childDied.wasChild` asks for a current parent and
+`Detaches` removes exactly that. Whether an abandoned orphan should be killable
+is a question about §3's detachment, not about this theorem, and
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.132 records it as unruled.
+
+The `sameKind` transport is `EndsInstance.nowEnded`'s and is there for the same
+reason: an incarnation carries its own `kind`, and the slot's is what indexes the
+lifecycle.
+-/
+theorem dying_was_supervised (transition : plan.NetworkTransition before after)
+    {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
+    {was now : ProcessInstance plan.topology} {reason : ProcessDeathReason}
+    (foundBefore : before.instances kind slot = some was) (live : was.Live)
+    (foundAfter : after.instances kind slot = some now)
+    (sameKind : now.kind = kind)
+    (dead : (sameKind ▸ now.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
+      = .died reason) :
+    was.parentage.currentParent ≠ none := by
+  by_cases inScope : transition.scope (.instanceState kind slot)
+  case neg =>
+    exact absurd (transition.touchesOnly (.instanceState kind slot) inScope)
+      (fun agrees =>
+        not_dead_where_nothing_moved agrees foundBefore live foundAfter sameKind dead)
+  case pos =>
+    revert inScope
+    cases transition with
+    | processStep otherKind otherSlot _ _ _ _ step =>
+      intro inScope
+      rcases inScope with sameSlot | ⟨_, isPending⟩ | ⟨_, _, isRegion⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        obtain ⟨later, foundLater, liveLater⟩ := step.stillLive
+        rw [foundAfter] at foundLater
+        injection foundLater with isNow
+        subst isNow
+        have transported := (ProcessLifecycle.live_cast sameKind now.lifecycle).mpr liveLater
+        rw [dead] at transported
+        exact transported.elim
+      · exact absurd isPending (by simp)
+      · exact absurd isRegion (by simp)
+    | spawn otherKind otherSlot _ _ _ step =>
+      intro inScope
+      rcases inScope with sameSlot | isNominals | ⟨_, isPending⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        rw [step.wasEmpty] at foundBefore
+        exact absurd foundBefore (by intro equal; cases equal)
+      · exact absurd isNominals (by simp)
+      · exact absurd isPending (by simp)
+    | restart otherKind otherSlot _ _ _ step =>
+      intro inScope
+      rcases inScope with sameSlot | isNominals | ⟨_, isPending⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        obtain ⟨earlier, foundEarlier, notLive⟩ := step.wasEnded
+        rw [foundBefore] at foundEarlier
+        injection foundEarlier with isWas
+        subst isWas
+        exact absurd live notLive
+      · exact absurd isNominals (by simp)
+      · exact absurd isPending (by simp)
+    | interrupt otherKind otherSlot _ _ _ step =>
+      intro inScope
+      rcases inScope with sameSlot | ⟨_, isObligations⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        obtain ⟨later, foundLater, laterKind, isEnding⟩ := step.nowEnded
+        rw [foundAfter] at foundLater
+        injection foundLater with isNow
+        subst isNow
+        exact absurd (dead.symm.trans isEnding) (by intro equal; cases equal)
+      · exact absurd isObligations (by simp)
+    | fault otherKind otherSlot _ _ step =>
+      intro inScope
+      rcases inScope with sameSlot | ⟨_, isObligations⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        obtain ⟨later, foundLater, laterKind, isEnding⟩ := step.nowEnded
+        rw [foundAfter] at foundLater
+        injection foundLater with isNow
+        subst isNow
+        exact absurd (dead.symm.trans isEnding) (by intro equal; cases equal)
+      · exact absurd isObligations (by simp)
+    | environmentViolation otherKind otherSlot _ _ step =>
+      intro inScope
+      rcases inScope with sameSlot | ⟨_, isObligations⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        obtain ⟨later, foundLater, laterKind, isEnding⟩ := step.nowEnded
+        rw [foundAfter] at foundLater
+        injection foundLater with isNow
+        subst isNow
+        exact absurd (dead.symm.trans isEnding) (by intro equal; cases equal)
+      · exact absurd isObligations (by simp)
+    | childCancelled otherKind otherSlot _ _ _ step =>
+      intro inScope
+      rcases inScope with sameSlot | ⟨_, isObligations⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        obtain ⟨later, foundLater, laterKind, isEnding⟩ := step.nowEnded
+        rw [foundAfter] at foundLater
+        injection foundLater with isNow
+        subst isNow
+        exact absurd (dead.symm.trans isEnding) (by intro equal; cases equal)
+      · exact absurd isObligations (by simp)
+    | processTermination otherKind otherSlot _ _ step =>
+      intro inScope
+      rcases inScope with sameSlot | ⟨_, isObligations⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        obtain ⟨later, foundLater, laterKind, isEnding⟩ := step.nowEnded
+        rw [foundAfter] at foundLater
+        injection foundLater with isNow
+        subst isNow
+        exact absurd (dead.symm.trans isEnding) (by intro equal; cases equal)
+      · exact absurd isObligations (by simp)
+    | childDied otherKind otherSlot _ _ wasChild step =>
+      intro inScope
+      rcases inScope with sameSlot | ⟨_, isObligations⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        exact wasChild was foundBefore
+      · exact absurd isObligations (by simp)
+    | join otherKind otherSlot _ step =>
+      intro sameSlot
+      injection sameSlot with sameKinds sameSlots
+      subst sameKinds
+      cases sameSlots
+      rw [step.nowFree] at foundAfter
+      exact absurd foundAfter (by intro equal; cases equal)
+    | detach otherKind otherSlot step =>
+      intro sameSlot
+      injection sameSlot with sameKinds sameSlots
+      subst sameKinds
+      cases sameSlots
+      obtain ⟨fromInstance, toInstance, fromKind, toKind, foundFrom, foundTo, _,
+        sameLifecycle, _⟩ := step.identityPreserved
+      rw [foundBefore] at foundFrom
+      rw [foundAfter] at foundTo
+      injection foundFrom with isWas
+      injection foundTo with isNow
+      subst isWas
+      subst isNow
+      have isDead : (fromKind ▸ was.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
+          = .died reason := sameLifecycle.symm.trans dead
+      have transported := (ProcessLifecycle.live_cast fromKind was.lifecycle).mpr live
+      rw [isDead] at transported
+      exact transported.elim
+    | send _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
+    | commit _ step => intro inScope; exact absurd inScope.2 (by simp)
+    | receive _ _ _ step =>
+      intro inScope; rcases inScope with isScope | isScope <;> exact absurd isScope (by simp)
+    | requestCancel _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
+    | acknowledgeCancel _ _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
+    | timeout _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
+    | channelClose _ _ _ step =>
+      intro inScope; rcases inScope with isScope | isScope <;> exact absurd isScope (by simp)
+    | senderDeath _ _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
+    | receiverDeath _ _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
+    | channelDeath _ _ _ step =>
+      intro inScope; rcases inScope with isScope | isScope <;> exact absurd isScope (by simp)
+    | drop _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
+    | reroute _ _ _ _ step =>
+      intro inScope; rcases inScope with isScope | isScope <;> exact absurd isScope (by simp)
+    | coalesce _ _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
+
+/--
 The nominals a step allocates.
 
 `docs/PROCESS.md` §3: "definitionally empty for nonallocating transitions". Two

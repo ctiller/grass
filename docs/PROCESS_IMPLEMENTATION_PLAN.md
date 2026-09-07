@@ -4919,6 +4919,10 @@ before-worlds by steps is owed, and is a bigger job: it wants a `processStep`
 that puts an instance in each state, which is `Tests/Process/ProcessStepFixtures.lean`'s
 territory rather than this file's.
 
+**Ran down** in §10.132. Three of the four are reachable and now are; the fourth
+holds a dead *root*, and `NetworkTransition.dying_was_supervised` says no step of
+any plan reaches it. The guess above was right for three cases out of four.
+
 ### 10.130 The fixture that proved the generalisation had content could not be satisfied
 
 §10.127 landed `ProcessPlan.coalescing` and recorded, honestly, that the corpus
@@ -5032,6 +5036,77 @@ one sense: two `Coalesces` into two *different* carriers, the second consuming
 the first's carrier, is a chain and is not forbidden. That is a genuine coalesce
 chain rather than a half-done merge — `EscrowLedger.no_cycle` is what keeps it
 finite — and §3 appears to permit it. Recorded rather than ruled on.
+
+### 10.132 Three of the four were reachable; the fourth cannot be
+
+§10.129 closed §10.89's check and left one thing owed: the two endpoint deaths
+and the two instance endings are steps *from worlds no step reaches*, and
+"reaching those before-worlds by steps is owed, and is a bigger job: it wants a
+`processStep` that puts an instance in each state". That guessed the shape of the
+answer. Three of the four are that; the fourth is a theorem in the other
+direction, and finding out which was which is the entry.
+
+**The three.** `Tests/Process/PreservationFixtures.lean` now has a step into each.
+`sentWithDeadReceiver` is one `childDied` from `sentWithLiveReceiver`.
+`holding waitingOnATick` is one `processStep` from `holding countingOnALog` —
+`countdown`'s `log` case is the one that consumes one occurrence and issues
+another, so the `tick` in the bag afterwards is one the instance issued.
+`holding settling` is one `processStep` from `holding oneToGo`, by an
+*interruption* rather than a settled tick: both reach state zero, but a settled
+tick emits a `beep`, so its after-world is `holding settling` with a pending
+trace and not `holding settling`. Reaching a hand-built world *on the nose* is a
+tighter constraint than reaching one like it, and it is the one that picks the
+event.
+
+**The fourth is unreachable, and the reason is a law.** `sentWithDeadSender`
+holds `World.rootListener` — parentage `.root` — in the `.died` state. `.died` is
+written by exactly one constructor of the 24: `childDied`. And `childDied`
+carries `wasChild`, which asks for a *current* parent. So no step of any plan
+puts a root in that state.
+
+`NetworkTransition.dying_was_supervised` is that, stated over the family:
+a step that leaves a live instance dead found it with a current parent. It is
+`moving_the_ledger_ends_an_instance`'s sibling and shares its shape — but where
+that one splits on a fragment no constructor but an ending names, this splits on
+`.instanceState kind slot`, which eleven constructors can name, so the split is
+on the transition's own `scope` at that fragment and the negative branch is
+`touchesOnly`. The eleven positive branches are eleven different reasons: a
+`processStep` leaves it live, a `spawn` found the slot empty, a `restart` found
+it already ended, a `join` leaves it gone, a `detach` copies the lifecycle
+across, five endings write an ending that is not `.died`, and `childDied` hands
+back its own `wasChild`.
+
+**What this does to §10.88's distinction.** §10.129 said "a step from an
+unreachable world is a real step, and it is not a step of any run", and left it
+implicit that the unreachability was a fact about the corpus. For three of the
+four it was. For the fourth it is a fact about the family, and
+`a_dead_root_is_reached_by_no_step` says so with the theorem rather than by not
+having built the chain. `theSenderDeathStep` satisfies §10.89's check and is a
+step of no run, both at once; this is where the two come apart.
+
+**Two things it opens.**
+
+*An orphan cannot die either.* `ProcessParentage.currentParent` is `none` for
+`.root` **and** for `.detached`, so `dying_was_supervised` says a detached child
+is as unkillable as a root. That is not an artefact of the proof —
+`childDied.wasChild` asks for a current parent and `Detaches` removes exactly
+that — and it may well be wrong: §3 says a detached child's parent "no longer
+holds any authority", which is an argument that nobody may *cancel* it, not that
+nothing may kill it. A process whose supervisor let it go and which then dies of
+its own accord has no constructor. Whether that is intended is §3's question and
+is recorded here unruled.
+
+*A restart can delete the root.* `Restarts.restartsAChild` requires the *new*
+incarnation to have a current parent, and nothing requires the *old* one to have
+had one — so a restart at the root's slot replaces the root with a child, and
+`LogicalProcessNetworkCore.RootUnique` does not notice, being uniqueness and not
+existence: a network with no root passes it. `Spawns.spawnsAChild` was added to
+stop a spawn *installing* a root; nothing stops a restart *removing* one. It does
+not land at `serverPlan` — `serverTopology.maySpawn` permits only
+listener-spawns-connection, so no permitted parent exists for the root's role and
+`ParentageValid` refuses the world — so this is a gap in the family rather than a
+constructible attack in this corpus, and it wants the same kind of ruling §10.104
+got rather than a unilateral field.
 
 ## 11. The authoring facade
 
