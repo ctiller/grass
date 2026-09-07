@@ -9,9 +9,9 @@ and fixes the consequence that matters most for the rest of the repository:
 
 `ByteArray := Vec Byte` is the early public name that rule protects, so `Vec`
 has to exist before the memory, artifact, decoder, and program layers reach for
-a byte container of their own. `Grass/Std/Logical/Byte.lean` records exactly
-that: `Byte` is defined there and `Vec` deliberately is not, because the design
-belongs to this module's owner.
+a byte container of their own. Both `Byte` and `ByteArray` are declared in
+`Grass/Std/Logical/Byte.lean`, which imports this module; `Vec` itself is
+deliberately byte-agnostic and mentions `Byte` nowhere in code.
 
 ## What this type is, and what it is not
 
@@ -201,8 +201,9 @@ The `some` case, both ways.
 The module stated the `none` case as a biconditional and the `some` case only in
 the direction that builds one — so nothing gave `i < v.length` *from* a successful
 read. A cross-agent review found this is the one lemma in `c-mem`'s migration with
-no mechanical replacement, since `Grass/Memory/ByteStore.lean` derives exactly
-that. The asymmetry was real rather than stylistic.
+no mechanical replacement, since the memory layer's byte-store reasoning derives
+exactly that. (That review read a `Grass/Memory/ByteStore.lean` that has never
+existed on `main`; the module is named here without a path for that reason.) The asymmetry was real rather than stylistic.
 -/
 theorem get?_eq_some_iff {v : Vec α} {i : Nat} {a : α} :
     v.get? i = some a ↔ ∃ h : i < v.length, v.get i h = a := by

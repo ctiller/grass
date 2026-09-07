@@ -470,7 +470,7 @@ It stops at the Lean value. An *OS buffer* — a pointer and a length handed to
 `OwnedVec`'s `PinLoan`, and none of that is here.
 
 Two findings from building it, both recorded because they are about the design
-rather than the code. First, the naming collision of §3.9 stopped being
+rather than the code. First, the naming collision of §3.12 stopped being
 hypothetical: `Tests/Std/HostBytes.lean` is the first module in the repository to
 mention both byte arrays at once, and a bare `ByteArray` in it is an ambiguity
 error. It is now the concrete instance of that question rather than an argument
@@ -645,8 +645,10 @@ implemented §1 as written and put the question to the owner of
 [STDLIB.md](STDLIB.md) rather than choosing a different name unilaterally, as
 `c-stdlib:7`.
 
-**Ruled** at `g-design:49`, recorded as [DECISIONS.md](DECISIONS.md) decision 133:
-keep `Grass.Std.Logical.ByteArray := Vec Byte`. Modules that also see the packed
+**Ruled** at `g-design:49`: keep `Grass.Std.Logical.ByteArray := Vec Byte`. The
+event records it as [DECISIONS.md](DECISIONS.md) decision 133, which is **not yet
+on `main`** -- that list stops at 130 here and 133 lands with `g-design`'s branch,
+so the bus event is what a reader can check today. Modules that also see the packed
 host type qualify the Grass one or take a narrow local alias, and the crossing
 between them is by explicitly named adapters carrying connection theorems rather
 than by any coercion. The ambiguity is an intentional representation-boundary
@@ -663,24 +665,41 @@ unblocked is §3.13.
 
 `ByteSeq` was `c-mem`'s deliberately provisional placeholder, written as a single
 `abbrev` so that retiring it would be one edit rather than a rewrite. With the
-naming settled by decision 133 and custody transferred at `c-mem:47`/`c-stdlib:19`,
+naming settled at `g-design:49` and custody transferred at `c-mem:47`/`c-stdlib:19`,
 both of its stated preconditions are met.
 
 The one-edit claim is **half right, and this plan had previously stated it without
 qualification.** Flipping the `abbrev` does retype every field that holds bytes
-with no edit at any use site, exactly as designed. But six proof steps then fail,
-because they apply `List` operations to what is now a `Vec`:
+with no edit -- all four `ByteSeq` field declarations are untouched, and
+`example : ByteSeq = Vec Byte := rfl` elaborates, so the flip lands on the Grass
+`Vec` and not on the host type. But six sites then fail, because they apply `List`
+operations to what is now a `Vec`:
 
-| Site | Operation | `Vec` counterpart |
-|---|---|---|
-| `Grass/Memory/Event.lean` `Committed.readCount` | `List.length` | `Vec.length` |
-| `Grass/Memory/Event.lean` `Committed.writeCount` | `List.length` | `Vec.length` |
-| `Grass/Memory/Event.lean` `observedFits`, `writtenFits` | `List.length_take` ×2 | `Vec.length_take` |
-| `Grass/Op/Step.lean` `Oracle.zeroed` | `List.replicate` ×2 | `Vec.replicate` |
+| Site | Declaration | Operation | `Vec` counterpart |
+|---|---|---|---|
+| `Grass/Memory/Event.lean:348` | `Committed.readCount` body | `List.length` | `Vec.length` |
+| `Grass/Memory/Event.lean:351` | `Committed.writeCount` body | `List.length` | `Vec.length` |
+| `Grass/Memory/Event.lean:390,396` | `Committed.truncate` tactics | `List.length_take` ×2 | `Vec.length_take` |
+| `Grass/Op/Step.lean:127,128` | `Oracle.zeroed` field values | `List.replicate` ×2 | `Vec.replicate` |
 
-Every counterpart already exists, no new name is needed, and with those six
-substitutions the whole build is green at 54 jobs. That was measured by making the
-change, not predicted.
+**They are six *sites*, not six proof steps**, and the distinction matters to
+whoever applies this: only the two in `Committed.truncate` are proof steps. Two
+are definition bodies and two are ordinary data-construction expressions -- so
+"no edit at any use site" is true of *fields* and false of value expressions.
+`Committed.truncate` is named rather than the obligations `observedFits` and
+`writtenFits`, because those two names occur in four declarations across the two
+files and would send a reader to the wrong one.
+
+Expect **thirteen diagnostics at nine locations**, not six. The other seven are
+downstream and need no edit of their own: five `declaration uses 'sorry'`
+cascades, and two `This simp argument is unused` linter messages that
+`warningAsError` promotes to errors. All clear when the six land.
+
+Every counterpart already exists and no new name is needed. With those six
+substitutions the build completes with zero errors, zero warnings and no `sorry`,
+and the other CI gates pass. That was measured by making the change, not
+predicted. Job count is *not* evidence: the build is 54 jobs before and after,
+because the module list does not change.
 
 All six sites are in `Grass/Memory/**` and `Grass/Op/**`, both `c-mem`'s exclusive
 scope, and the change has to be atomic: flipping the `abbrev` without them breaks
@@ -707,7 +726,7 @@ retyping ~83 fields produces ~83 elaboration errors. The migration `Byte.lean`'s
 docstring actually promised is **one line** — `abbrev ByteSeq := Vec Byte` — after
 which no field or parameter changes at all. Whether `ByteSeq` is later retired in
 favour of a qualified name is a separate cosmetic pass, and §3.12 has since been
-settled by decision 133: the name stays.
+settled at `g-design:49`: the name stays.
 
 **The "one line" half of that is now known to be incomplete, and §3.13 supersedes
 it.** No field changes, which is what this paragraph claims and what remains true.
@@ -715,7 +734,10 @@ Six *proof steps* do change, because they apply `List` operations to what has
 become a `Vec`. The two counts in this document measure different trees and are
 both right: the ~22 edits below were measured against `agent/c-mem/memory-*`, and
 §3.13's six were measured against merged `main`, where much of that branch work
-has not landed. Neither figure should be quoted without its tree.
+has not landed. The trees also differ in *scope*, which is the half of the reason
+this reconciliation originally left out: the per-branch breakdown below never
+enumerated `Grass/Op/Step.lean`, and two of §3.13's six sites are there. Neither
+figure should be quoted without its tree.
 
 **Size: one line plus about twenty-two edits, a single sitting.**
 `agent/c-mem/memory-obligation-resource` is one line and zero proofs;
@@ -729,7 +751,13 @@ pattern matches on a byte sequence, zero concatenations, and only four operation
 used — `length`, `take`, `[i]?`, `replicate`. `Byte.lean`'s original instruction,
 "write `ByteSeq`, not `List Byte`", was followed, and it worked.
 
-**What this library owed first, now supplied.** The review found two genuine gaps
+**What this library owed first, now supplied.** (§3.13 narrows the word "gap" to
+a *vocabulary* gap — an operation with no `Vec` spelling at all — and under that
+narrowing `ofFn` is the only one. The two named here are the two the review
+found; `get?_eq_some_iff` was a missing *direction* of a law that existed, not a
+missing spelling. Both statements are true under their own reading, and this note
+exists so a reader meeting them a few hundred lines apart does not have to
+reconcile them unaided.) The review found two genuine gaps
 and both are in: `Vec.ofFn` with `length_ofFn`, `get?_ofFn`, and `ofFn_congr`,
 without which `Grass/Memory/Apply.lean`'s `observedBytes` has no `Vec` spelling
 that a reviewer should accept; and `Vec.get?_eq_some_iff` with
@@ -747,15 +775,18 @@ into mechanical substitution. Note also that this repository has no mathlib, so
 
 ### 4.1 `Byte.lean`
 
-Accept unchanged. `abbrev Byte := BitVec 8` is exactly what §1 specifies.
-Accepting replaces the custody note and folds the `ByteArray` declaration back
-next to `Byte`, where §1 groups them; it currently sits in `Vec.lean` only
-because this agent does not edit a file still under another's custody.
+**Done.** Accepted unchanged at `c-mem:47`/`c-stdlib:19`: `abbrev Byte := BitVec 8`
+is exactly what §1 specifies. Accepting replaced the custody note and folded the
+`ByteArray` declaration back next to `Byte`, where §1 groups them; it had sat in
+`Vec.lean` only because this agent does not edit a file under another's custody.
+Moving it also let `Vec` stop importing `Byte`, so the import now runs
+`Byte -> Vec` and a general container no longer knows what a byte is.
 
-`ByteSeq` does not disappear at acceptance. It is the type the memory layer's
-event and state fields use today, and retiring it means editing
-`Grass/Memory/**`, which is `c-mem`'s exclusive scope. The two names coexist
-until that migration is agreed with `c-mem`; `Vec.lean` records why.
+`ByteSeq` did not disappear at acceptance and has not disappeared since. It is
+the type the memory layer's event and state fields use, and retiring it means
+editing `Grass/Memory/**` and `Grass/Op/**`, both `c-mem`'s exclusive scope. The
+two names coexist until that migration lands; **§3.13 records why, and carries the
+measured six-substitution recipe** offered to `c-mem` at `c-stdlib:20`.
 
 ### 4.2 `Bag.lean`
 
@@ -945,10 +976,14 @@ reader will want a reason for:
    wrapper is worse than no wrapper: it has §3.2's cost without its benefit,
    because a container that cannot be compared or indexed sends its users back to
    the representation. §3.6.
-8. The crossing to Lean's host `ByteArray` is named rather than a `Coe`, so it is
-   visible at the use site, and it lives in the `Vec` namespace with `Bytes` in
-   its name because `ByteArray` is an `abbrev` and dot notation on it resolves in
-   `Vec`. §3.8.
+8. The crossing to Lean's host `ByteArray` is named rather than a `Coe`, and it
+   lives in the `Vec` namespace with `Bytes` in its name because `ByteArray` is an
+   `abbrev` and dot notation on it resolves in `Vec`. The reason recorded here
+   used to be "so it is **visible at the use site**"; that is **withdrawn**, and
+   [HostBytes.lean](../Grass/Std/Logical/HostBytes.lean) says why in its own
+   words: visibility "has not survived contact with either consumer", and scope —
+   that a crossing is a place a reviewer must look — is the reason that stands.
+   The decision is unchanged; only its stated justification was wrong. §3.8.
 9. UTF-8 encoding delegates to Lean's `String.toUTF8` rather than being
    re-implemented, and the `@[extern]` trust boundary that creates is stated
    rather than left implicit. §3.9.
@@ -964,14 +999,16 @@ own docstring, which reads better anyway.
 
 Open, with the owner each is with:
 
-1. **The `ByteArray` name collision**, with the owner of
-   [STDLIB.md](STDLIB.md). §3.12. Twice sharper than when it was first raised.
-   The authored spike sources write bare `ByteArray` in **all five** spikes — an
-   earlier count of four was wrong and the correction strengthens the point — so
+1. ~~**The `ByteArray` name collision**~~ — **closed**, ruled at `g-design:49`;
+   see §3.12. Kept as a numbered entry rather than deleted so that the two
+   sharpenings it collected stay on the record, since both were arguments *for*
+   the cost that the ruling then accepted: the authored spike sources write bare
+   `ByteArray` in **all five** spikes — an earlier count of four was wrong — so
    "keep the name and qualify at the use site" is a change to the author surface
-   and not only to library-internal code. And it is no longer
-   hypothetical: `Tests/Std/HostBytes.lean` is the first module to mention both
-   byte arrays at once, and a bare `ByteArray` in it is an ambiguity error.
+   and not only to library-internal code; and it was already not hypothetical,
+   since `Tests/Std/HostBytes.lean` mentions both byte arrays at once and a bare
+   `ByteArray` in it is an ambiguity error. The ruling is that this cost is paid
+   deliberately, as a representation-boundary guard.
 2. **What the representation should be**, with this branch's reviewer in the
    first instance, and now a four-way question rather than a two-way one. The
    "adopting `Array` would delete the restatement cost" half of how this item
@@ -1062,8 +1099,10 @@ Open, with the owner each is with:
    recorded in a module comment as a placeholder. `Tools/AxiomAudit.lean` cannot
    see them, since an `@[extern]` is not an axiom, so a green audit is not
    evidence about that boundary. Raised with the coordinator. §3.9.
-13. **The `ByteSeq` retirement**, which is an edit to `Grass/Memory/**` and
-   therefore `c-mem`'s to make. §4.1.
+13. **The `ByteSeq` retirement**, which is an edit to `Grass/Memory/**` *and*
+   `Grass/Op/**` — both `c-mem`'s, so still `c-mem`'s to make, but two directories
+   rather than the one this item used to name. §3.13, which carries the measured
+   six-substitution recipe; offered to `c-mem` at `c-stdlib:20`.
 
 Items 1, 2, and 3 were all sharpened or found by reading the spike corpus for
 demands rather than by reasoning about the library in isolation, which is an

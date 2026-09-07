@@ -22,9 +22,12 @@ open Grass.Std.Logical
 Every `ByteArray` below is qualified. This module is the first in the repository
 to mention both byte arrays at once, and it is where `docs/STDLIB.md` §1's name
 collision with Lean's prelude stops being hypothetical: a bare `ByteArray` here
-is an ambiguity error naming both candidates. The naming question is open with
-g-design; this fixture is now its concrete instance rather than an argument
-about one.
+is an ambiguity error naming both candidates. That question was open with
+g-design when this fixture was written and is now **settled**: `g-design:49` ruled
+that the Grass type keeps the name and that consumers qualify, exactly so the
+ambiguity keeps guarding the representation boundary. This fixture was the
+concrete instance the ruling was argued over, and it now pins the ruled
+behaviour.
 -/
 
 def hi : Grass.Std.Logical.ByteArray := Vec.fromList [0x48, 0x69, 0x21]
