@@ -131,6 +131,25 @@ theorem live_cast {registry : ProtocolRegistry.{u, w, v}} {boundary : DriverBoun
     (sameKind ▸ lifecycle : ProcessLifecycle (topology.protocol right)).Live ↔ lifecycle.Live := by
   cases sameKind; exact Iff.rfl
 
+/--
+A running lifecycle carried across an equation of kinds is still not a death.
+
+`live_cast`'s companion, and needed where a start's `rootRunning` has to be
+compared against a death recorded at the slot's own kind —
+`Grass/Process/Network/Initial.lean`'s `start_holds_an_unkilled_root`.
+-/
+theorem running_cast_not_died {registry : ProtocolRegistry.{u, w, v}}
+    {boundary : DriverBoundary.{u}}
+    {topology : ProcessTopologyCore.{u, w, v, r} registry boundary}
+    {left right : topology.ProcessKind} (sameKind : left = right)
+    {lifecycle : ProcessLifecycle (topology.protocol left)} (running : lifecycle = .running)
+    (reason : ProcessDeathReason) :
+    (sameKind ▸ lifecycle : ProcessLifecycle (topology.protocol right)) ≠ .died reason := by
+  cases sameKind
+  rw [running]
+  intro equal
+  cases equal
+
 /-- Exactly one state is live, which makes `Live` a decision and not a hint. -/
 theorem live_iff_running {lifecycle : ProcessLifecycle protocol} :
     lifecycle.Live ↔ lifecycle = .running := by
@@ -264,6 +283,41 @@ ancestor.
 theorem detach_preserves_knownParent (parentage : ProcessParentage topology kind) :
     parentage.detach.knownParent = parentage.knownParent := by
   cases parentage <;> rfl
+
+/-- And an instance with a current parent records a known one — the direction
+`Grass/Process/Network/Transition.lean`'s `Restarts.authorized` is consumed in,
+since that field reads the permitted-parent law off `knownParent`. -/
+theorem knownParent_of_currentParent (parentage : ProcessParentage topology kind)
+    (hasParent : parentage.currentParent ≠ none) :
+    ∃ parentKind parent, parentage.knownParent = some ⟨parentKind, parent⟩ := by
+  cases parentage with
+  | root => exact absurd rfl hasParent
+  | attached parentKind parent => exact ⟨parentKind, parent, rfl⟩
+  | detached _ _ => exact absurd rfl hasParent
+
+/-- A root has no current parent, which is `currentParent`'s first case read
+back through `IsRoot`. -/
+theorem currentParent_of_isRoot (parentage : ProcessParentage topology kind)
+    (isRoot : parentage.IsRoot) : parentage.currentParent = none := by
+  cases parentage with
+  | root => rfl
+  | attached _ _ => exact absurd isRoot (fun claim => claim)
+  | detached _ _ => exact absurd isRoot (fun claim => claim)
+
+/--
+Transporting a parentage across an equation of kinds does not change who its
+current parent is.
+
+`knownParent_cast`'s sibling, needed by
+`Grass/Process/Network/Transition.lean`'s `parentless_slot_survives` for the
+same reason: a step compares two incarnations of one slot and each carries its
+own `kind`.
+-/
+theorem currentParent_cast {left right : topology.ProcessKind} (sameKind : left = right)
+    (parentage : ProcessParentage topology left) :
+    (sameKind ▸ parentage : ProcessParentage topology right).currentParent
+      = parentage.currentParent := by
+  cases sameKind; rfl
 
 /--
 Transporting a parentage across an equation of kinds does not change which

@@ -372,6 +372,76 @@ theorem holds_along_every_execution_from_a_start (mixin : plan.WeaveInvariantMix
   | still => exact atStart request network start
   | more _ step ih => exact mixin.preserved_by_every_step step ih
 
+/--
+A slot holds an instance that never had a supervisor and was never killed.
+
+The invariant `every_run_holds_an_unkilled_root` carries, named because it is two
+claims and losing either one loses the point: parentless *and* not dead. A
+detached child satisfies the first and can fail the second —
+`Tests/Process/PreservationFixtures.lean`'s `a_corpse_may_be_orphaned` — so this
+is deliberately not "parentless".
+-/
+def UnkilledRootAt (network : plan.LogicalProcessNetwork)
+    (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind) : Prop :=
+  ∃ incarnation, network.instances kind slot = some incarnation ∧
+    incarnation.parentage.currentParent = none ∧
+    ∀ (reason : ProcessDeathReason) (sameKind : incarnation.kind = kind),
+      (sameKind ▸ incarnation.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
+        ≠ .died reason
+
+/--
+**Every start has one, in the root's slot.**
+
+`ExactInitialNetwork.rootParentage` says the root is a root and
+`rootRunning` says it is running, which are the two halves `UnkilledRootAt`
+wants. Nothing here is about steps.
+-/
+theorem start_holds_an_unkilled_root {request : (plan.topology.protocol plan.topology.root).Request}
+    {network : plan.LogicalProcessNetwork} (start : plan.ExactInitialNetwork request network) :
+    plan.UnkilledRootAt network plan.topology.root start.rootSlot := by
+  refine ⟨start.root, start.rootPresent,
+    ProcessParentage.currentParent_of_isRoot _ start.rootParentage, ?_⟩
+  intro reason sameKind
+  exact ProcessLifecycle.running_cast_not_died sameKind start.rootRunning reason
+
+/--
+**And every execution keeps one, unless a restart takes it away.**
+
+`NetworkTransition.parentless_slot_is_unkilled` at every step of a run, and the
+disjunct is the same one: `Restarts.restartsAChild` constrains only the new
+incarnation, so a restart at the root's slot is the single way an execution can
+end without a root. A plan at which that restart is unconstructible —
+`ProcessGraph.maySpawn` permitting no parent for the root's role is the ordinary
+reason — therefore holds its root along every run, which is what
+`Tests/Process/PreservationFixtures.lean` discharges at `serverPlan`.
+
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.132 and §10.133. The invariant is
+stated over an execution rather than over one step because a step-local fact
+about the root is not what "no run reaches a dead root" needs, and local
+adversarial review found exactly that gap in the first version of this argument:
+each of three fixture before-worlds had been given *a* step into it while none
+of them was a world of any run.
+-/
+theorem execution_holds_an_unkilled_root
+    {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
+    {network final : plan.LogicalProcessNetwork}
+    (execution : plan.StepsTo network final)
+    (held : plan.UnkilledRootAt network kind slot)
+    (noRestart : ∀ (before after : plan.LogicalProcessNetwork)
+      (allocation : Allocation plan.topology.Carrier)
+      (emitted : Trace boundary.Observation)
+      (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation),
+      plan.Restarts before after kind slot allocation emitted localEmitted → False) :
+    plan.UnkilledRootAt final kind slot := by
+  induction execution with
+  | still => exact held
+  | more _ step carried =>
+    obtain ⟨was, found, parentless, unkilled⟩ := carried
+    rcases step.transition.parentless_slot_is_unkilled found parentless unkilled with
+      kept | ⟨allocation, emitted, localEmitted, restart⟩
+    · exact kept
+    · exact absurd restart (noRestart _ _ allocation emitted localEmitted)
+
 /-- And a whole family of them, which is what §8's aggregate consumes. -/
 theorem family_holds_along_every_execution_from_a_start
     (family : plan.WeaveInvariantFamily)

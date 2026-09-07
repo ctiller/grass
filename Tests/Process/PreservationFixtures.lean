@@ -468,11 +468,18 @@ implicit. It is the same distinction §10.88 drew between inhabited and exercise
 one level down: a step from an unreachable world is a real step, and it is not a
 step of any run.
 
-**§10.132 ran that down, and the four are not one case.** Three are reachable and
-the section after this one reaches them. The fourth is not, and not because
-nobody built the chain: `sentWithDeadSender` holds the *root* listener dead, and
-`NetworkTransition.dying_was_supervised` says no step of any plan puts a root in
-that state. `a_dead_root_is_reached_by_no_step` is that here.
+**§10.132 ran that down and got the answer wrong the first time.** The first
+version of this section gave three of the four a step into their before-world
+and said they were therefore reachable. A fresh reviewer refuted it: each new
+predecessor world has an *empty root slot*, so none of them is a world of a run
+either, and the gap had moved back exactly one step rather than closing.
+
+What closes it is an invariant over executions rather than steps.
+`ProcessPlan.execution_holds_an_unkilled_root` says every world of every run
+holds, in the root's slot, an instance with no current parent that has not died —
+unless a `restart` at that slot took it away, which
+`no_restart_at_the_root_slot` shows is unconstructible here. So none of the seven
+worlds below is a world of any run, and each of them says so by name. §10.133.
 -/
 
 open Grass.Process.Tests.ChannelStep
@@ -598,34 +605,170 @@ def theReceiverIsKilledStep :
   admissible := by intro _ nothing; cases nothing
   historyExact := rfl
 
-/--
-**And the sender's death is not, at this plan or any other.**
+/-! #### And none of these worlds is a world of a run
 
-`sentWithDeadSender` holds the wire's sender — `World.rootListener`, whose
-parentage is `.root` — in the `.died` state.
-`NetworkTransition.dying_was_supervised` says a step that leaves an instance dead
-found it with a current parent, and the root has none. So no transition of any
-plan reaches this world from one in which that slot holds a live root, which is
-strictly more than "nobody built the chain": there is no chain.
-
-`theSenderDeathStep` is therefore a step of no run, and §10.89's check is
-satisfied by it while §10.88's exercised-versus-inhabited distinction is not.
-Both halves are true at once and this is where they come apart.
+The correction §10.133 records. A step into a world says the transition is one an
+execution can *contain*; it does not say the execution reaches the world, and the
+first version of this section conflated the two.
 -/
-theorem a_dead_root_is_reached_by_no_step
-    {before : ServerWorld} {was : ProcessInstance serverTopology}
-    (found : before.instances .listener () = some was) (live : was.Live)
-    (isRoot : was.parentage.currentParent = none)
-    (transition : serverPlan.NetworkTransition before sentWithDeadSender) : False :=
-  transition.dying_was_supervised found live rfl rfl rfl isRoot
 
-/-- And the world the corpus actually has really does hold a live root at that
-slot, so the hypotheses above are not idle. -/
-theorem sent_holds_a_live_root :
-    sent.instances .listener () = some World.rootListener ∧ World.rootListener.Live ∧
-      World.rootListener.parentage.currentParent = none :=
-  ⟨rfl, trivial, rfl⟩
+/--
+**No restart can happen at the listener's slot**, which is what discharges
+`execution_holds_an_unkilled_root`'s one escape at this plan.
 
+`Restarts.restartsAChild` requires the new incarnation to have a current parent
+and `Restarts.authorized` requires that parent to be one
+`ProcessGraph.maySpawn` permits. `serverTopology.maySpawn` is
+`fun parent child => parent = .listener ∧ child = .connection`, so no parent may
+spawn a listener and the two fields cannot both hold. §10.133's second half — the
+gap where a restart deletes the root — is real at the family and unreachable
+here, and this is the proof of the second clause rather than an assumption of it.
+-/
+theorem no_restart_at_the_root_slot {before after : ServerWorld}
+    {allocation : Allocation serverTopology.Carrier}
+    {emitted : Trace fixtureBoundary.Observation}
+    {localEmitted : ObservationSegment (serverTopology.protocol .listener).Observation}
+    (step : serverPlan.Restarts before after .listener () allocation emitted localEmitted) :
+    False := by
+  obtain ⟨incarnation, found, _, _⟩ := step.nowLive
+  obtain ⟨isKind, _⟩ := step.slotAgrees incarnation found
+  have hasParent := step.restartsAChild incarnation found
+  obtain ⟨parentKind, parent, known⟩ :=
+    ProcessParentage.knownParent_of_currentParent incarnation.parentage hasParent
+  have permitted := step.authorized incarnation found parentKind parent known
+  rw [isKind] at permitted
+  exact absurd permitted.2 (by intro equal; cases equal)
+
+/--
+**So every run of `serverPlan` ends holding an unkilled root.**
+
+`ProcessPlan.execution_holds_an_unkilled_root` with its restart escape closed.
+This is the theorem the seven refusals below are read off, and it is what
+§10.129 was actually asking for: not a step into each before-world, but a reason
+no execution is ever in one.
+-/
+theorem every_run_holds_an_unkilled_root
+    {request : (serverTopology.protocol serverTopology.root).Request}
+    {start final : ServerWorld} (isStart : serverPlan.ExactInitialNetwork request start)
+    (execution : serverPlan.StepsTo start final) :
+    serverPlan.UnkilledRootAt final .listener () :=
+  serverPlan.execution_holds_an_unkilled_root execution
+    (ProcessPlan.start_holds_an_unkilled_root isStart)
+    (fun _ _ _ _ _ restart => no_restart_at_the_root_slot restart)
+
+/--
+**And `sentWithDeadSender` is not one**, which is the fourth of §10.129's four.
+
+It holds `World.rootListener` — parentage `.root`, so no current parent — in the
+`.died` state, and `UnkilledRootAt`'s second conjunct is exactly what that
+fails. `theSenderDeathStep` is a real step and it is a step of no run. That is
+§10.88's inhabited-versus-exercised distinction, and unlike the first version of
+this section it is now proved rather than asserted.
+-/
+theorem sentWithDeadSender_is_no_world_of_a_run :
+    ¬ serverPlan.UnkilledRootAt sentWithDeadSender .listener () := by
+  rintro ⟨root, found, _, unkilled⟩
+  injection found with same
+  subst same
+  exact unkilled .supervised rfl rfl
+
+/-- **And neither is the world the receiver's death is reached from**, nor the
+one it reaches: both have an empty root slot, `sent` notwithstanding. -/
+theorem sentWithLiveReceiver_is_no_world_of_a_run :
+    ¬ serverPlan.UnkilledRootAt sentWithLiveReceiver .listener () := by
+  rintro ⟨_, found, _⟩
+  exact absurd found (by intro equal; cases equal)
+
+theorem sentWithDeadReceiver_is_no_world_of_a_run :
+    ¬ serverPlan.UnkilledRootAt sentWithDeadReceiver .listener () := by
+  rintro ⟨_, found, _⟩
+  exact absurd found (by intro equal; cases equal)
+
+/-- **Nor any `holding` world**, which covers the two instance endings and the
+two worlds their steps start from. `Ending.holding` maps the listener to `none`
+by construction. -/
+theorem holding_is_no_world_of_a_run (incarnation : ProcessInstance serverTopology) :
+    ¬ serverPlan.UnkilledRootAt (holding incarnation) .listener () := by
+  rintro ⟨_, found, _⟩
+  exact absurd found (by intro equal; cases equal)
+
+/-- And the world the corpus does reach really does hold an unkilled root, so
+the invariant above is not vacuous. -/
+theorem sent_holds_an_unkilled_root : serverPlan.UnkilledRootAt sent .listener () :=
+  ⟨World.rootListener, rfl, rfl, fun _ _ dead => by cases dead⟩
+
+
+
+/-! #### And a dead instance with no parent, which a detach reaches
+
+The refutation §10.133 records. `NetworkTransition.dying_was_supervised` says a
+step that *kills* an instance found it with a current parent, and it is easy to
+read that as "a dead instance has a current parent". That reading is false, and
+the counterexample is one step from the world above: `Detaches` has no liveness
+requirement — `wasAttached` asks only for a current parent — and
+`identityPreserved` *pins* the lifecycle across the step. So a dead child
+detaches into a dead orphan, and nothing was killed in the process.
+
+The gap this is a witness for is not in `dying_was_supervised`. It is the
+question of whether a supervisor should be able to let go of a corpse at all,
+which `agent-bus` `c-process:91` asks `g-design` and which is why this fixture
+exists rather than a new field on `Detaches`.
+-/
+
+/-- The wire's receiver: dead, and then let go. -/
+def orphanedDeadConnection : ProcessInstance serverTopology :=
+  { deadConnection with parentage := .detached .listener Instances.listenerZero }
+
+theorem orphanedDeadConnection_is_dead :
+    orphanedDeadConnection.lifecycle = .died .providerLost := rfl
+
+/-- **And it has no current parent** — exactly the state `dying_was_supervised`
+refuses a *killing* step to produce. -/
+theorem orphanedDeadConnection_has_no_parent :
+    orphanedDeadConnection.parentage.currentParent = none := rfl
+
+noncomputable def deadOrphanWorld : ServerWorld :=
+  { sent with
+      instances := fun kind current =>
+        match kind, current with
+        | .listener, _ => none
+        | .connection, n => if n = 7 then some orphanedDeadConnection else none }
+
+theorem deadOrphanWorld_slot :
+    deadOrphanWorld.instances .connection wire.receiver.instanceId
+      = some orphanedDeadConnection := rfl
+
+/-- **A detach of a corpse is a legal `Detaches`.** -/
+theorem a_corpse_may_be_orphaned :
+    serverPlan.Detaches sentWithDeadReceiver deadOrphanWorld .connection
+      wire.receiver.instanceId where
+  wasAttached := ⟨deadConnection, sentWithDeadReceiver_slot, by intro empty; cases empty⟩
+  identityPreserved :=
+    ⟨deadConnection, orphanedDeadConnection, rfl, rfl, sentWithDeadReceiver_slot,
+      deadOrphanWorld_slot, rfl, rfl, rfl, rfl, rfl, rfl⟩
+  onlyThatSlot :=
+    { scope := by
+        intro fragment outside
+        cases fragment with
+        | instanceState kind current =>
+          cases kind with
+          | listener => rfl
+          | connection =>
+            show sentWithDeadReceiver.instances .connection current
+              = deadOrphanWorld.instances .connection current
+            simp only [sentWithDeadReceiver, deadOrphanWorld]
+            split
+            · rename_i isSeven
+              exact absurd (by rw [isSeven]; rfl) outside
+            · rfl
+        | _ => rfl }
+
+/-- And it is a step, so the dead orphan is two steps from a world holding a
+live attached child — `theReceiverIsKilledStep`, then this. -/
+def theOrphaningStep : serverPlan.NetworkStep sentWithDeadReceiver deadOrphanWorld where
+  transition := .detach .connection wire.receiver.instanceId a_corpse_may_be_orphaned
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
 
 /-! #### And the two instance endings
 

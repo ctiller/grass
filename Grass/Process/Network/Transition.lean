@@ -2200,7 +2200,10 @@ private theorem not_dead_where_nothing_moved
     {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
     {was now : ProcessInstance plan.topology} {reason : ProcessDeathReason}
     (agrees : before.instances kind slot = after.instances kind slot)
-    (foundBefore : before.instances kind slot = some was) (live : was.Live)
+    (foundBefore : before.instances kind slot = some was)
+    (notAlreadyDead : ∀ (earlier : ProcessDeathReason) (wasKind : was.kind = kind),
+      (wasKind ▸ was.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
+        ≠ .died earlier)
     (foundAfter : after.instances kind slot = some now)
     (sameKind : now.kind = kind)
     (dead : (sameKind ▸ now.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
@@ -2208,17 +2211,14 @@ private theorem not_dead_where_nothing_moved
   rw [foundBefore, foundAfter] at agrees
   injection agrees with same
   subst same
-  have transported := (ProcessLifecycle.live_cast sameKind was.lifecycle).mpr live
-  rw [dead] at transported
-  exact transported
+  exact notAlreadyDead reason sameKind dead
 
 /--
-**A live instance that a step leaves dead was somebody's child.**
+**A step that leaves an instance dead found it recording a current parent.**
 
 `docs/PROCESS.md` §3's supervision half, stated over the whole family rather than
-over one constructor: `.died` is written by `childDied` alone, `childDied`
-carries `wasChild`, and so a **root** — an incarnation whose parentage names no
-current parent — is not reachable in the dead state by any step of any plan.
+over one constructor: `.died` is written by `childDied` alone and `childDied`
+carries `wasChild`, so no constructor kills something that records no supervisor.
 
 `moving_the_ledger_ends_an_instance` is the sibling and the proof has its shape.
 Where that one splits on a fragment no constructor but an ending names, this one
@@ -2226,21 +2226,44 @@ splits on `.instanceState kind slot`, which eleven constructors can name — so 
 split is on the transition's own `scope` at that fragment, and the negative
 branch is `touchesOnly` handing back `not_dead_where_nothing_moved`.
 
-**What it costs to state honestly.** A *detached* child's `currentParent` is also
-`none`, so this theorem says an orphan cannot die either, and that is not an
-accident of the proof: `childDied.wasChild` asks for a current parent and
-`Detaches` removes exactly that. Whether an abandoned orphan should be killable
-is a question about §3's detachment, not about this theorem, and
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.132 records it as unruled.
+**Three things this does not say, each of which an earlier version of this
+docstring did.** They were found by a fresh adversarial reviewer who built a
+machine-checked witness for the first two, and they are recorded here rather than
+in the ledger alone because the wrong reading is the natural one.
+
+*It is not "a dead instance has a current parent".* `Detaches` has no liveness
+requirement and copies the lifecycle across, so a dead child detaches into a dead
+instance with no current parent —
+`Tests/Process/PreservationFixtures.lean`'s `a_corpse_may_be_orphaned`. Nothing
+was killed by that step, so this theorem is untouched; the *state* is reachable
+all the same. Whether a supervisor may let go of a corpse is `agent-bus`
+`c-process:91`'s question for `g-design`.
+
+*It is not "no run reaches a dead root".* This is one step. Getting from here to
+a claim about executions needs an induction from `ExactInitialNetwork`, and that
+is `ProcessPlan.execution_holds_an_unkilled_root`, which also has to close the
+`restart` escape `parentless_slot_survives` exposes.
+
+*And `wasChild` says "records a current parent", not "has one".* The named parent
+need not be present in the network at all — `PreservationFixtures`'
+`the_live_receiver_is_a_child` discharges it in a world holding no listener
+whatsoever. `LogicalProcessNetworkCore.ParentageValid` is what checks the
+recorded parent against the topology; this field checks only that one is
+recorded.
 
 The `sameKind` transport is `EndsInstance.nowEnded`'s and is there for the same
 reason: an incarnation carries its own `kind`, and the slot's is what indexes the
-lifecycle.
+lifecycle. The `notAlreadyDead` hypothesis replaced a `Live` one: `Live` was
+stronger than the proof needed and excluded the terminated-then-killed case by
+assumption rather than by argument.
 -/
 theorem dying_was_supervised (transition : plan.NetworkTransition before after)
     {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
     {was now : ProcessInstance plan.topology} {reason : ProcessDeathReason}
-    (foundBefore : before.instances kind slot = some was) (live : was.Live)
+    (foundBefore : before.instances kind slot = some was)
+    (notAlreadyDead : ∀ (earlier : ProcessDeathReason) (wasKind : was.kind = kind),
+      (wasKind ▸ was.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
+        ≠ .died earlier)
     (foundAfter : after.instances kind slot = some now)
     (sameKind : now.kind = kind)
     (dead : (sameKind ▸ now.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
@@ -2250,7 +2273,7 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
   case neg =>
     exact absurd (transition.touchesOnly (.instanceState kind slot) inScope)
       (fun agrees =>
-        not_dead_where_nothing_moved agrees foundBefore live foundAfter sameKind dead)
+        not_dead_where_nothing_moved agrees foundBefore notAlreadyDead foundAfter sameKind dead)
   case pos =>
     revert inScope
     cases transition with
@@ -2285,11 +2308,13 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
       · injection sameSlot with sameKinds sameSlots
         subst sameKinds
         cases sameSlots
-        obtain ⟨earlier, foundEarlier, notLive⟩ := step.wasEnded
-        rw [foundBefore] at foundEarlier
-        injection foundEarlier with isWas
-        subst isWas
-        exact absurd live notLive
+        obtain ⟨later, foundLater, liveLater, _⟩ := step.nowLive
+        rw [foundAfter] at foundLater
+        injection foundLater with isNow
+        subst isNow
+        have transported := (ProcessLifecycle.live_cast sameKind now.lifecycle).mpr liveLater
+        rw [dead] at transported
+        exact transported.elim
       · exact absurd isNominals (by simp)
       · exact absurd isPending (by simp)
     | interrupt otherKind otherSlot _ _ _ step =>
@@ -2380,11 +2405,8 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
       injection foundTo with isNow
       subst isWas
       subst isNow
-      have isDead : (fromKind ▸ was.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
-          = .died reason := sameLifecycle.symm.trans dead
-      have transported := (ProcessLifecycle.live_cast fromKind was.lifecycle).mpr live
-      rw [isDead] at transported
-      exact transported.elim
+      exact absurd (sameLifecycle.symm.trans dead : _ = ProcessLifecycle.died reason)
+        (notAlreadyDead reason fromKind)
     | send _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
     | commit _ step => intro inScope; exact absurd inScope.2 (by simp)
     | receive _ _ _ step =>
@@ -2402,6 +2424,256 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
     | reroute _ _ _ _ step =>
       intro inScope; rcases inScope with isScope | isScope <;> exact absurd isScope (by simp)
     | coalesce _ _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
+
+/--
+Parentlessness carried across a step's identity clause is still parentlessness.
+
+The `▸` bookkeeping `parentless_slot_survives` does eleven times, factored out
+because the eleven differ only in which structure supplied the clause.
+-/
+private theorem parentless_transported {kind : plan.topology.ProcessKind}
+    {from' to : ProcessInstance plan.topology}
+    (fromKind : from'.kind = kind) (toKind : to.kind = kind)
+    (same : (toKind ▸ to.parentage : ProcessParentage plan.topology kind)
+      = fromKind ▸ from'.parentage)
+    (parentless : from'.parentage.currentParent = none) :
+    to.parentage.currentParent = none := by
+  have bridge := congrArg ProcessParentage.currentParent same
+  rw [ProcessParentage.currentParent_cast toKind to.parentage,
+    ProcessParentage.currentParent_cast fromKind from'.parentage] at bridge
+  rw [bridge]
+  exact parentless
+
+/--
+**A slot holding an instance with no current parent still holds one after any
+step but a restart.**
+
+`docs/PROCESS.md` §3's root, as a fact about every step rather than about the
+start. A run begins at an `ExactInitialNetwork` whose root has `.root`
+parentage, and this is what carries that forward: nine constructors pin the
+parentage across the slot, `spawn` found the slot empty, and `join` and `detach`
+both ask for a current parent that a parentless instance does not have.
+
+**`restart` is the exception and it is the whole content of the disjunction.**
+`Restarts.restartsAChild` constrains only the *new* incarnation, requiring it to
+have a current parent, and nothing constrains the old one — so a restart at a
+parentless slot replaces a root with a child and the network afterwards has one
+fewer root. `LogicalProcessNetworkCore.RootUnique` does not notice, being
+uniqueness rather than existence.
+
+That is `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.133's open question, and
+stating the theorem this way is what turns it from a suspicion into a fact:
+restart is not *a* way to lose the root, it is the *only* way. A plan whose root
+role no permitted parent can spawn therefore holds its root along every
+execution, which is `Tests/Process/PreservationFixtures.lean`'s
+`every_run_holds_the_root`.
+-/
+theorem parentless_slot_survives (transition : plan.NetworkTransition before after)
+    {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
+    {was : ProcessInstance plan.topology}
+    (found : before.instances kind slot = some was)
+    (parentless : was.parentage.currentParent = none) :
+    (∃ now, after.instances kind slot = some now ∧
+        now.parentage.currentParent = none) ∨
+      ∃ allocation emitted localEmitted,
+        plan.Restarts before after kind slot allocation emitted localEmitted := by
+  by_cases inScope : transition.scope (.instanceState kind slot)
+  case neg =>
+    refine Or.inl ⟨was, ?_, parentless⟩
+    have agrees : before.instances kind slot = after.instances kind slot :=
+      transition.touchesOnly (.instanceState kind slot) inScope
+    rw [← agrees]
+    exact found
+  case pos =>
+    revert inScope
+    cases transition with
+    | processStep otherKind otherSlot _ _ _ _ step =>
+      intro inScope
+      rcases inScope with sameSlot | ⟨_, isPending⟩ | ⟨_, _, isRegion⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        obtain ⟨fromInstance, toInstance, fromKind, toKind, foundFrom, foundTo,
+          _, _, _, sameParentage, _⟩ := step.protocolStep
+        refine Or.inl ⟨toInstance, foundTo, ?_⟩
+        have same : was = fromInstance := Option.some.inj (found ▸ foundFrom)
+        subst same
+        exact parentless_transported fromKind toKind sameParentage parentless
+      · exact absurd isPending (by simp)
+      · exact absurd isRegion (by simp)
+    | spawn otherKind otherSlot _ _ _ step =>
+      intro inScope
+      rcases inScope with sameSlot | isNominals | ⟨_, isPending⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        rw [step.wasEmpty] at found
+        exact absurd found (by intro equal; cases equal)
+      · exact absurd isNominals (by simp)
+      · exact absurd isPending (by simp)
+    | restart otherKind otherSlot allocation emitted localEmitted step =>
+      intro inScope
+      rcases inScope with sameSlot | isNominals | ⟨_, isPending⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        exact Or.inr ⟨allocation, emitted, localEmitted, step⟩
+      · exact absurd isNominals (by simp)
+      · exact absurd isPending (by simp)
+    | interrupt otherKind otherSlot _ _ _ step =>
+      intro inScope
+      rcases inScope with sameSlot | ⟨_, isObligations⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        obtain ⟨fromInstance, toInstance, fromKind, toKind, foundFrom, foundTo,
+          _, sameParentage, _⟩ := step.identityPreserved
+        refine Or.inl ⟨toInstance, foundTo, ?_⟩
+        have same : was = fromInstance := Option.some.inj (found ▸ foundFrom)
+        subst same
+        exact parentless_transported fromKind toKind sameParentage parentless
+      · exact absurd isObligations (by simp)
+    | fault otherKind otherSlot _ _ step =>
+      intro inScope
+      rcases inScope with sameSlot | ⟨_, isObligations⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        obtain ⟨fromInstance, toInstance, fromKind, toKind, foundFrom, foundTo,
+          _, sameParentage, _⟩ := step.identityPreserved
+        refine Or.inl ⟨toInstance, foundTo, ?_⟩
+        have same : was = fromInstance := Option.some.inj (found ▸ foundFrom)
+        subst same
+        exact parentless_transported fromKind toKind sameParentage parentless
+      · exact absurd isObligations (by simp)
+    | environmentViolation otherKind otherSlot _ _ step =>
+      intro inScope
+      rcases inScope with sameSlot | ⟨_, isObligations⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        obtain ⟨fromInstance, toInstance, fromKind, toKind, foundFrom, foundTo,
+          _, sameParentage, _⟩ := step.identityPreserved
+        refine Or.inl ⟨toInstance, foundTo, ?_⟩
+        have same : was = fromInstance := Option.some.inj (found ▸ foundFrom)
+        subst same
+        exact parentless_transported fromKind toKind sameParentage parentless
+      · exact absurd isObligations (by simp)
+    | childCancelled otherKind otherSlot _ _ _ step =>
+      intro inScope
+      rcases inScope with sameSlot | ⟨_, isObligations⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        obtain ⟨fromInstance, toInstance, fromKind, toKind, foundFrom, foundTo,
+          _, sameParentage, _⟩ := step.identityPreserved
+        refine Or.inl ⟨toInstance, foundTo, ?_⟩
+        have same : was = fromInstance := Option.some.inj (found ▸ foundFrom)
+        subst same
+        exact parentless_transported fromKind toKind sameParentage parentless
+      · exact absurd isObligations (by simp)
+    | childDied otherKind otherSlot _ _ _ step =>
+      intro inScope
+      rcases inScope with sameSlot | ⟨_, isObligations⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        obtain ⟨fromInstance, toInstance, fromKind, toKind, foundFrom, foundTo,
+          _, sameParentage, _⟩ := step.identityPreserved
+        refine Or.inl ⟨toInstance, foundTo, ?_⟩
+        have same : was = fromInstance := Option.some.inj (found ▸ foundFrom)
+        subst same
+        exact parentless_transported fromKind toKind sameParentage parentless
+      · exact absurd isObligations (by simp)
+    | processTermination otherKind otherSlot _ _ step =>
+      intro inScope
+      rcases inScope with sameSlot | ⟨_, isObligations⟩
+      · injection sameSlot with sameKinds sameSlots
+        subst sameKinds
+        cases sameSlots
+        obtain ⟨fromInstance, toInstance, fromKind, toKind, foundFrom, foundTo,
+          _, sameParentage, _⟩ := step.identityPreserved
+        refine Or.inl ⟨toInstance, foundTo, ?_⟩
+        have same : was = fromInstance := Option.some.inj (found ▸ foundFrom)
+        subst same
+        exact parentless_transported fromKind toKind sameParentage parentless
+      · exact absurd isObligations (by simp)
+    | join otherKind otherSlot _ step =>
+      intro sameSlot
+      injection sameSlot with sameKinds sameSlots
+      subst sameKinds
+      cases sameSlots
+      exact absurd parentless (step.wasChild was found)
+    | detach otherKind otherSlot step =>
+      intro sameSlot
+      injection sameSlot with sameKinds sameSlots
+      subst sameKinds
+      cases sameSlots
+      obtain ⟨earlier, foundEarlier, hadAuthority⟩ := step.wasAttached
+      have same : was = earlier := Option.some.inj (found ▸ foundEarlier)
+      subst same
+      exact absurd parentless hadAuthority
+    | send _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
+    | commit _ step => intro inScope; exact absurd inScope.2 (by simp)
+    | receive _ _ _ step =>
+      intro inScope; rcases inScope with isScope | isScope <;> exact absurd isScope (by simp)
+    | requestCancel _ _ _ step =>
+      intro inScope; exact absurd inScope (by intro equal; cases equal)
+    | acknowledgeCancel _ _ _ _ step =>
+      intro inScope; exact absurd inScope (by intro equal; cases equal)
+    | timeout _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
+    | channelClose _ _ _ step =>
+      intro inScope; rcases inScope with isScope | isScope <;> exact absurd isScope (by simp)
+    | senderDeath _ _ _ _ step =>
+      intro inScope; exact absurd inScope (by intro equal; cases equal)
+    | receiverDeath _ _ _ _ step =>
+      intro inScope; exact absurd inScope (by intro equal; cases equal)
+    | channelDeath _ _ _ step =>
+      intro inScope; rcases inScope with isScope | isScope <;> exact absurd isScope (by simp)
+    | drop _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
+    | reroute _ _ _ _ step =>
+      intro inScope; rcases inScope with isScope | isScope <;> exact absurd isScope (by simp)
+    | coalesce _ _ _ _ step =>
+      intro inScope; exact absurd inScope (by intro equal; cases equal)
+
+/--
+**And what it still holds has not been killed.**
+
+`parentless_slot_survives` with `dying_was_supervised` spent on the result: the
+instance the slot holds afterwards is parentless, so if it were dead this step
+would have killed a parentless instance, which `dying_was_supervised` refuses.
+
+This is the invariant the earlier docstring on `dying_was_supervised` claimed and
+did not have. Local adversarial review found the gap by building a *dead orphan*
+— `Detaches` has no liveness requirement and copies the lifecycle across, so a
+dead child detaches into a dead parentless one — which means "a dead instance has
+a current parent" is false of the network as a whole while "a parentless
+instance was never killed" is true of every step. The difference is that a
+detach does not kill anything; it relabels something already dead.
+`Tests/Process/PreservationFixtures.lean`'s `a_corpse_may_be_orphaned` is that
+witness, kept because the distinction is easy to lose.
+-/
+theorem parentless_slot_is_unkilled (transition : plan.NetworkTransition before after)
+    {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
+    {was : ProcessInstance plan.topology}
+    (found : before.instances kind slot = some was)
+    (parentless : was.parentage.currentParent = none)
+    (unkilled : ∀ (earlier : ProcessDeathReason) (wasKind : was.kind = kind),
+      (wasKind ▸ was.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
+        ≠ .died earlier) :
+    (∃ now, after.instances kind slot = some now ∧
+        now.parentage.currentParent = none ∧
+        ∀ (reason : ProcessDeathReason) (nowKind : now.kind = kind),
+          (nowKind ▸ now.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
+            ≠ .died reason) ∨
+      ∃ allocation emitted localEmitted,
+        plan.Restarts before after kind slot allocation emitted localEmitted := by
+  rcases transition.parentless_slot_survives found parentless with
+    ⟨now, foundNow, stillParentless⟩ | restarted
+  · refine Or.inl ⟨now, foundNow, stillParentless, ?_⟩
+    intro reason nowKind dead
+    exact transition.dying_was_supervised found unkilled foundNow nowKind dead parentless
+  · exact Or.inr restarted
 
 /--
 The nominals a step allocates.

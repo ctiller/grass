@@ -5039,6 +5039,11 @@ finite — and §3 appears to permit it. Recorded rather than ruled on.
 
 ### 10.132 Three of the four were reachable; the fourth cannot be
 
+**Superseded by §10.133, which refutes this entry's headline and one of its two
+open questions.** Left standing rather than edited, because what it got wrong is
+the point of the next entry: it is the third consecutive entry in which the
+fixture, not the prose, was right.
+
 §10.129 closed §10.89's check and left one thing owed: the two endpoint deaths
 and the two instance endings are steps *from worlds no step reaches*, and
 "reaching those before-worlds by steps is owed, and is a bigger job: it wants a
@@ -5096,6 +5101,11 @@ nothing may kill it. A process whose supervisor let it go and which then dies of
 its own accord has no constructor. Whether that is intended is §3's question and
 is recorded here unruled.
 
+> **False, and refuted in §10.133.** A dead orphan is one `detach` away from a
+> dead child, because `Detaches` has no liveness requirement. The real question
+> is whether a supervisor may let go of a corpse, which is `agent-bus`
+> `c-process:91`.
+
 *A restart can delete the root.* `Restarts.restartsAChild` requires the *new*
 incarnation to have a current parent, and nothing requires the *old* one to have
 had one — so a restart at the root's slot replaces the root with a child, and
@@ -5107,6 +5117,80 @@ listener-spawns-connection, so no permitted parent exists for the root's role an
 `ParentageValid` refuses the world — so this is a gap in the family rather than a
 constructible attack in this corpus, and it wants the same kind of ruling §10.104
 got rather than a unilateral field.
+
+### 10.133 A step into a world is not a run that reaches it
+
+§10.132 is refuted in its headline and in one of its two open questions, by a
+fresh no-context adversarial reviewer who built machine-checked witnesses for
+both rather than arguing. Three entries in a row now — §10.130, §10.131, and this
+— where what was wrong was the prose and what caught it was a fixture. The
+pattern is worth naming: each time, the sentence that failed was the one
+generalising from what had just been built to what it meant.
+
+**The headline was wrong.** §10.132 said "three of the four are reachable and now
+are", on the strength of having built a step into each of three before-worlds.
+Every one of those three *predecessor* worlds has an empty root slot.
+`Ending.holding` maps the listener to `none` by construction, and
+`sentWithLiveReceiver` — which I wrote — is `sent` with the root deleted by hand,
+while `sent_holds_a_live_root` in the same commit proved `sent` has one. So none
+of the six worlds is a world of a run, and the gap had moved back exactly one
+step rather than closing. §10.129 had said precisely this failure out loud — "a
+step from an unreachable world is a real step, and it is not a step of any run" —
+and the entry that quoted it committed it.
+
+**What closes it is an invariant over executions.**
+`ProcessPlan.UnkilledRootAt` says a slot holds an instance with no current parent
+that has not died; `start_holds_an_unkilled_root` gets it from
+`ExactInitialNetwork.rootParentage` and `rootRunning`; and
+`execution_holds_an_unkilled_root` carries it across a whole `StepsTo`. The seven
+worlds are then refused by name rather than by not having a chain built to them,
+`sentWithDeadSender` included — it holds a parentless instance, and fails the
+*other* conjunct.
+
+**And the carrying step is where §10.132's second open question became a
+theorem.** `NetworkTransition.parentless_slot_survives` concludes a disjunction:
+either the slot still holds a parentless instance, or the step was a
+`restart` *at that slot*. So restart is not one way to lose the root, it is the
+only way — which is a considerably stronger statement than §10.132's suspicion,
+and it is what makes `no_restart_at_the_root_slot` sufficient at `serverPlan`.
+Stating the exception as a disjunct rather than as a hypothesis is what turned it
+from a caveat into content.
+
+**The orphan question was wrong too, and the corrected one is sharper.** §10.132
+said a detached child is "as unkillable as a root". The reviewer built the
+counterexample: `Detaches` has *no liveness requirement* — `wasAttached` asks
+only for a current parent — and `identityPreserved` pins the lifecycle across the
+step, so a `.died .attached` child detaches into a `.died .detached` one.
+`Tests/Process/PreservationFixtures.lean`'s `a_corpse_may_be_orphaned` is that
+step, two steps from a world holding a live child.
+
+`dying_was_supervised` is untouched by this: a detach kills nothing. What the
+witness kills is the *reading* — "a dead instance has a current parent" is false
+of the network even though "a step that kills found a current parent" is true of
+every step. That distinction is the whole of the finding, and the docstring now
+carries it. The live question for §3 is whether a supervisor may let go of a
+corpse at all: `Joins` collects a *terminated* child and nothing collects a
+*died* one, so detach may be the intended disposal route, in which case only the
+prose was wrong. `agent-bus` `c-process:91` asks it, correcting `c-process:80`,
+which had asked the wrong question on the record.
+
+**Two smaller corrections from the same review.** "There is no chain" into
+`sentWithDeadSender` was literally false — a `join` at a *connection* slot
+reaches it from a world already holding the dead root, since its scope never
+names the listener. And `childDied.wasChild` says the instance *records* a
+current parent, not that the parent exists: the same commit's
+`the_live_receiver_is_a_child` discharges it in a world holding no listener at
+all. `ParentageValid` is what checks a recorded parent against the topology; the
+field checks only that one is recorded.
+
+**What the theorem's hypothesis cost.** `dying_was_supervised` originally assumed
+the before-instance was `Live`. That excluded by assumption the case where a
+terminated instance is later killed, which is exactly the kind of hypothesis this
+ledger keeps finding does the work a proof should. It now assumes only that the
+instance was not *already* dead, every branch still goes through — `restart` now
+closes on `nowLive` rather than `wasEnded`, and `detach` carries the death
+backwards rather than liveness forwards — and the weaker form is what
+`parentless_slot_is_unkilled` needs.
 
 ## 11. The authoring facade
 
