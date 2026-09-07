@@ -350,6 +350,12 @@ ordinary structural elaboration must succeed before duplicate or unattached
 containment sites are checked on the exact normalized AST. The result retains
 both certificates and exposes graph and located-instruction invariance under
 metadata erasure; failures retain their structural or containment stage.
+`Grass.Construct.Link.Raw` is the format-neutral producer seam consumed by
+Artifact. It owns section-relative logical bytes and zero fill, requested class/
+permissions, definitions, parameterized relocations and external identities,
+entry candidates, and exact source-map ranges, with executable structural
+validation. `.gobj`, COFF, PE, final placement, and relocation/import policy stay
+Artifact-owned; the ISA/ABI backend supplies the exact source/encoding relation.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
