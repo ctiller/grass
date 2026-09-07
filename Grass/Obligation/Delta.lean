@@ -96,7 +96,7 @@ This is the framing predicate the M5 ledger law uses to justify not mentioning a
 obligation. It must therefore mean *untouched*, and an earlier version did not:
 it checked only `consumes` and `produces`, so it held for the very obligation a
 transfer had just re-owned. Any frame rule of the form
-`PreservesIdentity id → ledger[id] unchanged` would have been false at exactly
+`PreservesIdentity`, read as "the ledger row is unchanged", is false at exactly
 the transfers `docs/OBLIGATIONS.md` §1 cares most about.
 -/
 def PreservesIdentity (delta : LedgerDelta) (id : ObligationId) : Prop :=
@@ -240,8 +240,8 @@ owning protocol theorem".
 
 That half is now split between the type and this predicate. Every delta carries a
 `ProtocolAuthority claimed` — indexed by the protocol, so authority for one cannot
-be presented for another — and the clauses below check that `claimed` is the
-protocol the live obligation actually has. An earlier version compared
+be presented for another — and the clauses below check that the protocol
+`ProtocolAuthority` is indexed by is the one the live obligation actually has. An earlier version compared
 `ObligationProtocolId` values only, which is comparing strings any caller could
 write down, and carried no authority at all.
 -/
