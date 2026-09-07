@@ -616,9 +616,18 @@ S1 is complete when all of the following hold. All four hold on this branch in
 isolation. **Merged onto current `main`, two of them fail** — criteria 1 and 2,
 because `Grass/Build/Cache/Key.lean` needs the one-line import change §3.14
 describes, and both `lake build` and `Tools/AxiomAudit.lean` reach that module.
-Criteria 3 and 4 still hold on the broken tree: `Tools/CoverageAudit.lean` imports
-only `Vec` and `Order`, and every `Tests/Std` fixture builds. An earlier version of
-this paragraph said all four fail, which was asserted rather than checked.
+**Three of the four fail**: 1, 2 and 3, because `Tools/DeclNames.lean` — which
+`Tools/DocstringAudit.py` reads — imports `Grass.Build.Cache.Key` just as
+`Tools/AxiomAudit.lean` does. Only criterion 4 holds, and it genuinely does: all
+eight `Tests/Std` fixtures build on the broken tree.
+
+This sentence has now been wrong twice in opposite directions. It first said all
+four fail, asserted rather than checked. The correction said two fail and justified
+it with `Tools/CoverageAudit.lean`, which is not one of the criteria at all — the
+finding being answered had said "all four *audits*", and the rewrite swapped
+"audits" for "criteria" without re-mapping which was which. `CoverageAudit` does
+pass on the broken tree, since it imports only `Vec` and `Order`; that fact is true
+and was attached to the wrong claim.
 
 "Today" is also the wrong word for a criterion in a repository whose `main` moves
 hourly. These were last checked against `origin/main` at the merge recorded in the
@@ -708,8 +717,12 @@ are definition bodies and two are ordinary data-construction expressions -- so
 "no edit at any use site" is true of *fields* and false of value expressions.
 `Committed.truncate` is named rather than the obligations `observedFits` and
 `writtenFits`, because those two names occur in four declarations across the two
-files and would send a reader to the wrong one — those two names appear on twelve
-lines of `Event.lean` alone, across seven declarations.
+files and would send a reader to the wrong one: they appear on twelve lines of
+`Event.lean` across six declarations — `Committed`, `readCount_le`, `writeCount_le`,
+`inert`, `truncate` and `ofOutcome` — plus two lines of `Op/Step.lean` inside
+`Oracle.zeroed`. An earlier version said "four declarations across the two files"
+and a later one appended "across seven declarations" without removing the four,
+leaving a sentence that contradicted itself.
 
 Expect **thirteen diagnostics across eleven lines**, not six, and all of them in
 `Event.lean`: `Op/Step.lean` imports it, so its two errors cannot appear in the
@@ -745,7 +758,9 @@ an explicit uncons. There are `++` operators on 46 lines across the ISA and ABI 
 modules besides — 68 occurrences, since the count that matters for a migration is
 occurrences and the line count understates it.
 
-**The scope attribution was wrong too.** Of the `ByteSeq` mentions on `main`,
+**The scope attribution was wrong too.** Counting *lines* that mention `ByteSeq`
+on `main` — the same basis as the `++` figures above, and `Decode.lean` has 26
+occurrences on its 20 lines —
 `Grass/Memory/Event.lean` holds 4 and the rest are `c-x86`'s: `Decode.lean` 20,
 `Bytes.lean` 10, `UnwindBytes.lean` 8, and 6 across three `Tests/ISA/X86`
 fixtures. So the change spans `c-mem`, `c-x86`, and — for `ByteArray` rather than
@@ -790,13 +805,18 @@ divide cleanly, which they say they did not expect before counting.
 - `Grass/ABI/Win64/UnwindBytes.lean` is **also an emitter**, which corrects
   `c-x86:32` and this plan's first reading of it. All eight of its `ByteSeq`
   occurrences are `def … : ByteSeq` return types; it never consumes one. Its cons
-  patterns — five, not the seven reported — are over `List (BitVec n)`,
-  `List RuntimeFunction` and `List PlacedOp`, which a `ByteSeq` flip does not
-  touch, and the `CountOfCodes` induction is over `List PlacedOp`. By `c-x86`'s
+  patterns — five, not the seven reported, at lines 83, 103, 782, 818 and 868 — are
+  over `List (BitVec n)` and `List RuntimeFunction`, neither of which a `ByteSeq`
+  flip touches, and the `CountOfCodes` induction in `length_flatten_toBytes` is
+  over `List PlacedOp`. (An earlier version of this sentence put `List PlacedOp`
+  among the five and then listed that induction separately, which double-counted
+  it; `c-stdlib:37` carries the same error and is corrected at `c-stdlib:38`.) By `c-x86`'s
   own criterion, "builds byte sequences and never takes them apart", it belongs on
   the cheap side. Reported back at `c-stdlib:37`.
 - `Grass/ISA/X86/Decode.lean` (three cons patterns) is **the only file that does
-  not port**. `takeByte` recurses structurally on `cons`, and `takeLe64` matches eight
+  not port**. `takeByte` destructures `cons` in a two-arm match — `c-x86:32` calls this
+  structural recursion and it is not recursive, though the shape argument is
+  unaffected — and `takeLe64` matches eight
   elements in a single pattern to read a little-endian immediate. Over an indexed
   container that becomes index arithmetic with a bounds obligation at every step
   and a termination argument that is no longer free. About forty uses of
