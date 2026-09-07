@@ -8797,6 +8797,96 @@ mod tests {
         );
     }
 
+    /// Two coordinators reconciling the same authorization must converge.
+    ///
+    /// The sibling test races a `review.merged` against a
+    /// `review.merge_reconciled`, and those land in two *different*
+    /// containers, each receiving exactly one entry -- the one pairing where
+    /// arrival order cannot show through. This races two events into the
+    /// *same* container, which is what actually exercises the ordering, and
+    /// what caught `reconciled` still being a `Vec` after concurrent
+    /// receipts started being recorded rather than refused.
+    ///
+    /// `require_bootstrap_coordinator` admits any active member bound as
+    /// `Coordinator`, so two of them is a real configuration, not a
+    /// contrivance.
+    #[test]
+    fn two_coordinators_reconciling_the_same_authorization_converge() {
+        let build = |second_first: bool| {
+            let mut state = empty_state(&[
+                ("alice", Role::Implementor),
+                ("bob", Role::Reviewer),
+                ("coord1", Role::Coordinator),
+                ("coord2", Role::Coordinator),
+            ]);
+            let (alice, bob) = (a("alice"), a("bob"));
+            let (coord1, coord2) = (a("coord1"), a("coord2"));
+            apply_ok(&mut state, &register(&alice, Role::Implementor));
+            apply_ok(&mut state, &register(&bob, Role::Reviewer));
+            apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+            apply_ok(&mut state, &register(&coord2, Role::Coordinator));
+            let epoch = state.roster_epoch.as_ref().unwrap().clone();
+            let (nominate_env, _accept) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+            let authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
+            let authorize_env = Envelope::new(
+                &bob,
+                2,
+                complete_frontier(&epoch),
+                &EventData::ReviewMergeAuthorized(authorize.clone()),
+                [],
+            );
+            apply_ok(&mut state, &authorize_env);
+
+            let reconciled_by = |who: &Agent| {
+                Envelope::new(
+                    who,
+                    1,
+                    frontier_seeing(&[&authorize_env.id]),
+                    &EventData::ReviewMergeReconciled(ReviewMergeReconciled {
+                        authorization: authorize_env.id.clone(),
+                        previous_main: authorize.previous_main.clone(),
+                        main_commit: authorize.candidate.clone(),
+                        product_branch: authorize.product_branch.clone(),
+                        reviewed_commit: authorize.reviewed_commit.clone(),
+                        reason: text("r"),
+                        user_authority: text("operator"),
+                    }),
+                    [],
+                )
+            };
+            let first = reconciled_by(&coord1);
+            let second = reconciled_by(&coord2);
+
+            let order: Vec<&Envelope> = if second_first {
+                vec![&second, &first]
+            } else {
+                vec![&first, &second]
+            };
+            for env in order {
+                apply_event(&mut state, env).unwrap_or_else(|e| {
+                    panic!(
+                        "reducing {} must not fail (second_first={second_first}): {e}",
+                        env.id
+                    )
+                });
+                state.kind_of_event_insert(env.id.clone(), &env.kind);
+                state.events.insert(env.id.clone(), env.clone());
+                if let Some(ag) = state.agents.get_mut(&env.agent) {
+                    ag.next_seq = env.seq + 1;
+                }
+            }
+            state
+        };
+
+        let coord1_first = build(false);
+        let coord2_first = build(true);
+        assert_eq!(
+            format!("{:#?}", coord1_first.reviews),
+            format!("{:#?}", coord2_first.reviews),
+            "GATE 15/16: both receipts are recorded, and in an order-independent container"
+        );
+    }
+
     /// A reviewer's own `review.merged` racing a coordinator's
     /// `review.merge_reconciled` for the same authorization must not make the
     /// bus unreducible.
