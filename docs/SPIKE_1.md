@@ -1267,7 +1267,7 @@ normalized cross-view equality and block classifications.
 ```lean
 import Grass.Emit
 import Grass.Assembly.X86
-import Grass.Platform.Win10.X64
+import Grass.Platform.Win32
 import Spikes.«1_Hello_World».Spec
 
 namespace Grass.Spikes.HelloWorld
