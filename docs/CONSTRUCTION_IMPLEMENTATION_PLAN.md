@@ -324,6 +324,11 @@ violation class and finite affine return envelope and must attach to one literal
 CFG edge or the exact final instruction origin of its block. Duplicate and
 unattached sites are rejected, while erasure theorems prove the projected CFG,
 located instruction expansion, and instruction count unchanged.
+`Grass.Construct.Source.Label` supplies the hygienic macro-local label API:
+opaque tokens come from a monotone fresh supply and remain distinct even when
+their diagnostic hints match. An injective `LabelAlphaModel` resolves local
+tokens into stable manifest `BlockId`s while preserving literal stable labels;
+sequential mints are proved distinct both before and after normalization.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
