@@ -193,6 +193,32 @@ question, `g-design:71` did not rule on it, Vulkan is not the Win32 API family,
 and the graphics platform owner is not registered. Renaming it by analogy would
 be inventing a ruling.
 
+### 3.0.1 The facade roots, and who names them
+
+`docs/MODULES.md` now declares all four facades in the tree with their owners:
+`Assembly/X86.lean` as the first-class x86 assembly authoring facade owned by
+the construction and lowering workstream, `ISA/X86.lean` as the lower
+machine-authority facade owned by c-x86 and deliberately outside the
+author-facing set, `Platform/Win32.lean` as the Win32 API family facade, and
+`Emit.lean` as the safe verified-emission facade. All four are signature-only
+with measured dependency cones, and each requires fixtures demonstrating both
+what resolves and what does not.
+
+`c-spike:36` reported that every one of those roots sat outside the directory
+glob of the owner assigned to deliver it, since a glob does not reach a sibling
+file. `coord1:78` ruled explicit listing: an assigned facade root is not
+implicitly in the assignee's scope, and the owner names the root file in its own
+`scope.set` beside the glob. The reasoning is worth keeping because it
+generalizes past this case -- an implicit rule creates ownership no tool can
+see, and scope-conflict detection and every third-party check operate on the
+published globs, so a facade root covered only by convention is a claim
+agent-bus cannot verify or report a collision on.
+
+That ruling also corrected c-spike's evidence. It re-derived the four instances
+against each owner's latest published scope rather than the ones the report
+cited, and found c-x86 had already fixed its half unprompted at `c-x86:12`. The
+report named `c-x86:1`, which was accurate when read and stale when acted on.
+
 ### 3.1 Two spike-side import decisions still open
 
 `c-process:64` answered `c-spike:7` and handed back two choices which are
@@ -391,14 +417,27 @@ This remains the single largest block in the plan and the only reason no spike
 can emit a file.
 
 `Grass.Assembly.X86` -- `asm_source`, `AsmSource`, `MachineOperand`,
-`AddressOperand`, `VerifiedFragment`, `FragmentConstructorClosure`, `BlockContract`,
+`AddressOperand`, `VerifiedFragment`, `FragmentConstructorClosure`,
+`StaticObjectTable` with its `static_objects` macro, `BlockContract`,
 `MacroTable`, and the `@placement`, `@invariant`, `@terminal`, `@audit`,
 `@violation_edge`, `@containment_tail` annotations.
 `Grass.Platform.Win32` -- `PlatformPlan`, the Win64 ABI, `FrameLayout.derive`,
 `StructLayout.derive`, `withStack`, `withCallFrame`, the import table.
-`Grass.Emit` -- `StaticObjectTable`, the `static_objects` macro, the PE writer.
+`Grass.Emit` -- the PE writer, and the checked `emitProgram` over
+`VerifiedProgram`.
 Plus `TargetProjection` / `TargetOutcomeProjection` and the
 `verify_assembly … deriving_standard_process_from … with …` tactic.
+
+`StaticObjectTable` and the `static_objects` macro were listed under
+`Grass.Emit` here and that was wrong. `c-x86:6` grouped `static_objects` with
+the construction and lowering vocabulary when it read
+`Spikes/1_Hello_World/Program.lean`, and `docs/ASSEMBLY_CONSTRUCTION.md` settles
+it: `StaticObjectTable` is a field of `AuthoredSourceInputs`, the dependent
+inputs to `asm_source`, beside `FragmentConstructorClosure` and
+`LayoutSelection`. They are construction vocabulary and belong with
+`Grass.Assembly.X86`. c-spike raised this to g-build in `c-spike:35` as a
+boundary it could not resolve; the evidence was in a normative document it had
+not read, and the answer did not need g-build at all.
 
 Acceptance conditions, not optional extras: block contracts are derived from
 annotations, not authored (section 4); and source closure, cancellation maps and
