@@ -66,8 +66,8 @@ CLAIM_WORDS = (
 # not making a mechanised claim, and the rule explicitly permits it.
 HEDGES = (
     "intended", "not enforced", "cannot be made", "owes", "owed",
-    "open obligation", "used to", "an earlier", "M2", "M3", "M4", "M5",
-    "M6", "M7", "M8", "M9", "M10", "no arrangement", "is not the check",
+    "open obligation", "used to", "an earlier",
+    "no arrangement", "is not the check",
     "not by itself", "on its own", "nothing here", "cannot tell", "is not that",
     "not something", "no way to", "unrepresentable",
     # "X cannot do Y" is a statement of limitation, which is the honest
@@ -97,6 +97,18 @@ HEDGES = (
 # means. The reviewer read them as review scratch and this file briefly agreed;
 # both were wrong, and removing them would have suppressed a legitimate
 # exemption in `Grass/Memory/Event.lean`.
+# Milestone references in `docs/MEMORY_IMPLEMENTATION_PLAN.md` are hedges: a
+# sentence pointing at M4 is describing work that is planned, not enforced.
+# Case-sensitive and on the original text, because as lowercase members of
+# HEDGES any bare `m4` token exempted a whole sentence.
+MILESTONE = re.compile(r"\bM(?:[2-9]|10)\b")
+
+# Sorts are not enforcement. They were seeded into the declaration list so that
+# a sentence naming only `Prop` would not be reported as naming nothing that
+# exists; that made `Prop` satisfy the claim instead, which a reviewer used.
+# Dropped from consideration entirely, like a module path.
+SORTS = {"Prop", "Type", "Sort"}
+
 HEDGE_RE = re.compile(
     "|".join(
         r"\b" + re.escape(h.lower()).replace(r"\ ", " ") + r"\b"
@@ -303,25 +315,109 @@ def doc_blocks(source: str):
         yield line, match.group(1)
 
 
+# Where a claim word sits matters, and two exemptions used to ignore that.
+#
+# A reviewer planted this in a real facade docstring and the audit passed it:
+#
+#   "The console ensures a caller never observes a short write, which an
+#    earlier draft of the module could not do."
+#
+# `an earlier` is a hedge, and it is in the subordinate clause. The main clause
+# is an unhedged, false, load-bearing claim. Hedging is a property of the clause
+# making the claim, not of the sentence containing it, so the hedge test now
+# runs on the clause the claim word is in.
+# Subordinators only. An earlier version also split on ", and" / ", but",
+# which separated *coordinate* clauses that share the sentence's hedging and
+# produced two false positives on the real corpus: "a docstring URL cannot be
+# counted, cannot be checked for a missing anchor, and cannot be inverted..."
+# and "No private field prevents that, and no arrangement of this type could".
+# Both are statements of limitation, which is exactly the honest alternative
+# the rule asks for. A coordinate clause continues the assertion; a subordinate
+# clause comments on it, and only the latter can carry a hedge that does not
+# apply to the main claim.
+CLAUSE_SPLIT = re.compile(
+    r",\s+(?:which|because|although|though|while|since)\s+"
+    r"|;\s+|\s+--\s+")
+
+
+def claim_clauses(sentence: str) -> list[str]:
+    """The clauses of `sentence` that actually assert something."""
+    clauses = CLAUSE_SPLIT.split(sentence)
+    lowered = [clause.lower() for clause in clauses]
+    return [clause for clause, low in zip(clauses, lowered)
+            if any(word in low for word in CLAIM_WORDS)]
+
+
+QUOTED = re.compile(r'"[^"]*"')
+
+
+def quotes_the_claim(sentence: str) -> bool:
+    """Whether every claim word in `sentence` falls inside a quotation.
+
+    The exemption exists because a passage quoted from a normative document is
+    that document's claim, not this module's. It used to fire on any sentence
+    containing both a `docs/` token and a `"` anywhere, which a reviewer used to
+    pass an unhedged false claim with a stray quoted word in it. Now the quoted
+    span has to contain the claim.
+    """
+    if "docs/" not in sentence:
+        return False
+    spans = [match.span() for match in QUOTED.finditer(sentence)]
+    if not spans:
+        return False
+    lowered = sentence.lower()
+    for word in CLAIM_WORDS:
+        start = lowered.find(word)
+        while start != -1:
+            if not any(a < start and start + len(word) <= b for a, b in spans):
+                return False
+            start = lowered.find(word, start + 1)
+    return True
+
+
+def is_checked_claim(sentence: str) -> bool:
+    """Whether this sentence is a claim the rule applies to.
+
+    Every exemption lives here, so that `Tools/DocstringAuditSelfTest.py` can
+    ask what the gate actually does with a sentence rather than reimplementing
+    the filters and drifting from them. That matters for one purpose only:
+    telling a case that was *accepted* from a case that was never *examined*.
+    A test case that stops reaching the check proves nothing, and this is how
+    it gets caught saying so.
+    """
+    lowered = sentence.lower()
+    if not any(word in lowered for word in CLAIM_WORDS):
+        return False
+    # Hedged per clause, not per sentence: a hedge in a subordinate clause
+    # used to exempt an unhedged main clause, which a reviewer walked a false
+    # claim through.
+    unhedged = [clause for clause in claim_clauses(sentence)
+                if not HEDGE_RE.search(clause.lower())]
+    if not unhedged:
+        return False
+    # A passage quoted from a normative document is that document's claim, not
+    # this module's -- but only if the quotation is what makes the claim.
+    if quotes_the_claim(sentence):
+        return False
+    # Milestone references are hedges in their own case only.
+    if MILESTONE.search(sentence):
+        return False
+    return True
+
+
 def check(path: Path, known: set[str], specs: dict[str, str],
           modules: set[str], cited: dict[str, str]) -> list[str]:
     source = path.read_text(encoding="utf-8")
     findings = []
     for line, block in doc_blocks(source):
         for sentence in sentences(block):
-            lowered = sentence.lower()
-            if not any(word in lowered for word in CLAIM_WORDS):
-                continue
-            if HEDGE_RE.search(lowered):
-                continue
-            # A passage quoted from a normative document is that document's
-            # claim, not this module's. It is cited, which is the point.
-            if "docs/" in sentence and '"' in sentence:
+            if not is_checked_claim(sentence):
                 continue
             named = [
                 ident
                 for ident in IDENT.findall(sentence)
                 if not NOT_IDENT.match(ident) and ident not in modules
+                and ident not in SORTS
             ]
             resolved = [
                 ident for ident in named
@@ -375,18 +471,28 @@ def audited_roots() -> list[Path]:
     return [Path("Grass")]
 
 
+def audited_files() -> list[Path]:
+    """Every file this audit actually walks.
+
+    `main` uses this, and `Tools/DocstringAuditSelfTest.py` asserts floors
+    against it. That indirection is the point: the self-test used to recompute
+    the corpus with its own `rglob`, so it measured the tree rather than the
+    gate, and changing `rglob` to `glob` in `main` took the audit from 57 files
+    to 1 -- with every case still green. A floor is only a floor if it is
+    measured on the thing that runs.
+    """
+    return [path for root in audited_roots() if root.is_dir()
+            for path in sorted(root.rglob("*.lean"))]
+
+
 def main() -> int:
-    roots = audited_roots()
     known = declaration_names()
     specs = specification_names()
     modules = module_names()
     cited: dict[str, str] = {}
     findings: list[str] = []
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for path in sorted(root.rglob("*.lean")):
-            findings.extend(check(path, known, specs, modules, cited))
+    for path in audited_files():
+        findings.extend(check(path, known, specs, modules, cited))
     return report(findings, cited)
 
 

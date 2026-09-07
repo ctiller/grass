@@ -33,18 +33,35 @@ about the names on it.
   fixture passed.
 
 So `checkCone` pins the closure itself: the exact set of `Grass` modules the
-facade reaches. That is finite, exhaustive, and cannot go quietly vacuous,
-because every module in the cone must be named and nothing else may appear. A
-widening fails whether or not anyone anticipated the module that caused it.
+facade reaches. That is finite, exhaustive over `Grass`, and cannot go quietly
+vacuous, because every module in the cone must be named and nothing else may
+appear. A `Grass` widening fails whether or not anyone anticipated the module
+that caused it. The section below says what this still does not cover.
 
 The declaration list is kept as well, but its job is now the *first* half only:
 a facade that stops exporting its own vocabulary is a breaking change for
 everyone downstream, and that is worth its own error message.
 
-One caveat that bounds what these fixtures prove: the fixture module also
-imports `Lean`, so `Lean.*` is in scope. Only modules under `Grass` are compared,
-and no `Grass` module is reachable from `Lean`, so the two closures do not
-overlap.
+## What this cannot see, which is more than the first draft admitted
+
+The fixture module imports `Lean` in order to read an environment at all, so
+`Lean.*` is in every fixture's closure whether the facade pulls it in or not.
+Only modules under `Grass` are therefore compared. No `Grass` module is
+reachable from `Lean`, so the comparison itself is sound -- but the consequence
+is stronger than "a caveat": these fixtures **cannot detect a widening into
+`Lean`, `Init`, `Std`, or any future non-`Grass` dependency at all**. A reviewer
+added `import Lean` to `Grass/ISA/X86/Bytes.lean`, an in-cone shard, and the
+build stayed green.
+
+That is structural rather than an oversight: a Lean metaprogram cannot measure a
+cone from outside the environment it is running in. Closing it needs a check
+that reads `import` lines from source instead, outside Lean, and that does not
+exist yet. Until it does, read `isaCone` and `win32Cone` as pinning the `Grass`
+half of the cone exactly and saying nothing about the rest.
+
+A second limit worth stating: the cone pins module *names*, not module contents.
+Implementation-only material moved into a shard already in the cone widens what
+the facade exports without changing any edge, and nothing here would notice.
 -/
 
 namespace Grass.Tests.Facade

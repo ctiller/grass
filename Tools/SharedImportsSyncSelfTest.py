@@ -1,21 +1,32 @@
 """Falsifying tests for `Tools/shared-imports-sync.py`.
 
-Every case here is a file shape a cold reviewer used to break some version of
-that tool. Being exact about how, because the first draft of this paragraph said
-they all "destroyed content while reporting success" and that was not true of
-all of them: two destroyed content (the mixed-newline case and the block comment
-before the imports), three produced a wrong import block, and two -- the already
-sorted CRLF file and the duplicated import -- the original tool handled
-correctly and are here as controls, so that a change which starts breaking them
-is caught too.
+That tool rewrites two files the whole fleet is told to run `--write` on, and
+three successive versions of it corrupted content while `--check` reported
+success. So the standard here is not "the result looks right".
 
-The reason the file exists is unchanged: the tool rewrites files the whole fleet
-is instructed to run `--write` on, so "it looked right" is not a standard it can
-be held to.
+## Why every case states its exact expected output
 
-The invariant under test is narrow and total: **the tool may reorder, add and
-remove `import Grass.` lines, and may change nothing else.** Each case asserts
-that the non-import content survives byte-for-byte.
+The previous version of this file compared two *lists*: the non-import lines,
+and the import names. A reviewer then showed that 14 of 17 behaviour-changing
+mutations survived it, including two that matter a great deal:
+
+* writing the import block at offset 0 instead of at the first import -- which
+  is precisely the historical "a docstring above the imports" bug this file has
+  a named case for; and
+* writing the block at the end of the file, which Lean rejects outright with
+  `invalid 'import' command, it must be used in the beginning of the file`.
+
+Both preserve the set of non-import lines and the list of import names, so a
+list comparison cannot see either. Position is the thing that matters, and
+bytes are the only way to pin it without writing a second implementation of the
+tool and trusting that instead.
+
+So each case carries the exact text it must produce. A mutation that changes
+what the tool writes, anywhere, fails here.
+
+`main` is exercised too. Testing only the internals leaves the entry point free
+to ignore them, which is the same hole this repository just closed in
+`Tools/DocstringAuditSelfTest.py`.
 
 Run: python Tools/SharedImportsSyncSelfTest.py
 """
@@ -23,7 +34,6 @@ Run: python Tools/SharedImportsSyncSelfTest.py
 import importlib.util
 import io
 import os
-import re
 import sys
 import tempfile
 from pathlib import Path
@@ -35,224 +45,242 @@ _spec.loader.exec_module(sync)
 
 LF = "\n"
 CRLF = "\r\n"
-
-BODY = [
-    "",
-    "/-!",
-    "# A registry",
-    "-/",
-    "",
-    "open Lean in",
-    "run_cmd do",
-    "  pure ()",
-]
-
+BOM = "﻿"
 WANTED = ["Grass.Alpha", "Grass.Beta", "Grass.Gamma"]
+BLOCK = "".join(f"import {n}{LF}" for n in WANTED)
+CRLF_BLOCK = "".join(f"import {n}{CRLF}" for n in WANTED)
+TAIL = LF + "def x := 1" + LF
 
-
-def build(imports: list[str], newline: str, header: list[str] | None = None,
-          body: list[str] | None = None) -> str:
-    lines = (header if header is not None else ["import Lean"])
-    lines = lines + imports + (body if body is not None else BODY)
-    return newline.join(lines) + newline
-
-
-# The test's own parser, deliberately not the tool's. Verifying a rewriter
-# with the rewriter's own reader hides exactly the bugs that matter: when the
-# leading-run parser was reintroduced as a mutation, every case still passed,
-# because both the tool and the check agreed to stop reading at the same wrong
-# place. The result was a file carrying a duplicate import that neither could
-# see.
-IMPORT_RE = re.compile(r"^import\s+Grass\.[A-Za-z0-9_.']*\s*$")
-
-
-def non_import_lines(text: str) -> list[str]:
-    return [line for line in text.splitlines() if not IMPORT_RE.match(line)]
-
-
-def import_names(text: str) -> list[str]:
-    return [line.split()[1] for line in text.splitlines()
-            if IMPORT_RE.match(line)]
-
-
-CASES = []
-
-
-def case(name):
-    def register(fn):
-        CASES.append((name, fn))
-        return fn
-    return register
-
-
-@case("one CRLF line in an LF file (deleted every declaration)")
-def _crlf_mix():
-    text = build(["import Grass.Alpha", "import Grass.Gamma"], LF)
-    return text.replace("import Grass.Alpha" + LF,
-                        "import Grass.Alpha" + CRLF, 1)
-
-
-@case("a blank line inside the block (produced 53 duplicates)")
-def _blank_inside():
-    return build(["import Grass.Alpha", "", "import Grass.Gamma"], LF)
-
-
-@case("a comment inside the block")
-def _comment_inside():
-    return build(["import Grass.Alpha", "-- grouped by layer",
-                  "import Grass.Gamma"], LF)
-
-
-@case("a docstring above the imports (block written before it)")
-def _docstring_first():
-    return build(["import Grass.Alpha", "import Grass.Gamma"], LF,
-                 header=["/-! preamble -/", "import Lean"])
-
-
-@case("already correct, CRLF throughout")
-def _crlf_clean():
-    return build([f"import {n}" for n in WANTED], CRLF)
-
-
-@case("out of order only")
-def _unsorted():
-    return build(["import Grass.Gamma", "import Grass.Alpha",
-                  "import Grass.Beta"], LF)
-
-
-@case("duplicated import")
-def _duplicated():
-    return build(["import Grass.Alpha", "import Grass.Alpha",
-                  "import Grass.Beta", "import Grass.Gamma"], LF)
-
-
-# Files the tool must leave *byte-identical*: the import block is already
-# correct and sorted, so a correct tool has nothing to do. Asserted on the
-# whole file rather than on parsed lines, because these two shapes defeat a
-# line-based check as easily as they defeated the tool -- this test's own
-# IMPORT_RE is no more comment-aware than the tool's was, so parsing here
-# would reproduce the bug in the checker.
-#
-# A reviewer found this shape sitting in Tools/DeclNames.lean in the working
-# tree. With the comment before the imports, --write moved every import
-# inside the comment: the registry then imported nothing and --check called
-# it clean.
-UNCHANGED_CASES = [
+# (name, input, exact expected output)
+CASES = [
     (
-        "block comment with an example import, before the block",
-        ["/- To add a module by hand write, e.g.",
-         "import Grass.Memory.Access",
-         "-/"] + [f"import {n}" for n in WANTED],
+        "already correct",
+        BLOCK + TAIL,
+        BLOCK + TAIL,
     ),
     (
-        "block comment with an example import, after the block",
-        [f"import {n}" for n in WANTED] +
-        ["", "/- e.g.", "import Grass.Memory.Access", "-/"],
+        "out of order",
+        "import Grass.Gamma" + LF + "import Grass.Alpha" + LF
+        + "import Grass.Beta" + LF + TAIL,
+        BLOCK + TAIL,
     ),
     (
-        "nested block comment",
-        [f"import {n}" for n in WANTED] +
-        ["", "/- outer /- inner", "import Grass.Nope", "-/ still outer -/"],
+        "duplicated import",
+        "import Grass.Alpha" + LF + "import Grass.Alpha" + LF
+        + "import Grass.Beta" + LF + "import Grass.Gamma" + LF + TAIL,
+        BLOCK + TAIL,
     ),
     (
-        "doc comment containing an example import",
-        ["/-- e.g. `import Grass.Nope` -/"] +
-        [f"import {n}" for n in WANTED],
+        "missing import",
+        "import Grass.Alpha" + LF + "import Grass.Gamma" + LF + TAIL,
+        BLOCK + TAIL,
+    ),
+    (
+        # The block must land where the first import was, not at offset 0.
+        "module docstring above the imports",
+        "/-! preamble -/" + LF + "import Grass.Gamma" + LF
+        + "import Grass.Alpha" + LF + "import Grass.Beta" + LF + TAIL,
+        "/-! preamble -/" + LF + BLOCK + TAIL,
+    ),
+    (
+        "import Lean above the block",
+        "import Lean" + LF + "import Grass.Gamma" + LF
+        + "import Grass.Alpha" + LF + "import Grass.Beta" + LF + TAIL,
+        "import Lean" + LF + BLOCK + TAIL,
+    ),
+    (
+        # A blank line inside the block: the imports consolidate, the blank
+        # line survives, and nothing is duplicated.
+        "blank line inside the block",
+        "import Grass.Alpha" + LF + LF + "import Grass.Gamma" + LF
+        + "import Grass.Beta" + LF + TAIL,
+        BLOCK + LF + TAIL,
+    ),
+    (
+        "line comment inside the block",
+        "import Grass.Alpha" + LF + "-- by layer" + LF
+        + "import Grass.Gamma" + LF + "import Grass.Beta" + LF + TAIL,
+        BLOCK + "-- by layer" + LF + TAIL,
+    ),
+    (
+        "mixed line endings: only the block follows the first import",
+        "import Grass.Gamma" + CRLF + "import Grass.Alpha" + CRLF
+        + "def x := 1" + LF + "def y := 2" + LF,
+        CRLF_BLOCK + "def x := 1" + LF + "def y := 2" + LF,
+    ),
+    (
+        "no trailing newline",
+        "import Grass.Gamma" + LF + "import Grass.Alpha" + LF + "def x := 1",
+        BLOCK + "def x := 1",
+    ),
+    (
+        "byte-order mark",
+        BOM + "import Grass.Alpha" + LF + "import Grass.Gamma" + LF + TAIL,
+        BOM + BLOCK + TAIL,
     ),
 ]
 
+# Shapes where an import-looking line is not an import. The tool must leave
+# every one of these exactly as it found it: the block is already correct, and
+# the decoy must neither be counted nor edited.
+DECOYS = [
+    ("block comment above the block",
+     "/- e.g." + LF + "import Grass.Nope" + LF + "-/" + LF),
+    ("block comment below the block",
+     None),
+    ("nested block comment",
+     "/- outer /- inner" + LF + "import Grass.Nope" + LF + "-/ out -/" + LF),
+    ("doc comment",
+     "/-- e.g. `import Grass.Nope` -/" + LF),
+    ("line comment naming a block opener",
+     "-- keep sorted; the /-! header explains why" + LF),
+    ("line comment that is only an opener",
+     "--/-" + LF),
+    ("string literal holding a block opener",
+     'def opener := "/-"' + LF),
+    ("string literal holding an import",
+     'def sample := "import Grass.Nope"' + LF),
+]
 
-def run_unchanged(name, body: list[str]) -> list[str]:
-    text = LF.join(["import Lean"] + body + BODY) + LF
-    with tempfile.TemporaryDirectory() as raw:
-        path = os.path.join(raw, "Registry.lean")
-        io.open(path, "w", encoding="utf-8", newline="").write(text)
-        try:
-            sync.process(path, WANTED, write=True)
-        except SystemExit as exit_error:
-            return [f"{name}: refused ({exit_error}) a correct registry"]
-        after = io.open(path, encoding="utf-8", newline="").read()
-    if after != text:
-        return [f"{name}: the file changed although its import block was "
-                f"already correct.{LF}      before: {text!r}"
-                f"{LF}      after:  {after!r}"]
-    return []
+# Characters `str.splitlines()` treats as line breaks and `str.split(chr(10))`
+# does not. A rewriter built on the former turns each into a newline.
+EXOTIC = ["\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", " ", " ",
+          "\r"]
 
 
-def run_case(name, text: str) -> list[str]:
+def module_names_are_lean_identifiers() -> list[str]:
+    """`modules_on_disk` must refuse a path it cannot spell as an import.
+
+    Stubbed out by every case above, so a reviewer's mutation that dropped the
+    check survived the whole file. `Grass/A.B.lean` renders `import Grass.A.B`,
+    which parses as a module that does not exist.
+    """
     failures = []
-    before = non_import_lines(text)
+    saved = os.getcwd()
+    # The chdir is undone *inside* the context manager: on Windows a directory
+    # that is some process's cwd cannot be removed, so restoring afterwards
+    # makes the cleanup raise.
     with tempfile.TemporaryDirectory() as raw:
-        path = os.path.join(raw, "Registry.lean")
-        io.open(path, "w", encoding="utf-8", newline="").write(text)
         try:
-            sync.process(path, WANTED, write=True)
-        except SystemExit as exit_error:
-            # Refusing beats destroying, but every shape here is a legitimate
-            # file the tool is supposed to fix, so a refusal is still a
-            # failure -- and accepting it once let a reintroduced parser bug
-            # survive this very test.
-            after_text = io.open(path, encoding="utf-8", newline="").read()
-            failures.append(
-                f"{name}: the tool refused ({exit_error}) instead of "
-                "rewriting a legitimate file")
-            if after_text != text:
+            os.chdir(raw)
+            os.makedirs("Grass")
+            io.open(os.path.join("Grass", "Fine.lean"), "w").write("")
+            if sync.modules_on_disk() != ["Grass.Fine"]:
                 failures.append(
-                    f"{name}: and it had already modified the file")
-            return failures
-        after_text = io.open(path, encoding="utf-8", newline="").read()
-
-    after = non_import_lines(after_text)
-    if after != before:
-        failures.append(
-            f"{name}: non-import content changed.\n"
-            f"      before: {before!r}\n"
-            f"      after:  {after!r}")
-    found = import_names(after_text)
-    if found != WANTED:
-        failures.append(
-            f"{name}: import block is {found!r}, expected {WANTED!r}")
-    # Running again must be a no-op.
-    with tempfile.TemporaryDirectory() as raw:
-        path = os.path.join(raw, "Registry.lean")
-        io.open(path, "w", encoding="utf-8", newline="").write(after_text)
-        sync.process(path, WANTED, write=True)
-        if io.open(path, encoding="utf-8", newline="").read() != after_text:
-            failures.append(f"{name}: a second --write changed the file again")
+                    "modules_on_disk did not read an ordinary tree correctly")
+            io.open(os.path.join("Grass", "A.B.lean"), "w").write("")
+            try:
+                sync.modules_on_disk()
+                failures.append(
+                    "modules_on_disk accepted Grass/A.B.lean, which renders "
+                    "an import of a module that cannot exist")
+            except SystemExit:
+                pass
+        finally:
+            os.chdir(saved)
     return failures
 
 
-def main() -> int:
-    failures: list[str] = []
-    for name, make in CASES:
-        failures.extend(run_case(name, make()))
-    for name, body in UNCHANGED_CASES:
-        failures.extend(run_unchanged(name, body))
 
-    # A file with no library imports at all must be refused, not guessed at.
+def run(text, expected, name):
     with tempfile.TemporaryDirectory() as raw:
         path = os.path.join(raw, "Registry.lean")
-        original = build([], LF)
+        io.open(path, "w", encoding="utf-8", newline="").write(text)
+        try:
+            sync.process(path, WANTED, write=True)
+        except SystemExit as exit_error:
+            return [f"{name}: refused ({exit_error}) a file it should rewrite"]
+        after = io.open(path, encoding="utf-8", newline="").read()
+        if after != expected:
+            return [f"{name}: wrong output.{LF}      expected {expected!r}"
+                    f"{LF}      got      {after!r}"]
+        # Running again must change nothing.
+        sync.process(path, WANTED, write=True)
+        again = io.open(path, encoding="utf-8", newline="").read()
+    if again != expected:
+        return [f"{name}: not idempotent.{LF}      second run {again!r}"]
+    return []
+
+
+def main() -> int:
+    failures = []
+    for name, text, expected in CASES:
+        failures.extend(run(text, expected, name))
+
+    for name, decoy in DECOYS:
+        # `None` means "put the decoy after the block" rather than before
+        # it; position matters, because only a decoy above the block can
+        # capture the insertion point.
+        body = (BLOCK + LF + "/- e.g." + LF + "import Grass.Nope" + LF
+                + "-/" + LF) if decoy is None else decoy + BLOCK
+        failures.extend(run(body, body, "decoy: " + name))
+
+    for char in EXOTIC:
+        text = BLOCK + 'def s := "a' + char + 'b"' + LF
+        failures.extend(
+            run(text, text, "exotic break %r must survive" % char))
+
+    # A file with no real import must be refused, not guessed at, and not
+    # touched.
+    with tempfile.TemporaryDirectory() as raw:
+        path = os.path.join(raw, "Registry.lean")
+        original = "/- import Grass.Alpha -/" + LF + TAIL
         io.open(path, "w", encoding="utf-8", newline="").write(original)
         try:
             sync.process(path, WANTED, write=True)
             failures.append(
-                "a registry with no library imports was rewritten rather than "
-                "refused; the tool would be guessing where the block goes")
+                "a registry whose only import is inside a comment was "
+                "rewritten rather than refused")
         except SystemExit:
             if io.open(path, encoding="utf-8", newline="").read() != original:
-                failures.append(
-                    "refused a registry with no library imports but wrote to "
-                    "it anyway")
+                failures.append("refused that registry but wrote to it anyway")
+
+    failures.extend(module_names_are_lean_identifiers())
+    failures.extend(main_reports_drift())
 
     if failures:
         print("shared-imports-sync self-test: FAILED\n")
         for failure in failures:
-            print("  " + failure)
+            sys.stdout.buffer.write(("  " + failure).encode("utf-8", "replace")
+                                    + b"\n")
         return 1
-    print(f"shared-imports-sync self-test: {len(CASES)} rewrite shapes and "
-          f"{len(UNCHANGED_CASES)} that must not be touched at all")
+    print(f"shared-imports-sync self-test: {len(CASES)} rewrites, "
+          f"{len(DECOYS)} decoys and {len(EXOTIC)} exotic line breaks, "
+          "each byte-exact")
     return 0
+
+
+def main_reports_drift() -> list[str]:
+    """`main` must exit 1 on drift and 0 when clean.
+
+    Testing `process` alone leaves `main` free to ignore what it returns.
+    """
+    import contextlib
+    failures = []
+    saved = (sync.TARGETS, sync.modules_on_disk)
+    sink = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    try:
+        with tempfile.TemporaryDirectory() as raw:
+            path = os.path.join(raw, "Registry.lean")
+            io.open(path, "w", encoding="utf-8", newline="").write(
+                "import Grass.Alpha" + LF + TAIL)
+            sync.TARGETS = (path,)
+            sync.modules_on_disk = lambda: list(WANTED)
+            with contextlib.redirect_stdout(sink):
+                drifted = sync.main(["prog"])
+                sync.main(["prog", "--write"])
+                clean = sync.main(["prog"])
+            if drifted != 1:
+                failures.append(
+                    f"main() returned {drifted} on a registry missing two "
+                    "imports; the check would pass on drift")
+            if clean != 0:
+                failures.append(
+                    f"main() returned {clean} after --write fixed the file; a "
+                    "gate that fails when clean gets switched off")
+    finally:
+        sync.TARGETS, sync.modules_on_disk = saved
+    return failures
 
 
 if __name__ == "__main__":

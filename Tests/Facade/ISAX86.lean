@@ -11,10 +11,15 @@ absent: two cold reviewers defeated the sampled version, once by renaming the
 sampled names and once by widening the cone with modules the sample did not
 mention.
 
-`isaCone` is therefore the whole claim. Fourteen modules: the eleven shards, the
-facade itself, and outside `Grass.ISA.X86` exactly two leaves, `Grass.Core.Name`
-and `Grass.Std.Logical.Byte`. Any edge added anywhere under those fourteen fails
-this fixture, including one nobody anticipated.
+`isaCone` is the whole of the `Grass` claim. Fourteen modules: the eleven
+shards, the facade itself, and outside `Grass.ISA.X86` exactly two leaves,
+`Grass.Core.Name` and `Grass.Std.Logical.Byte`. Any *`Grass`* edge added
+anywhere under those fourteen fails this fixture, including one nobody
+anticipated.
+
+Not any edge at all: `import Lean` added to a shard passes, and
+`Tests/Facade/Containment.lean` explains why that is structural rather than an
+oversight. An earlier draft of this paragraph claimed "any edge".
 
 `isaPresent` is the other half: the vocabulary a machine-model author or
 `Grass.Assembly.X86` reaches for, which the facade may not quietly stop

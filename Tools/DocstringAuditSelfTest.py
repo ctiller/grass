@@ -109,6 +109,45 @@ CASES = [
         True,
     ),
     (
+        "hedge in a subordinate clause does not exempt the main clause",
+        "The console ensures a caller never observes a short write, which an "
+        "earlier draft of the module could not do.",
+        "names no enforcing type",
+        True,
+    ),
+    (
+        "a stray quotation does not make a sentence a citation",
+        "This ensures the encoding is unique, per docs/FOUNDATION.md law "
+        "\"18\".",
+        "names no enforcing type",
+        True,
+    ),
+    (
+        "a genuine quotation of a normative document is exempt",
+        "docs/FOUNDATION.md says \"a specification cannot observe a schedule "
+        "fact\".",
+        None,
+        False,
+    ),
+    (
+        "a sort is not an enforcer",
+        "`Prop` ensures the invariant holds.",
+        "names no enforcing type",
+        True,
+    ),
+    (
+        "a lowercase milestone token does not exempt",
+        "This ensures the encoding is unique for m4 inputs.",
+        "names no enforcing type",
+        True,
+    ),
+    (
+        "a real milestone reference is a hedge",
+        "M4 ensures the encoding is unique.",
+        None,
+        False,
+    ),
+    (
         "claim naming nothing",
         "This ensures the encoding is unique.",
         "names no enforcing type",
@@ -124,11 +163,16 @@ CASES = [
 
 
 def reaches_check(sentence: str) -> bool:
-    """Whether the tool treats this sentence as a claim at all."""
-    lowered = sentence.lower()
-    if not any(word in lowered for word in audit.CLAIM_WORDS):
-        return False
-    return not audit.HEDGE_RE.search(lowered)
+    """Whether the tool treats this sentence as a claim at all.
+
+    Delegated rather than reimplemented. Everywhere else in this file, using
+    the code under test to check the code under test would hide the bug; here
+    it is the only correct source, because the question is not "is the gate
+    right" but "did this case exercise the gate", and only the gate can answer
+    that. A mirrored copy drifted the moment the exemptions changed and turned
+    two real cases into false failures.
+    """
+    return audit.is_checked_claim(sentence)
 
 
 def run_one(tmp: Path, sentence: str, specs, modules, cited) -> list[str]:
@@ -226,8 +270,9 @@ def corpus_shape() -> list[str]:
         failures.append(
             f"the audit's roots are {roots}; Grass/ is the library and has to "
             "be among them")
-    files = [path for root in roots if root.is_dir()
-             for path in sorted(root.rglob("*.lean"))]
+    # Asked of the gate, not recomputed here: a floor derived independently
+    # measures the tree, and the gate can be narrowed without moving it.
+    files = audit.audited_files()
     blocks = 0
     claims = 0
     declaration_docstrings = 0
