@@ -31,6 +31,29 @@ def spec : SpecProcess where
   accepts := fun _ _ => True
   requirements := noDemands
 
+namespace ObservationProjectionFixture
+
+def boolToNat : ObservationProjection Bool Nat where
+  project := List.map Bool.toNat
+
+def natToString : ObservationProjection Nat String where
+  project := List.map toString
+
+def stringLengths : ObservationProjection String Nat where
+  project := List.map String.length
+
+example : (ObservationProjection.identity Nat).comp boolToNat = boolToNat := by
+  simp
+
+example : boolToNat.comp (ObservationProjection.identity Bool) = boolToNat := by
+  simp
+
+example : (stringLengths.comp natToString).comp boolToNat =
+    stringLengths.comp (natToString.comp boolToNat) := by
+  simp
+
+end ObservationProjectionFixture
+
 def system : RelationalSystem spec.AuditEvent where
   State := Bool
   Choice := Unit
@@ -51,6 +74,13 @@ def behavior : ProgramBehavior spec where
 def initialExecution (input : Bool) : system.ExecutionPrefix :=
   @RelationalSystem.ExecutionPrefix.initial spec.AuditEvent system input (0 : Nat)
     rfl
+
+example {initialState state : system.State} {initialGraph graph : system.Graph}
+    {events : List spec.AuditEvent}
+    (execution : system.Runs initialState initialGraph state graph events) : True := by
+  induction execution with
+  | initial _ => trivial
+  | step _ _ _ => trivial
 
 theorem behaviorAdequate : behavior.Adequate where
   execution input _ := ⟨initialExecution input, rfl⟩
