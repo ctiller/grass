@@ -234,6 +234,24 @@ pub fn drain_outbox(
                 continue;
             }
         }
+        // Gate 12's "audience resolution is exact". `apply` deliberately
+        // does not check it -- see `apply_broadcast_published` -- because
+        // the state it resolves against is mutable, unpinned, and routinely
+        // not yet applied when the broadcast is replayed. Here it is: this
+        // is the publishing host, `state` is its freshly-fetched reduction,
+        // and the publisher is claiming a snapshot it computed from exactly
+        // this view moments ago.
+        if let crate::events::EventData::BroadcastPublished(d) = &data {
+            if let Err(e) = verify_broadcast_published(&state, d) {
+                let reason = e.to_string();
+                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+                rejected.push(RejectedCandidate {
+                    kind: candidate.kind.clone(),
+                    reason,
+                });
+                continue;
+            }
+        }
         if let Err(e) = verify_object_ids_resolve(repo, &data) {
             let reason = e.to_string();
             reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
@@ -529,6 +547,28 @@ fn verify_review_merge_authorized(
     if chain.current_nomination != d.nomination {
         return Ok(());
     }
+    // AGENT_BUS_SCHEMA.md section 10: an unresolved issue whose `blocks` set
+    // names an event in the active nomination chain blocks authorization.
+    //
+    // This is the publication-time verdict, and publication time is the only
+    // place it can honestly be reached. `apply` cannot ask it: reduction
+    // orders events by `refs`, never by `observed`, so during replay an
+    // authorization is routinely applied before an issue its own frontier
+    // saw, and any answer there depends on the lexicographic accident of two
+    // agent names -- while a host that had fetched the issue would be unable
+    // to reduce the bus at all. Here there is no replay order to be at the
+    // mercy of: `state` is this host's fully-reduced view, freshly fetched by
+    // `drain_outbox`, and the question "can I already see that this chain is
+    // blocked?" has one answer.
+    //
+    // Cheap, and deliberately ahead of the candidate reconstruction below,
+    // which shells out to Git repeatedly.
+    if let Some(blocking) = crate::apply::blocking_issue_for_chain(state, chain) {
+        return Err(invalid(format!(
+            "issue {blocking} is unresolved and blocks nomination chain {}; resolve or reject it before authorizing the merge",
+            d.nomination
+        )));
+    }
     // The verifying host must also be on the pinned engine: reconstructing
     // the candidate below with a different ORT version would disagree with a
     // perfectly honest reviewer and reject a valid authorization.
@@ -664,6 +704,40 @@ fn verify_review_merge_reconciled(
 /// `base_code_commit`/`code_commit` are lower-stakes (correctable by a
 /// follow-up `scope.set`, or merely evidence rather than a binding field
 /// respectively) but the same silent-typo failure mode applies to both.
+/// docs/AGENT_COORDINATION_EVOLUTION.md section 4.2, gate 12: the claimed
+/// `audience_snapshot` must equal `audience_selector` resolved against
+/// `audience_epoch`.
+///
+/// `Ok(())` when the epoch is not known to this host: that is an ordinary
+/// validation failure `apply::dry_run` reports moments later with a
+/// clearer, epoch-specific message, so it is not duplicated here.
+fn verify_broadcast_published(
+    state: &crate::state::BusState,
+    d: &crate::events::BroadcastPublished,
+) -> AbResult<()> {
+    let epoch = match state.known_epochs.get(&d.audience_epoch) {
+        Some(e) => e,
+        None => return Ok(()),
+    };
+    let resolved = crate::apply::resolve_audience(state, &d.audience_selector, epoch);
+    let claimed: std::collections::BTreeSet<Agent> = d.audience_snapshot.iter().cloned().collect();
+    if resolved != claimed {
+        let missing: Vec<String> = resolved
+            .difference(&claimed)
+            .map(|a| a.to_string())
+            .collect();
+        let extra: Vec<String> = claimed
+            .difference(&resolved)
+            .map(|a| a.to_string())
+            .collect();
+        return Err(invalid(format!(
+            "audience_snapshot does not match audience_selector resolved against epoch {}: missing {:?}, unexpected {:?}",
+            d.audience_epoch, missing, extra
+        )));
+    }
+    Ok(())
+}
+
 fn verify_object_ids_resolve(repo: &Path, data: &crate::events::EventData) -> AbResult<()> {
     let candidates: Vec<(&str, &crate::scalars::ObjectId)> = match data {
         crate::events::EventData::AgentRegistered(d) => {
@@ -3643,5 +3717,139 @@ mod tests {
         let drained = drain_coord1(&f);
         assert!(drained.rejected.is_empty(), "{:?}", drained.rejected);
         assert_eq!(drained.published.len(), 1);
+    }
+
+    // --------------------------------------------- gate 12, audience exactness
+
+    /// Builds a state with `members` active in one epoch, each subscribed to
+    /// the topics named for them.
+    fn state_with_subscribers(
+        members: &[(&str, Role, &[&str])],
+    ) -> (crate::state::BusState, crate::registry::RosterEpoch) {
+        let mut active = std::collections::BTreeMap::new();
+        for (name, role, _) in members {
+            active.insert(
+                a(name),
+                crate::registry::MemberBinding {
+                    role: *role,
+                    host: short("host1"),
+                    coordinator_custody_epoch: 0,
+                    standby: None,
+                },
+            );
+        }
+        let epoch =
+            crate::registry::RosterEpoch::root(ObjectId::parse("0".repeat(40)).unwrap(), active);
+        let mut state = crate::state::BusState::new(crate::bootstrap::BusConfig {
+            object_format: "sha1".to_string(),
+            product_review_from: ObjectId::parse("1".repeat(40)).unwrap(),
+            merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
+            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+        });
+        state.known_epochs.insert(epoch.id.clone(), epoch.clone());
+        state.roster_epoch = Some(epoch.clone());
+        for (name, role, topics) in members {
+            let agent = a(name);
+            state.agents.insert(
+                agent.clone(),
+                crate::state::AgentState {
+                    agent: agent.clone(),
+                    display_name: short(name),
+                    primary_role: *role,
+                    purpose: text("p"),
+                    provider: None,
+                    model: None,
+                    status: LifecycleStatus::Active,
+                    status_note: text(""),
+                    product_branch: None,
+                    product_commit: None,
+                    last_lifecycle_event: EventId::new(&agent, 0),
+                    retired: false,
+                    scope: None,
+                    plan: None,
+                    progress_tail: vec![],
+                    next_seq: 1,
+                    subscribed_topics: crate::scalars::StringSet::from_iter(topics.iter().map(
+                        |t| crate::scalars::CoordinationTopic::parse((*t).to_string()).unwrap(),
+                    )),
+                },
+            );
+        }
+        (state, epoch)
+    }
+
+    fn broadcast_to_subscribers(
+        epoch: &crate::registry::RosterEpoch,
+        snapshot: &[&str],
+    ) -> crate::events::BroadcastPublished {
+        crate::events::BroadcastPublished {
+            topics: crate::scalars::StringSet::from_iter([
+                crate::scalars::CoordinationTopic::parse("release.main".into()).unwrap(),
+            ]),
+            importance: crate::common::Importance::Informational,
+            summary: short("s"),
+            detail: text("d"),
+            affected_paths: crate::scalars::StringSet::default(),
+            affected_interfaces: crate::scalars::StringSet::default(),
+            product_commits: crate::scalars::StringSet::default(),
+            audience_selector: crate::common::AudienceSelector::TopicSubscribers(
+                crate::scalars::CoordinationTopic::parse("release.main".into()).unwrap(),
+            ),
+            audience_epoch: epoch.id.clone(),
+            audience_snapshot: crate::scalars::StringSet::from_iter(snapshot.iter().map(|n| a(n))),
+            acknowledgement: crate::common::AckRequirement::None,
+            deadline: None,
+            supersedes: crate::scalars::StringSet::default(),
+            workaround: None,
+            expiry_condition: None,
+        }
+    }
+
+    /// Gate 12 ("audience resolution is exact") lives here, not in `apply`.
+    ///
+    /// `apply_broadcast_published` deliberately does not check it: the state
+    /// a selector resolves against is mutable and unpinned, and reduction
+    /// orders events by `refs` rather than by `observed`, so the deciding
+    /// `subscription.set` is routinely applied after the broadcast. Asking
+    /// there wedged honest publishers. Here `state` is the publishing host's
+    /// own fully-reduced view, so the question has one answer.
+    #[test]
+    fn verify_broadcast_published_enforces_audience_exactness() {
+        let (state, epoch) = state_with_subscribers(&[
+            ("alice", Role::Implementor, &[]),
+            ("bob", Role::Implementor, &["release.main"]),
+            ("carol", Role::Implementor, &["release.main"]),
+        ]);
+
+        verify_broadcast_published(&state, &broadcast_to_subscribers(&epoch, &["bob", "carol"]))
+            .expect("the exact resolved audience is accepted");
+
+        let err = verify_broadcast_published(&state, &broadcast_to_subscribers(&epoch, &["bob"]))
+            .expect_err("a snapshot omitting a subscriber is refused");
+        assert!(
+            err.to_string().contains("missing [\"carol\"]"),
+            "the message must name who was dropped: {err}"
+        );
+
+        let err = verify_broadcast_published(
+            &state,
+            &broadcast_to_subscribers(&epoch, &["bob", "carol", "alice"]),
+        )
+        .expect_err("a snapshot naming a non-subscriber is refused");
+        assert!(
+            err.to_string().contains("unexpected [\"alice\"]"),
+            "the message must name who was invented: {err}"
+        );
+    }
+
+    /// An unknown epoch is left to `apply::dry_run`, which reports it with a
+    /// clearer message moments later -- this gate must not duplicate it.
+    #[test]
+    fn verify_broadcast_published_defers_an_unknown_epoch() {
+        let (mut state, epoch) =
+            state_with_subscribers(&[("alice", Role::Implementor, &["release.main"])]);
+        state.known_epochs.clear();
+        verify_broadcast_published(&state, &broadcast_to_subscribers(&epoch, &["nobody-here"]))
+            .expect("an unknown epoch is deferred, not judged");
     }
 }

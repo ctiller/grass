@@ -118,12 +118,21 @@ pub struct ReviewChain {
     pub accepted_nominations: std::collections::BTreeSet<EventId>,
     pub decline_or_withdraw_or_reassign_status: ItemStatus,
     pub findings: BTreeMap<(EventId, String), FindingState>,
-    pub authorizations: Vec<EventId>,
+    /// Sets, not vectors, and that is load-bearing rather than tidiness.
+    /// Each of these can now receive entries from two agents who never
+    /// observed one another -- two reviewers authorizing the same chain, or
+    /// a reviewer's `review.merged` racing a coordinator's
+    /// `review.merge_reconciled` -- and reduction records both rather than
+    /// making one of the two valid orders fatal. A `Vec` would then hold
+    /// them in arrival order, so two hosts that fetched in different orders
+    /// would hold different state and gates 15/16 would break in the very
+    /// place the totality fix was meant to repair.
+    pub authorizations: std::collections::BTreeSet<EventId>,
     /// Receipts recorded so far; concurrently published redundant receipts
     /// with identical authorization-derived values are all kept
     /// (AGENT_BUS_SCHEMA.md section 8).
-    pub merged: Vec<EventId>,
-    pub reconciled: Vec<EventId>,
+    pub merged: std::collections::BTreeSet<EventId>,
+    pub reconciled: std::collections::BTreeSet<EventId>,
 }
 
 impl ReviewChain {
@@ -170,18 +179,6 @@ pub struct AgentState {
     /// here since they are derived from `primary_role`/`scope`, not
     /// separately declared.
     pub subscribed_topics: crate::scalars::StringSet<crate::scalars::CoordinationTopic>,
-    /// The `subscription.set` that produced `subscribed_topics`, and the
-    /// `scope.set` that produced `scope`. These two fields are the only
-    /// mutable per-agent state an audience selector resolves against
-    /// (`TopicSubscribers` and `InterfaceDependents` respectively), and
-    /// nothing pins them: a broadcast's `audience_epoch` fixes the member
-    /// set, not where each member's stream had got to. Recording which
-    /// event last moved them lets `broadcast.published` ask whether a
-    /// publisher had actually *seen* the change it failed to account for,
-    /// instead of failing whenever an unrelated concurrent event happens
-    /// to reduce first. `None` means nothing ever set the field.
-    pub subscribed_topics_at: Option<EventId>,
-    pub scope_at: Option<EventId>,
 }
 
 impl AgentState {

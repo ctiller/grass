@@ -416,8 +416,6 @@ fn apply_registered(state: &mut BusState, env: &Envelope, d: &AgentRegistered) -
             progress_tail: Vec::new(),
             next_seq: 1,
             subscribed_topics: crate::scalars::StringSet::default(),
-            subscribed_topics_at: None,
-            scope_at: None,
         },
     );
     Ok(())
@@ -646,7 +644,6 @@ fn apply_scope_set(state: &mut BusState, env: &Envelope, d: &ScopeSet) -> AbResu
         .get_mut(&env.agent)
         .expect("checked by require_active_role");
     ag.scope = Some(d.clone());
-    ag.scope_at = Some(env.id.clone());
     Ok(())
 }
 
@@ -1355,9 +1352,9 @@ fn apply_review_nominated(state: &mut BusState, env: &Envelope, d: &ReviewReques
             accepted_nominations: Default::default(),
             decline_or_withdraw_or_reassign_status: ItemStatus::Open,
             findings: BTreeMap::new(),
-            authorizations: vec![],
-            merged: vec![],
-            reconciled: vec![],
+            authorizations: Default::default(),
+            merged: Default::default(),
+            reconciled: Default::default(),
         },
     );
     state
@@ -1842,32 +1839,29 @@ fn apply_review_merge_authorized(
     // even if its `blocks` set still names a chain event -- disposition is
     // permanent, so there is nothing left to re-check once it fires.
     //
-    // The test is causal, not categorical. An `issue.opened` carrying
-    // `blocks` need have no causal edge to this event -- the issue references
-    // the chain, this does not reference the issue -- so where there is no
-    // edge the two are concurrent, both orders are valid linear extensions,
-    // and disagreeing about them costs everything: rejecting made the *fatal*
-    // outcome depend on fetch order, one host-unable-to-reduce-the-bus away
-    // from an outage, and merely skipping the record made the *state* depend
-    // on fetch order, a gate 15/16 violation.
+    // A blocking issue is deliberately not consulted *here*. Reduction is
+    // the wrong place for the question, and not merely because the naive
+    // form was fatal: `topological_order` derives its edges from `refs`
+    // alone, never from `observed`, so an authorization is routinely applied
+    // *before* the very issue its frontier says it saw. A causal test asked
+    // during replay therefore fires or not according to the lexicographic
+    // accident of the two agents' names -- and where it does fire, a host
+    // that has fetched the issue cannot reduce the bus while a host that has
+    // not reduces it fine, which is the outage this whole class describes.
+    // `probe_ordering_decides_whether_the_observed_blocker_check_fires`
+    // pins both halves of that.
     //
-    // But an authorization consumes the bus state its own observed frontier
-    // names, and a blocker sitting inside that frontier was information this
-    // reviewer had. That case is causally ordered, not concurrent: every
-    // valid linear extension puts the issue first, so rejecting it is both
-    // total and confluent, and it is what section 10 requires. Publication
-    // time still owns the verdict; `merge_ready::check_merge_ready` re-reads
-    // it live before the push as defence in depth, not as a replacement.
-    if let Some(blocking) = observed_blocking_issue_for_chain(state, chain, &env.observed) {
-        return Err(invalid(format!(
-            "{}: issue {blocking} blocks this nomination chain and this event has observed it",
-            env.id
-        )));
-    }
+    // Section 10's verdict is not lost, it is asked where the question is
+    // well-posed: `coordinator::verify_review_merge_authorized` refuses to
+    // *publish* an authorization against a chain this host can already see
+    // is blocked, and `merge_ready::check_merge_ready` re-reads it live
+    // immediately before the push. Both run against a fully-reduced state
+    // with no replay order to be at the mercy of. Reduction's own job is to
+    // say what happened, and the authorization did happen.
     let chain_mut = state
         .review_chain_mut(&d.nomination)
         .expect("checked above");
-    chain_mut.authorizations.push(env.id.clone());
+    chain_mut.authorizations.insert(env.id.clone());
     Ok(())
 }
 
@@ -1875,43 +1869,21 @@ fn apply_review_merge_authorized(
 /// `ItemStatus::Terminal`) whose `blocks` set names any event in `chain`'s
 /// nomination chain, if any.
 ///
-/// This is the unconditional, live question, and it is what
+/// Asked by the two places that have a fully-reduced state and no replay
+/// order to worry about: `coordinator::verify_review_merge_authorized`
+/// (publication time -- may this be published at all?) and
 /// `merge_ready::check_merge_ready` (AGENT_REVIEW.md section 8's pre-merge
-/// gate) asks: at the moment of the push, does anything block? Reduction
-/// asks the narrower causal question through
-/// `observed_blocking_issue_for_chain` instead. Both route through the same
-/// matching rule below so the two can never drift on what "blocking" means,
-/// only on which issues they are entitled to consider.
+/// gate -- may the push proceed right now?). Reduction deliberately does
+/// not ask it; see `apply_review_merge_authorized` for why.
 pub(crate) fn blocking_issue_for_chain(state: &BusState, chain: &ReviewChain) -> Option<EventId> {
-    first_blocking_issue(state, chain, None)
-}
-
-/// `blocking_issue_for_chain` restricted to issues the publisher had
-/// actually observed -- the form `apply_review_merge_authorized` needs,
-/// where charging a reviewer for an issue concurrent with its own event
-/// would make reduction itself order-dependent.
-pub(crate) fn observed_blocking_issue_for_chain(
-    state: &BusState,
-    chain: &ReviewChain,
-    observed: &crate::frontier::ObservedFrontier,
-) -> Option<EventId> {
-    first_blocking_issue(state, chain, Some(observed))
+    first_blocking_issue(state, chain)
 }
 
 /// `state.issues` is a `BTreeMap`, so "first" is a deterministic choice of
 /// witness rather than whichever one a hash order happened to yield.
-fn first_blocking_issue(
-    state: &BusState,
-    chain: &ReviewChain,
-    observed: Option<&crate::frontier::ObservedFrontier>,
-) -> Option<EventId> {
+fn first_blocking_issue(state: &BusState, chain: &ReviewChain) -> Option<EventId> {
     let chain_members: BTreeSet<&EventId> = chain.nomination_events.iter().collect();
     for issue in state.issues.values() {
-        if let Some(observed) = observed {
-            if observed.validate_reference(&issue.id).is_err() {
-                continue;
-            }
-        }
         // "Unresolved" means not yet terminally resolved/rejected -- an issue
         // sitting in `LifecycleConflict` (a race whose winner hasn't been
         // picked yet) is still unresolved and must still block, not just a
@@ -1966,7 +1938,7 @@ fn apply_review_merged(state: &mut BusState, env: &Envelope, d: &ReviewMerged) -
         .cloned()
         .ok_or_else(|| invalid(format!("{}: unknown nomination chain", env.id)))?;
     let chain = state.reviews.get_mut(&root).expect("chain exists");
-    chain.merged.push(env.id.clone());
+    chain.merged.insert(env.id.clone());
     Ok(())
 }
 
@@ -2025,27 +1997,37 @@ fn apply_review_merge_reconciled(
     // Whether a second receipt indicates something worth a human looking at
     // is an audit question, not a reduction one.
     //
-    // A receipt this event has *causally observed*, though, is a different
-    // thing entirely and stays a hard error. Streams are single-writer, so an
-    // author always observes its own prior events: publishing a second receipt
-    // while already knowing about the first is not a race anybody lost, it is
-    // a caller doing something incoherent, and there is no fleet-wide cost to
-    // refusing it. That is the same line `exclusive::record` draws between its
-    // two branches.
+    // The author's *own* prior receipt is a different thing entirely and
+    // stays a hard error: publishing a second receipt while already knowing
+    // about the first is not a race anybody lost, it is a caller doing
+    // something incoherent, and refusing it costs nothing fleet-wide because
+    // `topological_order` gives every stream its own predecessor edge -- an
+    // agent's events are ordered against each other in every extension, so
+    // this answer is the same on every host.
+    //
+    // The test is authorship, not `validate_reference`. It is tempting to
+    // write "a receipt this event observed", but `coordinator::build_frontier`
+    // skips the author when building a frontier (`ref_agent == *author`), and
+    // `dry_run` forbids adding refs beyond `referenced_ids()`, so a real
+    // envelope never carries an entry for its own stream and the frontier
+    // test would silently never fire. A cross-agent duplicate is exactly the
+    // concurrent case that must stay recordable; publication-time
+    // `coordinator::verify_review_merge_reconciled` is where that one is
+    // refused.
     let chain = state.reviews.get(&root).expect("chain exists");
     if let Some(observed) = chain
         .merged
         .iter()
         .chain(chain.reconciled.iter())
-        .find(|existing| env.observed.validate_reference(existing).is_ok())
+        .find(|existing| existing.agent() == env.agent)
     {
         return Err(invalid(format!(
-            "{}: receipt {observed} is already recorded and this event has observed it",
+            "{}: this agent already published receipt {observed} for this chain",
             env.id
         )));
     }
     let chain = state.reviews.get_mut(&root).expect("chain exists");
-    chain.reconciled.push(env.id.clone());
+    chain.reconciled.insert(env.id.clone());
     Ok(())
 }
 
@@ -2242,7 +2224,6 @@ fn apply_subscription_set(
     require_agent(state, &env.agent)?;
     let ag = state.agents.get_mut(&env.agent).expect("just checked");
     ag.subscribed_topics = d.topics.clone();
-    ag.subscribed_topics_at = Some(env.id.clone());
     Ok(())
 }
 
@@ -2300,30 +2281,6 @@ pub fn resolve_audience(
     }
 }
 
-/// The event that last set the state `selector` resolves against for
-/// `agent`, if any.
-///
-/// `Agents`, `Roles` and `AllActive` resolve purely from the pinned
-/// `audience_epoch`, which is immutable once known -- nothing later can
-/// move them, so they have no provenance and any disagreement about them
-/// is the publisher's own. The other two read `subscribed_topics` and
-/// `scope`, each written by exactly one event kind (`subscription.set`
-/// and `scope.set`), last-writer-wins. `None` likewise means nothing ever
-/// set the field, so no unobserved event could explain a disagreement.
-fn audience_input_provenance(
-    state: &BusState,
-    selector: &crate::common::AudienceSelector,
-    agent: &Agent,
-) -> Option<EventId> {
-    use crate::common::AudienceSelector as Sel;
-    let ag = state.agents.get(agent)?;
-    match selector {
-        Sel::TopicSubscribers(_) => ag.subscribed_topics_at.clone(),
-        Sel::InterfaceDependents(_) => ag.scope_at.clone(),
-        Sel::Agents(_) | Sel::Roles(_) | Sel::AllActive => None,
-    }
-}
-
 /// Section 4.2: "Selectors involving all active agents, and every
 /// required-ack broadcast to a derived audience, require a complete
 /// frontier for that epoch. An explicit list may use a sparse frontier
@@ -2378,30 +2335,30 @@ fn apply_broadcast_published(
         }
         env.observed.validate_complete(epoch)?;
     }
-    let resolved = resolve_audience(state, &d.audience_selector, epoch);
-    let claimed: BTreeSet<Agent> = d.audience_snapshot.iter().cloned().collect();
-    // A disagreement is the publisher's fault only where the publisher had
-    // the information. `TopicSubscribers` and `InterfaceDependents` resolve
-    // against `subscribed_topics`/`scope`, which any agent may change at any
-    // time and which nothing here pins -- `audience_epoch` fixes the member
-    // set, and even a complete frontier fixes only that set, never where
-    // each member's stream had got to. So a `subscription.set` published
-    // concurrently with this broadcast changes the resolved answer, and
-    // rejecting on that alone would make whether the bus reduces *at all*
-    // depend on which of two unordered events a host replayed first --
-    // permanently, on every host, for one honest event. Reject only for a
-    // member whose deciding event this publisher had already observed.
-    if let Some(attributable) = resolved.symmetric_difference(&claimed).find(|agent| {
-        match audience_input_provenance(state, &d.audience_selector, agent) {
-            Some(at) => env.observed.validate_reference(&at).is_ok(),
-            None => true,
-        }
-    }) {
-        return Err(invalid(format!(
-            "{}: audience_snapshot names the wrong audience for epoch {}: {attributable} differs and this event has observed the event that decides it",
-            env.id, d.audience_epoch
-        )));
-    }
+    // Gate 12's audience exactness is *not* checked here, and cannot be.
+    //
+    // `TopicSubscribers` and `InterfaceDependents` resolve against
+    // `subscribed_topics`/`scope`, which any agent may change at any time.
+    // Nothing pins them: `audience_epoch` fixes the member set, and even a
+    // complete frontier fixes only that set, never where each member's
+    // stream had got to. A `subscription.set` published concurrently with
+    // this broadcast therefore changes the resolved answer, and rejecting on
+    // that made whether the bus reduces *at all* depend on replay order.
+    //
+    // Nor can the disagreement be charged causally, the way it first
+    // appeared it could. Reduction orders events by `refs`, never by
+    // `observed`, so the deciding `subscription.set` is routinely applied
+    // *after* this broadcast -- and a broadcast cannot even name it:
+    // `BroadcastPublished::referenced_ids` is `supersedes` alone, so
+    // `coordinator::build_frontier` produces an empty frontier for an
+    // informational broadcast and `dry_run` forbids adding to it. An honest
+    // publisher naming a first-time subscriber would be refused on every
+    // host, permanently, while the case that is genuinely the publisher's
+    // fault could never be distinguished.
+    //
+    // So exactness is asked at publication, by
+    // `coordinator::verify_broadcast_published`, against this host's
+    // fully-reduced state with no replay order in play.
     for id in d.supersedes.iter() {
         if !state.broadcasts.contains_key(id) {
             return Err(invalid(format!(
@@ -4722,7 +4679,7 @@ mod tests {
         apply_ok(&mut state, &authorize_env);
         assert_eq!(
             state.review_chain(&nominate_env.id).unwrap().authorizations,
-            vec![authorize_env.id.clone()]
+            std::collections::BTreeSet::from([authorize_env.id.clone()])
         );
 
         let merged_data = EventData::ReviewMerged(ReviewMerged {
@@ -5461,38 +5418,6 @@ mod tests {
         assert!(
             err.to_string().contains("requires a complete frontier"),
             "{err}"
-        );
-    }
-
-    #[test]
-    fn broadcast_rejects_an_audience_snapshot_that_omits_an_active_member() {
-        let mut state = empty_state(&[("alice", Role::Implementor), ("bob", Role::Implementor)]);
-        let alice = a("alice");
-        let bob = a("bob");
-        apply_ok(&mut state, &register(&alice, Role::Implementor));
-        apply_ok(&mut state, &register(&bob, Role::Implementor));
-        let epoch = state.roster_epoch.as_ref().unwrap().clone();
-
-        let env = Envelope::new(
-            &alice,
-            1,
-            complete_frontier(&epoch),
-            &EventData::BroadcastPublished(broadcast(
-                epoch.id.clone(),
-                crate::common::AudienceSelector::AllActive,
-                &[&alice], // missing bob
-                crate::common::AckRequirement::None,
-            )),
-            [],
-        );
-        let err = apply_event(&mut state, &env).unwrap_err();
-        let msg = err.to_string();
-        // `AllActive` resolves purely from the pinned epoch, so there is no
-        // concurrent event that could excuse the omission and the message
-        // must say who was dropped.
-        assert!(
-            msg.contains("audience_snapshot names the wrong audience") && msg.contains("bob"),
-            "{msg}"
         );
     }
 
@@ -7387,7 +7312,7 @@ mod tests {
         apply_ok(&mut state, &env);
         assert_eq!(
             state.review_chain(&nominate_env.id).unwrap().authorizations,
-            vec![env.id]
+            std::collections::BTreeSet::from([env.id])
         );
     }
 
@@ -7873,24 +7798,30 @@ mod tests {
         );
         apply_ok(&mut state, &first_env);
 
+        // Deliberately the frontier `coordinator::build_frontier` would
+        // really produce: it skips the author's own stream, so there is no
+        // self-entry here. An earlier version of this test hand-built one
+        // and so passed against an envelope shape production cannot emit,
+        // which hid that the rule it was checking never fired.
         let second_env = Envelope::new(
             &coord1,
             2,
-            frontier_seeing(&[&authorize_env.id, &first_env.id]),
+            frontier_seeing(&[&authorize_env.id]),
             &reconciled_data(),
             [],
         );
         // Still refused, and for the reason that makes it a caller error
-        // rather than a race: this event's own frontier has observed the
-        // receipt it duplicates. A *concurrent* second receipt -- one whose
-        // author had not seen the first -- is recorded instead, since
-        // rejecting it would make reduction fail on every host depending on
-        // fetch order (see
-        // `a_merged_receipt_racing_a_reconciliation_reduces_in_either_order`).
+        // rather than a race: it is this same coordinator's second receipt.
+        // Streams get a predecessor edge in `topological_order`, so an
+        // agent's own events are ordered against each other on every host
+        // and this answer cannot vary. A *cross-agent* second receipt is
+        // recorded instead (see
+        // `a_merged_receipt_racing_a_reconciliation_reduces_in_either_order`),
+        // with publication-time verification refusing it there.
         let err = apply_event(&mut state, &second_env).unwrap_err();
         assert!(
             err.to_string()
-                .contains("already recorded and this event has observed it"),
+                .contains(&format!("already published receipt {}", first_env.id)),
             "{err}"
         );
     }
@@ -8866,122 +8797,6 @@ mod tests {
         );
     }
 
-    /// The concession above is causal, not blanket: a publisher that had
-    /// already observed the subscription is still held to it.
-    ///
-    /// Without this, "tolerate a mismatch" would degrade `audience_snapshot`
-    /// into an unchecked field -- gate 12 ("audience resolution is exact")
-    /// would be satisfied by nothing at all, and any agent could name any
-    /// audience it liked.
-    #[test]
-    fn an_observed_subscription_still_binds_the_audience_snapshot() {
-        let mut state = empty_state(&[
-            ("alice", Role::Implementor),
-            ("bob", Role::Implementor),
-            ("carol", Role::Implementor),
-        ]);
-        let (alice, bob, carol) = (a("alice"), a("bob"), a("carol"));
-        apply_ok(&mut state, &register(&alice, Role::Implementor));
-        apply_ok(&mut state, &register(&bob, Role::Implementor));
-        apply_ok(&mut state, &register(&carol, Role::Implementor));
-        let epoch = state.roster_epoch.as_ref().unwrap().clone();
-
-        let subscribe = Envelope::new(
-            &bob,
-            1,
-            no_frontier(),
-            &EventData::SubscriptionSet(crate::events::SubscriptionSet {
-                topics: StringSet::from_iter([topic("release.main")]),
-            }),
-            [],
-        );
-        let subscribe_id = subscribe.id.clone();
-        apply_ok(&mut state, &subscribe);
-        apply_ok(
-            &mut state,
-            &Envelope::new(
-                &carol,
-                1,
-                no_frontier(),
-                &EventData::SubscriptionSet(crate::events::SubscriptionSet {
-                    topics: StringSet::from_iter([topic("release.main")]),
-                }),
-                [],
-            ),
-        );
-
-        // alice has bob's subscription in its frontier and omits bob anyway.
-        let err = apply_event(
-            &mut state,
-            &Envelope::new(
-                &alice,
-                1,
-                frontier_seeing(&[&subscribe_id]),
-                &EventData::BroadcastPublished(broadcast(
-                    epoch.id.clone(),
-                    crate::common::AudienceSelector::TopicSubscribers(topic("release.main")),
-                    &[&carol],
-                    crate::common::AckRequirement::None,
-                )),
-                [],
-            ),
-        )
-        .expect_err("an observed subscriber may not be dropped from the snapshot");
-        let msg = err.to_string();
-        assert!(
-            msg.contains("bob") && msg.contains("observed the event that decides it"),
-            "the message must name who differs and why it is chargeable: {msg}"
-        );
-    }
-
-    /// And a member that never subscribed at all cannot be smuggled in:
-    /// with no provenance there is no unobserved event to blame.
-    #[test]
-    fn an_invented_audience_member_is_rejected_with_no_provenance_to_excuse_it() {
-        let mut state = empty_state(&[
-            ("alice", Role::Implementor),
-            ("bob", Role::Implementor),
-            ("carol", Role::Implementor),
-        ]);
-        let (alice, bob, carol) = (a("alice"), a("bob"), a("carol"));
-        apply_ok(&mut state, &register(&alice, Role::Implementor));
-        apply_ok(&mut state, &register(&bob, Role::Implementor));
-        apply_ok(&mut state, &register(&carol, Role::Implementor));
-        let epoch = state.roster_epoch.as_ref().unwrap().clone();
-        apply_ok(
-            &mut state,
-            &Envelope::new(
-                &carol,
-                1,
-                no_frontier(),
-                &EventData::SubscriptionSet(crate::events::SubscriptionSet {
-                    topics: StringSet::from_iter([topic("release.main")]),
-                }),
-                [],
-            ),
-        );
-
-        // bob has never published a `subscription.set`, so naming bob is not
-        // a stale read -- it is an invention.
-        let err = apply_event(
-            &mut state,
-            &Envelope::new(
-                &alice,
-                1,
-                no_frontier(),
-                &EventData::BroadcastPublished(broadcast(
-                    epoch.id.clone(),
-                    crate::common::AudienceSelector::TopicSubscribers(topic("release.main")),
-                    &[&carol, &bob],
-                    crate::common::AckRequirement::None,
-                )),
-                [],
-            ),
-        )
-        .expect_err("a never-subscribed agent may not be named in the snapshot");
-        assert!(err.to_string().contains("bob"), "{err}");
-    }
-
     /// A reviewer's own `review.merged` racing a coordinator's
     /// `review.merge_reconciled` for the same authorization must not make the
     /// bus unreducible.
@@ -9100,11 +8915,13 @@ mod tests {
     /// issue-first returned `Err`. With no per-event isolation in `reduce`,
     /// that `Err` is every host unable to reduce the bus at all.
     ///
-    /// Section 10's policy is right and is not weakened: it is asked against
-    /// the issues this authorization actually observed, which is the whole
-    /// difference between the case here and
-    /// `an_authorization_that_observed_its_blocking_issue_is_still_refused`.
-    /// The two are a pair and should be read together.
+    /// Section 10's policy is not weakened, it is asked where it can be
+    /// answered honestly -- at publication
+    /// (`coordinator::verify_review_merge_authorized`) and at the gate
+    /// (`merge_ready::check_merge_ready`), both against a fully-reduced
+    /// state. See
+    /// `reduction_never_consults_a_blocking_issue_whatever_the_names_or_fetch_state`
+    /// for why reduction itself cannot.
     #[test]
     fn an_issue_blocking_a_chain_does_not_make_a_published_authorization_fatal() {
         let build = |issue_first: bool| {
@@ -9189,98 +9006,6 @@ mod tests {
             format!("{:#?}", issue_first.reviews),
             "the two valid orders must converge on the same review state"
         );
-    }
-
-    /// The concession above is causal, not blanket: a reviewer whose own
-    /// observed frontier already contains the blocking issue is still
-    /// refused (g-reviewer:64, e-reviewer:113).
-    ///
-    /// Here every valid linear extension puts the issue before the
-    /// authorization -- the reviewer says so itself -- so refusing is both
-    /// total and confluent, and section 10's rule survives at publication
-    /// time rather than being demoted to a merge-ready-only check.
-    #[test]
-    fn an_authorization_that_observed_its_blocking_issue_is_still_refused() {
-        let mut state = empty_state(&[
-            ("alice", Role::Implementor),
-            ("bob", Role::Reviewer),
-            ("carol", Role::Implementor),
-        ]);
-        let (alice, bob, carol) = (a("alice"), a("bob"), a("carol"));
-        apply_ok(&mut state, &register(&alice, Role::Implementor));
-        apply_ok(&mut state, &register(&bob, Role::Reviewer));
-        apply_ok(&mut state, &register(&carol, Role::Implementor));
-        let (nominate_env, _accept) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
-        let epoch = state.roster_epoch.as_ref().unwrap().clone();
-
-        let mut issue_data = match open_issue(&carol, 1, &alice).typed_data().unwrap() {
-            EventData::IssueOpened(d) => d,
-            _ => unreachable!(),
-        };
-        issue_data.blocks = StringSet::from_iter([nominate_env.id.clone()]);
-        let issue = Envelope::new(
-            &carol,
-            1,
-            frontier_seeing(&[&nominate_env.id]),
-            &EventData::IssueOpened(issue_data),
-            [nominate_env.id.clone()],
-        );
-        let issue_id = issue.id.clone();
-        apply_ok(&mut state, &issue);
-
-        // bob's frontier runs *through* carol's issue this time.
-        let auth = Envelope::new(
-            &bob,
-            2,
-            ObservedFrontier::complete(
-                &epoch,
-                epoch.active_members.keys().map(|agent| FrontierEntry {
-                    agent: agent.clone(),
-                    stream_tip: hash(1),
-                    through: if *agent == alice {
-                        nominate_env.id.clone()
-                    } else if *agent == carol {
-                        issue_id.clone()
-                    } else {
-                        EventId::new(agent, 0)
-                    },
-                }),
-            )
-            .expect("a complete frontier"),
-            &EventData::ReviewMergeAuthorized(merge_authorized(
-                &nominate_env.id,
-                StringSet::default(),
-                &[],
-            )),
-            [nominate_env.id.clone()],
-        );
-        let err = apply_event(&mut state, &auth)
-            .expect_err("an observed blocking issue must still refuse the authorization");
-        let msg = err.to_string();
-        assert!(
-            msg.contains(&issue_id.to_string()) && msg.contains("has observed it"),
-            "the message must name the blocker and say why it is chargeable: {msg}"
-        );
-
-        // And resolving it lifts the refusal, so this is a live check on the
-        // issue's disposition and not a permanent mark against the chain.
-        apply_ok(
-            &mut state,
-            &Envelope::new(
-                &alice,
-                2,
-                frontier_seeing(&[&issue_id]),
-                &EventData::IssueResolved(IssueResolved {
-                    issue: issue_id.clone(),
-                    assignment: issue_id.clone(),
-                    summary: text("fixed"),
-                    fix_commit: None,
-                    verification: vec![],
-                }),
-                [issue_id.clone()],
-            ),
-        );
-        apply_ok(&mut state, &auth);
     }
 
     /// Gates 15/16 for the acknowledge-versus-reassign race: two valid,
@@ -9380,5 +9105,135 @@ mod tests {
             "GATE 15/16: two valid dependency-respecting orders of the same event set must \
              produce identical state"
         );
+    }
+
+    /// Reduction must not consult a blocking issue, because during replay it
+    /// cannot ask the question honestly.
+    ///
+    /// `topological_order` derives its edges from `refs` alone and never
+    /// from `observed`. An authorization references the nomination, not the
+    /// issue that blocks it, so the two are ordered against each other by
+    /// nothing but `EventId`'s lexicographic order -- that is, by the
+    /// agents' *names*. This runs one fixed scenario under two reviewer
+    /// names and both fetch states, and asserts all four reduce.
+    ///
+    /// Before the check moved to publication time, the four rows read:
+    ///   reviewer `bob`, issue fetched     -> Ok  (auth sorts first, never fires)
+    ///   reviewer `bob`, issue not fetched -> Ok
+    ///   reviewer `zed`, issue fetched     -> Err (issue sorts first, fires)
+    ///   reviewer `zed`, issue not fetched -> Ok
+    /// which is the whole outage in one table: a rule that enforced itself
+    /// only for some spellings of an agent's name, and that wedged exactly
+    /// those hosts which had fetched the most.
+    #[test]
+    fn reduction_never_consults_a_blocking_issue_whatever_the_names_or_fetch_state() {
+        // Faithfully reproduces `reduce`'s loop (same `topological_order`,
+        // same apply sequence) but on a state that already has a merge
+        // engine epoch, which only a test shortcut can install.
+        let run = |reviewer_name: &str, include_issue: bool| -> Result<String, String> {
+            let alice = a("alice");
+            let rev = a(reviewer_name);
+            let carol = a("carol");
+            let members: Vec<(&str, Role)> = vec![
+                ("alice", Role::Implementor),
+                (reviewer_name, Role::Reviewer),
+                ("carol", Role::Implementor),
+                ("coord1", Role::Coordinator),
+            ];
+            let mut st = empty_state(&members);
+            let coord1 = a("coord1");
+            let coord1_reg = register(&coord1, Role::Coordinator);
+            let alice_reg = register(&alice, Role::Implementor);
+            let rev_reg = register(&rev, Role::Reviewer);
+            let carol_reg = register(&carol, Role::Implementor);
+            apply_ok(&mut st, &coord1_reg);
+            apply_ok(&mut st, &alice_reg);
+            apply_ok(&mut st, &rev_reg);
+            apply_ok(&mut st, &carol_reg);
+            let (nominate_env, accept_env) = nominate_and_accept(&mut st, &alice, 1, &rev, 1);
+            let epoch = st.roster_epoch.as_ref().unwrap().clone();
+
+            let mut issue_data = match open_issue(&carol, 1, &alice).typed_data().unwrap() {
+                EventData::IssueOpened(d) => d,
+                _ => unreachable!(),
+            };
+            issue_data.blocks = StringSet::from_iter([nominate_env.id.clone()]);
+            let issue = Envelope::new(
+                &carol,
+                1,
+                frontier_seeing(&[&nominate_env.id]),
+                &EventData::IssueOpened(issue_data),
+                [nominate_env.id.clone()],
+            );
+            let auth = Envelope::new(
+                &rev,
+                2,
+                ObservedFrontier::complete(
+                    &epoch,
+                    epoch.active_members.keys().map(|agent| FrontierEntry {
+                        agent: agent.clone(),
+                        stream_tip: hash(1),
+                        through: if *agent == alice {
+                            nominate_env.id.clone()
+                        } else if *agent == carol {
+                            issue.id.clone()
+                        } else {
+                            EventId::new(agent, 0)
+                        },
+                    }),
+                )
+                .expect("a complete frontier"),
+                &EventData::ReviewMergeAuthorized(merge_authorized(
+                    &nominate_env.id,
+                    StringSet::default(),
+                    &[],
+                )),
+                [nominate_env.id.clone()],
+            );
+
+            let mut carol_stream = vec![carol_reg.clone()];
+            if include_issue {
+                carol_stream.push(issue.clone());
+            }
+            let streams: BTreeMap<Agent, Vec<Envelope>> = BTreeMap::from([
+                (alice.clone(), vec![alice_reg.clone(), nominate_env.clone()]),
+                (
+                    rev.clone(),
+                    vec![rev_reg.clone(), accept_env.clone(), auth.clone()],
+                ),
+                (carol.clone(), carol_stream),
+                (coord1.clone(), vec![coord1_reg.clone()]),
+            ]);
+            let order = topological_order(&streams).expect("topo order");
+            let order_str = order
+                .iter()
+                .map(|e| e.id.to_string())
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            // Replay onto a state carrying only the merge-engine setup.
+            let mut replay = empty_state(&members);
+            replay.current_merge_engine_epoch = st.current_merge_engine_epoch.clone();
+            replay.merge_engine_info = st.merge_engine_info.clone();
+            for env in order {
+                if let Err(e) = apply_event(&mut replay, env) {
+                    return Err(format!("[{order_str}] FAILED at {}: {e}", env.id));
+                }
+                replay.kind_of_event_insert(env.id.clone(), &env.kind);
+                replay.events.insert(env.id.clone(), env.clone());
+                if let Some(ag) = replay.agents.get_mut(&env.agent) {
+                    ag.next_seq = ag.next_seq.max(env.seq + 1);
+                }
+            }
+            Ok(format!("[{order_str}] OK"))
+        };
+
+        for name in ["bob", "zed"] {
+            for include in [true, false] {
+                if let Err(m) = run(name, include) {
+                    panic!("reduction must not depend on agent naming or fetch state (reviewer={name}, issue fetched={include}): {m}");
+                }
+            }
+        }
     }
 }

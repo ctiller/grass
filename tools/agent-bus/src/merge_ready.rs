@@ -418,9 +418,9 @@ mod tests {
             accepted_nominations,
             decline_or_withdraw_or_reassign_status: ItemStatus::Open,
             findings: findings_map,
-            authorizations: vec![],
-            merged: vec![],
-            reconciled: vec![],
+            authorizations: Default::default(),
+            merged: Default::default(),
+            reconciled: Default::default(),
         };
         state.reviews.insert(nomination.clone(), chain);
         register_active(&mut state, reviewer, crate::events::Role::Reviewer);
@@ -468,7 +468,7 @@ mod tests {
             .review_chain_mut(&nomination)
             .unwrap()
             .authorizations
-            .push(auth_id.clone());
+            .insert(auth_id.clone());
 
         (state, nomination, auth_id)
     }
@@ -501,8 +501,6 @@ mod tests {
                 progress_tail: vec![],
                 next_seq: 1,
                 subscribed_topics: crate::scalars::StringSet::default(),
-                subscribed_topics_at: None,
-                scope_at: None,
             },
         );
     }
@@ -876,9 +874,9 @@ mod tests {
             accepted_nominations,
             decline_or_withdraw_or_reassign_status: ItemStatus::Open,
             findings: BTreeMap::new(),
-            authorizations: vec![],
-            merged: vec![],
-            reconciled: vec![],
+            authorizations: Default::default(),
+            merged: Default::default(),
+            reconciled: Default::default(),
         };
         state.reviews.insert(nomination.clone(), chain);
         register_active(&mut state, reviewer, crate::events::Role::Reviewer);
@@ -919,7 +917,7 @@ mod tests {
             .review_chain_mut(&nomination)
             .unwrap()
             .authorizations
-            .push(auth_id.clone());
+            .insert(auth_id.clone());
         (state, auth_id)
     }
 
