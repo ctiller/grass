@@ -14,6 +14,7 @@ param(
         "Grass.ObservationProjection.comp_assoc",
         "Grass.RelationalSystem.Steps.trans",
         "Grass.RelationalSystem.Steps.graphExtends",
+        "Grass.RelationalSystem.InfiniteContinuation.ext",
         "Grass.RelationalSystem.Runs.initialValid",
         "Grass.RelationalSystem.Runs.steps",
         "Grass.RelationalSystem.Runs.ofInitialSteps",
@@ -29,7 +30,11 @@ param(
         "Grass.BehaviorRefinement.trans_assoc",
         "Grass.BehaviorRefinement.mapSteps",
         "Grass.BehaviorRefinement.mapInfinite",
+        "Grass.BehaviorRefinement.mapInfinite_refl",
+        "Grass.BehaviorRefinement.mapInfinite_trans",
         "Grass.BehaviorRefinement.mapCompletion",
+        "Grass.BehaviorRefinement.mapCompletion_refl",
+        "Grass.BehaviorRefinement.mapCompletion_trans",
         "Grass.BehaviorRefinement.mapRuns",
         "Grass.BehaviorRefinement.mapPrefix_refl",
         "Grass.BehaviorRefinement.mapPrefix_trans",
@@ -46,6 +51,8 @@ param(
         "Grass.VerifiedProgram.sound",
         "Grass.VerifiedProgram.execution_nonempty",
         "Grass.VerifiedProgram.execution_completes",
+        "Grass.VerifiedProgram.CompletionRefinement",
+        "Grass.VerifiedProgram.completion_refinement_nonempty",
         "Grass.emitProgram_parses"
     ),
     [string[]]$AllowedAxiom = @(

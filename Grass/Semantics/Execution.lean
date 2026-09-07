@@ -72,6 +72,25 @@ structure InfiniteContinuation {Event : Type u} (system : RelationalSystem Event
     (choiceAt index) (eventAt index) (stateAt (index + 1)) (graphAt (index + 1))
   consistent : system.InfiniteConsistent priorEvents stateAt graphAt choiceAt eventAt
 
+/-- Infinite continuations are determined by their state, graph, choice, and
+event streams; all coherence fields are proof-irrelevant. -/
+@[ext]
+theorem InfiniteContinuation.ext {Event : Type u}
+    {system : RelationalSystem Event} {state : system.State}
+    {graph : system.Graph} {priorEvents : List Event}
+    {left right : system.InfiniteContinuation state graph priorEvents}
+    (stateAt : left.stateAt = right.stateAt)
+    (graphAt : left.graphAt = right.graphAt)
+    (choiceAt : left.choiceAt = right.choiceAt)
+    (eventAt : left.eventAt = right.eventAt) : left = right := by
+  cases left
+  cases right
+  cases stateAt
+  cases graphAt
+  cases choiceAt
+  cases eventAt
+  rfl
+
 /-- A genuine finite-terminal or trace-aware infinite continuation from a
 frontier. -/
 inductive Completion {Event : Type u} (system : RelationalSystem Event)
