@@ -37,6 +37,15 @@ frontier, or the following lower-level relational escape hatch for transitions
 which issue or resolve several effects together:
 
 ```lean
+inductive DirectIssuance (Initial : ...) (Step : ...) where
+  | initial (...)
+  | step (...)
+
+structure DirectIssueOccurrence (Initial : ...) (Step : ...) where
+  issuance : DirectIssuance Initial Step
+  demand : EffectDemand boundary
+  slot : Fin (issuance.issued.count demand)
+
 structure DirectRelationalProgram (boundary : DriverBoundary) where
   State Request TerminalResult : Type
   Initial : Request -> State ->
@@ -48,11 +57,13 @@ structure DirectRelationalProgram (boundary : DriverBoundary) where
   Pending : State -> AbstractDemandBag (EffectDemand boundary)
   initialEquation : EveryInitialOutputEqualsPending Initial Pending
   transitionEquation : EveryStepHasExactConsumedIssuedPendingEquation Step Pending
-  binding : forall occurrence,
-    occurrence \u2208 DynamicOccurrences Initial Step ->
+  binding : forall occurrence : DirectIssueOccurrence Initial Step,
     ExactSiteProtocolAndChildBinding occurrence
   terminal : Request -> State -> TerminalResult -> Prop
   terminalDisposition : EveryTerminalStateClassifiesEveryPendingOccurrence
+
+abbrev DynamicOccurrence (program : DirectRelationalProgram boundary) :=
+  DirectIssueOccurrence program.Initial program.Step
 
 opaque DirectProgramDerivation
     (boundaryCertificate : CertifiedDriverBoundary boundary)
@@ -63,6 +74,25 @@ theorem DirectProgramDerivation.operationOrigins_exact ...
 theorem DirectProgramDerivation.operationOrigins_contained ...
 theorem DirectProgramDerivation.operationOrigins_aggregateExact ...
 theorem DirectProgramDerivation.connectsExactly ...
+
+opaque DirectOperationModelOwner : Type
+opaque OwnerIssuedDirectOperationModel
+    (owner : DirectOperationModelOwner)
+    (boundaryCertificate : CertifiedDriverBoundary boundary)
+    (program : DirectRelationalProgram boundary) : Type
+opaque RegisteredDirectOperationModel
+    (boundaryCertificate : CertifiedDriverBoundary boundary)
+    (program : DirectRelationalProgram boundary) : Type
+def RegisteredDirectOperationModel.register
+    (issued : OwnerIssuedDirectOperationModel owner boundaryCertificate program)
+    (requiresExact : OwnerModelRequirementsAreExact issued)
+    (contained : OwnerModelRequirementsStayInsideBoundary issued)
+    (aggregateExact : OwnerModelAggregateRequirementsAreExact issued)
+    (connects : OwnerModelConnectsExactProgramAndBoundary issued) :
+    RegisteredDirectOperationModel boundaryCertificate program
+def DirectProgramDerivation.certify
+    (model : RegisteredDirectOperationModel boundaryCertificate program) :
+    DirectProgramDerivation boundaryCertificate program
 
 structure CertifiedDirectProgram
     (boundary : DriverBoundary)
@@ -98,7 +128,12 @@ The provider-demand family is the conservative certified-boundary envelope.
 Every dynamic occurrence's possibly empty or multi-origin subfamily is
 `program.derivation.operationOrigins occurrence`: a function of the opaque
 derivation and exact occurrence, not merely its dependent demand and not caller-
-populated evidence. `operationOrigins_exact`, `operationOrigins_contained`, and
+populated evidence. The derivation is constructible only from an opaque
+owner-issued operation model whose registration proves exact requirement
+meaning, containment, aggregate exactness, and connection to the raw program;
+the factory derives origins by filtering the certified boundary. An arbitrary
+`Requires := False` predicate is not a construction input.
+`operationOrigins_exact`, `operationOrigins_contained`, and
 `operationOrigins_aggregateExact` connect it respectively to that occurrence's
 selected lower path, the conservative boundary, and the exact aggregate of used
 lower requirements. Thus two equal logical demands may choose different
@@ -136,9 +171,10 @@ when two demands have equal payloads.
 
 For a direct internal step, the root makes the corresponding process step and
 the occurrence map is unchanged. For an effect issue, the adapter allocates one
-fresh occurrence, inserts one child and escrow, and the demand-bag equation
+fresh monotone epoch for every multiplicity-indexed
+`DirectIssueOccurrence.slot`, inserts one child and escrow, and the demand-bag equation
 follows by multiset insertion. For a result, interruption, failure, or
-cancellation resolution, it consumes the exact occurrence and uses that
+cancellation resolution, it consumes the exact live epoch/slot token and uses that
 standard child protocol's result projection. A transition may consume a result
 and issue further demands in the same step; `transitionEquation` gives the
 single exact bag equation relating consumed, issued, and before/after
@@ -146,6 +182,9 @@ single exact bag equation relating consumed, issued, and before/after
 simulation plus `terminalDisposition` for the live map. Induction gives every finite prefix. The supplied complete-execution
 coverage and a standard coinductive lifting give infinite, divergent, pending,
 fault, and terminal shapes.
+The token is realization-private: erasure counts live tokens by demand to obtain
+the precious bag. A completion carrying the epoch of a different equal-valued
+demand is rejected locally, and completed epochs are never reused.
 
 For a law-bearing operation which exposes observations while still pending, the
 adapter state additionally retains its exact rooted history. A pending-progress
@@ -207,6 +246,11 @@ demand values issued as distinct occurrences; an initially pending demand; an
 issue followed by cancellation; and a result consumption plus new issue in one
 transition. Mutating any issued/consumed multiplicity or dependent child binding
 must break the local bag equation rather than a later global theorem.
+The duplicate-demand fixture completes one exact epoch and proves the other
+remains live; substituting its sibling's epoch or replaying the completed epoch
+must fail locally. A registered provider-using operation fixture must also fail
+when its owner-derived requirement predicate is replaced by `False`, before a
+`DirectProgramDerivation` can be constructed.
 Another fixture uses one streaming wait whose history emits a byte before its
 result: the general adapter must expose that prefix without consuming the
 occurrence, while selecting the atomic pending model must fail.

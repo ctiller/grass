@@ -621,6 +621,14 @@ structure SomeProviderDemand where
   authority : RequirementAuthority
   demand : ProviderDemand authority
 
+opaque SameRequirementOriginProvenance
+    (left right : SomeProviderDemand) : Prop
+theorem SameRequirementOriginProvenance.refl
+    (demand : SomeProviderDemand) : SameRequirementOriginProvenance demand demand
+theorem SameRequirementOriginProvenance.symm ...
+theorem SameRequirementOriginProvenance.trans ...
+theorem SameRequirementOriginProvenance.reindex ...
+
 inductive RequirementAuthorityId
   | builtin (owner : BuiltinRequirementAuthority)
   | extension (key : StableId)
@@ -633,6 +641,9 @@ structure ProviderDemandView where
 def ProviderDemand.view : ProviderDemand authority -> ProviderDemandView
 def SomeProviderDemand.view : SomeProviderDemand -> ProviderDemandView
 theorem ProviderDemand.reindex_view ...
+theorem SameRequirementOriginProvenance.viewExact
+    (same : SameRequirementOriginProvenance left right) :
+    left.view = right.view
 
 opaque ProviderDemandFamily : Type
 
@@ -648,6 +659,12 @@ def ProviderDemandFamily.lookupView
 theorem ProviderDemandFamily.lookup_exact ...
 theorem ProviderDemandFamily.lookupView_exact ...
 theorem ProviderDemandFamily.lookup_extension_registered ...
+def OriginsDisjointOrSameOriginProvenance
+    (left right : ProviderDemandFamily) : Prop :=
+  forall origin leftDemand rightDemand,
+    left.lookup origin = some leftDemand ->
+    right.lookup origin = some rightDemand ->
+    SameRequirementOriginProvenance leftDemand rightDemand
 structure ProviderDemandFamily.ExtEq
     (left right : ProviderDemandFamily) : Prop where
   sameOrigins : left.origins = right.origins
@@ -682,15 +699,45 @@ theorem ProviderDemandFamily.AuthorityEquiv.trans ...
 theorem ProviderDemandFamily.AuthorityEquiv.transportCompatibility
     (left : firstLeft.AuthorityEquiv secondLeft)
     (right : firstRight.AuthorityEquiv secondRight)
-    (compatible : OriginsDisjointOrDescriptorsExact firstLeft firstRight) :
-    OriginsDisjointOrDescriptorsExact secondLeft secondRight
+    (compatible : OriginsDisjointOrSameOriginProvenance firstLeft firstRight) :
+    OriginsDisjointOrSameOriginProvenance secondLeft secondRight
 theorem ProviderDemandFamily.AuthorityEquiv.union
     (left : firstLeft.AuthorityEquiv secondLeft)
     (right : firstRight.AuthorityEquiv secondRight)
-    (firstCompatible : OriginsDisjointOrDescriptorsExact firstLeft firstRight) :
+    (firstCompatible : OriginsDisjointOrSameOriginProvenance firstLeft firstRight) :
     (firstLeft.union firstRight firstCompatible).AuthorityEquiv
       (secondLeft.union secondRight
         (left.transportCompatibility right firstCompatible))
+
+def ExactlyOneOf (left right : Prop) : Prop :=
+  (left ∨ right) ∧ ¬ (left ∧ right)
+
+structure ExactAuthorityRespectingRequirementDisposition
+    (demands : ProviderDemandFamily) (provider : ProviderBindingView) where
+  IsForwarded : (origin : RequirementOriginId) ->
+    (view : ProviderDemandView) -> Prop
+  classification : forall origin demand,
+    demands.lookupView origin = some demand ->
+      ExactlyOneOf
+        (DemandDischargedByItsOwningProvider origin demand provider)
+        (IsForwarded origin demand)
+  exactForwardedFamily : ProviderDemandFamily
+  forwardedExact : forall origin demand,
+    exactForwardedFamily.lookupView origin = some demand <->
+      demands.lookupView origin = some demand /\ IsForwarded origin demand
+  authorityPreserved : EveryForwardedLookupRetainsExactOriginOwnerAndDescriptor
+    demands exactForwardedFamily IsForwarded
+
+def ProviderDemandFamily.AuthorityEquiv.transportDisposition
+    (equivalent : left.AuthorityEquiv right)
+    (disposition : ExactAuthorityRespectingRequirementDisposition left provider) :
+    ExactAuthorityRespectingRequirementDisposition right provider
+
+theorem ProviderDemandFamily.AuthorityEquiv.transportDisposition_forwardedExact
+    (equivalent : left.AuthorityEquiv right)
+    (disposition : ExactAuthorityRespectingRequirementDisposition left provider) :
+    (equivalent.transportDisposition disposition).exactForwardedFamily.AuthorityEquiv
+      disposition.exactForwardedFamily
 theorem ProviderDemandFamily.ext_sameRegistry
     (sameRegistry : left.authorityRegistry = right.authorityRegistry)
     (sameOrigins : left.origins = right.origins)
@@ -704,7 +751,7 @@ def ProviderDemandFamily.ofScope
     (descriptor : scope.Slot -> ProviderDemandDescriptor) : ProviderDemandFamily
 def ProviderDemandFamily.union
     (left right : ProviderDemandFamily)
-    (compatible : OriginsDisjointOrDescriptorsExact left right) :
+    (compatible : OriginsDisjointOrSameOriginProvenance left right) :
     ProviderDemandFamily
 def ProviderDemandFamily.reindex
     (family : ProviderDemandFamily)
@@ -729,10 +776,10 @@ def ProviderDemandFamily.reindexTo
 theorem ProviderDemandFamily.union_assoc_coherent
     (plan : ExtensionAuthorityUnionPlan [leftRegistry, middleRegistry, rightRegistry]
       pairwiseCompatibility)
-    (leftMiddle : OriginsDisjointOrDescriptorsExact left middle)
-    (middleRight : OriginsDisjointOrDescriptorsExact middle right)
-    (leftMiddleRight : OriginsDisjointOrDescriptorsExact (left.union middle leftMiddle) right)
-    (leftMiddleRight' : OriginsDisjointOrDescriptorsExact left (middle.union right middleRight)) :
+    (leftMiddle : OriginsDisjointOrSameOriginProvenance left middle)
+    (middleRight : OriginsDisjointOrSameOriginProvenance middle right)
+    (leftMiddleRight : OriginsDisjointOrSameOriginProvenance (left.union middle leftMiddle) right)
+    (leftMiddleRight' : OriginsDisjointOrSameOriginProvenance left (middle.union right middleRight)) :
     ProviderDemandFamily.reindexTo plan
         ((left.union middle leftMiddle).union right leftMiddleRight)
         (leftMiddleRight.nestedAuthoritiesContained pairwiseCompatibility) =
@@ -766,7 +813,7 @@ Reindexing is functorial across scopes, demands, and families: identity is
 extensionally identity, successive embeddings equal their composition, and the
 two associations of a three-registry family union are transported into the
 same canonical three-way `ExtensionAuthorityUnionPlan`.
-`union_assoc_coherent` consumes every descriptor-compatibility witness and
+`union_assoc_coherent` consumes every same-origin-provenance compatibility witness and
 proves equality there; no `Classical.choice`, proof-irrelevant registry cast, or ad hoc
 rewriting of dependent statements is part of the public construction.
 The normalized registry uses the finite subtype of stable keys occurring in the
@@ -841,6 +888,13 @@ larger storage registries cannot block certificate-DAG composition.
 Owner-specific disposition, forwarding, sharding, and final closure use
 `AuthorityEquiv`; bare `ExtEq` is only for semantic predicates already proved
 insensitive to registry representation.
+`transportDisposition` uses the dependent lookup correspondence to transport
+each discharge/forward classification, then constructs the forwarded family
+from exactly the transported forwarded members. Its
+`transportDisposition_forwardedExact` theorem is the mandatory bridge to the
+original forwarded family. A final certificate may not consume a disposition
+over a compact summary without composing this theorem back to the exact origin
+family.
 This prevents a well-typed requirement predicate from changing truth
 merely because composition embeds its extension into a larger registry.
 
@@ -871,8 +925,9 @@ representation is hidden. Its public equality is extensional over `lookup`, and
 serialization alone chooses canonical order. `union` retains repeated capability
 keys, composes the participating extension registries through checked
 embeddings, and requires a proof that origin scopes are disjoint or that equal
-origin IDs carry the same embedded authority identity and
-definitionally/theoremically exact descriptors. Standard
+origin IDs carry `SameRequirementOriginProvenance`. That opaque witness retains
+the originating scope/slot and authority path as well as the exact descriptor;
+descriptor equality alone cannot construct it. Standard
 hierarchical scopes derive this proof automatically; a collision is rejected at
 construction rather than leaving an `Except` inside a claimed total envelope.
 
