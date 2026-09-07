@@ -438,4 +438,64 @@ theorem high_not_encodable_with_rex (r : Gpr) :
 
 end ByteReg
 
+/-! ## The XMM register file
+
+Separate from `Gpr` rather than a widening of it. They are a different register
+file with their own numbering, and the one place this slice needs them --
+`UWOP_SAVE_XMM128` in `Grass.ABI.Win64` -- stores an XMM number in a field that
+would otherwise hold a general-purpose one, so a type able to hold either would
+make the wrong one writable.
+-/
+
+/-- An XMM register, `xmm0` to `xmm15`.
+
+Only the numbering is modelled. Nothing here describes the 128-bit lanes or any
+operation on them: the sole consumer is the Win64 unwind encoding, which needs
+the register's number and nothing else. -/
+inductive Xmm where
+  /-- Register 0. -/ | xmm0
+  /-- Register 1. -/ | xmm1
+  /-- Register 2. -/ | xmm2
+  /-- Register 3. -/ | xmm3
+  /-- Register 4. -/ | xmm4
+  /-- Register 5. -/ | xmm5
+  /-- Register 6. The first callee-saved XMM register under the Win64
+  convention, and so the first one a prologue has cause to save. -/ | xmm6
+  /-- Register 7. -/ | xmm7
+  /-- Register 8. -/ | xmm8
+  /-- Register 9. -/ | xmm9
+  /-- Register 10. -/ | xmm10
+  /-- Register 11. -/ | xmm11
+  /-- Register 12. -/ | xmm12
+  /-- Register 13. -/ | xmm13
+  /-- Register 14. -/ | xmm14
+  /-- Register 15. -/ | xmm15
+deriving DecidableEq, Repr, Inhabited
+
+namespace Xmm
+
+/-- Every XMM register, in numerical order. -/
+def all : List Xmm :=
+  [.xmm0, .xmm1, .xmm2, .xmm3, .xmm4, .xmm5, .xmm6, .xmm7,
+   .xmm8, .xmm9, .xmm10, .xmm11, .xmm12, .xmm13, .xmm14, .xmm15]
+
+/-- The register's architectural encoding number, 0-15. -/
+def index : Xmm → Fin 16
+  | .xmm0 => 0 | .xmm1 => 1 | .xmm2 => 2 | .xmm3 => 3
+  | .xmm4 => 4 | .xmm5 => 5 | .xmm6 => 6 | .xmm7 => 7
+  | .xmm8 => 8 | .xmm9 => 9 | .xmm10 => 10 | .xmm11 => 11
+  | .xmm12 => 12 | .xmm13 => 13 | .xmm14 => 14 | .xmm15 => 15
+
+/-- `all` holds sixteen registers. -/
+theorem all_length : all.length = 16 := by decide
+
+/-- `all` omits none of them, so a corpus walking `all` walks the file. -/
+theorem mem_all (r : Xmm) : r ∈ all := by cases r <;> decide
+
+/-- Distinct registers have distinct numbers, so `index` names one uniquely. -/
+theorem index_injective {a b : Xmm} (h : a.index = b.index) : a = b := by
+  cases a <;> cases b <;> simp_all [index]
+
+end Xmm
+
 end Grass.ISA.X86

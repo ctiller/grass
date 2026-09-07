@@ -128,12 +128,22 @@ The slots this operation occupies, as bytes.
 
 The first slot is always `CodeOffset` then the packed `UnwindOp`/`OpInfo` byte.
 `allocLarge` with `OpInfo = 0` follows it with the size scaled by eight, as a
-little-endian 16-bit value in the next slot.
+little-endian 16-bit value in the next slot. `saveNonvolatile` follows it with
+its offset scaled by eight the same way, and `saveXmm128` with its offset scaled
+by *sixteen* -- the divisor differs because the saved value is sixteen bytes
+wide, and getting it wrong would place a restore at four times the intended
+displacement.
 -/
 def toBytes : PlacedOp → ByteSeq
   | ⟨.allocLarge n, off⟩ =>
       [off, (UnwindOp.allocLarge n).opInfo ++ (UnwindOp.allocLarge n).opcode] ++
         le16 (BitVec.ofNat 16 (n / 8))
+  | ⟨.saveNonvolatile r n, off⟩ =>
+      [off, (UnwindOp.saveNonvolatile r n).opInfo ++
+        (UnwindOp.saveNonvolatile r n).opcode] ++ le16 (BitVec.ofNat 16 (n / 8))
+  | ⟨.saveXmm128 r n, off⟩ =>
+      [off, (UnwindOp.saveXmm128 r n).opInfo ++
+        (UnwindOp.saveXmm128 r n).opcode] ++ le16 (BitVec.ofNat 16 (n / 16))
   | ⟨op, off⟩ => [off, op.opInfo ++ op.opcode]
 
 /--
@@ -150,6 +160,8 @@ unwinder would read whatever follows `.xdata` as unwind codes.
   | ⟨.pushNonvolatile _, _⟩ => simp [toBytes, UnwindOp.slots]
   | ⟨.allocSmall _, _⟩ => simp [toBytes, UnwindOp.slots]
   | ⟨.setFramePointer _ _, _⟩ => simp [toBytes, UnwindOp.slots]
+  | ⟨.saveNonvolatile _ _, _⟩ => simp [toBytes, UnwindOp.slots, le16]
+  | ⟨.saveXmm128 _ _, _⟩ => simp [toBytes, UnwindOp.slots, le16]
 
 /-- The first byte written is the code offset. -/
 theorem toBytes_head (p : PlacedOp) : p.toBytes.head? = some p.codeOffset := by
@@ -158,6 +170,8 @@ theorem toBytes_head (p : PlacedOp) : p.toBytes.head? = some p.codeOffset := by
   | ⟨.pushNonvolatile _, _⟩ => rfl
   | ⟨.allocSmall _, _⟩ => rfl
   | ⟨.setFramePointer _ _, _⟩ => rfl
+  | ⟨.saveNonvolatile _ _, _⟩ => rfl
+  | ⟨.saveXmm128 _ _, _⟩ => rfl
 
 end PlacedOp
 

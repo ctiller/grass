@@ -115,6 +115,19 @@ inductive UnwindOp where
   `Grass.ABI.Win64.UnwindInfo.framePointerAgrees` demand that the header field
   and every establishing instruction name the same register. -/
   | setFramePointer (r : Gpr) (offset : Nat)
+  /-- `UWOP_SAVE_NONVOL` (4): `mov [RSP+n], reg`, saving a nonvolatile register
+  without pushing it. `OpInfo` is the register number, and one extra slot holds
+  `n/8` as a little-endian 16-bit value.
+
+  This and `saveXmm128` are how a compiler-generated prologue saves registers
+  after allocating its frame, rather than by pushing before it. `ml64`'s
+  `.savereg` directive emits it. -/
+  | saveNonvolatile (r : Gpr) (offset : Nat)
+  /-- `UWOP_SAVE_XMM128` (8): `movaps [RSP+n], xmm`. `OpInfo` is the XMM
+  register number, and one extra slot holds `n/16` -- scaled by sixteen, not
+  eight, because the saved value is sixteen bytes wide. `ml64`'s `.savexmm128`
+  directive emits it. -/
+  | saveXmm128 (r : Xmm) (offset : Nat)
 deriving DecidableEq, Repr, Inhabited
 
 namespace UnwindOp
@@ -125,6 +138,8 @@ def opcode : UnwindOp → BitVec 4
   | .allocLarge _ => 1
   | .allocSmall _ => 2
   | .setFramePointer _ _ => 3
+  | .saveNonvolatile _ _ => 4
+  | .saveXmm128 _ _ => 8
 
 /--
 How many two-byte slots this operation occupies in the `UNWIND_CODE` array.
@@ -139,6 +154,8 @@ def slots : UnwindOp → Nat
   | .allocSmall _ => 1
   | .allocLarge _ => 2
   | .setFramePointer _ _ => 1
+  | .saveNonvolatile _ _ => 2
+  | .saveXmm128 _ _ => 2
 
 /-- Every operation occupies at least one slot. -/
 theorem slots_pos (op : UnwindOp) : 0 < op.slots := by
@@ -150,6 +167,10 @@ def stackDelta : UnwindOp → Nat
   | .allocSmall n => n
   | .allocLarge n => n
   | .setFramePointer _ _ => 0
+  -- A save writes through `RSP` without moving it: the space was already
+  -- reserved by whichever allocation precedes it.
+  | .saveNonvolatile _ _ => 0
+  | .saveXmm128 _ _ => 0
 
 /-- The `OpInfo` nibble.
 
@@ -186,6 +207,8 @@ def opInfo : UnwindOp → BitVec 4
   | .allocSmall n => BitVec.ofNat 4 (n / 8 - 1)
   | .allocLarge _ => 0
   | .setFramePointer r _ => regNibble r
+  | .saveNonvolatile r _ => regNibble r
+  | .saveXmm128 r _ => BitVec.ofNat 4 r.index.val
 
 /--
 The allocation sizes `allocSmall` can encode: multiples of 8 from 8 to 128.
@@ -229,6 +252,12 @@ def Encodable : UnwindOp → Prop
   | .allocLarge n => LargeAllocEncodable n
   | .setFramePointer r off =>
       volatility r = .nonvolatile ∧ r ≠ .rsp ∧ off % 16 = 0 ∧ off ≤ 240
+  | .saveNonvolatile r off =>
+      volatility r = .nonvolatile ∧ r ≠ .rsp ∧ off % 8 = 0 ∧ off / 8 < 65536
+  | .saveXmm128 r off =>
+      -- `xmm0`-`xmm5` are volatile under Win64, so saving one in unwind data
+      -- describes a restore the unwinder must not perform.
+      6 ≤ r.index.val ∧ off % 16 = 0 ∧ off / 16 < 65536
 
 instance (op : UnwindOp) : Decidable op.Encodable := by
   cases op <;> unfold Encodable <;> infer_instance
@@ -426,6 +455,8 @@ theorem frameSpecIs_iff (p : Prologue) (reg offset : BitVec 4) :
     | .pushNonvolatile _ => rfl
     | .allocSmall _ => rfl
     | .allocLarge _ => rfl
+    | .saveNonvolatile _ _ => rfl
+    | .saveXmm128 _ _ => rfl
 
 /-- A register other than `RAX` has a nonzero four-bit number. `RAX` is 0, and 0
 is how `UNWIND_INFO.FrameRegister` spells "no frame pointer". -/

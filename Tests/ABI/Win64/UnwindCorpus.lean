@@ -51,7 +51,7 @@ ledger's owed column rather than in a comment claiming coverage.
 namespace Grass.Tests.ABI.Win64.Unwind
 
 open Grass.ISA.X86 Grass.ABI.Win64 Grass.Std.Logical
-open Grass.Tests.ISA.X86.Corpus (hexBytes nasmName)
+open Grass.Tests.ISA.X86.Corpus (hexBytes nasmName xmmName)
 
 /--
 One step of a prologue: an instruction plus the unwind directive describing it.
@@ -67,6 +67,10 @@ inductive Step where
   | alloc (n : Nat)
   /-- Establish a frame register at `rsp + off`, with `.setframe r, off`. -/
   | setFrame (r : Gpr) (off : Nat)
+  /-- `mov [rsp+off], r`, with `.savereg r, off`. -/
+  | saveReg (r : Gpr) (off : Nat)
+  /-- `movaps [rsp+off], xmm`, with `.savexmm128 xmm, off`. -/
+  | saveXmm (r : Xmm) (off : Nat)
 deriving Repr
 
 namespace Step
@@ -77,12 +81,18 @@ def instr : Step → String
   | .alloc n => "sub rsp, " ++ toString n
   | .setFrame r 0 => "mov " ++ nasmName r ++ ", rsp"
   | .setFrame r off => "lea " ++ nasmName r ++ ", [rsp+" ++ toString off ++ "]"
+  | .saveReg r off =>
+      "mov QWORD PTR [rsp+" ++ toString off ++ "], " ++ nasmName r
+  | .saveXmm r off =>
+      "movaps XMMWORD PTR [rsp+" ++ toString off ++ "], " ++ xmmName r
 
 /-- The unwind directive that must follow it. -/
 def directive : Step → String
   | .push r => ".pushreg " ++ nasmName r
   | .alloc n => ".allocstack " ++ toString n
   | .setFrame r off => ".setframe " ++ nasmName r ++ ", " ++ toString off
+  | .saveReg r off => ".savereg " ++ nasmName r ++ ", " ++ toString off
+  | .saveXmm r off => ".savexmm128 " ++ xmmName r ++ ", " ++ toString off
 
 /--
 The instruction's length in bytes.
@@ -105,6 +115,19 @@ def length : Step → Nat
   | .alloc n => if n ≤ 127 then 4 else 7
   | .setFrame _ 0 => 3
   | .setFrame _ off => if off ≤ 127 then 5 else 8
+  -- Both save lengths are read off `ml64`'s own `SizeOfProlog` rather than
+  -- counted from a manual, and the differential is what keeps them honest.
+  --
+  -- `mov [rsp+off], r64` is `REX.W` plus opcode plus ModRM plus SIB -- the SIB
+  -- is forced because the base is `rsp` -- and then a displacement, which is
+  -- absent at zero, one byte to 127, and four beyond. `REX` is already present
+  -- for the operand size, so `r8`-`r15` cost nothing extra.
+  | .saveReg _ off => 4 + (if off = 0 then 0 else if off ≤ 127 then 1 else 4)
+  -- `movaps [rsp+off], xmm` has no `REX` unless the register needs `REX.R`,
+  -- and is otherwise `0F 29` plus ModRM plus the forced SIB.
+  | .saveXmm r off =>
+      (if 8 ≤ r.index.val then 5 else 4)
+        + (if off = 0 then 0 else if off ≤ 127 then 1 else 4)
 
 /-- The unwind operation the directive records. `ml64` picks the small form up
 to 128 bytes, which is exactly `UnwindOp.SmallAllocEncodable`'s range. -/
@@ -112,6 +135,8 @@ def op : Step → UnwindOp
   | .push r => .pushNonvolatile r
   | .alloc n => if n ≤ 128 then .allocSmall n else .allocLarge n
   | .setFrame r off => .setFramePointer r off
+  | .saveReg r off => .saveNonvolatile r off
+  | .saveXmm r off => .saveXmm128 r off
 
 /-- The header nibbles this step establishes, if any. `FrameOffset` is scaled by
 sixteen. -/
@@ -210,6 +235,49 @@ def frameRows : List Row :=
   , rowOf "frame-rbp-240" [.push .rbp, .alloc 256, .setFrame .rbp 240]
   , rowOf "frame-r14-128" [.push .r14, .alloc 144, .setFrame .r14 128] ].reduceOption
 
+/-- `UWOP_SAVE_NONVOL`: a register saved with a `mov` after the frame is
+allocated, rather than pushed before it. Roughly what an optimising compiler
+emits, and the reason this family exists: the corpus previously covered only
+prologues built from pushes.
+
+Every nonvolatile register at a fixed offset, then `rbx` across the
+displacement forms, because `Step.length` claims the `mov` is four bytes at
+offset zero, five to 127 and eight beyond -- three different encodings whose
+lengths position everything after them. -/
+def saveRegRows : List Row :=
+  (pushable.filterMap fun r =>
+    rowOf ("savereg-" ++ nasmName r) [.alloc 64, .saveReg r 8])
+  ++ ([0, 8, 120, 128, 4096].filterMap fun off =>
+    rowOf ("savereg-rbx-at-" ++ toString off)
+      [.alloc (off + 4096), .saveReg .rbx off])
+
+/-- `UWOP_SAVE_XMM128`: an XMM register saved with `movaps`. The offset is
+scaled by *sixteen* in the extra slot rather than eight, and `xmm8`-`xmm15`
+carry a `REX.R` that lengthens the instruction, so both the scaling and the
+length claim are exercised.
+
+Only `xmm6`-`xmm15` appear: `xmm0`-`xmm5` are volatile under Win64, and
+`UnwindOp.Encodable` refuses them because unwind data naming one describes a
+restore the unwinder must not perform. -/
+def saveXmmRows : List Row :=
+  (Xmm.all.filter (fun r => 6 ≤ r.index.val)).filterMap (fun r =>
+    rowOf ("savexmm-" ++ xmmName r) [.alloc 64, .saveXmm r 16])
+  ++ ([0, 16, 112, 128, 4096].filterMap fun off =>
+    rowOf ("savexmm-xmm6-at-" ++ toString off)
+      [.alloc (off + 4096), .saveXmm .xmm6 off])
+
+/-- Saves mixed with the forms that already had coverage, so that a two-slot
+save has to agree on offsets with a push and an allocation on either side. -/
+def mixedSaveRows : List Row :=
+  [ rowOf "push-rbx-alloc-save-rsi"
+      [.push .rbx, .alloc 64, .saveReg .rsi 8]
+  , rowOf "push-rbp-frame-save-xmm6"
+      [.push .rbp, .alloc 96, .setFrame .rbp 0, .saveXmm .xmm6 32]
+  , rowOf "save-both-kinds"
+      [.alloc 128, .saveReg .r12 8, .saveXmm .xmm7 32]
+  , rowOf "push-r15-alloc-large-save-r14"
+      [.push .r15, .alloc 4096, .saveReg .r14 24] ].reduceOption
+
 /-- Spike 1's prologue, as the differential sees it. -/
 def spike1Rows : List Row :=
   [ rowOf "spike1"
@@ -218,7 +286,8 @@ def spike1Rows : List Row :=
 /-- The whole corpus. -/
 def corpus : List Row :=
   singlePushRows ++ pairPushRows ++ smallAllocRows ++ largeAllocRows ++
-    pushAllocRows ++ frameRows ++ spike1Rows
+    pushAllocRows ++ frameRows ++ saveRegRows ++ saveXmmRows ++
+    mixedSaveRows ++ spike1Rows
 
 /-- The Spike 1 row agrees with the theorem in `UnwindBytes.lean`, so the
 differential and the proof are checking the same bytes rather than two

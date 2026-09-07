@@ -104,7 +104,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 100
+def owedBaseline : Nat := 102
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -342,6 +342,13 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    -- The XMM register file's numbering, added for UWOP_SAVE_XMM128. Which
+    -- register is number six is an architectural fact like any other in this
+    -- ledger, and it carries no citation yet: DECISIONS 15 wants the
+    -- Intel/AMD intersection, and the AMD side is unretrievable (see
+    -- `Grass.ISA.X86.Sources`), so an anchor added now could not be confirmed.
+    `Grass.ISA.X86.Xmm.index,
+    `Grass.ISA.X86.Xmm.all,
     -- The Win32 handle and pointer widths. A reviewer of the platform profile
     -- pointed out that these are external ABI facts wearing the clothes of a
     -- project selection: `docs/DECISIONS.md` 16 fixes x64, but it says nothing
