@@ -117,9 +117,21 @@ STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 # `axiom` and `unsafe` stay line-anchored because both are ordinary words; the anchor
 # now steps over attributes and modifiers rather than requiring the keyword first.
 MODIFIER = r"(?:private|protected|noncomputable|scoped|local|partial|opaque|unsafe)"
+# **And after `in`, and at end of line.** The anchor above required the keyword to be
+# the first token on its line after attributes and modifiers, and to be followed by
+# whitespace *on that line*. Review walked past it three more ways: `open Nat in
+# axiom seeded : False`, `set_option maxRecDepth 2000 in axiom ...`, and `axiom` at
+# end of line with the signature wrapped to the next. All three elaborate and all
+# three prove `False`. So the anchor admits a preceding `in` or `;` as well as line
+# start, and ends at a word boundary rather than at whitespace.
+#
+# It stays anchored rather than becoming a bare `\baxiom\b`, because
+# `Tools/AxiomAudit.lean` is itself an exempted file and is *about* axioms -- an
+# unanchored pattern reports the gate that audits them.
 UNTRUSTED = re.compile(
     r"\bsorry(?:Ax)?\b|\bnative_decide\b"
-    r"|^\s*(?:@\[[^\]]*\]\s*)*(?:" + MODIFIER + r"\s+)*(?:axiom|unsafe)\s",
+    r"|(?:^|\bin\s+|;)\s*(?:@\[[^\]]*\]\s*)*"
+    r"(?:" + MODIFIER + r"\s+)*(?:axiom|unsafe)\b",
     re.MULTILINE)
 
 
@@ -227,6 +239,14 @@ def self_test() -> int:
         ("axiom seeded : False", True),
         # The four that got through.
         ("private axiom seeded : False", True),
+        # And review's three from the round after, which the anchor above also let
+        # through: a preceding `open ... in`, a preceding `set_option ... in`, and
+        # the keyword at end of line with the signature wrapped.
+        ("open Nat in axiom seeded : False", True),
+        ("set_option maxRecDepth 2000 in axiom seeded : False", True),
+        ("axiom" + chr(10) + "  seeded : False", True),
+        # A word merely beginning with the keyword is not the keyword.
+        ("theorem t : x = axiomatic := rfl", False),
         ("protected axiom seeded : False", True),
         ("@[simp] axiom seeded : False", True),
         ("private unsafe def f : Nat := 0", True),

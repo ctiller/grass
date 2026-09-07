@@ -145,6 +145,41 @@ claims. -/
 theorem a_range_outside_the_provenance_is_refused :
     ¬ ({ store with range := ⟨0, 4096⟩ } : AccessDescriptor).WellFormedIn space := by decide
 
+/-- The same clause from below. `Contains` is two inequalities and the neighbour above
+exercises one of them: `prov`'s path designates `⟨0, 64⟩`, so a range starting at zero
+satisfies the lower bound however far past the end it reaches.
+
+`pageAtSixteen` moves the field off zero so a range underneath it is outside what the
+provenance claims while lying inside the root. Same clause, other inequality — the shape
+§4.4.1 records for `issue?`, `MayLend` and `denialOf`, swept here rather than found
+here. -/
+def pageAtSixteen : Provenance :=
+  { prov with path := [{ kind := .field, label := ⟨"page"⟩, extent := ⟨16, 48⟩ }] }
+
+/-- It designates the field and descends from the root, so the refusal below is this
+clause and not the nesting one. -/
+theorem the_offset_page_is_nested :
+    pageAtSixteen.extent = ⟨16, 48⟩ ∧ pageAtSixteen.Nested := by
+  exact ⟨by decide, by decide⟩
+
+/-- `rangeInProvenance`, from below. The second conjunct is what makes this the *lower*
+inequality and not the upper one: the range's stop is inside the field's, so an upper
+bound alone would admit it. -/
+theorem a_range_below_the_provenance_is_refused :
+    (⟨0, 8⟩ : ByteRange).stop ≤ pageAtSixteen.extent.stop ∧
+    ¬ ({ store with
+          provenance := pageAtSixteen, range := ⟨0, 8⟩
+          address := .numeric 0x1000 } : AccessDescriptor).WellFormedIn space := by
+  exact ⟨by decide, by decide⟩
+
+/-- And the same descriptor inside the field is well formed, so the refusal is the
+lower bound and not the provenance. -/
+theorem a_range_inside_the_offset_page_is_well_formed :
+    ({ store with
+        provenance := pageAtSixteen, range := ⟨16, 8⟩
+        address := .numeric 0x1010 } : AccessDescriptor).WellFormedIn space := by
+  decide
+
 /-- `aligned`: the declared address must satisfy the declared alignment. `1` means
 "no demand" and is a deliberate declaration rather than a default. -/
 theorem a_misaligned_address_is_refused :

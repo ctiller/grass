@@ -2974,6 +2974,77 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   found the asymmetry rather than a consequence: two appliers written to be parallel
   differed in a checked precondition with no sentence anywhere saying why.
 
+- ~~**Two of this round's findings were the previous round's repair applied to the
+  instance.**~~ Worth recording as one entry, because the pair is the point.
+
+  Round twenty-three repaired `Tools/SourceLocationAudit.py`'s comment stripper: a `/-`
+  inside a string literal opened a comment and blanked every line to the next `-/`. The
+  four siblings carried the identical three patterns and the identical defect
+  **mirrored** — they ran `STRING` before `LINE`, so a `"` in a *line comment* opened a
+  string and everything down to the next quote was erased. Review appended a real
+  `issue?` call to `Grass/Op/Step.lean` between two comments each carrying one quote and
+  **all nine gates stayed green**, in the gate whose entire subject is which modules may
+  reach the grant map. The same shape hid an unused fixture from `FixtureAudit`.
+
+  Round twenty-three also repaired `issue?`'s containment clause, pinned in one
+  direction because `ByteRange.Contains` is two inequalities and the fixture exercised
+  one. Three more `Contains` guards were in the same state: `denialOf`'s bounds clause,
+  `MayLend`'s sublet bound, and `AccessDescriptor.WellFormedIn.rangeInProvenance`.
+
+  Both are swept now rather than repaired again. All five gates share one stripper,
+  written once and commented once — `STRING` first and unable to span lines, then
+  `BLOCK`, then `LINE`, all line-preserving — which is the only arrangement where
+  neither construct can swallow the other. And every `Contains` guard has a fixture on
+  each inequality, each one asserting the *upper* bound holds so that the theorem names
+  which half does the work rather than leaving it to be re-derived.
+
+  **A repair that fixes the instance leaves the class, and the class is usually four
+  siblings wide.** This branch has recorded that sentence for exemptions, enumerations
+  and counts; it applies to code shared by copy.
+- ~~**`Tools/FixtureAudit.py` never printed a correct line number.**~~ `BLOCK.sub("",
+  source)` deleted block comments *including their newlines*, so every report was short
+  by the length of the docstrings above it — and in this tree every fixture carries a
+  docstring, so no number it could print was ever right. Off by 323 on the seeded case.
+  `Tools/DoorAudit.py` records finding and repairing this exact defect in itself; the
+  sibling was not checked.
+- ~~**Three declaration walkers skipped a whole line when a docstring shared it.**~~
+  `fields_in`, `constructors_in` and `FixtureAudit`'s `DEFINITION` each `continue`d on
+  any line opening a comment, so `/-- doc -/ | reclaimed` and `/-- doc -/ quarry : Nat`
+  and `/-- doc -/ def orphan := 1` — all legal Lean — were not merely unreported but
+  never examined. Review seeded an inductive, a structure field and a fixture written
+  that way; every gate stayed green.
+
+  This is the documented historical failure of `fields_in` — "an earlier version ended
+  the structure at the first `/--`, which meant it saw almost no fields and reported a
+  clean tree" — in a narrower form nobody re-tested. The hand-rolled skipper is gone in
+  all three; they blank comments with the shared stripper first, which leaves whatever
+  follows the `-/` where it was. `constructors_in` also missed a second constructor on a
+  line, the whole of `inductive Foo where | a | b`, and any capitalised constructor.
+- ~~**The trust scan let three more forms through.**~~ `open Nat in axiom seeded : False`,
+  `set_option maxRecDepth 2000 in axiom …`, and `axiom` at end of line with the
+  signature wrapped. All elaborate, all prove `False`, all were silent — the anchor
+  required the keyword to be the first token on its line and to be followed by
+  whitespace *on that line*. It admits a preceding `in` or `;` now and ends at a word
+  boundary, and stays anchored rather than becoming a bare `\baxiom\b` because
+  `Tools/AxiomAudit.lean` is itself an exempted file and is *about* axioms.
+
+  Second consecutive round that this scan has been walked past, and the second
+  consecutive round where the repair was to add the attacker's cases to a self-test that
+  had only the author's.
+- ~~**`LoanConflicts`' writer clause was pinned as a conjunct, not as a disjunction.**~~
+  §7.3 asks whether *either* grant may write. Every fixture put a write grant against a
+  write grant, so both alternatives were true and neither was tested: review replaced
+  `a.rights.write ∨ b.rights.write` with each side alone and the tree stayed green both
+  times. Under the first, a writer joins a reader over the same bytes through the only
+  door there is, and §7.3's "unique loans prevent conflicting authority from being
+  issued" is gone in that orientation.
+
+  Deleting the disjunct outright was already caught; **the arity was not.** Two fixtures
+  now, one per orientation, each with the other side read-only, and
+  `the_lender_may_lend_again` is the control for both. A disjunction is two guards, which
+  is the sentence §4.4.1 already records for `if` branches, `match` arms, and the two
+  inequalities of a predicate a clause calls.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Four review rounds found the same shape and it is worth naming as a shape rather than

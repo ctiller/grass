@@ -796,6 +796,35 @@ theorem a_borrower_may_not_sublend_more_bytes_than_it_holds :
         range := ⟨0, 4⟩, rights := .readOnly } := by
   exact ⟨by decide, by decide, by decide⟩
 
+/-- The thread borrowing the buffer's *tail*, so a sublet below it is outside what the
+borrower holds rather than above it. `headLentToThread` starts where the sublet does, so
+its refusal exercises only the upper inequality of `Contains`. -/
+def tailLentToThread : MemoryState :=
+  (state₀.memory.issue? bufferLoan
+    { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
+      range := ⟨4, 4⟩, rights := .readOnly }).getD state₀.memory
+
+/-- **Nor bytes below what it holds.** The other inequality of `Contains`, and the third
+guard on this branch found pinned in one direction.
+
+The sublet is `⟨0, 8⟩` rather than `⟨0, 4⟩`, and that is the whole difference between
+this fixture and one that proves nothing: `thread₀` *owns* the buffer, so a sublet of
+bytes nothing is held over satisfies the lender disjunct outright and says nothing about
+the sublet bound. Overlapping the outstanding grant — which `engine₀` lent — makes the
+lender disjunct false, so the only disjunct in play is the sublet one, and `⟨0, 8⟩`
+fails its `Contains` on the lower inequality alone: eight is within the borrower's stop,
+zero is below its start. -/
+theorem a_borrower_may_not_sublet_below_what_it_holds :
+    (tailLentToThread.grantAt? bufferLoan).isSome ∧
+    (⟨0, 8⟩ : ByteRange).stop ≤ (⟨4, 4⟩ : ByteRange).stop ∧
+    ¬ tailLentToThread.MayLend
+      { kind := .loan, holder := engine₁, lender := thread₀, provenance := bufferProv
+        range := ⟨0, 8⟩, rights := .readOnly } ∧
+    tailLentToThread.MayLend
+      { kind := .loan, holder := engine₁, lender := thread₀, provenance := bufferProv
+        range := ⟨4, 4⟩, rights := .readOnly } := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
 /-- And the door agrees with the predicate, so the bound is not merely stated. -/
 theorem the_door_refuses_the_oversized_sublet :
     headLentToThread.issue? secondBufferLoan
@@ -1036,6 +1065,43 @@ theorem the_second_write_lend_is_refused_by_the_conflict_rule :
     lentToThread.issue? secondBufferLoan
       { kind := .loan, holder := engine₁, lender := engine₀, provenance := bufferProv
         range := ⟨0, 4⟩, rights := .readWrite } = Option.none := by
+  exact ⟨by decide, by decide⟩
+
+/-! ## "At least one writer" is a disjunction, and was pinned as a conjunct
+
+§7.3's issuance rule asks whether *either* grant may write. The fixture above puts a
+write grant against a write grant, so both sides of the disjunction are true and it
+cannot say which one is doing the work: review replaced `a.rights.write ∨ b.rights.write`
+with `a.rights.write` and the whole tree stayed green, and with `b.rights.write` and it
+stayed green again. In the first case a writer joins a reader over the same bytes,
+through the only door there is.
+
+The two theorems below are the two orientations, each with the other side read-only.
+Deleting the disjunct outright was already caught; **the arity was not**, which is the
+same sentence §4.4.1 records for `if` branches, `match` arms and the two inequalities of
+`Contains`. A disjunction is two guards. -/
+
+/-- **An installed *read* grant and a new *write* grant conflict**, so the disjunct's
+first alternative is not what carries it. -/
+theorem a_write_against_an_installed_read_conflicts :
+    readLentToThread.MayLend
+      { kind := .loan, holder := engine₁, lender := engine₀, provenance := bufferProv
+        range := ⟨0, 4⟩, rights := .readWrite } ∧
+    readLentToThread.issue? secondBufferLoan
+      { kind := .loan, holder := engine₁, lender := engine₀, provenance := bufferProv
+        range := ⟨0, 4⟩, rights := .readWrite } = Option.none := by
+  exact ⟨by decide, by decide⟩
+
+/-- **And an installed *write* grant with a new *read* grant conflicts too**, which is
+the mirror. `the_lender_may_lend_again` is the control for both: two reads over one
+range are accepted, so the refusals are the writer and not the second lend. -/
+theorem a_read_against_an_installed_write_conflicts :
+    lentToThread.MayLend
+      { kind := .loan, holder := engine₁, lender := engine₀, provenance := bufferProv
+        range := ⟨0, 4⟩, rights := .readOnly } ∧
+    lentToThread.issue? secondBufferLoan
+      { kind := .loan, holder := engine₁, lender := engine₀, provenance := bufferProv
+        range := ⟨0, 4⟩, rights := .readOnly } = Option.none := by
   exact ⟨by decide, by decide⟩
 
 end Tests.Op.StandardLoan

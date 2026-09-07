@@ -55,10 +55,35 @@ USED_IN = (DECLARED_IN + sorted((ROOT / "Grass").rglob("*.lean"))
 
 # Lean identifiers here use subscript digits and primes as well as ASCII.
 IDENT = r"[A-Za-z_][A-Za-z0-9_'₀-₉¹²³]*"
-DEFINITION = re.compile(r"^(?:private\s+|protected\s+)?def\s+(" + IDENT + r")", re.MULTILINE)
+# `^[ \t]*`, not `^`. `BLOCK.sub(blank, ...)` leaves what followed a same-line
+# docstring where it was, so `/-- doc -/ def orphan := 1` becomes an *indented* `def`
+# -- and this pattern anchored hard at column zero, so review seeded a fixture written
+# that way and the gate stayed green.
+DEFINITION = re.compile(
+    r"^[ \t]*(?:private\s+|protected\s+)?def\s+(" + IDENT + r")", re.MULTILINE)
+def blank(match: "re.Match[str]") -> str:
+    """Replace a match with as many newlines as it spanned, keeping line numbers."""
+    return chr(10) * match.group(0).count(chr(10))
+
+# Comments and string literals, blanked so line numbers survive.
+#
+# **These three patterns and this order are the same in every gate in this
+# directory, and were not.** Review found `SourceLocationAudit.py` blanking real code
+# because a `/-` inside a string literal opened a comment; that was repaired there and
+# the four siblings kept the defect, mirrored -- they ran `STRING` before `LINE`, so a
+# `" in a *line comment* opened a string and everything down to the next quote was
+# erased. Review appended a real door call between two such comments and every gate
+# stayed green.
+#
+# The order is `STRING`, then `BLOCK`, then `LINE`, and `STRING` cannot span lines.
+# That is the only arrangement where neither construct can swallow the other: a quote
+# inside a comment reaches the end of its own line and no further, and that line is a
+# comment the next two patterns blank anyway. `blank` rather than deletion, because a
+# report that points at the wrong line is the defect this file's sibling was found
+# with twice.
 BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
 LINE = re.compile(r"--.*?$", re.MULTILINE)
-STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 
 # Fixtures deliberately carried without a user, each with its reason. The two entries
 # this tool was written against -- `currentProv` and `lentThenReused` in
@@ -90,7 +115,7 @@ ALLOWED: set[str] = {
 
 def strip(source: str) -> str:
     """Remove block comments, line comments and string literals."""
-    return LINE.sub("", STRING.sub('""', BLOCK.sub("", source)))
+    return LINE.sub(blank, BLOCK.sub(blank, STRING.sub(blank, source)))
 
 
 def analyse(declared: dict[str, str], used: dict[str, str] | None = None) -> list[str]:
@@ -145,6 +170,23 @@ def inert_entries(declared: dict[str, str],
 
 def self_test() -> int:
     failures = 0
+
+    # Review's two shapes. A same-line docstring left the `def` indented and the
+    # pattern anchored at column zero; and `BLOCK.sub("", ...)` deleted the newlines
+    # of every docstring above a fixture, so no line number this gate printed was ever
+    # right -- the defect `DoorAudit.py` records finding and repairing in itself.
+    inline_doc = {"Tests/Memory/Loans.lean": "/-- doc -/ def orphan : Nat := 1\n"}
+    if not analyse(inline_doc):
+        print("  SELF-TEST FAILED: a fixture sharing a line with its docstring is not "
+              "reported")
+        failures += 1
+    numbered = {"Tests/Memory/Loans.lean":
+                "/-\nthree\nline\n-/\ndef orphan : Nat := 1\n"}
+    reports = analyse(numbered)
+    if not reports or ":5:" not in reports[0]:
+        print("  SELF-TEST FAILED: the reported line number does not survive a block "
+              f"comment above the fixture: {reports}")
+        failures += 1
 
     dead = {"Tests/Memory/Loans.lean": "def orphan : Nat := 1\n"}
     if not analyse(dead):

@@ -159,9 +159,25 @@ DOORS = {
     "tearDown?": {"Grass/Memory/State.lean"},
 }
 
+# Comments and string literals, blanked so line numbers survive.
+#
+# **These three patterns and this order are the same in every gate in this
+# directory, and were not.** Review found `SourceLocationAudit.py` blanking real code
+# because a `/-` inside a string literal opened a comment; that was repaired there and
+# the four siblings kept the defect, mirrored -- they ran `STRING` before `LINE`, so a
+# `" in a *line comment* opened a string and everything down to the next quote was
+# erased. Review appended a real door call between two such comments and every gate
+# stayed green.
+#
+# The order is `STRING`, then `BLOCK`, then `LINE`, and `STRING` cannot span lines.
+# That is the only arrangement where neither construct can swallow the other: a quote
+# inside a comment reaches the end of its own line and no further, and that line is a
+# comment the next two patterns blank anyway. `blank` rather than deletion, because a
+# report that points at the wrong line is the defect this file's sibling was found
+# with twice.
 BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
 LINE = re.compile(r"--.*?$", re.MULTILINE)
-STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 
 
 # A tactic that names a declaration without applying it. `unfold f at h` was reported
@@ -196,7 +212,7 @@ def strip(source: str) -> str:
     block comments — so this function now preserves newlines and the self-test seeds
     one.
     """
-    return LINE.sub("", STRING.sub('""', BLOCK.sub(blank, source)))
+    return LINE.sub(blank, BLOCK.sub(blank, STRING.sub(blank, source)))
 
 
 TACTIC_OPENER = re.compile(r"(?:^|\bby\b|;|<;>|·|\|)[ \t]*$")
@@ -325,6 +341,18 @@ def self_test() -> int:
     if len(DOORS) != 13:
         print(f"  SELF-TEST FAILED: DOORS has {len(DOORS)} entries and the module "
               "docstring says thirteen -- update both together")
+        failures += 1
+
+    # A quote in a *line comment* opened a string in the scanner's eyes and blanked
+    # every line down to the next quote, real code included. Review appended a door
+    # call between two such comments and all nine gates stayed green. `STRING` runs
+    # first and cannot span lines now; this is that case, seeded.
+    quote = chr(34)
+    quoted = ("-- the ABI" + chr(39) + "s " + quote + "shadow space" + chr(10)
+              + "def f (s : MemoryState) := s.issue? id grant" + chr(10)
+              + "-- registers the callee " + quote + "saves" + chr(10))
+    if not analyse({OUTSIDE: quoted}):
+        print("  SELF-TEST FAILED: a quote in a line comment hides a real door call")
         failures += 1
 
     focused = "theorem t : True := by\n  constructor <;> simp [MemoryState.issue?]\n"

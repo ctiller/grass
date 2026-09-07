@@ -71,10 +71,30 @@ DECLARED_IN = sorted((ROOT / "Grass").rglob("*.lean"))
 BUILDERS_IN = DECLARED_IN + sorted((ROOT / "Tests").rglob("*.lean"))
 
 INDUCTIVE = re.compile(r"^\s*(?:private\s+|protected\s+)?inductive\s+([A-Za-z_][A-Za-z0-9_.']*)")
-CONSTRUCTOR = re.compile(r"^\s*\|\s*([a-z][A-Za-z0-9_']*)")
+CONSTRUCTOR = re.compile(r"\|\s*([A-Za-z][A-Za-z0-9_']*)")
+def blank(match: "re.Match[str]") -> str:
+    """Replace a match with as many newlines as it spanned, keeping line numbers."""
+    return chr(10) * match.group(0).count(chr(10))
+
+# Comments and string literals, blanked so line numbers survive.
+#
+# **These three patterns and this order are the same in every gate in this
+# directory, and were not.** Review found `SourceLocationAudit.py` blanking real code
+# because a `/-` inside a string literal opened a comment; that was repaired there and
+# the four siblings kept the defect, mirrored -- they ran `STRING` before `LINE`, so a
+# `" in a *line comment* opened a string and everything down to the next quote was
+# erased. Review appended a real door call between two such comments and every gate
+# stayed green.
+#
+# The order is `STRING`, then `BLOCK`, then `LINE`, and `STRING` cannot span lines.
+# That is the only arrangement where neither construct can swallow the other: a quote
+# inside a comment reaches the end of its own line and no further, and that line is a
+# comment the next two patterns blank anyway. `blank` rather than deletion, because a
+# report that points at the wrong line is the defect this file's sibling was found
+# with twice.
 BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
 LINE = re.compile(r"--.*?$", re.MULTILINE)
-STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 
 # Constructors carried without a builder, as `Inductive.constructor` pairs. Every
 # entry says why.
@@ -207,33 +227,46 @@ def scannable(text: str) -> str:
     Prose naming a constructor is not a construction of it, and this file's own
     docstring names several.
     """
-    return STRING.sub('""', LINE.sub("", BLOCK.sub(" ", text)))
+    return LINE.sub(blank, BLOCK.sub(blank, STRING.sub(blank, text)))
 
 
 def constructors_in(text: str) -> list[tuple[str, str, int]]:
-    """Yield (inductive, constructor, line) for every constructor in one source."""
+    """Yield (inductive, constructor, line) for every constructor in one source.
+
+    **Comments are blanked before the walk rather than skipped during it.** The hand-
+    rolled skipper this replaces discarded any line whose first token opened a comment,
+    so a declaration sharing a line with its own docstring -- `/-- doc -/ | reclaimed`,
+    which is legal Lean -- was not merely unreported but never examined. Review seeded
+    an inductive written that way and an unread structure field written that way, and
+    every gate stayed green. `BLOCK.sub(blank, ...)` leaves whatever follows the `-/`
+    on the line and keeps the line number, which is what the walk needs and what the
+    skipper could not give it.
+
+    **Every constructor on the line, not the first.** `| reclaimed | abandoned` is legal
+    and the second was invisible, as was the whole of `inductive Foo where | a | b`,
+    because the walk matched at most one constructor per line and treated the
+    `inductive` line as carrying none. And the name pattern required a lower-case
+    initial, so a capitalised constructor was not a constructor to this tool -- three
+    shapes review seeded, all silent, in the gate whose subject is a constructor nothing
+    builds.
+    """
     out: list[tuple[str, str, int]] = []
     current: str | None = None
-    in_doc = False
-    for number, line in enumerate(text.splitlines(), 1):
+    for number, line in enumerate(BLOCK.sub(blank, text).splitlines(), 1):
         stripped = line.strip()
-        if in_doc:
-            if "-/" in stripped:
-                in_doc = False
-            continue
-        if stripped.startswith("/-"):
-            if "-/" not in stripped:
-                in_doc = True
-            continue
         match = INDUCTIVE.match(line)
         if match:
             current = match.group(1)
+            # `inductive Foo where | a | b` declares two of them on this line.
+            for name in CONSTRUCTOR.findall(line[match.end():]):
+                out.append((current, name, number))
             continue
         if current is None:
             continue
-        found = CONSTRUCTOR.match(line)
-        if found:
-            out.append((current, found.group(1), number))
+        found = CONSTRUCTOR.findall(line)
+        if found and line.lstrip().startswith("|"):
+            for name in found:
+                out.append((current, name, number))
             continue
         # A constructor line ends nothing. Testing for the end *first* meant an
         # inductive whose constructors are flush left — legal Lean — had every one of
@@ -357,6 +390,16 @@ def self_test() -> int:
         ("string literal mentioning it",
          {"a.lean": decl, "b.lean": 'def f := "Probe.quarry"\n'}, True),
         # Flush-left constructors are a declaration the scanner must still see.
+        # Review's four shapes, all silent before. A docstring may share the line, a
+        # line may carry two constructors, an `inductive ... where` may carry them
+        # itself, and a constructor may be capitalised.
+        ("docstring on the constructor's own line",
+         {"a.lean": "inductive Probe where" + chr(10)
+                    + "  /-- doc -/ | quarry" + chr(10)}, True),
+        ("two constructors on one line",
+         {"a.lean": "inductive Probe where" + chr(10) + "  | quarry | decoy" + chr(10)}, True),
+        ("inline inductive",
+         {"a.lean": "inductive Probe where | quarry | decoy" + chr(10)}, True),
         ("flush-left constructors",
          {"a.lean": "inductive Probe where\n| quarry\n| decoy\n"}, True),
         # Documented blind spot, asserted: a constructor named in a theorem's own

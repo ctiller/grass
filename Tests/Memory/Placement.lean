@@ -247,6 +247,21 @@ def overrunningStore : AccessDescriptor :=
     alignment := 1, initialization := .readsNothing
     producesInitialized := true }
 
+/-! ### Both inequalities of the bounds clause
+
+`ByteRange.Contains r s` is `r.start ≤ s.start ∧ s.stop ≤ r.stop`, and
+`overrunningStore` starts exactly where its allocation does, so its refusal exercises
+the upper inequality alone. Review weakened the clause to that inequality and the whole
+tree stayed green: a block access could underrun into bytes below an allocation whose
+extent does not start at zero, which is the only kind this fixture family has.
+
+This is the third `Contains` guard found pinned in one direction — `issue?`'s
+containment clause was the first and `MayLend`'s sublet bound the second — so the sweep
+this time was over every call site rather than the one review named.
+`an_underrunning_block_access_is_refused` is the missing half here,
+`a_borrower_may_not_sublet_below_what_it_holds` in `Tests/Op/StandardLoan.lean`, and
+`a_range_below_the_provenance_is_refused` in `Tests/Memory/WellFormedClauses.lean`. -/
+
 /-- **A block access outside its allocation is refused.** -/
 theorem a_block_access_out_of_bounds_is_refused :
     denialOf fitting overrunningStore = some AuditViolationClass.outOfBounds := by
@@ -307,6 +322,17 @@ theorem the_liveness_fixtures_are_real :
     (withFreed.allocations.lookup offsetAlloc).map AllocationRecord.epoch = some epoch ∧
     laterEpoch ≠ epoch := by
   exact ⟨by decide, by decide, by decide, by decide, by decide⟩
+
+/-- **And one underrunning it.** `offsetAlloc`'s extent starts at 200, so a range at
+zero lies below the allocation while inside the address space — the lower inequality of
+`Contains`, which nothing exercised. -/
+theorem an_underrunning_block_access_is_refused :
+    (⟨0, 8⟩ : ByteRange).stop ≤ offsetRecord.extent.stop ∧
+    denialOf fitting
+      { overrunningStore with
+        range := ⟨0, 8⟩, address := .numeric 0x2000 } =
+      some AuditViolationClass.outOfBounds := by
+  exact ⟨by decide, by decide⟩
 
 /-- The same store bounded to eight bytes, which `withFreed` admits: the control every
 refusal below is measured against. -/

@@ -304,9 +304,29 @@ ALLOWED = {
     "parseExact",
 }
 
+def blank(match: "re.Match[str]") -> str:
+    """Replace a match with as many newlines as it spanned, keeping line numbers."""
+    return chr(10) * match.group(0).count(chr(10))
+
+# Comments and string literals, blanked so line numbers survive.
+#
+# **These three patterns and this order are the same in every gate in this
+# directory, and were not.** Review found `SourceLocationAudit.py` blanking real code
+# because a `/-` inside a string literal opened a comment; that was repaired there and
+# the four siblings kept the defect, mirrored -- they ran `STRING` before `LINE`, so a
+# `" in a *line comment* opened a string and everything down to the next quote was
+# erased. Review appended a real door call between two such comments and every gate
+# stayed green.
+#
+# The order is `STRING`, then `BLOCK`, then `LINE`, and `STRING` cannot span lines.
+# That is the only arrangement where neither construct can swallow the other: a quote
+# inside a comment reaches the end of its own line and no further, and that line is a
+# comment the next two patterns blank anyway. `blank` rather than deletion, because a
+# report that points at the wrong line is the defect this file's sibling was found
+# with twice.
 BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
 LINE = re.compile(r"--.*?$", re.MULTILINE)
-STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 
 
 def scannable(text: str) -> str:
@@ -315,7 +335,7 @@ def scannable(text: str) -> str:
     Prose mentioning `.owner` and a docstring quoting a field name are not
     readers, and counting them was a false negative review found.
     """
-    return STRING.sub('""', LINE.sub("", BLOCK.sub(" ", text)))
+    return LINE.sub(blank, BLOCK.sub(blank, STRING.sub(blank, text)))
 
 
 def fields_in(text: str) -> list[tuple[str, str, int]]:
@@ -327,20 +347,20 @@ def fields_in(text: str) -> list[tuple[str, str, int]]:
     almost no fields and reported a clean tree. It was caught by probing it
     against a field already known to have no reader, which is the only way to
     tell a working audit from a silent one.
+
+    **Comments are blanked before the walk rather than skipped during it.** The hand-
+    rolled skipper this replaces discarded any line whose first token opened a comment,
+    so a declaration sharing a line with its own docstring -- `/-- doc -/ | reclaimed`,
+    which is legal Lean -- was not merely unreported but never examined. Review seeded
+    an inductive written that way and an unread structure field written that way, and
+    every gate stayed green. `BLOCK.sub(blank, ...)` leaves whatever follows the `-/`
+    on the line and keeps the line number, which is what the walk needs and what the
+    skipper could not give it.
     """
     out: list[tuple[str, str, int]] = []
     current: str | None = None
-    in_doc = False
-    for number, line in enumerate(text.splitlines(), 1):
+    for number, line in enumerate(BLOCK.sub(blank, text).splitlines(), 1):
         stripped = line.strip()
-        if in_doc:
-            if "-/" in stripped:
-                in_doc = False
-            continue
-        if stripped.startswith("/-"):
-            if "-/" not in stripped:
-                in_doc = True
-            continue
         match = STRUCTURE.match(line)
         if match:
             current = match.group(1)
@@ -422,6 +442,13 @@ def self_test() -> int:
         ("field whose type is on the next line",
          {"a.lean": "structure Probe where" + chr(10) + "  quarry :" + chr(10)
                     + "    Nat" + chr(10)}, True),
+        # A field sharing a line with its own docstring. The hand-rolled comment
+        # skipper discarded the whole line, so such a field was never examined -- which
+        # is the documented historical failure of this function ("saw almost no fields
+        # and reported a clean tree") in a narrower form nobody re-tested.
+        ("field sharing a line with its docstring",
+         {"a.lean": "structure Probe where" + chr(10)
+                    + "  /-- doc -/ quarry : Nat" + chr(10)}, True),
         # One space is indentation too. Latent when review seeded it, which is why the
         # case is here rather than in the tree.
         ("field indented by one space",
