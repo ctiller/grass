@@ -850,7 +850,10 @@ theorem only after preserving and reflecting `EffectPrefixExtends`.
 The adapter constructs a `Process.CertifiedDirectProgram` whose dependent
 `DirectProgramDerivation` payload retains the exact effect program,
 `EffectProgramAdequate`, selected `EffectProgramMeetsProgress`, and adapter
-certificate. Separately, the generated `CertifiedDriverBoundary` sidecar carries
+certificate. The derivation is also indexed by the exact projected
+`PendingInteractionModel`, `SequentialPendingSemantics`, and
+Effect-theory-to-model projection; neither `certifiedMachine` nor the final
+source constructor performs ambient model inference. Separately, the generated `CertifiedDriverBoundary` sidecar carries
 the stable `plan.providerDemands`; the underlying five-field `DriverBoundary`
 does not change. Its statements are indexed only by the source
 and target row models, lowering plan, and handoff—not by the caller's program
@@ -1033,6 +1036,10 @@ The first implementation is incomplete until checked fixtures demonstrate:
    `EffectPrefixExtends` chain.
 5. A project-local effect family is added from another module without editing a
    core sum type.
+   Three independently authored extension-authority registries compose under
+   both associations. Reindexing the same family through either association
+   produces extensionally identical origin IDs, descriptors, and lookups; a
+   fixture that replaces this transport with an unchecked dependent cast fails.
 6. Row membership embeds dependent results exactly; a forged name-only embedding
    is unconstructible.
 7. Duplicate family keys are rejected, and the lowering selection cannot carry
