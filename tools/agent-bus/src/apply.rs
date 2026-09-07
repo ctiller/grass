@@ -841,8 +841,23 @@ fn apply_issue_ack(state: &mut BusState, env: &Envelope, d: &IssueAcknowledged) 
     // the original assignment, its own frontier showing it had never observed
     // the reassignment. Every `status` and `tail` on every host then failed.
     //
-    // Superseded, so it contributes nothing: the reassignment already moved
-    // `current_assignment`, and the new target's own acknowledgement governs.
+    // Recorded against the assignment it *names*, not against whatever is
+    // current -- deliberately, and this is the part that took two attempts to
+    // get right. Dropping a superseded acknowledgement outright also unblocks
+    // reduction, but it makes the result depend on arrival order: whether the
+    // ack is recorded would hinge on whether the racing reassignment happened
+    // to reduce first, and `state.rs` documents `acknowledged_assignments` as
+    // "a pure function of history". Two hosts fetching the same two streams
+    // in different orders would then disagree permanently, with no error to
+    // signal it -- and after a later conflict rolls `current_assignment` back
+    // to the baseline, one host would report the issue acknowledged and the
+    // other not. Recording it keeps the field a pure function of history and
+    // satisfies gates 15/16.
+    //
+    // It grants nothing: `IssueState::acknowledged()` keys on
+    // `current_assignment`, so a superseded entry never makes the *current*
+    // assignment look acknowledged. The duplicate check below keys on the
+    // named assignment for the same reason.
     let issue = state.issues.get_mut(&d.issue).expect("just checked");
     if issue.acknowledged_assignments.contains(&d.assignment) {
         return Err(invalid(format!("{}: issue already acknowledged", env.id)));
@@ -1065,7 +1080,7 @@ fn apply_dependency_ack(
         )));
     }
     // The dependency twin of the issue case above -- same race, same
-    // fleet-wide consequence, same resolution.
+    // fleet-wide consequence, same order-independent resolution.
     let dep = state
         .dependencies
         .get_mut(&d.dependency)
@@ -6572,7 +6587,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dependency_ack_against_a_superseded_assignment_is_a_no_op() {
+    fn a_dependency_ack_against_a_superseded_assignment_reduces_and_is_recorded() {
         let mut state = empty_state(&[
             ("alice", Role::Implementor),
             ("bob", Role::Implementor),
@@ -6621,16 +6636,25 @@ mod tests {
             }),
             [],
         );
-        // A no-op, not a rejection. This test previously asserted the
-        // rejection, and that is exactly the behaviour that took the fleet
-        // down: reduction propagates with `?`, so one honest-but-superseded
-        // acknowledgement made every host unable to reduce the bus at all.
-        let before = format!("{:#?}", state.dependencies);
+        // It reduces -- which is the property that failed on the live bus --
+        // and it is *recorded against the assignment it names*, which is what
+        // keeps the field a pure function of history. It must not touch the
+        // current assignment, and must not make the current assignment look
+        // acknowledged.
+        let before_current = state.dependencies[&dep_env.id].current_assignment.clone();
         apply_event(&mut state, &ack_env).expect("a superseded ack is inapplicable, not invalid");
+        let dep = &state.dependencies[&dep_env.id];
+        assert!(
+            dep.acknowledged_assignments.contains(&dep_env.id),
+            "the historical acknowledgement must be recorded"
+        );
         assert_eq!(
-            before,
-            format!("{:#?}", state.dependencies),
-            "a superseded acknowledgement must change nothing"
+            dep.current_assignment, before_current,
+            "a superseded acknowledgement must not move the current assignment"
+        );
+        assert!(
+            !dep.acknowledged(),
+            "the current assignment must still read unacknowledged"
         );
     }
 
@@ -6639,7 +6663,7 @@ mod tests {
     /// `g-build:17`, and `g-foundation:68` acknowledging the original
     /// assignment with a frontier that had never seen the reassignment.
     #[test]
-    fn an_issue_ack_against_a_superseded_assignment_is_a_no_op() {
+    fn an_issue_ack_against_a_superseded_assignment_reduces_and_is_recorded() {
         let mut state = empty_state(&[
             ("alice", Role::Implementor),
             ("bob", Role::Implementor),
@@ -6682,12 +6706,20 @@ mod tests {
             }),
             [issue_id.clone()],
         );
-        let before = format!("{:#?}", state.issues);
+        let before_current = state.issues[&issue_id].current_assignment.clone();
         apply_event(&mut state, &ack).expect("a superseded ack is inapplicable, not invalid");
+        let reduced = &state.issues[&issue_id];
+        assert!(
+            reduced.acknowledged_assignments.contains(&issue_id),
+            "the historical acknowledgement must be recorded, so the field stays a pure              function of history"
+        );
         assert_eq!(
-            before,
-            format!("{:#?}", state.issues),
-            "a superseded acknowledgement must change nothing"
+            reduced.current_assignment, before_current,
+            "a superseded acknowledgement must not move the current assignment"
+        );
+        assert!(
+            !reduced.acknowledged(),
+            "the current assignment must still read unacknowledged -- recording history              grants nothing"
         );
 
         // And the whole stream still reduces -- the property that failed.
@@ -8580,8 +8612,17 @@ mod tests {
         );
     }
 
+    /// Gates 15/16 for the acknowledge-versus-reassign race: two valid,
+    /// dependency-respecting orders of the same events must reduce to
+    /// identical state.
+    ///
+    /// This is the test that rejects the tempting version of the fix. Simply
+    /// dropping a superseded acknowledgement unblocks reduction and looks
+    /// correct in isolation, but leaves `acknowledged_assignments` dependent
+    /// on arrival order -- so two hosts that fetched the same streams in
+    /// different orders diverge silently and permanently.
     #[test]
-    fn tmp_ack_vs_reassign_race_order_independence() {
+    fn an_ack_racing_a_reassignment_converges_in_either_order() {
         let alice = a("alice");
         let bob = a("bob");
         let carol = a("carol");
@@ -8661,31 +8702,6 @@ mod tests {
             .expect("ack-then-reassign reduces");
         let reassign_first = reduce_onto(base.clone(), &[reassign.clone(), ack.clone()])
             .expect("reassign-then-ack reduces");
-
-        println!(
-            "ACK FIRST      acknowledged_assignments = {:?}",
-            ack_first.issues[&issue_env.id].acknowledged_assignments
-        );
-        println!(
-            "REASSIGN FIRST acknowledged_assignments = {:?}",
-            reassign_first.issues[&issue_env.id].acknowledged_assignments
-        );
-
-        // Also: after a later lifecycle conflict rolls `current_assignment`
-        // back to the baseline, the two hosts disagree about whether the
-        // issue was ever acknowledged.
-        println!(
-            "ACK FIRST      acknowledged(alice:1) = {}",
-            ack_first.issues[&issue_env.id]
-                .acknowledged_assignments
-                .contains(&issue_env.id)
-        );
-        println!(
-            "REASSIGN FIRST acknowledged(alice:1) = {}",
-            reassign_first.issues[&issue_env.id]
-                .acknowledged_assignments
-                .contains(&issue_env.id)
-        );
 
         assert_eq!(
             format!("{ack_first:?}"),
