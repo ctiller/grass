@@ -125,6 +125,10 @@ def bigEndianIsomorphism (count : Nat) :
 def bigEndianFormat (count : Nat) : Format (BitVec (8 * count)) :=
   (fixedBytesFormat count).iso (bigEndianIsomorphism count)
 
+/-- Selected exact-width semantics transported through the big-endian view. -/
+def bigEndianSemantics (count : Nat) : FormatSemantics (bigEndianFormat count) :=
+  (fixedBytesSemantics count).iso (bigEndianIsomorphism count)
+
 /-- Reverse exact-length bytes without discarding their length index. -/
 def reverseSized {count : Nat} (bytes : SizedByteArray count) :
     SizedByteArray count :=
@@ -178,6 +182,10 @@ def littleEndianIsomorphism (count : Nat) :
 /-- Fixed-width bytes interpreted as a little-endian integer value. -/
 def littleEndianFormat (count : Nat) : Format (BitVec (8 * count)) :=
   (fixedBytesFormat count).iso (littleEndianIsomorphism count)
+
+/-- Selected exact-width semantics transported through the little-endian view. -/
+def littleEndianSemantics (count : Nat) : FormatSemantics (littleEndianFormat count) :=
+  (fixedBytesSemantics count).iso (littleEndianIsomorphism count)
 
 /-- Two-byte big-endian unsigned integer format. -/
 def bigEndianU16Format : Format (BitVec 16) := bigEndianFormat 2
