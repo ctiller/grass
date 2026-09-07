@@ -622,7 +622,12 @@ def ProviderDemandFamily.lookupView
 theorem ProviderDemandFamily.lookup_exact ...
 theorem ProviderDemandFamily.lookupView_exact ...
 theorem ProviderDemandFamily.lookup_extension_registered ...
-theorem ProviderDemandFamily.ext
+structure ProviderDemandFamily.ExtEq
+    (left right : ProviderDemandFamily) : Prop where
+  sameOrigins : left.origins = right.origins
+  sameViews : forall origin, left.lookupView origin = right.lookupView origin
+theorem ProviderDemandFamily.ext_sameRegistry
+    (sameRegistry : left.authorityRegistry = right.authorityRegistry)
     (sameOrigins : left.origins = right.origins)
     (sameViews : forall origin, left.lookupView origin = right.lookupView origin) :
     left = right
@@ -644,6 +649,9 @@ theorem ProviderDemandFamily.reindex_lookup_reindexes ...
 theorem ProviderDemandFamily.reindex_lookupView
     (family : ProviderDemandFamily) :
     (family.reindex embedding).lookupView origin = family.lookupView origin
+theorem ProviderDemandFamily.reindex_extEq
+    (family : ProviderDemandFamily) :
+    ProviderDemandFamily.ExtEq (family.reindex embedding) family
 theorem ProviderDemandFamily.reindex_authorityRegistry ...
 theorem ProviderDemandFamily.reindex_id ...
 theorem ProviderDemandFamily.reindex_comp ...
@@ -728,10 +736,13 @@ origin identity, and exact descriptor, but not an extension registry value,
 entry representation, or membership proof. `ProviderDemand.reindex_view`
 therefore makes registry reindexing provably invisible to semantic
 requirements while the dependent demand remains available for construction and
-lookup. `ProviderDemandFamily.lookupView` is the extensional observation used
-by family equality and semantic proofs; dependent `lookup` remains available
-to constructors, and its reindex theorem states structural correspondence
-rather than an ill-typed raw equality between differently indexed packages.
+lookup. `ProviderDemandFamily.lookupView` is the registry-independent
+observation used by `ExtEq` and semantic proofs; dependent
+`lookup` remains available to constructors, and its reindex theorem states
+structural correspondence rather than an ill-typed raw equality between
+differently indexed packages. Raw family equality additionally requires equal
+`authorityRegistry` values through `ext_sameRegistry`. In particular reindexing
+into a larger registry is semantically equivalent, not equal, to its source.
 This prevents a well-typed requirement predicate from changing truth
 merely because composition embeds its extension into a larger registry.
 

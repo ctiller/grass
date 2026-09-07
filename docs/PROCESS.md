@@ -78,6 +78,18 @@ structure ProcessVocabulary where
 structure DemandProviderSemantics (Demand : Type) where
   Requires : Demand -> ProviderDemandView -> Prop
 
+structure RegisteredOperationOrigins
+    (family : ProviderDemandFamily) (demand : Demand) where
+  originIds : Finset RequirementOriginId
+  registered : forall originId, originId ∈ originIds ->
+    exists view, family.lookupView originId = some view
+
+def OriginOccursIn
+    (origins : RegisteredOperationOrigins family demand)
+    (view : ProviderDemandView) : Prop :=
+  exists originId, originId ∈ origins.originIds /\
+    family.lookupView originId = some view
+
 opaque DemandProviderEnvelope
     (semantics : DemandProviderSemantics Demand) : Type
 def DemandProviderEnvelope.demands :
@@ -86,9 +98,10 @@ def DemandProviderEnvelope.origins
     (envelope : DemandProviderEnvelope semantics) (demand : Demand) :
     RegisteredOperationOrigins envelope.demands demand
 theorem DemandProviderEnvelope.origins_exact
-    (envelope : DemandProviderEnvelope semantics) :
-    OriginOccursIn (envelope.origins demand) origin <->
-      semantics.Requires demand origin.view
+    (envelope : DemandProviderEnvelope semantics) (demand : Demand) :
+    forall view : ProviderDemandView,
+      OriginOccursIn (envelope.origins demand) view <->
+        semantics.Requires demand view
 def DemandProviderEnvelope.reindex
     (envelope : DemandProviderEnvelope semantics)
     (embedding : ExtensionAuthorityEmbedding
@@ -1912,6 +1925,17 @@ structure PendingInteractionModel (boundary : DriverBoundary) where
   observations_congruent : Extends first second -> Extends second first ->
     observations first = observations second
 
+def PendingInteractionModel.atomic (boundary : DriverBoundary) :
+    PendingInteractionModel boundary where
+  Start := fun _ => Unit
+  History := fun _ _ => Unit
+  root := fun _ _ => ()
+  Extends := Eq
+  reflexive := Eq.refl
+  transitive := Eq.trans
+  observations := fun _ => []
+  observations_congruent := fun _ _ => rfl
+
 def PendingInteractionModel.ProperExtends
     (model : PendingInteractionModel boundary)
     (first second : model.History demand start) : Prop :=
@@ -1933,16 +1957,16 @@ structure SequentialPendingSemantics
   advance : SequentialWaitingState machine model start ->
     SequentialWaitingState machine model start -> Prop
   advanceExact : advance before after <->
-    SameWaitingOccurrence before.1 after.1 /\
-    model.ProperExtends before.2 (sameDemandTransport after.2)
+    exists same : before.1 = after.1,
+      model.ProperExtends before.2 (same.symm ▸ after.2)
   observationsExact : EveryPendingAdvanceEmitsExactNewPrefixObservations
     model advance
   preserves : EveryPendingAdvancePreservesMachineInvariant machine advance
 
 def SequentialPendingSemantics.atomic
-    (model : PendingInteractionModel boundary)
-    (atomic : model.HasNoProperExtensionOrObservation) :
-    SequentialPendingSemantics machine model
+    (machine : SequentialMachine boundary) :
+    SequentialPendingSemantics machine
+      (PendingInteractionModel.atomic boundary)
 ```
 
 Custom headers, multi-pass algorithms, retry policy, and custom error handling
@@ -1976,10 +2000,13 @@ disposition are generated structurally. Its generic theorem transports a
 `SequentialMachineRealizes spec machine model pending` proof to
 `DirectProgramRealizes spec (certifiedMachine machine model pending)`.
 
-The ordinary atomic API infers `SequentialPendingSemantics.atomic` only after
-the selected model proves it has no proper extension or pending observation;
-authors do not add a field. There is no ambient effect-theory lookup in this
-constructor. `SequentialMachineRealizes`, `elaborateMachine`,
+The ordinary atomic API selects the canonical Unit-start, Unit-history model
+and `SequentialPendingSemantics.atomic`; authors provide neither a model nor a
+field. An arbitrary model whose `Start` happens to be empty cannot enter this
+constructor. A selected Effect theory uses the atomic route only after proving
+that its rooted pending semantics and observations project exactly to the
+canonical model. There is no ambient effect-theory lookup in this constructor.
+`SequentialMachineRealizes`, `elaborateMachine`,
 `certifiedMachine`, and the resulting `DirectProgramDerivation` are indexed by
 the same exact `model` and `pending` values; no later call infers replacements.
 The realization connects that model to the specification. An Effect-generated adapter separately proves

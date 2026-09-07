@@ -838,8 +838,8 @@ and resumes the continuation. The Effect adapter generates this relation from
 `EffectTheory.Extends` and proves an exact projection to the selected
 `PendingInteractionModel`. For a plain `SequentialMachine`, the library accepts
 a `SequentialPendingSemantics` indexed by that exact model: its automatic
-`atomic` instance requires a proof that the model has no proper pending extension
-or pending observation and matches the currently landed adapter; a
+`atomic` instance selects the canonical Unit-start, Unit-history, empty-
+observation model and matches the currently landed adapter; a
 streaming/custom instance supplies the history extension relation.
 This optional certificate adds no field to a simple machine. A custom raw
 `DirectRelationalProgram` may instead express pending progress as an internal
@@ -1037,6 +1037,10 @@ The first implementation is incomplete until checked fixtures demonstrate:
    and unequal observation prefixes is rejected by
    `PendingInteractionModel.observations_congruent`; it cannot masquerade as an
    atomic model by placing the observable change between equivalent histories.
+   A custom model with `Start _ := Empty` cannot be selected by the standard
+   atomic constructor, which owns its Unit start and history. A pending advance
+   between distinct waiting occurrences is rejected because its history
+   transport requires an equality of the dependent occurrences.
 5. A project-local effect family is added from another module without editing a
    core sum type.
    Three independently authored extension-authority registries compose under
@@ -1066,6 +1070,9 @@ The first implementation is incomplete until checked fixtures demonstrate:
    relabel it as `.builtin .effect`; changing only a descriptor or capability
    name cannot typecheck. An operation with two independent origins retains and
    disposes both, while an operation with an empty subfamily adds none.
+   Exactness quantifies over every `ProviderDemandView`, not merely selected
+   members: omitting one semantically required view makes the reverse direction
+   of `origins_exact` false even when every retained origin remains registered.
 10. Handler identity and two-stage composition agree with direct handling in
     both complete and pending-prefix behavior directions.
 11. Graphics-only lowering leaves storage abstract, followed by storage-only
