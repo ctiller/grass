@@ -743,6 +743,22 @@ timeout, endpoint/channel death, drop, reroute, and coalescing are exhaustive
 competing resolution transitions. Coalescing consumes every source token and
 creates one fresh occurrence. Session state evolves on those same transitions.
 
+A send requires the exact incarnation the session names to be live. This is a
+property of the send, not of the session: an endpoint death does **not**
+generically close or kill the session it belongs to, because some channels
+permit buffered drain or half-close and `SessionStatus` has no state that
+distinguishes those from an ordinary close. A channel that wants a death to end
+its session says so in an explicit channel or session policy. What holds of every
+channel is the narrower fact, and it is where the check belongs: a dead sender
+cannot send. `agent-bus` ruling `g-design:83` settles this, and
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.125 records the world it closes — a
+sender present and dead, its death recorded against the session, the session
+still open, and an ordinary second send constructible from it.
+
+The evidence is transition-certificate evidence: a constructor or macro emitting
+a send derives the sender's liveness from the world it is already stepping, and
+an ordinary `ProcessSpec` author writes no new field.
+
 ### Byte-flow protocols and partial I/O
 
 Reads and writes are standardized as asynchronous byte-flow processes, not as

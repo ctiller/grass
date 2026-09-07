@@ -24,6 +24,41 @@ consumes, and leaves its construction to whoever owns the specification:
 records the dependency cycle between this layer and `Grass.Semantics` that makes
 it necessary rather than merely tidy.
 
+## These predicates are trusted specification input, and that is a boundary
+
+**Every field of `ProcessAcceptance` is an author-supplied `Prop`, and nothing
+here or anywhere else checks that it says something.** `agent-bus` ruling
+`g-design:84` on `c-process:69` settles this, and settles it against adding a
+mechanism: any author-supplied `Prop` can intentionally be tautological, and Lean
+cannot distinguish one that is from one that happens to hold. So the honest
+statement is the boundary rather than a field that would pretend to police it.
+
+`docs/FOUNDATION.md` law 15 is where the boundary already lives — "presentations
+and realizations remain reviewed replaceable inputs". An acceptance is not
+program meaning; it is a *claim about* program meaning, and it is trusted in the
+same sense and reviewed in the same way.
+
+Three consequences worth stating rather than leaving implicit:
+
+* **Prefer derivation.** An acceptance derived from the precious
+  `BehaviorContract` inherits that contract's review. That is the intended
+  route, and `Grass.Semantics` is expected to supply it.
+* **A standalone protocol library supplying one directly is asserting it**, and
+  therefore requires adequacy review of the acceptance itself, not only of the
+  process that satisfies it.
+* **A fixture showing that *this* acceptance rejects a wrong value is evidence
+  about that acceptance, and is not a general non-vacuity guarantee.**
+  `Tests/Process/ViewFixtures.lean`'s
+  `a_view_that_disagrees_with_the_state_is_refused` is exactly such a fixture and
+  says exactly that much.
+
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.102 records how this was found: giving
+`ViewAccepts` the state made a real obligation *possible* and did not make a
+vacuous one impossible, and the render-graph predicate — `fun facet state view =>
+view = facet.render state` — discharges `ProcessCorrect.viewAccepts` by `rw` for
+every specification while passing the single-valuedness test used elsewhere in
+this codebase.
+
 ## The terminal-remainder law arrives here
 
 `terminalRemainder` is the law `docs/PROCESS.md` §2 calls "the specification's
@@ -92,6 +127,15 @@ structure ProcessAcceptance (p : ProcessSpec.{u, w}) where
 
   With the state here, an acceptance names the projection it intends and the
   process has to implement it. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.99.
+
+  **That made a real obligation possible and did not make a vacuous one
+  impossible**, which §10.102 records and `g-design:84` ruled on. The render
+  graph — `fun facet state view => view = facet.render state` — still discharges
+  `ProcessCorrect.viewAccepts` for every specification, facet and render, and no
+  field of this record can refuse it. See the module note on the trust boundary:
+  this predicate is specification input under `docs/FOUNDATION.md` law 15, and
+  the fixtures show what a *particular* acceptance refuses rather than that any
+  acceptance refuses anything.
   -/
   ViewAccepts : (facet : ViewFacet p.State) → p.State → facet.View → Prop
   /--

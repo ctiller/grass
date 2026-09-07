@@ -3939,7 +3939,9 @@ This is the same family as §10.49 (`Demanded`), §10.56's original form, and
 §10.70: **an author-supplied predicate can always be made vacuous, and no field
 of the record can stop it.** What distinguishes the ones this milestone closed is
 that the vacuity was forced by the *signature* rather than chosen by the author.
-Needs a ruling on whether that distinction is worth a mechanism.
+
+**Ruled** by `g-design:84`: the distinction is not worth a mechanism, and the
+answer is a stated trust boundary. §10.126 is the entry.
 
 ### 10.103 Two things a step may write that nothing bounds
 
@@ -4397,6 +4399,9 @@ second occurrence on that session.
 sends") and `endpointDeathIsEarned` does not close it. Two shapes of fix, and the
 choice is a ruling:
 
+**Closed** by `SendsEscrow.senderIsLive`; §10.125 is the entry. The two options
+were:
+
 * `SendsEscrow` gains a `senderIsLive` field. Small to state, and it changes the
   most-used fixture in the corpus: `quiet` and `sent` hold no listener
   incarnation at all, so every send fixture would need a world that does.
@@ -4528,6 +4533,80 @@ outside its coverage — so the branch's own quality bar was enforced everywhere
 except on the branch. That is worth more than the 104 fixes: a gate that a new
 subtree silently escapes is a gate that reports success about work it never saw,
 which is §10.71's shape at the tooling layer rather than the proof layer.
+
+### 10.125 A dead sender can still send — closed, at the send
+
+§10.119, ruled by `agent-bus` `g-design:83` on `c-process:68` and implemented.
+The ruling took option (i) of the two this plan offered: `SendsEscrow` gains a
+field, and endpoint death does *not* become a session-level event.
+
+**Why the other option was refused, which is the part worth keeping.** Option
+(ii) was to give `senderDeath` and `receiverDeath` their own structure with the
+session in scope, so a death could close the session it belongs to — the same
+repair §10.90 made for a close, and c-process's own preference. g-design refused
+it on a fact about the type: `SessionStatus` has no half-closed state, so
+treating every endpoint death as a `KillsSession` would forbid buffered drain and
+half-close, which are legitimate channel policies. A channel that wants a death
+to end its session says so explicitly; the layer must not decide it for every
+channel. `docs/PROCESS.md` §3 now records that limit beside the field.
+
+That is a better answer than the one this plan preferred, and the reason is worth
+naming: c-process argued from what would close the hole most tidily, and the
+ruling argued from what the hole's *neighbours* need. §10.90 is the same shape in
+reverse — a repair that closed one defect by forbidding the ordinary close the
+resolution exists for.
+
+**What the field says.** `SendsEscrow.senderIsLive` asks for the incarnation in
+the sender's slot, that it be *the* incarnation `ChannelId.sender` names —
+generation included, which is what stops a restart reviving a stale session — and
+that it be live. `Tests/Process/ChannelStepFixtures.lean`'s
+`a_dead_sender_may_not_send` refuses the reviewer's world for any message and any
+after-world, and `the_live_sender_may` is the positive case at the same wire, so
+the refusal is about the death rather than about the world's shape.
+
+**And it moved the corpus's send onto a start.** The field made `quiet` unusable
+as a send's before-world — it holds no incarnation at all — and the fixture that
+replaced it is not a new one. `Tests/Process/WorldFixtures.lean`'s `withRoot`
+already existed, holds `rootListener` at exactly `wire.sender`, and
+`Tests/Process/PreservationFixtures.lean` proves it is an `ExactInitialNetwork`
+and derives its well-formedness from that. So the corpus's send, receive, reroute
+and second-send now all begin at a world an execution can begin at, rather than
+at `quiet` with a ledger bolted on. A first attempt at this entry built a
+`listening` world for the purpose and was discarded when `withRoot` turned out to
+be it — which is the ordinary failure of not looking first, recorded because this
+ledger has a section about exactly that.
+
+### 10.126 `ViewAccepts` admits a vacuous clause, and that is a boundary rather than a defect
+
+§10.102, ruled by `agent-bus` `g-design:84` on `c-process:69`. The ruling is
+against a mechanism: **do not add a structural anti-vacuity field.** Any
+author-supplied `Prop` can intentionally be tautological, and Lean cannot
+distinguish one that is from one that merely holds; a field claiming to police it
+would be the same class of overclaim this milestone has spent eight rounds
+finding.
+
+So the answer is a stated boundary. `ProcessAcceptance`'s fields are trusted
+specification input under `docs/FOUNDATION.md` law 15 — "presentations and
+realizations remain reviewed replaceable inputs" — and
+`Grass/Process/Acceptance.lean` now says so, with the three consequences the
+ruling names: prefer derivation from the precious `BehaviorContract`, which
+inherits that contract's review; a standalone protocol library supplying one
+directly is *asserting* it and owes adequacy review of the acceptance itself; and
+a fixture showing that one acceptance rejects a wrong value is evidence about
+that acceptance and not a general guarantee.
+
+`Tests/Process/ViewFixtures.lean` kept every theorem and lost one sentence's
+worth of implication. It had read as though `a_view_that_disagrees_with_the_state_is_refused`
+established something about `ViewAccepts`; it establishes something about
+`gaugeAcceptance`, and the file now says which. `intendedView` is still textually
+what `remaining.render` computes, so a reader still takes the intent's priority
+on trust — and that, exactly, is the boundary.
+
+**What this closes and what it does not.** It closes §10.102, which asked whether
+the signature-forced/author-chosen distinction is worth a mechanism: it is not.
+It does not close §10.49 or §10.69, which ask the neighbouring question of how a
+`demanded` predicate is tied to a specification; those are about where the
+predicate comes from rather than about whether the record can police it.
 
 ## 11. The authoring facade
 

@@ -73,7 +73,7 @@ theorem twoPendingAt_off {session : serverTopology.ChannelId ()} (notWire : sess
 
 /-- The world after both sends. -/
 noncomputable def sent2 : ServerWorld :=
-  { quiet with inFlight := fun _ => twoPendingAt }
+  { World.withRoot with inFlight := fun _ => twoPendingAt }
 
 theorem sent2_wire : sent2.inFlight () wire = twoPending := twoPendingAt_wire
 
@@ -85,6 +85,7 @@ manufactures the world its own complaint needs is not evidence of anything. This
 is `liveSteps.Send` again, at the same plan, one step further on.
 -/
 theorem the_second_send : serverPlan.SendsEscrow sent sent2 () payload strandedOccurrence where
+  senderIsLive := ⟨World.rootListener, rfl, ⟨rfl, rfl⟩, trivial⟩
   contractual :=
     ⟨rfl, rfl,
       by rw [sent_wire]

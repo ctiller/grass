@@ -535,6 +535,40 @@ structure SendsEscrow (before after : plan.LogicalProcessNetwork)
   /-- The edge's own send relation admits this step. -/
   contractual : (plan.steps edge).Send message occurrence before after
   /--
+  **And the sender the session names is the live incarnation in its slot.**
+
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.119, ruled by `agent-bus`
+  `g-design:83`. `ChannelContract.sendOnOpenSession` asks only that the *session*
+  be open, and `ResolvesEscrow`'s scope is the escrow ledger alone, so a
+  `senderDeath` cannot move the session status. From the world
+  `Tests/Process/ChannelStepFixtures.lean`'s `the_sender_death` reaches — sender
+  present and dead, its death recorded against the session, session still
+  `.open` — a reviewer built an ordinary send of a second occurrence.
+
+  **Both halves are load-bearing.** The `instances` lookup alone would accept
+  *some* incarnation in the sender's slot, which a restart makes a different one;
+  `sameRef` pins it to the exact incarnation `ChannelId.sender` names, generation
+  included, so a stale session cannot be revived by whoever holds the slot now.
+
+  **Why this rather than making a death close the session.** The ruling is
+  explicit: an endpoint death must not generically kill or close the session,
+  because some channels permit buffered drain or half-close and `SessionStatus`
+  has no half-closed state to express the difference. Whether a death ends the
+  session belongs to an explicit channel or session policy. What this field says
+  is narrower and is true of every channel: a *send* needs a live sender.
+
+  It is transition-certificate evidence, which is where the ruling puts the cost:
+  a constructor or macro that emits a send derives it from the world it is
+  already stepping, and an ordinary `ProcessSpec` author writes nothing. The
+  fixtures pay for it because a fixture builds its world by hand.
+  -/
+  senderIsLive : ∃ incarnation,
+    before.instances (plan.topology.endpoints edge).1 occurrence.1.sender.instanceId
+        = some incarnation ∧
+      (∃ sameKind : incarnation.kind = (plan.topology.endpoints edge).1,
+        sameKind ▸ incarnation.ref = occurrence.1.sender) ∧
+      incarnation.Live
+  /--
   **Its occurrence identity was not escrowed before.**
 
   Freshness of the *identity*, not of the pair. `EdgeOccurrence` is a message
