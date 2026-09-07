@@ -11,9 +11,10 @@ introduce a second unrelated byte-container primitive", and:
 
 `Grass/Std/Logical/Byte.lean` implements the first half — `abbrev ByteArray :=
 Vec Byte`, which lived in `Vec.lean` until the custody handoff let the two
-declarations merge — and `Tests/Std/VecVocabulary.lean` pins it: a host `_root_.ByteArray` is rejected
-where a Grass `ByteArray` is required. That rejection is only half a design. A
-seam with no sanctioned crossing is not a boundary, it is a dead end, and the
+declarations merge — and `Tests/Std/VecVocabulary.lean` pins it: a host
+`_root_.ByteArray` is rejected where a Grass `ByteArray` is required. That
+rejection is only half a design. A seam with no sanctioned crossing is not a
+boundary, it is a dead end, and the
 first author who needs to hand bytes to the operating system will cross it
 somewhere — with `Array.map` and no theorem, in a module that does not own the
 question.

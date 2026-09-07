@@ -1,4 +1,3 @@
-
 /-!
 # Finite ordered sequences
 
@@ -40,9 +39,9 @@ statement the elaborator checks rather than a naming convention.
 
 The second is that `docs/STDLIB.md` §4 separates capacity growth policy from
 logical equality, and makes complexity a matter of separately named profile
-theorems rather than of functional correctness. A one-field structure keeps a seam at which the representation can be
-replaced without touching a consumer, since consumers write `Vec.get?` and not
-`List.get?`.
+theorems rather than of functional correctness. A one-field structure keeps a seam
+at which the representation can be replaced without touching a consumer, since
+consumers write `Vec.get?` and not `List.get?`.
 
 The third is `docs/MODULES.md`'s prohibition on competing foundations. The
 narrower the door into the representation, the fewer places a lower layer can
@@ -203,7 +202,8 @@ the direction that builds one — so nothing gave `i < v.length` *from* a succes
 read. A cross-agent review found this is the one lemma in `c-mem`'s migration with
 no mechanical replacement, since the memory layer's byte-store reasoning derives
 exactly that. (That review read a `Grass/Memory/ByteStore.lean` that has never
-existed on `main`; the module is named here without a path for that reason.) The asymmetry was real rather than stylistic.
+existed on `main`; the module is named here without a path for that reason.) The
+asymmetry was real rather than stylistic.
 -/
 theorem get?_eq_some_iff {v : Vec α} {i : Nat} {a : α} :
     v.get? i = some a ↔ ∃ h : i < v.length, v.get i h = a := by

@@ -47,18 +47,22 @@ abbrev ByteArray := Vec Byte
 The memory layer's name for a byte sequence. Still `List Byte`.
 
 Its own docstring promised this would become `Vec Byte` once `Std.Logical` landed
-`Vec`. `Vec` has landed and `ByteArray` above is the name §1 asks for, so the only
-thing still holding is that the flip is not free at the use sites, which are
-`c-mem`'s.
+`Vec`. `Vec` has landed and `ByteArray` above is the name §1 asks for, so what
+still holds is only that the flip is not free at the use sites — and those are
+mostly not the memory layer's, which is the part `c-stdlib` got wrong.
 
-`c-stdlib` measured this and got it wrong, which is worth stating in the module
-rather than only on the bus. The measurement said the flip costs six substitutions
-inside `Grass/Memory/**` and `Grass/Op/**` and is then green; that was true of a
-`main` with 54 modules and false of the one this comment ships against. Re-measured
-against whole `main`, the flip leaves 41 errors in `Grass/ISA/X86/Bytes.lean` after
-every one of those six, and `Grass/ISA/X86/Decode.lean` pattern-matches a `ByteSeq`
-as a list, which no substitution can port. Two thirds of the consumers are
-`c-x86`'s, not `c-mem`'s.
+`c-stdlib` measured this and published the measurement as a verified recipe, and
+it was wrong in a way worth stating in the module rather than only on the bus. It
+said the flip costs six substitutions inside `Grass/Memory/**` and `Grass/Op/**`
+and is then green. Re-measured against whole `main`, the flip leaves 41 errors in
+`Grass/ISA/X86/Bytes.lean` after every one of those six, and
+`Grass/ISA/X86/Decode.lean` pattern-matches a `ByteSeq` as a list, which no
+substitution can port. Of the 48 lines mentioning `ByteSeq` outside this module,
+**44 are in `c-x86`'s files** and 4 are in `Grass/Memory/Event.lean`.
+
+The cause was not that `main` moved: this module's own merge-base already carried
+every one of those `Grass/ISA` and `Grass/ABI` files. The search was scoped to the
+consumer `c-stdlib` expected and never asked the repository-wide question.
 
 So the flip is not scheduled, and `docs/STDLIB_IMPLEMENTATION_PLAN.md` §3.13 carries
 the re-measured cost. The recipe is retracted at `c-stdlib:34`.

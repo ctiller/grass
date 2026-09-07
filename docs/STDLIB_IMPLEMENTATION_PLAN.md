@@ -610,7 +610,13 @@ qualified name will miss the idiomatic way the same function is called.
 
 ### 3.11 Exit criteria
 
-S1 is complete when all of the following hold. The first four hold today.
+S1 is complete when all of the following hold. The first four hold on this branch
+in isolation. **On this branch merged onto current `main` they do not**, and the
+reason is §3.14: `Grass/Build/Cache/Key.lean` needs a one-line import change that
+is `g-build`'s to make, without which the merged tree fails to build and all four
+audits fail with it. "Today" is also the wrong word for a criterion in a repository
+whose `main` moves hourly — these hold against the tree named in §3.14 and are
+re-checked per merge, not asserted once.
 
 1. `lake build` is green with `warningAsError = true`, so no declaration uses
    `sorry`.
@@ -695,17 +701,20 @@ are definition bodies and two are ordinary data-construction expressions -- so
 "no edit at any use site" is true of *fields* and false of value expressions.
 `Committed.truncate` is named rather than the obligations `observedFits` and
 `writtenFits`, because those two names occur in four declarations across the two
-files and would send a reader to the wrong one.
+files and would send a reader to the wrong one — those two names appear on twelve
+lines of `Event.lean` alone.
 
-Expect **thirteen diagnostics at nine locations**, not six, and all of them in
+Expect **thirteen diagnostics across eleven lines**, not six, and all of them in
 `Event.lean`: `Op/Step.lean` imports it, so its two errors cannot appear in the
 same build. The other nine are downstream and need no edit of their own — two
 `unsolved goals` at `Event.lean:560` and `:568`, five `declaration uses 'sorry'`
 cascades, and two `This simp argument is unused` linter messages that
 `warningAsError` promotes to errors. Four named sites plus those nine is the
-thirteen. An earlier version of this paragraph said "the other seven" and listed
-only the `sorry` cascades and the linter messages, which does not add up; the two
-`unsolved goals` were the ones it dropped.
+thirteen. Two earlier versions of this sentence miscounted: the first said "the
+other seven" and omitted the two `unsolved goals`, and the second said "at nine
+locations", which is the count of the *downstream* diagnostics rather than of the
+lines — the thirteen sit on lines 348, 351, 353, 359, 390, 396, 560, 561, 568, 569
+and 579.
 
 Every counterpart already exists and no new name is needed, and the six do clear
 the two files they are about: after them, `Grass/Memory/Event.lean` and
@@ -725,8 +734,9 @@ unmeasured and is not in the 41.**
 `takeByte` is `ByteSeq → Except DecodeError (Byte × ByteSeq)` with arms for `[]`
 and `b :: rest`. `Vec` is a structure wrapping a list, not an inductive with those
 constructors, so no lemma rename ports it; the decoder needs `Vec`'s recursors or
-an explicit uncons. There are 46 `++` uses across the ISA and ABI byte modules
-besides.
+an explicit uncons. There are `++` operators on 46 lines across the ISA and ABI byte
+modules besides — 68 occurrences, since the count that matters for a migration is
+occurrences and the line count understates it.
 
 **The scope attribution was wrong too.** Of the `ByteSeq` mentions on `main`,
 `Grass/Memory/Event.lean` holds 4 and the rest are `c-x86`'s: `Decode.lean` 20,
@@ -734,18 +744,64 @@ besides.
 fixtures. So the change spans `c-mem`, `c-x86`, and — for `ByteArray` rather than
 `ByteSeq` — `g-build`, and it was never `c-mem`'s to land atomically.
 
-**How this plan got it wrong, since the error is the one it lectures others
-about.** The six-site figure was measured when `main` carried 54 modules and was
-published as a durable recipe at `c-stdlib:20`; `main` is now 181 build jobs and
-the ISA, ABI and Build layers arrived afterwards. The measurement was true of its
-tree and was never re-taken. §4.0 above says in terms that neither count should be
-quoted without its tree, and this section then quoted one without its date. The
-recipe is retracted to `c-mem` at `c-stdlib:34`, `c-x86` is told at `c-stdlib:35`,
-and `g-build` at `c-stdlib:36`.
+**How this plan got it wrong. The first answer it gave was also wrong, and the
+correction matters more than the original error.** This section previously blamed
+`main`'s velocity: the figure was measured on a smaller tree and the ISA, ABI and
+Build layers arrived afterwards. A reviewer checked that excuse against the trees
+it names and it does not survive. This branch's own merge-base is `ca8e42f`, the
+54-module tree, and it already contained **all fourteen** `Grass/ISA` and
+`Grass/ABI` files with exactly today's `ByteSeq` distribution — `Decode.lean` 20,
+`Bytes.lean` 10, `UnwindBytes.lean` 8, six across three fixtures. The 41 ISA errors
+were discoverable on the tree this branch was cut from. Only `Grass/Build`, and so
+only §3.14's finding, arrived later.
+
+So the real cause is not staleness. **The search stopped at the scope boundary.**
+`c-stdlib` knew `ByteSeq`'s consumer was the memory layer, grepped `Grass/Memory/**`,
+found four fields, and never asked the repository-wide question — while writing
+that the change was confined to `c-mem`'s scope, which is the claim the
+repository-wide question would have refuted. A count is not made safe by stamping
+it with a tree; it is made safe by searching the whole tree.
+
+That distinction is why the wrong diagnosis was worth correcting rather than
+quietly improving. "`main` moves fast" prescribes re-measuring, which would not
+have helped: re-measuring the same grep on a newer tree gives the same four files.
+"The search was scoped to the answer expected" prescribes searching outside the
+scope you expect, which finds it on the first attempt and on any tree since.
+
+§4.0 above says in terms that neither count should be quoted without its tree, and
+this section quoted one without its date; that remains true and remains a smaller
+fault than the one above it. The recipe is retracted to `c-mem` at `c-stdlib:34`,
+`c-x86` is told at `c-stdlib:35`, and `g-build` at `c-stdlib:36`.
+
+**`c-x86` has since costed its half, at `c-x86:32`, and the answer changes the
+shape of the problem: the retirement is not all-or-nothing.** Their two halves
+divide cleanly, which they say they did not expect before counting.
+
+- `Grass/ISA/X86/Bytes.lean`, the **emitter**, has *zero* cons patterns and nine
+  appends. It builds byte sequences and never takes them apart, so it ports to
+  `Vec Byte` without touching a proof — and it is the file holding all 41 of the
+  errors above, which are therefore mechanical rather than structural.
+- `Grass/ISA/X86/Decode.lean` (three cons patterns) and
+  `Grass/ABI/Win64/UnwindBytes.lean` (seven) are the **decoders**, and they do not
+  port. `takeByte` recurses structurally on `cons`, and `takeLe64` matches eight
+  elements in a single pattern to read a little-endian immediate. Over an indexed
+  container that becomes index arithmetic with a bounds obligation at every step
+  and a termination argument that is no longer free. About forty uses of
+  `List.cons_append`, `List.nil_append`, `List.append_assoc`, `List.map_cons` and
+  `List.flatten_cons` rest on list structure rather than on bytes.
+
+`c-x86`'s recommendation, adopted here: **retire the emitter half first, where it
+costs nothing, and treat the decoder as a separate decision** justified by a real
+consumer needing random access or by a measured performance need — not by
+uniformity. They offer to do the decoder rewrite themselves if the repository
+decides it wants one container, and would otherwise keep `List Byte` for the
+decode and unwind proofs, whose correctness stories are structural inductions over
+exactly that shape.
 
 **Status.** The flip is not scheduled and is not this branch's to land. `ByteSeq`
-stays `List Byte`, everything builds, and the `Grass/Memory` half is costed while
-the ISA and ABI half is large and unmeasured until `c-x86` costs it.
+stays `List Byte` and everything builds. What was "large and unmeasured" is now
+measured by its owner, and what it measures to is that §1's retirement can proceed
+incrementally rather than waiting on a decoder rewrite nobody has justified.
 
 ### 3.14 Moving `ByteArray` costs one import line in `Grass/Build/**`
 
@@ -1250,10 +1306,14 @@ Open, with the owner each is with:
    recorded in a module comment as a placeholder. `Tools/AxiomAudit.lean` cannot
    see them, since an `@[extern]` is not an axiom, so a green audit is not
    evidence about that boundary. Raised with the coordinator. §3.9.
-13. **The `ByteSeq` retirement**, which is an edit to `Grass/Memory/**` *and*
-   `Grass/Op/**` — both `c-mem`'s, so still `c-mem`'s to make, but two directories
-   rather than the one this item used to name. §3.13, which carries the measured
-   six-substitution recipe; offered to `c-mem` at `c-stdlib:20`.
+13. **The `ByteSeq` retirement**, which is **not** `c-mem`'s to make and is not a
+   substitution. Of the 48 lines mentioning `ByteSeq` outside `Std.Logical`, 44 are
+   in `c-x86`'s `Grass/ISA/**`, `Grass/ABI/Win64/**` and `Tests/ISA/X86/**`, and 4
+   are in `c-mem`'s `Grass/Memory/Event.lean`; `Grass/ISA/X86/Decode.lean`
+   pattern-matches a `ByteSeq` as a list, which no lemma rename ports. The
+   six-substitution recipe this item used to advertise was **retracted at
+   `c-stdlib:34`**; `c-x86` is told at `c-stdlib:35`. Unscheduled until `c-x86`
+   costs its half. §3.13.
 
 Items 1, 2, and 3 were all sharpened or found by reading the spike corpus for
 demands rather than by reasoning about the library in isolation, which is an
