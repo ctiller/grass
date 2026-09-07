@@ -153,7 +153,7 @@ theorem a_loan_cannot_be_bypassed_through_an_alias :
 /-- **And what "the same bytes" does not yet mean.**
 
 `MemoryState.SharesBytes` is what the whole authority layer keys on — `grantsOver`,
-`AuthorizedBy`, `MemoryEvent.Conflicts` — and `MemoryState.write` writes the bytes of
+`AuthorizedAt`, `MemoryEvent.Conflicts` — and `MemoryState.write` writes the bytes of
 the *named* allocation only. So a store through the view leaves the buffer's bytes
 unchanged, and a read of the buffer afterwards sees the old value. "Same storage" is
 an authority-level fiction with no byte-level counterpart, which means the theorem

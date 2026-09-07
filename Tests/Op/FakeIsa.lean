@@ -2602,6 +2602,30 @@ theorem a_read_count_on_a_write_only_access_is_refused :
         if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 1 0
         else .none)).rejection? = some .faultCommitOutOfRange := by decide
 
+/-- **And a write count past what the access names is refused.** `store` writes eight
+bytes, so a plan claiming sixteen committed describes something the substep cannot have
+done.
+
+The bound is two conjuncts and only the read one had a fixture, so review neutered the
+write conjunct to `writes ≤ writes` with the tree green. This is the asymmetry the
+section below says "cannot come back unnoticed in either direction", returning in the
+section written so that it could not — which is worth more than the clause: a fixture
+pair that names a symmetry is evidence about the half it exercises, and the other half
+needs its own. -/
+theorem a_write_count_past_the_range_is_refused :
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
+      ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 16
+        else .none)).rejection? = some .faultCommitOutOfRange := by decide
+
+/-- And the same plan at the width the access does name runs, so the refusal is the
+count and not the plan. -/
+theorem the_same_plan_at_the_declared_width_runs :
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.store) thread₀ .thread
+      ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 8
+        else .none)).Ran := by decide
+
 /-- The same plan with the read count zero runs, so the refusal is the count and not
 the plan. -/
 theorem the_same_plan_without_the_read_runs :

@@ -23,7 +23,7 @@ that is well formed, and fourteen neighbours differing in a single field.
 caught it" from "some other clause did", so the baseline is proved well formed in the
 same theorem — the two together say the difference is the clause.
 
-**The pairing is only as good as the neighbour being one field away, and three were
+**The pairing is only as good as the neighbour being one field away, and five are
 not.** The inert intent, the over-wide range and the demandless read each failed a
 *second* clause, so each theorem held with the clause it names deleted — which review
 demonstrated by deciding all fourteen clauses separately and then rebuilding the tree
@@ -203,8 +203,14 @@ demand and a non-reading one must not. Without it a read could declare
 
 `producesInitialized := false` for the same reason as the inert case: a read writes
 nothing, so without it the neighbour also failed `producesInitializedOnlyIfWrites` and
-this theorem held with `initializationMatchesIntent` deleted. `readProducer` below is
-the control, differing from this descriptor in the initialization demand alone. -/
+this theorem held with `initializationMatchesIntent` deleted.
+`a_read_that_demands_initialization_is_admitted` below is the control, differing from
+this descriptor in the initialization demand alone.
+
+That sentence named `readProducer`, which is not a control at all: it is the *refused*
+neighbour for `producesInitializedOnlyIfWrites`, and it differs from this descriptor in
+two fields rather than one. Review found it while checking the accounting, and the
+accounting is the argument. -/
 theorem a_read_that_demands_nothing_is_refused :
     ¬ demandlessRead.WellFormedIn space := by decide
 

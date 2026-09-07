@@ -741,10 +741,15 @@ one outright defect that had already merged — see §3.11's denial row.
   that predicate's only consumer is `unregisteredOnFaultRule?_priorEffectsVisible`,
   a theorem.
 - **§10's proof package is closable by triviality, and its docstring calls that the
-  mechanism.** `RequiredProofPackage`'s eleven fields are bare `Prop`s the profile
-  owner chooses; nothing relates a field to the profile, to its admitted operations,
-  or to any theorem in the tree. `Holds` is their conjunction, so a profile supplying
-  `True` eleven times *closes* §10 and `Holds` is `trivial` —
+  mechanism.** ~~All eleven of~~ Eight of `RequiredProofPackage`'s fields are bare
+  `Prop`s the profile owner chooses; nothing relates such a field to the profile, to
+  its admitted operations, or to any theorem in the tree. `Holds` is the conjunction of
+  those eight, so a profile supplying `True` eight times closes what remains of §10 and
+  `Holds` is `trivial` —
+
+  This bullet said eleven, and said so after three of them had been given types this
+  layer states. §4.4.1a's table had the right number the whole time, so the document
+  contradicted itself; the entry below records the three that changed. —
   `Tests/Op/FakeIsa.lean` does exactly that and says so, but the honesty is the
   fixture's, not the type's. The docstring says a `MemoryProfile` "cannot be
   constructed with one missing — which is the mechanical content of" §10's gate; what
@@ -924,7 +929,7 @@ one outright defect that had already merged — see §3.11's denial row.
   list, which is that agent's and has not happened.
 - **Aliased allocations have independent byte stores.** `MemoryState.SharesBytes`
   says two allocations name the same bytes, and the whole authority layer believes
-  it: `grantsOver`, `AuthorizedBy` and `MemoryEvent.Conflicts` all key on it. But
+  it: `grantsOver`, `AuthorizedAt` and `MemoryEvent.Conflicts` all key on it. But
   `MemoryState.write` writes `record.bytes` of the *named* allocation only, so a
   store through a mapped view leaves the file's bytes unchanged and a read of the
   file afterwards sees the old value. "Same storage" is an authority-level fiction
@@ -955,10 +960,18 @@ one outright defect that had already merged — see §3.11's denial row.
 
   The second is the better shape. Neither should be taken without the design owner,
   because both change `MemoryState`.
-- **`MemoryState.aliases` records no offset mapping.** `AuthorizedBy` and
-  `grantsOver` compare `ByteRange`s across aliased allocations with `Contains` and
-  `Meets`, which assumes aliased allocations agree offset for offset. A view mapped
-  at a non-zero file offset — the ordinary `MapViewOfFile` case — does not.
+- **`MemoryState.aliases` records no offset mapping.** `AuthorizedAt` compares a
+  grant's range to an *offset* with `Covers`, and `grantsOver` compares ranges with
+  `Meets`, across aliased allocations — which assumes aliased allocations agree offset
+  for offset. A view mapped at a non-zero file offset — the ordinary `MapViewOfFile`
+  case — does not.
+
+  This entry named `AuthorizedBy`, which nothing declares, and gave it operations the
+  real predicate does not perform. It is the record of this layer's largest open gap,
+  so a reader chasing it was sent to a name that does not exist.
+  `Tools/CitationAudit.py` cannot see a bare token with no dot and no underscore, and
+  its self-test asserts that blind spot as permanent — which is right as a limit and
+  is why three of this round's findings were prose no gate could reach.
 - ~~**`AccessDescriptor.WellFormedIn.rangeInProvenance` is self-certifying.**~~ Half
   closed. `denialOf` compares `provenance.rootExtent` to the allocation record's
   `extent` and records `provenanceExtentMismatch` when they differ, so a descriptor
@@ -2217,6 +2230,48 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   owed to that owner as a report rather than decided here: whether an infinite
   continuation's witness fields are meant to be read is their call.
 
+- ~~**Ten of `LedgerDelta.Applicable`'s twenty clauses were discriminated by
+  nothing.**~~ `.discharge` had a theorem for liveness, protocol and owner; `.split`,
+  `.join` and `.transfer` ask the same three questions and had none. `.transfer` was
+  worst — three of its four clauses inert, so applicability for a transfer was
+  effectively "the recipient is a known context", while §2's sentence covers all five
+  constructors equally. Ten `not_applicable_*` theorems on the `.discharge` template,
+  each swept.
+- ~~**`MemoryEvent.Conflicts` had no theorem for either of the two conjuncts §7.3 is
+  about.**~~ Four of its six had one; the missing pair were the committed ranges
+  overlapping and the compatible-atomic exemption. Without the first every pair of
+  accesses to shared storage with a writer is a race however far apart they are — the
+  over-refusing direction, and therefore silent. Without the second `atomicShared`
+  stops meaning anything at the event layer.
+- ~~**`step`'s fault-commit bound checked the read half and not the write half.**~~ Two
+  conjuncts, one fixture, and `writes ≤ writes` left the tree green. The fixture pair
+  that exercises it says in so many words that the asymmetry "cannot come back
+  unnoticed in either direction" — and it came back in the section written so that it
+  could not. The lesson generalises past the clause: **a fixture pair that names a
+  symmetry is evidence about the half it exercises**, and the other half needs its own.
+- ~~**`MayLend`'s non-emptiness conjunct had become logically inert.**~~ Added because
+  `List.all` on the empty list is `true`; superseded by the ownership conjunct that
+  arrived a round later, which refuses those strangers itself. Review *proved* the two
+  disjunctions pointwise equal rather than observing it, which is the standard this
+  branch set when it deleted `applyAccess_frames_disjoint_range` from
+  `PreservationLaws`.
+- ~~**Prose naming things that are not there**, in four places no gate can reach.~~
+  `AuthorizedBy` was cited three times as a live mechanism and nothing declares it —
+  including in the record of this layer's *largest open gap*, where it was also given
+  operations the real `AuthorizedAt` does not perform. §4.4.1's description of §10's
+  package said eleven bare `Prop`s after three had been given types this layer states,
+  contradicting §4.4.1a's table in the same document. Two counts were stale.
+  `Tests/Memory/WellFormedClauses.lean` said three of its neighbours were more than one
+  field from the baseline when five are, and named `readProducer` as a control when it
+  is a refused neighbour.
+
+  All of it is invisible to `Tools/CitationAudit.py` for one documented reason: a bare
+  backticked token with no dot and no underscore is not adjudicated, and the self-test
+  asserts that blind spot as permanent. That is right as a limit — the alternative is
+  a declaration set that cannot tell prose from code — and it means **prose accuracy in
+  this document rests on review rather than on a gate**, which is worth knowing when
+  reading the struck-through entries above.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Four review rounds found the same shape and it is worth naming as a shape rather than
@@ -2531,7 +2586,7 @@ the field belongs beside it as something that can only add.
   consumer under `Grass/`.
 - ~~**Three admissibility failures report one rejection.**~~ Closed.
   `StepRejection.accessNotAdmitted` carries an `AdmittedVocabulary.AdmissibilityFailure`
-  with ten distinct reasons, `Admits` is that failure list's emptiness so the two
+  with twelve distinct reasons, `Admits` is that failure list's emptiness so the two
   cannot drift, and `the_three_refusals_are_distinguishable` is the fixture the old
   shape could not have. This bullet stayed on the owed list for two commits after the
   work landed, which is the same failure as an overclaim pointing the other way.
@@ -2625,7 +2680,7 @@ the field belongs beside it as something that can only add.
   form a policy at all, and `a_confused_vocabulary_is_not_well_formed` is that
   vocabulary refused.
 
-  Eight registries still have no coherence condition between them, and that is not a
+  Ten registries still have no coherence condition between them, and that is not a
   gap of the same kind: nothing says a fault class and an allocation source may not
   share a name, because nothing would go wrong if they did.
 - **A join of two independent duties halves the ledger, and one discharge ends
