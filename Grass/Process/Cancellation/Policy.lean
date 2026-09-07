@@ -182,7 +182,8 @@ theorem covers_calls {policy : CancellationPolicy} {summary : ProcessScopeSummar
     policy.blockingCalls = summary.blockingCalls := covers.2
 
 /--
-A policy cannot cover a summary that discovered a call it has not classified.
+A policy cannot cover a summary that discovered a call it has not classified —
+`not_covers_of_unclassified`.
 
 This is the local-invalidation property stated negatively, and it is what makes
 `callsExact` bite: adding a `Sleep` to a scope changes `summary.blockingCalls`,
@@ -266,7 +267,7 @@ def composePolicy (left right : CancellationPolicy) : CancellationPolicy where
     else right.callDisposition call
 
 /--
-Composition preserves exactness.
+Composition preserves exactness, which is `composePolicy_covers` below.
 
 The fold's key step: the composed policy covers the composed summary, so an
 aggregate certificate is assembled from child certificates rather than proved

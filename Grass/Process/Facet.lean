@@ -4,7 +4,7 @@ import Grass.Process.Termination
 /-!
 # Termination facets
 
-`docs/PROCESS.md` §3 attaches a facet only when a process makes a promise:
+`docs/PROCESS.md` §3 attaches a facet just where a process makes a promise:
 
 > This sophistication is capability-driven. `ProcessCorrect` itself retains only
 > ordinary invariant, terminal, observation, demand, and progress facts. A
@@ -36,8 +36,9 @@ it.
 
 ## "The bridge cannot discard it after manufacturing a liveness contract"
 
-§3 again: "The cooperative and supervised facet constructors retain the complete
-`CancellationBackedContract`, including the exact summary witness. Runtime and
+`docs/PROCESS.md` §3 again: "The cooperative and supervised facet constructors
+retain the complete `CancellationBackedContract`, including the exact summary
+witness. Runtime and
 proof-level cancellation transitions consume that retained summary to identify
 the affine request occurrence, safe state, delay premise and disposition; the
 bridge cannot discard it after manufacturing a liveness contract."
@@ -179,9 +180,10 @@ variable {request : p.Request} {accept : ProcessAcceptance p}
 /--
 The contract a facet retains, if it has one.
 
-§3: "the bridge cannot discard it after manufacturing a liveness contract."
-Total over the facet, so there is no constructor whose retained contract is
-undefined — and the two that promise cancellation both have one.
+`docs/PROCESS.md` §3: "the bridge cannot discard it after manufacturing a
+liveness contract." Total over the facet, so there is no constructor whose
+retained contract is undefined — and the two that promise cancellation both have
+one.
 -/
 def retainedContract {demand : TerminationDemand Policy Versions} :
     TerminationFacet correct request Policy Versions demand →
@@ -251,8 +253,9 @@ theorem cancellable_facets_retain_a_contract
 death.**
 
 The point of retaining the contract rather than a summary of it: a supervisor
-holding a cooperative or supervised facet can *derive* that it cannot
-manufacture a safe forced stop, instead of being told so.
+holding a cooperative or supervised facet can *derive* from
+`cancellable_facet_forbids_arbitrary_death` that it cannot manufacture a safe
+forced stop, instead of being told so.
 
 An earlier revision stated this with the contract supplied and the facet only
 mentioned in a hypothesis it never used — which made it a theorem about

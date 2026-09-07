@@ -48,7 +48,7 @@ layer could be written first.
 An earlier version of this module lived at `Grass/Process/Network/Boundary.lean`
 and imported `Grass.Process.Spec` in order to offer a `toVocabulary` view. That
 edge is what made the placement wrong rather than merely unconventional: a
-neutral record cannot depend on the layer that consumes it. The view moved to
+neutral record must not depend on the layer that consumes it. The view moved to
 `Grass/Process/Network/Exposure.lean`, which is Process-side and is allowed to
 know both.
 

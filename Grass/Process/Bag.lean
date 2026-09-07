@@ -7,11 +7,10 @@ output and says what that container must and must not be:
 > The finite demand multiset contains neither occurrence identities nor
 > execution order.
 
-and
-
-> Equal demand values remain indistinguishable at the precious level, but their
-> bag multiplicity cannot be fabricated, replayed, jointly consumed by one
-> result, or silently lost.
+and, of the same container, `docs/PROCESS.md` §2 says that "equal demand
+values remain indistinguishable at the precious level, but their bag
+multiplicity cannot be fabricated, replayed, jointly consumed by one result, or
+silently lost".
 
 Those two sentences pick the representation. Order must be quotiented away, or
 a specification would observe the order in which a transition happened to list

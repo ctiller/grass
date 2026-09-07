@@ -376,9 +376,9 @@ def NominalsAllocated : Prop :=
 /--
 **Every rerouted occurrence lands where it was rerouted to.**
 
-`Grass/Process/Network/Escrow.lean` names this obligation and says a ledger
-cannot discharge it, being one session's. That module was right that a ledger
-cannot and slightly wrong about who can: it named `Plan.lean`, but `inFlight`
+`Grass/Process/Network/Escrow.lean` names this obligation and says a ledger has
+no way to discharge it, being one session's. That module was right about the
+ledger and slightly wrong about who can: it named `Plan.lean`, but `inFlight`
 here already holds every session's ledger of every edge, and a reroute's
 destination is a `ChannelId` of the same edge. So the obligation is dischargeable
 one layer lower than it was recorded, and here it is.

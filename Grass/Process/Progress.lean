@@ -212,10 +212,11 @@ def Decreases (measure : ProcessMeasure p) (before : p.State)
   measure.lt (measure.rank after afterOutstanding) (measure.rank before beforeOutstanding)
 
 /--
-**A run cannot get smaller both ways.**
+**A run cannot get smaller both ways** — `not_decreases_both_ways`.
 
-A well-founded order is asymmetric, so a measure cannot certify progress from one
-running configuration to another *and* back. This is the fact one rank over
+A well-founded order is asymmetric, so `not_decreases_both_ways` says a measure
+cannot certify progress from one running configuration to another *and* back.
+This is the fact one rank over
 `(state, outstanding)` buys and two ranks in a disjunction do not:
 `Tests/Process/OscillateFixtures.lean` is the process that descended in the bag
 one step and in the state rank the next, and returned the run to where it
@@ -322,7 +323,8 @@ the state rank on the next, and be back where it started.
 The demand-result half is now inside the measure, which takes the outstanding bag
 as an argument — see `ProcessMeasure`. A step that answers a demand and issues
 nothing shrinks the bag, and an author who wants that to count says so by ranking
-the bag. What they cannot do is have it counted *and* have the rank climb back.
+the bag. What they cannot do is have it counted *and* have the rank climb back,
+which is `not_decreases_both_ways`.
 
 See the module note for why the first disjunct is environment entropy rather
 than "settled nothing"; that argument is about `.fault` and
@@ -352,8 +354,8 @@ requiring it costs a correct process its record, which is what happened to
 
 `productive` used to quantify over every step from an invariant-satisfying
 state. An `Invariant : p.State → Prop` sees the state and not the bag, so it
-cannot say "this demand is never outstanding" — and a process is then obliged to
-prove progress for results to demands it never issues. `countdown`'s `.result
+has no way to say "this demand is never outstanding" — and a process is then
+obliged to prove progress for results to demands it never issues. `countdown`'s `.result
 .log` case is exactly that step: it answers a demand that is never in the bag,
 leaves the state alone and reissues, so it progresses under no measure at all.
 The first response to that was to widen `StepProgresses` until the unreachable
@@ -374,9 +376,10 @@ structure MeetsProcessProgress (p : ProcessSpec.{u, w})
   Every deliverable event has a successor, at every reachable state the process
   has not finished at.
 
-  This is `docs/FOUNDATION.md` law 5 made checkable: an author cannot handle the
-  results they expect and leave the rest, because every event that could arrive
-  while the process is still working must have a transition.
+  This is `docs/FOUNDATION.md` law 5 made checkable, and `transition_for_event`
+  is where it is spent: an author cannot handle the results they expect and leave
+  the rest, because every event that could arrive while the process is still
+  working must have a transition.
 
   The non-terminality guard is a weakening for some processes and a necessity
   for others, and the module note says which. It is *not* true that the record
@@ -507,8 +510,9 @@ field documented as "law 5 made checkable" — was consumed by nothing.
 was `∃ after, ProcessRunTransition … after`, which never mentions `event`, so it
 is `exists_transition`'s conclusion verbatim and provable by discarding the
 field, the non-terminality hypothesis and the deliverability alike. Local
-adversarial review reproved it that way. A theorem is about the event it is handed
-only if the event appears in what it concludes.
+adversarial review reproved it that way. A theorem such as
+`transition_for_event` is about the event it is handed only if the event appears
+in what it concludes.
 
 It does now: the successor run state is the one the step and the event determine —
 the reached state, the bag `SuccessorBag` computes, and the trace extended by
@@ -622,7 +626,8 @@ theorem silent_step_descends (progress : MeetsProcessProgress p accept Invariant
     notEntropy undemanded
 
 /--
-**A run cannot take two silent steps and be back where it started.**
+**A run cannot take two silent steps and be back where it started** —
+`no_silent_two_cycle`.
 
 `Tests/Process/OscillateFixtures.lean` lifted off its fixture. That process
 descended the outstanding bag on one step and a state rank on the next, and

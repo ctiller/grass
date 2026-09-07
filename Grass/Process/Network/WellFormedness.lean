@@ -103,7 +103,8 @@ theorem instanceProperty_preserved
       ((transition.touchesOnly (.instanceState kind slot) declared).trans found)
 
 /--
-Two instance fragments are the same fragment only when they name the same slot.
+Two instance fragments are the same fragment only when they name the same slot,
+which is `instanceFragment_inj`.
 
 The inversion `instanceProperty_preserved`'s users need: a constructor declares
 one slot, and a clause is being asked about another, so the two have to be
@@ -392,7 +393,8 @@ theorem declared_slot_outcome (transition : plan.NetworkTransition before after)
 /-! ## The clauses -/
 
 /--
-**A step preserves the validity of recorded parenthood.**
+**A step preserves the validity of recorded parenthood** —
+`parentageValid_preserved`.
 
 `docs/DECISIONS.md` decision 130's law. A carried incarnation knows the parent
 the one before it knew, and the before-network answered for that; an installed
@@ -421,7 +423,8 @@ theorem parentageValid_preserved (transition : plan.NetworkTransition before aft
   · exact (installed incarnation found).2.1
 
 /--
-**A step preserves the agreement between a slot and what it holds.**
+**A step preserves the agreement between a slot and what it holds** —
+`slotsAgree_preserved`.
 
 The clause that stopped a spawn installing an incarnation naming slot 3 into slot
 7. A carried incarnation has the reference the one before it had, and the
@@ -557,7 +560,7 @@ theorem root_was_there (transition : plan.NetworkTransition before after)
       isRoot⟩
 
 /--
-**A step preserves root uniqueness.**
+**A step preserves root uniqueness** — `rootUnique_preserved`.
 
 `docs/DECISIONS.md` decision 130's other law. Both roots after the step were
 roots before it, in the same slots, and the before-network already said two roots
@@ -576,7 +579,7 @@ theorem rootUnique_preserved (transition : plan.NetworkTransition before after)
 /-! ## Reroutes land, which is about ledgers rather than slots -/
 
 /-- Two escrow fragments are the same fragment only when they name the same
-session of the same edge. -/
+session of the same edge, which is `escrowFragment_inj`. -/
 theorem escrowFragment_inj {edge edge' : plan.topology.ChannelKind}
     {session : plan.topology.ChannelId edge} {session' : plan.topology.ChannelId edge'}
     (equal : (NetworkFragment.escrow edge session : NetworkFragment plan.topology)
@@ -985,7 +988,8 @@ theorem occurrencesOnTheirSession_preserved (transition : plan.NetworkTransition
 
 /--
 A step that creates nothing in a ledger preserves that ledger's identity
-distinctness, because both entries were already there.
+distinctness, because both entries were already there —
+`creates_nothing_distinct`.
 
 Nine of the twelve escrow-scoped constructors are this case, and stating it once
 is the difference between a readable proof and nine copies of the same three
@@ -1009,7 +1013,8 @@ theorem creates_nothing_distinct {edge : plan.topology.ChannelKind}
   · exact (creates first heldFirst oldFirst).elim
 
 /--
-And a step that creates *one* entry with a fresh identity preserves it too.
+And a step that creates *one* entry with a fresh identity preserves it too, as
+`created_identities_distinct`.
 
 The three constructors that can put something in a ledger — a send, a coalesce's
 carrier, and a reroute's arrival at its destination — differ in which field says

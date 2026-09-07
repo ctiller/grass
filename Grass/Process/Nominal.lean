@@ -87,7 +87,8 @@ A logical identity: a kind and a carrier value.
 `Carrier` is a parameter rather than a fixed type because the mechanism that
 makes carriers unrepeatable — a supply whose constructor is private — belongs to
 `Grass.Core`, not here. This module proves what the *history* guarantees given
-any carrier with decidable equality; `Grass.Core` proves that the carrier supply
+any carrier with decidable equality — `never_fresh_again` is the headline — while
+`Grass.Core` proves that the carrier supply
 never reissues.
 -/
 structure LogicalNominal (Carrier : Type u) where

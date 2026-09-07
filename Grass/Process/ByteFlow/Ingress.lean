@@ -280,7 +280,8 @@ inductive ByteIngressTransition {Byte Occurrence : Type u} {Loan : Occurrence โ
           parserRemainder := rest }) :
       ByteIngressTransition before after
   /--
-  Draining finishes, and only when every internal buffer is empty.
+  Draining finishes, and the fields below require every internal buffer to be
+  empty first.
 
   `docs/PROCESS.md` ยง3's `IngressInternalBuffersEmpty`. Without it a flow could
   reach `terminal` holding undelivered bytes, and the conservation invariant

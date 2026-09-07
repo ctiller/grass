@@ -22,12 +22,13 @@ event *unconstructible*, and `Grass/Process/Vocabulary.lean` said honestly that
 this was an assumption rather than a discharged obligation until a classifier
 existed.
 
-Here is why the classifier discharges it. `VocabularyDelivery` is three *total*
-functions. A total function into `PEmpty` cannot exist unless its domain is also
-empty — that is `interrupt_source_empty_of_target_empty` below. So a delivery
-into a process that declares no interruption reason is available only from a
-side that can produce none, and the empty class is a *theorem* about what can
-arrive rather than a hole in what is handled.
+Here is why the classifier discharges it. `VocabularyDelivery` and
+`InterruptDelivery` are *total* functions between the classes. A total function
+into `PEmpty` cannot exist unless its domain is also empty — that is
+`source_empty_of_target_empty` and its two neighbours below. So a delivery into
+a process that declares no interruption reason is available only from a side
+that can produce none, and the empty class is a *theorem* about what can arrive
+rather than a hole in what is handled.
 
 `docs/FOUNDATION.md` law 8 is what makes this the right shape: an unclassified
 event must be rejected rather than approximated, so the classifier is total and

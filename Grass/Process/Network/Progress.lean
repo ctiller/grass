@@ -1,7 +1,7 @@
 import Grass.Process.Network.Initial
 
 /-!
-# Network progress: why a silent loop cannot run forever
+# Network progress: why a silent loop cannot run forever (`no_infinite_silent_run`)
 
 `docs/PROCESS.md` §7 states the theorem this module proves:
 
@@ -11,8 +11,11 @@ import Grass.Process.Network.Initial
 > declared external frontier; otherwise a global well-founded rank decreases
 > across process steps, spawn, retry, cancellation, death, join, and restart.
 > Supervision therefore carries a restart bound/rank or a separately demanded
-> productivity law. Fresh-child restart loops cannot evade the global theorem,
-> and scheduler fairness is used only when named by the specification.
+> productivity law.
+
+and closes with two exclusions: `docs/PROCESS.md` §7 says "fresh-child restart
+loops cannot evade the global theorem, and scheduler fairness is used only when
+named by the specification".
 
 ## The shape of the argument
 
@@ -435,7 +438,8 @@ theorem no_infinite_silent_run (run : Nat → plan.LogicalProcessNetwork)
     (fun index => measure.silent_run_descends (silent index))
 
 /--
-**Two silent steps cannot return to where they started.**
+**Two silent steps cannot return to where they started**, which is
+`two_silent_steps_cannot_return`.
 
 The shape a self-delivered livelock takes: a process sends to itself, receives,
 and is back where it began. `docs/PROCESS_IMPLEMENTATION_PLAN.md`'s M4 exit
@@ -464,7 +468,7 @@ theorem two_silent_steps_cannot_return {network middle : plan.LogicalProcessNetw
 Not a no-revisiting law: the caller must supply the run already split at the
 network it returns to, and `SilentRun` has no inversion at an interior point —
 only `.more` peels a step, and it peels the last one. So a run that revisits a
-network in the middle cannot be brought to this theorem. It is
+network in the middle cannot be brought to this theorem — it is
 `no_silent_cycle` for a concatenation, and an earlier docstring claimed
 otherwise.
 -/

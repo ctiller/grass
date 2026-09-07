@@ -6,10 +6,13 @@ import Grass.Process.Weave.Mixin
 `docs/PROCESS.md` §8:
 
 > Refinement itself is local. A `ProcessRefinementLens` selects one abstract
-> role or subgraph and its complete typed boundary. Replacing it preserves
-> observation origin, channel order, linear/shared custody, obligations,
-> resource flux, and progress at that boundary while introducing a finite
-> requirement delta. The generic contextual theorem frames every nonselected
+> role or subgraph and its complete typed boundary.
+
+`docs/PROCESS.md` §8 asks that "replacing it preserves observation origin,
+channel order, linear/shared custody, obligations, resource flux, and progress
+at that boundary while introducing a finite requirement delta", and continues:
+
+> The generic contextual theorem frames every nonselected
 > process. Thus one proof may replace only the graphics role with Vulkan
 > protocols while leaving disk I/O abstract; a later proof may replace only disk
 > I/O with Win32 asynchronous-file and IOCP protocols. Neither reopens the
@@ -27,8 +30,8 @@ skipped.
 proof is one application of `WeaveInvariantMixin.frames_past_unrelated_steps`.
 That is the argument for the scope discipline rather than a shortcoming of this
 module: an assertion carries a footprint, a transition carries a scope, a lens
-carries an interior, and "a step inside the lens cannot disturb an invariant
-outside it" is what those three compose to.
+carries an interior, and `frames_every_exterior_mixin` — "a step inside the lens
+cannot disturb an invariant outside it" — is what those three compose to.
 
 `disjoint_lenses_do_not_reopen_each_other` is the same fact between two lenses,
 which is §8's graphics-and-disk sentence. Neither refinement's author knows the
@@ -56,8 +59,9 @@ different thing.
 
 The same shape appears in `Grass/Process/Trace/Linearization.lean`: two
 independent steps never both emit, because one fragment carries every emission.
-Two disjoint lenses likewise cannot both contain it, so at most one refinement in
-a weave may change what the program produces without an explicit argument.
+Two disjoint lenses likewise cannot both contain it, so
+`at_most_one_lens_may_emit`: at most one refinement in a weave may change what
+the program produces without an explicit argument.
 
 ## What `Disjoint` does not separate
 
@@ -166,7 +170,7 @@ structure ProcessRefinementLens where
   **And an interior region is one a selected role may write.**
 
   Spending the capability `ProcessGraph.sharedAccess` already declares. A lens
-  cannot claim a region that only unselected roles write, nor one that is
+  has no way to claim a region that only unselected roles write, nor one that is
   read-only for everybody — which is exactly the fragment
   `Tests/Process/WeaveFixtures.lean` builds its immutability mixin around.
   -/
@@ -209,8 +213,9 @@ variable {lens}
 **The generic contextual theorem: a step inside the lens preserves every
 invariant outside it.**
 
-§8's "The generic contextual theorem frames every nonselected process", and the
-whole of what makes local refinement local. The mixin's author never mentioned
+§8's "The generic contextual theorem frames every nonselected process" as
+`frames_every_exterior_mixin`, and the whole of what makes local refinement
+local. The mixin's author never mentioned
 the lens and the refinement's author never mentioned the mixin; the framing
 comes from the mixin's footprint being inside its own scope, the step's changes
 being inside its own scope, and the lens keeping those two apart.
@@ -333,7 +338,8 @@ argument instead.
 
 `Grass/Process/Trace/Linearization.lean` reaches the same shape from the other
 side — two independent steps never both emit, because one fragment carries every
-emission. Two disjoint lenses likewise cannot both contain it.
+emission. Two disjoint lenses likewise cannot both contain it, which is
+`at_most_one_lens_may_emit`.
 
 This named `.observations` for one round after the trace split, which made it a
 statement about *commits*: only `commit` declares that fragment now. A reviewer
@@ -361,7 +367,7 @@ theorem committing_steps_need_the_committed_trace_inside
   inside .observations publishes
 
 /-- So two disjoint lenses cannot both own the produced trace, and at most one
-may emit. -/
+may emit — `at_most_one_lens_may_emit`. -/
 theorem at_most_one_lens_may_emit
     {left right : plan.ProcessRefinementLens} (disjoint : Disjoint left right)
     {a b c d : plan.LogicalProcessNetwork}
@@ -398,7 +404,8 @@ def PreservesTheExterior
       LogicalProcessNetworkCore.Agrees fragment before after
 
 /--
-**A run of the selected subgraph preserves the exterior.**
+**A run of the selected subgraph preserves the exterior** —
+`interior_steps_preserve_the_exterior`.
 
 The obligation above discharged for the replacement this layer can express. Note
 that it is stronger than `frames_every_exterior_mixin`: that one preserves

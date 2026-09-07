@@ -41,7 +41,8 @@ when applicable, and resulting instance state through equality proofs."
 
 `LifecycleWitnessed` remains, and its job is now sharper. It does not recover
 the result — the tag has it. It ties the stored result to the protocol, so a
-network cannot store an answer the protocol never reaches from that state.
+network cannot store an answer the protocol never reaches from that state, and
+`lifecyclesWitnessed_preserved` is what carries that across a step.
 
 ## `ProcessParentage` keeps the history detachment destroys
 
@@ -348,7 +349,8 @@ A root holds no parent authority either, which is the form
 `Spawns.spawnsAChild` refutes.
 
 That field says a spawned incarnation has a current parent; this says a root has
-none. Together they are why a spawn cannot install a second root.
+none. Together they are why a spawn cannot install a second root, which is what
+`rootUnique_preserved` spends them on.
 -/
 theorem root_currentParent {parentage : ProcessParentage topology kind}
     (root : parentage.IsRoot) : parentage.currentParent = none := by
@@ -425,7 +427,7 @@ Required of every instance in a well-formed `LogicalProcessNetwork` rather than
 carried as a field, for the reason in the module note. Since decision 129 the
 tag *has* the result, so this no longer recovers anything — it stops a network
 from storing an answer the protocol never reaches from that state, which is the
-half a stored payload cannot check for itself.
+half a stored payload has no way to check for itself.
 
 Only `terminated` is constrained. The other endings' payloads are their own
 witnesses: a `LogicalFault` is a fault, and there is no state relation to hold

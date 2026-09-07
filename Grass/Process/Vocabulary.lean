@@ -185,9 +185,10 @@ The demand this event settles, if any.
 demand; the other three do not. `docs/PROCESS.md` §2 states the consequence:
 "A result/interruption requires and consumes exactly one live matching item",
 while an external event, fault, or violation leaves the outstanding bag alone.
-`Grass/Process/Run.lean` is where that is enforced, and this function is what it
-is enforced against, so that the correspondence is one definition rather than
-five constructor cases restating it.
+`Grass/Process/Run.lean`'s `ProcessRunTransition.settle` is where that is
+enforced, and `settles` is what it is enforced against, so that the
+correspondence is one definition rather than five constructor cases restating
+it.
 -/
 def settles : ProcessEvent v → Option v.Demand
   | .external _ => none

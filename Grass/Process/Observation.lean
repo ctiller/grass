@@ -4,9 +4,11 @@
 `docs/PROCESS.md` §2:
 
 > The final argument of `Step` is the finite observation segment emitted by that
-> exact transition. A process run concatenates these segments. Processes do not
-> carry their complete observation history in local state, and revisiting or
-> rendering a state cannot duplicate an observation.
+> exact transition. A process run concatenates these segments.
+
+and, of the state, `docs/PROCESS.md` §2 adds that "processes do not carry their
+complete observation history in local state, and revisiting or rendering a state
+cannot duplicate an observation".
 
 That paragraph is the whole design. A segment is finite and belongs to one
 transition; the run's trace is the concatenation, and it is *derived* rather
@@ -114,9 +116,9 @@ never reaches an acceptance relation.
 -/
 
 /--
-The number of observations is the sum of the segment lengths: a transition
-cannot emit an observation that fails to appear in the trace, and the trace
-cannot contain one no transition emitted.
+The number of observations is the sum of the segment lengths — `flat_length` —
+so a transition cannot emit an observation that fails to appear in the trace,
+and the trace cannot contain one no transition emitted.
 -/
 theorem flat_length (history : Segmented Observation) :
     history.flat.length = (history.segments.map List.length).sum := by

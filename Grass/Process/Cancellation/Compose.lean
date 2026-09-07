@@ -17,9 +17,11 @@ it:
 > arriving after that point is retained until the process's terminal boundary,
 > where the ordinary terminal disposition must classify it. A bounded-
 > cancellation claim therefore also needs the two uncancellable regions to
-> terminate within named bounds or under named environment premises. **A
-> forever-blocking uncancellable region cannot acquire eventual cancellation
-> merely by being sequenced with a later point.**
+> terminate within named bounds or under named environment premises.
+
+and then the sentence this module exists for: `docs/PROCESS.md` §3 says that "a
+forever-blocking uncancellable region cannot acquire eventual cancellation
+merely by being sequenced with a later point".
 
 That last sentence is the one worth proving, and it is the reason this module
 exists rather than a `|>` that merely typechecks. It is easy to write a
@@ -140,7 +142,7 @@ def nothing : CancellationSequence := ⟨[]⟩
 Half of `docs/PROCESS_IMPLEMENTATION_PLAN.md` §5's exit criterion, and the
 reason a composite is a list: bracketing `a |> (b |> c)` differently from
 `(a |> b) |> c` cannot change what the process does, so the algebra must not be
-able to tell them apart.
+able to tell them apart, which is what `seq_assoc` below says.
 -/
 theorem seq_assoc (a b c : CancellationSequence) :
     (a.seq b).seq c = a.seq (b.seq c) := by

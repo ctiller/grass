@@ -6,13 +6,16 @@ import Grass.Process.Network.Transition
 `docs/PROCESS.md` §6 is short, and one sentence in it carries the whole module:
 
 > A platform reconciler proves that each physical commit refines that view under
-> an observation filter. It may skip an intermediate render or replace several
-> pending renders by the latest one only when no skipped render has a demanded
-> commit observation.
+> an observation filter.
+
+and then the sentence that carries the module: `docs/PROCESS.md` §6 permits a
+reconciler to "skip an intermediate render or replace several pending renders by
+the latest one only when no skipped render has a demanded commit observation".
 
 Everything else in §6 is a list of what a commit transition is indexed by, and
-most of those indices belong to layers this one cannot see — physical worlds and
-affected resource identities are the memory owner's, obligations are too. What
+most of those indices belong to layers this one has no way to see — physical
+worlds and affected resource identities are the memory owner's, obligations are
+too. What
 is here is the part that is a *process* fact: which pending renders a reconciler
 may drop, and the proof that dropping them loses no demanded observation.
 
@@ -63,7 +66,8 @@ variable {Observation : Type u}
 /--
 A render whose observations the specification demands.
 
-The filter is supplied; see the module note on why this layer cannot own it.
+The filter is supplied; see the module note on why this layer does not own
+it.
 -/
 def Demanded (demanded : Observation → Prop) (render : PendingRender Observation) : Prop :=
   ∃ observation ∈ render.observations, demanded observation

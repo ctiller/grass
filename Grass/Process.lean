@@ -19,9 +19,9 @@ whole-program umbrella and forbids an aggregate that imports every leaf, so the
 question the ruling settled was not whether to add the module but what shape it
 could have.
 
-## What "bounded" can and cannot mean in Lean
+## What "bounded" means here, and what it does not
 
-It cannot mean hiding. Importing a module makes its whole transitive closure
+It does not mean hiding. Importing a module makes its whole transitive closure
 visible, and `export` does not take anything away — so a facade cannot show an
 author less than what it imports. Saying otherwise would be the kind of claim
 this repository treats as a defect.

@@ -1,7 +1,7 @@
 import Grass.Process.Trace.Independence
 
 /-!
-# What the observation trace can and cannot witness
+# What the observation trace does and does not witness
 
 `docs/PROCESS.md` §7 asks for the graph-level result the flattening and
 serial-scheduler theorems consume:
@@ -40,12 +40,13 @@ produces without publishing is the gap. That is the right direction for law 18 �
 the predicate has to catch every step that could compete for a position in a
 trace — and an earlier version of this paragraph said the two "agree on which
 steps they select", which is false and was checked by a reviewer against this
-module's own `processStep` fixture. So of any two independent steps, at least one leaves both
-traces exactly as it found them, and swapping them cannot reorder two emissions
-because there are never two to reorder.
+module's own `processStep` fixture. So `one_of_two_independent_steps_is_silent`: of any two
+independent steps at least one leaves both traces exactly as it found them, and
+swapping them cannot reorder two emissions because there are never two to
+reorder.
 
 **This is a narrowing, not a strengthening, and the difference matters.** A
-first draft of this module reported it as making §7's
+first draft of this module reported it as making `docs/PROCESS.md` §7's
 `BoundaryObservationsCommute` "contentless", which local adversarial review
 rejected: §7 asks for a congruence under which reordering independent steps
 preserves the observed trace, and this layer obtains it by making every pair
@@ -147,8 +148,8 @@ theorem trace_unchanged_of_silent {before after : plan.LogicalProcessNetwork}
 `docs/PROCESS.md` §6 says a commit "appends to the observation trace", and this
 is what that is worth once the whole transition family is in view: *no* step
 rewrites or truncates it. A specification stated over observations is therefore
-stable under execution — an observation it demanded cannot be dropped by a later
-step, whatever that step was.
+stable under execution — `observations_extend` says an observation it demanded
+cannot be dropped by a later step, whatever that step was.
 
 The proof is a case split on whether the step declared the committed trace at
 all. If it did not, `touchesOnly` gives equality. If it did, it is `commit`, and
@@ -270,9 +271,9 @@ theorem execution_observations_extend {before after : plan.LogicalProcessNetwork
 **No execution retracts an observation.**
 
 The form a specification consumes: whatever the schedule did, everything
-observed so far is still observed. `docs/FOUNDATION.md` law 7 at the trace — an
-obligation discharged by emitting an observation cannot be undischarged by a
-later step.
+observed so far is still observed. `docs/FOUNDATION.md` law 7 at the trace, as
+`execution_observations_prefix` — an obligation discharged by emitting an
+observation cannot be undischarged by a later step.
 -/
 theorem execution_observations_prefix {before after : plan.LogicalProcessNetwork}
     (execution : plan.StepsTo before after) :
@@ -391,8 +392,9 @@ of a fact nothing arranged for it: every observation-touching constructor
 declares `.pending` in its scope, and `NetworkTransition.Independent` is scope
 disjointness.
 
-So a swap of two independent steps cannot reorder two emissions — there are
-never two emissions to reorder. §7's `BoundaryObservationsCommute` has no
+So a swap of two independent steps cannot reorder two emissions — by
+`independent_steps_do_not_both_emit` there are never two emissions to
+reorder. §7's `BoundaryObservationsCommute` has no
 content to prove at this layer, which is a stronger outcome than proving it.
 -/
 theorem independent_steps_do_not_both_emit
