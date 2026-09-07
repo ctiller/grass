@@ -89,6 +89,11 @@ theorem behaviorAdequate : behavior.Adequate where
 def behaviorRefinesItself : BehaviorRefinement behavior behavior :=
   .refl behavior
 
+def finiteCompletion (input : Bool) : system.Completion
+    (initialExecution input).state (initialExecution input).graph
+    (initialExecution input).events :=
+  .finite .refl trivial
+
 example (refinement : BehaviorRefinement behavior behavior) :
     (BehaviorRefinement.refl behavior).trans refinement = refinement := by simp
 
@@ -97,6 +102,17 @@ example (refinement : BehaviorRefinement behavior behavior) :
 
 example (first second third : BehaviorRefinement behavior behavior) :
     (first.trans second).trans third = first.trans (second.trans third) := by simp
+
+example : (BehaviorRefinement.refl behavior).mapCompletion
+    (finiteCompletion true) = finiteCompletion true :=
+  BehaviorRefinement.mapCompletion_refl behavior (finiteCompletion true)
+
+example : (behaviorRefinesItself.trans behaviorRefinesItself).mapCompletion
+    (finiteCompletion true) =
+      behaviorRefinesItself.mapCompletion
+        (behaviorRefinesItself.mapCompletion (finiteCompletion true)) :=
+  BehaviorRefinement.mapCompletion_trans behaviorRefinesItself
+    behaviorRefinesItself (finiteCompletion true)
 
 def portable : PortableProgramCertificate spec where
   behavior := behavior
@@ -319,6 +335,20 @@ def continuation : system.InfiniteContinuation samplePrefix.state samplePrefix.g
 
 def completion : system.Completion samplePrefix.state samplePrefix.graph samplePrefix.events :=
   .infinite continuation
+
+example : (BehaviorRefinement.refl behavior).mapInfinite continuation = continuation :=
+  BehaviorRefinement.mapInfinite_refl behavior continuation
+
+example : (toAbstract.trans toHighest).mapInfinite continuation =
+    toHighest.mapInfinite (toAbstract.mapInfinite continuation) :=
+  BehaviorRefinement.mapInfinite_trans toAbstract toHighest continuation
+
+example : (BehaviorRefinement.refl behavior).mapCompletion completion = completion :=
+  BehaviorRefinement.mapCompletion_refl behavior completion
+
+example : (toAbstract.trans toHighest).mapCompletion completion =
+    toHighest.mapCompletion (toAbstract.mapCompletion completion) :=
+  BehaviorRefinement.mapCompletion_trans toAbstract toHighest completion
 
 def mappedCompletion : abstractBehavior.system.Completion
     (toAbstract.mapPrefix samplePrefix).state
