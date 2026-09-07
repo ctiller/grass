@@ -152,8 +152,12 @@ def declaration_names() -> set[str]:
     could not obtain the name list is worse than no audit, which is the mistake
     this function was added to correct.
     """
+    # `cwd=ROOT`, because the paths this tool scans were anchored on `__file__` and
+    # this subprocess was left on the working directory -- half an anchoring. Run
+    # from anywhere but the repo root it failed loudly, which is the safe half, and
+    # created a Lake manifest in whatever directory it was run from, which is not.
     proc = subprocess.run(
-        ["lake", "env", "lean", "Tools/DeclNames.lean"],
+        ["lake", "env", "lean", "Tools/DeclNames.lean"], cwd=ROOT,
         capture_output=True, text=True, encoding="utf-8", errors="replace")
     if proc.returncode != 0:
         sys.exit(
