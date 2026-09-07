@@ -303,6 +303,10 @@ stable CFG scope vocabulary and pairs a checked session with exact stack-shape
 entry. Its all-exit theorem combines the session's resource closure with LIFO
 restoration to the exact outer `StackShape`, closing the structural edge-bypass
 seam without conflating stable authored identity and fresh occurrence identity.
+`Grass.Construct.StackScopeCFGNest` checks nested sessions in lexical order,
+proves their stable CFG identities distinct, exposes the exact two-scope stack
+head, and combines both all-exit closure certificates with exact two-step LIFO
+restoration. Outer and inner entry failures retain their exact lexical stage.
 `Grass.Construct.Scratch` provides the generic term-level prerequisite for
 `withScratch`: it selects the first non-live register from an exact ordered,
 duplicate-free candidate set and passes a handle to a fixed-contract verified
