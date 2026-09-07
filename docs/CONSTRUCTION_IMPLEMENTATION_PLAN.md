@@ -385,6 +385,10 @@ containing graph block, requires each call to be the sole projection of that
 block's final instruction, and reports stable block/origin/projection diagnostics.
 Because state predicates are not executable equality, exact block-to-call
 contract correspondence remains a separate proof-bearing certificate.
+`Grass.Construct.Source.CallElaborate` composes that checker with ordinary
+alpha-normalization and manifest derivation. Alpha/CFG failures retain priority
+over call-route failures, and both sides are indexed by the same normalized AST;
+the certified result adds exact block-to-call contract equality separately.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.

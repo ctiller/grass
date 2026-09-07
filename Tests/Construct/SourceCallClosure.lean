@@ -1,4 +1,4 @@
-import Grass.Construct.Source.CallClosure
+import Grass.Construct.Source.CallElaborate
 
 /-!
 # Authored call-closure fixtures
@@ -89,6 +89,36 @@ private def duplicateProjection :
     AuthoredCallSource Unit Terminal Instruction Unit :=
   ⟨ast, duplicateModel⟩
 
+private def preEntryBlock : PreAlphaBlock Unit Terminal Instruction Unit where
+  label := .stable (blockId "entry")
+  contract := provider.toBlockContract
+  outgoing := [⟨exitTag "normal", .label (.stable (blockId "finish"))⟩]
+  body := .literal [.invoke]
+  annotations := []
+
+private def preFinishBlock : PreAlphaBlock Unit Terminal Instruction Unit where
+  label := .stable (blockId "finish")
+  contract := finishContract
+  outgoing := [⟨exitTag "done", .terminal .returned⟩]
+  body := .literal [.finish]
+  annotations := []
+
+private def preAst : PreAlphaAst Unit Terminal Instruction Unit :=
+  ⟨.stable (blockId "entry"), [preEntryBlock, preFinishBlock]⟩
+
+private def preSource : PreAlphaCallSource Unit Terminal Instruction Unit :=
+  ⟨preAst, model call⟩
+
+private def preMisrouted : PreAlphaCallSource Unit Terminal Instruction Unit :=
+  ⟨preAst, model wrongRoute⟩
+
+private def duplicatePreAst : PreAlphaAst Unit Terminal Instruction Unit :=
+  ⟨.stable (blockId "missing"), [preEntryBlock, preEntryBlock]⟩
+
+private def duplicatePreSource :
+    PreAlphaCallSource Unit Terminal Instruction Unit :=
+  ⟨duplicatePreAst, model wrongRoute⟩
+
 example : ast.WellFormed := by decide
 example : source.occurrences.length = 1 := rfl
 example : source.occurrences.map (fun located => located.item.target) =
@@ -120,5 +150,47 @@ example : ¬nonTail.WellFormed := by decide
 example : (checkAuthoredCalls nonTail).isOk = false := rfl
 example : ¬duplicateProjection.WellFormed := by decide
 example : (checkAuthoredCalls duplicateProjection).isOk = false := rfl
+
+example (alpha : LabelAlphaModel) :
+    preSource.normalized alpha = source := rfl
+example (alpha : LabelAlphaModel) :
+    (elaborateCalls preSource alpha).isOk = true := rfl
+example (alpha : LabelAlphaModel) :
+    (elaborateCalls preMisrouted alpha).isOk = false := rfl
+example (alpha : LabelAlphaModel) :
+    (elaborateCalls duplicatePreSource alpha).isOk = false := rfl
+example (alpha : LabelAlphaModel) :
+    elaborateCalls duplicatePreSource alpha =
+      .error (.alpha ⟨blockId "missing",
+        [blockId "entry", blockId "entry"],
+        [blockId "finish", blockId "finish"]⟩) := rfl
+
+private theorem preWellFormed (alpha : LabelAlphaModel) :
+    (preAst.alphaNormalize alpha).WellFormed := by
+  change ast.WellFormed
+  decide
+
+private def callElaborated (alpha : LabelAlphaModel) :
+    CallElaborated preSource alpha := by
+  have hnormalized : preSource.normalized alpha = source := rfl
+  refine ⟨?_, ?_⟩
+  · exact ⟨preAst.alphaNormalize alpha,
+      (preAst.alphaNormalize alpha).manifest, rfl, rfl, preWellFormed alpha⟩
+  · rw [hnormalized]
+    exact ⟨by decide⟩
+
+private def callCertified (alpha : LabelAlphaModel) :
+    CertifiedCallElaborated preSource alpha := by
+  have hnormalized : preSource.normalized alpha = source := rfl
+  refine ⟨callElaborated alpha, ?_⟩
+  rw [hnormalized]
+  exact exact
+
+example (alpha : LabelAlphaModel) :
+    (preSource.normalized alpha).unclosed = [] :=
+  (callElaborated alpha).unclosed_eq_nil
+example (alpha : LabelAlphaModel) :
+    (preSource.normalized alpha).Exact :=
+  (callCertified alpha).exact
 
 end Grass.Tests.Construct.SourceCallClosure
