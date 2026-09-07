@@ -94,6 +94,9 @@ def finiteCompletion (input : Bool) : system.Completion
     (initialExecution input).events :=
   .finite .refl trivial
 
+example : behavior.observeCompletion (initialExecution true)
+    (finiteCompletion true) = CompleteObservation.finite [] := rfl
+
 example (refinement : BehaviorRefinement behavior behavior) :
     (BehaviorRefinement.refl behavior).trans refinement = refinement := by simp
 
@@ -113,6 +116,14 @@ example : (behaviorRefinesItself.trans behaviorRefinesItself).mapCompletion
         (behaviorRefinesItself.mapCompletion (finiteCompletion true)) :=
   BehaviorRefinement.mapCompletion_trans behaviorRefinesItself
     behaviorRefinesItself (finiteCompletion true)
+
+example : behavior.observeCompletion
+      (behaviorRefinesItself.mapPrefix (initialExecution true))
+      (behaviorRefinesItself.mapCompletionAtPrefix (initialExecution true)
+        (finiteCompletion true)) =
+    behavior.observeCompletion (initialExecution true) (finiteCompletion true) := by
+  exact BehaviorRefinement.observeCompletion_mapCompletionAtPrefix
+    behaviorRefinesItself (initialExecution true) (finiteCompletion true)
 
 def portable : PortableProgramCertificate spec where
   behavior := behavior
@@ -426,6 +437,32 @@ example : indexedPrefix.appendInfinitePrefix indexedContinuationAtPrefix 3 =
 
 def completion : system.Completion samplePrefix.state samplePrefix.graph samplePrefix.events :=
   .infinite continuation
+
+def completeInfiniteObservation : CompleteObservation spec.observationProjection :=
+  behavior.observeCompletion samplePrefix completion
+
+example : completeInfiniteObservation =
+    .infinite (InfiniteObservation.ofEventStream spec.observationProjection
+      samplePrefix.events continuation.eventAt) := rfl
+
+example :
+    (InfiniteObservation.ofEventStream spec.observationProjection
+      samplePrefix.events continuation.eventAt).approximant 2 =
+        [true, false, false] := rfl
+
+example :
+    (InfiniteObservation.ofEventStream spec.observationProjection
+      samplePrefix.events continuation.eventAt).approximant 3 =
+        behavior.observe (samplePrefix.appendInfinitePrefix continuation 3) :=
+  ProgramBehavior.observe_appendInfinitePrefix
+    behavior samplePrefix continuation 3
+
+example : abstractBehavior.observeCompletion
+      (toAbstract.mapPrefix samplePrefix)
+      (toAbstract.mapCompletionAtPrefix samplePrefix completion) =
+    behavior.observeCompletion samplePrefix completion :=
+  BehaviorRefinement.observeCompletion_mapCompletionAtPrefix
+    toAbstract samplePrefix completion
 
 example : (BehaviorRefinement.refl behavior).mapInfinite continuation = continuation :=
   BehaviorRefinement.mapInfinite_refl behavior continuation

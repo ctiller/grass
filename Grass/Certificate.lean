@@ -38,6 +38,59 @@ def observe (behavior : ProgramBehavior spec)
     (execution : behavior.system.ExecutionPrefix) : List spec.Observation :=
   spec.observationProjection.project execution.events
 
+/-- Observe a complete finite or infinite continuation from an exact packaged
+prefix without fabricating a terminal value for the infinite case. -/
+def observeCompletion (behavior : ProgramBehavior spec)
+    (execution : behavior.system.ExecutionPrefix)
+    (completion : behavior.system.Completion execution.state execution.graph
+      execution.events) :
+    CompleteObservation spec.observationProjection :=
+  match completion with
+  | .finite (events := events) _ _ =>
+      .finite (spec.observationProjection.project (execution.events ++ events))
+  | .infinite continuation =>
+      .infinite (InfiniteObservation.ofEventStream spec.observationProjection
+        execution.events continuation.eventAt)
+
+/-- `ProgramBehavior.observeCompletion_finite` exposes the full finite trace
+used by complete observation. -/
+@[simp]
+theorem observeCompletion_finite (behavior : ProgramBehavior spec)
+    (execution : behavior.system.ExecutionPrefix)
+    {events : List spec.AuditEvent}
+    {finalState : behavior.system.State} {finalGraph : behavior.system.Graph}
+    (steps : behavior.system.Steps execution.state execution.graph events
+      finalState finalGraph)
+    (terminal : behavior.system.Terminal finalState finalGraph) :
+    behavior.observeCompletion execution (.finite steps terminal) =
+      .finite (spec.observationProjection.project
+        (execution.events ++ events)) := rfl
+
+/-- `ProgramBehavior.observeCompletion_infinite` exposes the coherent
+approximant family selected from an infinite continuation. -/
+@[simp]
+theorem observeCompletion_infinite (behavior : ProgramBehavior spec)
+    (execution : behavior.system.ExecutionPrefix)
+    (continuation : behavior.system.InfiniteContinuation execution.state
+      execution.graph execution.events) :
+    behavior.observeCompletion execution (.infinite continuation) =
+      .infinite (InfiniteObservation.ofEventStream
+        spec.observationProjection execution.events continuation.eventAt) := rfl
+
+/-- Every approximant used by an infinite complete observation is exactly the
+ordinary observation of the corresponding appended execution prefix. -/
+theorem observe_appendInfinitePrefix (behavior : ProgramBehavior spec)
+    (execution : behavior.system.ExecutionPrefix)
+    (continuation : behavior.system.InfiniteContinuation execution.state
+      execution.graph execution.events)
+    (length : Nat) :
+    (InfiniteObservation.ofEventStream spec.observationProjection
+      execution.events continuation.eventAt).approximant length =
+        behavior.observe
+          (execution.appendInfinitePrefix continuation length) := by
+  simp [ProgramBehavior.observe,
+    RelationalSystem.ExecutionPrefix.appendInfinitePrefix_events]
+
 /-- The prefix begins with the selected specification input. -/
 def HasInput (behavior : ProgramBehavior spec)
     (input : spec.Input) (execution : behavior.system.ExecutionPrefix) : Prop :=
@@ -393,6 +446,19 @@ def mapCompletionAtPrefix (refinement : BehaviorRefinement concrete abstract)
       (refinement.mapPrefix execution).graph
       (refinement.mapPrefix execution).events :=
   refinement.mapCompletion completion
+
+/-- `BehaviorRefinement.observeCompletion_mapCompletionAtPrefix` states that
+exact completion mapping preserves the complete finite or infinite observation. -/
+@[simp]
+theorem observeCompletion_mapCompletionAtPrefix
+    (refinement : BehaviorRefinement concrete abstract)
+    (execution : concrete.system.ExecutionPrefix)
+    (completion : concrete.system.Completion execution.state execution.graph
+      execution.events) :
+    abstract.observeCompletion (refinement.mapPrefix execution)
+        (refinement.mapCompletionAtPrefix execution completion) =
+      concrete.observeCompletion execution completion := by
+  cases completion <;> rfl
 
 /-- Prefix-indexed completion mapping through the reflexive refinement leaves
 the completion unchanged. -/

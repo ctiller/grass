@@ -75,4 +75,86 @@ def comp (outer : ObservationProjection Middle Observation)
 
 end ObservationProjection
 
+/-- A single infinite event stream observed through all of its coherent finite
+restrictions. The witness prevents an arbitrary family of unrelated finite
+lists from masquerading as one infinite observation. -/
+structure InfiniteObservation
+    {Event : Type u} {Observation : Type v}
+    (projection : ObservationProjection Event Observation) where
+  approximant : Nat -> List Observation
+  singleStream : exists priorEvents : List Event, exists eventAt : Nat -> Event,
+    forall length,
+      approximant length = projection.project
+        (priorEvents ++
+          List.ofFn (fun index : Fin length => eventAt index))
+
+namespace InfiniteObservation
+
+variable {Event : Type u} {Observation : Type v}
+  {projection : ObservationProjection Event Observation}
+
+/-- Observe every finite restriction of one event stream, retaining the exact
+finite history which preceded that stream. -/
+def ofEventStream (projection : ObservationProjection Event Observation)
+    (priorEvents : List Event) (eventAt : Nat -> Event) :
+    InfiniteObservation projection where
+  approximant length := projection.project
+    (priorEvents ++ List.ofFn (fun index : Fin length => eventAt index))
+  singleStream := ⟨priorEvents, eventAt, fun _ => rfl⟩
+
+/-- `InfiniteObservation.approximant_ofEventStream` exposes the exact finite
+restriction selected by `InfiniteObservation.ofEventStream`. -/
+@[simp]
+theorem approximant_ofEventStream (projection : ObservationProjection Event Observation)
+    (priorEvents : List Event) (eventAt : Nat -> Event) (length : Nat) :
+    (ofEventStream projection priorEvents eventAt).approximant length =
+      projection.project
+        (priorEvents ++ List.ofFn (fun index : Fin length => eventAt index)) :=
+  rfl
+
+/-- `InfiniteObservation.single_stream_coherent` recovers the one-stream witness
+retained by every infinite observation. -/
+theorem single_stream_coherent (observations : InfiniteObservation projection) :
+    exists priorEvents : List Event, exists eventAt : Nat -> Event,
+      forall length,
+        observations.approximant length = projection.project
+          (priorEvents ++
+            List.ofFn (fun index : Fin length => eventAt index)) :=
+  observations.singleStream
+
+/-- Infinite observations are equal when every finite approximant is equal;
+the retained one-stream evidence is proof-irrelevant. -/
+@[ext]
+theorem ext {left right : InfiniteObservation projection}
+    (approximant : forall length, left.approximant length =
+      right.approximant length) : left = right := by
+  cases left
+  cases right
+  congr
+  funext length
+  exact approximant length
+
+/-- Equal finite histories and pointwise-equal streams produce the same
+infinite observation. -/
+theorem ofEventStream_congr
+    {leftPrior rightPrior : List Event}
+    {leftEvents rightEvents : Nat -> Event}
+    (prior : leftPrior = rightPrior)
+    (events : forall index, leftEvents index = rightEvents index) :
+    ofEventStream projection leftPrior leftEvents =
+      ofEventStream projection rightPrior rightEvents := by
+  apply ext
+  intro length
+  simp [prior, funext events]
+
+end InfiniteObservation
+
+/-- The specification-visible observation of a complete functional execution,
+distinguishing a finite result from one coherent infinite observation. -/
+inductive CompleteObservation
+    {Event : Type u} {Observation : Type v}
+    (projection : ObservationProjection Event Observation) : Type v where
+  | finite (observations : List Observation)
+  | infinite (observations : InfiniteObservation projection)
+
 end Grass
