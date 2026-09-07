@@ -695,7 +695,7 @@ def aliasedPair : MemoryState :=
       { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
         source := .virtualAlloc, owners := [owner]
         permission := .readWrite, live := true, bytes := .empty
-        base := some 0x1000 }).getD unlent).alias buffer view
+        base := some 0x1000 }).getD unlent).alias buffer view 0
 
 /-- A loan over the *view*, not over the buffer. -/
 def viewLoan : AuthorityGrant := { loanOfHead with provenance := viewProv }

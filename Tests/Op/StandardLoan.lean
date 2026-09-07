@@ -300,14 +300,14 @@ def separatelyLent : MemoryState :=
 /-- Then the profile declares the mapping. `docs/MEMORY_MODEL.md` §7.5 makes that a
 real transition, and nothing re-examines the grants already issued. -/
 def aliasedAfterIssue : MachineState :=
-  { state₀ with memory := separatelyLent.alias bufferAlloc borrowedAlloc }
+  { state₀ with memory := separatelyLent.alias bufferAlloc borrowedAlloc 0 }
 
 /-- Both lends succeeded, and they became conflicting only once the alias was
 declared: issued in the other order, `issue?` refuses the second. -/
 theorem the_conflict_appears_after_issue :
     (separatelyLent.grantAt? bufferLoan).isSome ∧
     (separatelyLent.grantAt? secondBufferLoan).isSome ∧
-    ((state₀.memory.alias bufferAlloc borrowedAlloc).issue? bufferLoan
+    ((state₀.memory.alias bufferAlloc borrowedAlloc 0).issue? bufferLoan
         { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
           range := ⟨0, 8⟩, rights := .readWrite }).isSome := by
   exact ⟨by decide, by decide, by decide⟩

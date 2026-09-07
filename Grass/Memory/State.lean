@@ -151,17 +151,42 @@ def AllocationRecord.metadata (record : AllocationRecord) : AllocationRecord.Met
    record.live, record.base⟩
 
 /--
+One declared aliasing edge, with the offset mapping that makes it usable.
+
+Offset `i` in `source` is the same byte as offset `i + delta` in `target`. The
+edge was a bare `AllocId x AllocId` and `delta` was therefore always zero in
+effect: aliased allocations were assumed to agree offset for offset, which the
+ordinary `MapViewOfFile` case -- a view mapped at a non-zero file offset --
+does not. `docs/MEMORY_IMPLEMENTATION_PLAN.md` section 4.4.1 recorded that as
+this layer's largest open gap.
+
+`delta` is an `Int` because the mapping runs both ways: an edge is symmetric,
+and traversing it from `target` to `source` shifts by `-delta`. A `Nat` would
+have made the reverse hop inexpressible and the relation asymmetric, which is
+the defect `aliasIdentities` was introduced to fix in the unoffset version.
+-/
+structure AliasEdge where
+  /-- The allocation the edge is declared from. -/
+  source : AllocId
+  /-- The allocation naming the same storage. -/
+  target : AllocId
+  /-- Offset `i` in `source` is offset `i + delta` in `target`. -/
+  delta : Int
+  deriving DecidableEq, Repr
+
+/--
 The memory state.
 
 `aliases` is symmetric by convention and `SharesBytes` closes it, so a profile
-declares each aliased pair once.
+declares each aliased edge once.
 -/
 structure MemoryState where
   private mk ::
   /-- The live and dead allocations. -/
   allocations : FiniteMap AllocId AllocationRecord
-  /-- Pairs of allocations whose bytes are the same storage. -/
-  aliases : List (AllocId × AllocId)
+  /-- Declared aliasing edges: allocations whose bytes are the same storage,
+  each with the offset by which the two are related. -/
+  aliases : List AliasEdge
   /-- The authority grants currently live. **Private**: see below.
 
 
@@ -275,12 +300,35 @@ def grantEntries (state : MemoryState) : List (GrantId × AuthorityGrant) :=
 def grantAt? (state : MemoryState) (id : GrantId) : Option AuthorityGrant :=
   state.grants.lookup id
 
-/-- One declared aliasing hop, in either direction. Aliasing is symmetric by
-convention and this is where the convention is discharged. -/
-def AliasHop (state : MemoryState) (a b : AllocId) : Prop :=
-  (a, b) ∈ state.aliases ∨ (b, a) ∈ state.aliases
+/-- A declared hop between two allocations, in either direction, with the offset
+not asked about.
 
-instance (state : MemoryState) (a b : AllocId) : Decidable (state.AliasHop a b) :=
+This is what the *unoffset* closure traverses, and it is the old `AliasHop`
+unchanged in meaning. Keeping the two separate is the point: `SharesBytes` answers
+"are these the same storage at all", which is the question conflict detection asks
+and where more sharing is the safe direction; `SharesBytesAt` answers "at what
+offset", which is the question authority asks and where a wrong offset is unsafe in
+the ordinary direction. One predicate serving both would have to pick a direction to
+be conservative in, and they are opposite. -/
+def AliasLinked (state : MemoryState) (a b : AllocId) : Prop :=
+  (∃ edge ∈ state.aliases, edge.source = a ∧ edge.target = b) ∨
+    (∃ edge ∈ state.aliases, edge.source = b ∧ edge.target = a)
+
+instance (state : MemoryState) (a b : AllocId) : Decidable (state.AliasLinked a b) :=
+  inferInstanceAs (Decidable (_ ∨ _))
+
+/-- One declared aliasing hop, in either direction, and the offset it shifts by.
+
+Aliasing is symmetric by convention and this is where the convention is
+discharged. Traversing an edge backwards negates its `delta`, which is the
+whole content of "symmetric" once an edge carries an offset: the *relation* is
+symmetric, the *shift* is antisymmetric, and conflating the two would make a
+view mapped at `+4096` also readable at `-4096` from itself. -/
+def AliasHop (state : MemoryState) (a b : AllocId) (shift : Int) : Prop :=
+  ⟨a, b, shift⟩ ∈ state.aliases ∨ ⟨b, a, -shift⟩ ∈ state.aliases
+
+instance (state : MemoryState) (a b : AllocId) (shift : Int) :
+    Decidable (state.AliasHop a b shift) :=
   inferInstanceAs (Decidable (_ ∨ _))
 
 /-- Every identity the alias list mentions, in either position.
@@ -303,14 +351,14 @@ list — and makes it conservative in the safe direction: an alias naming an
 unallocated identity now propagates sharing rather than silently stopping, and more
 sharing means more freezing. -/
 def aliasIdentities (state : MemoryState) : List AllocId :=
-  state.aliases.flatMap (fun pair => [pair.1, pair.2])
+  state.aliases.flatMap (fun edge => [edge.source, edge.target])
 
 /-- `state.SharesAfter n a b` holds when `b` is reachable from `a` in at most `n`
 declared hops. The bounded form, so the closure below is decidable. -/
 def SharesAfter (state : MemoryState) : Nat → AllocId → AllocId → Prop
   | 0, a, b => a = b
   | n + 1, a, b =>
-      a = b ∨ ∃ mid ∈ state.aliasIdentities, state.AliasHop a mid ∧
+      a = b ∨ ∃ mid ∈ state.aliasIdentities, state.AliasLinked a mid ∧
         state.SharesAfter n mid b
 
 instance decSharesAfter (state : MemoryState) : (n : Nat) → (a b : AllocId) →
@@ -342,6 +390,62 @@ def SharesBytes (state : MemoryState) (a b : AllocId) : Prop :=
 instance (state : MemoryState) (a b : AllocId) : Decidable (state.SharesBytes a b) :=
   inferInstanceAs (Decidable (state.SharesAfter _ a b))
 
+/-- The one-hop neighbours of `a`, each with the offset that hop shifts by.
+
+Enumerated rather than quantified over `Int`, which is what keeps the offset-aware
+closure decidable: the shifts an allocation can reach in one hop are exactly the
+`delta`s on the edges naming it, negated when the edge is traversed backwards. -/
+def aliasNeighbours (state : MemoryState) (a : AllocId) : List (AllocId × Int) :=
+  state.aliases.flatMap fun edge =>
+    (if edge.source = a then [(edge.target, edge.delta)] else []) ++
+      (if edge.target = a then [(edge.source, -edge.delta)] else [])
+
+/-- `state.SharesAfterAt n a b shift` holds when `b` is reachable from `a` in at most
+`n` declared hops, and offset `i` in `a` is offset `i + shift` in `b` along that path.
+
+The offset-aware twin of `SharesAfter`. A path's shift is the sum of its edges'
+shifts, so this accumulates by subtraction as it walks: reaching `b` at `shift` from
+`a` means stepping to a neighbour at `step.2` and then reaching `b` at `shift - step.2`
+from there. -/
+def SharesAfterAt (state : MemoryState) : Nat → AllocId → AllocId → Int → Prop
+  | 0, a, b, shift => a = b ∧ shift = 0
+  | n + 1, a, b, shift =>
+      (a = b ∧ shift = 0) ∨ ∃ step ∈ state.aliasNeighbours a,
+        state.SharesAfterAt n step.1 b (shift - step.2)
+
+instance decSharesAfterAt (state : MemoryState) : (n : Nat) → (a b : AllocId) →
+    (shift : Int) → Decidable (state.SharesAfterAt n a b shift)
+  | 0, _, _, _ => inferInstanceAs (Decidable (_ ∧ _))
+  | n + 1, _, b, shift =>
+      have : ∀ step : AllocId × Int, Decidable (state.SharesAfterAt n step.1 b (shift - step.2)) :=
+        fun step => decSharesAfterAt state n step.1 b (shift - step.2)
+      inferInstanceAs (Decidable (_ ∨ ∃ _ ∈ _, _))
+
+/--
+`state.SharesBytesAt a b shift` holds when two allocations name the same storage
+**and** offset `i` in `a` is offset `i + shift` in `b`.
+
+`SharesBytes` is this with the offset forgotten, and the two answer different
+questions. Conflict detection asks whether two accesses can touch one byte, and there
+more sharing is the safe direction, so forgetting the offset is conservative.
+Authority asks whether a grant covers the bytes an access names, and there a wrong
+offset admits an access the grant does not cover -- unsafe in the ordinary direction.
+
+**A path is not unique and neither is its shift.** An alias graph can relate `a` and
+`b` at two different offsets, either because a profile declared a cycle that does not
+close at zero or because two independent mappings exist. That is a profile error and
+this predicate does not resolve it: it holds at *every* shift some path witnesses.
+The caller that needs a single answer owes the refusal, which is
+[FOUNDATION.md](../../docs/FOUNDATION.md) law 8's direction -- refuse rather than pick
+one -- and `aliasShift?` below is where that is discharged.
+-/
+def SharesBytesAt (state : MemoryState) (a b : AllocId) (shift : Int) : Prop :=
+  state.SharesAfterAt state.aliases.length a b shift
+
+instance (state : MemoryState) (a b : AllocId) (shift : Int) :
+    Decidable (state.SharesBytesAt a b shift) :=
+  inferInstanceAs (Decidable (state.SharesAfterAt _ a b shift))
+
 theorem sharesAfter_zero_of_eq {state : MemoryState} {n : Nat} {a b : AllocId}
     (h : a = b) : state.SharesAfter n a b := by
   cases n with
@@ -351,22 +455,26 @@ theorem sharesAfter_zero_of_eq {state : MemoryState} {n : Nat} {a b : AllocId}
 theorem sharesBytes_refl (state : MemoryState) (a : AllocId) : state.SharesBytes a a :=
   sharesAfter_zero_of_eq rfl
 
-/-- Aliasing is symmetric, which `AliasHop` gets by construction. -/
-theorem aliasHop_symm {state : MemoryState} {a b : AllocId} (h : state.AliasHop a b) :
-    state.AliasHop b a := h.symm
+/-- Aliasing is symmetric, which `AliasLinked` gets by construction.
+
+The *relation* is symmetric; the offset is not, and `AliasHop` carries the offset,
+so its symmetry negates the shift instead. Keeping the two apart is what lets this
+one stay a one-liner. -/
+theorem aliasLinked_symm {state : MemoryState} {a b : AllocId}
+    (h : state.AliasLinked a b) : state.AliasLinked b a := h.symm
 
 /-- A declared hop's far end is one of the alias graph's own vertices. -/
 theorem mem_aliasIdentities_of_hop {state : MemoryState} {a b : AllocId}
-    (h : state.AliasHop a b) : b ∈ state.aliasIdentities := by
+    (h : state.AliasLinked a b) : b ∈ state.aliasIdentities := by
   unfold aliasIdentities
-  rcases h with h | h
-  · exact List.mem_flatMap.mpr ⟨(a, b), h, by simp⟩
-  · exact List.mem_flatMap.mpr ⟨(b, a), h, by simp⟩
+  rcases h with ⟨edge, hmem, _, htarget⟩ | ⟨edge, hmem, hsource, _⟩
+  · exact List.mem_flatMap.mpr ⟨edge, hmem, by simp [htarget]⟩
+  · exact List.mem_flatMap.mpr ⟨edge, hmem, by simp [hsource]⟩
 
 /-- A hop may be appended to a path, which is the step the recursion does not give:
 `SharesAfter` peels from the front and a reversal needs to add at the back. -/
 theorem sharesAfter_snoc {state : MemoryState} : ∀ {n : Nat} {a b c : AllocId},
-    state.SharesAfter n a b → state.AliasHop b c → state.SharesAfter (n + 1) a c := by
+    state.SharesAfter n a b → state.AliasLinked b c → state.SharesAfter (n + 1) a c := by
   intro n
   induction n with
   | zero =>
@@ -402,7 +510,7 @@ theorem sharesAfter_symm {state : MemoryState} : ∀ {n : Nat} {a b : AllocId},
     intro a b h
     rcases h with hab | ⟨mid, _, hop, hrest⟩
     · exact .inl hab.symm
-    · exact sharesAfter_snoc (ih hrest) (aliasHop_symm hop)
+    · exact sharesAfter_snoc (ih hrest) (aliasLinked_symm hop)
 
 /-- The closure form. -/
 theorem sharesBytes_symm {state : MemoryState} {a b : AllocId}
@@ -416,7 +524,7 @@ vertex of the alias graph by construction, so `mem_aliasIdentities_of_hop` suppl
 what the existential needs and a caller no longer has to prove the far end is
 allocated. -/
 theorem sharesBytes_of_hop {state : MemoryState} {a b : AllocId}
-    (hhop : state.AliasHop a b)
+    (hhop : state.AliasLinked a b)
     (hpos : 0 < state.aliases.length) : state.SharesBytes a b := by
   unfold SharesBytes
   cases hn : state.aliases.length with
@@ -2930,8 +3038,8 @@ set is changing authority whether or not the function refuses anything.
 **Unmapping has no representation at all.** §7.5's unmapping would remove a pair,
 and nothing here can; `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records it.
 -/
-def alias (state : MemoryState) (a b : AllocId) : MemoryState :=
-  { state with aliases := (a, b) :: state.aliases }
+def alias (state : MemoryState) (a b : AllocId) (delta : Int) : MemoryState :=
+  { state with aliases := ⟨a, b, delta⟩ :: state.aliases }
 
 /--
 Write `bytes` at `start` in allocation `id`.

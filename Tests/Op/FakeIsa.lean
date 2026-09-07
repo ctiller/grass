@@ -970,8 +970,8 @@ def allocations₀ : List (AllocId × AllocationRecord) :=
                         base := some 0x1000 }) ]
 
 def memory₀ : MemoryState :=
-  (((MemoryState.empty.allocateAll? allocations₀).getD .empty).alias bufferAlloc viewAlloc).alias
-    bufferAlloc deviceViewAlloc
+  (((MemoryState.empty.allocateAll? allocations₀).getD .empty).alias bufferAlloc
+    viewAlloc 0).alias bufferAlloc deviceViewAlloc 0
 
 /-- Every allocation happened, so `getD` did not fall back to the empty state. -/
 theorem the_allocations_succeed :
@@ -984,7 +984,7 @@ an alias: distinct allocation identities over the same storage. Placement does n
 decide aliasing — `MemoryState.aliases` does, and `docs/MEMORY_MODEL.md` §2 makes
 provenance rather than address the authority — so the two facts are declared
 separately and agreeing here is the fixture being realistic rather than a rule. -/
-def memory₁ : MemoryState := memory₀.alias viewAlloc chainedAlloc
+def memory₁ : MemoryState := memory₀.alias viewAlloc chainedAlloc 0
 
 /-- The starting machine state: allocations exist, but no authority is held. -/
 def state₀ : MachineState := .initial memory₁
@@ -2511,9 +2511,9 @@ theorem chained_alias_store_is_denied :
 declared aliased, so the theorem above is about transitivity and not about a
 declaration that was there all along. -/
 theorem the_chain_is_two_hops :
-    ¬ (state₀.memory.AliasHop bufferAlloc chainedAlloc) ∧
-    state₀.memory.AliasHop bufferAlloc viewAlloc ∧
-    state₀.memory.AliasHop viewAlloc chainedAlloc ∧
+    ¬ (state₀.memory.AliasLinked bufferAlloc chainedAlloc) ∧
+    state₀.memory.AliasLinked bufferAlloc viewAlloc ∧
+    state₀.memory.AliasLinked viewAlloc chainedAlloc ∧
     state₀.memory.SharesBytes bufferAlloc chainedAlloc := by decide
 
 /-- The same two accesses, one context apart, are *not* denied: program order
