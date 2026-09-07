@@ -82,9 +82,26 @@ pub fn drain_outbox(
     agent: &Agent,
     host: &Short,
     coordinator_custody_epoch: u64,
-    worktrees_dir: &Path,
     remote: &str,
 ) -> AbResult<DrainResult> {
+    // Custody is authorized *before* the empty-outbox shortcut, not after.
+    //
+    // Gate 6 requires duplicate custody of one agent stream to fail closed,
+    // and `registry.rs` claims `authorize_stream_write` is "called by every
+    // future `drain_outbox`/`publish_stream`". It was not: the early return
+    // below sat in front of it, so whenever the outbox happened to be empty
+    // this function returned success without checking custody at all, and
+    // `drain_and_publish` went on to push the agent's stream ref. That is
+    // reachable without contrivance -- a coordinator whose earlier drain
+    // committed locally but failed to push has an empty outbox and a local
+    // tip ahead of origin, so after custody moves away it could still
+    // fast-forward the new custodian's ref. No force-push required, which is
+    // exactly the shape gate 6 says must be impossible.
+    let registry_tip = crate::registry::read_registry_tip(repo)?
+        .ok_or_else(|| invalid("no registry root exists yet"))?;
+    let epoch = crate::registry::read_epoch(repo, &registry_tip)?;
+    crate::registry::authorize_stream_write(&epoch, agent, host, coordinator_custody_epoch)?;
+
     let pending = crate::outbox::list_pending(git_common_dir, agent)?;
     if pending.is_empty() {
         return Ok(DrainResult::default());
@@ -100,41 +117,21 @@ pub fn drain_outbox(
     let mut fresh_sync_err: Option<String> = None;
     let mut fresh_state = None;
     if needs_fresh {
-        match crate::sync::synced_snapshot(
-            repo,
-            git_common_dir,
-            remote,
-            &worktrees_dir.join("_validate_synced"),
-        ) {
+        match crate::sync::synced_snapshot(repo, git_common_dir, remote) {
             Ok(snap) => fresh_state = Some(snap.state),
             Err(e) => fresh_sync_err = Some(e.to_string()),
         }
     }
 
-    let registry_tip = crate::registry::read_registry_tip(repo)?
-        .ok_or_else(|| invalid("no registry root exists yet"))?;
-    let epoch = crate::registry::read_epoch(repo, &registry_tip, &worktrees_dir.join("_epoch"))?;
-    crate::registry::authorize_stream_write(&epoch, agent, host, coordinator_custody_epoch)?;
-
     let mut state = match fresh_state {
         Some(s) => s,
-        None => {
-            crate::sync::cached_snapshot(repo, git_common_dir, &worktrees_dir.join("_validate"))?
-                .state
-        }
+        None => crate::sync::cached_snapshot(repo, git_common_dir)?.state,
     };
 
     let existing_tip = crate::stream::read_stream_tip(repo, agent)?;
     let mut next_seq = if let Some(tip) = &existing_tip {
-        let reads_dir = worktrees_dir.join(format!("_read_{agent}"));
-        crate::storage::read_stream_log(
-            &{
-                crate::gitrepo::ensure_bus_worktree(repo, &reads_dir, tip.as_str())?;
-                reads_dir
-            },
-            agent,
-        )?
-        .len() as u64
+        let reader = crate::gitobjects::Libgit2Reader::open(repo)?;
+        crate::storage::read_stream_log_at(&reader, tip, agent)?.len() as u64
     } else {
         0
     };
@@ -216,14 +213,7 @@ pub fn drain_outbox(
             });
             continue;
         }
-        let observed = build_frontier(
-            repo,
-            &epoch,
-            &worktrees_dir.join("_frontier"),
-            agent,
-            &candidate.extra_refs,
-            &data,
-        )?;
+        let observed = build_frontier(repo, &epoch, agent, &candidate.extra_refs, &data)?;
         let env = Envelope::new(
             agent,
             next_seq,
@@ -261,12 +251,7 @@ pub fn drain_outbox(
             object_format: state.config.object_format.clone(),
             schema_fingerprint: crate::bootstrap::SCHEMA_FINGERPRINT.to_string(),
         };
-        let commit = crate::stream::create_root_commit(
-            repo,
-            &header,
-            &first,
-            &worktrees_dir.join(format!("_stream_root_{agent}")),
-        )?;
+        let commit = crate::stream::create_root_commit(repo, &header, &first)?;
         published.push(first.id);
         new_tip = Some(commit);
     }
@@ -277,7 +262,6 @@ pub fn drain_outbox(
             agent,
             new_tip.as_ref().expect("set above"),
             &remaining,
-            &worktrees_dir.join(format!("_stream_append_{agent}")),
         )?;
         published.extend(remaining.iter().map(|e| e.id.clone()));
         let _ = commit;
@@ -362,7 +346,6 @@ pub fn drain_and_publish(
     agent: &Agent,
     host: &Short,
     coordinator_custody_epoch: u64,
-    worktrees_dir: &Path,
     remote: &str,
 ) -> AbResult<(DrainResult, crate::publish::PublicationReceipt)> {
     let drained = drain_outbox(
@@ -371,7 +354,6 @@ pub fn drain_and_publish(
         agent,
         host,
         coordinator_custody_epoch,
-        worktrees_dir,
         remote,
     )?;
     let receipt = publish_stream(repo, remote, agent)?;
@@ -412,13 +394,12 @@ pub fn drain_and_publish(
 fn build_frontier(
     repo: &Path,
     epoch: &crate::registry::RosterEpoch,
-    worktrees_dir: &Path,
     author: &Agent,
     extra_refs: &[EventId],
     data: &crate::events::EventData,
 ) -> AbResult<ObservedFrontier> {
     if requires_complete_frontier(data) {
-        return build_complete_frontier(repo, epoch, worktrees_dir);
+        return build_complete_frontier(repo, epoch);
     }
     // One entry per cross-agent identity referenced, `through` set to the
     // *furthest* seq referenced for that agent (so gate 4 accepts every
@@ -445,7 +426,9 @@ fn build_frontier(
                 "cannot build a frontier entry for {ref_agent}: it has no stream"
             ))
         })?;
-        let _ = worktrees_dir; // reserved: a future version may need to read the referenced stream's own log to validate `r` actually exists there, not just trust the caller.
+        // TODO: a future version may need to read the referenced stream's
+        // own log (via an `ObjectReader`) to validate `r` actually exists
+        // there, not just trust the caller.
         entries.push(FrontierEntry {
             agent: ref_agent,
             stream_tip: tip,
@@ -491,6 +474,10 @@ fn verify_review_merge_authorized(
     if chain.current_nomination != d.nomination {
         return Ok(());
     }
+    // The verifying host must also be on the pinned engine: reconstructing
+    // the candidate below with a different ORT version would disagree with a
+    // perfectly honest reviewer and reject a valid authorization.
+    crate::bootstrap::require_pinned_merge_engine(state)?;
     let expected_authors: std::collections::BTreeSet<Agent> =
         chain.current_request.authors.iter().cloned().collect();
     crate::merge_candidate::verify_authorship(
@@ -690,11 +677,15 @@ fn requires_synced_snapshot(data: &crate::events::EventData) -> bool {
 /// set). Fails if any active member has not yet published its own stream
 /// root -- a real, honest failure rather than silently omitting them (which
 /// `ObservedFrontier::complete` would reject anyway).
+///
+/// One reader serves the whole roster. This loop used to check out a fresh
+/// worktree per active member on every call; that machinery is gone, and a
+/// single open of the object database now serves every member.
 fn build_complete_frontier(
     repo: &Path,
     epoch: &crate::registry::RosterEpoch,
-    worktrees_dir: &Path,
 ) -> AbResult<ObservedFrontier> {
+    let reader = crate::gitobjects::Libgit2Reader::open(repo)?;
     let mut entries = Vec::new();
     for member in epoch.active_members.keys() {
         let tip = crate::stream::read_stream_tip(repo, member)?.ok_or_else(|| {
@@ -702,9 +693,7 @@ fn build_complete_frontier(
                 "cannot build a complete frontier: {member} has not yet published its own stream"
             ))
         })?;
-        let reads_dir = worktrees_dir.join(format!("_complete_{member}"));
-        crate::gitrepo::ensure_bus_worktree(repo, &reads_dir, tip.as_str())?;
-        let log_len = crate::storage::read_stream_log(&reads_dir, member)?.len() as u64;
+        let log_len = crate::storage::read_stream_log_at(&reader, &tip, member)?.len() as u64;
         entries.push(FrontierEntry {
             agent: member.clone(),
             stream_tip: tip,
@@ -788,17 +777,88 @@ mod tests {
         Candidate::new(agent, &data, vec![])
     }
 
+    /// Gate 6: "duplicate custody of one agent stream fails closed without
+    /// force-push."
+    ///
+    /// The authorization used to sit *after* the empty-outbox shortcut, so a
+    /// custodian the registry had superseded was never checked whenever it
+    /// happened to have nothing pending -- and `drain_and_publish` would then
+    /// push that agent's stream ref anyway. The dangerous case needs no
+    /// contrivance: a coordinator whose earlier drain committed locally but
+    /// failed to push has an empty outbox and a local tip ahead of origin, so
+    /// once custody moves it can still fast-forward the new custodian's ref.
+    ///
+    /// Asserted with an empty outbox specifically, because with a non-empty
+    /// one the check was always reached and the bug was invisible.
+    #[test]
+    fn drain_outbox_refuses_a_wrong_custodian_even_with_nothing_pending() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap()).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        assert!(
+            crate::outbox::list_pending(repo.path(), &coord1)
+                .unwrap()
+                .is_empty(),
+            "fixture must have an empty outbox, or it tests the wrong path"
+        );
+
+        // The rightful custodian is accepted.
+        drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .expect("the registered custodian must be allowed");
+
+        // A different host claiming the same stream is refused.
+        let err = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host2"),
+            0,
+            "origin",
+        )
+        .expect_err("a host that does not hold custody must fail closed");
+        assert!(
+            err.to_string().contains("custody"),
+            "expected a custody refusal, got: {err}"
+        );
+    }
+
     #[test]
     fn drain_outbox_is_a_noop_when_empty() {
         let repo = init_repo();
-        let alice = a("alice");
+        let coord1 = a("coord1");
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap()).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
         let drained = drain_outbox(
             repo.path(),
             repo.path(),
-            &alice,
+            &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap();
@@ -819,7 +879,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -840,13 +899,7 @@ mod tests {
                 standby: None,
             },
         );
-        crate::registry::propose_transition(
-            repo.path(),
-            &epoch,
-            members,
-            &repo.path().join("_transition_wt"),
-        )
-        .unwrap();
+        crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
 
         let candidate = Candidate::new(
             &alice,
@@ -869,7 +922,6 @@ mod tests {
             &alice,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap();
@@ -897,7 +949,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -916,7 +967,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap();
@@ -926,8 +976,7 @@ mod tests {
         );
         assert!(drained.rejected.is_empty());
 
-        let reads_dir = repo.path().join("_reads");
-        let (_header, log) = crate::stream::read_stream(repo.path(), &coord1, &reads_dir).unwrap();
+        let (_header, log) = crate::stream::read_stream(repo.path(), &coord1).unwrap();
         assert_eq!(log.len(), 3); // genesis registration + the two status events
     }
 
@@ -950,7 +999,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -973,14 +1021,12 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap();
         assert!(drained.rejected.is_empty());
 
-        let reads_dir = repo.path().join("_reads");
-        let (_header, log) = crate::stream::read_stream(repo.path(), &coord1, &reads_dir).unwrap();
+        let (_header, log) = crate::stream::read_stream(repo.path(), &coord1).unwrap();
         // log[0] is the genesis registration; log[1] must be the urgent
         // candidate despite having been submitted second.
         assert_eq!(log[1].kind, "agent.status");
@@ -1017,7 +1063,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1042,7 +1087,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap();
@@ -1072,9 +1116,7 @@ mod tests {
 
         // The stream itself is clean: reduce() must not choke on anything
         // that was never actually published.
-        let snap =
-            crate::sync::cached_snapshot(repo.path(), repo.path(), &repo.path().join("_snap"))
-                .unwrap();
+        let snap = crate::sync::cached_snapshot(repo.path(), repo.path()).unwrap();
         assert_eq!(snap.state.agents[&coord1].next_seq, 3);
     }
 
@@ -1100,7 +1142,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
         let alice = a("alice");
@@ -1114,13 +1155,7 @@ mod tests {
                 standby: None,
             },
         );
-        crate::registry::propose_transition(
-            repo.path(),
-            &epoch,
-            members,
-            &repo.path().join("_transition_wt"),
-        )
-        .unwrap();
+        crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
         crate::outbox::submit(
             repo.path(),
             "alice-reg",
@@ -1146,7 +1181,6 @@ mod tests {
             &alice,
             &short("host1"),
             0,
-            &repo.path().join("_wt_alice"),
             "origin",
         )
         .unwrap();
@@ -1173,7 +1207,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1201,7 +1234,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap();
@@ -1228,7 +1260,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1261,7 +1292,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap();
@@ -1275,12 +1305,75 @@ mod tests {
         );
     }
 
+    /// Gate 17 at the *call site*, for the clause that only reassignments
+    /// reach.
+    ///
+    /// `reassignments_require_a_synced_snapshot_...` pins the predicate's
+    /// truth table; mutation testing showed that was not enough. Replacing
+    /// either `requires_synced_snapshot` call in `drain_outbox` with
+    /// `requires_complete_frontier` -- the same weakening as deleting the
+    /// clause -- left every suite green, so a reassignment could silently
+    /// stop demanding a fresh cut.
+    ///
+    /// The assertion is on the *reason*, not merely on rejection: with the
+    /// clause gone the candidate is still rejected, but for an unrelated
+    /// downstream cause, and only the gate-17 wording distinguishes the two.
     /// Gate 17 (AGENT_COORDINATION_EVOLUTION.md section 2.4): a
     /// currency-sensitive candidate (here, `schema.activated`) must be
     /// refused, not validated against a stale cached cut, when the fresh
     /// remote probe itself fails -- while an ordinary candidate in the same
     /// batch is unaffected, since only the currency-sensitive one actually
     /// needs that fresher view.
+    #[test]
+    fn drain_outbox_fails_closed_on_a_reassignment_when_the_fetch_fails() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        let reassign = crate::outbox::Candidate::new(
+            &coord1,
+            &EventData::IssueReassigned(crate::events::IssueReassigned {
+                issue: EventId::new(&a("alice"), 1),
+                previous_assignment: EventId::new(&a("alice"), 2),
+                previous_target: a("bob"),
+                new_target: a("carol"),
+                reason: text("bob went quiet"),
+            }),
+            vec![],
+        );
+        crate::outbox::submit(repo.path(), "reassign", &reassign).unwrap();
+
+        // No "origin" remote exists, so the currency probe cannot succeed.
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .unwrap();
+
+        assert!(drained.published.is_empty(), "{drained:?}");
+        assert_eq!(drained.rejected.len(), 1);
+        assert_eq!(drained.rejected[0].kind, "issue.reassigned");
+        assert!(
+            drained.rejected[0].reason.contains("gate 17"),
+            "a reassignment must fail closed on the currency probe, not on some              later check: {}",
+            drained.rejected[0].reason
+        );
+    }
+
     #[test]
     fn drain_outbox_fails_closed_on_a_currency_sensitive_candidate_when_the_fetch_fails() {
         let repo = init_repo();
@@ -1294,7 +1387,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1318,7 +1410,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap();
@@ -1346,7 +1437,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1358,7 +1448,6 @@ mod tests {
             &mallory,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             "origin",
         )
         .unwrap_err();
@@ -1389,7 +1478,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1422,7 +1510,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
         crate::outbox::submit(repo.path(), "client-1", &status_candidate(&coord1, "hi")).unwrap();
@@ -1433,7 +1520,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             &origin.path().to_string_lossy(),
         )
         .unwrap();
@@ -1457,20 +1543,37 @@ mod tests {
     fn drain_and_publish_is_a_noop_when_the_outbox_is_empty() {
         let repo = init_repo();
         let origin = init_bare_origin();
-        let alice = a("alice");
+        let coord1 = a("coord1");
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap()).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
         let (drained, receipt) = drain_and_publish(
             repo.path(),
             repo.path(),
-            &alice,
+            &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt"),
             &origin.path().to_string_lossy(),
         )
         .unwrap();
         assert!(drained.published.is_empty());
         assert!(drained.rejected.is_empty());
-        assert_eq!(receipt, crate::publish::PublicationReceipt::default());
+        // The bus exists now (custody has to be authorizable for the drain to
+        // be reached at all), so the coordinator's own stream root does get
+        // published -- that is the *publish* half doing its job. What this
+        // test is about is the drain half: an empty outbox contributes no new
+        // events, and nothing is rejected.
+        assert!(
+            receipt.rejected.is_empty(),
+            "nothing should be rejected: {receipt:?}"
+        );
     }
 
     /// End-to-end proof that `build_frontier` can actually construct a
@@ -1493,7 +1596,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1508,13 +1610,7 @@ mod tests {
                 standby: None,
             },
         );
-        let new_epoch = crate::registry::propose_transition(
-            repo.path(),
-            &epoch,
-            members,
-            &repo.path().join("_transition_wt"),
-        )
-        .unwrap();
+        let new_epoch = crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
         crate::outbox::submit(
             repo.path(),
             "alice-reg",
@@ -1539,7 +1635,6 @@ mod tests {
             &alice,
             &short("host1"),
             0,
-            &repo.path().join("_wt_alice"),
             &remote,
         )
         .unwrap();
@@ -1608,7 +1703,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt_coord1"),
             &remote,
         )
         .unwrap();
@@ -1652,7 +1746,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1667,13 +1760,7 @@ mod tests {
                 standby: None,
             },
         );
-        crate::registry::propose_transition(
-            repo.path(),
-            &epoch,
-            members,
-            &repo.path().join("_transition_wt"),
-        )
-        .unwrap();
+        crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
         crate::outbox::submit(
             repo.path(),
             "alice-reg",
@@ -1698,7 +1785,6 @@ mod tests {
             &alice,
             &short("host1"),
             0,
-            &repo.path().join("_wt_alice"),
             &remote,
         )
         .unwrap();
@@ -1728,7 +1814,6 @@ mod tests {
             &coord1,
             &short("host1"),
             0,
-            &repo.path().join("_wt_coord1"),
             &remote,
         )
         .unwrap();
@@ -1759,7 +1844,6 @@ mod tests {
             &alice,
             &short("host1"),
             0,
-            &repo.path().join("_wt_alice_ack"),
             &remote,
         )
         .unwrap();
@@ -1775,9 +1859,7 @@ mod tests {
         // gate-4 check, proving the envelope actually written to disk is
         // self-consistent, not merely that `dry_run` was fooled the same
         // way twice.
-        let (_header, log) =
-            crate::stream::read_stream(repo.path(), &alice, &repo.path().join("_reread_alice"))
-                .unwrap();
+        let (_header, log) = crate::stream::read_stream(repo.path(), &alice).unwrap();
         assert_eq!(log.len(), 2); // registration + acknowledgement
     }
 
@@ -1869,7 +1951,6 @@ mod tests {
             "sha1".to_string(),
             ObjectId::parse(review_from).unwrap(),
             short("host1"),
-            &repo.path().join("_genesis_wt"),
         )
         .unwrap();
 
@@ -1892,13 +1973,7 @@ mod tests {
                 standby: None,
             },
         );
-        let new_epoch = crate::registry::propose_transition(
-            repo.path(),
-            &epoch,
-            members,
-            &repo.path().join("_transition_wt"),
-        )
-        .unwrap();
+        let new_epoch = crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
 
         for (ag, role) in [(&author, Role::Implementor), (&reviewer, Role::Reviewer)] {
             crate::outbox::submit(
@@ -1919,16 +1994,7 @@ mod tests {
                 ),
             )
             .unwrap();
-            drain_outbox(
-                repo.path(),
-                repo.path(),
-                ag,
-                &short("host1"),
-                0,
-                &repo.path().join(format!("_wt_{ag}_reg")),
-                &remote,
-            )
-            .unwrap();
+            drain_outbox(repo.path(), repo.path(), ag, &short("host1"), 0, &remote).unwrap();
         }
 
         let coord1_tip = crate::stream::read_stream_tip(repo.path(), &coord1)
@@ -2000,7 +2066,6 @@ mod tests {
             &author,
             &short("host1"),
             0,
-            &repo.path().join("_wt_nominate"),
             &remote,
         )
         .unwrap();
@@ -2030,7 +2095,6 @@ mod tests {
             &reviewer,
             &short("host1"),
             0,
-            &repo.path().join("_wt_accept"),
             &remote,
         )
         .unwrap();
@@ -2130,7 +2194,6 @@ mod tests {
             &f.reviewer,
             &short("host1"),
             0,
-            &f.repo.path().join("_wt_authorize"),
             &f.remote,
         )
         .unwrap()
@@ -2308,6 +2371,55 @@ mod tests {
             drained.rejected[0].reason.contains("is not fetchable from"),
             "{}",
             drained.rejected[0].reason
+        );
+    }
+
+    /// The pinned-engine gate's *call site*, not the predicate.
+    ///
+    /// `bootstrap::pinned_engine_tests` proves what
+    /// `require_pinned_merge_engine` decides; it cannot see whether this
+    /// function calls it. Mutation testing showed that gap was real --
+    /// deleting the call from here left every suite green, because the test
+    /// host happens to run the pinned version, so the check was invisible
+    /// either way. Pinning a version nobody runs makes the call observable.
+    #[test]
+    fn the_authorization_gate_refuses_a_host_that_is_not_on_the_selected_engine() {
+        let f = build_review_fixture(Some("zoe"));
+        let candidate = crate::merge_candidate::reconstruct_candidate(
+            f.repo.path(),
+            &f.previous_main,
+            &f.feature_commit,
+            &f.reviewer,
+        )
+        .unwrap();
+
+        // A reduced state for this fixture, with the bus's selected engine
+        // moved to a version this host does not have.
+        let snapshot =
+            crate::sync::cached_snapshot(f.repo.path(), f.repo.path()).expect("reduce fixture");
+        let mut state = snapshot.state;
+        let epoch = EventId::new(&f.coord1, 987);
+        state.merge_engine_info.insert(
+            epoch.clone(),
+            (
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                short("0.0.0-not-a-real-git"),
+            ),
+        );
+        state.current_merge_engine_epoch = Some(epoch);
+
+        let d = match merge_authorized_candidate(&f, &candidate)
+            .typed_data()
+            .unwrap()
+        {
+            EventData::ReviewMergeAuthorized(d) => d,
+            other => panic!("fixture built the wrong event: {other:?}"),
+        };
+        let err = verify_review_merge_authorized(f.repo.path(), &f.remote, &state, &f.reviewer, &d)
+            .expect_err("a host off the selected engine must not verify a candidate");
+        assert!(
+            err.to_string().contains("0.0.0-not-a-real-git"),
+            "expected the selected-engine refusal, got: {err}"
         );
     }
 
@@ -2560,6 +2672,114 @@ mod tests {
         (origin, remote)
     }
 
+    /// AGENT_COORDINATION_EVOLUTION.md's currency rule (gate 17): a
+    /// reassignment must be published against a *freshly synced* snapshot,
+    /// because it moves work between agents and a stale read can hand the
+    /// same item to two of them. That is a strictly wider set than the
+    /// events needing a *complete frontier*, and the second clause of
+    /// `requires_synced_snapshot` is the only thing expressing it -- deleting
+    /// it left the whole suite green.
+    #[test]
+    fn reassignments_require_a_synced_snapshot_even_though_they_need_no_complete_frontier() {
+        let reassign = crate::events::EventData::IssueReassigned(crate::events::IssueReassigned {
+            issue: EventId::new(&a("alice"), 1),
+            previous_assignment: EventId::new(&a("alice"), 2),
+            previous_target: a("bob"),
+            new_target: a("carol"),
+            reason: text("moving it"),
+        });
+        assert!(
+            requires_synced_snapshot(&reassign),
+            "a reassignment must demand a fresh cut"
+        );
+        assert!(
+            !requires_complete_frontier(&reassign),
+            "fixture: if this ever needs a complete frontier, the first clause              would satisfy the assertion above and it would stop testing anything"
+        );
+    }
+
+    /// `through` names the last sequence a member has actually published,
+    /// which for a log of `n` events is `n - 1`. Off-by-one here would make
+    /// every complete frontier claim an event that does not exist yet, and
+    /// no test asserted the value -- only that a frontier could be built.
+    #[test]
+    fn a_complete_frontier_names_the_last_published_sequence_not_the_next_one() {
+        let dir = init_repo();
+        let coord = a("coord1");
+        crate::bootstrap::genesis(
+            dir.path(),
+            &coord,
+            crate::scalars::Short::parse("Coordinator One".to_string()).unwrap(),
+            crate::scalars::Text::parse("bootstraps the fleet".to_string()).unwrap(),
+            "sha1".to_string(),
+            crate::scalars::ObjectId::parse(crate::gitrepo::rev_parse(dir.path(), "HEAD").unwrap())
+                .unwrap(),
+            crate::scalars::Short::parse("host1".to_string()).unwrap(),
+        )
+        .unwrap();
+
+        let tip = crate::registry::read_registry_tip(dir.path())
+            .unwrap()
+            .unwrap();
+        let epoch = crate::registry::read_epoch(dir.path(), &tip).unwrap();
+        let frontier = build_complete_frontier(dir.path(), &epoch).unwrap();
+
+        let reader = crate::gitobjects::Libgit2Reader::open(dir.path()).unwrap();
+        // Explicit, so the loop below cannot become vacuous by the frontier
+        // turning up empty. `ObservedFrontier::complete` would reject that
+        // today, which makes this indirect rather than absent -- and indirect
+        // protection is the kind that quietly stops holding.
+        assert!(
+            !frontier.entries.is_empty(),
+            "a complete frontier must name at least the coordinator"
+        );
+        for entry in frontier.entries.values() {
+            let stream_tip = crate::stream::read_stream_tip(dir.path(), &entry.agent)
+                .unwrap()
+                .unwrap();
+            let published =
+                crate::storage::read_stream_log_at(&reader, &stream_tip, &entry.agent).unwrap();
+            assert_eq!(
+                entry.through.seq(),
+                published.len() as u64 - 1,
+                "through must name the last published sequence for {}",
+                entry.agent
+            );
+            assert!(
+                published.iter().any(|e| e.id == entry.through),
+                "through must name an event that actually exists"
+            );
+        }
+    }
+
+    /// A reconciliation is verified against `main` *as the remote has it*.
+    /// If that fetch cannot run, the check has no ground truth and must fail
+    /// closed -- accepting on an unreachable remote would let a reconciliation
+    /// claiming any `main_commit` through unverified.
+    #[test]
+    fn verify_review_merge_reconciled_fails_closed_when_main_cannot_be_fetched() {
+        let dir = init_repo();
+        let previous_main = crate::gitrepo::rev_parse(dir.path(), "main").unwrap();
+        let next = author_commit_for_reconcile(dir.path(), &previous_main, "feature.txt");
+        git(dir.path(), &["update-ref", "refs/heads/main", &next]);
+        let (state, auth_id) = state_with_bare_authorization(&previous_main, &next, &next);
+        let d = reconciled_data(&auth_id, &previous_main, &next, &next);
+
+        // A remote that cannot be contacted at all.
+        let unreachable = dir.path().join("no-such-origin.git");
+        let err = verify_review_merge_reconciled(
+            dir.path(),
+            &unreachable.display().to_string(),
+            &state,
+            &d,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("could not fetch refs/heads/main"),
+            "an unreachable remote must fail closed, got: {err}"
+        );
+    }
+
     #[test]
     fn verify_review_merge_reconciled_rejects_when_main_was_never_advanced() {
         let dir = init_repo();
@@ -2745,7 +2965,6 @@ mod tests {
             &f.coord1,
             &short("host1"),
             0,
-            &f.repo.path().join("_wt_activate_engine"),
             &f.remote,
         )
         .unwrap();
@@ -2817,7 +3036,6 @@ mod tests {
             &f.coord1,
             &short("host1"),
             0,
-            &f.repo.path().join("_wt_reconcile"),
             &f.remote,
         )
         .unwrap()

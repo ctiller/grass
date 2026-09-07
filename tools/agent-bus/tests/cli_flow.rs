@@ -36,6 +36,24 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(status.success(), "git {args:?} failed in {}", dir.display());
 }
 
+/// `git`, but returning its trimmed stdout, for the few tests that ask git a
+/// question rather than telling it to do something.
+fn git_out(dir: &Path, args: &[&str]) -> String {
+    let out = StdCommand::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .expect("git must be on PATH");
+    assert!(
+        out.status.success(),
+        "git {args:?} failed in {}: {}",
+        dir.display(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
 /// A forward-slash path string, since a `\`-separated Windows path is not
 /// what we want embedded as a git remote path.
 fn path_str(p: &Path) -> String {
@@ -549,6 +567,125 @@ fn redact_noise(value: Content, _path: ContentPath<'_>) -> Content {
 /// Requirement 1: `genesis` succeeds and its JSON has the expected
 /// registry_epoch/stream_commit/published fields, and those refs actually
 /// landed on the remote.
+/// `git commit` resolves identity from the environment before configuration,
+/// and the in-process writer must too.
+///
+/// This runs the real binary as a child process on purpose. The rule itself
+/// is unit-tested through `resolve_identity`, but that test injects both
+/// lookups -- so mutating the *wiring* (`ambient_identity` passing a lookup
+/// that always returns `None`) restored the original config-only bug with the
+/// whole suite still green. Only a test that sets real environment variables
+/// covers that seam, and environment variables are process-global, so it has
+/// to be a separate process rather than a unit test running beside others.
+///
+/// Author and committer are deliberately different people here: with both set
+/// to the same identity, swapping the two arguments at the call site is
+/// unobservable.
+#[test]
+fn a_published_commit_takes_its_identity_from_the_environment() {
+    let (_origin, repo) = fresh_bus();
+
+    let out = bin()
+        .current_dir(repo.path())
+        .args([
+            "genesis",
+            "--agent",
+            "coord1",
+            "--display-name",
+            "Coordinator One",
+            "--purpose",
+            "bootstraps the bus",
+            "--host",
+            "host1",
+        ])
+        .env("GIT_AUTHOR_NAME", "Env Author")
+        .env("GIT_AUTHOR_EMAIL", "env-author@example.com")
+        .env("GIT_COMMITTER_NAME", "Env Committer")
+        .env("GIT_COMMITTER_EMAIL", "env-committer@example.com")
+        .assert()
+        .success();
+    let _ = out;
+
+    // The repository's own config says `Test <test@example.com>`; the
+    // environment must win over it.
+    let ident = git_out(
+        repo.path(),
+        &[
+            "log",
+            "-1",
+            "--format=%an|%ae|%cn|%ce",
+            "refs/heads/agent-events/coord1",
+        ],
+    );
+    assert_eq!(
+        ident.trim(),
+        "Env Author|env-author@example.com|Env Committer|env-committer@example.com",
+        "the environment must take precedence over user.name/user.email, and the author must \
+         not be swapped with the committer"
+    );
+
+    // The registry root is written through the same path.
+    let registry_ident = git_out(
+        repo.path(),
+        &["log", "-1", "--format=%an|%ce", "refs/heads/agent-registry"],
+    );
+    assert_eq!(
+        registry_ident.trim(),
+        "Env Author|env-committer@example.com"
+    );
+}
+
+/// The `EMAIL` variable is git's last resort for an email, after
+/// `GIT_AUTHOR_EMAIL` and `user.email`. A host with `user.name` configured
+/// and `EMAIL` exported is an ordinary container setup, and it must be able
+/// to write to the bus.
+#[test]
+fn a_published_commit_falls_back_to_the_plain_email_variable() {
+    let (_origin, repo) = fresh_bus();
+    // Remove the repository's own email, and point the global/system config
+    // search somewhere empty, so `EMAIL` is genuinely the only source left.
+    // `user.email` outranks `EMAIL` in git's order, so leaving the developer's
+    // own global config visible would make this test assert nothing.
+    git(repo.path(), &["config", "--unset", "user.email"]);
+    let empty_home = tempfile::tempdir().unwrap();
+
+    bin()
+        .current_dir(repo.path())
+        .args([
+            "genesis",
+            "--agent",
+            "coord1",
+            "--display-name",
+            "Coordinator One",
+            "--purpose",
+            "bootstraps the bus",
+            "--host",
+            "host1",
+        ])
+        .env_remove("GIT_AUTHOR_EMAIL")
+        .env_remove("GIT_COMMITTER_EMAIL")
+        .env("HOME", empty_home.path())
+        .env("USERPROFILE", empty_home.path())
+        .env("XDG_CONFIG_HOME", empty_home.path())
+        .env("HOMEDRIVE", "")
+        .env("HOMEPATH", empty_home.path())
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("EMAIL", "fallback@example.com")
+        .assert()
+        .success();
+
+    let ident = git_out(
+        repo.path(),
+        &[
+            "log",
+            "-1",
+            "--format=%ae|%ce",
+            "refs/heads/agent-events/coord1",
+        ],
+    );
+    assert_eq!(ident.trim(), "fallback@example.com|fallback@example.com");
+}
+
 #[test]
 fn genesis_reports_expected_fields_and_publishes_both_refs() {
     let (origin, repo) = fresh_bus();
@@ -1743,36 +1880,24 @@ fn prepare_merge_rejects_an_unknown_nomination() {
 }
 
 // `prepare_merge`'s `chain.current_nomination != nomination` branch
-// ("nomination is no longer current") is deliberately left without a CLI-
-// level test here. The only way to reach it is a confirmed `review.
-// reassigned` moving the chain past an old nomination link, and `review.
-// reassigned` is gate-17 currency-sensitive -- while investigating a test
-// for exactly this, that fetch was found to trigger a real, separate,
-// severe, pre-existing bug in this crate's local ref plumbing (see this
-// task's final report): `stream.rs`/`registry.rs` update every local
-// stream/registry ref via `git branch -f <already-fully-qualified-ref>`
-// (e.g. `git branch -f refs/heads/agent-events/zoe <commit>`), which real
-// `git` does not treat as already-qualified -- it creates `refs/heads/
-// refs/heads/agent-events/zoe` instead (confirmed empirically). Every
-// ordinary read still resolves correctly only by accident, via `git rev-
-// parse`'s ref-disambiguation fallback chain finding the doubly-prefixed
-// ref. But `sync::synced_snapshot`'s own fetch (gate 17's currency probe,
-// or `--sync`) uses an explicit `<remote-ref>:<local-ref>` refspec that
-// *does* create the correctly-named exact ref as a byproduct -- and once
-// that exact ref exists, `rev-parse`'s disambiguation prefers it (its first
-// rule is a literal path match) over the doubly-prefixed one *forever*,
-// permanently shadowing that agent's real, advancing tip with whatever
-// commit the remote happened to have at that one fetch moment. Reassigning
-// as the same agent whose own reassignment is the currency-sensitive event
-// hits this immediately: gate 17's fetch (for that very candidate) pins the
-// exact ref to the pre-reassignment tip, the reassignment still commits
-// onto the doubly-prefixed ref locally, but `publish_stream`'s own `read_
-// stream_tip` afterward reads the now-shadowed, stale exact ref -- so the
-// event is reported published (it *is* a real local commit) while the
-// actual push silently reuses the old tip, never reaching the remote.
-// Fixing this is real, separate work (`stream.rs`/`registry.rs`'s ref-
-// update calls, used by every stream and the registry root, well outside
-// this task's git-linked-review-checks scope) -- flagged, not fixed, here.
+// ("nomination is no longer current") still has no CLI-level test.
+//
+// The long justification that used to stand here is obsolete and has been
+// removed rather than left to mislead: it described `stream.rs`/`registry.rs`
+// updating local refs through `git branch -f <already-qualified-ref>`, which
+// created a doubly-prefixed `refs/heads/refs/heads/...` and could permanently
+// shadow an agent's real tip. Both now use `update-ref`, and every other
+// mention of that bug in this crate is in the past tense. Keeping a
+// present-tense description of a fixed severe bug as the reason for a
+// coverage gap is worse than the gap.
+//
+// What remains true is only that reaching the branch needs a confirmed
+// `review.reassigned` moving the chain past an old nomination link, which is
+// several published events away in a CLI test. The equivalent rule on the
+// *merge-ready* side -- an authorization the chain never accepted -- is
+// covered at unit level by `merge_ready::tests::rejects_an_authorization_the_
+// chain_never_accepted_after_a_reassignment`, which is where the security
+// consequence actually lived.
 
 // ======================================================= merge-ready (gate 8)
 //
@@ -2676,4 +2801,142 @@ fn succeed_before_genesis_fails_cleanly() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("run `genesis` first"));
+}
+
+/// M1 regression. `spawn_and_wait` strips repository-*location* variables
+/// from every git subprocess; an earlier revision also stripped every
+/// `GIT_CONFIG_*` variable, which silently broke pushing on any host that
+/// supplies its remote configuration that way -- `GIT_CONFIG_COUNT` carrying
+/// `credential.helper` or `http.<url>.extraheader` is how CI injects a token,
+/// and publication is the coordinator's sole job, so a host that cannot push
+/// stalls the bus (AGENT_COORDINATION_EVOLUTION.md section 2.3).
+///
+/// The remote here is an alias that resolves *only* through an `insteadOf`
+/// rule injected the same way. The second half of the test is the control:
+/// without the injection the same command must fail, so a pass cannot come
+/// from the alias being reachable by some other means.
+#[test]
+fn transport_still_honors_configuration_injected_through_the_environment() {
+    let (origin, repo) = fresh_bus();
+    let alias = "agentbus-alias:";
+    let insteadof_key = format!("url.{}.insteadOf", path_str(origin.path()));
+
+    // Control: without the injected rule the alias resolves to nothing, so
+    // every ref is rejected. (`genesis` reports an unreachable remote in its
+    // receipt rather than as a nonzero exit, so the assertion is on
+    // `rejected`, not on the exit status.)
+    let control = run_json(bin().current_dir(repo.path()).args([
+        "genesis",
+        "--agent",
+        "coord1",
+        "--display-name",
+        "Coordinator One",
+        "--purpose",
+        "bootstraps the bus",
+        "--host",
+        "host1",
+        "--remote",
+        alias,
+    ]));
+    assert!(
+        !control["rejected"].as_array().unwrap().is_empty(),
+        "fixture is not proving anything unless the bare alias fails: {control}"
+    );
+    let _ = insteadof_key;
+
+    // Same command, same alias, with the `insteadOf` rule supplied the way CI
+    // supplies credentials. This must now publish.
+    let (origin2, repo2) = fresh_bus();
+    let injected = run_json(
+        bin()
+            .current_dir(repo2.path())
+            .args([
+                "genesis",
+                "--agent",
+                "coord1",
+                "--display-name",
+                "Coordinator One",
+                "--purpose",
+                "bootstraps the bus",
+                "--host",
+                "host1",
+                "--remote",
+                alias,
+            ])
+            .env("GIT_CONFIG_COUNT", "1")
+            .env(
+                "GIT_CONFIG_KEY_0",
+                format!("url.{}.insteadOf", path_str(origin2.path())),
+            )
+            .env("GIT_CONFIG_VALUE_0", alias),
+    );
+    assert!(
+        injected["rejected"].as_array().unwrap().is_empty()
+            && !injected["published"].as_object().unwrap().is_empty(),
+        "transport must still honor GIT_CONFIG_* configuration: {injected}"
+    );
+}
+
+/// Gate 19: a successor resumes preserved outboxes "exactly once **after
+/// winning** the registry custody transition". Winning is decided by the
+/// remote, and `publish` reports a rejected push in its receipt rather than
+/// as an error -- so `succeed` used to build the successor epoch locally,
+/// watch the push fail, and then drain and publish the target's stream
+/// anyway. Two hosts racing a succession would both resume, which is two
+/// coordinators publishing for one custody epoch (gate 7) with no force-push
+/// anywhere to make it look wrong.
+///
+/// An unreachable remote is the cleanest way to make the push fail
+/// deterministically. The assertion that matters is the second one: the
+/// target's pending work must still be pending afterwards.
+#[test]
+fn succeed_refuses_to_resume_when_the_registry_transition_did_not_reach_the_remote() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register_with(
+        repo.path(),
+        "alice",
+        "implementor",
+        "host-a",
+        Some("alice-standby"),
+    );
+    submit(
+        repo.path(),
+        "alice",
+        "agent.status",
+        r#"{"status":"active","note":"queued before the succession"}"#,
+        "pending-1",
+    );
+
+    bin()
+        .current_dir(repo.path())
+        .args([
+            "succeed",
+            "--proposer",
+            "alice-standby",
+            "--target",
+            "alice",
+            "--host",
+            "host-b",
+            "--remote",
+            "no-such-remote-anywhere",
+        ])
+        .assert()
+        .failure();
+
+    // The queued event must still be queued: nothing may have been resumed
+    // under a custody epoch this host never won.
+    let outbox = repo
+        .path()
+        .join(".git")
+        .join("agent-bus")
+        .join("outbox")
+        .join("alice");
+    let still_pending: Vec<_> = std::fs::read_dir(&outbox)
+        .map(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name()).collect())
+        .unwrap_or_default();
+    assert!(
+        !still_pending.is_empty(),
+        "the target's outbox must be untouched when the succession did not land, found {still_pending:?}"
+    );
 }

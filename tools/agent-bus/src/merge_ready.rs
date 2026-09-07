@@ -97,6 +97,44 @@ pub(crate) fn check_merge_ready(
             "reviewer is not the accepted eligible reviewer for this nomination",
         ));
     }
+    // AGENT_REVIEW.md section 3: a reviewer is eligible "only if the reviewer
+    // is a registered active agent with immutable primary role `reviewer`",
+    // and section 8 requires this gate's author to be the accepted *eligible*
+    // reviewer. Eligibility was checked when the nomination was published and
+    // never again, so a reviewer who has since published `agent.status`
+    // `done` -- or whom a coordinator has retired after a silence -- stayed
+    // merge-eligible indefinitely. Section 11 says an unavailable reviewer is
+    // *explicitly reassigned*; without this check the roster could declare
+    // them unavailable while they went on merging.
+    crate::apply::require_active_role(state, reviewer, crate::events::Role::Reviewer)?;
+    // The authorization must be one the chain actually *accepted*, not merely
+    // an event that exists.
+    //
+    // Without this, every check in this function is reachable around rather
+    // than through. `apply_review_merge_authorized` treats an authorization
+    // naming a superseded nomination link as a deliberate no-op (it returns
+    // `Ok(())` early rather than `Err`, so one inapplicable event cannot make
+    // a whole stream unreducible), and `coordinator::verify_review_merge_
+    // authorized` returns early on the same condition. Both are right on
+    // their own terms -- but the event still lands in `state.events`, and
+    // `state.review_chain` maps *any* nomination link to the chain root, so
+    // looking it up here found it anyway. After an ordinary reassignment
+    // round trip that leaves the same reviewer current, an authorization
+    // citing the stale link had passed *no* checks at all -- not
+    // `verify_authorship`, not `reconstruct_candidate`, not the candidate-tag
+    // fetchability probe, not `reviewed_scope` equality -- and this gate
+    // still reported it ready to push.
+    //
+    // `chain.authorizations` is exactly the right witness: `apply` appends to
+    // it only after all of those checks have passed, so membership means
+    // "survived reduction", which is the property section 8 is asking about
+    // when it says the authorization must be "published on the fetched bus".
+    if !chain.authorizations.contains(authorization) {
+        return Err(invalid(format!(
+            "authorization {authorization} is not one this nomination chain accepted -- it              names nomination {} while the chain is now at {}, so it was reduced as a no-op              and none of the merge checks ever ran against it",
+            auth.nomination, chain.current_nomination
+        )));
+    }
     for f in chain.findings.values() {
         if f.disposition == FindingDisposition::Open {
             return Err(invalid(format!(
@@ -214,6 +252,38 @@ pub(crate) fn check_merge_ready(
             "candidate must have exactly one matching Agent-Bus-Reviewer trailer",
         ));
     }
+    // Section 8 lists two more checks by name that lived only in the
+    // coordinator's publication gate: "selected commit authors match trailers
+    // and exclude that reviewer", and the candidate having a "conflict-free
+    // tree". Doing them here as well is deliberate defence in depth rather
+    // than duplication -- this gate runs on the reviewer's own host,
+    // immediately before the push, and is the last thing that looks at the
+    // candidate before it becomes `main`. It is also the check that survives
+    // if the publication gate is ever bypassed again, which is exactly what
+    // the stale-nomination hole above turned out to be.
+    let expected_authors: std::collections::BTreeSet<Agent> =
+        chain.current_request.authors.iter().cloned().collect();
+    crate::merge_candidate::verify_authorship(
+        repo,
+        reviewer,
+        &expected_authors,
+        auth.previous_main.as_str(),
+        auth.reviewed_commit.as_str(),
+    )?;
+    crate::bootstrap::require_pinned_merge_engine(state)?;
+    let reconstructed = crate::merge_candidate::reconstruct_candidate(
+        repo,
+        auth.previous_main.as_str(),
+        auth.reviewed_commit.as_str(),
+        reviewer,
+    )?;
+    if reconstructed != auth.candidate.as_str() {
+        return Err(invalid(format!(
+            "candidate {} is not the deterministic clean merge of {} into {} -- this host              reconstructs {reconstructed}. A candidate that is not that merge carries content              no reviewer authorized.",
+            auth.candidate, auth.reviewed_commit, auth.previous_main
+        )));
+    }
+
     let changed = crate::gitrepo::diff_name_status(repo, &current_main, auth.candidate.as_str())?;
     for (_, path) in &changed {
         if !auth.reviewed_scope.iter().any(|p| path_in_claim(path, p)) {
@@ -353,6 +423,8 @@ mod tests {
             reconciled: vec![],
         };
         state.reviews.insert(nomination.clone(), chain);
+        register_active(&mut state, reviewer, crate::events::Role::Reviewer);
+        register_active(&mut state, author, crate::events::Role::Implementor);
         state
             .review_chain_by_nomination
             .insert(nomination.clone(), nomination.clone());
@@ -388,8 +460,49 @@ mod tests {
         );
         let auth_id = auth_env.id.clone();
         state.events.insert(auth_id.clone(), auth_env);
+        // What `apply_review_merge_authorized` does once its own checks pass.
+        // Without this the fixture would be exercising `check_merge_ready`
+        // against an authorization reduction never accepted -- which is
+        // precisely the bypass this module now refuses.
+        state
+            .review_chain_mut(&nomination)
+            .unwrap()
+            .authorizations
+            .push(auth_id.clone());
 
         (state, nomination, auth_id)
+    }
+
+    /// Registers `agent` as an active member with `role`.
+    ///
+    /// The fixtures below previously populated no `state.agents` at all,
+    /// which is why a retired or deactivated reviewer sailing through the
+    /// merge gate went unnoticed: there was no roster for the check to
+    /// consult. A fixture that omits the roster cannot observe a rule about
+    /// the roster.
+    fn register_active(state: &mut BusState, agent: &Agent, role: crate::events::Role) {
+        state.agents.insert(
+            agent.clone(),
+            crate::state::AgentState {
+                agent: agent.clone(),
+                display_name: crate::scalars::Short::parse(agent.as_str().to_string()).unwrap(),
+                primary_role: role,
+                purpose: text("x"),
+                provider: None,
+                model: None,
+                status: crate::events::LifecycleStatus::Active,
+                status_note: text(""),
+                product_branch: None,
+                product_commit: None,
+                last_lifecycle_event: EventId::new(agent, 0),
+                retired: false,
+                scope: None,
+                plan: None,
+                progress_tail: vec![],
+                next_seq: 1,
+                subscribed_topics: crate::scalars::StringSet::default(),
+            },
+        );
     }
 
     fn issue_blocking(id: &EventId, target: &Agent, blocks: &EventId) -> IssueState {
@@ -766,6 +879,8 @@ mod tests {
             reconciled: vec![],
         };
         state.reviews.insert(nomination.clone(), chain);
+        register_active(&mut state, reviewer, crate::events::Role::Reviewer);
+        register_active(&mut state, author, crate::events::Role::Implementor);
         state
             .review_chain_by_nomination
             .insert(nomination.clone(), nomination.clone());
@@ -797,6 +912,12 @@ mod tests {
         );
         let auth_id = auth_env.id.clone();
         state.events.insert(auth_id.clone(), auth_env);
+        // As above: mirror what reduction does once its checks pass.
+        state
+            .review_chain_mut(&nomination)
+            .unwrap()
+            .authorizations
+            .push(auth_id.clone());
         (state, auth_id)
     }
 
@@ -823,6 +944,165 @@ mod tests {
             .unwrap()
             .trim()
             .to_string()
+    }
+
+    /// The stale-nomination bypass, in full.
+    ///
+    /// `apply_review_merge_authorized` and
+    /// `coordinator::verify_review_merge_authorized` both treat an
+    /// authorization naming a superseded nomination link as a *no-op* rather
+    /// than an error -- deliberately, so one inapplicable event cannot make a
+    /// whole agent stream unreducible. The consequence nobody had covered is
+    /// that such an event still exists in `state.events`, and
+    /// `state.review_chain` resolves *any* nomination link to the chain root,
+    /// so this gate used to find it and run its own checks against a chain
+    /// that had never accepted it.
+    ///
+    /// That was a complete bypass, not a narrow one. Everything that actually
+    /// validates a candidate -- `verify_authorship`, `reconstruct_candidate`,
+    /// the candidate-tag fetchability probe, `reviewed_scope` equality,
+    /// finding dispositions -- lives behind those two early returns. A
+    /// reviewer who is legitimately current (after a reassignment round trip
+    /// that returns to them) could therefore authorize a candidate they built
+    /// themselves, over commits they authored themselves, with no candidate
+    /// tag ever pushed, and this gate would answer `ready`.
+    ///
+    /// The fixture is that round trip: the chain has moved to a newer
+    /// nomination link, the reviewer is still the current one, and the
+    /// authorization names the old link.
+    #[test]
+    fn rejects_an_authorization_the_chain_never_accepted_after_a_reassignment() {
+        let author = a("zoe");
+        let reviewer = a("aiden");
+        let (dir, _origin, remote, previous_main, feature_commit, candidate) =
+            git_fixture(&author, &reviewer);
+        let (mut state, auth_id) = state_with_authorization(
+            &author,
+            &reviewer,
+            &previous_main,
+            &feature_commit,
+            &candidate,
+            &["feature.txt"],
+        );
+
+        // Sanity: this exact authorization is accepted before the chain moves.
+        check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+            .expect("fixture must be valid before the reassignment");
+
+        // The chain moves on to a newer nomination link naming the same
+        // reviewer, and reduction drops the old authorization (a no-op), so
+        // it is no longer among the chain's accepted authorizations.
+        let root = state.review_chain(&auth_id).map(|c| c.root.clone());
+        let nomination = state
+            .review_chain_by_nomination
+            .keys()
+            .next()
+            .cloned()
+            .expect("fixture has one chain");
+        let newer = EventId::new(&author, 99);
+        {
+            let chain = state.review_chain_mut(&nomination).unwrap();
+            chain.nomination_events.push(newer.clone());
+            chain.current_nomination = newer.clone();
+            chain
+                .nomination_reviewer
+                .insert(newer.clone(), reviewer.clone());
+            chain.accepted_nominations.insert(newer.clone());
+            chain.authorizations.clear();
+        }
+        state
+            .review_chain_by_nomination
+            .insert(newer.clone(), nomination.clone());
+        let _ = root;
+
+        let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+            .expect_err("an authorization the chain never accepted must be refused");
+        assert!(
+            err.to_string()
+                .contains("not one this nomination chain accepted"),
+            "expected the never-accepted refusal, got: {err}"
+        );
+    }
+
+    /// AGENT_REVIEW.md section 3 ("a registered **active** agent") and
+    /// section 11 ("an unavailable reviewer is explicitly reassigned").
+    /// Eligibility used to be checked only when the nomination was
+    /// published, so a reviewer who later went unavailable kept merging.
+    ///
+    /// Both directions of "unavailable" are covered: retirement by a
+    /// coordinator, and the reviewer deactivating themselves via
+    /// `agent.status`.
+    #[test]
+    fn a_reviewer_who_is_no_longer_active_may_not_merge() {
+        let author = a("zoe");
+        let reviewer = a("aiden");
+
+        for make_unavailable in [
+            (|s: &mut crate::state::AgentState| s.retired = true) as fn(&mut _),
+            |s: &mut crate::state::AgentState| {
+                s.status = crate::events::LifecycleStatus::Done;
+            },
+        ] {
+            let (dir, _origin, remote, previous_main, feature_commit, candidate) =
+                git_fixture(&author, &reviewer);
+            let (mut state, auth_id) = state_with_authorization(
+                &author,
+                &reviewer,
+                &previous_main,
+                &feature_commit,
+                &candidate,
+                &["feature.txt"],
+            );
+            check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+                .expect("fixture must be ready while the reviewer is active");
+
+            make_unavailable(state.agents.get_mut(&reviewer).unwrap());
+            let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+                .expect_err("an unavailable reviewer must not merge");
+            assert!(
+                err.to_string().contains("is not active"),
+                "expected an activity refusal, got: {err}"
+            );
+        }
+    }
+
+    /// AGENT_REVIEW.md section 8 names two checks this gate did not make:
+    /// "selected commit authors match trailers and exclude that reviewer",
+    /// and a "conflict-free tree". Both lived only in the coordinator's
+    /// publication gate, which the stale-nomination hole showed can be
+    /// routed around -- so this gate, the last thing to look at a candidate
+    /// before it becomes `main`, now makes them too.
+    ///
+    /// Driven through a candidate whose second parent introduces a commit
+    /// the reviewer authored: authorship is section 3's rule, and it is
+    /// invisible to the parent-shape and trailer checks that were already
+    /// here.
+    #[test]
+    fn rejects_a_candidate_whose_introduced_commit_the_reviewer_authored() {
+        let author = a("zoe");
+        let reviewer = a("aiden");
+        // The introduced commit carries the *reviewer* as its author.
+        let (dir, _origin, remote, previous_main, feature_commit, candidate) =
+            git_fixture(&reviewer, &reviewer);
+        // The roster is honest -- zoe implements, aiden reviews. Only the
+        // candidate is wrong: the commit it introduces was authored by the
+        // reviewer.
+        let (state, auth_id) = state_with_authorization(
+            &author,
+            &reviewer,
+            &previous_main,
+            &feature_commit,
+            &candidate,
+            &["feature.txt"],
+        );
+
+        let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+            .expect_err("a reviewer may not merge their own work");
+        assert!(
+            err.to_string().contains("ineligible to merge")
+                || err.to_string().contains("do not match nomination authors"),
+            "expected an authorship refusal, got: {err}"
+        );
     }
 
     #[test]
@@ -990,6 +1270,53 @@ mod tests {
         );
     }
 
+    /// The section 7 fixture "a candidate differing from the one authorized",
+    /// at this gate rather than at the coordinator's.
+    ///
+    /// This is the forged candidate that gets *past* the shape checks: right
+    /// parents, in the right order, with exactly one correct
+    /// `Agent-Bus-Reviewer` trailer. It still is not the candidate, because
+    /// `reconstruct_candidate` fixes the identity, the timestamp and the
+    /// message, and a hand-run `commit-tree` matches none of them. Only the
+    /// reconstruction comparison can tell the difference, which is why the
+    /// three sibling tests above -- all of which fail earlier, on shape --
+    /// could not catch its removal.
+    #[test]
+    fn rejects_a_hand_pushed_candidate_that_is_not_the_deterministic_reconstruction() {
+        let author = a("zoe");
+        let reviewer = a("aiden");
+        let (dir, _origin, remote, previous_main, feature_commit, real_candidate) =
+            git_fixture(&author, &reviewer);
+        let forged = commit_tree_with(
+            dir.path(),
+            &feature_commit,
+            &[&previous_main, &feature_commit],
+            "agent-bus candidate
+
+Agent-Bus-Reviewer: aiden",
+        );
+        assert_ne!(
+            forged, real_candidate,
+            "fixture must differ from the real candidate"
+        );
+
+        let (state, auth_id) = state_with_authorization(
+            &author,
+            &reviewer,
+            &previous_main,
+            &feature_commit,
+            &forged,
+            &["feature.txt"],
+        );
+        let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+            .expect_err("a candidate that is not the deterministic merge must be refused");
+        assert!(
+            err.to_string()
+                .contains("is not the deterministic clean merge"),
+            "expected the reconstruction refusal, got: {err}"
+        );
+    }
+
     #[test]
     fn rejects_a_hand_pushed_candidate_with_wrong_parents() {
         let author = a("zoe");
@@ -1128,6 +1455,76 @@ mod tests {
         assert!(
             err.to_string().contains("is outside reviewed_scope"),
             "{err}"
+        );
+    }
+
+    /// The other half of the scope gate, and the half nothing tested: a
+    /// candidate that *deletes* a file outside `reviewed_scope`.
+    ///
+    /// Every existing scope test adds a file. Dropping deleted deltas from
+    /// `diff_name_status` therefore left the whole suite green while a
+    /// candidate could remove any file in the tree, and this is the gate that
+    /// is supposed to stop it. It is also the concrete shape of the bypass
+    /// that rename detection used to hide: under `--name-status` with
+    /// detection on, a file renamed out of the tree reported only its
+    /// destination.
+    #[test]
+    fn rejects_a_deleted_path_outside_reviewed_scope() {
+        let author = a("zoe");
+        let reviewer = a("aiden");
+        let dir = init_repo();
+        let path = dir.path();
+        let origin = init_bare_origin();
+        let remote = origin.path().to_string_lossy().to_string();
+
+        // An out-of-scope file that exists on `main` before the candidate.
+        std::fs::write(path.join("elsewhere.txt"), "load-bearing\n").unwrap();
+        git(path, &["add", "."]);
+        git(path, &["commit", "-q", "-m", "add elsewhere.txt"]);
+        push_main(path, &remote);
+        let previous_main = rev_parse(path, "main");
+
+        git(path, &["checkout", "--quiet", "--detach", &previous_main]);
+        // In scope: add feature.txt. Out of scope: delete elsewhere.txt.
+        std::fs::write(path.join("feature.txt"), "feature content\n").unwrap();
+        git(path, &["rm", "-q", "elsewhere.txt"]);
+        git(path, &["add", "."]);
+        git(
+            path,
+            &[
+                "commit",
+                "-q",
+                "-m",
+                &format!("add feature, drop elsewhere\n\nAgent-Bus-Agent: {author}"),
+            ],
+        );
+        let feature_commit = rev_parse(path, "HEAD");
+        git(path, &["checkout", "--quiet", "main"]);
+        let candidate = crate::merge_candidate::reconstruct_candidate(
+            path,
+            &previous_main,
+            &feature_commit,
+            &reviewer,
+        )
+        .unwrap();
+
+        let (state, auth_id) = state_with_authorization(
+            &author,
+            &reviewer,
+            &previous_main,
+            &feature_commit,
+            &candidate,
+            &["feature.txt"],
+        );
+
+        let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id).unwrap_err();
+        assert!(
+            err.to_string().contains("is outside reviewed_scope"),
+            "a deletion outside the reviewed scope must be refused: {err}"
+        );
+        assert!(
+            err.to_string().contains("elsewhere.txt"),
+            "the message must name the deleted path: {err}"
         );
     }
 

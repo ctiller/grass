@@ -112,7 +112,12 @@ pub(crate) fn audit_main_findings(
 
     let mut findings = Vec::new();
     let mut previous = state.config.product_review_from.as_str().to_string();
+    // Every commit this audit will vouch for, so the receipt check below can
+    // ask the *converse* question afterwards.
+    let mut audited: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    audited.insert(previous.clone());
     for commit in commits {
+        audited.insert(commit.clone());
         let parents = crate::gitrepo::parents_of(repo, &commit)?;
         if parents.len() != 2 || parents[0] != previous {
             findings.push(serde_json::json!({
@@ -124,7 +129,27 @@ pub(crate) fn audit_main_findings(
         }
         let reviewed_commit = parents[1].clone();
 
-        let trailers = crate::gitrepo::commit_message_trailers(repo, &commit)?;
+        // A finding, not a `?`. One unreadable commit message anywhere in
+        // post-bootstrap `main` must not abandon the whole audit: this is the
+        // *only* authoritative place a bypass can be caught (sections 9/11/12),
+        // so aborting would hide every later commit rather than reporting one.
+        // The sibling call at `commit_authors_only`'s site below already
+        // handles its error this way; this one did not, which was an
+        // asymmetry rather than a decision. Reachable in practice because
+        // `commit_message` reads the recorded bytes where `git show
+        // --format=%B` transcoded through the commit's `encoding` header, so a
+        // legacy commit declaring a non-UTF-8 encoding now errors here.
+        let trailers = match crate::gitrepo::commit_message_trailers(repo, &commit) {
+            Ok(t) => t,
+            Err(e) => {
+                findings.push(serde_json::json!({
+                    "commit": commit,
+                    "problem": format!("commit message could not be read for trailers: {e}"),
+                }));
+                previous = commit;
+                continue;
+            }
+        };
         let reviewer_trailers: Vec<&(String, String)> = trailers
             .iter()
             .filter(|(k, _)| k == "Agent-Bus-Reviewer")
@@ -246,7 +271,29 @@ pub(crate) fn audit_main_findings(
                 // review, reproduced live: a candidate whose introduced
                 // content touched a file outside `reviewed_scope` audited
                 // clean when `merge-ready` was simply never run).
-                let changed = crate::gitrepo::diff_name_status(repo, &previous, &commit)?;
+                // A finding, not a `?`, for the same reason the trailer
+                // read above is: this out-of-scope check is the sole
+                // authoritative catch for section 12's fixture 6, so aborting
+                // here would report *no* findings at all for the whole
+                // history -- including ones already collected -- and a
+                // candidate could hide behind that.
+                //
+                // Reachable for the same reason too: `diff_name_status` now
+                // rejects a path that is not valid UTF-8, where the subprocess
+                // it replaced returned `core.quotePath`'s ASCII-quoted form
+                // instead. One Latin-1-named file used to be a quoted path and
+                // is now a hard error.
+                let changed = match crate::gitrepo::diff_name_status(repo, &previous, &commit) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        findings.push(serde_json::json!({
+                            "commit": commit,
+                            "problem": format!("changed paths could not be read: {e}"),
+                        }));
+                        previous = commit;
+                        continue;
+                    }
+                };
                 let out_of_scope: Vec<&str> = changed
                     .iter()
                     .filter(|(_, path)| {
@@ -270,7 +317,51 @@ pub(crate) fn audit_main_findings(
         previous = commit;
     }
 
+    findings.extend(receipts_without_a_matching_commit(state, &audited));
     Ok(findings)
+}
+
+/// AGENT_REVIEW.md section 12, fixture 10: "a merge receipt not matching
+/// product Git history".
+///
+/// The walk above asks, for each commit actually on `main`, whether the bus
+/// authorized it. That is only half of fixture 10. Nothing asked the converse
+/// -- whether every *receipt* names a commit that is really there -- and the
+/// asymmetry was backwards: `review.merge_reconciled`, the recovery receipt
+/// published by a third-party coordinator, is verified against live remote
+/// `main` at publication time, while `review.merged`, the primary receipt on
+/// which a reviewer's release from this chain hangs, was checked only for
+/// field equality against its own authorization.
+///
+/// So a reviewer whose push lost a race could publish `review.merged` anyway.
+/// Both gates accept it, and the audit stayed silent because the commit it
+/// names is not on `main` and therefore never walked. The bus would durably
+/// record a merge that never happened.
+fn receipts_without_a_matching_commit(
+    state: &BusState,
+    audited: &std::collections::BTreeSet<String>,
+) -> Vec<Value> {
+    let mut findings = Vec::new();
+    for chain in state.reviews.values() {
+        for receipt in chain.merged.iter().chain(chain.reconciled.iter()) {
+            let Some(env) = state.events.get(receipt) else {
+                continue;
+            };
+            let named = match env.typed_data() {
+                Ok(EventData::ReviewMerged(m)) => m.main_commit.as_str().to_string(),
+                Ok(EventData::ReviewMergeReconciled(m)) => m.main_commit.as_str().to_string(),
+                _ => continue,
+            };
+            if !audited.contains(&named) {
+                findings.push(serde_json::json!({
+                    "commit": named,
+                    "problem": "a merge receipt names a commit that is not on the audited main history",
+                    "receipt": receipt.as_str(),
+                }));
+            }
+        }
+    }
+    findings
 }
 
 #[cfg(test)]
@@ -827,6 +918,58 @@ mod tests {
         );
     }
 
+    /// A commit whose message this crate cannot read must produce a finding,
+    /// not abandon the audit.
+    ///
+    /// This is reachable rather than theoretical: the message is now read
+    /// from the object database, where `git show -s --format=%B` used to
+    /// transcode through the commit's `encoding` header. A legacy commit
+    /// declaring a non-UTF-8 encoding therefore errors where it once
+    /// succeeded -- and `audit_main` is the *only* authoritative place a
+    /// bypass can be caught (sections 9/11/12), so aborting on one commit
+    /// would hide every commit after it.
+    #[test]
+    fn reports_an_unreadable_commit_message_as_a_finding_rather_than_aborting() {
+        let dir = init_repo();
+        let root = git(dir.path(), &["rev-parse", "main"]);
+        let second = author_commit(dir.path(), &root, "x.txt", Some("alice"));
+        let tree = git(dir.path(), &["rev-parse", &format!("{second}^{{tree}}")]);
+
+        // Hand-build the commit object: git's porcelain will not write a
+        // message it cannot encode, and that is exactly the shape under test.
+        let mut body = Vec::new();
+        body.extend_from_slice(format!("tree {tree}\n").as_bytes());
+        body.extend_from_slice(format!("parent {root}\n").as_bytes());
+        body.extend_from_slice(format!("parent {second}\n").as_bytes());
+        body.extend_from_slice(b"author T <t@e> 1700000000 +0000\n");
+        body.extend_from_slice(b"committer T <t@e> 1700000000 +0000\n");
+        body.extend_from_slice(b"encoding ISO-8859-1\n\n");
+        // 0xe9 is `e`-acute in Latin-1 and invalid on its own in UTF-8.
+        body.extend_from_slice(b"sujet accentu\xe9\n\nAgent-Bus-Reviewer: bob\n");
+
+        let raw = dir.path().join("raw-commit");
+        std::fs::write(&raw, &body).unwrap();
+        let candidate = git(
+            dir.path(),
+            &["hash-object", "-t", "commit", "-w", &raw.to_string_lossy()],
+        );
+        std::fs::remove_file(&raw).unwrap();
+
+        let mut state = base_state(&root);
+        let nomination = insert_chain(&mut state);
+        insert_authorization(&mut state, &nomination, 1, &root, &second, &candidate);
+
+        let findings = audit_main_findings(dir.path(), &state, Some(&candidate))
+            .expect("one unreadable message must not abort the audit");
+        let problems = problems(&findings);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("commit message could not be read for trailers")),
+            "{problems:?}"
+        );
+    }
+
     #[test]
     fn flags_missing_receipt() {
         let dir = init_repo();
@@ -968,10 +1111,261 @@ mod tests {
         assert!(findings.is_empty(), "{findings:?}");
     }
 
+    /// AGENT_REVIEW.md sections 9/11: the authorization that clears a merge
+    /// must be published by *that merge's own* reviewer, named in its
+    /// `Agent-Bus-Reviewer` trailer. Deleting the `a_id.agent() != reviewer`
+    /// guard let any reviewer's authorization clear any merge, and no test
+    /// noticed, because every existing fixture used `bob` for both.
+    #[test]
+    fn an_authorization_published_by_a_different_reviewer_does_not_clear_a_merge() {
+        let dir = init_repo();
+        let root = git(dir.path(), &["rev-parse", "main"]);
+        let second = author_commit(dir.path(), &root, "x.txt", Some("alice"));
+        // The merge names `carol` as its reviewer ...
+        let candidate = merge_commit(
+            dir.path(),
+            &root,
+            &second,
+            "merge
+
+Agent-Bus-Reviewer: carol",
+        );
+
+        let mut state = base_state(&root);
+        let nomination = insert_chain(&mut state);
+        // ... but the only authorization on record was published by `bob`,
+        // and otherwise matches this candidate exactly.
+        insert_authorization(&mut state, &nomination, 1, &root, &second, &candidate);
+
+        let findings = audit_main_findings(dir.path(), &state, Some(&candidate)).unwrap();
+        let problems = problems(&findings);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("no review.merge_authorized matches")),
+            "an authorization by another reviewer must not clear this merge: {problems:?}"
+        );
+    }
+
+    /// The chain is matched by the exact author set of the introduced
+    /// commits (sections 3/7). A chain whose nomination names different
+    /// authors is a different piece of work and must not supply the
+    /// authorization for this one.
+    #[test]
+    fn a_chain_whose_authors_differ_does_not_supply_the_authorization() {
+        let dir = init_repo();
+        let root = git(dir.path(), &["rev-parse", "main"]);
+        // Introduced content authored by `dave`; the only chain on record
+        // names `alice`.
+        let second = author_commit(dir.path(), &root, "x.txt", Some("dave"));
+        let candidate = merge_commit(
+            dir.path(),
+            &root,
+            &second,
+            "merge
+
+Agent-Bus-Reviewer: bob",
+        );
+
+        let mut state = base_state(&root);
+        let nomination = insert_chain(&mut state);
+        insert_authorization(&mut state, &nomination, 1, &root, &second, &candidate);
+
+        let findings = audit_main_findings(dir.path(), &state, Some(&candidate)).unwrap();
+        let problems = problems(&findings);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("no review.merge_authorized matches")),
+            "a chain with a different author set must not match: {problems:?}"
+        );
+    }
+
+    /// All three of `candidate`, `previous_main` and `reviewed_commit` must
+    /// agree. Matching on the candidate alone would accept an authorization
+    /// issued against a different base -- the reviewer approved merging that
+    /// work onto *some other* main, which is not what happened here.
+    #[test]
+    fn an_authorization_naming_a_different_previous_main_does_not_match() {
+        let dir = init_repo();
+        let root = git(dir.path(), &["rev-parse", "main"]);
+        let second = author_commit(dir.path(), &root, "x.txt", Some("alice"));
+        let candidate = merge_commit(
+            dir.path(),
+            &root,
+            &second,
+            "merge
+
+Agent-Bus-Reviewer: bob",
+        );
+        let elsewhere = author_commit(dir.path(), &root, "unrelated.txt", Some("alice"));
+        assert_ne!(elsewhere, root);
+
+        let mut state = base_state(&root);
+        let nomination = insert_chain(&mut state);
+        // Right candidate, right reviewed_commit, wrong previous_main.
+        insert_authorization(&mut state, &nomination, 1, &elsewhere, &second, &candidate);
+
+        let findings = audit_main_findings(dir.path(), &state, Some(&candidate)).unwrap();
+        let problems = problems(&findings);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("no review.merge_authorized matches")),
+            "a near-miss authorization must not clear the merge: {problems:?}"
+        );
+    }
+
+    /// The audited history must be a first-parent chain: each merge's *first*
+    /// parent is the commit audited before it. A two-parent merge whose
+    /// parents are the other way round would otherwise pass the arity check
+    /// and then be read with `parents[1]` as the reviewed commit -- naming
+    /// the previous main as the reviewed work.
+    #[test]
+    fn a_merge_whose_first_parent_is_not_the_prior_main_commit_is_flagged() {
+        let dir = init_repo();
+        let root = git(dir.path(), &["rev-parse", "main"]);
+        // The audit starts from `start`; `sidestep` is a sibling of it, so
+        // the merge below rejoins the history *beside* the audited base
+        // rather than on top of it. Simply reversing a merge's parents does
+        // not express this: the walk follows first parents, so `previous`
+        // advances to whatever the first parent was and the check passes.
+        // The violation only exists at the first audited commit, where
+        // `previous` is `product_review_from` itself.
+        let start = author_commit(dir.path(), &root, "start.txt", Some("alice"));
+        let sidestep = author_commit(dir.path(), &root, "side.txt", Some("alice"));
+        let backwards = merge_commit(
+            dir.path(),
+            &root,
+            &sidestep,
+            "merge
+
+Agent-Bus-Reviewer: bob",
+        );
+
+        let state = base_state(&start);
+        let findings = audit_main_findings(dir.path(), &state, Some(&backwards)).unwrap();
+
+        // Asserted against *this* commit, not merely against the message.
+        // An earlier version of this test searched only for the message, and
+        // was vacuous: its fixture's walk also contained a non-merge commit
+        // reporting the identical problem, so it passed with the
+        // first-parent clause deleted. This fixture's walk is the single
+        // commit below, and the assertion names it.
+        let flagged_backwards = findings.iter().any(|f| {
+            f["commit"].as_str() == Some(backwards.as_str())
+                && f["problem"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("not a two-parent merge whose first parent is the prior audited main")
+        });
+        assert!(
+            flagged_backwards,
+            "the reversed-parent merge itself must be flagged: {findings:?}"
+        );
+    }
+
+    /// AGENT_REVIEW.md section 12 fixture 10, the direction that was missing:
+    /// a receipt naming a commit that never reached `main`.
+    ///
+    /// The realistic path is a lost push race -- the reviewer's
+    /// `git push <candidate>:refs/heads/main` is rejected because `main`
+    /// advanced, and they publish `review.merged` regardless. Both the
+    /// coordinator gate and reduction accept it (they compare it against its
+    /// own authorization, not against git), and the walk never sees it
+    /// because the commit is not on `main`.
     /// A receipt naming a *different* `main_commit` than the one actually
     /// under audit must not satisfy this commit's own correlation -- proves
     /// `has_receipt`'s equality check is load-bearing, not merely "some
     /// receipt exists somewhere on the chain".
+    #[test]
+    fn flags_a_merge_receipt_naming_a_commit_that_is_not_on_main() {
+        let dir = init_repo();
+        let root = git(dir.path(), &["rev-parse", "main"]);
+        let second = author_commit(dir.path(), &root, "x.txt", Some("alice"));
+        let candidate = merge_commit(
+            dir.path(),
+            &root,
+            &second,
+            "merge
+
+Agent-Bus-Reviewer: bob",
+        );
+        // A candidate that was built but never landed: `main` stays at root.
+        let never_pushed = merge_commit(
+            dir.path(),
+            &root,
+            &second,
+            "a candidate that lost the push race
+
+Agent-Bus-Reviewer: bob",
+        );
+        assert_ne!(candidate, never_pushed);
+
+        let mut state = base_state(&root);
+        let nomination = insert_chain(&mut state);
+        let auth_id =
+            insert_authorization(&mut state, &nomination, 1, &root, &second, &never_pushed);
+        insert_merged_receipt(
+            &mut state,
+            &nomination,
+            2,
+            &auth_id,
+            &root,
+            &second,
+            &never_pushed,
+        );
+
+        // Audit `main`, which never moved.
+        let findings = audit_main_findings(dir.path(), &state, Some(&root)).unwrap();
+        let problems = problems(&findings);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("names a commit that is not on the audited main history")),
+            "a receipt for a commit that never landed must be flagged: {problems:?}"
+        );
+    }
+
+    /// The companion: an honest receipt for a commit that *is* on `main` must
+    /// not be flagged, or the check above would fire on every healthy bus.
+    #[test]
+    fn does_not_flag_a_merge_receipt_for_a_commit_that_is_on_main() {
+        let dir = init_repo();
+        let root = git(dir.path(), &["rev-parse", "main"]);
+        let second = author_commit(dir.path(), &root, "x.txt", Some("alice"));
+        let candidate = merge_commit(
+            dir.path(),
+            &root,
+            &second,
+            "merge
+
+Agent-Bus-Reviewer: bob",
+        );
+
+        let mut state = base_state(&root);
+        let nomination = insert_chain(&mut state);
+        let auth_id = insert_authorization(&mut state, &nomination, 1, &root, &second, &candidate);
+        insert_merged_receipt(
+            &mut state,
+            &nomination,
+            2,
+            &auth_id,
+            &root,
+            &second,
+            &candidate,
+        );
+
+        let findings = audit_main_findings(dir.path(), &state, Some(&candidate)).unwrap();
+        let problems = problems(&findings);
+        assert!(
+            !problems
+                .iter()
+                .any(|p| p.contains("names a commit that is not on the audited main history")),
+            "an honest receipt must not be flagged: {problems:?}"
+        );
+    }
+
     #[test]
     fn a_receipt_for_a_different_commit_does_not_clear_this_ones_missing_receipt_finding() {
         let dir = init_repo();

@@ -119,6 +119,69 @@ exist in v2 yet:
   reachable today -- see `apply::apply_merge_engine_activated`'s doc
   comment).
 
+## Storage substrate and cost
+
+Every local git operation runs in-process against the object database
+(`gitobjects.rs`), through four traits stated in this crate's own vocabulary:
+
+| trait | answers |
+| ----- | ------- |
+| `ObjectReader` | the bytes recorded at this path in this commit |
+| `ObjectWriter` | write a blob, build a tree, create a commit |
+| `RefStore` | resolve, enumerate, and compare-and-swap a ref |
+| `HistoryReader` | resolve a revision, walk ancestry, diff trees, read commit metadata |
+
+Nothing above those traits knows libgit2 exists, and `FixtureObjectReader`
+substitutes for the real thing in unit tests of the blob-reading paths.
+
+Four things deliberately stay on the `git` subprocess, and each has a reason
+that is not "we ran out of time":
+
+- **`fetch`, `push`, `ls-remote`.** `git2` is built with
+  `default-features = false`, which drops its own HTTPS/SSH transports, so
+  remote operations keep going through the user's credential helpers, SSH
+  agent and `.netrc`. Moving them in-process would mean acquiring OpenSSL and
+  libssh2 as build dependencies and reimplementing credential discovery.
+- **`merge-tree --write-tree`.** Pinned to git's own ORT implementation
+  because AGENT_REVIEW.md section 7 requires every host to produce a
+  byte-identical tree; libgit2's separate merge algorithm would not.
+- **`interpret-trailers --parse`.** The one local operation not reimplemented.
+  It is the input to merge authorization, and git's real rule is not the one
+  its manual describes -- see `gitrepo::commit_message_trailers` for the
+  evidence. The message *read* did move in-process, so this costs one process
+  per commit rather than two.
+- **`git --version`.** A question about the `git` binary itself, for the
+  merge-engine pin.
+
+Every surviving subprocess runs under a deadline with a process-tree kill.
+Killing only the parent leaves the transport child (`ssh`, a credential
+helper) holding the pipe, which is the actual hang. Override the 120-second
+default with `AGENT_BUS_GIT_TIMEOUT_SECS`.
+
+There is no staging worktree and no file lock. An earlier design checked a
+worktree out per read and per write, which cost roughly 4.6s per cycle,
+serialized concurrent agents on git's shared `.git/worktrees` registration
+state, and took the repository index lock. Measured on the real fleet repo
+(432 events across 11 streams, warm):
+
+| command  | worktree substrate | in-process |
+| -------- | ------------------ | ---------- |
+| `status` | 24.7s              | 0.08s      |
+| `tail`   | 14.5s              | 0.13s      |
+| `outbox` | 12.0s              | 0.12s      |
+
+`status`, `tail`, `outbox` and `submit` now spawn no `git` process at all.
+
+Two costs found along the way are worth knowing about, because both are easy
+to reintroduce. Validating scalars (`Agent`, `Timestamp`, `Topic`) must not
+rebuild a regex per call -- reduction validates one `Agent` per event *plus*
+one per member of that event's observed frontier. And `Branch::parse` must
+not shell out: `Branch` deserializes through `parse`, and every review event
+names two branches, so a subprocess there costs one process per branch field
+of every event read. The cross-check against real `git check-ref-format` now
+runs once, in `branch_parse_agrees_with_real_git_check_ref_format`, rather
+than on every read.
+
 ## Design notes / known simplifications
 
 - **Causality**: no global bus-head commit exists in v2. An event's causal

@@ -321,7 +321,6 @@ pub struct AuditMainArgs {
 struct RepoPaths {
     repo: PathBuf,
     common_dir: PathBuf,
-    worktrees: PathBuf,
 }
 
 fn resolve_paths() -> AbResult<RepoPaths> {
@@ -331,12 +330,7 @@ fn resolve_paths() -> AbResult<RepoPaths> {
     })?;
     let repo = crate::gitrepo::repo_root(&cwd)?;
     let common_dir = crate::gitrepo::common_dir(&cwd)?;
-    let worktrees = common_dir.join("agent-bus").join("wt-v2");
-    Ok(RepoPaths {
-        repo,
-        common_dir,
-        worktrees,
-    })
+    Ok(RepoPaths { repo, common_dir })
 }
 
 fn parse_agent(s: &str) -> AbResult<Agent> {
@@ -500,7 +494,6 @@ fn genesis(args: GenesisArgs) -> AbResult<()> {
         args.object_format,
         ObjectId::parse(review_from)?,
         parse_short(&args.host)?,
-        &paths.worktrees,
     )?;
 
     let updates = vec![
@@ -530,11 +523,7 @@ fn register(args: RegisterArgs) -> AbResult<()> {
 
     let registry_tip = crate::registry::read_registry_tip(&paths.repo)?
         .ok_or_else(|| invalid("no registry root exists yet -- run `genesis` first"))?;
-    let epoch = crate::registry::read_epoch(
-        &paths.repo,
-        &registry_tip,
-        &paths.worktrees.join("_register_epoch"),
-    )?;
+    let epoch = crate::registry::read_epoch(&paths.repo, &registry_tip)?;
     if epoch.is_active_member(&new_agent) {
         return Err(invalid(format!(
             "{new_agent} is already an active member of roster epoch {} -- pick a different \
@@ -553,12 +542,7 @@ fn register(args: RegisterArgs) -> AbResult<()> {
             standby: args.standby.map(|s| parse_agent(&s)).transpose()?,
         },
     );
-    let new_epoch = crate::registry::propose_transition(
-        &paths.repo,
-        &epoch,
-        members,
-        &paths.worktrees.join("_register_transition"),
-    )?;
+    let new_epoch = crate::registry::propose_transition(&paths.repo, &epoch, members)?;
 
     let candidate = Candidate::new(
         &new_agent,
@@ -582,7 +566,6 @@ fn register(args: RegisterArgs) -> AbResult<()> {
         &new_agent,
         &host,
         args.custody_epoch,
-        &paths.worktrees,
         &args.remote,
     )?;
     let new_stream_tip = crate::stream::read_stream_tip(&paths.repo, &new_agent)?
@@ -607,7 +590,7 @@ fn register(args: RegisterArgs) -> AbResult<()> {
     // [`freshness_envelope`]'s doc comment: it reflects what is now known
     // locally, exactly like any other cached read taken immediately after
     // a local write.
-    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?;
+    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir)?;
 
     print_json(&with_freshness(
         serde_json::json!({
@@ -661,13 +644,12 @@ fn coordinate(args: CoordinateArgs) -> AbResult<()> {
         &agent,
         &host,
         args.custody_epoch,
-        &paths.worktrees,
         &args.remote,
     )?;
 
     // See `register`'s identical comment: a local-only reduction of what
     // was just published, honestly reported as `cached`.
-    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?;
+    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir)?;
 
     print_json(&with_freshness(
         serde_json::json!({
@@ -691,20 +673,11 @@ fn tail(args: TailArgs) -> AbResult<()> {
     let paths = resolve_paths()?;
     let agent = parse_agent(&args.agent)?;
     let snapshot = if args.sync {
-        crate::sync::synced_snapshot(
-            &paths.repo,
-            &paths.common_dir,
-            &args.remote,
-            &paths.worktrees,
-        )?
+        crate::sync::synced_snapshot(&paths.repo, &paths.common_dir, &args.remote)?
     } else {
-        crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?
+        crate::sync::cached_snapshot(&paths.repo, &paths.common_dir)?
     };
-    let (header, log) = crate::stream::read_stream(
-        &paths.repo,
-        &agent,
-        &paths.worktrees.join(format!("_tail_{agent}")),
-    )?;
+    let (header, log) = crate::stream::read_stream(&paths.repo, &agent)?;
 
     // Scoped to just `--agent`'s own tip (see `freshness_envelope`'s doc
     // comment on `tail`): reporting every other agent's tip here would
@@ -734,14 +707,9 @@ fn tail(args: TailArgs) -> AbResult<()> {
 fn status(args: StatusArgs) -> AbResult<()> {
     let paths = resolve_paths()?;
     let snapshot = if args.sync {
-        crate::sync::synced_snapshot(
-            &paths.repo,
-            &paths.common_dir,
-            &args.remote,
-            &paths.worktrees,
-        )?
+        crate::sync::synced_snapshot(&paths.repo, &paths.common_dir, &args.remote)?
     } else {
-        crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?
+        crate::sync::cached_snapshot(&paths.repo, &paths.common_dir)?
     };
 
     let agents: Vec<serde_json::Value> = snapshot
@@ -777,11 +745,7 @@ fn succeed(args: SucceedArgs) -> AbResult<()> {
 
     let registry_tip = crate::registry::read_registry_tip(&paths.repo)?
         .ok_or_else(|| invalid("no registry root exists yet -- run `genesis` first"))?;
-    let epoch = crate::registry::read_epoch(
-        &paths.repo,
-        &registry_tip,
-        &paths.worktrees.join("_succeed_epoch"),
-    )?;
+    let epoch = crate::registry::read_epoch(&paths.repo, &registry_tip)?;
 
     let new_epoch = crate::registry::propose_custody_succession(
         &paths.repo,
@@ -789,7 +753,6 @@ fn succeed(args: SucceedArgs) -> AbResult<()> {
         &proposer,
         &target,
         new_host.clone(),
-        &paths.worktrees.join("_succeed_transition"),
     )?;
     let new_custody_epoch = new_epoch.active_members[&target].coordinator_custody_epoch;
 
@@ -802,6 +765,30 @@ fn succeed(args: SucceedArgs) -> AbResult<()> {
         )],
     )?;
 
+    // Gate 19 is "a pre-authorized successor resumes preserved outboxes
+    // exactly once **after winning** the registry custody transition", and
+    // winning is decided by the remote, not locally. `propose_custody_
+    // succession` does a *local* compare-and-swap, and `publish` reports a
+    // rejected push in its receipt rather than as an error -- so two hosts
+    // holding the same stale registry could both build the same successor
+    // epoch, one push would win, and the loser would previously go on to
+    // drain and publish `target`'s stream regardless. That is two
+    // coordinators publishing for one custody epoch (gate 7) and a successor
+    // resuming without having won (gate 19), and because the stream push is
+    // an ordinary fast-forward, no force-push is involved to make it look
+    // wrong.
+    //
+    // Refusing here also leaves the loser's local registry ref diverged from
+    // origin, which is the honest state to be in: its next `synced_snapshot`
+    // fails its non-force registry fetch and says so, rather than quietly
+    // reducing a divergent local epoch.
+    if !registry_receipt.rejected.is_empty() || !registry_receipt.not_attempted.is_empty() {
+        return Err(invalid(format!(
+            "the registry custody transition did not reach {}: rejected {:?}, not attempted              {:?}. Another host almost certainly won this succession; re-run after fetching,              and do not resume {target}'s outbox from here -- doing so would publish for a              custody epoch this host does not hold.",
+            args.remote, registry_receipt.rejected, registry_receipt.not_attempted
+        )));
+    }
+
     // Resume whatever was left in `target`'s preserved outbox, now under
     // the new custody -- demonstrating gate 19's "resumes preserved
     // outboxes exactly once" rather than merely asserting it structurally.
@@ -811,13 +798,12 @@ fn succeed(args: SucceedArgs) -> AbResult<()> {
         &target,
         &new_host,
         new_custody_epoch,
-        &paths.worktrees,
         &args.remote,
     )?;
 
     // See `register`'s identical comment: a local-only reduction of what
     // was just published, honestly reported as `cached`.
-    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?;
+    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir)?;
 
     print_json(&with_freshness(
         serde_json::json!({
@@ -893,11 +879,10 @@ fn outbox(args: OutboxArgs) -> AbResult<()> {
     }
 
     let empty_tips = BTreeMap::new();
-    let (tips, roster_epoch) =
-        match crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees) {
-            Ok(snapshot) => (snapshot.stream_tips, Some(snapshot.roster_epoch.id)),
-            Err(_) => (empty_tips, None),
-        };
+    let (tips, roster_epoch) = match crate::sync::cached_snapshot(&paths.repo, &paths.common_dir) {
+        Ok(snapshot) => (snapshot.stream_tips, Some(snapshot.roster_epoch.id)),
+        Err(_) => (empty_tips, None),
+    };
     let last_synced = crate::sync::read_last_synced(&paths.common_dir)?;
     let envelope = freshness_fields(
         &tips,
@@ -933,7 +918,7 @@ fn prepare_merge(args: PrepareMergeArgs) -> AbResult<()> {
     let nomination = EventId::parse(args.nomination)?;
     let reviewed_commit = ObjectId::parse(args.reviewed_commit)?;
 
-    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?;
+    let snapshot = crate::sync::cached_snapshot(&paths.repo, &paths.common_dir)?;
     let envelope = freshness_envelope(&snapshot);
     let state = snapshot.state;
     let chain = state
@@ -953,6 +938,11 @@ fn prepare_merge(args: PrepareMergeArgs) -> AbResult<()> {
             "the reviewer must accept the nomination before preparing a merge",
         ));
     }
+
+    // Before anything is constructed: this host's git must be the engine
+    // version the bus pins, or the candidate it builds is unverifiable
+    // everywhere else (AGENT_REVIEW.md section 7).
+    crate::bootstrap::require_pinned_merge_engine(&state)?;
 
     let previous_main = crate::gitrepo::rev_parse(&paths.repo, "refs/heads/main")?;
     let expected_authors: BTreeSet<Agent> = chain.current_request.authors.iter().cloned().collect();
@@ -1016,12 +1006,7 @@ fn merge_ready(args: MergeReadyArgs) -> AbResult<()> {
     let reviewer = parse_agent(&args.agent)?;
     let authorization = EventId::parse(args.authorization)?;
 
-    let snapshot = crate::sync::synced_snapshot(
-        &paths.repo,
-        &paths.common_dir,
-        &args.remote,
-        &paths.worktrees,
-    )?;
+    let snapshot = crate::sync::synced_snapshot(&paths.repo, &paths.common_dir, &args.remote)?;
     let candidate = crate::merge_ready::check_merge_ready(
         &paths.repo,
         &args.remote,
@@ -1062,14 +1047,9 @@ fn merge_ready(args: MergeReadyArgs) -> AbResult<()> {
 fn audit_main(args: AuditMainArgs) -> AbResult<()> {
     let paths = resolve_paths()?;
     let snapshot = if args.sync {
-        crate::sync::synced_snapshot(
-            &paths.repo,
-            &paths.common_dir,
-            &args.remote,
-            &paths.worktrees,
-        )?
+        crate::sync::synced_snapshot(&paths.repo, &paths.common_dir, &args.remote)?
     } else {
-        crate::sync::cached_snapshot(&paths.repo, &paths.common_dir, &paths.worktrees)?
+        crate::sync::cached_snapshot(&paths.repo, &paths.common_dir)?
     };
     let findings =
         crate::audit_main::audit_main_findings(&paths.repo, &snapshot.state, args.to.as_deref())?;
