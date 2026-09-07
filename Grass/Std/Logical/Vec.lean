@@ -203,6 +203,21 @@ theorem get?_eq_some_get (v : Vec α) (i : Nat) (h : i < v.length) :
     v.get? i = some (v.get i h) :=
   List.getElem?_eq_getElem h
 
+/--
+A total read equals `a` exactly when the checked read yields `some a`.
+
+`simp` because it points the only way that is useful. `Vec.get?_eq_some_get`
+states the same correspondence in the other direction, which rewrites the
+accessor that has laws into the accessor that has none: this module states
+twenty-eight `get?` laws and no `get` law, so a goal driven towards `get` stops.
+Both `v[i]` and `v[i]?` elaborate through `get`, so without this the notation a
+consumer naturally writes cannot reach any of them.
+-/
+@[simp] theorem get_eq_iff_get?_eq {v : Vec α} {i : Nat} {h : i < v.length} {a : α} :
+    v.get i h = a ↔ v.get? i = some a := by
+  rw [get?_eq_some_get v i h]
+  exact ⟨fun e => by rw [e], fun e => (Option.some.inj e).symm ▸ rfl⟩
+
 theorem get?_eq_none (v : Vec α) {i : Nat} (h : v.length ≤ i) : v.get? i = none := by
   simp only [get?, List.getElem?_eq_none_iff]
   exact h
