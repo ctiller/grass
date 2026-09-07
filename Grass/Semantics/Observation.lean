@@ -75,9 +75,8 @@ def comp (outer : ObservationProjection Middle Observation)
 
 end ObservationProjection
 
-/-- A single infinite event stream observed through all of its coherent finite
-restrictions. The witness prevents an arbitrary family of unrelated finite
-lists from masquerading as one infinite observation. -/
+/-- A single infinite event stream observed through all of its finite
+restrictions, with coherence witnessed by `InfiniteObservation.singleStream`. -/
 structure InfiniteObservation
     {Event : Type u} {Observation : Type v}
     (projection : ObservationProjection Event Observation) where
