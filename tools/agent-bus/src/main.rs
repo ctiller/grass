@@ -24,6 +24,8 @@ mod state;
 mod storage;
 mod stream;
 mod sync;
+#[cfg(test)]
+mod testfix;
 
 fn main() {
     use clap::Parser;

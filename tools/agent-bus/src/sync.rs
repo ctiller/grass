@@ -256,22 +256,14 @@ mod tests {
         assert!(status.success(), "git {args:?} failed in {}", dir.display());
     }
 
+    /// In-process via libgit2 -- see `testfix`'s module doc for why fixtures
+    /// stopped spawning `git`.
     fn init_repo() -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path();
-        git(path, &["init", "--quiet", "-b", "main"]);
-        git(path, &["config", "user.email", "test@example.com"]);
-        git(path, &["config", "user.name", "Test"]);
-        std::fs::write(path.join("README.md"), "hello\n").unwrap();
-        git(path, &["add", "README.md"]);
-        git(path, &["commit", "-q", "-m", "initial"]);
-        dir
+        crate::testfix::init_repo()
     }
 
     fn init_bare_origin() -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        git(dir.path(), &["init", "--quiet", "--bare", "-b", "main"]);
-        dir
+        crate::testfix::init_bare_origin()
     }
 
     fn status_candidate(agent: &Agent, note: &str) -> Candidate {

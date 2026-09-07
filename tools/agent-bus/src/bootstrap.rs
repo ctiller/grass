@@ -357,39 +357,10 @@ mod tests {
         );
     }
 
+    /// In-process via libgit2 -- see `testfix`'s module doc for why fixtures
+    /// stopped spawning `git`.
     fn init_repo() -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path();
-        std::process::Command::new("git")
-            .args(["init", "--quiet", "-b", "main"])
-            .arg(path)
-            .status()
-            .unwrap();
-        for args in [
-            vec!["config", "user.email", "test@example.com"],
-            vec!["config", "user.name", "Test"],
-        ] {
-            std::process::Command::new("git")
-                .arg("-C")
-                .arg(path)
-                .args(args)
-                .status()
-                .unwrap();
-        }
-        std::fs::write(path.join("README.md"), "hello\n").unwrap();
-        std::process::Command::new("git")
-            .arg("-C")
-            .arg(path)
-            .args(["add", "README.md"])
-            .status()
-            .unwrap();
-        std::process::Command::new("git")
-            .arg("-C")
-            .arg(path)
-            .args(["commit", "-q", "-m", "initial"])
-            .status()
-            .unwrap();
-        dir
+        crate::testfix::init_repo()
     }
 
     #[test]
