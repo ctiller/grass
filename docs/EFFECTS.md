@@ -1051,6 +1051,9 @@ The first implementation is incomplete until checked fixtures demonstrate:
    A syntactic effect decision at a state unreachable from any initial request
    cannot construct `SequentialWaitingOccurrence`; removing its reachability
    field makes the negative fixture compile and is therefore rejected.
+   A custom model whose root history already contains an observation is rejected
+   by `rootObservations`; issue transitions are silent, and only certified proper
+   advances may expose pending observations.
 5. A project-local effect family is added from another module without editing a
    core sum type.
    Three independently authored extension-authority registries compose under
@@ -1075,6 +1078,10 @@ The first implementation is incomplete until checked fixtures demonstrate:
    Replacing either input of a compatible family union by an
    `AuthorityEquiv` family produces an authority-equivalent union; changing an
    active owner while retaining its stable key fails that congruence theorem.
+   The same unused-conflicting-owner example succeeds through
+   `ProcessProviderCertificate.build` for a selected two-protocol plan whose
+   families are empty; making either conflicting owner active rejects aggregate
+   compatibility.
 6. Row membership embeds dependent results exactly; a forged name-only embedding
    is unconstructible.
 7. Duplicate family keys are rejected, and the lowering selection cannot carry
