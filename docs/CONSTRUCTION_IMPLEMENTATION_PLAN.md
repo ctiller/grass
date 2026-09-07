@@ -329,6 +329,12 @@ opaque tokens come from a monotone fresh supply and remain distinct even when
 their diagnostic hints match. An injective `LabelAlphaModel` resolves local
 tokens into stable manifest `BlockId`s while preserving literal stable labels;
 sequential mints are proved distinct both before and after normalization.
+`Grass.Construct.Source.Alpha` carries literal or local labels at the authored
+entry, block declarations, and direct edges, resolves every position through
+one alpha model, and checks structural closure of the resulting ordinary AST.
+Normalization theorems preserve exact instruction bodies and review annotations;
+failed closure reports the normalized entry, block identities, and unresolved
+targets without manufacturing a partially verified program.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
