@@ -46,4 +46,10 @@ example : (replayFromStore? (environment 2) collidingStore).isSome = true := by
 example : replayFromStore? (environment 3) collidingStore = none := by
   decide
 
+example :
+    (replayFromStore? (environment 2) collidingStore).isSome = true ↔
+      ∃ candidate ∈ collidingStore.candidatesFor (environment 2),
+        ReplayEligible (environment 2) candidate.record :=
+  replayFromStore?_isSome_iff ..
+
 end Grass.Tests.Build.Cache.Store
