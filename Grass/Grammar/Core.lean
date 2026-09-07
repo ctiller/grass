@@ -199,6 +199,19 @@ theorem appendSuffix {α : Type} {format : Format α}
   | iso derivation derivationSuffix =>
       exact Derives.iso derivationSuffix
 
+/-- Concatenate a complete left encoding with a right encoding and derive their
+sequence without exposing either writer implementation. The empty residual on
+the left is essential: it is replaced by the entire right input using
+`appendSuffix`, after which the ordinary `Derives.seq` constructor applies. -/
+theorem seqAppend {α β : Type} {first : Format α} {next : α → Format β}
+    {leftInput rightInput rest : Std.Logical.ByteArray} {leftValue : α}
+    {rightValue : β}
+    (left : Derives first leftInput leftValue Vec.empty)
+    (right : Derives (next leftValue) rightInput rightValue rest) :
+    Derives (.seq first next) (leftInput ++ rightInput)
+      (leftValue, rightValue) rest := by
+  exact Derives.seq (by simpa using left.appendSuffix rightInput) right
+
 end Derives
 
 end Grass.Grammar
