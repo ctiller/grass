@@ -68,7 +68,13 @@ inductive Completion {Event : Type u} (system : RelationalSystem Event)
   | infinite (execution : InfiniteContinuation system state graph priorEvents) :
       Completion system state graph priorEvents
 
-/-- A finite execution proof retaining one monotonically extended graph. -/
+/--
+A finite execution proof retaining one monotonically extended graph.
+
+This remains an inductive public API so existing constructor-based `cases` and
+`induction` proofs keep working. The derived `initialValid` and `steps` views
+below centralize proofs shared with the suffix relation.
+-/
 inductive Runs {Event : Type u} (system : RelationalSystem Event) : system.State ->
     system.Graph -> system.State -> system.Graph -> List Event -> Prop where
   | initial {state graph} (valid : system.Initial state graph) :
@@ -77,6 +83,37 @@ inductive Runs {Event : Type u} (system : RelationalSystem Event) : system.State
       (prior : Runs system initialState initialGraph state graph events)
       (transition : system.Step graph state choice event nextState nextGraph) :
       Runs system initialState initialGraph nextState nextGraph (events ++ [event])
+
+/-- Recover the initial-validity witness retained by a finite execution. -/
+theorem Runs.initialValid {Event : Type u} {system : RelationalSystem Event}
+    {initialState state : system.State} {initialGraph graph : system.Graph}
+    {events : List Event}
+    (execution : system.Runs initialState initialGraph state graph events) :
+    system.Initial initialState initialGraph := by
+  induction execution with
+  | initial valid => exact valid
+  | step _ _ inductionHypothesis => exact inductionHypothesis
+
+/-- Forget initial validity and expose the coherent suffix of a finite execution. -/
+theorem Runs.steps {Event : Type u} {system : RelationalSystem Event}
+    {initialState state : system.State} {initialGraph graph : system.Graph}
+    {events : List Event}
+    (execution : system.Runs initialState initialGraph state graph events) :
+    system.Steps initialState initialGraph events state graph := by
+  induction execution with
+  | initial _ => exact .refl
+  | step _ transition inductionHypothesis => exact .step inductionHypothesis transition
+
+/-- Rebuild a finite execution from initial validity and its coherent suffix. -/
+theorem Runs.ofInitialSteps {Event : Type u} {system : RelationalSystem Event}
+    {initialState state : system.State} {initialGraph graph : system.Graph}
+    {events : List Event}
+    (valid : system.Initial initialState initialGraph)
+    (steps : system.Steps initialState initialGraph events state graph) :
+    system.Runs initialState initialGraph state graph events := by
+  induction steps with
+  | refl => exact .initial valid
+  | step _ transition inductionHypothesis => exact .step inductionHypothesis transition
 
 /-- A finite suffix monotonically extends its starting graph. -/
 theorem Steps.graphExtends
@@ -96,11 +133,8 @@ theorem Runs.graphExtends
     {initialState state : system.State} {initialGraph graph : system.Graph}
     {events : List Event}
     (execution : system.Runs initialState initialGraph state graph events) :
-    system.Extends initialGraph graph := by
-  induction execution with
-  | initial valid => exact system.extendsRefl _
-  | step prior transition inductionHypothesis =>
-      exact system.extendsTrans inductionHypothesis (system.stepExtends transition)
+    system.Extends initialGraph graph :=
+  execution.steps.graphExtends
 
 /-- A packaged finite prefix suitable for runners and prefix-safety theorems.
 

@@ -135,8 +135,8 @@ Cancellation coverage is proved per shard or lexical process scope:
 ```lean
 structure ScopedCancellationCertificate
     (scope : ProcessScopeSummary) where
-  policy : CancellationPolicy scope.publicCancellationPoints
-  callsExact : policy.calls = scope.blockingCalls
+  policy : CancellationPolicy
+  exact : policy.Covers scope
   localSafe : EveryCancellationRouteSafe scope policy
 
 def ScopedCancellationCertificate.compose
@@ -146,9 +146,12 @@ def ScopedCancellationCertificate.compose
     ScopedCancellationCertificate (a.compose b wiring)
 ```
 
-`callsExact` compares only the calls discovered in that scope. An added
-blocking call rebuilds its local certificate and the bounded aggregate path.
-It does not change a million-entry global key-set equality. Cross-boundary
+`Covers` compares only the points and calls discovered in that scope, and the
+field is `blockingCalls` on both sides — an earlier draft of this document
+spelled it `calls`, which made this law refer to a field
+[PROCESS.md](PROCESS.md) did not declare. An added blocking call rebuilds its
+local certificate and the bounded aggregate path. It does not change a
+million-entry global key-set equality. Cross-boundary
 cancellation is an explicit exported endpoint; internal cancellation points
 remain private.
 
