@@ -1033,7 +1033,10 @@ The first implementation is incomplete until checked fixtures demonstrate:
    an anonymous proposition. The same pending-only program cannot satisfy a
    terminating specification's `EffectProgramMeetsProgress`.
    Two individually valid prefixes from sibling history branches cannot form an
-   `EffectPrefixExtends` chain.
+   `EffectPrefixExtends` chain. A two-history model with universal `Extends`
+   and unequal observation prefixes is rejected by
+   `PendingInteractionModel.observations_congruent`; it cannot masquerade as an
+   atomic model by placing the observable change between equivalent histories.
 5. A project-local effect family is added from another module without editing a
    core sum type.
    Three independently authored extension-authority registries compose under
@@ -1044,6 +1047,11 @@ The first implementation is incomplete until checked fixtures demonstrate:
    or replaces structural scope transport with an unchecked dependent cast
    fails. Reindexing `introduce scope slot descriptor` commutes with structural
    slot transport, so a scope cannot mint a different origin after embedding.
+   An independently certified extension vocabulary and driver boundary survive
+   two-way and three-way normalization through the standard envelope/sidecar
+   reindex constructors with the identical `ProviderDemandView` and
+   `origins_exact` theorem; a `Requires` predicate cannot inspect the old
+   registry representation.
 6. Row membership embeds dependent results exactly; a forged name-only embedding
    is unconstructible.
 7. Duplicate family keys are rejected, and the lowering selection cannot carry

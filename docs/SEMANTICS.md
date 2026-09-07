@@ -595,6 +595,19 @@ structure SomeProviderDemand where
   authority : RequirementAuthority
   demand : ProviderDemand authority
 
+inductive RequirementAuthorityId
+  | builtin (owner : BuiltinRequirementAuthority)
+  | extension (key : StableId)
+
+structure ProviderDemandView where
+  authority : RequirementAuthorityId
+  originId : RequirementOriginId
+  descriptor : ProviderDemandDescriptor
+
+def ProviderDemand.view : ProviderDemand authority -> ProviderDemandView
+def SomeProviderDemand.view : SomeProviderDemand -> ProviderDemandView
+theorem ProviderDemand.reindex_view ...
+
 opaque ProviderDemandFamily : Type
 
 def ProviderDemandFamily.authorityRegistry :
@@ -698,6 +711,15 @@ constructors, not competing unindexed tags. `ProviderRequirementKey`,
 `ProviderKey`, and the theorem-demand `RequirementKey` are distinct nominal
 wrappers even when all contain a Core `ScopeId`. Equality in one domain cannot
 be used as equality in another.
+
+`ProviderDemandView` is the only representation accepted by semantic
+requirement predicates. It contains the built-in owner or extension stable key,
+origin identity, and exact descriptor, but not an extension registry value,
+entry representation, or membership proof. `ProviderDemand.reindex_view`
+therefore makes registry reindexing provably invisible to semantic
+requirements while the dependent demand remains available for construction and
+lookup. This prevents a well-typed requirement predicate from changing truth
+merely because composition embeds its extension into a larger registry.
 
 Origins are local dependent construction data, not entries in a global static
 registry: an authority-indexed finite scope can generate descriptors containing
