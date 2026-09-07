@@ -212,6 +212,27 @@ impl Auditor {
     }
 }
 
+fn newest_olean_mtime(dir: &Path) -> Option<std::time::SystemTime> {
+    let mut newest = None;
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(t) = newest_olean_mtime(&path) {
+                    newest = Some(newest.map_or(t, |n: std::time::SystemTime| n.max(t)));
+                }
+            } else if path.extension().and_then(|e| e.to_str()) == Some("olean") {
+                if let Ok(meta) = entry.metadata() {
+                    if let Ok(t) = meta.modified() {
+                        newest = Some(newest.map_or(t, |n: std::time::SystemTime| n.max(t)));
+                    }
+                }
+            }
+        }
+    }
+    newest
+}
+
 fn load_declarations() -> HashSet<String> {
     let cache_path = PathBuf::from(".lake/build/declnames.txt");
     let exe_name = if cfg!(windows) { "declnames.exe" } else { "declnames" };
@@ -219,8 +240,11 @@ fn load_declarations() -> HashSet<String> {
 
     let cache_valid = if cache_path.is_file() && exe_path.is_file() {
         if let (Ok(c_meta), Ok(e_meta)) = (cache_path.metadata(), exe_path.metadata()) {
-            c_meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-                >= e_meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+            let c_time = c_meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            let e_time = e_meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            let lean_lib = PathBuf::from(".lake/build/lib/lean/Grass");
+            let olean_time = newest_olean_mtime(&lean_lib).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            c_time >= e_time && c_time >= olean_time
         } else {
             false
         }
