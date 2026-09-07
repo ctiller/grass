@@ -126,6 +126,23 @@ def empty : Vec α := ⟨[]⟩
 
 instance : EmptyCollection (Vec α) := ⟨empty⟩
 
+/--
+`∅` and `Vec.empty` are the same sequence.
+
+Stated as `simp` because the `EmptyCollection` instance above makes `∅`
+*typecheck* without making it *rewrite*: `simp` does not see through the instance
+projection, so a goal written with the notation loses `Vec.empty_append` and
+`Vec.append_empty`, which are the two laws a consumer reaches for immediately
+after writing it.
+
+Found by porting `Grass/Process/ByteFlow/Ingress.lean` from `List Byte` to
+`Vec Byte`, which is `c-process`'s stated intent for that module. Everything else
+that port needs already existed; this was the whole gap, and without it two
+conservation obligations there fail with `unsolved goals` after every other
+substitution is made.
+-/
+@[simp] theorem emptyCollection_eq_empty : (∅ : Vec α) = empty := rfl
+
 instance : Inhabited (Vec α) := ⟨empty⟩
 
 /-- The one-element sequence. -/
