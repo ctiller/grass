@@ -145,12 +145,16 @@ def declaration_names() -> set[str]:
     could not obtain the name list is worse than no audit, which is the mistake
     this function was added to correct.
     """
+    exe_name = "declnames.exe" if sys.platform == "win32" else "declnames"
+    exe = Path(".lake/build/bin") / exe_name
+    if not exe.is_file():
+        subprocess.run(["lake", "build", "declnames"], check=True)
     proc = subprocess.run(
-        ["lake", "env", "lean", "Tools/DeclNames.lean"],
+        [str(exe)],
         capture_output=True, text=True, encoding="utf-8", errors="replace")
     if proc.returncode != 0:
         sys.exit(
-            "could not obtain the declaration list from Tools/DeclNames.lean:\n"
+            "could not obtain the declaration list from declnames:\n"
             + (proc.stdout + proc.stderr).strip()[:2000])
     known: set[str] = set()
     for line in proc.stdout.splitlines():
@@ -233,6 +237,12 @@ def check(path: Path, known: set[str]) -> list[str]:
 
 
 def main() -> int:
+    exe_name = "docstring-audit.exe" if sys.platform == "win32" else "docstring-audit"
+    rust_bin = Path(__file__).resolve().parent / "docstring-audit" / "target" / "release" / exe_name
+    if rust_bin.is_file():
+        res = subprocess.run([str(rust_bin)])
+        return res.returncode
+
     # `Tests/` is excluded: fixture comments describe values ("an identity that
     # is never live"), not mechanisms, and the fixtures are themselves the
     # evidence a claim would point at.

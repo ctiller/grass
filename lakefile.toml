@@ -32,3 +32,9 @@ globs = ["Grass.+"]
 [[lean_lib]]
 name = "Tests"
 globs = ["Tests.+"]
+
+[[lean_exe]]
+name = "declnames"
+root = "Tools.DeclNames"
+
+
