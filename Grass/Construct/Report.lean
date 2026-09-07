@@ -3,10 +3,10 @@ import Grass.Construct.Source.Close
 /-!
 # Construction residual reports
 
-Residuals use stable, comparable keys and the normative phase order.  A report
-is accepted only when keys are unique, phases are nondecreasing, and the exact
-ordered key list equals the reviewed allowlist; proposition text is carried for
-proof work but is never used as a comparison surrogate.
+Residuals use stable, comparable keys and the normative phase order.
+`ResidualReport.wellFormed` checks unique keys, nondecreasing phases, and exact
+ordered equality with the reviewed allowlist; proposition text is carried for
+proof work but is not part of a `ResidualKey`.
 -/
 
 namespace Grass.Construct
