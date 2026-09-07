@@ -35,6 +35,7 @@ inductive ParseResult (α : Type u) where
   | done (value : α) (rest : Std.Logical.ByteArray)
   | needMore (minimumAdditional : Option Nat)
   | invalid (error : ParseError)
+deriving DecidableEq, Repr
 
 /-- A proof-relevant, dependency-free isomorphism used by `Format.iso`. -/
 structure Isomorphism (α β : Type) where
