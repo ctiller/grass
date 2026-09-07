@@ -61,7 +61,7 @@ structure AllocationRecord where
 
   `docs/MEMORY_MODEL.md` §3 lists "exclusive read/write ownership" among the
   canonical authority states, and until this field existed the layer could not say
-  whose. `MayLend`'s unlent disjunct -- the one a first loan needs -- was therefore
+  whose. `MayLend`'s lender disjunct -- the one a first loan needs -- was therefore
   the same rule a stranger's first loan needed, so a context could lend out bytes it
   had no relation to; `MayLend`'s own docstring named that as what it could not stop.
   Ownership is the missing half.
@@ -575,6 +575,23 @@ which was therefore mutually exclusive with any other grant on those bytes.
 the query here. `loansOver` moved off `Disjoint` and this did not, which left one
 module with two answers to what "overlapping" means.
 
+That sentence says why the directions differ and not what the second one adds, and
+review found nothing discriminating it. `ByteRange.meets_comm_of_nonempty` is the
+boundary stated: on two non-empty ranges the directions agree, so the reverse one is
+reached only where the *installed* grant covers no bytes and the new grant covers
+where it sits. `issue?_eq_none_of_empty` refuses an empty grant at the door, so no
+state reached through `issue?` has one installed — which is the shape of `MayLend`'s
+epoch conjunct, and it is kept for the same reason: this is a safety rule, refusing is
+the narrowing direction, and §7.3 is not a place to widen on a reachability argument.
+Unlike that conjunct it is not unreachable at this layer, because `LoanConflicts` takes
+both grants as arguments rather than reading them out of the map, and
+`an_empty_installed_grant_still_conflicts` decides the case the reverse direction
+exists for.
+
+That fixture is what the two docstrings were standing in for. This paragraph cited the
+asymmetry, `issue?_eq_none_of_empty` cited this paragraph, and neither named a state
+either direction catches.
+
 Two read-only grants over one range do not conflict, which is `sharedImmutable`
 being a real state rather than a name. Nor do two **atomic-only** grants, which is
 `atomicShared` being one: §7.3's issuance sentence is "unique loans prevent
@@ -647,11 +664,7 @@ free or re-epoch the allocation because a grant was outstanding. Permanent seizu
 one accepted call. `AuthorityGrant.kind`'s own docstring calls a loan "a borrow of
 authority over bytes the lender retains".
 
-Three ways to have it, and the third is the one that took thinking about.
-
-Nothing is held over the bytes, *the lender owns the allocation, and the storage
-carries the rights being lent* — the unlent case, which is how a first grant is ever
-issued.
+Two ways to have it, and the second is the one that took thinking about.
 
 **The sublet disjunct keeps an epoch filter that `grantsOver` deliberately dropped**,
 and the two are not in conflict. `grantsOver` answers "which grants freeze these
@@ -663,7 +676,7 @@ sublending from it would hand on authority that does not exist. Refusing here is
 narrowing direction and refusing there was the widening one, which is why the same
 filter is right in one place and wrong in the other.
 
-Review found the conjunct discriminated by nothing and asked which way it should go;
+Review found that conjunct discriminated by nothing and asked which way it should go;
 this paragraph is the answer, and the honest limit is that no reachable state exercises
 it. `allocate?` refuses a record change while authority is outstanding over the bytes,
 alias-aware in both directions, and `tearDown?` goes through `allocate?`, so an
@@ -673,66 +686,74 @@ the doors cannot currently build. That is the conservative direction, and
 `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records it rather than leaving it to be
 rediscovered.
 
-**The third conjunct is what made `issue?_eq_none_of_nothing_to_lend`'s sentence true
-of this disjunct.** The second disjunct bounds a sublet by `entry.2.rights.Grants
-grant.rights`; the first had no rights term at all, so that sentence was false of the
-path which issues every first grant. Review had an owner lend `readWrite` over a read-only
-page: `issue?` accepted it, and `authorityOf` then reported the owner `frozen` over its
-own data and refused it even a read, from a write authority the model had just
-certified nobody has. `Permission.Grants` is the same relation `denialOf` uses for a
-descriptor's declared permission, asked here at the authority layer. Or the lender holds a grant covering the
-range with rights that supply what is being lent, which is `Permission.Grants` at the
-authority layer. Or every grant outstanding over the bytes was lent *by this lender* —
-whoever put them out may put more out — *if it owns the storage and the storage carries
-the rights*.
+The sublet disjunct bounds what is passed on by `entry.2.rights.GrantsAsGrant
+grant.rights`: a lender hands on no more than it holds. `Permission.Grants` is the same
+relation `denialOf` uses for a descriptor's declared permission, asked here at the
+authority layer, and `GrantsAsGrant` adds the `atomicOnly` comparison, because both
+sides are grants here and an atomic-only holder must not sublet an ordinary write.
 
-There was a fourth conjunct here requiring that something *be* outstanding, added
-because `List.all` on the empty list is `true` and without it this disjunct readmitted
-every stranger the first one had just refused. The ownership conjunct that arrived a
-round later refuses those strangers itself, and review then showed the non-emptiness
-conjunct had become logically inert: with nothing outstanding the `.all` is vacuous and
-the first disjunct subsumes the third, so the two disjunctions are pointwise equal.
-Proving that, rather than observing it, is what this branch requires of a redundancy
-claim. Deleted, so the docstring does not present a dead conjunct as the repair for a
-live attack.
+**The lender disjunct is the owner's, and the unlent case is its empty instance.** Every
+grant outstanding over the bytes was lent *by this lender* — whoever put them out may
+put more out — *if* the lender owns the storage and the storage carries the rights being
+lent. With nothing outstanding the `List.all` is vacuous, and that is exactly how a
+first grant is ever issued: "nothing is held over these bytes" is "everything held over
+these bytes is mine" with an empty list. `mayLend_of_unheld_of_owned` states that
+instance and proves it through this disjunct.
 
-**The ownership and rights conjuncts arrived a round after the first disjunct got
-its.** This disjunct was written for an owner that has lent a fragment out and holds no
-grant of its own, and never said so, so it admitted two things review stepped. An owner
-of a *read-only* page lent it read-only and then, because every grant outstanding was
-its own, lent itself `readWrite` — which the allocation-permission conjunct now refuses,
-exactly as it does on the first disjunct. And a read-only *borrower* sublet to itself,
-returned the original as holder, and lent itself write authority, all three deltas in
-one access's declared effect: having become the only lender of record it satisfied this
-disjunct outright, which the ownership conjunct now refuses.
+Without it an owner who lends once could never lend again, because it holds nothing
+itself: ownership is recorded on the allocation, not as a grant, so a lender's claim on
+unlent bytes leaves no trace in the map. Two read loans from one owner is
+`sharedImmutable`'s whole point, and the sublet disjunct alone refuses the second of
+them.
 
 The rights bound is the *storage's* and not the outstanding grants', deliberately. An
 owner that lent read still holds write and may lend it; bounding by what is already out
 would refuse that, and §3 says an owner retains what it did not lend.
 
-Without the third, an owner who lends once can never lend again, because it holds
-nothing itself: ownership is recorded on the allocation, not as a grant, so a lender's
-claim on unlent bytes leaves no trace in the map. Two read loans from one owner is
-`sharedImmutable`'s whole point, and the first two disjuncts alone refuse the second
-of them.
+**The rights conjunct is what made `issue?_eq_none_of_nothing_to_lend`'s sentence true
+of this disjunct.** Ownership is not itself the authority: review had an owner lend
+`readWrite` over a read-only page, `issue?` accepted it, and `authorityOf` then reported
+the owner `frozen` over its own data and refused it even a read, from a write authority
+the model had just certified nobody has.
 
 **The ownership conjunct is what this could not say before `AllocationRecord.owners`
-existed.** Seizing bytes nothing is held over used to be the first disjunct exactly as
-a legitimate owner's first loan was, so the model could not tell the two apart, and
-this docstring said so for two milestones. It can now: a stranger's first loan fails
-the conjunct, an owner's passes it, and `Grass/Op/Step.lean`'s `refusalOf` no longer
-carries the residue alone.
+existed.** Seizing bytes nothing is held over satisfied this disjunct exactly as a
+legitimate owner's first loan did, so the model could not tell the two apart, and this
+docstring said so for two milestones. It can now: a stranger's first loan fails the
+conjunct, an owner's passes it, and `Grass/Op/Step.lean`'s `refusalOf` no longer
+carries the residue alone. The disjunct was also written for an owner that has lent a
+fragment out and holds no grant of its own, and never said so, so it admitted two things
+review stepped. An owner of a *read-only* page lent it read-only and then, because every
+grant outstanding was its own, lent itself `readWrite` — which the allocation-permission
+conjunct refuses. And a read-only *borrower* sublet to itself, returned the original as
+holder, and lent itself write authority, all three deltas in one access's declared
+effect: having become the only lender of record it satisfied this disjunct outright,
+which the ownership conjunct refuses.
+
+**There were two further terms here, and deleting the second of them repaired the wrong
+one.** A fourth conjunct required that something *be* outstanding, because `List.all` on
+the empty list is `true` and without it this disjunct readmitted every stranger the
+ownership conjunct had not yet arrived to refuse. Once that conjunct did arrive the
+non-emptiness one was inert, and it went — on the argument that "the first disjunct
+subsumes the third, so the two disjunctions are pointwise equal". The equality holds;
+the subsumption runs the other way. `¬ AnyGrantOver` unfolds to `grantsOver = []`, which
+makes this disjunct's `.all` vacuous, so it was the *first* disjunct that implied this
+one, and the first disjunct that was dead. Review proved that the following round, on a
+branch that requires a redundancy claim to be proved rather than observed — and the
+proof offered was of the converse of what the deletion needed.
+
+The first disjunct was `¬ AnyGrantOver ∧ OwnedBy ∧ storage-rights`, and all three of its
+terms survive in this one. **A redundancy between two clauses says one of them may go
+and never which one**; choosing wrong leaves the definition the same size, still
+carrying something nothing can reach, under a docstring now arguing it is load-bearing.
+That is the shape of the very conjunct the deletion was meant to remove, one level up.
 
 Stealing from a lender was closed earlier and separately: once a context has lent
 bytes out, no other context can issue a grant over them, which is what ended review's
 permanent-seizure state.
 -/
 def MayLend (state : MemoryState) (grant : AuthorityGrant) : Prop :=
-  (¬ state.AnyGrantOver grant.provenance grant.range ∧
-      state.OwnedBy grant.lender grant.provenance ∧
-      (state.allocations.lookup grant.provenance.root).any
-        (fun record => decide (record.permission.GrantsAsGrant grant.rights)) = true) ∨
-    state.grantEntries.any (fun entry =>
+  state.grantEntries.any (fun entry =>
       entry.2.holder = grant.lender &&
         decide (state.SharesBytes entry.2.provenance.root grant.provenance.root) &&
         decide (state.CurrentEpoch entry.2.provenance) &&
@@ -745,7 +766,7 @@ def MayLend (state : MemoryState) (grant : AuthorityGrant) : Prop :=
         (fun entry => entry.2.lender = grant.lender) = true)
 
 instance (state : MemoryState) (grant : AuthorityGrant) : Decidable (state.MayLend grant) :=
-  inferInstanceAs (Decidable ((¬ _ ∧ _ ∧ _ = _) ∨ _ = _ ∨ (_ ∧ _ = _ ∧ _ = _)))
+  inferInstanceAs (Decidable (_ = _ ∨ (_ ∧ _ = _ ∧ _ = _)))
 
 /--
 Issue a grant, or refuse.
@@ -867,8 +888,14 @@ theorem mayLend_of_unheld_of_owned {state : MemoryState} {grant : AuthorityGrant
     (howns : state.OwnedBy grant.lender grant.provenance)
     (hrights : (state.allocations.lookup grant.provenance.root).any
       (fun record => decide (record.permission.GrantsAsGrant grant.rights)) = true) :
-    state.MayLend grant :=
-  Or.inl ⟨h, howns, hrights⟩
+    state.MayLend grant := by
+  refine Or.inr ⟨howns, hrights, ?_⟩
+  cases hl : state.grantsOver grant.provenance grant.range with
+  | nil => rfl
+  | cons x xs =>
+    exact absurd
+      (show state.grantsOver grant.provenance grant.range ≠ [] by
+        rw [hl]; exact List.cons_ne_nil x xs) h
 
 /-- **A stranger may not lend bytes nothing is held on.** The falsifying half of the
 theorem above, and the one that would have failed before `AllocationRecord.owners`
@@ -878,11 +905,11 @@ theorem not_mayLend_of_unheld_of_unowned {state : MemoryState} {grant : Authorit
     (h : ¬ state.AnyGrantOver grant.provenance grant.range)
     (howns : ¬ state.OwnedBy grant.lender grant.provenance)
     (hne : ¬ grant.range.IsEmpty) : ¬ state.MayLend grant := by
-  rintro (⟨_, howned, _⟩ | hheld | ⟨howned, _, _⟩)
-  · exact howns howned
+  rintro (hheld | ⟨howned, _, _⟩)
   · -- The lender holding a covering grant *is* a grant over the bytes, so the
-    -- second disjunct implies the first is false. `Contains` needs the range to be
-    -- non-empty before it implies `Meets`; `issue?` refuses empty ranges anyway.
+    -- sublet disjunct contradicts the hypothesis directly. `Contains` needs the
+    -- range to be non-empty before it implies `Meets`; `issue?` refuses empty
+    -- ranges anyway.
     refine h ?_
     obtain ⟨entry, hmem, hcond⟩ := List.any_eq_true.1 hheld
     simp only [Bool.and_eq_true, decide_eq_true_eq] at hcond
@@ -893,9 +920,16 @@ theorem not_mayLend_of_unheld_of_unowned {state : MemoryState} {grant : Authorit
   · exact howns howned
 
 /-- **A grant over no bytes is refused.** It would conflict at issue with a live one
-— `LoanConflicts` tries `Meets` in both directions — and freeze nobody once
-installed, because an empty extent meets no position. Decoration with a refusal
-attached. -/
+— `LoanConflicts`'s *forward* direction asks whether an installed grant covers the new
+grant's start, which an empty range inside a live one satisfies — and freeze nobody
+once installed, because an empty extent meets no position. Decoration with a refusal
+attached.
+
+This named "both directions", which is the wrong half of the rule: the reverse
+direction is about an *installed* grant of no bytes, and this theorem is what makes
+that state unreachable through the door. The two docstrings cited each other for why
+the reverse direction exists, and `ByteRange.meets_comm_of_nonempty` is the fact
+neither of them stated. -/
 theorem issue?_eq_none_of_empty (state : MemoryState) (id : GrantId)
     (grant : AuthorityGrant) (h : grant.range.IsEmpty) :
     state.issue? id grant = Option.none := by
@@ -1024,9 +1058,10 @@ the boundary and the high part runs from it. An *n*-way split is *n* − 1 of th
 
 **Neither door re-runs `issue?`.** A split is not a new claim of authority, it is a
 re-description of one the map already accepted, and re-running the door would refuse
-correct splits: `MayLend`'s unheld disjunct is false once the source is outstanding,
-and its lender-lends-again disjunct fails when the source coexists with another
-lender's grant over the same bytes. What justifies skipping the door is a theorem
+correct splits: `MayLend`'s lender disjunct requires the lender to own the storage
+and every grant outstanding to be its own, and a split's source is outstanding and
+often lent by a context that owns nothing; its sublet disjunct bounds a holder, and a
+split's lender need not hold anything. What justifies skipping the door is a theorem
 rather than an argument — `splitGrant?_creates_no_authority` says the result
 authorizes nothing the source did not, and `splitGrant?_preserves_authority` says it
 authorizes everything the source did.
@@ -2581,7 +2616,7 @@ statement -- so under an outstanding grant this refused a change to extent, epoc
 space, source, permission, liveness and placement, and *accepted* a change to who owns
 the allocation or to what its bytes say.
 
-Both are authority. `owners` is the field `MayLend`'s unlent disjunct and
+Both are authority. `owners` is the field `MayLend`'s lender disjunct and
 `Grass/Op/Step.lean`'s owner exemption read, so a context that wrote itself into it
 bought §3's authority over storage another context had lent out: review did exactly
 that and watched `a_stranger_may_not_join_the_atomic_protocol` and

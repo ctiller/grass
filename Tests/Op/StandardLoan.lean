@@ -663,8 +663,8 @@ then read a map in which the seizure was legitimate authority.
 
 The three conjuncts separate the rule from its inputs: the door refuses, `MayLend` is
 what refuses it, and the reason `MayLend` gives is that `engine₁` does not own the
-storage -- not that something is held over it, which is the other disjunct and is
-false here. -/
+storage -- not that it holds no covering grant of its own, which is the sublet
+disjunct and is also false here. -/
 theorem the_stranger_may_not_seize_unheld_bytes :
     state₀.memory.issue? secondBufferLoan strangerSeizure = Option.none ∧
     ¬ state₀.memory.MayLend strangerSeizure ∧
@@ -697,9 +697,9 @@ theorem the_read_loan_is_outstanding :
     readLentToThread.AnyGrantOver bufferProv ⟨0, 4⟩ := by
   exact ⟨by decide, by decide⟩
 
-/-- **A borrower may sublend what it holds.** This is `MayLend`'s second disjunct, and
-it is the reachable one: the third (“every grant over these bytes is mine”) covers a
-lender lending again, and without this a borrower could never pass a fragment on —
+/-- **A borrower may sublend what it holds.** This is `MayLend`'s sublet disjunct, and
+it is the reachable one: the lender disjunct (“every grant over these bytes is mine”)
+covers a lender lending again, and without this a borrower could never pass a fragment on —
 §3's authority is transferable by construction. -/
 theorem a_borrower_may_sublend_what_it_holds :
     (readLentToThread.issue? secondBufferLoan
@@ -707,8 +707,9 @@ theorem a_borrower_may_sublend_what_it_holds :
         range := ⟨0, 4⟩, rights := .readOnly }).isSome := by decide
 
 /-- **And may not sublend more than it holds.** The borrower holds read authority; the
-sublease claims write. Neither the unheld disjunct nor the lender-lends-again disjunct
-applies, and `Permission.Grants` is what refuses it — which is the same relation
+sublease claims write. The lender disjunct does not apply either -- the grant
+outstanding was lent by the engine, not by the thread -- and `Permission.Grants` is
+what refuses it — which is the same relation
 `denialOf` uses for a descriptor's declared permission. -/
 theorem a_borrower_may_not_sublend_more_than_it_holds :
     readLentToThread.issue? secondBufferLoan
@@ -738,7 +739,7 @@ def overreachingLoan : AuthorityGrant :=
     range := ⟨0, 8⟩, rights := .readWrite }
 
 /-- **Refused.** The page carries `readOnly` and `thread₀` owns it, so this is the
-first disjunct being asked about rights rather than only about ownership. -/
+lender disjunct being asked about rights rather than only about ownership. -/
 theorem an_owner_may_not_lend_rights_its_storage_lacks :
     ¬ state₀.memory.MayLend overreachingLoan ∧
     state₀.memory.issue? bufferLoan overreachingLoan = Option.none := by
@@ -762,9 +763,9 @@ theorem the_read_only_page_is_owned_and_unlent :
     ¬ state₀.memory.AnyGrantOver constProv ⟨0, 8⟩ := by
   exact ⟨by decide, by decide, by decide⟩
 
-/-! ## The third disjunct is about owners, and never said so
+/-! ## The lender disjunct is about owners, and never said so
 
-`MayLend`'s third disjunct is "every grant outstanding over these bytes was lent by
+`MayLend`'s lender disjunct is "every grant outstanding over these bytes was lent by
 this lender, so whoever put them out may put more out". It was written for an owner
 that has lent a fragment and holds no grant of its own, and it carried neither an
 ownership conjunct nor a rights bound -- so review stepped two things through it, both
@@ -774,8 +775,12 @@ An owner of a *read-only* page lent it read-only and then lent itself `readWrite
 because by then every grant outstanding was its own. And a read-only *borrower* sublet
 to itself, returned the original as holder, and lent itself write authority: having
 become the only lender of record, it satisfied the disjunct outright. The first is
-refused by the allocation-permission conjunct, the same one the first disjunct got a
-round earlier; the second by the ownership conjunct. -/
+refused by the allocation-permission conjunct; the second by the ownership conjunct.
+
+Both conjuncts were once carried by a separate unheld disjunct as well, which review
+later proved dead -- `¬ AnyGrantOver` makes this disjunct's `.all` vacuous, so it
+implied this one. It is gone, and an owner's first loan is this disjunct's empty
+instance. -/
 
 /-- The read-only page, lent read-only by the context that owns it. Accepted: this is
 the honest first lend. -/
@@ -785,7 +790,7 @@ def constLentReadOnly : MemoryState :=
       range := ⟨0, 8⟩, rights := .readOnly }).getD state₀.memory
 
 /-- It really was accepted, and it really is the only grant over those bytes -- so the
-refusal below is the third disjunct and not the first. -/
+refusal below comes from this disjunct's own conjuncts and not from an empty map. -/
 theorem the_honest_lend_of_the_read_only_page_is_accepted :
     (state₀.memory.issue? bufferLoan
       { kind := .loan, holder := engine₀, lender := thread₀, provenance := constProv
@@ -796,9 +801,9 @@ theorem the_honest_lend_of_the_read_only_page_is_accepted :
   exact ⟨by decide, by decide, by decide⟩
 
 /-- **And the owner may not then lend write over it.** One honest lend used to be
-enough: with every outstanding grant its own, the third disjunct admitted a lend of
-rights the page does not carry, which is what the first disjunct's rights conjunct was
-added to stop. -/
+enough: with every outstanding grant its own, the lender disjunct admitted a lend of
+rights the page does not carry, which is what its rights conjunct was added to
+stop. -/
 theorem one_honest_lend_does_not_unlock_the_page :
     ¬ constLentReadOnly.MayLend overreachingLoan ∧
     constLentReadOnly.issue? secondBufferLoan overreachingLoan = Option.none := by
@@ -816,7 +821,7 @@ def borrowedReadOnly : MemoryState :=
     { kind := .loan, holder := engine₁, lender := thread₀, provenance := bufferProv
       range := ⟨0, 8⟩, rights := .readOnly }).getD state₀.memory
 
-/-- It sublets to itself, which the second disjunct allows -- a borrower may pass on
+/-- It sublets to itself, which the sublet disjunct allows -- a borrower may pass on
 what it holds -- and then returns the original as holder, leaving itself the only
 lender of record. -/
 def borrowerIsTheOnlyLender : MemoryState :=
@@ -826,7 +831,7 @@ def borrowerIsTheOnlyLender : MemoryState :=
       engine₁ bufferLoan |>.getD borrowedReadOnly
 
 /-- The setup is real: the sublet was accepted, the original is gone, and every grant
-outstanding is now the borrower's own -- so the third disjunct's other two conjuncts
+outstanding is now the borrower's own -- so the lender disjunct's other two conjuncts
 hold and the refusal below is the ownership one. -/
 theorem the_borrower_really_is_the_only_lender :
     borrowerIsTheOnlyLender.grantAt? bufferLoan = Option.none ∧
@@ -854,7 +859,7 @@ not the bytes. `borrowedReadOnly` differs from the state above in exactly the su
 the return.
 
 This is the disjunct doing its job: `thread₀` holds no grant of its own there, so only
-the third disjunct can admit it, and it does. -/
+the lender disjunct can admit it, and it does. -/
 theorem the_owner_may_lend_write_before_the_sublet :
     borrowedReadOnly.OwnedBy thread₀ bufferProv ∧
     ¬ borrowedReadOnly.Granted thread₀ bufferProv ⟨0, 8⟩ AccessIntent.write ∧
@@ -875,7 +880,7 @@ theorem the_owner_may_not_lend_write_after_it :
 
 /-! ## Atomic-only authority does not lend on as ordinary authority
 
-`MayLend`'s second disjunct bounded a sublet with `Permission.Grants`, which does not
+`MayLend`'s sublet disjunct bounded a sublet with `Permission.Grants`, which does not
 compare `atomicOnly` -- its own docstring says so, and says a *page* has no such bit, so
 the relation is about a page and a demand. The sublet path applies it with a grant's
 rights on the left, which is the case that docstring excludes, and there is no `Permits`

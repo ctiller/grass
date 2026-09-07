@@ -135,12 +135,19 @@ ALLOWED = {
     # vocabulary; nothing in this layer mints one, because control flow is the ISA
     # owner's and the causal graph is M8's.
     "EventKind.control",
-    # §7.1 requires a fence event kind and nothing can mint one: `kindOf` yields only
-    # `read`, `write` and `readModifyWrite`, and `AccessIntent` has no fence form —
-    # an intent that neither reads nor writes is refused by `WellFormedIn.notInert`.
-    # So §7.4's "release establishes the profile's causal edge" has no event to carry
-    # it. Recorded in `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2.
-    "EventKind.fence",
+    # `EventKind.fence` stood here on the same ground and is gone. The reason was
+    # accurate and remains recorded in `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 —
+    # nothing in the *transition* can mint one, because `kindOf` yields only `read`,
+    # `write` and `readModifyWrite` and an intent that neither reads nor writes is
+    # refused by `WellFormedIn.notInert`, so §7.4's "release establishes the profile's
+    # causal edge" has no event to carry it. But `Tests/Memory/EventClauses.lean` mints
+    # three fence events directly, to isolate the seal clauses about an event that
+    # touches no memory, so the entry had stopped suppressing anything.
+    #
+    # It was the first entry this file's own `--inert` check ever reported, and it
+    # reported it only after the check was repaired: for its whole life the check
+    # matched entry names inside backticks against a report format that has no
+    # backticks, so it printed every entry in the list every run.
     # `docs/OBLIGATIONS.md` section 3 requires every obligation at a terminal edge to
     # receive a disposition. M5 owns terminal accounting and does not exist, so these
     # two are named and unbuilt.
@@ -264,6 +271,41 @@ def analyse(raw: dict[str, str], builders: dict[str, str] | None = None) -> list
     return unbuilt
 
 
+def inert_entries(declared: dict[str, str], builders: dict[str, str]) -> list[str]:
+    """The `ALLOWED` entries whose removal would change nothing.
+
+    A real leave-one-out, which is what this check was supposed to be from the day it
+    landed. It was not. It emptied the allowlist, ran `analyse`, joined the reports and
+    looked for each entry inside backticks -- and this tool's report format has no
+    backticks, so nothing was ever found and every entry was declared inert. All
+    twenty-five of them, every run, while each was suppressing exactly one report.
+
+    The comment that stood here argued for exact-name matching over a substring of the
+    joined report, on the ground that an entry which is a strict prefix of another
+    reported name would read as live. That was a true observation about substring
+    matching. The version it replaced *worked*, because the plain report text contains
+    the names; the version it introduced matched a delimiter the format does not use.
+    A check that reports everything is a check that reports nothing, and it fails in the
+    direction that looks like diligence -- twenty-five lines of "delete these".
+
+    It pointed at `ConsultedAudit.inert_entries` as "a real leave-one-out" in the same
+    sentence. This is that, here.
+
+    Reported rather than failed: an entry becomes inert when someone builds the
+    constructor, which is good news and should not break a build.
+    """
+    global ALLOWED
+    original = set(ALLOWED)
+    base = set(analyse(declared, builders))
+    inert = []
+    for entry in sorted(original):
+        ALLOWED = original - {entry}
+        if not set(analyse(declared, builders)) - base:
+            inert.append(entry)
+    ALLOWED = original
+    return inert
+
+
 def self_test() -> int:
     """Seed each class this file claims to catch, and the near-misses it must not."""
     decl = "inductive Probe where\n  | quarry\n  | decoy\n"
@@ -336,6 +378,20 @@ def self_test() -> int:
               "update the module docstring, which documents it as unhandled")
         failures += 1
 
+    # The `--inert` sweep, both directions. It had neither, and reported every entry
+    # in the allowlist as suppressing nothing for as long as it existed.
+    ALLOWED = {"Probe.quarry"}
+    if inert_entries({"a.lean": decl}, {"a.lean": decl}) != []:
+        print("  SELF-TEST FAILED [inert sweep]: an entry that suppresses a real "
+              "report is called inert")
+        failures += 1
+    ALLOWED = {"Probe.quarry", "Probe.decoy", "Nothing.here"}
+    if inert_entries({"a.lean": decl}, {"a.lean": decl}) != ["Nothing.here"]:
+        print("  SELF-TEST FAILED [inert sweep]: an entry that suppresses nothing is "
+              "not reported, or a live one is")
+        failures += 1
+    ALLOWED = saved
+
     if failures:
         print(f"reachability audit self-test: {failures} failure(s)")
         return 1
@@ -358,18 +414,7 @@ def main() -> int:
                     for path in DECLARED_IN}
         builders = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
                     for path in BUILDERS_IN}
-        listed = sorted(ALLOWED)
-        saved = ALLOWED
-        ALLOWED = set()
-        reported = " ".join(analyse(declared, builders))
-        ALLOWED = saved
-        # Exact names rather than a substring of the joined report. An entry that
-        # is a strict prefix of some *other* reported name read as live: review
-        # added a deliberate prefix to each of these two lists and both passed,
-        # while `ConsultedAudit.inert_entries` -- which does a real leave-one-out --
-        # reported them. Latent here, since no currently listed entry is masked.
-        found = set(re.findall(r"`([^`]+)`", reported))
-        inert = [entry for entry in listed if entry not in found]
+        inert = inert_entries(declared, builders)
         if inert:
             print("allowlist entries that suppress nothing: " + ", ".join(inert))
             print("Delete them, or say why the entry is kept with no effect.")

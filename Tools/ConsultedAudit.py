@@ -79,25 +79,35 @@ STRUCTURE = re.compile(r"^\s*(?:private\s+)?structure\s+([A-Za-z_][A-Za-z0-9_.']
 
 # Fields deliberately carried without a reader. Every entry states why, and the
 # entry is the record that the decision was made.
-# A structure whose fields are propositions bundles proof obligations, and not
-# reading such a field can be the normal case -- but "the constructor discharged it"
-# is not the same as "the obligation has content", and this exemption was written as
-# though it were.
 #
-# `MemoryEvent.WellFormed` is the counterexample and it was hidden by exactly this
-# entry: eleven of its thirteen field names are projected nowhere, and review then
-# replaced each clause with `True`, co-editing the sole producer's discharge, and
-# got thirteen green builds. The structure's own module disproves the reason, too --
-# `touchesMemory_ofOutcome` proves no event `ofOutcome` can mint fails
-# `noLocationWhenUntouched`, so discharging that one proves nothing, and the file
-# says so in prose.
+# An entry may name a bare field (`label`) or a qualified one (`Structure.field`).
+# Qualified is the better shape and the bare form survives for the entries whose
+# reason really is about the name: a bare entry is a claim about every structure that
+# will ever declare a field so called, which is the same overreach as a pattern.
 #
-# Kept for `Recognized` and `Laws`, whose fields really are discharged-and-done, and
-# dropped for `WellFormed`, where the discharge is the whole of what a seal claims.
-# `AccessDescriptor.WellFormedIn` was never in scope here -- `endswith("WellFormed")`
-# does not match it -- which is the only reason the seal round eighteen swept was
-# ever reported.
-PROOF_BUNDLES = ("Recognized", "Laws")
+# There *was* a pattern here, `PROOF_BUNDLES`, exempting any structure whose name
+# ended in `Recognized` or `Laws` on the reason that a structure whose fields are
+# propositions bundles proof obligations, so nothing projects them. It was written
+# after `MemoryEvent.WellFormed` disproved the same reason for `WellFormed`: eleven of
+# its thirteen clauses were projected nowhere and each could be replaced by `True`
+# with the tree green, so "the constructor discharged it" is not "the obligation has
+# content". The two survivors were kept as "whose fields really are
+# discharged-and-done" and never measured.
+#
+# Review measured them. `Laws` matched exactly one structure and silenced seventeen of
+# its twenty fields -- the same seventeen §4.4.1 records as never used by anything --
+# and `Recognized` silenced one. So 94% of the pattern's work was on
+# `Grass/Resource/Algebra.lean`, the module §4.4.1 calls the corner nobody reviews,
+# and it was invisible twice over: `--inert` sweeps `ALLOWED` entries, so the check
+# added "so the same rot is visible without a reviewer" could not see the mechanism
+# that caused it, and §4.4.1's list of this tool's blind spots named two others and
+# not this. The eighteen fields are individual entries below, `--inert` covers them
+# like every other entry, and this tool now has one exemption mechanism rather than
+# two.
+#
+# `AccessDescriptor.WellFormedIn` was never in scope for the pattern --
+# `endswith("WellFormed")` does not match it -- which is the only reason the seal
+# round eighteen swept was ever reported.
 
 # Sixteen entries were deleted from this list after review checked, one at a time,
 # whether removing an entry changed the report. It changed nothing for any of them.
@@ -125,6 +135,39 @@ ALLOWED = {
     # never dispatched on. `id` and `name` were here too and suppressed nothing.
     "label",
     "origin",
+    # --- The eighteen that `PROOF_BUNDLES` used to cover. Qualified, because the
+    # --- reason is about these structures and not about anything named `evidence`.
+    #
+    # `Recognized.evidence` holds the proof that a name was admitted by the profile's
+    # vocabulary. The elaborator reads it at construction, which is the whole point of
+    # requiring it, and no later rule re-derives what the constructor already had to
+    # supply.
+    "Recognized.evidence",
+    #
+    # The seventeen laws of `OrderedPartialCommutativeResourceLaws`. §4.4.1 records
+    # them as a gap and it is a real one: nothing under `Grass/` imports that module,
+    # so the laws are stated and no theorem yet reasons through them. M7 is the
+    # milestone that owes the consumers. They are listed here one by one rather than
+    # covered by a suffix so that a reviewer reading the allowlist sees seventeen
+    # decisions, which is what they are, and so that `--inert` reports each the day a
+    # consumer arrives.
+    "OrderedPartialCommutativeResourceLaws.compatibleComm",
+    "OrderedPartialCommutativeResourceLaws.compatibleZero",
+    "OrderedPartialCommutativeResourceLaws.combineComm",
+    "OrderedPartialCommutativeResourceLaws.combineAssoc",
+    "OrderedPartialCommutativeResourceLaws.combineZero",
+    "OrderedPartialCommutativeResourceLaws.leRefl",
+    "OrderedPartialCommutativeResourceLaws.leTrans",
+    "OrderedPartialCommutativeResourceLaws.leAntisymm",
+    "OrderedPartialCommutativeResourceLaws.zeroLe",
+    "OrderedPartialCommutativeResourceLaws.leCombine",
+    "OrderedPartialCommutativeResourceLaws.combineMonotone",
+    "OrderedPartialCommutativeResourceLaws.combineEqLeft",
+    "OrderedPartialCommutativeResourceLaws.alternativeComm",
+    "OrderedPartialCommutativeResourceLaws.alternativeAssoc",
+    "OrderedPartialCommutativeResourceLaws.alternativeZero",
+    "OrderedPartialCommutativeResourceLaws.leAlternative",
+    "OrderedPartialCommutativeResourceLaws.alternativeMonotone",
     # --- Carried without a projection. Being listed here is not "this is fine":
     # --- it is the record that someone read the corpus and decided. The reasons
     # --- differ, and conflating them is how the first version of section 4.2 of
@@ -291,9 +334,7 @@ def analyse(raw: dict[str, str],
     unread: list[str] = []
     for name, text in raw.items():
         for structure, field, line in fields_in(text):
-            if field in ALLOWED:
-                continue
-            if any(structure.endswith(suffix) for suffix in PROOF_BUNDLES):
+            if field in ALLOWED or f"{structure}.{field}" in ALLOWED:
                 continue
             # A projection, on a line that does not also *construct* this field.
             # `RequiredProofPackage.loanMapLaws` escaped the report because the
@@ -354,7 +395,29 @@ def self_test() -> int:
         ("no reader in either corpus",
          {"a.lean": decl}, {"a.lean": decl}, True),
     ]
-    failures = 0
+    # An allowlist entry may be qualified, and both halves of that need a case: a
+    # qualified entry must silence its own structure's field, and must not silence a
+    # field of the same name on another structure -- which is the whole reason the
+    # eighteen entries that replaced `PROOF_BUNDLES` are written qualified.
+    other = 'structure Decoy where\n  quarry : Nat\n'
+    global ALLOWED
+    original = set(ALLOWED)
+    try:
+        ALLOWED = original | {"Probe.quarry"}
+        if any("Probe.quarry" in line for line in analyse({"a.lean": decl})):
+            print("  SELF-TEST FAILED: a qualified allowlist entry does not silence "
+                  "its own field")
+            failures_qualified = 1
+        else:
+            failures_qualified = 0
+        if not any("Decoy.quarry" in line for line in analyse({"a.lean": other})):
+            print("  SELF-TEST FAILED: a qualified allowlist entry silences the same "
+                  "field name on another structure")
+            failures_qualified += 1
+    finally:
+        ALLOWED = original
+
+    failures = failures_qualified
     for label, sources, should_report in cases:
         reported = any("Probe.quarry" in line for line in analyse(sources))
         if reported != should_report:

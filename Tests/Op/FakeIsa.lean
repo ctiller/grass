@@ -2634,13 +2634,30 @@ theorem the_same_plan_without_the_read_runs :
         if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 0
         else .none)).Ran := by decide
 
-/-- **And a non-zero count on a substep that touches no memory is refused.** This is
-the half the pre-repair bound got right; it is here so that the asymmetry cannot come
-back unnoticed in either direction. `divide`'s second substep is a `.compute`. -/
+/-- **And a non-zero write count on a substep that touches no memory is refused.**
+This is the half the pre-repair bound got right; it is here so that the asymmetry
+cannot come back unnoticed in either direction. `divide`'s second substep is a
+`.compute`. -/
 theorem a_commit_count_on_a_compute_substep_is_refused :
     (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) thread₀ .thread
       ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
         if h : 1 < seq.substeps.length then .before ⟨1, h⟩ divideError 0 1
+        else .none)).rejection? = some .faultCommitOutOfRange := by decide
+
+/-- **And a non-zero read count on one.** The descriptor arm above is
+`reads ≤ … ∧ writes ≤ …` and has a fixture on each conjunct; the no-descriptor arm
+beside it is `reads = 0 ∧ writes = 0` and had one on the write conjunct alone — the
+same asymmetry, four lines from the paragraph that says it "cannot come back unnoticed
+in either direction", in the arm that paragraph does not quantify over.
+
+Review neutered `reads = 0` to `reads = reads` with the whole tree green. The lesson is
+narrower than the earlier one and worse: the fixture pair naming the symmetry was
+written for the *other branch of the same `match`*, so the paragraph that generalised
+it was true and still did not reach here. A guard with two arms is two guards. -/
+theorem a_read_count_on_a_compute_substep_is_refused :
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.divide) thread₀ .thread
+      ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 1 < seq.substeps.length then .before ⟨1, h⟩ divideError 1 0
         else .none)).rejection? = some .faultCommitOutOfRange := by decide
 
 /-- The same plan with both counts zero runs. -/

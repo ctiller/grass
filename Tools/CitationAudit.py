@@ -50,11 +50,18 @@ advertised a stronger reading and review corrected it:
 - It matches short names, so `Foo.bar` and `Baz.bar` are indistinguishable. A
   citation naming the right leaf in the wrong namespace passes.
 - `Tools/*.py` is scanned for *section* citations only, not declaration ones. A Python
-  file naming `applyAuthorityDelta?` is naming a door rather than citing a theorem, and
-  a declaration set built from Lean sources cannot adjudicate it. Nothing scanned this
-  directory at all until review found a debt pointed at the wrong section here — the
-  fourth finding to live in `Tools/`, which §4.4.1 had already recorded as "where no
-  gate looks".
+  file naming `applyAuthorityDelta?` is naming a door rather than citing a theorem, so
+  the scan of these files stays sections-only. Nothing scanned this directory at all
+  until review found a debt pointed at the wrong section here — the fourth finding to
+  live in `Tools/`, which §4.4.1 had already recorded as "where no gate looks".
+
+  What *is* adjudicated now is the other direction: prose citing a tool's own
+  internals. The declaration set includes each Python file's module-level constants,
+  functions and classes, so §4.4.1 naming a mechanism inside one of these tools is
+  checked like any other citation. Review's round-twenty findings are two thirds about
+  this directory, and the entries recording them cite the constants they changed; with
+  a Lean-only declaration set, every such citation would have had to be allowlisted,
+  which is the shape this file calls "a judgement somebody made and is not one".
 - A citation that is *stale but still resolves* — the name exists, but the theorem
   no longer says what the prose claims — is invisible here. It is invisible to
   `DocstringAudit.py` too, which only asks whether a claim-shaped sentence contains
@@ -77,6 +84,7 @@ the last tool added here was silent on its first version.
 
 from __future__ import annotations
 
+import keyword
 import re
 import sys
 from pathlib import Path
@@ -93,6 +101,11 @@ DOC_FILES = sorted((ROOT / "docs").glob("*.md"))
 # declaration set; the declaration half stays out, because a Python file naming
 # `applyAuthorityDelta?` is naming a door rather than citing a theorem.
 TOOL_FILES = sorted((ROOT / "Tools").glob("*.py"))
+
+# A module-level Python declaration: a constant, a function or a class, at column
+# zero. Anchored there deliberately -- an indented name is a local, and prose citing a
+# local names something a reader cannot find.
+PYTHON_DECL = re.compile(r"^(?:def |class )?([A-Za-z_][A-Za-z0-9_]*)\b\s*(?:=[^=]|\(|:)")
 
 # Documents that argue from Lean declaration names, and are scanned for them. See the
 # module docstring: the plan cites theorems as evidence for closed claims, and eight
@@ -261,6 +274,13 @@ ALLOWED = {
     # transition. Cited only as history, in a sentence that says it is gone.
     "loan_refuses_the_frozen",
     "MemoryState.grant",
+    # `Tools/ConsultedAudit.py`'s structure-name exemption, deleted in round twenty when
+    # review measured what it silenced: eighteen fields, seventeen of them one
+    # structure's. Both sites are in the section 4.4.1 entry recording the deletion, and
+    # the name is the whole subject of that entry. It is the first Python name to need
+    # this group, and it needs it because the same round taught the tool to resolve the
+    # live ones -- before that every citation of a tool's internals was unadjudicated.
+    "PROOF_BUNDLES",
 }
 
 
@@ -272,6 +292,18 @@ def declared_names() -> set[str]:
     `theorem`/`def` line.
     """
     names: set[str] = set()
+    # A tool's module-level names. `^NAME`, so a local variable inside a function is
+    # not a citable declaration -- prose naming one would be citing something a reader
+    # cannot find by searching for its definition.
+    for path in TOOL_FILES:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            m = PYTHON_DECL.match(line)
+            # `try:`, `else:` and `finally:` match the shape and are not declarations.
+            # They would be harmless -- `worth_checking` drops a token with no `_` and
+            # no `.` -- but a declaration set containing `else` is a false statement
+            # about the tree, and this file has already been caught keeping one.
+            if m and not keyword.iskeyword(m.group(1)):
+                names.add(m.group(1))
     for path in LEAN_FILES:
         namespaces: list[str] = []
         text = path.read_text(encoding="utf-8")
@@ -476,6 +508,37 @@ def self_test() -> int:
         if reported != should_report:
             print(f"  SELF-TEST FAILED [{label}]: expected "
                   f"{'reported' if should_report else 'not reported'}")
+            failures += 1
+
+    # Round twenty taught the declaration set to read this directory's own module-level
+    # names, so section 4.4.1 can cite the constants review changed without an allowlist
+    # entry apiece -- and so that citing one that has been deleted is reported, which is
+    # how `PROOF_BUNDLES` ended up in ALLOWED rather than passing unnoticed.
+    python_cases = [
+        ("a module-level constant", 'PROOF_BUNDLES = ("Recognized",)', "PROOF_BUNDLES"),
+        ("an annotated constant", "names: set[str] = set()", "names"),
+        ("a function", "def self_test() -> int:", "self_test"),
+        ("a class", "class Probe:", "Probe"),
+    ]
+    for label, line, expected in python_cases:
+        m = PYTHON_DECL.match(line)
+        if not m or m.group(1) != expected:
+            print(f"  SELF-TEST FAILED [{label}]: the Python declaration pattern did "
+                  f"not collect `{expected}`")
+            failures += 1
+
+    # An indented name is a local. Prose citing one names something a reader cannot
+    # find by searching for a definition, so it is deliberately not a citable name.
+    not_declarations = [
+        ("a local binding", "    inert = []"),
+        ("a comparison", "if failures == 0:"),
+        ("a call", "    print(message)"),
+    ]
+    for label, line in not_declarations:
+        m = PYTHON_DECL.match(line)
+        if m and not keyword.iskeyword(m.group(1)):
+            print(f"  SELF-TEST FAILED [{label}]: collected `{m.group(1)}` as a "
+                  "declaration")
             failures += 1
 
     # Documented blind spot: short-name matching cannot tell namespaces apart, so a

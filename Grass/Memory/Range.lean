@@ -308,6 +308,31 @@ theorem Disjoint.symm {r s : ByteRange} (h : r.Disjoint s) : s.Disjoint r := by
   omega
 
 /--
+**`Meets` is symmetric on non-empty ranges**, so a consumer that tries both
+directions is asking one question of two non-empty ranges and a second question of
+an empty one.
+
+`Meets` is asymmetric only through its second disjunct, which is about an empty
+query, and `Disjoint` is symmetric — `Disjoint.symm`. So the whole content of trying
+`s.Meets r` after `r.Meets s` is the case this theorem's hypotheses exclude: `s`
+covers no bytes and sits inside `r`.
+
+`MemoryState.LoanConflicts` tries both, and its docstring said "`Meets` is asymmetric
+and neither grant is the query here" — true, and not a statement of what the second
+direction adds. This is that statement, so the redundancy is a theorem with a stated
+boundary rather than a sentence about asymmetry in general.
+-/
+theorem meets_comm_of_nonempty {r s : ByteRange} (hr : ¬ r.IsEmpty) (hs : ¬ s.IsEmpty) :
+    r.Meets s ↔ s.Meets r := by
+  constructor
+  · rintro (h | ⟨he, _⟩)
+    · exact meets_of_not_disjoint (fun hd => h hd.symm)
+    · exact absurd he hs
+  · rintro (h | ⟨he, _⟩)
+    · exact meets_of_not_disjoint (fun hd => h hd.symm)
+    · exact absurd he hr
+
+/--
 The framing law. An offset inside one of two disjoint ranges is outside the other,
 so an update confined to `s` leaves every byte of `r` alone.
 -/

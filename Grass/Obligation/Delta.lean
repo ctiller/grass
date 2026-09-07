@@ -350,7 +350,7 @@ theorem not_applicable_discharge_of_wrong_protocol {live : List ObligationId}
 
 `.discharge` had a theorem for each of liveness, protocol and owner. The other three
 constructors ask the same three questions and had none, and review swept it: ten of
-`Applicable`'s twenty clauses could be neutered with the whole tree green, and
+`Applicable`'s twenty-four clauses could be neutered with the whole tree green, and
 `.transfer` was the worst — three of its four, so applicability for a transfer was
 effectively "the recipient is a known context".
 

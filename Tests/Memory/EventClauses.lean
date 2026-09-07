@@ -72,9 +72,16 @@ rests on.
 
 The clause propositions are restated here rather than projected, because a field of a
 `Prop` structure cannot be projected from a value that does not satisfy it. That is a
-second source of truth and it is the acceptable kind: it is a *test* of the seal
-written against the seal, and if the two drift the theorem below stops matching the
-`Decidable` instance and fails.
+second source of truth, and the commit that added it argued the risk away -- "if the
+two drift the theorem below stops matching the `Decidable` instance and fails" -- which
+is an argument and not a check, in a file whose whole subject is the difference.
+
+`sealClauses_is_the_seal` is the check. It says this function returns the empty list on
+exactly the events the seal admits, so no drift in any clause proposition can survive:
+weaken one here and the forward direction stops proving; weaken one in the structure
+and the reverse direction does. What it does *not* say is that each name labels the
+clause beside it -- two labels could be exchanged and both theorems would still hold --
+so the names are written in declaration order and read against the structure by eye.
 -/
 def sealClauses (e : MemoryEvent) : List String :=
   (if e.kind.reads = true → e.valueRead.isSome then [] else ["readValuePresent"]) ++
@@ -269,5 +276,33 @@ theorem each_neighbour_fails_exactly_one_clause :
       status := .completed 0 0, writeCommitted := 0 }) = [] := by
   refine ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide,
     by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩
+
+/-- **This function is the seal, and not a paraphrase of it.**
+
+`sealClauses` restates all eleven clause propositions, which is a second source of
+truth: every fixture above is decided against *this* list, so a clause that drifted
+from the structure would make the whole file agree with itself and say nothing about
+the seal. This is that risk closed rather than argued about. An event fails no clause
+here exactly when it satisfies `MemoryEvent.WellFormed`, so a weakening on either side
+breaks one direction of the proof.
+
+It does not fix the *labels*: exchanging two names would leave both directions
+provable. The names are in declaration order, which is how the `Decidable` instance is
+written too, and that much is read by eye. -/
+theorem sealClauses_is_the_seal (e : MemoryEvent) : sealClauses e = [] ↔ e.WellFormed := by
+  constructor
+  · intro h
+    simp only [sealClauses, List.append_eq_nil_iff, ite_eq_left_iff,
+      List.cons_ne_nil, imp_false, Decidable.not_not] at h
+    exact ⟨h.1.1.1.1.1.1.1.1.1.1, h.1.1.1.1.1.1.1.1.1.2, h.1.1.1.1.1.1.1.1.2,
+      h.1.1.1.1.1.1.1.2, h.1.1.1.1.1.1.2, h.1.1.1.1.1.2, h.1.1.1.1.2,
+      h.1.1.1.2, h.1.1.2, h.1.2, h.2⟩
+  · intro w
+    simp only [sealClauses, List.append_eq_nil_iff, ite_eq_left_iff,
+      List.cons_ne_nil, imp_false, Decidable.not_not]
+    exact ⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨w.readValuePresent, w.readValueAbsent⟩, w.writeValuePresent⟩,
+      w.writeValueAbsent⟩, w.noLocationWhenUntouched⟩, w.writtenLength⟩,
+      w.readLength⟩, w.statusWellFormed⟩, w.statusAgreesWithReads⟩,
+      w.statusAgreesWithWrites⟩, w.spaceAgreesWithProvenance⟩
 
 end Tests.Memory.EventClauses

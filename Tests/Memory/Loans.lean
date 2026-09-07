@@ -409,10 +409,14 @@ theorem one_past_the_end_of_a_loan_is_not_frozen :
 
 /-- **A grant over no bytes is refused at issue.**
 
-It was issuable, and it was decoration with a refusal attached: `LoanConflicts`
-tries `Meets` in both directions so an empty grant *conflicted* with a live one and
-could not be issued alongside it, while installed on its own it froze nobody,
-because an empty extent meets no position. `AccessDescriptor.WellFormedIn` refuses
+It was issuable, and it was decoration with a refusal attached: `LoanConflicts`'s
+forward direction asks whether an installed grant covers the new grant's start, so an
+empty grant inside a live one *conflicted* and could not be issued alongside it, while
+installed on its own it froze nobody, because an empty extent meets no position. This
+paragraph said "tries `Meets` in both directions", which is the direction that matters
+when the *installed* grant is the empty one — the case
+`an_empty_installed_grant_still_conflicts` decides, and the case this theorem makes
+unreachable through the door. `AccessDescriptor.WellFormedIn` refuses
 an empty access for the same reason and `issue?` now refuses an empty grant. -/
 theorem a_grant_of_no_bytes_is_refused :
     unlent.issue? firstLoan emptyLoan = Option.none ∧
@@ -486,7 +490,7 @@ theorem the_buffer_record_is_what_it_looks_like :
   exact ⟨by decide, by decide⟩
 
 /-- **A stranger may not write itself into the owner list under an outstanding
-grant.** `owners` is what `MayLend`'s unlent disjunct and `Grass/Op/Step.lean`'s owner
+grant.** `owners` is what `MayLend`'s lender disjunct and `Grass/Op/Step.lean`'s owner
 exemption read, so this call bought §3's authority over storage another context had
 lent out. -/
 theorem an_owner_list_may_not_be_rewritten_under_a_grant :
@@ -534,6 +538,35 @@ def tailLoan : AuthorityGrant :=
 theorem disjoint_halves_do_not_conflict :
     ¬ lentHead.LoanConflicts loanOfHead tailLoan ∧
     (lentHead.issue? secondLoan tailLoan).isSome := by
+  exact ⟨by decide, by decide⟩
+
+/-- **What the reverse `Meets` direction is for.** `LoanConflicts` asks
+`a.range.Meets b.range ∨ b.range.Meets a.range` with `a` the installed grant, and
+`ByteRange.meets_comm_of_nonempty` says the two agree unless one range is empty. So the
+reverse direction has exactly one job: an installed grant of no bytes, sitting inside
+the range a new grant claims.
+
+Nothing exercised it. Review deleted the reverse disjunct with the whole tree green,
+and both docstrings that explain why it exists cite the other one. The state is
+unreachable through `issue?`, which refuses an empty grant — but `LoanConflicts` takes
+its two grants as arguments and not out of the map, so the case is decidable right
+here, and the disjunct is a safety rule kept in the narrowing direction rather than a
+clause argued about.
+
+The three conjuncts separate the rule from its inputs: the pair conflicts, the forward
+direction says nothing, and the reverse direction is what says it. -/
+theorem an_empty_installed_grant_still_conflicts :
+    lentHead.LoanConflicts emptyLoan { tailLoan with range := ⟨0, 8⟩ } ∧
+    ¬ emptyLoan.range.Meets (⟨0, 8⟩ : ByteRange) ∧
+    (⟨0, 8⟩ : ByteRange).Meets emptyLoan.range := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- And the same pair with the installed grant carrying bytes conflicts through the
+forward direction instead, so the fixture above is about the empty range and not about
+the two contexts. -/
+theorem a_non_empty_installed_grant_conflicts_forwards :
+    lentHead.LoanConflicts loanOfHead { tailLoan with range := ⟨0, 8⟩ } ∧
+    loanOfHead.range.Meets (⟨0, 8⟩ : ByteRange) := by
   exact ⟨by decide, by decide⟩
 
 /-- And the same second loan overlapping the first is refused, so the acceptance above

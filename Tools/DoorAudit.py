@@ -162,7 +162,19 @@ STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
 
 # A tactic that names a declaration without applying it. `unfold f at h` was reported
 # as a call by the first version, which its own docstring said it would not be.
-NAMING_TACTIC = re.compile(r"\b(?:unfold|simp|simp_all|rw|delta|fold|exact|apply)\b")
+#
+# `exact` and `apply` were in this list and are the two that do not belong: they are
+# the tactics that *do* apply what they name, so `def f ... := by exact s.alias a b`
+# -- a definition written in tactic mode -- was silent while the identical term-mode
+# definition beside it was reported. The stated coverage is "any application of one
+# of the five doors", and review appended both forms to a real module allowed for
+# neither and got one report. Nothing is lost by dropping them, because the naming
+# forms these two tactics take do not match the application pattern anyway: `exact
+# MemoryState.issue?_eq_none_of_absent h` continues the name past the `?` with a
+# `_`, and `simp [MemoryState.issue?]` closes with a `]`. `self_test` seeds both
+# directions, because dropping a name from this list is a widening and a narrowing
+# at once.
+NAMING_TACTIC = re.compile(r"\b(?:unfold|simp|simp_all|rw|delta|fold)\b")
 
 
 def blank(match: "re.Match[str]") -> str:
@@ -277,6 +289,29 @@ def self_test() -> int:
     binder = "def f (s : MemoryState) (delta : AuthorityDelta) := s.issue? id grant\n"
     if not analyse({OUTSIDE: binder}):
         print("  SELF-TEST FAILED: a binder named `delta` silences a real door call")
+        failures += 1
+
+    # Review found this one: `exact` and `apply` were treated as naming tactics, so a
+    # definition written in tactic mode applied a door invisibly while the term-mode
+    # form beside it was reported. The guard's stated coverage is "any application".
+    tactic_def = "def f (s : MemoryState) := by exact s.issue? id grant\n"
+    if not analyse({OUTSIDE: tactic_def}):
+        print("  SELF-TEST FAILED: a door applied by `exact` in a definition is not "
+              "reported")
+        failures += 1
+
+    applied_def = "def f (s : MemoryState) := by apply s.issue?\n"
+    if not analyse({OUTSIDE: applied_def}):
+        print("  SELF-TEST FAILED: a door applied by `apply` in a definition is not "
+              "reported")
+        failures += 1
+
+    # And the other direction: dropping the two names must not start reporting the
+    # forms they were listed for, which is what makes the change safe rather than a
+    # trade of one blind spot for a false positive.
+    named_lemma = "theorem t : True := by exact MemoryState.issue?_eq_none_of_absent h\n"
+    if analyse({OUTSIDE: named_lemma}):
+        print("  SELF-TEST FAILED: `exact` naming a door's lemma is reported as a call")
         failures += 1
 
     focused = "theorem t : True := by\n  constructor <;> simp [MemoryState.issue?]\n"

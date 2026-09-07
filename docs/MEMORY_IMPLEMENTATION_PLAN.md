@@ -1522,11 +1522,11 @@ with what it used to say.
   does not read it and must not, ownership being an authority question, and
   `denialOf_congr_of_agrees` is that claim proved.
 
-  *Lending.* `MayLend`'s unlent disjunct now also requires the lender to own the
-  storage. Its third disjunct — "every grant outstanding was lent by this lender" —
+  *Lending.* `MayLend`'s lender disjunct requires the lender to own the storage. It
   gained a non-emptiness conjunct in the same change, because `List.all` on the empty
-  list is `true` and without it that disjunct readmitted every stranger the first had
-  just refused. Evidence:
+  list is `true` and without it the disjunct readmitted every stranger the unheld
+  disjunct beside it had just refused; both that conjunct and that disjunct have since
+  been deleted, in the order recorded below. Evidence:
   `Tests/Op/StandardLoan.lean`'s `the_stranger_may_not_seize_unheld_bytes` against
   `an_owner_may_lend_the_same_unheld_bytes` — one state, two grants differing only in
   the lender. The first of those replaces a theorem named
@@ -2092,7 +2092,7 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   ordinary non-atomic access" was enforced at the access and not at the lend.
 
   `Permission.GrantsAsGrant` is `Grants` with the comparison, for the one case where
-  both sides are grants, and all three disjuncts use it now. A grant may narrow into
+  both sides are grants, and both disjuncts use it now. A grant may narrow into
   atomic-only and may not widen out of it.
 - ~~**§4.4.1a's `AddressSpace.repr` row was an overclaim**: "nothing about a space is a
   profile's choice now except which identity it declares" was true of the eight
@@ -2236,7 +2236,7 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   owed to that owner as a report rather than decided here: whether an infinite
   continuation's witness fields are meant to be read is their call.
 
-- ~~**Ten of `LedgerDelta.Applicable`'s twenty clauses were discriminated by
+- ~~**Ten of `LedgerDelta.Applicable`'s twenty-four clauses were discriminated by
   nothing.**~~ `.discharge` had a theorem for liveness, protocol and owner; `.split`,
   `.join` and `.transfer` ask the same three questions and had none. `.transfer` was
   worst — three of its four clauses inert, so applicability for a transfer was
@@ -2261,6 +2261,26 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   disjunctions pointwise equal rather than observing it, which is the standard this
   branch set when it deleted `applyAccess_frames_disjoint_range` from
   `PreservationLaws`.
+
+  **And the proof was of the converse of what the deletion needed**, which the round
+  after found. `¬ AnyGrantOver` unfolds to `grantsOver = []`, which makes the owner
+  disjunct's `.all` vacuous — so the unheld disjunct implied the owner disjunct, not
+  the other way round, and the dead clause was the *disjunct*, not the conjunct inside
+  the one that subsumed it. Deleting the conjunct left `MayLend` with three disjuncts
+  and two meanings, and a docstring arguing that the dead one was how every first
+  grant is issued. It is deleted now; `mayLend_of_unheld_of_owned` states that case
+  and proves it through the owner disjunct, `not_mayLend_of_unheld_of_unowned` lost an
+  arm from its `rintro`, and the `Decidable` instance lost a conjunct pattern.
+
+  **A redundancy between two clauses says one of them may go and never which one.**
+  Picking wrong is invisible to every gate on this branch: the definition keeps its
+  size, the tree stays green, the fixtures still pass — because a fixture that
+  satisfies the surviving clause satisfies the dead one too — and the docstring is
+  rewritten to argue that what is now unreachable is load-bearing. The direction of a
+  subsumption is the whole content of the claim, and it was asserted in the same
+  sentence that proved the equality it does not settle. This is the third repair on
+  this branch to be found defective by the round after it landed, and the second where
+  the defect was in the *argument* rather than the code.
 - ~~**Prose naming things that are not there**, in four places no gate can reach.~~
   `AuthorizedBy` was cited three times as a live mechanism and nothing declares it —
   including in the record of this layer's *largest open gap*, where it was also given
@@ -2323,6 +2343,155 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   nothing about the lender rule the theorem is named for. It carries the conflict fact
   explicitly now, rather than leaving a reader to discover which rule did the work.
 
+- ~~**The fault-commit bound's no-descriptor arm had a fixture on one of its two
+  conjuncts.**~~ `Grass/Op/Step.lean`'s commit-count guard is a `match` on whether the
+  substep names a descriptor: the descriptor arm bounds `reads` and `writes` by what the
+  access covers and has a fixture on each conjunct; the no-descriptor arm requires both
+  to be zero and had one on the write conjunct alone. Review neutered `reads = 0` to
+  `reads = reads` with the whole tree green.
+  `a_read_count_on_a_compute_substep_is_refused` is the missing half.
+
+  This is round nineteen's finding four lines away from where round nineteen closed it,
+  and the generalisation that round recorded — *a fixture pair that names a symmetry is
+  evidence about the half it exercises* — was true, was written down, and did not reach
+  here, because the pair naming the symmetry was written for the **other branch of the
+  same `match`**. A guard with two arms is two guards, and a lesson stated about a guard
+  is about one arm of it.
+- ~~**`Tools/ConsultedAudit.py`'s proof-bundle exemption silenced eighteen fields by
+  structure name, and `--inert` was structurally unable to say so.**~~ `PROOF_BUNDLES`
+  exempted any structure whose name ended in `Recognized` or `Laws`, on the reason that
+  a structure whose fields are propositions bundles proof obligations nothing projects.
+  That reason had already been disproved for `WellFormed` in the same file — eleven of
+  `MemoryEvent.WellFormed`'s thirteen clauses were unprojected and each could be
+  replaced by `True` with the tree green — and the two survivors were kept as "whose
+  fields really are discharged-and-done" and never measured.
+
+  Measured: `Laws` matches exactly one structure and silenced seventeen of its twenty
+  fields, which are the same seventeen this section already records as never used by
+  anything; `Recognized` silenced one. So 94% of the exemption's work was on
+  `Grass/Resource/Algebra.lean`, the module this section calls the corner nobody
+  reviews, and the exemption is what kept it that way. All eighteen are individual
+  entries now, written **qualified** (`Structure.field`), and `PROOF_BUNDLES` is gone:
+  the tool has one exemption mechanism rather than two, `--inert` covers all eighteen
+  like every other entry, and `self_test` seeds both halves of the qualified form.
+
+  Three things generalise, and only the first was known. **An exemption keyed on a name
+  pattern is a claim about every structure that will ever match it** — recorded a round
+  earlier, from the same file, about a different pattern in it. **An `--inert` check
+  that sweeps one exemption mechanism reports nothing about the other**, so the check
+  added "so the same rot is visible without a reviewer" was blind to the larger of the
+  two mechanisms it was added to police. And **the blind-spot list is itself a claim
+  that needs sweeping**: this section lists what `ConsultedAudit` cannot see, and named
+  two narrower gaps than this one.
+- ~~**`Tools/DoorAudit.py` did not report a door applied in a tactic-mode
+  definition.**~~ Its stated coverage is "any application of one of the five doors from
+  a `Grass/` module other than the two that own the map". `exact` and `apply` were in
+  `NAMING_TACTIC`, the list of tactics that *name* a declaration without applying it, so
+  a definition written `:= by exact s.alias a b` was silent while the identical
+  term-mode definition beside it was reported. Review appended both to a real module
+  allowed for no door and got one report.
+
+  They are dropped, and nothing is lost: the naming forms those two tactics actually
+  take do not match the application pattern anyway, because `exact
+  MemoryState.issue?_eq_none_of_absent h` continues the name past the `?` and
+  `simp [MemoryState.issue?]` closes with a `]`. `self_test` seeds both directions,
+  because removing a name from that list widens and narrows the audit at once.
+
+  The two names were in the list because they can precede a declaration name. The list
+  is for tactics that *cannot apply* what they name, and `exact` and `apply` are the two
+  that do nothing else — an exemption assembled from a true observation about syntax
+  rather than from the property the exemption exists for.
+- ~~**`MemoryState.LoanConflicts` tried `Meets` in both directions and nothing said what
+  the second one adds.**~~ Review deleted the reverse disjunct with the whole tree
+  green. Three docstrings cite it — the definition's, `issue?_eq_none_of_empty`'s and a
+  fixture's — and each cites another of the three for why it exists, which is a circle
+  and not a reason.
+
+  `ByteRange.meets_comm_of_nonempty` is the fact none of them stated: on two non-empty
+  ranges the directions agree, because `Meets` is asymmetric only through its
+  empty-query disjunct and `Disjoint` is symmetric. So the reverse direction has exactly
+  one job — an *installed* grant of no bytes, inside the range a new grant claims — and
+  `issue?_eq_none_of_empty` is what makes that unreachable through the door.
+
+  Kept, not deleted, and that is the difference from `MayLend`'s dead disjunct above.
+  This is a safety rule: refusing is the narrowing direction, §7.3 is not a place to
+  widen on a reachability argument, and `LoanConflicts` takes both grants as arguments
+  rather than reading them out of the map, so the case is decidable at the predicate
+  even though no map holds it. `an_empty_installed_grant_still_conflicts` decides it,
+  with the forward direction shown false in the same theorem, and
+  `a_non_empty_installed_grant_conflicts_forwards` is the control.
+- ~~**`Tests/Memory/EventClauses.lean` decided every fixture against its own restatement
+  of the seal.**~~ `sealClauses` restates all eleven clause propositions, because a
+  field of a `Prop` structure cannot be projected from a value that does not satisfy it.
+  The commit that added it named the risk and argued it away: "if the two drift the
+  theorem below stops matching the `Decidable` instance and fails." That is an argument,
+  in a file whose entire subject is the difference between an argument and a check, one
+  commit after the same file was found asserting a property nothing decided.
+
+  `sealClauses_is_the_seal` is the check: `sealClauses e = [] ↔ e.WellFormed`, so a
+  weakening on either side breaks one direction of the proof. It does not fix the labels
+  — exchanging two names leaves both directions provable — and the file says so.
+- ~~**The read half of `AccessStatus.WellFormed` was consumed by nothing.**~~ Its
+  docstring argues for the pair ("a status that bounded only the larger of them would
+  let the other exceed the range unnoticed"), and the write half is consumed by
+  `AccessDescriptor.committedWriteRange_size` while the read half had no counterpart.
+  Review neutered `committedReads ≤ size` to `committedReads = committedReads`, with the
+  sole producer's three constructions co-edited so the mutation was not testing that
+  proof script, and the tree stayed green.
+
+  It is consumed now, by `MemoryEvent.readCommitted_le_size`, which arrived in the same
+  round for a different reason — it is what states the bound the two deleted seal
+  clauses used to assert. Re-running review's mutation against the current tree fails
+  inside that theorem. The residual asymmetry is real and stays: there is no
+  `AccessDescriptor.committedReadRange`, because §4's committed prefix is what marks
+  bytes initialized and a read initializes nothing, so the write half has a consumer at
+  the descriptor layer and the read half has one only at the event. That is a stated
+  design point rather than a missing mirror.
+
+- ~~**`Tools/ReachabilityAudit.py`'s `--inert` check reported every entry in its
+  allowlist, every run, for its whole life.**~~ It emptied the allowlist, ran the scan,
+  joined the reports into one string and looked for each entry name *inside backticks* —
+  and this tool's report format has no backticks. Nothing was ever found, so all
+  twenty-five entries were declared inert while each was suppressing exactly one report.
+
+  The comment above it argued for exact-name matching over a substring of the joined
+  report, because an entry that is a strict prefix of another reported name reads as
+  live. The observation is true and the version it replaced worked, because the report
+  text contains the names; the version it introduced matched a delimiter the format does
+  not use. In the same sentence it pointed at `ConsultedAudit.inert_entries` as "a real
+  leave-one-out". It is one now, and `self_test` seeds both directions, which it never
+  had.
+
+  **A check that reports everything reports nothing**, and this one failed in the
+  direction that looks like diligence: twenty-five lines of "delete these", under a
+  heading saying the allowlist had rotted, produced by a matcher that could not have said
+  anything else. `--inert` exits zero by design — an inert entry is news, not a
+  violation — so nothing forced a reader to notice that the news never changed. Three
+  gates on this branch grew an `--inert` check after being caught with dead entries, and
+  this is the first evidence that such a check needs its own falsifying test as much as
+  the gate does.
+
+  Repaired, it found exactly one real entry: `EventKind.fence`, which
+  `Tests/Memory/EventClauses.lean` now mints three of. Deleted, with the reason kept in
+  the comment, because §7.1's fence event still has no producer in the *transition* and
+  §4.2 records that.
+- ~~**`Tools/CitationAudit.py` could not adjudicate prose citing a tool's own
+  internals.**~~ Its declaration set was built from Lean sources, and its blind-spot list
+  said so: a Python file naming `applyAuthorityDelta?` is naming a door rather than citing
+  a theorem, and a Lean-only declaration set cannot tell the two apart. That reasoning is
+  about the `Tools/*.py` files as *citers* and was silently carried over to them as
+  *cited*, so §4.4.1 naming a constant inside one of these gates was unadjudicated in
+  either direction.
+
+  The declaration set now includes each Python file's module-level constants, functions
+  and classes, anchored at column zero — an indented name is a local, and prose citing one
+  names something a reader cannot find. Two thirds of round twenty's findings are in this
+  directory and the entries recording them name the constants that changed; without this
+  every such citation would have needed an allowlist entry, which is the shape this file
+  calls "a judgement somebody made and is not one". It reported one immediately: the
+  entries above cite the exemption constant they deleted, and that citation is in ALLOWED
+  under the group for names deliberately naming something gone.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Four review rounds found the same shape and it is worth naming as a shape rather than
@@ -2377,9 +2546,9 @@ the field belongs beside it as something that can only add.
   *n* − 1 of these.
 
   **Neither door re-runs `issue?`, and a theorem says why that is safe.** Re-running
-  it would refuse correct splits, because `MayLend`'s unheld disjunct is false once
-  the source is outstanding and its lender-lends-again disjunct fails when the source
-  coexists with another lender's grant over the same bytes. So the justification is
+  it would refuse correct splits, because `MayLend`'s lender disjunct requires the
+  lender to own the storage and every outstanding grant to be its own, and a split's
+  source is outstanding and often lent by a context that owns nothing. So the justification is
   `splitGrant?_creates_no_authority` and `joinGrants?_creates_no_authority` — the
   result authorizes nothing the sources did not — with
   `splitGrant?_preserves_authority` and the two `joinGrants?_preserves_*_authority`
@@ -2652,13 +2821,14 @@ the field belongs beside it as something that can only add.
   nor lent, and it could not free or re-epoch the allocation because a grant was
   outstanding. Permanent seizure, in one accepted call, and reachable through `step`.
 
-  `MayLend` has three ways to be satisfied — nothing is held over the bytes, the
-  lender holds covering authority that `Permission.Grants` what it is lending, or every
-  grant over those bytes was lent by this lender — and each is a fixture in
-  `Tests/Op/StandardLoan.lean`. The first is the one that still admits a claim: seizing
-  bytes *nothing* is held over is indistinguishable from a legitimate owner's first
-  loan, and stays so until `AllocationRecord` records an owner, which is the same gap
-  the bullet below records from the other side.
+  `MayLend` has two ways to be satisfied — the lender holds covering authority that
+  `Permission.GrantsAsGrant` what it is lending, or it owns the storage, the storage
+  carries the rights, and every grant over those bytes was lent by this lender — and
+  each is a fixture in `Tests/Op/StandardLoan.lean`. There was a third, for bytes
+  nothing is held over, and it admitted a claim for two milestones: seizing unheld
+  bytes was indistinguishable from a legitimate owner's first loan until
+  `AllocationRecord` recorded an owner. It is gone now, for the separate reason below
+  — an owner's first loan is the empty instance of the lender disjunct.
 - **Two live allocations may occupy the same machine address without being aliases.**
   `allocate?` refuses a metadata change under an outstanding grant and checks nothing
   about placement, and `AuthorizedAt` keys on `SharesBytes`, which is the declared
@@ -3123,15 +3293,21 @@ the field belongs beside it as something that can only add.
   `Granted`'s vacuity on an empty range becomes visible in a signature.
   `Tests/Memory/Loans.lean` states both over an arbitrary state with no `decide` in
   sight, since a fixture that could `decide` it would not be testing the bridge.
-- **The lender of a read-only loan is refused the read of its own bytes.** The loan
-  provider's holder half asks whether *anything* is held over the bytes, and if so
-  requires the accessor to hold covering authority. `AllocationRecord` records no
-  owner, so the lender and a context that never held anything are the same context to
-  that rule. Permitting the lender permits the stranger, and permitting the stranger
-  is how a context that was never let in joined an atomic protocol — review
-  demonstrated two contexts atomically writing the same live bytes with one holding
-  no grant. The over-refusal is the safe half of that trade and is recorded rather
-  than argued away; closing it properly needs an owner, which §5's arena model owes.
+- ~~**The lender of a read-only loan is refused the read of its own bytes.**~~ Closed
+  by `AllocationRecord.owners`, two milestones after this bullet said closing it needed
+  an owner §5's arena model owed. The holder clause of `refusalOf` now exempts an owner
+  that holds no grant of its own; `MemoryState.HeldBySelf` is the second half, because a
+  bare owner exemption would unbind an owner that took a *narrower* grant over its own
+  bytes. The four fixtures are named in §4.4's *Accessing.* paragraph above.
+
+  This bullet is the stale half of a repair that landed: the over-refusal it records
+  was gone, and it still read "`AllocationRecord` records no owner" — a document
+  stating a field does not exist five hundred lines below the paragraph describing the
+  field. `Tools/CitationAudit.py` adjudicates whether a cited *name* resolves and cannot
+  adjudicate a sentence in the present tense about what a resolving name does not have.
+  What is still open is narrower and is stated above: `HeldBySelf` is a predicate over
+  the whole range, so an owner holding a grant over one byte of it is bound over all
+  of it.
 - **An unplaced allocation opts out of the address check.** `denialOf` compares the
   declared address to the placement only when the allocation has a base, which is
   right for a logical address space — §7.5's SPIR-V `Private` storage class has no
@@ -3162,9 +3338,12 @@ the field belongs beside it as something that can only add.
   narrowing the buffer's `extent` under a live grant left the grant's range outside
   the allocation it was issued against, and moving its `base` left the grant naming
   bytes that had moved — both while the holder kept authority the record no longer
-  supported. Any metadata difference is now the refusal, because the property that
+  supported. Any difference in the record is now the refusal, because the property that
   matters is that the record a grant was checked against is still the record in the
-  table, and `AllocationRecord.Metadata` is exactly the part `denialOf` reads.
+  table. This sentence said "any *metadata* difference", and named
+  `AllocationRecord.Metadata` as exactly the part `denialOf` reads — which is true of
+  `Metadata` and was the reason the guard stated over it let `owners` and `bytes`
+  through, two paragraphs after this bullet says the guard is the whole record now.
 
   The state that skipping it produced was the one three rounds kept circling — a
   grant that freezes the storage that replaced it, authorizes nothing, and blocks a
