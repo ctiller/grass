@@ -103,4 +103,37 @@ inductive Derives : {α : Type} → Format α → Std.Logical.ByteArray → α �
       (derivation : Derives inner input value rest) :
       Derives (.iso inner isomorphism) input (isomorphism.forward value) rest
 
+namespace Derives
+
+/-- Prefix-format derivations are stable under an arbitrary appended suffix.
+The parsed value is unchanged and the exact residual bytes gain that suffix.
+This is the semantic transport law that lets concrete writers compose without
+revealing their implementations. -/
+theorem appendSuffix {α : Type} {format : Format α}
+    {input : Std.Logical.ByteArray} {value : α}
+    {rest : Std.Logical.ByteArray}
+    (derivation : Derives format input value rest)
+    (suffix : Std.Logical.ByteArray) :
+    Derives format (input ++ suffix) value (rest ++ suffix) := by
+  induction derivation with
+  | pure value input => exact Derives.pure value (input ++ suffix)
+  | byte accepts value rest accepted =>
+      simpa [Vec.append_assoc] using
+        Derives.byte accepts value (rest ++ suffix) accepted
+  | seq left right leftSuffix rightSuffix =>
+      exact Derives.seq leftSuffix rightSuffix
+  | choiceLeft derivation derivationSuffix =>
+      exact Derives.choiceLeft derivationSuffix
+  | choiceRight derivation derivationSuffix =>
+      exact Derives.choiceRight derivationSuffix
+  | repeatZero item input => exact Derives.repeatZero item (input ++ suffix)
+  | repeatSucc head tail headSuffix tailSuffix =>
+      exact Derives.repeatSucc headSuffix tailSuffix
+  | refine derivation accepted derivationSuffix =>
+      exact Derives.refine derivationSuffix accepted
+  | iso derivation derivationSuffix =>
+      exact Derives.iso derivationSuffix
+
+end Derives
+
 end Grass.Grammar

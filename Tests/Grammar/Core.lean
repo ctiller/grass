@@ -30,4 +30,11 @@ example (byte : Byte) (suffix : Std.Logical.ByteArray) :
       (Vec.singleton byte ++ suffix) byte suffix :=
   Derives.iso (Derives.byte (fun _ => True) byte suffix trivial)
 
+example (byte : Byte) (rest suffix : Std.Logical.ByteArray)
+    (derivation : Derives (.byte (fun _ => True))
+      (Vec.singleton byte ++ rest) byte rest) :
+    Derives (.byte (fun _ => True))
+      ((Vec.singleton byte ++ rest) ++ suffix) byte (rest ++ suffix) :=
+  derivation.appendSuffix suffix
+
 end Grass.Tests.Grammar

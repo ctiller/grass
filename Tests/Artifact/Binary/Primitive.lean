@@ -29,4 +29,8 @@ example (value : Byte) :
     takeByte (writeByte value) = .done value Vec.empty :=
   parse_write takeByte_realizes writeByte_realizes value
 
+example (value : Byte) (suffix : Std.Logical.ByteArray) :
+    Derives anyByteFormat (writeByte value ++ suffix) value suffix :=
+  writeByte_realizes.derivesWithSuffix value suffix
+
 end Grass.Tests.Artifact.Binary

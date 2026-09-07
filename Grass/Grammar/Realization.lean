@@ -57,6 +57,16 @@ structure WriterRealizes {α : Type} {format : Format α}
   selected : ∀ value,
     semantics.selectedDerivation (write value) value Vec.empty
 
+/-- A realized writer's derivation is valid in front of every suffix. This is
+the compositional form of writer soundness; it follows from the format law and
+does not ask the writer implementation for a second proof. -/
+theorem WriterRealizes.derivesWithSuffix {α : Type} {format : Format α}
+    {semantics : FormatSemantics format} {write : α → Std.Logical.ByteArray}
+    (writer : WriterRealizes semantics write) (value : α)
+    (suffix : Std.Logical.ByteArray) :
+    Derives format (write value ++ suffix) value suffix := by
+  simpa using (writer.sound value).appendSuffix suffix
+
 /-- Parser and writer realizations of the same selected language round-trip at
 the modeled value level and consume the complete written input. -/
 theorem parse_write {α : Type} {format : Format α}
