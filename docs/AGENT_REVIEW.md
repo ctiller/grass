@@ -107,11 +107,129 @@ underlying model may operate separate implementor and reviewer identities at
 different times, but one identity never mixes those workloads and may not review
 content produced through its other identity. Prefer genuinely separate agents.
 
-If the reviewer commits a material product fix, they become an author and lose
-eligibility to merge that content; another agent must review and merge it.
-Review comments or uncommitted patch suggestions do not by themselves create
-authorship. The reviewer must not resolve merge conflicts: that is product
-authorship. They request changes and leave integration to the authors.
+If the reviewer commits or materially generates a product fix, that content may
+not enter `main` under the reviewer identity. A fresh nomination cannot legalize
+it by naming the reviewer—the immutable reviewer role is not an implementor—or
+by omitting the reviewer, which launders authorship. The involved reviewer or
+author must publish the ordinary blocking `issue.opened` defined below; that
+issue is the contamination record in every discovery path. Preserve
+any published contaminated history for attribution but abandon it as a product
+candidate. An eligible clean-room implementor, distinct from every contaminating
+reviewer identity and unexposed to the reviewer-authored product material, must
+independently rebuild the needed change on a new branch from an uncontaminated
+base without incorporating reviewer-authored product text or code. A different
+reviewer identity, distinct from every contaminating reviewer and every author
+of the replacement, then reviews the replacement snapshot.
+
+For this rule, a prose diagnosis, behavioral requirement, described
+counterexample, transcript from an executed probe, or explicitly non-product
+pseudocode is review evidence only while it is not repository-ready product
+material. A finished normative paragraph, exact patch, repository-ready test or
+other code, or replacement content substantially derived from any of them is
+material generation even when it was never committed. Thus a reviewer may say
+"add a test for duplicate creation" or report the observed failure; supplying
+the exact test that the author commits is authorship. Undisclosed copying cannot
+in general be recovered from Git trailers or commit history, so the reviewer
+and implementor have a cooperative obligation to disclose contamination. A
+short illustrative suggestion does not by itself create authorship unless the
+product substantially incorporates it. The reviewer must not resolve merge
+conflicts: that is product authorship. They request changes and leave integration
+to implementors.
+
+For the clean-room rebuild, exposure means receiving or inspecting the finished
+paragraph, exact patch, repository-ready test or code, or a substantially
+equivalent rendering of it. The replacement implementor may receive only the
+uncontaminated precious specification and product requirements present at the
+exact named clean base, plus any later behavioral requirement that remains
+non-product review evidence under the boundary above, the described
+counterexample, executed probe results, and non-product pseudocode. A finished
+normative paragraph or repository-ready rendering remains prohibited regardless
+of when it was produced. If contaminated or derived material entered
+product history, the rebuild base is the exact latest eligible commit in the
+intended lineage strictly before its first incorporation; no descendant of a
+contaminated candidate is eligible merely because a later revert makes its tree
+look clean. When the material was never committed or incorporated, the base may
+instead be the clean branch tip at incident discovery. The incident record names
+that exact base. These are cooperative provenance assertions, not a helper-run
+history or content scan. If no unexposed implementor is available, or a clean
+boundary cannot be identified, the change is abandoned or deferred until one is
+available; no agent or user direction can waive clean-room eligibility by
+relabelling an exposed author.
+
+The helper can reject commits attributed to a reviewer, but it cannot infer who
+generated uncommitted text or whether one implementation was derived from a
+suggestion. That boundary is deliberately cooperative, not a content-matching
+subsystem. The author and reviewer must disclose it, and the formal reviewer
+must assess the provenance evidence.
+
+On every discovery, an author or reviewer first quarantines every affected local
+candidate, then opens an ordinary blocking issue naming every affected
+nomination or reassignment visible at that snapshot, including a withdrawn chain
+that has a potentially usable racing authorization. A later-visible affected
+nomination gets a supplemental blocking issue that names the root incident as
+evidence; immutable `blocks` sets are not branch or content tombstones.
+Immediately before publishing every root, supplemental, or escaped-incident
+issue, the reporter makes a fresh remote observation of `main` and records that
+exact tip as `code_commit`; if offline, the candidates remain quarantined and no
+product push occurs until reconnect. The issue targets a registered eligible
+implementor responsible for the independent replacement, or a registered
+coordinator when no such implementor is yet assigned; it never targets the
+contaminating reviewer. Its summary or evidence names the clean rebuild base and
+contaminated branch. The current helper verifies that `code_commit` resolves but
+not that it was freshly observed, so freshness is a cooperative assertion unless
+a later checked helper adds it.
+If discovery is before authorization, withdraw every
+affected nomination as well. Publication of those withdrawals is not sufficient
+to close the issue: a racing authorization may already have won, in which case
+the reducer deliberately leaves the authorization live. In every discovery path
+the issue stays open until a *separate clean reviewed merge* lands whose
+nomination cites the incident, whose candidate excludes the contaminated or
+derived material except for an explicitly reviewed removal, and whose first
+parent includes every `main` tip against which a racing authorization could have
+been formed before the barrier. Before closing, the target synchronizes and
+checks that every affected nomination then visible is withdrawn (or otherwise
+terminal in a way that forbids reauthorization) **and** every authorization it
+already produced has a stale `previous_main`. If the author cannot withdraw an
+affected nomination, the issue remains open. Any newly visible chain receives
+the supplemental issue above. The barrier merge receipt's event ID is recorded in
+`issue.resolved.summary`. That is unvalidated cooperative text, not a structural
+reference: the current schema fixes an issue resolution's refs to the issue and
+assignment only. An affected nomination deliberately hidden until after closure
+is likewise a cooperative provenance violation and is blocked when discovered;
+the bus has no content tombstone. An escaped contaminated candidate never
+qualifies merely by moving `main`; it makes the required barrier a separately
+reviewed removal or clean-room replacement after that escaped commit. If the
+author is unavailable, the withdrawal remains owed even though the issue already
+guards the nomination.
+If discovery is after authorization but before the product push, a freshly
+synchronized `merge-ready` refuses the nomination while the issue is open.
+The issue's current target must keep it open until the separate clean causal-
+barrier merge above makes every pre-barrier authorization stale and every
+affected nomination is terminal against reauthorization; it may then close the
+issue while recording that merge receipt in the unvalidated summary convention
+above.
+This is a cooperative rule, not a mechanical property of an ordinary issue. A
+premature `issue.resolved` or `issue.rejected` can make the old authorization
+usable again while `previous_main` still matches, and the current helper cannot
+distinguish that protocol violation from an honest disposition. The final
+preflight therefore proves only that no blocker is open at that moment. We
+accept and audit this boundary rather than add a second cancellation protocol,
+cross-ref CAS, or content-matching system.
+Preserve the contaminated branch for attribution but do not merge or revert on
+it. An eligible implementor independently rebuilds the wanted behavior on a new
+branch from the exact named uncontaminated base defined above, names the incident issue as
+evidence, and nominates a reviewer distinct from the contaminating reviewer and
+every replacement author.
+
+No local helper can atomically order a later bus issue against an already-started
+Git push, and this protocol adds no cross-ref CAS, receive hook, content scan, or
+repository-history walk. If the push has passed its synchronized final preflight,
+it may win. Discovery after that point is an escaped review violation: record it
+as an issue, repair current `main` through a separately reviewed removal or
+independent rebuild, and preserve the historical violation and its remediation
+in the audit trail. Semantic correctness of the escaped content is not grounds
+to omit the incident. The ordinary fast path and all local bus work remain
+millisecond-scale.
 
 ## 4. Nomination and review packet
 
@@ -591,8 +709,22 @@ nominations before adding a scheduler or merge service.
   open finding and must clear or supersede it; silence alone changes nothing.
 - A flawed merged change is fixed or reverted through another reviewed branch
   merge.
-- If a reviewer resolves a conflict or adds a material fix, another reviewer is
-  required for that content.
+- If a reviewer resolves a conflict or materially generates a product fix,
+  disclose it and open the contamination issue section 3 requires. Withdraw a
+  pre-authorization nomination; keep an already-authorized nomination blocked
+  until it is terminal against reauthorization and every authorization it
+  produced is stale.
+  Preserve but abandon the contaminated branch, then independently rebuild from
+  the exact named uncontaminated base defined in section 3 with an unexposed
+  implementor and a different
+  reviewer. The old nomination remains a historical record; the guard issue may
+  close only after the nomination is terminal against reauthorization and a
+  cited reviewed change has made every authorization it produced stale.
+  Branch replacement never silently supersedes or rehabilitates it.
+- If reviewer-generated product content is discovered after merge, record the
+  escaped review violation and complete a separately reviewed remediation. A
+  later removal, revert, or independent rebuild may remediate current `main`;
+  it never makes the historical violation disappear.
 - If `main` changes during merge, the reviewer retries from the new main; authors
   need act only if the merge no longer stays clean. Every required check reruns
   on the new candidate, which requires a new published authorization.
@@ -609,8 +741,10 @@ bypasses performed outside it:
 
 1. self-nomination or an inactive, unregistered, or non-`reviewer` nominee;
 2. authorization without accepted nomination for the product branch;
-3. reviewer authorship in the selected commit range;
-4. incomplete or false author identities;
+3. mechanically visible reviewer authorship in the selected commit range,
+   including a reviewer-valued authorship trailer;
+4. missing or unregistered authorship trailers, or an exact trailer set that
+   differs from the nomination's declared authors;
 5. unresolved findings or explicitly blocking issues;
 6. a candidate that omits current `main` or contains unreviewed side content;
 7. a merge requiring conflict resolution;
@@ -625,6 +759,11 @@ bypasses performed outside it:
 It also rejects product commits attributed to a `reviewer` identity and any
 attempt to change an identity's registered role.
 
+The helper does not detect a reviewer patch relayed through an implementor or
+coordinated false attribution. Those are cooperative provenance violations: the
+protocol records and acts on them when disclosed or independently evidenced,
+but Git metadata alone cannot make them mechanically distinguishable.
+
 Positive fixtures cover one and multiple authors, continued branch pushes during
 review, declined nomination followed by a new reviewer, requested changes fixed
 without re-nomination, reviewer loss and reassignment with finding disposition,
@@ -638,7 +777,10 @@ commits left for a later merge.
 1. Can an author manufacture or impersonate a reviewer?
 2. Can content enter the selected snapshot without reviewer inspection?
 3. Can commits pushed after selection leak into the merge?
-4. Does reviewer-authored product content force a different reviewer?
+4. Is reviewer-generated product content—including an uncommitted exact patch or
+   substantially derived replacement—disclosed and rebuilt from an
+   uncontaminated base rather than legalized by another reviewer, a revert, or
+   incomplete attribution?
 5. Can an unresolved finding be hidden by branch motion?
 6. Does a clean Git merge still receive exact-candidate integration checks?
 7. Does the rule work when agents share one GitHub credential?
