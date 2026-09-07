@@ -36,6 +36,7 @@ param(
         "Grass.BehaviorRefinement.mapPrefix_append",
         "Grass.BehaviorRefinement.preservesAcceptance",
         "Grass.VerifiedProgram.loadedBehavior_exact",
+        "Grass.VerifiedProgram.loadedAdequate",
         "Grass.VerifiedProgram.sound",
         "Grass.VerifiedProgram.execution_nonempty",
         "Grass.VerifiedProgram.execution_completes",

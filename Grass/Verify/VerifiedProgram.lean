@@ -33,6 +33,13 @@ theorem loadedBehavior_exact (verified : VerifiedProgram spec) :
   verified.artifact.format.loadExact
     (verified.artifact.format.writeParses verified.artifact.artifact)
 
+/-- The exact behavior loaded from emitted bytes inherits the artifact
+certificate's paired execution and completion adequacy guarantee. -/
+theorem loadedAdequate (verified : VerifiedProgram spec) :
+    (verified.artifact.format.loadedBehavior (emitProgram verified)).Adequate :=
+  ProgramBehavior.Adequate.cast verified.loadedBehavior_exact
+    verified.artifact.adequate
+
 /-- Loaded artifact behavior refines the portable process behavior. -/
 def refinement (verified : VerifiedProgram spec) :
     BehaviorRefinement
@@ -67,8 +74,7 @@ theorem execution_nonempty (verified : VerifiedProgram spec)
       (verified.artifact.format.loadedBehavior
         (emitProgram verified)).HasInput
           input execution } :=
-  verified.loadedBehavior_exact ▸
-    verified.artifact.adequate.execution input admitted
+  verified.loadedAdequate.execution input admitted
 
 /-- Every reachable finite frontier of the loaded behavior can either reach a
 terminal state or continue as an infinite execution. -/
@@ -78,8 +84,7 @@ theorem execution_completes (verified : VerifiedProgram spec)
     Nonempty ((verified.artifact.format.loadedBehavior
       (emitProgram verified)).system.Completion execution.state execution.graph
         execution.events) := by
-  exact (ProgramBehavior.Adequate.cast verified.loadedBehavior_exact
-    verified.artifact.adequate).completion execution
+  exact verified.loadedAdequate.completion execution
 
 end VerifiedProgram
 
