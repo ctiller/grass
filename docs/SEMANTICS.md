@@ -616,9 +616,16 @@ def ProviderDemandFamily.origins :
     ProviderDemandFamily -> Finset RequirementOriginId
 def ProviderDemandFamily.lookup :
     ProviderDemandFamily -> RequirementOriginId -> Option SomeProviderDemand
+def ProviderDemandFamily.lookupView
+    (family : ProviderDemandFamily) (origin : RequirementOriginId) :
+    Option ProviderDemandView := (family.lookup origin).map SomeProviderDemand.view
 theorem ProviderDemandFamily.lookup_exact ...
+theorem ProviderDemandFamily.lookupView_exact ...
 theorem ProviderDemandFamily.lookup_extension_registered ...
-theorem ProviderDemandFamily.ext ...
+theorem ProviderDemandFamily.ext
+    (sameOrigins : left.origins = right.origins)
+    (sameViews : forall origin, left.lookupView origin = right.lookupView origin) :
+    left = right
 def ProviderDemandFamily.empty : ProviderDemandFamily
 def ProviderDemandFamily.singleton
     (demand : ProviderDemand authority) : ProviderDemandFamily
@@ -633,7 +640,10 @@ def ProviderDemandFamily.reindex
     (family : ProviderDemandFamily)
     (embedding : ExtensionAuthorityEmbedding family.authorityRegistry target) :
     ProviderDemandFamily
-theorem ProviderDemandFamily.reindex_lookup ...
+theorem ProviderDemandFamily.reindex_lookup_reindexes ...
+theorem ProviderDemandFamily.reindex_lookupView
+    (family : ProviderDemandFamily) :
+    (family.reindex embedding).lookupView origin = family.lookupView origin
 theorem ProviderDemandFamily.reindex_authorityRegistry ...
 theorem ProviderDemandFamily.reindex_id ...
 theorem ProviderDemandFamily.reindex_comp ...
@@ -718,7 +728,11 @@ origin identity, and exact descriptor, but not an extension registry value,
 entry representation, or membership proof. `ProviderDemand.reindex_view`
 therefore makes registry reindexing provably invisible to semantic
 requirements while the dependent demand remains available for construction and
-lookup. This prevents a well-typed requirement predicate from changing truth
+lookup. `ProviderDemandFamily.lookupView` is the extensional observation used
+by family equality and semantic proofs; dependent `lookup` remains available
+to constructors, and its reindex theorem states structural correspondence
+rather than an ill-typed raw equality between differently indexed packages.
+This prevents a well-typed requirement predicate from changing truth
 merely because composition embeds its extension into a larger registry.
 
 Origins are local dependent construction data, not entries in a global static
