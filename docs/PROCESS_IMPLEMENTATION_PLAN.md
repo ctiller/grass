@@ -3013,6 +3013,24 @@ process layer and the network analogue was not, which a reviewer pointed out.
 
 Needs the same ruling as §10.49, and probably the same answer.
 
+**Narrowed, not closed, by §10.122.** `Tests/Process/ChimeFixtures.lean` moves the
+corpus off the `False` end — `chimingMeasure.demanded` is `· = Chime.chime`, and
+the production disjunct fires. It does not answer the ruling: `Chime` has one
+constructor, so that predicate is total on its type, which is the *permissive*
+end of the same complaint. A `demanded` that discriminates needs an observation
+type with something it does not demand, and no fixture has one. The two ends of
+§10.49 are now both exhibited at the network and the tie to a specification is
+still an author's choice.
+
+**Narrowed, not closed, by §10.120.** `Tests/Process/ChimeFixtures.lean` moves the
+corpus off the `False` end — `chimingMeasure.demanded` is `· = Chime.chime`, and
+the production disjunct fires. It does not answer the ruling: `Chime` has one
+constructor, so that predicate is total on its type, which is the *permissive*
+end of the same complaint. A `demanded` that discriminates needs an observation
+type with something it does not demand, and no fixture has one. The two ends of
+§10.49 are now both exhibited at the network and the tie to a specification is
+still an author's choice.
+
 ### 10.70 Every livelock this corpus knows about escapes through an author-supplied predicate
 
 `Tests/Process/ChatterFixtures.lean` is the fourth livelock with a full
@@ -3562,6 +3580,8 @@ What remains is **`NetworkProgressMeasure`**, which still has only `waitingPlan`
 — a plan whose `Observation` type is empty, so the "or produces a demanded
 observation" disjunct of `descendsOrProduces` can never fire. That is the largest
 single gap this milestone leaves, and it is a gap in the *progress* layer alone.
+
+**Closed** by `Tests/Process/ChimeFixtures.lean`. §10.122 is the entry.
 
 ### 10.89 A spawn can satisfy every field it has and not be a step
 
@@ -4482,6 +4502,62 @@ gate is met — it may not claim to discharge cancellation or supervision
 requirements, and it may not be consumed as a complete `ProcessPlan` by
 `VerifiedProgram`.
 
+### 10.122 §7's third escape now has a plan that takes it
+
+§10.88's residue, closed. `NetworkProgressMeasure.descendsOrProduces` is a
+three-way disjunction — entropy, a descending rank, or a produced
+specification-demanded observation — and until now the corpus's only measure was
+`waitingMeasure`, at a plan whose `Observation` type is `PEmpty`. Its `demanded`
+is `observation.elim`, so its third disjunct was not merely unused: it was
+unreachable in principle. A disjunct no plan can reach is the same shape as a
+record nothing inhabits, and this milestone has spent eight rounds on that class
+of defect.
+
+`Tests/Process/ChimeFixtures.lean` is `waitingPlan`'s skeleton with two changes:
+the observation type is inhabited by one constructor, and `chimer.Initial` emits
+it. That second change is what makes the fixture an argument rather than a
+stipulation — `ExactInitialNetwork.pendingProjected` forces a start's pending
+trace to be the projection of what starting emitted, so `chiming` holds the chime
+because the specification says so, not because the fixture put it there.
+`the_chime_is_committed` publishes it and `the_chime_takes_the_production_disjunct`
+reads out that at that step the other two disjuncts are both *false*: a commit is
+not `DrivenByEntropy`, and `Commits.scope` forbids it from touching `instances`,
+which is what the rank reads — so nothing descends and the observation is the
+whole payment.
+
+**The design mistake this entry is really about.** The first version set
+`Reachable := fun _ => True` and claimed `commit` was the plan's only transition,
+on the strength of `chimer.Step := False`, `ChannelKind := PEmpty`,
+`maySpawn := False` and three empty exceptional classes. That claim is true at
+`chiming` and `chimed` and false at the plan: `LogicalProcessNetwork` is a record,
+its unreachable inhabitants include a world whose slot holds an *attached* child,
+and at such a world `detach`, `childCancelled` and `childDied` are ordinary steps
+that publish nothing. The widest `Reachable` owes `descendsOrProduces` there too,
+so the fixture as first written was a proof of a false statement and Lean said so.
+
+This is §10.109's lesson at a different seam — "no reachable network is bad" and
+"no world of the record is bad" are different theorems — and it is worth recording
+that it recurred *while writing the fixture that was meant to close a gap in the
+same layer*. The repair is not a narrower `Reachable`: it is
+`produces_or_descends`, which carries `Tests/Process/FrontierFixtures.lean`'s
+structural slack unchanged, so the three parent-spending steps pay with rank and
+the commit pays with the chime. That makes `chimingMeasure` the corpus's first
+measure that both descends and produces, which is strictly more than §10.88 asked
+for.
+
+**What it does not show**, stated in the fixture rather than left to a reader:
+this is not an infinite producing run and this plan cannot exhibit one. The
+root's initial segment is finite, `Commits.earned` publishes each observation
+once, and `chimed.pending` is empty, so `nothing_happens_after_the_chime` rules
+out every constructor at that world and `the_chimed_world_is_a_frontier` follows
+— vacuously, in §10.71's sense. A plan whose producing run does not terminate
+would need a `Step` relation that emits forever, which is the next thing worth
+building here and is not owed by §7.
+
+Between the two fixtures all three of §7's escapes are now inhabited:
+`waitingPlan` takes entropy and descent, `chimingPlan` takes descent and
+production.
+
 ## 11. The authoring facade
 
 `docs/DECISIONS.md` decision 134, ruling `c-spike:4`'s third question and the
@@ -4595,7 +4671,7 @@ carries no count, because the two counts it has carried were both wrong:
 | Record | Why it was empty | Witness |
 |---|---|---|
 | `ProcessCorrect` | `handlesEveryEvent` and `terminalNoStep` contradicted each other | `Tests/Process/M1CorrectFixtures.lean`, then `CountdownCorrectFixtures` and `PrefixFixtures` |
-| `NetworkProgressMeasure` | `Commits` had no provenance, so no network could be at a frontier under any measure | `Tests/Process/FrontierFixtures.lean` |
+| `NetworkProgressMeasure` | `Commits` had no provenance, so no network could be at a frontier under any measure | `Tests/Process/FrontierFixtures.lean`, `Tests/Process/ChimeFixtures.lean` |
 | `ExactInitialNetwork` | nothing; it had never been built, and had absorbed two new fields with no proof breaking | `Tests/Process/FrontierFixtures.lean` |
 | `EndsInstance` | nothing; it had absorbed three | `Tests/Process/EndingFixtures.lean` |
 | `Restarts` | nothing | `Tests/Process/RestartFixtures.lean` |
@@ -4721,13 +4797,16 @@ because each found something the others did not:
 * **The proof-economics acceptance rule** — not started.
 * **`DirectProgramRealizes` transport** — §4 asks the adapter for it; the
   adapter delivers the syntax half only, and says so.
-* **A second plan-level `NetworkProgressMeasure`** — §10.88, narrowed. `Sound`,
-  `ExactInitialNetwork` and `WellFormed` now have witnesses at `serverPlan`, the
-  plan with real channels, slots and observations, in
-  `Tests/Process/PreservationFixtures.lean`. `NetworkProgressMeasure` still has
-  only `waitingPlan`, whose `Observation` type is empty — so the "or produces a
-  demanded observation" disjunct of `descendsOrProduces` has never been able to
-  fire. That is the largest gap the milestone leaves.
+* **A second plan-level `NetworkProgressMeasure`** — §10.88, **closed** by
+  §10.122. `Sound`, `ExactInitialNetwork` and `WellFormed` have witnesses at
+  `serverPlan`, the plan with real channels, slots and observations, in
+  `Tests/Process/PreservationFixtures.lean`, and `NetworkProgressMeasure` now has
+  `Tests/Process/ChimeFixtures.lean`'s `chimingMeasure` beside `waitingMeasure`.
+  Its `Observation` type is inhabited, its `demanded` is not an elimination, and
+  `the_chime_takes_the_production_disjunct` shows §7's production escape taken at
+  a step where the other two disjuncts are false. What is still owed is a
+  producing run that does not terminate: this plan's does, in one step, and says
+  so.
 
 ### Open findings by weight
 
