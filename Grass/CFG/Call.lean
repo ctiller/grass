@@ -118,6 +118,14 @@ variable {State : Type u} {Terminal : Type v}
 def returnTags (site : CallSite State Terminal) : List ExitTag :=
   site.returns.map CallReturn.tag
 
+/-- Return routing projected as ordinary CFG edges in authored outcome order. -/
+def returnEdges (site : CallSite State Terminal) : List (Edge Terminal) :=
+  site.returns.map fun result => ⟨result.tag, result.target⟩
+
+@[simp] theorem returnEdges_tags (site : CallSite State Terminal) :
+    site.returnEdges.map Edge.exit = site.returnTags := by
+  simp [returnEdges, returnTags]
+
 /-- Executable local check: the contract is structurally valid, the current
 stack has the exact required shape, and every supported outcome is routed once
 in canonical contract order. -/

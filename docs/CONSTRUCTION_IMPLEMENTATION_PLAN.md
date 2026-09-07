@@ -379,6 +379,12 @@ adds exact typed-application correspondence without promoting nominal lookup.
 over that exact normalized source before lowering. Constructor identity and
 exact generated bodies remain provenance evidence; neither is silently promoted
 into block-local semantic correctness.
+`Grass.Construct.Source.CallClosure` derives call occurrences from the exact
+located instruction expansion, checks targets and return routes against the
+containing graph block, requires each call to be the sole projection of that
+block's final instruction, and reports stable block/origin/projection diagnostics.
+Because state predicates are not executable equality, exact block-to-call
+contract correspondence remains a separate proof-bearing certificate.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
