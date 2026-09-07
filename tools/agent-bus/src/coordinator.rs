@@ -655,6 +655,20 @@ fn requires_complete_frontier(data: &crate::events::EventData) -> bool {
         crate::events::EventData::SchemaActivated(_)
         | crate::events::EventData::MergeEngineActivated(_)
         | crate::events::EventData::ReviewMergeAuthorized(_) => true,
+        // Section 2.2: the report "pins the inspected product revisions and
+        // observed event frontier". A sparse frontier pins one entry per
+        // referenced agent, so a clean report -- no issues, no `--observes`
+        // -- would publish having pinned *nothing* about the streams it
+        // claims to have examined. That is assurance without evidence, which
+        // is the specific failure `limitations` exists to prevent, so the one
+        // field that records what was observed has to be real.
+        //
+        // This makes an audit currency-sensitive too (`requires_synced_
+        // snapshot` builds on this), so a report cannot be published from a
+        // stale local cut. That is the right trade for an assurance artifact:
+        // an audit of a view that was already old is worth little, and the
+        // event carries no authority whose cost would argue the other way.
+        crate::events::EventData::AuditReported(_) => true,
         _ => false,
     }
 }
@@ -1257,6 +1271,11 @@ mod tests {
         );
     }
 
+    /// The coordinator half of the same rule: `build_frontier` must choose
+    /// the complete path for an audit report, and the report is therefore
+    /// currency-sensitive. Asserted on the predicates directly, because the
+    /// drain tests all supply a reachable remote and so cannot distinguish
+    /// "complete was chosen" from "sparse happened to be enough".
     /// An audit report pins the revisions it inspected. A mistyped one makes
     /// the report read as authoritative about a commit that does not exist,
     /// which is the same silent failure the sibling tests above cover for
@@ -1264,6 +1283,26 @@ mod tests {
     /// refuses a report naming a non-existent *issue*; this is the object-id
     /// half of the same rule, and it lives here because only the coordinator
     /// has the repository to resolve against.
+    #[test]
+    fn an_audit_report_is_frontier_complete_and_currency_sensitive() {
+        let data = EventData::AuditReported(crate::events::AuditReported {
+            inspected_commits: crate::scalars::StringSet::default(),
+            areas: vec![text("coordination history")],
+            methods: vec![text("replayed every stream")],
+            limitations: vec![],
+            issues: crate::scalars::StringSet::default(),
+            summary: text("clean"),
+        });
+        assert!(
+            requires_complete_frontier(&data),
+            "the frontier is the report's only record of what it observed"
+        );
+        assert!(
+            requires_synced_snapshot(&data),
+            "an audit of an already-stale view is worth little"
+        );
+    }
+
     #[test]
     fn drain_outbox_rejects_an_audit_report_pinning_a_nonexistent_commit() {
         let repo = init_repo();
@@ -1298,6 +1337,45 @@ mod tests {
         );
         crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
 
+        // The auditor needs a published stream root before it can build the
+        // complete frontier an `audit.reported` now requires -- every active
+        // member must have a stream for `build_complete_frontier` to name it.
+        crate::outbox::submit(
+            repo.path(),
+            "reg",
+            &Candidate::new(
+                &aud,
+                &EventData::AgentRegistered(crate::events::AgentRegistered {
+                    display_name: short("C Auditor"),
+                    primary_role: Role::Auditor,
+                    purpose: text("auditor:whole-architecture"),
+                    product_base: None,
+                    product_branch: None,
+                    provider: None,
+                    model: None,
+                }),
+                vec![],
+            ),
+        )
+        .unwrap();
+        // A reachable remote, because an `audit.reported` requires a complete
+        // frontier and is therefore currency-sensitive: the drain probes the
+        // remote before publishing one. Without this the candidate is refused
+        // for gate 17 rather than for the object id under test.
+        let origin = init_bare_origin();
+        let remote = origin.path().to_string_lossy().to_string();
+        let registered =
+            drain_outbox(repo.path(), repo.path(), &aud, &short("host1"), 0, &remote).unwrap();
+        assert_eq!(registered.rejected.len(), 0, "{registered:?}");
+        for r in [
+            crate::registry::REGISTRY_REF.to_string(),
+            crate::stream::stream_ref(&coord1).into_string(),
+            crate::stream::stream_ref(&aud).into_string(),
+        ] {
+            let push = crate::gitrepo::run(repo.path(), &["push", &remote, &r]).unwrap();
+            assert!(push.success, "{push:?}");
+        }
+
         crate::outbox::submit(
             repo.path(),
             "audit-1",
@@ -1320,7 +1398,7 @@ mod tests {
         .unwrap();
 
         let drained =
-            drain_outbox(repo.path(), repo.path(), &aud, &short("host1"), 0, "origin").unwrap();
+            drain_outbox(repo.path(), repo.path(), &aud, &short("host1"), 0, &remote).unwrap();
         assert!(drained.published.is_empty(), "{drained:?}");
         assert_eq!(drained.rejected.len(), 1);
         assert!(

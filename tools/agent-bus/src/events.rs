@@ -173,9 +173,12 @@ pub struct ProgressReported {
 /// explicitly (gate 22).
 ///
 /// The observed event frontier the design asks the report to pin is the
-/// envelope's own `observed` field, not a field here -- every event already
-/// carries it, and duplicating it would create two answers that could
-/// disagree.
+/// envelope's own `observed` field rather than a field here -- duplicating it
+/// would create two answers that could disagree. That is only true because
+/// this kind requires a *complete* frontier (`coordinator::requires_complete_
+/// frontier`): every event carries an `observed`, but a sparse one names only
+/// the agents the payload references, so a clean report would otherwise have
+/// pinned nothing at all about the streams it claims to have examined.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuditReported {
@@ -185,7 +188,10 @@ pub struct AuditReported {
     /// "without manufacturing empty issues".
     pub inspected_commits: StringSet<ObjectId>,
     /// What was examined -- architecture, proof surface, implementation,
-    /// validation evidence, coordination history.
+    /// validation evidence, coordination history. Must be nonempty: a report
+    /// that names no area is not a report, and the same precedent applies to
+    /// `friction.synthesized` ("must group at least one report") and
+    /// `review.changes_requested` ("findings must be nonempty").
     pub areas: Vec<Text>,
     /// How, so a reader can judge what the absence of a finding is worth.
     pub methods: Vec<Text>,
@@ -822,6 +828,18 @@ mod tests {
         assert_eq!(Role::Reviewer.to_string(), "reviewer");
         assert_eq!(Role::Coordinator.to_string(), "coordinator");
         assert_eq!(Role::Auditor.to_string(), "auditor");
+        // The `Display` impl above is hand-written and independent of serde,
+        // which is what actually decides the wire spelling and what
+        // `cli::parse_role` accepts. Renaming the serde spelling alone
+        // survived the whole suite until this assertion existed.
+        assert_eq!(
+            serde_json::to_value(Role::Auditor).unwrap(),
+            serde_json::Value::String("auditor".to_string())
+        );
+        assert_eq!(
+            serde_json::from_value::<Role>(serde_json::Value::String("auditor".into())).unwrap(),
+            Role::Auditor
+        );
     }
 
     #[test]

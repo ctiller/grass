@@ -139,11 +139,14 @@ The least-authority role was spelled `observer` in version one and is spelled
 `auditor` here. AGENT_COORDINATION_EVOLUTION.md section 2.2 renames the wire
 role rather than carrying two overlapping ones, and nothing was migrated
 because no `observer` was ever registered on this bus -- which is the reason
-that section gives for the rename being safe rather than breaking. An audit
-identity that must register before activation uses V1 `observer` with
-`purpose: auditor:<emphasis>`; it holds only observer authority until it
-migrates, and that spelling is a transition device, not a second long-term
-role.
+that section gives for the rename being safe rather than breaking. The design's V1 transition spelling -- registering as `observer` with
+`purpose: auditor:<emphasis>` until migration -- is deliberately **not**
+offered here, because it is already moot and following it would fail. The
+v1-to-v2 cutover has happened (AGENT_COORDINATION_EVOLUTION.md section 2.6),
+v1's `refs/heads/agent-bus` is read-only, so there is no v1 bus on which to
+register the transition spelling; and this helper rejects the string
+`observer` outright, so a reader who tried would get a parse error from
+`register --role`. An audit identity registers as `auditor`.
 
 Gate 24 ("a V1 `observer` registered for audit migrates to exactly one V2
 `auditor` identity without acquiring implementor or reviewer authority") is
@@ -294,6 +297,17 @@ refs = unique (blocks + evidence)
 ```
 
 Every `blocks` member is an opening review nomination or reassignment event.
+
+An auditor-opened `issue.opened` must carry an empty `blocks` set, and the
+helper rejects a nonempty one from an `auditor` identity
+(AGENT_COORDINATION_EVOLUTION.md section 2.2, gate 21). `blocks` makes an
+issue refuse the named reviewer's own `review.merge_authorized`, and only the
+issue's *target* may dispose of it -- so without this rule an auditor could
+halt a candidate at will and could not be made to release it, which is the
+"unilateral or indefinite candidate veto that the named reviewer cannot
+dispose" the design forbids. An auditor with an urgent finding routes the
+evidence to the reviewer and coordinator instead; the reviewer decides whether
+to publish a merge-blocking finding of its own.
 
 ### `issue.acknowledged`
 
@@ -745,9 +759,17 @@ what it reports would be clearing its own findings, which section 2.2 forbids
 (gate 22). A nominated reviewer may cite an audit as evidence but must still
 publish its own dispositions and authorization judgment (gate 23).
 
-`inspected_commits` and `issues` may both be empty: an audit of coordination
-history alone inspects no product commit, and a clean surface is reportable
-"without manufacturing empty issues". `limitations` is where blind spots are
+Requires a **complete** frontier, and is therefore currency-sensitive: it may
+not be published from a stale local cut. The frontier is the report's only
+record of what it observed, and a sparse one names just the agents the payload
+happens to reference -- a clean report would otherwise pin nothing at all
+about the streams it claims to have examined, which is exactly the
+assurance-without-evidence `limitations` exists to prevent.
+
+`areas`, `methods` and `summary` must be nonempty. `inspected_commits` and
+`issues` may both be empty: an audit of coordination history alone inspects no
+product commit, and a clean surface is reportable "without manufacturing empty
+issues". `limitations` is where blind spots are
 stated, because absence of a finding is not assurance that unexamined
 behavior is correct. The observed event frontier the report pins is the
 envelope's own `observed` field, not a field here.
