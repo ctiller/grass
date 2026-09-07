@@ -131,10 +131,24 @@ ALLOWED = {
     "RequirementKind.extension",
     "RequirementOrigin.prior",
     "RequirementOrigin.external",
-    # `docs/MEMORY_MODEL.md` section 7.1 makes control events part of the event
-    # vocabulary; nothing in this layer mints one, because control flow is the ISA
-    # owner's and the causal graph is M8's.
-    "EventKind.control",
+    # `EventKind.control` stood here too, on the reason that control flow is the
+    # ISA owner's and the causal graph is M8's -- accurate about the *transition*,
+    # which still mints none. It went the way its twin `EventKind.fence` went one
+    # round earlier and for the same reason: `Tests/Memory/EventClauses.lean` mints
+    # one now.
+    #
+    # It had to. `MemoryEvent.WellFormed`'s location clause says "a fence or control
+    # event has no location", and every fixture deciding it was a fence, so review
+    # narrowed the clause's guard from `touchesMemory = false` to `kind = .fence` --
+    # co-editing the `Decidable` instance, `sealClauses` and the producer's
+    # discharge -- and the whole tree stayed green with a control event carrying an
+    # eight-byte range admitted by the seal.
+    #
+    # That is a second cost of an entry here, beyond the dead-allowlist one this
+    # tool reports: **a constructor nothing builds is a constructor every clause
+    # about it is undecided for.** An entry recording "a later milestone owns the
+    # producer" is also recording that any rule quantifying over the type is
+    # exercised on a proper subset of it.
     # `EventKind.fence` stood here on the same ground and is gone. The reason was
     # accurate and remains recorded in `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 —
     # nothing in the *transition* can mint one, because `kindOf` yields only `read`,
@@ -399,7 +413,21 @@ def self_test() -> int:
     return 0
 
 
+# The options this gate accepts. A misspelt flag used to be ignored: `--self-tset`
+# and `--inertt` both ran the ordinary check and printed its success line at exit 0,
+# so a reviewer sweeping a mode across the gates got a pass from a tool that never
+# ran it. Review did exactly that in the round that found this, and one of the seven
+# gates had no `--inert` implementation at all -- which is invisible when an unknown
+# flag is a no-op and obvious the moment it is an error.
+KNOWN_OPTIONS = {"--self-test", "--inert"}
+
+
 def main() -> int:
+    unknown = [arg for arg in sys.argv[1:] if arg not in KNOWN_OPTIONS]
+    if unknown:
+        print("unknown option(s): " + " ".join(unknown), file=sys.stderr)
+        print("known: " + ", ".join(sorted(KNOWN_OPTIONS)), file=sys.stderr)
+        return 2
     if "--self-test" in sys.argv:
         return self_test()
     if "--inert" in sys.argv:

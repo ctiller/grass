@@ -227,7 +227,21 @@ def self_test() -> int:
     return 0
 
 
+# The options this gate accepts. A misspelt flag used to be ignored: `--self-tset`
+# and `--inertt` both ran the ordinary check and printed its success line at exit 0,
+# so a reviewer sweeping a mode across the gates got a pass from a tool that never
+# ran it. Review did exactly that in the round that found this, and one of the seven
+# gates had no `--inert` implementation at all -- which is invisible when an unknown
+# flag is a no-op and obvious the moment it is an error.
+KNOWN_OPTIONS = {"--self-test", "--inert", "--hedged"}
+
+
 def main() -> int:
+    unknown = [arg for arg in sys.argv[1:] if arg not in KNOWN_OPTIONS]
+    if unknown:
+        print("unknown option(s): " + " ".join(unknown), file=sys.stderr)
+        print("known: " + ", ".join(sorted(KNOWN_OPTIONS)), file=sys.stderr)
+        return 2
     if "--self-test" in sys.argv:
         return self_test()
     if "--inert" in sys.argv:

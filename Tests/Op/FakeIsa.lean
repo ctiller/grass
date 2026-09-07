@@ -2634,6 +2634,46 @@ theorem the_same_plan_without_the_read_runs :
         if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 0
         else .none)).Ran := by decide
 
+/-! ### The bound is four questions on a descriptor, not two
+
+Each conjunct is an `if` on the intent, so `store` — which writes and does not read —
+lands in the read conjunct's *false* arm and the write conjunct's *true* arm, and the
+four fixtures above say nothing about the other two cells. Review neutered
+`if d.intent.writes then d.range.size else 0` to `else d.range.size` and the whole tree
+stayed green: a read-only access could declare a committed write of up to the range's
+size and be believed. The read conjunct's true arm survived the same way.
+
+`load` reads eight bytes and writes none, which is exactly the descriptor those two
+cells need. The lesson is one round older than the fixtures: **a guard's arity is the
+product of its branches, not the count of its conjuncts**. -/
+
+/-- **A write count on an access that writes nothing is refused.** `load` reads eight
+bytes and writes none, so a plan claiming one committed write byte describes something
+the substep cannot have done -- `Committed.writtenAbsent` forces it to zero, and law 8
+says refuse the impossible report rather than rewrite it. -/
+theorem a_write_count_on_a_read_only_access_is_refused :
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.load) thread₀ .thread
+      ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 0 1
+        else .none)).rejection? = some .faultCommitOutOfRange := by decide
+
+/-- **And a read count past what a reading access names is refused.** The other
+surviving cell: `load`'s intent reads, so its read count is bounded by the range rather
+than by zero, and sixteen exceeds eight. -/
+theorem a_read_count_past_a_reading_range_is_refused :
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.load) thread₀ .thread
+      ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 16 0
+        else .none)).rejection? = some .faultCommitOutOfRange := by decide
+
+/-- The control for both: the same load at the width it does name runs, so the two
+refusals are the counts and not the operation. -/
+theorem the_same_load_at_the_declared_width_runs :
+    (Grass.Op.step policy state₀ (SomeOperation.of Alpha.load) thread₀ .thread
+      ⟨⟨"alpha"⟩⟩ (faultAt := fun seq =>
+        if h : 0 < seq.substeps.length then .before ⟨0, h⟩ .pageFault 8 0
+        else .none)).Ran := by decide
+
 /-- **And a non-zero write count on a substep that touches no memory is refused.**
 This is the half the pre-repair bound got right; it is here so that the asymmetry
 cannot come back unnoticed in either direction. `divide`'s second substep is a

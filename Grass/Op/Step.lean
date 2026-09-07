@@ -155,12 +155,29 @@ inductive StepRejection where
   `faultPointOutOfRange` existed to prevent for the index: a machine report the
   model knows is impossible should be refused, not approximated.
 
-  The bound is **intent-relative**. A write-only access cannot have read anything
-  — `Committed.observedAbsent` forces `readCount = 0` — so a plan claiming a read
-  on a store is exactly such an impossible report, and the first version of this
-  check bounded both counts by the range and let it through to be quietly rewritten
-  to zero. Review found that asymmetry: an impossible count on a compute substep
-  was refused while an impossible count on an access was approximated. -/
+  The bound is **intent-relative, in both directions**. A write-only access cannot
+  have read anything — `Committed.observedAbsent` forces `readCount = 0` — and a
+  read-only one cannot have written, which `Committed.writtenAbsent` forces the same
+  way. So a plan claiming a read on a store, or a write on a load, is an impossible
+  report; the first version of this check bounded both counts by the range and let
+  either through to be quietly rewritten to zero. Review found that asymmetry: an
+  impossible count on a compute substep was refused while an impossible count on an
+  access was approximated.
+
+  **It is four guards, not two, and three rounds each closed one of them.** Each
+  conjunct is itself an `if` on the intent, so the descriptor arm asks four questions
+  and the arm below asks two more. Round nineteen gave the write conjunct's
+  intent-true case a fixture; round twenty gave the compute arm's read conjunct one,
+  after the round-nineteen lesson turned out to be about the other branch of this
+  `match`; round twenty-one found that both remaining arms of the descriptor case
+  survived neutering — a read-only access could declare a committed write of up to
+  `range.size`, and a reading access's read count was bounded by nothing a fixture
+  defended. `Tests/Op/FakeIsa.lean` now exercises all six, `load` supplying the
+  reading descriptor and `store` the writing one.
+
+  The generalisation, three rounds running: **a guard's arity is the product of its
+  branches, not the count of its conjuncts**, and a fixture pair naming a symmetry is
+  evidence about the two cells it lands in. -/
   | faultCommitOutOfRange
   /-- A substep may raise a fault class the operation's `faults` facet does not
   declare.

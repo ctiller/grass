@@ -134,7 +134,14 @@ ALLOWED = {
     # Diagnostic identity: carried so a report or rejection can name which one,
     # never dispatched on. `id` and `name` were here too and suppressed nothing.
     "label",
-    "origin",
+    # Qualified after review measured it. Bare, this entry also silenced
+    # `DerivedDemandFamily.origin` in `Grass/Core/Demand.lean` -- which is not
+    # diagnostic identity at all: it is the field saying every demand in a derived
+    # family either descends from a prior key *with a membership proof* or names an
+    # external authority. It is another owner's module, of the kind the group below
+    # says must be listed and reported rather than silenced, and it was silenced by an
+    # entry from this group whose stated reason is about something else entirely.
+    "EventCause.origin",
     # --- The eighteen that `PROOF_BUNDLES` used to cover. Qualified, because the
     # --- reason is about these structures and not about anything named `evidence`.
     #
@@ -240,9 +247,18 @@ ALLOWED = {
     "graphZero",
     "consistent",
     "initialGraph",
+    # And `Grass/Core/Demand.lean`, the same way and for the same reason. This one was
+    # *already* silenced, by the bare `origin` entry two groups above, whose reason
+    # ("diagnostic identity, never dispatched on") is false of it. Reported to that
+    # owner as part of `c-mem:52` rather than decided here.
+    "DerivedDemandFamily.origin",
     # Diagnostic provenance carried into the trace for a report to read, never
-    # dispatched on, like `id` and `origin` above.
-    "cause",
+    # dispatched on, like `id` and `origin` above. Two structures carry a field so
+    # named and the reason is true of both, so both are listed -- which is the point of
+    # qualifying rather than the cost of it: the reason is now attached to a decision
+    # about each, and a third `cause` arriving somewhere else will be reported.
+    "MemoryEvent.cause",
+    "RaisedFault.cause",
     "substep",
     # The resource layer is built ahead of its consumers, which arrive at M7 and
     # M9. Nothing outside Grass/Resource projects any of it yet.
@@ -251,7 +267,8 @@ ALLOWED = {
     # "projected" in the sense this tool looks for. Found by widening the field
     # pattern to accept a capital initial, which is what made it visible at all.
     "Value",
-    "zero",
+    "ResourceAlgebra.zero",
+    "ResourceLimit.zero",
     "limit",
     "exhaustion",
     "lifecycle",
@@ -417,6 +434,26 @@ def self_test() -> int:
     finally:
         ALLOWED = original
 
+    # The over-broad check, both directions. A bare entry naming a field that two
+    # structures declare is reported; the same entry qualified is not, and a bare entry
+    # naming a field only one structure declares is not.
+    two = ('structure Probe where\n  quarry : Nat\n'
+           'structure Decoy where\n  quarry : Nat\n'
+           'structure Only where\n  lone : Nat\n')
+    try:
+        ALLOWED = {"quarry"}
+        if not overbroad_entries({"a.lean": two}):
+            print("  SELF-TEST FAILED: a bare entry naming two structures' fields is "
+                  "not reported as over-broad")
+            failures_qualified += 1
+        ALLOWED = {"Probe.quarry", "Decoy.quarry", "lone"}
+        if overbroad_entries({"a.lean": two}):
+            print("  SELF-TEST FAILED: qualified entries, or a bare entry with one "
+                  "carrier, are reported as over-broad")
+            failures_qualified += 1
+    finally:
+        ALLOWED = original
+
     failures = failures_qualified
     for label, sources, should_report in cases:
         reported = any("Probe.quarry" in line for line in analyse(sources))
@@ -451,6 +488,48 @@ def self_test() -> int:
     return 0
 
 
+def overbroad_entries(declared: dict[str, str]) -> list[str]:
+    """Report every bare `ALLOWED` entry that names a field on more than one structure.
+
+    An entry may be written bare (`label`) or qualified (`Structure.field`). A bare
+    entry exempts its name *everywhere*, so it can be a true statement about one
+    structure and a silent one about another -- and `inert_entries` cannot say so,
+    because leave-one-out asks whether an entry suppresses something and never how
+    much.
+
+    Review found three. The one that mattered was `origin`: written for
+    `EventCause.origin` under the reason "diagnostic identity, never dispatched on",
+    it also silenced `DerivedDemandFamily.origin` in another owner's module -- a field
+    carrying the proof that a derived demand descends from a prior key, in the very
+    module this file's own comments say must be *listed and reported* rather than
+    silenced.
+
+    This is round twenty's lesson one level in. That round replaced a structure-name
+    *pattern* with per-field entries because "an exemption keyed on a name pattern is a
+    claim about every structure that will ever match it". A bare entry is a name
+    pattern with one element. Failing rather than reporting, because unlike an inert
+    entry this does not become true on its own: it is a claim nobody made, and the fix
+    is always the same one line.
+    """
+    owners: dict[str, set[str]] = {}
+    for text in declared.values():
+        for structure, field, _ in fields_in(text):
+            owners.setdefault(field, set()).add(structure)
+    out = []
+    for entry in sorted(ALLOWED):
+        if "." in entry:
+            continue
+        carriers = sorted(owners.get(entry, ()))
+        if len(carriers) > 1:
+            out.append(
+                f"  ALLOWED entry {entry!r} names a field on "
+                + str(len(carriers))
+                + " structures: "
+                + ", ".join(f"{c}.{entry}" for c in carriers)
+            )
+    return out
+
+
 def inert_entries(declared: dict[str, str], readers: dict[str, str]) -> list[str]:
     """The `ALLOWED` entries whose removal would change nothing.
 
@@ -475,7 +554,21 @@ def inert_entries(declared: dict[str, str], readers: dict[str, str]) -> list[str
     return inert
 
 
+# The options this gate accepts. A misspelt flag used to be ignored: `--self-tset`
+# and `--inertt` both ran the ordinary check and printed its success line at exit 0,
+# so a reviewer sweeping a mode across the gates got a pass from a tool that never
+# ran it. Review did exactly that in the round that found this, and one of the seven
+# gates had no `--inert` implementation at all -- which is invisible when an unknown
+# flag is a no-op and obvious the moment it is an error.
+KNOWN_OPTIONS = {"--self-test", "--inert"}
+
+
 def main() -> int:
+    unknown = [arg for arg in sys.argv[1:] if arg not in KNOWN_OPTIONS]
+    if unknown:
+        print("unknown option(s): " + " ".join(unknown), file=sys.stderr)
+        print("known: " + ", ".join(sorted(KNOWN_OPTIONS)), file=sys.stderr)
+        return 2
     if "--self-test" in sys.argv:
         return self_test()
     declared = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
@@ -490,6 +583,15 @@ def main() -> int:
         else:
             print("consulted audit: every allowlist entry suppresses a report")
         return 0
+    overbroad = overbroad_entries(declared)
+    if overbroad:
+        print("\n".join(overbroad))
+        print("\nconsulted audit: an allowlist entry claims more than one structure\n")
+        print(
+            f"{len(overbroad)} bare entry/entries. Qualify each as `Structure.field` "
+            "for the structures the reason is actually about."
+        )
+        return 1
     unread = analyse(declared, readers)
 
     if unread:

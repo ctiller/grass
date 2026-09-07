@@ -118,6 +118,31 @@ def analyse(declared: dict[str, str], used: dict[str, str] | None = None) -> lis
     return reported
 
 
+def inert_entries(declared: dict[str, str],
+                  used: dict[str, str] | None = None) -> list[str]:
+    """The `ALLOWED` entries whose removal would change nothing.
+
+    A leave-one-out, the shape `ConsultedAudit.py` established. This gate had no such
+    check while four siblings grew one -- three of them after review found dead entries,
+    and the fourth after review found its check reporting every entry it had. An
+    allowlist is a record of decisions, so an entry that suppresses nothing records a
+    decision about nothing; here that is the *good* case, because an entry becomes inert
+    exactly when somebody starts using the fixture.
+
+    Reported rather than failed, for that reason.
+    """
+    global ALLOWED
+    original = set(ALLOWED)
+    base = set(analyse(declared, used))
+    inert = []
+    for entry in sorted(original):
+        ALLOWED = original - {entry}
+        if not set(analyse(declared, used)) - base:
+            inert.append(entry)
+    ALLOWED = original
+    return inert
+
+
 def self_test() -> int:
     failures = 0
 
@@ -164,6 +189,25 @@ def self_test() -> int:
               "module docstring says only `def`s are")
         failures += 1
 
+    # The `--inert` sweep, both directions. Four sibling gates grew this check only
+    # after review found something wrong with their allowlists; this file had none at
+    # all, which is why review found it by counting the gates rather than by reading
+    # one.
+    global ALLOWED
+    saved_allowed = set(ALLOWED)
+    live = {"Tests/Memory/Loans.lean": "def orphan : Nat := 1" + chr(10)}
+    ALLOWED = {"orphan"}
+    if inert_entries(live) != []:
+        print("  SELF-TEST FAILED: an entry that suppresses a real report is called "
+              "inert")
+        failures += 1
+    ALLOWED = {"orphan", "nothingNamedThis"}
+    if inert_entries(live) != ["nothingNamedThis"]:
+        print("  SELF-TEST FAILED: an entry that suppresses nothing is not reported, "
+              "or a live one is")
+        failures += 1
+    ALLOWED = saved_allowed
+
     if failures:
         print(f"fixture audit self-test: {failures} failure(s)")
         return 1
@@ -171,9 +215,35 @@ def self_test() -> int:
     return 0
 
 
+# The options this gate accepts. A misspelt flag used to be ignored: `--self-tset`
+# and `--inertt` both ran the ordinary check and printed its success line at exit 0,
+# so a reviewer sweeping a mode across the gates got a pass from a tool that never
+# ran it. Review did exactly that in the round that found this, and one of the seven
+# gates had no `--inert` implementation at all -- which is invisible when an unknown
+# flag is a no-op and obvious the moment it is an error.
+KNOWN_OPTIONS = {"--self-test", "--inert"}
+
+
 def main() -> int:
+    unknown = [arg for arg in sys.argv[1:] if arg not in KNOWN_OPTIONS]
+    if unknown:
+        print("unknown option(s): " + " ".join(unknown), file=sys.stderr)
+        print("known: " + ", ".join(sorted(KNOWN_OPTIONS)), file=sys.stderr)
+        return 2
     if "--self-test" in sys.argv:
         return self_test()
+    if "--inert" in sys.argv:
+        declared = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
+                    for path in DECLARED_IN}
+        used = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
+                for path in USED_IN}
+        inert = inert_entries(declared, used)
+        if inert:
+            print("allowlist entries that suppress nothing: " + ", ".join(inert))
+            print("Delete them, or say why the entry is kept with no effect.")
+        else:
+            print("fixture audit: every allowlist entry suppresses a report")
+        return 0
     declared = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
                 for path in DECLARED_IN}
     used = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")

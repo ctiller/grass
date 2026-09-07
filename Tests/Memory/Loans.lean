@@ -569,6 +569,24 @@ theorem a_non_empty_installed_grant_conflicts_forwards :
     loanOfHead.range.Meets (⟨0, 8⟩ : ByteRange) := by
   exact ⟨by decide, by decide⟩
 
+/-- **What the forward `Meets` direction is for**, and the mirror of the two theorems
+above. Its job is the case the reverse direction's job is not: a *new* grant of no
+bytes, sitting inside the range an installed grant covers.
+
+The theorem above says only that the forward direction is true on a pair where both
+directions are, so deleting the forward disjunct changed nothing and review deleted it
+with the whole tree green -- which is exactly the state round twenty found the reverse
+direction in, one round after repairing it. A pair on which both directions hold is
+evidence about neither.
+
+`issue?_eq_none_of_empty` refuses this grant at the door, and cites this direction for
+why the refusal is decoration rather than the rule. That citation is what this decides. -/
+theorem an_empty_new_grant_still_conflicts :
+    lentHead.LoanConflicts loanOfHead { tailLoan with range := ByteRange.empty 4 } ∧
+    loanOfHead.range.Meets (ByteRange.empty 4) ∧
+    ¬ (ByteRange.empty 4).Meets loanOfHead.range := by
+  exact ⟨by decide, by decide, by decide⟩
+
 /-- And the same second loan overlapping the first is refused, so the acceptance above
 is the disjointness and not the holders. The two grants differ in `range` alone. -/
 theorem an_overlapping_half_conflicts :

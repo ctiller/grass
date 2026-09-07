@@ -394,7 +394,15 @@ PATH_CITATION = re.compile(r"`([A-Za-z0-9_][A-Za-z0-9_/.-]*\.(?:lean|md|py|ps1|t
 # what the tool does, and one document another owner has not written yet.
 ALLOWED_PATHS = {
     # `Tools/CitationAudit.py` explains its own rules with example targets.
-    "../docs/FOUNDATION.md", "Grass/docs/FOUNDATION.md", "docs/NAME.md",
+    #
+    # `"../docs/FOUNDATION.md"` stood here and was structurally unreachable: the first
+    # character class of `PATH_CITATION` excludes `.`, so a citation written
+    # `../docs/FOUNDATION.md` is extracted as `docs/FOUNDATION.md`, which exists. The
+    # entry could never suppress anything, and it was invisible for the same reason it
+    # was written -- `--inert` swept `ALLOWED` and not this list, so the mechanism that
+    # exists to stop allowlist rot was blind to one of the two allowlists in its own
+    # file. Both are swept now.
+    "Grass/docs/FOUNDATION.md", "docs/NAME.md",
     # Cited by `Grass/Std/Logical/Bag.lean`, which is another owner's module; the
     # document is theirs to write and the citation is theirs to keep or drop.
     "docs/PROCESS_IMPLEMENTATION_PLAN.md",
@@ -580,6 +588,31 @@ def self_test() -> int:
               "are resolvable here")
         failures += 1
 
+    # **What `--inert` silently depends on.** That sweep empties both allowlists, joins
+    # the reports, and looks for each entry name inside backticks. It is sound only
+    # while every report format it reads puts the name in backticks --
+    # `ReachabilityAudit.py`'s did not, and its inert check therefore reported every
+    # entry in its allowlist, every run, for its whole life, which review found the
+    # round before this seed was written. Both formats this sweep reads are checked
+    # here, so the same rot cannot arrive by someone rewording a report line.
+    decl_report = check_declarations(
+        {"a.lean": comment_text("/-- see `zzz_no_such_name` -/")}, names)
+    if not decl_report or "`zzz_no_such_name`" not in decl_report[0]:
+        print("  SELF-TEST FAILED: a declaration report does not backtick the cited "
+              "name, which is what --inert matches on")
+        failures += 1
+    # The path written with `chr(96)` rather than as a literal, because this file
+    # is one of the ones `check_paths` scans: a seeded dead path spelled out here
+    # is a real citation of a file that does not exist, and the gate reported
+    # itself twice the first time this case was written.
+    tick = chr(96)
+    dead_path = tick + "docs/zzz_no_such_doc.md" + tick
+    path_report = check_paths({"a.lean": "-- see " + dead_path + chr(10)})
+    if not path_report or dead_path not in path_report[0]:
+        print("  SELF-TEST FAILED: a path report does not backtick the cited path, "
+              "which is what --inert matches on")
+        failures += 1
+
     if failures:
         print(f"citation audit self-test: {failures} failure(s)")
         return 1
@@ -587,7 +620,21 @@ def self_test() -> int:
     return 0
 
 
+# The options this gate accepts. A misspelt flag used to be ignored: `--self-tset`
+# and `--inertt` both ran the ordinary check and printed its success line at exit 0,
+# so a reviewer sweeping a mode across the gates got a pass from a tool that never
+# ran it. Review did exactly that in the round that found this, and one of the seven
+# gates had no `--inert` implementation at all -- which is invisible when an unknown
+# flag is a no-op and obvious the moment it is an error.
+KNOWN_OPTIONS = {"--self-test", "--inert"}
+
+
 def main() -> int:
+    unknown = [arg for arg in sys.argv[1:] if arg not in KNOWN_OPTIONS]
+    if unknown:
+        print("unknown option(s): " + " ".join(unknown), file=sys.stderr)
+        print("known: " + ", ".join(sorted(KNOWN_OPTIONS)), file=sys.stderr)
+        return 2
     if "--self-test" in sys.argv:
         return self_test()
 
@@ -613,11 +660,25 @@ def main() -> int:
             if path.name not in LEAN_FACING_DOCS:
                 continue
             prose[path.relative_to(ROOT).as_posix()] = path.read_text(encoding="utf-8")
-        listed = sorted(ALLOWED)
+        # Both allowlists, and over the same inputs `main` gives each check. Review
+        # found `ALLOWED_PATHS` unswept and already carrying a dead entry -- the same
+        # finding this mode exists to make, in the file that makes it, one list over.
+        global ALLOWED_PATHS
+        tools = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
+                 for path in TOOL_FILES}
+        lean_facing = {name: text for name, text in prose.items()
+                       if Path(name).name in LEAN_FACING_DOCS}
+        listed = sorted(ALLOWED) + sorted(ALLOWED_PATHS)
         saved = ALLOWED
+        saved_paths = ALLOWED_PATHS
         ALLOWED = set()
-        reported = " ".join(check_declarations(prose, names))
+        ALLOWED_PATHS = set()
+        reported = " ".join(check_declarations(prose, names)
+                            + check_paths(prose)
+                            + check_paths(tools)
+                            + check_paths(lean_facing))
         ALLOWED = saved
+        ALLOWED_PATHS = saved_paths
         # Exact names rather than a substring of the joined report. An entry that
         # is a strict prefix of some *other* reported name read as live: review
         # added a deliberate prefix to each of these two lists and both passed,

@@ -2308,10 +2308,16 @@ the four generated-name prefixes as *prefixes* of the last name component, on
 
   The rule is per (door, module) now: a door's *declaring* module is always allowed,
   because a door its own module may not call is not a door; a cross-module allowance
-  must have a caller. `--inert` reports one that does not, which makes `DoorAudit` the
-  fifth of five allowlist-bearing gates to grow that check after being found with dead
-  entries. That is no longer a coincidence and it is the argument for building the check
-  first next time.
+  must have a caller. `--inert` reports one that does not, which made `DoorAudit` the
+  fifth allowlist-bearing gate to grow that check after being found with dead entries.
+  That is no longer a coincidence and it is the argument for building the check first
+  next time.
+
+  This said "the fifth **of five**", and there are seven allowlists across seven
+  gates: `FixtureAudit.py` and `SourceLocationAudit.py` had none, and `CitationAudit.py`
+  has two. The count was written from the list of gates that had been repaired rather
+  than from the list that exists, which is the same error one scale up as an
+  exemption written from the case that prompted it. All seven have the check now.
 - ~~**Eleven references to a module deleted four hundred commits earlier**, three of
   them the reproduction steps justifying two `DoorAudit` entries.~~ So the negative
   tests behind a gate could not be reproduced from the tree as documented. Alongside
@@ -2491,6 +2497,154 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   calls "a judgement somebody made and is not one". It reported one immediately: the
   entries above cite the exemption constant they deleted, and that citation is in ALLOWED
   under the group for names deliberately naming something gone.
+
+- ~~**`Tests/Memory/EventClauses.lean`'s index decided events the file did not
+  contain, and the commit message described repairs that never landed.**~~ Round twenty
+  added `each_neighbour_fails_exactly_one_clause` to close the defect that five of
+  thirteen neighbours failed two or three clauses each. It wrote its entries as **fresh
+  event terms** rather than over the neighbours the theorems above state — so for two
+  clauses it decided a repaired event the file did not have, for two more it decided
+  nothing at all, and the four other repairs the commit message claimed (two neighbour
+  values, two deleted theorems, the header's clause count, the pairing paragraph) were
+  never applied at all. The script that made them was written and not run, and the
+  commit message was written from the script.
+
+  Every neighbour is a `def` now, and both the refusal theorem and the index entry are
+  stated over that one name, so the two cannot drift. Twelve neighbours for eleven
+  clauses, four controls, and the two theorems naming deleted clauses are gone.
+
+  **An index that does not name the same terms as the thing it indexes is not an
+  index** — and it is worse than none, because it reads as the check. This is the third
+  round in a row in which a repair to this file was defective, and the second in which
+  the defect was that a mechanism and the thing it measures were quantified over
+  different objects. The generalisation for the commit message is narrower and harsher:
+  **a claim that a repair landed is a claim about the tree, not about the intent**, and
+  the tree was not read before the message was written.
+- ~~**`Grass/Op/Step.lean`'s fault-commit bound is six guards and four had fixtures.**~~
+  Each conjunct of the descriptor arm is itself an `if` on the intent, so the arm asks
+  four questions, and the no-descriptor arm asks two. Round nineteen closed one, round
+  twenty closed a second after finding the round-nineteen lesson had not crossed the
+  `match`, and round twenty-one found *both remaining cells of the descriptor arm*
+  surviving neutering: a read-only access could declare a committed write of up to
+  `range.size`, and a reading access's read count was bounded by nothing a fixture
+  defended. `Alpha.load` supplies the reading descriptor the four `store` fixtures could
+  not, and all six cells are exercised now.
+
+  Three rounds, one guard, the same shape each time. **A guard's arity is the product of
+  its branches, not the count of its conjuncts**, and a fixture pair that names a
+  symmetry is evidence about the two cells it lands in.
+- ~~**`MayLend`'s sublet disjunct bounded rights and asserted extent.**~~ Its docstring's
+  boldfaced claim is "you cannot lend what you do not have". That was proved of the
+  rights term — `an_atomic_grant_does_not_sublet_as_an_ordinary_one` and
+  `a_borrower_may_not_sublend_more_than_it_holds` — and nothing tested the byte term.
+  Review weakened `entry.2.range.Contains grant.range` to `Meets`, co-editing the one
+  place the module's own proof consumes it so the mutation tested the statement rather
+  than the script, and the whole tree stayed green: **a borrower of four bytes could
+  sublet eight**, and the sub-borrower was then authorized over bytes no grant in the
+  chain covers. Reachable, not merely expressible — two read-only grants do not conflict
+  and `LoanConflicts` needs a writer, so the conflict scan does not stop it.
+
+  `a_borrower_may_not_sublend_more_bytes_than_it_holds` is the fixture, with the sublet
+  at four bytes as its control and `the_door_refuses_the_oversized_sublet` saying the
+  door agrees with the predicate. This is authority created from nothing, in the
+  definition three rounds have been repairing, found by attacking the half of a
+  two-part claim that had no fixture rather than the half that did.
+- ~~**`LoanConflicts`'s *forward* `Meets` direction was pinned by nothing**, one round
+  after its reverse was.~~ Round twenty found the reverse direction discriminated by
+  nothing, proved what it adds, and pinned it with a fixture carrying
+  `¬ emptyLoan.range.Meets ⟨0,8⟩` explicitly. The control it wrote beside that fixture,
+  `a_non_empty_installed_grant_conflicts_forwards`, is a pair on which *both* directions
+  hold — so deleting the forward disjunct changed nothing and review deleted it green.
+  `an_empty_new_grant_still_conflicts` is the mirror: a *new* grant of no bytes inside a
+  live one, which the forward direction catches and the reverse does not, and which is
+  the case `issue?_eq_none_of_empty`'s docstring cites it for.
+
+  **A fixture on which both halves of a disjunction hold is evidence about neither.**
+  That is the same sentence as round nineteen's about symmetric conjuncts, in the
+  repair round twenty wrote *because* of round nineteen's, one direction over.
+- ~~**The event seal's location clause names two event kinds and was decided for
+  one.**~~ "A fence or control event has no location, so its range is empty" — and every
+  fixture deciding it was a fence, because `EventKind.control` was minted nowhere in the
+  tree. Review narrowed the clause's guard from `touchesMemory = false` to
+  `kind = .fence`, co-editing the `Decidable` instance, `sealClauses` and the producer's
+  discharge, and the whole tree stayed green with a control event carrying an eight-byte
+  range admitted by the seal. `Tests/Memory/EventClauses.lean` mints one now, with its
+  own control and its own index row, and `"EventKind.control"` is out of
+  `Tools/ReachabilityAudit.py`'s allowlist — the second entry that tool has lost to a
+  fixture rather than to a deletion.
+
+  The generalisation is about the allowlist rather than the clause. **A constructor
+  nothing builds is a constructor every clause about it is undecided for.** An entry
+  recording "a later milestone owns the producer" is also, silently, recording that
+  every rule quantifying over that type is exercised on a proper subset of it — a cost
+  the tool does not report and the entry did not mention.
+- ~~**Three `Tools/ConsultedAudit.py` allowlist entries claimed two structures each, and
+  `--inert` cannot see it.**~~ Round twenty replaced a structure-name *pattern* with
+  per-field entries, on the rule that "an exemption keyed on a name pattern is a claim
+  about every structure that will ever match it". It qualified the eighteen entries the
+  pattern had covered and left thirty-four bare — and a bare entry is a name pattern
+  with one element. `cause`, `origin` and `zero` each exempted a field on two
+  structures.
+
+  `origin` is the one that mattered: written for `EventCause.origin` under "diagnostic
+  identity, never dispatched on", it also silenced `DerivedDemandFamily.origin` in
+  `Grass/Core/Demand.lean` — the field carrying the proof that a derived demand descends
+  from a prior key with a membership witness, in another owner's module, of exactly the
+  kind this file's own later comment says must be *listed and reported* rather than
+  silenced. It is listed in that group now and reported as part of `c-mem:52`.
+
+  `overbroad_entries` is the check, and it **fails** rather than reporting, because
+  unlike an inert entry this does not become true on its own. `--inert` structurally
+  cannot find it: leave-one-out asks whether an entry suppresses something and never how
+  much. **A mechanism that asks the wrong question passes every instance of the class it
+  cannot ask about** — which is the third distinct way an allowlist check on this branch
+  has been found blind, after the wrong-mechanism one and the wrong-delimiter one.
+- ~~**A second allowlist nothing swept, two gates with no `--inert` at all, and a
+  misspelt flag that passed.**~~ Three findings, one shape. `Tools/CitationAudit.py`'s
+  `--inert` swept `ALLOWED` and not `ALLOWED_PATHS`, the second allowlist added in the
+  same round — which was already carrying a structurally unreachable entry,
+  `"../docs/FOUNDATION.md"`, that `PATH_CITATION`'s leading character class can never
+  emit. `Tools/FixtureAudit.py` and `Tools/SourceLocationAudit.py` had no `--inert`
+  mode. And every gate ignored unknown flags, so `--inert` on a gate that had never
+  implemented it ran the ordinary check and printed its success line at exit 0 —
+  review swept the modes across the seven gates and got seven green lines, one of which
+  was not the check it named.
+
+  All seven now reject an unknown option with exit 2, both new sweeps are real
+  leave-one-outs seeded in both directions, and `CitationAudit`'s self-test asserts the
+  property its sweep silently depends on — that every report format it reads puts the
+  cited name in backticks, which is precisely what `ReachabilityAudit`'s did not.
+
+  §4.4.1's own count was wrong too: it said "the fifth of five allowlist-bearing gates".
+  There are seven allowlists across seven gates. **An exhaustiveness claim about a set
+  of gates is worth checking against the gates**, and this one was written from the list
+  of gates that had been repaired rather than from the list that exists.
+- ~~**`Grass/Memory/Profile.lean`'s package docstring named a declaration that has never
+  existed.**~~ "`PackageHolds` below is the only thing that turns it into a claim: a
+  consumer that demands `PackageHolds` demands proofs of all eleven." Nothing declares
+  `PackageHolds`; the declaration is `RequiredProofPackage.Holds`, it conjoins eight and
+  its own docstring says eight, and three of the eleven fields are no longer `Prop`s a
+  profile names, so "every field set to `True`" does not typecheck. This is the
+  paragraph a reader is sent to for what the last gate before `VerifiedProgram`
+  guarantees, describing the record as it stood three repairs earlier.
+
+  Invisible to every gate: a backticked token with no dot and no underscore is what
+  `Tools/CitationAudit.py` documents as permanently unadjudicated. Same class as
+  `AuthorizedBy` a round earlier, in the module that owns §10.
+- ~~**`issue?`'s docstring kept naming the wrong clause as unstated, through the repair
+  of the sentence it sits in.**~~ "The extent clause has no theorem of its own; it is
+  checked and not stated." The extent clause is the one gate that *does* have a theorem
+  — `issue?_eq_none_of_wrong_extent` — and the containment clause is the one that does
+  not. §4.4.1 diagnosed exactly this a round earlier ("a reviewer following it checked
+  the wrong clause") and recorded it closed; only the count beside it had been repaired,
+  from "four of the five" to "eight of the nine", and the misnaming — the part that hid
+  a finding — survived verbatim. The enumeration is complete now rather than partial,
+  because **a list of four under a claim about eight leaves the reader to guess which
+  four are missing.**
+
+  Also closed: the last surviving ordinal reference to `MayLend`'s disjuncts, in
+  `Tests/Op/StandardLoan.lean`, which round twenty's rename missed and which had
+  additionally kept `Grants` after the bound moved to `GrantsAsGrant`.
 
 ### 4.4.1a Which profile inputs can weaken a rule
 

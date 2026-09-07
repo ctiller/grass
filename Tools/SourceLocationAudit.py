@@ -77,6 +77,29 @@ def uncovered(paths: list[str]) -> list[str]:
     return sorted(out)
 
 
+def inert_entries(paths: list[str]) -> list[str]:
+    """The `ALLOWED` entries whose removal would change nothing.
+
+    A leave-one-out over the real tracked file list. This gate had no such check while
+    four siblings grew one; an entry here becomes inert when a file moves under a
+    covered prefix or stops being tracked, which is good news and not a violation, so
+    this reports rather than fails.
+
+    `Spikes/` is a prefix rather than a path and `uncovered` treats it that way, so the
+    sweep covers the prefix form too.
+    """
+    global ALLOWED
+    original = set(ALLOWED)
+    base = set(uncovered(paths))
+    inert = []
+    for entry in sorted(original):
+        ALLOWED = original - {entry}
+        if not set(uncovered(paths)) - base:
+            inert.append(entry)
+    ALLOWED = original
+    return inert
+
+
 def self_test() -> int:
     cases: list[tuple[str, list[str], list[str]]] = [
         ("a covered library file", ["Grass/Memory/State.lean"], []),
@@ -95,6 +118,21 @@ def self_test() -> int:
         if got != expected:
             print(f"  SELF-TEST FAILED [{label}]: expected {expected}, got {got}")
             failures += 1
+    # The `--inert` sweep, both directions, including the prefix form.
+    global ALLOWED
+    saved_allowed = set(ALLOWED)
+    ALLOWED = {"Grass.lean", "nothing/tracked/here.lean"}
+    if inert_entries(["Grass.lean"]) != ["nothing/tracked/here.lean"]:
+        print("  SELF-TEST FAILED: the inert sweep does not separate a live entry "
+              "from a dead one")
+        failures += 1
+    ALLOWED = {"Spikes/"}
+    if inert_entries(["Spikes/1_Hello_World/Program.lean"]) != []:
+        print("  SELF-TEST FAILED: a prefix entry that suppresses a real report is "
+              "called inert")
+        failures += 1
+    ALLOWED = saved_allowed
+
     if failures:
         print(f"source location audit self-test: {failures} failure(s)")
         return 1
@@ -102,13 +140,35 @@ def self_test() -> int:
     return 0
 
 
+# The options this gate accepts. A misspelt flag used to be ignored: `--self-tset`
+# and `--inertt` both ran the ordinary check and printed its success line at exit 0,
+# so a reviewer sweeping a mode across the gates got a pass from a tool that never
+# ran it. Review did exactly that in the round that found this, and one of the seven
+# gates had no `--inert` implementation at all -- which is invisible when an unknown
+# flag is a no-op and obvious the moment it is an error.
+KNOWN_OPTIONS = {"--self-test", "--inert"}
+
+
 def main() -> int:
+    unknown = [arg for arg in sys.argv[1:] if arg not in KNOWN_OPTIONS]
+    if unknown:
+        print("unknown option(s): " + " ".join(unknown), file=sys.stderr)
+        print("known: " + ", ".join(sorted(KNOWN_OPTIONS)), file=sys.stderr)
+        return 2
     if "--self-test" in sys.argv:
         return self_test()
     paths = tracked_lean_files()
     if not paths:
         print("source location audit: git listed no Lean files", file=sys.stderr)
         return 1
+    if "--inert" in sys.argv:
+        inert = inert_entries(paths)
+        if inert:
+            print("allowlist entries that suppress nothing: " + ", ".join(inert))
+            print("Delete them, or say why the entry is kept with no effect.")
+        else:
+            print("source location audit: every allowlist entry suppresses a report")
+        return 0
     stray = uncovered(paths)
     if stray:
         print("\n".join(f"  {path}" for path in stray))

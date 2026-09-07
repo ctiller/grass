@@ -809,11 +809,20 @@ reads the map it finds; this is the cheaper check that stops the honest caller
 earlier.
 
 Refusing rather than overwriting or ignoring is `docs/FOUNDATION.md` law 8's
-direction. Eight of the nine refusals are stated —  `issue?_eq_none_of_reissued`,
-`issue?_eq_none_of_empty`, `issue?_eq_none_of_not_live` and
+direction. Eight of the nine refusals are stated — `issue?_eq_none_of_reissued`,
+`issue?_eq_none_of_empty`, `issue?_eq_none_of_not_live`,
+`issue?_eq_none_of_not_nested`, `issue?_eq_none_of_wrong_extent`,
+`issue?_eq_none_of_wrong_identity`, `issue?_eq_none_of_nothing_to_lend` and
 `issue?_eq_none_of_conflict` — so a caller that cannot issue finds out which rule
-stopped it. The extent clause has no theorem of its own; it is checked and not
-stated.
+stopped it. **The containment clause is the one with no theorem of its own**; it is
+checked and not stated.
+
+This sentence named the *extent* clause, which is the one gate here that does have a
+theorem, and it went on naming it after the count beside it was repaired from "four of
+the five" to "eight of the nine". A reviewer following it checked a clause that was
+already covered and did not check the one that is not — which is why the enumeration
+is now complete rather than partial: a list of four under a claim about eight leaves
+the reader to guess which four are missing, and guessing wrong is the whole defect.
 -/
 def issue? (state : MemoryState) (id : GrantId) (grant : AuthorityGrant) :
     Option MemoryState :=

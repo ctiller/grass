@@ -720,10 +720,56 @@ theorem a_borrower_may_not_sublend_more_than_it_holds :
         range := ⟨0, 4⟩, rights := .readWrite } := by
   exact ⟨by decide, by decide⟩
 
+/-! ## A borrower may not sublet more *bytes* than it holds
+
+The section above is about rights and says so. This one is about extent, and nothing
+tested it: review weakened the sublet disjunct's `entry.2.range.Contains grant.range` to
+`Meets`, co-editing the one place the module's own proof consumes it so the mutation was
+testing the statement rather than the script, and the whole tree stayed green. A
+borrower of four bytes could sublet eight, and the sub-borrower was then authorized over
+bytes no grant in the chain covers -- authority created from nothing, and reachable,
+because two read-only grants do not conflict and `LoanConflicts` needs a writer.
+
+"You cannot lend what you do not have" is the disjunct's boldfaced claim. It was proved
+of the rights term and asserted of the extent one. -/
+
+/-- The thread borrowing only the buffer's head. `readLentToThread` above lends the
+whole eight bytes, which cannot distinguish a containment bound from an overlap one. -/
+def headLentToThread : MemoryState :=
+  (state₀.memory.issue? bufferLoan
+    { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
+      range := ⟨0, 4⟩, rights := .readOnly }).getD state₀.memory
+
+/-- **A borrower may not sublet bytes outside what it holds.** The three conjuncts
+separate the rule from its inputs: the borrow really happened, a sublet of eight bytes
+is refused, and the same sublet at four is not -- so the refusal is the extent and not
+the contexts, the rights or the epoch.
+
+The lender disjunct cannot rescue it either, and that is why the sublet is lent by
+`engine₀` rather than by the owner: `thread₀` owns the buffer, but the grant outstanding
+over it is the engine's, so "every grant outstanding was lent by this lender" is false
+and the only disjunct in play is the sublet one. -/
+theorem a_borrower_may_not_sublend_more_bytes_than_it_holds :
+    (headLentToThread.grantAt? bufferLoan).isSome ∧
+    ¬ headLentToThread.MayLend
+      { kind := .loan, holder := engine₁, lender := thread₀, provenance := bufferProv
+        range := ⟨0, 8⟩, rights := .readOnly } ∧
+    headLentToThread.MayLend
+      { kind := .loan, holder := engine₁, lender := thread₀, provenance := bufferProv
+        range := ⟨0, 4⟩, rights := .readOnly } := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- And the door agrees with the predicate, so the bound is not merely stated. -/
+theorem the_door_refuses_the_oversized_sublet :
+    headLentToThread.issue? secondBufferLoan
+      { kind := .loan, holder := engine₁, lender := thread₀, provenance := bufferProv
+        range := ⟨0, 8⟩, rights := .readOnly } = Option.none := by decide
+
 /-! ## An owner may not lend rights its storage does not carry
 
-`MayLend`'s second disjunct bounds a sublet by `entry.2.rights.Grants grant.rights`.
-Its first -- the one that issues every *first* grant -- had no rights term at all, so
+`MayLend`'s sublet disjunct bounds a sublet by
+`entry.2.rights.GrantsAsGrant grant.rights`. Its lender disjunct -- the one that issues
+every *first* grant -- had no rights term at all, so
 the file's boldfaced "you cannot lend what you do not have" was false of the path it is
 stated about. Review had `thread₀` lend `readWrite` over `constAlloc`, a read-only page
 it owns: `issue?` accepted it, and `authorityOf` then reported the owner `frozen` over

@@ -47,14 +47,27 @@ profile closes it until M10. An ISA author writing their first instruction can
 then see the whole eventual obligation, and closure becomes a field-by-field
 target rather than a discovery.
 
-**What it is not.** Its fields are `Prop`s — propositions, not proofs of them —
-so a profile can be built with every field set to `True`, or to `False`. It is a
-checklist, and `PackageHolds` below is the only thing that turns it into a claim:
-a consumer that demands `PackageHolds` demands proofs of all eleven. Nothing in
-M1 demands it, because the statements those props should carry need machinery
-that does not exist until M2 through M9. Treating a constructed `MemoryProfile`
-as evidence that §10 has closed would be a mistake, and an earlier version of
-this docstring invited exactly that reading.
+**What it is not.** Most of its fields are `Prop`s — propositions, not proofs of
+them — so a profile can name any of those and be built. It is a checklist, and
+`RequiredProofPackage.Holds` is the only thing that turns it into a claim: a
+consumer that demands `Holds` demands proofs of the eight items still named that
+way. Nothing in M1 demands it, because the statements those props should carry
+need machinery that does not exist until M2 through M9. Treating a constructed
+`MemoryProfile` as evidence that §10 has closed would be a mistake, and an earlier
+version of this docstring invited exactly that reading.
+
+Three of the eleven fields are no longer `Prop`s the profile names —
+`rangeProvenanceInitializationPreservation`, `loanMapLaws` and
+`allocatorFreshnessTeardownEpoch` hold *proofs* of propositions this layer states,
+so `:= trivial` no longer typechecks for them and `Holds` does not conjoin them:
+what they assert is already true by construction. Each item that gains a statement
+moves the same way, which is why `Holds` has eight conjuncts and not eleven.
+
+This paragraph said `PackageHolds` and said eleven. Nothing declares `PackageHolds`
+and nothing ever did, and it is the shape `Tools/CitationAudit.py` documents as
+permanently unadjudicated — a backticked token with no dot and no underscore. It was
+the paragraph a reader is sent to for what the last gate before `VerifiedProgram`
+guarantees, describing the record as it stood three repairs earlier.
 -/
 
 namespace Grass.Memory
