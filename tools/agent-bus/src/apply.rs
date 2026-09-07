@@ -317,7 +317,11 @@ fn require_agent<'a>(state: &'a BusState, a: &Agent) -> AbResult<&'a AgentState>
         .ok_or_else(|| invalid(format!("unregistered agent: {a}")))
 }
 
-fn require_active_role<'a>(state: &'a BusState, a: &Agent, role: Role) -> AbResult<&'a AgentState> {
+pub(crate) fn require_active_role<'a>(
+    state: &'a BusState,
+    a: &Agent,
+    role: Role,
+) -> AbResult<&'a AgentState> {
     let ag = require_agent(state, a)?;
     if ag.primary_role != role {
         return Err(invalid(format!("{a} does not have role {role}")));

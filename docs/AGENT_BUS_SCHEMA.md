@@ -60,7 +60,17 @@ The immutable bootstrap file has canonical compact JSON plus LF:
 
 Bootstrap fields use the fixed order displayed above.
 
-`object_format` is `sha1` or `sha256`; coordinator names form a nonempty
+**Deviation actually taken (2026-09), documented for the historical record.**
+`object_format` was narrowed from `sha1` or `sha256` to `sha1` alone. The
+helper reads and writes objects through a vendored libgit2 built without its
+experimental sha256 support, so a `sha256` bus is one no reader could open;
+`BusConfig::new` refuses to publish one and `BusConfig::parse` refuses to load
+one. Leaving the wider set documented would have advertised a value the only
+implementation rejects. Nothing observable is lost -- no `sha256` bus was ever
+activated -- and widening it again is a matter of the object-store build, not
+of this schema.
+
+`object_format` is `sha1`; coordinator names form a nonempty
 `StringSet<Agent>`; `product_review_from` is a full `ObjectId` reachable from
 product `main` and is the last bootstrap-exempt product commit. `merge_engine`
 is `git-ort` in V1 and `merge_engine_version` is the exact semantic version

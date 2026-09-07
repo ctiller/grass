@@ -1,7 +1,26 @@
-//! Thin wrapper around shelling out to `git`. The helper "uses ordinary Git
-//! fetch, rebase, commit, and push operations" (AGENT_BUS.md section 1) rather
-//! than reimplementing Git plumbing, so every operation here is a literal
-//! `git` invocation.
+//! What is left of shelling out to `git`.
+//!
+//! This module was once every git operation in the crate. It is now only the
+//! ones that must stay a subprocess, plus thin wrappers whose bodies moved
+//! in-process to `gitobjects.rs` but whose signatures many callers still use:
+//!
+//!  - **Remote transport** -- `fetch`, `push`, `ls-remote`. `git2` is built
+//!    with `default-features = false`, dropping its own HTTPS/SSH backends,
+//!    so these keep going through the user's credential helpers, SSH agent
+//!    and `.netrc`. Reimplementing them would mean acquiring OpenSSL and
+//!    libssh2 as build dependencies and reimplementing credential discovery.
+//!  - **`merge-tree --write-tree`** -- pinned to git's own ORT
+//!    implementation because AGENT_REVIEW.md section 7 requires every host to
+//!    produce a byte-identical tree, which libgit2's separate merge algorithm
+//!    would not.
+//!  - **`interpret-trailers --parse`** -- see `commit_message_trailers` for
+//!    why this one is deliberately not reimplemented.
+//!  - **`git --version`** -- the merge-engine pin check, which is a question
+//!    about the `git` binary itself.
+//!
+//! Everything here runs under a deadline with a process-tree kill
+//! (`run_with_deadline`), because the remote operations above are exactly the
+//! ones that can otherwise block forever.
 
 use crate::error::{invalid, AbError, AbResult};
 use std::path::{Path, PathBuf};
@@ -36,31 +55,396 @@ impl GitOutput {
     }
 }
 
-/// Every git invocation in this crate funnels through `run` (a plain
-/// argument list dispatch) or `run_stdin` (the one command, `interpret-
-/// trailers`, that needs piped input) — so unit tests can substitute a
-/// scripted [`mock::MockGit`] for the real `git` subprocess at exactly this
-/// seam and exercise error/retry paths in `commands.rs`/`bus.rs`/
-/// `review_cmds.rs`/`validate_cmd.rs`/`history.rs` without spawning real
-/// processes or building real repositories. See the `mock` submodule.
+/// How long any `git` subprocess may run before it is killed.
+///
+/// Every surviving subprocess in this crate either talks to a remote
+/// (`fetch`, `push`, `ls-remote`) or is `merge-tree`/`interpret-trailers`;
+/// the remote ones are the ones that can block forever. `g-reviewer:29`
+/// reported exactly that -- an unreachable or hanging remote wedges every
+/// agent-bus command with no deadline and no way out -- and this is the
+/// deadline that answers it.
+///
+/// Generous on purpose. The bus fetches and pushes a handful of small refs,
+/// so a healthy operation is a second or two; two minutes distinguishes
+/// "hung" from "slow network" without ever being the thing that fails a real
+/// operation. Override with `AGENT_BUS_GIT_TIMEOUT_SECS` for an unusually
+/// slow link, or to tighten it in a test.
+/// The one place this variable's name is written.
+///
+/// Both the lookup and the timeout error message derive from it, so the
+/// failure mode a mutation exposed -- the message telling an operator to set
+/// a variable the code no longer reads -- cannot recur by drift.
+pub(crate) const TIMEOUT_VAR: &str = "AGENT_BUS_GIT_TIMEOUT_SECS";
+
+fn git_timeout() -> std::time::Duration {
+    git_timeout_from(|k| std::env::var(k).ok())
+}
+
+/// [`git_timeout`] against a supplied lookup.
+///
+/// Parameterized for the same reason `gitobjects::resolve_identity` is:
+/// testing only the parse rule leaves the *wiring* -- that anything reads
+/// [`TIMEOUT_VAR`] at all -- unproven, and mutation testing showed exactly
+/// that gap here. Environment variables are process-global, so a test cannot
+/// set one without leaking into every test running beside it.
+fn git_timeout_from(env: impl Fn(&str) -> Option<String>) -> std::time::Duration {
+    std::time::Duration::from_secs(parse_timeout_secs(env(TIMEOUT_VAR).as_deref()))
+}
+
+/// The override's parse rule, separated from reading the environment so a
+/// test can exercise it directly.
+///
+/// A test that re-implements this rule locally and asserts against its own
+/// copy proves nothing about the code that ships -- which is exactly what the
+/// test here used to do.
+///
+/// Zero is treated as absent rather than as "no deadline": a deadline an
+/// environment variable can switch off is not a deadline, and always having
+/// one is the whole point (g-reviewer:29).
+fn parse_timeout_secs(raw: Option<&str>) -> u64 {
+    const DEFAULT_SECS: u64 = 120;
+    raw.and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_SECS)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Counts calls to [`kill_process_tree`] *on this thread*, so a test can
+    /// prove the deadline invoked it rather than only that it reported a
+    /// timeout.
+    ///
+    /// Thread-local, not a process-global atomic. `cargo test` runs tests in
+    /// parallel threads, and a shared counter would let a *sibling* test's
+    /// kill satisfy this test's assertion while its own deadline never fired
+    /// -- a green test proving nothing, which is the exact class of defect
+    /// this counter exists to rule out. `kill_process_tree` is called from
+    /// the timing-out caller's own thread, so a thread-local is both correct
+    /// and isolated.
+    pub(crate) static KILLS_REQUESTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Kill `pid` and everything it spawned.
+///
+/// A bare `Child::kill` reaps only the process we started. `git fetch` and
+/// `git push` delegate the actual transport to a child of their own (`ssh`,
+/// `git-remote-https`, a credential helper), and it is normally *that*
+/// process which is blocked -- on a dead TCP connection, or on a credential
+/// prompt reading a terminal that is not there. Killing only the parent
+/// leaves the real culprit running and holding the pipe, so the wait never
+/// ends.
+fn kill_process_tree(pid: u32) {
+    #[cfg(test)]
+    KILLS_REQUESTED.with(|c| c.set(c.get() + 1));
+
+    #[cfg(windows)]
+    {
+        // `taskkill /T` walks the tree; `/F` is required because a blocked
+        // child will not process a polite close request.
+        //
+        // Spawned and deliberately not waited on. Waiting here would put an
+        // unbounded wait on the error path of the very mechanism that exists
+        // to bound waits -- a hung `taskkill` would wedge the caller exactly
+        // as the hung `git` did. The OS reaps the tree whether or not we
+        // watch, and the caller needs the timeout error more than it needs
+        // confirmation that the kill completed.
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &pid.to_string()])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    }
+    #[cfg(unix)]
+    {
+        // The child was put in its own process group (see `spawn_git`), so a
+        // negative pid signals the whole group in one call.
+        unsafe {
+            libc_kill(-(pid as i32), 9);
+        }
+    }
+}
+
+#[cfg(unix)]
+extern "C" {
+    #[link_name = "kill"]
+    fn libc_kill(pid: i32, sig: i32) -> i32;
+}
+
+/// Run `command`, returning its output, or killing its whole process tree and
+/// failing if it outruns [`git_timeout`].
+///
+/// The wait happens on a separate thread rather than by polling
+/// Which ambient git configuration a subprocess is allowed to see.
+///
+/// The distinction is load-bearing, and an earlier revision of this function
+/// got it wrong in the permissive-looking direction: it stripped every
+/// `GIT_CONFIG_*` variable for *all* subprocesses, which silently disarmed
+/// the standard mechanisms for giving a push its credentials --
+/// `GIT_CONFIG_COUNT` carrying `credential.helper` or `http.*.extraheader`
+/// (how CI injects a token) and `GIT_CONFIG_GLOBAL` pointing at a config
+/// outside an unwritable `$HOME`. Publication is the coordinator's sole job
+/// (AGENT_COORDINATION_EVOLUTION.md section 2.3), so a host that cannot push
+/// stalls the whole bus.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ConfigPolicy {
+    /// The operator's configuration is *wanted*: credential helpers,
+    /// `url.<base>.insteadOf`, proxies, `http.*`. Everything transport needs
+    /// to reach a remote at all.
+    Inherit,
+    /// The operator's configuration is a *hazard*, because the command's
+    /// output must depend only on its inputs: AGENT_REVIEW.md section 7
+    /// requires a merge candidate to be byte-identically reconstructible on
+    /// another host, and `interpret-trailers --parse` decides which commits
+    /// carry an `Agent-Bus-Agent` trailer at all.
+    ///
+    /// Removing the variables is not sufficient, which is why this forces
+    /// values rather than only unsetting: the ambient `~/.gitconfig` is read
+    /// precisely when `GIT_CONFIG_GLOBAL` is *absent*. Measured against a
+    /// global config defining a `merge.<driver>.driver` and a
+    /// `core.attributesFile` selecting it, removal alone still produced a
+    /// different tree for the same two commits; forcing produced the clean
+    /// one.
+    Hermetic,
+}
+
+// The policy the most recent `spawn_and_wait` on *this thread* ran under.
+//
+// A test seam, for a gap unit tests could not otherwise reach: asserting what
+// `ConfigPolicy::Hermetic` does proves nothing about whether a given call
+// site uses it, and mutation testing showed exactly that -- switching
+// `merge_tree_write_tree` back to the inheriting `run` left the whole suite
+// green. Observing it directly is the only honest alternative to setting a
+// hostile `XDG_CONFIG_HOME` in the test process, which is global to every
+// test running beside it.
+//
+// Thread-local rather than global for that same reason: the call under test
+// and the assertion happen on one thread, so a sibling test cannot satisfy
+// or clobber it.
+#[cfg(test)]
+thread_local! {
+    static LAST_POLICY: std::cell::Cell<Option<ConfigPolicy>> =
+        const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn last_config_policy() -> Option<ConfigPolicy> {
+    LAST_POLICY.with(|p| p.get())
+}
+
+impl ConfigPolicy {
+    fn apply(self, command: &mut Command) {
+        #[cfg(test)]
+        LAST_POLICY.with(|p| p.set(Some(self)));
+        match self {
+            ConfigPolicy::Inherit => {}
+            ConfigPolicy::Hermetic => {
+                // Injection at `-c` precedence, which libgit2 never sees.
+                // Dropping `GIT_CONFIG_COUNT` neutralizes the indexed
+                // `_KEY_<n>`/`_VALUE_<n>` pairs, which git reads only
+                // through it. This half is not redundant with the forcing
+                // below: with the count still set, an injected
+                // `trailer.separators` was measured to survive
+                // `GIT_CONFIG_GLOBAL=/dev/null` and make every trailer in a
+                // commit message vanish from `--parse`.
+                command.env_remove("GIT_CONFIG_PARAMETERS");
+                command.env_remove("GIT_CONFIG_COUNT");
+                // `/dev/null` is git's own documented spelling of "no such
+                // config file", honored by git-for-windows too.
+                command.env("GIT_CONFIG_GLOBAL", "/dev/null");
+                command.env("GIT_CONFIG_SYSTEM", "/dev/null");
+                command.env("GIT_CONFIG_NOSYSTEM", "1");
+                // The system *attributes* file is reachable through no
+                // `GIT_CONFIG_*` variable at all and needs its own switch.
+                command.env("GIT_ATTR_NOSYSTEM", "1");
+            }
+        }
+    }
+}
+
+/// `try_wait` in a loop. Polling costs either latency (a sleep between
+/// checks, paid by every fast call) or CPU (a tight spin); a blocking wait
+/// on a thread costs neither, and `recv_timeout` gives the deadline for
+/// free. That matters here because these are the calls left on the hot
+/// publication path.
+fn run_with_deadline(
+    mut command: Command,
+    what: &str,
+    policy: ConfigPolicy,
+) -> AbResult<GitOutput> {
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    spawn_and_wait(command, what, None, git_timeout(), policy)
+}
+
+/// [`run_with_deadline`], but writing `stdin_text` to the child first.
+fn run_with_deadline_stdin(
+    mut command: Command,
+    what: &str,
+    stdin_text: &str,
+    policy: ConfigPolicy,
+) -> AbResult<GitOutput> {
+    command
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    spawn_and_wait(command, what, Some(stdin_text), git_timeout(), policy)
+}
+
+/// `timeout` is a parameter rather than read from [`git_timeout`] here so a
+/// test can exercise the expiry path with a short deadline without setting a
+/// process-global environment variable that every other test running in
+/// parallel would also see.
+fn spawn_and_wait(
+    mut command: Command,
+    what: &str,
+    stdin_text: Option<&str>,
+    timeout: std::time::Duration,
+    policy: ConfigPolicy,
+) -> AbResult<GitOutput> {
+    // The two halves of this crate must agree on which repository they are
+    // talking about. `git` honors `GIT_DIR`/`GIT_WORK_TREE` in preference to
+    // the `-C <dir>` we pass; libgit2's `Repository::discover` ignores them
+    // entirely and uses the path. With one of those set to another
+    // repository the halves diverge -- `merge_tree_write_tree` would write a
+    // tree into one object database while `commit_tree_deterministic` looked
+    // for it in another, and a push would run against the wrong repository.
+    // Before the in-process move there was only one half and no such split.
+    //
+    // Removing them makes the explicit path authoritative for both, which is
+    // what every caller here means: each passes a repository path it
+    // resolved itself.
+    //
+    // `GIT_DIR`/`GIT_WORK_TREE` alone do not close it. `git` also honors
+    // `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`,
+    // `GIT_COMMON_DIR`, `GIT_INDEX_FILE` and `GIT_NAMESPACE` over `-C <dir>`,
+    // and `Repository::discover` honors none of them. The object-directory
+    // ones reach exactly the split named above: with `GIT_OBJECT_DIRECTORY`
+    // set, `merge-tree --write-tree` writes its tree into that directory and
+    // the in-process `commit_with_identity` cannot find it.
+    //
+    // Repository *location* is stripped unconditionally, for every caller:
+    // it is the one class where the two halves of this crate would disagree
+    // about which repository they are talking about. Ambient *configuration*
+    // is not a single question with a single answer -- see [`ConfigPolicy`],
+    // applied below -- because transport needs the operator's configuration
+    // and candidate construction must be insulated from it.
+    //
+    // Nothing transport needs is touched here: `GIT_SSH_COMMAND`,
+    // `GIT_ASKPASS`, `GIT_TERMINAL_PROMPT`, `GIT_SSL_*`, `GIT_PROXY_COMMAND`
+    // and the credential-helper configuration all survive both policies.
+    for var in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_INDEX_FILE",
+        "GIT_NAMESPACE",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    ] {
+        command.env_remove(var);
+    }
+
+    policy.apply(&mut command);
+
+    #[cfg(unix)]
+    {
+        // Own process group, so `kill_process_tree` can signal the transport
+        // children too.
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| AbError::Git(format!("failed to run git {what}: {e}")))?;
+    let pid = child.id();
+
+    if let Some(text) = stdin_text {
+        use std::io::Write;
+        let mut pipe = child
+            .stdin
+            .take()
+            .ok_or_else(|| AbError::Git(format!("git {what}: stdin pipe unavailable")))?;
+        // A child that dies before reading everything makes this fail with a
+        // broken pipe; that is not itself the error worth reporting, since
+        // the exit status and stderr below say what actually went wrong.
+        let _ = pipe.write_all(text.as_bytes());
+        drop(pipe);
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(out)) => Ok(GitOutput {
+            success: out.status.success(),
+            stdout: String::from_utf8_lossy(&out.stdout).trim_end().to_string(),
+            stderr: String::from_utf8_lossy(&out.stderr).trim_end().to_string(),
+        }),
+        Ok(Err(e)) => Err(AbError::Git(format!("failed to run git {what}: {e}"))),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            kill_process_tree(pid);
+            Err(AbError::Git(format!(
+                "git {what} did not finish within {}s and was killed. If this was a fetch or \
+                 push, the remote is unreachable or is waiting on a credential prompt that \
+                 cannot be answered here -- check the remote and your credential helper, then \
+                 retry. Set {TIMEOUT_VAR} to allow longer.",
+                timeout.as_secs()
+            )))
+        }
+        // The waiting thread cannot drop the sender without sending, so this
+        // is unreachable in practice; report it rather than panicking.
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(AbError::Git(format!(
+            "git {what}: the process wait ended unexpectedly"
+        ))),
+    }
+}
+
+/// Dispatch for a `git` subprocess that takes no stdin, with
+/// [`mock::MockGit`] able to intercept it.
+///
+/// This used to be the seam through which *every* git operation in the crate
+/// passed. It is not any more, and a test that assumes otherwise will mock a
+/// call nobody makes: the whole local surface moved in-process to
+/// `gitobjects.rs`, and `version` and `check_ref_format` spawn directly
+/// without consulting the mock. What still arrives here is remote transport
+/// (`fetch`, `push`, `ls-remote`) and `merge-tree`.
 pub fn run(dir: &Path, args: &[&str]) -> AbResult<GitOutput> {
     if let Some(out) = mock::intercept(dir, args, None) {
         return out;
     }
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .map_err(|e| AbError::Git(format!("failed to run git {args:?}: {e}")))?;
-    Ok(GitOutput {
-        success: out.status.success(),
-        stdout: String::from_utf8_lossy(&out.stdout).trim_end().to_string(),
-        stderr: String::from_utf8_lossy(&out.stderr).trim_end().to_string(),
-    })
+    let mut command = Command::new("git");
+    command.arg("-C").arg(dir).args(args);
+    run_with_deadline(command, &format!("{args:?}"), ConfigPolicy::Inherit)
+}
+
+/// [`run`], but insulated from the operator's git configuration.
+///
+/// Only for commands whose output must depend on nothing but their inputs.
+/// Using this for transport would break pushing on any host that supplies
+/// credentials through configuration, which is most CI.
+fn run_hermetic(dir: &Path, args: &[&str]) -> AbResult<GitOutput> {
+    if let Some(out) = mock::intercept(dir, args, None) {
+        return out;
+    }
+    let mut command = Command::new("git");
+    command.arg("-C").arg(dir).args(args);
+    run_with_deadline(command, &format!("{args:?}"), ConfigPolicy::Hermetic)
 }
 
 /// Run a git command and turn a nonzero exit into an error.
+/// Only test code calls this now: every production caller either went
+/// in-process or needs `run`'s untranslated output. Kept because the tests
+/// that build real repositories still find it the clearest way to ask git a
+/// question directly.
+#[cfg(test)]
 pub fn run_ok(dir: &Path, args: &[&str]) -> AbResult<String> {
     let out = run(dir, args)?;
     if !out.success {
@@ -70,11 +454,25 @@ pub fn run_ok(dir: &Path, args: &[&str]) -> AbResult<String> {
 }
 
 pub fn version() -> AbResult<String> {
-    let out = Command::new("git")
-        .arg("--version")
-        .output()
-        .map_err(|e| AbError::Git(format!("failed to run git --version: {e}")))?;
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let mut command = Command::new("git");
+    command.arg("--version");
+    let out = run_with_deadline(command, "--version", ConfigPolicy::Inherit)?;
+    // A nonzero exit here is not a version. A malformed `~/.gitconfig` makes
+    // `git --version` die with an empty stdout, and returning `Ok("")` sent
+    // that straight into the pinned-engine comparison, which then reported
+    // "installed git  is not the merge engine version this bus selects" --
+    // a confident, wrong diagnosis for a broken config file.
+    if !out.success {
+        return Err(AbError::Git(format!(
+            "git --version failed: {}",
+            if out.stderr.trim().is_empty() {
+                "(no output)"
+            } else {
+                out.stderr.trim()
+            }
+        )));
+    }
+    let s = out.stdout.trim().to_string();
     // "git version 2.53.0.windows.1" -> "2.53.0"
     let ver = s
         .strip_prefix("git version ")
@@ -92,54 +490,88 @@ pub fn version() -> AbResult<String> {
 }
 
 pub fn repo_root(start: &Path) -> AbResult<PathBuf> {
-    let out = run_ok(start, &["rev-parse", "--show-toplevel"])?;
-    Ok(PathBuf::from(out))
+    crate::gitobjects::Libgit2Reader::open(start)?.workdir()
 }
 
-/// The repository's single shared git directory (AGENT_BUS.md section 2:
-/// "Multiple agents sharing one clone use detached worktrees"). In a linked
-/// worktree, `<repo_root>/.git` is a *file* pointing elsewhere, not a
+/// The repository's single shared git directory. Agents share one clone and
+/// work in linked worktrees (AGENT_BUS.md section 2), and in a linked
+/// worktree `<repo_root>/.git` is a *file* pointing elsewhere, not a
 /// directory — callers must not join onto it directly (`repo_root.join(
 /// ".git")` breaks under a linked worktree with an OS "not a directory"
 /// error). `--git-common-dir` (not `--git-dir`) deliberately resolves to the
-/// *main* checkout's git directory even from a linked worktree, so agent-bus
-/// staging worktrees and the cross-process lock are shared repo-wide rather
-/// than fragmented per linked worktree.
+/// *main* checkout's git directory even from a linked worktree, so every
+/// agent's outbox lands in one repo-wide location rather than being
+/// fragmented per linked worktree. (This crate no longer stages anything in
+/// worktrees of its own; the outbox is what still needs a shared home.)
 pub fn common_dir(start: &Path) -> AbResult<PathBuf> {
-    let out = run_ok(start, &["rev-parse", "--git-common-dir"])?;
-    let dir = PathBuf::from(out);
-    if dir.is_absolute() {
-        Ok(dir)
-    } else {
-        Ok(start.join(dir))
-    }
+    // libgit2 always reports this absolute, so the relative-path join the
+    // `rev-parse --git-common-dir` version needed is gone.
+    Ok(crate::gitobjects::Libgit2Reader::open(start)?.common_dir())
+}
+
+/// Resolve a revision expression against an already-open reader, failing
+/// rather than reporting absence. The `gitrepo` wrappers below all accept
+/// arbitrary revision strings (`HEAD`, a branch, a raw id) because their
+/// `git` predecessors did, so each one resolves before calling the
+/// object-id-typed methods on the reader.
+fn resolve_required(
+    g: &crate::gitobjects::Libgit2Reader,
+    rev: &str,
+) -> AbResult<crate::scalars::ObjectId> {
+    crate::gitobjects::HistoryReader::resolve_rev(g, rev)?
+        .ok_or_else(|| AbError::Git(format!("{rev} does not name an object in this repository")))
 }
 
 pub fn rev_parse(dir: &Path, rev: &str) -> AbResult<String> {
-    run_ok(dir, &["rev-parse", "--verify", rev])
+    rev_parse_opt(dir, rev)?
+        .ok_or_else(|| AbError::Git(format!("{rev} does not name an object in this repository")))
 }
 
 pub fn rev_parse_opt(dir: &Path, rev: &str) -> AbResult<Option<String>> {
-    // `rev-parse --verify` alone only checks that `rev` is *syntactically*
-    // resolvable: for a full-length hex string it echoes the input back and
-    // exits 0 even when no such object exists in the odb. Appending
-    // `^{object}` forces git to actually dereference to an object, which
-    // fails for both a nonexistent hash and a nonexistent ref.
-    let target = format!("{rev}^{{object}}");
-    let out = run(dir, &["rev-parse", "--verify", "--quiet", &target])?;
-    if out.success && !out.stdout.is_empty() {
-        Ok(Some(out.stdout))
-    } else {
-        Ok(None)
-    }
+    // The subprocess version had to spell this as `<rev>^{object}`, because
+    // `rev-parse --verify` alone accepts a full-length hex string
+    // syntactically and echoes it back even when no such object exists.
+    // `revparse_single` always dereferences to a real object, so the
+    // workaround is unnecessary here -- but it is still *accepted*, since
+    // callers may pass an explicit peel suffix of their own.
+    crate::gitobjects::HistoryReader::resolve_rev(
+        &crate::gitobjects::Libgit2Reader::open(dir)?,
+        rev,
+    )
+    .map(|o| o.map(|id| id.into_string()))
 }
 
+#[cfg(test)]
 pub fn check_ref_format(refname: &str) -> bool {
-    Command::new("git")
+    // Test-only, and memoized because the differential corpus asks about the
+    // same handful of names repeatedly.
+    //
+    // This was once on the hot read path: `Branch::parse` called it, `Branch`
+    // deserializes through `parse`, and every review event names two
+    // branches, so reducing the fleet's bus spawned hundreds of these -- 2.5
+    // seconds of a 6-second `status`. `Branch::parse` now decides for itself
+    // and this survives only as the oracle
+    // `branch_parse_agrees_with_real_git_check_ref_format` measures it
+    // against. Note it deliberately does not go through `run`, so it gets
+    // neither the deadline nor the environment strip; nothing in a release
+    // build calls it.
+    static SEEN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+    // A poisoned lock means another thread panicked mid-insert. The map is
+    // a pure cache, so recovering the guard and carrying on is correct --
+    // there is no invariant a panic could have left half-established.
+    let mut cache = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(known) = cache.get(refname) {
+        return *known;
+    }
+    let answer = Command::new("git")
         .args(["check-ref-format", refname])
         .status()
         .map(|s| s.success())
-        .unwrap_or(false)
+        .unwrap_or(false);
+    cache.insert(refname.to_string(), answer);
+    answer
 }
 
 /// Push one or more explicit `<sha>:<refname>` refspecs, optionally as one
@@ -242,168 +674,52 @@ pub fn remote_refs_existing(
     Ok(existing)
 }
 
-/// Ensure a detached worktree checked out at exactly `start_point` exists at
-/// `worktree_path` (AGENT_BUS.md section 2: "Multiple agents sharing one
-/// clone use detached worktrees"). This function's every caller passes a
-/// deterministic path reused across *separate process invocations* as a
-/// cache (e.g. `sync::reduce_local`'s per-agent `_reduce_stream_<agent>`
-/// worktrees, read via plain filesystem access in `storage::read_stream_
-/// log`) -- so an existing directory at `worktree_path` is not proof it is
-/// still at `start_point`: a prior, separate invocation may have checked it
-/// out at an *earlier* commit before more was published, and nothing here
-/// ever refreshed it since. Trusting "exists" alone (as an earlier version
-/// of this function did) silently serves stale on-disk content forever
-/// after the first call for a given path -- a real, confirmed bug: a
-/// `coordinate` call whose dry-run validation needs another agent's
-/// just-published event can spuriously reject it as unknown, purely
-/// because an earlier, unrelated call happened to create that same cache
-/// path first. So: verify before trusting, and refresh if the target has
-/// moved.
-pub fn ensure_bus_worktree(
-    repo_dir: &Path,
-    worktree_path: &Path,
-    start_point: &str,
-) -> AbResult<()> {
-    // AGENT_BUS.md section 2 explicitly supports "multiple agents sharing
-    // one clone" via these same deterministic cache paths -- so two
-    // concurrent processes can enter this function for the identical
-    // `worktree_path` at the same time. Without serialization, both could
-    // observe staleness and both race `worktree remove`/`worktree add` for
-    // the same path: one process's remove can delete files mid-read by the
-    // other, one process's add can be clobbered by the other's concurrent
-    // add, and git's own `.git/worktrees/<name>` metadata can end up
-    // half-referencing a path neither process can then re-add to cleanly.
-    // An OS advisory lock on a sibling lock file (released automatically
-    // when this guard drops, *and* automatically by the OS if this process
-    // crashes while holding it -- no manual staleness/timeout logic needed)
-    // makes the whole exists-check/refresh/create sequence atomic across
-    // processes.
-    let _guard = lock_worktree_path(worktree_path)?;
-    if worktree_path.exists() {
-        let target = rev_parse(repo_dir, start_point)?;
-        if rev_parse_opt(worktree_path, "HEAD")?.as_deref() == Some(target.as_str()) {
-            return Ok(());
-        }
-        // Stale: remove and fall through to recreate at the right commit.
-        // `worktree remove` fails if git's own metadata already considers
-        // this path gone (e.g. after a manual `rm -rf`) -- best-effort,
-        // then fall back to a plain filesystem removal plus `prune` so a
-        // half-cleaned-up worktree can never wedge every future call.
-        let _ = run(
-            repo_dir,
-            &[
-                "worktree",
-                "remove",
-                "--force",
-                &worktree_path.to_string_lossy(),
-            ],
-        );
-        if worktree_path.exists() {
-            std::fs::remove_dir_all(worktree_path).map_err(|e| AbError::Io {
-                path: worktree_path.display().to_string(),
-                source: e,
-            })?;
-            run_ok(repo_dir, &["worktree", "prune"])?;
-        }
-    }
-    if let Some(parent) = worktree_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| AbError::Io {
-            path: parent.display().to_string(),
-            source: e,
-        })?;
-    }
-    let worktree_path_str = worktree_path.to_string_lossy();
-    let add_args = [
-        "worktree",
-        "add",
-        "--detach",
-        &worktree_path_str,
-        start_point,
-    ];
-    let out = run(repo_dir, &add_args)?;
-    if out.success {
-        return Ok(());
-    }
-    // `git worktree add` refuses to reuse a path it still considers
-    // registered to *another* worktree, even when that worktree's own
-    // working directory is long gone -- e.g. a prior process was killed
-    // mid-`add`, or the directory was removed by a plain filesystem
-    // removal rather than `git worktree remove`, leaving `.git/worktrees/
-    // <name>` behind ("... is a missing but already registered worktree").
-    // The `worktree_path.exists()` branch above only ever runs when the
-    // *directory* is present, so it never observes or cleans up this case
-    // -- confirmed live in the field: two independent users hit exactly
-    // this error on `tail`, succeeding only on manual retry. `git worktree
-    // prune` removes stale admin registrations like this one; it defaults
-    // to a multi-hour grace period before touching anything, so it will
-    // not disturb a concurrent, genuinely-in-progress `add` racing this
-    // same repo for an unrelated path. Retry once after pruning so this
-    // self-heals instead of surfacing to the caller.
-    run_ok(repo_dir, &["worktree", "prune"])?;
-    run_ok(repo_dir, &add_args)?;
-    Ok(())
-}
-
-/// The sibling lock-file path guarding `worktree_path`: same parent
-/// directory, a dot-prefixed `.<name>.lock` name so it never collides with
-/// (or gets swept up by) anything that lists the parent directory looking
-/// for actual worktree entries.
-fn worktree_lock_path(worktree_path: &Path) -> PathBuf {
-    let name = worktree_path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    worktree_path.with_file_name(format!(".{name}.lock"))
-}
-
-/// Opens (creating if necessary) and exclusively locks `worktree_path`'s
-/// sibling lock file, blocking until any other process's lock on it is
-/// released. The returned `File` must be kept alive for exactly as long as
-/// the critical section it protects -- dropping it releases the lock.
-fn lock_worktree_path(worktree_path: &Path) -> AbResult<std::fs::File> {
-    use fs4::FileExt;
-    let lock_path = worktree_lock_path(worktree_path);
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| AbError::Io {
-            path: parent.display().to_string(),
-            source: e,
-        })?;
-    }
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&lock_path)
-        .map_err(|e| AbError::Io {
-            path: lock_path.display().to_string(),
-            source: e,
-        })?;
-    file.lock_exclusive().map_err(|e| AbError::Io {
-        path: lock_path.display().to_string(),
-        source: e,
-    })?;
-    Ok(file)
-}
-
-pub fn add_all(dir: &Path) -> AbResult<()> {
-    run_ok(dir, &["add", "-A"])?;
-    Ok(())
-}
-
-pub fn commit(dir: &Path, message: &str) -> AbResult<String> {
-    run_ok(dir, &["commit", "-m", message])?;
-    rev_parse(dir, "HEAD")
-}
-
-pub fn checkout_detach(dir: &Path, rev: &str) -> AbResult<()> {
-    run_ok(dir, &["checkout", "--detach", rev])?;
-    Ok(())
-}
-
+/// The trailers in `rev`'s commit message.
+///
+/// The message is read in-process; the *parse* deliberately stays on `git
+/// interpret-trailers`, which is the one local git operation this crate does
+/// not reimplement. That is a considered exception, not an oversight:
+///
+///  - It is a security boundary. `merge_candidate.rs` decides who authored a
+///    candidate's commits from `Agent-Bus-Agent` trailers, and `merge_ready.
+///    rs`/`audit_main.rs` decide who reviewed it from `Agent-Bus-Reviewer`.
+///    A parser that saw a trailer git would not see would let a crafted
+///    message claim an authorship or a review it never had.
+///  - Git's real rule is not the one its manual documents. The 25%
+///    non-trailer tolerance described there is not what the pinned binary
+///    does: one prose line voids a block of eight trailers. Enumerating every
+///    three-line block over {trailer, prose, cherry-pick, continuation}
+///    against the real binary produces a rule that fits all sixty-four cases
+///    only if you also encode that the presence of a `(cherry picked from
+///    commit ...)` line silently relaxes the strictness -- an implementation
+///    accident of `trailer.c`, not a principle, and not something to freeze
+///    into an authorization check.
+///  - There is nothing to gain. This is not on any hot path: `status`,
+///    `tail`, `outbox`, `submit` and `coordinate` never call it. Only
+///    `audit-main` and the merge path do, a handful of commits at a time.
+///
+/// What *was* worth taking off the subprocess is the message read, which is
+/// not security-critical and used to be a second `git show` per commit. So
+/// this costs one process per commit now instead of two.
 pub fn commit_message_trailers(dir: &Path, rev: &str) -> AbResult<Vec<(String, String)>> {
-    let body = run_ok(dir, &["show", "-s", "--format=%B", rev])?;
-    let out = run_stdin(dir, &["interpret-trailers", "--parse"], &body)?;
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    let body = crate::gitobjects::HistoryReader::commit_message(&g, &resolve_required(&g, rev)?)?;
+    // `trailer.separators` is repository-local configuration that
+    // `ConfigPolicy::Hermetic` does not reach, and it decides what counts as
+    // a trailer at all: measured, `separators=%` makes every trailer in a
+    // well-formed message vanish from `--parse`, which would report a
+    // properly attributed commit as unattributed and refuse an honest merge.
+    // Pinned to git's default, so behavior is unchanged where nobody set it.
+    let out = run_stdin(
+        dir,
+        &[
+            "-c",
+            "trailer.separators=:",
+            "interpret-trailers",
+            "--parse",
+        ],
+        &body,
+    )?;
     if !out.success {
         return Err(AbError::Git(format!(
             "interpret-trailers failed: {}",
@@ -422,34 +738,22 @@ pub fn commit_message_trailers(dir: &Path, rev: &str) -> AbResult<Vec<(String, S
     Ok(trailers)
 }
 
-pub fn run_stdin(dir: &Path, args: &[&str], stdin: &str) -> AbResult<GitOutput> {
+/// Runs a git subcommand with `stdin`, **hermetically** -- see
+/// [`ConfigPolicy::Hermetic`]. The name says `stdin`, so the policy is said
+/// here instead: a caller that needs the operator's configuration (anything
+/// touching a remote) must not reach for this one.
+pub(crate) fn run_stdin(dir: &Path, args: &[&str], stdin: &str) -> AbResult<GitOutput> {
     if let Some(out) = mock::intercept(dir, args, Some(stdin)) {
         return out;
     }
-    use std::io::Write;
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| AbError::Git(format!("failed to run git {args:?}: {e}")))?;
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(stdin.as_bytes())
-        .map_err(|e| AbError::Git(format!("failed to write stdin to git {args:?}: {e}")))?;
-    let out = child
-        .wait_with_output()
-        .map_err(|e| AbError::Git(format!("failed to wait on git {args:?}: {e}")))?;
-    Ok(GitOutput {
-        success: out.status.success(),
-        stdout: String::from_utf8_lossy(&out.stdout).trim_end().to_string(),
-        stderr: String::from_utf8_lossy(&out.stderr).trim_end().to_string(),
-    })
+    let mut command = Command::new("git");
+    command.arg("-C").arg(dir).args(args);
+    // Hermetic: the sole production caller is `interpret-trailers --parse`,
+    // which decides which commits carry an `Agent-Bus-Agent` trailer and so
+    // gates merge authorization. An ambient `trailer.separators` was measured
+    // to make every trailer in a well-formed message vanish from `--parse`,
+    // which would report a properly-attributed commit as unattributed.
+    run_with_deadline_stdin(command, &format!("{args:?}"), stdin, ConfigPolicy::Hermetic)
 }
 
 /// `git merge-tree --write-tree` a no-conflict ORT merge of `theirs` into
@@ -474,13 +778,88 @@ fn pinned_merge_config_args() -> Vec<&'static str> {
         "merge.renames=true",
         "-c",
         "diff.renameLimit=0",
+        // Measured: same two commits, a directory renamed on one side and a
+        // file added into the old directory on the other, produced three
+        // different answers -- unset conflicts, `false` and `true` each
+        // yield a *different* clean tree. It is per-clone `.git/config`, so
+        // unlike a committed `.gitattributes` it is not repository content
+        // every host shares. Pinned to git's own default so behavior is
+        // unchanged where nobody set it.
+        "-c",
+        "merge.directoryRenames=conflict",
+        // Measured, not assumed. `core.attributesFile` *defaults* to
+        // `$XDG_CONFIG_HOME/git/attributes`, which git reads when the key is
+        // unset -- so it is reached through neither `GIT_CONFIG_GLOBAL` nor
+        // `GIT_CONFIG_COUNT` and survives every neutralization in
+        // [`ConfigPolicy::Hermetic`]. With a `* merge=<driver>` line in that
+        // file, `merge-tree` produced a different tree for the same two
+        // commits; pinning the key produced the clean one. Without this,
+        // section 7's "Windows and Linux must produce the same tree" is
+        // contingent on the operator's home directory.
+        "-c",
+        "core.attributesFile=/dev/null",
     ]
 }
 
+/// Refuse to construct a candidate in a repository carrying an
+/// `info/attributes` file.
+///
+/// `--attr-source` overrides the working tree and the index, and
+/// `core.attributesFile` is pinned, but `$GIT_COMMON_DIR/info/attributes` is
+/// consulted regardless of all three -- measured, and there is no git switch
+/// that suppresses it. It is also per-clone rather than repository content,
+/// so a candidate built under it is one no other host can reproduce, which is
+/// exactly what section 7 forbids.
+///
+/// Failing closed is the only honest option: the alternative is to build a
+/// tree that looks fine locally and cannot be reconstructed anywhere else,
+/// and the coordinator would then reject the reviewer's honest authorization
+/// with a mismatch it cannot explain.
+fn refuse_ambient_attributes(dir: &Path) -> AbResult<()> {
+    // Measured with `GIT_TRACE=1`: on a partial clone, `merge-tree` reading a
+    // blob it does not have runs a fetch underneath -- object count went up
+    // mid-merge. That fetch inherits this command's environment, and
+    // candidate construction is deliberately hermetic, so it runs with no
+    // credential helper, no `url.<base>.insteadOf`, no proxy, and with stdin
+    // closed so no prompt can be answered. Against a private remote it fails
+    // and surfaces as "could not cleanly merge", blaming the merge for a
+    // credentials problem.
+    //
+    // Refused rather than papered over. Making the merge inherit
+    // configuration would reopen the reproducibility hole this policy exists
+    // to close, and pre-hydrating the objects is real work with its own
+    // failure modes; neither belongs behind a silent fallback.
+    if crate::gitobjects::Libgit2Reader::open(dir)?.is_partial_clone() {
+        return Err(invalid(
+            "this repository is a partial clone, and candidate construction refuses to run in              one: the merge reads blob content, which makes git fetch missing objects              mid-merge, and that fetch cannot authenticate because construction is              deliberately insulated from the operator's git configuration. Use a full clone              for the host that prepares merges, or hydrate it first with `git fetch              --refetch --filter=`."
+                .to_string(),
+        ));
+    }
+    let path = common_dir(dir)?.join("info").join("attributes");
+    if path.exists() {
+        return Err(invalid(format!(
+            "{} exists; candidate construction refuses to run because git consults it no matter what this helper pins, so the resulting tree would depend on this clone rather than only on the commits being merged (AGENT_REVIEW.md section 7). Move the file aside, or commit those attributes so every host shares them.",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
 pub fn merge_tree_write_tree(dir: &Path, ours: &str, theirs: &str) -> AbResult<String> {
+    // AGENT_REVIEW.md section 7 asks for "repository attributes from
+    // `previous_main`", and without this the merge read them from whatever
+    // happens to be checked out. Measured: an *untracked* `.gitattributes` in
+    // the working tree changed the resulting tree for the same two commits.
+    // `ConfigPolicy::Hermetic` cannot reach this -- the file is repository
+    // content, not configuration -- and in the deployment AGENT_BUS.md
+    // specifies, many agents share one clone, so one stray file would move
+    // every candidate built on that host.
+    refuse_ambient_attributes(dir)?;
+    let attr_source = format!("--attr-source={ours}");
     let mut args = pinned_merge_config_args();
+    args.push(&attr_source);
     args.extend(["merge-tree", "--write-tree", "--name-only", ours, theirs]);
-    let out = run(dir, &args)?;
+    let out = run_hermetic(dir, &args)?;
     if !out.success {
         return Err(invalid(format!(
             "merge-tree could not cleanly merge {theirs} into {ours}: {}",
@@ -500,19 +879,19 @@ pub fn merge_tree_write_tree(dir: &Path, ours: &str, theirs: &str) -> AbResult<S
 
 /// Committer-date unix timestamp (seconds) of `rev`.
 pub fn committer_timestamp(dir: &Path, rev: &str) -> AbResult<i64> {
-    let out = run_ok(dir, &["show", "-s", "--format=%ct", rev])?;
-    out.trim().parse().map_err(|e| {
-        invalid(format!(
-            "could not parse committer timestamp for {rev}: {e}"
-        ))
-    })
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    crate::gitobjects::HistoryReader::committer_timestamp(&g, &resolve_required(&g, rev)?)
 }
 
 /// The exact number of merge bases between `a` and `b` (AGENT_REVIEW.md
 /// section 7: "It requires one merge base").
 pub fn merge_base_count(dir: &Path, a: &str, b: &str) -> AbResult<usize> {
-    let out = run_ok(dir, &["merge-base", "--all", a, b])?;
-    Ok(out.lines().filter(|l| !l.trim().is_empty()).count())
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    crate::gitobjects::HistoryReader::merge_base_count(
+        &g,
+        &resolve_required(&g, a)?,
+        &resolve_required(&g, b)?,
+    )
 }
 
 /// Construct a commit object with fully deterministic metadata
@@ -526,58 +905,96 @@ pub fn commit_tree_deterministic(
     parents: &[&str],
     message: &str,
 ) -> AbResult<String> {
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+
+    let mut resolved = Vec::with_capacity(parents.len());
+    for p in parents {
+        resolved.push(resolve_required(&g, p)?);
+    }
     let mut latest = i64::MIN;
     for p in parents {
-        let t = committer_timestamp(dir, p)?;
-        latest = latest.max(t);
+        latest = latest.max(committer_timestamp(dir, p)?);
     }
     let ts = latest
         .checked_add(1)
         .ok_or_else(|| invalid("candidate timestamp overflow"))?;
-    let date = format!("{ts} +0000");
 
-    let mut args: Vec<&str> = vec!["commit-tree", tree];
-    for p in parents {
-        args.push("-p");
-        args.push(p);
-    }
-    args.push("-m");
-    args.push(message);
-
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        // Deterministic candidates never carry a signature, regardless of
-        // ambient repo/global signing config (AGENT_REVIEW.md section 7: "no
-        // optional encoding, signature, or mergetag headers").
-        .args(["-c", "commit.gpgsign=false"])
-        .args(&args)
-        .env("GIT_AUTHOR_NAME", "Grass Agent Bus")
-        .env("GIT_AUTHOR_EMAIL", "agent-bus@invalid")
-        .env("GIT_AUTHOR_DATE", &date)
-        .env("GIT_COMMITTER_NAME", "Grass Agent Bus")
-        .env("GIT_COMMITTER_EMAIL", "agent-bus@invalid")
-        .env("GIT_COMMITTER_DATE", &date)
-        .env_remove("GIT_CONFIG_COUNT")
-        .output()
-        .map_err(|e| AbError::Git(format!("failed to run git commit-tree: {e}")))?;
-    if !out.status.success() {
-        return Err(AbError::Git(format!(
-            "git commit-tree failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        )));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    let tree = resolve_required(&g, tree)?;
+    let parent_refs: Vec<&crate::scalars::ObjectId> = resolved.iter().collect();
+    let id = g.commit_with_identity(
+        &tree,
+        &parent_refs,
+        message,
+        DETERMINISTIC_COMMIT_NAME,
+        DETERMINISTIC_COMMIT_EMAIL,
+        ts,
+    )?;
+    Ok(id.into_string())
 }
 
+/// The fixed identity every reproducible candidate commit carries. Any
+/// change here changes every future candidate's object id, so it is named
+/// once rather than spelled out at the point of use.
+pub const DETERMINISTIC_COMMIT_NAME: &str = "Grass Agent Bus";
+pub const DETERMINISTIC_COMMIT_EMAIL: &str = "agent-bus@invalid";
+
 pub fn tag_lightweight(dir: &Path, name: &str, target: &str) -> AbResult<()> {
-    run_ok(dir, &["tag", name, target])?;
-    Ok(())
+    // `git tag` validates the name it is given; `Branch::parse` is this
+    // crate's equivalent, cross-checked against real `git check-ref-format`
+    // by `scalars::ref_format_tests`.
+    //
+    // `git tag` refuses two names `check-ref-format` accepts, so
+    // `Branch::parse` cannot know about them: a tag literally named `HEAD`,
+    // and one starting with `-` (which would be read as an option). Neither
+    // is reachable from `candidate_tag_name`, but a tag name is caller input
+    // and this function should not be the place that stops matching `git
+    // tag`.
+    if name == "HEAD" || name.starts_with('-') {
+        return Err(invalid(format!(
+            "{name} is not a usable tag name: git refuses a tag named HEAD or one starting with \
+             a hyphen"
+        )));
+    }
+    let refname = crate::scalars::Branch::parse(format!("refs/tags/{name}"))
+        .map_err(|e| invalid(format!("{name} is not a usable tag name: {e}")))?;
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    let target = resolve_required(&g, target)?;
+    // Re-tagging the *same* target is a no-op, not a violation.
+    //
+    // AGENT_REVIEW.md section 7 makes the candidate tag immutable, and
+    // `compare_and_set(.., None, ..)` enforces that -- but it also made
+    // `prepare-merge` non-idempotent, and both the tag name and the target
+    // are deterministic functions of `(previous_main, reviewed_commit,
+    // reviewer)`. So a reviewer whose tag was created locally and whose push
+    // then failed (network, credentials) could never retry: the second run
+    // died at this call with "already exists ... another writer created it
+    // first; re-read the current tip and retry", which is false -- it was
+    // themselves -- and unactionable, since retrying cannot help. Meanwhile
+    // the authorization stays unverifiable forever, because the tag never
+    // reached the remote. Recovery required a manual `git tag -d`.
+    //
+    // Immutability is unaffected: a *different* target under the same name is
+    // still refused below, which is the case the rule is actually about.
+    if let Some(existing) = crate::gitobjects::RefStore::resolve(&g, refname.as_str())? {
+        if existing == target {
+            return Ok(());
+        }
+    }
+    crate::gitobjects::RefStore::compare_and_set(&g, refname.as_str(), None, &target)
 }
 
 /// Whether `remote` actually has a tag named `name` pointing at `target` --
 /// a real `ls-remote` network round trip, not a check against anything
-/// already fetched into the local repository. A local-only existence check
+/// already fetched into the local repository.
+///
+/// One limit worth stating, because a caller could otherwise over-trust this:
+/// the remote spec is resolved by `git`, under the operator's configuration,
+/// which transport deliberately inherits. A host with a `url.<base>.insteadOf`
+/// rule can therefore have `remote` resolve somewhere other than where the
+/// name suggests. That is inherent to letting transport keep its
+/// configuration -- the same rule is what makes credentialed pushes work at
+/// all -- so this answers "the tag is fetchable from the remote this host
+/// resolves that name to", not "from the remote everyone else means". A local-only existence check
 /// alone cannot tell the difference between "this tag reached origin" and
 /// "this tag only ever existed in the reviewer's own clone" (AGENT_BUS_
 /// SCHEMA.md's linked validation, and every other agent, need the former) --
@@ -613,40 +1030,38 @@ pub fn remote_tag_matches(dir: &Path, remote: &str, name: &str, target: &str) ->
     Ok(sha == Some(target))
 }
 
-/// `(status, path)` per changed path between `from` and `to`. A rename or
-/// copy line (`R100`/`C75`/...) carries *two* tab-separated path fields (old,
-/// new) rather than one -- `path` here is always the second/final one, the
-/// path that actually exists in `to`'s tree, since every caller cares about
-/// "what changed in the resulting tree," not "what it used to be called."
-/// (Previously mis-parsed via a 2-way split, which folded a rename's two
-/// paths into one string with a literal embedded tab -- round-6 adversarial
-/// review, reproduced directly: `merge_ready::check_merge_ready`'s scope
-/// check rejected every renamed file regardless of whether it was in scope,
-/// even though renames are deliberately supported elsewhere in this exact
-/// crate, `merge.renames=true` pinned for candidate construction.)
+/// Every path that differs between `from` and `to`, as `(status, path)`.
+///
+/// Rename detection is off, so a rename is reported as a delete of the old
+/// path plus an add of the new one rather than as a single `R<score>` entry
+/// naming only the destination. Both consumers -- `merge_ready::
+/// check_merge_ready` and `audit_main`'s post-hoc correlation -- check every
+/// path returned against a reviewed scope, and reporting both sides is what
+/// stops a rename *into* the reviewed scope from hiding the out-of-scope path
+/// it came from. See `gitobjects::HistoryReader::diff_name_status`.
 pub fn diff_name_status(dir: &Path, from: &str, to: &str) -> AbResult<Vec<(String, String)>> {
-    let out = run_ok(dir, &["diff", "--name-status", &format!("{from}..{to}")])?;
-    let mut result = Vec::new();
-    for line in out.lines() {
-        let mut parts = line.split('\t');
-        let (Some(status), Some(first_path)) = (parts.next(), parts.next()) else {
-            continue;
-        };
-        let path = parts.next().unwrap_or(first_path);
-        result.push((status.to_string(), path.to_string()));
-    }
-    Ok(result)
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    crate::gitobjects::HistoryReader::diff_name_status(
+        &g,
+        &resolve_required(&g, from)?,
+        &resolve_required(&g, to)?,
+    )
 }
 
 pub fn rev_list_first_parent(dir: &Path, from_exclusive: &str, to: &str) -> AbResult<Vec<String>> {
-    let range = format!("{from_exclusive}..{to}");
-    let out = run_ok(dir, &["rev-list", "--first-parent", "--reverse", &range])?;
-    Ok(out.lines().map(|s| s.to_string()).collect())
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    let out = crate::gitobjects::HistoryReader::first_parent_range(
+        &g,
+        &resolve_required(&g, from_exclusive)?,
+        &resolve_required(&g, to)?,
+    )?;
+    Ok(out.into_iter().map(|id| id.into_string()).collect())
 }
 
 pub fn parents_of(dir: &Path, rev: &str) -> AbResult<Vec<String>> {
-    let out = run_ok(dir, &["show", "-s", "--format=%P", rev])?;
-    Ok(out.split_whitespace().map(|s| s.to_string()).collect())
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    let out = crate::gitobjects::HistoryReader::parents_of(&g, &resolve_required(&g, rev)?)?;
+    Ok(out.into_iter().map(|id| id.into_string()).collect())
 }
 
 pub fn commits_between_first_parent_exclusive(
@@ -656,9 +1071,13 @@ pub fn commits_between_first_parent_exclusive(
 ) -> AbResult<Vec<String>> {
     // Commits introduced by the second parent relative to the first parent:
     // ancestor..second_parent
-    let range = format!("{ancestor}..{descendant_second_parent}");
-    let out = run_ok(dir, &["rev-list", &range])?;
-    Ok(out.lines().map(|s| s.to_string()).collect())
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    let out = crate::gitobjects::HistoryReader::range(
+        &g,
+        &resolve_required(&g, ancestor)?,
+        &resolve_required(&g, descendant_second_parent)?,
+    )?;
+    Ok(out.into_iter().map(|id| id.into_string()).collect())
 }
 
 /// A scriptable stand-in for the real `git` subprocess, installed for the
@@ -875,9 +1294,342 @@ pub mod mock {
 
 #[cfg(test)]
 mod outer_tests {
+
+    // ----------------------------------------------- the subprocess deadline
+
+    /// A command that blocks far longer than any deadline in these tests.
+    /// Neither program is `git`, which is the point: the deadline is a
+    /// property of how this module runs a child, and a program that reliably
+    /// hangs makes the expiry path deterministic instead of needing an
+    /// unreachable remote.
+    fn blocking_command() -> Command {
+        if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            // `ping -n N 127.0.0.1` is the portable Windows sleep.
+            c.args(["/c", "ping -n 30 127.0.0.1 >nul"]);
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.args(["-c", "sleep 30"]);
+            c
+        }
+    }
+
+    /// The killer must actually terminate the process, not merely be called.
+    ///
+    /// This is half of what `g-reviewer:29` needs; the other half (that the
+    /// deadline *invokes* it) is the test below. Splitting them is deliberate:
+    /// an earlier single test asserted only the error text and a bounded wall
+    /// clock, both of which stay true when the kill does nothing at all.
+    #[test]
+    fn kill_process_tree_actually_terminates_the_child() {
+        let mut child = blocking_command()
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+
+        // It is running, and stays running on its own.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "the fixture exited on its own; it cannot demonstrate a kill"
+        );
+
+        kill_process_tree(child.id());
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the child was still running 10s after kill_process_tree"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    /// `g-reviewer:29`: an unbounded subprocess can hang every agent-bus
+    /// command. On expiry the deadline must report *and* kill -- reporting
+    /// alone leaves the process running and the pipe held.
+    #[test]
+    fn a_command_that_outruns_its_deadline_is_reported_and_its_tree_killed() {
+        let before = KILLS_REQUESTED.with(|c| c.get());
+
+        let mut command = blocking_command();
+        command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        let started = std::time::Instant::now();
+        let err = spawn_and_wait(
+            command,
+            "test-hang",
+            None,
+            std::time::Duration::from_millis(300),
+            ConfigPolicy::Inherit,
+        )
+        .unwrap_err();
+        let elapsed = started.elapsed();
+
+        assert!(
+            err.to_string().contains("did not finish within"),
+            "expected a timeout error, got: {err}"
+        );
+        // The deadline must bound the wait, not merely be reported after the
+        // child finished on its own.
+        assert!(
+            elapsed < std::time::Duration::from_secs(15),
+            "waited {elapsed:?}, so the deadline did not bound the wait"
+        );
+        // ...and it must have asked for the kill. Without this the test stays
+        // green when the kill is removed entirely.
+        assert!(
+            KILLS_REQUESTED.with(|c| c.get()) > before,
+            "the deadline expired without requesting a process-tree kill"
+        );
+    }
+
+    /// This CLI's callers are other agents with no human in the loop, so a
+    /// failure has to say what to do next, not only that it failed.
+    #[test]
+    fn the_timeout_error_names_the_operator_action() {
+        let mut command = blocking_command();
+        command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let err = spawn_and_wait(
+            command,
+            "test-hang",
+            None,
+            std::time::Duration::from_millis(300),
+            ConfigPolicy::Inherit,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("credential"), "{err}");
+        assert!(err.contains("retry"), "{err}");
+        assert!(err.contains("AGENT_BUS_GIT_TIMEOUT_SECS"), "{err}");
+    }
+
+    /// A command that finishes well inside the deadline must not be delayed
+    /// by it. This is why the wait is a blocking wait on a thread rather than
+    /// a poll loop with a sleep: a poll interval would be paid by every call.
+    #[test]
+    fn a_fast_command_is_not_delayed_by_the_deadline() {
+        let repo = init_repo();
+        let started = std::time::Instant::now();
+        let out = run(repo.path(), &["rev-parse", "HEAD"]).unwrap();
+        assert!(out.success, "{out:?}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "a trivial git call took {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// The override's parse rule, exercised against the shipped function
+    /// rather than a copy of it re-implemented in the test. The previous
+    /// version defined a local closure with the same logic and asserted
+    /// against that, which proved nothing about the code that ships.
+    /// The wiring, not only the rule: something must actually read
+    /// [`TIMEOUT_VAR`], and it must be that name.
+    ///
+    /// Mutating `git_timeout` to read a variable that is never set left the
+    /// whole suite green, because every other test either calls
+    /// `parse_timeout_secs` directly or passes `spawn_and_wait` an explicit
+    /// duration. The escape hatch the error message advertises was therefore
+    /// unreachable and nothing noticed.
+    #[test]
+    fn the_deadline_reads_the_documented_environment_variable() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let got = git_timeout_from(|k| {
+            seen.borrow_mut().push(k.to_string());
+            (k == "AGENT_BUS_GIT_TIMEOUT_SECS").then(|| "7".to_string())
+        });
+        assert_eq!(got, std::time::Duration::from_secs(7));
+        assert_eq!(
+            seen.into_inner(),
+            vec!["AGENT_BUS_GIT_TIMEOUT_SECS".to_string()],
+            "the lookup must ask for exactly the documented variable"
+        );
+
+        // Unset falls back to the default.
+        assert_eq!(
+            git_timeout_from(|_| None),
+            std::time::Duration::from_secs(120)
+        );
+        // And the constant the message advertises is the one that is read.
+        assert_eq!(TIMEOUT_VAR, "AGENT_BUS_GIT_TIMEOUT_SECS");
+    }
+
+    #[test]
+    fn the_deadline_default_is_used_when_the_override_is_unusable() {
+        assert_eq!(parse_timeout_secs(None), 120);
+        assert_eq!(parse_timeout_secs(Some("")), 120);
+        assert_eq!(
+            parse_timeout_secs(Some("0")),
+            120,
+            "zero must not disable the deadline"
+        );
+        assert_eq!(parse_timeout_secs(Some("not-a-number")), 120);
+        assert_eq!(parse_timeout_secs(Some("-5")), 120);
+        assert_eq!(parse_timeout_secs(Some("5")), 5);
+        assert_eq!(parse_timeout_secs(Some("3600")), 3600);
+    }
     use super::*;
     use crate::gitrepo::mock::MockGit;
     use std::path::PathBuf;
+
+    // ------------------------------------------- ambient configuration
+
+    /// The mechanism, asserted exactly: `Hermetic` must both *remove* the
+    /// `-c`-precedence injection variables and *force* the file-location
+    /// ones. Removing alone is insufficient -- git reads the operator's
+    /// `~/.gitconfig` precisely when `GIT_CONFIG_GLOBAL` is absent -- and
+    /// forcing alone is insufficient, because `GIT_CONFIG_COUNT` injection
+    /// is honored independently of it. Both halves were measured against
+    /// real git before being written down here.
+    #[test]
+    fn the_hermetic_policy_both_removes_and_forces_the_configuration_channels() {
+        let mut command = Command::new("git");
+        ConfigPolicy::Hermetic.apply(&mut command);
+        let seen: std::collections::BTreeMap<String, Option<String>> = command
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+
+        // Removed (`None` == `env_remove`).
+        assert_eq!(seen.get("GIT_CONFIG_PARAMETERS"), Some(&None));
+        assert_eq!(seen.get("GIT_CONFIG_COUNT"), Some(&None));
+        // Forced.
+        assert_eq!(
+            seen.get("GIT_CONFIG_GLOBAL"),
+            Some(&Some("/dev/null".to_string()))
+        );
+        assert_eq!(
+            seen.get("GIT_CONFIG_SYSTEM"),
+            Some(&Some("/dev/null".to_string()))
+        );
+        assert_eq!(
+            seen.get("GIT_CONFIG_NOSYSTEM"),
+            Some(&Some("1".to_string()))
+        );
+        assert_eq!(seen.get("GIT_ATTR_NOSYSTEM"), Some(&Some("1".to_string())));
+    }
+
+    /// The other half of the contract, and the one whose absence broke
+    /// pushing: transport must see the operator's configuration untouched.
+    #[test]
+    fn the_inherit_policy_changes_no_configuration_at_all() {
+        let mut command = Command::new("git");
+        ConfigPolicy::Inherit.apply(&mut command);
+        assert_eq!(
+            command.get_envs().count(),
+            0,
+            "Inherit must not add, remove or override any environment variable"
+        );
+    }
+
+    /// `core.attributesFile` needs its own pin because its *default* --
+    /// `$XDG_CONFIG_HOME/git/attributes` -- is read when the key is unset,
+    /// and is therefore reachable through no `GIT_CONFIG_*` variable at all.
+    ///
+    /// This drives real `git merge-tree` three ways over the same two
+    /// commits: with a hostile attributes file plus the driver it names,
+    /// unpinned (the tree changes); pinned (the tree is the clean one); and
+    /// with no hostile configuration at all (establishing what "clean"
+    /// means). Without the middle case a reader cannot tell whether the pin
+    /// does anything, and without the first the test would pass even if the
+    /// channel did not exist.
+    #[test]
+    fn the_attributes_file_pin_closes_a_channel_no_environment_variable_reaches() {
+        let repo = init_repo();
+        let path = repo.path();
+        std::fs::write(path.join("f.txt"), "line1\nline2\n").unwrap();
+        git(path, &["add", "f.txt"]);
+        git(path, &["commit", "-q", "-m", "base"]);
+        git(path, &["checkout", "-q", "-b", "left"]);
+        commit_file(path, "f.txt", "LEFT\nline2\n", "left");
+        git(path, &["checkout", "-q", "main"]);
+        git(path, &["checkout", "-q", "-b", "right"]);
+        commit_file(path, "f.txt", "RIGHT\nline2\n", "right");
+
+        // A hostile "home": an attributes file selecting a merge driver that
+        // resolves the conflict instead of leaving markers.
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join("git")).unwrap();
+        std::fs::write(home.path().join("git/attributes"), "* merge=takeours\n").unwrap();
+
+        let merge = |pin_attrs: bool, hostile: bool| -> String {
+            let mut c = Command::new("git");
+            c.arg("-C").arg(path);
+            for a in [
+                "-c",
+                "merge.conflictStyle=merge",
+                "-c",
+                "core.autocrlf=false",
+            ] {
+                c.arg(a);
+            }
+            if pin_attrs {
+                c.args(["-c", "core.attributesFile=/dev/null"]);
+            }
+            if hostile {
+                c.env("XDG_CONFIG_HOME", home.path());
+                // The driver definition itself may arrive by any route; what
+                // matters is that the *attributes* half is unreachable by
+                // environment.
+                c.env("GIT_CONFIG_COUNT", "1");
+                c.env("GIT_CONFIG_KEY_0", "merge.takeours.driver");
+                c.env("GIT_CONFIG_VALUE_0", "cp %B %A");
+            } else {
+                c.env("GIT_CONFIG_GLOBAL", "/dev/null");
+                c.env("GIT_CONFIG_NOSYSTEM", "1");
+            }
+            c.args(["merge-tree", "--write-tree", "--name-only", "left", "right"]);
+            let out = c.output().unwrap();
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_string()
+        };
+
+        let clean = merge(false, false);
+        assert!(
+            !clean.is_empty(),
+            "fixture: the clean merge must produce a tree"
+        );
+        assert_ne!(
+            merge(false, true),
+            clean,
+            "fixture is not proving anything unless the ambient attributes file \
+             actually changes the merge result"
+        );
+        assert_eq!(
+            merge(true, true),
+            clean,
+            "pinning core.attributesFile must make the merge independent of the \
+             operator's home directory (AGENT_REVIEW.md section 7)"
+        );
+        assert!(
+            pinned_merge_config_args()
+                .windows(2)
+                .any(|w| { w[0] == "-c" && w[1] == "core.attributesFile=/dev/null" }),
+            "the pin this test justifies must actually be in the pinned set"
+        );
+    }
 
     /// Run a real `git` subcommand and assert it succeeded -- for test setup
     /// only, never for the behavior under test itself. Mirrors the pattern
@@ -927,229 +1679,55 @@ mod outer_tests {
     /// `--git-common-dir` returning an already-absolute path (the common case
     /// from within a linked worktree, AGENT_BUS.md section 2) must be used
     /// as-is, not re-joined onto `start`.
+    /// `common_dir` must report an absolute path to the repository's shared
+    /// git directory, and must agree with `git rev-parse --git-common-dir`,
+    /// which is what it replaced.
+    ///
+    /// The two tests this supersedes scripted a `MockGit` answer and checked
+    /// the relative-path join that answer needed. libgit2 reports this
+    /// absolute already, so there is no join left to test -- and a mock
+    /// cannot intercept an in-process call in any case. Comparing against
+    /// real git is a stronger claim than the one that was lost.
     #[test]
-    fn common_dir_returns_an_absolute_result_unchanged() {
-        let abs = if cfg!(windows) {
-            "C:\\repo\\.git"
-        } else {
-            "/repo/.git"
-        };
-        let _guard = MockGit::new()
-            .on(&["rev-parse", "--git-common-dir"], GitOutput::ok(abs))
-            .install();
-        let got = common_dir(&PathBuf::from("/wherever")).unwrap();
-        assert_eq!(got, PathBuf::from(abs));
-    }
-
-    /// A relative `--git-common-dir` result (the common case from within the
-    /// main checkout, e.g. `.git`) must be resolved against `start`.
-    #[test]
-    fn common_dir_joins_a_relative_result_onto_start() {
-        let _guard = MockGit::new()
-            .on(&["rev-parse", "--git-common-dir"], GitOutput::ok(".git"))
-            .install();
-        let start = PathBuf::from("/repo/checkout");
-        let got = common_dir(&start).unwrap();
-        assert_eq!(got, start.join(".git"));
-    }
-
-    /// Regression test for a real, confirmed bug: `ensure_bus_worktree`'s
-    /// callers all pass a deterministic path reused across *separate
-    /// process invocations* as a cache (`sync::reduce_local`'s per-agent
-    /// worktrees in particular). Treating "the path exists" as proof it is
-    /// already at `start_point` meant a worktree created once, early, was
-    /// silently stuck there forever -- a later call naming a *newer*
-    /// `start_point` at the same path got the stale content back with no
-    /// error. `storage::read_stream_log` reads these worktrees via plain
-    /// filesystem access, so this directly caused a live failure: a
-    /// `coordinate` dry-run validating an event that referenced another
-    /// agent's just-published event saw that agent's stream frozen at an
-    /// earlier tip and rejected it as unknown.
-    #[test]
-    fn ensure_bus_worktree_refreshes_a_worktree_whose_start_point_has_moved() {
+    fn common_dir_matches_git_and_is_absolute() {
         let repo = init_repo();
-        let worktree = repo.path().join("_shared_cache_path");
+        let got = common_dir(repo.path()).unwrap();
+        assert!(got.is_absolute(), "expected an absolute path, got {got:?}");
 
-        ensure_bus_worktree(repo.path(), &worktree, "HEAD").unwrap();
-        assert_eq!(
-            std::fs::read_to_string(worktree.join("README.md"))
-                .unwrap()
-                .trim_end(),
-            "hello"
-        );
-
-        commit_file(repo.path(), "README.md", "goodbye\n", "second");
-
-        // Same worktree path, but `start_point` (still "HEAD") now names a
-        // different commit -- the cached worktree must be refreshed to it,
-        // not served stale.
-        ensure_bus_worktree(repo.path(), &worktree, "HEAD").unwrap();
-        assert_eq!(
-            std::fs::read_to_string(worktree.join("README.md"))
-                .unwrap()
-                .trim_end(),
-            "goodbye",
-            "the worktree must have been refreshed to the new HEAD, not left stale"
-        );
-    }
-
-    /// The common, unchanged-target case must not pay for a full
-    /// remove-and-recreate: `ensure_bus_worktree` first checks whether the
-    /// existing worktree's HEAD already matches `start_point` via
-    /// `rev-parse`, and only falls through to `worktree remove` + `worktree
-    /// add` if it does not.
-    #[test]
-    fn ensure_bus_worktree_is_a_cheap_noop_when_already_at_start_point() {
-        let repo = init_repo();
-        let worktree = repo.path().join("_shared_cache_path");
-        let head = rev_parse(repo.path(), "HEAD").unwrap();
-
-        ensure_bus_worktree(repo.path(), &worktree, &head).unwrap();
-        let _guard = MockGit::new()
-            .on(&["rev-parse", "--verify", &head], GitOutput::ok(&head))
-            .on(
-                &["rev-parse", "--verify", "--quiet", "HEAD^{object}"],
-                GitOutput::ok(&head),
-            )
-            .install();
-        // With the mock installed, any git call other than the two
-        // `rev-parse`s above would panic with "no rule matched" -- in
-        // particular no `worktree remove`/`worktree add`.
-        ensure_bus_worktree(repo.path(), &worktree, &head).unwrap();
-    }
-
-    /// Round-4 review, Significant finding: the staleness fix above
-    /// introduced a new hazard of its own -- AGENT_BUS.md section 2
-    /// explicitly supports "multiple agents sharing one clone" via these
-    /// same deterministic cache paths, so two concurrent processes can
-    /// legitimately race to refresh the identical `worktree_path` at once.
-    /// Without serialization, one caller's `worktree remove` could delete
-    /// files mid-read by another, or two concurrent `worktree add`s for the
-    /// same path could corrupt git's own worktree metadata. Proves the
-    /// exclusive-lock fix: many threads hammering `ensure_bus_worktree` for
-    /// the *same* path with a *moving* target, concurrently, all succeed
-    /// (no error, no panic), and every one observes the worktree correctly
-    /// checked out at some real, valid commit afterward -- never a
-    /// half-removed or half-added state.
-    #[test]
-    fn ensure_bus_worktree_is_safe_under_concurrent_callers_racing_the_same_path() {
-        let repo = init_repo();
-        let worktree = repo.path().join("_shared_cache_path");
-        let repo_path = repo.path().to_path_buf();
-
-        // Two real commits, so `start_point` genuinely differs across
-        // concurrent calls, not just a no-op every time.
-        let first = rev_parse(&repo_path, "HEAD").unwrap();
-        commit_file(&repo_path, "README.md", "second\n", "second");
-        let second = rev_parse(&repo_path, "HEAD").unwrap();
-        let targets = [first.clone(), second.clone()];
-
-        let handles: Vec<_> = (0..8)
-            .map(|i| {
-                let repo_path = repo_path.clone();
-                let worktree = worktree.clone();
-                let target = targets[i % targets.len()].clone();
-                std::thread::spawn(move || ensure_bus_worktree(&repo_path, &worktree, &target))
-            })
-            .collect();
-        for h in handles {
-            h.join()
-                .expect("thread must not panic")
-                .expect("ensure_bus_worktree must not error under concurrent callers");
-        }
-
-        // The worktree must be left in a fully valid state: checked out at
-        // *one* of the two real commits, never a torn/partial mix.
-        let final_head = rev_parse(&worktree, "HEAD").unwrap();
-        assert!(
-            final_head == first || final_head == second,
-            "worktree ended up at an unexpected commit: {final_head}"
-        );
-        let content = std::fs::read_to_string(worktree.join("README.md"))
-            .unwrap()
-            .trim_end()
-            .to_string();
-        assert!(
-            content == "hello" || content == "second",
-            "worktree content is inconsistent with its own HEAD: {content:?}"
-        );
-    }
-
-    /// When the worktree path's parent cannot be created (here, because a
-    /// path component is an ordinary file, not a directory), the IO error
-    /// must be surfaced as `AbError::Io`, not panic or silently proceed.
-    #[test]
-    fn ensure_bus_worktree_reports_io_error_when_parent_cannot_be_created() {
-        let dir = tempfile::tempdir().unwrap();
-        let blocking_file = dir.path().join("not_a_dir");
-        std::fs::write(&blocking_file, "x").unwrap();
-        let worktree_path = blocking_file.join("nested").join("wt");
-        let err = ensure_bus_worktree(
-            &PathBuf::from("/unused"),
-            &worktree_path,
-            "origin/agent-bus",
-        )
-        .unwrap_err();
-        assert!(matches!(err, AbError::Io { .. }), "{err:?}");
-    }
-
-    /// The ordinary path: the worktree does not yet exist, its parent can be
-    /// created, and `git worktree add --detach <path> <start>` succeeds.
-    #[test]
-    fn ensure_bus_worktree_creates_a_new_worktree() {
-        let dir = tempfile::tempdir().unwrap();
-        let worktree_path = dir.path().join("nested").join("wt");
-        let _guard = MockGit::new()
-            .on_prefix(&["worktree", "add", "--detach"], GitOutput::ok(""))
-            .install();
-        ensure_bus_worktree(
-            &PathBuf::from("/unused"),
-            &worktree_path,
-            "origin/agent-bus",
+        let expected = run_ok(
+            repo.path(),
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
         )
         .unwrap();
-    }
-
-    #[test]
-    fn ensure_bus_worktree_recovers_from_a_stale_admin_registration_after_a_manual_removal() {
-        let repo = init_repo();
-        let worktree = repo.path().join("_shared_cache_path");
-        let head = rev_parse(repo.path(), "HEAD").unwrap();
-
-        // First call actually creates the worktree and registers it with
-        // git's own `.git/worktrees/<name>` admin metadata.
-        ensure_bus_worktree(repo.path(), &worktree, &head).unwrap();
-        assert!(worktree.exists());
-
-        // Simulate a killed process / manual cleanup: the working directory
-        // is removed via a plain filesystem removal, never through `git
-        // worktree remove`, so git's admin entry for it survives untouched.
-        std::fs::remove_dir_all(&worktree).unwrap();
-        assert!(!worktree.exists());
-
-        // A second call for the identical path/target must still succeed --
-        // not surface git's "missing but already registered worktree" error
-        // to the caller the way the live bug reports describe.
-        ensure_bus_worktree(repo.path(), &worktree, &head).unwrap();
-        assert!(worktree.exists());
-        assert_eq!(rev_parse(&worktree, "HEAD").unwrap(), head);
+        assert_eq!(
+            std::fs::canonicalize(&got).unwrap(),
+            std::fs::canonicalize(PathBuf::from(expected.trim())).unwrap()
+        );
     }
 
     /// A failing `git interpret-trailers --parse` invocation must surface as
     /// an error rather than an empty/garbage trailer list.
     #[test]
     fn commit_message_trailers_reports_interpret_trailers_failure() {
+        // A real repository, not `PathBuf::from(".")`. The message is now
+        // read in-process, so the old `show -s --format=%B` mock rule is
+        // never consulted and the call needs a repository it can actually
+        // open -- relying on the process working directory happening to be
+        // one is exactly the accidental coupling this avoids. Only the
+        // `interpret-trailers` rule still intercepts anything.
+        let repo = init_repo();
         let _guard = MockGit::new()
-            .on_prefix(
-                &["show", "-s", "--format=%B"],
-                GitOutput::ok("subject\n\nAgent-Bus-Agent: alice"),
-            )
             .on(
-                &["interpret-trailers", "--parse"],
+                &[
+                    "-c",
+                    "trailer.separators=:",
+                    "interpret-trailers",
+                    "--parse",
+                ],
                 GitOutput::err("bad format"),
             )
             .install();
-        let err = commit_message_trailers(&PathBuf::from("."), "HEAD").unwrap_err();
+        let err = commit_message_trailers(repo.path(), "HEAD").unwrap_err();
         assert!(
             format!("{err}").contains("interpret-trailers failed"),
             "{err}"
@@ -1197,7 +1775,12 @@ mod outer_tests {
             "msg",
         )
         .unwrap_err();
-        assert!(format!("{err}").contains("commit-tree failed"), "{err}");
+        // The all-zero id names no object; the failure now comes from
+        // resolving it rather than from `git commit-tree`'s exit status.
+        assert!(
+            format!("{err}").contains("does not name an object"),
+            "{err}"
+        );
     }
 
     /// The success path: given a real parent and its real tree, the
@@ -1277,7 +1860,12 @@ mod outer_tests {
         let repo = init_repo();
         let out = run_stdin(
             repo.path(),
-            &["interpret-trailers", "--parse"],
+            &[
+                "-c",
+                "trailer.separators=:",
+                "interpret-trailers",
+                "--parse",
+            ],
             "subject\n\nSigned-off-by: Alice <alice@example.com>",
         )
         .unwrap();
@@ -1306,9 +1894,382 @@ mod outer_tests {
         assert!(!out.stderr.is_empty(), "{out:?}");
     }
 
+    /// The *wiring*, not the mechanism.
+    ///
+    /// `the_hermetic_policy_both_removes_and_forces_the_configuration_channels`
+    /// proves what `ConfigPolicy::Hermetic` does; it says nothing about
+    /// whether candidate construction uses it. Mutation testing showed the
+    /// difference mattered: switching this call back to the inheriting `run`
+    /// left all 549 tests green, which would have silently reopened
+    /// AGENT_REVIEW.md section 7's reproducibility requirement.
+    ///
+    /// Transport is asserted in the same test, because the two halves of the
+    /// split only mean anything together -- an implementation that made
+    /// everything hermetic would satisfy the first assertion alone.
     /// The success path: a real, cleanly-mergeable pair of branches must
     /// produce a real, resolvable tree object containing both sides'
     /// changes.
+    #[test]
+    fn candidate_construction_runs_hermetic_while_transport_still_inherits() {
+        let repo = init_repo();
+        git(repo.path(), &["checkout", "-q", "-b", "theirs"]);
+        commit_file(
+            repo.path(),
+            "theirs.txt",
+            "theirs
+",
+            "add theirs.txt",
+        );
+        let theirs_tip = rev_parse(repo.path(), "HEAD").unwrap();
+        git(repo.path(), &["checkout", "-q", "main"]);
+        commit_file(
+            repo.path(),
+            "ours.txt",
+            "ours
+",
+            "add ours.txt",
+        );
+        let ours_tip = rev_parse(repo.path(), "HEAD").unwrap();
+
+        merge_tree_write_tree(repo.path(), &ours_tip, &theirs_tip).unwrap();
+        assert_eq!(
+            last_config_policy(),
+            Some(ConfigPolicy::Hermetic),
+            "merge-tree must not see the operator's configuration"
+        );
+
+        // A remote operation, which must keep it.
+        let origin = init_bare_origin();
+        let remote = origin.path().display().to_string();
+        let _ = remote_refs_existing(repo.path(), &remote, &["refs/heads/main".to_string()]);
+        assert_eq!(
+            last_config_policy(),
+            Some(ConfigPolicy::Inherit),
+            "transport must still see credential helpers and url rewrites"
+        );
+    }
+
+    /// The trailer parse decides which commits carry an `Agent-Bus-Agent`
+    /// trailer, so it gates merge authorization; an ambient
+    /// `trailer.separators` was measured to make every trailer in a
+    /// well-formed message vanish from `--parse`.
+    #[test]
+    fn the_trailer_parse_runs_hermetic() {
+        let repo = init_repo();
+        commit_file(
+            repo.path(),
+            "x.txt",
+            "x
+",
+            "subject
+
+Agent-Bus-Agent: alice",
+        );
+        let head = rev_parse(repo.path(), "HEAD").unwrap();
+        let trailers = commit_message_trailers(repo.path(), &head).unwrap();
+        assert!(
+            trailers
+                .iter()
+                .any(|(k, v)| k == "Agent-Bus-Agent" && v == "alice"),
+            "fixture must produce a real trailer: {trailers:?}"
+        );
+        assert_eq!(last_config_policy(), Some(ConfigPolicy::Hermetic));
+    }
+
+    /// Builds two branches that merge cleanly, and returns `(repo, ours,
+    /// theirs)`. They touch opposite ends of one file, so a merge driver or
+    /// an `-merge` attribute changes the result while an honest merge does
+    /// not -- which is what makes the attribute tests below falsifiable.
+    fn cleanly_mergeable_repo() -> (tempfile::TempDir, String, String) {
+        let repo = init_repo();
+        let p = repo.path();
+        std::fs::write(
+            p.join("f.txt"),
+            "l1
+l2
+l3
+l4
+l5
+",
+        )
+        .unwrap();
+        git(p, &["add", "f.txt"]);
+        git(p, &["commit", "-q", "-m", "base"]);
+        git(p, &["checkout", "-q", "-b", "ours"]);
+        commit_file(
+            p,
+            "f.txt",
+            "OURS
+l2
+l3
+l4
+l5
+",
+            "ours",
+        );
+        let ours = rev_parse(p, "HEAD").unwrap();
+        git(p, &["checkout", "-q", "main"]);
+        git(p, &["checkout", "-q", "-b", "theirs"]);
+        commit_file(
+            p,
+            "f.txt",
+            "l1
+l2
+l3
+l4
+THEIRS
+",
+            "theirs",
+        );
+        let theirs = rev_parse(p, "HEAD").unwrap();
+        git(p, &["checkout", "-q", "main"]);
+        (repo, ours, theirs)
+    }
+
+    /// AGENT_REVIEW.md section 7: "repository attributes from
+    /// `previous_main`". Before `--attr-source`, the merge read them from
+    /// whatever was checked out -- so an *untracked* file, which is not
+    /// repository content at all and which no other host has, moved the
+    /// candidate.
+    ///
+    /// Non-vacuous by construction: the same poison is shown to change the
+    /// answer when the attribute source is the working tree, so the test
+    /// fails both if the poison stops working and if the pin stops working.
+    #[test]
+    fn candidate_attributes_come_from_previous_main_not_the_working_tree() {
+        let (repo, ours, theirs) = cleanly_mergeable_repo();
+        let clean = merge_tree_write_tree(repo.path(), &ours, &theirs).unwrap();
+
+        std::fs::write(
+            repo.path().join(".gitattributes"),
+            "* -merge
+",
+        )
+        .unwrap();
+
+        // The poison is real: pointed at the working tree, git refuses the
+        // same merge outright.
+        let poisoned = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(pinned_merge_config_args())
+            .args(["merge-tree", "--write-tree", "--name-only", &ours, &theirs])
+            .output()
+            .unwrap();
+        assert!(
+            !poisoned.status.success(),
+            "fixture proves nothing unless the untracked file changes the merge"
+        );
+
+        // Taken from `previous_main`, it is invisible.
+        let with_pin = merge_tree_write_tree(repo.path(), &ours, &theirs).unwrap();
+        assert_eq!(
+            with_pin, clean,
+            "an untracked .gitattributes must not move the candidate"
+        );
+    }
+
+    /// The one attribute channel no git switch closes: `--attr-source`
+    /// overrides the worktree and index, `core.attributesFile` is pinned, and
+    /// `$GIT_COMMON_DIR/info/attributes` is still consulted over all three.
+    /// It is per-clone, so a candidate built under it is one no other host
+    /// can reproduce -- refused rather than silently host-dependent.
+    #[test]
+    fn candidate_construction_refuses_a_clone_carrying_info_attributes() {
+        let (repo, ours, theirs) = cleanly_mergeable_repo();
+        merge_tree_write_tree(repo.path(), &ours, &theirs)
+            .expect("fixture must merge cleanly before the file exists");
+
+        let info = common_dir(repo.path()).unwrap().join("info");
+        std::fs::create_dir_all(&info).unwrap();
+        std::fs::write(
+            info.join("attributes"),
+            "* -merge
+",
+        )
+        .unwrap();
+
+        let err = merge_tree_write_tree(repo.path(), &ours, &theirs)
+            .expect_err("info/attributes must be refused, not silently honored");
+        assert!(
+            err.to_string()
+                .contains("candidate construction refuses to run"),
+            "expected the ambient-attributes refusal, got: {err}"
+        );
+    }
+
+    /// `trailer.separators` is repository-local configuration, which the
+    /// hermetic policy does not reach, and it decides what counts as a
+    /// trailer at all -- so an unpinned parse would report a properly
+    /// attributed commit as unattributed and refuse an honest merge.
+    #[test]
+    fn the_trailer_parse_is_pinned_against_repository_local_configuration() {
+        let repo = init_repo();
+        commit_file(
+            repo.path(),
+            "x.txt",
+            "x
+",
+            "subject
+
+Agent-Bus-Agent: alice",
+        );
+        let head = rev_parse(repo.path(), "HEAD").unwrap();
+
+        // The poison is real: unpinned, this suppresses every trailer.
+        git(repo.path(), &["config", "trailer.separators", "%"]);
+        let unpinned = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["interpret-trailers", "--parse"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut c| {
+                use std::io::Write;
+                c.stdin.take().unwrap().write_all(
+                    b"subject
+
+Agent-Bus-Agent: alice
+",
+                )?;
+                c.wait_with_output()
+            })
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&unpinned.stdout).trim().is_empty(),
+            "fixture proves nothing unless the local config suppresses trailers"
+        );
+
+        let trailers = commit_message_trailers(repo.path(), &head).unwrap();
+        assert!(
+            trailers
+                .iter()
+                .any(|(k, v)| k == "Agent-Bus-Agent" && v == "alice"),
+            "the pinned parse must still see the trailer: {trailers:?}"
+        );
+    }
+
+    /// `merge.directoryRenames` is repository-local configuration, which the
+    /// hermetic policy does not reach, and it genuinely moves the answer:
+    /// with a directory renamed on one side and a file added into the old
+    /// directory on the other, `false` produces a *different clean tree* from
+    /// git's default. Per-clone configuration deciding candidate content is
+    /// exactly what section 7's "Windows and Linux must produce the same
+    /// tree" forbids, so it is pinned to the default.
+    #[test]
+    fn candidate_construction_is_pinned_against_local_directory_rename_configuration() {
+        let repo = init_repo();
+        let p = repo.path();
+        std::fs::create_dir_all(p.join("old")).unwrap();
+        for i in 0..5 {
+            std::fs::write(
+                p.join("old").join(format!("f{i}.txt")),
+                format!(
+                    "c{i}
+"
+                ),
+            )
+            .unwrap();
+        }
+        git(p, &["add", "-A"]);
+        git(p, &["commit", "-q", "-m", "base"]);
+        git(p, &["checkout", "-q", "-b", "ours"]);
+        git(p, &["mv", "old", "new"]);
+        git(p, &["commit", "-q", "-m", "rename the directory"]);
+        git(p, &["checkout", "-q", "main"]);
+        git(p, &["checkout", "-q", "-b", "theirs"]);
+        std::fs::write(
+            p.join("old").join("added.txt"),
+            "added
+",
+        )
+        .unwrap();
+        git(p, &["add", "-A"]);
+        git(p, &["commit", "-q", "-m", "add into the old directory"]);
+        git(p, &["checkout", "-q", "main"]);
+        let ours = rev_parse(p, "ours").unwrap();
+        let theirs = rev_parse(p, "theirs").unwrap();
+
+        // Pinned to git's default, this is a genuine conflict: content was
+        // added into a directory the other side renamed, and only a human
+        // can say where it belongs.
+        let err = merge_tree_write_tree(p, &ours, &theirs)
+            .expect_err("the default treats this as a conflict");
+        assert!(
+            err.to_string().contains("could not cleanly merge"),
+            "unexpected error: {err}"
+        );
+
+        // The poison is real, and it is the dangerous direction: local
+        // configuration turns that refusal into a silent clean merge that
+        // relocates the file.
+        git(p, &["config", "merge.directoryRenames", "false"]);
+        let unpinned = std::process::Command::new("git")
+            .arg("-C")
+            .arg(p)
+            .args([
+                "-c",
+                "core.autocrlf=false",
+                "-c",
+                "merge.conflictStyle=merge",
+                "-c",
+                "merge.renames=true",
+                "-c",
+                "diff.renameLimit=0",
+            ])
+            .args(["merge-tree", "--write-tree", "--name-only", &ours, &theirs])
+            .output()
+            .unwrap();
+        assert!(
+            unpinned.status.success(),
+            "fixture proves nothing unless local configuration makes this merge cleanly"
+        );
+
+        // Pinned, the same local configuration is invisible and the merge is
+        // still refused.
+        let still = merge_tree_write_tree(p, &ours, &theirs)
+            .expect_err("merge.directoryRenames must be pinned, not taken from this clone");
+        assert!(
+            still.to_string().contains("could not cleanly merge"),
+            "unexpected error: {still}"
+        );
+    }
+
+    /// A partial clone is refused, with the real thing: an actual
+    /// `--filter=blob:none` clone, not a hand-written config key, so the test
+    /// fails if git ever stops recording the promisor remote the way this
+    /// detection expects.
+    #[test]
+    fn candidate_construction_refuses_a_partial_clone() {
+        let (source, ours, theirs) = cleanly_mergeable_repo();
+        merge_tree_write_tree(source.path(), &ours, &theirs)
+            .expect("the full clone must merge cleanly");
+
+        let dest = tempfile::tempdir().unwrap();
+        let target = dest.path().join("partial");
+        let status = std::process::Command::new("git")
+            .args(["clone", "--quiet", "--filter=blob:none", "--no-checkout"])
+            .arg(source.path())
+            .arg(&target)
+            .status()
+            .unwrap();
+        assert!(status.success(), "fixture clone failed");
+
+        let g = crate::gitobjects::Libgit2Reader::open(&target).unwrap();
+        assert!(
+            g.is_partial_clone(),
+            "fixture proves nothing unless git actually recorded a promisor remote"
+        );
+
+        let err = merge_tree_write_tree(&target, &ours, &theirs)
+            .expect_err("a partial clone must be refused, not silently merged");
+        assert!(
+            err.to_string().contains("partial clone"),
+            "expected the partial-clone refusal, got: {err}"
+        );
+    }
+
     #[test]
     fn merge_tree_write_tree_produces_a_real_clean_merge() {
         let repo = init_repo();
@@ -1412,7 +2373,7 @@ mod outer_tests {
     /// message, indistinguishable from a real usage error (e.g. a bad
     /// revision). See this function's report note.
     #[test]
-    fn merge_base_count_errs_for_unrelated_orphan_histories() {
+    fn merge_base_count_is_zero_for_unrelated_orphan_histories() {
         let repo = init_repo();
         let main_tip = rev_parse(repo.path(), "HEAD").unwrap();
 
@@ -1421,12 +2382,62 @@ mod outer_tests {
         commit_file(repo.path(), "other.txt", "other\n", "unrelated root");
         let orphan_tip = rev_parse(repo.path(), "HEAD").unwrap();
 
-        let err = merge_base_count(repo.path(), &main_tip, &orphan_tip).unwrap_err();
-        assert!(matches!(err, AbError::Git(_)), "{err:?}");
+        // Two histories with no common ancestor have zero merge bases. The
+        // subprocess version reported this as an error, because `git
+        // merge-base --all` signals it by exiting non-zero with no output --
+        // which meant `merge_candidate` surfaced a raw git error instead of
+        // its own "do not have exactly one merge base". Zero is the honest
+        // answer and produces the domain error the caller means.
+        assert_eq!(
+            merge_base_count(repo.path(), &main_tip, &orphan_tip).unwrap(),
+            0
+        );
     }
 
+    /// `prepare-merge` must be retryable after a failed push, and must still
+    /// refuse to move an existing candidate tag.
+    ///
+    /// The tag name and target are both deterministic functions of
+    /// `(previous_main, reviewed_commit, reviewer)`, so re-running the same
+    /// `prepare-merge` asks for the identical tag. Before this, the second
+    /// run died claiming another writer had created it -- false, and
+    /// unactionable -- while the candidate stayed unverifiable forever
+    /// because the tag had never reached the remote.
     /// The ordinary path: a lightweight tag must resolve back to exactly
     /// the target it was created at.
+    #[test]
+    fn retagging_the_same_candidate_is_idempotent_but_moving_it_is_still_refused() {
+        let repo = init_repo();
+        let first = rev_parse(repo.path(), "HEAD").unwrap();
+        commit_file(
+            repo.path(),
+            "other.txt",
+            "other
+",
+            "another commit",
+        );
+        let second = rev_parse(repo.path(), "HEAD").unwrap();
+        assert_ne!(first, second);
+
+        tag_lightweight(repo.path(), "agent-candidate/bob/x", &first).unwrap();
+        // The retry after a failed push: same name, same target.
+        tag_lightweight(repo.path(), "agent-candidate/bob/x", &first)
+            .expect("re-tagging the same target must be a no-op, not a conflict");
+        assert_eq!(
+            rev_parse(repo.path(), "refs/tags/agent-candidate/bob/x").unwrap(),
+            first,
+            "the tag must still point where it did"
+        );
+
+        // Immutability is untouched: a different target is still refused.
+        let err = tag_lightweight(repo.path(), "agent-candidate/bob/x", &second)
+            .expect_err("moving an existing candidate tag must be refused");
+        assert!(
+            err.to_string().contains("already exists"),
+            "unexpected error: {err}"
+        );
+    }
+
     #[test]
     fn tag_lightweight_creates_a_real_tag_pointing_at_the_target() {
         let repo = init_repo();
@@ -1567,7 +2578,7 @@ mod outer_tests {
     /// embedded tab -- `merge_ready::check_merge_ready`'s scope check then
     /// rejected every renamed file outright, in-scope or not.
     #[test]
-    fn diff_name_status_reports_the_new_path_for_a_rename_not_a_tab_mangled_string() {
+    fn diff_name_status_reports_both_sides_of_a_rename_untangled() {
         let repo = init_repo();
         commit_file(repo.path(), "old.txt", "unchanged content\n", "add old.txt");
         let from = rev_parse(repo.path(), "HEAD").unwrap();
@@ -1579,10 +2590,19 @@ mod outer_tests {
         let to = rev_parse(repo.path(), "HEAD").unwrap();
 
         let changed = diff_name_status(repo.path(), &from, &to).unwrap();
-        assert_eq!(changed.len(), 1, "{changed:?}");
-        let (status, path) = &changed[0];
-        assert!(status.starts_with('R'), "{status}");
-        assert_eq!(path, "new.txt");
-        assert!(!path.contains('\t'), "{path}");
+        let mut paths: Vec<&str> = changed.iter().map(|(_, p)| p.as_str()).collect();
+        paths.sort_unstable();
+        // Rename detection is deliberately off, so this is a delete plus an
+        // add rather than one `R<score> old new` line. Both consumers
+        // (`merge_ready`, `audit_main`) scope-check every path returned, and
+        // a rename *into* a reviewed scope must not hide the out-of-scope
+        // path it came from -- see `HistoryReader::diff_name_status`.
+        assert_eq!(paths, vec!["new.txt", "old.txt"], "{changed:?}");
+        // The original defect this guards: a tab-separated `old\tnew` pair
+        // returned as one mangled path.
+        assert!(
+            changed.iter().all(|(_, p)| !p.contains('\t')),
+            "{changed:?}"
+        );
     }
 }

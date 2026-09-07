@@ -60,8 +60,14 @@ validated_string!(Agent, "Agent identity name: `[a-z][a-z0-9-]{0,47}`.");
 
 impl Agent {
     pub fn parse(s: String) -> AbResult<Self> {
-        let re = regex::Regex::new(r"^[a-z][a-z0-9-]{0,47}$").unwrap();
-        if !re.is_match(&s) {
+        // Compiled once per process, not once per call. Reduction validates
+        // one `Agent` per event *plus* one per member of that event's
+        // observed frontier, so a complete frontier over an eleven-member
+        // roster costs a dozen of these; rebuilding the automaton each time
+        // made reading one real stream take seconds.
+        static RE: std::sync::LazyLock<regex::Regex> =
+            std::sync::LazyLock::new(|| regex::Regex::new(r"^[a-z][a-z0-9-]{0,47}$").unwrap());
+        if !RE.is_match(&s) {
             return Err(invalid(format!(
                 "invalid agent name: {s:?} (must match [a-z][a-z0-9-]{{0,47}}: lowercase, \
                  starting with a letter, letters/digits/hyphens only)"
@@ -150,8 +156,11 @@ validated_string!(
 
 impl Timestamp {
     pub fn parse(s: String) -> AbResult<Self> {
-        let re = regex::Regex::new(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$").unwrap();
-        if !re.is_match(&s) {
+        // See `Agent::parse`: one of these per event on every read.
+        static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$").unwrap()
+        });
+        if !RE.is_match(&s) {
             return Err(invalid(format!("invalid timestamp: {s:?}")));
         }
         let fmt = time::format_description::well_known::Rfc3339;
@@ -177,10 +186,19 @@ impl Timestamp {
 validated_string!(Branch, "A full ref accepted by `git check-ref-format`.");
 
 impl Branch {
-    /// Syntactic validation approximating `git check-ref-format --normalize`,
-    /// then confirmed against the real `git check-ref-format` -- every
-    /// deployment of this tool already hard-depends on a `git` binary, so
-    /// this adds no new external dependency.
+    /// Full syntactic validation of a ref name, equivalent to `git
+    /// check-ref-format` over the shapes this crate can produce.
+    ///
+    /// This used to *also* shell out to the real `git check-ref-format` for
+    /// confirmation. That was correct and unaffordable: `Branch`
+    /// deserializes through `parse`, and every review event names two
+    /// branches, so reducing the fleet's bus spawned a process per branch
+    /// field -- 2.5 seconds of a 6-second `status`. The cross-check against
+    /// real git has not been dropped, only moved to where it costs nothing:
+    /// `branch_parse_agrees_with_real_git_check_ref_format` runs a corpus of
+    /// valid and invalid names through both and asserts they agree, so a
+    /// divergence fails the build rather than being re-discovered at every
+    /// read.
     pub fn parse(s: String) -> AbResult<Self> {
         if !s.starts_with("refs/") {
             return Err(invalid(format!("branch must start with refs/: {s:?}")));
@@ -200,7 +218,19 @@ impl Branch {
             || s.contains('\\')
             || s.ends_with(".lock")
             || s.ends_with('.')
-            || s.chars().any(|c| c.is_control())
+            // `git check-ref-format` rejects the sequence `@{` anywhere: it
+            // is reflog syntax. A lone `@` *component* is fine -- only a
+            // refname that is exactly `@` is rejected, which the required
+            // "refs/" prefix already precludes. The differential test below
+            // caught this rule being written too strictly.
+            || s.contains("@{")
+            // git's rule is bytes below 0x20 plus 0x7f -- *not* Rust's
+            // `char::is_control()`, which also covers the C1 block
+            // U+0080..=U+009F. Being stricter than git fails closed rather
+            // than open, but it is still a divergence, and the differential
+            // test below asserts there is none: real `git check-ref-format`
+            // accepts `refs/heads/a\u{80}b` where `is_control()` rejected it.
+            || s.chars().any(|c| (c as u32) < 0x20 || c as u32 == 0x7f)
         {
             return Err(invalid(format!("invalid ref syntax: {s:?}")));
         }
@@ -208,9 +238,6 @@ impl Branch {
             if component.is_empty() || component.starts_with('.') || component.ends_with(".lock") {
                 return Err(invalid(format!("invalid ref component in {s:?}")));
             }
-        }
-        if !crate::gitrepo::check_ref_format(&s) {
-            return Err(invalid(format!("git check-ref-format rejects {s:?}")));
         }
         Ok(Branch(s))
     }
@@ -232,8 +259,11 @@ validated_string!(
 
 impl Topic {
     pub fn parse(s: String) -> AbResult<Self> {
-        let re = regex::Regex::new(r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$").unwrap();
-        if s.is_empty() || s.len() > 64 || !re.is_match(&s) {
+        // See `Agent::parse`.
+        static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$").unwrap()
+        });
+        if s.is_empty() || s.len() > 64 || !RE.is_match(&s) {
             return Err(invalid(format!("invalid topic: {s:?}")));
         }
         Ok(Topic(s))
@@ -424,6 +454,77 @@ where
 }
 
 #[cfg(test)]
+mod ref_format_tests {
+    use super::Branch;
+
+    /// The cross-check `Branch::parse` used to perform at runtime, once per
+    /// branch field of every event read. Running it here instead keeps the
+    /// assurance -- a divergence between our rules and git's own fails the
+    /// build -- while taking it off a path that reduces a whole bus.
+    ///
+    /// The corpus deliberately includes the cases our hand-rolled checks are
+    /// most likely to get wrong (reflog syntax, a bare `@` component,
+    /// `.lock` suffixes on inner components, a trailing dot, control
+    /// characters) rather than only obviously-good and obviously-bad names.
+    #[test]
+    fn branch_parse_agrees_with_real_git_check_ref_format() {
+        let del = format!("refs/heads/a{}b", '\u{7f}');
+        // The C1 block, where `char::is_control()` and git disagree. A
+        // hand-picked corpus missed this entire class, so it is generated.
+        let c1: Vec<String> = [0x80u32, 0x85, 0x9f]
+            .iter()
+            .map(|cp| format!("refs/heads/a{}b", char::from_u32(*cp).unwrap()))
+            .collect();
+        let low: Vec<String> = [0x01u32, 0x1f]
+            .iter()
+            .map(|cp| format!("refs/heads/a{}b", char::from_u32(*cp).unwrap()))
+            .collect();
+        let long = format!("refs/heads/{}", "a".repeat(4096));
+        let corpus: Vec<&str> = vec![
+            "refs/heads/main",
+            "refs/heads/agent-events/c-agent",
+            "refs/heads/agent/c-agent/bus-in-process",
+            "refs/tags/candidate-1",
+            "refs/heads/a.b.c",
+            "refs/heads/feature.lock",
+            "refs/heads/x.lock/y",
+            "refs/heads/@",
+            "refs/heads/@{1}",
+            "refs/heads/a@{b",
+            "refs/heads/.hidden",
+            "refs/heads/a..b",
+            "refs/heads/a//b",
+            "refs/heads/a b",
+            "refs/heads/a~b",
+            "refs/heads/a^b",
+            "refs/heads/a:b",
+            "refs/heads/a?b",
+            "refs/heads/a*b",
+            "refs/heads/a[b",
+            r"refs/heads/a\b",
+            "refs/heads/trailing.",
+            "refs/heads/",
+            &del,
+            &long,
+        ];
+        let corpus: Vec<&str> = corpus
+            .into_iter()
+            .chain(c1.iter().map(|s| s.as_str()))
+            .chain(low.iter().map(|s| s.as_str()))
+            .collect();
+        for name in corpus {
+            let ours = Branch::parse(name.to_string()).is_ok();
+            let theirs = crate::gitrepo::check_ref_format(name);
+            assert_eq!(
+                ours, theirs,
+                "disagreement on {name:?}: Branch::parse says {ours}, git check-ref-format \
+                 says {theirs}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -435,6 +536,19 @@ mod tests {
         assert!(Agent::parse("2alice".into()).is_err());
         assert!(Agent::parse("_reserved".into()).is_err());
         assert!(Agent::is_reserved("_reserved"));
+
+        // The length bound, at the boundary. An agent name becomes a ref
+        // path component (`refs/heads/agent-events/<agent>`), so the bound is
+        // protocol-relevant rather than cosmetic -- and widening it by one
+        // was invisible to every test until now.
+        assert!(
+            Agent::parse("a".repeat(48)).is_ok(),
+            "48 characters is the documented maximum"
+        );
+        assert!(
+            Agent::parse("a".repeat(49)).is_err(),
+            "49 characters must be refused"
+        );
     }
 
     #[test]

@@ -13,8 +13,9 @@
 //! its validation, not the network round trip that publishes one.
 
 use crate::bootstrap::BusConfig;
-use crate::error::{invalid, AbError, AbResult};
+use crate::error::{invalid, AbResult};
 use crate::events::Role;
+use crate::gitobjects::{ObjectWriter, RefStore};
 use crate::scalars::{Agent, ObjectId, Short};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -51,22 +52,32 @@ impl EpochFile {
 /// The current tip of the registry ref, or `None` if it has never been
 /// created.
 pub fn read_registry_tip(repo: &Path) -> AbResult<Option<ObjectId>> {
-    match crate::gitrepo::rev_parse_opt(repo, REGISTRY_REF)? {
-        Some(s) => Ok(Some(ObjectId::parse(s)?)),
-        None => Ok(None),
-    }
+    crate::gitobjects::Libgit2Reader::open(repo)?.resolve(REGISTRY_REF)
 }
 
 /// Reads one named, immutable epoch by its commit id -- any epoch ever
 /// created, not only the current tip, since an authority event's already
 /// -complete frontier must remain re-validatable forever (gate 5's "a later
 /// registration does not invalidate it").
-pub fn read_epoch(repo: &Path, epoch_id: &ObjectId, worktree: &Path) -> AbResult<RosterEpoch> {
-    crate::gitrepo::ensure_bus_worktree(repo, worktree, epoch_id.as_str())?;
-    crate::gitrepo::checkout_detach(worktree, epoch_id.as_str())?;
-    let bytes = std::fs::read(worktree.join(EPOCH_FILE)).map_err(|e| AbError::Io {
-        path: worktree.join(EPOCH_FILE).display().to_string(),
-        source: e,
+/// Reads the epoch blob straight out of the object database
+/// (`gitobjects.rs`); no worktree is materialized, so this needs no scratch
+/// directory to check out into.
+pub fn read_epoch(repo: &Path, epoch_id: &ObjectId) -> AbResult<RosterEpoch> {
+    let reader = crate::gitobjects::Libgit2Reader::open(repo)?;
+    read_epoch_at(&reader, epoch_id)
+}
+
+/// [`read_epoch`] against an already-open reader, so a caller reading a
+/// whole lineage ([`read_epoch_chain`]) pays one repository open rather
+/// than one per epoch.
+pub fn read_epoch_at(
+    reader: &dyn crate::gitobjects::ObjectReader,
+    epoch_id: &ObjectId,
+) -> AbResult<RosterEpoch> {
+    let bytes = reader.read_blob_at(epoch_id, EPOCH_FILE)?.ok_or_else(|| {
+        invalid(format!(
+            "commit {epoch_id} has no {EPOCH_FILE}; it is not a registry epoch"
+        ))
     })?;
     let file: EpochFile =
         serde_json::from_slice(&bytes).map_err(|e| invalid(format!("malformed epoch: {e}")))?;
@@ -83,15 +94,15 @@ pub fn read_epoch(repo: &Path, epoch_id: &ObjectId, worktree: &Path) -> AbResult
 /// merely the current tip (gate 5: "a later registration does not
 /// invalidate it") -- this is what lets a caller build that full lookup
 /// table once per reduction instead of re-walking history per event.
-pub fn read_epoch_chain(
-    repo: &Path,
-    tip: &ObjectId,
-    worktree: &Path,
-) -> AbResult<BTreeMap<ObjectId, RosterEpoch>> {
+pub fn read_epoch_chain(repo: &Path, tip: &ObjectId) -> AbResult<BTreeMap<ObjectId, RosterEpoch>> {
+    // One reader for the whole walk. This used to check a worktree out at
+    // every epoch in the lineage in turn, so a bus with a long registration
+    // history paid a full `git worktree add` per epoch on every reduction.
+    let reader = crate::gitobjects::Libgit2Reader::open(repo)?;
     let mut chain = BTreeMap::new();
     let mut next = Some(tip.clone());
     while let Some(id) = next {
-        let epoch = read_epoch(repo, &id, worktree)?;
+        let epoch = read_epoch_at(&reader, &id)?;
         next = epoch.parent.clone();
         chain.insert(id, epoch);
     }
@@ -104,12 +115,20 @@ pub fn read_epoch_chain(
 /// before layering its own change on top, so the file reaches every epoch
 /// unchanged without this function needing to walk `parent` back to the
 /// root itself.
-pub fn read_bus_config(repo: &Path, epoch_id: &ObjectId, worktree: &Path) -> AbResult<BusConfig> {
-    crate::gitrepo::ensure_bus_worktree(repo, worktree, epoch_id.as_str())?;
-    crate::gitrepo::checkout_detach(worktree, epoch_id.as_str())?;
-    let bytes = std::fs::read(worktree.join(CONFIG_FILE)).map_err(|e| AbError::Io {
-        path: worktree.join(CONFIG_FILE).display().to_string(),
-        source: e,
+pub fn read_bus_config(repo: &Path, epoch_id: &ObjectId) -> AbResult<BusConfig> {
+    let reader = crate::gitobjects::Libgit2Reader::open(repo)?;
+    read_bus_config_at(&reader, epoch_id)
+}
+
+/// [`read_bus_config`] against an already-open reader.
+pub fn read_bus_config_at(
+    reader: &dyn crate::gitobjects::ObjectReader,
+    epoch_id: &ObjectId,
+) -> AbResult<BusConfig> {
+    let bytes = reader.read_blob_at(epoch_id, CONFIG_FILE)?.ok_or_else(|| {
+        invalid(format!(
+            "commit {epoch_id} has no {CONFIG_FILE}; it is not a registry epoch"
+        ))
     })?;
     BusConfig::parse(&bytes)
 }
@@ -121,7 +140,6 @@ pub fn create_root(
     repo: &Path,
     config: &BusConfig,
     active_members: BTreeMap<Agent, MemberBinding>,
-    worktree: &Path,
 ) -> AbResult<RosterEpoch> {
     if read_registry_tip(repo)?.is_some() {
         return Err(invalid(
@@ -129,42 +147,32 @@ pub fn create_root(
              use `register` to add a further agent instead of `genesis`",
         ));
     }
-    std::fs::create_dir_all(worktree).map_err(|e| AbError::Io {
-        path: worktree.display().to_string(),
-        source: e,
-    })?;
-    let tmp_branch = "_tmp_registry_root";
-    crate::gitrepo::run_ok(
-        repo,
-        &[
-            "worktree",
-            "add",
-            "--orphan",
-            "-b",
-            tmp_branch,
-            &worktree.to_string_lossy(),
-        ],
-    )?;
-    crate::storage::atomic_write(&worktree.join(".gitattributes"), b"*.json -text\n")?;
+    // Test-only seam: a competing proposer lands here, after the existence
+    // check above and before the root epoch is built.
+    #[cfg(test)]
+    crate::gitobjects::fire_competing_writer();
+
+    let git = crate::gitobjects::Libgit2Reader::open(repo)?;
     let file = EpochFile {
         parent: None,
         active_members: active_members.clone(),
     };
-    crate::storage::atomic_write(&worktree.join(EPOCH_FILE), &file.canonical_bytes())?;
-    crate::storage::atomic_write(&worktree.join(CONFIG_FILE), &config.to_canonical_bytes())?;
-    crate::gitrepo::add_all(worktree)?;
-    let commit = crate::gitrepo::commit(worktree, "agent-registry: root epoch")?;
-    // `update-ref`, not `branch -f`: see `stream::create_root_commit`'s
-    // identical comment -- `REGISTRY_REF` is already fully qualified
-    // (`refs/heads/agent-registry`), and `git branch -f` does not accept
-    // that form as the ref itself.
-    crate::gitrepo::run_ok(repo, &["update-ref", REGISTRY_REF, &commit])?;
-    crate::gitrepo::run_ok(
-        repo,
-        &["worktree", "remove", "--force", &worktree.to_string_lossy()],
+    // See `stream::create_root_commit` for why `.gitattributes` is still
+    // written even though nothing checks a registry commit out any more.
+    let attributes = git.write_blob(b"*.json -text\n")?;
+    let epoch = git.write_blob(&file.canonical_bytes())?;
+    let cfg = git.write_blob(&config.to_canonical_bytes())?;
+    let tree = git.write_tree(
+        None,
+        &[
+            (".gitattributes", attributes),
+            (EPOCH_FILE, epoch),
+            (CONFIG_FILE, cfg),
+        ],
     )?;
-    crate::gitrepo::run_ok(repo, &["branch", "-D", tmp_branch])?;
-    Ok(RosterEpoch::root(ObjectId::parse(commit)?, active_members))
+    let commit = git.create_commit(&tree, &[], "agent-registry: root epoch")?;
+    git.compare_and_set(REGISTRY_REF, None, &commit)?;
+    Ok(RosterEpoch::root(commit, active_members))
 }
 
 /// Proposes the next epoch as a child of `expected_parent`: registration,
@@ -176,7 +184,6 @@ pub fn propose_transition(
     repo: &Path,
     expected_parent: &RosterEpoch,
     new_active_members: BTreeMap<Agent, MemberBinding>,
-    worktree: &Path,
 ) -> AbResult<RosterEpoch> {
     let actual_tip = read_registry_tip(repo)?
         .ok_or_else(|| invalid("the agent-registry has no root epoch yet"))?;
@@ -187,28 +194,36 @@ pub fn propose_transition(
             expected_parent.id
         )));
     }
-    crate::gitrepo::ensure_bus_worktree(repo, worktree, expected_parent.id.as_str())?;
-    crate::gitrepo::checkout_detach(worktree, expected_parent.id.as_str())?;
+    // Test-only seam: a competing proposer lands here, after the staleness
+    // check above and before this transition's epoch commit is built. The
+    // registry is the fleet's one serializing point, so this is the
+    // compare-and-swap that matters most.
+    #[cfg(test)]
+    crate::gitobjects::fire_competing_writer();
+
+    let git = crate::gitobjects::Libgit2Reader::open(repo)?;
     let file = EpochFile {
         parent: Some(expected_parent.id.clone()),
         active_members: new_active_members.clone(),
     };
-    crate::storage::atomic_write(&worktree.join(EPOCH_FILE), &file.canonical_bytes())?;
-    crate::gitrepo::add_all(worktree)?;
-    let commit = crate::gitrepo::commit(worktree, "agent-registry: epoch transition")?;
-    let parents = crate::gitrepo::parents_of(repo, &commit)?;
-    if parents != vec![expected_parent.id.as_str().to_string()] {
-        return Err(invalid(format!(
-            "registry commit {commit} does not have exactly one parent equal to {}",
-            expected_parent.id
-        )));
-    }
-    // `update-ref`, not `branch -f`: see `stream::create_root_commit`'s
-    // identical comment -- `REGISTRY_REF` is already fully qualified
-    // (`refs/heads/agent-registry`), and `git branch -f` does not accept
-    // that form as the ref itself.
-    crate::gitrepo::run_ok(repo, &["update-ref", REGISTRY_REF, &commit])?;
-    Ok(expected_parent.child(ObjectId::parse(commit)?, new_active_members))
+    // Only `epoch.json` is named, so `.gitattributes` and `bus_config.json`
+    // carry through from the parent tree untouched. The bus config is
+    // deliberately not rewritten here: a transition changes membership, and
+    // an epoch that silently restated the config would let a stale in-memory
+    // copy overwrite an activation this proposer never observed.
+    let epoch = git.write_blob(&file.canonical_bytes())?;
+    let tree = git.write_tree(Some(&expected_parent.id), &[(EPOCH_FILE, epoch)])?;
+    let commit = git.create_commit(
+        &tree,
+        &[&expected_parent.id],
+        "agent-registry: epoch transition",
+    )?;
+    // The registry is the fleet's one serializing point (section 2.1), so
+    // this is the compare-and-swap that matters most: naming the expected
+    // parent means a proposer that lost the race is told to re-read rather
+    // than overwriting the epoch that won.
+    git.compare_and_set(REGISTRY_REF, Some(&expected_parent.id), &commit)?;
+    Ok(expected_parent.child(commit, new_active_members))
 }
 
 /// Proposes coordinator succession for `target`'s stream custody (section
@@ -236,7 +251,6 @@ pub fn propose_custody_succession(
     proposer: &Agent,
     target: &Agent,
     new_host: Short,
-    worktree: &Path,
 ) -> AbResult<RosterEpoch> {
     let binding = expected_parent.active_members.get(target).ok_or_else(|| {
         invalid(format!(
@@ -266,7 +280,7 @@ pub fn propose_custody_succession(
             standby: binding.standby.clone(),
         },
     );
-    propose_transition(repo, expected_parent, members, worktree)
+    propose_transition(repo, expected_parent, members)
 }
 
 /// One active identity's binding within a `RosterEpoch`: which host its
@@ -499,8 +513,7 @@ mod tests {
         let config = test_config(repo.path());
         let mut members = BTreeMap::new();
         members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
-        let wt = repo.path().join("_wt_root");
-        let epoch = create_root(repo.path(), &config, members.clone(), &wt).unwrap();
+        let epoch = create_root(repo.path(), &config, members.clone()).unwrap();
         assert_eq!(epoch.parent, None);
         assert_eq!(epoch.active_members, members);
         assert_eq!(
@@ -508,8 +521,7 @@ mod tests {
             Some(epoch.id.clone())
         );
 
-        let read_wt = repo.path().join("_wt_read");
-        let read_back = read_epoch(repo.path(), &epoch.id, &read_wt).unwrap();
+        let read_back = read_epoch(repo.path(), &epoch.id).unwrap();
         assert_eq!(read_back, epoch);
     }
 
@@ -523,19 +535,83 @@ mod tests {
     /// fallback resolution, but permanently shadowed the moment a real
     /// fetch (e.g. `sync::synced_snapshot`) ever created the correctly
     /// -named ref.
+    /// Publish an unrelated commit on `refname`, as another proposer would.
+    fn land_competing_writer(repo: &Path, refname: &str) {
+        let g = crate::gitobjects::Libgit2Reader::open(repo).unwrap();
+        let blob = g.write_blob(b"a competing proposer's content").unwrap();
+        let tree = g.write_tree(None, &[("competing.txt", blob)]).unwrap();
+        let commit = g.create_commit(&tree, &[], "competing proposer").unwrap();
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["update-ref", refname, commit.as_str()])
+            .status()
+            .unwrap();
+        assert!(status.success(), "the competing proposer could not publish");
+    }
+
+    /// The registry is the fleet's one serializing point (section 2.1), so
+    /// this is the compare-and-swap that matters most. The staleness check at
+    /// the top of `propose_transition` reads the tip before the epoch commit
+    /// is built; a proposer that lands while it is being built passes that
+    /// check and must still be refused.
+    #[test]
+    fn propose_transition_refuses_a_proposer_that_lands_after_the_staleness_check() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let mut members = BTreeMap::new();
+        members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
+        let root = create_root(repo.path(), &config, members.clone()).unwrap();
+
+        let path = repo.path().to_path_buf();
+        let _armed = crate::gitobjects::arm_competing_writer(move || {
+            land_competing_writer(&path, REGISTRY_REF);
+        });
+
+        let err = propose_transition(repo.path(), &root, members).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("changed after this write was prepared"),
+            "expected the compare-and-swap to refuse, got: {err}"
+        );
+    }
+
+    /// The same window for the registry root, whose expected value is "this
+    /// ref must not exist".
+    #[test]
+    fn create_root_refuses_a_root_that_lands_after_the_existence_check() {
+        let repo = init_repo();
+        let config = test_config(repo.path());
+        let mut members = BTreeMap::new();
+        members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
+
+        let path = repo.path().to_path_buf();
+        let _armed = crate::gitobjects::arm_competing_writer(move || {
+            land_competing_writer(&path, REGISTRY_REF);
+        });
+
+        let err = create_root(repo.path(), &config, members).unwrap_err();
+        assert!(
+            err.to_string().contains("already exists"),
+            "expected create-if-absent to refuse, got: {err}"
+        );
+    }
+
     #[test]
     fn create_root_writes_exactly_the_correctly_named_ref() {
         let repo = init_repo();
         let config = test_config(repo.path());
         let mut members = BTreeMap::new();
         members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
-        let wt = repo.path().join("_wt_root");
-        create_root(repo.path(), &config, members, &wt).unwrap();
+        create_root(repo.path(), &config, members).unwrap();
 
-        let out = crate::gitrepo::run(repo.path(), &["for-each-ref", "--format=%(refname)"])
+        // The *actual* ref set, not `rev-parse` -- which is exactly what
+        // would paper over the bug this guards.
+        let all = crate::gitobjects::Libgit2Reader::open(repo.path())
             .unwrap()
-            .stdout;
-        let refs: Vec<&str> = out.lines().collect();
+            .list("refs/")
+            .unwrap();
+        let refs: Vec<&str> = all.iter().map(|(name, _)| name.as_str()).collect();
         assert!(
             refs.contains(&REGISTRY_REF),
             "expected {REGISTRY_REF} among {refs:?}"
@@ -550,10 +626,8 @@ mod tests {
     fn create_root_rejects_a_second_root() {
         let repo = init_repo();
         let config = test_config(repo.path());
-        let wt = repo.path().join("_wt_root");
-        create_root(repo.path(), &config, BTreeMap::new(), &wt).unwrap();
-        let wt2 = repo.path().join("_wt_root2");
-        let err = create_root(repo.path(), &config, BTreeMap::new(), &wt2).unwrap_err();
+        create_root(repo.path(), &config, BTreeMap::new()).unwrap();
+        let err = create_root(repo.path(), &config, BTreeMap::new()).unwrap_err();
         assert!(
             err.to_string().contains("already has a root epoch"),
             "{err}"
@@ -566,13 +640,10 @@ mod tests {
         let config = test_config(repo.path());
         let mut members = BTreeMap::new();
         members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
-        let wt = repo.path().join("_wt_root");
-        let root = create_root(repo.path(), &config, members.clone(), &wt).unwrap();
+        let root = create_root(repo.path(), &config, members.clone()).unwrap();
 
         members.insert(a("bob"), binding(Role::Reviewer, "host1", 0));
-        let transition_wt = repo.path().join("_wt_transition");
-        let child =
-            propose_transition(repo.path(), &root, members.clone(), &transition_wt).unwrap();
+        let child = propose_transition(repo.path(), &root, members.clone()).unwrap();
         assert_eq!(child.parent, Some(root.id.clone()));
         assert_eq!(child.active_members, members);
         assert_eq!(
@@ -580,8 +651,7 @@ mod tests {
             Some(child.id.clone())
         );
 
-        let read_wt = repo.path().join("_wt_read");
-        let read_back = read_epoch(repo.path(), &child.id, &read_wt).unwrap();
+        let read_back = read_epoch(repo.path(), &child.id).unwrap();
         assert_eq!(read_back, child);
     }
 
@@ -596,24 +666,14 @@ mod tests {
         let config = test_config(repo.path());
         let mut members = BTreeMap::new();
         members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
-        let wt = repo.path().join("_wt_root");
-        let root = create_root(repo.path(), &config, members.clone(), &wt).unwrap();
+        let root = create_root(repo.path(), &config, members.clone()).unwrap();
 
-        let root_read_wt = repo.path().join("_wt_config_root");
-        assert_eq!(
-            read_bus_config(repo.path(), &root.id, &root_read_wt).unwrap(),
-            config
-        );
+        assert_eq!(read_bus_config(repo.path(), &root.id).unwrap(), config);
 
         members.insert(a("bob"), binding(Role::Reviewer, "host1", 0));
-        let transition_wt = repo.path().join("_wt_transition");
-        let child = propose_transition(repo.path(), &root, members, &transition_wt).unwrap();
+        let child = propose_transition(repo.path(), &root, members).unwrap();
 
-        let child_read_wt = repo.path().join("_wt_config_child");
-        assert_eq!(
-            read_bus_config(repo.path(), &child.id, &child_read_wt).unwrap(),
-            config
-        );
+        assert_eq!(read_bus_config(repo.path(), &child.id).unwrap(), config);
     }
 
     /// The registry's own compare-and-swap guarantee: a proposal against a
@@ -623,17 +683,14 @@ mod tests {
     fn propose_transition_rejects_a_stale_expected_parent() {
         let repo = init_repo();
         let config = test_config(repo.path());
-        let wt = repo.path().join("_wt_root");
-        let root = create_root(repo.path(), &config, BTreeMap::new(), &wt).unwrap();
+        let root = create_root(repo.path(), &config, BTreeMap::new()).unwrap();
 
         let mut members = BTreeMap::new();
         members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
-        let t1 = repo.path().join("_wt_t1");
-        propose_transition(repo.path(), &root, members.clone(), &t1).unwrap();
+        propose_transition(repo.path(), &root, members.clone()).unwrap();
 
         // `root` is now stale: the registry has already advanced past it.
-        let t2 = repo.path().join("_wt_t2");
-        let err = propose_transition(repo.path(), &root, members, &t2).unwrap_err();
+        let err = propose_transition(repo.path(), &root, members).unwrap_err();
         assert!(err.to_string().contains("has moved"), "{err}");
     }
 
@@ -641,8 +698,7 @@ mod tests {
     fn propose_transition_fails_before_any_root_exists() {
         let repo = init_repo();
         let phantom_root = RosterEpoch::root(hash(1), BTreeMap::new());
-        let wt = repo.path().join("_wt_transition");
-        let err = propose_transition(repo.path(), &phantom_root, BTreeMap::new(), &wt).unwrap_err();
+        let err = propose_transition(repo.path(), &phantom_root, BTreeMap::new()).unwrap_err();
         assert!(err.to_string().contains("no root epoch yet"), "{err}");
     }
 
@@ -653,7 +709,7 @@ mod tests {
         config: &BusConfig,
         members: BTreeMap<Agent, MemberBinding>,
     ) -> RosterEpoch {
-        create_root(repo, config, members, &repo.join("_wt_succession_root")).unwrap()
+        create_root(repo, config, members).unwrap()
     }
 
     /// Gate 19's authorization precondition: the pre-authorized standby may
@@ -672,15 +728,9 @@ mod tests {
         );
         let root = root_with(repo.path(), &config, members);
 
-        let new_epoch = propose_custody_succession(
-            repo.path(),
-            &root,
-            &alice_standby,
-            &alice,
-            short("host2"),
-            &repo.path().join("_wt_succeed"),
-        )
-        .unwrap();
+        let new_epoch =
+            propose_custody_succession(repo.path(), &root, &alice_standby, &alice, short("host2"))
+                .unwrap();
         let new_binding = &new_epoch.active_members[&alice];
         assert_eq!(new_binding.host, short("host2"));
         assert_eq!(new_binding.coordinator_custody_epoch, 4);
@@ -702,15 +752,9 @@ mod tests {
         members.insert(coord2.clone(), binding(Role::Coordinator, "host2", 0));
         let root = root_with(repo.path(), &config, members);
 
-        let new_epoch = propose_custody_succession(
-            repo.path(),
-            &root,
-            &coord2,
-            &alice,
-            short("host2"),
-            &repo.path().join("_wt_succeed"),
-        )
-        .unwrap();
+        let new_epoch =
+            propose_custody_succession(repo.path(), &root, &coord2, &alice, short("host2"))
+                .unwrap();
         assert_eq!(new_epoch.active_members[&alice].host, short("host2"));
     }
 
@@ -727,15 +771,8 @@ mod tests {
         members.insert(mallory.clone(), binding(Role::Implementor, "host3", 0));
         let root = root_with(repo.path(), &config, members);
 
-        let err = propose_custody_succession(
-            repo.path(),
-            &root,
-            &mallory,
-            &alice,
-            short("host3"),
-            &repo.path().join("_wt_succeed"),
-        )
-        .unwrap_err();
+        let err = propose_custody_succession(repo.path(), &root, &mallory, &alice, short("host3"))
+            .unwrap_err();
         assert!(err.to_string().contains("is not authorized"), "{err}");
     }
 
@@ -749,15 +786,8 @@ mod tests {
         members.insert(coord1.clone(), binding(Role::Coordinator, "host1", 0));
         let root = root_with(repo.path(), &config, members);
 
-        let err = propose_custody_succession(
-            repo.path(),
-            &root,
-            &coord1,
-            &ghost,
-            short("host2"),
-            &repo.path().join("_wt_succeed"),
-        )
-        .unwrap_err();
+        let err = propose_custody_succession(repo.path(), &root, &coord1, &ghost, short("host2"))
+            .unwrap_err();
         assert!(err.to_string().contains("not an active member"), "{err}");
     }
 
@@ -778,15 +808,9 @@ mod tests {
         );
         let root = root_with(repo.path(), &config, members);
 
-        let new_epoch = propose_custody_succession(
-            repo.path(),
-            &root,
-            &alice_standby,
-            &alice,
-            short("host2"),
-            &repo.path().join("_wt_succeed"),
-        )
-        .unwrap();
+        let new_epoch =
+            propose_custody_succession(repo.path(), &root, &alice_standby, &alice, short("host2"))
+                .unwrap();
 
         // The old custodian (host1, custody epoch 0) still believes it can
         // write -- authorize_stream_write must refuse it against the new
@@ -795,5 +819,98 @@ mod tests {
         assert!(err.to_string().contains("belongs to host"), "{err}");
         // The new custodian succeeds.
         authorize_stream_write(&new_epoch, &alice, &short("host2"), 1).unwrap();
+    }
+
+    // ------------------------ reading an epoch straight out of history
+    //
+    // `read_epoch_at`/`read_bus_config_at`'s own branches, driven by a
+    // `FixtureObjectReader`. The happy paths are already covered end to end
+    // against real commits above (`create_root_then_read_epoch_round_trips`
+    // and friends now go through libgit2); these pin the failure shapes,
+    // which a real `create_root` will never produce.
+
+    fn epoch_blob(parent: Option<ObjectId>) -> Vec<u8> {
+        let mut members = BTreeMap::new();
+        members.insert(a("alice"), binding(Role::Implementor, "host1", 0));
+        EpochFile {
+            parent,
+            active_members: members,
+        }
+        .canonical_bytes()
+    }
+
+    #[test]
+    fn read_epoch_at_reads_a_well_formed_epoch() {
+        let id = hash(7);
+        let r = crate::gitobjects::FixtureObjectReader::new().with_blob(
+            &id,
+            EPOCH_FILE,
+            epoch_blob(Some(hash(6))),
+        );
+        let epoch = read_epoch_at(&r, &id).unwrap();
+        // `id` comes from the caller, never from the blob: a commit cannot
+        // name its own sha inside itself.
+        assert_eq!(epoch.id, id);
+        assert_eq!(epoch.parent, Some(hash(6)));
+        assert!(epoch.is_active_member(&a("alice")));
+    }
+
+    /// A commit that is not a registry epoch at all must say so, rather
+    /// than surfacing a bare missing-file error.
+    #[test]
+    fn read_epoch_at_rejects_a_commit_with_no_epoch_file() {
+        let id = hash(7);
+        let r = crate::gitobjects::FixtureObjectReader::new().with_blob(&id, "other.json", b"{}");
+        let err = read_epoch_at(&r, &id).unwrap_err();
+        assert!(err.to_string().contains("is not a registry epoch"), "{err}");
+        assert!(err.to_string().contains(id.as_str()), "{err}");
+    }
+
+    #[test]
+    fn read_epoch_at_rejects_a_malformed_epoch_file() {
+        let id = hash(7);
+        let r = crate::gitobjects::FixtureObjectReader::new().with_blob(&id, EPOCH_FILE, b"nope");
+        let err = read_epoch_at(&r, &id).unwrap_err();
+        assert!(err.to_string().contains("malformed epoch"), "{err}");
+    }
+
+    #[test]
+    fn read_epoch_at_propagates_an_unresolvable_commit() {
+        let r = crate::gitobjects::FixtureObjectReader::new().with_blob(
+            &hash(7),
+            EPOCH_FILE,
+            epoch_blob(None),
+        );
+        let err = read_epoch_at(&r, &hash(8)).unwrap_err();
+        assert!(matches!(err, crate::error::AbError::Git(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn read_bus_config_at_rejects_a_commit_with_no_config_file() {
+        let id = hash(7);
+        let r = crate::gitobjects::FixtureObjectReader::new().with_blob(
+            &id,
+            EPOCH_FILE,
+            epoch_blob(None),
+        );
+        let err = read_bus_config_at(&r, &id).unwrap_err();
+        assert!(err.to_string().contains("is not a registry epoch"), "{err}");
+    }
+
+    /// `BusConfig::parse`'s own validation must still run on bytes that
+    /// arrived as a blob -- reading from history is not a way around it.
+    #[test]
+    fn read_bus_config_at_still_applies_bus_config_validation() {
+        let id = hash(7);
+        let r = crate::gitobjects::FixtureObjectReader::new().with_blob(
+            &id,
+            CONFIG_FILE,
+            br#"{"object_format":"sha3","product_review_from":"0000000000000000000000000000000000000000","merge_engine":"git-ort","merge_engine_version":"2.53.0"}"#,
+        );
+        let err = read_bus_config_at(&r, &id).unwrap_err();
+        assert!(
+            err.to_string().contains("unsupported object_format"),
+            "{err}"
+        );
     }
 }

@@ -190,6 +190,35 @@ mod tests {
         Candidate::new(agent, &data, vec![])
     }
 
+    /// An outbox entry is read back as authoritative for *whose* event it
+    /// is, so the directory it sits in and the agent it names must agree.
+    /// Nothing else re-checks this: `coordinator::drain_outbox` takes the
+    /// deserialized `Candidate` at its word, so a file misfiled into another
+    /// agent's outbox would be published as that agent's own event.
+    ///
+    /// Only reachable by writing the file directly -- `submit` derives the
+    /// directory from the candidate, so it cannot produce the mismatch.
+    #[test]
+    fn list_pending_refuses_an_entry_that_names_a_different_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let (alice, bob) = (a("alice"), a("bob"));
+
+        // Alice's candidate, filed under Bob's outbox.
+        let bob_dir = outbox_dir(dir.path(), &bob);
+        std::fs::create_dir_all(&bob_dir).unwrap();
+        std::fs::write(
+            bob_dir.join("client-1.json"),
+            serde_json::to_vec(&status_candidate(&alice)).unwrap(),
+        )
+        .unwrap();
+
+        let err = list_pending(dir.path(), &bob).unwrap_err().to_string();
+        assert!(
+            err.contains("claims agent alice") && err.contains("bob"),
+            "the error must name both the claimed and the owning agent: {err}"
+        );
+    }
+
     #[test]
     fn submit_then_list_pending_round_trips() {
         let dir = tempfile::tempdir().unwrap();
