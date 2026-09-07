@@ -453,6 +453,11 @@ encoder explicitly tainted.
 encodings before projecting emitted items into `Link.SourceMapEntry` values.
 Accepted ranges retain exact block/origin data and carry reusable positive-length
 and emitted-byte-bound theorems; artifact placement remains downstream.
+`Grass.Unsafe.EmitRelocatable` packages that checked stream as one initialized
+format-neutral section with exact bytes and source ranges. It proves the generic
+`RelocatableFragment.WellFormed` contract while leaving definitions,
+relocations, externals, entry selection, serialization, and placement to their
+independent producers and artifact-layer checks.
 
 Exit criteria include round trips for supported raw instructions, structured
 errors for unknown/ambiguous bytes and targets, exact stepping agreement with

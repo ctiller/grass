@@ -128,6 +128,17 @@ def entries
     List SourceMapEntry :=
   emission.linkSourceMap sectionId
 
+/-- Every projected entry names the section selected for this source map. -/
+theorem entrySectionExact
+    {emission : RawProgramEmission State Terminal Instruction}
+    {sectionId : SectionId}
+    (checked : CheckedLinkSourceMap emission sectionId)
+    (entry : SourceMapEntry) (hentry : entry ∈ checked.entries) :
+    entry.sectionId = sectionId := by
+  simp only [entries, RawProgramEmission.linkSourceMap, List.mem_map] at hentry
+  obtain ⟨item, hitem, rfl⟩ := hentry
+  rfl
+
 /-- Every checked link source-map entry has positive length. -/
 theorem entryPositive
     {emission : RawProgramEmission State Terminal Instruction}
