@@ -220,6 +220,155 @@ theorem parse_write {α : Type} {format : Format α}
     parse (write value) = .done value Vec.empty :=
   parser.successComplete (write value) value Vec.empty (writer.selected value)
 
+/-! ## Realization transport across format isomorphisms -/
+
+/-- Transport selected semantics across a total value isomorphism. Prefix
+classification is unchanged because the byte language is unchanged. -/
+def FormatSemantics.iso {α β : Type} {format : Format α}
+    (semantics : FormatSemantics format) (isomorphism : Isomorphism α β) :
+    FormatSemantics (.iso format isomorphism) where
+  selectedDerivation input value rest :=
+    semantics.selectedDerivation input (isomorphism.backward value) rest
+  repairableIncompletePrefix := semantics.repairableIncompletePrefix
+  irrecoverablyInvalidPrefix := semantics.irrecoverablyInvalidPrefix
+  selectedSound := by
+    intro input value rest selected
+    have derivation : Derives (.iso format isomorphism) input
+        (isomorphism.forward (isomorphism.backward value)) rest :=
+      @Derives.iso α β format isomorphism input rest
+        (isomorphism.backward value) (semantics.selectedSound selected)
+    rw [isomorphism.forward_backward] at derivation
+    exact derivation
+
+/-- Map only successful parse values, preserving both failure classifications
+and the exact unconsumed suffix. -/
+def ParseResult.map {α β : Type} (forward : α → β) : ParseResult α → ParseResult β
+  | .done value rest => .done (forward value) rest
+  | .needMore hint => .needMore hint
+  | .invalid error => .invalid error
+
+/-- Lift an executable parser through a total value isomorphism. -/
+def isoParser {α β : Type} (isomorphism : Isomorphism α β)
+    (parse : Std.Logical.ByteArray → ParseResult α) :
+    Std.Logical.ByteArray → ParseResult β :=
+  fun input => (parse input).map isomorphism.forward
+
+/-- Lift an executable writer contravariantly through a total value
+isomorphism. -/
+def isoWriter {α β : Type} (isomorphism : Isomorphism α β)
+    (write : α → Std.Logical.ByteArray) : β → Std.Logical.ByteArray :=
+  fun value => write (isomorphism.backward value)
+
+/-- `ParserRealizes.iso` states that parser realization is preserved by total
+value isomorphisms. -/
+theorem ParserRealizes.iso {α β : Type} {format : Format α}
+    {semantics : FormatSemantics format}
+    {parse : Std.Logical.ByteArray → ParseResult α}
+    (parser : ParserRealizes semantics parse)
+    (isomorphism : Isomorphism α β) :
+    ParserRealizes (semantics.iso isomorphism) (isoParser isomorphism parse) := by
+  constructor
+  · intro input value rest selected
+    unfold isoParser
+    rw [parser.successComplete input (isomorphism.backward value) rest selected]
+    simp [ParseResult.map, isomorphism.forward_backward]
+  · intro input hint
+    unfold isoParser FormatSemantics.iso
+    cases parsed : parse input with
+    | done value rest =>
+        have notNeedMore :
+            ¬semantics.repairableIncompletePrefix input hint := by
+          intro repairable
+          have := parser.needMoreExact input hint |>.2 repairable
+          rw [parsed] at this
+          contradiction
+        simp [ParseResult.map, notNeedMore]
+    | needMore actualHint =>
+        simp only [ParseResult.map, ParseResult.needMore.injEq]
+        constructor
+        · intro equal
+          subst hint
+          exact parser.needMoreExact input actualHint |>.1 parsed
+        · intro repairable
+          have exactResult := parser.needMoreExact input hint |>.2 repairable
+          exact ParseResult.needMore.inj (parsed.symm.trans exactResult)
+    | invalid error =>
+        have notNeedMore :
+            ¬semantics.repairableIncompletePrefix input hint := by
+          intro repairable
+          have := parser.needMoreExact input hint |>.2 repairable
+          rw [parsed] at this
+          contradiction
+        simp [ParseResult.map, notNeedMore]
+  · intro input error
+    unfold isoParser FormatSemantics.iso
+    cases parsed : parse input with
+    | done value rest =>
+        have notInvalid :
+            ¬semantics.irrecoverablyInvalidPrefix input error := by
+          intro invalid
+          have := parser.invalidExact input error |>.2 invalid
+          rw [parsed] at this
+          contradiction
+        simp [ParseResult.map, notInvalid]
+    | needMore hint =>
+        have notInvalid :
+            ¬semantics.irrecoverablyInvalidPrefix input error := by
+          intro invalid
+          have := parser.invalidExact input error |>.2 invalid
+          rw [parsed] at this
+          contradiction
+        simp [ParseResult.map, notInvalid]
+    | invalid actualError =>
+        simp only [ParseResult.map, ParseResult.invalid.injEq]
+        constructor
+        · intro equal
+          subst error
+          exact parser.invalidExact input actualError |>.1 parsed
+        · intro invalid
+          have exactResult := parser.invalidExact input error |>.2 invalid
+          exact ParseResult.invalid.inj (parsed.symm.trans exactResult)
+  · intro input value rest success
+    unfold isoParser at success
+    cases parsed : parse input with
+    | done innerValue innerRest =>
+        rw [parsed] at success
+        simp only [ParseResult.map] at success
+        injection success with valueEq restEq
+        subst value
+        subst rest
+        have selected := parser.consumes input innerValue innerRest parsed
+        unfold FormatSemantics.iso
+        simpa only [isomorphism.backward_forward] using selected
+    | needMore hint =>
+        rw [parsed] at success
+        simp [ParseResult.map] at success
+    | invalid error =>
+        rw [parsed] at success
+        simp [ParseResult.map] at success
+
+/-- `WriterRealizes.iso` states that writer realization is preserved by total
+value isomorphisms. -/
+theorem WriterRealizes.iso {α β : Type} {format : Format α}
+    {semantics : FormatSemantics format} {write : α → Std.Logical.ByteArray}
+    (writer : WriterRealizes semantics write)
+    (isomorphism : Isomorphism α β) :
+    WriterRealizes (semantics.iso isomorphism) (isoWriter isomorphism write) := by
+  constructor
+  · intro value
+    unfold isoWriter
+    have derivation : Derives (.iso format isomorphism)
+        (write (isomorphism.backward value))
+        (isomorphism.forward (isomorphism.backward value)) Vec.empty :=
+      @Derives.iso α β format isomorphism (write (isomorphism.backward value))
+        Vec.empty (isomorphism.backward value)
+        (writer.sound (isomorphism.backward value))
+    rw [isomorphism.forward_backward] at derivation
+    exact derivation
+  · intro value
+    unfold isoWriter FormatSemantics.iso
+    exact writer.selected (isomorphism.backward value)
+
 /-! ## The generic one-byte language -/
 
 /-- Every byte is accepted. Instruction-specific byte predicates do not belong
