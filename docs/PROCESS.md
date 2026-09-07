@@ -108,7 +108,11 @@ def DemandProviderEnvelope.reindex
       envelope.demands.authorityRegistry target) :
     DemandProviderEnvelope semantics
 theorem DemandProviderEnvelope.reindex_demands ...
-theorem DemandProviderEnvelope.reindex_origins ...
+theorem DemandProviderEnvelope.reindex_origins
+    (envelope : DemandProviderEnvelope semantics) :
+    forall demand view,
+      OriginOccursIn ((envelope.reindex embedding).origins demand) view <->
+        OriginOccursIn (envelope.origins demand) view
 theorem DemandProviderEnvelope.reindex_id ...
 theorem DemandProviderEnvelope.reindex_comp ...
 
@@ -1885,12 +1889,18 @@ structure PendingInteractionModel (boundary : DriverBoundary) where
   History : (demand : EffectDemand boundary) -> Start demand -> Type
   root : (demand : EffectDemand boundary) ->
     (start : Start demand) -> History demand start
-  Extends : History demand start -> History demand start -> Prop
-  reflexive : Reflexive Extends
-  transitive : Transitive Extends
-  observations : History demand start -> List boundary.Observation
-  observations_congruent : Extends first second -> Extends second first ->
-    observations first = observations second
+  Extends : {demand : EffectDemand boundary} ->
+    {start : Start demand} -> History demand start -> History demand start -> Prop
+  reflexive : forall {demand} {start : Start demand},
+    Reflexive (@Extends demand start)
+  transitive : forall {demand} {start : Start demand},
+    Transitive (@Extends demand start)
+  observations : {demand : EffectDemand boundary} ->
+    {start : Start demand} -> History demand start -> List boundary.Observation
+  observations_congruent : forall {demand} {start : Start demand}
+      {first second : History demand start},
+    Extends first second -> Extends second first ->
+      observations first = observations second
 
 def PendingInteractionModel.atomic (boundary : DriverBoundary) :
     PendingInteractionModel boundary where
@@ -1898,13 +1908,15 @@ def PendingInteractionModel.atomic (boundary : DriverBoundary) :
   History := fun _ _ => Unit
   root := fun _ _ => ()
   Extends := Eq
-  reflexive := Eq.refl
-  transitive := Eq.trans
+  reflexive := fun _ => rfl
+  transitive := fun firstSecond secondThird => firstSecond.trans secondThird
   observations := fun _ => []
   observations_congruent := fun _ _ => rfl
 
 def PendingInteractionModel.ProperExtends
     (model : PendingInteractionModel boundary)
+    {demand : EffectDemand boundary}
+    {start : model.Start demand}
     (first second : model.History demand start) : Prop :=
   model.Extends first second /\ ¬ model.Extends second first
 

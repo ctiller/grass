@@ -48,7 +48,8 @@ structure ProcessShardCertificate (sig : ProcessSignature) where
   private localProof : LocalProcessCorrect realization
   public boundary : RealizesProcessSignature realization sig
   public providerOriginsExact :
-    sig.providers.family.ExtEq realization.providers.providerDemands
+    sig.providers.family.AuthorityEquiv
+      realization.providers.providerDemands
 ```
 
 The public theorem type contains `sig`, including its semantic `behavior`, but
@@ -250,7 +251,7 @@ structure RootProcessCertificate {R : Type} (root : SpecProcess R) where
   providerCompositionExact : ExactOriginPreservingShardDemandUnion
     aggregate providerFamily
   signatureProvidersExact :
-    signature.providers.family.ExtEq providerFamily
+    signature.providers.family.AuthorityEquiv providerFamily
 ```
 
 `VerifiedProgram root` consumes this root certificate. Replacement under an

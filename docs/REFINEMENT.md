@@ -423,7 +423,7 @@ structure ProviderRealizesEffectPlan
   inheritedDisposition : ExactAuthorityRespectingRequirementDisposition
     plan.handoff.requirements providerEnv.bindingView
   forwardedRequirements : ProviderDemandFamily
-  forwardedExact : forwardedRequirements.ExtEq
+  forwardedExact : forwardedRequirements.AuthorityEquiv
     inheritedDisposition.exactForwardedFamily
 
 def ProviderRealizesEffectPlan.requirementConnections
