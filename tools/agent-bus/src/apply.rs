@@ -820,14 +820,31 @@ fn apply_issue_ack(state: &mut BusState, env: &Envelope, d: &IssueAcknowledged) 
             env.id
         )));
     }
-    if issue.current_assignment != d.assignment {
-        return Err(invalid(format!(
-            "{}: assignment {} is not the issue's current assignment",
-            env.id, d.assignment
-        )));
-    }
+    // A no-op, not an `Err`. This is the identical situation
+    // `apply_review_accept` and `apply_finding_disposition` already handle
+    // that way, for the identical reason recorded there: a hard failure here
+    // "would permanently break reduction of the entire bus, not just this
+    // chain".
+    //
+    // It is a plain causal race and nobody is at fault. The target
+    // acknowledges the assignment it holds; concurrently the item is
+    // reassigned away by someone whose event it has not yet observed. The
+    // acknowledgement is honest, correctly authorized, and simply
+    // inapplicable by the time it is reduced -- and because reduction
+    // propagates with `?` and has no per-event isolation, rejecting it makes
+    // every host unable to reduce the bus at all, forever, from one
+    // well-formed event.
+    //
+    // That is not hypothetical: it took the whole fleet down. `g-build:4` was
+    // opened against `g-foundation`, reassigned to `g-build` by `g-build:17`,
+    // acknowledged and resolved there -- and `g-foundation:68` acknowledged
+    // the original assignment, its own frontier showing it had never observed
+    // the reassignment. Every `status` and `tail` on every host then failed.
+    //
+    // Superseded, so it contributes nothing: the reassignment already moved
+    // `current_assignment`, and the new target's own acknowledgement governs.
     let issue = state.issues.get_mut(&d.issue).expect("just checked");
-    if issue.acknowledged() {
+    if issue.acknowledged_assignments.contains(&d.assignment) {
         return Err(invalid(format!("{}: issue already acknowledged", env.id)));
     }
     issue.acknowledged_assignments.insert(d.assignment.clone());
@@ -1047,17 +1064,13 @@ fn apply_dependency_ack(
             env.id
         )));
     }
-    if dep.current_assignment != d.assignment {
-        return Err(invalid(format!(
-            "{}: assignment {} is not the dependency's current assignment",
-            env.id, d.assignment
-        )));
-    }
+    // The dependency twin of the issue case above -- same race, same
+    // fleet-wide consequence, same resolution.
     let dep = state
         .dependencies
         .get_mut(&d.dependency)
         .expect("just checked");
-    if dep.acknowledged() {
+    if dep.acknowledged_assignments.contains(&d.assignment) {
         return Err(invalid(format!(
             "{}: dependency already acknowledged",
             env.id
@@ -6559,7 +6572,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_dependency_ack_against_a_superseded_assignment() {
+    fn a_dependency_ack_against_a_superseded_assignment_is_a_no_op() {
         let mut state = empty_state(&[
             ("alice", Role::Implementor),
             ("bob", Role::Implementor),
@@ -6608,12 +6621,95 @@ mod tests {
             }),
             [],
         );
-        let err = apply_event(&mut state, &ack_env).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("is not the dependency's current assignment"),
-            "{err}"
+        // A no-op, not a rejection. This test previously asserted the
+        // rejection, and that is exactly the behaviour that took the fleet
+        // down: reduction propagates with `?`, so one honest-but-superseded
+        // acknowledgement made every host unable to reduce the bus at all.
+        let before = format!("{:#?}", state.dependencies);
+        apply_event(&mut state, &ack_env).expect("a superseded ack is inapplicable, not invalid");
+        assert_eq!(
+            before,
+            format!("{:#?}", state.dependencies),
+            "a superseded acknowledgement must change nothing"
         );
+    }
+
+    /// The issue twin, reproducing the shape that actually broke the fleet:
+    /// `g-build:4` opened against `g-foundation`, reassigned away by
+    /// `g-build:17`, and `g-foundation:68` acknowledging the original
+    /// assignment with a frontier that had never seen the reassignment.
+    #[test]
+    fn an_issue_ack_against_a_superseded_assignment_is_a_no_op() {
+        let mut state = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Implementor),
+            ("carol", Role::Implementor),
+        ]);
+        let (alice, bob, carol) = (a("alice"), a("bob"), a("carol"));
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        apply_ok(&mut state, &register(&carol, Role::Implementor));
+
+        let issue = open_issue(&alice, 1, &bob);
+        let issue_id = issue.id.clone();
+        apply_ok(&mut state, &issue);
+
+        let reassign = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&issue_id]),
+            &EventData::IssueReassigned(IssueReassigned {
+                issue: issue_id.clone(),
+                previous_assignment: issue_id.clone(),
+                previous_target: bob.clone(),
+                new_target: carol.clone(),
+                reason: text("carol owns this now"),
+            }),
+            [issue_id.clone()],
+        );
+        apply_ok(&mut state, &reassign);
+
+        // bob acknowledges the assignment it held, never having observed the
+        // reassignment -- its frontier stops at the issue itself.
+        let ack = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&issue_id]),
+            &EventData::IssueAcknowledged(IssueAcknowledged {
+                issue: issue_id.clone(),
+                assignment: issue_id.clone(),
+                note: text("on it"),
+            }),
+            [issue_id.clone()],
+        );
+        let before = format!("{:#?}", state.issues);
+        apply_event(&mut state, &ack).expect("a superseded ack is inapplicable, not invalid");
+        assert_eq!(
+            before,
+            format!("{:#?}", state.issues),
+            "a superseded acknowledgement must change nothing"
+        );
+
+        // And the whole stream still reduces -- the property that failed.
+        let mut fresh = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Implementor),
+            ("carol", Role::Implementor),
+        ]);
+        // `apply_ok` rather than raw `apply_event`: it carries the per-agent
+        // sequence bookkeeping a real reduction does, and it panics on error,
+        // which is the assertion -- the property that failed on the live bus
+        // was that reducing this sequence at all was impossible.
+        for env in [
+            register(&alice, Role::Implementor),
+            register(&bob, Role::Implementor),
+            register(&carol, Role::Implementor),
+            issue.clone(),
+            reassign.clone(),
+            ack.clone(),
+        ] {
+            apply_ok(&mut fresh, &env);
+        }
     }
 
     #[test]
@@ -8481,6 +8577,121 @@ mod tests {
             format!("{incremental:?}"),
             "cold replay and cold-plus-incremental replay of the identical event set must \
              produce byte-identical state"
+        );
+    }
+
+    #[test]
+    fn tmp_ack_vs_reassign_race_order_independence() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        let epoch = epoch_with(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Implementor),
+            ("carol", Role::Implementor),
+        ]);
+        let mut known_epochs = BTreeMap::new();
+        known_epochs.insert(epoch.id.clone(), epoch.clone());
+
+        let alice_reg = register(&alice, Role::Implementor);
+        let bob_reg = register(&bob, Role::Implementor);
+        let carol_reg = register(&carol, Role::Implementor);
+
+        let issue_data = EventData::IssueOpened(IssueOpened {
+            target: bob.clone(),
+            issue_kind: IssueKind::Bug,
+            severity: Priority::Normal,
+            summary: text("s"),
+            code_commit: None,
+            locations: vec![],
+            expected: None,
+            observed_behavior: None,
+            reproduction: vec![],
+            blocks: StringSet::default(),
+            evidence: StringSet::from_iter([bob_reg.id.clone()]),
+        });
+        let issue_env = Envelope::new(
+            &alice,
+            1,
+            frontier_seeing(&[&bob_reg.id]),
+            &issue_data,
+            [bob_reg.id.clone()],
+        );
+
+        let reassign = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&bob_reg.id]),
+            &EventData::IssueReassigned(IssueReassigned {
+                issue: issue_env.id.clone(),
+                previous_assignment: issue_env.id.clone(),
+                previous_target: bob.clone(),
+                new_target: carol.clone(),
+                reason: text("carol owns this now"),
+            }),
+            [],
+        );
+
+        let ack = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&issue_env.id]),
+            &EventData::IssueAcknowledged(IssueAcknowledged {
+                issue: issue_env.id.clone(),
+                assignment: issue_env.id.clone(),
+                note: text("on it"),
+            }),
+            [issue_env.id.clone()],
+        );
+
+        let streams_prefix: BTreeMap<Agent, Vec<Envelope>> = BTreeMap::from([
+            (alice.clone(), vec![alice_reg.clone(), issue_env.clone()]),
+            (bob.clone(), vec![bob_reg.clone()]),
+            (carol.clone(), vec![carol_reg.clone()]),
+        ]);
+        let base = reduce(
+            config(),
+            Some(epoch.clone()),
+            known_epochs.clone(),
+            &streams_prefix,
+        )
+        .expect("prefix cold reduce succeeds");
+
+        let ack_first = reduce_onto(base.clone(), &[ack.clone(), reassign.clone()])
+            .expect("ack-then-reassign reduces");
+        let reassign_first = reduce_onto(base.clone(), &[reassign.clone(), ack.clone()])
+            .expect("reassign-then-ack reduces");
+
+        println!(
+            "ACK FIRST      acknowledged_assignments = {:?}",
+            ack_first.issues[&issue_env.id].acknowledged_assignments
+        );
+        println!(
+            "REASSIGN FIRST acknowledged_assignments = {:?}",
+            reassign_first.issues[&issue_env.id].acknowledged_assignments
+        );
+
+        // Also: after a later lifecycle conflict rolls `current_assignment`
+        // back to the baseline, the two hosts disagree about whether the
+        // issue was ever acknowledged.
+        println!(
+            "ACK FIRST      acknowledged(alice:1) = {}",
+            ack_first.issues[&issue_env.id]
+                .acknowledged_assignments
+                .contains(&issue_env.id)
+        );
+        println!(
+            "REASSIGN FIRST acknowledged(alice:1) = {}",
+            reassign_first.issues[&issue_env.id]
+                .acknowledged_assignments
+                .contains(&issue_env.id)
+        );
+
+        assert_eq!(
+            format!("{ack_first:?}"),
+            format!("{reassign_first:?}"),
+            "GATE 15/16: two valid dependency-respecting orders of the same event set must \
+             produce identical state"
         );
     }
 }
