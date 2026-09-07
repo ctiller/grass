@@ -4,8 +4,8 @@ import Grass.Unsafe.Raw
 # Raw byte emission
 
 Emission is parameterized by an instruction-family encoder and returns either
-the complete byte list or an indexed error.  Empty instruction encodings are
-rejected explicitly so a raw instruction cannot disappear silently.
+the complete byte list or an indexed error.  `EmissionError.emptyEncoding`
+rejects an empty encoding at the instruction's flattened index.
 -/
 
 namespace Grass.Unsafe

@@ -3,10 +3,9 @@ import Grass.Unsafe.Raw
 /-!
 # Raw byte import
 
-A successful one-instruction decode carries the exact nonempty byte prefix it
-consumed and the remaining suffix.  Recursive import therefore progresses by a
-kernel-checked length decrease and cannot silently skip, duplicate, or retain
-input bytes.
+A successful one-instruction decode carries the exact byte prefix and remaining
+suffix in `DecodedOne.inputExact`; `DecodedOne.consumedNonempty` supplies the
+strict length decrease checked by the recursive definition.
 -/
 
 namespace Grass.Unsafe
