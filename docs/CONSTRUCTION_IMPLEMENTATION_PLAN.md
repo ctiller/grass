@@ -370,6 +370,11 @@ exact checked constructor input; structural failures precede constructor
 diagnostics, preserving the staged-checking order. Nominal closure is not
 expansion authority: a separate `CertifiedConstructorSource` requires every
 generated node body to equal one typed application of its resolved constructor.
+`Grass.Construct.Source.ConstructorElaborate` composes that gate with ordinary
+alpha-normalization and manifest derivation. Its staged error preserves alpha/
+CFG failure priority, its success retains exact pre-alpha instructions and the
+same normalized AST used by constructor closure, and its certified companion
+adds exact typed-application correspondence without promoting nominal lookup.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
