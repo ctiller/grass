@@ -1,10 +1,17 @@
 """Falsifying tests for `Tools/shared-imports-sync.py`.
 
-Every case here is a file shape that made the first version of that tool destroy
-content while reporting success. A cold reviewer found all four inside one
-session, which is the reason this file exists: the tool rewrites files that the
-whole fleet is instructed to run `--write` on, so "it looked right" is not a
-standard it can be held to.
+Every case here is a file shape a cold reviewer used to break some version of
+that tool. Being exact about how, because the first draft of this paragraph said
+they all "destroyed content while reporting success" and that was not true of
+all of them: two destroyed content (the mixed-newline case and the block comment
+before the imports), three produced a wrong import block, and two -- the already
+sorted CRLF file and the duplicated import -- the original tool handled
+correctly and are here as controls, so that a change which starts breaking them
+is caught too.
+
+The reason the file exists is unchanged: the tool rewrites files the whole fleet
+is instructed to run `--write` on, so "it looked right" is not a standard it can
+be held to.
 
 The invariant under test is narrow and total: **the tool may reorder, add and
 remove `import Grass.` lines, and may change nothing else.** Each case asserts
@@ -119,6 +126,59 @@ def _duplicated():
                   "import Grass.Beta", "import Grass.Gamma"], LF)
 
 
+# Files the tool must leave *byte-identical*: the import block is already
+# correct and sorted, so a correct tool has nothing to do. Asserted on the
+# whole file rather than on parsed lines, because these two shapes defeat a
+# line-based check as easily as they defeated the tool -- this test's own
+# IMPORT_RE is no more comment-aware than the tool's was, so parsing here
+# would reproduce the bug in the checker.
+#
+# A reviewer found this shape sitting in Tools/DeclNames.lean in the working
+# tree. With the comment before the imports, --write moved every import
+# inside the comment: the registry then imported nothing and --check called
+# it clean.
+UNCHANGED_CASES = [
+    (
+        "block comment with an example import, before the block",
+        ["/- To add a module by hand write, e.g.",
+         "import Grass.Memory.Access",
+         "-/"] + [f"import {n}" for n in WANTED],
+    ),
+    (
+        "block comment with an example import, after the block",
+        [f"import {n}" for n in WANTED] +
+        ["", "/- e.g.", "import Grass.Memory.Access", "-/"],
+    ),
+    (
+        "nested block comment",
+        [f"import {n}" for n in WANTED] +
+        ["", "/- outer /- inner", "import Grass.Nope", "-/ still outer -/"],
+    ),
+    (
+        "doc comment containing an example import",
+        ["/-- e.g. `import Grass.Nope` -/"] +
+        [f"import {n}" for n in WANTED],
+    ),
+]
+
+
+def run_unchanged(name, body: list[str]) -> list[str]:
+    text = LF.join(["import Lean"] + body + BODY) + LF
+    with tempfile.TemporaryDirectory() as raw:
+        path = os.path.join(raw, "Registry.lean")
+        io.open(path, "w", encoding="utf-8", newline="").write(text)
+        try:
+            sync.process(path, WANTED, write=True)
+        except SystemExit as exit_error:
+            return [f"{name}: refused ({exit_error}) a correct registry"]
+        after = io.open(path, encoding="utf-8", newline="").read()
+    if after != text:
+        return [f"{name}: the file changed although its import block was "
+                f"already correct.{LF}      before: {text!r}"
+                f"{LF}      after:  {after!r}"]
+    return []
+
+
 def run_case(name, text: str) -> list[str]:
     failures = []
     before = non_import_lines(text)
@@ -166,6 +226,8 @@ def main() -> int:
     failures: list[str] = []
     for name, make in CASES:
         failures.extend(run_case(name, make()))
+    for name, body in UNCHANGED_CASES:
+        failures.extend(run_unchanged(name, body))
 
     # A file with no library imports at all must be refused, not guessed at.
     with tempfile.TemporaryDirectory() as raw:
@@ -188,8 +250,8 @@ def main() -> int:
         for failure in failures:
             print("  " + failure)
         return 1
-    print(f"shared-imports-sync self-test: {len(CASES)} file shapes, "
-          "non-import content preserved in each")
+    print(f"shared-imports-sync self-test: {len(CASES)} rewrite shapes and "
+          f"{len(UNCHANGED_CASES)} that must not be touched at all")
     return 0
 
 

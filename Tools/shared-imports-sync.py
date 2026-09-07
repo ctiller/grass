@@ -25,18 +25,32 @@ in the same commit, and the diff is a sorted import block.
 
 The first version parsed the import block as "the leading run of lines that look
 like imports", stopping at the first line that did not, and then re-emitted that
-run. A cold reviewer destroyed it in four ways within one session, each of which
-ended with `--check` reporting success:
+run. Cold reviewers broke it in five file shapes across two sessions, and every
+one of them ended with `--check` reporting success.
+
+Two destroyed content outright:
 
 * one CRLF line in an otherwise-LF file made the whole remainder of the file
   parse as a single import line, so `--write` deleted every declaration in
   `Tools/AxiomAudit.lean` and left an import list behind;
+* a Lean block comment containing an example `import Grass.X` line, placed
+  before the real imports, fixed the insertion point inside the comment, so
+  `--write` moved every import into it and the registry then imported nothing.
+  That shape was found sitting in `Tools/DeclNames.lean` in the working tree,
+  not invented for the test.
+
+Three produced a wrong import block rather than destroying anything:
+
 * one blank line inside the block hid the imports after it, which `--write` then
   re-added, producing 53 duplicates that `--check` could not see;
+* a line comment inside the block did the same;
 * a module docstring above the imports made the block start at line 0, so the
   new list was written before the docstring and the old one left after it.
 
-The lesson is that a rewriter must not be trusted to have parsed correctly. So:
+The lesson is that a rewriter must not be trusted to have parsed correctly, and
+that an invariant checked with the parser under test is not an invariant: the
+block-comment shape passed the re-parse fixpoint precisely because both sides
+of it agreed on the same wrong reading. So:
 
 * lines are split with `splitlines`, which treats CRLF, LF and a mixture alike;
 * `import Grass.` lines are collected from anywhere in the file rather than from
@@ -92,18 +106,59 @@ def modules_on_disk() -> list[str]:
     return names
 
 
+def comment_depth_after(line: str, depth: int) -> int:
+    """Block-comment nesting depth at the end of `line`, starting from `depth`.
+
+    Lean block comments nest, and `/--` opens one as surely as `/-` does.
+    """
+    index = 0
+    while index < len(line) - 1:
+        pair = line[index:index + 2]
+        if pair == "/-":
+            depth += 1
+            index += 2
+            continue
+        if pair == "-/" and depth > 0:
+            depth -= 1
+            index += 2
+            continue
+        index += 1
+    return depth
+
+
 def plan(text: str) -> tuple[list[str], list[str], int]:
     """Return (library imports found, all other lines, where the block starts).
 
-    Library imports are collected from anywhere in the file: a blank line, a
+    Library imports are collected from anywhere in *code*: a blank line, a line
     comment or a stray carriage return must not be able to hide one.
+
+    Lines inside a block comment are not code, and that distinction is the whole
+    of this function's difficulty. A reviewer put an ordinary explanatory
+    comment in a registry --
+
+        /- To add a module by hand write, e.g.
+        import Grass.Memory.Access
+        -/
+
+    -- and the earlier version read that example as a real import. Worse, when
+    the comment came before the real imports it fixed the insertion point inside
+    the comment, so `--write` moved every import into it: the file then imported
+    nothing, and `--check` reported it clean, because both sides of the fixpoint
+    check used this same reader. An invariant asserted with the parser under
+    test cannot catch the parser being wrong, so the parser has to be right.
+
+    That shape was not hypothetical; it was sitting in `Tools/DeclNames.lean`
+    in the working tree when the reviewer found it.
     """
     lines = text.splitlines()
     found: list[str] = []
     others: list[str] = []
     first: int | None = None
-    for index, line in enumerate(lines):
-        match = LIBRARY_IMPORT.match(line)
+    depth = 0
+    for line in lines:
+        opened_before = depth
+        depth = comment_depth_after(line, depth)
+        match = LIBRARY_IMPORT.match(line) if opened_before == 0 else None
         if match:
             if first is None:
                 first = len(others)

@@ -13,19 +13,37 @@ import Grass.ISA.X86.Sources
 /-!
 # The x86 machine-authority facade
 
-## Where the rule comes from, and where it is not yet
+## Where the rule comes from
 
-The facade rules this module answers to are `g-design:71`, authored at commit
-`fff7344`, which is an ancestor of neither `main` nor this branch;
-`docs/MODULES.md` in this tree has no facade section. The quoted phrases below
-are accurate to that ruling and not checkable from this repository until it
-merges. A reviewer flagged the first draft for quoting them as though they were
-already here.
+`docs/MODULES.md` calls this "the lower machine-authority facade over the x86
+encoding, decoding, instruction semantics, and validation-metadata shards",
+consumed directly by machine-model authors and by `Grass.Assembly.X86`, so that
+"ordinary assembly authors should not have to assemble its shards one by one".
 
-The ruling calls this "the lower machine-authority facade over the x86 encoding,
-decoding, instruction semantics, and validation-metadata shards", consumed
-directly by machine-model authors and by `Grass.Assembly.X86`, so that "ordinary
-assembly authors should not have to assemble its shards one by one".
+Two corrections have been made to this paragraph and the second is worth keeping
+written down. The first draft quoted `docs/MODULES.md` normally. A reviewer
+reported that no such text existed in the tree, so I rewrote it to say the rule
+lived on an unmerged commit and was not checkable here. That was false when I
+wrote it: `fff7344` had already merged, and the only true statement was that
+this branch was behind `main` by twenty-seven commits. I asserted a fact about
+git ancestry without running `git merge-base`, on a reviewer's word, which is
+the same mistake in the same session as taking a fixture's output for a fixture's
+intent.
+
+## What ratifies it, which is not decision 134
+
+`docs/MODULES.md` is explicit that decision 134 ratifies `Grass.Assembly.*`,
+`Grass.Platform.*` and `Grass.Emit`, and that "`Grass.ISA.X86` is deliberately
+outside that list: it is the narrower machine-authority integration surface
+consumed by machine-model authors and `Grass.Assembly.X86`, and uses
+`docs/OLEAN_SHARDING.md`'s reviewed deliberate-public-re-export exception on
+that basis."
+
+That is the authority for the eleven-shard import list below, and it answers a
+question a reviewer raised and left open -- whether this module is an
+`import all` wearing a facade's name. It is the named exception, granted on the
+stated basis. The same passage adds that neither case is permission to use
+`import all`.
 
 This module declares nothing. It is the import list and this note, which is what
 makes it a facade rather than a second implementation hierarchy: there is no
@@ -67,6 +85,6 @@ Membership in this cone is not a statement that a shard is validated. The
 citation, dual-citation, ledger and source shards are *validation metadata*:
 they record which external authority is claimed for which encoding rule and
 which of those claims is still unconfirmed. `Grass.ISA.X86.openReleaseBlockers`
-is not empty, and `Tests/ISA/X86/LedgerAudit.lean` reports the count on every
-build.
+is not empty, and `Tests/ISA/X86/LedgerAudit.lean` names the blocking
+documents on every build.
 -/

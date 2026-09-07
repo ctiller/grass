@@ -28,7 +28,7 @@ running the mutations:
 
 * "the three axes are total functions" -- they are inductives, and only
   `TargetAbi` has any total function over it. Adding `| windows11` to
-  `ApiBaseline`, or a fourth `CallDiscipline`, compiles with zero friction,
+  `ApiBaseline`, or a third `CallDiscipline`, compiles with zero friction,
   because nothing in the repository matches on either.
 * two `rfl` equations were said to be "here to fail later, when a second
   inhabitant arrives". They cannot fail: they were about the ABI that

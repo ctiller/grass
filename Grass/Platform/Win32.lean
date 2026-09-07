@@ -4,23 +4,28 @@ import Grass.Platform.Win32.Profile
 /-!
 # The Win32 API facade
 
-## Where the rule comes from, and where it is not yet
+## Where the rule comes from
 
-The facade rules this module answers to are `g-design:71`, authored at commit
-`fff7344`. That commit is an ancestor of neither `main` nor this branch, and
-`docs/MODULES.md` in this tree contains no facade section at all. So the quoted
-phrases below are accurate to the ruling and *not* checkable from this
-repository until it merges. A reviewer flagged the first draft for quoting them
-as though they were present here; saying where they live is the fix.
+`docs/MODULES.md` calls this "the public facade for the Win32 API family", and
+decision 134 ratifies `Grass.Platform.*` as a stable author-facing facade. The
+spike spelling `Grass.Platform.Win10.X64` "must be replaced by
+`Grass.Platform.Win32`, not retained as an alias" -- a requirement, and not yet
+a completed action, since the spike corpus still imports the old spelling.
 
-The ruling calls this "the public facade for the Win32 API family" and replaces
-the spike spelling `Grass.Platform.Win10.X64` with it. That is not a rename: a
-Windows version floor and an architecture/ABI selection "remain explicit profile
-values selected through this API; neither belongs in the module path".
+That is not a rename either way: a Windows version floor and an architecture/ABI
+selection "remain explicit profile values selected through this API; neither
+belongs in the module path".
+
+An earlier draft of this paragraph said the rule lived on an unmerged commit and
+was not checkable from this tree. That was false -- the ruling had already
+merged, and the true statement was only that this branch was behind `main`. It
+went in because I asserted a fact about git ancestry on a reviewer's word
+without running `git merge-base` myself.
 
 `Grass.Platform.Win32.Profile` is where they went, and its own header is candid
 about how little is enforced there: the only mechanism is that
-`TargetAbi.handleBits` is total. Nothing consumes the profile yet.
+`TargetAbi.handleBits` and `TargetAbi.pointerBits` are total. Nothing consumes
+the profile yet.
 
 This module declares nothing; it is the import list and this note.
 
