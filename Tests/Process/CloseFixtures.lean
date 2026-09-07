@@ -619,6 +619,7 @@ theorem afterCoalesce_off {session : serverTopology.ChannelId ()} (notWire : ses
   show (if session = wire then merged else EscrowLedger.empty) = EscrowLedger.empty
   rw [if_neg notWire]
 
+open Classical in
 /--
 **A coalesce: the constructor nothing in this corpus had ever built.**
 
@@ -671,10 +672,24 @@ theorem the_coalesce :
     rw [afterCoalesce_wire]
     exact ⟨List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self),
       merged_other carrier_ne_escrowed⟩
-  carrierCarriesTheMessage := by
+  carrierIsPermitted := by
     intro carrier' isMerge
     cases isMerge
-    rfl
+    refine ⟨[escrowed], by simp, List.mem_cons_self, ?_, ?_⟩
+    · intro source
+      constructor
+      · intro inList
+        rw [List.mem_singleton.mp inList, afterCoalesce_wire]
+        exact merged_first
+      · intro resolved
+        rw [afterCoalesce_wire] at resolved
+        by_cases isFirst : source = escrowed
+        · rw [isFirst]; exact List.mem_cons_self
+        · rw [merged_other isFirst] at resolved
+          exact absurd resolved (by intro equal; cases equal)
+    · intro source inList
+      rw [List.mem_singleton.mp inList]
+      rfl
   endpointDeathIsEarned := by
     constructor
     · intro reason isDeath
@@ -726,20 +741,30 @@ theorem a_coalesce_may_not_launder_into_a_delivered_message
   exact absurd stillHere (by intro equal; cases equal)
 
 /--
-**And it may not merge a payload into a carrier holding a different message.**
+**And it may not merge a payload into a carrier holding a different message —
+at this plan.**
 
-`carrierCarriesTheMessage`. Without it a coalesce could merge `⟨7⟩` into a fresh
-carrier holding `⟨99⟩`: the source's payload is gone and a message nobody sent is
-in flight, and the after-world passes every `WellFormed` clause. `Reroutes.arrives`
-has carried the same conjunct since §10.98. §10.113.
+Without some such bound a coalesce could merge `⟨7⟩` into a fresh carrier holding
+`⟨99⟩`: the source's payload is gone and a message nobody sent is in flight, and
+the after-world passes every `WellFormed` clause. §10.113 added it as
+`carrierCarriesTheMessage`, a per-source equality on every plan.
+
+**The qualification is the point, and it is new.** `agent-bus` ruling
+`g-design:83` moved the policy to the channel, because a per-source equality made
+latest-wins and folding channels unconstructible everywhere. So this is now a
+theorem about `serverPlan`, whose `coalescing` is `ProcessPlan.exactDedup`, and
+not about coalescing. A channel that merges different payloads on purpose is
+permitted, and `Grass/Process/Network/Plan.lean` says what it owes instead.
+§10.127.
 -/
 theorem a_coalesce_may_not_change_the_payload
     {before after : ServerWorld}
     {other : EdgeOccurrence serverTopology World.serverMessage ()}
     (different : other.1 ≠ escrowed.1)
     (merged : serverPlan.ResolvesEscrow before after () wire escrowed
-      (.coalesced other)) : False :=
-  different (merged.carrierCarriesTheMessage other rfl)
+      (.coalesced other)) : False := by
+  obtain ⟨sources, _, isSource, _, permitted⟩ := merged.carrierIsPermitted other rfl
+  exact different (permitted escrowed isSource).symm
 
 /--
 **And two sources may merge into one carrier**, which is what §3's "consumes
@@ -755,5 +780,58 @@ theorem a_second_source_may_name_the_same_carrier
     (first : serverPlan.ResolvesEscrow before middle () wire escrowed (.coalesced other)) :
     (middle.inFlight () wire).Outstanding other :=
   first.carrierIsOutstanding other rfl
+
+/-! ## A policy the old field forbade
+
+`agent-bus` ruling `g-design:83` generalised `carrierCarriesTheMessage` into
+`ProcessPlan.coalescing` because a per-source equality made latest-wins and
+folding channels unconstructible at *every* plan. A field that is only ever
+instantiated at `ProcessPlan.exactDedup` would be that generalisation in name
+only, which is the shape this ledger has spent eight rounds refusing, so the
+distinction is exhibited rather than described.
+
+What is here is the distinction at the level of the *policy*. A plan-level
+witness — a second channel-carrying plan whose `coalescing` is `latestWins`, with
+a `ResolvesEscrow` merging two different payloads through it — is owed and
+recorded in §10.127; this is the part that is cheap and still falsifiable.
+-/
+
+/-- A latest-wins policy: the carrier is one of the sources, and the others are
+discarded rather than required to agree with it. -/
+def latestWins (sources : List (EdgeOccurrence serverTopology World.serverMessage ()))
+    (carrier : EdgeOccurrence serverTopology World.serverMessage ()) : Prop :=
+  carrier ∈ sources
+
+/-- The two payloads a dedup channel may not merge and a latest-wins channel may. -/
+def otherPayload : World.serverMessage () := ⟨99⟩
+
+def otherCarrier : EdgeOccurrence serverTopology World.serverMessage () :=
+  ⟨otherPayload, ⟨wire, { id := ⟨.messageOccurrence, 6⟩, isMessage := rfl }⟩⟩
+
+/--
+**Latest-wins admits a merge of two different payloads.**
+
+`escrowed` carries `payload` and `otherCarrier` carries `otherPayload`; the
+carrier is one of the sources, and nothing asks the other to agree with it.
+-/
+theorem latestWins_admits_a_real_merge :
+    latestWins [escrowed, otherCarrier] otherCarrier :=
+  List.mem_cons_of_mem _ List.mem_cons_self
+
+/--
+**And `exactDedup` refuses exactly that merge**, which is what the old field
+imposed on every channel.
+
+The two theorems together are the ruling's content: the same source family and
+carrier are permitted under one policy and refused under the other, so
+`ProcessPlan.coalescing` is a choice a channel makes rather than a restatement of
+`carrier.1 = source.1`.
+-/
+theorem exactDedup_refuses_it :
+    ¬ exactDedup [escrowed, otherCarrier] otherCarrier := by
+  intro dedup
+  have payloads := dedup escrowed List.mem_cons_self
+  have counts := congrArg (fun message => message.down) payloads
+  simp [escrowed, Transition.payload, otherCarrier, otherPayload] at counts
 
 end Grass.Process.Tests.Close

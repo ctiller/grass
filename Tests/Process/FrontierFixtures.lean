@@ -172,6 +172,10 @@ type, which is what "no channels" costs. -/
   steps := fun edge => edge.elim
   channel := fun edge => edge.elim
   sessionOpenIsRecorded := fun edge => edge.elim
+  -- This plan has no channels, so nothing can coalesce and the policy is
+  -- never consumed. `ProcessPlan.coalescing`'s note says the cost lands only
+  -- on channels that enable coalescing; this is what that looks like.
+  coalescing := fun edge => edge.elim
   escrowImpliesOutstanding := fun edge => edge.elim
 
 /-! ## The network that is waiting -/

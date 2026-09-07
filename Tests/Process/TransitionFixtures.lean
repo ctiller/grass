@@ -50,6 +50,11 @@ noncomputable def serverPlan : ProcessPlan graphRegistry fixtureBoundary NoOblig
   steps := fun _ => liveSteps
   channel := fun _ => liveChannel
   sessionOpenIsRecorded := fun _ _ _ open' => open'
+  -- The wire deduplicates: a merge collapses sources carrying the carrier's
+  -- message and does not combine different ones. `ProcessPlan.exactDedup` is
+  -- the one-line policy g-design:83 asks for, and it recovers exactly what
+  -- `carrierCarriesTheMessage` used to impose on every plan.
+  coalescing := fun _ => exactDedup
   escrowImpliesOutstanding := fun _ _ _ _ escrowed => escrowed
 
 /-- The world a step of it moves through is the one the other fixtures use. -/

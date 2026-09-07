@@ -593,7 +593,7 @@ theorem the_sender_death :
     exact inList
   carrierOnItsSession := by intro carrier isCoalesce; cases isCoalesce
   carrierIsOutstanding := by intro carrier isCoalesce; cases isCoalesce
-  carrierCarriesTheMessage := by intro carrier isCoalesce; cases isCoalesce
+  carrierIsPermitted := by intro carrier isCoalesce; cases isCoalesce
   endpointDeathIsEarned := by
     constructor
     · intro reason isDeath
@@ -752,7 +752,7 @@ theorem the_receiver_death :
     exact inList
   carrierOnItsSession := by intro carrier isCoalesce; cases isCoalesce
   carrierIsOutstanding := by intro carrier isCoalesce; cases isCoalesce
-  carrierCarriesTheMessage := by intro carrier isCoalesce; cases isCoalesce
+  carrierIsPermitted := by intro carrier isCoalesce; cases isCoalesce
   endpointDeathIsEarned := by
     constructor
     · intro reason isDeath
@@ -858,7 +858,7 @@ theorem the_drop : serverPlan.ResolvesEscrow sent afterDropping () wire escrowed
     exact fun _ => rfl
   carrierOnItsSession := by intro carrier isCoalesce; cases isCoalesce
   carrierIsOutstanding := by intro carrier isCoalesce; cases isCoalesce
-  carrierCarriesTheMessage := by intro carrier isCoalesce; cases isCoalesce
+  carrierIsPermitted := by intro carrier isCoalesce; cases isCoalesce
   endpointDeathIsEarned := by
     constructor
     · intro reason isDeath

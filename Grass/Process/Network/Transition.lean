@@ -237,21 +237,41 @@ structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
   carrierIsOutstanding : ∀ carrier, resolution = .coalesced carrier →
     (after.inFlight edge session).Outstanding carrier
   /--
-  **And the carrier carries the source's message.**
+  **And the merge is one the channel permits.**
 
-  The other half of §10.111, and the half `carrierIsFresh` missed entirely.
-  Nothing related the carrier's *payload* to the source's, so a coalesce could
-  merge `⟨7⟩` into a fresh carrier holding `⟨99⟩`: the reviewer compiled it, and
-  the after-world passes all seven `WellFormed` clauses. The source's payload is
-  gone and a message nobody sent is in flight — which is §10.91's defect
+  This was `carrierCarriesTheMessage`, a per-source `carrier.1 = occurrence.1`,
+  and §10.113 added it for a good reason: nothing related the carrier's payload
+  to the source's, so a coalesce could merge `⟨7⟩` into a fresh carrier holding
+  `⟨99⟩` and the after-world passed every `WellFormed` clause — §10.91's defect
   reopened through the one exception `createsOnlyTheCarrier` grants.
 
-  `Reroutes.arrives` has carried exactly this conjunct since §10.98, for exactly
-  this reason. The two constructors that "pass a payload on" now say the same
-  thing about it. §10.113.
+  **But a reviewer then proved what it cost, generically.** Stated per source, it
+  forces any two sources naming one carrier to carry the same message, so a
+  latest-wins or folding channel is unconstructible at *every* plan. `agent-bus`
+  ruling `g-design:83` on `c-process:68` settles that coalescing is not
+  universally same-payload, and moves the policy to the channel:
+  `ProcessPlan.coalescing`, with `exactDedup` recovering the old behaviour in one
+  line for a channel that wants it.
+
+  **Three things `carrierIsPermitted` says beyond calling the relation.** The
+  family is non-empty, so a coalesce cannot invent a carrier out of nothing. This
+  step's own occurrence is in it, so the field is about *this* merge. And the
+  family is *exactly* those the after-ledger resolves into that carrier, which is
+  what `docs/PROCESS.md` §3 means by "coalescing consumes every source token": a
+  step cannot satisfy the channel's policy against a convenient subset and
+  quietly merge more. That last conjunct is the one an equality could not have
+  had, because an equality never mentioned a family at all.
+
+  A concrete implementation may realise the merge as finite silent steps under
+  refinement; what the ruling forbids, and what "exactly" forbids here, is a
+  *logical* world in which the merge is half done.
   -/
-  carrierCarriesTheMessage : ∀ carrier, resolution = .coalesced carrier →
-    carrier.1 = occurrence.1
+  carrierIsPermitted : ∀ carrier, resolution = .coalesced carrier →
+    ∃ sources : List (EdgeOccurrence plan.topology plan.message edge),
+      sources ≠ [] ∧ occurrence ∈ sources ∧
+        (∀ source, source ∈ sources ↔
+          (after.inFlight edge session).resolution source = some (.coalesced carrier)) ∧
+        plan.coalescing edge sources carrier
   /--
   **And an endpoint death is a death of that endpoint.**
 

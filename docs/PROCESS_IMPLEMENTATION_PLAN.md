@@ -4372,7 +4372,10 @@ is an arbitrary type with no combining operation, so equality is the only payloa
 relation expressible, and a merge that genuinely combined two payloads would need
 a law `ProcessPlan` does not have.
 
-But it was not a decision, it was a consequence of copying a conjunct from
+**Ruled** by `g-design:83`: coalescing is not universally same-payload, and the
+policy moves to the channel. §10.127 is the entry.
+
+It was not a decision, it was a consequence of copying a conjunct from
 `Reroutes.arrives` — where it is right because a reroute *moves* one payload. A
 coalesce merges N into one. **Needs a ruling**: either §3's coalescing is
 same-payload and this should be said in `ChannelResolution.coalesced`'s docstring
@@ -4607,6 +4610,62 @@ the signature-forced/author-chosen distinction is worth a mechanism: it is not.
 It does not close §10.49 or §10.69, which ask the neighbouring question of how a
 `demanded` predicate is tied to a specification; those are about where the
 predicate comes from rather than about whether the record can police it.
+
+### 10.127 Coalescing is the channel's policy, not the layer's
+
+§10.118, ruled by `agent-bus` `g-design:83` on `c-process:68`. The question was
+whether `.coalesced` being a same-payload relation is a decision or an accident.
+The ruling: an accident, and coalescing is **not** universally same-payload.
+
+`ResolvesEscrow.carrierCarriesTheMessage` said `carrier.1 = occurrence.1`, per
+source. §10.113 added it for a real defect — without it a coalesce could merge
+`⟨7⟩` into a fresh carrier holding `⟨99⟩`, and the after-world passed every
+`WellFormed` clause — and it was copied from `Reroutes.arrives`, where the same
+conjunct is right because a reroute forwards *one* payload. A reviewer then
+proved generically what the copy cost: two sources naming one carrier are forced
+to carry the same message, so a latest-wins or folding channel is unconstructible
+at every plan.
+
+**What replaced it.** `ProcessPlan.coalescing` is a per-edge relation between a
+source family and its carrier, and `ResolvesEscrow.carrierIsPermitted` requires
+the family to be non-empty, to contain this step's own occurrence, to be
+*exactly* those the after-ledger resolves into that carrier, and to satisfy the
+channel's relation. `ProcessPlan.exactDedup` is the one-line policy the ruling
+asks for and recovers the old behaviour verbatim; `serverPlan` uses it, so
+`Tests/Process/CloseFixtures.lean`'s `a_coalesce_may_not_change_the_payload`
+survives — restated as a theorem about that plan rather than about coalescing.
+
+**The "exactly" conjunct is worth more than the relation.** An equality never
+mentioned a family, so nothing said which sources a merge consumed. The new field
+does, which is `docs/PROCESS.md` §3's "coalescing consumes every source token"
+stated where it can be checked: a step cannot satisfy the policy against a
+convenient subset and quietly merge more. The ruling's "no intermediate partially
+coalesced logical world is observable" is that conjunct; a concrete
+implementation may still realise the merge as finite silent steps under
+refinement.
+
+**What is exhibited and what is owed.** `latestWins_admits_a_real_merge` and
+`exactDedup_refuses_it` are the same source family and carrier permitted under
+one policy and refused under the other, so the field is a choice rather than a
+renaming. What is *not* here is a plan-level witness: a second channel-carrying
+plan whose `coalescing` is `latestWins`, with a `ResolvesEscrow` merging two
+different payloads through it. Until that exists, `ProcessPlan.coalescing` has
+one instantiation in the corpus and it is `exactDedup` — which is the "inhabited
+and not exercised" shape §10.88 named, and is recorded here rather than left for
+a reviewer to find. **Owed.**
+
+**And one thing the ruling asked for that this layer cannot carry.** g-design's
+wording is "plus the exact custody/resource/obligation preservation laws". An
+`EdgeOccurrence` is a message and a nominal identity; there is no resource or
+obligation attached to an occurrence at this layer to preserve, and the
+obligation ledger is an opaque `Obligations` that a coalesce's own `scope`
+already forbids it from touching. So that half is discharged partly by the scope
+and partly inside the relation, by a channel whose *message type* carries the
+resources. `Grass/Process/Network/Plan.lean` says so at the field. If the
+intended reading was stronger — a law this layer states about custody across a
+merge — it needs a way to attach custody to an occurrence, which is
+`Grass/Process/Network/Escrow.lean`'s §3 escrow assertion and is not modelled
+here. Recorded rather than assumed closed.
 
 ## 11. The authoring facade
 
