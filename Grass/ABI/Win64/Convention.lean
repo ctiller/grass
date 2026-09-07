@@ -106,11 +106,32 @@ rule, and `docs/PLATFORM_ABI.md` section 3's "omitting a permitted behavior is
 unsound" applies to a caller reasoning from this table about a callee that
 touches them.
 
-That is an open obligation rather than a claim of coverage. It is the same gap
-`Grass.ABI.Win64.UnwindOp` measures from the other side: its four constructors
-have no `UWOP_SAVE_XMM128`, and that omission accounts for most of what this
-profile cannot describe.
+That is an open obligation rather than a claim of coverage, and it is now the
+*only* side of the gap left. `Grass.ABI.Win64.UnwindOp` gained `saveXmm128`, so
+the unwind language can describe an XMM save; this table still cannot say which
+XMM registers a callee must preserve, because it models general-purpose
+registers only. `Grass.ISA.X86.Xmm` exists but carries numbering alone.
 -/
+
+/-- Which XMM registers a callee must preserve.
+
+`xmm0`-`xmm5` are volatile and `xmm6`-`xmm15` are nonvolatile under the Windows
+x64 convention. Stated here rather than left as the literal `6` it was written
+as inside `Grass.ABI.Win64.UnwindOp.Encodable`: a bare bound in a predicate is
+an external ABI fact with no declaration to cite, no ledger row and no way for a
+reader to find it, and a reviewer pointed out the same number was also spelled
+independently in the corpus filter, so two copies of an unnamed fact had to
+agree by hand. -/
+def xmmVolatility (r : Xmm) : Volatility :=
+  if r.index.val < 6 then .volatile else .nonvolatile
+
+/-- `xmm6` onward are the preserved ones, which is the fact
+`Grass.ABI.Win64.UnwindOp.Encodable` relies on when it refuses to describe a
+save of a volatile XMM register. -/
+theorem xmmVolatility_nonvolatile_iff (r : Xmm) :
+    xmmVolatility r = .nonvolatile ↔ 6 ≤ r.index.val := by
+  simp only [xmmVolatility]
+  split <;> simp_all <;> omega
 
 /-- The registers a call may destroy. -/
 def volatileRegisters : List Gpr := Gpr.all.filter (fun r => volatility r == .volatile)

@@ -29,7 +29,7 @@ still records a human following an anchor and remains unmechanised. This closes
 the narrower question of whether the recorded retrieval status is true today.
 
 Usage:
-    lake env lean --run Tests/ISA/X86/SourceCorpus.lean > sources.txt
+    lake env lean --run Tests/Emit.lean sources > sources.txt
     python Tools/source-liveness.py sources.txt
 
 Exit status is 1 when a recorded status disagrees with what the network says.

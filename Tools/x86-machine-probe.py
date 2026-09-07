@@ -57,7 +57,7 @@ User mode only. Ring 0 instructions cannot be reached from a process and are not
 attempted here; they need a bare-metal or hypervisor harness.
 
 Usage:
-    lake env lean --run Tests/ISA/X86/MachineProbes.lean > probes.txt
+    lake env lean --run Tests/Emit.lean probes > probes.txt
     python Tools/x86-machine-probe.py probes.txt
 
 Exit status is 1 if any probe disagrees with the model.
@@ -76,7 +76,7 @@ REGS = ("rax rcx rdx rbx rsp rbp rsi rdi "
 RSP = 4  # never loaded or compared: it is the harness's own stack
 
 # The corpus this tool was last reviewed against. See corpus_digest.
-EXPECTED_DIGEST = "2657182b0661e3e476e02c2111e5adac8beb3f43818d242da97e3834b75200c1"
+EXPECTED_DIGEST = "ecdf1bc5d173aef9988d24546f8fcbb1de0d02c1c96cf6035e6841cfe680c07e"
 # The coverage this tool was reviewed at. Shrinking the corpus must be a
 # deliberate, reviewed edit rather than a side effect of regenerating it.
 #
@@ -117,14 +117,21 @@ def corpus_digest(text: str) -> str:
     nothing to, and its own remedy was to silence it. That is the shape of the
     row-count weakness described below, one column over.
 
+    Sorted, because coverage is a set and not a sequence. Reordering the
+    generator's own enumeration -- swapping two entries in `Gpr.all`, say --
+    leaves exactly the same cases exercised, and a digest that fired on it
+    would route a real model change to the "update the constant" path instead
+    of to the oracle. A reviewer raised that as the residue of the previous
+    fix.
+
     Hashing coverage keeps what the guard is for. A corpus that drops rows,
     duplicates them, or swaps hard cases for easy ones still changes this
     digest; a corpus whose byte column changed because the encoder changed does
     not, and goes straight to the oracle that can judge it.
     """
     normalised = COVERAGE_LINE.join(
-        coverage_of(line.rstrip("\r"))
-        for line in text.splitlines() if line.strip())
+        sorted(coverage_of(line.rstrip("\r"))
+               for line in text.splitlines() if line.strip()))
     return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 

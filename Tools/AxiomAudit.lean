@@ -10,6 +10,7 @@ import Grass.Core.Generational
 import Grass.Core.Identifiers
 import Grass.Core.Name
 import Grass.Core.Uid
+import Grass.ISA.X86
 import Grass.ISA.X86.Addressing
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.Citation
@@ -39,7 +40,9 @@ import Grass.Obligation.Delta
 import Grass.Obligation.Disposition
 import Grass.Op.Facets
 import Grass.Op.Step
+import Grass.Platform.Win32
 import Grass.Platform.Win32.Console
+import Grass.Platform.Win32.Profile
 import Grass.Process
 import Grass.Process.Acceptance
 import Grass.Process.Bag

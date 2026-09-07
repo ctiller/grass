@@ -10,6 +10,7 @@ import Grass.Core.Generational
 import Grass.Core.Identifiers
 import Grass.Core.Name
 import Grass.Core.Uid
+import Grass.ISA.X86
 import Grass.ISA.X86.Addressing
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.Citation
@@ -39,7 +40,9 @@ import Grass.Obligation.Delta
 import Grass.Obligation.Disposition
 import Grass.Op.Facets
 import Grass.Op.Step
+import Grass.Platform.Win32
 import Grass.Platform.Win32.Console
+import Grass.Platform.Win32.Profile
 import Grass.Process
 import Grass.Process.Acceptance
 import Grass.Process.Bag
@@ -128,6 +131,20 @@ push authors towards naming nothing rather than towards naming something real.
 This is not a proof and not an audit. It is a fact dump, and the tool that reads
 it still cannot tell whether the named theorem proves the sentence. It closes one
 gap: whether the name resolves at all.
+
+## The import list is everyone's job
+
+The list above must name every module in the build, because a name the audit
+cannot see is a name it reports as invented. `lake env lean` resolves those
+imports against the *current tree*, so this file also fails outright from a tree
+where one of them does not exist yet: `c-stdlib` hit exactly that running the
+gate before `Grass.ABI.Win64.Convention` had merged, and reported it in
+`c-stdlib:25`.
+
+So adding a module is also adding a line here, in the same change. The failure
+mode is loud rather than quiet — the gate refuses to run rather than reporting a
+false clean — but it is still a stall for whoever hits it. `Tools/AxiomAudit.lean`
+carries the same coupling for the same reason.
 -/
 
 open Lean

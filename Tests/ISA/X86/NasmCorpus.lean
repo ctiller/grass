@@ -179,8 +179,12 @@ end Grass.Tests.ISA.X86.Nasm
 
 /-- Print the corpus as tab-separated `bytes<TAB>source` lines.
 
-Top level rather than in the namespace because `lake env lean --run` looks for
-`main` there. -/
-def main : IO Unit := do
+Top level, and named for its corpus rather than `main`. Six of these
+modules declared a root `main`, so importing any two into one environment
+collided on it -- which is what `audit-trust.ps1` does, and `g-construct:58`
+reported the gate failing before it could audit anything. `Tests/Emit.lean`
+holds the single `main` that `lake env lean --run` needs and dispatches to
+these by name. -/
+def emitNasmCorpus : IO Unit := do
   for r in Grass.Tests.ISA.X86.Nasm.corpus do
     IO.println (r.bytes ++ "\t" ++ r.source)

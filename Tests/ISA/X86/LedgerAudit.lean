@@ -4,6 +4,7 @@ import Grass.ISA.X86.Decode
 import Grass.ISA.X86.Profile
 import Grass.ABI.Win64.UnwindBytes
 import Grass.Platform.Win32.Console
+import Grass.Platform.Win32.Profile
 
 /-!
 # Ledger coverage gate
@@ -88,7 +89,8 @@ def auditedModules : List Name :=
   [`Grass.ISA.X86.Register, `Grass.ISA.X86.Encoding,
    `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.Unwind,
-   `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console]
+   `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
+   `Grass.Platform.Win32.Profile]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -102,7 +104,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 98
+def owedBaseline : Nat := 105
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -124,7 +126,7 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 54
+def notBehaviourBaseline : Nat := 57
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -168,7 +170,11 @@ real instruction in it.
 def notModelling : List Name :=
   [`Grass.ISA.X86.Citation, `Grass.ISA.X86.DualCitation,
    `Grass.ISA.X86.Sources, `Grass.ISA.X86.Ledger,
-   `Grass.ISA.X86.Profile, `Grass.ISA.X86.Performance]
+   `Grass.ISA.X86.Profile, `Grass.ISA.X86.Performance,
+   -- The two authoring facades. They declare nothing at all, so there
+   -- is no declaration under them that could owe a citation; the
+   -- shards they front are classified individually above and here.
+   `Grass.ISA.X86, `Grass.Platform.Win32]
 
 /--
 Every Lean module found under `root` on disk, as a module name.
@@ -262,6 +268,20 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- `Xmm.all` is a list of Grass constructors, exactly as `Gpr.all` is; the
+    -- architectural fact is the numbering, which `Xmm.index` carries in
+    -- `owed`. It was put in `owed` alongside `index` when the XMM file
+    -- landed, which a reviewer flagged as the wrong bucket by this file's own
+    -- rule -- and noted that the wrong bucket happened to need one reviewed
+    -- baseline bump where the right one needs two. That is the move this
+    -- ratchet exists to catch, so it is recorded rather than quietly fixed.
+    `Grass.ISA.X86.Xmm.all,
+    -- The platform selection itself. Choosing Windows 10, x64 and documented
+    -- APIs is a project decision recorded in `docs/DECISIONS.md` 16, not a
+    -- claim about how Windows behaves; the external content it implies is the
+    -- pair of widths in `owed` below.
+    `Grass.Platform.Win32.decision16,
+    `Grass.Platform.Win32.Profile.FollowsDecision16,
     -- Win64 and Win32: Grass's own constructions over the ABI types. The
     -- external content they are built from is in `owed` below.
     `Grass.ABI.Win64.Ascends, `Grass.ABI.Win64.ascends,
@@ -330,6 +350,35 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    -- The XMM register file's numbering, added for UWOP_SAVE_XMM128. Which
+    -- register is number six is an architectural fact like any other in this
+    -- ledger, and it carries no citation yet: DECISIONS 15 wants the
+    -- Intel/AMD intersection, and the AMD side is unretrievable (see
+    -- `Grass.ISA.X86.Sources`), so an anchor added now could not be confirmed.
+    `Grass.ISA.X86.Xmm.index,
+    -- Which XMM registers a callee must preserve. An external ABI fact, and
+    -- it was previously a bare `6` inside UnwindOp.Encodable with no
+    -- declaration to carry it -- so the fact was real, load-bearing and
+    -- absent from this ledger entirely. Naming it is what put it here.
+    `Grass.ABI.Win64.xmmVolatility,
+    -- The two ceilings of UWOP_ALLOC_LARGE. Both are external facts about the
+    -- unwind encoding rather than choices: 524280 is what the 16-bit scaled
+    -- field reaches, and 4294967288 is what the unscaled form reaches, which
+    -- ml64 confirms by refusing 2^32 with A2156.
+    `Grass.ABI.Win64.UnwindOp.largeAllocScaledMax,
+    `Grass.ABI.Win64.UnwindOp.largeAllocRawMax,
+    -- Where an unwind code may sit relative to the instruction it describes.
+    -- An external rule about how the unwinder reads the array -- a code takes
+    -- effect after its instruction, except a machine frame, which precedes
+    -- every instruction -- rather than a construction of Grass's own.
+    `Grass.ABI.Win64.PlacedOp.OffsetPlaced,
+    -- The Win32 handle and pointer widths. A reviewer of the platform profile
+    -- pointed out that these are external ABI facts wearing the clothes of a
+    -- project selection: `docs/DECISIONS.md` 16 fixes x64, but it says nothing
+    -- about how wide a `HANDLE` is, and a consistently wrong pair would pass
+    -- every gate here. They owe a citation like any other machine fact.
+    `Grass.Platform.Win32.TargetAbi.handleBits,
+    `Grass.Platform.Win32.TargetAbi.pointerBits,
     -- Architectural facts that were in `notBehaviour` and should not have been.
     -- A reviewer pointed at the sharpest case: `ByteReg.Encodable` is one of the
     -- six cited declarations and is *defined from* `highCapable` and
