@@ -52,6 +52,9 @@ def nothingChanged (_ : ScopeId) : Bool := false
 example : rebuildCone fixtureDag nothingChanged = Vec.empty := by
   decide
 
+example : rebuildCone fixtureDag nothingChanged = Vec.empty :=
+  rebuildCone_no_changes fixtureDag nothingChanged (by intro; rfl)
+
 example : nodeAffected onlyAChanged Vec.empty (node leafA Vec.empty) = true :=
   (nodeAffected_eq_true_iff ..).2 (Or.inl (by decide))
 
@@ -101,5 +104,17 @@ example : diamondDag.WellFormed := by decide
 example : rebuildCone diamondDag onlyAChanged =
     Vec.fromList [leafA, leftParent, rightParent, product] := by
   decide
+
+example : product ∈ rebuildCone diamondDag onlyAChanged := by
+  change product ∈ scanRebuildCone onlyAChanged Vec.empty
+    ([node leafA Vec.empty, node leftParent (Vec.singleton leafA),
+      node rightParent (Vec.singleton leafA),
+      node product (Vec.fromList [leftParent, rightParent])])
+  apply parent_scope_mem_scanRebuildCone_of_dependency onlyAChanged Vec.empty
+    ([node leafA Vec.empty, node leftParent (Vec.singleton leafA),
+      node rightParent (Vec.singleton leafA)]) []
+    (node product (Vec.fromList [leftParent, rightParent])) leftParent
+  · decide
+  · decide
 
 end Grass.Tests.Build.Manifest
