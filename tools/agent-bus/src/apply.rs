@@ -1840,16 +1840,25 @@ fn apply_review_merge_authorized(
     // AGENT_BUS_SCHEMA.md: "merge_engine_epoch is the selected engine epoch
     // visible in the authorization's observed state" -- not merely some
     // historically-known activation, but the one currently selected.
-    if Some(&d.merge_engine_epoch) != state.current_merge_engine_epoch.as_ref() {
+    //
+    // Reduction can only carry half of that. The half it can: the epoch must
+    // name a real activation, and `ReviewMergeAuthorized::referenced_ids`
+    // includes `merge_engine_epoch`, so `topological_order` gives it a
+    // genuine dependency edge and the activation is applied before this
+    // event on every host. That check is sound.
+    //
+    // The half it cannot: whether the epoch is still *current*.
+    // `current_merge_engine_epoch` is moved by any later
+    // `merge_engine.activated`, which this authorization does not reference
+    // and need not have observed. Comparing against it made
+    // authorization-first reduce and activation-first return `Err` for the
+    // same two events -- one host wedged, one not, decided by replay order.
+    // `coordinator::verify_review_merge_authorized` asks the currency
+    // question at publication, against a fully-reduced state.
+    if !state.merge_engine_info.contains_key(&d.merge_engine_epoch) {
         return Err(invalid(format!(
-            "{}: merge_engine_epoch {} is not the currently selected merge engine epoch ({})",
-            env.id,
-            d.merge_engine_epoch,
-            state
-                .current_merge_engine_epoch
-                .as_ref()
-                .map(|e| e.to_string())
-                .unwrap_or_else(|| "none selected yet".to_string())
+            "{}: merge_engine_epoch {} is not a known merge engine activation",
+            env.id, d.merge_engine_epoch
         )));
     }
     // Extra checks beyond required are fine; required checks must all be
@@ -7517,13 +7526,23 @@ mod tests {
         );
     }
 
-    /// `ReviewMergeAuthorized.merge_engine_epoch` must equal the currently
-    /// selected engine epoch (AGENT_BUS_SCHEMA.md: "the selected engine
-    /// epoch visible in the authorization's observed state") -- a stale or
-    /// fabricated epoch id must be refused, not accepted just as readily as
-    /// the real current one.
+    /// A fabricated `merge_engine_epoch` is refused here; a merely *stale*
+    /// one is refused at publication instead.
+    ///
+    /// AGENT_BUS_SCHEMA.md asks for "the selected engine epoch visible in
+    /// the authorization's observed state", and reduction can only carry
+    /// half of that. `ReviewMergeAuthorized::referenced_ids` includes
+    /// `merge_engine_epoch`, so `topological_order` gives it a real
+    /// dependency edge and the named activation is applied first on every
+    /// host -- checking it exists is sound. Whether it is still *current* is
+    /// not: any later `merge_engine.activated` moves the selection, this
+    /// event neither references nor need have observed it, and comparing
+    /// against it made authorization-first reduce while activation-first
+    /// returned `Err` for the same two events. That half now lives in
+    /// `coordinator::verify_review_merge_authorized`, pinned by
+    /// `the_authorization_gate_refuses_a_stale_merge_engine_epoch`.
     #[test]
-    fn review_merge_authorized_rejects_a_stale_or_unknown_merge_engine_epoch() {
+    fn review_merge_authorized_rejects_an_unknown_merge_engine_epoch() {
         let mut state = empty_state(&[]);
         let alice = a("alice");
         let bob = a("bob");
@@ -7533,8 +7552,8 @@ mod tests {
         let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
 
         let mut authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
-        // `nominate_and_accept` seeded `default_merge_engine_epoch()` as the
-        // current selection; this names something else entirely.
+        // Not merely stale -- no `merge_engine.activated` ever named this, so
+        // no ordering of any event set could make it valid.
         authorize.merge_engine_epoch = EventId::new(&a("nobody"), 7);
         let env = Envelope::new(
             &bob,
@@ -7546,9 +7565,43 @@ mod tests {
         let err = apply_event(&mut state, &env).unwrap_err();
         assert!(
             err.to_string()
-                .contains("is not the currently selected merge engine epoch"),
+                .contains("is not a known merge engine activation"),
             "{err}"
         );
+    }
+
+    /// The counterpart to the above: a *known but superseded* epoch reduces
+    /// fine, because refusing it would depend on whether the later
+    /// activation had been replayed yet.
+    #[test]
+    fn a_superseded_merge_engine_epoch_still_reduces() {
+        let mut state = empty_state(&[]);
+        let alice = a("alice");
+        let bob = a("bob");
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
+        let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+
+        // The authorization names the epoch that was current when it was
+        // written; something else has since been selected.
+        let authorize = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
+        let superseded = authorize.merge_engine_epoch.clone();
+        state.current_merge_engine_epoch = Some(EventId::new(&a("coord1"), 99));
+        state
+            .merge_engine_info
+            .insert(EventId::new(&a("coord1"), 99), (short("ort"), short("2")));
+        assert!(state.merge_engine_info.contains_key(&superseded));
+
+        let env = Envelope::new(
+            &bob,
+            2,
+            complete_frontier(&epoch),
+            &EventData::ReviewMergeAuthorized(authorize),
+            [],
+        );
+        apply_event(&mut state, &env)
+            .expect("a superseded but real epoch must not make the bus unreducible");
     }
 
     // ------------------------------------------------- review merged / reconciled

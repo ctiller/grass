@@ -609,6 +609,24 @@ fn verify_review_merge_authorized(
              not verify this merge"
         )));
     }
+    // Checked last, after this gate's own reconstruction work, so a
+    // candidate that is wrong in a more specific way still says so.
+    // `apply` checks only that the epoch names a real activation, which is
+    // all it can soundly do -- a later `merge_engine.activated` moves
+    // `current_merge_engine_epoch` and this authorization neither references
+    // nor need have observed it, so asking there made reduction itself
+    // order-dependent. Here the state is this host's fully-reduced view.
+    if Some(&d.merge_engine_epoch) != state.current_merge_engine_epoch.as_ref() {
+        return Err(invalid(format!(
+            "merge_engine_epoch {} is not the currently selected merge engine epoch ({}); re-run the merge on the current engine before authorizing",
+            d.merge_engine_epoch,
+            state
+                .current_merge_engine_epoch
+                .as_ref()
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "none selected yet".to_string())
+        )));
+    }
     Ok(())
 }
 
@@ -2993,6 +3011,85 @@ mod tests {
         );
     }
 
+    /// The currency half of the `merge_engine_epoch` rule, in its new home.
+    ///
+    /// `apply` checks only that the epoch names a real activation, because
+    /// that is all reduction can soundly do: the authorization references
+    /// the epoch it names, so that one is always applied first, but a
+    /// *later* `merge_engine.activated` moves the selection and this event
+    /// neither references nor need have observed it. Asking there made the
+    /// same two events reduce on a host that replayed the authorization
+    /// first and fail on one that replayed the activation first.
+    ///
+    /// Here there is no replay order: `state` is the publishing host's own
+    /// fully-reduced view. Without this test the currency rule would have
+    /// been deleted rather than moved --
+    /// `a_superseded_merge_engine_epoch_still_reduces` asserts reduction
+    /// accepts exactly what this refuses, and one of the pair alone would
+    /// look like a regression.
+    #[test]
+    fn the_authorization_gate_refuses_a_stale_merge_engine_epoch() {
+        let f = build_review_fixture(Some("zoe"));
+        let candidate = crate::merge_candidate::reconstruct_candidate(
+            f.repo.path(),
+            &f.previous_main,
+            &f.feature_commit,
+            &f.reviewer,
+        )
+        .unwrap();
+        // Everything else about this candidate is genuinely valid, so the
+        // gate reaches its last check rather than stopping earlier.
+        let tag = crate::merge_candidate::candidate_tag_name(&f.reviewer, &candidate);
+        crate::gitrepo::tag_lightweight(f.repo.path(), &tag, &candidate).unwrap();
+        let push = crate::gitrepo::run(
+            f.repo.path(),
+            &["push", &f.remote, &format!("refs/tags/{tag}")],
+        )
+        .unwrap();
+        assert!(push.success, "{push:?}");
+
+        let snapshot =
+            crate::sync::cached_snapshot(f.repo.path(), f.repo.path()).expect("reduce fixture");
+        let mut state = snapshot.state;
+
+        let d = match merge_authorized_candidate(&f, &candidate)
+            .typed_data()
+            .unwrap()
+        {
+            EventData::ReviewMergeAuthorized(d) => d,
+            other => panic!("fixture built the wrong event: {other:?}"),
+        };
+
+        // The epoch the authorization names is real and this host runs its
+        // engine, so nothing else in the gate objects to it -- but the bus
+        // has since selected a different one.
+        let newer = EventId::new(&f.coord1, 4242);
+        state.merge_engine_info.insert(
+            d.merge_engine_epoch.clone(),
+            (
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+            ),
+        );
+        state.merge_engine_info.insert(
+            newer.clone(),
+            (
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+            ),
+        );
+        state.current_merge_engine_epoch = Some(newer.clone());
+
+        let err = verify_review_merge_authorized(f.repo.path(), &f.remote, &state, &f.reviewer, &d)
+            .expect_err("an authorization pinned to a superseded engine must not publish");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("is not the currently selected merge engine epoch")
+                && msg.contains(&newer.to_string()),
+            "the message must name the epoch that is current now: {msg}"
+        );
+    }
+
     /// The pinned-engine gate's *call site*, not the predicate.
     ///
     /// `bootstrap::pinned_engine_tests` proves what
@@ -3049,10 +3146,14 @@ mod tests {
     /// `current_merge_engine_epoch` (see `merge_authorized_candidate`'s own
     /// comment) -- a real, separate, pre-existing gap this task does not
     /// fix -- so full end-to-end acceptance is not yet reachable. What this
-    /// test instead proves is that this gate specifically did *not* reject
-    /// the candidate: the rejection reason that does surface names the
-    /// known unrelated downstream cause, not any of this gate's own error
-    /// text.
+    /// test instead proves is that this gate's own substantive checks did
+    /// not reject the candidate: the rejection that surfaces is the known
+    /// unrelated `merge_engine_epoch` currency failure, and none of the
+    /// authorship, reconstruction or candidate-tag text appears.
+    ///
+    /// That currency check now lives in this gate too (it cannot live in
+    /// `apply`, which has no sound way to ask it), so it is deliberately
+    /// absent from the exclusion list below.
     #[test]
     fn drain_outbox_review_merge_authorized_gate_passes_a_genuinely_valid_candidate() {
         let f = build_review_fixture(Some("zoe"));
