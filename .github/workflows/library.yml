@@ -79,6 +79,13 @@ jobs:
       - name: Build the library
         run: lake build
 
+      # The validation tools are Rust. Built once here so every step below
+      # runs a compiled binary rather than paying a build cost per step, and
+      # so a tool that fails to compile fails the job before any audit has
+      # had a chance to report a misleading pass.
+      - name: Build the validation tools
+        run: cargo build --release --locked --manifest-path tools/grass-tools/Cargo.toml
+
       - name: Audit axioms
         run: lake env lean Tools/AxiomAudit.lean
 
@@ -87,7 +94,7 @@ jobs:
         run: ./audit-trust.ps1
 
       - name: Audit docstring claims
-        run: python3 Tools/DocstringAudit.py
+        run: ./tools/grass-tools/target/release/docstring-audit
 
       - name: Report ledger coverage
         run: lake env lean Tests/ISA/X86/LedgerAudit.lean
@@ -101,17 +108,17 @@ jobs:
       - name: Differential against NASM
         run: |
           lake env lean --run Tests/ISA/X86/NasmCorpus.lean > "$RUNNER_TEMP/corpus.txt"
-          python3 Tools/x86-nasm-differential.py "$RUNNER_TEMP/corpus.txt"
+          ./tools/grass-tools/target/release/x86-nasm-differential "$RUNNER_TEMP/corpus.txt"
 
       - name: Differential against NDISASM
         run: |
           lake env lean --run Tests/ISA/X86/RipCorpus.lean > "$RUNNER_TEMP/rip.txt"
-          python3 Tools/x86-ndisasm-differential.py "$RUNNER_TEMP/rip.txt"
+          ./tools/grass-tools/target/release/x86-ndisasm-differential "$RUNNER_TEMP/rip.txt"
 
       - name: Decoder differential against NDISASM
         run: |
           lake env lean --run Tests/ISA/X86/DecodeCorpus.lean > "$RUNNER_TEMP/decode.txt"
-          python3 Tools/x86-decode-differential.py "$RUNNER_TEMP/decode.txt"
+          ./tools/grass-tools/target/release/x86-decode-differential "$RUNNER_TEMP/decode.txt"
   unwind:
     runs-on: windows-latest
     timeout-minutes: 30
@@ -135,10 +142,13 @@ jobs:
           lean --version
           lake --version
 
+      - name: Build the validation tools
+        run: cargo build --release --locked --manifest-path tools/grass-tools/Cargo.toml
+
       - name: Build the unwind corpus
         run: lake build Tests.ABI.Win64.UnwindCorpus
 
       - name: Differential against ml64
         run: |
           lake env lean --run Tests/ABI/Win64/UnwindCorpus.lean > "$RUNNER_TEMP/unwind.txt"
-          python Tools/win64-unwind-differential.py "$RUNNER_TEMP/unwind.txt"
+          ./tools/grass-tools/target/release/win64-unwind-differential.exe "$RUNNER_TEMP/unwind.txt"

@@ -1,0 +1,46 @@
+[package]
+name = "grass-tools"
+version = "0.1.0"
+edition = "2021"
+description = "Grass validation and audit tools: differential checks against independent assemblers, machine probes, and source audits"
+
+# Each tool is a self-contained binary with no shared library. The Python
+# scripts these replace were self-contained too, and each is invoked
+# independently by `.github/workflows/library.yml`; keeping them separate
+# means a change to one cannot silently alter another's verdict.
+
+[[bin]]
+name = "x86-nasm-differential"
+path = "src/bin/x86_nasm_differential.rs"
+
+[[bin]]
+name = "x86-ndisasm-differential"
+path = "src/bin/x86_ndisasm_differential.rs"
+
+[[bin]]
+name = "x86-decode-differential"
+path = "src/bin/x86_decode_differential.rs"
+
+[[bin]]
+name = "x86-machine-probe"
+path = "src/bin/x86_machine_probe.rs"
+
+[[bin]]
+name = "win64-unwind-differential"
+path = "src/bin/win64_unwind_differential.rs"
+
+[[bin]]
+name = "docstring-audit"
+path = "src/bin/docstring_audit.rs"
+
+[[bin]]
+name = "source-liveness"
+path = "src/bin/source_liveness.rs"
+
+[dependencies]
+anyhow = "1"
+regex = "1"
+tempfile = "3"
+
+[profile.release]
+debug = false
