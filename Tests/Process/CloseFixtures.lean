@@ -556,6 +556,25 @@ theorem carrier_ne_escrowed : carrier ≠ escrowed := by
   have ids := congrArg (fun occurrence => occurrence.2.2.id.carrier) same
   simp [carrier, escrowed, Transition.occurrenceOf] at ids
 
+/--
+**And the carrier's identity is new**, which is the stronger claim
+`ResolvesEscrow.createdIdentityIsFresh` asks for and which
+`carrier_ne_escrowed` does not give.
+
+Two entries can be distinct pairs and share a nominal — that is exactly the alias
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.115 is about, and it is why a fixture
+proving the pairs differ proves nothing about the identities.
+-/
+theorem escrowed_id_ne_carrier : escrowed.2.2.id ≠ carrier.2.2.id := by
+  intro same
+  have ids := congrArg (fun nominal => nominal.carrier) same
+  simp [carrier, escrowed, Transition.occurrenceOf] at ids
+/-- And the same for the second source. See `escrowed_id_ne_carrier`. -/
+theorem stranded_id_ne_carrier : stranded.2.2.id ≠ carrier.2.2.id := by
+  intro same
+  have ids := congrArg (fun nominal => nominal.carrier) same
+  simp [carrier, Reroute.stranded] at ids
+
 open Classical in
 /-- The wire's ledger after the merge: the carrier escrowed, the first source
 resolved into it, the second still in flight. -/
@@ -648,6 +667,29 @@ theorem the_coalesce :
         cancelRequestMonotone := by
           intro occurrence requested
           exact absurd requested (by intro equal; cases equal) }
+  -- The one place in the corpus where this field is not vacuous: this step really
+  -- does create the carrier, so its identity has to be new to the ledger and the
+  -- two source occurrences are what it has to be new against.
+  createdIdentityIsFresh := by
+    intro created held fresh other old
+    have isCarrier : created = carrier := by
+      have inList : created ∈ (afterCoalesce.inFlight () wire).created := held
+      rw [afterCoalesce_wire] at inList
+      have three : created ∈ [escrowed, stranded, carrier] := inList
+      rcases List.mem_cons.mp three with isFirst | rest
+      · exact absurd (by rw [isFirst, sent2_wire]; exact List.mem_cons_self) fresh
+      · rcases List.mem_cons.mp rest with isSecond | last
+        · refine absurd ?_ fresh
+          rw [isSecond, sent2_wire]
+          exact List.mem_cons_of_mem _ List.mem_cons_self
+        · exact List.mem_singleton.mp last
+    have oldList : other ∈ (sent2.inFlight () wire).created := old
+    rw [sent2_wire] at oldList
+    have two : other ∈ [escrowed, stranded] := oldList
+    rw [isCarrier]
+    rcases List.mem_cons.mp two with isFirst | rest
+    · rw [isFirst]; exact escrowed_id_ne_carrier
+    · rw [List.mem_singleton.mp rest]; exact stranded_id_ne_carrier
   createsOnlyTheCarrier := by
     intro other held fresh
     have inList : other ∈ (afterCoalesce.inFlight () wire).created := held
@@ -885,6 +927,16 @@ theorem the_second_coalesce :
         cancelRequestMonotone := by
           intro occurrence requested
           exact absurd requested (by intro equal; cases equal) }
+  -- Vacuous: this merge reuses the carrier the first one created, so nothing is
+  -- added to the ledger and there is no new identity.
+  createdIdentityIsFresh := by
+    intro created held fresh
+    refine absurd ?_ fresh
+    show created ∈ (afterCoalesce.inFlight () wire).created
+    rw [afterCoalesce_wire]
+    have inList : created ∈ (afterBothMerged.inFlight () wire).created := held
+    rw [afterBothMerged_wire] at inList
+    exact inList
   createsOnlyTheCarrier := by
     intro other held fresh
     refine absurd ?_ fresh

@@ -3142,8 +3142,10 @@ before it was finished. But the plan is an *argument*, and this ledger has five
 entries recording defects that did not exist, every one filed from an argument
 rather than a construction. It should be read as owed work, not as a result.
 
-**Closed.** `ProcessPlan.wellFormed_preserved` is the theorem, all six clauses,
-`#print axioms` clean. Reading the entry back against what it took:
+**Closed.** `ProcessPlan.wellFormed_preserved` is the theorem, every clause,
+`#print axioms` clean. Six clauses then; eight now, since §10.109 and §10.115
+each added one after this entry was written. Reading the entry back against what
+it took:
 
 * The plan had the **layer wrong**. It said "transition"; `NominalsAllocated` is
   a law of `NetworkStep`, because `usedNominals` moves by `historyExact`, which
@@ -3346,7 +3348,7 @@ Two consequences it found, both worth more than the count:
 inhabited nowhere — `terminated_result_is_exact` took a `Sound` hypothesis
 nothing had ever supplied. `Tests/Process/FrontierFixtures.lean`'s
 `waiting_is_wellFormed` and `waiting_is_sound` are the witnesses, and the fixture
-says plainly that five of the six clauses cannot fail at that plan:
+says plainly that seven of the eight clauses cannot fail at that plan:
 `nominalsAllocated` is the one with content. Inhabited, not exercised — the same
 distinction §10.59 drew for `ExactInitialNetwork` at the same plan.
 
@@ -3556,7 +3558,7 @@ world.
 **A correction to the paragraph above, made the same way the rest of this ledger
 gets corrected — by looking rather than by agreeing.** `WellFormed` does not
 belong on that list. `Tests/Process/WorldFixtures.lean`'s `quiet_is_wellFormed`
-is a second witness, at `serverPlan`. It is *vacuous* — all six clauses are
+is a second witness, at `serverPlan`. It is *vacuous* — all eight clauses are
 `absurd found`, the empty network being well formed because there is nothing to
 be wrong about — which is a different complaint from having no witness, and the
 sweep's own table said so. Stating it as "no witness" would have been the same
@@ -4305,14 +4307,16 @@ now asks it of the identity, as `identityIsFresh` — `send` is the one construc
 that escrows a new occurrence from outside, so the two-ordinary-sends attack is
 refused at its source. `wasFresh` remains as a theorem.
 
-**The invariant is still owed**, and that is the ruling this entry is really
-about. There is no `WellFormed` clause saying the identities in a ledger are
-distinct, so nothing states the property in a form a consumer can use — which is
-§10.109's lesson exactly: "no reachable network is bad" and "no well-formed
-network is bad" are different theorems. The remaining routes into a ledger are a
-coalesce carrier and a reroute arrival, and neither is required to carry a fresh
+**The invariant was still owed**, and that was the substance of this entry.
+There was no `WellFormed` clause saying the identities in a ledger are distinct,
+so nothing stated the property in a form a consumer can use — which is §10.109's
+lesson exactly: "no reachable network is bad" and "no well-formed network is bad"
+are different theorems. The remaining routes into a ledger were a coalesce
+carrier and a reroute arrival, and neither was required to carry a fresh
 identity. `EscrowLedger` is generic over `Occurrence` and cannot project one, so
-the clause belongs at `ProcessPlan`, beside `OccurrencesOnTheirSession`.
+the clause belongs at the network, beside `OccurrencesOnTheirSession`.
+
+**Closed** by `IdentitiesDistinct`, an eighth clause. §10.123 is the entry.
 
 ### 10.116 Two more things declared and never spent
 
@@ -4558,6 +4562,67 @@ Between the two fixtures all three of §7's escapes are now inhabited:
 `waitingPlan` takes entropy and descent, `chimingPlan` takes descent and
 production.
 
+### 10.123 The eighth clause, and the two constructors that had to earn it
+
+§10.115's owed invariant, closed. `LogicalProcessNetworkCore.IdentitiesDistinct`
+says no two entries in one escrow ledger share an occurrence identity, and
+`ProcessPlan.wellFormed_preserved` now carries it.
+
+**Why a clause and not a fixed field.** `SendsEscrow.identityIsFresh` closed the
+*cause* — the constructor that escrows a new occurrence from outside — and that
+is a statement about what a run can reach. Every theorem stated over
+`before.WellFormed` still admitted the aliased world as an input, because
+`WellFormed` did not mention identities. §10.109 made exactly this argument for
+`OccurrencesOnTheirSession` and it is the second time this milestone has had to
+make it, which is worth recording as a pattern rather than as two incidents: a
+guard on the transition family and a clause of the network invariant are not
+substitutes, and finding the first does not discharge the second.
+
+**Two fields the proof demanded.** Three constructors can put an entry into a
+ledger. The send already had its freshness field. The other two did not, and both
+gaps were real:
+
+* `ResolvesEscrow.createdIdentityIsFresh`. `createsOnlyTheCarrier` bounds *what*
+  a coalesce may add and says nothing about its nominal, so a coalesce could
+  install a carrier reusing a nominal already in the ledger under a different
+  message. The field is vacuous at every resolution but `.coalesced`, because
+  `createsOnlyTheCarrier` makes its hypothesis unsatisfiable there — which is why
+  it costs the five non-creating resolutions one `absurd` line each and no
+  thought.
+* `Reroutes.arrivalIdentityIsFresh`. `arrives` pins the arrival's message, its
+  session and its uniqueness, and says nothing about its nominal.
+
+`Tests/Process/CloseFixtures.lean` is where the coalesce field is not vacuous,
+and it needed two new lemmas — `escrowed_id_ne_carrier` and
+`stranded_id_ne_carrier`. The fixture already had `carrier_ne_escrowed` and
+`carrier_ne_stranded`, and **those prove nothing about the identities**: two
+entries can be distinct pairs and share a nominal, which is the whole of §10.115.
+A fixture that proves the pairs differ and is read as proving the nominals differ
+is the same class of mistake as a docstring asserting what its type does not
+carry.
+
+**The falsifying fixture.** `Tests/Process/IdentityFixtures.lean` builds the
+world. `twin` is `escrowed`'s nominal under a different payload;
+`aliasedLedger` holds both and ranks them by payload, so `rankOrdersCreated` — the
+field whose docstring used to claim this world was impossible — is discharged.
+`aliasedLedger_breaks_the_token` is what the alias costs: one nominal
+simultaneously `.dropped` and `Outstanding`, with every field of `EscrowLedger`
+satisfied, because `atMostOneRecordedEnding` and `outstanding_xor_settled` are
+keyed on the pair while §3's affine `ResolveToken occurrence.id` is keyed on the
+identity. `identitiesDistinct_is_what_refuses_it` and
+`the_seventh_clause_is_satisfied` are the pair that matters: the new clause
+refuses the world and the old ones do not, so the eighth is not derivable from
+the seven.
+
+**And a claims audit came with it.** Every count of `WellFormed`'s clauses in the
+corpus said *six*, and the seventh had landed in §10.109 — so the numbers were
+already wrong before this entry made them wronger. Six sites corrected, in
+`Initial.lean`, `WellFormedness.lean`, `FrontierFixtures.lean` and three places in
+this document. The three occurrences of "six clauses" that remain are §10.73's
+account of a plan that really was written for six, and are history rather than
+claims. This is §10.105's lesson holding: a number in prose is a claim, and a
+clause added anywhere invalidates every count of them everywhere.
+
 ## 11. The authoring facade
 
 `docs/DECISIONS.md` decision 134, ruling `c-spike:4`'s third question and the
@@ -4646,7 +4711,7 @@ tables as a reader's index and the files themselves as the record.
 | `Network/Progress.lean` | §7's progress theorem, as a no-infinite-silent-run law, over what a run can reach |
 | `Network/Initial.lean` | §3's `ExactInitialNetwork`, and `initial_is_wellformed` |
 | `Progress.lean` | the per-process livelock theorem: no silent cycle, no infinite silent run |
-| `Network/WellFormedness.lean` | §3's capstone: a step of a well-formed network reaches a well-formed one, all six clauses |
+| `Network/WellFormedness.lean` | §3's capstone: a step of a well-formed network reaches a well-formed one, all eight clauses |
 | `Weave/Blend.lean` | §8's disjoint weave, and that routing is forced |
 
 `Grass/Process/Network/Transition.lean` was reworked six times over the same
@@ -4708,7 +4773,7 @@ full `ProcessCorrect`; the first two are now excluded and the third is §10.70.
 ### The capstone, and what proving it cost
 
 `ProcessPlan.wellFormed_preserved` — a step of a well-formed network reaches a
-well-formed one — is proved, all six clauses, axioms clean. It is worth a
+well-formed one — is proved, all eight clauses, axioms clean. It is worth a
 paragraph here because of the ratio.
 
 §10.73 was a clause-by-clause *argument* for it, filed with a warning that it
