@@ -280,6 +280,11 @@ ordered ledger covers every contract exit by identity and proves that each exit
 has no escaping address, live loan, or live obligation. The eventual
 provenance-indexed eliminator must consume this certificate; it may not infer
 closure from a normal exit alone.
+`Grass.Construct.StackScopeToken` supplies the generative identity side: it
+threads a monotone fresh supply, ties each minted token to one declared scope in
+an exact checked layout, and indexes object bindings by that token only when the
+object's declared scope matches. Physical memory provenance remains owned by
+the execution model rather than being fabricated by construction.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
