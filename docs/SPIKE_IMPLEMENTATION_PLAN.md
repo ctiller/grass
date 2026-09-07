@@ -245,7 +245,17 @@ provide.
 
 ### P2 — The target side (blocking every spike)
 
-Owner: routed by `coord1:43`, not yet registered. The user decided this is split
+Owner: routed by `coord1:43`; the first of the three is now registered.
+`c-x86` took machine and platform authority -- `Grass/ISA/X86`, `Grass/ABI/Win64`,
+`Grass/Platform/Win32` -- at `c-x86:1`, and already has an encoder, a decoder and
+a byte-level round-trip theorem. The construction/lowering and artifact/build
+owners are still unregistered. One boundary surfaced immediately and is raised
+with c-x86 rather than assumed: no scope owns `Grass/Assembly/X86.lean`,
+`Grass/Platform/Win10/X64.lean` or `Grass/Emit.lean`, which are the module names
+the authored spikes actually import and which decision 134 ratified as narrow
+signature-only facades. `c-x86:1` claims the `MODULES.md` names instead, so the
+facade layer between what an author types and what this owner builds has no
+owner yet. The user decided this is split
 by layer rather than given to one owner: machine and platform authority
 (`ISA/X86`, `ABI/Win64`, `Platform/Win32`), the construction and lowering
 language (`CFG`, `Construct`, `Unsafe`) consuming the first, and artifact and
