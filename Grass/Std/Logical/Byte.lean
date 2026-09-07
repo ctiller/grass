@@ -26,10 +26,11 @@ between them is by named adapters carrying connection theorems
 (`Grass/Std/Logical/HostBytes.lean`) rather than by a `Coe`. The ambiguity error
 is the representation-boundary guard doing its job, not a defect to route around.
 
-That ruling is recorded as `docs/DECISIONS.md` decision 133, which has **not
-landed on `main`**: the numbered list stops at 130 here, and 133 arrives with
-`g-design`'s own branch. The bus event is cited above rather than the decision
-number because a reader can check the bus event today.
+That ruling is also recorded as `docs/DECISIONS.md` decision 133. Both sources are
+named, and neither is described as landed or unlanded: a ruling reaches its bus
+event and `DECISIONS.md` at different times, so any sentence about which of the
+two a reader can currently follow goes stale on its own.
+
 `Tests/Std/VecVocabulary.lean` pins both halves: a `List Byte` is rejected where a
 Grass `ByteArray` is required, and so is a host `_root_.ByteArray`.
 -/

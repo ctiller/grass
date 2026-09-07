@@ -671,11 +671,17 @@ implemented §1 as written and put the question to the owner of
 [STDLIB.md](STDLIB.md) rather than choosing a different name unilaterally, as
 `c-stdlib:7`.
 
-**Ruled** at `g-design:49`: keep `Grass.Std.Logical.ByteArray := Vec Byte`. The
-event records it as [DECISIONS.md](DECISIONS.md) decision 133, which is **not yet
-on `main`** -- that list stops at 130 here and 133 lands with `g-design`'s branch,
-so the bus event is what a reader can check today. Modules that also see the packed
-host type qualify the Grass one or take a narrow local alias, and the crossing
+**Ruled** at `g-design:49`, and recorded as [DECISIONS.md](DECISIONS.md) decision
+133: keep `Grass.Std.Logical.ByteArray := Vec Byte`. Both are cited deliberately.
+A ruling becomes checkable in its bus event immediately and in `DECISIONS.md` only
+when the ruling agent's branch merges, so for a window the decision number points
+at nothing; two adversarial reviewers caught this plan asserting decision 133 while
+the list still stopped at 130. The correction then made — saying it was not on
+`main` — was itself stale within a day, when the branch merged. Naming both and
+saying nothing about which has landed is the form that stays true.
+
+Modules that also see the packed host type qualify the Grass one or take a narrow
+local alias, and the crossing
 between them is by explicitly named adapters carrying connection theorems rather
 than by any coercion. The ambiguity is an intentional representation-boundary
 guard; the ruling is explicit that it must not become a silent coercion or
