@@ -285,6 +285,13 @@ threads a monotone fresh supply, ties each minted token to one declared scope in
 an exact checked layout, and indexes object bindings by that token only when the
 object's declared scope matches. Physical memory provenance remains owned by
 the execution model rather than being fabricated by construction.
+`Grass.Construct.StackScopeSession` composes those prerequisites: it performs
+one exact mint and checks an all-exit ledger whose resource family is indexed by
+the resulting nominal identity through `StackScopeResource`. It preserves the
+token and advanced supply for the later eliminator and proves freshness,
+issuance, non-reissue, exact exit coverage, and closure. It is not itself
+`withStack`: hiding the token while returning a verified outer fragment still
+requires the execution model's provenance interpretation and elimination law.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
