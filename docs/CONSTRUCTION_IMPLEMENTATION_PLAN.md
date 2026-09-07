@@ -449,6 +449,10 @@ review-visible.
 offset. Its verified-construction bridge proves the raw stream projects to the
 original pre-alpha instructions and normalized CFG while keeping the byte
 encoder explicitly tainted.
+`Grass.Unsafe.EmitLink` validates consecutive offsets and rejects zero-width
+encodings before projecting emitted items into `Link.SourceMapEntry` values.
+Accepted ranges retain exact block/origin data and carry reusable positive-length
+and emitted-byte-bound theorems; artifact placement remains downstream.
 
 Exit criteria include round trips for supported raw instructions, structured
 errors for unknown/ambiguous bytes and targets, exact stepping agreement with
