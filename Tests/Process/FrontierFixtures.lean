@@ -869,15 +869,15 @@ nowhere in the corpus — `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.79 — so
 `ProcessPlan.terminated_result_is_exact` took a hypothesis nothing had ever
 supplied. This is the first witness.
 
-Five of its six clauses are discharged by the shape of this plan rather than by
-anything about `waiting`: kind and slot are `Unit`, the root has no parent, the
+Seven of its eight clauses are discharged by the shape of this plan rather than
+by anything about `waiting`: kind and slot are `Unit`, the root has no parent, the
 protocol has no terminal result, and there are no channels. `nominalsAllocated`
 is the one with content, and it is the same fact `waiting_is_a_start`'s
 `rootAllocated` needed: the root's generation is in the history because the
 history is `NominalHistory.initial` extended by exactly it.
 
 That is worth saying rather than leaving to be found. A record inhabited only
-where five of six clauses cannot fail is inhabited and not exercised, which is
+where seven of eight clauses cannot fail is inhabited and not exercised, which is
 the distinction §10.59 drew for `ExactInitialNetwork` at this same plan.
 -/
 theorem waiting_is_wellFormed : waiting.WellFormed where
@@ -902,6 +902,7 @@ theorem waiting_is_wellFormed : waiting.WellFormed where
       theRootsGeneration, NominalHistory.extend]
   reroutesLand := fun edge => edge.elim
   occurrencesOnTheirSession := fun edge _ _ _ => edge.elim
+  identitiesDistinct := fun edge _ _ _ _ _ _ => edge.elim
 
 /-- **So it is sound**, which is what `terminated_result_is_exact` wanted. -/
 theorem waiting_is_sound : waitingPlan.Sound waiting :=

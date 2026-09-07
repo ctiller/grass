@@ -273,6 +273,16 @@ theorem mapPrefix_refl (behavior : ProgramBehavior spec)
     (refl behavior).mapPrefix execution = execution := by
   apply RelationalSystem.ExecutionPrefix.ext <;> rfl
 
+/-- Mapping an initial prefix agrees with constructing the initial prefix from
+the mapped initial-state witness. -/
+@[simp]
+theorem mapPrefix_initial (refinement : BehaviorRefinement concrete abstract)
+    {state : concrete.system.State} {graph : concrete.system.Graph}
+    (valid : concrete.system.Initial state graph) :
+    refinement.mapPrefix (RelationalSystem.ExecutionPrefix.initial valid) =
+      RelationalSystem.ExecutionPrefix.initial (refinement.initial valid) := by
+  apply RelationalSystem.ExecutionPrefix.ext <;> rfl
+
 /-- Mapping a prefix through a composite refinement agrees with mapping it
 through the two adjacent refinements in order. -/
 @[simp]
@@ -281,6 +291,19 @@ theorem mapPrefix_trans (lowerMiddle : BehaviorRefinement lower middle)
     (execution : lower.system.ExecutionPrefix) :
     (lowerMiddle.trans middleUpper).mapPrefix execution =
       middleUpper.mapPrefix (lowerMiddle.mapPrefix execution) := by
+  apply RelationalSystem.ExecutionPrefix.ext <;> rfl
+
+/-- Mapping a one-step extension agrees with extending the mapped prefix by the
+mapped transition. -/
+@[simp]
+theorem mapPrefix_step (refinement : BehaviorRefinement concrete abstract)
+    (execution : concrete.system.ExecutionPrefix)
+    {choice : concrete.system.Choice} {event : spec.AuditEvent}
+    {nextState : concrete.system.State} {nextGraph : concrete.system.Graph}
+    (transition : concrete.system.Step execution.graph execution.state choice
+      event nextState nextGraph) :
+    refinement.mapPrefix (execution.step transition) =
+      (refinement.mapPrefix execution).step (refinement.step transition) := by
   apply RelationalSystem.ExecutionPrefix.ext <;> rfl
 
 /-- `BehaviorRefinement.mapPrefix_append` states that refinement mapping
@@ -348,6 +371,28 @@ def mapCompletionAtPrefix (refinement : BehaviorRefinement concrete abstract)
       (refinement.mapPrefix execution).graph
       (refinement.mapPrefix execution).events :=
   refinement.mapCompletion completion
+
+/-- Prefix-indexed completion mapping through the reflexive refinement leaves
+the completion unchanged. -/
+theorem mapCompletionAtPrefix_refl (behavior : ProgramBehavior spec)
+    (execution : behavior.system.ExecutionPrefix)
+    (completion : behavior.system.Completion execution.state execution.graph
+      execution.events) :
+    (refl behavior).mapCompletionAtPrefix execution completion = completion :=
+  mapCompletion_refl behavior completion
+
+/-- Prefix-indexed completion mapping through a composite refinement agrees
+with mapping through the two adjacent refinements in order. -/
+theorem mapCompletionAtPrefix_trans
+    (lowerMiddle : BehaviorRefinement lower middle)
+    (middleUpper : BehaviorRefinement middle upper)
+    (execution : lower.system.ExecutionPrefix)
+    (completion : lower.system.Completion execution.state execution.graph
+      execution.events) :
+    (lowerMiddle.trans middleUpper).mapCompletionAtPrefix execution completion =
+      middleUpper.mapCompletionAtPrefix (lowerMiddle.mapPrefix execution)
+        (lowerMiddle.mapCompletionAtPrefix execution completion) :=
+  mapCompletion_trans lowerMiddle middleUpper completion
 
 /-- Transport the concrete side of a refinement along exact behavior equality. -/
 def castConcrete {replacement : ProgramBehavior spec}
