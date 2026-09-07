@@ -343,6 +343,36 @@ theorem not_conflicts_of_both_read {sharesBytes : AllocId → AllocId → Prop}
   rw [ha, hb] at hw
   simp [EventKind.writes] at hw
 
+/-- **Events whose committed ranges do not overlap never conflict.** §7.3's first
+condition, as a refusal.
+
+`Conflicts` has six conjuncts and four had a negative theorem; this and
+`not_conflicts_of_compatible` below are the two §7.3 is actually *about*, and review
+found both replaceable by `True` with the tree green. Without this one every pair of
+accesses to shared storage with a writer is a race, however far apart they are --
+which is the over-refusing direction, and therefore silent.
+
+Stated over the *committed* ranges, because bytes an event did not commit are bytes it
+did not touch. -/
+theorem not_conflicts_of_disjoint {sharesBytes : AllocId → AllocId → Prop}
+    {compatible : MemoryEvent → MemoryEvent → Prop} {a b : MemoryEvent}
+    (h : ¬ a.committedRange.Overlaps b.committedRange) :
+    ¬ Conflicts sharesBytes compatible a b :=
+  fun hc => h hc.2.2.2.1
+
+/-- **And a compatible pair never conflicts**, which is §7.3's own exemption: "not both
+compatible atomic accesses under one profile". Without it `atomicShared` stops meaning
+anything at the event layer.
+
+The adjective is load-bearing and is enforced one layer up:
+`Grass/Op/Step.lean`'s `StepPolicy.compatibleIsAtomic` is a proof field, so a policy
+that cannot show both accesses atomic cannot be constructed at all. This theorem is
+about the clause; that field is about what a profile may put in it. -/
+theorem not_conflicts_of_compatible {sharesBytes : AllocId → AllocId → Prop}
+    {compatible : MemoryEvent → MemoryEvent → Prop} {a b : MemoryEvent}
+    (h : compatible a b) : ¬ Conflicts sharesBytes compatible a b :=
+  fun hc => hc.2.2.2.2.2 h
+
 /-- Events in different storage never conflict, however their offsets compare.
 This is `docs/MEMORY_MODEL.md` §7.5 at the event layer. -/
 theorem not_conflicts_of_unshared {sharesBytes : AllocId → AllocId → Prop}

@@ -346,6 +346,145 @@ theorem not_applicable_discharge_of_wrong_protocol {live : List ObligationId}
     ¬ Applicable live protocolOf ownerOf kindOf contexts actor (.discharge claimed authority id) :=
   fun ha => h ha.2.1
 
+/-! ### The same three questions, for split, join and transfer
+
+`.discharge` had a theorem for each of liveness, protocol and owner. The other three
+constructors ask the same three questions and had none, and review swept it: ten of
+`Applicable`'s twenty clauses could be neutered with the whole tree green, and
+`.transfer` was the worst — three of its four, so applicability for a transfer was
+effectively "the recipient is a known context".
+
+§2's sentence is one sentence for all four: "It may preserve, create, discharge, split,
+join, or transfer obligations only through the owning protocol theorem." A theorem for
+one constructor is evidence about that constructor.
+-/
+
+/-- **A split of a duty that is not live is not applicable.** -/
+theorem not_applicable_split_of_dead_source {live : List ObligationId}
+    {protocolOf : ObligationId → Option ObligationProtocolId}
+    {ownerOf : ObligationId → Option ContextId}
+    {kindOf : ObligationId → Option ObligationKindId} {contexts : List ContextId}
+    {actor : ContextId} {source : ObligationId} {into : List Obligation}
+    {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
+    (h : source ∉ live) :
+    ¬ Applicable live protocolOf ownerOf kindOf contexts actor
+      (.split claimed authority source into) :=
+  fun ha => h ha.1
+
+/-- **Nor one whose source is governed by another protocol.** -/
+theorem not_applicable_split_of_wrong_protocol {live : List ObligationId}
+    {protocolOf : ObligationId → Option ObligationProtocolId}
+    {ownerOf : ObligationId → Option ContextId}
+    {kindOf : ObligationId → Option ObligationKindId} {contexts : List ContextId}
+    {actor : ContextId} {source : ObligationId} {into : List Obligation}
+    {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
+    (h : protocolOf source ≠ some claimed) :
+    ¬ Applicable live protocolOf ownerOf kindOf contexts actor
+      (.split claimed authority source into) :=
+  fun ha => h ha.2.1
+
+/-- **Nor one whose outputs claim another protocol than the one being split under.**
+Without this a split is a protocol laundry: one authority in, duties governed by
+anything out. -/
+theorem not_applicable_split_of_wrong_output_protocol {live : List ObligationId}
+    {protocolOf : ObligationId → Option ObligationProtocolId}
+    {ownerOf : ObligationId → Option ContextId}
+    {kindOf : ObligationId → Option ObligationKindId} {contexts : List ContextId}
+    {actor : ContextId} {source : ObligationId} {into : List Obligation}
+    {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
+    {o : Obligation} (hmem : o ∈ into) (h : o.protocol ≠ claimed) :
+    ¬ Applicable live protocolOf ownerOf kindOf contexts actor
+      (.split claimed authority source into) :=
+  fun ha => h (ha.2.2.2.2.1 o hmem)
+
+/-- **Nor one whose outputs are owned by anyone but the actor.** §1 makes an
+obligation a duty of its holder, and a split that hands its outputs to somebody else
+is §2's transfer wearing a split's name. -/
+theorem not_applicable_split_of_wrong_output_owner {live : List ObligationId}
+    {protocolOf : ObligationId → Option ObligationProtocolId}
+    {ownerOf : ObligationId → Option ContextId}
+    {kindOf : ObligationId → Option ObligationKindId} {contexts : List ContextId}
+    {actor : ContextId} {source : ObligationId} {into : List Obligation}
+    {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
+    {o : Obligation} (hmem : o ∈ into) (h : o.owner ≠ actor) :
+    ¬ Applicable live protocolOf ownerOf kindOf contexts actor
+      (.split claimed authority source into) :=
+  fun ha => h (ha.2.2.2.2.2.1 o hmem)
+
+/-- **A join whose sources are governed by another protocol is not applicable.** -/
+theorem not_applicable_join_of_wrong_source_protocol {live : List ObligationId}
+    {protocolOf : ObligationId → Option ObligationProtocolId}
+    {ownerOf : ObligationId → Option ContextId}
+    {kindOf : ObligationId → Option ObligationKindId} {contexts : List ContextId}
+    {actor : ContextId} {sources : List ObligationId} {into : Obligation}
+    {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
+    {id : ObligationId} (hmem : id ∈ sources) (h : protocolOf id ≠ some claimed) :
+    ¬ Applicable live protocolOf ownerOf kindOf contexts actor
+      (.join claimed authority sources into) :=
+  fun ha => h (ha.2.1 id hmem)
+
+/-- **Nor one whose output claims another.** -/
+theorem not_applicable_join_of_wrong_output_protocol {live : List ObligationId}
+    {protocolOf : ObligationId → Option ObligationProtocolId}
+    {ownerOf : ObligationId → Option ContextId}
+    {kindOf : ObligationId → Option ObligationKindId} {contexts : List ContextId}
+    {actor : ContextId} {sources : List ObligationId} {into : Obligation}
+    {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
+    (h : into.protocol ≠ claimed) :
+    ¬ Applicable live protocolOf ownerOf kindOf contexts actor
+      (.join claimed authority sources into) :=
+  fun ha => h ha.2.2.2.2.2.1
+
+/-- **Nor one whose output is owned by anyone but the actor.** -/
+theorem not_applicable_join_of_wrong_output_owner {live : List ObligationId}
+    {protocolOf : ObligationId → Option ObligationProtocolId}
+    {ownerOf : ObligationId → Option ContextId}
+    {kindOf : ObligationId → Option ObligationKindId} {contexts : List ContextId}
+    {actor : ContextId} {sources : List ObligationId} {into : Obligation}
+    {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
+    (h : into.owner ≠ actor) :
+    ¬ Applicable live protocolOf ownerOf kindOf contexts actor
+      (.join claimed authority sources into) :=
+  fun ha => h ha.2.2.2.2.2.2
+
+/-- **A transfer of a duty that is not live is not applicable.** -/
+theorem not_applicable_transfer_of_dead_source {live : List ObligationId}
+    {protocolOf : ObligationId → Option ObligationProtocolId}
+    {ownerOf : ObligationId → Option ContextId}
+    {kindOf : ObligationId → Option ObligationKindId} {contexts : List ContextId}
+    {actor : ContextId} {id : ObligationId} {newOwner : ContextId}
+    {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
+    (h : id ∉ live) :
+    ¬ Applicable live protocolOf ownerOf kindOf contexts actor
+      (.transfer claimed authority id newOwner) :=
+  fun ha => h ha.1
+
+/-- **Nor one governed by another protocol.** -/
+theorem not_applicable_transfer_of_wrong_protocol {live : List ObligationId}
+    {protocolOf : ObligationId → Option ObligationProtocolId}
+    {ownerOf : ObligationId → Option ContextId}
+    {kindOf : ObligationId → Option ObligationKindId} {contexts : List ContextId}
+    {actor : ContextId} {id : ObligationId} {newOwner : ContextId}
+    {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
+    (h : protocolOf id ≠ some claimed) :
+    ¬ Applicable live protocolOf ownerOf kindOf contexts actor
+      (.transfer claimed authority id newOwner) :=
+  fun ha => h ha.2.1
+
+/-- **Nor one the actor does not own.** A context cannot give away a duty that is not
+its own, which is the same sentence `not_applicable_discharge_of_wrong_owner` states
+for discharge and is the clause that made `.transfer` worth having. -/
+theorem not_applicable_transfer_of_wrong_owner {live : List ObligationId}
+    {protocolOf : ObligationId → Option ObligationProtocolId}
+    {ownerOf : ObligationId → Option ContextId}
+    {kindOf : ObligationId → Option ObligationKindId} {contexts : List ContextId}
+    {actor : ContextId} {id : ObligationId} {newOwner : ContextId}
+    {claimed : ObligationProtocolId} {authority : ProtocolAuthority claimed}
+    (h : ownerOf id ≠ some actor) :
+    ¬ Applicable live protocolOf ownerOf kindOf contexts actor
+      (.transfer claimed authority id newOwner) :=
+  fun ha => h ha.2.2.1
+
 /--
 **A duty is discharged by its holder, not by whoever runs next.**
 

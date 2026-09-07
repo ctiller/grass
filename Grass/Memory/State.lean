@@ -664,9 +664,17 @@ descriptor's declared permission, asked here at the authority layer. Or the lend
 range with rights that supply what is being lent, which is `Permission.Grants` at the
 authority layer. Or every grant outstanding over the bytes was lent *by this lender* —
 whoever put them out may put more out — *if it owns the storage and the storage carries
-the rights* — and there must *be* some, because `List.all` on the empty list is `true`
-and without that conjunct this disjunct readmitted every stranger the first one had just
-refused.
+the rights*.
+
+There was a fourth conjunct here requiring that something *be* outstanding, added
+because `List.all` on the empty list is `true` and without it this disjunct readmitted
+every stranger the first one had just refused. The ownership conjunct that arrived a
+round later refuses those strangers itself, and review then showed the non-emptiness
+conjunct had become logically inert: with nothing outstanding the `.all` is vacuous and
+the first disjunct subsumes the third, so the two disjunctions are pointwise equal.
+Proving that, rather than observing it, is what this branch requires of a redundancy
+claim. Deleted, so the docstring does not present a dead conjunct as the repair for a
+live attack.
 
 **The ownership and rights conjuncts arrived a round after the first disjunct got
 its.** This disjunct was written for an owner that has lent a fragment out and holds no
@@ -710,15 +718,14 @@ def MayLend (state : MemoryState) (grant : AuthorityGrant) : Prop :=
         decide (state.CurrentEpoch entry.2.provenance) &&
         decide (entry.2.range.Contains grant.range) &&
         decide (entry.2.rights.GrantsAsGrant grant.rights)) = true ∨
-    (state.AnyGrantOver grant.provenance grant.range ∧
-      state.OwnedBy grant.lender grant.provenance ∧
+    (state.OwnedBy grant.lender grant.provenance ∧
       (state.allocations.lookup grant.provenance.root).any
         (fun record => decide (record.permission.GrantsAsGrant grant.rights)) = true ∧
       (state.grantsOver grant.provenance grant.range).all
         (fun entry => entry.2.lender = grant.lender) = true)
 
 instance (state : MemoryState) (grant : AuthorityGrant) : Decidable (state.MayLend grant) :=
-  inferInstanceAs (Decidable ((¬ _ ∧ _ ∧ _ = _) ∨ _ = _ ∨ (_ ∧ _ ∧ _ = _ ∧ _ = _)))
+  inferInstanceAs (Decidable ((¬ _ ∧ _ ∧ _ = _) ∨ _ = _ ∨ (_ ∧ _ = _ ∧ _ = _)))
 
 /--
 Issue a grant, or refuse.
@@ -851,7 +858,7 @@ theorem not_mayLend_of_unheld_of_unowned {state : MemoryState} {grant : Authorit
     (h : ¬ state.AnyGrantOver grant.provenance grant.range)
     (howns : ¬ state.OwnedBy grant.lender grant.provenance)
     (hne : ¬ grant.range.IsEmpty) : ¬ state.MayLend grant := by
-  rintro (⟨_, howned, _⟩ | hheld | ⟨hany, _, _, _⟩)
+  rintro (⟨_, howned, _⟩ | hheld | ⟨howned, _, _⟩)
   · exact howns howned
   · -- The lender holding a covering grant *is* a grant over the bytes, so the
     -- second disjunct implies the first is false. `Contains` needs the range to be
@@ -863,7 +870,7 @@ theorem not_mayLend_of_unheld_of_unowned {state : MemoryState} {grant : Authorit
     refine List.ne_nil_of_mem (a := entry) ?_
     refine List.mem_filter.2 ⟨hmem, ?_⟩
     simpa using ⟨hshare, ByteRange.meets_of_contains hcontains hne⟩
-  · exact h hany
+  · exact howns howned
 
 /-- **A grant over no bytes is refused.** It would conflict at issue with a live one
 — `LoanConflicts` tries `Meets` in both directions — and freeze nobody once
