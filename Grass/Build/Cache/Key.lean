@@ -1,4 +1,5 @@
 import Grass.Specification.Scope
+import Grass.Std.Logical.Byte
 import Grass.Std.Logical.Vec
 
 /-!
