@@ -104,10 +104,12 @@ schedules. And the facade pattern is the mechanism by which section 4's
 economy is defended, so "which facade does this name enter through" becomes a
 real design question per module rather than a packaging afterthought.
 
-### 3.0 The machine and platform import names, answered in part
+### 3.0 The machine and platform import names, settled
 
 `c-spike:19` asked c-x86 where the drafted machine and platform imports land.
-`c-x86:6` answered by splitting the question, and the split is the useful part.
+`c-x86:6` answered by splitting the question, escalated the normative half as
+`c-x86:7`, and `g-design:71` then ruled on it. All four names now have a settled
+spelling and a named owner.
 
 `Grass.Platform.Win10.X64` becomes `Grass.Platform.Win32`, and c-x86 will
 deliver `Grass/Platform/Win32.lean` as a signature-only authoring facade on the
@@ -132,9 +134,9 @@ have looked like a fix without being one.
 
 The consequence for this plan is sharper than section 6's P2 first recorded.
 Spike 1 needs three of the target-side owners, not one, and two of them are
-still unregistered: the construction and lowering owner for the authored
-assembly vocabulary, and the emission owner. c-x86's half is committed and
-partly built.
+still unregistered: the construction and lowering owner, which `g-design:71`
+assigns `Grass.Assembly.X86`, and the artifact owner, which it assigns
+`Grass.Emit`. c-x86's half is committed and partly built.
 
 What exists for Spike 1 on c-x86's side today, per `c-x86:6`: the prologue is
 modelled and externally verified -- `spike1Prologue`, `spike1Layout`, and
@@ -147,13 +149,31 @@ contracts exist; and the `[rip + symbol]` form Spike 1 needs is
 than left to be discovered: no encoder yet for `push`, `sub`, `test`, `cmp`,
 `jz`/`je`/`ja`/`jmp`, or call-through-memory-import.
 
-Which normative document moves -- MODULES.md gaining `Assembly/` and `Emit`, or
-decision 134's ratified import list changing -- is escalated to g-design as
-`c-x86:7` and is not c-spike's to settle. c-spike is holding the corpus resync
-until that lands, deliberately: `Spikes/1_Hello_World/Program.lean` imports
-`Grass.Emit`, `Grass.Assembly.X86` and the platform module in the same file, so
-applying the settled platform rename now and the rest later would mean editing
-the same authored sources and their byte-exact mirror blocks twice.
+`g-design:71` settled which normative document moves, and it moved MODULES.md
+rather than the author surface. The normative module map now declares
+`Grass.Assembly.X86` as the first-class assembly-author facade over narrow
+`Construct`, `CFG` and `Grass.ISA.X86` signatures, owned by the future
+construction and lowering workstream rather than by the x86 table owner.
+`Grass.ISA.X86` is the machine-authority facade owned by c-x86.
+`Grass.Platform.Win32` replaces the spike spelling `Grass.Platform.Win10.X64`,
+with Windows 10 and x64 remaining explicit profile selections rather than being
+conflated with the Win32 API family in the path. `Grass.Emit` remains the safe
+facade exposing `VerifiedProgram` and a checked `emitProgram`, with raw erasure,
+admission, linking and byte writing staying in `Unsafe` and `Artifact`; the
+facade may not expose unverified source to executable bytes. Every one of these
+is signature-only, and each requires both positive vocabulary and negative
+implementation-leakage fixtures.
+
+So three of the four drafted names stand unchanged and only the platform
+spelling moved. `g-design:71` directed c-spike to update and resynchronize only
+the Platform import, which this branch does: four authored sources and their
+four byte-exact `SPIKE_n.md` mirror blocks, in one pass, verified by
+`check-spike-sources.ps1` and negative-tested by desynchronizing one side alone.
+`Spikes/5_Spinning_Cube/Process.lean` still imports
+`Grass.Platform.Win10.Vulkan13`, deliberately: it raises the same shape of
+question, `g-design:71` did not rule on it, Vulkan is not the Win32 API family,
+and the graphics platform owner is not registered. Renaming it by analogy would
+be inventing a ruling.
 
 ### 3.1 Two spike-side import decisions still open
 
@@ -302,7 +322,7 @@ Owner: routed by `coord1:43`; the first of the three is now registered.
 a byte-level round-trip theorem. The construction/lowering and artifact/build
 owners are still unregistered. One boundary surfaced immediately and is raised
 with c-x86 rather than assumed: no scope owns `Grass/Assembly/X86.lean`,
-`Grass/Platform/Win10/X64.lean` or `Grass/Emit.lean`, which are the module names
+`Grass/Platform/Win32.lean` or `Grass/Emit.lean`, which are the module names
 the authored spikes actually import and which decision 134 ratified as narrow
 signature-only facades. `c-x86:1` claims the `MODULES.md` names instead, so the
 facade layer between what an author types and what this owner builds has no
@@ -326,7 +346,7 @@ can emit a file.
 `AddressOperand`, `VerifiedFragment`, `FragmentConstructorClosure`, `BlockContract`,
 `MacroTable`, and the `@placement`, `@invariant`, `@terminal`, `@audit`,
 `@violation_edge`, `@containment_tail` annotations.
-`Grass.Platform.Win10.X64` -- `PlatformPlan`, the Win64 ABI, `FrameLayout.derive`,
+`Grass.Platform.Win32` -- `PlatformPlan`, the Win64 ABI, `FrameLayout.derive`,
 `StructLayout.derive`, `withStack`, `withCallFrame`, the import table.
 `Grass.Emit` -- `StaticObjectTable`, the `static_objects` macro, the PE writer.
 Plus `TargetProjection` / `TargetOutcomeProjection` and the
