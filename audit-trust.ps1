@@ -81,8 +81,37 @@ function Get-PathUnder([string] $Base, [string] $Full) {
     return $normalizedFull.Substring($normalizedBase.Length + 1).Replace('\', '/')
 }
 
+function Get-RejectedAxiom(
+    [string[]] $Used,
+    [string[]] $Allowed
+) {
+    # Lean names require ordinal equality. Even PowerShell's case-sensitive
+    # comparison operators use culture-sensitive string comparison, which can
+    # equate distinct Unicode spellings.
+    $rejected = @()
+    foreach ($usedAxiom in $Used) {
+        $accepted = $false
+        foreach ($allowedAxiom in $Allowed) {
+            if ([String]::Equals($usedAxiom, $allowedAxiom, [StringComparison]::Ordinal)) {
+                $accepted = $true
+                break
+            }
+        }
+        if (-not $accepted) {
+            $rejected += $usedAxiom
+        }
+    }
+    return @($rejected)
+}
+
 if ($Declaration.Count -eq 0) {
     throw "At least one declaration must be audited."
+}
+
+$caseVariantProbe = @(Get-RejectedAxiom -Used @("Propext") -Allowed @("propext"))
+if ($caseVariantProbe.Count -ne 1 -or
+    -not [String]::Equals($caseVariantProbe[0], "Propext", [StringComparison]::Ordinal)) {
+    throw "Axiom allowlist comparison is not ordinal."
 }
 
 $moduleNames = @()
@@ -132,6 +161,9 @@ $temporaryPath = [System.IO.Path]::Combine(
 $externalProbeModule = "AuditExternalProbe$([System.Guid]::NewGuid().ToString('N'))"
 $externalProbePath = Join-Path (Get-Location).Path "$externalProbeModule.lean"
 $externalProbeOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$externalProbeModule.olean"
+$internalRootProbeModule = "AuditInternalRootProbe$([System.Guid]::NewGuid().ToString('N'))"
+$internalRootProbePath = Join-Path (Get-Location).Path "$internalRootProbeModule.lean"
+$internalRootProbeOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$internalRootProbeModule.olean"
 $runtimeProbeModule = "AuditRuntimeProbe$([System.Guid]::NewGuid().ToString('N'))"
 $runtimeProbePath = Join-Path (Get-Location).Path "$runtimeProbeModule.lean"
 $runtimeProbeOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$runtimeProbeModule.olean"
@@ -178,7 +210,7 @@ try {
         if ($line -match "^'[^']+' depends on axioms: \[(.*)\]$") {
             $reported += 1
             $used = @($Matches[1].Split(',') | ForEach-Object { $_.Trim() })
-            $rejected = @($used | Where-Object { $_ -notin $AllowedAxiom })
+            $rejected = @(Get-RejectedAxiom -Used $used -Allowed $AllowedAxiom)
             if ($rejected.Count -ne 0) {
                 throw "Rejected transitive axiom(s): $($rejected -join ', ')"
             }
@@ -227,6 +259,34 @@ try {
         throw "Trust audit did not discover a producer behind an irreducible result alias."
     }
 
+    $internalRootProbe = @(
+        "import Tests.Foundation",
+        "open Grass",
+        "namespace InternalRootAuditProbe",
+        "@[irreducible] def HiddenVerifiedProgram : Type 1 := VerifiedProgram Grass.Tests.Foundation.spec",
+        "def _hiddenVerifiedProgram : HiddenVerifiedProgram := by",
+        "  unfold HiddenVerifiedProgram",
+        "  exact Grass.Tests.Foundation.verified",
+        "end InternalRootAuditProbe"
+    )
+    [System.IO.File]::WriteAllLines($internalRootProbePath, $internalRootProbe)
+    $internalRootBuildOutput = @(& lake env lean $internalRootProbePath -o $internalRootProbeOlean 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        $internalRootBuildOutput | ForEach-Object { Write-Host $_ }
+        throw "Could not compile the imported underscore-prefixed root probe."
+    }
+    $internalRootConsumerProbe = @(
+        "import $internalRootProbeModule",
+        "#audit_verified_programs"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $internalRootConsumerProbe)
+    $internalRootConsumerOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -ne 0 -or
+        -not ($internalRootConsumerOutput -match "InternalRootAuditProbe\._hiddenVerifiedProgram")) {
+        $internalRootConsumerOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit did not discover an imported underscore-prefixed root."
+    }
+
     $wrappedNegativeProbe = @(
         "import Tests.Foundation",
         "open Grass",
@@ -257,6 +317,19 @@ try {
         -not ($flatCtorNegativeOutput -match "AuditProbe.Sink._flat_ctor.*AuditProbe.Source._flat_ctor")) {
         $flatCtorNegativeOutput | ForEach-Object { Write-Host $_ }
         throw "Trust audit ignored a user declaration named _flat_ctor."
+    }
+
+    $underscoreAxiomNegativeProbe = @(
+        "import Tests.Foundation",
+        "axiom Grass._unauditedFalse : False",
+        "#audit_verified_programs"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $underscoreAxiomNegativeProbe)
+    $underscoreAxiomNegativeOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -eq 0 -or
+        -not ($underscoreAxiomNegativeOutput -match "Grass\._unauditedFalse.*rejected axioms")) {
+        $underscoreAxiomNegativeOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit ignored an authored underscore-prefixed axiom."
     }
 
     $externalProbe = @(
@@ -420,6 +493,12 @@ finally {
     }
     if ([System.IO.File]::Exists($externalProbeOlean)) {
         [System.IO.File]::Delete($externalProbeOlean)
+    }
+    if ([System.IO.File]::Exists($internalRootProbePath)) {
+        [System.IO.File]::Delete($internalRootProbePath)
+    }
+    if ([System.IO.File]::Exists($internalRootProbeOlean)) {
+        [System.IO.File]::Delete($internalRootProbeOlean)
     }
     if ([System.IO.File]::Exists($runtimeProbePath)) {
         [System.IO.File]::Delete($runtimeProbePath)
