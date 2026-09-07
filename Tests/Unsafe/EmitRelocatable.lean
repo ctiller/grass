@@ -37,6 +37,19 @@ private def emission : RawProgramEmission Unit Unit Instruction :=
 private def config : RelocatableEmissionConfig :=
   ⟨fragmentId, sectionId, 16, .code, ⟨true, false, true⟩⟩
 
+private inductive RelocKind where
+  | pcRelative32
+deriving Repr, DecidableEq
+private structure ImportIdentity where
+  provider : StableId
+deriving Repr, DecidableEq
+private def entryId : SymbolId :=
+  ⟨⟨"test.unsafe.emit-relocatable", "entry-symbol"⟩⟩
+private def writeId : SymbolId :=
+  ⟨⟨"test.unsafe.emit-relocatable", "write-symbol"⟩⟩
+private def writeIdentity : ImportIdentity :=
+  ⟨⟨"test.provider", "write"⟩⟩
+
 private def checked : CheckedRelocatableEmission emission config :=
   ⟨by decide, by
     change CheckedLinkSourceMap emission sectionId
@@ -66,6 +79,33 @@ example : (checked.fragment (RelocKind := Unit)
     (ImportIdentity := Unit)).entryCandidates = [] := rfl
 example : (checked.fragment (RelocKind := Unit)
     (ImportIdentity := Unit)).WellFormed := checked.fragmentWellFormed
+
+private def plan : RelocatableEmissionPlan RelocKind ImportIdentity where
+  definitions := [⟨entryId, sectionId, 0, .exported⟩]
+  relocations := [⟨sectionId, 1, .pcRelative32, writeId, 0⟩]
+  externals := [⟨writeId, writeIdentity⟩]
+  entryCandidates := [entryId]
+
+example : (checked.plannedFragment plan).definitions = plan.definitions := rfl
+example : (checked.plannedFragment plan).relocations = plan.relocations := rfl
+example : (checked.plannedFragment plan).externals = plan.externals := rfl
+example : (checked.plannedFragment plan).entryCandidates = [entryId] := rfl
+example : (checked.plannedFragment plan).sections.map
+    (fun contribution => contribution.content.initialized.toList) =
+    [emission.bytes.map Byte.ofUInt8] := checked.plannedSectionBytesExact plan
+example : (checked.plannedFragment plan).sourceMap =
+    checked.sourceMap.entries := checked.plannedSourceMapExact plan
+example : (checked.checkPlannedFragment plan).isOk = true := by decide
+
+private def danglingPlan : RelocatableEmissionPlan RelocKind ImportIdentity :=
+  { plan with externals := [] }
+example : (checked.checkPlannedFragment danglingPlan).isOk = false := by decide
+
+private def outOfBoundsDefinition :
+    RelocatableEmissionPlan RelocKind ImportIdentity :=
+  { plan with definitions := [⟨entryId, sectionId, 4, .exported⟩] }
+example : (checked.checkPlannedFragment outOfBoundsDefinition).isOk = false :=
+  by decide
 
 private def zeroAlignment : RelocatableEmissionConfig :=
   { config with alignment := 0 }

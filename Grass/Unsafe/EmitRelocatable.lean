@@ -29,6 +29,16 @@ structure RelocatableEmissionConfig where
   permissions : SectionPermissions
 deriving Repr, DecidableEq
 
+/-- Producer-authored symbolic link metadata kept separate from emitted bytes
+and their construction source map. -/
+structure RelocatableEmissionPlan (RelocKind : Type x)
+    (ImportIdentity : Type y) where
+  definitions : List SymbolDefinition := []
+  relocations : List (RelocationRequest RelocKind) := []
+  externals : List (ExternalReference ImportIdentity) := []
+  entryCandidates : List SymbolId := []
+deriving Repr, DecidableEq
+
 /-- `RelocatableEmissionError` records why one raw stream cannot become a
 checked relocatable fragment. -/
 inductive RelocatableEmissionError where
@@ -124,6 +134,50 @@ def checkedFragment
       (checked.fragment (RelocKind := RelocKind)
         (ImportIdentity := ImportIdentity)) :=
   ⟨checked.fragmentWellFormed⟩
+
+/-- Relocatable producer value with symbolic metadata supplied independently of
+the checked emitted bytes and source ranges. -/
+def plannedFragment
+    {emission : RawProgramEmission State Terminal Instruction}
+    {config : RelocatableEmissionConfig}
+    (checked : CheckedRelocatableEmission emission config)
+    (plan : RelocatableEmissionPlan RelocKind ImportIdentity) :
+    RelocatableFragment RelocKind ImportIdentity :=
+  { checked.fragment (RelocKind := RelocKind)
+      (ImportIdentity := ImportIdentity) with
+      definitions := plan.definitions
+      relocations := plan.relocations
+      externals := plan.externals
+      entryCandidates := plan.entryCandidates }
+
+/-- Adding symbolic metadata does not change the initialized section bytes. -/
+@[simp] theorem plannedSectionBytesExact
+    {emission : RawProgramEmission State Terminal Instruction}
+    {config : RelocatableEmissionConfig}
+    (checked : CheckedRelocatableEmission emission config)
+    (plan : RelocatableEmissionPlan RelocKind ImportIdentity) :
+    (checked.plannedFragment plan).sections.map
+      (fun contribution => contribution.content.initialized.toList) =
+    [emission.bytes.map Byte.ofUInt8] := rfl
+
+/-- Adding symbolic metadata retains the exact checked construction source map. -/
+@[simp] theorem plannedSourceMapExact
+    {emission : RawProgramEmission State Terminal Instruction}
+    {config : RelocatableEmissionConfig}
+    (checked : CheckedRelocatableEmission emission config)
+    (plan : RelocatableEmissionPlan RelocKind ImportIdentity) :
+    (checked.plannedFragment plan).sourceMap = checked.sourceMap.entries := rfl
+
+/-- Validate producer-authored symbolic metadata against the exact emitted
+section and its already checked source map. -/
+def checkPlannedFragment
+    {emission : RawProgramEmission State Terminal Instruction}
+    {config : RelocatableEmissionConfig}
+    (checked : CheckedRelocatableEmission emission config)
+    (plan : RelocatableEmissionPlan RelocKind ImportIdentity) :
+    Except RawLinkError (CheckedRelocatableFragment
+      (checked.plannedFragment plan)) :=
+  checkRelocatableFragment (checked.plannedFragment plan)
 
 end CheckedRelocatableEmission
 

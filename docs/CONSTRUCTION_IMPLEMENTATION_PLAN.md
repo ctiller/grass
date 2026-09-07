@@ -458,6 +458,10 @@ format-neutral section with exact bytes and source ranges. It proves the generic
 `RelocatableFragment.WellFormed` contract while leaving definitions,
 relocations, externals, entry selection, serialization, and placement to their
 independent producers and artifact-layer checks.
+Its `RelocatableEmissionPlan` overlay accepts those four symbolic metadata
+tables independently, retains the exact checked bytes and source map, and
+delegates their section bounds, symbol closure, and entry closure to
+`checkRelocatableFragment`; it still performs no relocation or serialization.
 
 Exit criteria include round trips for supported raw instructions, structured
 errors for unknown/ambiguous bytes and targets, exact stepping agreement with
