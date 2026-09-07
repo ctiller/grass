@@ -472,12 +472,34 @@ structure ExtensionAuthorityEmbedding
   keyExact : forall source, large.key (entry source) = small.key source
   injective : Function.Injective entry
 
-def ExtensionAuthorityRegistry.merge
+structure ExtensionAuthorityUnionPlan
+    (registries : List ExtensionAuthorityRegistry)
+    (compatible : PairwiseExtensionAuthorityKeysDisjointOrExact registries) where
+  merged : ExtensionAuthorityRegistry
+  include : forall registry, registry ∈ registries ->
+    ExtensionAuthorityEmbedding registry merged
+  coverage : forall entry : merged.Entry,
+    exists registry member source,
+      (include registry member).entry source = entry
+
+def ExtensionAuthorityRegistry.normalize
+    (registries : List ExtensionAuthorityRegistry)
+    (compatible : PairwiseExtensionAuthorityKeysDisjointOrExact registries) :
+    ExtensionAuthorityUnionPlan registries compatible
+def ExtensionAuthorityUnionPlan.includeCompatible
+    (plan : ExtensionAuthorityUnionPlan registries compatible)
+    (registry : ExtensionAuthorityRegistry)
+    (contained : EveryExtensionAuthorityKeyIn registry OccursIn registries) :
+    ExtensionAuthorityEmbedding registry plan.merged
+def ExtensionAuthorityRegistry.mergePlan
     (left right : ExtensionAuthorityRegistry)
     (compatible : ExtensionAuthorityKeysDisjointOrExact left right) :
-    ExtensionAuthorityRegistry
-def ExtensionAuthorityRegistry.leftEmbedding ...
-def ExtensionAuthorityRegistry.rightEmbedding ...
+    ExtensionAuthorityUnionPlan [left, right] compatible.asPairwise
+def ExtensionAuthorityRegistry.merge ... := (mergePlan ...).merged
+def ExtensionAuthorityRegistry.leftEmbedding ... := (mergePlan ...).include ...
+def ExtensionAuthorityRegistry.rightEmbedding ... := (mergePlan ...).include ...
+theorem ExtensionAuthorityRegistry.normalize_proof_irrelevant ...
+theorem ExtensionAuthorityRegistry.normalize_permutation ...
 
 structure RegisteredExtensionAuthority
     (registry : ExtensionAuthorityRegistry) where
@@ -532,12 +554,24 @@ def ProviderDemand.descriptor : ProviderDemand authority -> ProviderDemandDescri
 theorem ProviderDemand.introduce_origin_exact ...
 theorem ProviderDemand.introduce_descriptor_exact ...
 
+structure RequirementOriginScopeEmbedding
+    (embedding : ExtensionAuthorityEmbedding source target)
+    (authority : RegisteredExtensionAuthority source)
+    (scope : RequirementOriginScope (.extension authority)) where
+  targetScope : RequirementOriginScope
+    (.extension (authority.reindex embedding))
+  slot : scope.Slot ≃ targetScope.Slot
+  namespaceExact : targetScope.namespace = scope.namespace
+  slotKeyExact : forall sourceSlot,
+    targetScope.slotKey (slot sourceSlot) = scope.slotKey sourceSlot
+
 def RequirementOriginScope.reindex
     (embedding : ExtensionAuthorityEmbedding source target)
     (authority : RegisteredExtensionAuthority source)
     (scope : RequirementOriginScope (.extension authority)) :
-    RequirementOriginScope
-      (.extension (authority.reindex embedding))
+    RequirementOriginScopeEmbedding embedding authority scope
+theorem RequirementOriginScope.reindex_id ...
+theorem RequirementOriginScope.reindex_comp ...
 def ProviderDemand.reindex
     (embedding : ExtensionAuthorityEmbedding source target)
     (authority : RegisteredExtensionAuthority source)
@@ -547,6 +581,15 @@ theorem ProviderDemand.reindex_originId ...
 theorem ProviderDemand.reindex_descriptor ...
 theorem ProviderDemand.reindex_id ...
 theorem ProviderDemand.reindex_comp ...
+theorem ProviderDemand.introduce_reindex
+    (scope : RequirementOriginScope (.extension authority))
+    (slot : scope.Slot) :
+    ProviderDemand.reindex embedding authority
+        (ProviderDemand.introduce scope slot descriptor) =
+      ProviderDemand.introduce
+        (RequirementOriginScope.reindex embedding authority scope).targetScope
+        ((RequirementOriginScope.reindex embedding authority scope).slot slot)
+        descriptor
 
 structure SomeProviderDemand where
   authority : RequirementAuthority
@@ -581,17 +624,25 @@ theorem ProviderDemandFamily.reindex_lookup ...
 theorem ProviderDemandFamily.reindex_authorityRegistry ...
 theorem ProviderDemandFamily.reindex_id ...
 theorem ProviderDemandFamily.reindex_comp ...
-theorem ProviderDemandFamily.union_assoc_coherent ...
-
-structure ExtensionAuthorityMergeIso
-    (left middle right : ExtensionAuthorityRegistry) where
-  forward : ExtensionAuthorityEmbedding
-    (merge (merge left middle) right) (merge left (merge middle right))
-  backward : ExtensionAuthorityEmbedding
-    (merge left (merge middle right)) (merge (merge left middle) right)
-  leftInverse : EveryEntryReindexedBackwardAfterForwardIsIdentical
-  rightInverse : EveryEntryReindexedForwardAfterBackwardIsIdentical
-  preservesKeys : EveryReindexedEntryPreservesStableKey
+def ProviderDemandFamily.reindexTo
+    (plan : ExtensionAuthorityUnionPlan registries compatible)
+    (family : ProviderDemandFamily)
+    (contained : EveryExtensionAuthorityKeyIn family.authorityRegistry
+      OccursIn registries) : ProviderDemandFamily :=
+  family.reindex (plan.includeCompatible family.authorityRegistry contained)
+theorem ProviderDemandFamily.union_assoc_coherent
+    (plan : ExtensionAuthorityUnionPlan [leftRegistry, middleRegistry, rightRegistry]
+      pairwiseCompatibility)
+    (leftMiddle : OriginsDisjointOrDescriptorsExact left middle)
+    (middleRight : OriginsDisjointOrDescriptorsExact middle right)
+    (leftMiddleRight : OriginsDisjointOrDescriptorsExact (left.union middle leftMiddle) right)
+    (leftMiddleRight' : OriginsDisjointOrDescriptorsExact left (middle.union right middleRight)) :
+    ProviderDemandFamily.reindexTo plan
+        ((left.union middle leftMiddle).union right leftMiddleRight)
+        (leftMiddleRight.nestedRegistryKeysContained pairwiseCompatibility) =
+      ProviderDemandFamily.reindexTo plan
+        (left.union (middle.union right middleRight) leftMiddleRight')
+        (leftMiddleRight'.nestedRegistryKeysContained pairwiseCompatibility)
 
 def ProviderDemandFamily.CertifiedBy
     (demands : ProviderDemandFamily) (view : ProviderBindingView) : Prop :=
@@ -608,18 +659,28 @@ how a platform environment is built.
 The built-in tags and their pairwise-distinctness are ordinary finite inductive
 data centralized here; no downstream owner definition or axiom is required.
 Extension registries are explicit composable values, never one unparameterized
-global table. Independent packages publish a finite registry; `merge` checks
-stable-key compatibility and returns origin-preserving embeddings. A larger
-composition reindexes extension authorities through those embeddings without
-changing their stable identity. Thus adding an extension does not edit a core
+global table. Independent packages publish a finite registry. `normalize`
+checks pairwise stable-key compatibility once and constructs one canonical
+union plus origin-preserving embeddings for any arity; binary `merge` is only a
+convenience projection of that plan. A larger composition reindexes extension
+authorities through the plan's embeddings without changing their stable
+identity. Thus adding an extension does not edit a core
 sum or global registry, and a freely asserted `Contains` proof is not authority.
 Reindexing is functorial across scopes, demands, and families: identity is
 extensionally identity, successive embeddings equal their composition, and the
-two associations of a three-registry merge are connected by the canonical
-origin/descriptor-preserving `ExtensionAuthorityMergeIso`.
-`union_assoc_coherent` uses that isomorphism; no `Classical.choice`,
-proof-irrelevant registry cast, or ad hoc
+two associations of a three-registry family union are transported into the
+same canonical three-way `ExtensionAuthorityUnionPlan`.
+`union_assoc_coherent` consumes every descriptor-compatibility witness and
+proves equality there; no `Classical.choice`, proof-irrelevant registry cast, or ad hoc
 rewriting of dependent statements is part of the public construction.
+The normalized registry uses the finite subtype of stable keys occurring in the
+input registries as its `Entry`, rather than choosing a representative input
+entry. `includeCompatible` maps an entry to its key plus occurrence proof.
+Consequently normalization sorts the finite stable-key union by the specified
+lexicographic order on the `(owner, localName)` fields of `StableId` and is
+deterministic under proof irrelevance.
+`normalize_permutation` proves that permuting the input registries produces the
+same normalized registry and embeddings; no hidden representative is chosen.
 
 A tag is descriptive data, not itself authority. Every extension authority is
 dependently indexed by its exact selected registry and packages an entry of

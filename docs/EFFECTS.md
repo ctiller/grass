@@ -1037,9 +1037,13 @@ The first implementation is incomplete until checked fixtures demonstrate:
 5. A project-local effect family is added from another module without editing a
    core sum type.
    Three independently authored extension-authority registries compose under
-   both associations. Reindexing the same family through either association
-   produces extensionally identical origin IDs, descriptors, and lookups; a
-   fixture that replaces this transport with an unchecked dependent cast fails.
+   both family-union associations after all pairwise and outer descriptor
+   compatibility witnesses are supplied. Reindexing either association into
+   the same canonical three-way union plan produces extensionally identical
+   origin IDs, descriptors, and lookups; a fixture which omits an outer witness
+   or replaces structural scope transport with an unchecked dependent cast
+   fails. Reindexing `introduce scope slot descriptor` commutes with structural
+   slot transport, so a scope cannot mint a different origin after embedding.
 6. Row membership embeds dependent results exactly; a forged name-only embedding
    is unconstructible.
 7. Duplicate family keys are rejected, and the lowering selection cannot carry
