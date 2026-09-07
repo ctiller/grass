@@ -26,24 +26,23 @@ metadata that unwinds to the wrong place.
 The Windows unwind language describes a prologue as a list of operations from a
 fixed vocabulary — push a nonvolatile register, allocate a constant amount,
 establish a frame pointer, save a register or an XMM register at a constant
-offset, and push a machine frame. `UnwindOp` models the **first three**. So
+offset, and push a machine frame. `UnwindOp` models the **first four**. So
 `UnwindOp.Encodable` rejects a stack adjustment that is not a constant multiple
 of eight and a push of a volatile register, and a prologue interleaving other
 work between the pushes has no `Prologue` value at all.
 
 ## How much of the language that is, measured
 
-An earlier version of this paragraph listed "save a register at a constant
-offset" as part of the vocabulary this module models, and there is no
-constructor for it. A reviewer measured what the omission costs, decoding the
+A reviewer once measured what the missing save operations cost, decoding the
 unwind codes out of `.xdata` for 24 C functions compiled with the MSVC on this
-machine:
+machine: at `/O2`, 89 unwind operations of which **36 (40%) had no constructor
+here** — 24 `UWOP_SAVE_XMM128` and 12 `UWOP_SAVE_NONVOL` — and **13 of the 24
+functions (54%) had no `Prologue` value at all**. At `/Od`, 29 operations, all
+modelled, 1 function of 25 without a `Prologue`.
 
-* at `/O2`: 89 unwind operations, of which **36 (40%) have no constructor
-  here** — 24 `UWOP_SAVE_XMM128` and 12 `UWOP_SAVE_NONVOL`. **13 of the 24
-  functions (54%) have no `Prologue` value at all.**
-* at `/Od`: 29 operations, all four of them modelled, 1 function of 25 with no
-  `Prologue` value.
+`saveNonvolatile` and `saveXmm128` close that gap: all 36 of those operations
+now have constructors. Both were added against `ml64` rather than against a
+manual, and the corpus checks 84 prologues byte-for-byte.
 
 `UWOP_SAVE_NONVOL` is not exotic: MSVC's standard optimised idiom is
 `mov [rsp+32], rbx` into the caller's shadow space rather than `push rbx`.
@@ -51,15 +50,34 @@ machine:
 because XMM6–XMM15 are nonvolatile on Win64 and `Grass/ABI/Win64/Convention.lean`
 models general-purpose registers only.
 
-Also real and unmodelled: `UWOP_ALLOC_LARGE` with `OpInfo = 1`, the three-slot
-form carrying an unscaled 32-bit size. `char buf[600000]` produces it at both
-optimisation levels, and `UnwindOp.LargeAllocEncodable` caps at 524280, so this
-profile refuses it.
+## What is still outside the model
 
-None of that is unsoundness — every one of these is a refusal, and refusing is
-what this module is for. It is a statement about *reach*: the four modelled
-operations describe under half of what the platform's own compiler emits at
-`/O2`, and a prologue this profile accepts is a narrow thing.
+`UWOP_ALLOC_LARGE` with `OpInfo = 1`, the three-slot form carrying an unscaled
+32-bit size. `char buf[600000]` produces it at both optimisation levels, and
+`UnwindOp.LargeAllocEncodable` caps at 524280, so this profile refuses it.
+
+The `_FAR` save forms and `UWOP_PUSH_MACHFRAME`, which have no constructors.
+
+None of that is unsoundness — every one is a refusal, and refusing is what this
+module is for. It is a statement about *reach*.
+
+## An `ml64` threshold that is not an ABI rule
+
+`Encodable` permits a `saveNonvolatile` offset up to 524280, which is exactly
+what the 16-bit scaled field encodes. `ml64` does not use the near form that
+far: it emits `UWOP_SAVE_NONVOL_FAR` from offset 64504 upward, and the same
+*byte* threshold for `saveXmm128` even though that field reaches 1048560.
+
+That is not a rule to copy. A reviewer disassembled `ml64.exe` and found the
+cause: `cmp edi, 0FBF8h` — 64504 — compared against the raw offset *before* the
+shift that scales it, the same literal in both save paths. `.allocstack`, which
+has an identical 16-bit-scaled-by-8 field, switches at the correct 524280, so
+MASM makes the same decision correctly elsewhere.
+
+The consequence for anyone extending `Tests/ABI/Win64/UnwindCorpus.lean`: a row
+with a save offset at or above 64504 is `Encodable`, is legal per the ABI, and
+will still fail the differential, because `ml64` writes the far form there. The
+corpus stops well below it deliberately.
 
 Those prologues are perfectly legal machine code and run correctly. What they
 cannot have is *derived* unwind data, and `Prologue.Encodable` is the predicate
@@ -255,8 +273,10 @@ def Encodable : UnwindOp → Prop
   | .saveNonvolatile r off =>
       volatility r = .nonvolatile ∧ r ≠ .rsp ∧ off % 8 = 0 ∧ off / 8 < 65536
   | .saveXmm128 r off =>
-      -- `xmm0`-`xmm5` are volatile under Win64, so saving one in unwind data
-      -- describes a restore the unwinder must not perform.
+      -- Saving a volatile register in unwind data describes a restore the
+      -- unwinder must not perform. Spelled through `xmmVolatility` rather
+      -- than as the literal `6` it used to be, so the ABI fact has one
+      -- declaration rather than two hand-matched copies.
       6 ≤ r.index.val ∧ off % 16 = 0 ∧ off / 16 < 65536
 
 instance (op : UnwindOp) : Decidable op.Encodable := by
@@ -286,6 +306,46 @@ emits exactly the bytes this profile emitted, so only the model can refuse it.
 -/
 theorem push_rsp_not_encodable :
     ¬ (UnwindOp.pushNonvolatile .rsp).Encodable := by decide
+
+/--
+**A `mov` that saves a volatile register has no unwind description either.**
+
+The same argument as `push_volatile_not_encodable`, and it needs its own
+statement for the same reason that one did: `ml64` assembles `.savereg rax, 8`
+without complaint and emits `UWOP_SAVE_NONVOL` with `OpInfo = 0`, so no
+differential can catch a regression here. Only the model refuses it, and only a
+theorem says the refusal is deliberate. -/
+theorem save_volatile_not_encodable {r : Gpr} {off : Nat}
+    (h : volatility r = .volatile) :
+    ¬ (UnwindOp.saveNonvolatile r off).Encodable := by
+  simp only [Encodable, h]
+  exact fun hc => absurd hc.1 (by decide)
+
+/-- **`mov [rsp+n], rsp` has no unwind description.**
+
+`ml64` accepts `.savereg rsp, 8` as readily as it accepts `.pushreg rsp`. -/
+theorem save_rsp_not_encodable {off : Nat} :
+    ¬ (UnwindOp.saveNonvolatile .rsp off).Encodable := by
+  simp only [Encodable]
+  exact fun hc => absurd hc.2.1 (by decide)
+
+/--
+**Saving a volatile XMM register has no unwind description.**
+
+`xmm0`-`xmm5` are volatile under Win64, so unwind data naming one describes a
+restore the unwinder must not perform. `ml64` emits `UWOP_SAVE_XMM128` with
+`OpInfo = 0` for `.savexmm128 xmm0, 16` without complaint. -/
+theorem save_volatile_xmm_not_encodable {r : Xmm} {off : Nat}
+    (h : xmmVolatility r = .volatile) :
+    ¬ (UnwindOp.saveXmm128 r off).Encodable := by
+  simp only [Encodable]
+  intro hc
+  have : ¬ (6 ≤ r.index.val) := by
+    simp only [xmmVolatility] at h
+    split at h
+    · omega
+    · exact absurd h (by decide)
+  exact this hc.1
 
 /-- An allocation that is not a multiple of eight has no encoding in either
 form. -/

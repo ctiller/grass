@@ -301,7 +301,14 @@ def module_names() -> set[str]:
 
 
 def sentences(block: str) -> list[str]:
-    text = " ".join(line.strip() for line in block.splitlines())
+    # Markdown headings are labels, not assertions, and joining them to the
+    # prose beneath donates their words to a sentence that never said them:
+    # "## What this layer still cannot exclude" followed by a description of
+    # what is *not* enforced was read as one claim containing "cannot", and
+    # reported as unbacked. A heading naming the subject is exactly how these
+    # modules are written, so this is the common case rather than an oddity.
+    lines = [line.strip() for line in block.splitlines()]
+    text = " ".join(line for line in lines if not line.startswith("#"))
     # Split on sentence ends only. A semicolon joins a claim to the clause that
     # names its enforcement, so splitting there would report the claim as unbacked
     # while the name sits in the next fragment.
@@ -310,8 +317,30 @@ def sentences(block: str) -> list[str]:
     # into the next sentence -- "(Partial writes are intended to be modelled
     # here.) The console ensures no caller observes a short write." was read as
     # one hedged sentence, and a reviewer used it to pass a false claim.
-    return [s.strip() for s in re.split(r"""(?<=[.])['")\]]*\s+""", text)
-            if s.strip()]
+    # The closing punctuation is *captured*, not consumed. Splitting on
+    # `(?<=[.])["')\\]]*\\s+` discards whatever it matched, which threw
+    # away the quote that ends a citation -- so a sentence quoting a
+    # normative document came back with one unbalanced quote character,
+    # `quotes_the_claim` could not find a complete span, and the
+    # document's own sentence was reported as this module's unbacked
+    # claim. Nine such reports arrived at once when a merge brought in a
+    # layer that cites heavily.
+    parts = re.split(r"""((?<=[.])['")\]]*)\s+""", text)
+    pieces: list[str] = []
+    for index in range(0, len(parts), 2):
+        tail = parts[index + 1] if index + 1 < len(parts) else ""
+        piece = (parts[index] + tail).strip()
+        if piece:
+            pieces.append(piece)
+    # A citation can still run past a full stop inside the quotation
+    # itself; rejoin anything left with an odd number of quotes.
+    merged: list[str] = []
+    for piece in pieces:
+        if merged and merged[-1].count('"') % 2 == 1:
+            merged[-1] = merged[-1] + " " + piece
+        else:
+            merged.append(piece)
+    return merged
 
 
 def doc_blocks(source: str):

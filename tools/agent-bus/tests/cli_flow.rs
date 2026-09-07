@@ -2940,3 +2940,111 @@ fn succeed_refuses_to_resume_when_the_registry_transition_did_not_reach_the_remo
         "the target's outbox must be untouched when the succession did not land, found {still_pending:?}"
     );
 }
+
+/// The auditor role, end to end through the CLI.
+///
+/// Three review rounds covered it only at unit level, and the Critical they
+/// eventually found -- an `audit.reported` whose frontier could not be built
+/// aborting the whole drain and wedging the outbox permanently -- is exactly
+/// the class of bug that only shows up when a real `register` and a real
+/// `coordinate` run against a real repository. Nothing here existed before.
+#[test]
+fn an_auditor_registers_reports_and_its_report_is_readable() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register_with(repo.path(), "alice", "implementor", "host1", None);
+    register_with(repo.path(), "c-auditor", "auditor", "host1", None);
+
+    // The role the registry binds is the role that shows up.
+    let status = run_json(bin().current_dir(repo.path()).args(["status"]));
+    let auditor = status["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["agent"] == "c-auditor")
+        .expect("the auditor is on the roster");
+    assert_eq!(auditor["role"], "auditor");
+
+    // Report a bug against an implementor -- the survey-and-report path.
+    submit(
+        repo.path(),
+        "c-auditor",
+        "issue.opened",
+        r#"{"target":"alice","issue_kind":"bug","severity":"normal","summary":"cross-cutting drift","locations":[],"reproduction":[],"blocks":[],"evidence":[]}"#,
+        "issue-1",
+    );
+    let drained = coordinate(repo.path(), "c-auditor", "host1", 0);
+    assert!(
+        drained["outbox_rejected"].as_array().unwrap().is_empty(),
+        "{drained}"
+    );
+    let issue_id = drained["published_events"][0].as_str().unwrap().to_string();
+
+    // And publish the summary that references it.
+    submit(
+        repo.path(),
+        "c-auditor",
+        "audit.reported",
+        &format!(
+            r#"{{"inspected_commits":[],"areas":["coordination history"],"methods":["replayed every stream"],"limitations":["product surface not examined"],"issues":["{issue_id}"],"summary":"one finding, filed"}}"#
+        ),
+        "audit-1",
+    );
+    let drained = coordinate(repo.path(), "c-auditor", "host1", 0);
+    assert!(
+        drained["outbox_rejected"].as_array().unwrap().is_empty(),
+        "the audit must publish: {drained}"
+    );
+
+    // Readable afterwards -- `tail` is the bus's reader for durable facts.
+    let tail = run_json(
+        bin()
+            .current_dir(repo.path())
+            .args(["tail", "--agent", "c-auditor"]),
+    );
+    let kinds: Vec<&str> = tail["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["kind"].as_str().unwrap())
+        .collect();
+    assert!(
+        kinds.contains(&"audit.reported") && kinds.contains(&"issue.opened"),
+        "the auditor's report and finding must both be readable: {kinds:?}"
+    );
+}
+
+/// The design's `blocks` rule, through the CLI: an auditor may report a bug,
+/// but may not turn it into a merge veto the named reviewer cannot dispose.
+#[test]
+fn the_cli_refuses_an_auditor_issue_that_blocks_a_candidate() {
+    let (_origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    register_with(repo.path(), "alice", "implementor", "host1", None);
+    register_with(repo.path(), "c-auditor", "auditor", "host1", None);
+
+    submit(
+        repo.path(),
+        "c-auditor",
+        "issue.opened",
+        r#"{"target":"alice","issue_kind":"bug","severity":"normal","summary":"blocking attempt","locations":[],"reproduction":[],"blocks":["alice:0"],"evidence":[]}"#,
+        "blocking-1",
+    );
+    let drained = coordinate(repo.path(), "c-auditor", "host1", 0);
+    // `outbox_rejected` is the candidate-level receipt; `rejected` is for ref
+    // pushes that did not land, which is a different failure entirely.
+    let rejected = drained["outbox_rejected"].as_array().unwrap();
+    assert_eq!(rejected.len(), 1, "{drained}");
+    assert_eq!(rejected[0]["kind"], "issue.opened");
+    assert!(
+        rejected[0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("empty blocks set"),
+        "{drained}"
+    );
+    assert!(
+        drained["published_events"].as_array().unwrap().is_empty(),
+        "nothing may publish: {drained}"
+    );
+}

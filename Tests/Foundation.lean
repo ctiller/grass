@@ -31,6 +31,29 @@ def spec : SpecProcess where
   accepts := fun _ _ => True
   requirements := noDemands
 
+namespace ObservationProjectionFixture
+
+def boolToNat : ObservationProjection Bool Nat where
+  project := List.map Bool.toNat
+
+def natToString : ObservationProjection Nat String where
+  project := List.map toString
+
+def stringLengths : ObservationProjection String Nat where
+  project := List.map String.length
+
+example : (ObservationProjection.identity Nat).comp boolToNat = boolToNat := by
+  simp
+
+example : boolToNat.comp (ObservationProjection.identity Bool) = boolToNat := by
+  simp
+
+example : (stringLengths.comp natToString).comp boolToNat =
+    stringLengths.comp (natToString.comp boolToNat) := by
+  simp
+
+end ObservationProjectionFixture
+
 def system : RelationalSystem spec.AuditEvent where
   State := Bool
   Choice := Unit
@@ -52,12 +75,44 @@ def initialExecution (input : Bool) : system.ExecutionPrefix :=
   @RelationalSystem.ExecutionPrefix.initial spec.AuditEvent system input (0 : Nat)
     rfl
 
+example {initialState state : system.State} {initialGraph graph : system.Graph}
+    {events : List spec.AuditEvent}
+    (execution : system.Runs initialState initialGraph state graph events) : True := by
+  induction execution with
+  | initial _ => trivial
+  | step _ _ _ => trivial
+
 theorem behaviorAdequate : behavior.Adequate where
   execution input _ := ⟨initialExecution input, rfl⟩
   completion _ := ⟨.finite .refl trivial⟩
 
 def behaviorRefinesItself : BehaviorRefinement behavior behavior :=
   .refl behavior
+
+def finiteCompletion (input : Bool) : system.Completion
+    (initialExecution input).state (initialExecution input).graph
+    (initialExecution input).events :=
+  .finite .refl trivial
+
+example (refinement : BehaviorRefinement behavior behavior) :
+    (BehaviorRefinement.refl behavior).trans refinement = refinement := by simp
+
+example (refinement : BehaviorRefinement behavior behavior) :
+    refinement.trans (BehaviorRefinement.refl behavior) = refinement := by simp
+
+example (first second third : BehaviorRefinement behavior behavior) :
+    (first.trans second).trans third = first.trans (second.trans third) := by simp
+
+example : (BehaviorRefinement.refl behavior).mapCompletion
+    (finiteCompletion true) = finiteCompletion true :=
+  BehaviorRefinement.mapCompletion_refl behavior (finiteCompletion true)
+
+example : (behaviorRefinesItself.trans behaviorRefinesItself).mapCompletion
+    (finiteCompletion true) =
+      behaviorRefinesItself.mapCompletion
+        (behaviorRefinesItself.mapCompletion (finiteCompletion true)) :=
+  BehaviorRefinement.mapCompletion_trans behaviorRefinesItself
+    behaviorRefinesItself (finiteCompletion true)
 
 def portable : PortableProgramCertificate spec where
   behavior := behavior
@@ -121,6 +176,9 @@ example : spec.accepts true
     ((artifactFormat.loadedBehavior ByteArray.empty).observe (initialExecution true)) :=
   verified.sound (initialExecution true) trivial trivial
 
+example : (artifactFormat.loadedBehavior (emitProgram verified)).Adequate :=
+  verified.loadedAdequate
+
 example : Nonempty { execution :
     (artifactFormat.loadedBehavior ByteArray.empty).system.ExecutionPrefix //
     (artifactFormat.loadedBehavior ByteArray.empty).HasInput true execution } :=
@@ -130,6 +188,16 @@ example : Nonempty ((artifactFormat.loadedBehavior ByteArray.empty).system.Compl
     (initialExecution true).state (initialExecution true).graph
       (initialExecution true).events) :=
   verified.execution_completes (initialExecution true)
+
+example : Nonempty (VerifiedProgram.CompletionRefinement verified
+    (initialExecution true)) :=
+  verified.completion_refinement_nonempty (initialExecution true)
+
+example (completion : VerifiedProgram.CompletionRefinement verified
+    (initialExecution true)) :
+    completion.portable = verified.refinement.mapCompletionAtPrefix
+      (initialExecution true) completion.loaded :=
+  completion.exact
 
 namespace InfinitePrefixFixture
 
@@ -155,6 +223,115 @@ def samplePrefix : system.ExecutionPrefix :=
       (state := ()) (graph := ()) trivial)
     (choice := ()) (event := true) (nextState := ()) (nextGraph := ()) trivial
 
+theorem falseSuffix : system.Steps samplePrefix.state samplePrefix.graph [false] () () :=
+  .step (choice := ()) .refl trivial
+
+theorem trueSuffix : system.Steps () () [true] () () :=
+  .step (choice := ()) .refl trivial
+
+abbrev behavior : ProgramBehavior spec where
+  system := system
+  inputOf := fun _ => false
+
+def refinement : BehaviorRefinement behavior behavior :=
+  .refl behavior
+
+abbrev abstractSystem : RelationalSystem Bool where
+  State := Bool
+  Choice := Nat
+  Graph := Nat
+  Initial := fun _ _ => True
+  Step := fun _ _ _ _ _ _ => True
+  Terminal := fun _ _ => False
+  InfiniteConsistent := fun _ _ _ _ _ => True
+  Extends := fun _ _ => True
+  extendsRefl := fun _ => trivial
+  extendsTrans := fun _ _ => trivial
+  stepExtends := fun _ => trivial
+
+abbrev abstractBehavior : ProgramBehavior spec where
+  system := abstractSystem
+  inputOf := fun _ => false
+
+def toAbstract : BehaviorRefinement behavior abstractBehavior where
+  mapState := fun _ => false
+  mapGraph := fun _ => 0
+  mapChoice := fun _ => 0
+  input := fun _ => rfl
+  initial := fun _ => trivial
+  step := fun _ => trivial
+  terminal := fun terminal => False.elim terminal
+  infiniteConsistency := fun _ => trivial
+
+abbrev highestSystem : RelationalSystem Bool where
+  State := Nat
+  Choice := Bool
+  Graph := Bool
+  Initial := fun _ _ => True
+  Step := fun _ _ _ _ _ _ => True
+  Terminal := fun _ _ => False
+  InfiniteConsistent := fun _ _ _ _ _ => True
+  Extends := fun _ _ => True
+  extendsRefl := fun _ => trivial
+  extendsTrans := fun _ _ => trivial
+  stepExtends := fun _ => trivial
+
+abbrev highestBehavior : ProgramBehavior spec where
+  system := highestSystem
+  inputOf := fun _ => false
+
+def toHighest : BehaviorRefinement abstractBehavior highestBehavior where
+  mapState := Bool.toNat
+  mapGraph := fun _ => true
+  mapChoice := fun _ => false
+  input := fun _ => rfl
+  initial := fun _ => trivial
+  step := fun _ => trivial
+  terminal := fun terminal => False.elim terminal
+  infiniteConsistency := fun _ => trivial
+
+example : (samplePrefix.append falseSuffix).events = [true, false] := rfl
+
+example : (samplePrefix.append falseSuffix).append trueSuffix =
+    samplePrefix.append (falseSuffix.trans trueSuffix) :=
+  RelationalSystem.ExecutionPrefix.append_assoc samplePrefix falseSuffix trueSuffix
+
+example : samplePrefix.append (.refl) = samplePrefix := by simp
+
+example : refinement.mapPrefix samplePrefix = samplePrefix := by
+  change (BehaviorRefinement.refl behavior).mapPrefix samplePrefix = samplePrefix
+  exact BehaviorRefinement.mapPrefix_refl behavior samplePrefix
+
+example : (toAbstract.trans toHighest).mapPrefix samplePrefix =
+    toHighest.mapPrefix (toAbstract.mapPrefix samplePrefix) :=
+  BehaviorRefinement.mapPrefix_trans toAbstract toHighest samplePrefix
+
+example : toAbstract.mapPrefix (samplePrefix.append falseSuffix) =
+    (toAbstract.mapPrefix samplePrefix).append
+      (toAbstract.mapSteps falseSuffix) := by
+  exact BehaviorRefinement.mapPrefix_append
+    toAbstract samplePrefix falseSuffix
+
+example : (toAbstract.mapPrefix samplePrefix).events = samplePrefix.events :=
+  BehaviorRefinement.mapPrefix_events toAbstract samplePrefix
+
+example : abstractBehavior.observe (toAbstract.mapPrefix samplePrefix) =
+    behavior.observe samplePrefix :=
+  BehaviorRefinement.observe_mapPrefix toAbstract samplePrefix
+
+example : abstractBehavior.inputOf (toAbstract.mapPrefix samplePrefix).initialState =
+    behavior.inputOf samplePrefix.initialState :=
+  BehaviorRefinement.inputOf_mapPrefix toAbstract samplePrefix
+
+example : abstractBehavior.HasInput false (toAbstract.mapPrefix samplePrefix) ↔
+    behavior.HasInput false samplePrefix :=
+  BehaviorRefinement.hasInput_mapPrefix toAbstract false samplePrefix
+
+example (terminal : system.Terminal samplePrefix.state samplePrefix.graph) :
+    abstractBehavior.system.Terminal (toAbstract.mapPrefix samplePrefix).state
+      (toAbstract.mapPrefix samplePrefix).graph :=
+  BehaviorRefinement.terminal_mapPrefix toAbstract samplePrefix terminal
+
 def continuation : system.InfiniteContinuation samplePrefix.state samplePrefix.graph
     samplePrefix.events where
   stateAt := fun _ => ()
@@ -168,6 +345,26 @@ def continuation : system.InfiniteContinuation samplePrefix.state samplePrefix.g
 
 def completion : system.Completion samplePrefix.state samplePrefix.graph samplePrefix.events :=
   .infinite continuation
+
+example : (BehaviorRefinement.refl behavior).mapInfinite continuation = continuation :=
+  BehaviorRefinement.mapInfinite_refl behavior continuation
+
+example : (toAbstract.trans toHighest).mapInfinite continuation =
+    toHighest.mapInfinite (toAbstract.mapInfinite continuation) :=
+  BehaviorRefinement.mapInfinite_trans toAbstract toHighest continuation
+
+example : (BehaviorRefinement.refl behavior).mapCompletion completion = completion :=
+  BehaviorRefinement.mapCompletion_refl behavior completion
+
+example : (toAbstract.trans toHighest).mapCompletion completion =
+    toHighest.mapCompletion (toAbstract.mapCompletion completion) :=
+  BehaviorRefinement.mapCompletion_trans toAbstract toHighest completion
+
+def mappedCompletion : abstractBehavior.system.Completion
+    (toAbstract.mapPrefix samplePrefix).state
+    (toAbstract.mapPrefix samplePrefix).graph
+    (toAbstract.mapPrefix samplePrefix).events :=
+  toAbstract.mapCompletionAtPrefix samplePrefix completion
 
 example : samplePrefix.events = [true] := rfl
 

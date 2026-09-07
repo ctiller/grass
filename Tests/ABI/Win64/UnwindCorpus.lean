@@ -40,12 +40,20 @@ reported count, a mistake invisible on every even-slot prologue including Spike
 1's. `Prologue.arraySlots` is now the padded length and `countOfCodes` the
 reported one.
 
-Not covered: `UWOP_SAVE_NONVOL`, `UWOP_SAVE_XMM128` and their `_FAR` forms, and
-`UWOP_PUSH_MACHFRAME`. `Grass.ABI.Win64.UnwindOp` has no constructors for them,
-so no row can be built and none is faked. Allocations of 512 KiB and above are
-also absent: they need `UWOP_ALLOC_LARGE` with `OpInfo = 1` and a 32-bit size,
-which `UnwindOp.LargeAllocEncodable` excludes. Both gaps belong in the trust
-ledger's owed column rather than in a comment claiming coverage.
+`UWOP_SAVE_NONVOL` and `UWOP_SAVE_XMM128` are covered by `saveRegRows` and
+`saveXmmRows` below, over every nonvolatile register, every displacement form,
+and mixed with pushes, frames and large allocations.
+
+Not covered: the `_FAR` save forms and `UWOP_PUSH_MACHFRAME`, which have no
+constructors, so no row can be built and none is faked. Allocations of 512 KiB
+and above are also absent: they need `UWOP_ALLOC_LARGE` with `OpInfo = 1` and a
+32-bit size, which `UnwindOp.LargeAllocEncodable` excludes.
+
+Save offsets stop well below 64504 on purpose. `Encodable` permits up to 524280
+and the ABI encodes it, but `ml64` switches to the far form at 64504 -- a
+hard-coded `cmp edi, 0FBF8h` in the assembler, applied to the raw offset before
+it is scaled. A row above that threshold would be correct and would still fail
+this differential. `Grass/ABI/Win64/Unwind.lean` records the cause.
 -/
 
 namespace Grass.Tests.ABI.Win64.Unwind

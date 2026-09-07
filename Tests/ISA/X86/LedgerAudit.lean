@@ -126,7 +126,7 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 56
+def notBehaviourBaseline : Nat := 57
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -268,6 +268,14 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- `Xmm.all` is a list of Grass constructors, exactly as `Gpr.all` is; the
+    -- architectural fact is the numbering, which `Xmm.index` carries in
+    -- `owed`. It was put in `owed` alongside `index` when the XMM file
+    -- landed, which a reviewer flagged as the wrong bucket by this file's own
+    -- rule -- and noted that the wrong bucket happened to need one reviewed
+    -- baseline bump where the right one needs two. That is the move this
+    -- ratchet exists to catch, so it is recorded rather than quietly fixed.
+    `Grass.ISA.X86.Xmm.all,
     -- The platform selection itself. Choosing Windows 10, x64 and documented
     -- APIs is a project decision recorded in `docs/DECISIONS.md` 16, not a
     -- claim about how Windows behaves; the external content it implies is the
@@ -348,7 +356,11 @@ def owed : List Name :=
     -- Intel/AMD intersection, and the AMD side is unretrievable (see
     -- `Grass.ISA.X86.Sources`), so an anchor added now could not be confirmed.
     `Grass.ISA.X86.Xmm.index,
-    `Grass.ISA.X86.Xmm.all,
+    -- Which XMM registers a callee must preserve. An external ABI fact, and
+    -- it was previously a bare `6` inside UnwindOp.Encodable with no
+    -- declaration to carry it -- so the fact was real, load-bearing and
+    -- absent from this ledger entirely. Naming it is what put it here.
+    `Grass.ABI.Win64.xmmVolatility,
     -- The Win32 handle and pointer widths. A reviewer of the platform profile
     -- pointed out that these are external ABI facts wearing the clothes of a
     -- project selection: `docs/DECISIONS.md` 16 fixes x64, but it says nothing
