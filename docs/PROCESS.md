@@ -1847,7 +1847,7 @@ structure PendingInteractionModel (boundary : DriverBoundary) where
 def PendingInteractionModel.ProperExtends
     (model : PendingInteractionModel boundary)
     (first second : model.History demand start) : Prop :=
-  model.Extends first second /\ first != second
+  model.Extends first second /\ ¬ model.Extends second first
 
 abbrev SequentialWaitingState
     (machine : SequentialMachine boundary)
@@ -1887,6 +1887,14 @@ proof for every program using it.
 point, demand, continuation, and the equality proving that `decide` waits there.
 It cannot be chosen as `Empty`; every actual effect decision constructs a
 member, and proof irrelevance gives uniqueness for the same point/demand/resume.
+
+`ProperExtends` is the strict relation induced by the history preorder. Merely
+using unequal representatives is insufficient: two distinct but mutually
+reachable histories denote the same progress class and may not justify a
+pending-progress transition. The asymmetric definition rules out two-state
+cycles without demanding decidable equality or quotient ceremony from an
+ordinary machine author. Effect-theory projection proves that this strict
+relation is exactly semantic history growth.
 
 `SequentialAdapter.elaborateMachine` translates this syntax plus an exact
 selected `PendingInteractionModel` and its pending semantics to the more general

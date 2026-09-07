@@ -479,22 +479,22 @@ def ExtensionAuthorityRegistry.merge
 def ExtensionAuthorityRegistry.leftEmbedding ...
 def ExtensionAuthorityRegistry.rightEmbedding ...
 
-structure RegisteredExtensionAuthority where
-  registry : ExtensionAuthorityRegistry
+structure RegisteredExtensionAuthority
+    (registry : ExtensionAuthorityRegistry) where
   entry : registry.Entry
 
 def RegisteredExtensionAuthority.reindex
     (embedding : ExtensionAuthorityEmbedding source target)
-    (authority : RegisteredExtensionAuthority)
-    (usesSource : authority.registry = source) : RegisteredExtensionAuthority
-theorem RegisteredExtensionAuthority.reindex_registry ...
+    (authority : RegisteredExtensionAuthority source) :
+    RegisteredExtensionAuthority target
 theorem RegisteredExtensionAuthority.reindex_key ...
 theorem RegisteredExtensionAuthority.reindex_id ...
 theorem RegisteredExtensionAuthority.reindex_comp ...
 
 inductive RequirementAuthority
   | builtin (owner : BuiltinRequirementAuthority)
-  | extension (owner : RegisteredExtensionAuthority)
+  | extension {registry : ExtensionAuthorityRegistry}
+      (owner : RegisteredExtensionAuthority registry)
 
 structure ProviderBindingView where
   Entry : Type
@@ -534,15 +534,15 @@ theorem ProviderDemand.introduce_descriptor_exact ...
 
 def RequirementOriginScope.reindex
     (embedding : ExtensionAuthorityEmbedding source target)
-    (scope : RequirementOriginScope (.extension authority))
-    (usesSource : authority.registry = source) :
+    (authority : RegisteredExtensionAuthority source)
+    (scope : RequirementOriginScope (.extension authority)) :
     RequirementOriginScope
-      (.extension (authority.reindex embedding usesSource))
+      (.extension (authority.reindex embedding))
 def ProviderDemand.reindex
     (embedding : ExtensionAuthorityEmbedding source target)
-    (demand : ProviderDemand (.extension authority))
-    (usesSource : authority.registry = source) :
-    ProviderDemand (.extension (authority.reindex embedding usesSource))
+    (authority : RegisteredExtensionAuthority source)
+    (demand : ProviderDemand (.extension authority)) :
+    ProviderDemand (.extension (authority.reindex embedding))
 theorem ProviderDemand.reindex_originId ...
 theorem ProviderDemand.reindex_descriptor ...
 theorem ProviderDemand.reindex_id ...
@@ -621,8 +621,10 @@ origin/descriptor-preserving `ExtensionAuthorityMergeIso`.
 proof-irrelevant registry cast, or ad hoc
 rewriting of dependent statements is part of the public construction.
 
-A tag is descriptive data, not itself authority. Every extension authority
-dependently packages its exact selected registry and entry.
+A tag is descriptive data, not itself authority. Every extension authority is
+dependently indexed by its exact selected registry and packages an entry of
+that registry; no equality proof or dependent cast is needed to recover the
+source of an embedding.
 `RequirementOriginScope` is opaque and indexed by that complete authority; its raw
 constructor is not public. Each built-in owner exports only typed scope
 constructors for its own index, and an extension obtains the corresponding
