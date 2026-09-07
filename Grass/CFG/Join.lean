@@ -3,11 +3,11 @@ import Grass.CFG.Graph
 /-!
 # Structural CFG join discovery
 
-Shared targets are derived from the graph's nested edge lists.  A selection is
-accepted only when it supplies one contract for each discovered target in the
-same canonical order.  Cycle participation is reported as structural data for
-the later loop checker; this module does not choose loop headers or invent loop
-invariants.
+Shared targets are derived from the graph's nested edge lists.
+`JoinSelection.wellFormed` accepts a selection only when it identifies each
+discovered target in the same canonical order.  Cycle participation is reported
+as structural data for the later loop checker; this module does not choose loop
+headers or invent loop invariants.
 -/
 
 namespace Grass.CFG

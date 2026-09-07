@@ -57,7 +57,8 @@ variable {Instruction : Type u} {State : Type v} {Effect : Type w}
 def instructionCount (fragment : VerifiedFragment semantics effectModel contract) : Nat :=
   fragment.source.instructionCount
 
-/-- Effect summaries cannot differ from the selected source expansion. -/
+/-- `VerifiedFragment.effects_eq_derived` exposes equality between the stored
+effect summary and derivation over the selected source expansion. -/
 theorem effects_eq_derived
     (fragment : VerifiedFragment semantics effectModel contract) :
     fragment.effects = effectModel.derive fragment.source.expand :=

@@ -131,8 +131,8 @@ def accepts (requirement : StackAlignment) (shape : StackShape) : Bool :=
 
 end StackAlignment
 
-/-- Exact shape compatibility at a CFG edge.  A depth-only equality cannot
-silently bypass elimination of a live lexical stack scope. -/
+/-- `StackShape.compatible` requires exact shape equality at a CFG edge,
+including the live lexical stack-scope list rather than depth alone. -/
 def StackShape.compatible (actual expected : StackShape) : Bool :=
   decide (actual = expected)
 
