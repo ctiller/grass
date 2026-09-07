@@ -123,12 +123,19 @@ def extendRebuildCone (changed : ScopeId → Bool) (affected : Vec ScopeId)
     {fanout : Nat} (node : DependencyNode fanout) : Vec ScopeId :=
   if nodeAffected changed affected node then affected.push node.scope else affected
 
+/-- Stream a topologically ordered node list, retaining the accumulated cone
+between steps. -/
+def scanRebuildCone (changed : ScopeId → Bool) {fanout : Nat} :
+    Vec ScopeId → List (DependencyNode fanout) → Vec ScopeId
+  | affected, [] => affected
+  | affected, node :: rest =>
+      scanRebuildCone changed (extendRebuildCone changed affected node) rest
+
 /-- Stream the graph once in child-before-parent order. No descendant source or
 flattened certificate value is materialized. -/
 def rebuildCone {fanout : Nat} (dag : ManifestDag fanout)
     (changed : ScopeId → Bool) : Vec ScopeId :=
-  dag.nodes.foldl (fun affected node => extendRebuildCone changed affected node)
-    Vec.empty
+  scanRebuildCone changed Vec.empty dag.nodes.toList
 
 /-- Rebuild-cone computation on admitted graph metadata. -/
 def CheckedManifestDag.rebuildCone {fanout : Nat}
@@ -164,6 +171,103 @@ theorem mem_extendRebuildCone_semantics_iff (changed : ScopeId → Bool)
           (changed node.scope = true ∨
             ∃ dependency ∈ node.dependencies, dependency ∈ affected)) := by
   rw [mem_extendRebuildCone_iff, nodeAffected_eq_true_iff]
+
+/-- Scanning concatenated node lists is the same as carrying the first scan's
+cone into the second scan. -/
+theorem scanRebuildCone_append (changed : ScopeId → Bool)
+    {fanout : Nat} (affected : Vec ScopeId)
+    (priorNodes suffix : List (DependencyNode fanout)) :
+    scanRebuildCone changed affected (priorNodes ++ suffix) =
+      scanRebuildCone changed (scanRebuildCone changed affected priorNodes) suffix := by
+  induction priorNodes generalizing affected with
+  | nil => rfl
+  | cons node rest inductionHypothesis =>
+      simp [scanRebuildCone, inductionHypothesis]
+
+/-- A whole scan never drops a scope already present in its input cone. -/
+theorem mem_scanRebuildCone_of_mem (changed : ScopeId → Bool)
+    {fanout : Nat} (affected : Vec ScopeId)
+    (nodes : List (DependencyNode fanout)) {scope : ScopeId}
+    (present : scope ∈ affected) :
+    scope ∈ scanRebuildCone changed affected nodes := by
+  induction nodes generalizing affected with
+  | nil => exact present
+  | cons node rest inductionHypothesis =>
+      apply inductionHypothesis
+      exact (mem_extendRebuildCone_iff changed affected node scope).2 (Or.inl present)
+
+/-- `mem_scanRebuildCone_scope` rules out invented scopes: every final cone
+member was either in the input cone or is the scope of a visited graph node. -/
+theorem mem_scanRebuildCone_scope (changed : ScopeId → Bool)
+    {fanout : Nat} (affected : Vec ScopeId)
+    (nodes : List (DependencyNode fanout)) {scope : ScopeId}
+    (present : scope ∈ scanRebuildCone changed affected nodes) :
+    scope ∈ affected ∨ ∃ node ∈ nodes, scope = node.scope := by
+  induction nodes generalizing affected with
+  | nil => exact Or.inl present
+  | cons node rest inductionHypothesis =>
+      rcases inductionHypothesis
+          (extendRebuildCone changed affected node) present with retained | later
+      · rcases (mem_extendRebuildCone_iff changed affected node scope).1 retained with
+          prior | ⟨current, _⟩
+        · exact Or.inl prior
+        · exact Or.inr ⟨node, by simp, current⟩
+      · rcases later with ⟨laterNode, inRest, equal⟩
+        exact Or.inr ⟨laterNode, by simp [inRest], equal⟩
+
+/-- A locally changed node occurring anywhere in a scan belongs to the final
+cone, independently of the surrounding prefix and suffix. -/
+theorem changed_scope_mem_scanRebuildCone (changed : ScopeId → Bool)
+    {fanout : Nat} (affected : Vec ScopeId)
+    (priorNodes suffix : List (DependencyNode fanout))
+    (node : DependencyNode fanout)
+    (locallyChanged : changed node.scope = true) :
+    node.scope ∈ scanRebuildCone changed affected (priorNodes ++ node :: suffix) := by
+  rw [scanRebuildCone_append]
+  simp only [scanRebuildCone]
+  apply mem_scanRebuildCone_of_mem
+  exact (mem_extendRebuildCone_semantics_iff changed
+    (scanRebuildCone changed affected priorNodes) node node.scope).2
+      (Or.inr ⟨rfl, Or.inl locallyChanged⟩)
+
+/-- `parent_scope_mem_scanRebuildCone_of_dependency` proves that if a direct
+dependency is in the cone after the prior nodes, visiting its parent puts that
+parent in the final cone and the suffix cannot remove it. -/
+theorem parent_scope_mem_scanRebuildCone_of_dependency
+    (changed : ScopeId → Bool) {fanout : Nat} (affected : Vec ScopeId)
+    (priorNodes suffix : List (DependencyNode fanout))
+    (node : DependencyNode fanout) (dependency : ScopeId)
+    (direct : dependency ∈ node.dependencies)
+    (dependencyAffected :
+      dependency ∈ scanRebuildCone changed affected priorNodes) :
+    node.scope ∈ scanRebuildCone changed affected (priorNodes ++ node :: suffix) := by
+  rw [scanRebuildCone_append]
+  simp only [scanRebuildCone]
+  apply mem_scanRebuildCone_of_mem
+  exact (mem_extendRebuildCone_semantics_iff changed
+    (scanRebuildCone changed affected priorNodes) node node.scope).2
+      (Or.inr ⟨rfl, Or.inr ⟨dependency, direct, dependencyAffected⟩⟩)
+
+/-- With an empty initial cone and no locally changed scope,
+`scanRebuildCone_no_changes` produces the empty cone. -/
+theorem scanRebuildCone_no_changes (changed : ScopeId → Bool)
+    (noneChanged : ∀ scope, changed scope = false)
+    {fanout : Nat} (nodes : List (DependencyNode fanout)) :
+    scanRebuildCone changed Vec.empty nodes = Vec.empty := by
+  induction nodes with
+  | nil => rfl
+  | cons node rest inductionHypothesis =>
+      have unaffected :
+          extendRebuildCone changed Vec.empty node = Vec.empty := by
+        simp [extendRebuildCone, nodeAffected, noneChanged, Vec.any_eq_true_iff,
+          Vec.contains_iff_mem]
+      simpa [scanRebuildCone, unaffected] using inductionHypothesis
+
+/-- A graph with no locally changed scope has an empty rebuild cone. -/
+theorem rebuildCone_no_changes {fanout : Nat} (dag : ManifestDag fanout)
+    (changed : ScopeId → Bool) (noneChanged : ∀ scope, changed scope = false) :
+    rebuildCone dag changed = Vec.empty :=
+  scanRebuildCone_no_changes changed noneChanged dag.nodes.toList
 
 /-- Extending the cone never loses a previously affected scope. -/
 theorem mem_extendRebuildCone_of_mem (changed : ScopeId → Bool)
