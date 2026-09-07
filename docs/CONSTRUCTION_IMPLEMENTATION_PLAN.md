@@ -375,6 +375,10 @@ alpha-normalization and manifest derivation. Its staged error preserves alpha/
 CFG failure priority, its success retains exact pre-alpha instructions and the
 same normalized AST used by constructor closure, and its certified companion
 adds exact typed-application correspondence without promoting nominal lookup.
+`Grass.Construct.Source.ConstructorLower` then requires a separate `VerifiedAst`
+over that exact normalized source before lowering. Constructor identity and
+exact generated bodies remain provenance evidence; neither is silently promoted
+into block-local semantic correctness.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
