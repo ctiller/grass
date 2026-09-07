@@ -362,6 +362,18 @@ def continuation : system.InfiniteContinuation samplePrefix.state samplePrefix.g
   step := fun _ => trivial
   consistent := ⟨rfl, rfl⟩
 
+example : (toAbstract.mapInfinite continuation).prefixEvents 2 =
+    continuation.prefixEvents 2 :=
+  toAbstract.mapInfinite_prefixEvents continuation 2
+
+example : abstractSystem.Steps
+    (toAbstract.mapState samplePrefix.state)
+    (toAbstract.mapGraph samplePrefix.graph)
+    (continuation.prefixEvents 2)
+    (toAbstract.mapState (continuation.stateAt 2))
+    (toAbstract.mapGraph (continuation.graphAt 2)) :=
+  toAbstract.mapInfinite_prefixSteps continuation 2
+
 /-- A non-vacuous indexed continuation: state and graph both advance at every
 step, while its observable events alternate. -/
 abbrev indexedSystem : RelationalSystem Bool where
