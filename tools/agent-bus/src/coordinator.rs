@@ -252,6 +252,15 @@ pub fn drain_outbox(
                 continue;
             }
         }
+        if let Err(e) = verify_participants_active(&state, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
+        }
         if let Err(e) = verify_predecessor_not_contested(&state, &data) {
             let reason = e.to_string();
             reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
@@ -738,6 +747,45 @@ fn verify_review_merge_reconciled(
              current main -- reconcile only records a merge that has genuinely already landed",
             d.main_commit, d.previous_main
         )));
+    }
+    Ok(())
+}
+
+/// Every agent this event names must still be active.
+///
+/// `apply` checks only that they hold the right role, which is fixed at
+/// registration and therefore ordered ahead of everything. Liveness is not:
+/// `agent.status` and `agent.retired` live on the named agent's own stream,
+/// which this event neither references nor need have observed, so asking
+/// during replay made a nomination fatal on a host that had fetched the
+/// reviewer's retirement and harmless on one that had not.
+///
+/// Here `state` is the publishing host's fully-reduced view, so a nominator
+/// is held to what it could actually have seen.
+fn verify_participants_active(
+    state: &crate::state::BusState,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    use crate::events::EventData as E;
+    let named: Vec<&Agent> = match data {
+        E::ReviewNominated(d) => d
+            .authors
+            .iter()
+            .chain(std::iter::once(&d.reviewer))
+            .collect(),
+        E::ReviewReassigned(d) => vec![&d.reviewer],
+        _ => return Ok(()),
+    };
+    for agent in named {
+        match state.agents.get(agent) {
+            Some(ag) if ag.active() => {}
+            Some(_) => {
+                return Err(invalid(format!(
+                "{agent} is retired or otherwise inactive, so it cannot take part in this review"
+            )))
+            }
+            None => return Err(invalid(format!("{agent} is not a registered agent"))),
+        }
     }
     Ok(())
 }
@@ -4147,5 +4195,47 @@ mod tests {
                 )
             });
         }
+    }
+
+    /// The other half of `apply::a_reviewer_retiring_concurrently_with_a_
+    /// nomination_still_reduces`: reduction records it, publication refuses
+    /// it.
+    #[test]
+    fn the_publication_gate_refuses_an_inactive_participant() {
+        let (mut state, _epoch) = state_with_subscribers(&[
+            ("alice", Role::Implementor, &[]),
+            ("bob", Role::Reviewer, &[]),
+        ]);
+        let nomination = |reviewer: &str| {
+            EventData::ReviewNominated(crate::events::ReviewRequest {
+                authors: crate::scalars::StringSet::from_iter([a("alice")]),
+                product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                    .unwrap(),
+                reviewer: a(reviewer),
+                required_checks: vec![],
+                review_scope: crate::scalars::StringSet::from_iter([
+                    crate::scalars::PathClaim::parse("Grass/**".into()).unwrap(),
+                ]),
+                summary: text("s"),
+                target_branch: crate::scalars::Branch::parse("refs/heads/main".into()).unwrap(),
+                evidence: crate::scalars::StringSet::default(),
+            })
+        };
+        let data = nomination("bob");
+
+        verify_participants_active(&state, &data).expect("an active reviewer publishes normally");
+
+        state.agents.get_mut(&a("bob")).unwrap().retired = true;
+        let err = verify_participants_active(&state, &data)
+            .expect_err("a retired reviewer must not be handed a review");
+        assert!(
+            err.to_string().contains("retired or otherwise inactive"),
+            "{err}"
+        );
+
+        // An agent nobody registered is a different failure, and says so.
+        let unknown = nomination("nobody");
+        let err = verify_participants_active(&state, &unknown).expect_err("unknown agent");
+        assert!(err.to_string().contains("not a registered agent"), "{err}");
     }
 }

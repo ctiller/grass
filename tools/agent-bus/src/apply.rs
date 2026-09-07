@@ -319,7 +319,34 @@ fn require_agent<'a>(state: &'a BusState, a: &Agent) -> AbResult<&'a AgentState>
         .ok_or_else(|| invalid(format!("unregistered agent: {a}")))
 }
 
+/// `a` is registered with `role` and is still active.
+///
+/// Sound only where `a` is the publisher itself: `active()` reads `status`
+/// and `retired`, which `agent.status`/`agent.retired` move, and those are
+/// ordered against this event only when they are on the *same* stream. For
+/// a subject named in someone else's event, use `require_role` and let
+/// `coordinator::verify_participants_active` ask about liveness.
 pub(crate) fn require_active_role<'a>(
+    state: &'a BusState,
+    a: &Agent,
+    role: Role,
+) -> AbResult<&'a AgentState> {
+    let ag = require_role(state, a, role)?;
+    if !ag.active() {
+        return Err(invalid(format!("{a} is not active")));
+    }
+    Ok(ag)
+}
+
+/// `a` is registered with `role`, saying nothing about whether it is still
+/// active.
+///
+/// The role half is safe to ask during replay where the liveness half is
+/// not. `primary_role` is fixed by `agent.registered` at sequence zero and
+/// never changes, and `topological_order` sorts every sequence-zero event
+/// into a tier ahead of all others, so an agent's registration is applied
+/// before any event that could name it, on every host.
+pub(crate) fn require_role<'a>(
     state: &'a BusState,
     a: &Agent,
     role: Role,
@@ -327,9 +354,6 @@ pub(crate) fn require_active_role<'a>(
     let ag = require_agent(state, a)?;
     if ag.primary_role != role {
         return Err(invalid(format!("{a} does not have role {role}")));
-    }
-    if !ag.active() {
-        return Err(invalid(format!("{a} is not active")));
     }
     Ok(ag)
 }
@@ -1354,8 +1378,19 @@ fn apply_review_nominated(state: &mut BusState, env: &Envelope, d: &ReviewReques
             env.id
         )));
     }
+    // The publisher is one of the authors (just checked), so its own
+    // liveness is sound to ask here: a stream is single-writer and
+    // `topological_order` gives it a predecessor edge, so this agent's own
+    // status events are ordered against this one on every host.
+    require_active_role(state, &env.agent, Role::Implementor)?;
     for author in d.authors.iter() {
-        require_active_role(state, author, Role::Implementor)?;
+        // Every *other* author gets the role check only. Their
+        // `agent.status`/`agent.retired` is on their own stream, which this
+        // nomination neither references nor need have observed, so charging
+        // the nominator for it made reduction depend on which a host
+        // replayed first. `coordinator::verify_participants_active` asks
+        // about liveness at publication instead.
+        require_role(state, author, Role::Implementor)?;
     }
     if d.authors.iter().any(|a| a == &d.reviewer) {
         return Err(invalid(format!(
@@ -1363,7 +1398,7 @@ fn apply_review_nominated(state: &mut BusState, env: &Envelope, d: &ReviewReques
             env.id
         )));
     }
-    require_active_role(state, &d.reviewer, Role::Reviewer)?;
+    require_role(state, &d.reviewer, Role::Reviewer)?;
     if d.target_branch.as_str() != "refs/heads/main" {
         return Err(invalid(format!(
             "{}: target_branch must be refs/heads/main",
@@ -1729,7 +1764,7 @@ fn apply_review_reassigned(
             env.id
         )));
     }
-    require_active_role(state, &d.reviewer, Role::Reviewer)?;
+    require_role(state, &d.reviewer, Role::Reviewer)?;
     let is_author = chain
         .current_request
         .authors
@@ -4123,6 +4158,96 @@ mod tests {
             forward.issues[&issue_env.id].current_target,
             reverse.issues[&issue_env.id].current_target
         );
+    }
+
+    /// A reviewer retiring concurrently with a nomination naming it must not
+    /// make the bus unreducible.
+    ///
+    /// `active()` reads `status` and `retired`, both moved by events on the
+    /// reviewer's *own* stream. A nomination references neither and need not
+    /// have observed either, so charging the nominator for them made the
+    /// nomination fatal on a host that had fetched the retirement and
+    /// harmless on one that had not -- the same two events, one host unable
+    /// to read the bus.
+    ///
+    /// The role half is still checked here, and is sound: `primary_role` is
+    /// fixed by `agent.registered` at sequence zero, and `topological_order`
+    /// sorts every sequence-zero event ahead of all others.
+    ///
+    /// Pairs with `the_publication_gate_refuses_an_inactive_participant`,
+    /// which is where the liveness rule now lives.
+    #[test]
+    fn a_reviewer_retiring_concurrently_with_a_nomination_still_reduces() {
+        let build = |retire_first: bool| {
+            let mut state = empty_state(&[("alice", Role::Implementor), ("bob", Role::Reviewer)]);
+            let (alice, bob) = (a("alice"), a("bob"));
+            apply_ok(&mut state, &register(&alice, Role::Implementor));
+            apply_ok(&mut state, &register(&bob, Role::Reviewer));
+
+            let retire = Envelope::new(
+                &bob,
+                1,
+                no_frontier(),
+                &EventData::AgentStatus(AgentStatusEvent {
+                    status: LifecycleStatus::Done,
+                    note: text("handing over"),
+                    product_branch: None,
+                    product_commit: None,
+                }),
+                [],
+            );
+            let nominate = Envelope::new(
+                &alice,
+                1,
+                no_frontier(),
+                &EventData::ReviewNominated(review_request(&[&alice], &bob)),
+                [],
+            );
+
+            let order: Vec<Envelope> = if retire_first {
+                vec![retire.clone(), nominate.clone()]
+            } else {
+                vec![nominate.clone(), retire.clone()]
+            };
+            reduce_onto(state, &order)
+                .unwrap_or_else(|e| panic!("retire_first={retire_first} must still reduce: {e}"))
+        };
+
+        let nominate_first = build(false);
+        let retire_first = build(true);
+        assert_eq!(
+            nominate_first.reviews.len(),
+            1,
+            "the nomination must be recorded, not silently skipped"
+        );
+        assert_eq!(
+            format!("{nominate_first:#?}"),
+            format!("{retire_first:#?}"),
+            "GATE 15/16: both valid orders must reduce to identical state"
+        );
+    }
+
+    /// The role half of the same check is not weakened: naming an agent that
+    /// is registered as something else is still refused during replay,
+    /// because `primary_role` cannot move.
+    #[test]
+    fn a_nomination_naming_a_non_reviewer_is_still_refused() {
+        let mut state = empty_state(&[("alice", Role::Implementor), ("bob", Role::Implementor)]);
+        let (alice, bob) = (a("alice"), a("bob"));
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        let err = apply_event(
+            &mut state,
+            &Envelope::new(
+                &alice,
+                1,
+                no_frontier(),
+                &EventData::ReviewNominated(review_request(&[&alice], &bob)),
+                [],
+            ),
+        )
+        .expect_err("an implementor cannot be nominated as the reviewer");
+        assert!(err.to_string().contains("does not have role"), "{err}");
     }
 
     /// A third claim published concurrently with a `lifecycle.conflict_
