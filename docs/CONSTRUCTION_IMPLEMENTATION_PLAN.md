@@ -292,6 +292,11 @@ token and advanced supply for the later eliminator and proves freshness,
 issuance, non-reissue, exact exit coverage, and closure. It is not itself
 `withStack`: hiding the token while returning a verified outer fragment still
 requires the execution model's provenance interpretation and elimination law.
+`Grass.Construct.StackScopeNest` threads an outer session's exact output supply
+into an inner session, permits the inner payload to depend on the outer token,
+and proves the two sequential tokens distinct. This supplies the nominal and
+all-exit composition for nested binders while leaving the same provenance
+elimination obligation explicit.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
