@@ -175,7 +175,7 @@ structure PortableProgramCertificate {R : Type u} [ResourceModel R]
   providerDemandSummary : ProviderDemandFamily
   providerDemandExtractionExact :
     providerDemandSummary.AuthorityEquiv
-      model.processOrigin.providers.providerDemands
+      model.processOrigin.providerDemands
   demands : DemandCertificateFamily spec.requirements model
 
 structure ProjectedDriverCertificate {R : Type u} [ResourceModel R]

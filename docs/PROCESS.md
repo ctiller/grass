@@ -769,7 +769,7 @@ structure ProcessProviderCompatibility
     (registryCertificate : CertifiedProtocolRegistry registry)
     (plan : ProcessPlan registry boundary)
     (selected : SelectedProtocolImage registry plan.toProcessTopologyCore) : Prop where
-  authorities : EverySelectedProviderAuthorityPairIsDisjointOrSameOwner
+  authorities : EverySelectedProviderSupportPairIsDisjointOrSameOwner
     boundaryCertificate registryCertificate plan selected
   descriptors : EveryCollidingSelectedOriginHasExactDescriptor
     boundaryCertificate registryCertificate plan selected
@@ -837,6 +837,11 @@ plan/shard constructors generate the selected image, compatibility, family, and
 the three proofs; applications do not maintain a second list. A novel explicit
 plan supplies compatibility at its composition boundary, where a true owner or
 descriptor collision fails before the opaque certificate can be built.
+`EverySelectedProviderSupportPairIsDisjointOrSameOwner` ranges over each
+selected family's exact `supportRegistry`, never its larger ambient storage
+registry. Thus two empty-demand protocols aggregate even if their unused
+ambient registries contain conflicting owners, while an active collision still
+requires typed owner equality.
 constructor. `authorityExact` additionally embeds the generated summary and the
 canonical normalized union into one owner-preserving registry; coverage by
 stable origin/view alone is never accepted as aggregate authority evidence.
@@ -1959,6 +1964,8 @@ structure PendingInteractionModel (boundary : DriverBoundary) where
       @Extends demand start first third
   observations : {demand : EffectDemand boundary} ->
     {start : Start demand} -> History demand start -> List boundary.Observation
+  rootObservations : forall (demand : EffectDemand boundary) (start : Start demand),
+    observations (root demand start) = []
   observations_congruent : forall {demand} {start : Start demand}
       {first second : History demand start},
     Extends first second -> Extends second first ->
@@ -1973,6 +1980,7 @@ def PendingInteractionModel.atomic (boundary : DriverBoundary) :
   reflexive := fun _ => rfl
   transitive := fun firstSecond secondThird => firstSecond.trans secondThird
   observations := fun _ => []
+  rootObservations := fun _ _ => rfl
   observations_congruent := fun _ _ => rfl
 
 def PendingInteractionModel.ProperExtends

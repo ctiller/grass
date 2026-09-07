@@ -435,6 +435,11 @@ def ProviderRealizesEffectPlan.requirementConnections
     (dischargeAll plan.realizationDemands
       (plan.realizationDemands_certified_iff.mpr certificate.viewRealization))
 
+theorem ProviderRealizesEffectPlan.requirementConnections_forwardedExact
+    (certificate : ProviderRealizesEffectPlan providerEnv plan) :
+    (certificate.requirementConnections).exactForwardedFamily.AuthorityEquiv
+      certificate.forwardedRequirements
+
 structure EquivalentProviderRealizesEffectPlan ... extends
     ProviderRealizesEffectPlan providerEnv plan where
   historyCoverage : EverySelectedHistoryHasAProviderOperationPrefix ...
@@ -449,6 +454,10 @@ resulting dependent family against its exact `ProviderEnv`: provider-owned
 members are discharged, while every memory/resource/obligation/ABI/ISA or later
 member is forwarded with its original origin into the next staged family. For an
 Effect origin, `requirementConnections` is the local constructor. Equal names or
+`requirementConnections_forwardedExact` is the authority-preserving bridge from
+that returned disposition to the certificate summary; projected-driver
+construction consumes it rather than reading `forwardedRequirements` alone.
+Equal names or
 equal requirement sets cannot substitute a
 different effect theory, operation history, observation lens, or provider
 dictionary. The base theorem is directed refinement. Coverage/reflection is

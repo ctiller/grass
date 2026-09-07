@@ -94,10 +94,15 @@ structure DirectProgramRealizes {R : Type u} [ResourceModel R]
 and produces one conventional, replaceable process presentation. The input
 already contains the program decomposition and correctness proof; neither the
 adapter's topology nor its chosen child placement becomes precious.
-The provider-demand family is the conservative certified-boundary envelope;
-every dynamic occurrence's possibly empty or multi-origin subfamily is a definition
-of its dependent demand, not caller-populated evidence. Thus neither the adapter
-nor a replacement correctness proof can omit or relabel it, and provider
+The provider-demand family is the conservative certified-boundary envelope.
+Every dynamic occurrence's possibly empty or multi-origin subfamily is
+`program.derivation.operationOrigins occurrence`: a function of the opaque
+derivation and exact occurrence, not merely its dependent demand and not caller-
+populated evidence. `operationOrigins_exact`, `operationOrigins_contained`, and
+`operationOrigins_aggregateExact` connect it respectively to that occurrence's
+selected lower path, the conservative boundary, and the exact aggregate of used
+lower requirements. Thus two equal logical demands may choose different
+lowerings without either proof omitting or relabelling an origin. Provider
 certificates are not duplicated per call site. The raw relational program stays
 free of provider and finite-site fields; only the certified wrapper enters the
 complete proof chain.
