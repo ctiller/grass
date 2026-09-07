@@ -420,6 +420,13 @@ inputs. Its one-instruction adapter is definitionally `Grass.Op.step`; the batch
 runner threads only successful states, records the first rejection, and retains
 the exact unattempted suffix. It introduces no parallel instruction semantics.
 
+`Grass.Unsafe.Emit` streams a hierarchical fragment through one explicitly raw
+instruction encoder. Every item retains its structural `SourceOrigin` and
+consecutive byte offset, including zero-byte encodings; exact projection and
+concatenation theorems tie the result to the original source while a mandatory
+ordered taint ledger makes the absence of semantic and artifact certification
+review-visible.
+
 Exit criteria include round trips for supported raw instructions, structured
 errors for unknown/ambiguous bytes and targets, exact stepping agreement with
 `Grass.Op.step`, and exact byte/list input passed to the artifact writer.
