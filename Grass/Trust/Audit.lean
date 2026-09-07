@@ -31,6 +31,22 @@ private def isRootCandidate : ConstantInfo -> Bool
   | .opaqueInfo _ => true
   | _ => false
 
+/-- Whether `name` is Lean's generated wrapper for a structure constructor.
+
+These definitions have result type `VerifiedProgram` for the `VerifiedProgram`
+constructor, but they are construction machinery rather than completed
+certificates. Checking the parent declaration distinguishes them from ordinary
+authored declarations whose final component happens to be `_flat_ctor`. -/
+private def isGeneratedFlatConstructor
+    (environment : Environment) (name : Name) : Bool :=
+  match name with
+  | .str parent "_flat_ctor" =>
+      match environment.find? parent with
+      | some (.ctorInfo constructor) =>
+          isStructure environment constructor.induct
+      | _ => false
+  | _ => false
+
 private def allowedAxiom (name : Name) : Bool :=
   name == ``propext || name == ``Classical.choice || name == ``Quot.sound
 
@@ -245,7 +261,7 @@ def auditVerifiedPrograms : CommandElabM Unit := do
     found.push (name, info)
   let mut roots := #[]
   for (name, info) in declarations do
-    if isRootCandidate info &&
+    if !isGeneratedFlatConstructor environment name && isRootCandidate info &&
         (← liftTermElabM <| producesVerifiedProgram info.type) then
       roots := roots.push (name, info)
   if roots.isEmpty then

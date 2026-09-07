@@ -242,6 +242,18 @@ try {
         $entrypointOutput | ForEach-Object { Write-Host $_ }
     }
 
+    $rootNonvacuityProbe = @(
+        "import Grass.Trust.Audit",
+        "#audit_verified_programs"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $rootNonvacuityProbe)
+    $rootNonvacuityOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -eq 0 -or
+        -not ($rootNonvacuityOutput -match "trust audit found no concrete VerifiedProgram declarations")) {
+        $rootNonvacuityOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit accepted generated constructor machinery as a concrete certificate root."
+    }
+
     $irreducibleDiscoveryProbe = @(
         "import Tests.Foundation",
         "open Grass",
@@ -267,6 +279,13 @@ try {
         "def _hiddenVerifiedProgram : HiddenVerifiedProgram := by",
         "  unfold HiddenVerifiedProgram",
         "  exact Grass.Tests.Foundation.verified",
+        "def _flat_ctor : HiddenVerifiedProgram := by",
+        "  unfold HiddenVerifiedProgram",
+        "  exact Grass.Tests.Foundation.verified",
+        "inductive AuthoredContainer where | node",
+        "def AuthoredContainer.node._flat_ctor : HiddenVerifiedProgram := by",
+        "  unfold HiddenVerifiedProgram",
+        "  exact Grass.Tests.Foundation.verified",
         "end InternalRootAuditProbe"
     )
     [System.IO.File]::WriteAllLines($internalRootProbePath, $internalRootProbe)
@@ -282,9 +301,11 @@ try {
     [System.IO.File]::WriteAllLines($temporaryPath, $internalRootConsumerProbe)
     $internalRootConsumerOutput = @(& lake env lean $temporaryPath 2>&1)
     if ($LASTEXITCODE -ne 0 -or
-        -not ($internalRootConsumerOutput -match "InternalRootAuditProbe\._hiddenVerifiedProgram")) {
+        -not ($internalRootConsumerOutput -match "InternalRootAuditProbe\._hiddenVerifiedProgram") -or
+        -not ($internalRootConsumerOutput -match "InternalRootAuditProbe\._flat_ctor") -or
+        -not ($internalRootConsumerOutput -match "InternalRootAuditProbe\.AuthoredContainer\.node\._flat_ctor")) {
         $internalRootConsumerOutput | ForEach-Object { Write-Host $_ }
-        throw "Trust audit did not discover an imported underscore-prefixed root."
+        throw "Trust audit did not discover an imported authored underscore-prefixed root."
     }
 
     $wrappedNegativeProbe = @(
