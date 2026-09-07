@@ -1033,53 +1033,48 @@ theorem both_sources_merged :
 
 `agent-bus` ruling `g-design:83` generalised `carrierCarriesTheMessage` into
 `ProcessPlan.coalescing` because a per-source equality made latest-wins and
-folding channels unconstructible at *every* plan. A field that is only ever
-instantiated at `ProcessPlan.exactDedup` would be that generalisation in name
-only, which is the shape this ledger has spent eight rounds refusing, so the
+folding channels unconstructible at *every* plan. A field only ever instantiated
+at `ProcessPlan.exactDedup` would be that generalisation in name only, so the
 distinction is exhibited rather than described.
 
-What is here is the distinction at the level of the *policy*. A plan-level
-witness — a second channel-carrying plan whose `coalescing` is `latestWins`, with
-a `ResolvesEscrow` merging two different payloads through it — is owed and
-recorded in §10.127; this is the part that is cheap and still falsifiable.
+**What is here is the distinction between two predicates, and that is less than
+it looks.** The first version of this section offered `latestWins sources carrier
+:= carrier ∈ sources` and proved it admits a family `exactDedup` refuses. Both
+halves are true and the pair proves nothing about coalescing, because *no*
+`ResolvesEscrow` can hand that predicate a family containing its own carrier:
+`carrierIsPermitted` takes the sources to be exactly those the after-ledger
+resolves into the carrier, and `EscrowLedger.coalesceCarrierLater` requires each
+of them to rank strictly below it.
+`Tests/Process/MergeFixtures.lean`'s `latestWins_is_unsatisfiable` is that,
+proved. A fixture written to show a generalisation had content was itself a
+predicate no plan can meet — §10.130.
+
+So what remains here is the arithmetic, kept because it is still the cheapest
+statement of what `exactDedup` refuses, and the *plan-level* witness lives in
+`Tests/Process/MergeFixtures.lean`: a second plan over this same topology whose
+coalescing keeps one source's payload, two real merges through it, and
+`serverPlan_refuses_it` showing this plan could not have taken the second.
 -/
 
-/-- A latest-wins policy: the carrier is one of the sources, and the others are
-discarded rather than required to agree with it. -/
-def latestWins (sources : List (EdgeOccurrence serverTopology World.serverMessage ()))
-    (carrier : EdgeOccurrence serverTopology World.serverMessage ()) : Prop :=
-  carrier ∈ sources
-
-/-- The two payloads a dedup channel may not merge and a latest-wins channel may. -/
+/-- The two payloads a dedup channel may not merge. -/
 def otherPayload : World.serverMessage () := ⟨99⟩
 
 def otherCarrier : EdgeOccurrence serverTopology World.serverMessage () :=
   ⟨otherPayload, ⟨wire, { id := ⟨.messageOccurrence, 6⟩, isMessage := rfl }⟩⟩
 
 /--
-**Latest-wins admits a merge of two different payloads.**
+**`exactDedup` refuses a family whose members disagree about the payload.**
 
-`escrowed` carries `payload` and `otherCarrier` carries `otherPayload`; the
-carrier is one of the sources, and nothing asks the other to agree with it.
+Which is what the old per-source conjunct imposed on every channel. The merge
+this refuses is constructible at a plan that permits it, and
+`Tests/Process/MergeFixtures.lean`'s `the_merge_that_keeps_one_payload` is that
+merge.
 -/
-theorem latestWins_admits_a_real_merge :
-    latestWins [escrowed, otherCarrier] otherCarrier :=
-  List.mem_cons_of_mem _ List.mem_cons_self
-
-/--
-**And `exactDedup` refuses exactly that merge**, which is what the old field
-imposed on every channel.
-
-The two theorems together are the ruling's content: the same source family and
-carrier are permitted under one policy and refused under the other, so
-`ProcessPlan.coalescing` is a choice a channel makes rather than a restatement of
-`carrier.1 = source.1`.
--/
-theorem exactDedup_refuses_it :
+theorem exactDedup_refuses_a_mixed_family :
     ¬ exactDedup [escrowed, otherCarrier] otherCarrier := by
   intro dedup
   have payloads := dedup escrowed List.mem_cons_self
-  have counts := congrArg (fun message => message.down) payloads
-  simp [escrowed, Transition.payload, otherCarrier, otherPayload] at counts
+  have counts : (7 : Nat) = 99 := congrArg (fun message => message.down) payloads
+  exact absurd counts (by decide)
 
 end Grass.Process.Tests.Close

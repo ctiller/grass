@@ -4805,6 +4805,11 @@ one instantiation in the corpus and it is `exactDedup` — which is the "inhabit
 and not exercised" shape §10.88 named, and is recorded here rather than left for
 a reviewer to find. **Owed.**
 
+**Closed by §10.130**, which also records that the `latestWins` half of this
+paragraph was worse than it looks: the predicate it names is satisfiable by no
+coalesce at any plan, so the pair offered here proved nothing about coalescing at
+all.
+
 **And one thing the ruling asked for that this layer cannot carry.** g-design's
 wording is "plus the exact custody/resource/obligation preservation laws". An
 `EdgeOccurrence` is a message and a nominal identity; there is no resource or
@@ -4908,6 +4913,64 @@ still the thing §10.89 asked for — the transition is one an execution can con
 before-worlds by steps is owed, and is a bigger job: it wants a `processStep`
 that puts an instance in each state, which is `Tests/Process/ProcessStepFixtures.lean`'s
 territory rather than this file's.
+
+### 10.130 The fixture that proved the generalisation had content could not be satisfied
+
+§10.127 landed `ProcessPlan.coalescing` and recorded, honestly, that the corpus
+instantiated it at `ProcessPlan.exactDedup` and nowhere else — a field with one
+instantiation being the generalisation in name only. It offered a pair of
+theorems as the stand-in: `latestWins sources carrier := carrier ∈ sources`
+admits a family `exactDedup` refuses.
+
+**Building the plan-level witness found that the stand-in was worse than
+under-exercised.** `ResolvesEscrow.carrierIsPermitted` takes the source family to
+be exactly those the after-ledger resolves into the carrier, and
+`EscrowLedger.coalesceCarrierLater` requires every such source to rank *strictly
+below* the carrier. So no coalesce, at any plan, can ever hand `latestWins` a
+family containing its own carrier: the predicate is satisfiable by nothing.
+`Tests/Process/MergeFixtures.lean`'s `latestWins_is_unsatisfiable` proves it in
+three lines.
+
+That is the failure this ledger has spent the whole milestone refusing — a record
+nothing inhabits, a law that cannot fail, a disjunct no plan can reach — arriving
+this time *inside the fixture written to rule it out*. The entry that recorded the
+gap honestly still shipped a witness that was not one, and no reviewer caught it
+because the two theorems it offered are both true.
+
+**What closes it.** `Tests/Process/MergeFixtures.lean` is the plan-level witness
+§10.127 said was owed:
+
+* `mergingPlan` is `serverPlan` with one field changed, so every world,
+  occurrence and ledger the other fixtures build is a world of it too, and the
+  comparison is a comparison rather than two unrelated stories;
+* `keepsOnePayload` replaces `latestWins` — the carrier agrees with *some* source
+  rather than with every source, which is the weakest policy that is not
+  deduplication;
+* `the_first_merge` and `the_merge_that_keeps_one_payload` are two real
+  `ResolvesEscrow`s into one carrier, and the second merges a source carrying a
+  *different* payload;
+* `serverPlan_refuses_it` shows the same step is unconstructible at the plan whose
+  policy is `exactDedup`.
+
+**A merge takes two steps, which is worth knowing.**
+`ResolvesEscrow.resolvesNothingElse` lets a step resolve exactly the occurrence it
+names, so §3's "coalescing consumes every source token" is a *sequence* of
+coalesces into one carrier rather than a single step — and because
+`carrierIsPermitted` reads the family off each step's own after-ledger, the
+family grows as the sequence proceeds. The first merge here would satisfy
+`exactDedup` too; only the second has a family whose members disagree. A policy
+is therefore checked against every prefix of the merge, not only against the
+whole, which is stronger than the ruling asked for and worth stating before
+someone assumes otherwise.
+
+**And one thing this does not settle.** `keepsOnePayload` is not latest-wins:
+pinning *which* source the carrier follows needs an order over the family, and
+`ProcessPlan.coalescing` receives a `List` whose order is the plan's to interpret
+rather than the ledger's rank. A genuine latest-wins policy is expressible — take
+the last element — but relating that list order to `EscrowLedger.rank` is not,
+because the relation never sees the ledger. Recorded rather than fixed: it is the
+same shape as §10.103's `rank`, which is pinned indirectly and by nothing that
+mentions it.
 
 ## 11. The authoring facade
 
