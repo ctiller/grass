@@ -160,6 +160,9 @@ example : spec.accepts true
     ((artifactFormat.loadedBehavior ByteArray.empty).observe (initialExecution true)) :=
   verified.sound (initialExecution true) trivial trivial
 
+example : (artifactFormat.loadedBehavior (emitProgram verified)).Adequate :=
+  verified.loadedAdequate
+
 example : Nonempty { execution :
     (artifactFormat.loadedBehavior ByteArray.empty).system.ExecutionPrefix //
     (artifactFormat.loadedBehavior ByteArray.empty).HasInput true execution } :=
