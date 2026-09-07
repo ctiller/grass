@@ -28,12 +28,16 @@ Grass/
   Weave/         composition and noninteraction
   CFG/           block contracts, edges, loops, calls, stack shapes
   Construct/     layouts, placement, verified instruction-fragment generators
+  Assembly/
+    X86.lean     narrow first-class x86 assembly authoring facade
   Op/            existential ghost/raw operation interfaces and erasure
   ISA/
+    X86.lean     narrow x86 machine-authority facade
     X86/         common, Intel, AMD, encoding, decoding, validation metadata
   ABI/
     Win64/
   Platform/
+    Win32.lean   narrow Win32 API authoring facade
     Win32/
   Artifact/
     Binary/      concrete readers/writers realizing Grammar formats
@@ -44,6 +48,7 @@ Grass/
     Cache/       semantic-environment Merkle keys and certificate replay
     Manifest/    measured shards and hierarchical composition certificates
   Unsafe/        raw construction, import, stepping, and emission
+  Emit.lean      verified-program emission facade
   Programs/
     HelloWin64/
     SortWin64/
@@ -89,6 +94,55 @@ Lower layers must not import concrete programs. Common semantics must not import
 one ISA or platform. ISA and platform profiles may depend on common memory/event
 vocabulary but own their consistency and applicability rules. Artifact writers
 consume raw layout/link descriptions, not high-level specifications.
+
+The files marked as facades are stable public authoring surfaces, not a second
+implementation hierarchy and not ownership of every module beneath a similarly
+named directory. Their purpose is to let an assembly author name the artifact
+being authored instead of manually reproducing the internal dependency graph.
+
+`Grass.Assembly.X86` is the first-class x86 assembly authoring facade. It may
+re-export the narrow instruction signatures from `Grass.ISA.X86` together with
+the architecture-independent `Construct` and `CFG` signatures needed by source
+forms such as `asm_source`, `withStack`, block annotations, and calls. It does
+not make the x86 machine-authority owner responsible for the construction
+language: the construction/lowering workstream owns this facade and consumes
+the ISA facade as a dependency. An implementation or certificate module may
+not enter its dependency cone merely for convenience.
+
+`Grass.ISA.X86` is the lower machine-authority facade over the x86 encoding,
+decoding, instruction semantics, and validation-metadata shards. Machine-model
+authors and the assembly facade consume it directly; ordinary assembly authors
+should not have to assemble its shards one by one.
+
+`Grass.Platform.Win32` is the public facade for the Win32 API family. A Windows
+version floor such as Windows 10 and an architecture/ABI selection such as x64
+remain explicit profile values selected through this API; neither belongs in
+the module path. In particular, the spike spelling `Grass.Platform.Win10.X64`
+must be replaced by `Grass.Platform.Win32`, not retained as an alias that
+conflates an API family, deployment floor, architecture, and ABI. The spike-side
+replacement, including the Vulkan profile spelling, is tracked by agent-bus
+dependency `g-design:86` rather than claimed complete here.
+
+`Grass.Emit` is the safe verified-emission facade. It exposes `VerifiedProgram`
+and the checked `emitProgram` entry point, plus only the result vocabulary
+needed to use them. Ghost erasure, raw instruction admission, unchecked
+construction, linking mechanics, and byte writers remain in their owning
+`Unsafe` and `Artifact` shards. Calling the internal layer `Grass.Unsafe` does
+not make it an acceptable replacement for the verified author surface, and
+`Grass.Emit` must not expose a route from an unverified source directly to
+executable bytes.
+
+All four facades are signature-only and have measured dependency cones. They
+may import reviewed logical or signature leaves, but never `Impl`, `Cert`, a
+whole-program aggregate, or a concrete program. Facade tests demonstrate both
+halves of the boundary: the intended spike vocabulary resolves through the
+concise import, and representative implementation-only declarations do not.
+Decision 134 ratifies `Grass.Assembly.*`, `Grass.Platform.*`, and `Grass.Emit`
+as stable author-facing facades. `Grass.ISA.X86` is deliberately outside that
+list: it is the narrower machine-authority integration surface consumed by
+machine-model authors and `Grass.Assembly.X86`, and uses
+[OLEAN_SHARDING.md](OLEAN_SHARDING.md)'s reviewed deliberate-public-re-export
+exception on that basis. Neither case is permission to use `import all`.
 
 The foundational dependency graph is an acyclic diamond rather than a single
 chain:

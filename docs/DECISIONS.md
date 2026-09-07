@@ -771,6 +771,63 @@ to imitate compiler-selected storage or CFG structure.
     an ordinary process author fills. This resolves `c-process:47` and replaces
     the `Option` field that conflated roots with detached children.
 
+131. `ChannelContract` contains authored semantic assertions, their checkable
+    fragment-locality witnesses, and send/receive Hoare obligations over an
+    explicit `ChannelSteps` parameter. It does not contain opaque fields whose
+    names merely restate desired consequences. Escrow stability, framing, and
+    separability of receiver state from escrow are derived from assertion
+    footprints and the frame theorem. Prefix conservation and affine
+    resolution are ledger theorems. Exhaustive resolution and exact logical
+    state/obligation transfer are obligations of the completed transition
+    family that realizes the contract. A reusable contract may quantify over
+    an abstract world agreement and supplied `SessionOpen` assertion; every
+    completed plan instantiates both at its actual logical network and session
+    ledger. These placements remove repeated channel-author ceremony without
+    weakening any law and resolve `c-process:51`.
+132. `ScopeId` is a dependency-minimal Core identifier for a reviewed,
+    structurally nested namespace. It is not a generative execution `Uid` and
+    does not inherit allocation, occurrence, or process-generation freshness
+    laws. `RequirementSet` has membership-extensional semantic identity:
+    insertion order and duplicate insertion attempts are unobservable. Its
+    public type must therefore hide an arbitrary `Nodup List` representation
+    behind a canonical finite-set representation or an extensional quotient;
+    storage and serialization use a canonical order. In particular,
+    `demandAlso` is idempotent and commutative up to the public equality, and
+    dependent interfaces may not make list order part of requirement identity.
+    This resolves `g-foundation:45`.
+133. Grass retains `Grass.Std.Logical.ByteArray` as the early public name for
+    pure `Vec Byte`, despite the deliberate collision with Lean's packed
+    `_root_.ByteArray`. A module that can see both representations qualifies
+    the Grass name or uses a narrow local alias; host conversion APIs are
+    explicitly named and retain their order/length/value connection theorems.
+    The ambiguity error is a useful guard against silently crossing a
+    representation boundary, while renaming the logical type would abandon the
+    already-ratified fundamental vocabulary. This resolves the naming question
+    raised by `c-stdlib` after its first implementation.
+134. The public `SpecProcess` is the resource-indexed captured root specified by
+    `SEMANTICS.md`: it retains one `SpecificationSuite`, its exact selected
+    resource semantics, derived behavior contract/boundary, and finite keyed
+    process demands. `VerifiedProgram` is indexed by this type. The unindexed
+    `Input`/`AuditEvent`/`Observation` record currently drafted by foundation is
+    not an alternate public `SpecProcess`; it is replaced, or renamed as a
+    private helper and connected to the public root. `capture`, `ofRelational`,
+    `withLiveness`, and the other suite-append modifiers are required library
+    constructors, not spike-authored scaffolding. `Grass.Semantics.SpecProcess`
+    owns `MeetsAllSpecificationTheorems spec`, defined as the universal proof of
+    every independently keyed theorem in `spec.suite.theorems`. These are
+    authored properties of the composed contract, not a tautological claim that
+    the contract equals itself and not machine/platform correctness.
+    The import names shown in the spike corpus are also ratified as stable,
+    narrow authoring facades: `Grass.Spec.*`, `Grass.Process*`,
+    `Grass.Assembly.*`, `Grass.Platform.*`, `Grass.Std.*`, and `Grass.Emit`.
+    Facades re-export logical/signature modules only and never implementation,
+    certificate, or aggregate bodies; their measured dependency cones are the
+    deliberate public-re-export exception to the no-umbrella rule.
+    `Grass.Process` is specifically a bounded authoring facade, not an aggregate
+    of every `Grass/Process/**` module. This resolves the three-way
+    spike/foundation/module mismatch raised by `c-spike` while retaining the
+    process layer's no-import-all invariant.
+
 ## Explicitly rejected shortcuts
 
 - bolting memory safety on after an instruction library exists;
