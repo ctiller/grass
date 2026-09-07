@@ -21,7 +21,7 @@ inductive RawHierarchy (Instruction : Type u) where
   | empty
   | leaf (instructions : List Instruction)
   | append (left right : RawHierarchy Instruction)
-deriving Repr
+deriving Repr, DecidableEq
 
 namespace RawHierarchy
 
