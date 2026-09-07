@@ -263,6 +263,10 @@ expansion equal to those constructors and provide no semantic certificate.
 machine backend supplies each `VerifiedFragment` and exact equality to the
 transparent checked-slice source, while construction only projects those
 witnesses.
+`Grass.Construct.FrameStackObject` reuses the exact checked local layout from a
+`CheckedWin64Frame`, adds the derived shadow and stack-argument base to each
+checked slice, and proves the resulting post-prologue RSP-relative range stays
+within the selected frame subtraction.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
