@@ -841,13 +841,18 @@ to imitate compiler-selected storage or CFG structure.
     index rather than a caller-filled descriptor tag; owner-specific
     substitution constructors prevent Effect from
     discharging memory, resource, obligation, ABI, platform, or ISA demands.
+    Extension-authority registries are finite composable values with
+    stable-identity-preserving embeddings, not an unparameterized global table.
+    Provider provenance is carried by indexed sidecar certificates over the
+    stable five-field `DriverBoundary`, so a provider change does not alter the
+    semantic boundary type.
     The handoff retains the exact
     upstream effect theory/model identity, so equal requirement names cannot
     substitute a different dictionary semantics. Every effect-generated
     operation has an exact, possibly empty or multi-origin registered subfamily,
     and sequential, explicit, and blended
     Process sources derive one coverage-complete, conservative provider-demand
-    family from their selected boundary and a finite exact image of every
+    family from a sidecar certificate over their stable selected boundary and a finite exact image of every
     selected plan role (without closing the open registry), with
     bidirectional coverage/no-extra/descriptor-exactness proofs; local
     operation origins point into that family. A certified wrapper around the

@@ -48,31 +48,40 @@ structure DirectRelationalProgram (boundary : DriverBoundary) where
   Pending : State -> AbstractDemandBag (EffectDemand boundary)
   initialEquation : EveryInitialOutputEqualsPending Initial Pending
   transitionEquation : EveryStepHasExactConsumedIssuedPendingEquation Step Pending
-  sites : FiniteDependentEffectSiteInventory Initial Step
   binding : forall occurrence,
     occurrence \u2208 DynamicOccurrences Initial Step ->
     ExactSiteProtocolAndChildBinding occurrence
-  operationOrigin : forall occurrence,
-    occurrence \u2208 DynamicOccurrences Initial Step ->
-    RegisteredOperationOrigin boundary.providerDemands occurrence
   terminal : Request -> State -> TerminalResult -> Prop
   terminalDisposition : EveryTerminalStateClassifiesEveryPendingOccurrence
 
-def DirectRelationalProgram.originDemands
-    (program : DirectRelationalProgram boundary) : ProviderDemandFamily :=
-  boundary.providerDemands
-
 structure DirectProgramDerivation
+    (boundaryCertificate : CertifiedDriverBoundary boundary)
     (program : DirectRelationalProgram boundary) where
   Kind : Type
   payload : Kind
-  connectsExactly : RegisteredDerivationConnectsExactProgram payload program
+  connectsExactly : RegisteredDerivationConnectsExactProgramAndBoundary
+    payload program boundaryCertificate
+
+structure CertifiedDirectProgram
+    (boundary : DriverBoundary)
+    (boundaryCertificate : CertifiedDriverBoundary boundary) where
+  program : DirectRelationalProgram boundary
+  derivation : DirectProgramDerivation boundaryCertificate program
+
+def CertifiedDirectProgram.originDemands
+    (program : CertifiedDirectProgram boundary boundaryCertificate) :
+    ProviderDemandFamily := boundaryCertificate.providers.demands
+
+def CertifiedDirectProgram.operationOrigins
+    (program : CertifiedDirectProgram boundary boundaryCertificate)
+    (occurrence : DynamicOccurrence program.program) :=
+  boundaryCertificate.providers.origins occurrence.demand
 
 structure DirectProgramRealizes {R : Type u} [ResourceModel R]
     {resources : R} (spec : SpecProcess resources)
-    (program : DirectRelationalProgram spec.driverBoundary)
-    (derivation : DirectProgramDerivation program) where
-  invariant : program.State -> Prop
+    (boundaryCertificate : CertifiedDriverBoundary spec.driverBoundary)
+    (program : CertifiedDirectProgram spec.driverBoundary boundaryCertificate) where
+  invariant : program.program.State -> Prop
   initial : DirectInitialSimulation spec program invariant
   step : DirectStepSimulation spec program invariant
   terminal : DirectTerminalSimulation spec program invariant
@@ -83,18 +92,21 @@ structure DirectProgramRealizes {R : Type u} [ResourceModel R]
 and produces one conventional, replaceable process presentation. The input
 already contains the program decomposition and correctness proof; neither the
 adapter's topology nor its chosen child placement becomes precious.
-The provider-demand family is the exact boundary envelope; every dynamic site
-must point to a registered member. Thus neither the adapter nor a replacement
-correctness proof can omit it, and provider certificates are not duplicated per
-call site.
+The provider-demand family is the exact certified-boundary envelope; every
+dynamic occurrence's possibly empty or multi-origin subfamily is a definition
+of its dependent demand, not caller-populated evidence. Thus neither the adapter
+nor a replacement correctness proof can omit or relabel it, and provider
+certificates are not duplicated per call site. The raw relational program stays
+free of provider and finite-site fields; only the certified wrapper enters the
+complete proof chain.
 
 ### Construction
 
-The adapter uses one root process whose local state is `program.State`. Each
+The adapter uses one root process whose local state is `program.program.State`. Each
 dynamic occurrence named by an `Initial` or `Step` witness becomes either:
 
 - an internal serial transition;
-- one standard child-protocol demand at a declared effect site; or
+- one standard child-protocol demand at a dynamic typed occurrence; or
 - one root external event.
 
 The generated network state is the direct state plus a finite map from live
@@ -128,6 +140,14 @@ simulation plus `terminalDisposition` for the live map. Induction gives every fi
 coverage and a standard coinductive lifting give infinite, divergent, pending,
 fault, and terminal shapes.
 
+For a law-bearing operation which exposes observations while still pending, the
+adapter state additionally retains its exact rooted history. A pending-progress
+step keeps the same occurrence and escrow, advances only along the selected
+model's proper `Extends` relation, and appends exactly the new observation
+segment. The canonical waiting-occurrence sigma prevents omitting an effect
+decision by choosing an empty carrier. Atomic operations use the same theorem
+with an exact selected model proving that no proper pending step exists.
+
 The reverse direction is not guessed: canonical network transitions are
 generated only by the cases above, so inversion on the transition constructor
 recovers the corresponding direct step. This is why a canonical adapter can
@@ -136,14 +156,14 @@ network normally proves only the refinement direction its specification needs.
 
 ### Automation boundary
 
-The library generates bookkeeping for declared effect sites. It does not find a
+The library generates bookkeeping for dynamic typed occurrences. It does not find a
 loop invariant, decide which arbitrary subexpression is an effect, invent a
 child protocol, prove `DirectProgramRealizes`, or infer a simulation relation
 from an arbitrary `Prop`.
 
-For `SequentialMachine`, the library also generates the declared effect sites:
-they are a structural fold over the finite typed decision syntax. Its proof is
-one induction over `SequentialDecision`. `.internal` preserves the live
+For `SequentialMachine`, the library generates the occurrence identity and
+dependent binding from the typed decision. Its proof is one induction over
+`SequentialDecision`. `.internal` preserves the live
 occurrence map, `.effect demand resume` allocates exactly one fresh occurrence
 whose result type fixes the continuation, and `.terminal` requires the map to
 be empty or to have the explicitly selected terminal disposition. This covers
@@ -159,7 +179,7 @@ is inspected when implementing or auditing the generic constructor, not filled
 once per application.
 
 For the gzip fixture, standard byte-input, byte-output, allocation, and
-terminal combinators derive the effect sites, exact occurrences, pending
+terminal combinators derive the effect frontiers, exact occurrences, pending
 equations, bindings, and dispositions.  The meaningful reusable proof inputs
 are exactly the streaming transducer relation, exhaustive failure behavior,
 bounded resource theorem, and conditional-progress theorem.  The compressor's
@@ -172,14 +192,17 @@ bookkeeping fails this section even if the theorem is provable.
 Hello, sort, and fixed-gzip must use the same closed standard-realizer registry,
 and each application fixture must select its realization with one expression.
 Adding a new result constructor to a used effect must leave one local unmatched
-case. Removing an effect site must remove its generated child. Reordering two
-independent declared sites must not require an application proof edit. A custom
+case. Removing an effect decision must remove its generated child. Reordering two
+independent typed decisions must not require an application proof edit. A custom
 relation without `DirectProgramRealizes` must fail immediately rather than start
 proof search. Dedicated fixtures cover a zero-effect transition; two equal
 demand values issued as distinct occurrences; an initially pending demand; an
 issue followed by cancellation; and a result consumption plus new issue in one
 transition. Mutating any issued/consumed multiplicity or dependent child binding
 must break the local bag equation rather than a later global theorem.
+Another fixture uses one streaming wait whose history emits a byte before its
+result: the general adapter must expose that prefix without consuming the
+occurrence, while selecting the atomic pending model must fail.
 
 ### Status and fallback
 

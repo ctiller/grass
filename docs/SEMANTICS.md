@@ -457,10 +457,31 @@ inductive BuiltinRequirementAuthority
   | effect | process | memory | resource | obligation | abi | platform | isa
   deriving DecidableEq
 
+structure ExtensionAuthorityRegistry where
+  Entry : Type
+  entries : List Entry
+  complete : forall entry, entry ∈ entries
+  unique : entries.Nodup
+  key : Entry -> StableId
+  keyInjective : Function.Injective key
+  freshFromBuiltins : forall entry, key entry ∉ builtinRequirementAuthorityKeys
+
+structure ExtensionAuthorityEmbedding
+    (small large : ExtensionAuthorityRegistry) where
+  entry : small.Entry -> large.Entry
+  keyExact : forall source, large.key (entry source) = small.key source
+  injective : Function.Injective entry
+
+def ExtensionAuthorityRegistry.merge
+    (left right : ExtensionAuthorityRegistry)
+    (compatible : ExtensionAuthorityKeysDisjointOrExact left right) :
+    ExtensionAuthorityRegistry
+def ExtensionAuthorityRegistry.leftEmbedding ...
+def ExtensionAuthorityRegistry.rightEmbedding ...
+
 structure RegisteredExtensionAuthority where
-  key : StableId
-  registered : ExtensionAuthorityRegistry.Contains key
-  freshFromBuiltins : key ∉ builtinRequirementAuthorityKeys
+  registry : ExtensionAuthorityRegistry
+  entry : registry.Entry
 
 inductive RequirementAuthority
   | builtin (owner : BuiltinRequirementAuthority)
@@ -508,11 +529,14 @@ structure SomeProviderDemand where
 
 opaque ProviderDemandFamily : Type
 
+def ProviderDemandFamily.authorityRegistry :
+    ProviderDemandFamily -> ExtensionAuthorityRegistry
 def ProviderDemandFamily.origins :
     ProviderDemandFamily -> Finset RequirementOriginId
 def ProviderDemandFamily.lookup :
     ProviderDemandFamily -> RequirementOriginId -> Option SomeProviderDemand
 theorem ProviderDemandFamily.lookup_exact ...
+theorem ProviderDemandFamily.lookup_extension_registered ...
 theorem ProviderDemandFamily.ext ...
 def ProviderDemandFamily.empty : ProviderDemandFamily
 def ProviderDemandFamily.singleton
@@ -538,13 +562,22 @@ layers can therefore carry statements about the future binding without knowing
 how a platform environment is built.
 
 The built-in tags and their pairwise-distinctness are ordinary finite inductive
-data centralized here; no downstream owner definition or axiom is required. A
-tag is descriptive data, not itself authority. `RequirementOriginScope` is
-opaque and indexed by its authority; its raw constructor is not public. Each
-built-in owner exports only typed scope constructors for its own index, and an
-extension obtains the corresponding indexed scope through the reviewed neutral
-registry. `ProviderDemand` retains that index, while a heterogeneous family
-stores `SomeProviderDemand`. Hence an existing memory demand cannot be
+data centralized here; no downstream owner definition or axiom is required.
+Extension registries are explicit composable values, never one unparameterized
+global table. Independent packages publish a finite registry; `merge` checks
+stable-key compatibility and returns origin-preserving embeddings. A larger
+composition reindexes extension authorities through those embeddings without
+changing their stable identity. Thus adding an extension does not edit a core
+sum or global registry, and a freely asserted `Contains` proof is not authority.
+
+A tag is descriptive data, not itself authority. Every extension authority
+dependently packages its exact selected registry and entry.
+`RequirementOriginScope` is opaque and indexed by that complete authority; its raw
+constructor is not public. Each built-in owner exports only typed scope
+constructors for its own index, and an extension obtains the corresponding
+indexed scope from an entry of a reviewed registry. `ProviderDemand` retains
+that dependent authority, while a heterogeneous family stores
+`SomeProviderDemand`. Hence an existing memory demand cannot be
 repackaged as Effect-owned merely by filling an `authority` field: no such field
 or raw scope constructor exists. Owner layers export their indexed substitution
 constructors, not competing unindexed tags. `ProviderRequirementKey`,
@@ -577,9 +610,10 @@ by the memory, resource, obligation, ABI, platform, or ISA authorities. There is
 which accepts an arbitrary proof and erases its owner. `ProviderDemandFamily`'s
 representation is hidden. Its public equality is extensional over `lookup`, and
 serialization alone chooses canonical order. `union` retains repeated capability
-keys and requires a compositional proof that origin scopes are disjoint or that
-equal origin IDs carry the same authority index and definitionally/theoremically
-exact descriptors. Standard
+keys, composes the participating extension registries through checked
+embeddings, and requires a proof that origin scopes are disjoint or that equal
+origin IDs carry the same embedded authority identity and
+definitionally/theoremically exact descriptors. Standard
 hierarchical scopes derive this proof automatically; a collision is rejected at
 construction rather than leaving an `Except` inside a claimed total envelope.
 
