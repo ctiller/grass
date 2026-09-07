@@ -3,6 +3,7 @@ import Grass.ABI.Win64.Convention
 import Grass.ABI.Win64.Unwind
 import Grass.ABI.Win64.UnwindBytes
 import Grass.Build.Cache.Key
+import Grass.Build.Cache.Replay
 import Grass.Certificate
 import Grass.Core.Context
 import Grass.Core.Demand
