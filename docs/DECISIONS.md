@@ -823,6 +823,13 @@ to imitate compiler-selected storage or CFG structure.
     Facades re-export logical/signature modules only and never implementation,
     certificate, or aggregate bodies; their measured dependency cones are the
     deliberate public-re-export exception to the no-umbrella rule.
+    `Grass.Spec.*` is a distinct shallow authoring namespace, not an alias for
+    all of `Grass.Specification/**`. Its initial closed facade inventory is
+    `Console`, `Grammar`, `Graphics`, and `Resource`, corresponding exactly to
+    the spike imports. The specification/foundation workstream owns those
+    facade files while underlying domain signatures and implementations retain
+    their existing owners. A new facade requires demonstrated author demand and
+    dependency-cone review; the family is not an import-all surface.
     `Grass.Process` is specifically a bounded authoring facade, not an aggregate
     of every `Grass/Process/**` module. This resolves the three-way
     spike/foundation/module mismatch raised by `c-spike` while retaining the
