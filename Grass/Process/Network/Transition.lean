@@ -2235,8 +2235,10 @@ in the ledger alone because the wrong reading is the natural one.
 requirement and copies the lifecycle across, so a dead child detaches into a dead
 instance with no current parent —
 `Tests/Process/PreservationFixtures.lean`'s `a_corpse_may_be_orphaned`. Nothing
-was killed by that step, so this theorem is untouched; the *state* is reachable
-all the same. Whether a supervisor may let go of a corpse is `agent-bus`
+was killed by that step, so this theorem is untouched; the *family admits a step
+into that state* all the same. Whether any run reaches one is a further question
+and this corpus does not answer it — at `serverPlan` it does not, since both ends
+of that detach have an empty root slot. Whether a supervisor may let go of a corpse is `agent-bus`
 `c-process:103`'s question for `g-design`.
 
 *It is not "no run reaches a dead root".* This is one step. Getting from here to
@@ -2428,8 +2430,8 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
 /--
 Parentlessness carried across a step's identity clause is still parentlessness.
 
-The `▸` bookkeeping `parentless_slot_survives` does eleven times, factored out
-because the eleven differ only in which structure supplied the clause.
+The `▸` bookkeeping `parentless_slot_survives` does seven times, factored out
+because the seven differ only in which structure supplied the clause.
 -/
 private theorem parentless_transported {kind : plan.topology.ProcessKind}
     {from' to : ProcessInstance plan.topology}
@@ -2445,20 +2447,24 @@ private theorem parentless_transported {kind : plan.topology.ProcessKind}
   exact parentless
 
 /--
-**A slot holding an instance with no current parent still holds one after any
-step but a restart.**
+**A slot holding an instance with no current parent still holds one, unless the
+step's two worlds stand in `Restarts` at that slot.**
 
 `docs/PROCESS.md` §3's root, as a fact about every step rather than about the
 start. A run begins at an `ExactInitialNetwork` whose root has `.root`
-parentage, and this is what carries that forward: nine constructors pin the
-parentage across the slot, `spawn` found the slot empty, and `join` and `detach`
-both ask for a current parent that a parentless instance does not have.
+parentage, and this is what carries that forward: seven constructors pin the
+parentage across the slot, `spawn` found the slot empty, `join` and `detach` both
+ask for a current parent that a parentless instance does not have, and the
+remaining thirteen never name this fragment at all.
 
 **`restart` is the exception and it is the whole content of the disjunction.**
 `Restarts.restartsAChild` constrains only the *new* incarnation, requiring it to
 have a current parent, and nothing constrains the old one — so a restart at a
 parentless slot replaces a root with a child and the network afterwards has one
-fewer root. `LogicalProcessNetworkCore.RootUnique` does not notice, being
+fewer root. The disjunct says the two worlds stand in the `Restarts` *relation*
+at that slot rather than naming the constructor taken, which is the conservative
+side: a consumer refutes the relation, as `no_restart_at_the_root_slot` does, and
+does not have to reason about which constructor was used. `LogicalProcessNetworkCore.RootUnique` does not notice, being
 uniqueness rather than existence.
 
 That is `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.133's open question, and
@@ -2466,7 +2472,7 @@ stating the theorem this way is what turns it from a suspicion into a fact:
 restart is not *a* way to lose the root, it is the *only* way. A plan whose root
 role no permitted parent can spawn therefore holds its root along every
 execution, which is `Tests/Process/PreservationFixtures.lean`'s
-`every_run_holds_the_root`.
+`every_run_holds_an_unkilled_root`.
 -/
 theorem parentless_slot_survives (transition : plan.NetworkTransition before after)
     {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}

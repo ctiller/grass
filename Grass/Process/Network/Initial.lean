@@ -1,3 +1,4 @@
+import Grass.Process.Network.WellFormedness
 import Grass.Process.Weave.Mixin
 
 /-!
@@ -373,21 +374,31 @@ theorem holds_along_every_execution_from_a_start (mixin : plan.WeaveInvariantMix
   | more _ step ih => exact mixin.preserved_by_every_step step ih
 
 /--
-A slot holds an instance that never had a supervisor and was never killed.
+A slot holds an instance that records no current parent and is not dead.
 
-The invariant `every_run_holds_an_unkilled_root` carries, named because it is two
-claims and losing either one loses the point: parentless *and* not dead. A
-detached child satisfies the first and can fail the second —
+The invariant `execution_holds_an_unkilled_root` carries. It is two claims and
+losing either loses the point: no current parent *and* not dead. A detached
+child satisfies the first and can fail the second —
 `Tests/Process/PreservationFixtures.lean`'s `a_corpse_may_be_orphaned` — so this
-is deliberately not "parentless".
+is deliberately not "parentless" alone.
+
+**The death clause is stated at the incarnation's own kind, with no transport.**
+An earlier version guarded it with `∀ sameKind : incarnation.kind = kind`, and
+local adversarial review showed that guard is uninhabited at a world storing an
+incarnation of the wrong kind in a slot — so a corpse satisfied the predicate.
+`LogicalProcessNetworkCore.SlotsAgree` is what rules such a world out, and it is
+a well-formedness clause rather than something this definition should assume;
+`ProcessInstance.lifecycle` is already indexed by the incarnation's own kind, so
+the clause needs no transport to be stated at all.
+
+Note what it does *not* say: not "never had a supervisor". `.detached` also has
+no current parent, and `a_corpse_may_be_orphaned` is exactly that case.
 -/
 def UnkilledRootAt (network : plan.LogicalProcessNetwork)
     (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind) : Prop :=
   ∃ incarnation, network.instances kind slot = some incarnation ∧
     incarnation.parentage.currentParent = none ∧
-    ∀ (reason : ProcessDeathReason) (sameKind : incarnation.kind = kind),
-      (sameKind ▸ incarnation.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
-        ≠ .died reason
+    ∀ reason : ProcessDeathReason, incarnation.lifecycle ≠ ProcessLifecycle.died reason
 
 /--
 **Every start has one, in the root's slot.**
@@ -401,8 +412,9 @@ theorem start_holds_an_unkilled_root {request : (plan.topology.protocol plan.top
     plan.UnkilledRootAt network plan.topology.root start.rootSlot := by
   refine ⟨start.root, start.rootPresent,
     ProcessParentage.currentParent_of_isRoot _ start.rootParentage, ?_⟩
-  intro reason sameKind
-  exact ProcessLifecycle.running_cast_not_died sameKind start.rootRunning reason
+  intro reason dead
+  rw [start.rootRunning] at dead
+  cases dead
 
 /--
 **And every execution keeps one, unless a restart takes it away.**
@@ -426,6 +438,7 @@ theorem execution_holds_an_unkilled_root
     {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
     {network final : plan.LogicalProcessNetwork}
     (execution : plan.StepsTo network final)
+    (wellFormed : network.WellFormed)
     (held : plan.UnkilledRootAt network kind slot)
     (noRestart : ∀ (before after : plan.LogicalProcessNetwork)
       (allocation : Allocation plan.topology.Carrier)
@@ -433,14 +446,23 @@ theorem execution_holds_an_unkilled_root
       (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation),
       plan.Restarts before after kind slot allocation emitted localEmitted → False) :
     plan.UnkilledRootAt final kind slot := by
-  induction execution with
-  | still => exact held
-  | more _ step carried =>
-    obtain ⟨was, found, parentless, unkilled⟩ := carried
-    rcases step.transition.parentless_slot_is_unkilled found parentless unkilled with
-      kept | ⟨allocation, emitted, localEmitted, restart⟩
-    · exact kept
-    · exact absurd restart (noRestart _ _ allocation emitted localEmitted)
+  have carried : plan.UnkilledRootAt final kind slot ∧ final.WellFormed := by
+    induction execution with
+    | still => exact ⟨held, wellFormed⟩
+    | more _ step carried =>
+      obtain ⟨⟨was, found, parentless, unkilled⟩, formed⟩ := carried
+      have formedAfter := plan.wellFormed_preserved step formed
+      rcases step.transition.parentless_slot_survives found parentless with
+        ⟨now, foundNow, stillParentless⟩ | ⟨allocation, emitted, localEmitted, restart⟩
+      · refine ⟨⟨now, foundNow, stillParentless, ?_⟩, formedAfter⟩
+        intro reason dead
+        obtain ⟨nowKind, _⟩ := formedAfter.slotsAgree kind slot now foundNow
+        exact step.transition.dying_was_supervised found
+          (fun earlier wasKind carriedDead =>
+            unkilled earlier ((ProcessLifecycle.died_cast wasKind).mp carriedDead))
+          foundNow nowKind ((ProcessLifecycle.died_cast nowKind).mpr dead) parentless
+      · exact absurd restart (noRestart _ _ allocation emitted localEmitted)
+  exact carried.1
 
 /-- And a whole family of them, which is what §8's aggregate consumes. -/
 theorem family_holds_along_every_execution_from_a_start

@@ -546,11 +546,17 @@ theorem sentWithLiveReceiver_slot :
 
 /--
 **The receiver's death is earned by a step**, so `theReceiverDeathStep`'s
-before-world is one an execution reaches.
+before-world is one the *family* admits a step into.
 
 `childDied` is the only constructor that writes `.died`, and it carries
-`wasChild` — which `liveConnection` satisfies, being `.attached .listener`. That
-is what separates this case from the sender's below.
+`wasChild` — which `liveConnection` records, being `.attached .listener`. That is
+what separates this case from the sender's below, where no constructor can write
+the death at all.
+
+**It is not a world of a run**, and the distinction is the whole of §10.133:
+`sentWithDeadReceiver_is_no_world_of_a_run` and
+`no_run_reaches_sentWithDeadReceiver` below say so, and `sentWithLiveReceiver`
+is no better — both have an empty root slot.
 -/
 theorem the_receiver_is_killed :
     serverPlan.EndsInstance sentWithLiveReceiver sentWithDeadReceiver .connection
@@ -585,8 +591,11 @@ theorem the_receiver_is_killed :
         · rfl
     | _ => rfl
 
-/-- And it really is somebody's child, which is what `childDied` asks and what the
-sender below cannot supply. -/
+/-- And it *records* a current parent, which is what `childDied` asks and what the
+sender below cannot supply. Note what it does not show: `sentWithLiveReceiver`
+holds no listener at all, so the parent this instance names is not in the world.
+`wasChild` checks that a supervisor is recorded;
+`LogicalProcessNetworkCore.ParentageValid` is what checks the record. -/
 theorem the_live_receiver_is_a_child : ∀ incarnation,
     sentWithLiveReceiver.instances .connection wire.receiver.instanceId = some incarnation →
     incarnation.parentage.currentParent ≠ none := by
@@ -653,6 +662,7 @@ theorem every_run_holds_an_unkilled_root
     (execution : serverPlan.StepsTo start final) :
     serverPlan.UnkilledRootAt final .listener () :=
   serverPlan.execution_holds_an_unkilled_root execution
+    isStart.initial_is_wellformed
     (ProcessPlan.start_holds_an_unkilled_root isStart)
     (fun _ _ _ _ _ restart => no_restart_at_the_root_slot restart)
 
@@ -660,8 +670,8 @@ theorem every_run_holds_an_unkilled_root
 **And `sentWithDeadSender` is not one**, which is the fourth of §10.129's four.
 
 It holds `World.rootListener` — parentage `.root`, so no current parent — in the
-`.died` state, and `UnkilledRootAt`'s second conjunct is exactly what that
-fails. `theSenderDeathStep` is a real step and it is a step of no run. That is
+`.died` state, and `UnkilledRootAt`'s death clause is exactly what that fails —
+its first two, an instance in the slot with no current parent, both hold. `theSenderDeathStep` is a real step and it is a step of no run. That is
 §10.88's inhabited-versus-exercised distinction, and unlike the first version of
 this section it is now proved rather than asserted.
 -/
@@ -670,7 +680,7 @@ theorem sentWithDeadSender_is_no_world_of_a_run :
   rintro ⟨root, found, _, unkilled⟩
   injection found with same
   subst same
-  exact unkilled .supervised rfl rfl
+  exact unkilled .supervised rfl
 
 /-- **And neither is the world the receiver's death is reached from**, nor the
 one it reaches: both have an empty root slot, `sent` notwithstanding. -/
@@ -692,10 +702,39 @@ theorem holding_is_no_world_of_a_run (incarnation : ProcessInstance serverTopolo
   rintro ⟨_, found, _⟩
   exact absurd found (by intro equal; cases equal)
 
+/-! ##### And the same three, as statements about runs rather than about worlds
+
+Local adversarial review's second round pointed out that `¬ UnkilledRootAt w` is
+one inference away from "no run reaches `w`" and that leaving the inference to
+the reader is how the first version's prose went wrong. These are the inference,
+written down.
+-/
+
+theorem no_run_reaches_sentWithDeadSender
+    {request : (serverTopology.protocol serverTopology.root).Request} {start : ServerWorld}
+    (isStart : serverPlan.ExactInitialNetwork request start)
+    (execution : serverPlan.StepsTo start sentWithDeadSender) : False :=
+  sentWithDeadSender_is_no_world_of_a_run
+    (every_run_holds_an_unkilled_root isStart execution)
+
+theorem no_run_reaches_sentWithDeadReceiver
+    {request : (serverTopology.protocol serverTopology.root).Request} {start : ServerWorld}
+    (isStart : serverPlan.ExactInitialNetwork request start)
+    (execution : serverPlan.StepsTo start sentWithDeadReceiver) : False :=
+  sentWithDeadReceiver_is_no_world_of_a_run
+    (every_run_holds_an_unkilled_root isStart execution)
+
+theorem no_run_reaches_a_holding_world (incarnation : ProcessInstance serverTopology)
+    {request : (serverTopology.protocol serverTopology.root).Request} {start : ServerWorld}
+    (isStart : serverPlan.ExactInitialNetwork request start)
+    (execution : serverPlan.StepsTo start (holding incarnation)) : False :=
+  holding_is_no_world_of_a_run incarnation
+    (every_run_holds_an_unkilled_root isStart execution)
+
 /-- And the world the corpus does reach really does hold an unkilled root, so
 the invariant above is not vacuous. -/
 theorem sent_holds_an_unkilled_root : serverPlan.UnkilledRootAt sent .listener () :=
-  ⟨World.rootListener, rfl, rfl, fun _ _ dead => by cases dead⟩
+  ⟨World.rootListener, rfl, rfl, fun _ dead => by cases dead⟩
 
 
 
@@ -821,7 +860,9 @@ theorem the_log_is_answered (answer : countdownVocabulary.Result .log) :
         · rfl
     | _ => rfl
 
-/-- So `an_honest_interruption`'s before-world is a world of a run. -/
+/-- So `an_honest_interruption`'s before-world is one the family admits a step
+into. It is not a world of a run — `holding` maps the listener to `none`, and
+`holding_is_no_world_of_a_run` covers every `holding` world including this one. -/
 def theLogStep (answer : countdownVocabulary.Result .log) :
     serverPlan.NetworkStep (holding countingOnALog) (holding waitingOnATick) where
   transition := .processStep .connection slot (.result .log answer) []
@@ -877,7 +918,8 @@ theorem the_last_tick_is_abandoned (reason : Interrupt) :
         · rfl
     | _ => rfl
 
-/-- So `an_honest_termination`'s before-world is one too. -/
+/-- So `an_honest_termination`'s before-world is one too, and equally not a world
+of a run, for the same reason. -/
 def theLastTickStep (reason : Interrupt) :
     serverPlan.NetworkStep (holding oneToGo) (holding settling) where
   transition := .processStep .connection slot (.interrupted Demand.tick reason) [] 0 []

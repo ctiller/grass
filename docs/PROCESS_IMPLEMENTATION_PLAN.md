@@ -5085,8 +5085,8 @@ back its own `wasChild`.
 unreachable world is a real step, and it is not a step of any run", and left it
 implicit that the unreachability was a fact about the corpus. For three of the
 four it was. For the fourth it is a fact about the family, and
-`a_dead_root_is_reached_by_no_step` says so with the theorem rather than by not
-having built the chain. `theSenderDeathStep` satisfies §10.89's check and is a
+`sentWithDeadSender_is_no_world_of_a_run` says so with the theorem rather than
+by not having built the chain. `theSenderDeathStep` satisfies §10.89's check and is a
 step of no run, both at once; this is where the two come apart.
 
 **Two things it opens.**
@@ -5132,7 +5132,7 @@ are", on the strength of having built a step into each of three before-worlds.
 Every one of those three *predecessor* worlds has an empty root slot.
 `Ending.holding` maps the listener to `none` by construction, and
 `sentWithLiveReceiver` — which I wrote — is `sent` with the root deleted by hand,
-while `sent_holds_a_live_root` in the same commit proved `sent` has one. So none
+while `sent_holds_an_unkilled_root` in the same commit proved `sent` has one. So none
 of the six worlds is a world of a run, and the gap had moved back exactly one
 step rather than closing. §10.129 had said precisely this failure out loud — "a
 step from an unreachable world is a real step, and it is not a step of any run" —
@@ -5191,6 +5191,84 @@ instance was not *already* dead, every branch still goes through — `restart` n
 closes on `nowLive` rather than `wasEnded`, and `detach` carries the death
 backwards rather than liveness forwards — and the weaker form is what
 `parentless_slot_is_unkilled` needs.
+
+### 10.134 The correction left the sentences it corrected in place
+
+A second fresh reviewer, no context and no sight of the first, went over §10.133's
+own commit. It could not break the Lean — it tried, and reports so — and found
+eight things, every one of them prose outrunning its theorem. Four of those are
+*contradicted by theorems in the same commit*, which is a worse failure than the
+one §10.133 was correcting, because this time the refutation was already in the
+file.
+
+**The commit fixed the section headers and not the declarations.**
+`theReceiverIsKilledStep`'s docstring still said "which is what makes
+`sentWithDeadReceiver` a world of a run"; `theLogStep`'s and `theLastTickStep`'s
+still said their before-worlds were worlds of a run. Sixty lines below,
+`sentWithDeadReceiver_is_no_world_of_a_run` and `holding_is_no_world_of_a_run`
+say the opposite, in the same file, added by the same commit. The ledger entry
+knew and the source did not, which is the exact shape §10.131 recorded — a
+docstring contradicting a recorded fact without noticing — and it recurred inside
+the entry written to fix it.
+
+The reviewer also wrote the missing inference as Lean, which is the right answer
+to "why did the reader have to make it": `no_run_reaches_sentWithDeadSender`,
+`no_run_reaches_sentWithDeadReceiver` and `no_run_reaches_a_holding_world` are
+now declarations rather than steps a reader takes. A `¬ UnkilledRootAt w` is one
+application away from "no run reaches `w`", and leaving that one application to
+prose is how both rounds went wrong.
+
+**And `UnkilledRootAt`'s third clause was vacuous.** This is the substantive one.
+It was written as
+
+> `∀ (reason) (sameKind : incarnation.kind = kind), (sameKind ▸ incarnation.lifecycle) ≠ .died reason`
+
+and `LogicalProcessNetworkCore.instances` returns a `ProcessInstance topology`
+whose `kind` field is *not* tied to the slot's index by anything short of
+`WellFormed.slotsAgree`. So at a world storing an incarnation of the wrong kind,
+the guard is uninhabited and the clause says nothing — the reviewer built the
+world and proved `UnkilledRootAt` holds at one whose root slot contains a corpse,
+using this branch's own `orphanedDeadConnection`.
+
+A clause guarded by an equation that may be uninhabited is a clause nothing
+enforces, which is §10.105's generality-by-vacuity in its smallest form, and it
+was introduced by the entry that had just refused two others. The fix is not to
+add the guard as a conjunct but to *drop the transport*:
+`ProcessInstance.lifecycle` is already indexed by the incarnation's own kind, so
+`incarnation.lifecycle ≠ .died reason` is well-typed with no equation at all.
+`ProcessLifecycle.died_cast` bridges it to
+`NetworkTransition.dying_was_supervised`, which is stated at the slot's kind, and
+`execution_holds_an_unkilled_root` now carries `WellFormed` alongside — through
+`wellFormed_preserved` — so that `slotsAgree` supplies the bridge where the proof
+needs it. Well-formedness is where the kind agreement belongs; the invariant
+should not have been asserting it by accident.
+
+**Three dangling declaration names, and a gate that cannot see them.**
+`every_run_holds_the_root`, `a_dead_root_is_reached_by_no_step` and
+`sent_holds_a_live_root` were all cited and none exists — two of them were names
+the same commit *renamed*. `Tools/DocstringAudit.py` exits zero on all three,
+because its identifier check fires only inside a sentence carrying a strong-claim
+word. This is the third time a citation of a nonexistent declaration has reached
+a branch here (§10.131's audit pass found nine at once), and the pattern is
+specific enough to be worth a gate: a backticked lower-camel name in a docstring
+is either a declaration or a typo, whatever sentence it sits in. That is
+`Tools/`'s owner's call and is reported rather than assumed.
+
+**And two miscounts.** "Eleven times" for seven uses of `parentless_transported`,
+and "nine constructors pin the parentage" for seven — the second contradicting
+`dying_was_supervised`'s own correct count of eleven constructors that can name
+`.instanceState`. Both were numbers written from memory of the shape rather than
+from the file.
+
+**What the round did not break**, recorded because a clean result is evidence
+too: `no_restart_at_the_root_slot` survived an independent reconstruction from
+`Restarts`' four fields and `serverTopology.maySpawn`; the invariant is
+non-vacuous, since `withRoot_is_a_start` inhabits `ExactInitialNetwork` and
+`serverTopology.InstanceId .listener` is `Unit` so `start.rootSlot` really is
+`()`; `noRestart`'s quantifiers are correctly scoped; the weakened
+`notAlreadyDead` hypothesis is strictly implied by `Live`, so the theorem did get
+stronger; and `a_corpse_may_be_orphaned` is a genuine `Detaches` with all three
+fields checked against the structure.
 
 ## 11. The authoring facade
 

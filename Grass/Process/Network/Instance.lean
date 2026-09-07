@@ -132,23 +132,26 @@ theorem live_cast {registry : ProtocolRegistry.{u, w, v}} {boundary : DriverBoun
   cases sameKind; exact Iff.rfl
 
 /--
-A running lifecycle carried across an equation of kinds is still not a death.
+Being a death survives transport across an equation of kinds, in both
+directions.
 
-`live_cast`'s companion, and needed where a start's `rootRunning` has to be
-compared against a death recorded at the slot's own kind —
-`Grass/Process/Network/Initial.lean`'s `start_holds_an_unkilled_root`.
+`live_cast`'s companion. `Grass/Process/Network/Initial.lean`'s
+`UnkilledRootAt` states its death clause at the *incarnation's own* kind, with no
+transport, so that it is a claim about the stored lifecycle rather than one
+guarded by an equation that may be uninhabited — local adversarial review built a
+world where the guarded form was vacuous and a corpse counted as an unkilled
+root. This is what bridges that untransported form to
+`NetworkTransition.dying_was_supervised`, which is stated at the slot's kind.
 -/
-theorem running_cast_not_died {registry : ProtocolRegistry.{u, w, v}}
+theorem died_cast {registry : ProtocolRegistry.{u, w, v}}
     {boundary : DriverBoundary.{u}}
     {topology : ProcessTopologyCore.{u, w, v, r} registry boundary}
     {left right : topology.ProcessKind} (sameKind : left = right)
-    {lifecycle : ProcessLifecycle (topology.protocol left)} (running : lifecycle = .running)
-    (reason : ProcessDeathReason) :
-    (sameKind ▸ lifecycle : ProcessLifecycle (topology.protocol right)) ≠ .died reason := by
+    {lifecycle : ProcessLifecycle (topology.protocol left)} {reason : ProcessDeathReason} :
+    (sameKind ▸ lifecycle : ProcessLifecycle (topology.protocol right)) = .died reason
+      ↔ lifecycle = .died reason := by
   cases sameKind
-  rw [running]
-  intro equal
-  cases equal
+  exact Iff.rfl
 
 /-- Exactly one state is live, which makes `Live` a decision and not a hint. -/
 theorem live_iff_running {lifecycle : ProcessLifecycle protocol} :
