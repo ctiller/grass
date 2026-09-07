@@ -267,6 +267,9 @@ witnesses.
 `CheckedWin64Frame`, adds the derived shadow and stack-argument base to each
 checked slice, and proves the resulting post-prologue RSP-relative range stays
 within the selected frame subtraction.
+`Grass.Construct.FrameStackObjectVerified` requires machine-supplied verified
+fragments whose sources are exactly the derived frame-offset load/store
+sources; its public operations only project those witnesses.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
