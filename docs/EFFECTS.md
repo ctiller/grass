@@ -1045,6 +1045,9 @@ The first implementation is incomplete until checked fixtures demonstrate:
    `ProperExtends`, `SequentialWaitingState`, and `advanceExact` signatures are
    copied into a checked Lean fixture with auto-implicit indices disabled; the
    canonical model elaborates and one nontrivial indexed custom model constructs.
+   A mutation that inserts an arbitrary non-root history directly into the
+   adapter state fails because waiting state is restricted by
+   `SequentialPendingSemantics.Reachable`.
 5. A project-local effect family is added from another module without editing a
    core sum type.
    Three independently authored extension-authority registries compose under
@@ -1060,6 +1063,9 @@ The first implementation is incomplete until checked fixtures demonstrate:
    reindex constructors with the identical `ProviderDemandView` and
    `origins_exact` theorem; a `Requires` predicate cannot inspect the old
    registry representation.
+   A second extension authority declared with the same serialized `StableId`
+   cannot satisfy owner compatibility or `includeCompatible`; deliberately
+   importing the first owner's opaque declaration is the only way to adopt it.
 6. Row membership embeds dependent results exactly; a forged name-only embedding
    is unconstructible.
 7. Duplicate family keys are rejected, and the lowering selection cannot carry
