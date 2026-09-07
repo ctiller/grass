@@ -332,6 +332,21 @@ ledger already names the exact ones each spike expects.
 cube. The order is the drafts' own and is preserved: each spike is the smallest
 program that adds one new class of obligation.
 
+Spikes 4 and 5 additionally carry a named blocking dependency as of
+`g-design:67`, which is worth recording because it is not visible from the spike
+sources. Ruling (3) preserves the facet-carrying `ProcessTopology` of decision
+122 as normative but defers implementing it out of c-process's M4 candidate into
+a later milestone, and states that until it lands the current
+`ProcessPlan`/topology implementation is provisional: it cannot claim to
+discharge cancellation or supervision requirements, and cannot be consumed as a
+complete `ProcessPlan` by `VerifiedProgram`. Both spikes instantiate
+`ProcessPlan` -- `Spikes/4_Web_Server/Process.lean:229` and
+`Spikes/5_Spinning_Cube/Process.lean:200` -- and both close through it, via
+`ProcessPlanRealizes` and, in Spike 4, `using explicit_process`. So neither can
+reach a verified program until that deferred milestone lands, whatever else is
+ready. Nothing in the authored sources changes: the drafted names and shapes
+stand, and this is a scheduling fact rather than a resynchronization.
+
 Two scheduled decision points rather than smooth progress. Spike 2 is the first
 program whose portable model cannot plausibly carry one step per machine
 instruction, so it is where the refinement granularity of
