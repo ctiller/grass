@@ -393,6 +393,10 @@ the certified result adds exact block-to-call contract equality separately.
 one alpha-normalized AST passes CFG, constructor-closure, and call-route checks
 in explicit stage order. Its certified result retains typed constructor
 application equality and block-to-call contract equality as separate proofs.
+`Grass.Construct.Source.ConstructionLower` adds independently supplied
+`VerifiedAst` evidence over that same normalized source. Total lowering retains
+exact graph, source locations, and original pre-alpha instructions while both
+constructor and call certificates remain separately inspectable.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.

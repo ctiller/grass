@@ -1,4 +1,4 @@
-import Grass.Construct.Source.ConstructionElaborate
+import Grass.Construct.Source.ConstructionLower
 
 /-!
 # Unified construction-source elaboration fixtures
@@ -213,6 +213,55 @@ private def certified (alpha : LabelAlphaModel) :
     CertifiedConstructionElaborated valid alpha :=
   ⟨checked alpha, constructorExact alpha, callExact alpha⟩
 
+private def entryFragment :
+    VerifiedFragment semantics effects provider.toBlockContract where
+  source := entryBody constructorId
+  contractWellFormed := provider.toBlockContract_wellFormed (by decide)
+  effects := 1
+  effectsExact := rfl
+  localCorrect := by
+    intro _ _ _ _
+    refine ⟨provider.toBlockContract.exits[0], by simp [CallContract.toBlockContract,
+      provider], trivial, ?_⟩
+    intro candidate hcandidate _
+    simp [CallContract.toBlockContract, provider] at hcandidate
+    subst candidate
+    rfl
+
+private def finishFragment :
+    VerifiedFragment semantics effects finishContract where
+  source := .literal [.finish]
+  contractWellFormed := by
+    simp [finishContract, BlockContract.WellFormed,
+      BlockContract.wellFormed, BlockContract.exitTags]
+  effects := 1
+  effectsExact := rfl
+  localCorrect := by
+    intro _ _ _ _
+    refine ⟨finishContract.exits[0], by simp [finishContract], trivial, ?_⟩
+    intro candidate hcandidate _
+    simp [finishContract] at hcandidate
+    subst candidate
+    rfl
+
+private def verifiedEntry :
+    @VerifiedBlock Unit Terminal Instruction Unit Nat semantics effects :=
+  ⟨entryBlock, entryFragment, rfl⟩
+
+private def verifiedFinish :
+    @VerifiedBlock Unit Terminal Instruction Unit Nat semantics effects :=
+  ⟨finishBlock, finishFragment, rfl⟩
+
+private def verifiedAst (alpha : LabelAlphaModel) :
+    VerifiedAst semantics effects (valid.authored.alphaNormalize alpha) where
+  structural := structural alpha
+  blocks := [verifiedEntry, verifiedFinish]
+  blocksExact := rfl
+
+private def verifiedConstruction (alpha : LabelAlphaModel) :
+    VerifiedConstructionElaborated valid alpha :=
+  ⟨certified alpha, verifiedAst alpha⟩
+
 example (alpha : LabelAlphaModel) :
     (valid.constructorSource.normalized alpha).Exact :=
   (certified alpha).constructorApplications
@@ -222,5 +271,23 @@ example (alpha : LabelAlphaModel) :
 example (alpha : LabelAlphaModel) :
     (valid.constructorSource.normalized alpha).ast =
       (valid.callSource.normalized alpha).ast := rfl
+example (alpha : LabelAlphaModel) :
+    (verifiedConstruction alpha).lower.items.map
+      LoweredInstruction.instruction = [.invoke, .finish] :=
+  (verifiedConstruction alpha).lower_instructions_exact
+example (alpha : LabelAlphaModel) :
+    (verifiedConstruction alpha).lower.graph =
+      (valid.authored.alphaNormalize alpha).toGraph :=
+  (verifiedConstruction alpha).lower_graph
+example (alpha : LabelAlphaModel) :
+    (verifiedConstruction alpha).lower.items =
+      (valid.authored.alphaNormalize alpha).loweredItems :=
+  (verifiedConstruction alpha).lower_items_exact
+example (alpha : LabelAlphaModel) :
+    (valid.constructorSource.normalized alpha).Exact :=
+  (verifiedConstruction alpha).constructorApplicationsExact
+example (alpha : LabelAlphaModel) :
+    (valid.callSource.normalized alpha).Exact :=
+  (verifiedConstruction alpha).callContractsExact
 
 end Grass.Tests.Construct.SourceConstructionElaborate
