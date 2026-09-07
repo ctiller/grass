@@ -54,13 +54,15 @@ structure DirectRelationalProgram (boundary : DriverBoundary) where
   terminal : Request -> State -> TerminalResult -> Prop
   terminalDisposition : EveryTerminalStateClassifiesEveryPendingOccurrence
 
-structure DirectProgramDerivation
+opaque DirectProgramDerivation
     (boundaryCertificate : CertifiedDriverBoundary boundary)
-    (program : DirectRelationalProgram boundary) where
-  Kind : Type
-  payload : Kind
-  connectsExactly : RegisteredDerivationConnectsExactProgramAndBoundary
-    payload program boundaryCertificate
+    (program : DirectRelationalProgram boundary) : Type
+def DirectProgramDerivation.operationRequires ...
+def DirectProgramDerivation.operationOrigins ...
+theorem DirectProgramDerivation.operationOrigins_exact ...
+theorem DirectProgramDerivation.operationOrigins_contained ...
+theorem DirectProgramDerivation.operationOrigins_aggregateExact ...
+theorem DirectProgramDerivation.connectsExactly ...
 
 structure CertifiedDirectProgram
     (boundary : DriverBoundary)
@@ -75,7 +77,7 @@ def CertifiedDirectProgram.originDemands
 def CertifiedDirectProgram.operationOrigins
     (program : CertifiedDirectProgram boundary boundaryCertificate)
     (occurrence : DynamicOccurrence program.program) :=
-  boundaryCertificate.providers.origins occurrence.demand
+  program.derivation.operationOrigins occurrence
 
 structure DirectProgramRealizes {R : Type u} [ResourceModel R]
     {resources : R} (spec : SpecProcess resources)
@@ -92,8 +94,8 @@ structure DirectProgramRealizes {R : Type u} [ResourceModel R]
 and produces one conventional, replaceable process presentation. The input
 already contains the program decomposition and correctness proof; neither the
 adapter's topology nor its chosen child placement becomes precious.
-The provider-demand family is the exact certified-boundary envelope; every
-dynamic occurrence's possibly empty or multi-origin subfamily is a definition
+The provider-demand family is the conservative certified-boundary envelope;
+every dynamic occurrence's possibly empty or multi-origin subfamily is a definition
 of its dependent demand, not caller-populated evidence. Thus neither the adapter
 nor a replacement correctness proof can omit or relabel it, and provider
 certificates are not duplicated per call site. The raw relational program stays
