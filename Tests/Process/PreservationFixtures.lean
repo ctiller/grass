@@ -376,6 +376,123 @@ theorem the_arrival_is_on_its_destination {occurrence destination}
         arrival.1 = occurrence.1 ∧ arrival.2.1 = destination :=
   afterReroute_is_wellFormed.rerouted_arrival_is_on_its_destination () wire rerouted
 
+/-! ## The rest of §10.89's check, run
+
+The section above ran §10.89's check against the six constructors whose
+transitions this branch had built at the time. A claims audit of the corpus found
+eight more with a transition witness and no `NetworkStep` wrapping it: the two
+session enders, the two endpoint deaths, the drop, the cancel request, and the
+two instance endings. Each was the weaker witness §10.89 warns about — a
+transition nothing can wrap is a transition no execution contains, and
+`ProcessPlan.wellFormed_preserved` is stated over steps.
+
+None of the eight was hard, and that is the point rather than a complaint: every
+one of them is non-allocating, so `admissible` is vacuous and `historyExact` is
+`rfl`. The check is cheap and it had simply not been run to the end.
+
+Each step is paired with the well-formedness of the world it reaches, by the
+capstone rather than by hand. That is the part that was actually missing: before
+these, `afterClosing`, `afterDying`, `afterSenderDeath`, `afterReceiverDeath`,
+`afterDropping`, `afterRequesting` and the two ending worlds were worlds no
+theorem said anything about.
+-/
+
+open Grass.Process.Tests.ChannelStep
+  (afterClosing afterDying afterDropping afterRequesting the_close the_death the_drop
+   the_request)
+
+/-- An ordinary close is a step. -/
+def theCloseStep : serverPlan.NetworkStep sent afterClosing where
+  transition := .channelClose () wire escrowed the_close
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-- The world every one of these four starts from, named once. -/
+theorem sent_is_wellFormed : sent.WellFormed :=
+  ProcessPlan.wellFormed_preserved theSendStep withRoot_is_wellFormed
+
+theorem afterClosing_is_wellFormed : afterClosing.WellFormed :=
+  ProcessPlan.wellFormed_preserved theCloseStep sent_is_wellFormed
+
+/-- And so is a channel death. -/
+def theDeathStep : serverPlan.NetworkStep sent afterDying where
+  transition := .channelDeath () wire escrowed the_death
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+theorem afterDying_is_wellFormed : afterDying.WellFormed :=
+  ProcessPlan.wellFormed_preserved theDeathStep sent_is_wellFormed
+
+/-- A drop is a step. -/
+def theDropStep : serverPlan.NetworkStep sent afterDropping where
+  transition := .drop () wire escrowed the_drop
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+theorem afterDropping_is_wellFormed : afterDropping.WellFormed :=
+  ProcessPlan.wellFormed_preserved theDropStep sent_is_wellFormed
+
+/-- And so is a cancellation request, which resolves nothing. -/
+def theRequestStep : serverPlan.NetworkStep sent afterRequesting where
+  transition := .requestCancel () wire escrowed the_request
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+theorem afterRequesting_is_wellFormed : afterRequesting.WellFormed :=
+  ProcessPlan.wellFormed_preserved theRequestStep sent_is_wellFormed
+
+/-! ### The four whose before-world is not `sent`
+
+The two endpoint deaths and the two instance endings start from worlds built by
+hand rather than reached by a step — a world holding a *dead* sender, or an
+instance mid-countdown — so there is no chain from `quiet` to carry
+well-formedness along. What §10.89's check asks for is still the step, and these
+are it: each transition is one an execution can contain, which is the claim a
+transition alone does not make.
+
+That the before-worlds are unreached is worth saying rather than leaving
+implicit. It is the same distinction §10.88 drew between inhabited and exercised,
+one level down: a step from an unreachable world is a real step, and it is not a
+step of any run.
+-/
+
+open Grass.Process.Tests.ChannelStep
+  (sentWithDeadSender afterSenderDeath sentWithDeadReceiver afterReceiverDeath
+   the_sender_death the_receiver_death)
+open Grass.Process.Tests.Ending (holding settling waitingOnATick
+  an_honest_termination an_honest_interruption)
+open Grass.Process.Tests.Instances (finished)
+
+/-- A sender's death is a step. -/
+def theSenderDeathStep : serverPlan.NetworkStep sentWithDeadSender afterSenderDeath where
+  transition := .senderDeath () wire escrowed .supervised the_sender_death
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-- And a receiver's. -/
+def theReceiverDeathStep :
+    serverPlan.NetworkStep sentWithDeadReceiver afterReceiverDeath where
+  transition := .receiverDeath () wire escrowed .providerLost the_receiver_death
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-- A termination is a step. -/
+def theTerminationStep :
+    serverPlan.NetworkStep (holding settling) (holding finished) where
+  transition := .processTermination Role.connection Ending.slot ⟨()⟩ (fun _ _ _ => True)
+    an_honest_termination
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-- And so is an interruption of the demand the instance is holding. -/
+def theInterruptionStep (reason : Interrupt) :
+    serverPlan.NetworkStep (holding waitingOnATick)
+      (holding { waitingOnATick with lifecycle := .interrupted Demand.tick reason }) where
+  transition := .interrupt Role.connection Ending.slot Demand.tick reason
+    (fun _ _ _ => True) (an_honest_interruption reason)
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
 /-! ## And a start at a plan with something in it
 
 §10.88: `ExactInitialNetwork` had one witness in the corpus,
