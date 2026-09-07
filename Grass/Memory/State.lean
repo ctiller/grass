@@ -653,6 +653,26 @@ Nothing is held over the bytes, *the lender owns the allocation, and the storage
 carries the rights being lent* — the unlent case, which is how a first grant is ever
 issued.
 
+**The sublet disjunct keeps an epoch filter that `grantsOver` deliberately dropped**,
+and the two are not in conflict. `grantsOver` answers "which grants freeze these
+bytes", and there a stale grant must still count, because dropping it lifted a freeze
+and let an unauthorized store commit — the argument is written out above that
+function. This disjunct answers a different question: "may this lender pass on what it
+holds". A grant naming a defunct epoch authorizes nothing, by `AuthorizedAt`, so
+sublending from it would hand on authority that does not exist. Refusing here is the
+narrowing direction and refusing there was the widening one, which is why the same
+filter is right in one place and wrong in the other.
+
+Review found the conjunct discriminated by nothing and asked which way it should go;
+this paragraph is the answer, and the honest limit is that no reachable state exercises
+it. `allocate?` refuses a record change while authority is outstanding over the bytes,
+alias-aware in both directions, and `tearDown?` goes through `allocate?`, so an
+outstanding grant's provenance cannot go stale through any door —
+`allocate?_eq_none_of_outstanding` is that refusal, so the conjunct is kept for a state
+the doors cannot currently build. That is the conservative direction, and
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records it rather than leaving it to be
+rediscovered.
+
 **The third conjunct is what made `issue?_eq_none_of_nothing_to_lend`'s sentence true
 of this disjunct.** The second disjunct bounds a sublet by `entry.2.rights.Grants
 grant.rights`; the first had no rights term at all, so that sentence was false of the

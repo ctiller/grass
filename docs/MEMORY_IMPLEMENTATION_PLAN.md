@@ -133,7 +133,7 @@ Grass/Memory/Access.lean         AccessDescriptor, AccessOutcome, AccessResult
 Grass/Memory/Substep.lean        ordered substeps, commit prefix, fault visibility
 Grass/Memory/Event.lean          MemoryEvent, ContextId, ContextKind
 Grass/Memory/Audit.lean          AuditRecord, append-only AuditLedger
-Grass/Memory/Facet.lean          the operation-facing effect interfaces
+Grass/Op/Facets.lean             the operation-facing effect interfaces
 Grass/Memory/Profile.lean        MemoryProfile: the §10 package as a record type
 Grass/Obligation/Core.lean       ObligationId, kind, existential payload, Obligation
 Grass/Obligation/Disposition.lean  the five terminal dispositions
@@ -147,11 +147,17 @@ Grass/Resource/Axis.lean         ResourceAxisName, HasResourceAxis, HasResourceL
 including the concurrency fields, on day one. See §7 of this plan for why they
 are populated before the single-threaded semantics reads them.
 
-`Grass/Memory/Facet.lean` is the seam ISA authors implement. It provides
+`Grass/Op/Facets.lean` is the seam ISA authors implement. It provides
 separated conditional facets rather than one god class, per
-[INSTRUCTIONS.md](INSTRUCTIONS.md) §1, and a `MemoryProfileRequirements` value
-naming exactly which facets a given profile demands. A reachable operation
-missing a demanded facet is rejected; there is no default empty effect.
+[INSTRUCTIONS.md](INSTRUCTIONS.md) §1, and `StepPolicy.requiredFacets` names exactly
+which facets a given profile demands. A reachable operation missing a demanded facet is
+rejected; there is no default empty effect — `closes_iff_no_missing` is what says the
+gate deciding that is `OperationFacets.Closes`.
+
+This paragraph named a file that had been renamed and a `MemoryProfileRequirements`
+type that was never declared: three things a reader of the project's ISA-facing
+contract could not find. Review swept every backticked repo-relative path in the tree
+against the filesystem, which is how.
 
 `Grass/Memory/Profile.lean` ships the §10 required proof package as a record in
 M1 even though no instance closes until much later. ISA authors then see the
@@ -1321,7 +1327,7 @@ freeing revokes and an epoch bump revokes, without a field to keep in step, and
 than per-allocation.
 
 It takes the context, and an earlier version did not — a context that had lent to
-itself was reported frozen while `Grass/Op/LoanAuthority.lean` let its write
+itself was reported frozen while the loan provider let its write
 through, which is the two halves of the model contradicting each other.
 
 It reads **every kind of grant**, not only loans. §7.3's conflict is about
@@ -1362,7 +1368,7 @@ query is the position, so a loan over no bytes still freezes nothing
 or a grant conflicting with a live one — and `LoanConflicts` is §7.3's test at issue
 time. §7.3's rule is between *distinct* contexts, and a missing holder clause made a
 second grant to the same holder a conflict, which is exactly the "declare a loan to
-yourself" idiom `Grass/Op/LoanAuthority.lean` endorses; the clause is there now
+yourself" idiom the loan provider endorsed; the clause is there now
 (`a_second_loan_to_the_same_holder_is_accepted`).
 
 Issuing is not the guarantee, and a comment here said it was. `MemoryState.grant`
@@ -1371,7 +1377,7 @@ issued become conflicting when an alias is declared afterwards — §7.5 makes t
 real transition and nothing re-examines what was already issued. Review reached both
 states and watched the write commit with no violation recorded.
 
-`Grass/Op/LoanAuthority.lean` is the rule as a provider a profile adopts rather
+The loan provider *was* the rule as a provider a profile adopts rather
 than reinvents, and it has two halves. Lent bytes are reachable only through a loan
 — a holder test over the loan map. **And** the state `authorityOf` reports must
 permit the intent, which is the half that reads the map it is handed rather than
@@ -2272,6 +2278,51 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   this document rests on review rather than on a gate**, which is worth knowing when
   reading the struck-through entries above.
 
+- ~~**Eight `DOORS` allowances permitted no caller**, five of them created at once by a
+  shared constant.~~ A shared owners set gave `Grass/Memory/Loan.lean` reach into four of
+  `State.lean`'s doors it never calls and `State.lean` reach into `Loan.lean`'s one door
+  it never calls. That is the same defect this file records finding for
+  `applyAuthorityDelta?` and `Grass/Op/Step.lean` one round earlier — a widened
+  permission granted for no caller — repeated five times by a constant, which is how one
+  decision became five.
+
+  The rule is per (door, module) now: a door's *declaring* module is always allowed,
+  because a door its own module may not call is not a door; a cross-module allowance
+  must have a caller. `--inert` reports one that does not, which makes `DoorAudit` the
+  fifth of five allowlist-bearing gates to grow that check after being found with dead
+  entries. That is no longer a coincidence and it is the argument for building the check
+  first next time.
+- ~~**Eleven references to a module deleted four hundred commits earlier**, three of
+  them the reproduction steps justifying two `DoorAudit` entries.~~ So the negative
+  tests behind a gate could not be reproduced from the tree as documented. Alongside
+  them, the paragraph describing this project's ISA-facing contract named a renamed
+  seam and a `MemoryProfileRequirements` type that was never declared — three things a
+  reader of that paragraph could not find.
+
+  A backticked repo-relative path was adjudicated by nothing: the declaration check
+  drops anything ending `.lean`, `.md` or `.py`, and the link check resolves only
+  markdown link syntax. `CitationAudit` resolves them now, with an allowlist for
+  the illustrative names in a tool's own docstring and for one document another owner
+  has not written. Negative-tested against a real dead path in a real file.
+- **`MayLend`'s sublet disjunct keeps an epoch filter `grantsOver` deliberately
+  dropped, and the two are not in conflict.** Review found the conjunct discriminated by
+  nothing and asked which way it should go. `grantsOver` answers "which grants freeze
+  these bytes", where a stale grant must still count — dropping it there lifted a
+  freeze and let an unauthorized store commit. The sublet disjunct answers "may this
+  lender pass on what it holds", and a grant naming a defunct epoch authorizes nothing,
+  so sublending from it hands on authority that does not exist. Refusing is the
+  narrowing direction here and was the widening one there.
+
+  The honest limit, now written beside the conjunct: no reachable state exercises it,
+  because `allocate?_eq_none_of_outstanding` refuses a record change while authority is
+  outstanding and `tearDown?` goes through `allocate?`, so an outstanding grant's
+  provenance cannot go stale through any door.
+- ~~**`a_stranger_may_not_lend_what_another_lent` was over-determined at the door.**~~
+  A per-gate sweep over every `issue?` refusal fixture found exactly one where two gates
+  fire: `MayLend` and the conflict scan both refuse it, so its first conjunct said
+  nothing about the lender rule the theorem is named for. It carries the conflict fact
+  explicitly now, rather than leaving a reader to discover which rule did the work.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Four review rounds found the same shape and it is worth naming as a shape rather than
@@ -2473,7 +2524,7 @@ the field belongs beside it as something that can only add.
   is that guard — it fails on any application of one of the five doors from a
   `Grass/` module other than the two that own the map, and it does not scan `Tests/`,
   where calling a door directly is what a fixture is for. Negative-tested by adding a
-  real call to `Grass/Op/LoanAuthority.lean` and watching it fail, not only by its
+  real call added to a module that owns no door, and watching it fail, not only by its
   own self-test.
 - ~~**`GrantKind` is an open nominal name with no registry.**~~ Closed by
   `AdmittedVocabulary.grantKinds`, and the timing is the point: it did not matter
@@ -2632,7 +2683,7 @@ the field belongs beside it as something that can only add.
 - ~~**`MemoryState.alias` was an unchecked mutator outside every gate.**~~ It changes
   which allocations name the same bytes, which is an authority question — every rule
   in the layer keys on `SharesBytes` — and `Tools/DoorAudit.py`'s first version left
-  it out. Review added a real definition calling it to `Grass/Op/LoanAuthority.lean`
+  it out. Review added a real definition calling it to a module that owns no door
   and the audit printed its green line. It is a door now, negative-tested the same
   way.
 
@@ -2912,7 +2963,7 @@ the field belongs beside it as something that can only add.
   theorem, not an observation — stated as an observation, it was false within the
   hour.
 
-  `AuthorityProvider.loan` is deleted, with `Grass/Op/LoanAuthority.lean`. Both its
+  `AuthorityProvider.loan` is deleted, with the module that held it. Both its
   clauses were in `refusalOf` verbatim, which is two encodings of one rule and
   [FOUNDATION.md](FOUNDATION.md) law 11 forbids it; nineteen citations across eight
   files are repointed at `refusalOf`, and `Tests/Op/StandardLoan.lean` — which existed
@@ -2982,7 +3033,7 @@ the field belongs beside it as something that can only add.
   The argument that an `actor` parameter on `issue?` is worthless applies verbatim to
   `applyAuthorityDelta?`'s `actor`, which is caller-chosen everywhere except the one
   `performAccess` site. Review added three real map-changing definitions to
-  `Grass/Op/LoanAuthority.lean`, one routed through the applier, and the audit printed
+  a module that owns no door, one routed through the applier, and the audit printed
   its green line. Both appliers are doors now, with the transition as an allowed
   caller.
 
@@ -3149,7 +3200,7 @@ Unblocks: `Std.Owned` slice loans, and M4.
 ```text
 Grass/Memory/Frame.lean       stack reservation provenance, frame create/destroy,
                               frame-loan resolution before destruction
-Grass/Memory/CallFrame.lean   the reusable ABI call-framing theorem of §6: lend
+Grass/Memory/CallFrame.lean   (M4, not yet written) the reusable ABI call-framing theorem of §6: lend
                               exact slot authority, retain disjoint residual,
                               construct the pending frontier state and completion
                               obligation, and consume the same loan identities on

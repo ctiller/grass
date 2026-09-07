@@ -341,6 +341,43 @@ def check_declarations(prose: dict[str, str], names: set[str]) -> list[str]:
     return out
 
 
+# A backticked repo-relative path, which `worth_checking` deliberately drops as a
+# declaration and nothing else adjudicated. Eleven references to a module deleted
+# four hundred commits earlier survived in this tree -- three of them the
+# reproduction steps justifying two `Tools/DoorAudit.py` entries, so the negative
+# tests behind a gate could not be reproduced from the tree as documented -- plus a
+# renamed seam and a never-declared type in the paragraph describing this project's
+# ISA-facing contract. `check_links` resolves markdown link targets and this resolves
+# the same thing written as code.
+PATH_CITATION = re.compile(r"`([A-Za-z0-9_][A-Za-z0-9_/.-]*\.(?:lean|md|py|ps1|toml))`")
+
+# Paths that are deliberately not files: illustrative names in a docstring explaining
+# what the tool does, and one document another owner has not written yet.
+ALLOWED_PATHS = {
+    # `Tools/CitationAudit.py` explains its own rules with example targets.
+    "../docs/FOUNDATION.md", "Grass/docs/FOUNDATION.md", "docs/NAME.md",
+    # Cited by `Grass/Std/Logical/Bag.lean`, which is another owner's module; the
+    # document is theirs to write and the citation is theirs to keep or drop.
+    "docs/PROCESS_IMPLEMENTATION_PLAN.md",
+    # Named by this plan as owed rather than present, with the milestone beside it.
+    "Grass/Memory/CallFrame.lean",
+}
+
+
+def check_paths(prose: dict[str, str]) -> list[str]:
+    """Report every backticked repo-relative path that resolves to no file."""
+    out: list[str] = []
+    for where, text in prose.items():
+        for number, line in enumerate(text.splitlines(), 1):
+            for cited in PATH_CITATION.findall(line):
+                if "/" not in cited or cited in ALLOWED_PATHS:
+                    continue
+                if (ROOT / cited).exists():
+                    continue
+                out.append(
+                    f"  {where}:{number}: `{cited}` is cited and no such file exists")
+    return out
+
 def check_sections(prose: dict[str, str], sections: dict[str, set[str]]) -> list[str]:
     """Report every `docs/X.md ... §N` whose section X does not have."""
     out: list[str] = []
@@ -579,6 +616,9 @@ def main() -> int:
                 # the audit passed.
                 + check_sections(prose, sections)
                 + check_sections(tools, sections)
+                + check_paths(prose)
+                + check_paths(tools)
+                + check_paths(lean_facing)
                 + check_sections(documents, sections)
                 + check_links(prose))
     if problems:

@@ -5,7 +5,7 @@ import Tests.Op.FakeIsa
 
 `Tests/Op/FakeIsa.lean` writes its own providers, which was the right thing to do
 when the point was to demonstrate that the seam accepts one. This file used to adopt
-a *standard* loan provider, `Grass/Op/LoanAuthority.lean`, so that a profile need not
+a *standard* loan provider, `AuthorityProvider.loan`, so that a profile need not
 reinvent §3's rule — and review then showed what that shape costs:
 `StepPolicy.authorities` defaults to `[]`, so a profile that declared no providers
 got no authority enforcement at all, and an operation could mint a grant through
@@ -632,6 +632,14 @@ refused as conflicting, it could not return a grant it neither held nor lent, an
 could not free or re-epoch the allocation because a grant was outstanding. Permanent
 seizure, in one accepted call.
 
+**The door refuses this for two reasons, and the second conjunct is the one that
+names the rule.** A per-gate sweep of `issue?`'s nine gates over every refusal fixture
+in this file found exactly one over-determined: this one, where `MayLend` *and* the
+conflict scan both fire, so the first conjunct alone would say nothing about the lender
+rule. The third conjunct says so out loud rather than leaving a reader to find it — the
+sibling `the_stranger_may_not_seize_unheld_bytes` fires one gate and carries three
+discriminating conjuncts, which is the shape to copy.
+
 **Seizing bytes nothing is held over** was the residue this could not stop, because it
 was the same rule a legitimate owner's first loan needed and `AllocationRecord`
 recorded no owner. `AllocationRecord.owners` is that missing half and the theorem
@@ -639,8 +647,11 @@ below is the case that flipped.
 -/
 theorem a_stranger_may_not_lend_what_another_lent :
     lentToEngine.memory.issue? secondBufferLoan strangerSeizure = Option.none ∧
-    ¬ lentToEngine.memory.MayLend strangerSeizure := by
-  exact ⟨by decide, by decide⟩
+    ¬ lentToEngine.memory.MayLend strangerSeizure ∧
+    lentToEngine.memory.grantEntries.any
+      (fun entry => decide (lentToEngine.memory.LoanConflicts entry.2 strangerSeizure))
+      = true := by
+  exact ⟨by decide, by decide, by decide⟩
 
 /-- **And the same seizure over bytes nothing is held on is refused too.**
 

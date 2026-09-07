@@ -84,20 +84,32 @@ SOURCES_IN = sorted((ROOT / "Grass").rglob("*.lean"))
 # anything passes `grant.lender` — applies verbatim to `applyAuthorityDelta?`'s
 # `actor`, which is caller-chosen everywhere except the one `performAccess` site where
 # it is `d.context`. Three real map-changing definitions were added to
-# `Grass/Op/LoanAuthority.lean`, one routed through `applyAuthorityDelta?` with
+# `Grass/Op/Facets.lean`, one routed through `applyAuthorityDelta?` with
 # `grant.lender` as its actor, and this tool printed its green line.
 #
 # So the effect appliers are guarded too, and their allowed callers are the module
 # that owns them and the transition — which is the only place the actor is not the
 # caller's to choose.
+# **An allowance is per (door, module), and a blanket set was granting eight of them
+# to no caller at all.** `MAP_OWNERS` gave `Grass/Memory/Loan.lean` reach into four of
+# `State.lean`'s doors it never calls, and `State.lean` reach into `Loan.lean`'s one
+# door it never calls. That is the same defect this file records finding for
+# `applyAuthorityDelta?` and `Grass/Op/Step.lean` below -- a widened permission granted
+# for no caller -- repeated five times by a shared constant, which is how one decision
+# became five.
+#
+# The rule now: a door's *declaring* module is always allowed, because a door that its
+# own module may not call is not a door; a *cross-module* allowance must have a caller,
+# and `--inert` reports one that does not. `Loan.lean` calls `issue?` and
+# `returnGrant?`, and that is the whole of the cross-module traffic.
 MAP_OWNERS = {"Grass/Memory/State.lean", "Grass/Memory/Loan.lean"}
 DOORS = {
     "issue?": MAP_OWNERS,
     "returnGrant?": MAP_OWNERS,
-    "returnLoan?": MAP_OWNERS,
-    "splitGrant?": MAP_OWNERS,
-    "joinGrants?": MAP_OWNERS,
-    "transferGrant?": MAP_OWNERS,
+    "returnLoan?": {"Grass/Memory/Loan.lean"},
+    "splitGrant?": {"Grass/Memory/State.lean"},
+    "joinGrants?": {"Grass/Memory/State.lean"},
+    "transferGrant?": {"Grass/Memory/State.lean"},
     # `Grass/Op/Step.lean` is allowed the *effect* and not the *delta*: it applies
     # `applyAuthorityEffect?` in five places and `applyAuthorityDelta?` in none. The
     # allowance was on both, with a reason true only of the second -- "the transition
@@ -105,15 +117,15 @@ DOORS = {
     # context is not the caller's to choose" -- so the door whose whole purpose is the
     # actor check carried a widened permission granted for no caller. Removing it
     # changed nothing, which is how review found it.
-    "applyAuthorityDelta?": MAP_OWNERS,
+    "applyAuthorityDelta?": {"Grass/Memory/State.lean"},
     "applyAuthorityEffect?": {"Grass/Memory/State.lean", "Grass/Op/Step.lean"},
     # `alias` changes which allocations name the same bytes, which is an authority
     # question -- every rule in the layer keys on `SharesBytes`. It is deliberately
     # *not* an `Option`-returning door (see its own docstring), which is exactly why
     # it belongs here: the first version of this file left it out, and review added a
-    # real `Grass/Op/LoanAuthority.lean` definition calling it and watched the audit
+    # real `Grass/Op/Facets.lean` definition calling it and watched the audit
     # print its green line.
-    "alias": MAP_OWNERS,
+    "alias": {"Grass/Memory/State.lean"},
     # `ProtocolAuthority.mintedBy` is the one door onto the value every ledger delta
     # carries, and it is public, total and unconditioned: review minted authority for
     # a protocol out of a string in a module that owns nothing and discharged another
@@ -163,7 +175,7 @@ def strip(source: str) -> str:
     structure.
 
     The first version deleted them, so every report pointed at the wrong line of a
-    real file: a control call on line 219 of `Grass/Op/LoanAuthority.lean` was
+    real file: a control call on line 219 of `Grass/Op/Facets.lean` was
     reported as line 106. The self-test never noticed, because seeded sources have no
     block comments — so this function now preserves newlines and the self-test seeds
     one.
@@ -237,7 +249,7 @@ def analyse(sources: dict[str, str]) -> list[str]:
 def self_test() -> int:
     failures = 0
     # A module allowed for no door, so one seeded case works for all of them.
-    OUTSIDE = "Grass/Op/LoanAuthority.lean"
+    OUTSIDE = "Grass/Op/Facets.lean"
     call = "def f (s : MemoryState) := s.issue? id grant\n"
 
     if not analyse({OUTSIDE: call}):
@@ -346,6 +358,38 @@ def self_test() -> int:
 def main() -> int:
     if "--self-test" in sys.argv:
         return self_test()
+
+    if "--inert" in sys.argv:
+        # Which (door, module) allowances permit no caller. Four sibling tools grew
+        # this check after being found with dead allowlist entries; this table was
+        # the fifth and had none, and review then found eight dead pairs -- five of
+        # them created at once by a shared constant.
+        #
+        # A door's own declaring module is exempt from the report: a door its own
+        # module may not call is not a door, so that allowance is structural rather
+        # than a claim about a caller. Everything else must have one.
+        declared = {}
+        for path in sorted(ROOT.joinpath("Grass").rglob("*.lean")):
+            text = path.read_text(encoding="utf-8")
+            for door in DOORS:
+                if re.search(r"^def %s\b" % re.escape(door), text, re.MULTILINE):
+                    declared[door] = path.relative_to(ROOT).as_posix()
+        bodies = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
+                  for path in sorted(ROOT.joinpath("Grass").rglob("*.lean"))}
+        dead = []
+        for door, allowed in sorted(DOORS.items()):
+            for module in sorted(allowed):
+                if declared.get(door) == module:
+                    continue
+                text = bodies.get(module, "")
+                if not applications(text, door):
+                    dead.append("%s <- %s" % (door, module))
+        if dead:
+            print("allowances that permit no caller: " + ", ".join(dead))
+            print("Narrow them, or say why the allowance is kept with no caller.")
+        else:
+            print("door audit: every cross-module allowance has a caller")
+        return 0
     sources = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
                for path in SOURCES_IN}
     if not sources:
