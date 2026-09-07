@@ -271,6 +271,15 @@ in `UncheckedAst` with a mandatory primary `Taint` and an ordered additional
 taint ledger. Its helpers perform no structural check and expose no promotion;
 checked lowering still requires `Grass.Construct.Source.VerifiedAst`.
 
+`Grass.Unsafe.Import` is machine-parametric: a machine owner supplies a
+one-instruction decoder and exact control-target projection. The importer
+requires each decode step to consume a nonempty exact prefix, rejects unresolved
+direct or indirect targets against a `TargetPolicy` tied to one structurally
+well-formed CFG and its derived block identities, and returns an `ImportedProgram`
+whose concatenated instruction byte slices equal the original input and which
+retains the exact policy used for acceptance. That byte-coverage proof is not an
+instruction-semantics certificate.
+
 Exit criteria include round trips for supported raw instructions, structured
 errors for unknown/ambiguous bytes and targets, exact stepping agreement with
 `Grass.Op.step`, and exact byte/list input passed to the artifact writer.
