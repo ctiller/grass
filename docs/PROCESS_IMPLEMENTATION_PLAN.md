@@ -4014,6 +4014,11 @@ requires atomicity here is a ruling. If it does, `coalesce` needs its own
 structure taking a list of sources, and §10.95's revert is right for the wrong
 reason.
 
+**Ruled** by `g-design:83`: it does. **Closed** by `ProcessPlan.Coalesces`, and
+this paragraph's prediction was right down to the structure it names — §10.131 is
+the entry, and records that a docstring on `main` had meanwhile claimed the
+opposite.
+
 §10.111's first repair briefly made the decomposition *unconstructible*, and
 §10.113 is that being caught and undone — so this entry has been false once and is
 true again. Worth noting because it is the only place on this branch where a
@@ -4805,6 +4810,11 @@ one instantiation in the corpus and it is `exactDedup` — which is the "inhabit
 and not exercised" shape §10.88 named, and is recorded here rather than left for
 a reviewer to find. **Owed.**
 
+**Closed by §10.130**, which also records that the `latestWins` half of this
+paragraph was worse than it looks: the predicate it names is satisfiable by no
+coalesce at any plan, so the pair offered here proved nothing about coalescing at
+all.
+
 **And one thing the ruling asked for that this layer cannot carry.** g-design's
 wording is "plus the exact custody/resource/obligation preservation laws". An
 `EdgeOccurrence` is a message and a nominal identity; there is no resource or
@@ -4908,6 +4918,120 @@ still the thing §10.89 asked for — the transition is one an execution can con
 before-worlds by steps is owed, and is a bigger job: it wants a `processStep`
 that puts an instance in each state, which is `Tests/Process/ProcessStepFixtures.lean`'s
 territory rather than this file's.
+
+### 10.130 The fixture that proved the generalisation had content could not be satisfied
+
+§10.127 landed `ProcessPlan.coalescing` and recorded, honestly, that the corpus
+instantiated it at `ProcessPlan.exactDedup` and nowhere else — a field with one
+instantiation being the generalisation in name only. It offered a pair of
+theorems as the stand-in: `latestWins sources carrier := carrier ∈ sources`
+admits a family `exactDedup` refuses.
+
+**Building the plan-level witness found that the stand-in was worse than
+under-exercised.** `ResolvesEscrow.carrierIsPermitted` takes the source family to
+be exactly those the after-ledger resolves into the carrier, and
+`EscrowLedger.coalesceCarrierLater` requires every such source to rank *strictly
+below* the carrier. So no coalesce, at any plan, can ever hand `latestWins` a
+family containing its own carrier: the predicate is satisfiable by nothing.
+`Tests/Process/MergeFixtures.lean`'s `latestWins_is_unsatisfiable` proves it in
+three lines.
+
+That is the failure this ledger has spent the whole milestone refusing — a record
+nothing inhabits, a law that cannot fail, a disjunct no plan can reach — arriving
+this time *inside the fixture written to rule it out*. The entry that recorded the
+gap honestly still shipped a witness that was not one, and no reviewer caught it
+because the two theorems it offered are both true.
+
+**What closes it.** `Tests/Process/MergeFixtures.lean` is the plan-level witness
+§10.127 said was owed:
+
+* `mergingPlan` is `serverPlan` with one field changed, so every world,
+  occurrence and ledger the other fixtures build is a world of it too, and the
+  comparison is a comparison rather than two unrelated stories;
+* `keepsOnePayload` replaces `latestWins` — the carrier agrees with *some* source
+  rather than with every source, which is the weakest policy that is not
+  deduplication;
+* `the_first_merge` and `the_merge_that_keeps_one_payload` are two real
+  `ResolvesEscrow`s into one carrier, and the second merges a source carrying a
+  *different* payload;
+* `serverPlan_refuses_it` shows the same step is unconstructible at the plan whose
+  policy is `exactDedup`.
+
+**A merge takes two steps, which is worth knowing.**
+`ResolvesEscrow.resolvesNothingElse` lets a step resolve exactly the occurrence it
+names, so §3's "coalescing consumes every source token" is a *sequence* of
+coalesces into one carrier rather than a single step — and because
+`carrierIsPermitted` reads the family off each step's own after-ledger, the
+family grows as the sequence proceeds. The first merge here would satisfy
+`exactDedup` too; only the second has a family whose members disagree. A policy
+is therefore checked against every prefix of the merge, not only against the
+whole, which is stronger than the ruling asked for and worth stating before
+someone assumes otherwise.
+
+**And one thing this does not settle.** `keepsOnePayload` is not latest-wins:
+pinning *which* source the carrier follows needs an order over the family, and
+`ProcessPlan.coalescing` receives a `List` whose order is the plan's to interpret
+rather than the ledger's rank. A genuine latest-wins policy is expressible — take
+the last element — but relating that list order to `EscrowLedger.rank` is not,
+because the relation never sees the ledger. Recorded rather than fixed: it is the
+same shape as §10.103's `rank`, which is pinned indirectly and by nothing that
+mentions it.
+
+### 10.131 A coalesce was a sequence, and the docstring said it was not
+
+§10.104, closed, and a defect of my own on `main` alongside it.
+
+**The ruling.** `agent-bus` `g-design:83` answered §10.104's question: "at the
+logical level the coalesce consumes all named sources and creates one fresh
+carrier atomically ... thus no intermediate partially coalesced logical world is
+observable". §10.104 had predicted the consequence exactly — "if §3 requires
+atomicity, `coalesce` needs its own structure taking a list of sources, and
+§10.95's revert is right for the wrong reason".
+
+**What was implemented instead, and the false sentence.** §10.127 implemented the
+ruling's *policy* half — `ProcessPlan.coalescing`, with `carrierIsPermitted`
+requiring the source family to be exactly those the after-ledger resolves into
+the carrier — and its docstring said: "what the ruling forbids, and what
+'exactly' forbids here, is a *logical* world in which the merge is half done."
+That is false, and it reached `main` through `c-process:74`.
+
+`carrierIsPermitted` constrained each step's family to be exactly what *that
+step's* after-ledger recorded. It said nothing about a later step adding more to
+the same carrier. And `ResolvesEscrow.resolvesNothingElse` lets a step resolve
+exactly the occurrence it names, so a multi-source merge was *necessarily* a
+sequence: the world between two of its steps — carrier outstanding, some sources
+merged, others still in flight — was a legal world of the plan. §10.104 said this
+in as many words and the docstring contradicted it without noticing.
+
+**How it was caught.** Building §10.130's plan-level witness. The witness needed
+two sources with different payloads, which under `ResolvesEscrow` had to be two
+steps, and writing the intermediate world down is what made it obvious that the
+intermediate world was the thing the ruling forbids. The fixture written to close
+one gap found that the entry which recorded it had asserted the opposite of the
+truth. That is twice in three entries — §10.130 was the same shape — and both
+times the fixture caught what the prose asserted.
+
+**What closes it.** `ProcessPlan.Coalesces`: its own structure, taking the whole
+source family. `nowResolved` says every member is resolved after the one step, so
+there is no step of this family that leaves part of it outstanding.
+`consumesExactly` says the family is everything the carrier collects, so a second
+step into the same carrier is refused — `Tests/Process/CloseFixtures.lean`'s
+`no_second_merge_into_the_same_carrier` is that, and it replaces a theorem which
+truthfully said the opposite under the old shape.
+
+**And `ResolvesEscrow` got smaller.** It was the coalesce's structure as well as
+the other five resolutions', so it carried `carrierOnItsSession`,
+`carrierIsOutstanding`, `carrierIsPermitted` and a `createsOnlyTheCarrier` that
+were vacuous at every resolution but `.coalesced` — four fields that five of six
+constructors discharged with `cases isCoalesce`. They are gone, and what remains
+is `createsNothing`. Four vacuous fields out of six is the generality-by-vacuity
+§10.105 names, and it was invisible while the sixth constructor needed them.
+
+**What this does not settle.** A merge is still *expressible* as a sequence in
+one sense: two `Coalesces` into two *different* carriers, the second consuming
+the first's carrier, is a chain and is not forbidden. That is a genuine coalesce
+chain rather than a half-done merge — `EscrowLedger.no_cycle` is what keeps it
+finite — and §3 appears to permit it. Recorded rather than ruled on.
 
 ## 11. The authoring facade
 

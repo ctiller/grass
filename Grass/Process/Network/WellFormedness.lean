@@ -803,14 +803,13 @@ theorem rerouting_stood_or_is_this_step (transition : plan.NetworkTransition bef
         rw [step.nowResolved] at resolved
         exact absurd resolved (by intro equal; cases equal)
       · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
-    | coalesce _ _ occurrence' _ step =>
+    | coalesce _ _ sources _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
-      by_cases isIt : occurrence = occurrence'
-      · subst isIt
-        rw [step.nowResolved] at resolved
+      by_cases isSource : occurrence ∈ sources
+      · rw [step.nowResolved occurrence isSource] at resolved
         exact absurd resolved (by intro equal; cases equal)
-      · exact Or.inl (step.resolvesNothingElse occurrence isIt ▸ resolved)
+      · exact Or.inl (step.resolvesNothingElse occurrence isSource ▸ resolved)
     | processStep _ _ _ _ _ _ _ =>
       exact absurd declared (by rintro (h | ⟨_, h⟩ | ⟨_, _, h⟩) <;> cases h)
     | spawn _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
@@ -877,43 +876,38 @@ theorem occurrencesOnTheirSession_preserved (transition : plan.NetworkTransition
       cases same; cases sameSession
       by_cases fresh : occurrence ∈ (before.inFlight edge session).created
       · exact holds edge session occurrence fresh
-      · exact step.carrierOnItsSession occurrence
-          (step.createsOnlyTheCarrier occurrence held fresh)
+      · rw [step.createsOnlyTheCarrier occurrence held fresh]
+        exact step.carrierOnItsSession
     | acknowledgeCancel _ _ _ _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
       by_cases fresh : occurrence ∈ (before.inFlight edge session).created
       · exact holds edge session occurrence fresh
-      · exact absurd (step.createsOnlyTheCarrier occurrence held fresh)
-          (by intro equal; cases equal)
+      · exact absurd (step.createsNothing ▸ held) fresh
     | timeout _ _ _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
       by_cases fresh : occurrence ∈ (before.inFlight edge session).created
       · exact holds edge session occurrence fresh
-      · exact absurd (step.createsOnlyTheCarrier occurrence held fresh)
-          (by intro equal; cases equal)
+      · exact absurd (step.createsNothing ▸ held) fresh
     | senderDeath _ _ _ _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
       by_cases fresh : occurrence ∈ (before.inFlight edge session).created
       · exact holds edge session occurrence fresh
-      · exact absurd (step.createsOnlyTheCarrier occurrence held fresh)
-          (by intro equal; cases equal)
+      · exact absurd (step.createsNothing ▸ held) fresh
     | receiverDeath _ _ _ _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
       by_cases fresh : occurrence ∈ (before.inFlight edge session).created
       · exact holds edge session occurrence fresh
-      · exact absurd (step.createsOnlyTheCarrier occurrence held fresh)
-          (by intro equal; cases equal)
+      · exact absurd (step.createsNothing ▸ held) fresh
     | drop _ _ _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
       by_cases fresh : occurrence ∈ (before.inFlight edge session).created
       · exact holds edge session occurrence fresh
-      · exact absurd (step.createsOnlyTheCarrier occurrence held fresh)
-          (by intro equal; cases equal)
+      · exact absurd (step.createsNothing ▸ held) fresh
     | requestCancel _ _ _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
@@ -1075,45 +1069,39 @@ theorem identitiesDistinct_preserved (transition : plan.NetworkTransition before
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
       refine created_identities_distinct (created := carrier)
-        step.createdIdentityIsFresh ?_ holds heldFirst heldSecond sameIdentity
-      intro other found fresh
-      have named := step.createsOnlyTheCarrier other found fresh
-      injection named with same
-      exact same.symm
+        (fun entry found fresh other old => ?_) step.createsOnlyTheCarrier
+        holds heldFirst heldSecond sameIdentity
+      rw [step.createsOnlyTheCarrier entry found fresh]
+      exact step.createdIdentityIsFresh other old
     | acknowledgeCancel _ _ _ _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
       exact creates_nothing_distinct
-        (fun other found fresh =>
-          absurd (step.createsOnlyTheCarrier other found fresh) (by intro e; cases e))
+        (fun other found fresh => absurd (step.createsNothing ▸ found) fresh)
         holds heldFirst heldSecond sameIdentity
     | timeout _ _ _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
       exact creates_nothing_distinct
-        (fun other found fresh =>
-          absurd (step.createsOnlyTheCarrier other found fresh) (by intro e; cases e))
+        (fun other found fresh => absurd (step.createsNothing ▸ found) fresh)
         holds heldFirst heldSecond sameIdentity
     | senderDeath _ _ _ _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
       exact creates_nothing_distinct
-        (fun other found fresh =>
-          absurd (step.createsOnlyTheCarrier other found fresh) (by intro e; cases e))
+        (fun other found fresh => absurd (step.createsNothing ▸ found) fresh)
         holds heldFirst heldSecond sameIdentity
     | receiverDeath _ _ _ _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
       exact creates_nothing_distinct
-        (fun other found fresh =>
-          absurd (step.createsOnlyTheCarrier other found fresh) (by intro e; cases e))
+        (fun other found fresh => absurd (step.createsNothing ▸ found) fresh)
         holds heldFirst heldSecond sameIdentity
     | drop _ _ _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
       exact creates_nothing_distinct
-        (fun other found fresh =>
-          absurd (step.createsOnlyTheCarrier other found fresh) (by intro e; cases e))
+        (fun other found fresh => absurd (step.createsNothing ▸ found) fresh)
         holds heldFirst heldSecond sameIdentity
     | requestCancel _ _ _ step =>
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared

@@ -338,9 +338,22 @@ and was not put through it — a transition with no `NetworkStep` is the weaker
 witness §10.89 warns about. §10.112.
 -/
 def theCoalesceStep : serverPlan.NetworkStep Close.sent2 Close.afterCoalesce where
-  transition := .coalesce () wire escrowed Close.carrier Close.the_coalesce
+  transition := .coalesce () wire [escrowed] Close.carrier Close.the_coalesce
   admissible := by intro _ nothing; cases nothing
   historyExact := rfl
+
+/-- And the two-source merge is a step too, which since §10.131 is one step
+rather than two: `Coalesces` takes the whole family. -/
+def theAtomicMergeStep : serverPlan.NetworkStep Close.sent2 Close.afterBothMerged where
+  transition := .coalesce () wire [escrowed, Reroute.stranded] Close.carrier
+    Close.the_atomic_merge
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+theorem afterBothMerged_is_wellFormed : Close.afterBothMerged.WellFormed :=
+  ProcessPlan.wellFormed_preserved theAtomicMergeStep
+    (ProcessPlan.wellFormed_preserved theSecondSendStep
+      (ProcessPlan.wellFormed_preserved theSendStep withRoot_is_wellFormed))
 
 /-- Two sends and a merge, carried from `quiet`. -/
 theorem afterCoalesce_is_wellFormed : Close.afterCoalesce.WellFormed :=
