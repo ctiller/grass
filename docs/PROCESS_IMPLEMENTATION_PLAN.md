@@ -3611,7 +3611,7 @@ moved.
 **The general check this suggests**, and it is cheap: for every `NetworkTransition`
 witness in the corpus, is there a `NetworkStep` wrapping it? A transition nothing
 can wrap is a transition no execution contains, and every theorem stated over
-steps passes it by. Owed.
+steps passes it by. **Run to the end in §10.129**, which found eight more.
 
 ### 10.90 `ResolvesNothingElse` forbade the close it was meant to enable
 
@@ -4869,6 +4869,45 @@ unchanged: no field mentions it, and it is pinned only indirectly by
 `rankOrdersCreated`, `created`-monotonicity and `coalesceCarrierLater`. That was
 recorded as an observation rather than raised as a question, and it stays
 recorded.
+### 10.129 §10.89's check, run to the end
+
+§10.89 proposed a cheap general check and
+`Tests/Process/PreservationFixtures.lean` ran it against six constructors: *for
+every `NetworkTransition` witness in the corpus, is there a `NetworkStep`
+wrapping it?* A transition nothing can wrap is a transition no execution
+contains, and `ProcessPlan.wellFormed_preserved` is stated over steps, so every
+theorem about steps passes such a transition by. `the_spawn` failed the check
+when it was written, which is why the check exists.
+
+Running it over the whole corpus found **eight more** that had not been checked:
+`the_close`, `the_death`, `the_drop`, `the_request`, `the_sender_death`,
+`the_receiver_death`, `an_honest_termination` and `an_honest_interruption`. Every
+one now has a step.
+
+**None of the eight was hard, and that is the finding.** All are non-allocating,
+so `admissible` is vacuous and `historyExact` is `rfl`; each step is four lines.
+The check was not run to the end because running it is boring, not because it was
+difficult — and the same was true of §10.112, where a reviewer noticed that
+`the_coalesce` had landed in the same commit as the section stating the check and
+had not been put through it. That is twice. A check whose cost is four lines per
+case and which has now caught nine transitions is worth running as a sweep rather
+than per commit.
+
+**What the steps buy beyond the check.** Four of them chain from `quiet`, so the
+capstone now certifies four more worlds: `afterClosing`, `afterDying`,
+`afterDropping` and `afterRequesting` were worlds no theorem said anything about,
+and each is now well formed by `wellFormed_preserved` rather than by hand.
+
+**And four of them do not**, which is stated rather than glossed. The two
+endpoint deaths start from worlds holding a *dead* sender or receiver, and the
+two instance endings from an instance mid-countdown; none is reached by a step
+from `quiet`, so there is no chain to carry well-formedness along. The step is
+still the thing §10.89 asked for — the transition is one an execution can contain
+— but a step *from an unreachable world* is not a step of any run, which is
+§10.88's inhabited-versus-exercised distinction one level down. Reaching those
+before-worlds by steps is owed, and is a bigger job: it wants a `processStep`
+that puts an instance in each state, which is `Tests/Process/ProcessStepFixtures.lean`'s
+territory rather than this file's.
 
 ## 11. The authoring facade
 
