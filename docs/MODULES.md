@@ -118,8 +118,10 @@ should not have to assemble its shards one by one.
 version floor such as Windows 10 and an architecture/ABI selection such as x64
 remain explicit profile values selected through this API; neither belongs in
 the module path. In particular, the spike spelling `Grass.Platform.Win10.X64`
-is replaced by `Grass.Platform.Win32`, not treated as an alias that conflates
-an API family, deployment floor, architecture, and ABI.
+must be replaced by `Grass.Platform.Win32`, not retained as an alias that
+conflates an API family, deployment floor, architecture, and ABI. The spike-side
+replacement, including the Vulkan profile spelling, is tracked by agent-bus
+dependency `g-design:86` rather than claimed complete here.
 
 `Grass.Emit` is the safe verified-emission facade. It exposes `VerifiedProgram`
 and the checked `emitProgram` entry point, plus only the result vocabulary
@@ -135,8 +137,12 @@ may import reviewed logical or signature leaves, but never `Impl`, `Cert`, a
 whole-program aggregate, or a concrete program. Facade tests demonstrate both
 halves of the boundary: the intended spike vocabulary resolves through the
 concise import, and representative implementation-only declarations do not.
-This is the public-re-export exception defined by
-[OLEAN_SHARDING.md](OLEAN_SHARDING.md), not permission to use `import all`.
+Decision 134 ratifies `Grass.Assembly.*`, `Grass.Platform.*`, and `Grass.Emit`
+as stable author-facing facades. `Grass.ISA.X86` is deliberately outside that
+list: it is the narrower machine-authority integration surface consumed by
+machine-model authors and `Grass.Assembly.X86`, and uses
+[OLEAN_SHARDING.md](OLEAN_SHARDING.md)'s reviewed deliberate-public-re-export
+exception on that basis. Neither case is permission to use `import all`.
 
 The foundational dependency graph is an acyclic diamond rather than a single
 chain:
