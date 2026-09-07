@@ -14,6 +14,7 @@ import Grass.Core.Name
 import Grass.Core.Uid
 import Grass.Grammar.Binary
 import Grass.Grammar.Core
+import Grass.Grammar.Endian
 import Grass.Grammar.Realization
 import Grass.ISA.X86.Addressing
 import Grass.ISA.X86.Bytes
