@@ -148,12 +148,16 @@ theorem ofEventStream_congr
 
 end InfiniteObservation
 
-/-- The specification-visible observation of a complete functional execution,
-distinguishing a finite result from one coherent infinite observation. -/
+/-- The specification-visible observation of a maximal functional execution.
+
+The constructors keep finite termination, an environment-pending frontier,
+and one coherent infinite execution distinct. In particular, a pending
+frontier is not fabricated as either a terminal result or an infinite trace. -/
 inductive CompleteObservation
     {Event : Type u} {Observation : Type v}
     (projection : ObservationProjection Event Observation) : Type v where
   | finite (observations : List Observation)
+  | pending (observations : List Observation)
   | infinite (observations : InfiniteObservation projection)
 
 end Grass

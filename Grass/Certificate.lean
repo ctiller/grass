@@ -23,10 +23,25 @@ universe u
 structure ProgramBehavior (spec : SpecProcess) where
   system : RelationalSystem spec.AuditEvent
   inputOf : system.State -> spec.Input
+  waitsFor : system.State -> system.Graph -> system.Choice -> Prop
 
 namespace ProgramBehavior
 
 variable {spec : SpecProcess}
+
+/-- No relational step is enabled at this exact frontier. -/
+def NoStep (behavior : ProgramBehavior spec)
+    (state : behavior.system.State) (graph : behavior.system.Graph) : Prop :=
+  forall {choice event nextState nextGraph},
+    ¬ behavior.system.Step graph state choice event nextState nextGraph
+
+/-- Structural evidence that a frontier has no enabled relational step because
+it is waiting on one exact environment request. -/
+structure EnvironmentPending (behavior : ProgramBehavior spec)
+    (state : behavior.system.State) (graph : behavior.system.Graph) : Type u where
+  request : behavior.system.Choice
+  waiting : behavior.waitsFor state graph request
+  noStep : behavior.NoStep state graph
 
 /-- The specification's whole-trace view of one finite execution prefix.
 
@@ -91,19 +106,52 @@ theorem observe_appendInfinitePrefix (behavior : ProgramBehavior spec)
   simp [ProgramBehavior.observe,
     RelationalSystem.ExecutionPrefix.appendInfinitePrefix_events]
 
+/-- An exhaustive maximal continuation from one exact finite frontier.
+
+Environment-pending carries an exact request and evidence that no relational
+step is enabled, distinct from both finite termination and authored infinite
+execution. -/
+inductive MaximalContinuation (behavior : ProgramBehavior spec)
+    (state : behavior.system.State) (graph : behavior.system.Graph)
+    (priorEvents : List spec.AuditEvent) : Type u where
+  | finite {events : List spec.AuditEvent}
+      {finalState : behavior.system.State}
+      {finalGraph : behavior.system.Graph}
+      (steps : behavior.system.Steps state graph events finalState finalGraph)
+      (terminal : behavior.system.Terminal finalState finalGraph)
+  | pending (waiting : behavior.EnvironmentPending state graph)
+  | infinite (execution : behavior.system.InfiniteContinuation
+      state graph priorEvents)
+
+/-- Observe one maximal continuation without collapsing its disposition. -/
+def observeMaximal (behavior : ProgramBehavior spec)
+    (execution : behavior.system.ExecutionPrefix)
+    (continuation : behavior.MaximalContinuation execution.state
+      execution.graph execution.events) :
+    CompleteObservation spec.observationProjection :=
+  match continuation with
+  | .finite (events := events) _ _ =>
+      .finite (spec.observationProjection.project (execution.events ++ events))
+  | .pending _ =>
+      .pending (spec.observationProjection.project execution.events)
+  | .infinite infinite =>
+      .infinite (InfiniteObservation.ofEventStream spec.observationProjection
+        execution.events infinite.eventAt)
+
 /-- The prefix begins with the selected specification input. -/
 def HasInput (behavior : ProgramBehavior spec)
     (input : spec.Input) (execution : behavior.system.ExecutionPrefix) : Prop :=
   behavior.inputOf execution.initialState = input
 
 /-- Every admitted input has an initial execution, and every permitted finite
-frontier has either a finite-terminal or infinite continuation. -/
+frontier has a finite-terminal, environment-pending, or infinite maximal
+continuation. -/
 structure Adequate (behavior : ProgramBehavior spec) : Prop where
   execution : forall input, spec.admits input ->
     Nonempty { run : behavior.system.ExecutionPrefix //
       behavior.HasInput input run }
   completion : forall run : behavior.system.ExecutionPrefix,
-    Nonempty (behavior.system.Completion run.state run.graph run.events)
+    Nonempty (behavior.MaximalContinuation run.state run.graph run.events)
 
 /-- Transport adequacy along exact behavior equality. -/
 theorem Adequate.cast {behavior replacement : ProgramBehavior spec}
@@ -131,6 +179,11 @@ structure BehaviorRefinement (concrete abstract : ProgramBehavior spec) where
       (mapState nextState) (mapGraph nextGraph)
   terminal : forall {state graph}, concrete.system.Terminal state graph ->
     abstract.system.Terminal (mapState state) (mapGraph graph)
+  pending : forall {state graph request},
+    concrete.waitsFor state graph request ->
+    concrete.NoStep state graph ->
+    abstract.waitsFor (mapState state) (mapGraph graph) (mapChoice request) /\
+      abstract.NoStep (mapState state) (mapGraph graph)
   infiniteConsistency : forall {priorEvents stateAt graphAt choiceAt eventAt},
     concrete.system.InfiniteConsistent priorEvents stateAt graphAt choiceAt eventAt ->
     abstract.system.InfiniteConsistent priorEvents (fun index => mapState (stateAt index))
@@ -163,6 +216,7 @@ def refl (behavior : ProgramBehavior spec) : BehaviorRefinement behavior behavio
   initial := id
   step := id
   terminal := id
+  pending waiting noStep := ⟨waiting, noStep⟩
   infiniteConsistency := id
 
 /-- Exact adjacent refinements compose without introducing a new proof route. -/
@@ -177,6 +231,9 @@ def trans (lowerMiddle : BehaviorRefinement lower middle)
   initial initial := middleUpper.initial (lowerMiddle.initial initial)
   step step := middleUpper.step (lowerMiddle.step step)
   terminal terminal := middleUpper.terminal (lowerMiddle.terminal terminal)
+  pending waiting noStep := by
+    rcases lowerMiddle.pending waiting noStep with ⟨middleWaiting, middleNoStep⟩
+    exact middleUpper.pending middleWaiting middleNoStep
   infiniteConsistency consistent :=
     middleUpper.infiniteConsistency (lowerMiddle.infiniteConsistency consistent)
 
@@ -294,6 +351,67 @@ def mapCompletion (refinement : BehaviorRefinement concrete abstract)
   | finite steps terminal =>
       exact .finite (refinement.mapSteps steps) (refinement.terminal terminal)
   | infinite execution => exact .infinite (refinement.mapInfinite execution)
+
+/-- Map every maximal functional disposition through one refinement. -/
+def mapMaximal (refinement : BehaviorRefinement concrete abstract)
+    {state : concrete.system.State} {graph : concrete.system.Graph}
+    {priorEvents : List spec.AuditEvent}
+    (continuation : concrete.MaximalContinuation state graph priorEvents) :
+    abstract.MaximalContinuation (refinement.mapState state)
+      (refinement.mapGraph graph) priorEvents := by
+  cases continuation with
+  | finite steps terminal =>
+      exact .finite (refinement.mapSteps steps) (refinement.terminal terminal)
+  | pending waiting =>
+      let mapped := refinement.pending waiting.waiting waiting.noStep
+      exact .pending {
+        request := refinement.mapChoice waiting.request
+        waiting := mapped.1
+        noStep := mapped.2
+      }
+  | infinite execution => exact .infinite (refinement.mapInfinite execution)
+
+/-- Reflexive refinement leaves every maximal continuation unchanged. -/
+theorem mapMaximal_refl (behavior : ProgramBehavior spec)
+    {state : behavior.system.State} {graph : behavior.system.Graph}
+    {priorEvents : List spec.AuditEvent}
+    (continuation : behavior.MaximalContinuation state graph priorEvents) :
+    (refl behavior).mapMaximal continuation = continuation := by
+  cases continuation with
+  | finite => rfl
+  | pending waiting =>
+      apply congrArg ProgramBehavior.MaximalContinuation.pending
+      cases waiting
+      rfl
+  | infinite execution =>
+      change ProgramBehavior.MaximalContinuation.infinite
+          ((refl behavior).mapInfinite execution) =
+        ProgramBehavior.MaximalContinuation.infinite execution
+      rw [mapInfinite_refl]
+      rfl
+
+/-- Mapping a maximal continuation through a composite refinement agrees with
+mapping it through the adjacent refinements in order. -/
+theorem mapMaximal_trans (lowerMiddle : BehaviorRefinement lower middle)
+    (middleUpper : BehaviorRefinement middle upper)
+    {state : lower.system.State} {graph : lower.system.Graph}
+    {priorEvents : List spec.AuditEvent}
+    (continuation : lower.MaximalContinuation state graph priorEvents) :
+    (lowerMiddle.trans middleUpper).mapMaximal continuation =
+      middleUpper.mapMaximal (lowerMiddle.mapMaximal continuation) := by
+  cases continuation with
+  | finite => rfl
+  | pending waiting =>
+      apply congrArg ProgramBehavior.MaximalContinuation.pending
+      cases waiting
+      rfl
+  | infinite execution =>
+      change ProgramBehavior.MaximalContinuation.infinite
+          ((lowerMiddle.trans middleUpper).mapInfinite execution) =
+        ProgramBehavior.MaximalContinuation.infinite
+          (middleUpper.mapInfinite (lowerMiddle.mapInfinite execution))
+      rw [mapInfinite_trans]
+      rfl
 
 /-- Reflexive refinement leaves every finite or infinite completion unchanged. -/
 theorem mapCompletion_refl (behavior : ProgramBehavior spec)
@@ -480,6 +598,31 @@ def mapCompletionAtPrefix (refinement : BehaviorRefinement concrete abstract)
       (refinement.mapPrefix execution).events :=
   refinement.mapCompletion completion
 
+/-- Map a maximal continuation while fixing its type to the exact mapped
+prefix. -/
+def mapMaximalAtPrefix (refinement : BehaviorRefinement concrete abstract)
+    (execution : concrete.system.ExecutionPrefix)
+    (continuation : concrete.MaximalContinuation execution.state
+      execution.graph execution.events) :
+    abstract.MaximalContinuation (refinement.mapPrefix execution).state
+      (refinement.mapPrefix execution).graph
+      (refinement.mapPrefix execution).events :=
+  refinement.mapMaximal continuation
+
+/-- `BehaviorRefinement.observeMaximal_mapMaximalAtPrefix` states that exact
+maximal-continuation mapping preserves the complete observation, including the
+finite trace at an environment-pending frontier. -/
+@[simp]
+theorem observeMaximal_mapMaximalAtPrefix
+    (refinement : BehaviorRefinement concrete abstract)
+    (execution : concrete.system.ExecutionPrefix)
+    (continuation : concrete.MaximalContinuation execution.state
+      execution.graph execution.events) :
+    abstract.observeMaximal (refinement.mapPrefix execution)
+        (refinement.mapMaximalAtPrefix execution continuation) =
+      concrete.observeMaximal execution continuation := by
+  cases continuation <;> rfl
+
 /-- `BehaviorRefinement.observeCompletion_mapCompletionAtPrefix` states that
 exact completion mapping preserves the complete finite or infinite observation. -/
 @[simp]
@@ -542,6 +685,30 @@ theorem preservesAcceptance (refinement : BehaviorRefinement concrete abstract)
   simpa using abstractSound (refinement.mapPrefix execution)
     (refinement.terminal_mapPrefix execution terminal) mappedAdmitted
 
+/-- Exhaustive maximal acceptance transfers from an abstraction to a refining
+behavior without treating infinite or environment-pending behavior as a
+terminal trace. -/
+theorem preservesCompleteAcceptance
+    (refinement : BehaviorRefinement concrete abstract)
+    (abstractSound : forall (execution : abstract.system.ExecutionPrefix)
+      (continuation : abstract.MaximalContinuation execution.state
+        execution.graph execution.events),
+      spec.admits (abstract.inputOf execution.initialState) ->
+      spec.AcceptsComplete (abstract.inputOf execution.initialState)
+        (abstract.observeMaximal execution continuation))
+    (execution : concrete.system.ExecutionPrefix)
+    (continuation : concrete.MaximalContinuation execution.state
+      execution.graph execution.events)
+    (admitted : spec.admits (concrete.inputOf execution.initialState)) :
+    spec.AcceptsComplete (concrete.inputOf execution.initialState)
+      (concrete.observeMaximal execution continuation) := by
+  have mappedAdmitted :
+      spec.admits (abstract.inputOf
+        (refinement.mapPrefix execution).initialState) := by
+    simpa using admitted
+  simpa using abstractSound (refinement.mapPrefix execution)
+    (refinement.mapMaximalAtPrefix execution continuation) mappedAdmitted
+
 end BehaviorRefinement
 
 /-- Portable process/model correctness, independent of target realization. -/
@@ -549,10 +716,12 @@ structure PortableProgramCertificate (spec : SpecProcess) where
   behavior : ProgramBehavior spec
   requirements : DemandCertificateFamily spec.requirements
   adequate : behavior.Adequate
-  sound : forall (execution : behavior.system.ExecutionPrefix),
-    behavior.system.Terminal execution.state execution.graph ->
+  sound : forall (execution : behavior.system.ExecutionPrefix)
+    (continuation : behavior.MaximalContinuation execution.state
+      execution.graph execution.events),
     spec.admits (behavior.inputOf execution.initialState) ->
-    spec.accepts (behavior.inputOf execution.initialState) (behavior.observe execution)
+    spec.AcceptsComplete (behavior.inputOf execution.initialState)
+      (behavior.observeMaximal execution continuation)
 
 /-- A projected driver and its exact refinement to the portable behavior. -/
 structure ProjectedDriverCertificate {spec : SpecProcess}

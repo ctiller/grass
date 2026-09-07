@@ -29,6 +29,8 @@ def spec : SpecProcess where
   admits := fun _ => True
   observationProjection := .identity Bool
   accepts := fun _ _ => True
+  acceptsPending := fun _ _ => True
+  acceptsInfinite := fun _ _ => True
   requirements := noDemands
 
 namespace ObservationProjectionFixture
@@ -71,6 +73,7 @@ def system : RelationalSystem spec.AuditEvent where
 def behavior : ProgramBehavior spec where
   system := system
   inputOf := id
+  waitsFor := fun _ _ _ => False
 
 def initialExecution (input : Bool) : system.ExecutionPrefix :=
   @RelationalSystem.ExecutionPrefix.initial spec.AuditEvent system input (0 : Nat)
@@ -130,7 +133,9 @@ def portable : PortableProgramCertificate spec where
   behavior := behavior
   requirements := noDemandCertificates
   adequate := behaviorAdequate
-  sound := fun _ _ _ => trivial
+  sound := by
+    intro _ continuation _
+    cases continuation <;> trivial
 
 def driver : ProjectedDriverCertificate portable where
   behavior := behavior
@@ -186,7 +191,7 @@ def inferredVerified := verified
 
 example : spec.accepts true
     ((artifactFormat.loadedBehavior ByteArray.empty).observe (initialExecution true)) :=
-  verified.sound (initialExecution true) trivial trivial
+  verified.terminalSound (initialExecution true) trivial trivial
 
 example : (artifactFormat.loadedBehavior (emitProgram verified)).Adequate :=
   verified.loadedAdequate
@@ -196,7 +201,7 @@ example : Nonempty { execution :
     (artifactFormat.loadedBehavior ByteArray.empty).HasInput true execution } :=
   verified.execution_nonempty true trivial
 
-example : Nonempty ((artifactFormat.loadedBehavior ByteArray.empty).system.Completion
+example : Nonempty ((artifactFormat.loadedBehavior ByteArray.empty).MaximalContinuation
     (initialExecution true).state (initialExecution true).graph
       (initialExecution true).events) :=
   verified.execution_completes (initialExecution true)
@@ -207,7 +212,7 @@ example : Nonempty (VerifiedProgram.CompletionRefinement verified
 
 example (completion : VerifiedProgram.CompletionRefinement verified
     (initialExecution true)) :
-    completion.portable = verified.refinement.mapCompletionAtPrefix
+    completion.portable = verified.refinement.mapMaximalAtPrefix
       (initialExecution true) completion.loaded :=
   completion.exact
 
@@ -249,6 +254,7 @@ theorem trueSuffix : system.Steps () () [true] () () :=
 abbrev behavior : ProgramBehavior spec where
   system := system
   inputOf := fun _ => false
+  waitsFor := fun _ _ _ => False
 
 def refinement : BehaviorRefinement behavior behavior :=
   .refl behavior
@@ -270,6 +276,7 @@ abbrev abstractSystem : RelationalSystem Bool where
 abbrev abstractBehavior : ProgramBehavior spec where
   system := abstractSystem
   inputOf := fun _ => false
+  waitsFor := fun _ _ _ => False
 
 def toAbstract : BehaviorRefinement behavior abstractBehavior where
   mapState := fun _ => false
@@ -279,6 +286,9 @@ def toAbstract : BehaviorRefinement behavior abstractBehavior where
   initial := fun _ => trivial
   step := fun _ => trivial
   terminal := fun terminal => False.elim terminal
+  pending := by
+    intro _ _ _ waiting _
+    exact False.elim waiting
   infiniteConsistency := fun _ => trivial
 
 abbrev highestSystem : RelationalSystem Bool where
@@ -298,6 +308,7 @@ abbrev highestSystem : RelationalSystem Bool where
 abbrev highestBehavior : ProgramBehavior spec where
   system := highestSystem
   inputOf := fun _ => false
+  waitsFor := fun _ _ _ => False
 
 def toHighest : BehaviorRefinement abstractBehavior highestBehavior where
   mapState := Bool.toNat
@@ -307,6 +318,9 @@ def toHighest : BehaviorRefinement abstractBehavior highestBehavior where
   initial := fun _ => trivial
   step := fun _ => trivial
   terminal := fun terminal => False.elim terminal
+  pending := by
+    intro _ _ _ waiting _
+    exact False.elim waiting
   infiniteConsistency := fun _ => trivial
 
 example : (samplePrefix.append falseSuffix).events = [true, false] := rfl
@@ -523,6 +537,125 @@ example :
     toAbstract samplePrefix continuation 3
 
 end InfinitePrefixFixture
+
+namespace MaximalAcceptanceFixture
+
+/-- A specification which accepts finite termination and environment waits but
+rejects every authored infinite functional disposition. -/
+def rejectingSpec : SpecProcess where
+  Input := Unit
+  AuditEvent := Unit
+  Observation := Unit
+  admits := fun _ => True
+  observationProjection := .identity Unit
+  accepts := fun _ _ => True
+  acceptsPending := fun _ _ => True
+  acceptsInfinite := fun _ _ => False
+  requirements := noDemands
+
+/-- A behavior whose admitted initial execution has an authored infinite
+continuation but neither a terminal nor an environment-pending disposition. -/
+def infiniteSystem : RelationalSystem rejectingSpec.AuditEvent where
+  State := Unit
+  Choice := Unit
+  Graph := Unit
+  Initial := fun _ _ => True
+  Step := fun _ _ _ _ _ _ => True
+  Terminal := fun _ _ => False
+  InfiniteConsistent := fun _ _ _ _ _ => True
+  Extends := fun _ _ => True
+  extendsRefl := fun _ => trivial
+  extendsTrans := fun _ _ => trivial
+  stepExtends := fun _ => trivial
+
+def infiniteBehavior : ProgramBehavior rejectingSpec where
+  system := infiniteSystem
+  inputOf := fun _ => ()
+  waitsFor := fun _ _ _ => False
+
+def infinitePrefix : infiniteSystem.ExecutionPrefix :=
+  @RelationalSystem.ExecutionPrefix.initial rejectingSpec.AuditEvent
+    infiniteSystem () () trivial
+
+def infiniteContinuation : infiniteSystem.InfiniteContinuation
+    infinitePrefix.state infinitePrefix.graph infinitePrefix.events where
+  stateAt := fun _ => ()
+  graphAt := fun _ => ()
+  choiceAt := fun _ => ()
+  eventAt := fun _ => ()
+  stateZero := rfl
+  graphZero := rfl
+  step := fun _ => trivial
+  consistent := trivial
+
+theorem infinite_disposition_rejected :
+    ¬ rejectingSpec.AcceptsComplete ()
+      (infiniteBehavior.observeMaximal infinitePrefix
+        (.infinite infiniteContinuation)) := by
+  intro accepted
+  exact accepted
+
+/-- The terminal-vacuous bug is closed at the public gate: no
+`VerifiedProgram` may select this infinite-only behavior when its specification
+rejects the exact infinite observation. -/
+theorem infinite_only_cannot_be_verified :
+    ¬ ∃ verified : VerifiedProgram rejectingSpec,
+      verified.portable.behavior = infiniteBehavior := by
+  rintro ⟨verified, exactBehavior⟩
+  have sound := verified.portable.sound
+  rw [exactBehavior] at sound
+  exact infinite_disposition_rejected
+    (sound infinitePrefix (.infinite infiniteContinuation) trivial)
+
+end MaximalAcceptanceFixture
+
+namespace EnvironmentPendingFixture
+
+/-- A specification which accepts only environment-pending observations. -/
+def pendingSpec : SpecProcess where
+  Input := Unit
+  AuditEvent := Unit
+  Observation := Unit
+  admits := fun _ => True
+  observationProjection := .identity Unit
+  accepts := fun _ _ => False
+  acceptsPending := fun _ _ => True
+  acceptsInfinite := fun _ _ => False
+  requirements := noDemands
+
+/-- A frontier with no enabled relational step and one exact outstanding
+environment request. -/
+def system : RelationalSystem pendingSpec.AuditEvent where
+  State := Unit
+  Choice := Bool
+  Graph := Unit
+  Initial := fun _ _ => True
+  Step := fun _ _ _ _ _ _ => False
+  Terminal := fun _ _ => False
+  InfiniteConsistent := fun _ _ _ _ _ => True
+  Extends := fun _ _ => True
+  extendsRefl := fun _ => trivial
+  extendsTrans := fun _ _ => trivial
+  stepExtends := fun _ => trivial
+
+def behavior : ProgramBehavior pendingSpec where
+  system := system
+  inputOf := fun _ => ()
+  waitsFor := fun _ _ request => request = true
+
+def initialPrefix : system.ExecutionPrefix :=
+  @RelationalSystem.ExecutionPrefix.initial pendingSpec.AuditEvent
+    system () () trivial
+
+def pending : behavior.EnvironmentPending initialPrefix.state initialPrefix.graph := by
+  refine ⟨true, rfl, ?_⟩
+  intro _ _ _ _ step
+  exact step
+
+example : pendingSpec.AcceptsComplete ()
+    (behavior.observeMaximal initialPrefix (.pending pending)) := trivial
+
+end EnvironmentPendingFixture
 
 example : artifactFormat.Parses (emitProgram verified) () :=
   emitProgram_parses verified

@@ -49,22 +49,41 @@ def refinement (verified : VerifiedProgram spec) :
     (((verified.artifact.refinement.trans verified.machine.refinement).trans
       verified.provider.refinement).trans verified.driver.refinement)
 
-/-- Fundamental behavioral inclusion for every admitted loaded execution. -/
+/-- Fundamental behavioral inclusion for every admitted maximal loaded
+execution, with finite, environment-pending, and infinite dispositions kept
+distinct by the specification. -/
 theorem sound (verified : VerifiedProgram spec)
     (execution : (verified.artifact.format.loadedBehavior (emitProgram verified)).system.ExecutionPrefix)
-    (terminal : (verified.artifact.format.loadedBehavior
-      (emitProgram verified)).system.Terminal
-        execution.state execution.graph)
+    (continuation : (verified.artifact.format.loadedBehavior
+      (emitProgram verified)).MaximalContinuation execution.state
+        execution.graph execution.events)
     (admitted : spec.admits ((verified.artifact.format.loadedBehavior
       (emitProgram verified)).inputOf
         execution.initialState)) :
-    spec.accepts
+    spec.AcceptsComplete
       ((verified.artifact.format.loadedBehavior
         (emitProgram verified)).inputOf
           execution.initialState)
+      ((verified.artifact.format.loadedBehavior (emitProgram verified)).observeMaximal
+        execution continuation) :=
+  verified.refinement.preservesCompleteAcceptance verified.portable.sound
+    execution continuation admitted
+
+/-- The previous terminal-prefix theorem is a derived specialization of
+exhaustive maximal soundness, not an alternate certificate field. -/
+theorem terminalSound (verified : VerifiedProgram spec)
+    (execution : (verified.artifact.format.loadedBehavior (emitProgram verified)).system.ExecutionPrefix)
+    (terminal : (verified.artifact.format.loadedBehavior
+      (emitProgram verified)).system.Terminal execution.state execution.graph)
+    (admitted : spec.admits ((verified.artifact.format.loadedBehavior
+      (emitProgram verified)).inputOf execution.initialState)) :
+    spec.accepts
       ((verified.artifact.format.loadedBehavior
-        (emitProgram verified)).observe execution) :=
-  verified.refinement.preservesAcceptance verified.portable.sound execution terminal admitted
+        (emitProgram verified)).inputOf execution.initialState)
+      ((verified.artifact.format.loadedBehavior
+        (emitProgram verified)).observe execution) := by
+  simpa [ProgramBehavior.observeMaximal, ProgramBehavior.observe] using
+    verified.sound execution (.finite .refl terminal) admitted
 
 /-- Every admitted input has a coherent loaded execution prefix. -/
 theorem execution_nonempty (verified : VerifiedProgram spec)
@@ -76,13 +95,13 @@ theorem execution_nonempty (verified : VerifiedProgram spec)
           input execution } :=
   verified.loadedAdequate.execution input admitted
 
-/-- Every reachable finite frontier of the loaded behavior can either reach a
-terminal state or continue as an infinite execution. -/
+/-- Every reachable finite frontier of the loaded behavior has an exhaustive
+finite-terminal, environment-pending, or infinite maximal disposition. -/
 theorem execution_completes (verified : VerifiedProgram spec)
     (execution : (verified.artifact.format.loadedBehavior
       (emitProgram verified)).system.ExecutionPrefix) :
     Nonempty ((verified.artifact.format.loadedBehavior
-      (emitProgram verified)).system.Completion execution.state execution.graph
+      (emitProgram verified)).MaximalContinuation execution.state execution.graph
         execution.events) := by
   exact verified.loadedAdequate.completion execution
 
@@ -92,14 +111,14 @@ structure CompletionRefinement (verified : VerifiedProgram spec)
     (execution : (verified.artifact.format.loadedBehavior
       (emitProgram verified)).system.ExecutionPrefix) where
   loaded : (verified.artifact.format.loadedBehavior
-    (emitProgram verified)).system.Completion execution.state execution.graph
+    (emitProgram verified)).MaximalContinuation execution.state execution.graph
       execution.events
-  portable : verified.portable.behavior.system.Completion
+  portable : verified.portable.behavior.MaximalContinuation
     (verified.refinement.mapPrefix execution).state
     (verified.refinement.mapPrefix execution).graph
     (verified.refinement.mapPrefix execution).events
   exact : portable =
-    verified.refinement.mapCompletionAtPrefix execution loaded
+    verified.refinement.mapMaximalAtPrefix execution loaded
 
 /-- Every loaded finite frontier has a completion whose exact image in the
 portable behavior is retained by `CompletionRefinement`. -/
@@ -110,7 +129,7 @@ theorem completion_refinement_nonempty (verified : VerifiedProgram spec)
   rcases verified.execution_completes execution with ⟨completion⟩
   exact ⟨{
     loaded := completion
-    portable := verified.refinement.mapCompletionAtPrefix execution completion
+    portable := verified.refinement.mapMaximalAtPrefix execution completion
     exact := rfl
   }⟩
 
