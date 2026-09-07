@@ -280,6 +280,12 @@ whose concatenated instruction byte slices equal the original input and which
 retains the exact policy used for acceptance. That byte-coverage proof is not an
 instruction-semantics certificate.
 
+`Grass.Unsafe.Step` maps imported instructions to the existing open
+`Grass.Op.SomeOperation` package plus explicit context, cause, and fault-plan
+inputs. Its one-instruction adapter is definitionally `Grass.Op.step`; the batch
+runner threads only successful states, records the first rejection, and retains
+the exact unattempted suffix. It introduces no parallel instruction semantics.
+
 Exit criteria include round trips for supported raw instructions, structured
 errors for unknown/ambiguous bytes and targets, exact stepping agreement with
 `Grass.Op.step`, and exact byte/list input passed to the artifact writer.
