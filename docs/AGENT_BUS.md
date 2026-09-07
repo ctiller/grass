@@ -118,7 +118,15 @@ Each identity declares exactly one immutable primary role at registration:
   merges, but authors no product commits;
 - `coordinator` records user-directed retirement and coordinates assignments
   without authoring or merging product content; or
-- `observer` queries the bus and may report issues but owns no product scope.
+- `auditor` performs fleet-wide assurance -- it reads every product and event
+  stream without claiming any path, publishes a non-authoritative
+  `audit.reported`, and opens or reassigns issues, but never authors product
+  content, reviews or merges a candidate. Version one spelled this
+  least-authority role `observer`; version two renames the wire role
+  (AGENT_COORDINATION_EVOLUTION.md section 2.2), and the helper accepts only
+  `auditor`. An identity that must register before activation may use V1
+  `observer` with `purpose: auditor:<emphasis>` as a transition spelling; it
+  holds only observer authority until it migrates.
 
 This separation is intentional. Review is a dedicated workload, not a temporary
 hat worn by the implementation identity. If one underlying agent changes role,

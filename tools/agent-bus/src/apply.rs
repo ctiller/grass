@@ -678,9 +678,14 @@ fn apply_progress(state: &mut BusState, env: &Envelope, d: &ProgressReported) ->
 /// is enforced by this function doing *nothing* to the issues it names --
 /// deliberately, and the emptiness is the enforcement. It validates that
 /// each referenced issue exists, so a report cannot cite a fiction, and then
-/// touches no issue status, no assignment, no finding disposition. If a
-/// future change makes this function mutate an issue, gate 22 is broken and
-/// `an_audit_report_leaves_every_issue_it_names_untouched` will say so.
+/// touches no issue, no review chain, and no finding disposition.
+///
+/// `an_audit_report_disturbs_no_issue_and_no_review_chain` holds that to
+/// account by comparing `state.issues` and `state.reviews` *wholesale* across
+/// the report. An earlier version of this comment claimed a four-field
+/// comparison would catch any mutation here; it would not, and an adversarial
+/// review demonstrated it by making the report silently reassign every issue
+/// it named and clear every finding on every chain, both of which passed.
 fn apply_audit_reported(
     state: &mut BusState,
     env: &Envelope,
@@ -2460,7 +2465,8 @@ mod tests {
         );
         let err = apply_event(&mut fresh(), &product_state).unwrap_err();
         assert!(
-            err.to_string().contains("implementor"),
+            err.to_string()
+                .contains("product fields are permitted only for an implementor"),
             "an auditor must not carry product commit state, got: {err}"
         );
 
@@ -2515,6 +2521,138 @@ mod tests {
             err.to_string().contains("does not have role reviewer"),
             "an auditor must not be nominated as a reviewer, got: {err}"
         );
+
+        // The remaining half of gate 21 -- accepting, authorizing, merging,
+        // reconciling, and requesting changes -- needs a *live* chain, since
+        // each of those checks keys off the chain's accepting reviewer rather
+        // than off a role. Without a real chain these events are refused for
+        // the wrong reason (unknown nomination), which would prove nothing.
+        let mut with_chain = fresh();
+        let (nominate_env, _accept) = nominate_and_accept(&mut with_chain, &alice, 1, &bob, 1);
+        let nomination = nominate_env.id.clone();
+        let seeing = frontier_seeing(&[&nomination]);
+        // Some of these events demand a *complete* frontier, and would
+        // otherwise be refused for that instead of for the rule under test --
+        // the same way the accept row was being refused by "already
+        // accepted". This one names every active member and puts alice at the
+        // nomination, so it is both complete and causally sufficient.
+        let epoch = with_chain.roster_epoch.as_ref().unwrap().clone();
+        let complete_seeing = ObservedFrontier::complete(
+            &epoch,
+            epoch.active_members.keys().map(|agent| FrontierEntry {
+                agent: agent.clone(),
+                stream_tip: hash(1),
+                through: if *agent == alice {
+                    nomination.clone()
+                } else {
+                    EventId::new(agent, 0)
+                },
+            }),
+        )
+        .expect("a complete frontier for this epoch");
+
+        // `review.merged` and `review.merge_reconciled` both name an
+        // *authorization*, so the fixture needs a real one or they are
+        // refused for citing the wrong kind of event rather than for who
+        // emitted them. Bob, the legitimate reviewer, publishes it.
+        let bob_auth = Envelope::new(
+            &bob,
+            2,
+            complete_seeing.clone(),
+            &EventData::ReviewMergeAuthorized(merge_authorized(
+                &nomination,
+                StringSet::default(),
+                &[],
+            )),
+            [nomination.clone()],
+        );
+        apply_ok(&mut with_chain, &bob_auth);
+        let authorization = bob_auth.id.clone();
+
+        // Each row names the refusal it expects, not merely that *some*
+        // refusal happened. Asserting `is_err()` alone was not enough: with
+        // the reviewer check disabled, an auditor's `review.nomination_
+        // accepted` is still refused -- by the unrelated "already accepted"
+        // check further down -- so the test passed while the rule it exists
+        // for was gone. An adversarial review found exactly that.
+        let intrusions: Vec<(bool, &str, &str, EventData)> = vec![
+            (
+                false,
+                "accept a review",
+                "only the named reviewer may accept this nomination",
+                EventData::ReviewNominationAccepted(ReviewNominationAccepted {
+                    nomination: nomination.clone(),
+                    note: text(""),
+                }),
+            ),
+            (
+                false,
+                "request changes on one",
+                "only the accepting reviewer may request changes",
+                EventData::ReviewChangesRequested(ReviewChangesRequested {
+                    nomination: nomination.clone(),
+                    reviewed_commit: hash(3),
+                    findings: vec![finding("f1")],
+                    evidence: StringSet::default(),
+                }),
+            ),
+            (
+                true,
+                "authorize a merge",
+                "only the accepting reviewer may authorize a merge",
+                EventData::ReviewMergeAuthorized(merge_authorized(
+                    &nomination,
+                    StringSet::default(),
+                    &[],
+                )),
+            ),
+            (
+                true,
+                "record a merge",
+                "only the authorizing reviewer may emit review.merged",
+                EventData::ReviewMerged(ReviewMerged {
+                    authorization: authorization.clone(),
+                    previous_main: hash(1),
+                    main_commit: hash(2),
+                    product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+                    reviewed_commit: hash(3),
+                    summary: text("s"),
+                }),
+            ),
+            (
+                true,
+                "reconcile a merge",
+                "is not a coordinator in the current roster epoch",
+                EventData::ReviewMergeReconciled(ReviewMergeReconciled {
+                    authorization: authorization.clone(),
+                    previous_main: hash(1),
+                    main_commit: hash(2),
+                    product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+                    reviewed_commit: hash(3),
+                    reason: text("r"),
+                    user_authority: text("u"),
+                }),
+            ),
+        ];
+
+        for (needs_complete, what, expected, data) in intrusions {
+            let frontier = if needs_complete {
+                complete_seeing.clone()
+            } else {
+                seeing.clone()
+            };
+            let refs: Vec<EventId> = data.referenced_ids().into_iter().collect();
+            let env = Envelope::new(&aud, 1, frontier, &data, refs);
+            // Each intrusion runs against its own copy, so an earlier
+            // refusal cannot be what makes a later one fail.
+            let err = apply_event(&mut with_chain.clone(), &env)
+                .expect_err(&format!("an auditor must not {what}"))
+                .to_string();
+            assert!(
+                err.contains(expected),
+                "an auditor must not {what}, and must be refused for that reason;                  expected {expected:?}, got: {err}"
+            );
+        }
     }
 
     /// Gate 20: "an auditor can publish `audit.reported` and open issues
@@ -2558,6 +2696,203 @@ mod tests {
         }
     }
 
+    /// Gate 23: "a nominated reviewer can consume auditor evidence but must
+    /// publish its own finding dispositions and authorization judgment."
+    ///
+    /// The consuming half is easy to get right by accident and easy to lose
+    /// silently, so it is asserted from both sides: the reviewer *may* cite
+    /// an audit report as evidence, and doing so changes nothing about what
+    /// it still owes. An open finding still blocks the authorization with the
+    /// audit cited; clearing it -- by the reviewer, in its own event -- is
+    /// what unblocks it.
+    #[test]
+    fn citing_an_audit_as_evidence_does_not_discharge_a_reviewers_own_disposition() {
+        let mut state = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Reviewer),
+            ("aud", Role::Auditor),
+        ]);
+        let (alice, bob, aud) = (a("alice"), a("bob"), a("aud"));
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        apply_ok(&mut state, &register(&aud, Role::Auditor));
+
+        let report = audit(&aud, 1, &[]);
+        let report_id = report.id.clone();
+        apply_ok(&mut state, &report);
+
+        let (nominate_env, _accept) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let changes = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                nomination: nominate_env.id.clone(),
+                reviewed_commit: hash(3),
+                findings: vec![finding("f1")],
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &changes);
+
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
+        let complete = ObservedFrontier::complete(
+            &epoch,
+            epoch.active_members.keys().map(|agent| FrontierEntry {
+                agent: agent.clone(),
+                stream_tip: hash(1),
+                through: if *agent == alice {
+                    nominate_env.id.clone()
+                } else if *agent == aud {
+                    report_id.clone()
+                } else {
+                    EventId::new(agent, 0)
+                },
+            }),
+        )
+        .expect("a complete frontier for this epoch");
+
+        // The reviewer authorizes, citing the audit as evidence.
+        let mut authorized = merge_authorized(&nominate_env.id, StringSet::default(), &[]);
+        authorized.evidence = StringSet::from_iter([report_id.clone()]);
+        let env = Envelope::new(
+            &bob,
+            3,
+            complete,
+            &EventData::ReviewMergeAuthorized(authorized),
+            [nominate_env.id.clone(), report_id.clone()],
+        );
+
+        let err = apply_event(&mut state, &env)
+            .expect_err("an open finding must still block, audit or no audit");
+        assert!(
+            err.to_string().contains("finding"),
+            "the reviewer still owes its own disposition, got: {err}"
+        );
+    }
+
+    /// Gate 20's positive half, beyond the two events the first test covers.
+    ///
+    /// Over-restriction is a defect too: section 2.2 says an auditor "may
+    /// read every product and event stream without claiming those paths, run
+    /// analyses and validation probes, publish an audit report, and open or
+    /// reassign issues". If the role were accidentally locked out of ordinary
+    /// participation it would be unable to do the job the design gives it,
+    /// and nothing here would have said so.
+    #[test]
+    fn an_auditor_retains_ordinary_participation() {
+        let mut state = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Reviewer),
+            ("aud", Role::Auditor),
+        ]);
+        let (alice, bob, aud) = (a("alice"), a("bob"), a("aud"));
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        apply_ok(&mut state, &register(&aud, Role::Auditor));
+
+        // Choose what it listens to.
+        apply_ok(
+            &mut state,
+            &Envelope::new(
+                &aud,
+                1,
+                no_frontier(),
+                &EventData::SubscriptionSet(crate::events::SubscriptionSet {
+                    topics: StringSet::from_iter([crate::scalars::CoordinationTopic::parse(
+                        "release.main".into(),
+                    )
+                    .unwrap()]),
+                }),
+                [],
+            ),
+        );
+
+        // Report progress -- but carrying no product commit, which is the
+        // line gate 21 draws and which the refusal test above pins.
+        apply_ok(
+            &mut state,
+            &Envelope::new(
+                &aud,
+                2,
+                no_frontier(),
+                &EventData::ProgressReported(ProgressReported {
+                    product_commit: None,
+                    completed: vec![text("swept the coordination history")],
+                    current: vec![],
+                    next: vec![],
+                    blockers: vec![],
+                    verification: vec![text("replayed every stream")],
+                }),
+                [],
+            ),
+        );
+
+        // Open an issue, then reassign it -- section 2.2 names both. The
+        // reassignment is legitimate because the auditor is the *opener*; a
+        // non-opener non-coordinator would be refused, which is ordinary
+        // issue-lifecycle authority rather than anything about this role.
+        let issue = open_issue(&aud, 3, &alice);
+        let issue_id = issue.id.clone();
+        apply_ok(&mut state, &issue);
+        apply_ok(
+            &mut state,
+            &Envelope::new(
+                &aud,
+                4,
+                frontier_seeing(&[&issue_id]),
+                &EventData::IssueReassigned(IssueReassigned {
+                    issue: issue_id.clone(),
+                    previous_assignment: issue_id.clone(),
+                    previous_target: alice.clone(),
+                    new_target: bob.clone(),
+                    reason: text("belongs with the reviewer"),
+                }),
+                [issue_id.clone()],
+            ),
+        );
+        assert_eq!(
+            state.issues[&issue_id].current_target, bob,
+            "an auditor may reassign an issue it opened"
+        );
+    }
+
+    /// The role check is `require_active_role`, not merely a role
+    /// comparison, and that distinction needs its own case: replacing it with
+    /// a bare `primary_role` check survived the entire suite. Same failure
+    /// mode `merge_ready` documents at length for reviewers -- an identity
+    /// the roster has declared unavailable going on working.
+    #[test]
+    fn an_auditor_the_roster_has_deactivated_may_not_publish_a_report() {
+        let mut state = empty_state(&[("aud", Role::Auditor)]);
+        let aud = a("aud");
+        apply_ok(&mut state, &register(&aud, Role::Auditor));
+        apply_ok(&mut state, &audit(&aud, 1, &[]));
+
+        apply_ok(
+            &mut state,
+            &Envelope::new(
+                &aud,
+                2,
+                no_frontier(),
+                &EventData::AgentStatus(AgentStatusEvent {
+                    status: LifecycleStatus::Done,
+                    note: text("audit complete"),
+                    product_branch: None,
+                    product_commit: None,
+                }),
+                [],
+            ),
+        );
+
+        let err = apply_event(&mut state, &audit(&aud, 3, &[])).unwrap_err();
+        assert!(
+            err.to_string().contains("is not active"),
+            "a deactivated auditor must not publish, got: {err}"
+        );
+    }
+
     /// A report may not cite a finding that does not exist -- otherwise an
     /// audit could manufacture the appearance of filed work.
     #[test]
@@ -2573,6 +2908,24 @@ mod tests {
         assert!(
             err.to_string().contains("unknown issue"),
             "expected an unknown-issue refusal, got: {err}"
+        );
+
+        // And an id that *is* a real event but is not an issue. Without this
+        // case the existence check could look in `state.events` instead of
+        // `state.issues` and no test would notice -- an adversarial review
+        // made exactly that substitution and the whole suite stayed green.
+        // The schema promises `issues` names `issue.opened` events; without
+        // this, a report could pass off a progress note, a broadcast, or a
+        // previous audit report as a filed finding.
+        let not_an_issue = register(&aud, Role::Auditor).id.clone();
+        assert!(
+            state.events.contains_key(&not_an_issue) && !state.issues.contains_key(&not_an_issue),
+            "fixture must name an id that is an event but not an issue"
+        );
+        let err = apply_event(&mut state, &audit(&aud, 1, &[&not_an_issue])).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown issue"),
+            "a real non-issue event must not pass as a finding, got: {err}"
         );
     }
 
@@ -2619,36 +2972,74 @@ mod tests {
 
     /// Gate 22: "an audit report cannot resolve its referenced issues or
     /// satisfy any merge finding disposition merely by describing them as
-    /// closed." Asserted as a *before and after* comparison of the issue's
-    /// entire lifecycle state, so any future change that makes the report
-    /// touch an issue fails here rather than silently granting the auditor
-    /// disposal authority the design denies it.
+    /// closed."
+    ///
+    /// Both halves, and asserted *wholesale* rather than field by field. An
+    /// earlier version of this test compared four hand-picked fields of the
+    /// referenced issue, and an adversarial review broke it twice without
+    /// failing it: once by making the report reassign every issue it named to
+    /// the auditor, and once by making it clear every finding on every review
+    /// chain in the fleet. Neither field was in the four.
+    ///
+    /// Comparing derived `Debug` is deliberate. `IssueState` and `ReviewChain`
+    /// are not `PartialEq`, and widening production types for a test's
+    /// convenience is the wrong trade; `Debug` covers every field, and both
+    /// containers are `BTreeMap`s so the rendering is ordered and stable.
     #[test]
-    fn an_audit_report_leaves_every_issue_it_names_untouched() {
-        let mut state = empty_state(&[("alice", Role::Implementor), ("aud", Role::Auditor)]);
-        let (alice, aud) = (a("alice"), a("aud"));
+    fn an_audit_report_disturbs_no_issue_and_no_review_chain() {
+        let mut state = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Reviewer),
+            ("aud", Role::Auditor),
+        ]);
+        let (alice, bob, aud) = (a("alice"), a("bob"), a("aud"));
         apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
         apply_ok(&mut state, &register(&aud, Role::Auditor));
+
+        // An issue the report will name ...
         let issue = open_issue(&aud, 1, &alice);
         let issue_id = issue.id.clone();
         apply_ok(&mut state, &issue);
 
-        let before = state.issues.get(&issue_id).cloned().expect("issue exists");
-        apply_ok(&mut state, &audit(&aud, 2, &[&issue_id]));
-        let after = state.issues.get(&issue_id).expect("issue still exists");
+        // ... and a live review chain carrying an *open* finding, which is
+        // the half gate 22 calls "satisfy any merge finding disposition".
+        let (nominate_env, _accept) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let changes = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                nomination: nominate_env.id.clone(),
+                reviewed_commit: hash(3),
+                findings: vec![finding("f1")],
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+        apply_ok(&mut state, &changes);
+        assert!(
+            state.reviews.values().any(|c| c
+                .findings
+                .values()
+                .any(|f| f.disposition == FindingDisposition::Open)),
+            "fixture must carry an open finding, or the second half proves nothing"
+        );
 
-        assert_eq!(before.status, after.status, "status must not move");
+        let issues_before = format!("{:#?}", state.issues);
+        let reviews_before = format!("{:#?}", state.reviews);
+
+        apply_ok(&mut state, &audit(&aud, 2, &[&issue_id]));
+
         assert_eq!(
-            before.current_assignment, after.current_assignment,
-            "assignment must not move"
+            issues_before,
+            format!("{:#?}", state.issues),
+            "an audit report must leave every issue exactly as it found it"
         );
         assert_eq!(
-            before.acknowledged_assignments, after.acknowledged_assignments,
-            "acknowledgement must not move"
-        );
-        assert_eq!(
-            before.resolution_summary, after.resolution_summary,
-            "the report must not resolve what it reports"
+            reviews_before,
+            format!("{:#?}", state.reviews),
+            "an audit report must not touch a review chain or dispose of a finding"
         );
     }
 

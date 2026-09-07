@@ -620,6 +620,16 @@ fn verify_object_ids_resolve(repo: &Path, data: &crate::events::EventData) -> Ab
         crate::events::EventData::IssueOpened(d) => {
             d.code_commit.iter().map(|c| ("code_commit", c)).collect()
         }
+        // An audit report pins the revisions it inspected, which is the same
+        // class of evidence as the fields above and fails the same silent way
+        // if mistyped: the report reads as authoritative about a commit that
+        // does not exist. `apply` already refuses a report naming an issue
+        // that does not exist; this is the object-id half of the same rule.
+        crate::events::EventData::AuditReported(d) => d
+            .inspected_commits
+            .iter()
+            .map(|c| ("inspected_commits", c))
+            .collect(),
         _ => vec![],
     };
     for (field, id) in candidates {
@@ -1241,6 +1251,80 @@ mod tests {
         assert_eq!(drained.rejected.len(), 1);
         assert!(
             drained.rejected[0].reason.contains("base_code_commit")
+                && drained.rejected[0].reason.contains("does not resolve"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    /// An audit report pins the revisions it inspected. A mistyped one makes
+    /// the report read as authoritative about a commit that does not exist,
+    /// which is the same silent failure the sibling tests above cover for
+    /// `product_base`, `base_code_commit` and `code_commit`. `apply` already
+    /// refuses a report naming a non-existent *issue*; this is the object-id
+    /// half of the same rule, and it lives here because only the coordinator
+    /// has the repository to resolve against.
+    #[test]
+    fn drain_outbox_rejects_an_audit_report_pinning_a_nonexistent_commit() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let aud = a("aud");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+        // The auditor must be a member of the current epoch for
+        // `authorize_stream_write` to let its outbox be drained at all.
+        let tip = crate::registry::read_registry_tip(repo.path())
+            .unwrap()
+            .unwrap();
+        let epoch = crate::registry::read_epoch(repo.path(), &tip).unwrap();
+        let mut members = epoch.active_members.clone();
+        members.insert(
+            aud.clone(),
+            crate::registry::MemberBinding {
+                role: Role::Auditor,
+                host: short("host1"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
+
+        crate::outbox::submit(
+            repo.path(),
+            "audit-1",
+            &Candidate::new(
+                &aud,
+                &EventData::AuditReported(crate::events::AuditReported {
+                    inspected_commits: crate::scalars::StringSet::from_iter([ObjectId::parse(
+                        "f".repeat(40),
+                    )
+                    .unwrap()]),
+                    areas: vec![text("coordination history")],
+                    methods: vec![text("replayed every stream")],
+                    limitations: vec![],
+                    issues: crate::scalars::StringSet::default(),
+                    summary: text("s"),
+                }),
+                vec![],
+            ),
+        )
+        .unwrap();
+
+        let drained =
+            drain_outbox(repo.path(), repo.path(), &aud, &short("host1"), 0, "origin").unwrap();
+        assert!(drained.published.is_empty(), "{drained:?}");
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0].reason.contains("inspected_commits")
                 && drained.rejected[0].reason.contains("does not resolve"),
             "{}",
             drained.rejected[0].reason

@@ -145,6 +145,19 @@ identity that must register before activation uses V1 `observer` with
 migrates, and that spelling is a transition device, not a second long-term
 role.
 
+Gate 24 ("a V1 `observer` registered for audit migrates to exactly one V2
+`auditor` identity without acquiring implementor or reviewer authority") is
+**discharged vacuously and deliberately, not implemented**. No `observer` has
+ever been registered on this bus -- verified against the live roster and
+against every published event on every stream before the rename -- so there is
+nothing to migrate and no fixture that could exercise a migration. Recording
+that here rather than leaving it implied, because the gap is otherwise
+invisible: the helper rejects the string `observer` outright, and reduction
+propagates that failure, so a single V1 `observer` registration appearing in
+migrated history would make the bus unreducible on every host. If such an
+identity is ever created before activation, the migration tool must rewrite
+the wire string, and this note must become a test.
+
 ### `agent.status`
 
 ```text
@@ -636,40 +649,6 @@ with the authorization or product history is invalid.
 
 ## 9. Lifecycle conflict resolution
 
-### `audit.reported`
-
-```text
-data = {
-  inspected_commits : StringSet<ObjectId>,
-  areas : List<Text>,
-  methods : List<Text>,
-  limitations : List<Text>,
-  issues : StringSet<EventId>,
-  summary : Text
-}
-refs = issues
-```
-
-The auditor's fleet-wide summary (AGENT_COORDINATION_EVOLUTION.md section 2.2).
-Valid only from an active agent whose immutable primary role is `auditor`.
-
-Deliberately **non-authoritative**, and the type carries no status,
-disposition or verdict field of any kind so that it cannot become otherwise.
-Actionable findings live in separate `issue.opened` events referenced by
-`issues`; every id there must name an issue that exists, so a report cannot
-cite a fiction. Reducing this event touches nothing else -- no issue status,
-no assignment, no finding disposition -- because an auditor that could close
-what it reports would be clearing its own findings, which section 2.2 forbids
-(gate 22). A nominated reviewer may cite an audit as evidence but must still
-publish its own dispositions and authorization judgment (gate 23).
-
-`inspected_commits` and `issues` may both be empty: an audit of coordination
-history alone inspects no product commit, and a clean surface is reportable
-"without manufacturing empty issues". `limitations` is where blind spots are
-stated, because absence of a finding is not assurance that unexamined
-behavior is correct. The observed event frontier the report pins is the
-envelope's own `observed` field, not a field here.
-
 ### `lifecycle.conflict_resolved`
 
 ```text
@@ -736,3 +715,39 @@ Before bus bootstrap, the helper implementation must generate and check in:
 The generated JSON Schema is validation convenience. This normative document
 and reviewed Rust types define intended semantics; disagreement is an
 implementation defect and blocks bootstrap.
+
+## 12. Fleet-wide assurance
+
+### `audit.reported`
+
+```text
+data = {
+  inspected_commits : StringSet<ObjectId>,
+  areas : List<Text>,
+  methods : List<Text>,
+  limitations : List<Text>,
+  issues : StringSet<EventId>,
+  summary : Text
+}
+refs = issues
+```
+
+The auditor's fleet-wide summary (AGENT_COORDINATION_EVOLUTION.md section 2.2).
+Valid only from an active agent whose immutable primary role is `auditor`.
+
+Deliberately **non-authoritative**, and the type carries no status,
+disposition or verdict field of any kind so that it cannot become otherwise.
+Actionable findings live in separate `issue.opened` events referenced by
+`issues`; every id there must name an issue that exists, so a report cannot
+cite a fiction. Reducing this event touches nothing else -- no issue status,
+no assignment, no finding disposition -- because an auditor that could close
+what it reports would be clearing its own findings, which section 2.2 forbids
+(gate 22). A nominated reviewer may cite an audit as evidence but must still
+publish its own dispositions and authorization judgment (gate 23).
+
+`inspected_commits` and `issues` may both be empty: an audit of coordination
+history alone inspects no product commit, and a clean surface is reportable
+"without manufacturing empty issues". `limitations` is where blind spots are
+stated, because absence of a finding is not assurance that unexamined
+behavior is correct. The observed event frontier the report pins is the
+envelope's own `observed` field, not a field here.
