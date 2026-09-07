@@ -13,6 +13,7 @@ import Grass.Core.Name
 import Grass.Core.Uid
 import Grass.Grammar.Core
 import Grass.Grammar.Realization
+import Grass.Grammar.Streaming
 import Grass.ISA.X86.Addressing
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.Citation
