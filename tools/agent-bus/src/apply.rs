@@ -574,12 +574,20 @@ fn apply_merge_engine_activated(
             env.id, d.previous_epoch
         )));
     }
-    if state.exclusive.is_contested(&d.previous_epoch) {
-        return Err(invalid(format!(
-            "{}: previous_epoch {} is itself part of an unresolved lifecycle conflict",
-            env.id, d.previous_epoch
-        )));
-    }
+    // Whether the predecessor is itself contested is deliberately not asked
+    // here. `is_contested` reads `ExclusiveTracker` group membership, which
+    // *grows* as concurrent candidates reduce, and the candidate that makes a
+    // predecessor contested is referenced by nothing this event carries.
+    // Reduce that candidate first and this event was fatal; reduce it second
+    // and this event succeeded -- the same two events, one host wedged and
+    // one not, with no per-event isolation in `reduce` to contain it.
+    //
+    // `coordinator::verify_predecessor_not_contested` asks it at publication
+    // instead, against this host's fully-reduced view, where there is no
+    // replay order to be at the mercy of. Recording is confluent: this event
+    // joins its own key's group, which is a set, and whether its effect
+    // applies is `ExclusiveTracker::disposition`, a pure function of that
+    // group's final membership.
     if d.merge_engine.as_str() != crate::bootstrap::SUPPORTED_MERGE_ENGINE {
         return Err(invalid(format!(
             "{}: unsupported merge_engine {}",
@@ -894,12 +902,10 @@ fn apply_issue_terminal(
             env.id
         )));
     }
-    if state.exclusive.is_contested(assignment) {
-        return Err(invalid(format!(
-            "{}: assignment {assignment} is itself part of an unresolved lifecycle conflict",
-            env.id
-        )));
-    }
+    // Not asked here -- see `apply_merge_engine_activated` for why the
+    // contested-predecessor question cannot be answered during replay,
+    // and `coordinator::verify_predecessor_not_contested` for where it
+    // is answered instead.
     let key = issue_key(assignment);
     state.exclusive.record(&key, &env.id)?;
     let expected_target = expected_target.clone();
@@ -1008,12 +1014,10 @@ fn apply_issue_reassigned(
     if !is_opener {
         require_bootstrap_coordinator(state, &env.agent)?;
     }
-    if state.exclusive.is_contested(&d.previous_assignment) {
-        return Err(invalid(format!(
-            "{}: previous_assignment {} is itself part of an unresolved lifecycle conflict",
-            env.id, d.previous_assignment
-        )));
-    }
+    // Not asked here -- see `apply_merge_engine_activated` for why the
+    // contested-predecessor question cannot be answered during replay,
+    // and `coordinator::verify_predecessor_not_contested` for where it
+    // is answered instead.
     let key = issue_key(&d.previous_assignment);
     state.exclusive.record(&key, &env.id)?;
     match state.exclusive.disposition(&key, &env.id) {
@@ -1133,12 +1137,10 @@ fn apply_dependency_terminal(
             env.id
         )));
     }
-    if state.exclusive.is_contested(assignment) {
-        return Err(invalid(format!(
-            "{}: assignment {assignment} is itself part of an unresolved lifecycle conflict",
-            env.id
-        )));
-    }
+    // Not asked here -- see `apply_merge_engine_activated` for why the
+    // contested-predecessor question cannot be answered during replay,
+    // and `coordinator::verify_predecessor_not_contested` for where it
+    // is answered instead.
     let expected_target = expected_target.clone();
     let key = dependency_key(assignment);
     state.exclusive.record(&key, &env.id)?;
@@ -1223,12 +1225,10 @@ fn apply_dependency_reassigned(
     if !is_requester {
         require_bootstrap_coordinator(state, &env.agent)?;
     }
-    if state.exclusive.is_contested(&d.previous_assignment) {
-        return Err(invalid(format!(
-            "{}: previous_assignment {} is itself part of an unresolved lifecycle conflict",
-            env.id, d.previous_assignment
-        )));
-    }
+    // Not asked here -- see `apply_merge_engine_activated` for why the
+    // contested-predecessor question cannot be answered during replay,
+    // and `coordinator::verify_predecessor_not_contested` for where it
+    // is answered instead.
     let key = dependency_key(&d.previous_assignment);
     state.exclusive.record(&key, &env.id)?;
     match state.exclusive.disposition(&key, &env.id) {
@@ -1310,12 +1310,10 @@ fn apply_handoff_terminal(
         }
         _ => unreachable!(),
     }
-    if state.exclusive.is_contested(handoff_id) {
-        return Err(invalid(format!(
-            "{}: handoff {handoff_id} is itself part of an unresolved lifecycle conflict",
-            env.id
-        )));
-    }
+    // Not asked here -- see `apply_merge_engine_activated` for why the
+    // contested-predecessor question cannot be answered during replay,
+    // and `coordinator::verify_predecessor_not_contested` for where it
+    // is answered instead.
     let key = handoff_key(handoff_id);
     state.exclusive.record(&key, &env.id)?;
     match state.exclusive.disposition(&key, &env.id) {
@@ -6499,8 +6497,23 @@ mod tests {
         );
     }
 
+    /// Building on a contested predecessor must not be fatal to reduction.
+    ///
+    /// `is_contested` reads `ExclusiveTracker` group membership, which grows
+    /// as concurrent candidates reduce. Nothing `downstream` carries
+    /// references `candidate_b` -- the event that makes its predecessor
+    /// contested -- so reducing `candidate_b` first made `downstream` fatal
+    /// while reducing it second let `downstream` through. Same events, one
+    /// host unable to read the bus and one not.
+    ///
+    /// The rule itself is sound and is not dropped: it is asked at
+    /// publication by `coordinator::verify_predecessor_not_contested`, where
+    /// the state is the publishing host's own fully-reduced view. See
+    /// `the_publication_gate_refuses_a_contested_predecessor` for that half;
+    /// this test and that one are a pair, and either alone reads like a
+    /// regression.
     #[test]
-    fn rejects_merge_engine_activated_when_previous_epoch_is_itself_contested() {
+    fn building_on_a_contested_predecessor_still_reduces() {
         let mut state =
             empty_state(&[("coord1", Role::Coordinator), ("coord2", Role::Coordinator)]);
         let coord1 = a("coord1");
@@ -6537,11 +6550,12 @@ mod tests {
             &EventData::MergeEngineActivated(merge_engine_activated(&candidate_a.id)),
             [],
         );
-        let err = apply_event(&mut state, &downstream).unwrap_err();
+        apply_event(&mut state, &downstream)
+            .expect("a contested predecessor must not make the bus unreducible");
+        // And it is recorded, rather than quietly dropped.
         assert!(
-            err.to_string()
-                .contains("is itself part of an unresolved lifecycle conflict"),
-            "{err}"
+            state.exclusive.is_contested(&candidate_a.id),
+            "the underlying race is untouched by the downstream event"
         );
     }
 

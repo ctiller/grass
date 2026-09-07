@@ -252,6 +252,15 @@ pub fn drain_outbox(
                 continue;
             }
         }
+        if let Err(e) = verify_predecessor_not_contested(&state, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
+        }
         if let Err(e) = verify_object_ids_resolve(repo, &data) {
             let reason = e.to_string();
             reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
@@ -728,6 +737,46 @@ fn verify_review_merge_reconciled(
             "main_commit {} is not a first-parent successor of previous_main {} on {remote}'s \
              current main -- reconcile only records a merge that has genuinely already landed",
             d.main_commit, d.previous_main
+        )));
+    }
+    Ok(())
+}
+
+/// AGENT_BUS_SCHEMA.md's "a transition may not build on a predecessor whose
+/// own disposition is still an open race".
+///
+/// `apply` cannot ask this. `ExclusiveTracker::is_contested` reads group
+/// membership, which grows as concurrent candidates reduce, and nothing this
+/// event carries references the candidate that contests its predecessor --
+/// so asking during replay made the same two events fatal on one host and
+/// harmless on another, decided by which was fetched first.
+///
+/// Here `state` is the publishing host's own fully-reduced view, so the
+/// question has one answer. A publisher that genuinely cannot see the
+/// competing claim yet is not stopped, and should not be: it has committed
+/// no error, and the resulting group is reconciled by
+/// `lifecycle.conflict_resolved` exactly as an ordinary race is.
+fn verify_predecessor_not_contested(
+    state: &crate::state::BusState,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    use crate::events::EventData as E;
+    let predecessor = match data {
+        E::MergeEngineActivated(d) => &d.previous_epoch,
+        E::IssueResolved(d) => &d.assignment,
+        E::IssueRejected(d) => &d.assignment,
+        E::IssueReassigned(d) => &d.previous_assignment,
+        E::DependencyResolved(d) => &d.assignment,
+        E::DependencyRejected(d) => &d.assignment,
+        E::DependencyReassigned(d) => &d.previous_assignment,
+        E::HandoffAccepted(d) => &d.handoff,
+        E::HandoffDeclined(d) => &d.handoff,
+        E::HandoffWithdrawn(d) => &d.handoff,
+        _ => return Ok(()),
+    };
+    if state.exclusive.is_contested(predecessor) {
+        return Err(invalid(format!(
+            "{predecessor} is itself part of an unresolved lifecycle conflict; a coordinator must publish lifecycle.conflict_resolved for it before anything builds on it"
         )));
     }
     Ok(())
@@ -3979,5 +4028,124 @@ mod tests {
         state.known_epochs.clear();
         verify_broadcast_published(&state, &broadcast_to_subscribers(&epoch, &["nobody-here"]))
             .expect("an unknown epoch is deferred, not judged");
+    }
+
+    // ------------------------------------- contested-predecessor publication gate
+
+    /// The other half of `apply::building_on_a_contested_predecessor_still_
+    /// reduces`: reduction records such an event, publication refuses it.
+    ///
+    /// Reduction cannot ask the question -- `is_contested` reads group
+    /// membership that grows as concurrent candidates reduce, and nothing
+    /// the event carries references the candidate that contests its
+    /// predecessor, so the answer depended on fetch order. Here `state` is
+    /// the publishing host's own fully-reduced view and there is one answer.
+    ///
+    /// Covers every kind the gate dispatches on, because the mapping from
+    /// event to predecessor field is exactly where a future kind gets
+    /// forgotten, and a forgotten kind fails open.
+    #[test]
+    fn the_publication_gate_refuses_a_contested_predecessor() {
+        use crate::events::{
+            DependencyReassigned, DependencyRejected, DependencyResolved, HandoffAccepted,
+            HandoffDeclined, HandoffWithdrawn, IssueReassigned, IssueRejected, IssueResolved,
+        };
+
+        let contested = EventId::new(&a("alice"), 3);
+        let quiet = EventId::new(&a("alice"), 9);
+
+        // A state in which `contested` is a member of a live two-candidate
+        // race, and `quiet` is not.
+        let mut state = crate::state::BusState::new(crate::bootstrap::BusConfig {
+            object_format: "sha1".to_string(),
+            product_review_from: ObjectId::parse("1".repeat(40)).unwrap(),
+            merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
+            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+        });
+        state
+            .exclusive
+            .record("issue:race", &contested)
+            .expect("first candidate");
+        state
+            .exclusive
+            .record("issue:race", &EventId::new(&a("bob"), 4))
+            .expect("second, concurrent candidate");
+        assert!(state.exclusive.is_contested(&contested));
+
+        let text = |t: &str| Text::parse(t.to_string()).unwrap();
+        let with = |p: &EventId| -> Vec<EventData> {
+            vec![
+                EventData::IssueResolved(IssueResolved {
+                    issue: p.clone(),
+                    assignment: p.clone(),
+                    summary: text("s"),
+                    fix_commit: None,
+                    verification: vec![],
+                }),
+                EventData::IssueRejected(IssueRejected {
+                    issue: p.clone(),
+                    assignment: p.clone(),
+                    reason: text("r"),
+                    normative_refs: vec![],
+                }),
+                EventData::IssueReassigned(IssueReassigned {
+                    issue: p.clone(),
+                    previous_assignment: p.clone(),
+                    previous_target: a("bob"),
+                    new_target: a("carol"),
+                    reason: text("r"),
+                }),
+                EventData::DependencyResolved(DependencyResolved {
+                    dependency: p.clone(),
+                    assignment: p.clone(),
+                    summary: text("s"),
+                    product_commit: None,
+                    verification: vec![],
+                }),
+                EventData::DependencyRejected(DependencyRejected {
+                    dependency: p.clone(),
+                    assignment: p.clone(),
+                    reason: text("r"),
+                }),
+                EventData::DependencyReassigned(DependencyReassigned {
+                    dependency: p.clone(),
+                    previous_assignment: p.clone(),
+                    previous_target: a("bob"),
+                    new_target: a("carol"),
+                    reason: text("r"),
+                }),
+                EventData::HandoffAccepted(HandoffAccepted {
+                    handoff: p.clone(),
+                    note: text(""),
+                }),
+                EventData::HandoffDeclined(HandoffDeclined {
+                    handoff: p.clone(),
+                    reason: text("r"),
+                }),
+                EventData::HandoffWithdrawn(HandoffWithdrawn {
+                    handoff: p.clone(),
+                    reason: text("r"),
+                }),
+            ]
+        };
+
+        for data in with(&contested) {
+            let err = verify_predecessor_not_contested(&state, &data)
+                .expect_err("a contested predecessor must not publish");
+            assert!(
+                err.to_string()
+                    .contains("is itself part of an unresolved lifecycle conflict"),
+                "{}: {err}",
+                data.kind()
+            );
+        }
+        for data in with(&quiet) {
+            verify_predecessor_not_contested(&state, &data).unwrap_or_else(|e| {
+                panic!(
+                    "an uncontested predecessor must publish ({}): {e}",
+                    data.kind()
+                )
+            });
+        }
     }
 }
