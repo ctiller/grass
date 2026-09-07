@@ -764,18 +764,36 @@ structure ProcessPlan (registry : ProtocolRegistry) (boundary : DriverBoundary)
       (logicalWorldAgreement toProcessTopology Message) edge
   boundaryProjection : RootLocalDemandProjection toProcessTopology boundary
 
-structure ProcessProviderCertificate
+def CanonicalProcessProviderUnion
     (boundaryCertificate : CertifiedDriverBoundary boundary)
     (registryCertificate : CertifiedProtocolRegistry registry)
-    (plan : ProcessPlan registry boundary) where
-  selectedProtocols : SelectedProtocolImage registry plan.toProcessTopologyCore
-  providerDemands : ProviderDemandFamily
-  providerCoverage : EveryBoundaryAndSelectedRoleDemandOriginOccursIn
-    boundaryCertificate registryCertificate plan selectedProtocols providerDemands
-  providerNoExtras : EveryProviderDemandOriginComesFromBoundaryOrSelectedRole
-    boundaryCertificate registryCertificate plan selectedProtocols providerDemands
-  providerDescriptorsExact : EveryCoveredOriginRetainsExactDescriptor
-    boundaryCertificate registryCertificate plan selectedProtocols providerDemands
+    (plan : ProcessPlan registry boundary)
+    (selected : SelectedProtocolImage registry plan.toProcessTopologyCore) :
+    ProviderDemandFamily
+
+opaque ProcessProviderCertificate
+    (boundaryCertificate : CertifiedDriverBoundary boundary)
+    (registryCertificate : CertifiedProtocolRegistry registry)
+    (plan : ProcessPlan registry boundary) : Type
+def ProcessProviderCertificate.selectedProtocols
+    (certificate : ProcessProviderCertificate
+      boundaryCertificate registryCertificate plan) :
+    SelectedProtocolImage registry plan.toProcessTopologyCore
+def ProcessProviderCertificate.providerDemands
+    (certificate : ProcessProviderCertificate
+      boundaryCertificate registryCertificate plan) : ProviderDemandFamily
+theorem ProcessProviderCertificate.authorityExact
+    (certificate : ProcessProviderCertificate
+      boundaryCertificate registryCertificate plan) :
+    certificate.providerDemands.AuthorityEquiv
+      (CanonicalProcessProviderUnion boundaryCertificate registryCertificate plan
+        certificate.selectedProtocols)
+theorem ProcessProviderCertificate.providerCoverage ...
+theorem ProcessProviderCertificate.providerNoExtras ...
+theorem ProcessProviderCertificate.providerDescriptorsExact ...
+def ProcessProviderCertificate.build
+    (selected : SelectedProtocolImage registry plan.toProcessTopologyCore) :
+    ProcessProviderCertificate boundaryCertificate registryCertificate plan
 
 abbrev LogicalProcessNetwork (plan : ProcessPlan registry boundary) :=
   LogicalProcessNetworkCore plan.toProcessTopology plan.Message
@@ -790,14 +808,17 @@ the ecosystem registry and not the potentially unbounded runtime population.
 Standard finite graph/role constructors synthesize it; an open or proposition-
 indexed role family must provide this real compactness witness when constructing
 the aggregate plan. Ordinary process bodies do not maintain it.
-`ProcessProviderCertificate.providerDemands` is one finite extensional summary of the
+`ProcessProviderCertificate` is opaque and its standard `build` constructor
+derives one finite authority-preserving summary of the
 boundary plus every protocol in `selectedProtocols`. `providerCoverage`,
 `providerNoExtras`, and `providerDescriptorsExact` make that summary exact in
 both directions without deciding reachability or enumerating the registry. An
 unused selected role therefore remains conservatively included. Hierarchical
 plan/shard constructors generate the family and the three proofs; applications
 do not maintain a second list. A true origin collision fails at the composing
-constructor.
+constructor. `authorityExact` additionally embeds the generated summary and the
+canonical normalized union into one owner-preserving registry; coverage by
+stable origin/view alone is never accepted as aggregate authority evidence.
 
 The sidecar placement is load-bearing. `DriverBoundary` remains the stable
 five-field object implemented in `Grass.Specification`; changing a provider plan
@@ -1878,6 +1899,7 @@ structure SequentialMachine (boundary : DriverBoundary) where
   progress : SequentialDecisionProgress decide
 
 structure SequentialWaitingOccurrence
+    {boundary : DriverBoundary}
     (machine : SequentialMachine boundary) where
   point : machine.State
   demand : EffectDemand boundary
@@ -1892,9 +1914,12 @@ structure PendingInteractionModel (boundary : DriverBoundary) where
   Extends : {demand : EffectDemand boundary} ->
     {start : Start demand} -> History demand start -> History demand start -> Prop
   reflexive : forall {demand} {start : Start demand},
-    Reflexive (@Extends demand start)
+    forall history, @Extends demand start history history
   transitive : forall {demand} {start : Start demand},
-    Transitive (@Extends demand start)
+    forall {first second third},
+      @Extends demand start first second ->
+      @Extends demand start second third ->
+      @Extends demand start first third
   observations : {demand : EffectDemand boundary} ->
     {start : Start demand} -> History demand start -> List boundary.Observation
   observations_congruent : forall {demand} {start : Start demand}
@@ -1914,6 +1939,7 @@ def PendingInteractionModel.atomic (boundary : DriverBoundary) :
   observations_congruent := fun _ _ => rfl
 
 def PendingInteractionModel.ProperExtends
+    {boundary : DriverBoundary}
     (model : PendingInteractionModel boundary)
     {demand : EffectDemand boundary}
     {start : model.Start demand}
@@ -1921,6 +1947,7 @@ def PendingInteractionModel.ProperExtends
   model.Extends first second /\ ¬ model.Extends second first
 
 abbrev SequentialWaitingState
+    {boundary : DriverBoundary}
     (machine : SequentialMachine boundary)
     (model : PendingInteractionModel boundary)
     (start : (waiting : SequentialWaitingOccurrence machine) ->
@@ -1929,20 +1956,42 @@ abbrev SequentialWaitingState
     model.History waiting.demand (start waiting)
 
 structure SequentialPendingSemantics
+    {boundary : DriverBoundary}
     (machine : SequentialMachine boundary)
     (model : PendingInteractionModel boundary) where
   start : (waiting : SequentialWaitingOccurrence machine) ->
     model.Start waiting.demand
   advance : SequentialWaitingState machine model start ->
     SequentialWaitingState machine model start -> Prop
-  advanceExact : advance before after <->
+  advanceExact : forall before after, advance before after <->
     exists same : before.1 = after.1,
       model.ProperExtends before.2 (same.symm ▸ after.2)
   observationsExact : EveryPendingAdvanceEmitsExactNewPrefixObservations
     model advance
   preserves : EveryPendingAdvancePreservesMachineInvariant machine advance
 
+def SequentialPendingSemantics.rootState
+    {boundary : DriverBoundary}
+    {machine : SequentialMachine boundary}
+    {model : PendingInteractionModel boundary}
+    (pending : SequentialPendingSemantics machine model)
+    (waiting : SequentialWaitingOccurrence machine) :
+    SequentialWaitingState machine model pending.start :=
+  ⟨waiting, model.root waiting.demand (pending.start waiting)⟩
+
+inductive SequentialPendingSemantics.Reachable
+    {boundary : DriverBoundary}
+    {machine : SequentialMachine boundary}
+    {model : PendingInteractionModel boundary}
+    (pending : SequentialPendingSemantics machine model) :
+    SequentialWaitingState machine model pending.start -> Prop
+  | root (waiting : SequentialWaitingOccurrence machine) :
+      Reachable pending (pending.rootState waiting)
+  | advance {before after} : Reachable pending before ->
+      pending.advance before after -> Reachable pending after
+
 def SequentialPendingSemantics.atomic
+    {boundary : DriverBoundary}
     (machine : SequentialMachine boundary) :
     SequentialPendingSemantics machine
       (PendingInteractionModel.atomic boundary)
@@ -1958,6 +2007,11 @@ proof for every program using it.
 point, demand, continuation, and the equality proving that `decide` waits there.
 It cannot be chosen as `Empty`; every actual effect decision constructs a
 member, and proof irrelevance gives uniqueness for the same point/demand/resume.
+`rootState` is the only adapter constructor for a newly issued waiting
+occurrence, and the adapter stores the subtype satisfying `Reachable`. Arbitrary
+inhabitants of a history type are model values, not reachable waiting states;
+every reachable value is generated from the exact `model.root` by zero or more
+certified advances.
 
 `ProperExtends` is the strict relation induced by the history preorder. Merely
 using unequal representatives is insufficient: two distinct but mutually

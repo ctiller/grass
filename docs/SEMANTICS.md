@@ -457,9 +457,11 @@ inductive BuiltinRequirementAuthority
   | effect | process | memory | resource | obligation | abi | platform | isa
   deriving DecidableEq
 
-structure ExtensionAuthorityOwner where
-  Token : Type
-  stableId : StableId
+opaque ExtensionAuthorityOwner : Type
+def ExtensionAuthorityOwner.stableId : ExtensionAuthorityOwner -> StableId
+
+syntax (name := declareExtensionAuthority)
+  "declare_extension_authority " ident " => " term : command
 
 structure ExtensionAuthorityRegistry where
   Entry : Type
@@ -470,6 +472,14 @@ structure ExtensionAuthorityRegistry where
   key : Entry -> StableId := fun entry => (owner entry).stableId
   keyInjective : Function.Injective key
   freshFromBuiltins : forall entry, key entry ∉ builtinRequirementAuthorityKeys
+
+structure ExtensionAuthorityContainedIn
+    (registry : ExtensionAuthorityRegistry)
+    (registries : List ExtensionAuthorityRegistry) : Prop where
+  locate : forall entry : registry.Entry,
+    exists target, exists member : target ∈ registries, exists targetEntry,
+      target.key targetEntry = registry.key entry /\
+      target.owner targetEntry = registry.owner entry
 
 structure ExtensionAuthorityEmbedding
     (small large : ExtensionAuthorityRegistry) where
@@ -505,7 +515,7 @@ def ExtensionAuthorityRegistry.normalize
 def ExtensionAuthorityUnionPlan.includeCompatible
     (plan : ExtensionAuthorityUnionPlan registries compatible)
     (registry : ExtensionAuthorityRegistry)
-    (contained : EveryExtensionAuthorityKeyIn registry OccursIn registries) :
+    (contained : ExtensionAuthorityContainedIn registry registries) :
     ExtensionAuthorityEmbedding registry plan.merged
 def ExtensionAuthorityRegistry.mergePlan
     (left right : ExtensionAuthorityRegistry)
@@ -683,8 +693,8 @@ theorem ProviderDemandFamily.reindex_comp ...
 def ProviderDemandFamily.reindexTo
     (plan : ExtensionAuthorityUnionPlan registries compatible)
     (family : ProviderDemandFamily)
-    (contained : EveryExtensionAuthorityKeyIn family.authorityRegistry
-      OccursIn registries) : ProviderDemandFamily :=
+    (contained : ExtensionAuthorityContainedIn family.authorityRegistry
+      registries) : ProviderDemandFamily :=
   family.reindex (plan.includeCompatible family.authorityRegistry contained)
 theorem ProviderDemandFamily.union_assoc_coherent
     (plan : ExtensionAuthorityUnionPlan [leftRegistry, middleRegistry, rightRegistry]
@@ -695,10 +705,10 @@ theorem ProviderDemandFamily.union_assoc_coherent
     (leftMiddleRight' : OriginsDisjointOrDescriptorsExact left (middle.union right middleRight)) :
     ProviderDemandFamily.reindexTo plan
         ((left.union middle leftMiddle).union right leftMiddleRight)
-        (leftMiddleRight.nestedRegistryKeysContained pairwiseCompatibility) =
+        (leftMiddleRight.nestedAuthoritiesContained pairwiseCompatibility) =
       ProviderDemandFamily.reindexTo plan
         (left.union (middle.union right middleRight) leftMiddleRight')
-        (leftMiddleRight'.nestedRegistryKeysContained pairwiseCompatibility)
+        (leftMiddleRight'.nestedAuthoritiesContained pairwiseCompatibility)
 
 def ProviderDemandFamily.CertifiedBy
     (demands : ProviderDemandFamily) (view : ProviderBindingView) : Prop :=
@@ -739,14 +749,20 @@ proof irrelevance.
 same normalized registry and embeddings; no hidden representative is chosen.
 
 `StableId` is serialization and collision-diagnostic data, not extension
-authority. An extension owner publishes an `ExtensionAuthorityOwner` containing
-a nominal Lean `Token` type; independently declared tokens remain distinct even
-when their displayed stable IDs match. Equal-key compatibility therefore
-requires equality of the owner witnesses, and every embedding preserves it.
-Reusing an imported owner's published witness is an explicit adoption of that
-authority; reproducing its string key alone is insufficient. Normalization
-deduplicates equal keys only under that typed owner-equality proof and retains
-the nominal owner in the merged entry.
+authority. `ExtensionAuthorityOwner` is opaque and has no public constructor.
+The `declare_extension_authority name => stableId` command is the sole creation
+surface: its checked elaborator emits a fresh nominal owner declaration and the
+kernel-checked stable-ID projection theorem. It does not accept a caller-
+supplied token type, so two `Unit` aliases cannot collapse independently
+declared owners. Equal-key compatibility therefore requires equality of the
+owner witnesses, and every embedding preserves it. Reusing an imported owner's
+published witness is an explicit adoption of that authority; reproducing its
+string key alone is insufficient. The command implementation and generated
+declaration shape are trust-audited, and negative fixtures attempt duplicate-key
+owners from separate modules. Normalization deduplicates equal keys only under
+the typed owner-equality proof and retains the nominal owner in the merged
+entry. `includeCompatible` requires key *and owner* containment; key occurrence
+alone cannot construct an embedding.
 
 A tag is descriptive data, not itself authority. Every extension authority is
 dependently indexed by its exact selected registry and packages an entry of
