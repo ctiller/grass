@@ -624,6 +624,16 @@ theorem currentEpoch_of_live {state : MemoryState} {provenance : Provenance}
       simp only [Option.any_some] at *
       exact ((Bool.and_eq_true _ _).mp h).2
 
+/-- A grant's range in the coordinates of `root`, when the alias graph supplies one
+offset for the pair.
+
+`none` when there is no path, and `none` when there are several that disagree --
+`MemoryState.aliasShift?` conflates those deliberately and this inherits it. Callers
+must decide what `none` means for them, and the two below decide it oppositely. -/
+def grantRangeIn (state : MemoryState) (grant : AuthorityGrant) (root : AllocId) :
+    Option ByteRange :=
+  (state.aliasShift? grant.provenance.root root).bind grant.range.shiftBy
+
 /--
 The grants outstanding over the same *bytes* as `provenance`, meeting `range`.
 
@@ -668,12 +678,27 @@ The epoch filter had made the two disagree about which grants exist, and review 
 exactly that gap: a context could not *obtain* a loan (the conflict test saw the
 stale grant) and did not need one (this list did not), so the write proceeded
 unauthorized.
+
+**Offsets, and why this list keeps what `AuthorizedAt` refuses.**
+
+**`none` from `grantRangeIn` keeps the grant**, which is the opposite of what
+`AuthorizedAt` does with it and is the whole reason the two are written out
+separately. This list feeds conflict detection: dropping a grant here means a
+conflict nobody notices, so an offset this layer cannot determine has to be treated
+as possibly overlapping. `AuthorizedAt` asks whether authority *reaches* an access,
+where the unknown case must refuse. Same unknown, opposite safe answer.
+
+`SharesBytes` stays the gate rather than `aliasShift?`, for the same reason: it is
+true whenever *any* declared path relates the two, including when several disagree
+about the offset, and this is the caller that wants the permissive relation.
 -/
 def grantsOver (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
     List (GrantId × AuthorityGrant) :=
   state.grantEntries.filter fun entry =>
     decide (state.SharesBytes entry.2.provenance.root provenance.root) &&
-      decide (entry.2.range.Meets range)
+      (match state.grantRangeIn entry.2 provenance.root with
+       | Option.none => true
+       | some shifted => decide (shifted.Meets range))
 
 /-- The loans among them. §3's laws — exclusivity, counts, return by identity — are
 about loans, so they are stated over this; the access-time conflict rule is about
@@ -1352,6 +1377,30 @@ private theorem sharesBytes_grants (state : MemoryState)
     (g : FiniteMap GrantId AuthorityGrant) (a b : AllocId) :
     SharesBytes { state with grants := g } a b ↔ state.SharesBytes a b :=
   sharesAfter_grants state g _ a b
+
+/-- One hop is a fact about `aliases` alone. -/
+private theorem aliasNeighbours_grants (state : MemoryState)
+    (g : FiniteMap GrantId AuthorityGrant) (a : AllocId) :
+    aliasNeighbours { state with grants := g } a = state.aliasNeighbours a := rfl
+
+/-- And so is the whole frontier, by induction on the hop count. `rfl` does not close
+this one: `aliasFrontier` recurses, so the two sides agree only after the recursion
+is unfolded the same number of times on both. -/
+private theorem aliasFrontier_grants (state : MemoryState)
+    (g : FiniteMap GrantId AuthorityGrant) : ∀ (n : Nat) (a : AllocId),
+    aliasFrontier { state with grants := g } n a = state.aliasFrontier n a
+  | 0, _ => rfl
+  | n + 1, a => by
+    simp [aliasFrontier, aliasFrontier_grants state g n,
+      aliasNeighbours_grants state g]
+
+/-- An offset between two allocations is a fact about `aliases`, so replacing the
+grant map leaves it alone. The twin of `sharesBytes_grants`, and needed for the same
+reason: a door that only touches grants must not appear to move a mapping. -/
+private theorem aliasShift?_grants (state : MemoryState)
+    (g : FiniteMap GrantId AuthorityGrant) (a b : AllocId) :
+    aliasShift? { state with grants := g } a b = state.aliasShift? a b := by
+  simp only [aliasShift?, aliasShiftsTo, aliasFrontier_grants state g]
 
 private theorem currentEpoch_grants (state : MemoryState)
     (g : FiniteMap GrantId AuthorityGrant) (provenance : Provenance) :
@@ -2204,6 +2253,35 @@ theorem returnGrant?_eq_none_of_absent {state : MemoryState} {context : ContextI
   unfold returnGrant?
   rw [show state.grants.lookup id = Option.none from h]
 
+/-- The grant covers `offset`, where `offset` is in `root`'s coordinates and the
+grant's range is in its own.
+
+**This is the clause that used to assume aliased allocations agree offset for
+offset.** It was `SharesBytes grant.provenance.root provenance.root` beside
+`grant.range.Covers offset`: sharing was checked, and then the offset was compared as
+though the two allocations were the same allocation. A view mapped 2048 bytes into a
+buffer authorized an access at the buffer's offset 0 through a grant covering the
+view's offset 0, which are different bytes.
+
+`none` refuses. There is no path, or there are several that disagree, and in both
+cases this layer cannot say which byte the grant covers -- so it does not authorize
+one. That is [FOUNDATION.md](../../docs/FOUNDATION.md) law 8's direction and it is
+the opposite of what `grantsOver` does with the same `none`.
+
+Strictly narrower than what it replaced: `aliasShift? a a = some 0` for an
+unaliased allocation and `ByteRange.shiftBy_zero` leaves the range alone, so every
+state without an offset alias decides exactly as before. -/
+def CoversAcrossAliases (state : MemoryState) (grant : AuthorityGrant)
+    (root : AllocId) (offset : Nat) : Prop :=
+  match state.grantRangeIn grant root with
+  | Option.none => False
+  | some shifted => shifted.Covers offset
+
+instance (state : MemoryState) (grant : AuthorityGrant) (root : AllocId)
+    (offset : Nat) : Decidable (state.CoversAcrossAliases grant root offset) := by
+  unfold CoversAcrossAliases
+  split <;> infer_instance
+
 /--
 `state.AuthorizedAt grant context provenance offset intent` holds when this grant
 lets `context` touch that byte, in this state.
@@ -2259,7 +2337,7 @@ def AuthorizedAt (state : MemoryState) (grant : AuthorityGrant) (context : Conte
   state.SharesBytes grant.provenance.root provenance.root ∧
   state.CurrentEpoch grant.provenance ∧
   state.CurrentEpoch provenance ∧
-  grant.range.Covers offset ∧
+  state.CoversAcrossAliases grant provenance.root offset ∧
   grant.rights.Permits intent
 
 instance (state : MemoryState) (grant : AuthorityGrant) (context : ContextId)
@@ -2297,19 +2375,100 @@ theorem not_authorizedAt_of_stale_epoch {state : MemoryState} {grant : Authority
     {intent : AccessIntent} (h : ¬ state.CurrentEpoch provenance) :
     ¬ state.AuthorizedAt grant context provenance offset intent := fun ha => h ha.2.2.2.1
 
+/-- A grant whose range contains another's covers everything the other does, at
+whatever offset the alias graph supplies.
+
+The lemma the split and join theorems need once coverage is offset-aware. Both grants
+share a provenance root -- splitting and joining change ranges, not provenance -- so
+`aliasShift?` returns the same shift for both and the containment simply moves with
+them. Without this, every theorem relating a part to its source would have to redo
+the offset reasoning. -/
+theorem coversAcrossAliases_mono {state : MemoryState} {grant part : AuthorityGrant}
+    {root : AllocId} {offset : Nat}
+    (hprov : part.provenance.root = grant.provenance.root)
+    (hsub : grant.range.Contains part.range)
+    (h : state.CoversAcrossAliases part root offset) :
+    state.CoversAcrossAliases grant root offset := by
+  unfold CoversAcrossAliases grantRangeIn at h ⊢
+  rw [hprov] at h
+  cases hshift : state.aliasShift? grant.provenance.root root with
+  | none =>
+      rw [hshift] at h
+      exact h.elim
+  | some shift =>
+      rw [hshift] at h
+      simp only [Option.bind] at h ⊢
+      cases hpart : part.range.shiftBy shift with
+      | none =>
+          rw [hpart] at h
+          exact h.elim
+      | some partShifted =>
+          rw [hpart] at h
+          cases hwhole : grant.range.shiftBy shift with
+          | none =>
+              obtain ⟨_, hsome⟩ :=
+                ByteRange.shiftBy_isSome_of_contains hsub hpart
+              rw [hsome] at hwhole
+              exact absurd hwhole (by simp)
+          | some wholeShifted =>
+              have hcontains :=
+                ByteRange.contains_shiftBy hsub hwhole hpart
+              unfold ByteRange.Contains ByteRange.stop at hcontains
+              unfold ByteRange.Covers ByteRange.stop at h ⊢
+              omega
+
+/-- At shift zero the alias-aware coverage clause is the plain one.
+
+The bridge every theorem below uses, and the reason this change did not have to
+reprove them: an allocation is at shift zero from itself whenever the alias graph is
+consistent, so an access whose provenance root *is* the grant's root goes through
+this unchanged. `ByteRange.shiftBy_zero` is the half that does the work.
+
+The theorems taking `hshift` as a hypothesis are the ones that used to assume it
+silently. They concluded that a grant covering offset `i` authorizes offset `i` under
+an aliased provenance, which is true exactly when the two agree offset for offset and
+was stated as though it were true always. -/
+theorem coversAcrossAliases_of_covers {state : MemoryState} {grant : AuthorityGrant}
+    {root : AllocId} {offset : Nat}
+    (hshift : state.aliasShift? grant.provenance.root root = some 0)
+    (h : grant.range.Covers offset) :
+    state.CoversAcrossAliases grant root offset := by
+  unfold CoversAcrossAliases grantRangeIn
+  rw [hshift]
+  simpa using h
+
+/-- Coverage across aliases is a fact about `aliases` and the grant, so replacing the
+grant map leaves it alone. Needed by the split and join theorems, which state
+authority in one state and re-derive it in the other. -/
+private theorem coversAcrossAliases_grants (state : MemoryState)
+    (g : FiniteMap GrantId AuthorityGrant) (grant : AuthorityGrant) (root : AllocId)
+    (offset : Nat) :
+    CoversAcrossAliases { state with grants := g } grant root offset ↔
+      state.CoversAcrossAliases grant root offset := by
+  unfold CoversAcrossAliases grantRangeIn
+  rw [aliasShift?_grants]
+
 /-- A grant whose range covers a whole access covers each of its bytes. The bridge a
-caller with one covering grant uses to reach `Granted`. -/
+caller with one covering grant uses to reach `Granted`.
+
+**`hshift` is new and is the assumption this theorem used to make silently.** "Covers
+each of its bytes" is a statement about offsets, and offsets only carry across an
+alias when the two allocations agree on them. A grant over a view mapped 2048 bytes
+into a buffer covers the buffer's bytes 2048 onward, not its bytes 0 onward, and this
+theorem said otherwise for every aliased pair. -/
 theorem authorizedAt_of_covering {state : MemoryState} {grant : AuthorityGrant}
     {context : ContextId} {provenance : Provenance} {range : ByteRange}
     {intent : AccessIntent} {i : Nat} (hi : i < range.size)
     (hcover : grant.range.Contains range)
     (hholder : grant.holder = context)
     (hshares : state.SharesBytes grant.provenance.root provenance.root)
+    (hshift : state.aliasShift? grant.provenance.root provenance.root = some 0)
     (hgrant : state.CurrentEpoch grant.provenance)
     (haccess : state.CurrentEpoch provenance)
     (hrights : grant.rights.Permits intent) :
     state.AuthorizedAt grant context provenance (range.start + i) intent := by
   refine ⟨hholder, hshares, hgrant, haccess, ?_, hrights⟩
+  refine coversAcrossAliases_of_covers hshift ?_
   rw [ByteRange.contains_def] at hcover
   rw [ByteRange.covers_def]
   omega
@@ -2342,10 +2501,12 @@ theorem granted_of_covering {state : MemoryState} {context : ContextId}
     (hshares : state.SharesBytes entry.2.provenance.root provenance.root)
     (hgrant : state.CurrentEpoch entry.2.provenance)
     (haccess : state.CurrentEpoch provenance)
+    (hshift : state.aliasShift? entry.2.provenance.root provenance.root = some 0)
     (hrights : entry.2.rights.Permits intent) :
     state.Granted context provenance range intent :=
   fun _ hi => ⟨entry, hmem,
-    authorizedAt_of_covering hi hcover hholder hshares hgrant haccess hrights⟩
+    authorizedAt_of_covering hi hcover hholder hshares hshift hgrant haccess
+      hrights⟩
 
 /--
 The same bridge from an identity rather than from a membership.
@@ -2365,11 +2526,12 @@ theorem granted_of_grantAt {state : MemoryState} {context : ContextId}
     (hshares : state.SharesBytes grant.provenance.root provenance.root)
     (hgrant : state.CurrentEpoch grant.provenance)
     (haccess : state.CurrentEpoch provenance)
+    (hshift : state.aliasShift? grant.provenance.root provenance.root = some 0)
     (hrights : grant.rights.Permits intent) :
     state.Granted context provenance range intent :=
   granted_of_covering (entry := (id, grant))
     (Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hat)
-    hcover hholder hshares hgrant haccess hrights
+    hcover hholder hshares hgrant haccess hshift hrights
 
 /--
 `Granted` refuted, from a refutation of every outstanding grant.
@@ -2411,6 +2573,7 @@ theorem splitGrant?_preserves_authority {state next : MemoryState} {id low high 
     (hcover : grant.range.Contains range)
     (hholder : grant.holder = context)
     (hshares : state.SharesBytes grant.provenance.root provenance.root)
+    (hshift : state.aliasShift? grant.provenance.root provenance.root = some 0)
     (hgrant : state.CurrentEpoch grant.provenance)
     (haccess : state.CurrentEpoch provenance) (hrights : grant.rights.Permits intent) :
     next.Granted context provenance range intent := by
@@ -2432,13 +2595,18 @@ theorem splitGrant?_preserves_authority {state next : MemoryState} {id low high 
   have haccess' : next.CurrentEpoch provenance := by
     subst hnext
     exact (currentEpoch_grants state _ _).mpr haccess
+  have hshift' : next.aliasShift? grant.provenance.root provenance.root = some 0 := by
+    subst hnext
+    exact (aliasShift?_grants state _ _ _).trans hshift
   rcases AuthorityGrant.covered_by_part (boundary := boundary) hcovers with hpart | hpart
   · exact ⟨(low, grant.lowPart boundary),
       Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hlowat,
-      hholder, hshares', hgrant', haccess', hpart, hrights⟩
+      hholder, hshares', hgrant', haccess',
+      coversAcrossAliases_of_covers hshift' hpart, hrights⟩
   · exact ⟨(high, grant.highPart boundary),
       Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hhighat,
-      hholder, hshares', hgrant', haccess', hpart, hrights⟩
+      hholder, hshares', hgrant', haccess',
+      coversAcrossAliases_of_covers hshift' hpart, hrights⟩
 
 /--
 **A split creates no authority.**
@@ -2485,20 +2653,33 @@ theorem splitGrant?_creates_no_authority {state next : MemoryState}
     exact (currentEpoch_grants state _ _).mp haccess
   have hstop' : boundary < grant.range.start + grant.range.size := hstop
   rcases hmem' with hcase | hcase | hcase
+  -- Each part carries the source's provenance and a range inside the source's, so
+  -- `coversAcrossAliases_mono` moves the coverage up to the source. Before
+  -- offsets these two branches did the arithmetic inline; the offset is the same
+  -- for part and source, which is exactly what that lemma abstracts.
   · subst hcase
-    obtain ⟨hc1, hc2⟩ : boundary ≤ range.start + i ∧
-        range.start + i < boundary + (grant.range.start + grant.range.size - boundary) :=
-      hcovers
-    refine ⟨(id, grant), hsource, hholder, hshares', hgrantepoch', haccess', ?_, hrights⟩
-    refine ⟨Nat.le_trans (Nat.le_of_lt hstart) hc1, ?_⟩
-    show range.start + i < grant.range.start + grant.range.size
+    refine ⟨(id, grant), hsource, hholder, hshares', hgrantepoch', haccess', ?_,
+      hrights⟩
+    have hcov : state.CoversAcrossAliases (grant.highPart boundary)
+        provenance.root (range.start + i) := by
+      subst hnext
+      exact (coversAcrossAliases_grants state _ _ _ _).mp hcovers
+    refine coversAcrossAliases_mono (grant := grant)
+      (part := grant.highPart boundary) rfl ?_ hcov
+    unfold AuthorityGrant.highPart ByteRange.Contains ByteRange.stop
+    simp only []
     omega
   · subst hcase
-    obtain ⟨hc1, hc2⟩ : grant.range.start ≤ range.start + i ∧
-        range.start + i < grant.range.start + (boundary - grant.range.start) := hcovers
-    refine ⟨(id, grant), hsource, hholder, hshares', hgrantepoch', haccess', ?_, hrights⟩
-    refine ⟨hc1, ?_⟩
-    show range.start + i < grant.range.start + grant.range.size
+    refine ⟨(id, grant), hsource, hholder, hshares', hgrantepoch', haccess', ?_,
+      hrights⟩
+    have hcov : state.CoversAcrossAliases (grant.lowPart boundary)
+        provenance.root (range.start + i) := by
+      subst hnext
+      exact (coversAcrossAliases_grants state _ _ _ _).mp hcovers
+    refine coversAcrossAliases_mono (grant := grant)
+      (part := grant.lowPart boundary) rfl ?_ hcov
+    unfold AuthorityGrant.lowPart ByteRange.Contains ByteRange.stop
+    simp only []
     omega
   · exact ⟨entry, hcase, hholder, hshares', hgrantepoch', haccess', hcovers, hrights⟩
 

@@ -69,6 +69,43 @@ namespace ByteRange
 /-- The offset one past the last byte covered. -/
 def stop (r : ByteRange) : Nat := r.start + r.size
 
+/-- `r` expressed in the coordinates of an allocation aliased to this one at
+`shift`, clipped at zero, or `none` when none of it lands.
+
+**Clipped rather than refused, because refusing is not monotone.** The first version
+returned `none` whenever `r.start + shift` was negative, and that broke the one law
+the authority theorems need: a container starts *earlier* than what it contains, so a
+grant's range could fall below zero while a part of it did not. "The part is covered,
+therefore the whole grant is" then failed, which is `splitGrant?_creates_no_authority`
+-- a split would have created authority. The proof did not go through and the reason
+it did not was a real hole, not a missing lemma.
+
+So the bytes that do land are kept and the bytes that do not are dropped. That is
+the honest reading: an alias maps part of one allocation onto another, and the part
+that falls outside simply is not there. `none` is reserved for a range lying
+strictly below zero, where there is nothing to keep. The test is `< 0` and not `<= 0`
+so that an empty range landing exactly at zero survives, which `shiftBy_zero` needs
+for the empty range at the origin and which also makes the clip monotone: a container
+ends at or after what it contains, so it survives whenever the contained range
+does.
+-/
+def shiftBy (r : ByteRange) (shift : Int) : Option ByteRange :=
+  if (r.stop : Int) + shift < 0 then Option.none
+  else
+    some ⟨(max ((r.start : Int) + shift) 0).toNat,
+      (((r.stop : Int) + shift) - max ((r.start : Int) + shift) 0).toNat⟩
+
+/-- Shifting by nothing is the range itself, which is what makes the unaliased case
+-- and the whole tree before offsets existed -- go through this unchanged. -/
+@[simp] theorem shiftBy_zero (r : ByteRange) : r.shiftBy 0 = some r := by
+  unfold shiftBy stop
+  split
+  · omega
+  · congr 1
+    have : max ((r.start : Int) + 0) 0 = (r.start : Int) := by omega
+    rw [this]
+    congr 1 <;> omega
+
 /-- The empty range at `start`. -/
 def empty (start : Nat) : ByteRange := ⟨start, 0⟩
 
@@ -158,6 +195,46 @@ theorem disjoint_def (r s : ByteRange) :
 
 theorem contains_def (r s : ByteRange) :
     r.Contains s ↔ r.start ≤ s.start ∧ s.start + s.size ≤ r.start + r.size := Iff.rfl
+
+/-- A container survives a shift whenever what it contains does.
+
+The monotonicity the clipping threshold was chosen for: `r.Contains s` puts `r.stop`
+at or after `s.stop`, so if `s` has anything left after the shift then so does `r`.
+Without this, a grant could fail to shift while a part of it succeeded, and a split
+would create authority. -/
+theorem shiftBy_isSome_of_contains {r s s' : ByteRange} {shift : Int}
+    (h : r.Contains s) (hs : s.shiftBy shift = some s') :
+    ∃ r', r.shiftBy shift = some r' := by
+  obtain ⟨_, h2⟩ := h
+  unfold stop at h2
+  unfold shiftBy at hs ⊢
+  by_cases hc : (s.stop : Int) + shift < 0
+  · rw [if_pos hc] at hs
+    exact absurd hs (by simp)
+  · unfold stop at hc
+    exact ⟨_, if_neg (by unfold stop; omega)⟩
+
+/-- A containing range shifts whenever the range it contains does, and by the same
+amount, so containment survives the move.
+
+The direction matters: `r.Contains s` puts `s.start` at or after `r.start`, so if `r`
+lands at or above zero then so does `s`. That is why this needs no side condition on
+`s` -- the hypothesis that `r` shifts is enough. -/
+theorem contains_shiftBy {r s r' s' : ByteRange} {shift : Int}
+    (h : r.Contains s) (hr : r.shiftBy shift = some r')
+    (hs : s.shiftBy shift = some s') : r'.Contains s' := by
+  unfold shiftBy at hr hs
+  obtain ⟨h1, h2⟩ := h
+  unfold stop at h2
+  split at hr
+  · exact absurd hr (by simp)
+  · split at hs
+    · exact absurd hs (by simp)
+    · cases hr
+      cases hs
+      unfold Contains stop
+      simp only []
+      omega
 
 theorem isEmpty_def (r : ByteRange) : r.IsEmpty ↔ r.size = 0 := Iff.rfl
 
