@@ -298,6 +298,11 @@ requires the inner declared scope's parent to equal the outer declared scope,
 and proves the two sequential tokens distinct. This supplies the nominal,
 lexical, and all-exit composition for nested binders while leaving the same
 provenance elimination obligation explicit.
+`Grass.Construct.StackScopeCFG` injectively maps declared layout scopes into the
+stable CFG scope vocabulary and pairs a checked session with exact stack-shape
+entry. Its all-exit theorem combines the session's resource closure with LIFO
+restoration to the exact outer `StackShape`, closing the structural edge-bypass
+seam without conflating stable authored identity and fresh occurrence identity.
 `Grass.Construct.Scratch` provides the generic term-level prerequisite for
 `withScratch`: it selects the first non-live register from an exact ordered,
 duplicate-free candidate set and passes a handle to a fixed-contract verified
