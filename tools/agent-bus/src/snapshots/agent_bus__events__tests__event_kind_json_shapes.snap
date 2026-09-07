@@ -1,0 +1,295 @@
+---
+source: src/events.rs
+expression: "&shapes"
+---
+{
+  "agent.registered": {
+    "display_name": "Alice",
+    "primary_role": "implementor",
+    "purpose": "x"
+  },
+  "agent.resumed": {
+    "previous_lifecycle": "alice:0",
+    "reason": "r",
+    "user_authority": "u"
+  },
+  "agent.retired": {
+    "previous_lifecycle": "alice:0",
+    "reason": "r",
+    "target": "bob",
+    "user_authority": "u"
+  },
+  "agent.status": {
+    "note": "",
+    "status": "active"
+  },
+  "broadcast.acknowledged": {
+    "broadcasts": [
+      "alice:0"
+    ]
+  },
+  "broadcast.published": {
+    "acknowledgement": "none",
+    "affected_interfaces": [],
+    "affected_paths": [],
+    "audience_epoch": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "audience_selector": {
+      "kind": "all_active"
+    },
+    "audience_snapshot": [
+      "bob"
+    ],
+    "detail": "d",
+    "importance": "informational",
+    "product_commits": [],
+    "summary": "s",
+    "supersedes": [],
+    "topics": [
+      "release.main"
+    ]
+  },
+  "broadcast.seen": {
+    "broadcasts": [
+      "alice:0"
+    ]
+  },
+  "dependency.acknowledged": {
+    "assignment": "alice:0",
+    "dependency": "alice:0",
+    "note": ""
+  },
+  "dependency.reassigned": {
+    "dependency": "alice:0",
+    "new_target": "carol",
+    "previous_assignment": "alice:0",
+    "previous_target": "bob",
+    "reason": "r"
+  },
+  "dependency.rejected": {
+    "assignment": "alice:0",
+    "dependency": "alice:0",
+    "reason": "r"
+  },
+  "dependency.requested": {
+    "blocking": true,
+    "evidence": [],
+    "interface": "iface",
+    "needed_by": "soon",
+    "summary": "s",
+    "target": "bob"
+  },
+  "dependency.resolved": {
+    "assignment": "alice:0",
+    "dependency": "alice:0",
+    "summary": "s",
+    "verification": []
+  },
+  "friction.reported": {
+    "area": "proof.rebuild",
+    "evidence": [],
+    "impact": "rebuild",
+    "measurements": [],
+    "product_locations": [],
+    "summary": "s"
+  },
+  "friction.synthesized": {
+    "disposition": "accepted_cost",
+    "rationale": "r",
+    "reports": [
+      "alice:0"
+    ],
+    "theme": "proof.rebuild"
+  },
+  "handoff.accepted": {
+    "handoff": "alice:0",
+    "note": ""
+  },
+  "handoff.declined": {
+    "handoff": "alice:0",
+    "reason": "r"
+  },
+  "handoff.offered": {
+    "evidence": [],
+    "known_issues": [],
+    "product_branch": "refs/heads/agent/alice/x",
+    "product_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "receiver": "bob",
+    "scope": [],
+    "summary": "s",
+    "verification": []
+  },
+  "handoff.withdrawn": {
+    "handoff": "alice:0",
+    "reason": "r"
+  },
+  "issue.acknowledged": {
+    "assignment": "alice:0",
+    "issue": "alice:0",
+    "note": ""
+  },
+  "issue.opened": {
+    "blocks": [],
+    "evidence": [],
+    "issue_kind": "bug",
+    "locations": [],
+    "reproduction": [],
+    "severity": "normal",
+    "summary": "s",
+    "target": "bob"
+  },
+  "issue.reassigned": {
+    "issue": "alice:0",
+    "new_target": "carol",
+    "previous_assignment": "alice:0",
+    "previous_target": "bob",
+    "reason": "r"
+  },
+  "issue.rejected": {
+    "assignment": "alice:0",
+    "issue": "alice:0",
+    "normative_refs": [],
+    "reason": "r"
+  },
+  "issue.resolved": {
+    "assignment": "alice:0",
+    "issue": "alice:0",
+    "summary": "s",
+    "verification": []
+  },
+  "lifecycle.conflict_resolved": {
+    "competing": [
+      "alice:0",
+      "bob:0"
+    ],
+    "reason": "r",
+    "root": "alice:0",
+    "selected": "alice:0",
+    "user_authority": "u"
+  },
+  "merge_engine.activated": {
+    "design_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "helper_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "merge_engine": "git-ort",
+    "merge_engine_version": "2.53.0",
+    "previous_epoch": "alice:0"
+  },
+  "plan.set": {
+    "risks": [],
+    "steps": [],
+    "summary": "s"
+  },
+  "progress.reported": {
+    "blockers": [],
+    "completed": [],
+    "current": [],
+    "next": [],
+    "verification": []
+  },
+  "review.changes_requested": {
+    "evidence": [],
+    "findings": [],
+    "nomination": "alice:0",
+    "reviewed_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "review.findings_cleared": {
+    "changes_event": "alice:0",
+    "finding_id": "f1",
+    "nomination": "alice:0",
+    "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "summary": "s"
+  },
+  "review.findings_superseded": {
+    "changes_event": "alice:0",
+    "finding_id": "f1",
+    "nomination": "alice:0",
+    "rationale": "r"
+  },
+  "review.merge_authorized": {
+    "candidate": "cccccccccccccccccccccccccccccccccccccccc",
+    "checks": [],
+    "evidence": [],
+    "finding_dispositions": [],
+    "limitations": [],
+    "merge_engine_epoch": "alice:0",
+    "nomination": "alice:0",
+    "previous_main": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "product_branch": "refs/heads/agent/alice/x",
+    "reviewed_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "reviewed_scope": [],
+    "summary": "s"
+  },
+  "review.merge_reconciled": {
+    "authorization": "alice:0",
+    "main_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "previous_main": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "product_branch": "refs/heads/agent/alice/x",
+    "reason": "r",
+    "reviewed_commit": "cccccccccccccccccccccccccccccccccccccccc",
+    "user_authority": "u"
+  },
+  "review.merged": {
+    "authorization": "alice:0",
+    "main_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "previous_main": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "product_branch": "refs/heads/agent/alice/x",
+    "reviewed_commit": "cccccccccccccccccccccccccccccccccccccccc",
+    "summary": "s"
+  },
+  "review.nominated": {
+    "authors": [
+      "alice"
+    ],
+    "evidence": [],
+    "product_branch": "refs/heads/agent/alice/x",
+    "required_checks": [],
+    "review_scope": [],
+    "reviewer": "bob",
+    "summary": "s",
+    "target_branch": "refs/heads/main"
+  },
+  "review.nomination_accepted": {
+    "nomination": "alice:0",
+    "note": ""
+  },
+  "review.nomination_declined": {
+    "nomination": "alice:0",
+    "reason": "r"
+  },
+  "review.reassigned": {
+    "authors": [
+      "alice"
+    ],
+    "evidence": [],
+    "inherited_findings": [],
+    "product_branch": "refs/heads/agent/alice/x",
+    "reason": "r",
+    "replaces": "alice:0",
+    "required_checks": [],
+    "review_scope": [],
+    "reviewer": "carol",
+    "summary": "s",
+    "target_branch": "refs/heads/main"
+  },
+  "review.withdrawn": {
+    "nomination": "alice:0",
+    "reason": "r"
+  },
+  "schema.activated": {
+    "design_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "helper_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "version": 1
+  },
+  "scope.set": {
+    "base_code_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "depends_on": [],
+    "exclusive": [],
+    "exports": [],
+    "note": "",
+    "shared": []
+  },
+  "subscription.set": {
+    "topics": [
+      "safety.memory"
+    ]
+  }
+}

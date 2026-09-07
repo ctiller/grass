@@ -3,10 +3,10 @@
 Grass is a high-level, extensible assembler for building programs whose emitted
 machine code is proved safe and equivalent to a Lean specification.
 
-> **Project status:** pre-implementation specification and spike corpus. Grass
-> does not yet provide a buildable assembler, verified executable, or supported
-> release. The Lean files under `Spikes/` are reviewed authoring fixtures whose
-> imported `Grass.*` libraries are deliberately not built yet.
+> **Project status:** early foundation implementation and spike corpus. Grass
+> provides a minimal compiling foundation API, but not yet a buildable
+> assembler, verified executable, or supported release. The Lean files under
+> `Spikes/` remain reviewed authoring fixtures and are not expected to compile.
 
 Its target is large, long-lived systems—games, databases, operating systems,
 compilers, graphics and storage engines—not merely small verified examples. The
@@ -20,9 +20,15 @@ emitProgram : VerifiedProgram spec → ByteArray
 ```
 
 `emitProgram v` produces an executable artifact for `v`'s selected platform.
-The `VerifiedProgram` certificate establishes functional refinement, memory and
-concurrency safety, progress, ABI correctness, obligation handling, and the
-connection between the program that was proved and the bytes that were emitted.
+The current minimal `VerifiedProgram` certificate composes exact adjacent
+behavior refinements, terminal-trace acceptance, a terminal-or-infinite
+continuation available from every finite frontier, selected demand
+certificates, and the connection between the
+modeled loaded artifact and the bytes that were emitted. This is a non-stuck
+may-completion property, not universal termination or liveness: a relational
+system may still admit other infinite executions. Concrete memory, concurrency,
+ABI, and other domain guarantees become part of the result only when a domain
+layer exposes them as explicit demands and supplies their certificates.
 
 The first end-to-end target is a Win32 x64 PE32+ Hello World using
 `GetStdHandle`, `WriteFile`, and `ExitProcess`, with ASLR, derived imports,
@@ -48,16 +54,38 @@ snapshot of the named product branch.
 
 ## Repository validation
 
-The current executable check verifies that annotated spike documents and their
-comment-free authored Lean views remain exact:
+Build the foundation API without warnings (so `sorry` is an error), audit every
+concrete `VerifiedProgram` producer, and check the named public theorem roots
+with:
+
+```powershell
+lake build
+pwsh ./audit-trust.ps1
+```
+
+The trust script generates a temporary audit import over every library and test
+module. Its Lean command unfolds even irreducible result aliases to discover
+concrete `VerifiedProgram` producers and audits every declaration originating
+in those project modules, including declarations outside the `Grass` namespace.
+It also follows the transitive dependency closure of certificate-bearing and
+emission-consuming declarations across arbitrarily named imported modules, then
+follows their downstream runtime dependencies to reject unverified
+`implemented_by` and `extern` replacements. Participating module cohorts and
+persisted non-meta compiler dependency modules keep scoped `csimp`
+substitutions covered after their attribute state expires. Finally, it checks
+configured public theorem roots as an explicit manifest. The build's
+warning-as-error setting independently rejects admission mechanisms.
+
+The corpus checks verify that annotated spike documents and their comment-free
+authored Lean views remain exact:
 
 ```powershell
 pwsh ./check-spike-sources.ps1
 pwsh ./check-doc-links.ps1
 ```
 
-These are corpus consistency checks, not compilation or proof checking. The
-conditions for beginning implementation are tracked in
+The last two commands are corpus consistency checks, not compilation or proof
+checking. The implementation ratchet remains documented in
 [docs/IMPLEMENTATION_RATCHET.md](docs/IMPLEMENTATION_RATCHET.md).
 
 ## Contributing and security

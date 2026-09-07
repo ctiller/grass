@@ -61,14 +61,14 @@ structure ProcessVocabulary where
   Demand : Type
   Result : Demand -> Type
   Observation : Type
-  InterruptReason : Type
+  InterruptReason : Demand -> Type
   LogicalFault : Type
   EnvironmentViolation : Type
 
 inductive ProcessEvent (v : ProcessVocabulary)
   | external (event : v.ExternalEvent)
   | result (demand : v.Demand) (result : v.Result demand)
-  | interrupted (demand : v.Demand) (reason : v.InterruptReason)
+  | interrupted (demand : v.Demand) (reason : v.InterruptReason demand)
   | fault (fault : v.LogicalFault)
   | environmentViolation (violation : v.EnvironmentViolation)
 
@@ -119,6 +119,13 @@ the same ruling: an ordinary author *selects* a reusable vocabulary in one line
 instead of writing seven interface fields. Simple processes pay no ceremony for
 a classification they do not use, and a process with no faults selects a
 vocabulary whose classes are empty.
+
+Reusable protocol or network constructors select all seven associated families
+once and pass one `ProcessVocabulary` to their process clients. Convenience
+constructors such as `ProcessVocabulary.quiescent` fill the three exceptional
+families with empty types when the route is proved unreachable. An ordinary
+`ProcessSpec` literal therefore names one `vocabulary`; it never restates the
+families and cannot discard an unclassified exceptional event.
 
 Grass uses explicit terminology:
 
@@ -418,10 +425,19 @@ structure ProcessTopologyCore (registry : ProtocolRegistry)
   spawn : SpawnAuthorityAndParenthood toProcessGraph
 
 structure ProcessTopology (registry : ProtocolRegistry)
-    (boundary : DriverBoundary) (requirements : FacetRequirements)
-    extends ProcessTopologyCore registry boundary where
-  facets : DemandedFacetFamily toProcessTopologyCore requirements
-  lifecycle : ExportsDemandedLifecycleTheorems facets
+    (boundary : DriverBoundary) extends ProcessTopologyCore registry boundary where
+  facets : SelectedTopologyFacetFamily toProcessTopologyCore
+    (requiredTopologyFacets boundary)
+  facetsExact : FacetsMeetExactlyDemandedCancellationAndSupervisionContracts
+    toProcessTopologyCore (requiredTopologyFacets boundary) facets
+
+theorem ProcessTopology.allCancellationContracts
+    (topology : ProcessTopology registry boundary) :
+    EveryDemandedCancellationContractHolds topology := ...
+
+theorem ProcessTopology.allSupervisionContracts
+    (topology : ProcessTopology registry boundary) :
+    EveryDemandedSupervisionContractHolds topology := ...
 
 structure ProcessRef (topology : ProcessTopologyCore registry boundary)
     (kind : topology.ProcessKind) where
@@ -450,9 +466,9 @@ The split between `ProcessTopologyCore` and `ProcessTopology` is
 Cancellation and supervision are *optional imported facets*, not fields every
 topology carries, so a process with no lifecycle promise pays no ceremony for
 one. `ProcessTopologyCore` is the graph, channels, and spawn authority — what a
-`ChannelContract` actually consumes — and `ProcessTopology requirements`
-aggregates exactly the facets the selected specification demands and exports the
-corresponding lifecycle theorems.
+`ChannelContract` actually consumes — and `ProcessTopology` aggregates exactly
+the facets `requiredTopologyFacets boundary` derives from the selected
+specification and exports the corresponding aggregate lifecycle theorems.
 
 The weaker object may not carry the unqualified name. A consumer holding a value
 called `ProcessTopology` is entitled to assume the lifecycle authority its type
@@ -500,21 +516,96 @@ endpoint—owns the exact occurrence and every resource, capability, provenance
 fact, and obligation transferred with it until receive or an explicitly modeled
 cancellation/disposition transition consumes it.
 
+The assertion must name the world it describes. That world cannot depend on a
+completed `ProcessPlan`, because channel contracts are themselves fields of the
+plan. Grass breaks the dependency at the smallest useful seam: the plan declares
+its per-edge message family before its contracts; topology plus that family is
+enough to define the whole logical-network carrier. Contracts are then stated
+over that carrier. There is no second topology-level escrow carrier and no
+self-referential structure.
+
 ```lean
-structure ChannelContract (topology : ProcessTopologyCore registry boundary)
+inductive ProcessLifecycle (p : ProcessSpec)
+  | running
+  | terminated (result : p.TerminalResult)
+  | cancelled (reason : CancelReason)
+  | interrupted (reason : p.InterruptReason)
+  | faulted (fault : p.LogicalFault)
+  | violated (violation : p.EnvironmentViolation)
+  | died (reason : ProcessDeathReason)
+
+inductive ProcessParentage (topology : ProcessTopology registry boundary) :
+    topology.ProcessKind -> Type
+  | root : ProcessParentage topology topology.root
+  | attached {kind : topology.ProcessKind}
+      (parentKind : topology.ProcessKind)
+      (parent : ProcessRef topology parentKind) : ProcessParentage topology kind
+  | detached {kind : topology.ProcessKind}
+      (formerParentKind : topology.ProcessKind)
+      (formerParent : ProcessRef topology formerParentKind) :
+      ProcessParentage topology kind
+
+structure ProcessInstance (topology : ProcessTopology registry boundary) where
+  kind : topology.ProcessKind
+  ref : ProcessRef topology kind
+  parentage : ProcessParentage topology kind
+  request : (registry.protocol (topology.protocolKey kind)).Request
+  local : (registry.protocol (topology.protocolKey kind)).State
+  lifecycle : ProcessLifecycle (registry.protocol (topology.protocolKey kind))
+
+structure LogicalProcessNetworkCore
+    (topology : ProcessTopology registry boundary)
+    (Message : topology.ChannelKind -> Type) where
+  instances : (kind : topology.ProcessKind) ->
+    ProcessId kind -> Option (ProcessInstance topology)
+  shared : (region : topology.SharedRegion) -> topology.SharedState region
+  inFlight : ChannelEscrowLedger topology Message
+  sessions : ChannelSessionLedger topology Message
+  obligations : LogicalObligationLedger
+  observations : Trace boundary.Observation
+  usedNominals : MonotoneNominalHistory
+
+structure WorldAgreement (topology : ProcessTopology registry boundary)
+    (World : Type) where
+  Agrees : NetworkFragment topology -> World -> World -> Prop
+  agreesRefl : forall fragment world, Agrees fragment world world
+  agreesSymm : forall fragment left right,
+    Agrees fragment left right -> Agrees fragment right left
+  agreesTrans : forall fragment a b c,
+    Agrees fragment a b -> Agrees fragment b c -> Agrees fragment a c
+  agreesGlue : forall (inside : NetworkFragment topology -> Prop) (left right : World),
+    exists mixed,
+      (forall fragment, inside fragment -> Agrees fragment mixed left) /\
+      (forall fragment, not (inside fragment) -> Agrees fragment mixed right)
+
+structure NetworkAssertion {topology : ProcessTopology registry boundary}
+    {World : Type} (agreement : WorldAgreement topology World) where
+  holds : World -> Prop
+  footprint : NetworkFragment topology -> Prop
+  framed : forall left right,
+    (forall fragment, footprint fragment -> agreement.Agrees fragment left right) ->
+    (holds left <-> holds right)
+
+def logicalWorldAgreement
+    (topology : ProcessTopology registry boundary)
+    (Message : topology.ChannelKind -> Type) :
+    WorldAgreement topology (LogicalProcessNetworkCore topology Message) := ...
+
+structure ChannelContract (topology : ProcessTopology registry boundary)
+    (Message : Type) {World : Type}
+    (agreement : WorldAgreement topology World)
     (edge : topology.ChannelKind) where
-  Message : Type
   senderOutput : SenderDemandEmbedding topology (topology.endpoints edge).1 Message
   receiverInput : ReceiverEventEmbedding topology (topology.endpoints edge).2 Message
-  SendPre : Message -> NetworkAssertion topology
+  SendPre : Message -> NetworkAssertion agreement
   SenderPost : (message : Message) ->
-    ChannelOccurrence topology edge Message message -> NetworkAssertion topology
+    ChannelOccurrence topology edge Message message -> NetworkAssertion agreement
   Escrow : (message : Message) ->
-    ChannelOccurrence topology edge Message message -> NetworkAssertion topology
+    ChannelOccurrence topology edge Message message -> NetworkAssertion agreement
   ReceiverPre : (message : Message) ->
-    ChannelOccurrence topology edge Message message -> NetworkAssertion topology
+    ChannelOccurrence topology edge Message message -> NetworkAssertion agreement
   ReceiverPost : (message : Message) ->
-    ChannelOccurrence topology edge Message message -> NetworkAssertion topology
+    ChannelOccurrence topology edge Message message -> NetworkAssertion agreement
   send : forall message,
          HoareTransition
            (SendPre message)
@@ -533,36 +624,70 @@ structure ChannelContract (topology : ProcessTopologyCore registry boundary)
   frame : UnmentionedProcessesAndRegionsPreserved
 
 structure ProcessPlan (registry : ProtocolRegistry) (boundary : DriverBoundary)
-    extends ProcessTopologyCore registry boundary where
+    extends ProcessTopology registry boundary where
+  Message : ChannelKind -> Type
   channel : (edge : ChannelKind) ->
-    ChannelContract toProcessTopologyCore edge
-  boundaryProjection : RootLocalDemandProjection toProcessTopologyCore boundary
+    ChannelContract toProcessTopology (Message edge)
+      (logicalWorldAgreement toProcessTopology Message) edge
+  boundaryProjection : RootLocalDemandProjection toProcessTopology boundary
+
+abbrev LogicalProcessNetwork (plan : ProcessPlan registry boundary) :=
+  LogicalProcessNetworkCore plan.toProcessTopology plan.Message
 ```
+
+`ProcessTopologyCore` is the graph, population, channel-endpoint, and spawn
+object every plan needs. `requiredTopologyFacets` derives its result from the
+already selected `boundary.requirements`; an author cannot choose a convenient
+second demand set. `ProcessTopology` adds only that derived cancellation and
+supervision facet family, and the two aggregate theorems recover all and only
+its selected contracts. When the derived family is empty, the library supplies
+the unique empty selection automatically, so a simple plan authors no
+cancellation or supervision field. The unqualified topology never silently
+assumes a facet absent from `requiredTopologyFacets boundary`.
+
+`LogicalProcessNetworkCore` is a construction dependency, not a second public
+network semantics; authors and later theorems use `LogicalProcessNetwork plan`.
+The canonical `logicalWorldAgreement` decomposes exactly the named network
+fragments and proves the gluing law, so an assertion footprint is meaningful
+rather than a decoration. A reusable lower module may quantify over an arbitrary
+`WorldAgreement`; the completed plan always instantiates its channel contracts
+at the full logical network shown above. Because footprints are arbitrary
+predicates—including non-finite families over generative populations—the
+canonical mix used to prove `agreesGlue` may depend on the reviewed
+`Classical.choice` foundation constant. That dependency is localized to the
+logical-world supplier and is visible to the transitive axiom audit; the generic
+assertion and framing library neither chooses worlds nor acquires a broader
+admission mechanism. Requiring a Boolean footprint merely to avoid that reviewed
+constant would make every author supply decidable membership and would exclude
+useful proposition-indexed families without improving the verified gate.
 
 The definitions above make each occurrence nominally indexed by the exact
 channel edge, sender and receiver incarnations, session epoch, message, and
-pre-send world. The logical network then has this dependent shape:
+pre-send world.
 
-```lean
-structure ProcessInstance (topology : ProcessTopologyCore registry boundary) where
-  kind : topology.ProcessKind
-  ref : ProcessRef topology kind
-  parent : Option (Sigma fun parentKind => ProcessRef topology parentKind)
-  request : (registry.protocol (topology.protocolKey kind)).Request
-  local : (registry.protocol (topology.protocolKey kind)).State
-  lifecycle : ProcessLifecycle
+`ProcessLifecycle` is indexed by the instance protocol because an ending must
+remain recoverable from network state without replaying the parent transition.
+The terminal tag stores the exact `TerminalResult`; the other ending tags store
+their exact cancellation, interruption, fault, violation, or death reason. A
+well-formed network separately proves that `.terminated result` satisfies the
+protocol's `Terminal request local result` relation and that every ending tag is
+the exact payload committed by its lifecycle transition. Carrying the payload
+does not duplicate an independent fact: the transition owns one value and
+records that same value in the child event, parent projection when applicable,
+and resulting instance state through equality proofs.
 
-structure LogicalProcessNetwork
-    (plan : ProcessPlan registry boundary) where
-  instances : (kind : plan.ProcessKind) ->
-    ProcessId kind -> Option (ProcessInstance plan.toProcessTopologyCore)
-  shared : (region : plan.SharedRegion) -> plan.SharedState region
-  inFlight : ChannelEscrowLedger plan
-  sessions : ChannelSessionLedger plan
-  obligations : LogicalObligationLedger
-  observations : Trace boundary.Observation
-  usedNominals : MonotoneNominalHistory
-```
+`ProcessParentage` preserves both current authority and the history needed to
+justify its loss. `.root` is indexed at exactly the topology's root kind;
+`.attached parent` names the current parent incarnation; and
+`.detached formerParent` records the exact incarnation from which the process
+was detached without granting that incarnation any continuing parent authority.
+The detach transition changes only `.attached parent` to
+`.detached parent`, proves the references identical, and establishes the
+corresponding non-returning child disposition. Thus a root and a detached child
+are distinguishable from network state, and an audit can validate detachment
+without replaying the transition history. Root uniqueness and the validity of
+attached parent/spawn relationships remain network well-formedness laws rather
+than proof fields paid by each instance author.
 
 `usedNominals` contains every process generation, channel epoch, child demand,
 message occurrence, and coalesced replacement ever allocated in the execution
@@ -1051,8 +1176,15 @@ does not prove acknowledgement or recover its resources.
 `ChildLifecycleEvent` family. Success/failure/ordinary termination consumes live
 lifecycle authority, establishes the exact terminal state and parent event,
 transfers or disposes every resource and obligation, and only then enables join
-or restart. `processTermination` performs the corresponding operation for a
-non-child/root instance; ordinary close is distinct from endpoint death.
+or restart. The event's exact terminal result, cancellation reason, interruption
+reason, fault, or violation is stored in the resulting protocol-indexed
+`ProcessLifecycle`; a death disposition supplies its exact `ProcessDeathReason`.
+Joins, supervisors, and audits therefore do not reconstruct an ending from a
+possibly nondeterministic terminal relation or search another process's history.
+`processTermination` performs the corresponding operation for a non-child/root
+instance; ordinary close is distinct from endpoint death. This storage is
+transition-generated and imposes no additional payload bookkeeping on an
+ordinary protocol author.
 
 A `WriteFile` process can remain pending, commit a partial effect, return a
 dependent count, fail, be cancelled/interrupted, violate its environment

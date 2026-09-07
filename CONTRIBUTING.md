@@ -1,10 +1,11 @@
 # Contributing to Grass
 
-Grass is currently a pre-implementation specification corpus. Contributions
-should improve the reviewed architecture, its proof-economics pressure tests,
-or the small validation tools around them. The imported `Grass.*` Lean modules
-shown in `Spikes/` do not exist yet; the spike files are design fixtures, not a
-package that can currently be built.
+Grass is currently an early foundation implementation plus specification
+corpus. Contributions may extend the minimal compiling `Grass.*` foundation,
+improve the reviewed architecture and proof-economics pressure tests, or improve
+the validation tools around them. Most modules imported by `Spikes/` do not yet
+exist; the spike files remain design fixtures, not a package that currently
+builds.
 
 Start with the [specification corpus index](docs/README.md), which defines
 document authority and the meaning of normative language. For spike changes,
@@ -30,13 +31,22 @@ both the annotated document and its comment-free authored source.
 Run the repository's current consistency check from its root:
 
 ```powershell
+lake build
+lake build Tests
+pwsh ./audit-trust.ps1
 pwsh ./check-spike-sources.ps1
 pwsh ./check-doc-links.ps1
 ```
 
-These check that every spike code block is classified, that each authored Lean
-block exactly matches its file under `Spikes/`, and that relative documentation
-targets exist. They are not a Lean build or an end-to-end proof check.
+The Lake commands compile the Lean libraries, and the trust command audits
+project declarations and named public roots for rejected transitive axioms, then
+rejects unverified `implemented_by` and `extern` replacements in the verified
+runtime dependency closure. Participating module cohorts and persisted non-meta
+compiler dependency modules keep scoped `csimp` substitutions covered after
+their attribute state expires.
+The last two commands classify spike code, compare authored blocks with their
+files under `Spikes/`, and check relative documentation targets. None of these
+commands is an end-to-end proof of the eventual assembler or executable.
 
 ## Review
 

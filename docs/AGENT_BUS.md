@@ -1,7 +1,9 @@
 # Git agent bus protocol
 
-Status: normative design for cooperative build coordination. The bus and its
-helper are not implemented yet.
+Status: normative design for cooperative build coordination. The helper at
+[tools/agent-bus/](../tools/agent-bus/) implements this protocol; see its
+README for build/usage instructions and documented simplifications relative
+to this design.
 
 Grass will be implemented by agents running under different providers and in
 different environments. GitHub is the only shared coordination substrate all
@@ -25,7 +27,7 @@ refs/heads/agent-bus
     └── 000000.jsonl
 ```
 
-The product tree contains this protocol and, once implemented, the helper at
+The product tree contains this protocol and the helper at
 `tools/agent-bus/`. Live events never merge into `main`.
 
 ## 1. Goals and non-goals
@@ -452,7 +454,7 @@ causally reference the invalid log.
 
 ## 8. Rust helper
 
-The planned helper lives at `tools/agent-bus/`. Rust supplies one portable
+The helper lives at `tools/agent-bus/`. Rust supplies one portable
 binary, typed schemas, safe file handling, and predictable JSON parsing. It uses
 ordinary Git and requires no GitHub API.
 

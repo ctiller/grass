@@ -48,6 +48,14 @@ No document may override a narrower owner by restating it differently.
 | [STDLIB.md](STDLIB.md) | fundamental data structures and reusable proof laws |
 | [PROTOCOL_STDLIB.md](PROTOCOL_STDLIB.md) | candidate protocol-package shape, staged obligations, and HTTP/2/gRPC composition |
 
+Coordination protocol evolution is drafted separately in
+[AGENT_COORDINATION_EVOLUTION.md](AGENT_COORDINATION_EVOLUTION.md). It is a
+review candidate, not an amendment to the active version-one bus.
+[AGENT_WORKSTREAM_TRANSITION.md](AGENT_WORKSTREAM_TRANSITION.md) separates
+durable provider-neutral responsibilities from model-backed agent identities
+and specifies safe provider exhaustion, replacement, and return. It is likewise
+a review candidate until its protocol support is implemented and activated.
+
 ## Review and delivery
 
 - [VISION.md](VISION.md) explains the large-system objective and the tradeoffs

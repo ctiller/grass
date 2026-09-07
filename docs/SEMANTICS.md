@@ -203,70 +203,6 @@ def SpecProcess.driverBoundary (spec : SpecProcess resources) :
 def SpecProcess.progress (spec : SpecProcess resources) :
     AbstractProgressContract := spec.contract.progress
 
-/-!
-`ProcessPresentationNetwork` is PROCESS.md's `StructuralProcessNetwork`,
-instantiated at this document's protocol family, plus the composition law that
-network satisfies. The structural shape is declared *there* and not here.
-
-An earlier version of this document declared a second structure named
-`AbstractSpecificationProcessNetwork`, incompatible with PROCESS.md's, and
-consumers read fields from both. The role-schema shape survived, because it is
-the one the spikes instantiate. The semantic fields did not: a structural
-network carrying a `BehaviorContract` puts the process layer above this one and
-makes the dependency cyclic, which is what agent-bus dispositions coord1:4 and
-coord1:5 settled.
-
-The five accessors are the author surface, and they are the reason `roles` may
-be a wrapper at all. A specification writes `network.RoleSchema` and
-`network.protocol schema`, exactly as it did before this structure existed;
-requiring `network.roles.protocol` everywhere would leak the wrapper's
-representation into every consumer and add permanent ceremony for nothing.
-`docs/REFINEMENT.md` and Spike 5 both use the short spelling.
-
-The denotation is therefore *selected* rather than carried. A
-`NetworkTraceDenotation` is a chosen reading of one network's traces as a
-behavior contract; `ProcessPresentation.denotationExact` is the claim that the
-chosen reading agrees with the specification. Two different presentations of one
-network may select different denotations, which a field on the network could not
-express.
--/
-
-structure ProcessPresentationNetwork {R : Type u} [ResourceModel R]
-    (resources : R) where
-  roles : StructuralProcessNetwork (SpecProcess resources) ProtocolInstance
-  composition : AbstractNetworkCompositionLaw roles
-
-abbrev ProcessPresentationNetwork.RoleSchema
-    (network : ProcessPresentationNetwork resources) : Type :=
-  network.roles.RoleSchema
-
-abbrev ProcessPresentationNetwork.protocol
-    (network : ProcessPresentationNetwork resources) :
-    network.RoleSchema -> SpecProcess resources :=
-  network.roles.protocol
-
-abbrev ProcessPresentationNetwork.Instance
-    (network : ProcessPresentationNetwork resources) :
-    network.RoleSchema -> Type :=
-  network.roles.Instance
-
-abbrev ProcessPresentationNetwork.instanceOf
-    (network : ProcessPresentationNetwork resources) :
-    forall schema, network.Instance schema ->
-      ProtocolInstance (network.protocol schema) :=
-  network.roles.instanceOf
-
-abbrev ProcessPresentationNetwork.schemas
-    (network : ProcessPresentationNetwork resources) :
-    List network.RoleSchema :=
-  network.roles.schemas
-
-structure NetworkTraceDenotation {R : Type u} [ResourceModel R]
-    {resources : R} (network : ProcessPresentationNetwork resources) where
-  contract : BehaviorContract resources
-  denotes : EveryNetworkExecutionTraceAccepted network contract
-  exact : EveryContractBehaviorHasNetworkExecution network contract
-
 def SpecProcess.capture
     (suite : SpecificationSuite resources) : SpecProcess resources :=
   { suite := suite
@@ -283,21 +219,6 @@ def SpecProcess.ofRelational
     (contract : BehaviorContract resources) :
     SpecProcess resources :=
   SpecProcess.capture (SpecificationSuite.singletonRelational contract)
-
-`ProcessPresentation` is where a chosen network is connected to precious
-behavior, and it is the only place that connection lives. The network itself
-carries no denotation: `trace` is a *selected* denotation of a *chosen*
-structural network, and `denotationExact` is the claim that it agrees with the
-specification. Putting those fields on the network instead would make every
-structural network carry a semantic commitment, which is what made the two
-historical declarations irreconcilable.
-
-structure ProcessPresentation (spec : SpecProcess resources) where
-  network : ProcessPresentationNetwork resources
-  trace : NetworkTraceDenotation network
-  denotationExact : trace.contract = spec.contract
-  requirementsExact : TransportedProcessRequirements network denotationExact =
-    spec.requirements
 
 structure RequirementSubstitution
     (spec : SpecProcess resources) where
@@ -446,12 +367,15 @@ about the captured operations, never to identify competing semantic operations.
 The one root `SpecProcess` stores the precious suite of DSL components and
 semantic junctions, its captured transition/observation semantics, selected
 resource-semantics snapshot, and theorem demands. `VerifiedProgram` is indexed
-by that exact process. A `ProcessPresentation` is a
-replaceable proof lens over that value. It may name abstract logical roles,
+by that exact process. A `ProcessPresentation`, owned by `Refinement` where the
+independent `Semantics` and `Process` dependency arms meet, is a replaceable
+proof lens over that value. It may name abstract logical roles,
 typed channels, linear custody, shared logical state, and causal ordering, but
-its `denotationExact` theorem must recover the already selected contract. It is
-not stored inside the specification and changing its topology cannot change the
-precious value. OS threads, worker counts, polling/completion mechanisms,
+its explicit `trace` and `denotationExact` theorem must recover the already
+selected contract. The network contains neither that trace nor a second
+denotation. The presentation is not stored inside the specification and
+changing its topology or selected proof trace cannot change the precious value.
+OS threads, worker counts, polling/completion mechanisms,
 concrete queues/buffers/handles, layouts, registers, and schedulers remain still
 lower realization choices.
 
