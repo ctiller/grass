@@ -1841,24 +1841,29 @@ fn apply_review_merge_authorized(
     // authorization." A resolved/rejected (Terminal) issue never blocks,
     // even if its `blocks` set still names a chain event -- disposition is
     // permanent, so there is nothing left to re-check once it fires.
-    // A blocking issue is deliberately *not* consulted here. It is enforced
-    // by `merge_ready::check_merge_ready`, which is the gate that decides
-    // whether a merge may proceed, and which re-reads it live immediately
-    // before the push.
     //
-    // Reduction cannot carry this rule without breaking one of the two
-    // properties it must have. `blocking_issue_for_chain` scans every issue,
-    // and an `issue.opened` carrying `blocks` has no causal edge to this event
-    // -- the issue references the chain, this does not reference the issue --
-    // so the two are concurrent and both orders are valid linear extensions.
-    // Rejecting here made the *fatal* outcome depend on fetch order, which is
-    // one host-unable-to-reduce-the-bus away from an outage; and merely
-    // skipping the record made the *state* depend on fetch order, which is a
-    // gate 15/16 violation. Recording unconditionally is the only choice that
-    // is both total and confluent, and it loses nothing: reduction's job is to
-    // say what happened, and the authorization did happen. Whether it may be
-    // acted on is the gate's question, asked against live state at the moment
-    // it matters.
+    // The test is causal, not categorical. An `issue.opened` carrying
+    // `blocks` need have no causal edge to this event -- the issue references
+    // the chain, this does not reference the issue -- so where there is no
+    // edge the two are concurrent, both orders are valid linear extensions,
+    // and disagreeing about them costs everything: rejecting made the *fatal*
+    // outcome depend on fetch order, one host-unable-to-reduce-the-bus away
+    // from an outage, and merely skipping the record made the *state* depend
+    // on fetch order, a gate 15/16 violation.
+    //
+    // But an authorization consumes the bus state its own observed frontier
+    // names, and a blocker sitting inside that frontier was information this
+    // reviewer had. That case is causally ordered, not concurrent: every
+    // valid linear extension puts the issue first, so rejecting it is both
+    // total and confluent, and it is what section 10 requires. Publication
+    // time still owns the verdict; `merge_ready::check_merge_ready` re-reads
+    // it live before the push as defence in depth, not as a replacement.
+    if let Some(blocking) = observed_blocking_issue_for_chain(state, chain, &env.observed) {
+        return Err(invalid(format!(
+            "{}: issue {blocking} blocks this nomination chain and this event has observed it",
+            env.id
+        )));
+    }
     let chain_mut = state
         .review_chain_mut(&d.nomination)
         .expect("checked above");
@@ -1868,14 +1873,45 @@ fn apply_review_merge_authorized(
 
 /// AGENT_BUS_SCHEMA.md section 10: the first unresolved issue (not
 /// `ItemStatus::Terminal`) whose `blocks` set names any event in `chain`'s
-/// nomination chain, if any. Shared by `apply_review_merge_authorized` (the
-/// publication-time gate above) and `merge_ready::check_merge_ready`
-/// (AGENT_REVIEW.md section 8's pre-merge gate) so the two never drift:
-/// ported from the shipped version-one helper's identically-named
-/// `review_cmds`/`apply` helper.
+/// nomination chain, if any.
+///
+/// This is the unconditional, live question, and it is what
+/// `merge_ready::check_merge_ready` (AGENT_REVIEW.md section 8's pre-merge
+/// gate) asks: at the moment of the push, does anything block? Reduction
+/// asks the narrower causal question through
+/// `observed_blocking_issue_for_chain` instead. Both route through the same
+/// matching rule below so the two can never drift on what "blocking" means,
+/// only on which issues they are entitled to consider.
 pub(crate) fn blocking_issue_for_chain(state: &BusState, chain: &ReviewChain) -> Option<EventId> {
+    first_blocking_issue(state, chain, None)
+}
+
+/// `blocking_issue_for_chain` restricted to issues the publisher had
+/// actually observed -- the form `apply_review_merge_authorized` needs,
+/// where charging a reviewer for an issue concurrent with its own event
+/// would make reduction itself order-dependent.
+pub(crate) fn observed_blocking_issue_for_chain(
+    state: &BusState,
+    chain: &ReviewChain,
+    observed: &crate::frontier::ObservedFrontier,
+) -> Option<EventId> {
+    first_blocking_issue(state, chain, Some(observed))
+}
+
+/// `state.issues` is a `BTreeMap`, so "first" is a deterministic choice of
+/// witness rather than whichever one a hash order happened to yield.
+fn first_blocking_issue(
+    state: &BusState,
+    chain: &ReviewChain,
+    observed: Option<&crate::frontier::ObservedFrontier>,
+) -> Option<EventId> {
     let chain_members: BTreeSet<&EventId> = chain.nomination_events.iter().collect();
     for issue in state.issues.values() {
+        if let Some(observed) = observed {
+            if observed.validate_reference(&issue.id).is_err() {
+                continue;
+            }
+        }
         // "Unresolved" means not yet terminally resolved/rejected -- an issue
         // sitting in `LifecycleConflict` (a race whose winner hasn't been
         // picked yet) is still unresolved and must still block, not just a
@@ -9056,18 +9092,19 @@ mod tests {
     /// A blocking issue opened concurrently with an authorization must not
     /// make the bus unreducible.
     ///
-    /// `blocking_issue_for_chain` scans *every* issue, and an `issue.opened`
-    /// carrying `blocks` has no causal edge to a `review.merge_authorized`:
-    /// the issue references the chain event, the authorization does not
-    /// reference the issue. So both orders are valid linear extensions, and
-    /// they disagree -- authorization-first succeeds, issue-first returns
-    /// `Err`. With no per-event isolation in `reduce`, that `Err` is every
-    /// host unable to reduce the bus at all.
+    /// An `issue.opened` carrying `blocks` need have no causal edge to a
+    /// `review.merge_authorized`: the issue references the chain event, the
+    /// authorization does not reference the issue. Where there is no edge
+    /// both orders are valid linear extensions, and a rule that scanned
+    /// *every* issue made them disagree -- authorization-first succeeded,
+    /// issue-first returned `Err`. With no per-event isolation in `reduce`,
+    /// that `Err` is every host unable to reduce the bus at all.
     ///
-    /// The policy is right and is not what changes here: an authorization
-    /// published against a chain that turns out to be blocked should not take
-    /// effect. It simply must not be *fatal*, for the same reason
-    /// `apply_review_reassigned` already treats "already merged" as a no-op.
+    /// Section 10's policy is right and is not weakened: it is asked against
+    /// the issues this authorization actually observed, which is the whole
+    /// difference between the case here and
+    /// `an_authorization_that_observed_its_blocking_issue_is_still_refused`.
+    /// The two are a pair and should be read together.
     #[test]
     fn an_issue_blocking_a_chain_does_not_make_a_published_authorization_fatal() {
         let build = |issue_first: bool| {
@@ -9152,6 +9189,98 @@ mod tests {
             format!("{:#?}", issue_first.reviews),
             "the two valid orders must converge on the same review state"
         );
+    }
+
+    /// The concession above is causal, not blanket: a reviewer whose own
+    /// observed frontier already contains the blocking issue is still
+    /// refused (g-reviewer:64, e-reviewer:113).
+    ///
+    /// Here every valid linear extension puts the issue before the
+    /// authorization -- the reviewer says so itself -- so refusing is both
+    /// total and confluent, and section 10's rule survives at publication
+    /// time rather than being demoted to a merge-ready-only check.
+    #[test]
+    fn an_authorization_that_observed_its_blocking_issue_is_still_refused() {
+        let mut state = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Reviewer),
+            ("carol", Role::Implementor),
+        ]);
+        let (alice, bob, carol) = (a("alice"), a("bob"), a("carol"));
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        apply_ok(&mut state, &register(&carol, Role::Implementor));
+        let (nominate_env, _accept) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
+
+        let mut issue_data = match open_issue(&carol, 1, &alice).typed_data().unwrap() {
+            EventData::IssueOpened(d) => d,
+            _ => unreachable!(),
+        };
+        issue_data.blocks = StringSet::from_iter([nominate_env.id.clone()]);
+        let issue = Envelope::new(
+            &carol,
+            1,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::IssueOpened(issue_data),
+            [nominate_env.id.clone()],
+        );
+        let issue_id = issue.id.clone();
+        apply_ok(&mut state, &issue);
+
+        // bob's frontier runs *through* carol's issue this time.
+        let auth = Envelope::new(
+            &bob,
+            2,
+            ObservedFrontier::complete(
+                &epoch,
+                epoch.active_members.keys().map(|agent| FrontierEntry {
+                    agent: agent.clone(),
+                    stream_tip: hash(1),
+                    through: if *agent == alice {
+                        nominate_env.id.clone()
+                    } else if *agent == carol {
+                        issue_id.clone()
+                    } else {
+                        EventId::new(agent, 0)
+                    },
+                }),
+            )
+            .expect("a complete frontier"),
+            &EventData::ReviewMergeAuthorized(merge_authorized(
+                &nominate_env.id,
+                StringSet::default(),
+                &[],
+            )),
+            [nominate_env.id.clone()],
+        );
+        let err = apply_event(&mut state, &auth)
+            .expect_err("an observed blocking issue must still refuse the authorization");
+        let msg = err.to_string();
+        assert!(
+            msg.contains(&issue_id.to_string()) && msg.contains("has observed it"),
+            "the message must name the blocker and say why it is chargeable: {msg}"
+        );
+
+        // And resolving it lifts the refusal, so this is a live check on the
+        // issue's disposition and not a permanent mark against the chain.
+        apply_ok(
+            &mut state,
+            &Envelope::new(
+                &alice,
+                2,
+                frontier_seeing(&[&issue_id]),
+                &EventData::IssueResolved(IssueResolved {
+                    issue: issue_id.clone(),
+                    assignment: issue_id.clone(),
+                    summary: text("fixed"),
+                    fix_commit: None,
+                    verification: vec![],
+                }),
+                [issue_id.clone()],
+            ),
+        );
+        apply_ok(&mut state, &auth);
     }
 
     /// Gates 15/16 for the acknowledge-versus-reassign race: two valid,
