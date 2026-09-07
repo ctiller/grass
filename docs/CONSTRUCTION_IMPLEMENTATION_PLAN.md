@@ -240,8 +240,10 @@ must contain a compositional prepared-to-closed transition run: acquisition
 records the exact nonempty loan set, return or unwind records the exact released
 set, and closure records restoration of exactly the selected saved registers.
 The run exposes those actions in exact lifecycle order and run concatenation
-concatenates action traces exactly. Valid prepared and closed endpoints alone
-are insufficient. A literal call remains legal and is checked against the same
+concatenates action traces exactly. Every completed session is classified as
+exactly acquisition, matched release through normal return or unwind, and exact
+saved-register restoration. Valid prepared and closed endpoints alone are
+insufficient. A literal call remains legal and is checked against the same
 pre-call contract without implicit rewriting.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's

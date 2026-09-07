@@ -55,6 +55,13 @@ example : unwindRun.actions =
 
 example : (CallFrameRun.done prepared).append returnRun = returnRun := rfl
 
+example : ∃ loans : List Name,
+    session.actions =
+      [.acquire loans, .releaseReturn loans, .restoreReturn frame.plan.saved] ∨
+    session.actions =
+      [.acquire loans, .releaseUnwind loans, .restoreUnwind frame.plan.saved] :=
+  session.actions_shape
+
 example : ¬Nonempty (CallFrameTransition frame prepared closed) := by
   intro transition
   cases transition with

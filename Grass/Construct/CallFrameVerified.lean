@@ -158,6 +158,62 @@ structure CallFrameSession {profile : LayoutProfile}
   closed : CheckedCallFrameUse frame .closed
   run : CallFrameRun frame prepared closed
 
+namespace CallFrameSession
+
+/-- Reveal the exact resource actions witnessed by a complete session. -/
+def actions {profile : LayoutProfile} {frame : CheckedWin64Frame profile}
+    (session : CallFrameSession frame) : List CallFrameAction :=
+  session.run.actions
+
+/-- Every complete session has exactly the normal-return or unwind trace shape. -/
+theorem actions_shape {profile : LayoutProfile} {frame : CheckedWin64Frame profile}
+    (session : CallFrameSession frame) :
+    ∃ loans : List Name,
+      session.actions =
+        [.acquire loans, .releaseReturn loans, .restoreReturn frame.plan.saved] ∨
+      session.actions =
+        [.acquire loans, .releaseUnwind loans, .restoreUnwind frame.plan.saved] := by
+  rcases session with ⟨prepared, closed, run⟩
+  cases run with
+  | next acquire rest =>
+      cases acquire with
+      | acquire _ loaned acquired acquiredExact =>
+          cases rest with
+          | next release rest =>
+              cases release with
+              | completeReturn _ returned released releasedExact =>
+                  cases rest with
+                  | next restore rest =>
+                      cases restore with
+                      | closeReturn _ _ restored restoredExact =>
+                          cases rest with
+                          | done =>
+                              refine ⟨acquired, Or.inl ?_⟩
+                              simp only [actions, CallFrameRun.actions]
+                              have releaseExact : released = acquired :=
+                                releasedExact.symm.trans acquiredExact
+                              subst released
+                              subst restored
+                              simp [CallFrameTransition.action, acquiredExact]
+                          | next impossible _ => cases impossible
+              | unwind _ unwinding released releasedExact =>
+                  cases rest with
+                  | next restore rest =>
+                      cases restore with
+                      | closeUnwind _ _ restored restoredExact =>
+                          cases rest with
+                          | done =>
+                              refine ⟨acquired, Or.inr ?_⟩
+                              simp only [actions, CallFrameRun.actions]
+                              have releaseExact : released = acquired :=
+                                releasedExact.symm.trans acquiredExact
+                              subst released
+                              subst restored
+                              simp [CallFrameTransition.action, acquiredExact]
+                          | next impossible _ => cases impossible
+
+end CallFrameSession
+
 namespace FrameVerifiedBackend
 
 variable {Instruction : Type u} {State : Type v} {Effect : Type w}
