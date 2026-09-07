@@ -5,8 +5,8 @@ import Grass.CFG.Contract
 
 Edges are nested under their source block.  Labels, predecessor sets, direct
 targets, and closure checks are consequently projections of one graph value;
-an author cannot keep a parallel edge or predecessor manifest that drifts from
-the source.
+`Graph.predecessors` and `Graph.directTargets` derive both views without a
+separately authored edge or predecessor manifest.
 -/
 
 namespace Grass.CFG
@@ -45,8 +45,8 @@ variable {State : Type u} {Terminal : Type v}
 def blockIds (graph : Graph State Terminal) : List BlockId :=
   graph.blocks.map Block.id
 
-/-- Find one block by stable identity.  Structural well-formedness guarantees
-that a successful result is unique. -/
+/-- Find one block by stable identity.  For a `Graph.WellFormed` value the block
+identities are unique, so a successful result denotes one structural block. -/
 def findBlock? (graph : Graph State Terminal) (id : BlockId) :
     Option (Block State Terminal) :=
   graph.blocks.find? (fun block => block.id == id)
