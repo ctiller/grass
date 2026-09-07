@@ -16,6 +16,12 @@ abbrev ScopeId := Grass.ScopeId
 
 namespace ScopeId
 
+/-- Compatibility name for the Core-owned constructor. -/
+abbrev mk : List String → ScopeId := Grass.ScopeId.mk
+
+/-- Compatibility name for the Core-owned path projection. -/
+abbrev path : ScopeId → List String := Grass.ScopeId.path
+
 /-- Compatibility name for `Grass.ScopeId.root`. -/
 abbrev root := Grass.ScopeId.root
 
