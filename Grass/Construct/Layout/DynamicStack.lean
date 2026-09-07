@@ -4,9 +4,11 @@ import Grass.Construct.Layout.Stack
 # Bounded dynamic stack reservations
 
 `BoundedStackLayout` extends one checked ordinary `StackLayout` with named
-reservations whose selected extents may vary up to explicit capacities.  The
-checker keeps capacity ranges disjoint from every fixed object and from every
-other reservation, so changing a selected extent cannot create an overlap.
+reservations whose selected extents may vary up to explicit capacities.
+`BoundedStackLayout.dynamicDisjoint` and
+`BoundedStackLayout.fixedDynamicDisjoint` check the complete capacity ranges;
+`DynamicStackObject.reservedRange_contains_selectedRange` keeps every admitted
+selected extent inside the checked reservation.
 -/
 
 namespace Grass.Construct.Layout
