@@ -335,6 +335,11 @@ one alpha model, and checks structural closure of the resulting ordinary AST.
 Normalization theorems preserve exact instruction bodies and review annotations;
 failed closure reports the normalized entry, block identities, and unresolved
 targets without manufacturing a partially verified program.
+`Grass.Construct.Source.Manifest` derives the command-facing per-block manifest
+from that ordinary AST: canonical block and exit identities, exact outgoing
+edges, structural instruction origins, and counts remain in authored order.
+Projection and lookup theorems tie every field back to the single AST, so the
+manifest cannot become a second independently maintained source description.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
