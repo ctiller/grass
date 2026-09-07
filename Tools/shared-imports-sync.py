@@ -62,6 +62,16 @@ SEGMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_']*$")
 BOM = "﻿"
 
 
+# Git leaves these at a conflict, and a registry is exactly where a merge puts
+# one: both sides of a merge routinely add imports to the same sorted block.
+CONFLICT_MARKER = re.compile(r"^(<{7}|\|{7}|={7}|>{7})(\s|$)")
+
+
+def conflict_markers(text: str) -> list[str]:
+    """The git conflict markers in `text`, if any."""
+    return [line for line in text.splitlines() if CONFLICT_MARKER.match(line)]
+
+
 def modules_on_disk() -> list[str]:
     """Every module `lake` builds under `Grass/`, as import names."""
     root = Path(LIBRARY_ROOT)
@@ -167,6 +177,8 @@ def verify(before: str, after: str, spans, wanted: list[str]) -> str | None:
     middle is required to contain only import lines plus whatever already sat
     between the originals.
     """
+    if conflict_markers(after):
+        return "the rewrite would leave a git conflict marker in the file"
     prefix = before[:spans[0][0]]
     suffix = before[spans[-1][1]:]
     if not after.startswith(prefix):
@@ -192,6 +204,32 @@ def verify(before: str, after: str, spans, wanted: list[str]) -> str | None:
 
 def process(path: str, wanted: list[str], write: bool) -> list[str]:
     whole = io.open(path, encoding="utf-8", newline="").read()
+
+    # Refuse a conflicted file outright, before parsing and before writing.
+    #
+    # This is not a hypothetical shape for these two files: a merge that brings
+    # in modules puts imports on both sides of the same sorted block, which is
+    # the conflict this tool is meant to help resolve. `g-build:41` found that
+    # it did not refuse. With an empty conflict below the imports it reported
+    # both registries clean and in order -- a passing gate on a file Lean
+    # cannot parse -- and with imports on either side of the markers it added
+    # them to the header block while the originals stayed inside the conflict,
+    # duplicating every one and still reporting a successful rewrite.
+    #
+    # Resolve the conflict first, then run this. Taking the union of both sides
+    # and letting `--write` sort it is the intended workflow, and it is what
+    # the header describes; what must not happen is this tool treating a
+    # marker as ordinary text.
+    markers = conflict_markers(whole)
+    if markers:
+        sys.exit(
+            f"{path} contains git conflict markers ({len(markers)} of them, "
+            f"first {markers[0].split()[0]!r}). Refusing to read or write it: "
+            "a conflicted registry is not Lean, and rewriting one would report "
+            "success on a file that does not parse. Resolve the conflict -- "
+            "for an import block, keeping both sides is usually right -- and "
+            "run this again to sort and dedupe the result.")
+
     mark, raw = (BOM, whole[len(BOM):]) if whole.startswith(BOM) else ("", whole)
     spans, header_end = parse_header(raw)
     found = [name for _, _, name in spans]

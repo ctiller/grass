@@ -127,6 +127,12 @@ DECOYS = [
     ("U+2028 in a later string", BLOCK + 'def s := "a b"' + LF),
     ("lone carriage return in a later string",
      BLOCK + 'def s := "a\rb"' + LF),
+    # Near-misses that must still be rewritten. Refusing these would make
+    # the tool unusable on ordinary prose.
+    ("a line comment containing seven equals signs",
+     BLOCK + "-- ======= section rule" + LF),
+    ("an eight-character rule is not a marker",
+     BLOCK + "-- ========" + LF),
 ]
 
 # Files the tool must refuse outright, leaving them untouched.
@@ -137,6 +143,24 @@ REFUSALS = [
     ("no import at all", "def x := 1" + LF),
     ("unterminated comment before the block", "/- oops" + LF + BLOCK),
     ("whole file is a comment", "/- everything" + LF + BLOCK + "still" + LF),
+    # g-build:41. A registry is exactly where a merge leaves these: both
+    # sides routinely add imports to the same sorted block. The tool used
+    # to treat markers as ordinary text -- reporting an empty conflict as
+    # "both registries in order", a passing gate on a file Lean cannot
+    # parse, and duplicating every import when the conflict held some.
+    ("empty conflict below the imports",
+     BLOCK + "<<<<<<< HEAD" + LF + "=======" + LF + ">>>>>>> origin/main"
+     + LF + "def x := 1" + LF),
+    ("imports on both sides of a conflict",
+     "import Grass.Alpha" + LF + "<<<<<<< HEAD" + LF
+     + "import Grass.Beta" + LF + "=======" + LF
+     + "import Grass.Gamma" + LF + ">>>>>>> origin/main" + LF
+     + "def x := 1" + LF),
+    ("diff3 conflict with a base section",
+     "import Grass.Alpha" + LF + "<<<<<<< HEAD" + LF
+     + "import Grass.Beta" + LF + "||||||| base" + LF + "=======" + LF
+     + "import Grass.Gamma" + LF + ">>>>>>> theirs" + LF
+     + "def x := 1" + LF),
 ]
 
 
