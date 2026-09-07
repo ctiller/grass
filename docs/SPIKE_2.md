@@ -1,4 +1,4 @@
-# Spike 2: in-memory stable byte-line sort from stdin to Win32 PE
+﻿# Spike 2: in-memory stable byte-line sort from stdin to Win32 PE
 
 Status: design artifact for review; intentionally not compilable yet.
 
@@ -78,8 +78,12 @@ def Occurrence.le (left right : Occurrence) : Prop :=
 def stableSorted (input output : Vec Occurrence) : Prop :=
   output.Permutation input ∧
   output.Pairwise Occurrence.le ∧
-  ∀ i j, i < j -> input[i].value = input[j].value ->
-    (output.findIdx? input[i]).get! < (output.findIdx? input[j]).get!
+  ∀ (i j : Nat) (hi : i < input.length) (hj : j < input.length),
+    (input.get i hi).value = (input.get j hj).value ->
+    (input.get i hi).ordinal < (input.get j hj).ordinal ->
+    ∀ p q, output.idxOf? (input.get i hi) = some p ->
+           output.idxOf? (input.get j hj) = some q ->
+           p < q
 
 /-!
 `stable` is an algorithmic demand over input-occurrence identity, not a claim
@@ -2127,8 +2131,12 @@ def Occurrence.le (left right : Occurrence) : Prop :=
 def stableSorted (input output : Vec Occurrence) : Prop :=
   output.Permutation input ∧
   output.Pairwise Occurrence.le ∧
-  ∀ i j, i < j -> input[i].value = input[j].value ->
-    (output.findIdx? input[i]).get! < (output.findIdx? input[j]).get!
+  ∀ (i j : Nat) (hi : i < input.length) (hj : j < input.length),
+    (input.get i hi).value = (input.get j hj).value ->
+    (input.get i hi).ordinal < (input.get j hj).ordinal ->
+    ∀ p q, output.idxOf? (input.get i hi) = some p ->
+           output.idxOf? (input.get j hj) = some q ->
+           p < q
 
 def lineStreamFormat : Format (Vec ByteArray) :=
   Console.byteLineStreamFormat format
