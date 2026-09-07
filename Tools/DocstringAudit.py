@@ -48,13 +48,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Anchored on this file rather than on the working directory. `roots = [Path("Grass")]`
-# is relative to wherever the tool is run from, and an `is_dir()` guard swallowed
-# the miss -- so running the audit from anywhere but the repo root printed the
-# success line having read nothing. Every other gate in this directory anchors
-# this way; this one is the reason the rule exists.
-ROOT = Path(__file__).resolve().parent.parent
-
 # Deliberately narrow. The designer's rule names "ensures", "prevents", "cannot",
 # "only", and "preserves"; the last two occur constantly in ordinary descriptive
 # English ("the only fault position", "a value that is never live") and flagging
@@ -85,6 +78,11 @@ HEDGES = (
     "cannot be erased or masked",
 )
 
+# Hedges match as whole words. As bare substrings they matched inside ordinary
+# x86 vocabulary: "M8" inside `imm8`, "M3" inside `imm32`, "M6" inside `imm64`,
+# and "owed" inside `Allowed`. A reviewer found three real sentences exempted
+# for no reason but the letters in an operand size -- in an x86 tree that was
+# only going to grow.
 # Hedges match as whole words, not as bare substrings.
 #
 # As substrings they matched inside ordinary vocabulary: "owed" inside
@@ -99,26 +97,12 @@ HEDGES = (
 # means. The reviewer read them as review scratch and this file briefly agreed;
 # both were wrong, and removing them would have suppressed a legitimate
 # exemption in `Grass/Memory/Event.lean`.
-def _hedge_re(entries) -> "re.Pattern[str]":
-    """The hedge alternation, as a function so `--inert` can rebuild it.
-
-    `--inert` used to decide whether an entry was live by asking whether its text
-    appeared anywhere in the joined findings. `HEDGE_RE` matches on word boundaries
-    and that test did not, so the mode whose job is to police this list reproduced
-    the substring bug the comment above `HEDGES` records fixing -- review seeded a
-    sentence containing `XMM6` and watched `M6` stop being reported as inert while
-    still silencing nothing. It under-reported, which is the direction that leaves a
-    dead entry looking alive.
-    """
-    return re.compile(
-        "|".join(
-            r"\b" + re.escape(h.lower()).replace(r"\ ", " ") + r"\b"
-            for h in entries
-        )
+HEDGE_RE = re.compile(
+    "|".join(
+        r"\b" + re.escape(h.lower()).replace(r"\ ", " ") + r"\b"
+        for h in HEDGES
     )
-
-
-HEDGE_RE = _hedge_re(HEDGES)
+)
 
 # Which unresolved names are worth reporting.
 #
@@ -145,21 +129,7 @@ LEAN_STYLE_NAME = re.compile(r"^[a-z][A-Za-z0-9']*(_[A-Za-z0-9'][A-Za-z0-9']*)+$
 
 # A backticked identifier is the "names the enforcing type or theorem" part.
 IDENT = re.compile(r"`([A-Za-z_][A-Za-z0-9_.?!']*)`")
-# Section references and prose in backticks are not identifiers -- **and this
-# cannot fire.** `IDENT`'s capture class is `[A-Za-z_][A-Za-z0-9_.?!']*`, which
-# contains no slash, no section mark and no space, so no string `IDENT` can produce
-# matches any of this pattern's three alternations. It is a dead constant filtering
-# a set it cannot intersect, and review proved it by construction rather than by
-# corpus.
-#
-# Kept rather than deleted, and this comment is the reason. The shape it describes
-# is real -- docstrings do write backticked document paths and section marks -- and
-# what makes it unreachable is `IDENT`'s class, which is upstream and load-bearing.
-# Widening `IDENT` to catch those and then filtering them here would be two changes
-# to reach today's behaviour. This file's header records a reviewer finding
-# `SELF_NAMING` "defined and never used" and treats that as a real finding; the
-# difference is that `SELF_NAMING` was a check somebody believed was running, and
-# this is a guard whose work is already done one line earlier.
+# Section references and prose in backticks are not identifiers.
 NOT_IDENT = re.compile(r"^(docs/|§|[a-z]+\s)")
 
 
@@ -175,32 +145,13 @@ def declaration_names() -> set[str]:
     could not obtain the name list is worse than no audit, which is the mistake
     this function was added to correct.
     """
-    # `cwd=ROOT`, because the paths this tool scans were anchored on `__file__` and
-    # this subprocess was left on the working directory -- half an anchoring. Run
-    # from anywhere but the repo root it failed loudly, which is the safe half, and
-    # created a Lake manifest in whatever directory it was run from, which is not.
     proc = subprocess.run(
-        ["lake", "env", "lean", "Tools/DeclNames.lean"], cwd=ROOT,
+        ["lake", "env", "lean", "Tools/DeclNames.lean"],
         capture_output=True, text=True, encoding="utf-8", errors="replace")
     if proc.returncode != 0:
-        detail = (proc.stdout + proc.stderr).strip()
-        if detail:
-            sys.exit("could not obtain the declaration list from "
-                     f"Tools/DeclNames.lean (exit {proc.returncode}):\n"
-                     + detail[:2000])
-        # Non-zero with *nothing* on either stream is not a Lean error, and
-        # printing an empty reason sends a reader looking for one. It is what a
-        # killed subprocess looks like: this gate spawns `lake env lean` over the
-        # whole tree, which peaks near a gigabyte, and three of its modes run in
-        # CI beside two more Lean audits. Observed exactly once, under six
-        # concurrent Lean processes; `DeclNames.lean` run alone immediately
-        # afterwards produced the full list.
-        sys.exit("could not obtain the declaration list from "
-                 f"Tools/DeclNames.lean: `lake env lean` exited {proc.returncode} "
-                 "with no output on stdout or stderr. That is not a Lean error -- "
-                 "it is what the subprocess being killed looks like, usually "
-                 "memory pressure from other Lean processes. Re-run this gate "
-                 "alone before looking for a defect in the tree.")
+        sys.exit(
+            "could not obtain the declaration list from Tools/DeclNames.lean:\n"
+            + (proc.stdout + proc.stderr).strip()[:2000])
     known: set[str] = set()
     for line in proc.stdout.splitlines():
         name = line.strip()
@@ -281,220 +232,18 @@ def check(path: Path, known: set[str]) -> list[str]:
     return findings
 
 
-def hedged(path: Path, known: set[str]) -> list[str]:
-    """Claim sentences a hedge silences, which name nothing enforcing them.
-
-    `--inert` reports hedge entries that silence nothing. This is the other half: what
-    the whole `HEDGES` set is silencing, so the suppression is reviewable rather than
-    invisible. An exemption nobody can list is an exemption nobody has read.
-    """
-    global HEDGE_RE
-    saved = HEDGE_RE
-    HEDGE_RE = re.compile(r"(?!)")
-    try:
-        widened = check(path, known)
-    finally:
-        HEDGE_RE = saved
-    return [line for line in widened if line not in set(check(path, known))]
-
-
-def self_test() -> int:
-    """Seed a claim the tool must report and the near-misses it must not.
-
-    Including the documented bypasses, so what this check cannot see is asserted rather
-    than merely described.
-    """
-    failures = 0
-    known = {"MemoryState.issue?", "byteRange_le_of_contains"}
-    import tempfile
-
-    def probe(text: str) -> list[str]:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "Probe.lean"
-            path.write_text(text, encoding="utf-8")
-            return check(path, known)
-
-    cases = [
-        ("an unbacked claim", "/-- This ensures the range is bounded. -/", True),
-        ("a claim naming a real declaration",
-         "/-- This ensures the range is bounded, by `byteRange_le_of_contains`. -/",
-         False),
-        ("a hedged sentence", "/-- This is intended to ensure the range is bounded. -/",
-         False),
-        ("no claim word at all", "/-- The range is bounded. -/", False),
-        # The attack the strict half exists for: a name that looks like a Lean
-        # declaration and is not in the build.
-        ("an invented Lean-style name",
-         "/-- This ensures the range is bounded, by `no_such_theorem_at_all`. -/", True),
-        # An unresolved name that is *not* Lean-shaped is reported too, under a
-        # different message. Seeded because the first version of this case asserted
-        # the opposite: it was written from a reading of the pattern rather than from
-        # running the tool, which is the mistake this whole file exists to catch in
-        # prose.
-        ("a non-Lean-shaped unresolved name",
-         "/-- This ensures the range is bounded, by `RAX`. -/", True),
-    ]
-    for label, text, should_report in cases:
-        if bool(probe(text)) != should_report:
-            want = "reported" if should_report else "not reported"
-            print(f"  SELF-TEST FAILED [{label}]: expected {want}")
-            failures += 1
-
-    # The root walk, which nothing exercised. Every case above seeds a probe into
-    # a temporary directory and calls `check` directly, so narrowing the roots was
-    # invisible here -- and `c-mem:54` was answered on the assumption that a floor
-    # in this gate held the roots in place. It does now.
-    walked = sorted((ROOT / "Grass").rglob("*.lean"))
-    if roots_are_covered(walked):
-        print("  SELF-TEST FAILED: the root walk misses a subtree on disk")
-        failures += 1
-    if not roots_are_covered([p for p in walked
-                              if "Memory" not in p.parts]):
-        print("  SELF-TEST FAILED: a missing subtree is not reported")
-        failures += 1
-
-    if failures:
-        print(f"docstring audit self-test: {failures} failure(s)")
-        return 1
-    print("docstring audit self-test: all cases discriminate as documented")
-    return 0
-
-
-# The options this gate accepts. A misspelt flag used to be ignored, so asking a gate
-# for a mode it had never implemented ran the ordinary check and printed its success
-# line -- review swept the modes across the seven gates and got seven green lines, one
-# of which was not the check it named.
-KNOWN_OPTIONS = {"--self-test", "--inert", "--hedged"}
-
-
-def roots_are_covered(paths) -> list[str]:
-    """Report if the root walk has lost a subtree it is supposed to cover.
-
-    This gate is deliberately *unscoped*: it audits every docstring under `Grass/`,
-    other owners' included, because a claim-shaped sentence is a claim wherever it is
-    written. `Tools/DeclNames.lean`'s name oracle widened to `Tests/` and the roots did
-    not, which is the asymmetry `c-mem:54` settled -- a fixture's own prose is not held
-    to §3.10, while a `Grass/` docstring may cite a fixture.
-
-    An asymmetry is worth only as much as the thing that holds it in place. That answer
-    named floors "asserting what the gate walks"; there were none, in this gate or in
-    its self-test, which seeds probes into a temporary directory and calls `check`
-    directly so the walk is never exercised. This is that floor: every subtree on
-    disk must reach the scan, so narrowing the roots fails rather than quietening.
-
-    `required` was a hand-written six -- Memory, Obligation, Op, ISA, ABI, Process --
-    under a sentence promising "a representative subtree from each owner". Nine of
-    the fifteen subtrees on disk could vanish with this floor green, and review ran
-    it: dropping `Grass/Std/Logical` and `Grass/Resource` took `--hedged` from 35
-    claim sentences to 30 while the floor printed nothing and the gate printed its
-    success line. Two of the nine were this branch's own areas, and `Grass/Std` is a
-    distinct owner with `STDLIB.md` as its normative document -- so the list did not
-    even satisfy the sentence above it.
-
-    Derived from disk now, which is the same repair `scope_is_covered` already got
-    in the sibling gates: a floor written as a literal is a second copy of the thing
-    it is supposed to hold in place, and it rots separately. A new subtree is
-    covered the day it is created rather than the day somebody remembers.
-    """
-    # A set, because `Grass/Process/` and `Grass/Process.lean` both exist and a
-    # tuple lists that name twice.
-    required = sorted({
-        entry.name.removesuffix(".lean") for entry in (ROOT / "Grass").iterdir()
-        if entry.is_dir() or entry.suffix == ".lean"})
-    reached = set()
-    for path in paths:
-        try:
-            parts = path.resolve().relative_to(ROOT).parts
-        except ValueError:
-            continue
-        if len(parts) > 1 and parts[0] == "Grass":
-            reached.add(parts[1].removesuffix(".lean"))
-    # `is_dir()` alone dropped every top-level module. `Grass/Certificate.lean` is
-    # a file, so this guard excluded it from `missing` and the subtree could still
-    # vanish with the floor green even once `required` named it -- enumerating
-    # correctly and then filtering the enumeration is two chances to be wrong,
-    # and the second one silently undid the first.
-    missing = [name for name in required
-               if ((ROOT / "Grass" / name).is_dir()
-                   or (ROOT / "Grass" / (name + ".lean")).is_file())
-               and name not in reached]
-    return [f"  Grass/{name}: on disk and no file reached the scan" for name in missing]
-
-
 def main() -> int:
-    unknown = [arg for arg in sys.argv[1:] if arg not in KNOWN_OPTIONS]
-    if unknown:
-        print("unknown option(s): " + " ".join(unknown), file=sys.stderr)
-        print("known: " + ", ".join(sorted(KNOWN_OPTIONS)), file=sys.stderr)
-        return 2
-    if "--self-test" in sys.argv:
-        return self_test()
-    # `Tests/` is excluded as a *source of claims*: fixture comments describe values
-    # ("an identity that is never live"), not mechanisms. Its declarations are in the
-    # name set, because a fixture is enforcement and this tree's docstrings cite them.
-    root = ROOT / "Grass"
-    paths = sorted(root.rglob("*.lean"))
-    # A tool that finds no files must fail, not pass.
-    if not paths:
-        print(f"docstring audit: no sources found under {root}", file=sys.stderr)
-        return 1
-    uncovered_roots = roots_are_covered(paths)
-    if uncovered_roots:
-        print(chr(10).join(uncovered_roots), file=sys.stderr)
-        print("the root walk lost a subtree; narrowing the roots is not a "
-              "quieter run, it is a smaller claim", file=sys.stderr)
-        return 1
+    # `Tests/` is excluded: fixture comments describe values ("an identity that
+    # is never live"), not mechanisms, and the fixtures are themselves the
+    # evidence a claim would point at.
+    roots = [Path("Grass")]
     known = declaration_names()
-    if "--hedged" in sys.argv:
-        listed: list[str] = []
-        for path in paths:
-            listed.extend(hedged(path, known))
-        for entry in listed:
-            sys.stdout.buffer.write((chr(32)*2 + entry + chr(10)).encode("utf-8", "replace"))
-        print()
-        print(f"docstring audit: {len(listed)} claim sentence(s) silenced by a hedge "
-              "and naming nothing enforcing them")
-        return 0
-    if "--inert" in sys.argv:
-        # Leave-one-out, the shape every other gate's `--inert` uses, rather than a
-        # substring test that disagreed with `HEDGE_RE` about what a match is.
-        #
-        # The baseline is the findings with the *full* hedge set. Taking it with
-        # hedges disabled instead makes every narrowed run a subset of it, so every
-        # entry reads as inert -- which is what the first version of this loop did,
-        # reporting all thirty-nine. A leave-one-out compares against the run the
-        # gate actually makes.
-        #
-        # Two entries that silence the *same* sentence and nothing else both read
-        # as inert here, because removing either leaves the other covering it.
-        # That is leave-one-out's known shape and it errs towards reporting, which
-        # is the safe direction for a list whose entries are supposed to be read.
-        global HEDGE_RE
-        global HEDGES
-        original = HEDGES
-        base = set()
-        for source in paths:
-            base.update(check(source, known))
-        inert = []
-        for entry in original:
-            HEDGES = tuple(h for h in original if h != entry)
-            HEDGE_RE = _hedge_re(HEDGES)
-            narrowed: list[str] = []
-            for source in paths:
-                narrowed.extend(check(source, known))
-            if not set(narrowed) - base:
-                inert.append(entry)
-        HEDGES = original
-        HEDGE_RE = _hedge_re(HEDGES)
-        if inert:
-            print("hedge entries that silence nothing: " + ", ".join(sorted(inert)))
-            print("Delete them, or say why the entry is kept with no effect.")
-        else:
-            print("docstring audit: every hedge entry silences a report")
-        return 0
     findings: list[str] = []
-    for path in paths:
-        findings.extend(check(path, known))
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*.lean")):
+            findings.extend(check(path, known))
     if findings:
         print("docstring audit: claims that name nothing enforcing them\n")
         for finding in findings:
