@@ -501,6 +501,8 @@ mod tests {
                 progress_tail: vec![],
                 next_seq: 1,
                 subscribed_topics: crate::scalars::StringSet::default(),
+                subscribed_topics_at: None,
+                scope_at: None,
             },
         );
     }

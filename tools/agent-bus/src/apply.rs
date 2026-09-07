@@ -416,6 +416,8 @@ fn apply_registered(state: &mut BusState, env: &Envelope, d: &AgentRegistered) -
             progress_tail: Vec::new(),
             next_seq: 1,
             subscribed_topics: crate::scalars::StringSet::default(),
+            subscribed_topics_at: None,
+            scope_at: None,
         },
     );
     Ok(())
@@ -644,6 +646,7 @@ fn apply_scope_set(state: &mut BusState, env: &Envelope, d: &ScopeSet) -> AbResu
         .get_mut(&env.agent)
         .expect("checked by require_active_role");
     ag.scope = Some(d.clone());
+    ag.scope_at = Some(env.id.clone());
     Ok(())
 }
 
@@ -2203,6 +2206,7 @@ fn apply_subscription_set(
     require_agent(state, &env.agent)?;
     let ag = state.agents.get_mut(&env.agent).expect("just checked");
     ag.subscribed_topics = d.topics.clone();
+    ag.subscribed_topics_at = Some(env.id.clone());
     Ok(())
 }
 
@@ -2257,6 +2261,30 @@ pub fn resolve_audience(
             .cloned()
             .collect(),
         Sel::AllActive => epoch.active_members.keys().cloned().collect(),
+    }
+}
+
+/// The event that last set the state `selector` resolves against for
+/// `agent`, if any.
+///
+/// `Agents`, `Roles` and `AllActive` resolve purely from the pinned
+/// `audience_epoch`, which is immutable once known -- nothing later can
+/// move them, so they have no provenance and any disagreement about them
+/// is the publisher's own. The other two read `subscribed_topics` and
+/// `scope`, each written by exactly one event kind (`subscription.set`
+/// and `scope.set`), last-writer-wins. `None` likewise means nothing ever
+/// set the field, so no unobserved event could explain a disagreement.
+fn audience_input_provenance(
+    state: &BusState,
+    selector: &crate::common::AudienceSelector,
+    agent: &Agent,
+) -> Option<EventId> {
+    use crate::common::AudienceSelector as Sel;
+    let ag = state.agents.get(agent)?;
+    match selector {
+        Sel::TopicSubscribers(_) => ag.subscribed_topics_at.clone(),
+        Sel::InterfaceDependents(_) => ag.scope_at.clone(),
+        Sel::Agents(_) | Sel::Roles(_) | Sel::AllActive => None,
     }
 }
 
@@ -2316,9 +2344,25 @@ fn apply_broadcast_published(
     }
     let resolved = resolve_audience(state, &d.audience_selector, epoch);
     let claimed: BTreeSet<Agent> = d.audience_snapshot.iter().cloned().collect();
-    if resolved != claimed {
+    // A disagreement is the publisher's fault only where the publisher had
+    // the information. `TopicSubscribers` and `InterfaceDependents` resolve
+    // against `subscribed_topics`/`scope`, which any agent may change at any
+    // time and which nothing here pins -- `audience_epoch` fixes the member
+    // set, and even a complete frontier fixes only that set, never where
+    // each member's stream had got to. So a `subscription.set` published
+    // concurrently with this broadcast changes the resolved answer, and
+    // rejecting on that alone would make whether the bus reduces *at all*
+    // depend on which of two unordered events a host replayed first --
+    // permanently, on every host, for one honest event. Reject only for a
+    // member whose deciding event this publisher had already observed.
+    if let Some(attributable) = resolved.symmetric_difference(&claimed).find(|agent| {
+        match audience_input_provenance(state, &d.audience_selector, agent) {
+            Some(at) => env.observed.validate_reference(&at).is_ok(),
+            None => true,
+        }
+    }) {
         return Err(invalid(format!(
-            "{}: audience_snapshot does not match resolving audience_selector against epoch {}",
+            "{}: audience_snapshot names the wrong audience for epoch {}: {attributable} differs and this event has observed the event that decides it",
             env.id, d.audience_epoch
         )));
     }
@@ -5406,9 +5450,13 @@ mod tests {
             [],
         );
         let err = apply_event(&mut state, &env).unwrap_err();
+        let msg = err.to_string();
+        // `AllActive` resolves purely from the pinned epoch, so there is no
+        // concurrent event that could excuse the omission and the message
+        // must say who was dropped.
         assert!(
-            err.to_string().contains("does not match resolving"),
-            "{err}"
+            msg.contains("audience_snapshot names the wrong audience") && msg.contains("bob"),
+            "{msg}"
         );
     }
 
@@ -8687,6 +8735,217 @@ mod tests {
         );
     }
 
+    /// A subscription change racing a broadcast must not make the bus
+    /// unreducible.
+    ///
+    /// `resolve_audience` for `TopicSubscribers` reads
+    /// `AgentState::subscribed_topics`, which is mutable derived state set by
+    /// `subscription.set`. A complete frontier does not pin it --
+    /// `validate_complete` checks that the frontier names the epoch's exact
+    /// active-member *set*, never their stream positions -- and an
+    /// informational broadcast needs only a sparse frontier anyway. So a
+    /// publisher resolves the audience against the view it had, someone
+    /// subscribes concurrently, and whether the snapshot "matches" depends
+    /// entirely on which event a host reduced first.
+    #[test]
+    fn a_subscription_racing_a_broadcast_reduces_in_either_order() {
+        let build = |subscribe_first: bool| {
+            let mut state = empty_state(&[
+                ("alice", Role::Implementor),
+                ("bob", Role::Implementor),
+                ("carol", Role::Implementor),
+            ]);
+            let (alice, bob, carol) = (a("alice"), a("bob"), a("carol"));
+            apply_ok(&mut state, &register(&alice, Role::Implementor));
+            apply_ok(&mut state, &register(&bob, Role::Implementor));
+            apply_ok(&mut state, &register(&carol, Role::Implementor));
+            let epoch = state.roster_epoch.as_ref().unwrap().clone();
+
+            // carol is already subscribed, and alice has seen that.
+            apply_ok(
+                &mut state,
+                &Envelope::new(
+                    &carol,
+                    1,
+                    no_frontier(),
+                    &EventData::SubscriptionSet(crate::events::SubscriptionSet {
+                        topics: StringSet::from_iter([topic("release.main")]),
+                    }),
+                    [],
+                ),
+            );
+
+            // bob subscribes too, concurrently with alice's broadcast.
+            let subscribe = Envelope::new(
+                &bob,
+                1,
+                no_frontier(),
+                &EventData::SubscriptionSet(crate::events::SubscriptionSet {
+                    topics: StringSet::from_iter([topic("release.main")]),
+                }),
+                [],
+            );
+            // alice publishes to that topic's subscribers, having resolved the
+            // audience before bob subscribed -- so the snapshot is empty.
+            let published = Envelope::new(
+                &alice,
+                1,
+                no_frontier(),
+                &EventData::BroadcastPublished(broadcast(
+                    epoch.id.clone(),
+                    crate::common::AudienceSelector::TopicSubscribers(topic("release.main")),
+                    &[&carol],
+                    crate::common::AckRequirement::None,
+                )),
+                [],
+            );
+
+            let order: Vec<&Envelope> = if subscribe_first {
+                vec![&subscribe, &published]
+            } else {
+                vec![&published, &subscribe]
+            };
+            for env in order {
+                apply_event(&mut state, env).unwrap_or_else(|e| {
+                    panic!(
+                        "reducing {} must not fail (subscribe_first={subscribe_first}): {e}",
+                        env.id
+                    )
+                });
+                state.kind_of_event_insert(env.id.clone(), &env.kind);
+                state.events.insert(env.id.clone(), env.clone());
+                if let Some(ag) = state.agents.get_mut(&env.agent) {
+                    ag.next_seq = env.seq + 1;
+                }
+            }
+            state
+        };
+
+        let publish_first = build(false);
+        let subscribe_first = build(true);
+        assert_eq!(
+            format!("{:#?}", publish_first.broadcasts),
+            format!("{:#?}", subscribe_first.broadcasts),
+            "both valid orders must converge on the same broadcast state"
+        );
+    }
+
+    /// The concession above is causal, not blanket: a publisher that had
+    /// already observed the subscription is still held to it.
+    ///
+    /// Without this, "tolerate a mismatch" would degrade `audience_snapshot`
+    /// into an unchecked field -- gate 12 ("audience resolution is exact")
+    /// would be satisfied by nothing at all, and any agent could name any
+    /// audience it liked.
+    #[test]
+    fn an_observed_subscription_still_binds_the_audience_snapshot() {
+        let mut state = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Implementor),
+            ("carol", Role::Implementor),
+        ]);
+        let (alice, bob, carol) = (a("alice"), a("bob"), a("carol"));
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        apply_ok(&mut state, &register(&carol, Role::Implementor));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
+
+        let subscribe = Envelope::new(
+            &bob,
+            1,
+            no_frontier(),
+            &EventData::SubscriptionSet(crate::events::SubscriptionSet {
+                topics: StringSet::from_iter([topic("release.main")]),
+            }),
+            [],
+        );
+        let subscribe_id = subscribe.id.clone();
+        apply_ok(&mut state, &subscribe);
+        apply_ok(
+            &mut state,
+            &Envelope::new(
+                &carol,
+                1,
+                no_frontier(),
+                &EventData::SubscriptionSet(crate::events::SubscriptionSet {
+                    topics: StringSet::from_iter([topic("release.main")]),
+                }),
+                [],
+            ),
+        );
+
+        // alice has bob's subscription in its frontier and omits bob anyway.
+        let err = apply_event(
+            &mut state,
+            &Envelope::new(
+                &alice,
+                1,
+                frontier_seeing(&[&subscribe_id]),
+                &EventData::BroadcastPublished(broadcast(
+                    epoch.id.clone(),
+                    crate::common::AudienceSelector::TopicSubscribers(topic("release.main")),
+                    &[&carol],
+                    crate::common::AckRequirement::None,
+                )),
+                [],
+            ),
+        )
+        .expect_err("an observed subscriber may not be dropped from the snapshot");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("bob") && msg.contains("observed the event that decides it"),
+            "the message must name who differs and why it is chargeable: {msg}"
+        );
+    }
+
+    /// And a member that never subscribed at all cannot be smuggled in:
+    /// with no provenance there is no unobserved event to blame.
+    #[test]
+    fn an_invented_audience_member_is_rejected_with_no_provenance_to_excuse_it() {
+        let mut state = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Implementor),
+            ("carol", Role::Implementor),
+        ]);
+        let (alice, bob, carol) = (a("alice"), a("bob"), a("carol"));
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        apply_ok(&mut state, &register(&carol, Role::Implementor));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
+        apply_ok(
+            &mut state,
+            &Envelope::new(
+                &carol,
+                1,
+                no_frontier(),
+                &EventData::SubscriptionSet(crate::events::SubscriptionSet {
+                    topics: StringSet::from_iter([topic("release.main")]),
+                }),
+                [],
+            ),
+        );
+
+        // bob has never published a `subscription.set`, so naming bob is not
+        // a stale read -- it is an invention.
+        let err = apply_event(
+            &mut state,
+            &Envelope::new(
+                &alice,
+                1,
+                no_frontier(),
+                &EventData::BroadcastPublished(broadcast(
+                    epoch.id.clone(),
+                    crate::common::AudienceSelector::TopicSubscribers(topic("release.main")),
+                    &[&carol, &bob],
+                    crate::common::AckRequirement::None,
+                )),
+                [],
+            ),
+        )
+        .expect_err("a never-subscribed agent may not be named in the snapshot");
+        assert!(err.to_string().contains("bob"), "{err}");
+    }
+
     /// A reviewer's own `review.merged` racing a coordinator's
     /// `review.merge_reconciled` for the same authorization must not make the
     /// bus unreducible.
@@ -8696,30 +8955,6 @@ mod tests {
     /// Both reference the authorization; neither references the other. They
     /// are concurrent, both orders are valid, and rejecting the second one is
     /// fatal to reduction on every host.
-    /// A blocking issue opened concurrently with an authorization must not
-    /// make the bus unreducible.
-    ///
-    /// `blocking_issue_for_chain` scans *every* issue, and an `issue.opened`
-    /// carrying `blocks` has no causal edge to a `review.merge_authorized`:
-    /// the issue references the chain event, the authorization does not
-    /// reference the issue. So both orders are valid linear extensions, and
-    /// they disagree -- authorization-first succeeds, issue-first returns
-    /// `Err`. With no per-event isolation in `reduce`, that `Err` is every
-    /// host unable to reduce the bus at all.
-    ///
-    /// The policy is right and is not what changes here: an authorization
-    /// published against a chain that turns out to be blocked should not take
-    /// effect. It simply must not be *fatal*, for the same reason
-    /// `apply_review_reassigned` already treats "already merged" as a no-op.
-    /// Gates 15/16 for the acknowledge-versus-reassign race: two valid,
-    /// dependency-respecting orders of the same events must reduce to
-    /// identical state.
-    ///
-    /// This is the test that rejects the tempting version of the fix. Simply
-    /// dropping a superseded acknowledgement unblocks reduction and looks
-    /// correct in isolation, but leaves `acknowledged_assignments` dependent
-    /// on arrival order -- so two hosts that fetched the same streams in
-    /// different orders diverge silently and permanently.
     #[test]
     fn a_merged_receipt_racing_a_reconciliation_reduces_in_either_order() {
         let build = |reconcile_first: bool| {
@@ -8818,6 +9053,21 @@ mod tests {
         );
     }
 
+    /// A blocking issue opened concurrently with an authorization must not
+    /// make the bus unreducible.
+    ///
+    /// `blocking_issue_for_chain` scans *every* issue, and an `issue.opened`
+    /// carrying `blocks` has no causal edge to a `review.merge_authorized`:
+    /// the issue references the chain event, the authorization does not
+    /// reference the issue. So both orders are valid linear extensions, and
+    /// they disagree -- authorization-first succeeds, issue-first returns
+    /// `Err`. With no per-event isolation in `reduce`, that `Err` is every
+    /// host unable to reduce the bus at all.
+    ///
+    /// The policy is right and is not what changes here: an authorization
+    /// published against a chain that turns out to be blocked should not take
+    /// effect. It simply must not be *fatal*, for the same reason
+    /// `apply_review_reassigned` already treats "already merged" as a no-op.
     #[test]
     fn an_issue_blocking_a_chain_does_not_make_a_published_authorization_fatal() {
         let build = |issue_first: bool| {
@@ -8904,6 +9154,15 @@ mod tests {
         );
     }
 
+    /// Gates 15/16 for the acknowledge-versus-reassign race: two valid,
+    /// dependency-respecting orders of the same events must reduce to
+    /// identical state.
+    ///
+    /// This is the test that rejects the tempting version of the fix. Simply
+    /// dropping a superseded acknowledgement unblocks reduction and looks
+    /// correct in isolation, but leaves `acknowledged_assignments` dependent
+    /// on arrival order -- so two hosts that fetched the same streams in
+    /// different orders diverge silently and permanently.
     #[test]
     fn an_ack_racing_a_reassignment_converges_in_either_order() {
         let alice = a("alice");

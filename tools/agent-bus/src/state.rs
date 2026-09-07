@@ -170,6 +170,18 @@ pub struct AgentState {
     /// here since they are derived from `primary_role`/`scope`, not
     /// separately declared.
     pub subscribed_topics: crate::scalars::StringSet<crate::scalars::CoordinationTopic>,
+    /// The `subscription.set` that produced `subscribed_topics`, and the
+    /// `scope.set` that produced `scope`. These two fields are the only
+    /// mutable per-agent state an audience selector resolves against
+    /// (`TopicSubscribers` and `InterfaceDependents` respectively), and
+    /// nothing pins them: a broadcast's `audience_epoch` fixes the member
+    /// set, not where each member's stream had got to. Recording which
+    /// event last moved them lets `broadcast.published` ask whether a
+    /// publisher had actually *seen* the change it failed to account for,
+    /// instead of failing whenever an unrelated concurrent event happens
+    /// to reduce first. `None` means nothing ever set the field.
+    pub subscribed_topics_at: Option<EventId>,
+    pub scope_at: Option<EventId>,
 }
 
 impl AgentState {
