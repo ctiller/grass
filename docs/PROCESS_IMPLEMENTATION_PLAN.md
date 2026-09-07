@@ -5416,6 +5416,15 @@ alone, which is decision 134's authoring-surface constraint applied to the field
 `g-design:84` added. `Tools/DocstringAudit.py` cannot see citations like this and
 that gap is reported to the gate's owner.
 
+Declaring it is only half the repair, and the other half is the check this
+sequence keeps failing: a lemma with no consumer and an unsatisfiable hypothesis
+would be exactly the shape §10.105 refuses.
+`Tests/Process/PreservationFixtures.lean`'s `the_connection_writes_nothing`
+inhabits the hypothesis at a real role — `serverTopology`'s connection may write
+neither region — and `theConnectionOwesNoValueBound` is the consumer. Both were
+written because the previous four rounds would have asked, which is the point of
+running them.
+
 **What four rounds have established, which is worth stating plainly.** No round
 found a defect in a proof. Every defect was a sentence asserting more than the
 declaration under it, a count written from memory, or a clause nothing could

@@ -745,6 +745,48 @@ theorem sent_holds_an_unkilled_root : serverPlan.UnkilledRootAt sent .listener (
 
 
 
+/-! #### And a role that may write nothing owes nothing
+
+`NetworkTransition.sharedWritesAdmitted_of_no_writes` was cited by two docstrings
+and declared by neither until §10.136. Declaring it is only half the repair: a
+lemma with no consumer and an unsatisfiable hypothesis would be the shape this
+ledger refuses. Both halves are here.
+-/
+
+/-- **`serverTopology`'s connection role may write no region.**
+
+`sharedAccess .connection .routeTable` is `.readOnly` and
+`sharedAccess .connection .acceptCount` is `.none`, and `mayWrite` is `false` in
+both — so the hypothesis of `sharedWritesAdmitted_of_no_writes` is satisfiable at
+a real role of a real plan rather than only in principle. The listener is the
+contrast: it may write `.acceptCount`, which is what
+`Tests/Process/ProcessStepFixtures.lean`'s `the_listener_counts` spends. -/
+theorem the_connection_writes_nothing (region : serverTopology.SharedRegion) :
+    (serverTopology.sharedAccess .connection region).mayWrite = false := by
+  cases region <;> rfl
+
+/-- And the consumer: at that role, `sharedWritesAdmitted` follows from
+`writesPermitted` with no argument about values at all. -/
+theorem theConnectionOwesNoValueBound {before after : ServerWorld}
+    {slot : serverTopology.InstanceId Role.connection}
+    {event : (serverTopology.protocol Role.connection).Event}
+    {issued : Bag (serverTopology.protocol Role.connection).Demand}
+    {localEmitted : ObservationSegment (serverTopology.protocol Role.connection).Observation}
+    (permitted : ∀ region, before.shared region ≠ after.shared region →
+      (serverTopology.sharedAccess Role.connection region).mayWrite = true) :
+    ∀ region, before.shared region ≠ after.shared region →
+      ∀ (fromInstance toInstance : ProcessInstance serverTopology)
+        (fromKind : fromInstance.kind = Role.connection)
+        (toKind : toInstance.kind = Role.connection),
+        before.instances Role.connection slot = some fromInstance →
+        after.instances Role.connection slot = some toInstance →
+        serverPlan.sharedUpdate Role.connection event (fromKind ▸ fromInstance.localState)
+          (toKind ▸ toInstance.localState) issued localEmitted region
+          (before.shared region) (after.shared region) :=
+  ProcessPlan.sharedWritesAdmitted_of_no_writes (plan := serverPlan)
+    (before := before) (after := after) (slot := slot) (event := event) (issued := issued)
+    (localEmitted := localEmitted) the_connection_writes_nothing permitted
+
 /-! #### And a dead instance with no parent, which a detach reaches
 
 The refutation §10.133 records. `NetworkTransition.dying_was_supervised` says a
