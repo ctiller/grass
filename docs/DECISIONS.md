@@ -844,7 +844,8 @@ to imitate compiler-selected storage or CFG structure.
     substitute a different dictionary semantics. Every effect-generated
     operation has a registered origin, and sequential, explicit, and blended
     Process sources derive one coverage-complete, conservative provider-demand
-    family from their selected boundary and complete protocol registries; local
+    family from their selected boundary and every selected plan role, with
+    bidirectional coverage/no-extra/descriptor-exactness proofs; local
     operation origins point into that family. The generic sequential source also
     retains an exact dependent `DirectProgramDerivation`; the Effect adapter
     stores its program/model/progress/adapter proof there while provider demands

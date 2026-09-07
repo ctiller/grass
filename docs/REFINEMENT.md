@@ -442,8 +442,8 @@ structure EquivalentProviderRealizesEffectPlan ... extends
 
 The Effect adapter stores this demand in the registered origin of every
 generated effect-operation site. Sequential, explicit, and blended sources
-derive one conservative provider-demand union from the selected boundary and
-complete declared protocol registry, including unused protocols.
+derive one conservative provider-demand summary from the selected boundary and
+every protocol selected by a plan role, including roles unused by one execution.
 `ProjectedDriverCertificate.originRequirementConnections` consumes the
 resulting dependent family against its exact `ProviderEnv`: provider-owned
 members are discharged, while every memory/resource/obligation/ABI/ISA or later

@@ -405,12 +405,8 @@ a process plan rather than one giant state record:
 ```lean
 structure ProtocolRegistry where
   Key : Type
-  keys : List Key
-  complete : forall key, key \u2208 keys
-  unique : keys.Nodup
   protocol : Key -> ProcessSpec
-  providerOriginsCompatible : PairwiseProtocolProviderOriginsCompatible
-    keys protocol
+  scope : Key -> ScopeId
 
 structure DriverBoundary where
   ExternalEvent : Type
@@ -658,24 +654,28 @@ structure ProcessPlan (registry : ProtocolRegistry) (boundary : DriverBoundary)
     ChannelContract toProcessTopology (Message edge)
       (logicalWorldAgreement toProcessTopology Message) edge
   boundaryProjection : RootLocalDemandProjection toProcessTopology boundary
-  boundaryProviderOriginsCompatible : OriginsDisjointOrDescriptorsExact
-    boundary.providerDemands registry.providerDemandUnion
+  providerDemands : ProviderDemandFamily
+  providerCoverage : EveryBoundaryAndSelectedRoleDemandOriginOccursIn
+    boundary registry toProcessTopologyCore providerDemands
+  providerNoExtras : EveryProviderDemandOriginComesFromBoundaryOrSelectedRole
+    boundary registry toProcessTopologyCore providerDemands
+  providerDescriptorsExact : EveryCoveredOriginRetainsExactDescriptor
+    boundary registry toProcessTopologyCore providerDemands
 
 abbrev LogicalProcessNetwork (plan : ProcessPlan registry boundary) :=
   LogicalProcessNetworkCore plan.toProcessTopology plan.Message
 ```
 
-`ProcessPlan.providerDemands` is a definition: the membership-extensional,
-duplicate-compatible union of `boundary.providerDemands` and every protocol
-vocabulary's provider family in the exact finite `registry`. This deliberately
-includes an unused declared protocol rather than attempting an undecidable
-reachability subtraction. `ProcessPlanRealizes` proves every reachable demand's
-origin projects to the corresponding union member. Authors never maintain a
-second plan-level list.
-The registry's complete duplicate-free key list makes the fold finite;
-`providerOriginsCompatible` and `boundaryProviderOriginsCompatible` are its
-constructive union premises. Standard hierarchical registry builders derive
-both, while a true origin collision is a local construction error.
+`ProtocolRegistry` remains the open, scoped registry implemented by sum merges;
+its key type is not forced into a closed whole-program finite enumeration.
+`ProcessPlan.providerDemands` is instead one finite extensional summary of the
+boundary plus every protocol selected by a `ProcessKind`. `providerCoverage`,
+`providerNoExtras`, and `providerDescriptorsExact` make that summary exact in
+both directions without deciding reachability or enumerating the registry. An
+unused selected role therefore remains conservatively included. Hierarchical
+plan/shard constructors generate the family and the three proofs; applications
+do not maintain a second list. A true origin collision fails at the composing
+constructor.
 
 `ProcessTopologyCore` is the graph, population, channel-endpoint, and spawn
 object every plan needs. `requiredTopologyFacets` derives its result from the
@@ -1693,7 +1693,7 @@ plan; its separate local origin proof connects every generated site to the
 corresponding member. Repackaging the same program with another
 `DirectProgramRealizes` proof cannot change `program.originDemands`. Nested
 Effect-generated protocols in explicit and blended plans remain in the
-coverage-complete declared-registry union even when one execution does not reach
+coverage-complete selected-role union even when one execution does not reach
 them.
 
 The ordinary authoring interface is a typed sequential effect machine:
