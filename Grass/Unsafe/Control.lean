@@ -125,4 +125,49 @@ structure ClosedImport {Instruction : Type u} {Target : Type v} {Site : Type w}
   evidence : ControlEvidence raw model
   closed : evidence.WellFormed
 
+/-- Structured reason control-target evidence could not be closed. -/
+inductive ControlEvidenceError (Target : Type v) (Site : Type w) where
+  | duplicateAdmittedTargets (targets : List Target)
+  | duplicateDemandedSites (sites : List Site)
+  | indirectSitesMismatch (selected demanded : List Site)
+  | unresolvedDirect (demands : List (LocatedControlDemand Target Site))
+  | invalidIndirectSelections (selections : List (IndirectSelection Target Site))
+deriving Repr, DecidableEq
+
+namespace ControlEvidence
+
+variable {Instruction : Type u} {Target : Type v} {Site : Type w}
+  {raw : RawHierarchy Instruction} {model : ControlModel Instruction Target Site}
+  [DecidableEq Target] [DecidableEq Site]
+
+/-- Check raw control evidence totally, returning either a closed package or the
+first structural failure in checker order. -/
+def close (evidence : ControlEvidence raw model) :
+    Except (ControlEvidenceError Target Site) (ClosedImport model) :=
+  if admittedUnique : evidence.admittedTargets.Nodup then
+    if sitesUnique : evidence.demandedIndirectSites.Nodup then
+      if sitesExact : evidence.selectedIndirectSites = evidence.demandedIndirectSites then
+        if directClosed : evidence.unresolvedDirect = [] then
+          if indirectClosed : evidence.indirectSelectionsValid = true then
+            .ok {
+              raw := raw
+              evidence := evidence
+              closed := by
+                simp [WellFormed, wellFormed, admittedUnique, sitesUnique,
+                  sitesExact, directClosed, indirectClosed]
+            }
+          else
+            .error (.invalidIndirectSelections evidence.indirect)
+        else
+          .error (.unresolvedDirect evidence.unresolvedDirect)
+      else
+        .error (.indirectSitesMismatch evidence.selectedIndirectSites
+          evidence.demandedIndirectSites)
+    else
+      .error (.duplicateDemandedSites evidence.demandedIndirectSites)
+  else
+    .error (.duplicateAdmittedTargets evidence.admittedTargets)
+
+end ControlEvidence
+
 end Grass.Unsafe
