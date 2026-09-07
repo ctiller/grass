@@ -168,7 +168,7 @@ forwarded family.
 ```lean
 structure PortableProgramCertificate {R : Type u} [ResourceModel R]
     {resources : R} (spec : SpecProcess resources) where
-  model : PortableProcessModel spec.driverBoundary
+  model : PortableProcessModel spec
   correctness : ModelSatisfiesSpecification model spec
   boundary : ProcessBoundary
   exportsBoundary : ModelExportsBoundary model boundary
@@ -263,7 +263,7 @@ memory, concurrency, progress, termination, resource, obligation,
 applicability, diagnostic, and artifact theorems. Grouping them by dependency
 tier does not conflate their statements or make one theorem discharge another.
 
-`VerifiedProgram` remains indexed only by the precious `spec`. `portable.model.origin`
+`VerifiedProgram` remains indexed only by the precious `spec`. `portable.model.processOrigin`
 records whether the plan was synthesized from a sequential relational program
 or explicitly authored; both have already elaborated to the same universal
 process algebra. The exact registry, population, local/shared state partition,

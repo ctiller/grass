@@ -453,12 +453,11 @@ every protocol selected by a plan role, including roles unused by one execution.
 resulting dependent family against its exact `ProviderEnv`: provider-owned
 members are discharged, while every memory/resource/obligation/ABI/ISA or later
 member is forwarded with its original origin into the next staged family. For an
-Effect origin, `requirementConnections` is the local constructor. Equal names or
+Effect origin, `requirementConnections` is the local constructor.
 `requirementConnections_forwardedExact` is the authority-preserving bridge from
 that returned disposition to the certificate summary; projected-driver
 construction consumes it rather than reading `forwardedRequirements` alone.
-Equal names or
-equal requirement sets cannot substitute a
+Equal requirement names or sets cannot substitute a
 different effect theory, operation history, observation lens, or provider
 dictionary. The base theorem is directed refinement. Coverage/reflection is
 required only when the selected claim is equivalence or explicitly preserves
