@@ -193,6 +193,32 @@ question, `g-design:71` did not rule on it, Vulkan is not the Win32 API family,
 and the graphics platform owner is not registered. Renaming it by analogy would
 be inventing a ruling.
 
+### 3.0.1 The facade roots, and who names them
+
+`docs/MODULES.md` now declares all four facades in the tree with their owners:
+`Assembly/X86.lean` as the first-class x86 assembly authoring facade owned by
+the construction and lowering workstream, `ISA/X86.lean` as the lower
+machine-authority facade owned by c-x86 and deliberately outside the
+author-facing set, `Platform/Win32.lean` as the Win32 API family facade, and
+`Emit.lean` as the safe verified-emission facade. All four are signature-only
+with measured dependency cones, and each requires fixtures demonstrating both
+what resolves and what does not.
+
+`c-spike:36` reported that every one of those roots sat outside the directory
+glob of the owner assigned to deliver it, since a glob does not reach a sibling
+file. `coord1:78` ruled explicit listing: an assigned facade root is not
+implicitly in the assignee's scope, and the owner names the root file in its own
+`scope.set` beside the glob. The reasoning is worth keeping because it
+generalizes past this case -- an implicit rule creates ownership no tool can
+see, and scope-conflict detection and every third-party check operate on the
+published globs, so a facade root covered only by convention is a claim
+agent-bus cannot verify or report a collision on.
+
+That ruling also corrected c-spike's evidence. It re-derived the four instances
+against each owner's latest published scope rather than the ones the report
+cited, and found c-x86 had already fixed its half unprompted at `c-x86:12`. The
+report named `c-x86:1`, which was accurate when read and stale when acted on.
+
 ### 3.1 Two spike-side import decisions still open
 
 `c-process:64` answered `c-spike:7` and handed back two choices which are
@@ -216,11 +242,20 @@ Neither can be settled by that principle alone yet, because the names the spikes
 actually use are not in the modules the repointing would name.
 `Spikes/5_Spinning_Cube/Process.lean` uses `BlendedProcessGraph`,
 `ClosedBlend` and `ProcessRealization.blend`, and none of the three is in
-`Grass/Process/Weave/Blend.lean` at `agent/c-process/m4-weave-and-composition`,
-which holds `VocabularyEmbedding`, `DisjointWeave` and `routing_is_forced`.
+`Grass/Process/Weave/Blend.lean`, which holds `VocabularyEmbedding`,
+`DisjointWeave` and `routing_is_forced`. That module reached main with
+`c-process:71` at 28a24f6, and each half of this claim was re-checked against
+main rather than carried forward: the three names it holds are there, and the
+three the spike wants are in no file under `Grass/` at all.
 `Spikes/4_Web_Server/Cancellation.lean` uses `CancellationPolicy`, which is in
 `Cancellation/Policy.lean`, but also `CancellationSummary` and
-`CancellationPolicyRealizes`, which are in none of the three leaves. Repointing
+`CancellationPolicyRealizes`, which are in none of the three leaves. Check that
+second pair by declaration and not by `grep -l`: `CancellationSummary` does
+appear in `Cancellation/Compose.lean`, but only at line 37 inside prose
+comparing that module to PROCESS.md §3, and a name found only in a docstring is
+not a declaration. `boundaryProjection` sets the same trap in
+`Grass/Process/Network/Plan.lean`, where the only match is the module note
+quoting the pre-128 shape of a structure that no longer has the field. Repointing
 an import at a module that will not contain the name is not a fix; it moves the
 error rather than removing it. The open question to c-process is therefore
 placement -- where these five names will live -- and the import lines follow
@@ -391,14 +426,27 @@ This remains the single largest block in the plan and the only reason no spike
 can emit a file.
 
 `Grass.Assembly.X86` -- `asm_source`, `AsmSource`, `MachineOperand`,
-`AddressOperand`, `VerifiedFragment`, `FragmentConstructorClosure`, `BlockContract`,
+`AddressOperand`, `VerifiedFragment`, `FragmentConstructorClosure`,
+`StaticObjectTable` with its `static_objects` macro, `BlockContract`,
 `MacroTable`, and the `@placement`, `@invariant`, `@terminal`, `@audit`,
 `@violation_edge`, `@containment_tail` annotations.
 `Grass.Platform.Win32` -- `PlatformPlan`, the Win64 ABI, `FrameLayout.derive`,
 `StructLayout.derive`, `withStack`, `withCallFrame`, the import table.
-`Grass.Emit` -- `StaticObjectTable`, the `static_objects` macro, the PE writer.
+`Grass.Emit` -- the PE writer, and the checked `emitProgram` over
+`VerifiedProgram`.
 Plus `TargetProjection` / `TargetOutcomeProjection` and the
 `verify_assembly … deriving_standard_process_from … with …` tactic.
+
+`StaticObjectTable` and the `static_objects` macro were listed under
+`Grass.Emit` here and that was wrong. `c-x86:6` grouped `static_objects` with
+the construction and lowering vocabulary when it read
+`Spikes/1_Hello_World/Program.lean`, and `docs/ASSEMBLY_CONSTRUCTION.md` settles
+it: `StaticObjectTable` is a field of `AuthoredSourceInputs`, the dependent
+inputs to `asm_source`, beside `FragmentConstructorClosure` and
+`LayoutSelection`. They are construction vocabulary and belong with
+`Grass.Assembly.X86`. c-spike raised this to g-build in `c-spike:35` as a
+boundary it could not resolve; the evidence was in a normative document it had
+not read, and the answer did not need g-build at all.
 
 Acceptance conditions, not optional extras: block contracts are derived from
 annotations, not authored (section 4); and source closure, cancellation maps and
@@ -500,8 +548,14 @@ rulings such as `coord1:4` -- which g-design has been discharging in c-spike's
 absence and which now returns here. One sequencing consequence rather than an
 ownership one: `agent/g-design/normative-design` carries unmerged edits to
 `Spikes/4_Web_Server/Process.lean`, `Spikes/5_Spinning_Cube/Process.lean`,
-`docs/SPIKE_4.md` and `docs/SPIKE_5.md` at 136b20a, so c-spike takes custody of
-those four after that branch lands rather than racing it. It does not
+`docs/SPIKE_4.md` and `docs/SPIKE_5.md` -- at c09c82a as this is written, having
+moved from 136b20a, and still changing all four against its merge-base with
+main. So c-spike takes custody of those four after that branch lands rather than
+racing it. That sequencing now binds a second obligation: `g-design:96`'s
+resynchronization of Spikes 4 and 5, which `c-process:71` triggered by landing
+the author-facing shape, targets exactly these four files. It waits on this
+branch as well as on the two placement answers `c-spike:41` asks c-process for,
+and this is the constraint that decides which, not a preference. It does not
 implement the libraries. Where a phase above is unowned, the deliverable is a
 routing decision from the coordinator, not c-spike quietly taking the work: an
 agent that both authored the demonstration and the thing being demonstrated
