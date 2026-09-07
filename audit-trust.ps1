@@ -244,6 +244,8 @@ try {
 
     $rootNonvacuityProbe = @(
         "import Grass.Trust.Audit",
+        "open Grass",
+        "def passthrough {spec : SpecProcess} (verified : VerifiedProgram spec) : VerifiedProgram spec := verified",
         "#audit_verified_programs"
     )
     [System.IO.File]::WriteAllLines($temporaryPath, $rootNonvacuityProbe)
@@ -251,7 +253,7 @@ try {
     if ($LASTEXITCODE -eq 0 -or
         -not ($rootNonvacuityOutput -match "trust audit found no concrete VerifiedProgram declarations")) {
         $rootNonvacuityOutput | ForEach-Object { Write-Host $_ }
-        throw "Trust audit accepted generated constructor machinery as a concrete certificate root."
+        throw "Trust audit accepted generated constructor machinery or a certificate pass-through as a concrete root."
     }
 
     $irreducibleDiscoveryProbe = @(

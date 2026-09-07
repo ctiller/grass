@@ -9,8 +9,8 @@ import Grass.Verify.VerifiedProgram
 # VerifiedProgram trust-root audit
 
 The command inspects elaborated declarations in the Lean environment. It does
-not guess roots from source syntax: it discovers direct `VerifiedProgram`
-producers from their types, follows the transitive dependency closure of all
+not guess roots from source syntax: it discovers closed `VerifiedProgram`
+values from their types, follows the transitive dependency closure of all
 certificate-bearing and emission-consuming declarations across imported
 modules, and audits every declaration originating in a Grass library or test
 module. It also follows downstream runtime dependencies and rejects unverified
@@ -50,9 +50,11 @@ private def isGeneratedFlatConstructor
 private def allowedAxiom (name : Name) : Bool :=
   name == ``propext || name == ``Classical.choice || name == ``Quot.sound
 
-private def producesVerifiedProgram (type : Expr) : MetaM Bool :=
+private def producesClosedVerifiedProgram (type : Expr) : MetaM Bool :=
   withTransparency .all do
-    forallTelescopeReducing type fun _ result => do
+    forallTelescopeReducing type fun parameters result => do
+      unless parameters.isEmpty do
+        return false
       let reduced ← whnf result
       return reduced.getAppFn.constName? == some ``Grass.VerifiedProgram
 
@@ -250,7 +252,7 @@ elab "#audit_runtime_dependencies " declaration:ident : command => do
   logInfo m!"runtime dependency audit passed for '{name}' across \
     {runtimeDependencies.size} declaration(s)"
 
-/-- Audit every project declaration and report direct `VerifiedProgram` roots.
+/-- Audit every project declaration and report closed `VerifiedProgram` roots.
 
 `audit-trust.ps1` invokes `auditVerifiedPrograms` from a nonce-named local
 command declared after importing the modules under inspection, then requires
@@ -262,7 +264,7 @@ def auditVerifiedPrograms : CommandElabM Unit := do
   let mut roots := #[]
   for (name, info) in declarations do
     if !isGeneratedFlatConstructor environment name && isRootCandidate info &&
-        (← liftTermElabM <| producesVerifiedProgram info.type) then
+        (← liftTermElabM <| producesClosedVerifiedProgram info.type) then
       roots := roots.push (name, info)
   if roots.isEmpty then
     throwError "trust audit found no concrete VerifiedProgram declarations"
