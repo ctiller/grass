@@ -158,7 +158,7 @@ example : ¬ BoundaryCompatible (contractFrom 0 2) (contractFrom 3 1) := by
   intro claimed
   have firstExit : ClassifiesExactlyOneExit (contractFrom 0 2) 2 := by
     apply first.localCorrect 0 2 rfl
-    rfl
+    simp [semantics, first, addFrom, eval, evalInstruction]
   have impossible := claimed 2 firstExit
   simp [contractFrom] at impossible
 
