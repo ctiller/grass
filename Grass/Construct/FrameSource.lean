@@ -5,7 +5,7 @@ import Grass.Construct.Fragment.Source
 # Transparent frame instruction sources
 
 `FrameSourceBackend` supplies machine-owned instruction constructors.
-`enter`, `leave`, `spill?`, and `reload?` only assemble inspectable
+`save`, `restore`, `enter`, `leave`, `spill?`, and `reload?` only assemble inspectable
 `Fragment.Source` values from a checked frame; they do not manufacture a
 `Fragment.VerifiedFragment` or any semantic certificate.
 -/
@@ -29,11 +29,21 @@ namespace FrameSourceBackend
 
 variable {Instruction : Type u} {profile : LayoutProfile}
 
+/-- Saved-register source in the frame plan's selected order. -/
+def save (backend : FrameSourceBackend Instruction)
+    (frame : CheckedWin64Frame profile) : Source Instruction :=
+  .literal (frame.plan.saved.map backend.push)
+
+/-- Saved-register restoration source in reverse selected order. -/
+def restore (backend : FrameSourceBackend Instruction)
+    (frame : CheckedWin64Frame profile) : Source Instruction :=
+  .literal (frame.plan.saved.reverse.map backend.pop)
+
 /-- Prologue source in saved-register order, followed by stack subtraction. -/
 def enter (backend : FrameSourceBackend Instruction)
     (frame : CheckedWin64Frame profile) : Source Instruction :=
   .sequence [
-    .literal (frame.plan.saved.map backend.push),
+    backend.save frame,
     .literal (backend.subtractRsp frame.plan.subtracted)
   ]
 
@@ -42,7 +52,7 @@ def leave (backend : FrameSourceBackend Instruction)
     (frame : CheckedWin64Frame profile) : Source Instruction :=
   .sequence [
     .literal (backend.addRsp frame.plan.subtracted),
-    .literal (frame.plan.saved.reverse.map backend.pop)
+    backend.restore frame
   ]
 
 private def object? (frame : CheckedWin64Frame profile) (name : Name) :=
@@ -63,6 +73,16 @@ def reload? (backend : FrameSourceBackend Instruction)
   (object? frame name).map fun object =>
     let offset := frame.plan.shadowBytes + frame.plan.stackArgumentBytes + object.offset
     .literal (backend.reload register offset)
+
+@[simp] theorem save_expand (backend : FrameSourceBackend Instruction)
+    (frame : CheckedWin64Frame profile) :
+    (backend.save frame).expand = frame.plan.saved.map backend.push := by
+  simp [save]
+
+@[simp] theorem restore_expand (backend : FrameSourceBackend Instruction)
+    (frame : CheckedWin64Frame profile) :
+    (backend.restore frame).expand = frame.plan.saved.reverse.map backend.pop := by
+  simp [restore]
 
 @[simp] theorem enter_expand (backend : FrameSourceBackend Instruction)
     (frame : CheckedWin64Frame profile) :

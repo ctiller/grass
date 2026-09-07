@@ -28,6 +28,8 @@ private def plan : Win64FramePlan profile :=
 private def frame : CheckedWin64Frame profile :=
   ⟨plan, by native_decide⟩
 
+example : (backend.save frame).expand = [.push .rbx, .push .r12] := by native_decide
+example : (backend.restore frame).expand = [.pop .r12, .pop .rbx] := by native_decide
 example : (backend.enter frame).expand =
     [.push .rbx, .push .r12, .sub frame.plan.subtracted] := by native_decide
 example : (backend.leave frame).expand =

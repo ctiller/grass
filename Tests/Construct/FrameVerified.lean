@@ -39,15 +39,21 @@ private def verified (source : Source Instruction) :
 
 private def backend : FrameVerifiedBackend Instruction Unit Nat semantics effects where
   source := sourceBackend
+  saveContract _ := contract
+  restoreContract _ := contract
   enterContract _ := contract
   leaveContract _ := contract
   slotContract _ _ _ := contract
+  saveVerified frame := verified (sourceBackend.save frame)
+  restoreVerified frame := verified (sourceBackend.restore frame)
   enterVerified frame := verified (sourceBackend.enter frame)
   leaveVerified frame := verified (sourceBackend.leave frame)
   spillVerified _ slot register :=
     verified (.literal (sourceBackend.spill register slot.absoluteOffset))
   reloadVerified _ slot register :=
     verified (.literal (sourceBackend.reload register slot.absoluteOffset))
+  saveSourceExact _ := rfl
+  restoreSourceExact _ := rfl
   enterSourceExact _ := rfl
   leaveSourceExact _ := rfl
   spillSourceExact _ _ _ := rfl
@@ -62,6 +68,10 @@ private def plan : Win64FramePlan profile := ⟨layout, [.rbx], 0, 32, 48⟩
 private def frame : CheckedWin64Frame profile := ⟨plan, by native_decide⟩
 private def slot : FrameObjectRef frame := ⟨object, by simp [frame, plan, layout]⟩
 
+example : (backend.save frame).source = sourceBackend.save frame :=
+  backend.saveSourceExact frame
+example : (backend.restore frame).source = sourceBackend.restore frame :=
+  backend.restoreSourceExact frame
 example : (backend.enter frame).source = sourceBackend.enter frame :=
   backend.enterSourceExact frame
 example : (backend.leave frame).source = sourceBackend.leave frame :=

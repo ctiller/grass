@@ -270,6 +270,10 @@ within the selected frame subtraction.
 `Grass.Construct.FrameStackObjectVerified` requires machine-supplied verified
 fragments whose sources are exactly the derived frame-offset load/store
 sources; its public operations only project those witnesses.
+`FrameSourceBackend.save` and `FrameSourceBackend.restore` expose the exact
+selected push order and reverse pop order independently of `enter` and `leave`;
+`FrameVerifiedBackend` requires separate verified witnesses and exact-source
+equalities for both operations.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.

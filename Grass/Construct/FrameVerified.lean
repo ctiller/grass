@@ -7,7 +7,7 @@ import Grass.Construct.Fragment.Verified
 `FrameVerifiedBackend` requires a machine owner to supply each
 `VerifiedFragment` and an equality to the corresponding transparent frame
 source. The construction layer merely projects those proofs through `enter`,
-`leave`, `spill`, and `reload`; it cannot synthesize local correctness.
+`leave`, `save`, `restore`, `spill`, and `reload`; it cannot synthesize local correctness.
 -/
 
 namespace Grass.Construct
@@ -37,10 +37,16 @@ structure FrameVerifiedBackend (Instruction : Type u) (State : Type v)
     (Effect : Type w) (semantics : Semantics Instruction State)
     (effectModel : EffectModel Instruction Effect) where
   source : FrameSourceBackend Instruction
+  saveContract : {profile : LayoutProfile} → CheckedWin64Frame profile → BlockContract State
+  restoreContract : {profile : LayoutProfile} → CheckedWin64Frame profile → BlockContract State
   enterContract : {profile : LayoutProfile} → CheckedWin64Frame profile → BlockContract State
   leaveContract : {profile : LayoutProfile} → CheckedWin64Frame profile → BlockContract State
   slotContract : {profile : LayoutProfile} → (frame : CheckedWin64Frame profile) →
     FrameObjectRef frame → Gpr → BlockContract State
+  saveVerified : {profile : LayoutProfile} → (frame : CheckedWin64Frame profile) →
+    VerifiedFragment semantics effectModel (saveContract frame)
+  restoreVerified : {profile : LayoutProfile} → (frame : CheckedWin64Frame profile) →
+    VerifiedFragment semantics effectModel (restoreContract frame)
   enterVerified : {profile : LayoutProfile} → (frame : CheckedWin64Frame profile) →
     VerifiedFragment semantics effectModel (enterContract frame)
   leaveVerified : {profile : LayoutProfile} → (frame : CheckedWin64Frame profile) →
@@ -51,6 +57,10 @@ structure FrameVerifiedBackend (Instruction : Type u) (State : Type v)
   reloadVerified : {profile : LayoutProfile} → (frame : CheckedWin64Frame profile) →
     (slot : FrameObjectRef frame) → (register : Gpr) →
     VerifiedFragment semantics effectModel (slotContract frame slot register)
+  saveSourceExact : ∀ {profile} (frame : CheckedWin64Frame profile),
+    (saveVerified frame).source = source.save frame
+  restoreSourceExact : ∀ {profile} (frame : CheckedWin64Frame profile),
+    (restoreVerified frame).source = source.restore frame
   enterSourceExact : ∀ {profile} (frame : CheckedWin64Frame profile),
     (enterVerified frame).source = source.enter frame
   leaveSourceExact : ∀ {profile} (frame : CheckedWin64Frame profile),
@@ -68,6 +78,16 @@ namespace FrameVerifiedBackend
 
 variable {Instruction : Type u} {State : Type v} {Effect : Type w}
   {semantics : Semantics Instruction State} {effectModel : EffectModel Instruction Effect}
+
+/-- Transparent verified saved-register projection. -/
+def save (backend : FrameVerifiedBackend Instruction State Effect semantics effectModel)
+    {profile : LayoutProfile} (frame : CheckedWin64Frame profile) :=
+  backend.saveVerified frame
+
+/-- Transparent verified saved-register restoration projection. -/
+def restore (backend : FrameVerifiedBackend Instruction State Effect semantics effectModel)
+    {profile : LayoutProfile} (frame : CheckedWin64Frame profile) :=
+  backend.restoreVerified frame
 
 /-- Transparent verified prologue projection. -/
 def enter (backend : FrameVerifiedBackend Instruction State Effect semantics effectModel)
