@@ -4,6 +4,7 @@ import Grass.Core.Demand
 import Grass.Core.Generational
 import Grass.Core.Identifiers
 import Grass.Core.Name
+import Grass.Core.Scope
 import Grass.Core.Uid
 import Grass.ABI.Win64.Convention
 import Grass.ABI.Win64.Unwind
@@ -44,6 +45,8 @@ import Grass.Resource.Axis
 import Grass.Semantics.Execution
 import Grass.Semantics.Observation
 import Grass.Semantics.SpecProcess
+import Grass.Specification.Boundary
+import Grass.Specification.Scope
 import Grass.Std.Logical.Bag
 import Grass.Std.Logical.Byte
 import Grass.Std.Logical.FiniteMap
