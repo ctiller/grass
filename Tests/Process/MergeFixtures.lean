@@ -298,40 +298,66 @@ theorem afterBothMerges_wire : afterBothMerges.inFlight () wire = bothMergedLoud
   show (if wire = wire then bothMergedLoudly else EscrowLedger.empty) = bothMergedLoudly
   rw [if_pos rfl]
 
-/-! ## The two merges -/
+/-! ## The merge -/
+
+theorem escrowed_is_outstanding : bothLoud.Outstanding escrowed :=
+  ⟨List.mem_cons_self, rfl⟩
 
 theorem loud_is_outstanding : bothLoud.Outstanding loud :=
   ⟨List.mem_cons_of_mem _ List.mem_cons_self, rfl⟩
 
-theorem escrowed_is_outstanding_after_the_first : firstMerged.Outstanding escrowed :=
-  ⟨List.mem_cons_self, firstMerged_other (fun same => loud_ne_escrowed same.symm)⟩
-
 open Classical in
 /--
-**The first merge: `loud` into a carrier that keeps its payload.**
+**A merge of two payloads that disagree, in one step.**
 
-`exactDedup` would accept this one — the only source agrees with the carrier — so
-this step is not yet the witness. It is what puts the carrier in the ledger for
-the second merge to find, and it is a `ResolvesEscrow` of `mergingPlan` rather
-than a world asserted into existence.
+The family is `[escrowed, loud]`; `escrowed` carries `payload` and the carrier
+carries `otherPayload`, so the family's members disagree about what the carrier
+should hold. `mergingPlan.coalescing` is `keepsOnePayload`, which asks only that
+*some* source agree with the carrier, and `loud` does.
+
+`serverPlan` could not take this step, and `serverPlan_refuses_it` below is that.
+The difference between the two plans is one field.
 -/
-theorem the_first_merge :
-    mergingPlan.ResolvesEscrow bothInFlight afterFirstMerge () wire loud
-      (.coalesced mergeCarrier) where
-  onItsSession := rfl
-  wasOutstanding := by rw [bothInFlight_wire]; exact loud_is_outstanding
-  nowResolved := by rw [afterFirstMerge_wire]; exact firstMerged_loud
+theorem the_merge_that_keeps_one_payload :
+    mergingPlan.Coalesces bothInFlight afterBothMerges () wire [escrowed, loud]
+      mergeCarrier where
+  sourcesNonempty := by simp
+  sourcesOnItsSession := by
+    intro source inList
+    rcases List.mem_cons.mp inList with isFirst | rest
+    · rw [isFirst]; rfl
+    · rw [List.mem_singleton.mp rest]; rfl
+  wereOutstanding := by
+    intro source inList
+    rw [bothInFlight_wire]
+    rcases List.mem_cons.mp inList with isFirst | rest
+    · rw [isFirst]; exact escrowed_is_outstanding
+    · rw [List.mem_singleton.mp rest]; exact loud_is_outstanding
+  nowResolved := by
+    intro source inList
+    rw [afterBothMerges_wire]
+    rcases List.mem_cons.mp inList with isFirst | rest
+    · rw [isFirst]; exact bothMergedLoudly_first
+    · rw [List.mem_singleton.mp rest]; exact bothMergedLoudly_loud
   resolvesNothingElse := by
-    rw [bothInFlight_wire, afterFirstMerge_wire]
-    intro other notIt
-    rw [firstMerged_other notIt]
+    intro other notSource
+    have notFirst : other ≠ escrowed :=
+      fun same => notSource (by rw [same]; exact List.mem_cons_self)
+    have notLoud : other ≠ loud :=
+      fun same => notSource (by rw [same]; exact List.mem_cons_of_mem _ List.mem_cons_self)
+    rw [afterBothMerges_wire, bothMergedLoudly_other notLoud notFirst, bothInFlight_wire]
     rfl
-  requestsNothing := by
-    show RequestsNothing (bothInFlight.inFlight () wire) (afterFirstMerge.inFlight () wire)
-    rw [bothInFlight_wire, afterFirstMerge_wire]
-    exact fun _ => rfl
+  consumesExactly := by
+    intro other resolved
+    rw [afterBothMerges_wire] at resolved
+    by_cases isFirst : other = escrowed
+    · rw [isFirst]; exact List.mem_cons_self
+    · by_cases isLoud : other = loud
+      · rw [isLoud]; exact List.mem_cons_of_mem _ List.mem_cons_self
+      · rw [bothMergedLoudly_other isLoud isFirst] at resolved
+        exact absurd resolved (by intro equal; cases equal)
   ledgerExtends := by
-    rw [bothInFlight_wire, afterFirstMerge_wire]
+    rw [bothInFlight_wire, afterBothMerges_wire]
     exact
       { createdPrefix := ⟨[mergeCarrier], rfl⟩
         resolutionPermanent := by
@@ -340,10 +366,16 @@ theorem the_first_merge :
         cancelRequestMonotone := by
           intro occurrence requested
           exact absurd requested (by intro equal; cases equal) }
+  carrierOnItsSession := rfl
+  carrierIsOutstanding := by
+    rw [afterBothMerges_wire]
+    exact ⟨List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self),
+      bothMergedLoudly_other carrier_ne_loud carrier_ne_escrowed⟩
+  permitted := ⟨loud, List.mem_cons_of_mem _ List.mem_cons_self, rfl⟩
   createsOnlyTheCarrier := by
     intro other held fresh
-    have inList : other ∈ (afterFirstMerge.inFlight () wire).created := held
-    rw [afterFirstMerge_wire] at inList
+    have inList : other ∈ (afterBothMerges.inFlight () wire).created := held
+    rw [afterBothMerges_wire] at inList
     have three : other ∈ [escrowed, loud, mergeCarrier] := inList
     rcases List.mem_cons.mp three with isFirst | rest
     · exact absurd (by rw [isFirst, bothInFlight_wire]; exact List.mem_cons_self) fresh
@@ -351,24 +383,12 @@ theorem the_first_merge :
       · refine absurd ?_ fresh
         rw [isSecond, bothInFlight_wire]
         exact List.mem_cons_of_mem _ List.mem_cons_self
-      · rw [List.mem_singleton.mp last]
+      · exact List.mem_singleton.mp last
   createdIdentityIsFresh := by
-    intro created held fresh other old
-    have isCarrier : created = mergeCarrier := by
-      have inList : created ∈ (afterFirstMerge.inFlight () wire).created := held
-      rw [afterFirstMerge_wire] at inList
-      have three : created ∈ [escrowed, loud, mergeCarrier] := inList
-      rcases List.mem_cons.mp three with isFirst | rest
-      · exact absurd (by rw [isFirst, bothInFlight_wire]; exact List.mem_cons_self) fresh
-      · rcases List.mem_cons.mp rest with isSecond | last
-        · refine absurd ?_ fresh
-          rw [isSecond, bothInFlight_wire]
-          exact List.mem_cons_of_mem _ List.mem_cons_self
-        · exact List.mem_singleton.mp last
+    intro other old
     have oldList : other ∈ (bothInFlight.inFlight () wire).created := old
     rw [bothInFlight_wire] at oldList
     have two : other ∈ [escrowed, loud] := oldList
-    rw [isCarrier]
     rcases List.mem_cons.mp two with isFirst | rest
     · rw [isFirst]
       intro same
@@ -378,35 +398,10 @@ theorem the_first_merge :
       intro same
       have ids : (8 : Nat) = 9 := congrArg (fun nominal => nominal.carrier) same
       exact absurd ids (by decide)
-  carrierOnItsSession := by intro carrier isMerge; cases isMerge; rfl
-  carrierIsOutstanding := by
-    intro carrier isMerge
-    cases isMerge
-    rw [afterFirstMerge_wire]
-    exact ⟨List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self),
-      firstMerged_other carrier_ne_loud⟩
-  carrierIsPermitted := by
-    intro carrier isMerge
-    cases isMerge
-    refine ⟨[loud], by simp, List.mem_cons_self, ?_, ?_⟩
-    · intro source
-      constructor
-      · intro inList
-        rw [List.mem_singleton.mp inList, afterFirstMerge_wire]
-        exact firstMerged_loud
-      · intro resolved
-        rw [afterFirstMerge_wire] at resolved
-        by_cases isLoud : source = loud
-        · rw [isLoud]; exact List.mem_cons_self
-        · rw [firstMerged_other isLoud] at resolved
-          exact absurd resolved (by intro equal; cases equal)
-    · exact ⟨loud, List.mem_cons_self, rfl⟩
-  endpointDeathIsEarned := by
-    constructor
-    · intro reason isDeath
-      cases isDeath
-    · intro reason isDeath
-      cases isDeath
+  requestsNothing := by
+    show RequestsNothing (bothInFlight.inFlight () wire) (afterBothMerges.inFlight () wire)
+    rw [bothInFlight_wire, afterBothMerges_wire]
+    exact fun _ => rfl
   scope := by
     intro fragment outside
     cases fragment with
@@ -418,128 +413,16 @@ theorem the_first_merge :
         subst isWire
         exact outside rfl
       show (if session = wire then bothLoud else EscrowLedger.empty)
-        = (if session = wire then firstMerged else EscrowLedger.empty)
-      rw [if_neg notWire, if_neg notWire]
-    | _ => rfl
-
-open Classical in
-/--
-**The second merge, and the witness this file exists for.**
-
-`escrowed` carries `payload` and the carrier carries `otherPayload`, so the
-source family `carrierIsPermitted` reads off the after-ledger is
-`[escrowed, loud]` and its two members disagree about the payload.
-`mergingPlan.coalescing` is `keepsOnePayload`, which asks only that *some* source
-agree with the carrier, and `loud` does.
-
-This is the merge `ResolvesEscrow.carrierCarriesTheMessage` forbade at every
-plan, and `agent-bus` ruling `g-design:83` said was a channel's business.
--/
-theorem the_merge_that_keeps_one_payload :
-    mergingPlan.ResolvesEscrow afterFirstMerge afterBothMerges () wire escrowed
-      (.coalesced mergeCarrier) where
-  onItsSession := rfl
-  wasOutstanding := by
-    rw [afterFirstMerge_wire]; exact escrowed_is_outstanding_after_the_first
-  nowResolved := by rw [afterBothMerges_wire]; exact bothMergedLoudly_first
-  resolvesNothingElse := by
-    rw [afterFirstMerge_wire, afterBothMerges_wire]
-    intro other notIt
-    by_cases isLoud : other = loud
-    · rw [isLoud, firstMerged_loud, bothMergedLoudly_loud]
-    · rw [firstMerged_other isLoud, bothMergedLoudly_other isLoud notIt]
-  requestsNothing := by
-    show RequestsNothing (afterFirstMerge.inFlight () wire) (afterBothMerges.inFlight () wire)
-    rw [afterFirstMerge_wire, afterBothMerges_wire]
-    exact fun _ => rfl
-  ledgerExtends := by
-    rw [afterFirstMerge_wire, afterBothMerges_wire]
-    exact
-      { createdPrefix := ⟨[], by rw [List.append_nil]; rfl⟩
-        resolutionPermanent := by
-          intro occurrence resolution ended
-          by_cases isLoud : occurrence = loud
-          · subst isLoud
-            rw [firstMerged_loud] at ended
-            cases ended
-            exact bothMergedLoudly_loud
-          · rw [firstMerged_other isLoud] at ended
-            exact absurd ended (by intro equal; cases equal)
-        cancelRequestMonotone := by
-          intro occurrence requested
-          exact absurd requested (by intro equal; cases equal) }
-  createsOnlyTheCarrier := by
-    intro other held fresh
-    refine absurd ?_ fresh
-    show other ∈ (afterFirstMerge.inFlight () wire).created
-    rw [afterFirstMerge_wire]
-    have inList : other ∈ (afterBothMerges.inFlight () wire).created := held
-    rw [afterBothMerges_wire] at inList
-    exact inList
-  createdIdentityIsFresh := by
-    intro created held fresh
-    refine absurd ?_ fresh
-    show created ∈ (afterFirstMerge.inFlight () wire).created
-    rw [afterFirstMerge_wire]
-    have inList : created ∈ (afterBothMerges.inFlight () wire).created := held
-    rw [afterBothMerges_wire] at inList
-    exact inList
-  carrierOnItsSession := by intro carrier isMerge; cases isMerge; rfl
-  carrierIsOutstanding := by
-    intro carrier isMerge
-    cases isMerge
-    rw [afterBothMerges_wire]
-    exact ⟨List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self),
-      bothMergedLoudly_other carrier_ne_loud carrier_ne_escrowed⟩
-  carrierIsPermitted := by
-    intro carrier isMerge
-    cases isMerge
-    refine ⟨[escrowed, loud], by simp, List.mem_cons_self, ?_, ?_⟩
-    · intro source
-      constructor
-      · intro inList
-        rw [afterBothMerges_wire]
-        rcases List.mem_cons.mp inList with isFirst | rest
-        · rw [isFirst]; exact bothMergedLoudly_first
-        · rw [List.mem_singleton.mp rest]; exact bothMergedLoudly_loud
-      · intro resolved
-        rw [afterBothMerges_wire] at resolved
-        by_cases isLoud : source = loud
-        · rw [isLoud]; exact List.mem_cons_of_mem _ List.mem_cons_self
-        · by_cases isFirst : source = escrowed
-          · rw [isFirst]; exact List.mem_cons_self
-          · rw [bothMergedLoudly_other isLoud isFirst] at resolved
-            exact absurd resolved (by intro equal; cases equal)
-    · exact ⟨loud, List.mem_cons_of_mem _ List.mem_cons_self, rfl⟩
-  endpointDeathIsEarned := by
-    constructor
-    · intro reason isDeath
-      cases isDeath
-    · intro reason isDeath
-      cases isDeath
-  scope := by
-    intro fragment outside
-    cases fragment with
-    | escrow edge session =>
-      have sameEdge : edge = () := rfl
-      subst sameEdge
-      have notWire : session ≠ wire := by
-        intro isWire
-        subst isWire
-        exact outside rfl
-      show (if session = wire then firstMerged else EscrowLedger.empty)
         = (if session = wire then bothMergedLoudly else EscrowLedger.empty)
       rw [if_neg notWire, if_neg notWire]
     | _ => rfl
 
 /--
-**And `exactDedup` refuses exactly that merge.**
+**And `ProcessPlan.exactDedup` refuses exactly that family.**
 
-The pair `latestWins_admits_a_real_merge` and `exactDedup_refuses_it` in
-`Tests/Process/CloseFixtures.lean` compared two predicates. This compares the
-same predicates against the source family a *real* `ResolvesEscrow` produced, so
-it is the difference the ruling is about rather than an arithmetic fact about two
-lists.
+The same source family and carrier a real merge produced, put to the other
+policy. This is the difference `agent-bus` ruling `g-design:83` is about, at the
+family a `Coalesces` actually names rather than at a list chosen to make a point.
 -/
 theorem the_merge_is_refused_by_dedup :
     ¬ exactDedup [escrowed, loud] mergeCarrier := by
@@ -548,19 +431,17 @@ theorem the_merge_is_refused_by_dedup :
   have counts : (7 : Nat) = 99 := congrArg (fun message => message.down) payloads
   exact absurd counts (by decide)
 
-/-- **So `serverPlan` could not have taken this step**, which is what makes the
-policy a property of the channel rather than of the layer. -/
+/--
+**So `serverPlan` could not have taken this step**, which is what makes the
+policy a property of the channel rather than of the layer.
+
+`Coalesces.permitted` is the only field that differs in what it asks of the two
+plans; every other field of the step above would be discharged verbatim at
+`serverPlan`.
+-/
 theorem serverPlan_refuses_it
-    (step : serverPlan.ResolvesEscrow afterFirstMerge afterBothMerges () wire escrowed
-      (.coalesced mergeCarrier)) : False := by
-  obtain ⟨sources, _, isSource, exactly, permitted⟩ := step.carrierIsPermitted mergeCarrier rfl
-  refine the_merge_is_refused_by_dedup (fun source inList => ?_)
-  refine permitted source ?_
-  rcases List.mem_cons.mp inList with isFirst | rest
-  · rw [isFirst]; exact isSource
-  · rw [List.mem_singleton.mp rest]
-    refine (exactly loud).mpr ?_
-    rw [afterBothMerges_wire]
-    exact bothMergedLoudly_loud
+    (step : serverPlan.Coalesces bothInFlight afterBothMerges () wire [escrowed, loud]
+      mergeCarrier) : False :=
+  the_merge_is_refused_by_dedup step.permitted
 
 end Grass.Process.Tests.Merge

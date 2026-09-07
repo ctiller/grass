@@ -183,96 +183,6 @@ structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
   requestsNothing : RequestsNothing
     (before.inFlight edge session) (after.inFlight edge session)
   /--
-  **And a coalesce's carrier belongs to this session.**
-
-  `ChannelResolution.coalesced`'s docstring says the carrier is "this occurrence
-  of the same session", and until this field nothing enforced it: `onItsSession`
-  constrains the *source*, `EscrowLedger.coalesceCarrierLater` asks only that the
-  carrier be in this `created` with a later rank, and `createsOnlyTheCarrier`
-  asks only that a created occurrence *be* the carrier.
-
-  What that left open is the worst thing found on this branch, and a reviewer
-  compiled all of it. A coalesce may install a carrier whose own `ChannelId` is a
-  *different* session. That carrier is then outstanding on this ledger and
-  `ClosesSession.closesEverything`'s on-session guard — §10.96 — cannot see it, so
-  it strands: no close, no death, no disposition and no delivery can name it,
-  because every one of those carries `onItsSession`. **A payload in flight that no
-  transition of the family can ever end**, which is exactly the disjunction
-  `channelClosed` exists to break. And from the other side the session becomes
-  *unclosable*, because a close must end everything outstanding and the guard
-  excludes the only thing that is.
-
-  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.100. It is the twin of the
-  `arrival.2.1 = destination` conjunct §10.98 gave `Reroutes.arrives`, one
-  constructor over, and it went unnoticed for the same reason: the field that
-  *would* have caught it was weakened in the same round that created the hole.
-  -/
-  carrierOnItsSession : ∀ carrier, resolution = .coalesced carrier →
-    carrier.2.1 = session
-  /--
-  **And a coalesce's carrier is still in flight afterwards.**
-
-  `createsOnlyTheCarrier` bounds what a step *creates* and never says the carrier
-  is in any particular state — and `EscrowLedger.coalesceCarrierLater` asks only
-  for membership and a later rank, which a **previously delivered** occurrence
-  satisfies. A reviewer built the four-step program from `quiet`: send, send,
-  deliver the second, coalesce the first into it. Afterwards the first payload is
-  neither in flight nor delivered, because `.coalesced` is not
-  `ChannelResolution.IsTerminal` — it *passes the payload on* — and what it
-  passed to had been consumed a step earlier.
-  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.111.
-
-  **This field was `carrierIsFresh` for one round, and that was wrong twice.**
-  Freshness forbids a *second* source naming a carrier the first one created —
-  `coalesceCarrierLater` puts the carrier in `created` and `createdPrefix` keeps
-  it there — so it made §3's "Coalescing consumes every source token", plural,
-  unconstructible, and falsified §10.104's recorded decomposition. And it does not
-  close §10.111 anyway: a *fresh* carrier can be delivered later just as well.
-
-  Outstanding-afterwards is what the property actually is. It permits the second
-  source (the carrier is created, unresolved, and stays so) and refuses the
-  laundering (a delivered carrier's resolution is permanent, by
-  `LedgerExtends.resolutionPermanent`). §10.113.
-  -/
-  carrierIsOutstanding : ∀ carrier, resolution = .coalesced carrier →
-    (after.inFlight edge session).Outstanding carrier
-  /--
-  **And the merge is one the channel permits.**
-
-  This was `carrierCarriesTheMessage`, a per-source `carrier.1 = occurrence.1`,
-  and §10.113 added it for a good reason: nothing related the carrier's payload
-  to the source's, so a coalesce could merge `⟨7⟩` into a fresh carrier holding
-  `⟨99⟩` and the after-world passed every `WellFormed` clause — §10.91's defect
-  reopened through the one exception `createsOnlyTheCarrier` grants.
-
-  **But a reviewer then proved what it cost, generically.** Stated per source, it
-  forces any two sources naming one carrier to carry the same message, so a
-  latest-wins or folding channel is unconstructible at *every* plan. `agent-bus`
-  ruling `g-design:83` on `c-process:68` settles that coalescing is not
-  universally same-payload, and moves the policy to the channel:
-  `ProcessPlan.coalescing`, with `exactDedup` recovering the old behaviour in one
-  line for a channel that wants it.
-
-  **Three things `carrierIsPermitted` says beyond calling the relation.** The
-  family is non-empty, so a coalesce cannot invent a carrier out of nothing. This
-  step's own occurrence is in it, so the field is about *this* merge. And the
-  family is *exactly* those the after-ledger resolves into that carrier, which is
-  what `docs/PROCESS.md` §3 means by "coalescing consumes every source token": a
-  step cannot satisfy the channel's policy against a convenient subset and
-  quietly merge more. That last conjunct is the one an equality could not have
-  had, because an equality never mentioned a family at all.
-
-  A concrete implementation may realise the merge as finite silent steps under
-  refinement; what the ruling forbids, and what "exactly" forbids here, is a
-  *logical* world in which the merge is half done.
-  -/
-  carrierIsPermitted : ∀ carrier, resolution = .coalesced carrier →
-    ∃ sources : List (EdgeOccurrence plan.topology plan.message edge),
-      sources ≠ [] ∧ occurrence ∈ sources ∧
-        (∀ source, source ∈ sources ↔
-          (after.inFlight edge session).resolution source = some (.coalesced carrier)) ∧
-        plan.coalescing edge sources carrier
-  /--
   **And an endpoint death is a death of that endpoint.**
 
   `senderDeath` and `receiverDeath` are bare `ResolvesEscrow`s whose scope is one
@@ -326,45 +236,27 @@ structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
         incarnation.ref.generation = session.receiver.generation ∧
         incarnation.lifecycle = .died reason)
   /--
-  **And the only occurrence it escrows is a coalesce's carrier.**
+  **And it creates nothing.**
 
-  `ledgerExtends` forbids erasing and `resolvesOnlyAs` bounds what is *ended*.
-  Neither bounds what is *created*, and `LedgerExtends.createdPrefix` positively
-  permits appending — so a `drop` could conjure an unrelated occurrence into
-  flight in the same move. Local adversarial review built one and proved what
-  makes it serious: at its after-world the edge contract's `Escrow` assertion
-  holds of a message nothing sent, and `docs/PROCESS.md` §3 gives only a send
-  that power. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.91.
+  Every carrier field this structure used to carry is gone, and so is the one
+  exception to "a resolution creates nothing". `ResolvesEscrow` was the coalesce
+  constructor's structure as well as the other five resolutions', so it had to
+  permit a step that adds a carrier to the ledger, and it carried
+  `carrierOnItsSession`, `carrierIsOutstanding`, `carrierIsPermitted` and a
+  `createsOnlyTheCarrier` that were vacuous at every resolution but `.coalesced`.
 
-  The exception is `ChannelResolution.coalesced`, whose carrier
-  `coalesceCarrierLater` requires to be in this ledger and strictly later — a
-  fresh occurrence, per `NominalKind.coalescedReplacement`. Every other
-  resolution creates nothing, and the disjunction says which.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.131 moved the coalesce to
+  `ProcessPlan.Coalesces`, which takes its whole source family in one step.
+  Nothing that remains here can create, so the bound is the simple one and the
+  four fields only a coalesce could satisfy are where they belong.
+
+  Four vacuous fields at five of six constructors is the shape §10.105 calls out —
+  a structure earning its generality by making most of its instances discharge
+  obligations that cannot fail — and `createsNothing` is what is left once the
+  one instance that needed them has its own structure.
   -/
-  createsOnlyTheCarrier : ∀ other, other ∈ (after.inFlight edge session).created →
-    other ∉ (before.inFlight edge session).created → resolution = .coalesced other
-  /--
-  **And if it does create one, that entry's identity is new to this ledger.**
-
-  `SendsEscrow.identityIsFresh` at the other constructor that may create.
-  `createsOnlyTheCarrier` bounds *what* may appear and says nothing about its
-  nominal, so a coalesce could install a carrier reusing a nominal the ledger
-  already holds under a different message — two entries, one identity, which is
-  the alias `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.115 is about.
-
-  Freshness of the identity against the *before* ledger, not of the pair: the pair
-  is already new by hypothesis, and asking freshness of the pair is exactly the
-  weaker thing `SendsEscrow.wasFresh` used to ask.
-
-  Vacuous at every resolution but `.coalesced`, because `createsOnlyTheCarrier`
-  makes the hypothesis unsatisfiable there — a close, a drop, a timeout and the
-  two endpoint deaths create nothing, so this field costs them a `fun _ found
-  fresh => absurd …` they were already writing.
-  -/
-  createdIdentityIsFresh : ∀ created, created ∈ (after.inFlight edge session).created →
-    created ∉ (before.inFlight edge session).created →
-    ∀ other, other ∈ (before.inFlight edge session).created →
-      other.2.2.id ≠ created.2.2.id
+  createsNothing : CreatesNothing
+    (before.inFlight edge session) (after.inFlight edge session)
   /-- And nothing outside this session's escrow changed. -/
   scope : plan.TouchesOnly before after (fun fragment => fragment = .escrow edge session)
 
@@ -562,6 +454,93 @@ theorem observations_untouched {before after edge session occurrence resolution}
   resolved.scope .observations (by simp)
 
 end ResolvesEscrow
+
+/--
+**A coalesce: one step, the whole source family, one fresh carrier.**
+
+`docs/PROCESS.md` §3 says "coalescing consumes every source token and creates one
+fresh occurrence" — one transition — and `agent-bus` ruling `g-design:83` is
+explicit about what that means at this layer: "at the logical level the coalesce
+consumes all named sources and creates one fresh carrier atomically ... thus no
+intermediate partially coalesced logical world is observable". A concrete
+implementation may still realise it as finite silent steps under refinement.
+
+**Why this is a structure of its own, which is `docs/PROCESS_IMPLEMENTATION_PLAN.md`
+§10.131.** A coalesce used to be a `ResolvesEscrow` at resolution
+`.coalesced carrier`, and `ResolvesEscrow.resolvesNothingElse` lets a step resolve
+exactly the occurrence it names. So a merge of several sources was necessarily a
+*sequence* of steps into one carrier, and every intermediate world — carrier
+outstanding, some sources merged, others not — was a legal world of the plan.
+§10.104 recorded that and asked whether §3 requires atomicity; the ruling says it
+does, and §10.104 predicted the consequence exactly: "coalesce needs its own
+structure taking a list of sources".
+
+`carrierIsPermitted` on the old field did *not* close it, and a docstring saying
+it did reached `main`. It constrained each step's family to be exactly what that
+*step's* after-ledger recorded, which says nothing about what a later step adds.
+`Tests/Process/MergeFixtures.lean` built the half-merged world and is what caught
+it. §10.131.
+-/
+structure Coalesces (before after : plan.LogicalProcessNetwork)
+    (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
+    (sources : List (EdgeOccurrence plan.topology plan.message edge))
+    (carrier : EdgeOccurrence plan.topology plan.message edge) : Prop where
+  /-- **A merge merges something.** A carrier with no sources is a fabrication,
+  which is `SendsEscrow`'s job and not this one. -/
+  sourcesNonempty : sources ≠ []
+  /-- Every source is on the session whose ledger holds it — `onItsSession` for a
+  family. -/
+  sourcesOnItsSession : ∀ source ∈ sources, source.2.1 = session
+  /-- And every one of them was in flight before the step. -/
+  wereOutstanding : ∀ source ∈ sources, (before.inFlight edge session).Outstanding source
+  /--
+  **And all of them are merged by this one step.**
+
+  The atomicity clause. `nowResolved` for a family rather than for the one
+  occurrence a `ResolvesEscrow` names, and it is what makes the intermediate
+  world unconstructible: there is no step of this family that leaves part of it
+  outstanding, because the step's own field says every member is resolved after
+  it.
+  -/
+  nowResolved : ∀ source ∈ sources,
+    (after.inFlight edge session).resolution source = some (.coalesced carrier)
+  /-- **And nothing outside the family is touched.** `ResolvesNothingElse` for a
+  family. -/
+  resolvesNothingElse : ∀ other, other ∉ sources →
+    (after.inFlight edge session).resolution other
+      = (before.inFlight edge session).resolution other
+  /--
+  **And the family is everything this carrier collects.**
+
+  The other half of atomicity, and the half that has to be said separately: a
+  step could otherwise resolve *more* occurrences into the same carrier than it
+  declared, and satisfy the channel's policy against the smaller family. With
+  this, `sources` is exactly the carrier's collection in the after-ledger.
+  -/
+  consumesExactly : ∀ other,
+    (after.inFlight edge session).resolution other = some (.coalesced carrier) →
+    other ∈ sources
+  /-- The ledger only moved forward. -/
+  ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
+  /-- The carrier belongs to this session — §10.100. -/
+  carrierOnItsSession : carrier.2.1 = session
+  /-- And is in flight afterwards, which is what stops a merge being a disguised
+  drop — §10.113. -/
+  carrierIsOutstanding : (after.inFlight edge session).Outstanding carrier
+  /-- **And the merge is one the channel permits** — `ProcessPlan.coalescing`,
+  over the whole family at once rather than per prefix. §10.127. -/
+  permitted : plan.coalescing edge sources carrier
+  /-- It escrows nothing but the carrier. -/
+  createsOnlyTheCarrier : ∀ other, other ∈ (after.inFlight edge session).created →
+    other ∉ (before.inFlight edge session).created → other = carrier
+  /-- Whose identity is new to this ledger — §10.115. -/
+  createdIdentityIsFresh : ∀ other, other ∈ (before.inFlight edge session).created →
+    other.2.2.id ≠ carrier.2.2.id
+  /-- **And it requests no cancellation**; see `EscrowLedger.RequestsNothing`. -/
+  requestsNothing : RequestsNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /-- And nothing outside this session's escrow changed. -/
+  scope : plan.TouchesOnly before after (fun fragment => fragment = .escrow edge session)
 
 /--
 A send: one occurrence joins a session's escrow.
@@ -1966,9 +1945,10 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
   | reroute (edge session occurrence) (destination : plan.topology.ChannelId edge)
       (step : plan.Reroutes before after edge session occurrence destination)
   /-- It merged into another occurrence. -/
-  | coalesce (edge session occurrence)
+  | coalesce (edge session)
+      (sources : List (EdgeOccurrence plan.topology plan.message edge))
       (carrier : EdgeOccurrence plan.topology plan.message edge)
-      (step : plan.ResolvesEscrow before after edge session occurrence (.coalesced carrier))
+      (step : plan.Coalesces before after edge session sources carrier)
   /-- A parent joined a finished child. -/
   | join (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
       (result : (plan.topology.protocol kind).TerminalResult)
