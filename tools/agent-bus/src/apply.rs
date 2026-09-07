@@ -810,6 +810,29 @@ fn apply_issue_ack(state: &mut BusState, env: &Envelope, d: &IssueAcknowledged) 
         .issues
         .get(&d.issue)
         .ok_or_else(|| invalid(format!("{}: unknown issue {}", env.id, d.issue)))?;
+    // An assignment a lifecycle conflict has already retracted is
+    // *inapplicable*, not invalid.
+    //
+    // `reset_issue_to_conflict` removes a provisionally-applied reassignment
+    // from `assignment_target`, and it must -- keeping it would make the
+    // converged state depend on arrival order. But that erasure leaves the
+    // reducer unable to distinguish "an assignment that never existed" from
+    // "an assignment that was live when its target acknowledged it and was
+    // retracted afterwards". Treating the second as invalid returns `Err`,
+    // and with no per-event isolation that is every host unable to reduce the
+    // bus at all -- the same fleet-wide outage as the superseded case below,
+    // one step further along the same race.
+    //
+    // Narrow on purpose: only when the item is actually in
+    // `LifecycleConflict`, which is the one state where this crate is known
+    // to have disowned an assignment it had already applied. On a healthy
+    // item an unknown assignment is still a hard error, because there it
+    // really does name something that never existed.
+    if issue.status == ItemStatus::LifecycleConflict
+        && !issue.assignment_target.contains_key(&d.assignment)
+    {
+        return Ok(());
+    }
     let expected_target = issue
         .assignment_target
         .get(&d.assignment)
@@ -945,12 +968,23 @@ fn reset_issue_to_conflict(
         if issue.current_assignment != *assignment {
             // A provisional reassignment already ran before this conflict
             // was detected (exclusive::winner() gives a lone candidate the
-            // group's effect until a second member arrives) -- retract
-            // exactly what it added, not just the derived `status`/
-            // `current_*` fields. Any later member of the same group
-            // observes current_assignment already at baseline and takes
-            // this branch as a no-op, so this fires at most once per race
-            // regardless of group size or processing order (gates 15/16).
+            // group's effect until a second member arrives) -- roll back the
+            // *derived* chain it advanced, not just the `status`/`current_*`
+            // fields. Any later member of the same group observes
+            // current_assignment already at baseline and takes this branch as
+            // a no-op, so this fires at most once per race regardless of
+            // group size or processing order (gates 15/16).
+            //
+            // The entry must be *removed*, not kept: `apply_issue_reassigned`
+            // takes a different path when its predecessor is already
+            // contested, so in one order the entry is added and then retracted
+            // and in the other it is never added at all. Keeping it would make
+            // the converged state depend on arrival order, which is exactly
+            // what gates 15/16 forbid -- see `two_racing_issue_reassignments_
+            // converge_with_no_stale_chain_entry`, which runs both orders.
+            // The consequence for a later acknowledgement of a retracted
+            // assignment is handled where that acknowledgement is reduced,
+            // not by keeping history the conflict has already disowned.
             let provisional = issue.current_assignment.clone();
             issue.assignment_target.remove(&provisional);
             issue.reassignment_chain.retain(|id| id != &provisional);
@@ -1069,6 +1103,12 @@ fn apply_dependency_ack(
         .dependencies
         .get(&d.dependency)
         .ok_or_else(|| invalid(format!("{}: unknown dependency {}", env.id, d.dependency)))?;
+    // The dependency twin of the retraction case in `apply_issue_ack`.
+    if dep.status == ItemStatus::LifecycleConflict
+        && !dep.assignment_target.contains_key(&d.assignment)
+    {
+        return Ok(());
+    }
     let expected_target = dep
         .assignment_target
         .get(&d.assignment)
@@ -8610,6 +8650,140 @@ mod tests {
             "cold replay and cold-plus-incremental replay of the identical event set must \
              produce byte-identical state"
         );
+    }
+
+    /// The retraction guard must stay narrow.
+    ///
+    /// On an item in `LifecycleConflict` an unknown assignment is tolerated,
+    /// because the conflict is known to have disowned an assignment that was
+    /// genuinely live when its target acknowledged it. On a *healthy* item it
+    /// names something that never existed, and must still be refused --
+    /// otherwise the guard quietly turns every malformed acknowledgement into
+    /// a silent no-op, which is the "quiet corruption" side of the trade.
+    /// The same fleet-wide outage, one step further along the same race.
+    ///
+    /// `reset_issue_to_conflict` retracts a provisional reassignment by
+    /// *removing* it from `assignment_target`. A later acknowledgement of
+    /// that assignment then fails the "unknown assignment" lookup and returns
+    /// `Err` -- and because reduction has no per-event isolation, that is once
+    /// again every host unable to reduce the bus at all.
+    ///
+    /// The sequence is ordinary: an issue is reassigned; the new target
+    /// acknowledges it; the old target concurrently resolves the original
+    /// assignment, never having observed the reassignment. Those two
+    /// transitions contest the same exclusive key, the reassignment is
+    /// retracted, and the acknowledgement that was already valid when it was
+    /// written becomes unreducible.
+    #[test]
+    fn an_unknown_assignment_on_a_healthy_issue_is_still_refused() {
+        let mut state = empty_state(&[("alice", Role::Implementor), ("bob", Role::Implementor)]);
+        let (alice, bob) = (a("alice"), a("bob"));
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        let issue = open_issue(&alice, 1, &bob);
+        let issue_id = issue.id.clone();
+        apply_ok(&mut state, &issue);
+        assert_eq!(
+            state.issues[&issue_id].status,
+            ItemStatus::Open,
+            "fixture: the issue must be healthy, not conflicted"
+        );
+
+        let bogus = EventId::new(&alice, 99);
+        let ack = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&issue_id]),
+            &EventData::IssueAcknowledged(IssueAcknowledged {
+                issue: issue_id.clone(),
+                assignment: bogus.clone(),
+                note: text("on it"),
+            }),
+            [issue_id.clone()],
+        );
+        let err = apply_event(&mut state, &ack).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown assignment"),
+            "an assignment that never existed must still be refused, got: {err}"
+        );
+    }
+
+    #[test]
+    fn an_ack_of_a_retracted_provisional_assignment_still_reduces() {
+        let mut state = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Implementor),
+            ("carol", Role::Implementor),
+        ]);
+        let (alice, bob, carol) = (a("alice"), a("bob"), a("carol"));
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        apply_ok(&mut state, &register(&carol, Role::Implementor));
+
+        let issue = open_issue(&alice, 1, &bob);
+        let issue_id = issue.id.clone();
+        apply_ok(&mut state, &issue);
+
+        // alice reassigns to carol.
+        let reassign = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&issue_id]),
+            &EventData::IssueReassigned(IssueReassigned {
+                issue: issue_id.clone(),
+                previous_assignment: issue_id.clone(),
+                previous_target: bob.clone(),
+                new_target: carol.clone(),
+                reason: text("carol owns this"),
+            }),
+            [issue_id.clone()],
+        );
+        apply_ok(&mut state, &reassign);
+        let provisional = reassign.id.clone();
+
+        // bob resolves the original assignment, never having seen the
+        // reassignment -- the two contest the same exclusive key, and the
+        // provisional reassignment is retracted.
+        let bob_resolve = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&issue_id]),
+            &EventData::IssueResolved(IssueResolved {
+                issue: issue_id.clone(),
+                assignment: issue_id.clone(),
+                summary: text("already handled"),
+                fix_commit: None,
+                verification: vec![],
+            }),
+            [issue_id.clone()],
+        );
+        apply_ok(&mut state, &bob_resolve);
+        assert!(
+            !state.issues[&issue_id]
+                .assignment_target
+                .contains_key(&provisional),
+            "fixture: the conflict must have retracted the provisional assignment -- that              retraction is convergence-critical and is what makes the acknowledgement below              unresolvable without the guard"
+        );
+        assert_eq!(
+            state.issues[&issue_id].status,
+            ItemStatus::LifecycleConflict,
+            "fixture: the race must have produced a lifecycle conflict"
+        );
+
+        // carol acknowledges the assignment it was actually given.
+        let carol_ack = Envelope::new(
+            &carol,
+            1,
+            frontier_seeing(&[&provisional]),
+            &EventData::IssueAcknowledged(IssueAcknowledged {
+                issue: issue_id.clone(),
+                assignment: provisional.clone(),
+                note: text("on it"),
+            }),
+            [provisional.clone()],
+        );
+        apply_event(&mut state, &carol_ack)
+            .expect("an ack of a retracted assignment must reduce, not wedge the bus");
     }
 
     /// Gates 15/16 for the acknowledge-versus-reassign race: two valid,
