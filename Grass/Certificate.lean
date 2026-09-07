@@ -243,6 +243,59 @@ theorem mapPrefix_append (refinement : BehaviorRefinement concrete abstract)
       (refinement.mapPrefix execution).append (refinement.mapSteps suffix) := by
   apply RelationalSystem.ExecutionPrefix.ext <;> rfl
 
+/-- `BehaviorRefinement.mapPrefix_events` exposes the exact event trace retained
+by prefix mapping. -/
+@[simp]
+theorem mapPrefix_events (refinement : BehaviorRefinement concrete abstract)
+    (execution : concrete.system.ExecutionPrefix) :
+    (refinement.mapPrefix execution).events = execution.events := rfl
+
+/-- `BehaviorRefinement.observe_mapPrefix` states that prefix mapping preserves
+the specification-selected whole-trace observation. -/
+@[simp]
+theorem observe_mapPrefix (refinement : BehaviorRefinement concrete abstract)
+    (execution : concrete.system.ExecutionPrefix) :
+    abstract.observe (refinement.mapPrefix execution) =
+      concrete.observe execution := rfl
+
+/-- `BehaviorRefinement.inputOf_mapPrefix` states that prefix mapping preserves
+the specification input selected by the initial state. -/
+@[simp]
+theorem inputOf_mapPrefix (refinement : BehaviorRefinement concrete abstract)
+    (execution : concrete.system.ExecutionPrefix) :
+    abstract.inputOf (refinement.mapPrefix execution).initialState =
+      concrete.inputOf execution.initialState :=
+  refinement.input execution.initialState
+
+/-- `BehaviorRefinement.hasInput_mapPrefix` transports the packaged input
+predicate exactly across a refinement. -/
+@[simp]
+theorem hasInput_mapPrefix (refinement : BehaviorRefinement concrete abstract)
+    (input : spec.Input) (execution : concrete.system.ExecutionPrefix) :
+    abstract.HasInput input (refinement.mapPrefix execution) ↔
+      concrete.HasInput input execution := by
+  simp [ProgramBehavior.HasInput]
+
+/-- `BehaviorRefinement.terminal_mapPrefix` transports a terminal witness to
+the exact mapped frontier. -/
+theorem terminal_mapPrefix (refinement : BehaviorRefinement concrete abstract)
+    (execution : concrete.system.ExecutionPrefix)
+    (terminal : concrete.system.Terminal execution.state execution.graph) :
+    abstract.system.Terminal (refinement.mapPrefix execution).state
+      (refinement.mapPrefix execution).graph :=
+  refinement.terminal terminal
+
+/-- `BehaviorRefinement.mapCompletionAtPrefix` maps a completion while fixing
+its result type to the exact frontier and trace of the mapped prefix. -/
+def mapCompletionAtPrefix (refinement : BehaviorRefinement concrete abstract)
+    (execution : concrete.system.ExecutionPrefix)
+    (completion : concrete.system.Completion execution.state execution.graph
+      execution.events) :
+    abstract.system.Completion (refinement.mapPrefix execution).state
+      (refinement.mapPrefix execution).graph
+      (refinement.mapPrefix execution).events :=
+  refinement.mapCompletion completion
+
 /-- Transport the concrete side of a refinement along exact behavior equality. -/
 def castConcrete {replacement : ProgramBehavior spec}
     (exact : concrete = replacement)
@@ -263,12 +316,12 @@ theorem preservesAcceptance (refinement : BehaviorRefinement concrete abstract)
     (admitted : spec.admits (concrete.inputOf execution.initialState)) :
     spec.accepts (concrete.inputOf execution.initialState)
       (concrete.observe execution) := by
-  rw [<- refinement.input execution.initialState]
-  exact abstractSound (refinement.mapPrefix execution)
-    (refinement.terminal terminal) (by
-    change spec.admits (abstract.inputOf (refinement.mapState execution.initialState))
-    rw [refinement.input]
-    exact admitted)
+  have mappedAdmitted :
+      spec.admits (abstract.inputOf
+        (refinement.mapPrefix execution).initialState) := by
+    simpa using admitted
+  simpa using abstractSound (refinement.mapPrefix execution)
+    (refinement.terminal_mapPrefix execution terminal) mappedAdmitted
 
 end BehaviorRefinement
 
