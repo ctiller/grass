@@ -15,6 +15,8 @@ param(
         "Grass.RelationalSystem.Steps.trans",
         "Grass.RelationalSystem.Steps.graphExtends",
         "Grass.RelationalSystem.InfiniteContinuation.ext",
+        "Grass.RelationalSystem.InfiniteContinuation.graphExtendsAt",
+        "Grass.RelationalSystem.InfiniteContinuation.prefixSteps",
         "Grass.RelationalSystem.Runs.initialValid",
         "Grass.RelationalSystem.Runs.steps",
         "Grass.RelationalSystem.Runs.ofInitialSteps",
