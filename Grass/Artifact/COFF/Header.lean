@@ -12,8 +12,8 @@ namespace Grass.Artifact.COFF
 
 open Grass.Artifact.Binary Grass.Grammar Grass.Std.Logical
 
-/-- The seven fields of the 20-byte COFF file header. Each integer is stored
-little-endian on disk; retaining bit widths in the type prevents truncation. -/
+/-- The seven fields of the 20-byte COFF file header. `Header` retains each
+integer's exact bit width; `writeHeader` supplies its little-endian disk view. -/
 structure Header where
   machine : BitVec 16
   numberOfSections : BitVec 16
@@ -154,8 +154,8 @@ theorem writeHeader_derives (header : Header) :
               ((writeLittleEndian_realizes 2).sound optional)
               ((writeLittleEndian_realizes 2).sound flags))))))
 
-/-- Reading a written header consumes exactly the header and preserves an
-arbitrary following suffix. -/
+/-- `readHeader_writeHeader_append` states that reading a written header
+consumes exactly the header and preserves an arbitrary following suffix. -/
 @[simp] theorem readHeader_writeHeader_append (header : Header)
     (rest : Std.Logical.ByteArray) :
     readHeader (writeHeader header ++ rest) = .done header rest := by
