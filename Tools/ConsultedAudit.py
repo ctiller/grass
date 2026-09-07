@@ -250,7 +250,7 @@ ALLOWED = {
     # And `Grass/Core/Demand.lean`, the same way and for the same reason. This one was
     # *already* silenced, by the bare `origin` entry two groups above, whose reason
     # ("diagnostic identity, never dispatched on") is false of it. Reported to that
-    # owner as part of `c-mem:52` rather than decided here.
+    # owner in `c-mem:53`, an addendum to `c-mem:52`, rather than decided here.
     "DerivedDemandFamily.origin",
     # Diagnostic provenance carried into the trace for a report to read, never
     # dispatched on, like `id` and `origin` above. Two structures carry a field so
