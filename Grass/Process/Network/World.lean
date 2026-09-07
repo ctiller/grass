@@ -432,6 +432,26 @@ def OccurrencesOnTheirSession : Prop :=
     occurrence ∈ (network.inFlight edge session).created → occurrence.2.1 = session
 
 /--
+**Every shared region holds what the graph says it must.**
+
+`ProcessGraph.sharedInvariant` declared; this is where a *world* is held to it,
+and it is the half `agent-bus` ruling `g-design:84` means by "network
+`WellFormed` must spend the shared invariant".
+
+Without a clause here the invariant would be a declaration no world had to
+satisfy, and `ProcessPlan.sharedUpdate` would be a bound on steps with nothing
+downstream consuming it — the shape §10.109 named, where a guarantee stops at the
+transition family's own edge and every theorem stated over `before.WellFormed`
+still admits the world the family refuses to reach.
+
+A graph with no regions discharges this by `elim`, and one whose invariant is
+`fun _ _ => True` by `trivial`; the cost lands on a plan that declares something
+about its shared state, which is the plan that wanted it.
+-/
+def SharedInvariantHolds : Prop :=
+  ∀ region, topology.sharedInvariant region (network.shared region)
+
+/--
 **Every instance's stored ending is one its protocol reaches.**
 
 `docs/DECISIONS.md` decision 129 puts this at the network: "Network
@@ -472,6 +492,8 @@ structure WellFormed
   reroutesLand : network.ReroutesLand
   /-- And every occurrence in flight is on the session holding it. -/
   occurrencesOnTheirSession : network.OccurrencesOnTheirSession
+  /-- And every shared region holds what the graph requires. -/
+  sharedInvariantHolds : network.SharedInvariantHolds
 
 /--
 **And in a well-formed network the arrival is on its destination.**

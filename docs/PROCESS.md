@@ -508,7 +508,24 @@ processes.” Creation and termination are typed transitions, not changes to an
 uninterpreted global bag.
 
 Local state belongs to one process instance. Shared logical state is named
-separately with read/write/atomic capabilities and interference invariants.
+separately with read/write/atomic capabilities and interference invariants. Both
+belong to the graph: `ProcessGraph.sharedAccess` is the capability and
+`ProcessGraph.sharedInvariant` is the invariant, and network well-formedness
+holds every world to the second.
+
+*How* a region may move is a further thing, and it belongs to the plan rather
+than to the graph or to a process. `ProcessPlan.sharedUpdate` relates a role's
+own transition data — the event, its local state either side, what it issued and
+what it observed — to the before and after value of each region it writes, and
+every local step must show its writes are admitted. `ProcessSpec.Step` does
+**not** mention shared regions and must not: a root specification prescribing a
+state partition is precisely the weave leakage
+[FOUNDATION.md](FOUNDATION.md) law 15 forbids. A root that wants to model
+logically shared behaviour models it in its own `State`, and the presentation
+relates that state to the chosen partition. A role with no writable region owes
+nothing. `agent-bus` ruling `g-design:84` settles this and
+[PROCESS_IMPLEMENTATION_PLAN.md](PROCESS_IMPLEMENTATION_PLAN.md) §10.128 records
+what it closes.
 Nothing is shared merely because two transitions mention the same Lean value.
 The later memory realization maps this logical ownership/access graph to
 provenance, loans, synchronization, allocation identity, and race-freedom

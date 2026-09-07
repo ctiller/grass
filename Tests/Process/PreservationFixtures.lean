@@ -252,6 +252,11 @@ def withRoot_is_a_start :
     | connection => exact absurd found (by intro equal; cases equal)
   nothingInFlight := fun _ _ => rfl
   sessionsFresh := fun _ _ => rfl
+  sharedInvariantAtStart := by
+    intro region
+    cases region with
+    | routeTable => exact List.nodup_nil
+    | acceptCount => trivial
   historyFromEmpty :=
     NominalHistory.Reaches.extend (.refl _) LifecycleStep.theGeneration
       (by intro _ _; exact List.not_mem_nil)

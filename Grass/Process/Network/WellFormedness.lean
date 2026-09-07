@@ -983,6 +983,69 @@ theorem occurrencesOnTheirSession_preserved (transition : plan.NetworkTransition
       rcases declared.2 with h | h <;> exact absurd h (by intro equal; cases equal)
   · exact holds edge session occurrence (ledger_unchanged transition declared ▸ held)
 
+/--
+**A step preserves the shared invariant** — `sharedInvariantHolds_preserved`.
+
+`agent-bus` ruling `g-design:84`'s "network `WellFormed` must spend the shared
+invariant", carried across the family. One constructor can move a shared region
+and it is `processStep`; every other declares no `.region` fragment at all, so
+`touchesOnly` says the region is where it was and the before-network answers.
+
+The `processStep` case is the only one with content, and it is two fields
+composed: `StepsLocally.sharedWritesAdmitted` says the move is one
+`ProcessPlan.sharedUpdate` admits, and `ProcessPlan.sharedUpdatePreserves` says
+such a move keeps the invariant. Neither alone would do — the first is a bound
+with no consequence and the second is a fact about a relation nothing ties to a
+step.
+-/
+theorem sharedInvariantHolds_preserved (transition : plan.NetworkTransition before after)
+    (holds : before.SharedInvariantHolds) : after.SharedInvariantHolds := by
+  intro region
+  by_cases declared : transition.scope (.region region)
+  · cases transition with
+    | processStep kind slot event emitted issued localEmitted step =>
+      obtain ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter, _⟩ :=
+        step.protocolStep
+      rcases declared with h | ⟨_, h⟩ | ⟨region', moved, sameFragment⟩
+      · exact absurd h (by intro equal; cases equal)
+      · exact absurd h (by intro equal; cases equal)
+      · injection sameFragment with same
+        subst same
+        exact plan.sharedUpdatePreserves kind event (fromKind ▸ fromInstance.localState)
+          (toKind ▸ toInstance.localState) issued localEmitted region
+          (before.shared region) (after.shared region)
+          (step.sharedWritesAdmitted region moved fromInstance toInstance fromKind toKind
+            foundBefore foundAfter)
+          (holds region)
+    | spawn _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
+    | restart _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
+    | send _ _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | receive _ _ _ _ =>
+      exact absurd declared (by rintro (h | h) <;> cases h)
+    | commit _ _ =>
+      rcases declared.2 with h | h <;> exact absurd h (by intro equal; cases equal)
+    | requestCancel _ _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | acknowledgeCancel _ _ _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | timeout _ _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | interrupt _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | fault _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | environmentViolation _ _ _ _ _ =>
+      exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | childCancelled _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | childDied _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | processTermination _ _ _ _ _ =>
+      exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | join _ _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | detach _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | senderDeath _ _ _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | receiverDeath _ _ _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | drop _ _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | coalesce _ _ _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | reroute _ _ _ _ _ => exact absurd declared (by rintro (h | h) <;> cases h)
+    | channelClose _ _ _ _ => exact absurd declared (by rintro (h | h) <;> cases h)
+    | channelDeath _ _ _ _ => exact absurd declared (by rintro (h | h) <;> cases h)
+  · exact (transition.touchesOnly (.region region) declared) ▸ holds region
+
 /-! ## The capstone -/
 
 /--
@@ -1004,6 +1067,8 @@ theorem wellFormed_preserved (step : plan.NetworkStep before after)
   reroutesLand := reroutesLand_preserved step.transition wellFormed.reroutesLand
   occurrencesOnTheirSession :=
     occurrencesOnTheirSession_preserved step.transition wellFormed.occurrencesOnTheirSession
+  sharedInvariantHolds :=
+    sharedInvariantHolds_preserved step.transition wellFormed.sharedInvariantHolds
 
 end ProcessPlan
 

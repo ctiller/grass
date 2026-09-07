@@ -295,6 +295,38 @@ structure ProcessGraph (registry : ProtocolRegistry.{u, w, v})
   observeAtRoot : observeAt root = rootBoundary.observe
   /-- What each role may do to each shared region. -/
   sharedAccess : ProcessKind → SharedRegion → LogicalAccess
+  /--
+  **And what each region is required to hold.**
+
+  `docs/PROCESS.md` §3 names two things about shared state, not one: it is
+  "named separately with read/write/atomic capabilities **and** interference
+  invariants". `sharedAccess` above is the first. This is the second, and until
+  `agent-bus` ruling `g-design:84` on `c-process:69` the module note said the
+  interference invariant "is not here" and left it at that.
+
+  **What the gap was.** `StepsLocally.writesPermitted` bounds *which* regions a
+  step may move — those its role may write — and nothing bounded the *value*
+  written. `ProcessSpec.Step` relates local state, outstanding demands and
+  emissions and never mentions `shared`, so a `processStep` could set any
+  writable region to any value whatever, unrelated to the event it was handling.
+  Nothing broke, because no clause of `LogicalProcessNetworkCore.WellFormed` was
+  about shared regions — which is precisely the shape §10.87, §10.91 and §10.97
+  each had at a ledger field before something downstream needed them.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.128.
+
+  **Why it is here and not on `ProcessSpec`.** The ruling is explicit: a root
+  specification must not mention presentation-owned regions, because that would
+  make the precious portable behaviour prescribe a weave and a state partition,
+  which is `docs/FOUNDATION.md` law 15. A root spec that wants to model logically
+  shared behaviour models it in its own `State`, and the presentation relates
+  that state to the chosen partition. So the invariant belongs to the graph, the
+  *update* relation belongs to the plan — `ProcessPlan.sharedUpdate` — and
+  neither is an author obligation on a leaf protocol.
+
+  A region nobody may write can take `fun _ => True`, and a graph with no regions
+  at all discharges this by `elim`.
+  -/
+  sharedInvariant : (region : SharedRegion) → SharedState region → Prop
   /-- How many instances of each role, and whether they carry generations. -/
   population : PopulationLaw ProcessKind
 

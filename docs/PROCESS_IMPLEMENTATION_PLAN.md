@@ -3965,6 +3965,10 @@ which is exactly the shape §10.87, §10.91 and §10.97 each had at a ledger fie
 before something downstream needed them. Closing it needs `ProcessSpec.Step` to
 mention shared state, which it does not, so this is a ruling rather than a patch.
 
+**Ruled** by `g-design:84`: not in `ProcessSpec.Step`, which would be weave
+leakage, but in the graph's invariant and the plan's update relation. §10.128 is
+the entry, and closes this half. The `EscrowLedger.rank` half below is unchanged.
+
 **`EscrowLedger.rank`.** No field of any structure mentions it and `LedgerExtends`
 says nothing about it, so a step may renumber freely. The reviewer tried and could
 not break it: `rankOrdersCreated` at the after-ledger forces rank to increase
@@ -4666,6 +4670,58 @@ intended reading was stronger — a law this layer states about custody across a
 merge — it needs a way to attach custody to an occurrence, which is
 `Grass/Process/Network/Escrow.lean`'s §3 escrow assertion and is not modelled
 here. Recorded rather than assumed closed.
+
+### 10.128 A step could write any value into any writable region
+
+§10.103's first half, ruled by `agent-bus` `g-design:84` on `c-process:69` and
+implemented. `StepsLocally.writesPermitted` bounded *which* regions a step may
+move — those its role may write — and nothing bounded the value. `protocolStep`
+relates `localState`, `outstanding`, `ref`, `parentage` and `request`; `shared`
+appeared in `Grass/Process/` only in scope and capability positions. So a
+`processStep` could set any writable region to anything at all, unrelated to the
+event it was handling, and nothing broke because no clause of `WellFormed` was
+about shared regions.
+
+**The ruling refused the obvious fix and said why.** Putting shared state into
+`ProcessSpec.Step` would make the precious portable behaviour prescribe a weave
+and a state partition, which is `docs/FOUNDATION.md` law 15 — the same boundary
+§10.1 and `coord1:5` were about, one layer down. A root specification that wants
+logically shared behaviour models it in its own `State`, and the presentation
+relates that state to the partition.
+
+**So the gap is closed in three places, none of them the protocol.**
+
+* `ProcessGraph.sharedInvariant` — what each region must hold. §3 has always
+  asked for "read/write/atomic capabilities **and** interference invariants", and
+  `Grass/Process/Network/Graph.lean`'s own note said the invariant "is not here".
+  Now it is, beside the capability it was always paired with in the sentence.
+* `ProcessPlan.sharedUpdate` — how a role's step may move a region, indexed by
+  the acting kind and the local transition data the ruling names. Plus
+  `sharedUpdatePreserves`, without which the invariant would be a clause any step
+  could break.
+* `WellFormed.sharedInvariantHolds`, and `sharedInvariantHolds_preserved` in the
+  capstone. One constructor can move a region and it is `processStep`; every
+  other declares no `.region` fragment, so `touchesOnly` answers. The
+  `processStep` case is the two new fields composed, and neither alone would do:
+  the first is a bound with no consequence and the second is a fact about a
+  relation nothing ties to a step. `ExactInitialNetwork.sharedInvariantAtStart`
+  is the third piece — an execution keeps the invariant only if it begins with
+  it, which is §10.106's shape again.
+
+**And it is exercised, which is the part that took the longest.** Every
+`StepsLocally` in the corpus discharged `writesPermitted` by `absurd rfl moved`:
+no fixture step had ever moved a region, so a bound on the value would have been
+declared and never met. `Tests/Process/ProcessStepFixtures.lean`'s
+`the_listener_counts` is a step that writes the accept counter, and
+`the_listener_may_not_miscount` is the same step writing seven instead of one,
+refused. `writesPermitted` is satisfied in both — the listener *may* write that
+region — so the capability is demonstrably not what refuses the second.
+
+**What is still open from §10.103.** Its second half, `EscrowLedger.rank`, is
+unchanged: no field mentions it, and it is pinned only indirectly by
+`rankOrdersCreated`, `created`-monotonicity and `coalesceCarrierLater`. That was
+recorded as an observation rather than raised as a question, and it stays
+recorded.
 
 ## 11. The authoring facade
 

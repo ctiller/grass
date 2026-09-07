@@ -134,6 +134,22 @@ structure ExactInitialNetwork
   /-- **Every session is open and has delivered nothing.** -/
   sessionsFresh : ∀ edge session, network.sessions edge session = ⟨.open, 0⟩
   /--
+  **And every shared region starts holding what the graph requires.**
+
+  The clause `LogicalProcessNetworkCore.SharedInvariantHolds` needs at a start,
+  and the one thing about shared state a *start* can be asked. `sharedUpdate`
+  bounds how a region moves and `sharedUpdatePreserves` carries the invariant
+  across a step, so an execution keeps it — but only if it begins with it, and
+  nothing else here says what a region initially holds.
+
+  This is `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.106's shape again: a clause
+  the theorem below would otherwise have to take as a hypothesis is a missing
+  field, seen from the caller's side. A graph with no regions discharges it by
+  `elim`.
+  -/
+  sharedInvariantAtStart : ∀ region,
+    plan.topology.sharedInvariant region (network.shared region)
+  /--
   **And the nominal history is reachable from empty.**
 
   `docs/FOUNDATION.md` law 22: freshness is absence from the monotone history.
@@ -272,6 +288,7 @@ theorem initial_is_wellformed : network.WellFormed where
     intro edge session occurrence held
     rw [start.nothingInFlight edge session] at held
     exact absurd held List.not_mem_nil
+  sharedInvariantHolds := start.sharedInvariantAtStart
   slotsAgree := by
     intro kind slot incarnation found
     obtain ⟨sameKind, sameSlot⟩ := start.the_root_is_alone found

@@ -179,6 +179,50 @@ structure ProcessPlan (registry : ProtocolRegistry.{u, w, v})
     List (EdgeOccurrence topology message edge) →
     EdgeOccurrence topology message edge → Prop
   /--
+  **How a role's own step may move a shared region.**
+
+  `agent-bus` ruling `g-design:84` on `c-process:69`, and
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.128.
+  `StepsLocally.writesPermitted` bounds *which* regions a step may move and said
+  nothing about the value; `ProcessSpec.Step` never mentions `shared` and must
+  not, because a root specification prescribing a state partition is exactly what
+  `docs/FOUNDATION.md` law 15 forbids. So the relation belongs here, between the
+  two.
+
+  It is indexed by the acting kind and by the local transition data the ruling
+  names — the event, the local state either side, and what the step issued and
+  observed — so a plan can say "the accept counter goes up by one *when the
+  listener handles an accept*" rather than only "the counter may change".
+
+  `StepsLocally.sharedWritesAdmitted` is where it is spent, and only for regions
+  that actually moved. A kind with no writable region pays nothing: the field is
+  vacuous there, which `StepsLocally.sharedWritesAdmitted_of_no_writes` states so
+  that no author has to notice.
+  -/
+  sharedUpdate : (kind : topology.ProcessKind) →
+    (event : (topology.protocol kind).Event) →
+    (beforeLocal afterLocal : (topology.protocol kind).State) →
+    (issued : Bag (topology.protocol kind).Demand) →
+    (observed : ObservationSegment (topology.protocol kind).Observation) →
+    (region : topology.SharedRegion) →
+    topology.SharedState region → topology.SharedState region → Prop
+  /--
+  **And a permitted update preserves the region's invariant.**
+
+  The half that makes `ProcessGraph.sharedInvariant` worth declaring. Without it
+  the invariant is a clause of `WellFormed` that any step may break, so
+  `wellFormed_preserved` could not carry it and the guarantee would stop at the
+  transition's edge — §10.109's lesson, which this milestone has now had to apply
+  three times.
+
+  Quantified over every index, because a step's own data is what the relation
+  sees and there is nothing else for the preservation to depend on.
+  -/
+  sharedUpdatePreserves : ∀ kind event beforeLocal afterLocal issued observed region
+      (before after : topology.SharedState region),
+    sharedUpdate kind event beforeLocal afterLocal issued observed region before after →
+    topology.sharedInvariant region before → topology.sharedInvariant region after
+  /--
   **And a contract's "open session" is the session the network records as open.**
 
   `ChannelContract.sendOnOpenSession` makes the session law a *demand* rather

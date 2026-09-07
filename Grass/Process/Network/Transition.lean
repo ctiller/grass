@@ -965,6 +965,35 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
   writesPermitted : ∀ region, before.shared region ≠ after.shared region →
     (plan.topology.sharedAccess kind region).mayWrite = true
   /--
+  **And what it wrote is what the plan admits it to write.**
+
+  `writesPermitted` above bounds *which* regions may move.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.128 is the gap that leaves: nothing
+  bounded the *value*, so a `processStep` could set any writable region to
+  anything at all, unrelated to the event it was handling. `ProcessSpec.Step`
+  cannot close it — it never mentions `shared`, and `agent-bus` ruling
+  `g-design:84` is explicit that it must not, since a root specification
+  prescribing a state partition is what `docs/FOUNDATION.md` law 15 forbids.
+
+  So the bound is `ProcessPlan.sharedUpdate`, indexed by this step's own kind,
+  event, local states, issued bag and observed segment. Quantified over the
+  regions that *moved*, for the same reason `writesPermitted` is: a step that
+  names a region it did not write would make two disjoint steps fail to commute
+  in `Grass/Process/Trace/Independence.lean`.
+
+  A kind with no writable region owes nothing here — see
+  `sharedWritesAdmitted_of_no_writes`, which derives the whole field from
+  `writesPermitted`.
+  -/
+  sharedWritesAdmitted : ∀ region, before.shared region ≠ after.shared region →
+    ∀ (fromInstance toInstance : ProcessInstance plan.topology)
+      (fromKind : fromInstance.kind = kind) (toKind : toInstance.kind = kind),
+      before.instances kind slot = some fromInstance →
+      after.instances kind slot = some toInstance →
+      plan.sharedUpdate kind event (fromKind ▸ fromInstance.localState)
+        (toKind ▸ toInstance.localState) issued localEmitted region
+        (before.shared region) (after.shared region)
+  /--
   Its slot, the regions it wrote, the observation trace **if it actually
   emitted**, and nothing else.
 

@@ -55,6 +55,19 @@ noncomputable def serverPlan : ProcessPlan graphRegistry fixtureBoundary NoOblig
   -- the one-line policy g-design:83 asks for, and it recovers exactly what
   -- `carrierCarriesTheMessage` used to impose on every plan.
   coalescing := fun _ => exactDedup
+  -- The plan's shared-update policy, §10.128. The route table only grows and
+  -- keeps its entries distinct; the accept counter goes up by exactly one, which
+  -- is what "one connection accepted" means and is the content an invariant
+  -- alone would not have.
+  sharedUpdate := fun _ _ _ _ _ _ region =>
+    match region with
+    | .routeTable => fun before after => after.down.Nodup ∧ before.down <+: after.down
+    | .acceptCount => fun before after => after.down = before.down + 1
+  sharedUpdatePreserves := by
+    intro _ _ _ _ _ _ region before after admitted _
+    cases region with
+    | routeTable => exact admitted.1
+    | acceptCount => trivial
   escrowImpliesOutstanding := fun _ _ _ _ escrowed => escrowed
 
 /-- The world a step of it moves through is the one the other fixtures use. -/
