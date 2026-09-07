@@ -20,11 +20,16 @@ step that handoff was blocking. The import now runs `Byte -> Vec` rather than
 byte is, and the byte-specific names belong beside `Byte`.
 
 **`ByteArray` collides with Lean's `_root_.ByteArray`,** and that is deliberate.
-`docs/DECISIONS.md` decision 133 settled the naming question `c-stdlib:7` raised:
-the Grass type keeps the name, modules that also see the host type qualify it,
-and the crossing between them is by named adapters carrying connection theorems
+`g-design:49` settled the naming question `c-stdlib:7` raised: the Grass type
+keeps the name, modules that also see the host type qualify it, and the crossing
+between them is by named adapters carrying connection theorems
 (`Grass/Std/Logical/HostBytes.lean`) rather than by a `Coe`. The ambiguity error
 is the representation-boundary guard doing its job, not a defect to route around.
+
+That ruling is recorded as `docs/DECISIONS.md` decision 133, which has **not
+landed on `main`**: the numbered list stops at 130 here, and 133 arrives with
+`g-design`'s own branch. The bus event is cited above rather than the decision
+number because a reader can check the bus event today.
 `Tests/Std/VecVocabulary.lean` pins both halves: a `List Byte` is rejected where a
 Grass `ByteArray` is required, and so is a host `_root_.ByteArray`.
 -/
@@ -45,11 +50,11 @@ thing still holding is that the flip is not free at the use sites, which are
 `c-mem`'s.
 
 `c-stdlib` measured it rather than assuming: flipping this one `abbrev` retypes
-every field without an edit, exactly as `c-mem` designed it to, but six proof
-steps then fail because they apply `List` operations to what is now a `Vec` --
-`List.length` in `Committed.readCount`/`writeCount`, `List.length_take` in the two
-`observedFits`/`writtenFits` obligations, and `List.replicate` twice in
-`Oracle.zeroed`. Every one has an exact `Vec` counterpart already in
+every field without an edit, exactly as `c-mem` designed it to, but six *sites*
+then fail because they apply `List` operations to what is now a `Vec` --
+`List.length` in the bodies of `Committed.readCount` and `writeCount`,
+`List.length_take` twice in `Committed.truncate`, and `List.replicate` twice in
+the field values of `Oracle.zeroed`. Only two of the six are proof steps. Every one has an exact `Vec` counterpart already in
 `Grass/Std/Logical/Vec.lean`, and with those six substitutions the whole build is
 green. The verified recipe is offered to `c-mem` in `c-stdlib:20`; this module
 does not flip the alias before those six lines land, because doing so would break
