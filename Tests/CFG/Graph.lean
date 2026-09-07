@@ -16,6 +16,9 @@ open Grass Grass.CFG
 def blockId (name : String) : BlockId := ⟨⟨"test.cfg", name⟩⟩
 def exitTag (name : String) : ExitTag := ⟨⟨"test.cfg", name⟩⟩
 
+example : LawfulBEq BlockId := inferInstance
+example : LawfulBEq ExitTag := inferInstance
+
 inductive Terminal where
   | returned
   | failed
