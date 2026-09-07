@@ -184,7 +184,7 @@ the tree that reaches this branch.
 
 So `AuditViolationClass.outOfBounds` is emitted by this layer and belongs in the
 declared set; what is *not* true is the ordering sentence above, which reads as though
-`step` bounds-checks the state. It does not, because it cannot need to.
+`step` bounds-checks the state. It does not, because `AccessDescriptor.WellFormedIn` has already asked.
 `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records the distinction.
 -/
 theorem the_bounds_clause_cannot_fire {d : AccessDescriptor} {space : AddressSpace}

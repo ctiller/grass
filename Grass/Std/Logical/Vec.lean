@@ -1092,9 +1092,9 @@ to the flattening agrees on them.
 here rather than in a plan, because the docstring is what ships. The proof is two
 rewrites and a `refl`; `f` never participates, and the same statement holds with
 `Vec.flatten` replaced by any function at all, including ones that *do* see chunk
-boundaries such as `Vec.length`. So this does not *stop* a consumer from
-observing boundaries — it says that a consumer which has already been written as
-a function of the flattening cannot.
+boundaries such as `Vec.length`. So `IsChunking` does not *stop* a consumer
+from observing boundaries — it says that a consumer already written as a
+function of `flatten` cannot.
 
 `docs/PROCESS.md` §"parser_chunking_invariant" defines `ChunkExtensional` as a
 predicate on a `StreamingParser` and pairs it with a real theorem relating

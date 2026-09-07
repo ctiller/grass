@@ -104,8 +104,9 @@ travels with the run.
 
 Newest wins for initialization as it does for value, so a non-initializing write
 over initialized bytes leaves them uninitialized. The corpus does not settle that
-case; it is the conservative reading, and it is the one that cannot admit a
-program a stricter model would refuse.
+case; it is the conservative reading, and `ByteStore.read` is where it is taken --
+the reading that refuses rather than the one that admits a program a stricter
+model would reject.
 -/
 
 namespace Grass.Memory

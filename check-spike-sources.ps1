@@ -13,6 +13,22 @@ $pairs = @(
     @{ Number = 5; Directory = '5_Spinning_Cube' }
 ) | Where-Object { $Spike -contains $_.Number }
 
+function Get-PathUnder([string] $Base, [string] $Full) {
+    # [IO.Path]::GetRelativePath exists only on .NET Core / .NET 5+, so calling
+    # it makes this check unrunnable under Windows PowerShell 5.1, which is what
+    # is installed on this project's machines: the script dies on its first file
+    # rather than reporting a mirror mismatch. Every path measured here is a file
+    # discovered underneath $Base by Get-ChildItem, so the general relative-path
+    # algorithm is not needed. Strip the prefix, and require that it was one.
+    $normalizedBase = [IO.Path]::GetFullPath($Base).TrimEnd('\', '/')
+    $normalizedFull = [IO.Path]::GetFullPath($Full)
+    $separator = [IO.Path]::DirectorySeparatorChar
+    if (-not $normalizedFull.StartsWith($normalizedBase + $separator, [StringComparison]::Ordinal)) {
+        throw "$normalizedFull is not underneath $normalizedBase"
+    }
+    return $normalizedFull.Substring($normalizedBase.Length + 1).Replace('\', '/')
+}
+
 function ConvertTo-NormalizedSource([string] $Text) {
     return $Text.Replace("`r`n", "`n").Replace("`r", "`n").TrimEnd("`n")
 }
@@ -102,7 +118,7 @@ foreach ($pair in $pairs) {
     $directoryFiles = @(Get-ChildItem -LiteralPath $sourceDirectory -Filter '*.lean' -Recurse |
         Sort-Object FullName)
     $directoryPaths = @($directoryFiles | ForEach-Object {
-        [IO.Path]::GetRelativePath($sourceDirectory, $_.FullName).Replace('\', '/')
+        Get-PathUnder $sourceDirectory $_.FullName
     } | Sort-Object -CaseSensitive)
     $documentPaths = @($documentSources.Keys | Sort-Object -CaseSensitive)
 
@@ -113,8 +129,7 @@ foreach ($pair in $pairs) {
     }
 
     foreach ($file in $directoryFiles) {
-        $relativePath = [IO.Path]::GetRelativePath(
-            $sourceDirectory, $file.FullName).Replace('\', '/')
+        $relativePath = Get-PathUnder $sourceDirectory $file.FullName
         if (-not $documentSources.ContainsKey($relativePath)) {
             continue
         }

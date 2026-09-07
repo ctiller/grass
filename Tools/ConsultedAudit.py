@@ -52,7 +52,33 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DECLARED_IN = sorted((ROOT / "Grass").rglob("*.lean"))
+# **Scope: the modules this gate was written for.**
+#
+# Merging `origin/main` put three other owners' trees under these globs -- `Grass/ISA`,
+# `Grass/ABI`, `Grass/Process` and their fixtures -- and this gate immediately reported
+# hundreds of findings in them. Every one may be true and none is this branch's to
+# judge: an allowlist entry here records that *somebody read the corpus and decided*,
+# and nobody on this branch has read theirs. A gate that reports what its author cannot
+# adjudicate produces a list nobody acts on, which is how an allowlist fills with
+# entries that record nothing.
+#
+# So the scope is named rather than implied, and widening it is one edit. The honest
+# statement of coverage is in the module docstring: this gate covers the memory layer,
+# and the rest of the tree is not covered by anything of this kind. That has been
+# reported to those owners rather than decided here.
+SCOPE = ("Memory", "Obligation", "Resource", "Op", "Core", "Std", "Trust", "Semantics")
+
+
+def in_scope(path) -> bool:
+    """Whether a path lies in one of `SCOPE`'s subtrees, or at a tree's root."""
+    parts = path.parts
+    for i, part in enumerate(parts):
+        if part in ("Grass", "Tests") and i + 1 < len(parts):
+            return parts[i + 1].removesuffix(".lean") in SCOPE
+    return True
+
+
+DECLARED_IN = [p for p in sorted((ROOT / "Grass").rglob("*.lean")) if in_scope(p)]
 # Readers are looked for in the fixtures too: a field a fixture projects is read,
 # and excluding them made AuditViolation.class_ look inert when Tests/ reads it.
 READERS_IN = DECLARED_IN + sorted((ROOT / "Tests").rglob("*.lean"))
@@ -148,9 +174,23 @@ STRUCTURE = re.compile(r"^\s*(?:private\s+)?structure\s+([A-Za-z_][A-Za-z0-9_.']
 # docs/MEMORY_IMPLEMENTATION_PLAN.md and in their own docstrings, which is where a
 # gap this tool cannot see belongs.
 ALLOWED = {
+    # --- Six entries left this list on merging `origin/main`, and the reason is a
+    # --- warning rather than good news. `label`, `observations`, `disposition`,
+    # --- `lifecycle`, `initialGraph` and `parseExact` all stopped suppressing
+    # --- anything -- not because the memory-layer field gained a reader, but
+    # --- because another tree now declares a field of the same name and projects
+    # --- *it*. `AccessDescriptor.observations` still has no reader; so does
+    # --- `PendingRender.observations`, and the projection of the latter satisfies
+    # --- the scan for both.
+    #
+    # --- **Merging main widened this scan's same-name blind spot materially.** It
+    # --- was a documented limitation with a handful of instances; over a tree three
+    # --- times the size it is the ordinary case for any short field name. The
+    # --- entries are deleted because an entry that suppresses nothing records
+    # --- nothing, and section 4.4.1 carries what they were covering, because this
+    # --- gate can no longer say it.
     # Diagnostic identity: carried so a report or rejection can name which one,
     # never dispatched on. `id` and `name` were here too and suppressed nothing.
-    "label",
     # Qualified after review measured it. Bare, this entry also silenced
     # `DerivedDemandFamily.origin` in `Grass/Core/Demand.lean` -- which is not
     # diagnostic identity at all: it is the field saying every demand in a derived
@@ -200,7 +240,6 @@ ALLOWED = {
     #
     # Genuine gaps: a corpus requirement, no consumer, and no milestone that owns
     # them. Recorded as owed in section 4.2.
-    "observations",       # section 7.5 device observation labels; no reader at all
     "vocabularyVersion",  # one version exists, so nothing to compare against yet
     #
     # Not gaps: the consumer is a later milestone or another layer, and the field
@@ -209,7 +248,6 @@ ALLOWED = {
     "coherence",          # likewise; the rules are section 7.2's, which is M8
     "package",            # section 10 gates VerifiedProgram, not this transition
     "obligation",         # TerminalOutcome awaits terminal accounting
-    "disposition",   # TerminalOutcome, likewise
     # Proof obligations: their purpose is that a constructor had to discharge
     # them, so nothing projects them. The structure-suffix rule above misses these
     # because they sit on structures with other names.
@@ -263,12 +301,22 @@ ALLOWED = {
     "stateZero",
     "graphZero",
     "consistent",
-    "initialGraph",
     # And `Grass/Core/Demand.lean`, the same way and for the same reason. This one was
     # *already* silenced, by the bare `origin` entry two groups above, whose reason
     # ("diagnostic identity, never dispatched on") is false of it. Reported to that
     # owner in `c-mem:53`, an addendum to `c-mem:52`, rather than decided here.
     "DerivedDemandFamily.origin",
+    # Five more of the same, which merging `origin/main` brought in: three witness
+    # fields of `InfiniteContinuation` beside the four already listed, and both fields
+    # of `SpecProcess`. Same reason and same routing -- listed rather than silently
+    # skipped, reported to that owner rather than decided here. `SpecProcess.admits` is
+    # the one worth their eye: a process specification whose admission relation nothing
+    # projects is a specification nothing checks against.
+    "InfiniteContinuation.stateAt",
+    "InfiniteContinuation.graphAt",
+    "InfiniteContinuation.choiceAt",
+    "SpecProcess.admits",
+    "SpecProcess.observationProjection",
     # Diagnostic provenance carried into the trace for a report to read, never
     # dispatched on, like `id` and `origin` above. Two structures carry a field so
     # named and the reason is true of both, so both are listed -- which is the point of
@@ -288,7 +336,6 @@ ALLOWED = {
     "ResourceLimit.zero",
     "limit",
     "exhaustion",
-    "lifecycle",
 
     # Proof obligations on structures a *provider* supplies, from modules this
     # branch does not own -- Grass/Core/Demand.lean and Grass/Certificate.lean,
@@ -301,7 +348,6 @@ ALLOWED = {
     "complete",
     "unique",
     "identityInjective",
-    "parseExact",
 }
 
 def blank(match: "re.Match[str]") -> str:

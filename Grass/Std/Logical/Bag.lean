@@ -36,8 +36,8 @@ membership, because membership is not what the constructor asks for.
 ## Accepted from `c-process`
 
 This module was written in the Grass.Process namespace as declared temporary
-custody, because `ProcessSpec` cannot be stated without a multiset and none
-existed in Lean core or on any branch. `docs/MODULES.md` gives pure collections to
+custody: `Bag` is the multiset that `docs/PROCESS.md`'s process-step vocabulary
+cannot be stated without, and none existed in Lean core or on any branch. `docs/MODULES.md` gives pure collections to
 `Grass.Std.Logical`, `coord1:32` named this library the receiver, and
 `c-process:52` offered it. The transfer is what `c-process` designed it to be: a
 namespace change and nothing else. Every declaration, law and proof below is as

@@ -67,7 +67,33 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DECLARED_IN = sorted((ROOT / "Grass").rglob("*.lean"))
+# **Scope: the modules this gate was written for.**
+#
+# Merging `origin/main` put three other owners' trees under these globs -- `Grass/ISA`,
+# `Grass/ABI`, `Grass/Process` and their fixtures -- and this gate immediately reported
+# hundreds of findings in them. Every one may be true and none is this branch's to
+# judge: an allowlist entry here records that *somebody read the corpus and decided*,
+# and nobody on this branch has read theirs. A gate that reports what its author cannot
+# adjudicate produces a list nobody acts on, which is how an allowlist fills with
+# entries that record nothing.
+#
+# So the scope is named rather than implied, and widening it is one edit. The honest
+# statement of coverage is in the module docstring: this gate covers the memory layer,
+# and the rest of the tree is not covered by anything of this kind. That has been
+# reported to those owners rather than decided here.
+SCOPE = ("Memory", "Obligation", "Resource", "Op", "Core", "Std", "Trust", "Semantics")
+
+
+def in_scope(path) -> bool:
+    """Whether a path lies in one of `SCOPE`'s subtrees, or at a tree's root."""
+    parts = path.parts
+    for i, part in enumerate(parts):
+        if part in ("Grass", "Tests") and i + 1 < len(parts):
+            return parts[i + 1].removesuffix(".lean") in SCOPE
+    return True
+
+
+DECLARED_IN = [p for p in sorted((ROOT / "Grass").rglob("*.lean")) if in_scope(p)]
 BUILDERS_IN = DECLARED_IN + sorted((ROOT / "Tests").rglob("*.lean"))
 
 INDUCTIVE = re.compile(r"^\s*(?:private\s+|protected\s+)?inductive\s+([A-Za-z_][A-Za-z0-9_.']*)")
@@ -159,6 +185,14 @@ ALLOWED = {
     "RequirementKind.diagnostic",
     "RequirementKind.applicability",
     "RequirementKind.extension",
+    # `artifact` joins the list rather than being reported, and its arrival is this
+    # tool working rather than the tree changing: the round that stopped the
+    # declaration walk from skipping a line when a docstring shares it, and stopped a
+    # quote in a comment from blanking real code, is what made this constructor visible.
+    # `memory` is still hidden by the documented same-name blindness -- `.memory`
+    # matches `state.memory` on hundreds of lines -- so it is not listed, because an
+    # entry for a name this scanner cannot see records a judgement nobody made.
+    "RequirementKind.artifact",
     "RequirementOrigin.prior",
     "RequirementOrigin.external",
     # `EventKind.control` stood here too, on the reason that control flow is the

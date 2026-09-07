@@ -74,6 +74,30 @@ name: Library build
 # Vec.sum, on the right-hand side of a law consumers apply. lake build says
 # nothing about it: an operation with no law compiles. Tools/CoverageAudit.lean
 # is what says something.
+#
+# The x86 differentials check something no Lean theorem can. Every theorem in
+# Grass/ISA/X86/** relates Grass's own definitions to each other, so an encoder
+# and decoder that are wrong in the same way satisfy all of them while emitting
+# instructions no processor executes -- a reviewer demonstrated exactly that
+# with a consistent RIP-relative/absolute swap that closed every proof
+# unchanged. NASM and NDISASM are the only things in the repository that can
+# notice. They ran by hand until now, which meant the claim they support could
+# rot with nothing to say so.
+#
+# The `unwind` job exists because that argument applies again, and the second
+# time it was not hypothetical. Win64 `.xdata` is a Microsoft format, and
+# Microsoft's assembler generates it from the same prologue Grass models, so
+# ml64 is an oracle for it -- a better one than NASM is for encodings, being the
+# vendor of the format rather than a third party. It disagreed on 32 of 50
+# prologues the first time it ran, and both causes were Grass defects that no
+# proof in the repository could see: CountOfCodes folded in the padding slot,
+# and UWOP_SET_FPREG wrote 0 where ml64 writes the frame register. Of eight
+# mutations tried against the model afterwards, four are caught only here and
+# not by any theorem.
+#
+# It is a separate Windows job because ml64.exe is Windows-only. A missing
+# assembler fails the job rather than skipping it: a differential that passes
+# because its oracle is absent is worse than no differential.
 
 on:
   push:
@@ -155,5 +179,56 @@ jobs:
 
       - name: Audit citations of declarations and document sections
         run: python3 Tools/CitationAudit.py
+
+      - name: Report ledger coverage
+        run: lake env lean Tests/ISA/X86/LedgerAudit.lean
       - name: Audit observation coverage
         run: lake env lean Tools/CoverageAudit.lean
+
+      - name: Install NASM
+        run: sudo apt-get update && sudo apt-get install -y nasm
+
+      - name: Differential against NASM
+        run: |
+          lake env lean --run Tests/ISA/X86/NasmCorpus.lean > "$RUNNER_TEMP/corpus.txt"
+          python3 Tools/x86-nasm-differential.py "$RUNNER_TEMP/corpus.txt"
+
+      - name: Differential against NDISASM
+        run: |
+          lake env lean --run Tests/ISA/X86/RipCorpus.lean > "$RUNNER_TEMP/rip.txt"
+          python3 Tools/x86-ndisasm-differential.py "$RUNNER_TEMP/rip.txt"
+
+      - name: Decoder differential against NDISASM
+        run: |
+          lake env lean --run Tests/ISA/X86/DecodeCorpus.lean > "$RUNNER_TEMP/decode.txt"
+          python3 Tools/x86-decode-differential.py "$RUNNER_TEMP/decode.txt"
+  unwind:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: |
+          curl -sSfL -o elan-init.exe https://github.com/leanprover/elan/releases/download/v4.2.3/elan-init-x86_64-pc-windows-msvc.exe
+          ./elan-init.exe -y --default-toolchain none
+          echo "$USERPROFILE/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Report toolchain
+        run: |
+          lean --version
+          lake --version
+
+      - name: Build the unwind corpus
+        run: lake build Tests.ABI.Win64.UnwindCorpus
+
+      - name: Differential against ml64
+        run: |
+          lake env lean --run Tests/ABI/Win64/UnwindCorpus.lean > "$RUNNER_TEMP/unwind.txt"
+          python Tools/win64-unwind-differential.py "$RUNNER_TEMP/unwind.txt"

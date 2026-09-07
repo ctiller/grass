@@ -86,6 +86,21 @@ structure BehaviorRefinement (concrete abstract : ProgramBehavior spec) where
 
 namespace BehaviorRefinement
 
+/-- Two refinements are equal when their state, graph, and choice maps are
+equal. The remaining fields are propositions witnessing that those maps
+preserve the adjacent behaviors. -/
+@[ext]
+theorem ext {left right : BehaviorRefinement concrete abstract}
+    (state : left.mapState = right.mapState)
+    (graph : left.mapGraph = right.mapGraph)
+    (choice : left.mapChoice = right.mapChoice) : left = right := by
+  cases left
+  cases right
+  cases state
+  cases graph
+  cases choice
+  rfl
+
 /-- Refinement is reflexive. -/
 def refl (behavior : ProgramBehavior spec) : BehaviorRefinement behavior behavior where
   mapState := id
@@ -111,6 +126,29 @@ def trans (lowerMiddle : BehaviorRefinement lower middle)
   terminal terminal := middleUpper.terminal (lowerMiddle.terminal terminal)
   infiniteConsistency consistent :=
     middleUpper.infiniteConsistency (lowerMiddle.infiniteConsistency consistent)
+
+/-- Reflexive refinement is a left identity for composition. -/
+@[simp]
+theorem refl_trans (refinement : BehaviorRefinement lower upper) :
+    (refl lower).trans refinement = refinement := by
+  apply ext <;> rfl
+
+/-- Reflexive refinement is a right identity for composition. -/
+@[simp]
+theorem trans_refl (refinement : BehaviorRefinement lower upper) :
+    refinement.trans (refl upper) = refinement := by
+  apply ext <;> rfl
+
+/-- Adjacent refinement composition is associative. The orientation gives
+the simplifier a right-associated normal form for certificate chains. -/
+@[simp]
+theorem trans_assoc {highest : ProgramBehavior spec}
+    (lowerMiddle : BehaviorRefinement lower middle)
+    (middleUpper : BehaviorRefinement middle upper)
+    (upperHighest : BehaviorRefinement upper highest) :
+    (lowerMiddle.trans middleUpper).trans upperHighest =
+      lowerMiddle.trans (middleUpper.trans upperHighest) := by
+  apply ext <;> rfl
 
 /-- Map a coherent finite suffix through a step simulation. -/
 theorem mapSteps (refinement : BehaviorRefinement concrete abstract)
@@ -159,11 +197,10 @@ theorem mapRuns (refinement : BehaviorRefinement concrete abstract)
     (execution : concrete.system.Runs initialState initialGraph state graph events) :
     abstract.system.Runs (refinement.mapState initialState)
       (refinement.mapGraph initialGraph) (refinement.mapState state)
-      (refinement.mapGraph graph) events := by
-  induction execution with
-  | initial valid => exact .initial (refinement.initial valid)
-  | step prior transition inductionHypothesis =>
-      exact .step inductionHypothesis (refinement.step transition)
+      (refinement.mapGraph graph) events :=
+  RelationalSystem.Runs.ofInitialSteps
+    (refinement.initial execution.initialValid)
+    (refinement.mapSteps execution.steps)
 
 /-- Prefix mapping is derived from the coherent state/graph simulation. -/
 def mapPrefix (refinement : BehaviorRefinement concrete abstract)
@@ -175,6 +212,36 @@ def mapPrefix (refinement : BehaviorRefinement concrete abstract)
   graph := refinement.mapGraph execution.graph
   events := execution.events
   runs := refinement.mapRuns execution.runs
+
+/-- Reflexive refinement leaves every packaged execution prefix unchanged. -/
+@[simp]
+theorem mapPrefix_refl (behavior : ProgramBehavior spec)
+    (execution : behavior.system.ExecutionPrefix) :
+    (refl behavior).mapPrefix execution = execution := by
+  apply RelationalSystem.ExecutionPrefix.ext <;> rfl
+
+/-- Mapping a prefix through a composite refinement agrees with mapping it
+through the two adjacent refinements in order. -/
+@[simp]
+theorem mapPrefix_trans (lowerMiddle : BehaviorRefinement lower middle)
+    (middleUpper : BehaviorRefinement middle upper)
+    (execution : lower.system.ExecutionPrefix) :
+    (lowerMiddle.trans middleUpper).mapPrefix execution =
+      middleUpper.mapPrefix (lowerMiddle.mapPrefix execution) := by
+  apply RelationalSystem.ExecutionPrefix.ext <;> rfl
+
+/-- `BehaviorRefinement.mapPrefix_append` states that refinement mapping
+preserves suffix append and its complete event order. -/
+@[simp]
+theorem mapPrefix_append (refinement : BehaviorRefinement concrete abstract)
+    (execution : concrete.system.ExecutionPrefix)
+    {events : List spec.AuditEvent}
+    {finalState : concrete.system.State} {finalGraph : concrete.system.Graph}
+    (suffix : concrete.system.Steps execution.state execution.graph events
+      finalState finalGraph) :
+    refinement.mapPrefix (execution.append suffix) =
+      (refinement.mapPrefix execution).append (refinement.mapSteps suffix) := by
+  apply RelationalSystem.ExecutionPrefix.ext <;> rfl
 
 /-- Transport the concrete side of a refinement along exact behavior equality. -/
 def castConcrete {replacement : ProgramBehavior spec}

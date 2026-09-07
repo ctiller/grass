@@ -372,7 +372,8 @@ theorem not_wellFormed_numeric_spirvPrivate :
     ¬ ({ spirvPrivate with repr := .numeric 64 } : AddressSpace).WellFormed := by decide
 
 /-- **An identity this module does not name is numerically addressed**, which is the
-default a profile cannot argue with. It used to be unconstrained, and review declared a
+default `AddressSpaceId.requiredRepresentation` gives it and a profile does not
+supply. It used to be unconstrained, and review declared a
 symbolic space under `win32.processHeap` -- an allocator name Spike 1's own profile uses
 -- and put a store of `2 ^ 70` bytes at a symbolic address through the seal with a
 4096-byte alignment demand, both numeric clauses vacuous. -/

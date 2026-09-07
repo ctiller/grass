@@ -5,7 +5,21 @@ import Grass.Core.Generational
 import Grass.Core.Identifiers
 import Grass.Core.Name
 import Grass.Core.Uid
+import Grass.ABI.Win64.Convention
+import Grass.ABI.Win64.Unwind
+import Grass.ABI.Win64.UnwindBytes
 import Grass.Certificate
+import Grass.ISA.X86.Addressing
+import Grass.ISA.X86.Bytes
+import Grass.ISA.X86.Citation
+import Grass.ISA.X86.Decode
+import Grass.ISA.X86.DualCitation
+import Grass.ISA.X86.Encoding
+import Grass.ISA.X86.Ledger
+import Grass.ISA.X86.Performance
+import Grass.ISA.X86.Profile
+import Grass.ISA.X86.Register
+import Grass.ISA.X86.Sources
 import Grass.Memory.Access
 import Grass.Memory.AddressSpace
 import Grass.Memory.Addressing
@@ -27,12 +41,63 @@ import Grass.Obligation.Core
 import Grass.Obligation.Delta
 import Grass.Obligation.Disposition
 import Grass.Op.Facets
+import Grass.Platform.Win32.Console
 import Grass.Op.Step
+import Grass.Process
+import Grass.Process.Acceptance
+import Grass.Process.Bag
+import Grass.Process.ByteFlow.Egress
+import Grass.Process.ByteFlow.Ingress
+import Grass.Process.ByteFlow.Rechunk
+import Grass.Process.Cancellation
+import Grass.Process.Cancellation.Compose
+import Grass.Process.Cancellation.Identity
+import Grass.Process.Cancellation.Policy
+import Grass.Process.Correct
+import Grass.Process.Facet
+import Grass.Process.Function.Serial
+import Grass.Process.Network.Assertion
+import Grass.Process.Network.Channel
+import Grass.Process.Network.Child
+import Grass.Process.Network.Commit
+import Grass.Process.Network.Death
+import Grass.Process.Network.Delivery
+import Grass.Process.Network.Escrow
+import Grass.Process.Network.Exposure
+import Grass.Process.Network.Graph
+import Grass.Process.Network.Initial
+import Grass.Process.Network.Instance
+import Grass.Process.Network.Mailbox
+import Grass.Process.Network.Plan
+import Grass.Process.Network.Progress
+import Grass.Process.Network.Structural
+import Grass.Process.Network.Topology
+import Grass.Process.Network.Transition
+import Grass.Process.Network.WellFormedness
+import Grass.Process.Network.World
+import Grass.Process.Nominal
+import Grass.Process.Observation
+import Grass.Process.Progress
+import Grass.Process.Protocol.Registry
+import Grass.Process.Run
+import Grass.Process.Sequential.Adapter
+import Grass.Process.Sequential.Machine
+import Grass.Process.Sequential.Standard
+import Grass.Process.Spec
+import Grass.Process.Termination
+import Grass.Process.Trace.Independence
+import Grass.Process.Trace.Linearization
+import Grass.Process.Vocabulary
+import Grass.Process.Weave.Blend
+import Grass.Process.Weave.Lens
+import Grass.Process.Weave.Mixin
 import Grass.Resource.Algebra
 import Grass.Resource.Axis
 import Grass.Semantics.Execution
 import Grass.Semantics.Observation
 import Grass.Semantics.SpecProcess
+import Grass.Specification.Boundary
+import Grass.Specification.Scope
 import Grass.Std.Logical.Bag
 import Grass.Std.Logical.Byte
 import Grass.Std.Logical.FiniteMap
@@ -97,6 +162,17 @@ the review that section demands, not an edit here.
 def allowedAxioms : List Name :=
   [``propext, ``Classical.choice, ``Quot.sound]
 
+/--
+The name a declaration is written under, with any `private` mangling removed.
+
+A `private` declaration is stored as `_private.<module>.<n>.<real name>`, whose
+first component is `_private` rather than `Grass`. Testing the namespace on the
+stored name therefore skipped every private declaration in the library -- 111 in
+the x86 tree alone, including proof-carrying theorems. Stripping the mangling
+first is what puts them back inside the audit.
+-/
+def userFacing (name : Name) : Name := (privateToUserName? name).getD name
+
 /-- Whether a declaration belongs to the audited namespace.
 
 **Namespace, not module**, and that is a gap rather than a design. A declaration
@@ -106,7 +182,37 @@ it, and `lake build` and this audit both passed. `moduleNamespacesAgree` below c
 it by refusing the module rather than by widening this predicate, because widening it
 would pull in every core declaration the environment carries. -/
 def isAudited (name : Name) : Bool :=
-  (`Grass).isPrefixOf name && !name.isInternal
+  let n := userFacing name
+  (`Grass).isPrefixOf n && !n.isInternal
+
+/--
+Attributes that make a declaration's compiled behaviour differ from its logical
+definition.
+
+`docs/FOUNDATION.md` §3 is about what a proof may depend on, and this is the
+same question one step out. Every differential in this repository generates its
+corpus by *executing* a Grass definition through `lake env lean --run`, while
+every theorem is about the definition the kernel sees. `@[implemented_by]`,
+`@[extern]` and `@[csimp]` are exactly the three ways to make those two objects
+different.
+
+A reviewer demonstrated the consequence: an `opcodeTable` whose `0x83` row was
+poisoned to the wrong immediate size, with `@[implemented_by]` pointing at an
+untouched copy, passed the build, both audits, the ledger and all four
+differentials -- including the decoder differential written specifically to
+catch that mutation. It produces no axiom, no warning and no `unsafe` marker,
+so nothing else here would ever notice.
+
+None of the three is forbidden in general; they are forbidden on declarations
+this repository's assurance rests on, which is every `Grass` declaration.
+-/
+def compiledOverride (env : Environment) (name : Name) : Option String :=
+  if (Lean.Compiler.getImplementedBy? env name).isSome then
+    some "@[implemented_by]"
+  else if Lean.isExtern env name then
+    some "@[extern]"
+  else
+    Option.none
 
 /--
 Every Lean module found under `root` on disk, as a module name.
@@ -195,6 +301,7 @@ run_cmd do
 "}"
   let mut audited : Nat := 0
   let mut unsafeFindings : Array Name := #[]
+  let mut overrideFindings : Array (Name × String) := #[]
   let mut findings : Array (Name × Name) := #[]
   for (name, info) in env.constants.toList do
     unless isAudited name do continue
@@ -202,16 +309,28 @@ run_cmd do
     -- §3 also names "unsafe declarations used as proof".
     if info.isUnsafe then
       unsafeFindings := unsafeFindings.push name
+    -- The compiled definition must be the proved one; see `compiledOverride`.
+    match compiledOverride env name with
+    | some attr => overrideFindings := overrideFindings.push (userFacing name, attr)
+    | Option.none => pure ()
     let axioms ← Elab.Command.liftCoreM (collectAxioms name)
     for used in axioms do
       unless allowedAxioms.contains used do
         findings := findings.push (name, used)
+  unless overrideFindings.isEmpty do
+    let lines := overrideFindings.map fun (name, attr) => m!"  {name} carries {attr}"
+    throwError m!"axiom audit failed: a Grass declaration's compiled behaviour is \
+allowed to differ from its logical definition. Every differential in this \
+repository measures the compiled definition while every theorem is about the \
+logical one, so this severs the two.
+{MessageData.joinSep lines.toList "
+"}"
   unless unsafeFindings.isEmpty do
     throwError m!"axiom audit failed; docs/FOUNDATION.md section 3 forbids unsafe declarations used as proof:
 {MessageData.joinSep (unsafeFindings.toList.map (m!"  {·}")) "
 "}"
   if findings.isEmpty then
-    logInfo m!"axiom audit: {audited} Grass declarations across {onDisk.size} modules, no axiom outside the allowlist, no unsafe declaration"
+    logInfo m!"axiom audit: {audited} Grass declarations across {onDisk.size} modules, no axiom outside the allowlist, no unsafe declaration, no compiled override"
   else
     let lines := findings.map fun (name, used) => m!"  {name} depends on {used}"
     throwError m!"axiom audit failed; docs/FOUNDATION.md section 3 permits only \

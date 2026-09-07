@@ -3045,6 +3045,72 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   is the sentence §4.4.1 already records for `if` branches, `match` arms, and the two
   inequalities of a predicate a clause calls.
 
+### 4.4.1c What merging main changed about the gates
+
+Two hundred and seventy-three commits of `origin/main` merged into this branch at once,
+tripling the tree: 193 build jobs where there were 70, 10,616 audited declarations where
+there were 4,220, three other owners' subtrees under globs written for this one. Four
+things came out of it that are about the gates rather than about the merge.
+
+**Main's `Tools/DocstringAudit.py` is strictly stronger and found eight claims this
+branch's version passed.** It resolves every backticked name against the real declaration
+set, printed by `Tools/DeclNames.lean`; the version here checked only that a claim-shaped
+sentence contained *some* backticked identifier. Merging took main's file wholesale and
+re-applied this branch's four additions on top — `__file__` anchoring, `--self-test`,
+`--hedged` and `--inert` — none of which main had.
+
+The eight are repaired by naming what each sentence is about rather than by widening the
+hedge list, which is the direction this branch spent a round pruning. Writing the
+self-test for the merged tool surfaced a ninth, in the self-test: a case asserting that a
+non-Lean-shaped unresolved name is a blind spot, when it is reported under a different
+message. **It was written from reading the pattern rather than from running it**, which is
+the mistake that file exists to catch in prose, made while repairing that file.
+
+**A fixture is enforcement, and the declaration set did not think so.** `DeclNames.lean`
+built its name set from `Grass/` alone, so three true citations of fixture theorems in
+this layer's docstrings read as naming nothing — §3.10 says "name the enforcing type or
+theorem", and in this layer the enforcement of a refusal is routinely a fixture.
+`Tools/CitationAudit.py` already resolved those names, which is how the disagreement
+surfaced: **two gates adjudicating the same citation and disagreeing is worth more than
+either verdict.** The set includes `Tests/` now, with a coverage guard mirroring the one
+for `Grass/`, excluding seven modules that define a `main` and cannot share an
+environment. That widens what the docstring audit accepts for every owner and is reported
+rather than assumed.
+
+**Four gates now have a stated scope, because they had an implied one.** `CitationAudit`,
+`ReachabilityAudit`, `FixtureAudit` and `ConsultedAudit` report a declaration, a
+constructor or a fixture as unread — and "unread" is a judgement only that code's owner
+can make. Over the merged tree they produced 219, 50, 8 and 4 findings, essentially all
+in `Grass/ISA`, `Grass/ABI`, `Grass/Process` and their fixtures. Every one may be true and
+none is this branch's to adjudicate: **an allowlist entry records that somebody read the
+corpus and decided, and nobody here has read theirs.** The scope is a named constant now,
+widening it is one edit, and the module docstrings say what is not covered.
+
+`DoorAudit` and `SourceLocationAudit` are deliberately *not* scoped. Their subjects — who
+may call this layer's doors, and whether a tracked `.lean` file is inside any gate — are
+tree-wide questions by construction.
+
+**And the merge widened one blind spot materially.** Six `ConsultedAudit` allowlist
+entries stopped suppressing anything, and not because the memory-layer field gained a
+reader: another tree now declares a field of the same name and projects *that*.
+`AccessDescriptor.observations` still has no reader; so does `PendingRender.observations`;
+one projection satisfies the scan for both. The entries are deleted, because an entry
+that suppresses nothing records nothing, and what they were covering is recorded here
+because the gate can no longer say it.
+
+The same-name blindness was a documented limitation with a handful of instances. Over a
+tree three times the size it is the ordinary case for any short field name, and **a
+lexical gate's precision falls with the square of the tree it scans while its stated
+coverage does not change.** That is the cost of the design, it was always going to arrive
+at integration rather than at authorship, and it is the strongest argument yet for the
+qualified-entry form this branch adopted two rounds ago: `Structure.field` says which
+structure, and the scan still cannot.
+
+Reported to their owners rather than decided here: the six new unread fields in
+`Grass/Semantics` and the twelfth `RequirementKind` constructor (g-foundation, extending
+`c-mem:52` and `c-mem:53`); eighteen hedge entries in main's `DocstringAudit` that silence
+nothing in the merged tree; and the `Tests/` widening of `DeclNames.lean`.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Four review rounds found the same shape and it is worth naming as a shape rather than

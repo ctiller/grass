@@ -1175,8 +1175,8 @@ list, so a state that differs only in `grants` agrees with the original on all
 three. For the last two that is definitional — they are non-recursive definitions
 over a projection — but `SharesAfter` recurses on the alias-chain length, so its
 state argument does not reduce and the agreement needs an induction. Without it
-every theorem below would have to carry a hypothesis about the split state that it
-cannot discharge.
+every theorem below would have to carry a hypothesis about the state
+`MemoryState.splitMap` produces, which none of them is in a position to discharge.
 -/
 
 private theorem sharesAfter_grants (state : MemoryState)
@@ -2914,7 +2914,7 @@ grants into conflict that did not conflict when they were issued: nothing
 re-examines them, and `docs/MEMORY_MODEL.md` §7.5 makes the mapping a real
 transition. The tempting fix is to refuse such an alias. That would be a lie in the
 other direction — if the platform mapped two views of one file, the alias *exists*,
-and a model that cannot record it cannot describe the machine.
+and a `MemoryState` with no way to record it does not describe the machine.
 
 What makes the unchecked form safe is that the question is asked at access time
 instead. `Grass/Op/Step.lean`'s `refusalOf` carries both halves of §3's rule, so in
@@ -3529,8 +3529,9 @@ bare `Prop`; see `LoanMapLaws` for why that matters and
 that remain.
 
 Freshness is two conjuncts rather than one, and the pair is the point: an unused
-identity can always be allocated, and an identity whose *record would change at all*
-while authority is outstanding over its bytes cannot -- §5.1's precondition.
+identity can always be allocated, and `MemoryState.allocate?` refuses an identity
+whose *record would change at all* while authority is outstanding over its bytes --
+§5.1's precondition.
 
 The second conjunct read "whose metadata would change" and that was the width of the
 guard, which review found too narrow: `AllocationRecord.Metadata` omits `owners` and

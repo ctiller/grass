@@ -60,6 +60,9 @@ ALLOWED = {
     # The axiom audit is run by `lake env lean`, not by `lake build`, because it is a
     # `run_cmd` over the whole environment rather than a library module.
     "Tools/AxiomAudit.lean",
+    # The declaration-name printer `Tools/DocstringAudit.py` shells out to, run the
+    # same way and arrived by merging main. Same reason, different owner.
+    "Tools/DeclNames.lean",
     # The acceptance programs. They import modules that do not exist yet — an ISA,
     # an ABI, a platform — so they cannot be built, and `docs/MEMORY_IMPLEMENTATION_PLAN.md`
     # §4.2 records the consequence: they are prose to the build, and drift between

@@ -215,9 +215,10 @@ def wrongAddressSpace : AuditViolationClass := ⟨⟨"wrongAddressSpace"⟩⟩
 
 `Oracle.answer` returns `none` when it cannot fill a completed access, and the
 transition records this rather than accepting a short answer as success. It is a
-statement about the *model*, not about the program: an oracle that cannot supply
-the bytes a store declared is a machine description that does not match the
-access, and `docs/FOUNDATION.md` law 8 says refuse rather than approximate. -/
+statement about the *model*, not about the program: an oracle whose
+`Oracle.answer` returns `none` for a store the profile admitted is a machine
+description that does not match the access, and `docs/FOUNDATION.md` law 8 says
+refuse rather than approximate. -/
 def machineAnswerIncomplete : AuditViolationClass := ⟨⟨"machineAnswerIncomplete"⟩⟩
 
 /-- A provenance whose recorded root extent is not the extent of the allocation it
@@ -332,8 +333,15 @@ This is the cheapest mechanism that exists: put the number in a `by decide` theo
 adding a class breaks the build here and whoever adds it has to come to this line. Every
 sentence that states the count cites this theorem, so the sentence and the number are one
 edit apart rather than in different files. Where a count can be pinned this way it should
-be; where it cannot — a Python dict, a structure's fields — the gate's own `self_test` is
-the place, and `Tools/DoorAudit.py` has one now. -/
+be, as `emittedByTransition_length` pins this one; where a count cannot be a Lean
+theorem — a Python dict, a structure's fields — the gate's own self-test is the
+place, and `Tools/DoorAudit.py` asserts its door count there.
+
+That sentence backticked `self_test`, which is a Python function. The stricter
+docstring audit that arrived with main resolves every backticked name against the
+*build*, so a tool's internals in backticks now read as a Lean declaration that does
+not exist -- the convention is that backticks are for Lean names and a tool's parts
+are named in prose. -/
 theorem emittedByTransition_length : emittedByTransition.length = 18 := by decide
 
 end AuditViolationClass
