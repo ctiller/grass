@@ -75,6 +75,22 @@ example :
       (.literal [Instruction.add 7])).expand := by
   simp
 
+def locatedSource : Source Instruction :=
+  .generated (fragmentId "outer") (.sequence [
+    .literal [.add 1, .add 2],
+    .generated (fragmentId "inner") (.literal [.add 3])
+  ])
+
+example : locatedSource.expandLocated = [
+    ⟨⟨[fragmentId "outer"], [0], 0⟩, .add 1⟩,
+    ⟨⟨[fragmentId "outer"], [0], 1⟩, .add 2⟩,
+    ⟨⟨[fragmentId "outer", fragmentId "inner"], [1, 0], 0⟩, .add 3⟩
+  ] := by decide
+
+example : locatedSource.expand =
+    locatedSource.expandLocated.map LocatedInstruction.instruction :=
+  Source.expand_eq_map_located locatedSource
+
 example : (generator.generate 7).instructionCount = 1 := by
   simp [generator, VerifiedFragment.instructionCount, addFragment,
     Source.instructionCount]
