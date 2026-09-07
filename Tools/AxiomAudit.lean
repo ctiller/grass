@@ -2,6 +2,7 @@ import Lean
 import Grass.ABI.Win64.Convention
 import Grass.ABI.Win64.Unwind
 import Grass.ABI.Win64.UnwindBytes
+import Grass.Artifact.Binary.Codec
 import Grass.Artifact.Binary.Gobj.Resolution
 import Grass.Artifact.Binary.Gobj.Schema
 import Grass.Artifact.Binary.Primitive
