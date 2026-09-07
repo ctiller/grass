@@ -186,6 +186,16 @@ example : Nonempty ((artifactFormat.loadedBehavior ByteArray.empty).system.Compl
       (initialExecution true).events) :=
   verified.execution_completes (initialExecution true)
 
+example : Nonempty (VerifiedProgram.CompletionRefinement verified
+    (initialExecution true)) :=
+  verified.completion_refinement_nonempty (initialExecution true)
+
+example (completion : VerifiedProgram.CompletionRefinement verified
+    (initialExecution true)) :
+    completion.portable = verified.refinement.mapCompletionAtPrefix
+      (initialExecution true) completion.loaded :=
+  completion.exact
+
 namespace InfinitePrefixFixture
 
 /-- A nontrivial fixture whose infinite limit condition inspects both the event

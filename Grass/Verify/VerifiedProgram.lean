@@ -81,6 +81,34 @@ theorem execution_completes (verified : VerifiedProgram spec)
   exact (ProgramBehavior.Adequate.cast verified.loadedBehavior_exact
     verified.artifact.adequate).completion execution
 
+/-- A loaded completion paired with the exact portable completion obtained by
+the verified refinement, retaining inspectable transport provenance. -/
+structure CompletionRefinement (verified : VerifiedProgram spec)
+    (execution : (verified.artifact.format.loadedBehavior
+      (emitProgram verified)).system.ExecutionPrefix) where
+  loaded : (verified.artifact.format.loadedBehavior
+    (emitProgram verified)).system.Completion execution.state execution.graph
+      execution.events
+  portable : verified.portable.behavior.system.Completion
+    (verified.refinement.mapPrefix execution).state
+    (verified.refinement.mapPrefix execution).graph
+    (verified.refinement.mapPrefix execution).events
+  exact : portable =
+    verified.refinement.mapCompletionAtPrefix execution loaded
+
+/-- Every loaded finite frontier has a completion whose exact image in the
+portable behavior is retained by `CompletionRefinement`. -/
+theorem completion_refinement_nonempty (verified : VerifiedProgram spec)
+    (execution : (verified.artifact.format.loadedBehavior
+      (emitProgram verified)).system.ExecutionPrefix) :
+    Nonempty (CompletionRefinement verified execution) := by
+  rcases verified.execution_completes execution with ⟨completion⟩
+  exact ⟨{
+    loaded := completion
+    portable := verified.refinement.mapCompletionAtPrefix execution completion
+    exact := rfl
+  }⟩
+
 end VerifiedProgram
 
 /-- The canonical parser accepts the exact bytes returned by emission. -/

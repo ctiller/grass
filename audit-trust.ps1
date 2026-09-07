@@ -50,6 +50,8 @@ param(
         "Grass.VerifiedProgram.sound",
         "Grass.VerifiedProgram.execution_nonempty",
         "Grass.VerifiedProgram.execution_completes",
+        "Grass.VerifiedProgram.CompletionRefinement",
+        "Grass.VerifiedProgram.completion_refinement_nonempty",
         "Grass.emitProgram_parses"
     ),
     [string[]]$AllowedAxiom = @(
