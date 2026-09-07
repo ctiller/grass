@@ -73,8 +73,8 @@ private def pairsCompatible (policy : LocationPolicy profile Location) :
 def fieldsCompatible (placement : Placement layout policy) : Bool :=
   pairsCompatible policy layout.fields placement.fields
 
-/-- Executable placement checker.  Exact nominal order prevents missing,
-duplicate, extra, or reordered field assignments. -/
+/-- Executable placement checker.  `Placement.wellFormed` uses exact nominal
+order to reject missing, duplicate, extra, or reordered field assignments. -/
 def wellFormed (placement : Placement layout policy) : Bool :=
   layout.wellFormed &&
   decide (placement.fieldNames = layout.fieldNames) &&
