@@ -91,14 +91,36 @@ def uncovered(paths: list[str]) -> list[str]:
 
 BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
 LINE = re.compile(r"--.*?$", re.MULTILINE)
-STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+# Single-line deliberately. `STRING` runs *first* now, so that a `/-` inside a
+# string literal cannot open a comment in the scanner's eyes -- review wrote
+# `def a := "/-"` above an `axiom` and below `def b := "-/"` and the whole run of
+# real code between them was blanked. Running it first would be unsafe if it could
+# span lines, because a stray quote inside a comment would then eat real code, so
+# it cannot: a stray quote reaches the end of its own line and no further, and that
+# line is a comment `BLOCK` or `LINE` blanks anyway.
+STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 
-# What may not appear in a Lean file no build elaborates. `sorry` and `native_decide`
-# anywhere; `axiom` and `unsafe` only where a declaration can start, because both are
-# ordinary words. `Tools/AxiomAudit.lean` covers all four inside the elaborated
-# environment and cannot reach these files at all.
+# What may not appear in a Lean file no build elaborates. `Tools/AxiomAudit.lean`
+# covers all of this inside the elaborated environment and cannot reach these files at
+# all.
+#
+# **`sorryAx`, and every modifier that may precede a declaration.** The first version
+# of this pattern was `\bsorry\b|\bnative_decide\b|^\s*axiom\s|^\s*unsafe\s`, and review
+# walked past it with one keyword: `private axiom seededProbe : False` is valid Lean,
+# elaborates, proves anything, and is not `^\s*axiom`. So were `protected`,
+# `@[simp]`, and `Lean.sorryAx` -- which escapes `\bsorry\b` because `A` is a word
+# character. The round that added this gate had written it to close exactly this hole
+# and left four ways through, in its own allowlisted directory, with `False` provable
+# under each. All eleven of review's probes -- the four that got through and the seven
+# that did not -- are seeded in `self_test`.
+#
+# `axiom` and `unsafe` stay line-anchored because both are ordinary words; the anchor
+# now steps over attributes and modifiers rather than requiring the keyword first.
+MODIFIER = r"(?:private|protected|noncomputable|scoped|local|partial|opaque|unsafe)"
 UNTRUSTED = re.compile(
-    r"\bsorry\b|\bnative_decide\b|^\s*axiom\s|^\s*unsafe\s", re.MULTILINE)
+    r"\bsorry(?:Ax)?\b|\bnative_decide\b"
+    r"|^\s*(?:@\[[^\]]*\]\s*)*(?:" + MODIFIER + r"\s+)*(?:axiom|unsafe)\s",
+    re.MULTILINE)
 
 
 def blank(match: "re.Match[str]") -> str:
@@ -111,8 +133,13 @@ def strip(source: str) -> str:
 
     Line numbers have to survive: a report that points at the wrong line is the defect
     `Tools/CitationAudit.py` and `Tools/DoorAudit.py` were each found with.
+
+    Strings are blanked **before** comments, which is the opposite of the order the
+    sibling tools use and is deliberate: this one is a trust gate, so the failure that
+    matters is blanking too much rather than too little, and a `/-` inside a string
+    literal blanked every line to the next `-/`.
     """
-    return STRING.sub(blank, LINE.sub(blank, BLOCK.sub(blank, source)))
+    return LINE.sub(blank, BLOCK.sub(blank, STRING.sub(blank, source)))
 
 
 def untrusted(paths: list[str]) -> list[str]:
@@ -184,22 +211,56 @@ def self_test() -> int:
         if got != expected:
             print(f"  SELF-TEST FAILED [{label}]: expected {expected}, got {got}")
             failures += 1
-    # The trust scan, both directions, against the real exempted files. A seeded token
-    # is written to a temporary tracked-looking path rather than into the tree, so the
-    # case is exercised without a file ever being committed.
+    # The trust scan, seeded case by case against the real exempted-file machinery. A
+    # probe is written to a temporary path under an exempted directory and removed, so
+    # each case is exercised without a file ever being committed.
+    #
+    # **The first version of this block seeded two cases and the scan had four holes.**
+    # It asserted that a bare `sorry` is reported and that `sorry` in a comment or a
+    # string is not, which is exactly the pair of cases the pattern was written from --
+    # so it tested the author's model of the pattern rather than the pattern. Review
+    # walked past the gate four ways, and all eleven of its probes are below with the
+    # negatives beside them. A trust gate's self-test wants the cases somebody tried to
+    # get through it, not the cases it was built from.
+    quote = chr(34)
+    trust_cases: list[tuple[str, bool]] = [
+        ("axiom seeded : False", True),
+        # The four that got through.
+        ("private axiom seeded : False", True),
+        ("protected axiom seeded : False", True),
+        ("@[simp] axiom seeded : False", True),
+        ("private unsafe def f : Nat := 0", True),
+        # `sorryAx` is what `sorry` elaborates to, and `A` is a word character.
+        ("theorem p : False := Lean.sorryAx False false", True),
+        # A `/-` inside a string opened a comment and blanked the lines between.
+        ("def a := " + quote + "/-" + quote + chr(10) + "axiom seeded : False" + chr(10)
+         + "def b := " + quote + "-/" + quote, True),
+        # The seven that did not.
+        ("theorem p : False := by sorry", True),
+        ("unsafe def f : Nat := 0", True),
+        ("/- outer /- inner -/ -/" + chr(10) + "axiom seeded : False", True),
+        ("example : True := by native_decide", True),
+        # And what it must stay quiet on.
+        ("/-- a docstring mentioning sorry and axiom -/" + chr(10) + "def f := 1", False),
+        ("-- a line comment mentioning sorry and axiom", False),
+        ("def f := " + quote + "sorry" + quote, False),
+        ("def notAnAxiomAtAll := 1", False),
+    ]
     probe = ROOT / "Spikes" / "__self_test_probe.lean"
     try:
-        probe.write_text("theorem p : False := by sorry" + chr(10), encoding="utf-8")
-        hits = untrusted(["Spikes/__self_test_probe.lean"])
-        if not hits or "Spikes/__self_test_probe.lean:1" not in hits[0]:
-            print("  SELF-TEST FAILED: a `sorry` in an exempted file is not reported")
-            failures += 1
-        probe.write_text("/-- a docstring mentioning sorry -/" + chr(10)
-                         + "-- and a line comment mentioning sorry" + chr(10)
-                         + "def f := " + chr(34) + "sorry" + chr(34) + chr(10),
+        for text, should_report in trust_cases:
+            probe.write_text(text + chr(10), encoding="utf-8")
+            if bool(untrusted(["Spikes/__self_test_probe.lean"])) != should_report:
+                want = "reported" if should_report else "not reported"
+                first = text.splitlines()[0]
+                print(f"  SELF-TEST FAILED [trust scan]: expected {want} for {first!r}")
+                failures += 1
+        # And the report names the file and the line, which is what a reader chases.
+        probe.write_text("def f := 1" + chr(10) + "axiom seeded : False" + chr(10),
                          encoding="utf-8")
-        if untrusted(["Spikes/__self_test_probe.lean"]):
-            print("  SELF-TEST FAILED: `sorry` in a comment or a string is reported")
+        hits = untrusted(["Spikes/__self_test_probe.lean"])
+        if not hits or "Spikes/__self_test_probe.lean:2" not in hits[0]:
+            print("  SELF-TEST FAILED [trust scan]: the reported line number is wrong")
             failures += 1
     finally:
         if probe.exists():

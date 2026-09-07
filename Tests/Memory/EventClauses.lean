@@ -103,12 +103,21 @@ survive: weaken one here and the forward direction stops proving; weaken one in 
 structure and the reverse direction does.
 
 It says nothing about the *names*, and `each_label_names_its_clause` is the second
-check, which closes that. Both docstrings here disclosed the gap for a round -- "two
-labels could be exchanged and both theorems would still hold" -- and review measured it:
-exchanging two labels in this function alone is caught by the index, and exchanging them
-in both places survived all nine gates, leaving the file attesting that the neighbour
-whose status disagrees about *reads* is caught by the *write* clause. A disclosed gap is
-better than a hidden one and is not the same as a closed one.
+check. Both docstrings here disclosed the gap for a round -- "two labels could be
+exchanged and both theorems would still hold" -- and review measured it: exchanging two
+labels in this function alone is caught by the index, and exchanging them in both places
+survived all nine gates, leaving the file attesting that the neighbour whose status
+disagrees about *reads* is caught by the *write* clause. A disclosed gap is better than
+a hidden one and is not the same as a closed one.
+
+**And the second check did not close it either**, which the round after measured too:
+`each_label_names_its_clause` restates each proposition a third time from scratch, so an
+exchange across all three sites is self-consistent again. Every consistency theorem
+raises the price of a mislabelling by one edit; none of them anchors a string to a field
+*name*, and nothing inside Lean can without metaprogramming.
+`Tools/ConsultedAudit.py`'s `seal_labels` is the anchor: it reads this function's labels
+and `MemoryEvent.WellFormed`'s field names and fails if they differ, in order. Defeating
+it takes renaming the structure's fields, which is a rename rather than a mislabelling.
 -/
 def sealClauses (e : MemoryEvent) : List String :=
   (if e.kind.reads = true → e.valueRead.isSome then [] else ["readValuePresent"]) ++
@@ -354,7 +363,8 @@ here exactly when it satisfies `MemoryEvent.WellFormed`, so a weakening on eithe
 breaks one direction of the proof.
 
 It does not fix the *labels*: exchanging two names leaves both directions provable, and
-review confirmed by doing it. `each_label_names_its_clause` is what fixes them. -/
+review confirmed by doing it. `each_label_names_its_clause` raises the price and
+`Tools/ConsultedAudit.py`'s `seal_labels` is what fixes them, from outside Lean. -/
 theorem sealClauses_is_the_seal (e : MemoryEvent) : sealClauses e = [] ↔ e.WellFormed := by
   constructor
   · intro h
@@ -382,9 +392,16 @@ because the index names the labels; the coordinated exchange is what survived, a
 docstrings above disclosed it as unclosable by eye.
 
 Eleven biconditionals, one per label, each tying a string to the proposition it stands
-for. An exchange makes two of them false. This is a third statement of each clause and
-it earns that: the first says which events the seal admits, the second says which
-clauses an event fails, and only this one says what a clause *is called*. -/
+for. A two-place exchange makes two of them false. This is a third statement of each
+clause and it earns that: the first says which events the seal admits, the second says
+which clauses an event fails, and only this one says what a clause *is called*.
+
+**It is not the anchor**, and the round after this landed said so with a mutation:
+because this theorem restates the propositions from scratch, an exchange carried through
+all three sites is self-consistent and every gate stays green. What it buys is the third
+edit. `Tools/ConsultedAudit.py`'s `seal_labels` compares this file's labels to
+`MemoryEvent.WellFormed`'s field names directly, which is the one comparison no theorem
+in this file can make. -/
 theorem each_label_names_its_clause (e : MemoryEvent) :
     ("readValuePresent" ∈ sealClauses e ↔
       ¬ (e.kind.reads = true → e.valueRead.isSome)) ∧

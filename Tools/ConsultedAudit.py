@@ -84,7 +84,14 @@ READERS_IN = DECLARED_IN + sorted((ROOT / "Tests").rglob("*.lean"))
 # `FIELD` already used the lookahead form. Widening it brought six fields into scope
 # and produced no new report, because all six are projected -- which is why the gap
 # was invisible.
-DECL = re.compile(r"^\s{2,}(?:private\s+)?([A-Za-z][A-Za-z0-9_']*)\s*:(?!=)")
+# **And one space is indentation.** `^\s{2,}` was the next form of the same gap: a
+# field indented by a single space is valid Lean and was not a field to this tool.
+# The two-space floor was doing nothing `STRUCTURE.match` and `fields_in`'s
+# unindented-line terminator do not already do. Latent when review found it -- no
+# field under `Grass/` is written that way -- which is what a blind spot looks like
+# from inside, and is the second round running that this pattern has been one
+# character too strict.
+DECL = re.compile(r"^\s+(?:private\s+)?([A-Za-z][A-Za-z0-9_']*)\s*:(?!=)")
 STRUCTURE = re.compile(r"^\s*(?:private\s+)?structure\s+([A-Za-z_][A-Za-z0-9_.']*)")
 
 # Fields deliberately carried without a reader. Every entry states why, and the
@@ -415,6 +422,10 @@ def self_test() -> int:
         ("field whose type is on the next line",
          {"a.lean": "structure Probe where" + chr(10) + "  quarry :" + chr(10)
                     + "    Nat" + chr(10)}, True),
+        # One space is indentation too. Latent when review seeded it, which is why the
+        # case is here rather than in the tree.
+        ("field indented by one space",
+         {"a.lean": "structure Probe where" + chr(10) + " quarry : Nat" + chr(10)}, True),
         # And a `:=` default is still not a field declaration, which is what the
         # non-`=` requirement was there for.
         ("a default value is not a declaration",
@@ -475,6 +486,25 @@ def self_test() -> int:
     finally:
         ALLOWED = original
 
+    # The seal-label check, both directions. An exchange is what review got through
+    # three consistency theorems, so the exchanged case is the one that matters.
+    seal_decl = ("structure WellFormed where" + chr(10)
+                 + "  alpha : Nat" + chr(10) + "  beta : Nat" + chr(10))
+    good = ("def sealClauses (e : E) : List String :=" + chr(10)
+            + '  (if p then [] else ["alpha"]) ++' + chr(10)
+            + '  (if q then [] else ["beta"])' + chr(10) + chr(10) + "/-! rest -/" + chr(10))
+    swapped = good.replace('["alpha"]', '["ZZ"]').replace('["beta"]', '["alpha"]') \
+                  .replace('["ZZ"]', '["beta"]')
+    if seal_labels(seal_decl, good):
+        print("  SELF-TEST FAILED: labels matching the field names are reported")
+        failures_qualified += 1
+    if not seal_labels(seal_decl, swapped):
+        print("  SELF-TEST FAILED: two exchanged labels are not reported")
+        failures_qualified += 1
+    if not seal_labels(seal_decl, "def nothingLikeIt := 1" + chr(10)):
+        print("  SELF-TEST FAILED: a missing `sealClauses` is not reported")
+        failures_qualified += 1
+
     failures = failures_qualified
     for label, sources, should_report in cases:
         reported = any("Probe.quarry" in line for line in analyse(sources))
@@ -507,6 +537,53 @@ def self_test() -> int:
         return 1
     print("consulted audit self-test: all cases discriminate as documented")
     return 0
+
+
+# The seal's label list, and the structure whose field names it must reproduce.
+#
+# `Tests/Memory/EventClauses.lean`'s `sealClauses` returns the names of the clauses an
+# event fails. Three theorems in that file tie those strings to propositions, to
+# neighbours, and to `MemoryEvent.WellFormed` itself -- and none of them ties a string
+# to a *field name*, because nothing inside Lean can without metaprogramming. Review
+# exchanged two labels across all three sites and every gate stayed green, leaving the
+# file attesting that the neighbour whose status disagrees about reads is caught by the
+# clause called `statusAgreesWithWrites`. Each consistency check raised the price of a
+# mislabelling by one edit; none of them anchored it.
+#
+# **This check lives here for the parser and not for the subject.** Its subject is a
+# fixture file agreeing with a structure, which is nobody's gate; this is the tool that
+# already reads `structure` fields in declaration order, and inventing an eighth gate for
+# one check would be worse. Order is the available anchor because
+# `sealClauses_is_the_seal`'s proof consumes the fields positionally, so position is
+# already pinned to the structure and only the names ride free.
+SEAL_STRUCTURE = ("Grass/Memory/Event.lean", "WellFormed")
+SEAL_LABELS = ("Tests/Memory/EventClauses.lean", "def sealClauses")
+SEAL_LABEL = re.compile(
+    r"else " + chr(92) + r"[" + chr(34) + r"([A-Za-z][A-Za-z0-9_']*)" + chr(34)
+    + chr(92) + r"]")
+
+
+def seal_labels(structure_text: str, labels_text: str) -> list[str]:
+    """Report the seal's labels where they do not reproduce its field names, in order.
+
+    Lexical, like everything else here. The label list is read from the body of
+    `sealClauses` alone -- up to the first blank line -- because the same string literals
+    appear again in the theorems below it, and a check that read those too would compare
+    a list against itself.
+    """
+    fields = [field for structure, field, _ in fields_in(structure_text)
+              if structure == SEAL_STRUCTURE[1]]
+    start = labels_text.find(SEAL_LABELS[1])
+    if start < 0:
+        return [f"  {SEAL_LABELS[0]}: `{SEAL_LABELS[1]}` is gone, so the seal's labels "
+                "are no longer checked against its field names"]
+    body = labels_text[start:]
+    end = body.find(chr(10) * 2)
+    labels = SEAL_LABEL.findall(body if end < 0 else body[:end])
+    if labels == fields:
+        return []
+    return [f"  {SEAL_LABELS[0]}: `sealClauses` emits {labels}, and "
+            f"`{SEAL_STRUCTURE[1]}` declares {fields}, in that order"]
 
 
 def overbroad_entries(declared: dict[str, str]) -> list[str]:
@@ -604,6 +681,18 @@ def main() -> int:
         else:
             print("consulted audit: every allowlist entry suppresses a report")
         return 0
+    mislabelled = seal_labels(
+        declared.get(SEAL_STRUCTURE[0], ""),
+        (ROOT / SEAL_LABELS[0]).read_text(encoding="utf-8"))
+    if mislabelled:
+        print("\n".join(mislabelled))
+        print("\nconsulted audit: the seal's labels do not name its clauses\n")
+        print(
+            "Read the two lists against each other. `sealClauses` reproduces "
+            "`MemoryEvent.WellFormed`'s field names in declaration order, and nothing "
+            "inside Lean can say so."
+        )
+        return 1
     overbroad = overbroad_entries(declared)
     if overbroad:
         print("\n".join(overbroad))

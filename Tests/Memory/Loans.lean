@@ -631,6 +631,50 @@ theorem a_grant_within_its_path_is_accepted :
     bufferProv.rootExtent.Contains ⟨8, 8⟩ := by
   exact ⟨by decide, by decide⟩
 
+/-! ### `Contains` is two claims, and one of them was pinned
+
+`ByteRange.Contains r s` is `r.start ≤ s.start ∧ s.stop ≤ r.stop`. The pair above uses a
+field at the *start* of the root, so its refused grant lies entirely above the field and
+only the upper claim is exercised: review weakened the clause to
+`¬ grant.range.stop ≤ grant.provenance.extent.stop` and the whole tree stayed green, with
+a grant under a path designating the tail installed over the head.
+
+That is misdescription rather than authority from nothing — `Nested` keeps the range
+inside the allocation — but `grantsOver` reads no path at all, so the grant freezes and
+authorizes over bytes its path does not designate. The pair below is the same fixture
+with the field moved off zero.
+
+**A guard's arity is the product of its branches, not the count of its conjuncts**, and
+here the conjunct is one call whose *definition* is two. That is the same sentence
+§4.4.1 records three times, one level further in. -/
+
+/-- Provenance of the buffer's *second* field, so a grant below it is outside what the
+path designates rather than above it. -/
+def tailFieldProv : Provenance :=
+  { bufferProv with path := [{ kind := .field, label := ⟨"tail"⟩, extent := ⟨8, 8⟩ }] }
+
+/-- It designates the tail and descends from the root, so the refusal below is the
+containment clause and not the nesting one. -/
+theorem the_tail_field_provenance_designates_the_tail :
+    tailFieldProv.extent = ⟨8, 8⟩ ∧ tailFieldProv.rootExtent = ⟨0, 64⟩ ∧
+    tailFieldProv.Nested ∧ unlent.RootExtentAgrees tailFieldProv := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-- **Nor bytes below what its path designates.** The lower half of `Contains`, which
+nothing exercised: this range lies entirely under the field, inside the root, and is
+refused. -/
+theorem a_grant_below_its_path_is_refused :
+    unlent.issue? firstLoan
+      { kind := .loan, holder := borrower, lender := owner, provenance := tailFieldProv
+        range := ⟨0, 8⟩, rights := .readWrite } = Option.none := by decide
+
+/-- And the same grant at the field it designates is accepted, so the refusal is the
+lower bound and not the provenance. -/
+theorem a_grant_at_its_tail_field_is_accepted :
+    (unlent.issue? firstLoan
+      { kind := .loan, holder := borrower, lender := owner, provenance := tailFieldProv
+        range := ⟨8, 8⟩, rights := .readWrite }).isSome := by decide
+
 /-! ## Authority ends with the epoch, and is not only about loans -/
 
 /-- The buffer, freed: same epoch, no longer live. -/

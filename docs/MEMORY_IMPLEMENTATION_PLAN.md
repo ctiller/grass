@@ -2810,6 +2810,68 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   can miss one**, and the miss is invisible because the enumeration reads as a survey. Of
   the five findings this round, four are a previous round's repair being one short.
 
+- ~~**`private axiom seededProbe : False` passed all nine gates**, one round after the
+  trust scan was added to stop exactly that.~~ `UNTRUSTED` anchored `axiom` and `unsafe`
+  at the start of a line with `^\s*`, so a single modifier keyword walked past it:
+  `private`, `protected` and `@[simp]` each did, and so did `private unsafe`. `Lean.sorryAx`
+  — what `sorry` elaborates to — escaped `\bsorry\b` because `A` is a word character. And
+  `strip` ran `BLOCK` before `STRING`, so `def a := "/-"` opened a comment in the
+  scanner's eyes and blanked every line to the next `-/`, hiding an `axiom` between them.
+  Four ways through, in the gate's own allowlisted directory, with `False` provable under
+  each.
+
+  The pattern steps over attributes and modifiers now, `sorryAx` is covered, `STRING`
+  runs first and cannot span lines, and **all eleven of review's probes are seeded in
+  `self_test` beside four negatives**.
+
+  That last part is the finding. The first version of that self-test seeded two cases: a
+  bare `sorry` is reported, and `sorry` in a comment or a string is not — which is
+  precisely the pair the pattern was written from, so it tested the author's model of the
+  pattern rather than the pattern. **A gate's self-test wants the cases somebody tried to
+  get through it, not the cases it was built from**, and the difference is invisible while
+  nobody is trying.
+- ~~**`issue?`'s containment clause was pinned in one direction.**~~ `ByteRange.Contains r s`
+  is `r.start ≤ s.start ∧ s.stop ≤ r.stop` — two claims in one call. The fixture pair
+  exercising it used a field at the *start* of the root, so its refused grant lay entirely
+  above the field and only the upper claim was tested. Review weakened the clause to
+  `¬ grant.range.stop ≤ grant.provenance.extent.stop`, co-editing the two case splits
+  in this module that branch on it so the mutation tested the statement, and the whole tree stayed
+  green: a grant under a path designating the *tail* installed over the head.
+
+  Misdescription rather than authority from nothing — `Nested` keeps the range inside the
+  allocation — but `grantsOver` reads no path at all, so such a grant freezes and
+  authorizes over bytes its path does not designate, and it is reachable through the
+  sublet chain. `a_grant_below_its_path_is_refused` is the missing half, with the same
+  grant at the field it designates as its control.
+
+  **A guard's arity is the product of its branches**, which §4.4.1 records three times
+  over `if`s and `match`es — and here the branching is inside the *definition* of a
+  predicate the clause calls, where counting the conjuncts of the clause finds one.
+- ~~**Every consistency theorem on the seal's labels raised the price of a mislabelling
+  and none anchored it.**~~ Round twenty-two closed a two-place label exchange with
+  `each_label_names_its_clause`. That theorem restates each clause proposition a third
+  time from scratch, so review carried the exchange through all three sites — the
+  function, the index and the new theorem — and every gate stayed green again, with the
+  file attesting that the neighbour whose status disagrees about reads is caught by the
+  clause called `statusAgreesWithWrites`.
+
+  Nothing inside Lean can tie a string literal to a *field name* without
+  metaprogramming, so the anchor is outside it: `Tools/ConsultedAudit.py`'s `seal_labels`
+  reads `sealClauses`' labels and `MemoryEvent.WellFormed`'s field names and fails if
+  they differ in order. It lives in that tool for the parser and not for the subject,
+  which its comment says. Defeating it now takes renaming the structure's fields, which
+  is a rename rather than a mislabelling.
+
+  **A consistency check between two copies is defeated by editing both copies.** Three
+  rounds each added one, each closing the previous round's exchange and admitting the
+  next; the sequence only terminates by leaving the language the copies are written in.
+- ~~**`Tools/ConsultedAudit.py`'s field pattern was one character too strict, again.**~~
+  `^\s{2,}` missed a field indented by a single space, which is valid Lean. The two-space
+  floor was doing nothing `STRUCTURE` and `fields_in`'s unindented-line terminator
+  do not already do. Latent — no field under `Grass/` is written that way — which is what
+  a blind spot looks like from inside, and is the second round running that this one
+  pattern has been found too strict.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Four review rounds found the same shape and it is worth naming as a shape rather than
