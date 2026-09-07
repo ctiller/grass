@@ -345,6 +345,11 @@ closure, and manifest derivation into one checked term-level result. Its fields
 and public theorems retain the exact normalized AST, manifest, instruction list,
 annotations, entry, block identities, and counts. A future command/parser layer
 may construct the pre-alpha value but cannot bypass these closure checks.
+`Grass.Construct.Source.ElaborateContainment` adds the containment-specific gate:
+ordinary structural elaboration must succeed before duplicate or unattached
+containment sites are checked on the exact normalized AST. The result retains
+both certificates and exposes graph and located-instruction invariance under
+metadata erasure; failures retain their structural or containment stage.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
