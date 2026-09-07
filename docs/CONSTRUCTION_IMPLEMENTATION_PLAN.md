@@ -266,6 +266,11 @@ cast or proof-erasing convenience. Imported indirect control flow is rejected
 until annotations, relocation/symbol evidence, or analysis proves every target
 belongs to the typed CFG.
 
+The first C6 slice, `Grass.Unsafe.Construct`, wraps even malformed authored ASTs
+in `UncheckedAst` with a mandatory primary `Taint` and an ordered additional
+taint ledger. Its helpers perform no structural check and expose no promotion;
+checked lowering still requires `Grass.Construct.Source.VerifiedAst`.
+
 Exit criteria include round trips for supported raw instructions, structured
 errors for unknown/ambiguous bytes and targets, exact stepping agreement with
 `Grass.Op.step`, and exact byte/list input passed to the artifact writer.
