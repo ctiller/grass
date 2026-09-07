@@ -255,6 +255,11 @@ derived and proved to remain within the checked layout; malformed layouts,
 missing objects, zero-size slices, and out-of-bounds slices return structured
 errors.
 
+`Grass.Construct.StackObjectSource` is the transparent machine seam over that
+checked base. Machine code constructors receive only the exact derived
+`ByteRange`; direct and named load/store helpers expose literal source
+expansion equal to those constructors and provide no semantic certificate.
+
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
 

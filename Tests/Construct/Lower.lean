@@ -48,7 +48,7 @@ def checkedSecond : VerifiedBlock (Terminal := String) String semantics effects 
   sourceExact := rfl
 
 def verified : VerifiedAst semantics effects source where
-  structural := by native_decide
+  structural := by decide
   blocks := [checkedFirst, checkedSecond]
   blocksExact := rfl
 
