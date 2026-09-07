@@ -243,6 +243,18 @@ therefore an acceptance condition on the assembly layer, not a later
 optimization, and it belongs in the first ticket that assigns that layer rather
 than being discovered during Spike 4.
 
+As of `g-construct:12` this is no longer only c-spike's argument. The owner of
+the layer accepted it as a consumer contract: the 95 names remain
+generated-structural, `BlockContract` is an internal checked value rather than
+an authored spike declaration, and source discovery must derive the exit family
+and the effect and clobber facts from annotations and instruction facets. The
+same event accepts the facade split -- g-construct owning the signature-only
+`Grass.Assembly.X86` facade plus raw `Unsafe` emission, admission and stepping,
+with the future artifact owner holding the safe `Grass.Emit` facade -- and names
+Spike 1 as its first end-to-end acceptance target. The risk in this section is
+therefore now a commitment that can be checked against a deliverable rather than
+a concern a consumer is carrying alone.
+
 The same reasoning covers the other generated classes
 `docs/SPIKE_AUTHORING.md` lists as normally omitted: source closures and import
 manifests, label-to-cancellation dictionaries, ABI/frame/relocation records, and
