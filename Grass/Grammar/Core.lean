@@ -36,6 +36,24 @@ inductive ParseResult (α : Type u) where
   | needMore (minimumAdditional : Option Nat)
   | invalid (error : ParseError)
 
+/-- A proof-relevant, dependency-free isomorphism used by `Format.iso`. -/
+structure Isomorphism (α β : Type) where
+  forward : α → β
+  backward : β → α
+  backward_forward : ∀ value, backward (forward value) = value
+  forward_backward : ∀ value, forward (backward value) = value
+
+namespace Isomorphism
+
+/-- Identity format isomorphism. -/
+def refl (α : Type) : Isomorphism α α where
+  forward := id
+  backward := id
+  backward_forward _ := rfl
+  forward_backward _ := rfl
+
+end Isomorphism
+
 /-- A typed language description. Choice denotes the union of alternatives;
 priority is never inferred from constructor order. This initial kernel contains
 the constructors whose denotation is already used by the primitive consumers.
@@ -45,7 +63,10 @@ inductive Format : Type → Type 1 where
   | byte (accepts : Byte → Prop) : Format Byte
   | seq {α β : Type} (left : Format α) (right : α → Format β) : Format (α × β)
   | choice {α : Type} (left right : Format α) : Format α
+  | repeat {α : Type} (count : Nat) (item : Format α) : Format (Vec α)
   | refine {α : Type} (inner : Format α) (accepts : α → Prop) : Format α
+  | iso {α β : Type} (inner : Format α)
+      (isomorphism : Isomorphism α β) : Format β
 
 /-- Denotational parsing relation with an explicit unconsumed suffix. -/
 inductive Derives : {α : Type} → Format α → Std.Logical.ByteArray → α →
@@ -66,9 +87,20 @@ inductive Derives : {α : Type} → Format α → Std.Logical.ByteArray → α �
   | choiceRight {α : Type} {left right : Format α} {input rest : Std.Logical.ByteArray}
       {value : α} (derivation : Derives right input value rest) :
       Derives (.choice left right) input value rest
+  | repeatZero {α : Type} (item : Format α) (input : Std.Logical.ByteArray) :
+      Derives (.repeat 0 item) input Vec.empty input
+  | repeatSucc {α : Type} {count : Nat} {item : Format α}
+      {input middle rest : Std.Logical.ByteArray} {value : α} {values : Vec α}
+      (head : Derives item input value middle)
+      (tail : Derives (.repeat count item) middle values rest) :
+      Derives (.repeat (Nat.succ count) item) input (Vec.singleton value ++ values) rest
   | refine {α : Type} {inner : Format α} {predicate : α → Prop}
       {input rest : Std.Logical.ByteArray} {value : α}
       (derivation : Derives inner input value rest) (accepted : predicate value) :
       Derives (.refine inner predicate) input value rest
+  | iso {α β : Type} {inner : Format α} {isomorphism : Isomorphism α β}
+      {input rest : Std.Logical.ByteArray} {value : α}
+      (derivation : Derives inner input value rest) :
+      Derives (.iso inner isomorphism) input (isomorphism.forward value) rest
 
 end Grass.Grammar
