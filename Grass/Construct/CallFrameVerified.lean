@@ -3,15 +3,17 @@ import Grass.Construct.FrameCompose
 /-!
 # Verified call-frame sessions
 
-`CallFrameSession` binds one checked frame to explicit valid prepared and closed
-`CallFrameUse` states. `withCallFrame` requires that lifecycle evidence before
+`CallFrameTransition` records the only permitted lifecycle steps, including
+exact receipts for acquired or released call loans and restored registers.
+`CallFrameRun` composes those steps, and `CallFrameSession` requires a complete
+prepared-to-closed run. `withCallFrame` consumes that lifecycle evidence before
 delegating to verified frame composition; instruction correctness still comes
 only from `FrameVerifiedBackend`.
 -/
 
 namespace Grass.Construct
 
-open Grass.CFG Grass.Construct.Layout Grass.Construct.Fragment
+open Grass.Core Grass.CFG Grass.Construct.Layout Grass.Construct.Fragment
 
 universe u v w
 
@@ -23,11 +25,72 @@ structure CheckedCallFrameUse {profile : LayoutProfile}
   phaseExact : use.phase = phase
   valid : use.WellFormed
 
+/-- One permitted transition between checked uses of the same call frame. -/
+inductive CallFrameTransition {profile : LayoutProfile}
+    (frame : CheckedWin64Frame profile) :
+    {fromPhase toPhase : CallFramePhase} →
+      CheckedCallFrameUse frame fromPhase →
+      CheckedCallFrameUse frame toPhase → Type where
+  /-- Acquire exactly the named nonempty, duplicate-free loan set. -/
+  | acquire
+      (source : CheckedCallFrameUse frame .prepared)
+      (target : CheckedCallFrameUse frame .loaned)
+      (acquired : List Name)
+      (acquiredExact : target.use.liveCallLoans = acquired) :
+      CallFrameTransition frame source target
+  /-- Return from a call after releasing every live loan. -/
+  | completeReturn
+      (source : CheckedCallFrameUse frame .loaned)
+      (target : CheckedCallFrameUse frame .returned)
+      (released : List Name)
+      (releasedExact : source.use.liveCallLoans = released) :
+      CallFrameTransition frame source target
+  /-- Enter unwinding after releasing every live loan. -/
+  | unwind
+      (source : CheckedCallFrameUse frame .loaned)
+      (target : CheckedCallFrameUse frame .unwinding)
+      (released : List Name)
+      (releasedExact : source.use.liveCallLoans = released) :
+      CallFrameTransition frame source target
+  /-- Close a returned frame after restoring exactly its saved registers. -/
+  | closeReturn
+      (source : CheckedCallFrameUse frame .returned)
+      (target : CheckedCallFrameUse frame .closed)
+      (restored : List Grass.ISA.X86.Gpr)
+      (restoredExact : restored = frame.plan.saved) :
+      CallFrameTransition frame source target
+  /-- Close an unwinding frame after restoring exactly its saved registers. -/
+  | closeUnwind
+      (source : CheckedCallFrameUse frame .unwinding)
+      (target : CheckedCallFrameUse frame .closed)
+      (restored : List Grass.ISA.X86.Gpr)
+      (restoredExact : restored = frame.plan.saved) :
+      CallFrameTransition frame source target
+
+/-- A compositional path of permitted transitions between checked uses. -/
+inductive CallFrameRun {profile : LayoutProfile}
+    (frame : CheckedWin64Frame profile) :
+    {fromPhase toPhase : CallFramePhase} →
+      CheckedCallFrameUse frame fromPhase →
+      CheckedCallFrameUse frame toPhase → Type where
+  /-- The empty run leaves a checked use unchanged. -/
+  | done {phase : CallFramePhase}
+      (state : CheckedCallFrameUse frame phase) : CallFrameRun frame state state
+  /-- Prefix one permitted transition to a remaining run. -/
+  | next {fromPhase middlePhase toPhase : CallFramePhase}
+      {source : CheckedCallFrameUse frame fromPhase}
+      {middle : CheckedCallFrameUse frame middlePhase}
+      {target : CheckedCallFrameUse frame toPhase}
+      (step : CallFrameTransition frame source middle)
+      (rest : CallFrameRun frame middle target) :
+      CallFrameRun frame source target
+
 /-- Prepared-to-closed lifecycle evidence for one checked call frame. -/
 structure CallFrameSession {profile : LayoutProfile}
     (frame : CheckedWin64Frame profile) where
   prepared : CheckedCallFrameUse frame .prepared
   closed : CheckedCallFrameUse frame .closed
+  run : CallFrameRun frame prepared closed
 
 namespace FrameVerifiedBackend
 
