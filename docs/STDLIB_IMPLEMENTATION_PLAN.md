@@ -1144,7 +1144,13 @@ Open, with the owner each is with:
    supplies none, and `(output.findIdx? input[i]).get!` panics exactly when the
    substantive claim fails, so the specification is silent about the case a
    wrong sort would hit. `Tests/Std/StableSort.lean` shows the same statement
-   written totally. Owner as for the other authored-surface items. §3.10.
+   written totally, and proves the sharper finding: indexing the stability
+   conjunct by *element* makes the predicate **unsatisfiable** whenever two
+   occurrences are identical, since `idxOf?` returns one position for both and
+   `p < q` becomes `p < p`. Owner as for the other authored-surface items, and
+   now actually with them: raised as `c-stdlib:28`. It had been an open item here
+   and in a fixture comment for three days without ever being a bus event, which
+   is not the same as being raised. §3.10.
 7. **The `Bag` representation**, inherited undecided from `c-process:28` and
       genuinely blocked on a dependency question rather than on a container
    judgement — though less blocked than §4.2 says: [MODULES.md](MODULES.md)'s

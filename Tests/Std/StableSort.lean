@@ -111,8 +111,14 @@ whenever the input contains two identical occurrences**, and
 `p < p`. `no_sort_can_satisfy_repeated` proves it. The specification therefore
 needs a well-formedness hypothesis it does not state — occurrences carry an
 `ordinal` precisely so that a parser makes them distinct, and nothing says so —
-or it needs to index by position rather than by element. Raised as an open item
-against the spike surface rather than patched here.
+or it needs to index by position rather than by element. Raised with the corpus's
+owner as `c-stdlib:28` rather than patched here, because `Spikes/**` is authored
+surface and not this library's to edit.
+
+That sentence previously read "raised as an open item against the spike surface",
+which was true of this library's own plan and false of anything `c-spike` could
+see. It stood for three days while the only record was a document its subject had
+no reason to read.
 -/
 
 /-- Two occurrences identical in both fields: a degenerate input a real parser
