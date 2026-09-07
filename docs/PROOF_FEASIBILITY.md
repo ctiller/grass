@@ -65,6 +65,34 @@ structure DirectRelationalProgram (boundary : DriverBoundary) where
 abbrev DynamicOccurrence (program : DirectRelationalProgram boundary) :=
   DirectIssueOccurrence program.Initial program.Step
 
+opaque LiveDynamicOccurrence (program : DirectRelationalProgram boundary) : Type
+opaque DirectOccurrenceState (program : DirectRelationalProgram boundary) : Type
+def DirectOccurrenceState.initial : DirectOccurrenceState program
+def DirectOccurrenceState.live
+    (state : DirectOccurrenceState program) : List (LiveDynamicOccurrence program)
+opaque LiveOccurrenceHandle (state : DirectOccurrenceState program) : Type
+def LiveOccurrenceHandle.occurrence
+    (handle : LiveOccurrenceHandle state) : LiveDynamicOccurrence program
+
+opaque DirectIssueResult
+    (before : DirectOccurrenceState program)
+    (issuance : DirectIssuance program.Initial program.Step) : Type
+def DirectIssueResult.after
+    (result : DirectIssueResult before issuance) : DirectOccurrenceState program
+def DirectIssueResult.introduced
+    (result : DirectIssueResult before issuance) :
+    List (LiveOccurrenceHandle result.after)
+theorem DirectIssueResult.introducedNodup
+    (result : DirectIssueResult before issuance) : result.introduced.Nodup
+def DirectIssueResult.slots
+    (result : DirectIssueResult before issuance) :
+    { handle : LiveOccurrenceHandle result.after //
+        handle ∈ result.introduced } ≃
+      Sigma fun demand : EffectDemand boundary =>
+        Fin (issuance.issued.count demand)
+theorem DirectIssueResult.introducedExact ...
+theorem DirectIssueResult.priorExact ...
+
 opaque DirectProgramDerivation
     (boundaryCertificate : CertifiedDriverBoundary boundary)
     (program : DirectRelationalProgram boundary) : Type
@@ -76,19 +104,41 @@ theorem DirectProgramDerivation.operationOrigins_aggregateExact ...
 theorem DirectProgramDerivation.connectsExactly ...
 
 opaque DirectOperationModelOwner : Type
+opaque RegisteredOperationFamily
+    (boundaryCertificate : CertifiedDriverBoundary boundary) : Type
+def RegisteredOperationFamily.Operation
+    (family : RegisteredOperationFamily boundaryCertificate)
+    (demand : EffectDemand boundary) : Type
+def RegisteredOperationFamily.lowerRequirements
+    (family : RegisteredOperationFamily boundaryCertificate)
+    (demand : EffectDemand boundary)
+    (operation : family.Operation demand) :
+    RegisteredOperationOrigins boundaryCertificate.providers.demands demand
 opaque OwnerIssuedDirectOperationModel
     (owner : DirectOperationModelOwner)
     (boundaryCertificate : CertifiedDriverBoundary boundary)
     (program : DirectRelationalProgram boundary) : Type
+structure DirectOperationSemantics
+    (boundaryCertificate : CertifiedDriverBoundary boundary)
+    (program : DirectRelationalProgram boundary) where
+  family : RegisteredOperationFamily boundaryCertificate
+  selected : forall occurrence : DynamicOccurrence program,
+    family.Operation occurrence.demand
+  aggregateExact : AggregateOperationOriginViews
+      (fun occurrence => family.lowerRequirements
+        occurrence.demand (selected occurrence)) =
+    ExactUsedLowerRequirementViewsOf selected program
+  connectsInitial : EveryInitialIssuanceSelectsExactlyItsOperations
+    program.Initial selected
+  connectsStep : EveryStepIssuanceSelectsExactlyItsOperations
+    program.Step selected
+  bindingExact : EverySelectedOperationUsesTheProgramBindingExactly
+    program.binding selected
 opaque RegisteredDirectOperationModel
     (boundaryCertificate : CertifiedDriverBoundary boundary)
     (program : DirectRelationalProgram boundary) : Type
 def RegisteredDirectOperationModel.register
-    (issued : OwnerIssuedDirectOperationModel owner boundaryCertificate program)
-    (requiresExact : OwnerModelRequirementsAreExact issued)
-    (contained : OwnerModelRequirementsStayInsideBoundary issued)
-    (aggregateExact : OwnerModelAggregateRequirementsAreExact issued)
-    (connects : OwnerModelConnectsExactProgramAndBoundary issued) :
+    (issued : OwnerIssuedDirectOperationModel owner boundaryCertificate program) :
     RegisteredDirectOperationModel boundaryCertificate program
 def DirectProgramDerivation.certify
     (model : RegisteredDirectOperationModel boundaryCertificate program) :
@@ -111,8 +161,10 @@ def CertifiedDirectProgram.operationOrigins
 
 structure DirectProgramRealizes {R : Type u} [ResourceModel R]
     {resources : R} (spec : SpecProcess resources)
-    (boundaryCertificate : CertifiedDriverBoundary spec.driverBoundary)
-    (program : CertifiedDirectProgram spec.driverBoundary boundaryCertificate) where
+    {boundary : DriverBoundary}
+    {boundaryCertificate : CertifiedDriverBoundary boundary}
+    (program : CertifiedDirectProgram boundary boundaryCertificate) where
+  boundaryProjection : ExactDriverBoundaryProjection boundary spec.driverBoundary
   invariant : program.program.State -> Prop
   initial : DirectInitialSimulation spec program invariant
   step : DirectStepSimulation spec program invariant
@@ -124,15 +176,22 @@ structure DirectProgramRealizes {R : Type u} [ResourceModel R]
 and produces one conventional, replaceable process presentation. The input
 already contains the program decomposition and correctness proof; neither the
 adapter's topology nor its chosen child placement becomes precious.
+`boundaryProjection` permits a realization boundary to carry derived lower
+requirements while proving that its portable observation, input, and demand
+view projects exactly to `spec.driverBoundary`; an unrelated boundary cannot be
+smuggled through the implicit certificate index.
 The provider-demand family is the conservative certified-boundary envelope.
 Every dynamic occurrence's possibly empty or multi-origin subfamily is
 `program.derivation.operationOrigins occurrence`: a function of the opaque
 derivation and exact occurrence, not merely its dependent demand and not caller-
 populated evidence. The derivation is constructible only from an opaque
-owner-issued operation model whose registration proves exact requirement
-meaning, containment, aggregate exactness, and connection to the raw program;
-the factory derives origins by filtering the certified boundary. An arbitrary
-`Requires := False` predicate is not a construction input.
+owner-issued program binding selecting operations from an independently
+registered operation family. That family fixes each operation's relation,
+provider footprint, owner, and source citation; the binding proves aggregate
+exactness and connection to the raw program. The factory derives origins by
+filtering the certified boundary. An arbitrary `Requires := False` predicate is
+not a construction input, and the machine certificate must connect every
+authored instruction/API call back to the exact selected registered operation.
 `operationOrigins_exact`, `operationOrigins_contained`, and
 `operationOrigins_aggregateExact` connect it respectively to that occurrence's
 selected lower path, the conservative boundary, and the exact aggregate of used
@@ -182,9 +241,14 @@ single exact bag equation relating consumed, issued, and before/after
 simulation plus `terminalDisposition` for the live map. Induction gives every finite prefix. The supplied complete-execution
 coverage and a standard coinductive lifting give infinite, divergent, pending,
 fault, and terminal shapes.
-The token is realization-private: erasure counts live tokens by demand to obtain
-the precious bag. A completion carrying the epoch of a different equal-valued
-demand is rejected locally, and completed epochs are never reused.
+The token, occurrence state, handle, and issue result are realization-private
+and opaque. `DirectIssueResult.slots` bijects introduced handles with the exact
+dependent slots of the witnessed issuance, so an equal demand from another
+initial/step witness cannot be substituted. Erasure counts live tokens by
+demand to obtain the precious bag. Events accept a
+`LiveOccurrenceHandle` indexed by the exact current occurrence state. A caller
+cannot fabricate a same-epoch token, and a consumed handle does not typecheck
+against the post-consumption state; completed epochs are never reused.
 
 For a law-bearing operation which exposes observations while still pending, the
 adapter state additionally retains its exact rooted history. A pending-progress
@@ -246,9 +310,9 @@ demand values issued as distinct occurrences; an initially pending demand; an
 issue followed by cancellation; and a result consumption plus new issue in one
 transition. Mutating any issued/consumed multiplicity or dependent child binding
 must break the local bag equation rather than a later global theorem.
-The duplicate-demand fixture completes one exact epoch and proves the other
-remains live; substituting its sibling's epoch or replaying the completed epoch
-must fail locally. A registered provider-using operation fixture must also fail
+The duplicate-demand fixture completes one exact handle and proves the other
+remains live; fabricating a sibling with the same epoch or replaying the
+consumed handle must fail locally. A registered provider-using operation fixture must also fail
 when its owner-derived requirement predicate is replaced by `False`, before a
 `DirectProgramDerivation` can be constructed.
 Another fixture uses one streaming wait whose history emits a byte before its

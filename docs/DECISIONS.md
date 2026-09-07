@@ -891,12 +891,18 @@ to imitate compiler-selected storage or CFG structure.
     progress exists. Adapters
     may embed well-founded effect programs without making Process core depend on the
     Effect implementation. Process owns one open
-    `RegisteredDirectOperationModel` seam: an operation/DSL owner supplies a
-    sealed owner-issued package and exact requirement, containment, aggregate,
-    and raw-program connection laws; Process derives occurrence origins rather
-    than accepting an origin function or caller predicate. Dynamic issued-bag
-    slots receive monotone realization-private epochs, so two equal-valued
-    pending demands remain separately completable and epochs cannot replay.
+    `RegisteredDirectOperationModel` seam. An independent owner-issued operation
+    family fixes operation constructors, relations, provider footprints, and
+    citations; each program binding selects only registered operations and proves
+    aggregate and raw-program connection laws. The machine certificate connects
+    every concrete instruction/API call back to those selected operations.
+    Process derives occurrence origins rather than accepting an origin function
+    or caller predicate. Dynamic issued-bag
+    slots receive opaque monotone realization-private tokens; events carry a
+    handle indexed by an opaque exact occurrence state, and issuance results
+    biject those handles with the original dependent issuance slots, so two
+    equal-valued pending demands remain separately completable and consumed
+    epochs cannot be fabricated or replayed.
     Direct serial functions and first-class authored
     assembly may refine the same specification requirements without constructing
     a decorative effect-program witness. This is the proposed resolution of

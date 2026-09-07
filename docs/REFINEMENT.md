@@ -361,22 +361,63 @@ projection and a coherent platform plan exist. After selection, the same lens
 supports a second, machine-indexed blend:
 
 ```lean
-structure MachineSubsystemRealization
+opaque MachineIsa {R : Type u} [ResourceModel R]
+    {resources : R} {spec : SpecProcess resources}
+    {profile : PlatformProfile}
+    {portable : PortableProgramCertificate spec}
+    {projection : TargetProjection spec profile}
+    (driver : ProjectedDriverCertificate portable projection) : Type
+
+opaque ClosedScopeMachineSource {R : Type u} [ResourceModel R]
+    {resources : R} {spec : SpecProcess resources}
+    {profile : PlatformProfile}
+    {portable : PortableProgramCertificate spec}
+    {projection : TargetProjection spec profile}
+    (driver : ProjectedDriverCertificate portable projection)
+    (scope : ClosedProcessOriginScope driver.processOrigin)
+    (isa : MachineIsa driver) : Type
+
+structure HeterogeneousMachineSource {R : Type u} [ResourceModel R]
+    {resources : R} {spec : SpecProcess resources}
+    {profile : PlatformProfile}
+    {portable : PortableProgramCertificate spec}
+    {projection : TargetProjection spec profile}
     (driver : ProjectedDriverCertificate portable projection)
     (scope : ClosedProcessOriginScope driver.processOrigin) where
-  source : HeterogeneousMachineSource driver.plan scope
+  isa : MachineIsa driver
+  source : ClosedScopeMachineSource driver scope isa
+  syntaxOwnedByIsa : SourceUsesExactlyRegisteredIsaSyntax source isa
+  platformCompatible : IsaAcceptedByPlatformPlan isa driver.plan
+
+structure MachineSubsystemRealization {R : Type u} [ResourceModel R]
+    {resources : R} {spec : SpecProcess resources}
+    {profile : PlatformProfile}
+    {portable : PortableProgramCertificate spec}
+    {projection : TargetProjection spec profile}
+    (driver : ProjectedDriverCertificate portable projection)
+    (scope : ClosedProcessOriginScope driver.processOrigin) where
+  source : HeterogeneousMachineSource driver scope
   local : SourceRefinesExactClosedScope source scope
   boundary : MachineSourceExportsExactDriverBoundary source scope
   crossIsa : EveryCrossIsaEdgeConnected source driver.plan scope
 
-structure MachineBlend
+structure MachineBlend {R : Type u} [ResourceModel R]
+    {resources : R} {spec : SpecProcess resources}
+    {profile : PlatformProfile}
+    {portable : PortableProgramCertificate spec}
+    {projection : TargetProjection spec profile}
     (driver : ProjectedDriverCertificate portable projection) where
   nodes : forall scope : ClosedProcessOriginScope driver.processOrigin,
     MachineSubsystemRealization driver scope
   coverage : EveryReachableClosedScopeAppearsExactlyOnce nodes
   coherent : MachineSourcesAbiIsaAndProviderCoherent driver nodes
 
-def MachineBlend.exactSource
+def MachineBlend.exactSource {R : Type u} [ResourceModel R]
+    {resources : R} {spec : SpecProcess resources}
+    {profile : PlatformProfile}
+    {portable : PortableProgramCertificate spec}
+    {projection : TargetProjection spec profile}
+    {driver : ProjectedDriverCertificate portable projection}
     (blend : MachineBlend driver) : MachineSource driver.plan :=
   MachineSource.compose blend.nodes blend.coverage blend.coherent
 ```

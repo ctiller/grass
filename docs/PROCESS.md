@@ -1887,6 +1887,46 @@ theorem ProcessPlanSource.sequential_providerDemands_exact ...
 theorem ProcessPlanSource.explicit_providerDemands_exact ...
 theorem ProcessPlanSource.blended_providerDemands_exact ...
 
+structure ProcessPlan.ClosedScope
+    {registry : ProtocolRegistry} {boundary : DriverBoundary}
+    (plan : ProcessPlan registry boundary) where
+  scope : plan.ProcessKind
+  reachable : ReachableProcessKind plan scope
+  frontiersClosed : EveryInternalFrontierClosed plan scope
+
+inductive ClosedProcessOriginScope {R : Type u} [ResourceModel R]
+    {resources : R} {spec : SpecProcess resources}
+    {boundary : DriverBoundary}
+    {boundaryCertificate : CertifiedDriverBoundary boundary} :
+    (origin : ProcessPlanSource spec boundary boundaryCertificate) -> Type
+  | sequentialRoot
+      (program : CertifiedDirectProgram boundary boundaryCertificate)
+      (correct : DirectProgramRealizes spec program) :
+      ClosedProcessOriginScope (.sequential program correct)
+  | explicit
+      (registry : ProtocolRegistry)
+      (registryCertificate : CertifiedProtocolRegistry registry)
+      (plan : ProcessPlan registry boundary)
+      (providers : ProcessProviderCertificate
+        boundaryCertificate registryCertificate plan)
+      (correct : ProcessPlanRealizes spec plan)
+      (scope : plan.ClosedScope) :
+      ClosedProcessOriginScope
+        (.explicit registry registryCertificate plan providers correct)
+  | blended
+      (registry : ProtocolRegistry)
+      (registryCertificate : CertifiedProtocolRegistry registry)
+      (plan : ProcessPlan registry boundary)
+      (providers : ProcessProviderCertificate
+        boundaryCertificate registryCertificate plan)
+      (correct : ProcessPlanRealizes spec plan)
+      (provenance : ClosedBlendProvenance spec boundary boundaryCertificate
+        registry registryCertificate plan providers correct)
+      (scope : plan.ClosedScope)
+      (occurs : ScopeOccursInExactClosedBlend provenance scope) :
+      ClosedProcessOriginScope
+        (.blended registry registryCertificate plan providers correct provenance)
+
 structure ProcessRealization {R : Type u} [ResourceModel R]
     {resources : R} (spec : SpecProcess resources) where
   boundary : DriverBoundary
@@ -2221,44 +2261,126 @@ structure DirectRelationalProgram (boundary : DriverBoundary) where
 abbrev DynamicOccurrence (program : DirectRelationalProgram boundary) :=
   DirectIssueOccurrence program.Initial program.Step
 
-structure LiveDynamicOccurrence (program : DirectRelationalProgram boundary) where
-  epoch : Nat
-  issued : DynamicOccurrence program
+opaque LiveDynamicOccurrence (program : DirectRelationalProgram boundary) : Type
+def LiveDynamicOccurrence.epoch
+    (occurrence : LiveDynamicOccurrence program) : Nat
+def LiveDynamicOccurrence.issued
+    (occurrence : LiveDynamicOccurrence program) : DynamicOccurrence program
 
-structure DirectOccurrenceState (program : DirectRelationalProgram boundary) where
-  nextEpoch : Nat
-  live : List (LiveDynamicOccurrence program)
-  epochsUnique : (live.map LiveDynamicOccurrence.epoch).Nodup
-  belowFrontier : forall occurrence ∈ live, occurrence.epoch < nextEpoch
+opaque DirectOccurrenceState (program : DirectRelationalProgram boundary) : Type
+def DirectOccurrenceState.initial : DirectOccurrenceState program
+def DirectOccurrenceState.nextEpoch
+    (state : DirectOccurrenceState program) : Nat
+def DirectOccurrenceState.live
+    (state : DirectOccurrenceState program) : List (LiveDynamicOccurrence program)
+theorem DirectOccurrenceState.epochsUnique
+    (state : DirectOccurrenceState program) :
+    (state.live.map LiveDynamicOccurrence.epoch).Nodup
+theorem DirectOccurrenceState.belowFrontier
+    (state : DirectOccurrenceState program) :
+    forall occurrence ∈ state.live, occurrence.epoch < state.nextEpoch
 
-inductive CorrelatedDirectEvent (program : DirectRelationalProgram boundary)
-  | result (occurrence : LiveDynamicOccurrence program)
-      (value : boundary.Result occurrence.issued.demand)
-  | interrupted (occurrence : LiveDynamicOccurrence program)
-      (reason : DirectInterruptionFor occurrence.issued.demand)
+opaque LiveOccurrenceHandle
+    (state : DirectOccurrenceState program) : Type
+def LiveOccurrenceHandle.occurrence
+    (handle : LiveOccurrenceHandle state) : LiveDynamicOccurrence program
+theorem LiveOccurrenceHandle.live
+    (handle : LiveOccurrenceHandle state) : handle.occurrence ∈ state.live
+
+inductive CorrelatedDirectEvent
+    (state : DirectOccurrenceState program)
+  | result (handle : LiveOccurrenceHandle state)
+      (value : boundary.Result handle.occurrence.issued.demand)
+  | interrupted (handle : LiveOccurrenceHandle state)
+      (reason : DirectInterruptionFor handle.occurrence.issued.demand)
 
 def CorrelatedDirectEvent.erase
-    (event : CorrelatedDirectEvent program) : DirectEvent boundary
+    (event : CorrelatedDirectEvent state) : DirectEvent boundary
 theorem CorrelatedDirectEvent.erase_preserves_exact_demand ...
+
+opaque DirectIssueResult
+    (before : DirectOccurrenceState program)
+    (issuance : DirectIssuance program.Initial program.Step) : Type
+def DirectIssueResult.after
+    (result : DirectIssueResult before issuance) : DirectOccurrenceState program
+def DirectIssueResult.introduced
+    (result : DirectIssueResult before issuance) :
+    List (LiveOccurrenceHandle result.after)
+theorem DirectIssueResult.introducedNodup
+    (result : DirectIssueResult before issuance) : result.introduced.Nodup
+def DirectIssueResult.slots
+    (result : DirectIssueResult before issuance) :
+    { handle : LiveOccurrenceHandle result.after //
+        handle ∈ result.introduced } ≃
+      Sigma fun demand : EffectDemand boundary =>
+        Fin (issuance.issued.count demand)
+theorem DirectIssueResult.introducedExact
+    (result : DirectIssueResult before issuance) :
+    forall handle present,
+      let slot := result.slots ⟨handle, present⟩
+      handle.occurrence.issued =
+        { issuance := issuance, demand := slot.1, slot := slot.2 }
+theorem DirectIssueResult.priorExact
+    (result : DirectIssueResult before issuance) :
+    ExactPreservationAndNoExtraPriorOccurrences before result.after
+
 def DirectOccurrenceState.issue
-    (state : DirectOccurrenceState program)
+    (before : DirectOccurrenceState program)
     (issuance : DirectIssuance program.Initial program.Step) :
-    DirectOccurrenceState program
-def DirectOccurrenceState.consume?
-    (state : DirectOccurrenceState program)
-    (event : CorrelatedDirectEvent program) : Option (DirectOccurrenceState program)
-theorem DirectOccurrenceState.consume?_some_iff_exact_live_epoch ...
+    DirectIssueResult before issuance
+def DirectOccurrenceState.consume
+    (before : DirectOccurrenceState program)
+    (event : CorrelatedDirectEvent before) : DirectOccurrenceState program
+theorem DirectOccurrenceState.consume_removes_exact_handle ...
 theorem DirectOccurrenceState.issue_fresh ...
 theorem DirectOccurrenceState.consumed_epoch_never_reappears ...
+
+opaque RegisteredOperationFamily {boundary : DriverBoundary}
+    (boundaryCertificate : CertifiedDriverBoundary boundary) : Type
+def RegisteredOperationFamily.Operation
+    {boundary : DriverBoundary}
+    {boundaryCertificate : CertifiedDriverBoundary boundary}
+    (family : RegisteredOperationFamily boundaryCertificate)
+    (demand : EffectDemand boundary) : Type
+def RegisteredOperationFamily.lowerRequirements
+    {boundary : DriverBoundary}
+    {boundaryCertificate : CertifiedDriverBoundary boundary}
+    (family : RegisteredOperationFamily boundaryCertificate)
+    (demand : EffectDemand boundary)
+    (operation : family.Operation demand) :
+    RegisteredOperationOrigins boundaryCertificate.providers.demands demand
+def RegisteredOperationFamily.relationalMeaning
+    {boundary : DriverBoundary}
+    {boundaryCertificate : CertifiedDriverBoundary boundary}
+    (family : RegisteredOperationFamily boundaryCertificate)
+    (demand : EffectDemand boundary)
+    (operation : family.Operation demand) : OperationRelation boundary demand
+theorem RegisteredOperationFamily.requirementsExact ...
+theorem RegisteredOperationFamily.ownerAndCitationAnchored ...
+
+structure DirectOperationSemantics {boundary : DriverBoundary}
+    (boundaryCertificate : CertifiedDriverBoundary boundary)
+    (program : DirectRelationalProgram boundary) where
+  family : RegisteredOperationFamily boundaryCertificate
+  selected : forall occurrence : DynamicOccurrence program,
+    family.Operation occurrence.demand
+  aggregateExact : AggregateOperationOriginViews
+      (fun occurrence => family.lowerRequirements
+        occurrence.demand (selected occurrence)) =
+    ExactUsedLowerRequirementViewsOf selected program
+  connectsInitial : EveryInitialIssuanceSelectsExactlyItsOperations
+    program.Initial selected
+  connectsStep : EveryStepIssuanceSelectsExactlyItsOperations
+    program.Step selected
+  bindingExact : EverySelectedOperationUsesTheProgramBindingExactly
+    program.binding selected
 
 opaque DirectProgramDerivation
     (boundaryCertificate : CertifiedDriverBoundary boundary)
     (program : DirectRelationalProgram boundary) : Type
-def DirectProgramDerivation.Kind :
-    DirectProgramDerivation boundaryCertificate program -> Type
 def DirectProgramDerivation.payload
     (derivation : DirectProgramDerivation boundaryCertificate program) :
-    derivation.Kind
+    DirectOperationSemantics boundaryCertificate program
 def DirectProgramDerivation.operationRequires
     (derivation : DirectProgramDerivation boundaryCertificate program)
     (occurrence : DynamicOccurrence program) : ProviderDemandView -> Prop
@@ -2290,10 +2412,36 @@ def DirectOperationModelOwner.id : DirectOperationModelOwner -> StableId
 -- Generates one fresh nominal owner and its sealed model-package constructor.
 elab "declare_direct_operation_owner" ident "=>" term : command
 
-opaque OwnerIssuedDirectOperationModel
+opaque OwnerIssuedOperationFamily {boundary : DriverBoundary}
+    (owner : DirectOperationModelOwner)
+    (boundaryCertificate : CertifiedDriverBoundary boundary) : Type
+def RegisteredOperationFamily.register
+    {boundary : DriverBoundary}
+    {boundaryCertificate : CertifiedDriverBoundary boundary}
+    {owner : DirectOperationModelOwner}
+    (issued : OwnerIssuedOperationFamily owner boundaryCertificate) :
+    RegisteredOperationFamily boundaryCertificate
+
+opaque OwnerIssuedDirectOperationModel {boundary : DriverBoundary}
     (owner : DirectOperationModelOwner)
     (boundaryCertificate : CertifiedDriverBoundary boundary)
     (program : DirectRelationalProgram boundary) : Type
+
+def ExactLowerRequirementOf
+    (semantics : DirectOperationSemantics boundaryCertificate program)
+    (occurrence : DynamicOccurrence program) (view : ProviderDemandView) : Prop :=
+  OriginOccursIn
+    (semantics.family.lowerRequirements occurrence.demand
+      (semantics.selected occurrence)) view
+
+def OwnerIssuedDirectOperationModel.semantics
+    (issued : OwnerIssuedDirectOperationModel
+      owner boundaryCertificate program) :
+    DirectOperationSemantics boundaryCertificate program
+theorem OwnerIssuedDirectOperationModel.ownerAuthentic
+    (issued : OwnerIssuedDirectOperationModel
+      owner boundaryCertificate program) :
+    IssuedByExactly owner issued
 
 opaque RegisteredDirectOperationModel
     (boundaryCertificate : CertifiedDriverBoundary boundary)
@@ -2301,10 +2449,9 @@ opaque RegisteredDirectOperationModel
 def RegisteredDirectOperationModel.Owner :
     RegisteredDirectOperationModel boundaryCertificate program ->
       DirectOperationModelOwner
-def RegisteredDirectOperationModel.Kind
-    (model : RegisteredDirectOperationModel boundaryCertificate program) : Type
 def RegisteredDirectOperationModel.payload
-    (model : RegisteredDirectOperationModel boundaryCertificate program) : model.Kind
+    (model : RegisteredDirectOperationModel boundaryCertificate program) :
+    DirectOperationSemantics boundaryCertificate program
 def RegisteredDirectOperationModel.operationRequires
     (model : RegisteredDirectOperationModel boundaryCertificate program)
     (occurrence : DynamicOccurrence program) : ProviderDemandView -> Prop
@@ -2331,11 +2478,7 @@ theorem RegisteredDirectOperationModel.connectsExactly
       model.payload program boundaryCertificate
 
 def RegisteredDirectOperationModel.register
-    (issued : OwnerIssuedDirectOperationModel owner boundaryCertificate program)
-    (requiresExact : OwnerModelRequirementsAreExact issued)
-    (contained : OwnerModelRequirementsStayInsideBoundary issued)
-    (aggregateExact : OwnerModelAggregateRequirementsAreExact issued)
-    (connects : OwnerModelConnectsExactProgramAndBoundary issued) :
+    (issued : OwnerIssuedDirectOperationModel owner boundaryCertificate program) :
     RegisteredDirectOperationModel boundaryCertificate program
 
 def DirectProgramDerivation.certify
@@ -2369,12 +2512,20 @@ segment for that execution. `DirectIssuance` retains the exact relation witness;
 that witness's issued bag. It therefore distinguishes equal-valued demands
 without putting correlation identity into the precious relation.
 `initialEquation` and `transitionEquation` connect those outputs to `Pending`.
-When the adapter executes an issuance, it pairs every slot with the current
-monotone `nextEpoch`, advances the frontier, and records the resulting
-`LiveDynamicOccurrence`. An epoch is never reused. Completion, interruption,
-cancellation, pending progress, child custody, and terminal disposition all
-consume or preserve that exact live token; only their projection into the
-portable relation erases it back to the demand bag. The adapter generates child
+When the adapter executes an issuance, it uses the opaque minting operation to
+pair every slot with a fresh monotone epoch, advances the frontier, and returns
+state-indexed handles for the resulting `LiveDynamicOccurrence` values.
+`DirectIssueResult.slots` is a bijection with the exact dependent demand slots
+of that issuance, and `introducedExact` retains the original initial/step
+witness rather than merely an equal demand value. The token, occurrence-state,
+handle, and issue-result constructors are not public, and an epoch is never reused. Completion,
+interruption, cancellation, pending progress, child custody, and terminal
+disposition all consume or preserve a `LiveOccurrenceHandle` for the exact
+current occurrence state; only their projection into the portable relation
+erases it back to the demand bag. A handle from the pre-consumption state does
+not inhabit the post-consumption event type. Retaining the old opaque state
+permits reasoning about an alternate history; it cannot reconstruct that token
+inside the returned successor state. The adapter generates child
 records, escrows, and topology from this evidence. It does not infer demand
 issuance from a finite syntactic inventory or treat multiplicity alone as a
 runtime correlation identity.
@@ -2418,13 +2569,18 @@ those whose views satisfy the registered model's decidable per-occurrence
 `operationRequires`, and derives
 `operationOrigins_exact`, containment, and aggregate exactness internally. Its
 public input contains no origin list or origin function.
-`declare_direct_operation_owner` creates a fresh nominal owner and a sealed
-owner-issued package constructor; importing an owner's stable ID cannot mint a
-package under that owner. A custom assembly or DSL module may declare its own
-owner and pay the four genuine model laws once. `register` checks exact
-per-occurrence requirement meaning, boundary containment, aggregate exactness,
-and the connection to the raw transition relation before producing the opaque
-registered model. In particular `operationRequires := False` cannot register a
+`declare_direct_operation_owner` creates a fresh nominal owner plus separate
+sealed constructors for an operation family and its program binding; importing
+an owner's stable ID cannot mint either package under that owner. The registered
+family fixes each operation constructor, relational meaning, provider footprint,
+owner, and source citation independently of any `DirectRelationalProgram`.
+`DirectOperationSemantics` can only select members of that family and prove the
+aggregate and initial/step binding laws; its lower requirements are a projection
+from the registered operation, not an author field. A custom assembly or DSL
+module may declare its own owner, register its law-bearing operation family once,
+and then bind any number of programs to it. `register` only erases the authentic
+owner; it does not accept a second caller-defined requirement predicate or proof bundle.
+In particular `operationRequires := False` cannot be substituted for a
 provider-using operation. The downstream Effect module registers the exact
 selected theory/lowering package and calls the same `certify` factory. Process
 imports neither Effect nor any closed operation-owner sum.
@@ -2433,9 +2589,13 @@ imports neither Effect nor any closed operation-owner sum.
 supplied sidecar. The final machine/source connection proves the
 same law for each lowered API call or instruction, so a custom boundary may not
 declare an empty `Requires` relation while emitting provider-using operations.
-The negative fixture registers a provider-using operation and then replaces its
-derived requirement predicate with `False`; `requiresExactLowering` must fail at
-the registration site, before a `DirectProgramDerivation` exists.
+The negative fixture selects a registered provider-using operation and then
+attempts to replace its nonempty registered footprint with the empty origin
+family; there is no field at which to make that substitution. Selecting a
+provider-free surrogate fails the initial/step operation-relation connection,
+and emitting a provider call while claiming the surrogate fails the mandatory
+machine-source correspondence. Registering a genuinely provider-free operation
+remains valid.
 
 Sequential authoring is intended for straight-line and ordinary sequential
 CFGs. It composes standard relational API Hoare contracts and an extensional
@@ -2494,9 +2654,10 @@ authoring; no adapter proof may weaken them to set membership or site
 possibility.
 The duplicate-demand fixture issues the same value twice, assigns distinct
 epochs, completes the second, and proves the first remains live. Mutating that
-completion to consume the first token, or replaying either epoch after
-completion, must fail at the local occurrence-state transition before any
-global refinement theorem is attempted.
+completion to carry a fabricated same-epoch token is impossible because the
+token constructor is opaque; replaying the consumed handle fails because it is
+indexed by the prior occurrence state. Both failures occur before any global
+refinement theorem is attempted.
 
 Explicit authoring is selected when independent state machines, supervision,
 callbacks, cancellation, concurrency, or heterogeneous engines make the network
@@ -2519,6 +2680,12 @@ structure StandardSequentialRealization {R : Type u} [ResourceModel R]
   program : CertifiedDirectProgram spec.driverBoundary boundaryCertificate
   exactElaboration : program = certifiedMachine machine pendingModel pending
   correct : SequentialMachineRealizes spec machine pendingModel pending
+
+def StandardSequentialRealization.directCorrect
+    (realization : StandardSequentialRealization spec) :
+    DirectProgramRealizes spec realization.program :=
+  realization.exactElaboration.symm ▸
+    SequentialMachineRealizes.toDirect realization.correct
 
 structure StandardRealizerEntry where
   R : Type u
@@ -2547,8 +2714,7 @@ def ProcessRealization.standard
     ProcessRealization spec :=
   ProcessRealization.sequential
     (selected.realization.transport selected.exactSpec).program
-    (selected.realization.transport selected.exactSpec).derivation
-    (selected.realization.transport selected.exactSpec).correct
+    (selected.realization.transport selected.exactSpec).directCorrect
 ```
 
 This interface has two deliberately different audiences.  The implementor of a

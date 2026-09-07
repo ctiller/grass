@@ -729,10 +729,9 @@ def EffectLoweringPlan.pendingAndExtension
   plan.core.pendingAndExtension
 
 structure SameEffectOriginProvenance
-    (left : EffectLoweringPlan leftIdentity source sourceModel)
-    (right : EffectLoweringPlan rightIdentity source sourceModel) : Prop where
-  identityExact : leftIdentity = rightIdentity
-  planExact : identityExact ▸ left = right
+    (left : EffectLoweringPlan leftIdentity leftSource leftModel)
+    (right : EffectLoweringPlan rightIdentity rightSource rightModel) : Prop where
+  planExact : HEq left right
 
 inductive EffectOriginComposition
     (left : EffectLoweringPlan leftIdentity leftSource leftModel)
@@ -962,6 +961,14 @@ structure EffectAdapterCertificate
   operationSelection : EveryDirectOccurrenceSelectsItsExactEffectLowering
     junction plan directProgram
 
+def Effect.ownerIssuedModel
+    (junction : EffectSpecJunction spec program)
+    (plan : EffectLoweringPlan identity source sourceModel)
+    (adapter : EffectAdapterCertificate junction plan) :
+    OwnerIssuedDirectOperationModel Effect.directOperationOwner
+      adapter.boundaryCertificate adapter.directProgram
+theorem Effect.ownerIssuedModel_semantics_exact ...
+
 def EffectProgram.registeredDirectOperationModel
     (junction : EffectSpecJunction spec program)
     (plan : EffectLoweringPlan identity source sourceModel)
@@ -970,10 +977,6 @@ def EffectProgram.registeredDirectOperationModel
       adapter.boundaryCertificate adapter.directProgram :=
   RegisteredDirectOperationModel.register
     (Effect.ownerIssuedModel junction plan adapter)
-    (Effect.requirementsExact junction plan adapter)
-    (Effect.requirementsContained junction plan adapter)
-    (Effect.requirementsAggregateExact junction plan adapter)
-    (Effect.modelConnectsProgramAndBoundary junction plan adapter)
 
 def EffectProgram.directDerivation ... :
     DirectProgramDerivation adapter.boundaryCertificate adapter.directProgram :=
@@ -1252,9 +1255,9 @@ The first implementation is incomplete until checked fixtures demonstrate:
     logical demand may select different registered lower paths; each opaque
     derivation-owned origin subfamily is exact for its own path, both are
     contained in the conservative boundary family, and their aggregate equals
-    the exact used lower-requirement views. Completing one exact epoch leaves
-    the other live; substituting its sibling's epoch or replaying a consumed
-    token is rejected locally.
+    the exact used lower-requirement views. Completing one state-indexed opaque
+    handle leaves the other live; a fabricated same-epoch token is
+    unconstructible and a consumed handle cannot be replayed in the next state.
 17. A direct authored-assembly realization discharges the same specification
     requirement without constructing an effect-program witness.
 18. Removing any family-law proof, handler simulation direction, requirement
