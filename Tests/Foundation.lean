@@ -59,6 +59,15 @@ theorem behaviorAdequate : behavior.Adequate where
 def behaviorRefinesItself : BehaviorRefinement behavior behavior :=
   .refl behavior
 
+example (refinement : BehaviorRefinement behavior behavior) :
+    (BehaviorRefinement.refl behavior).trans refinement = refinement := by simp
+
+example (refinement : BehaviorRefinement behavior behavior) :
+    refinement.trans (BehaviorRefinement.refl behavior) = refinement := by simp
+
+example (first second third : BehaviorRefinement behavior behavior) :
+    (first.trans second).trans third = first.trans (second.trans third) := by simp
+
 def portable : PortableProgramCertificate spec where
   behavior := behavior
   requirements := noDemandCertificates
