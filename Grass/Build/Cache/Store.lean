@@ -69,4 +69,47 @@ terminal lookup result. -/
       some (matchEnvironment.symm ▸ entry.certificate) := by
   simp [replayCandidates?, matchEnvironment]
 
+/-- Candidate scanning succeeds exactly when one candidate retains the requested
+environment. This theorem mentions structural eligibility, never a digest. -/
+theorem replayCandidates?_isSome_iff {hasher : MerkleHasher}
+    {Certificate : SemanticEnvironment → Type}
+    (requested : SemanticEnvironment)
+    (entries : List (CertifiedCacheEntry hasher Certificate)) :
+    (replayCandidates? requested entries).isSome = true ↔
+      ∃ entry ∈ entries, ReplayEligible requested entry.record := by
+  induction entries with
+  | nil => simp [replayCandidates?]
+  | cons entry rest inductionHypothesis =>
+      by_cases equal : requested = entry.record.environment
+      · simp [replayCandidates?, equal, ReplayEligible]
+      · simp [replayCandidates?, equal, ReplayEligible, inductionHypothesis]
+
+/-- An exact stored entry always survives hash candidate selection. This is the
+one-way implication justified by `ReplayEligible.key_matches`; no converse from
+key equality is claimed. -/
+theorem CacheStore.eligible_mem_candidatesFor {hasher : MerkleHasher}
+    {Certificate : SemanticEnvironment → Type}
+    (store : CacheStore hasher Certificate)
+    (requested : SemanticEnvironment)
+    (entry : CertifiedCacheEntry hasher Certificate)
+    (stored : entry ∈ store.entries)
+    (eligible : ReplayEligible requested entry.record) :
+    entry ∈ store.candidatesFor requested := by
+  have keyMatch : entry.record.key = cacheKey hasher requested := eligible.key_matches
+  have storedList : entry ∈ store.entries.toList :=
+    Vec.mem_iff_mem_toList.mp stored
+  simp [CacheStore.candidatesFor, Vec.mem_iff_mem_toList, storedList, keyMatch]
+
+/-- Store replay succeeds exactly when the hash-located candidates include an
+entry with the exact requested semantic environment. -/
+theorem replayFromStore?_isSome_iff {hasher : MerkleHasher}
+    {Certificate : SemanticEnvironment → Type}
+    (requested : SemanticEnvironment)
+    (store : CacheStore hasher Certificate) :
+    (replayFromStore? requested store).isSome = true ↔
+      ∃ entry ∈ store.candidatesFor requested,
+        ReplayEligible requested entry.record := by
+  simpa [replayFromStore?, Vec.mem_iff_mem_toList] using
+    replayCandidates?_isSome_iff requested (store.candidatesFor requested).toList
+
 end Grass.Build.Cache
