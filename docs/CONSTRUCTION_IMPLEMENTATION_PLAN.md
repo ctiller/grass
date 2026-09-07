@@ -304,6 +304,11 @@ duplicate-free candidate set and passes a handle to a fixed-contract verified
 body without adding hidden source. It deliberately does not derive liveness;
 the machine backend must connect the supplied live set to its effect model
 before the final authored macro can rely on the selection.
+`Grass.Construct.ScratchLiveness` makes that connection explicit:
+`CheckedScratchContext` requires the backend's liveness relation to equal the
+request's live set at every state admitted by the body contract. The resulting
+`withLiveScratch` binder retains the fixed contract and exact body source; it
+still delegates instruction correctness to the supplied `VerifiedFragment`.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
