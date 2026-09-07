@@ -232,8 +232,13 @@ change falsifies a drafted import. Add each spike to the default target as soon
 as it can compile -- which for every spike means after P0 and P2 -- and keep the
 mirror check running in CI until then. That is the whole of this phase.
 
-`check-spike-sources.ps1` needs PowerShell 7 for `GetRelativePath`, which not
-every machine has; making it portable is worth more than any new command.
+`check-spike-sources.ps1` is portable as of this branch. It called
+`[IO.Path]::GetRelativePath`, which exists only on .NET Core and .NET 5+, so it
+ran in CI -- `corpus.yml` invokes it with `shell: pwsh` -- and died on its first
+file for anyone without PowerShell 7. A gate whose purpose is to be run before
+you push is the wrong thing to have working only after you push. Verified under
+Windows PowerShell 5.1 and negative-tested: a changed source byte and a deleted
+classification comment each fail it.
 
 Exit: `lake build` fails when a spike references a name the libraries no longer
 provide.
