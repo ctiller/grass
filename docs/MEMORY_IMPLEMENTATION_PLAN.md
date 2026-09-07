@@ -973,11 +973,34 @@ one outright defect that had already merged — see §3.11's denial row.
 
   The second is the better shape. Neither should be taken without the design owner,
   because both change `MemoryState`.
-- **`MemoryState.aliases` records no offset mapping.** `AuthorizedAt` compares a
-  grant's range to an *offset* with `Covers`, and `grantsOver` compares ranges with
-  `Meets`, across aliased allocations — which assumes aliased allocations agree offset
-  for offset. A view mapped at a non-zero file offset — the ordinary `MapViewOfFile`
-  case — does not.
+- **`MemoryState.aliases` records an offset now, and nothing consults it.** The
+  representation half of this gap is closed and the deciding half is not, which is
+  the distinction worth keeping: `AliasEdge` carries a `delta : Int`, `AliasHop`
+  carries the shift, and `SharesBytesAt` accumulates it along a path, with
+  `Tests/Memory/Placement.lean` demonstrating a view mapped 2048 bytes in, its
+  negation at zero, the reverse hop at `-2048`, and two hops composing to 2304.
+
+  **`AuthorizedAt` and `grantsOver` still use the unoffset form.** `AuthorizedAt`
+  compares a grant's range to an *offset* with `Covers`, and `grantsOver` compares
+  ranges with `Meets`, across aliased allocations — so an authority decision still
+  assumes aliased allocations agree offset for offset, and a view mapped at a
+  non-zero file offset is still decided wrongly. What changed is that the model can
+  now *say* what the right answer is. That is expressive power, not a repair, and
+  calling it one would be this corpus's "disclosed gap treated as a closed one"
+  applied to the entry recording the gap.
+
+  Two separate relations, because the two callers want opposite conservatism.
+  `AliasLinked` is the old relation unchanged — same storage at all — and
+  `SharesBytes` still traverses it, which is what conflict detection asks and where
+  more sharing is safe. `SharesBytesAt` answers at what offset, which is what
+  authority asks and where a wrong offset admits an access a grant does not cover.
+  A single predicate would have to pick a direction to be conservative in.
+
+  **`SharesBytesAt` holds at every shift some path witnesses**, and a profile can
+  declare a cycle that does not close at zero. It does not resolve that; the caller
+  needing one answer owes the refusal, which is [FOUNDATION.md](FOUNDATION.md) law
+  8's direction. That refusal is unwritten, and it is what the deciding half needs
+  before `AuthorizedAt` can move onto the offset-aware form.
 
   This entry named `AuthorizedBy`, which nothing declares, and gave it operations the
   real predicate does not perform. It is the record of this layer's largest open gap,
