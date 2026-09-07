@@ -38,6 +38,26 @@ def Contains (outer inner : ScopeId) : Prop :=
     scope.Contains (scope.child segment) := by
   simp [Contains, child]
 
+/-- Structural scope containment is transitive. -/
+theorem Contains.trans {outer middle inner : ScopeId}
+    (outerMiddle : outer.Contains middle)
+    (middleInner : middle.Contains inner) : outer.Contains inner := by
+  rw [Contains, List.isPrefixOf_iff_prefix] at outerMiddle middleInner ⊢
+  exact outerMiddle.trans middleInner
+
+/-- Two scopes containing one another are the same structural scope. -/
+theorem Contains.antisymm {left right : ScopeId}
+    (leftRight : left.Contains right)
+    (rightLeft : right.Contains left) : left = right := by
+  rw [Contains, List.isPrefixOf_iff_prefix] at leftRight rightLeft
+  have pathsEqual := leftRight.eq_of_length_le rightLeft.length_le
+  cases left with
+  | mk leftPath =>
+      cases right with
+      | mk rightPath =>
+          cases pathsEqual
+          rfl
+
 /-- Adding a path segment produces a scope distinct from its parent. -/
 theorem child_ne (scope : ScopeId) (segment : String) :
     scope.child segment ≠ scope := by

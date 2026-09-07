@@ -43,6 +43,16 @@ def Contains (outer inner : ScopeId) : Prop :=
     scope.Contains (scope.child segment) :=
   Grass.ScopeId.contains_child scope segment
 
+theorem Contains.trans {outer middle inner : ScopeId}
+    (outerMiddle : outer.Contains middle)
+    (middleInner : middle.Contains inner) : outer.Contains inner :=
+  Grass.ScopeId.Contains.trans outerMiddle middleInner
+
+theorem Contains.antisymm {left right : ScopeId}
+    (leftRight : left.Contains right)
+    (rightLeft : right.Contains left) : left = right :=
+  Grass.ScopeId.Contains.antisymm leftRight rightLeft
+
 theorem child_ne (scope : ScopeId) (segment : String) :
     scope.child segment ≠ scope :=
   Grass.ScopeId.child_ne scope segment
