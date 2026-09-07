@@ -401,8 +401,19 @@ abbrev indexedContinuation : indexedSystem.InfiniteContinuation 0 0 [] where
   step := fun _ => ⟨rfl, rfl, rfl⟩
   consistent := trivial
 
+abbrev indexedPrefix : indexedSystem.ExecutionPrefix :=
+  RelationalSystem.ExecutionPrefix.initial (system := indexedSystem)
+    (state := 0) (graph := 0) ⟨rfl, rfl⟩
+
+abbrev indexedContinuationAtPrefix : indexedSystem.InfiniteContinuation
+    indexedPrefix.state indexedPrefix.graph indexedPrefix.events :=
+  indexedContinuation
+
 theorem indexedPrefixEvents :
     indexedContinuation.prefixEvents 3 = [false, true, false] := rfl
+
+example : indexedContinuation.prefixEvents 3 =
+    List.ofFn (fun index : Fin 3 => indexedContinuation.eventAt index) := by simp
 
 example : indexedSystem.Steps 0 0 [false, true, false] 3 3 := by
   rw [← indexedPrefixEvents]
@@ -410,6 +421,25 @@ example : indexedSystem.Steps 0 0 [false, true, false] 3 3 := by
 
 example : indexedSystem.Extends 0 (indexedContinuation.graphAt 3) :=
   indexedContinuation.graphExtendsAt 3
+
+example :
+    (indexedPrefix.appendInfinitePrefix indexedContinuationAtPrefix 3).state = 3 := rfl
+
+example :
+    (indexedPrefix.appendInfinitePrefix indexedContinuationAtPrefix 3).graph = 3 := rfl
+
+example :
+    (indexedPrefix.appendInfinitePrefix indexedContinuationAtPrefix 3).events =
+      [false, true, false] := rfl
+
+example : indexedPrefix.appendInfinitePrefix indexedContinuationAtPrefix 0 =
+    indexedPrefix := by simp
+
+example : indexedPrefix.appendInfinitePrefix indexedContinuationAtPrefix 3 =
+    (indexedPrefix.appendInfinitePrefix indexedContinuationAtPrefix 2).step
+      (indexedContinuationAtPrefix.step 2) :=
+  RelationalSystem.ExecutionPrefix.appendInfinitePrefix_succ
+    indexedPrefix indexedContinuationAtPrefix 2
 
 def completion : system.Completion samplePrefix.state samplePrefix.graph samplePrefix.events :=
   .infinite continuation
@@ -446,6 +476,14 @@ def mappedCompletion : abstractBehavior.system.Completion
   toAbstract.mapCompletionAtPrefix samplePrefix completion
 
 example : samplePrefix.events = [true] := rfl
+
+example :
+    toAbstract.mapPrefix
+        (samplePrefix.appendInfinitePrefix continuation 3) =
+      (toAbstract.mapPrefix samplePrefix).appendInfinitePrefix
+        (toAbstract.mapInfinite continuation) 3 :=
+  BehaviorRefinement.mapPrefix_appendInfinitePrefix
+    toAbstract samplePrefix continuation 3
 
 end InfinitePrefixFixture
 

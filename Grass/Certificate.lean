@@ -352,6 +352,28 @@ theorem mapPrefix_append (refinement : BehaviorRefinement concrete abstract)
       (refinement.mapPrefix execution).append (refinement.mapSteps suffix) := by
   apply RelationalSystem.ExecutionPrefix.ext <;> rfl
 
+/-- Refinement commutes with appending every finite restriction of an infinite
+continuation to the exact packaged prefix that anchors it. -/
+@[simp]
+theorem mapPrefix_appendInfinitePrefix
+    (refinement : BehaviorRefinement concrete abstract)
+    (execution : concrete.system.ExecutionPrefix)
+    (continuation : concrete.system.InfiniteContinuation execution.state
+      execution.graph execution.events)
+    (length : Nat) :
+    refinement.mapPrefix
+        (execution.appendInfinitePrefix continuation length) =
+      (refinement.mapPrefix execution).appendInfinitePrefix
+        (refinement.mapInfinite continuation) length := by
+  have prefixEvents :
+      (refinement.mapInfinite continuation).prefixEvents length =
+        continuation.prefixEvents length := by
+    rw [RelationalSystem.InfiniteContinuation.prefixEvents_eq_ofFn,
+      RelationalSystem.InfiniteContinuation.prefixEvents_eq_ofFn]
+    rfl
+  apply RelationalSystem.ExecutionPrefix.ext <;> try rfl
+  exact congrArg (execution.events ++ ·) prefixEvents.symm
+
 /-- `BehaviorRefinement.mapPrefix_events` exposes the exact event trace retained
 by prefix mapping. -/
 @[simp]

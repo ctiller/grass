@@ -104,6 +104,23 @@ def InfiniteContinuation.prefixEvents {Event : Type u}
   | 0 => []
   | length + 1 => execution.prefixEvents length ++ [execution.eventAt length]
 
+/-- `InfiniteContinuation.prefixEvents_eq_ofFn` identifies the recursive prefix
+API with the canonical finite restriction of the event stream. -/
+@[simp]
+theorem InfiniteContinuation.prefixEvents_eq_ofFn {Event : Type u}
+    {system : RelationalSystem Event} {state : system.State}
+    {graph : system.Graph} {priorEvents : List Event}
+    (execution : system.InfiniteContinuation state graph priorEvents)
+    (length : Nat) :
+    execution.prefixEvents length =
+      List.ofFn (fun index : Fin length => execution.eventAt index) := by
+  induction length with
+  | zero => simp [InfiniteContinuation.prefixEvents]
+  | succ length inductionHypothesis =>
+      rw [InfiniteContinuation.prefixEvents, List.ofFn_succ_last,
+        inductionHypothesis]
+      rfl
+
 /-- Every finite restriction of an infinite continuation is a coherent
 `Steps` witness from its exact frontier. -/
 theorem InfiniteContinuation.prefixSteps {Event : Type u}
@@ -292,6 +309,70 @@ def ExecutionPrefix.append {Event : Type u} {system : RelationalSystem Event}
   graph := finalGraph
   events := prior.events ++ events
   runs := prior.runs.append suffix
+
+/-- Append the first `length` transitions of an infinite continuation to the
+exact packaged prefix whose frontier anchors that continuation. -/
+def ExecutionPrefix.appendInfinitePrefix {Event : Type u}
+    {system : RelationalSystem Event} (prior : system.ExecutionPrefix)
+    (continuation : system.InfiniteContinuation prior.state prior.graph prior.events)
+    (length : Nat) : system.ExecutionPrefix :=
+  prior.append (continuation.prefixSteps length)
+
+/-- The finite restriction appended from an infinite continuation reaches its
+indexed state exactly. -/
+@[simp]
+theorem ExecutionPrefix.appendInfinitePrefix_state {Event : Type u}
+    {system : RelationalSystem Event} (prior : system.ExecutionPrefix)
+    (continuation : system.InfiniteContinuation prior.state prior.graph prior.events)
+    (length : Nat) :
+    (prior.appendInfinitePrefix continuation length).state =
+      continuation.stateAt length := rfl
+
+/-- The finite restriction appended from an infinite continuation reaches its
+indexed graph exactly. -/
+@[simp]
+theorem ExecutionPrefix.appendInfinitePrefix_graph {Event : Type u}
+    {system : RelationalSystem Event} (prior : system.ExecutionPrefix)
+    (continuation : system.InfiniteContinuation prior.state prior.graph prior.events)
+    (length : Nat) :
+    (prior.appendInfinitePrefix continuation length).graph =
+      continuation.graphAt length := rfl
+
+/-- Appending a finite restriction retains the original trace followed by the
+exact events selected from the infinite continuation. -/
+@[simp]
+theorem ExecutionPrefix.appendInfinitePrefix_events {Event : Type u}
+    {system : RelationalSystem Event} (prior : system.ExecutionPrefix)
+    (continuation : system.InfiniteContinuation prior.state prior.graph prior.events)
+    (length : Nat) :
+    (prior.appendInfinitePrefix continuation length).events =
+      prior.events ++ continuation.prefixEvents length := rfl
+
+/-- The zero-length restriction of an infinite continuation leaves its
+packaged prefix unchanged. -/
+@[simp]
+theorem ExecutionPrefix.appendInfinitePrefix_zero {Event : Type u}
+    {system : RelationalSystem Event} (prior : system.ExecutionPrefix)
+    (continuation : system.InfiniteContinuation prior.state prior.graph prior.events) :
+    prior.appendInfinitePrefix continuation 0 = prior := by
+  apply ExecutionPrefix.ext <;>
+    simp [ExecutionPrefix.appendInfinitePrefix, ExecutionPrefix.append,
+      InfiniteContinuation.prefixEvents, continuation.stateZero,
+      continuation.graphZero]
+
+/-- Extending an infinite restriction by one transition agrees with the
+ordinary one-step prefix constructor. -/
+theorem ExecutionPrefix.appendInfinitePrefix_succ {Event : Type u}
+    {system : RelationalSystem Event} (prior : system.ExecutionPrefix)
+    (continuation : system.InfiniteContinuation prior.state prior.graph prior.events)
+    (length : Nat) :
+    prior.appendInfinitePrefix continuation (length + 1) =
+      (prior.appendInfinitePrefix continuation length).step
+        (continuation.step length) := by
+  apply ExecutionPrefix.ext <;>
+    simp [ExecutionPrefix.appendInfinitePrefix, ExecutionPrefix.append,
+      ExecutionPrefix.step, InfiniteContinuation.prefixEvents,
+      List.append_assoc]
 
 /-- Appending the empty suffix leaves a packaged prefix unchanged. -/
 @[simp]
