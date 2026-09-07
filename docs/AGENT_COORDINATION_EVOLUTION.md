@@ -301,6 +301,44 @@ After it holds, no version-one event is accepted. There is never a period in
 which an event may be validly authored on either substrate at the author's
 choice.
 
+**Deviation actually taken (2026-09), documented for the historical record.**
+The fleet was quiesced to a single active agent at cutover time, so step 3's
+"continuing after its final version-one sequence" was deliberately replaced,
+by the maintainer's explicit direction, with a full event-by-event replay:
+every version-one event, for every identity, re-encoded as a native
+version-two event rather than left on version one with version-two streams
+starting fresh afterward. This was done by a one-time tool
+(`tools/agent-bus/src/bin/migrate_v1.rs`, on branch
+`agent/c-agent/v1-to-v2-migration`), not by the reviewed helper itself.
+
+Two defects were found in the already-published result after the fact (an
+adversarial review comparing migrated output against version-one's real
+data): every migrated event's `time` carried the migration run's own
+wall-clock moment instead of its real version-one authoring time, and a
+handful of prose fields citing another migrated event by id (e.g. a
+finding's rationale) were left referencing the pre-migration id after the
+id itself shifted by the one position needed to insert a synthesized
+`merge_engine.activated` "genesis" event (version one has no such event;
+version two requires one -- see that tool's own module doc). Both defects
+are fixed in the migration tool itself (verified against real data), but by
+the time they were found, real post-cutover activity had already published
+new events referencing the flawed migrated history's exact commit hashes in
+their own `observed` frontiers. Correcting the already-published history
+in place would mean rewriting those hashes too -- a live rebase of a
+system already back in active use, judged a materially worse risk than the
+defects themselves. The maintainer's decision: accept and document, not
+rebase.
+
+**What this means for anyone reading pre-cutover events on version two**:
+a migrated event's `time` field is not its real authoring time (v1's own
+`refs/heads/agent-bus`, kept read-only rather than deleted, remains the
+authoritative source for real historical timestamps); a small number of
+migrated events' prose may cite a sibling event's pre-shift id rather than
+its actual version-two id. Neither affects any event's `refs`,
+causal ordering, or semantic content -- both are metadata-only defects,
+confined to the one-time migrated prefix, never present in anything
+published natively on version two.
+
 ## 3. Friction collection
 
 ### 3.1 Friction is not an issue

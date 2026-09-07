@@ -106,7 +106,8 @@ CORE_ROOTS = {
     "List", "Option", "Nat", "Int", "Bool", "BitVec", "Array", "String", "Char",
     "Prod", "Sigma", "Subtype", "Fin", "Decidable", "Function", "Classical", "Or",
     "And", "Iff", "Eq", "Ne", "Not", "Exists", "Sum", "UInt8", "UInt16", "UInt32",
-    "UInt64", "USize", "Quot", "Sub", "Add", "Mul", "Lean", "IO", "Except", "Id",
+    "UInt64", "USize", "Quot", "Quotient", "Sub", "Add", "Mul", "Lean", "IO",
+    "Except", "Id",
 }
 
 
@@ -183,18 +184,33 @@ ALLOWED = {
     "of_decide_eq_true", "beq_self_eq_true", "eq_of_beq", "macro_rules",
     # Modules another owner will build, named as dependencies.
     "Std.Process", "Std.Process.ByteFlow", "Grass.Effect", "ByteArray.toHost",
-    # **Findings, not exemptions.** Each of these is cited as a local declaration and
-    # nothing declares it: `built_two_ways` twice in `Tests/Std/VecVocabulary.lean`,
-    # `Vec.concat` in `Grass/Std/Logical/Vec.lean`, `stable_merge_pass` and
-    # `ByteStringOrder.lexicographicUnsigned` in `Grass/Std/Logical/Order.lean` and
-    # `Tests/Std/StableSort.lean`, `write_all_loop` and `exit_no_progress` in
-    # `Tests/Std/PartialWrite.lean`. They are exactly what this tool was written to
-    # catch -- prose that reads as a pointer and points at nothing -- and they are
-    # listed here rather than fixed because the modules belong to c-stdlib and the
-    # names may be renames only that owner can resolve. Reported to them rather than
-    # decided here; delete these entries when they answer.
-    "built_two_ways", "Vec.concat", "stable_merge_pass",
-    "ByteStringOrder.lexicographicUnsigned", "write_all_loop", "exit_no_progress",
+    # --- Names in the spike corpus, which is prose about code that does not compile.
+    #
+    # `stable_merge_pass` (`Spikes/2_Sort/Assembly.lean`, `docs/SPIKE_2.md`,
+    # `docs/SPIKE_PROOF_BURDEN.md`), `write_all_loop` and `exit_no_progress`
+    # (`Spikes/1_Hello_World/Program.lean`, `docs/SPIKE_1.md`) and
+    # `ByteStringOrder.lexicographicUnsigned` (`Spikes/2_Sort/Spec.lean`,
+    # `docs/SPIKE_2.md`) each name a real thing that is not a Lean declaration,
+    # because `README.md` says the spike corpus deliberately does not compile yet.
+    # A citation into it is a pointer at something real that this tool structurally
+    # cannot resolve, which is what an exemption is for.
+    #
+    # These six were parked here as *findings* rather than exemptions, reported to
+    # c-stdlib as `c-mem:42` because the modules are theirs and a rename is only
+    # resolvable by the owner. `c-stdlib:14` answered: two were defects and four are
+    # these. `built_two_ways` and `Vec.concat` are gone from the list because they
+    # are gone from the tree -- the first was deleted with the fixture it named, and
+    # the second was a *deliberately absent* name, written in citation shape inside
+    # the passage explaining why the module refuses to declare it, and has been
+    # reworded. That distinction is worth keeping: a name deliberately absent and a
+    # name that went missing are indistinguishable to a lexical tool, and the fix for
+    # one is prose while the fix for the other is code.
+    "stable_merge_pass", "ByteStringOrder.lexicographicUnsigned",
+    "write_all_loop", "exit_no_progress",
+    # A field of the `ProcessSpec` structure sketch at `docs/PROCESS.md` line 87,
+    # cited by `Grass/Std/Logical/Bag.lean`'s module comment. A specification written
+    # as a type signature in a document is not a declaration this tree carries.
+    "ProcessSpec.Step",
     # Two path entries stood here -- `lean-toolchain` and `lakefile.toml` -- and
     # `worth_checking` drops a `.toml` suffix and a hyphenated token before the
     # allowlist is consulted, so neither did anything. Deleted for the same reason as
@@ -466,6 +482,14 @@ def main() -> int:
             prose[path.relative_to(ROOT).as_posix()] = comment_text(
                 path.read_text(encoding="utf-8"))
         for path in DOC_FILES:
+            # Only the lean-facing ones, which is what `main` scans for declaration
+            # citations. Reading every document here made this mode over-report
+            # suppression: it called `Vec.concat` live because a plan document cites
+            # it, while the real run never reads that document and the entry was in
+            # fact dead. An inert-entry check whose inputs differ from the check it
+            # is about is worse than none, and this one was wrong the round it landed.
+            if path.name not in LEAN_FACING_DOCS:
+                continue
             prose[path.relative_to(ROOT).as_posix()] = path.read_text(encoding="utf-8")
         listed = sorted(ALLOWED)
         saved = ALLOWED

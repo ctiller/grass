@@ -1,0 +1,14 @@
+---
+source: tests/cli_flow.rs
+expression: out
+---
+{
+  "object_format": "sha1",
+  "published": {
+    "refs/heads/agent-events/coord1": "[hash]",
+    "refs/heads/agent-registry": "[hash]"
+  },
+  "registry_epoch": "[hash]",
+  "rejected": [],
+  "stream_commit": "[hash]"
+}
