@@ -194,6 +194,20 @@ def samplePrefix : system.ExecutionPrefix :=
       (state := ()) (graph := ()) trivial)
     (choice := ()) (event := true) (nextState := ()) (nextGraph := ()) trivial
 
+theorem falseSuffix : system.Steps samplePrefix.state samplePrefix.graph [false] () () :=
+  .step (choice := ()) .refl trivial
+
+theorem trueSuffix : system.Steps () () [true] () () :=
+  .step (choice := ()) .refl trivial
+
+example : (samplePrefix.append falseSuffix).events = [true, false] := rfl
+
+example : (samplePrefix.append falseSuffix).append trueSuffix =
+    samplePrefix.append (falseSuffix.trans trueSuffix) :=
+  RelationalSystem.ExecutionPrefix.append_assoc samplePrefix falseSuffix trueSuffix
+
+example : samplePrefix.append (.refl) = samplePrefix := by simp
+
 def continuation : system.InfiniteContinuation samplePrefix.state samplePrefix.graph
     samplePrefix.events where
   stateAt := fun _ => ()
