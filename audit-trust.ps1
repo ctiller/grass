@@ -79,7 +79,7 @@ function Assert-AxiomReports(
     foreach ($report in $axiomReports) {
         $used = @($report.Groups[1].Value.Split(',') |
             ForEach-Object { $_.Trim() })
-        $rejected = @($used | Where-Object { $_ -notin $Allowed })
+        $rejected = @($used | Where-Object { $_ -cnotin $Allowed })
         if ($rejected.Count -ne 0) {
             throw "Rejected transitive axiom(s): $($rejected -join ', ')"
         }
@@ -213,6 +213,19 @@ try {
         Assert-AxiomReports -Lines $multilineRejectedProbe -Expected 1 `
             -Allowed $AllowedAxiom
         throw "The multiline axiom parser accepted an unallowed axiom."
+    } catch {
+        if ($_.Exception.Message -notmatch '^Rejected transitive axiom') {
+            throw
+        }
+    }
+
+    $wrongCaseRejectedProbe = @(
+        "'AuditParser.WrongCase' depends on axioms: [Propext]"
+    )
+    try {
+        Assert-AxiomReports -Lines $wrongCaseRejectedProbe -Expected 1 `
+            -Allowed $AllowedAxiom
+        throw "The axiom parser accepted a case-mismatched axiom."
     } catch {
         if ($_.Exception.Message -notmatch '^Rejected transitive axiom') {
             throw
