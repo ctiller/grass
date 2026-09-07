@@ -747,7 +747,7 @@ theorem sent_holds_an_unkilled_root : serverPlan.UnkilledRootAt sent .listener (
 
 /-! #### And a role that may write nothing owes nothing
 
-`NetworkTransition.sharedWritesAdmitted_of_no_writes` was cited by two docstrings
+`ProcessPlan.sharedWritesAdmitted_of_no_writes` was cited by two docstrings
 and declared by neither until §10.136. Declaring it is only half the repair: a
 lemma with no consumer and an unsatisfiable hypothesis would be the shape this
 ledger refuses. Both halves are here.

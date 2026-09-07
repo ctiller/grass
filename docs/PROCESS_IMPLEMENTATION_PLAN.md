@@ -4920,7 +4920,10 @@ that puts an instance in each state, which is `Tests/Process/ProcessStepFixtures
 territory rather than this file's.
 
 **Ran down** in §10.132, whose answer was then refuted in §10.133 and §10.134.
-The guess above — four `processStep`s — was wrong about all four. Three of the
+The guess above was that four `processStep`s would settle it. Two of the four
+before-worlds are indeed reached by literal `processStep`s — `theLogStep` and
+`theLastTickStep` — so the guess was right about the shape and wrong about what
+it would buy, which is the part that mattered. Three of the
 four before-worlds have a step into them and none of the six worlds involved is a
 world of a run; the fourth holds a dead *root*, and what refuses it is not a
 step-local theorem but `ProcessPlan.execution_holds_an_unkilled_root`, an
@@ -5359,8 +5362,12 @@ Fourth fresh reviewer. The Lean survived a fourth time — it re-derived the
 constructor arithmetic, confirmed every hypothesis of every new theorem is
 jointly satisfiable, checked that each new declaration has a consumer, and
 verified §10.135's claims about this branch's own git history with `git show`.
-Six more defects, all prose, and the two that matter say the same thing about how
-this went wrong.
+More defects, all prose, and two of them say the same thing about how this went
+wrong. (This entry originally opened with a number. A fifth round found the
+number wrong — it had dropped the one item the commit fixed in `UnkilledRootAt`'s
+own docstring, the "two claims" correction below. The entry claiming every number
+in it was measured got its own headline count wrong, so the number is gone rather
+than corrected, which is what the rule below actually prescribes.)
 
 **The commit that fixed a miscount introduced two more, in the sentence it was
 rewriting.** §10.135 corrected "the seven refusals below are read off this
@@ -5373,8 +5380,10 @@ That is the third round in a row containing a miscount, and the second in which
 the miscount is *inside the correction of a miscount*. The pattern is specific
 enough to be a rule now, and it is not "be careful": **do not write a count you
 have not just measured, and prefer a sentence with no count in it.** Every number
-in this entry was produced by `grep -c` immediately before writing it, and the
-ones that were not load-bearing were removed rather than checked.
+about the *files* in this entry was produced by `grep -c` immediately before
+writing it. The one number that was not — how many findings the round itself had
+— is the one the next round found wrong, which is the rule proving itself the
+hard way.
 
 **And "like every other world in this file" was false of the file.** The docstring
 on `no_run_reaches_deadOrphanWorld` — a declaration added *because* the previous
@@ -5395,26 +5404,36 @@ the sentence now says so. That is a real open question about the family rather
 than a wording fix, and it is the substance behind `agent-bus` `c-process:103`'s
 request for a ruling on detaching a corpse.
 
-**Three smaller ones.** §10.135's own edit left a duplicated paragraph on
+**Four smaller ones.** §10.135's own edit left a duplicated paragraph on
 `not_dead_where_nothing_moved` — the previous paragraph rewritten and the old one
 not removed, which is §10.134's title recurring inside the commit reporting that
 class. The surviving text also said the lemma is used by "every constructor whose
 scope does not name this slot"; it has one call site, in the single branch taken
-before the constructor split. And §10.133 still cited
+before the constructor split. §10.133 still cited
 `parentless_slot_is_unkilled` in the present tense two entries after the branch
 deleted it, without the marker this ledger puts on every other superseded claim.
+And `UnkilledRootAt`'s own docstring called it "two claims" when it has three
+conjuncts, in the one place where the third does the work.
 
 **One dangling citation of my own, from before this branch.** The mechanical
 sweep this entry's rule prescribes — every backticked Lean-style name in every
 file the branch touches, resolved against the declaration set — turned up
-`sharedWritesAdmitted_of_no_writes`, cited by `StepsLocally`'s own docstring and
-by `Grass/Process/Network/Plan.lean`'s note on `sharedUpdate`, declared by
-neither, and landed in that state by my own commit `c373340`. It is declared
+`sharedWritesAdmitted_of_no_writes`, cited by `StepsLocally.sharedWritesAdmitted`'s
+own docstring and by `Grass/Process/Network/Plan.lean`'s note on `sharedUpdate`,
+declared by neither, and landed in that state by my own commit `c373340`. A fifth
+round then found that declaring it had fixed only one of the two citations: the
+other named it under the `StepsLocally` prefix, which resolves to nothing, so the
+entry below reported a repair that was half done. Both now name
+`ProcessPlan.sharedWritesAdmitted_of_no_writes`, which is where it is. It is declared
 here rather than the citations deleted, because the content is real: a role that
 may write no region discharges `sharedWritesAdmitted` from `writesPermitted`
 alone, which is decision 134's authoring-surface constraint applied to the field
-`g-design:84` added. `Tools/DocstringAudit.py` cannot see citations like this and
-that gap is reported to the gate's owner.
+`g-design:84` added — and it is `g-design:84` that carries the
+no-author-burden constraint, not decision 134, which is about the public
+`SpecProcess` surface and the module facade. An earlier version of this paragraph
+cited the wrong ruling while the right one was already in the sentence.
+`Tools/DocstringAudit.py` cannot see citations like this and that gap is reported
+to the gate's owner.
 
 Declaring it is only half the repair, and the other half is the check this
 sequence keeps failing: a lemma with no consumer and an unsatisfiable hypothesis

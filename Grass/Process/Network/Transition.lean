@@ -1030,8 +1030,10 @@ The content is small and worth having anyway: `writesPermitted` says a region
 that moved is one this role may write, so at a role that may write nothing, no
 region moved, and the value bound is discharged from an impossible hypothesis.
 An author whose role has no write capability supplies `writesPermitted` and gets
-`sharedWritesAdmitted` for free, which is decision 134's small-authoring-surface
-constraint applied to the field `agent-bus` ruling `g-design:84` added.
+`sharedWritesAdmitted` for free, which is what `agent-bus` ruling `g-design:84`
+asked for in the same breath as the field itself: "For a kind with no writable
+shared region, derive the stuttering contract automatically; add no author
+burden".
 -/
 theorem sharedWritesAdmitted_of_no_writes {before after : plan.LogicalProcessNetwork}
     {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
@@ -2232,10 +2234,10 @@ A slot nothing moved holds the same instance afterwards, so under
 `LogicalProcessNetworkCore.Agrees` an instance already recorded as not dead
 cannot be found dead there.
 
-The off-scope half of `dying_was_supervised` below, factored out because that
-proof takes it once, in the branch where the transition's scope does not name
-this slot at all — which is the branch covering every constructor the split does
-not go on to examine.
+The off-scope half of `dying_was_supervised` below. That proof takes it exactly
+once, before splitting on the constructor at all: the `by_cases` on whether the
+transition's scope names this slot has a negative branch that holds of any
+constructor, and this is it.
 
 It took a `Live` hypothesis and used `ProcessLifecycle.live_cast` until
 `dying_was_supervised` was weakened to `notAlreadyDead`; now it needs neither,
@@ -2300,7 +2302,7 @@ is `ProcessPlan.execution_holds_an_unkilled_root`, which also has to close the
 `restart` escape `parentless_slot_survives` exposes.
 
 *And `wasChild` says "records a current parent", not "has one".* The named parent
-need not be present in the network at all — `PreservationFixtures`'
+need not be present in the network at all — `Tests/Process/PreservationFixtures.lean`'s
 `the_live_receiver_is_a_child` discharges it in a world holding no listener
 whatsoever. `LogicalProcessNetworkCore.ParentageValid` is what checks the
 recorded parent against the topology; this field checks only that one is
