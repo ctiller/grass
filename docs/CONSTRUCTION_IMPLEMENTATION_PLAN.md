@@ -275,6 +275,12 @@ selected push order and reverse pop order independently of `enter` and `leave`;
 `FrameVerifiedBackend` requires separate verified witnesses and exact-source
 equalities for both operations.
 
+The lexical `withStack` path begins with `Grass.Construct.StackScope`: an exact
+ordered ledger covers every contract exit by identity and proves that each exit
+has no escaping address, live loan, or live obligation. The eventual
+provenance-indexed eliminator must consume this certificate; it may not infer
+closure from a normal exit alone.
+
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
 
