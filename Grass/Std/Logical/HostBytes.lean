@@ -1,4 +1,4 @@
-import Grass.Std.Logical.Vec
+import Grass.Std.Logical.Byte
 
 /-!
 # The sanctioned crossing to Lean's host `ByteArray`
@@ -9,10 +9,12 @@ introduce a second unrelated byte-container primitive", and:
 > Adapters to Lean's host `ByteArray`, OS buffers, or foreign vectors require
 > connection theorems preserving order, length, and byte values.
 
-`Grass/Std/Logical/Vec.lean` implements the first half, and
-`Tests/Std/VecVocabulary.lean` pins it: a host `_root_.ByteArray` is rejected
-where a Grass `ByteArray` is required. That rejection is only half a design. A
-seam with no sanctioned crossing is not a boundary, it is a dead end, and the
+`Grass/Std/Logical/Byte.lean` implements the first half — `abbrev ByteArray :=
+Vec Byte`, which lived in `Vec.lean` until the custody handoff let the two
+declarations merge — and `Tests/Std/VecVocabulary.lean` pins it: a host
+`_root_.ByteArray` is rejected where a Grass `ByteArray` is required. That
+rejection is only half a design. A seam with no sanctioned crossing is not a
+boundary, it is a dead end, and the
 first author who needs to hand bytes to the operating system will cross it
 somewhere — with `Array.map` and no theorem, in a module that does not own the
 question.

@@ -1,4 +1,4 @@
-import Grass.Std.Logical.Vec
+import Grass.Std.Logical.Byte
 
 /-!
 # The `Vec` vocabulary expresses what `docs/STDLIB.md` §1 and §3 ask of it
@@ -42,8 +42,10 @@ open Grass.Std.Logical
 
 Every `ByteArray` below is written out in full. Bare `ByteArray` does not
 elaborate inside `open Grass.Std.Logical`, because Lean's own `_root_.ByteArray`
-is also in scope; that collision is recorded in `Grass/Std/Logical/Vec.lean` and
-is an open naming question for the owner of `docs/STDLIB.md`.
+is also in scope; that collision is recorded in `Grass/Std/Logical/Byte.lean`,
+where the declaration lives, and it is settled rather than open — `g-design:49`
+ruled that the Grass type keeps the name and that consumers qualify, precisely so
+that this ambiguity keeps acting as a representation-boundary guard.
 -/
 
 /--
