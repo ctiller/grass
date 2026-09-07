@@ -47,6 +47,14 @@ example : session.closed.use.liveCallLoans = [] := rfl
 example : session.closed.use.restoreObligations = [] := rfl
 example : unwindSession.closed.use.restoreObligations = [] := rfl
 
+example : returnRun.actions =
+    [.acquire [⟨"call"⟩], .releaseReturn [⟨"call"⟩], .restoreReturn [.rbx]] := rfl
+
+example : unwindRun.actions =
+    [.acquire [⟨"call"⟩], .releaseUnwind [⟨"call"⟩], .restoreUnwind [.rbx]] := rfl
+
+example : (CallFrameRun.done prepared).append returnRun = returnRun := rfl
+
 example : ¬Nonempty (CallFrameTransition frame prepared closed) := by
   intro transition
   cases transition with

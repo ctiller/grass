@@ -67,6 +67,32 @@ inductive CallFrameTransition {profile : LayoutProfile}
       (restoredExact : restored = frame.plan.saved) :
       CallFrameTransition frame source target
 
+/-- Transparent action recorded by a checked call-frame transition. -/
+inductive CallFrameAction where
+  | acquire (loans : List Name)
+  | releaseReturn (loans : List Name)
+  | releaseUnwind (loans : List Name)
+  | restoreReturn (registers : List Grass.ISA.X86.Gpr)
+  | restoreUnwind (registers : List Grass.ISA.X86.Gpr)
+deriving Repr, DecidableEq
+
+namespace CallFrameTransition
+
+/-- Reveal the exact resource action carried by one transition witness. -/
+def action {profile : LayoutProfile} {frame : CheckedWin64Frame profile}
+    {fromPhase toPhase : CallFramePhase}
+    {source : CheckedCallFrameUse frame fromPhase}
+    {target : CheckedCallFrameUse frame toPhase}
+    (transition : CallFrameTransition frame source target) : CallFrameAction :=
+  match transition with
+  | .acquire _ _ acquired _ => .acquire acquired
+  | .completeReturn _ _ released _ => .releaseReturn released
+  | .unwind _ _ released _ => .releaseUnwind released
+  | .closeReturn _ _ restored _ => .restoreReturn restored
+  | .closeUnwind _ _ restored _ => .restoreUnwind restored
+
+end CallFrameTransition
+
 /-- A compositional path of permitted transitions between checked uses. -/
 inductive CallFrameRun {profile : LayoutProfile}
     (frame : CheckedWin64Frame profile) :
@@ -84,6 +110,46 @@ inductive CallFrameRun {profile : LayoutProfile}
       (step : CallFrameTransition frame source middle)
       (rest : CallFrameRun frame middle target) :
       CallFrameRun frame source target
+
+namespace CallFrameRun
+
+/-- Concatenate compatible checked lifecycle runs. -/
+def append {profile : LayoutProfile} {frame : CheckedWin64Frame profile}
+    {startPhase middlePhase endPhase : CallFramePhase}
+    {start : CheckedCallFrameUse frame startPhase}
+    {middle : CheckedCallFrameUse frame middlePhase}
+    {finish : CheckedCallFrameUse frame endPhase}
+    (first : CallFrameRun frame start middle)
+    (second : CallFrameRun frame middle finish) : CallFrameRun frame start finish :=
+  match first with
+  | .done _ => second
+  | .next step rest => .next step (append rest second)
+
+/-- Reveal every exact resource action in lifecycle order. -/
+def actions {profile : LayoutProfile} {frame : CheckedWin64Frame profile}
+    {startPhase endPhase : CallFramePhase}
+    {start : CheckedCallFrameUse frame startPhase}
+    {finish : CheckedCallFrameUse frame endPhase}
+    (run : CallFrameRun frame start finish) : List CallFrameAction :=
+  match run with
+  | .done _ => []
+  | .next step rest => step.action :: actions rest
+
+/-- Concatenating runs concatenates their transparent action traces exactly. -/
+@[simp] theorem actions_append {profile : LayoutProfile}
+    {frame : CheckedWin64Frame profile}
+    {startPhase middlePhase endPhase : CallFramePhase}
+    {start : CheckedCallFrameUse frame startPhase}
+    {middle : CheckedCallFrameUse frame middlePhase}
+    {finish : CheckedCallFrameUse frame endPhase}
+    (first : CallFrameRun frame start middle)
+    (second : CallFrameRun frame middle finish) :
+    actions (append first second) = actions first ++ actions second := by
+  induction first with
+  | done => rfl
+  | next step rest ih => simp [append, actions, ih]
+
+end CallFrameRun
 
 /-- Prepared-to-closed lifecycle evidence for one checked call frame. -/
 structure CallFrameSession {profile : LayoutProfile}

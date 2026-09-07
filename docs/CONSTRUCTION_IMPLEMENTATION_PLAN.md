@@ -239,9 +239,10 @@ call-loan phases, and exact unwind correspondence. A checked call-frame session
 must contain a compositional prepared-to-closed transition run: acquisition
 records the exact nonempty loan set, return or unwind records the exact released
 set, and closure records restoration of exactly the selected saved registers.
-Valid prepared and closed endpoints alone are insufficient. A literal call
-remains legal and is checked against the same pre-call contract without
-implicit rewriting.
+The run exposes those actions in exact lifecycle order and run concatenation
+concatenates action traces exactly. Valid prepared and closed endpoints alone
+are insufficient. A literal call remains legal and is checked against the same
+pre-call contract without implicit rewriting.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
