@@ -2,6 +2,7 @@ import Lean
 import Grass.ABI.Win64.Convention
 import Grass.ABI.Win64.Unwind
 import Grass.ABI.Win64.UnwindBytes
+import Grass.Artifact.Binary.Gobj.Schema
 import Grass.Artifact.Binary.Primitive
 import Grass.Artifact.Binary.Realization
 import Grass.Build.Cache.Key
@@ -109,13 +110,6 @@ import Grass.Std.Logical.Text
 import Grass.Std.Logical.Vec
 import Grass.Trust.Audit
 import Grass.Verify.VerifiedProgram
-<<<<<<< HEAD
-=======
->>>>>>> origin/agent/g-construct/link-raw-minimal
-<<<<<<< HEAD
-=======
->>>>>>> origin/agent/g-construct/link-raw-minimal
-
 /-!
 # Every declaration name the build knows
 
