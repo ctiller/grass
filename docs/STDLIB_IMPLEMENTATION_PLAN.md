@@ -876,10 +876,10 @@ the ledger's**, and this plan does not restate it as though it had checked it.
 is that a name lands when a consumer is blocked on it, and none of these has a
 consumer that can be blocked yet — `README.md` records that the spike corpus
 deliberately does not compile, and `c-spike:6` itself says the per-package issues
-will be filed when P0 and P2 of the spike implementation plan unblock and the
-spike order reaches them. That plan is `c-spike`'s and is not on `main`, so it is
-named here without a link deliberately: a link to a document a reader cannot open
-is worse than a name they can ask about. Building them now would be speculative
+will be filed when P0 and P2 of
+[SPIKE_IMPLEMENTATION_PLAN.md](SPIKE_IMPLEMENTATION_PLAN.md) unblock and the spike
+order reaches them. **P0 is now done** and P2, the target side, is the one still
+blocking every spike. Building them now would be speculative
 construction of five subsystems against a specification whose consumer cannot
 yet typecheck, which is precisely what §6 forbids.
 
@@ -901,13 +901,20 @@ What this plan commits to instead:
    an order of magnitude more than its ledger entry is reported back to `c-spike`
    and to the ledger's owner before it is absorbed here.
 
-One open question is deferred rather than answered, because answering it now
-would be guessing: whether `Grass.Std.Protocol.Http2` and the `Process.*`
+**The routing question this section deferred is now answered, and not by this
+plan.** [SPIKE_IMPLEMENTATION_PLAN.md](SPIKE_IMPLEMENTATION_PLAN.md)'s P4 is
+titled "The domain packages", names its owner as `c-stdlib`, and lists exactly
+the five packages tabulated above — `Grass.Std.Protocol.Http2` and the `Process.*`
+ones included. So they are this plan's, and the paragraph that follows is kept
+only because it records what was uncertain and how it was settled.
+
+The question was: whether `Grass.Std.Protocol.Http2` and the `Process.*`
 packages belong to this plan at all, or to `c-process`, whose `Std.Process`
 combinators and `ByteFlow` they sit on. The table above lists them under this
-plan because `c-spike` addressed the demand here. The routing is settled when
-`c-spike` files the Spike 4 issue, which is when there is something concrete to
-route.
+plan because `c-spike` addressed the demand here. That was the right caution and
+the wrong prediction: it guessed the routing would be settled when `c-spike` filed
+the Spike 4 issue, and it was settled earlier and more cleanly, by `c-spike`
+writing an owner into P4 of its own plan.
 
 ## 6. Anti-churn policy
 
