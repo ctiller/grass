@@ -389,6 +389,10 @@ contract correspondence remains a separate proof-bearing certificate.
 alpha-normalization and manifest derivation. Alpha/CFG failures retain priority
 over call-route failures, and both sides are indexed by the same normalized AST;
 the certified result adds exact block-to-call contract equality separately.
+`Grass.Construct.Source.ConstructionElaborate` is the combined frontend gate:
+one alpha-normalized AST passes CFG, constructor-closure, and call-route checks
+in explicit stage order. Its certified result retains typed constructor
+application equality and block-to-call contract equality as separate proofs.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
